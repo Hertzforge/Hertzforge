@@ -261,6 +261,30 @@ impl TriggerEngine {
         self.ring.capacity_frames()
     }
 
+    /// Count frames from `frame` on: the station frame of the next frame fed, so the
+    /// trigger's frames, its fires and its holdoff are station frames.
+    pub fn sync_to(&mut self, frame: u64) {
+        self.global_frame = frame;
+        self.holdoff_until_frame = self.holdoff_until_frame.min(frame);
+    }
+
+    /// Count `n` frames the trigger does not see (they went to a recording), so its
+    /// count stays the station's.
+    pub fn skip(&mut self, n: u64) {
+        self.global_frame += n;
+    }
+
+    /// Start a fresh pre-window: the frames held are dropped, and the detector does
+    /// not arm until a full pre-window has been acquired from here. After a recording
+    /// ends, this keeps every frame out of two recordings.
+    pub fn restart_pre_window(&mut self) {
+        let capacity = self.ring.capacity_frames();
+        self.ring = PreTriggerRing::new(self.n_channels, capacity);
+        self.holdoff_until_frame = self
+            .holdoff_until_frame
+            .max(self.global_frame + capacity as u64);
+    }
+
     /// The frames the pre-window holds now.
     pub fn pre_frames_held(&self) -> usize {
         self.ring.len_frames()

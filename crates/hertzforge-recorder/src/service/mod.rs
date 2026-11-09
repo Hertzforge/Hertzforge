@@ -271,6 +271,10 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     backend_up: bool,
     /// The run's one engine, built when the station is up.
     engine: Option<Engine>,
+    /// The input group delay the station states, frames: given by the caller, else
+    /// the station's configured answer, else 0.
+    group_delay_given: Option<f64>,
+    group_delay_frames: f64,
 
     /// The enabled-input slot count (interleave width).
     n_input: usize,
@@ -392,14 +396,11 @@ impl<B: Backend> RecorderService<B> {
             ));
         }
 
-        // The record table: exactly the enabled input channels (frame width
-        // matches the bridge output). Re-index 1.. so it validates cleanly.
+        // The record table: exactly the enabled input channels, in table order and
+        // with their own indexes (the frame width the bridge forwards; every
+        // recording states these rows).
         let mut record_table = ChannelTable::new();
-        for (i, ch) in input_channels.iter().enumerate() {
-            let mut c = ch.clone();
-            c.index = (i + 1) as u32;
-            record_table.channels.push(c);
-        }
+        record_table.channels.extend(input_channels.iter().cloned());
 
         // The engine table clone: user table + one synthetic drive; abort
         // limits stripped when the watchdog is off.
@@ -466,6 +467,8 @@ impl<B: Backend> RecorderService<B> {
             block_frames: DEFAULT_BLOCK_FRAMES,
             backend_up: false,
             engine: None,
+            group_delay_given: None,
+            group_delay_frames: 0.0,
             n_input,
             analysis,
             frf,
@@ -504,6 +507,18 @@ impl<B: Backend> RecorderService<B> {
     /// Scheduling faults this run has seen: 0, or 1 for the one that ended it.
     pub fn scheduling_faults(&self) -> u64 {
         self.scheduling_faults
+    }
+
+    /// State the station's input group delay, frames, for every recording's record
+    /// (a station's own figure to 0.01 frames, where its configured answer is whole).
+    pub fn with_group_delay_frames(mut self, frames: f64) -> Self {
+        self.group_delay_given = Some(frames);
+        self
+    }
+
+    /// The input group delay every recording states, frames.
+    pub fn group_delay_frames(&self) -> f64 {
+        self.group_delay_frames
     }
 
     /// Put another record store behind the seam (a test double, or a writer with
@@ -635,6 +650,9 @@ impl<B: Backend> RecorderService<B> {
             pretrigger_s,
             self.cfg.auto_rearm,
         ));
+        if let Some(t) = self.trigger.as_mut() {
+            t.sync_to(self.session_frames);
+        }
         self.rearms_remaining = self.cfg.auto_rearm;
         self.transition(RecState::Armed);
         Ok(())
@@ -656,7 +674,23 @@ impl<B: Backend> RecorderService<B> {
             .filter(|ev| ev.pretrigger_frames > 0);
         self.trigger_fires += 1;
         self.last_fire_station_frame = Some(self.session_frames);
-        self.begin_recording(pretrigger)
+        self.begin_recording(pretrigger, "manual")
+    }
+
+    /// Begin the run's recording from its first frame, with no pre-window: the
+    /// `start` mode. Valid before the first batch is read.
+    pub fn record_from_start(&mut self) -> Result<(), RecorderError> {
+        if self.state != RecState::Monitoring || self.session_frames != 0 {
+            return Err(RecorderError::BadState(format!(
+                "record_from_start requires Monitoring before the first batch, was {:?} at \
+                 frame {}",
+                self.state, self.session_frames
+            )));
+        }
+        self.trigger = None;
+        self.trigger_fires += 1;
+        self.last_fire_station_frame = Some(0);
+        self.begin_recording(None, "start")
     }
 
     /// Stop the monitor loop entirely -> Stopped. Finalizes any active
@@ -889,7 +923,7 @@ impl<B: Backend> RecorderService<B> {
                     if let Some(ev) = fire {
                         self.trigger_fires += 1;
                         self.last_fire_station_frame = Some(start_frame + used as u64);
-                        self.begin_recording(Some(ev))?;
+                        self.begin_recording(Some(ev), "level")?;
                     }
                 }
                 RecState::Recording if self.recording => {
@@ -900,6 +934,9 @@ impl<B: Backend> RecorderService<B> {
                     } as usize;
                     self.hand_to_record_thread(&interleaved[at * w..(at + take) * w], take);
                     at += take;
+                    if let Some(t) = self.trigger.as_mut() {
+                        t.skip(take as u64);
+                    }
                     if self
                         .record_target_frames
                         .is_some_and(|target| self.record_frames >= target)
@@ -1029,7 +1066,11 @@ impl<B: Backend> RecorderService<B> {
 
     /// Begin a recording (from a trigger fire or record_now). Prepends the
     /// pre-window when given. Transitions to Recording.
-    fn begin_recording(&mut self, pretrigger: Option<TriggerEvent>) -> Result<(), RecorderError> {
+    fn begin_recording(
+        &mut self,
+        pretrigger: Option<TriggerEvent>,
+        kind: &str,
+    ) -> Result<(), RecorderError> {
         self.run_counter += 1;
         let run_name = format!("rec_{:04}", self.run_counter);
         let pre_frames = pretrigger.as_ref().map_or(0, |e| e.pretrigger_frames);
@@ -1039,6 +1080,10 @@ impl<B: Backend> RecorderService<B> {
             .rec
             .as_ref()
             .ok_or_else(|| RecorderError::BadState("the station is not up".into()))?;
+        let pre_frames_asked = self
+            .trigger
+            .as_ref()
+            .map_or(0, |t| t.ring_capacity_frames() as u64);
         rec.start(RecordingSpec {
             data_root: self.data_root.clone(),
             name: run_name.clone(),
@@ -1047,6 +1092,13 @@ impl<B: Backend> RecorderService<B> {
             requested_fs_hz: self.cfg.acq.native_rate_hz,
             floor_bytes: self.floor_bytes(),
             pretrigger,
+            station: crate::recording::StationFacts {
+                name: run_name.clone(),
+                trigger: kind.to_string(),
+                group_delay_frames: self.group_delay_frames,
+                first_station_frame: self.session_frames,
+                pre_frames_asked,
+            },
         });
         let real_name = run_name;
         self.recording = true;
@@ -1078,16 +1130,20 @@ impl<B: Backend> RecorderService<B> {
         self.finish_recording()?;
         if self.rearms_remaining > 0 {
             self.rearms_remaining -= 1;
-            // The trigger engine's own holdoff (>= ring depth) prevents the
-            // next pre-window from overlapping this run's tail. Re-arm the
-            // detector and keep the trigger active.
+            // Re-armed: the holdoff runs in station time from the trigger, and a
+            // fresh full pre-window is acquired before the next fire, so no frame is
+            // in two recordings.
             if let Some(trig) = self.trigger.as_mut() {
                 trig.rearm(self.rearms_remaining);
+                trig.restart_pre_window();
                 self.transition(RecState::Armed);
             } else {
                 self.transition(RecState::Monitoring);
             }
         } else {
+            // Back to monitoring, not armed: the next recording begins with no
+            // pre-window unless the run is armed again.
+            self.trigger = None;
             self.transition(RecState::Monitoring);
         }
         Ok(())
@@ -1102,6 +1158,7 @@ impl<B: Backend> RecorderService<B> {
             )));
         }
         self.finish_recording()?;
+        self.trigger = None;
         self.transition(RecState::Monitoring);
         Ok(())
     }
@@ -1151,6 +1208,9 @@ impl<B: Backend> RecorderService<B> {
             .configure(&self.engine_table, &acq)
             .map_err(|e| RecorderError::Backend(format!("configure: {e}")))?;
         self.fs_hz = actual.actual_rate_hz;
+        self.group_delay_frames = self
+            .group_delay_given
+            .unwrap_or_else(|| actual.group_delay_frames.map_or(0.0, f64::from));
 
         // The engine's block cadence, ring depth and scheduling-health budget all
         // come from what the backend ACTUALLY configured, not from the request.

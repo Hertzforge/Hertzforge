@@ -56,7 +56,7 @@ pub use analysis::{
 };
 pub use recording::{
     recorder_capture_config, recorder_disk_budget_seconds, GapRecord, RecorderSidecar,
-    RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter, WriterFacts,
+    RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter, StationFacts, WriterFacts,
 };
 pub use store::{RecordStore, RecordingSpec, WriterStore};
 pub use trigger::{LevelTrigger, PreTriggerRing, Slope, TriggerEngine, TriggerEvent, TriggerMode};

@@ -14,7 +14,7 @@ use hertzforge_capture::{DurabilityConfig, FreeSpaceFloor, DEFAULT_FLUSH_INTERVA
 use hertzforge_channel_table::ChannelTable;
 
 use crate::acq::AcquisitionConfig;
-use crate::recording::{GapRecord, RecordingSummary, RecordingWriter, WriterFacts};
+use crate::recording::{GapRecord, RecordingSummary, RecordingWriter, StationFacts, WriterFacts};
 use crate::trigger::TriggerEvent;
 
 /// What a recording is, given to the store when it begins.
@@ -37,6 +37,9 @@ pub struct RecordingSpec {
     pub floor_bytes: u64,
     /// The trigger that began it, if any; its pre-window is the file's first frames.
     pub pretrigger: Option<TriggerEvent>,
+    /// What began it, the station's group delay, its first station frame and the
+    /// pre-window asked, for its record.
+    pub station: StationFacts,
 }
 
 /// The seam between the service and the writer. One recording at a time.
@@ -108,6 +111,7 @@ impl RecordStore for WriterStore {
                     free_space_floor: FreeSpaceFloor::Bytes(spec.floor_bytes),
                     allow_unknown_free_space: false,
                 },
+                station: spec.station,
                 ..WriterFacts::default()
             },
         )
