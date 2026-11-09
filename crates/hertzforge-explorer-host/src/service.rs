@@ -1438,6 +1438,15 @@ impl ExplorerHostService {
                 self.state
             )));
         }
+        // Once a stop has begun nothing raises or moves the drive: a level taken here
+        // would lift the target the ramp is walking down to, and the stop would never
+        // reach 0 V. Only the stop itself and an abort act on a stopping run.
+        if self.state == RunState::Stopping {
+            return Err(ServiceError::BadState(
+                "the run is stopping: nothing raises or moves the drive once a stop has begun"
+                    .into(),
+            ));
+        }
         self.step
             .as_mut()
             .ok_or_else(|| ServiceError::BadState("not armed".into()))
