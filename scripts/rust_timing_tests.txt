@@ -241,6 +241,10 @@ hertzforge-sine-laws  test:law_call_timing  a_sine_law_file_call_at_the_default_
 # pass on a macOS runner one call took 3.2 ms against 2.5 ms (the built-in) and 8.6 ms (a law file)
 hertzforge-sine-laws  test:check_cases  the_sine_built_in_passes_every_check_case
 hertzforge-sine-laws  test:law_file_check  a_sine_law_file_that_misbehaves_fails_the_check_and_the_same_file_behaving_passes
+# The built-in and its law file run the same: the law file's calls have the same 2.5 ms deadline on
+# the wall clock, and one missed under the parallel pass's load changed a discrete outcome
+hertzforge-sine-laws  test:same_door  the_built_in_and_its_law_file_run_the_same_at_both_parameter_sets
+hertzforge-sine-laws  test:same_door  the_limit_channel_case_is_reported
 
 # The template law file on a simulated station with the NI chassis's output queue: each run goes
 # through the law host, whose call deadline is on the wall clock, so a starved call is a miss
