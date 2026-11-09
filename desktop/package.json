@@ -6,7 +6,7 @@
 	"license": "MIT",
 	"scripts": {
 		"tauri": "tauri",
-		"icons": "tauri icon ../ui/static/favicon.svg -o icons"
+		"icons": "tauri icon icon.png -o icons"
 	},
 	"devDependencies": {
 		"@tauri-apps/cli": "2.12.4"
