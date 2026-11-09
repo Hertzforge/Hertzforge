@@ -22,7 +22,7 @@ use hertzforge_recorder::RecorderService;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -39,6 +39,38 @@ const MAX_PACE: Duration = Duration::from_millis(50);
 /// The overload indicator's definition, for `run.json`.
 pub const OVERLOAD_DEFINITION: &str = "A row's overload indicator latches the first time a \
      sample's magnitude reaches 0.9 of the row's range_max, and holds for the run.";
+
+/// The most the pump waits, after a batch, for the threads waiting on the service to take it:
+/// a verb or a status read holds it for well under a millisecond.
+const HANDOFF_MAX: Duration = Duration::from_millis(20);
+
+/// On a hardware station the pump holds the service across each batch's read, the read being
+/// the pacing, and takes it again at once; a lock that is not fair can then keep a verb or the
+/// status thread out indefinitely (on the NI bench verbs went unanswered for 5 s and an abort
+/// took 10 s to end acquisition). A thread that wants the service says so here while it waits,
+/// and the pump gives way after each batch until it has had its turn.
+#[derive(Default)]
+struct Handoff {
+    waiting: AtomicUsize,
+}
+
+impl Handoff {
+    /// Take `m`, counted as waiting until it is held.
+    fn take<'a, T>(&self, m: &'a Mutex<T>) -> MutexGuard<'a, T> {
+        self.waiting.fetch_add(1, Ordering::SeqCst);
+        let g = lock(m);
+        self.waiting.fetch_sub(1, Ordering::SeqCst);
+        g
+    }
+
+    /// Wait, up to `max`, while anyone is waiting to take the service.
+    fn give_way(&self, max: Duration) {
+        let t0 = Instant::now();
+        while self.waiting.load(Ordering::SeqCst) > 0 && t0.elapsed() < max {
+            std::thread::sleep(Duration::from_micros(200));
+        }
+    }
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     match m.lock() {
@@ -147,6 +179,8 @@ pub struct RecorderRun {
     folder: Mutex<Option<PathBuf>>,
     /// Recordings saved since the last arm.
     saved_at_arm: Mutex<u64>,
+    /// The pump's way of letting a waiting verb or the status thread at the service.
+    handoff: Handoff,
 }
 
 impl RecorderRun {
@@ -172,6 +206,7 @@ impl RecorderRun {
             stop_cause: Mutex::new(None),
             folder: Mutex::new(None),
             saved_at_arm: Mutex::new(0),
+            handoff: Handoff::default(),
         }
     }
 
@@ -471,8 +506,10 @@ impl RecorderRun {
                     std::thread::sleep(pause);
                 }
             } else {
-                // Let a parked verb take the lock between batches.
-                std::thread::yield_now();
+                // The read is the pacing here, inside the lock: give way to a verb or the
+                // status thread waiting for the service, or it can starve (an unfair lock
+                // re-taken at once; verbs went unanswered on the NI bench).
+                self.handoff.give_way(HANDOFF_MAX);
             }
         }
         // Acquisition ends here; the record thread finishes the files.
@@ -542,7 +579,7 @@ impl RecorderRun {
             return Err(wrong_mode(&v, "recorder.arm"));
         }
         let svc = self.running("recorder.arm")?;
-        let mut s = lock(&svc);
+        let mut s = self.handoff.take(&svc);
         if s.state() != RecState::Monitoring {
             return Err(wrong_state(&self.view(), "recorder.arm"));
         }
@@ -560,7 +597,7 @@ impl RecorderRun {
             return Err(wrong_mode(&v, "recorder.disarm"));
         }
         let svc = self.running("recorder.disarm")?;
-        let mut s = lock(&svc);
+        let mut s = self.handoff.take(&svc);
         if s.state() != RecState::Armed {
             return Err(wrong_state(&self.view(), "recorder.disarm"));
         }
@@ -576,7 +613,7 @@ impl RecorderRun {
             return Err(wrong_mode(&v, "recorder.record"));
         }
         let svc = self.running("recorder.record")?;
-        let mut s = lock(&svc);
+        let mut s = self.handoff.take(&svc);
         if !matches!(s.state(), RecState::Monitoring | RecState::Armed) {
             return Err(wrong_state(&self.view(), "recorder.record"));
         }
@@ -600,7 +637,7 @@ impl RecorderRun {
             return Err(wrong_mode(&v, "recorder.cut"));
         }
         let svc = self.running("recorder.cut")?;
-        let mut s = lock(&svc);
+        let mut s = self.handoff.take(&svc);
         let st = s.status(0);
         let Some(now) = st.recording.filter(|_| s.state() == RecState::Recording) else {
             return Err(wrong_state(&self.view(), "recorder.cut"));
@@ -644,7 +681,7 @@ impl RecorderRun {
                 self.shared.add_log("note", format!("driver: {w}"));
             }
             let (st, fs, floor, marks, spectra, frf, saved, stats) = {
-                let mut s = lock(svc);
+                let mut s = self.handoff.take(svc);
                 let st = s.status(free.unwrap_or(0));
                 let fs = s.actual_rate_hz();
                 let floor = s.floor_bytes();
@@ -878,7 +915,7 @@ impl RecorderRun {
         {
             let svc = self.service();
             if let Some(svc) = svc {
-                let s = lock(&svc);
+                let s = self.handoff.take(&svc);
                 for row in v.live_rows.iter_mut() {
                     row.marks = s
                         .marks()
@@ -1000,7 +1037,7 @@ impl RecorderRun {
         let Some(svc) = self.service() else {
             return (Vec::new(), 0);
         };
-        let s = lock(&svc);
+        let s = self.handoff.take(&svc);
         let all = s.marks();
         let next = all.len() as u64;
         (
@@ -1055,5 +1092,64 @@ pub fn mark_words(m: &Mark) -> (&'static str, String) {
                 num(round(*level, 4))
             ),
         ),
+    }
+}
+
+#[cfg(test)]
+mod recorder_handoff_tests {
+    use super::*;
+
+    #[test]
+    fn recorder_handoff_gives_way_only_while_someone_waits() {
+        let h = Handoff::default();
+        let t0 = Instant::now();
+        h.give_way(Duration::from_millis(200));
+        assert!(
+            t0.elapsed() < Duration::from_millis(50),
+            "no one waiting: no wait"
+        );
+        h.waiting.fetch_add(1, Ordering::SeqCst);
+        let t0 = Instant::now();
+        h.give_way(Duration::from_millis(30));
+        let w = t0.elapsed();
+        assert!(
+            w >= Duration::from_millis(30) && w < Duration::from_millis(500),
+            "bounded: {w:?}"
+        );
+    }
+
+    /// A pump that holds the lock almost all the time, as the hardware read does, and takes it
+    /// again at once: a waiter through the handoff gets it every time, within a batch or two.
+    #[test]
+    fn recorder_a_waiter_gets_the_service_from_a_pump_that_holds_it() {
+        let h = Arc::new(Handoff::default());
+        let m = Arc::new(Mutex::new(0u64));
+        let stop = Arc::new(AtomicBool::new(false));
+        let pump = {
+            let (h, m, stop) = (h.clone(), m.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    {
+                        let mut g = lock(&m);
+                        std::thread::sleep(Duration::from_millis(10));
+                        *g += 1;
+                    }
+                    h.give_way(HANDOFF_MAX);
+                }
+            })
+        };
+        let mut worst = Duration::ZERO;
+        for _ in 0..20 {
+            let t0 = Instant::now();
+            drop(h.take(&m));
+            worst = worst.max(t0.elapsed());
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        stop.store(true, Ordering::SeqCst);
+        pump.join().unwrap();
+        assert!(
+            worst < Duration::from_millis(500),
+            "a waiter waited {worst:?}"
+        );
     }
 }
