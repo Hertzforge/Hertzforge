@@ -275,8 +275,8 @@ sds-control  test:sine_law_check  the_built_in_sine_law_passes_every_case_and_is
 # TWR laws: the host's deadline on a TWR law file, and a law call's time at the bench record and
 # at the record cap against its budget
 hertzforge-law-host  test:twr_host  a_spinning_twr_law_is_stopped_within_a_tick_of_its_budget
-hertzforge-law-host  test:twr_host  a_late_law_is_stopped_at_its_budget_and_stays_stopped
-hertzforge-law-host  test:twr_host  each_misbehaviour_is_a_named_error
+hertzforge-law-host  test:twr_host  a_late_twr_law_is_stopped_at_its_budget_and_stays_stopped
+hertzforge-law-host  test:twr_host  each_twr_misbehaviour_is_a_named_error
 hertzforge-twr-laws  test:law_call_timing  a_twr_law_call_at_the_bench_record_and_the_record_cap_is_well_inside_its_budget
 
 # The TWR service over its socket and on its run thread: runs on the simulated station paced to the

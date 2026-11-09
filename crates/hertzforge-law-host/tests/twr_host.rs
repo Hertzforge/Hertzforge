@@ -191,7 +191,7 @@ fn the_law_file_seeds_the_reference_through_its_inverse() {
 }
 
 #[test]
-fn each_misbehaviour_is_a_named_error() {
+fn each_twr_misbehaviour_is_a_named_error() {
     let host = LawHost::new(HostConfig::default()).unwrap();
     let rule = |r: &Result<Vec<f64>, LawError>| match r {
         Err(LawError::BadTwrOutput { rule, .. }) => Some(*rule),
@@ -244,7 +244,7 @@ fn each_misbehaviour_is_a_named_error() {
 }
 
 #[test]
-fn a_late_law_is_stopped_at_its_budget_and_stays_stopped() {
+fn a_late_twr_law_is_stopped_at_its_budget_and_stays_stopped() {
     let host = LawHost::new(HostConfig::default()).unwrap();
     let budget = Duration::from_millis(50);
     for mode in ["spin", "sleep_after"] {
