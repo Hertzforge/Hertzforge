@@ -1494,7 +1494,7 @@ specified with the run-file format, not here.
 
 Multiple-input multiple-output Random: up to 24 drives and 72 control channels, controlled to a
 reference spectral density matrix. The service runs one test at a time, so a MIMO run and a
-single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine or TWR run)
+single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine, TWR or Explorer run)
 exclude each other exactly as two Random runs would: each is refused `run_active` while the other
 is live. The controller and observer rules
 are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
@@ -1856,8 +1856,8 @@ identifies the system with band-limited random at a stated drive in volts, inver
 plant, and seeds the control law from it; after each pulse is fired, measured and judged, the law
 proposes the next full-level drive and the service checks it before it plays. The drive is in
 volts throughout. The run is one test like any other: a classical shock run, a Random run, a MIMO
-run, an SRS shock run, a Sine run, a TWR run and a `sim.start` run exclude each other, each
-refused `run_active` while another is live.
+run, an SRS shock run, a Sine run, a TWR run, an Explorer run and a `sim.start` run exclude each
+other, each refused `run_active` while another is live.
 **Any connected screen may stop or abort** (`shock.stop`, `shock.abort`); `shock.configure`
 (other than a dry run), `arm`, `start`, `proceed`, `fire`, `level`, `train`, `burst`, `reset`
 and `clear` need control; everything that only reads is open to every connection. While the
@@ -2201,8 +2201,8 @@ system with a burst of that synthesis at a stated peak in volts, and seeds the c
 the identified gain at each component; after each pulse is fired, measured and judged, the law
 proposes a gain for each component, and the service caps the gains and checks the drive before it
 plays. The drive is in volts throughout. The run is one test like any other: an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a Sine run, a TWR run and a `sim.start` run
-exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a Sine run, a TWR run, an Explorer run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`srs.stop`, `srs.abort`); `srs.configure` (other than a dry run), `arm`, `start`, `proceed`,
 `fire`, `level`, `reset` and `clear` need control; everything that only reads or only computes is
 open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
@@ -2500,8 +2500,8 @@ channels' notch and the drive ceiling, and judges the response against the profi
 and abort bands at the present frequency. The frequency, the sweep and its direction, the
 tone's phase and the level schedule are the service's, never the law's. The drive is in volts
 peak on hardware. The run is one test like any other: a Sine run, an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a TWR run and a `sim.start` run exclude each
-other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a TWR run, an Explorer run and a `sim.start` run
+exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`sine.stop`, `sine.abort`); `sine.configure` (other than a dry run), `arm`, `start`,
 `proceed`, `level`, `mode`, `hold`, `resume`, `reverse`, `jog`, `goto`, `adjust`, `reset` and
 `clear` need control; everything that only reads or only computes is open to every
@@ -2955,8 +2955,8 @@ the response, aligns it, judges it and gates it at its level; after a play the s
 corrected, the law proposes the next full-level drive and the service checks it before it plays.
 The level ladder, the gate, the playback schedule and every abort are the service's, never the
 law's. The drive is in volts throughout. The run is one test like any other: a TWR run, a Sine
-run, an SRS shock run, a classical shock run, a Random run, a MIMO run and a `sim.start` run
-exclude each other, each refused `run_active` while another is live. **Any connected screen may
+run, an SRS shock run, a classical shock run, a Random run, a MIMO run, an Explorer run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may
 stop or abort** (`twr.stop`, `twr.abort`); `twr.configure` (other than a dry run), `arm`,
 `start`, `proceed`, `iterate`, `play`, `level`, `freeze`, `reset` and `clear` need control;
 everything that only reads or only computes is open to every connection. While the service is
@@ -3454,10 +3454,6 @@ need control; everything that only reads or only computes is open to every conne
 service is shutting down, `explorer.start`, `steer` and `sweep` are refused `shutting_down`;
 `explorer.hold`, `stop` and `abort` are not.
 
-**Status.** The service does not offer Explorer yet. This section is the contract the service and
-the shell are being built against; until they ship, every `explorer.*` method is refused
-`unknown_method`.
-
 | Method | Params | From | Result |
 |---|---|---|---|
 | `explorer.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived"}` |
@@ -3479,7 +3475,10 @@ the shell are being built against; until they ship, every `explorer.*` method is
 "state" in the Result column is the `explorer.state` object below. A run is live while it is
 starting, running or stopping. `explorer.configure` replaces a run that is not live;
 `explorer.reset` returns an ended run to `configured` with its configuration on the present table
-and station, the survey line and the log empty; `explorer.clear` forgets it (`unconfigured`).
+and station, the survey line and the log empty; `explorer.clear` forgets it (`unconfigured`). While
+a run is live both are refused `run_active` (naming that run), and so is `explorer.reset` while
+another module's run is live, as a configure would be. `explorer.start` on a run already started
+is refused `wrong_state`.
 
 ### Explorer Configuration
 
@@ -3564,11 +3563,14 @@ station at 12 800 Hz:
   narrows the band under 0.45 times that rate (logged), passes the arm gate, writes the station's
   lead-in at 0 V and starts the clock and the tone in one step (`starting`, `priming`, while the
   station opens). It answers once the tone runs at 0 V at `start_hz` (`running`, `quiet`).
-  Refusals: `not_controller`, `not_configured`, `run_active`, `run_finished` (reset first),
-  `config_invalid` (the table, as it is now, no longer carries the run: the same items as
-  configure), `table_invalid`, `hardware_busy`, `devices_absent`, `arm_refused` (the station or
-  the arm gate refused; the message is the controller's own, and the run ends `arm_refused`) and
-  `shutting_down`.
+  Refusals, in the order they are checked: `shutting_down`, `not_controller`, `not_configured`,
+  `run_finished` (reset first), `wrong_state` (already started), `run_active` (another module's
+  run is live; it names that run, so a live Sine run refuses an Explorer start and a live Explorer
+  run refuses a Sine arm, each naming the other), `table_invalid`, `config_invalid` (the table, as
+  it is now, no longer carries the run: the same items as configure), then, once the station is
+  being opened, `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate
+  refused; the message is the controller's own). A refusal once the station is being opened ends
+  the run `arm_refused`, and `explorer.reset` comes before another start.
 - **`explorer.steer`** moves the tone. A frequency part is `hz` (absolute), `step_hz` (added to
   the target frequency) or `step_oct` (the target frequency times 2 to that power); a level part
   is `vpk` (absolute) or `step_db` (from the target level). A steer has one part or one of each,
@@ -3593,13 +3595,14 @@ station at 12 800 Hz:
   never turns by itself. Another `explorer.sweep` re-aims it. Refused `wrong_state` outside
   `running`.
 - **`explorer.hold`** ends the sweep and the tone holds where it is now (`hz` in the answer).
-  Without a sweep it changes nothing. Refused `wrong_state` outside `running`.
+  Without a sweep it changes nothing and answers the target frequency in force. Refused
+  `wrong_state` outside `running`.
 - The steering verbs are taken between the service's batches of two blocks, and each answers
   within one batch and one analysis pass.
 - **`explorer.stop`** is the controlled stop: any sweep ends, the drive ramps to 0 V at the drive
   slew (`stopping`, `ramping_down`), then the station's tasks stop and the run ends
-  `operator_stop`. From `starting` it takes effect once the station has opened. It answers at
-  once.
+  `operator_stop`. From `starting` it takes effect once the station has opened (the drive is
+  still at 0 V, so the ramp is immediate). It answers at once, with the state as it stands.
 - **`explorer.abort`** ends the run within one batch without the ramp; the station takes the drive
   down with its own stop. The outcome is `operator_abort`.
 - **The protections.** Every generated sample is checked against `max_drive_vpk`: a sample over it
@@ -3676,9 +3679,15 @@ service's clock.
 - `stop` is null until a stop begins, then its cause: `operator`, `safe_stop` (nobody held
   control), `shutdown` or `limit` (the derived motion).
 - `end` is null until the run finishes, then
-  `{"outcome","message","at_s","at_hz","vpk","ramp_s","trip"}`: `at_s` station time from start,
-  `at_hz` and `vpk` the tone when the end began, `ramp_s` the controlled stop's length on the
-  station's clock (null for an abort and a fault).
+  `{"outcome","message","at_s","at_hz","vpk","ramp_s","trip"}`: `at_s` the station time at which
+  the run finished, `at_hz` and `vpk` the tone when the end began, `ramp_s` the controlled stop's
+  length on the station's clock, from the input frame the stop was taken at (null for an abort and
+  a fault), so the stop began at `at_s - ramp_s`. The messages: `operator_stop` "Stopped by
+  <name>: the controlled stop ramped the drive to 0 V."; `safe_stop` "Nobody held control: the
+  controlled stop ramped the drive to 0 V." or, at a shutdown, "The service shut down: the
+  controlled stop ramped the drive to 0 V."; `operator_abort` "Aborted by <name>."; a trip names
+  its channel, axis, value and limit, or the drive sample and the ceiling; a fault is the
+  controller's words.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -3710,13 +3719,19 @@ from fewer than three cycles. A visit within `derived.survey.tolerance_hz` of a 
 it, and the tone passing through a span (a sweep, or a jump from one point to the next) removes
 every older point inside it, so a second pass over a band shows the second pass. `peak` is the
 highest point, `{"hz","level"}`, or null. `revision` counts every change; given `since` equal to
-it, `points` is null (nothing has changed since). `explorer.survey.clear` empties it and answers
-the new revision. The survey lives as long as the run: it is kept after the end until
+it, `points` is null (nothing has changed since). A point carries no time of its own: the steering
+answers' and the records' frames say when a change was taken, and the revision moves with every
+point. A survey of one point is carried as that point, on its own points or drawn.
+`explorer.survey.clear` empties it and answers the new revision; the tone held at the clear is
+measured again from the next pass. Refused `wrong_state` outside `running` and `stopping`. The survey lives as long as the run: it is kept after the end until
 `explorer.reset`, `explorer.clear` or a new configuration.
 
 ### Explorer Records
 
-Each run writes its folder `capture.run_name` under the local data root: `explorer.json` (the
+Each run writes its folder `capture.run_name` under the local data root (`HERTZFORGE_DATA_ROOT`,
+else `Hertzforge_Data` in the home folder; the log names the folder at start, "records in
+<path>"); a name already taken gets the first free `<name>-<n>`, so no run writes over another:
+`explorer.json` (the
 configuration, the station, the requested and adopted rates and the derived numbers),
 `intents.jsonl` (a line for every steering verb the run took: its station time, the frame it took
 effect at, what was asked, what was adopted and whether it was clamped), `survey.json` (the
@@ -3729,13 +3744,16 @@ Event topics:
 
 - `explorer.state` (text): the state object on every change of `state`, `phase`, `sweep`,
   `stop`, `stall` or `end`.
-- `explorer.log` (text): new log entries, as Random's: the rate adopted and the band narrowed at
-  start, every driver warning, the stop's cause and the end.
+- `explorer.log` (text): new log entries, as Random's: "the station programmed <fs> Hz (asked
+  <fs> Hz); the band is <lo> to <hi> Hz" and "records in <path>" at start, every driver warning
+  (`note`, "driver: " and the driver's own text), "stop began: <cause>" and "ended <outcome>:
+  <message>".
 - `explorer.live` (binary, to every connection without an Explorer subscription of its own, 10
   times a second from start until the run has finished, then once more).
 - `explorer.data` (binary, to one subscribed connection, in place of `explorer.live`):
-  `explorer.live`'s fields but `views`, and `plots`, at most `rate_hz` times a second, and at once
-  on subscribe.
+  `explorer.live`'s fields but `views`, and `plots`, at `rate_hz` (default 10, so a `time` plot
+  comes ten times a second unless the subscription asks for fewer), and at once on subscribe once
+  the run has started.
 
 ```
 {"run_id","source","class","state","phase","t_s","frequency_hz","target_hz","measured_hz",
