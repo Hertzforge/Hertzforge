@@ -73,10 +73,19 @@ impl ProcessStep for NoDrive {
     fn process(&mut self, _input: &[f32], _n_frames: usize, _drive_out: &mut Vec<f32>) {}
 }
 
-/// Default segment length in frames (~0.25 s of the 65,536 Hz native rate,
-/// rounded to a power of two): short enough that a scheduling-fault blip only
-/// costs one segment, long enough that per-segment overhead is negligible.
-pub const DEFAULT_SEGMENT_FRAMES: u64 = 16_384;
+/// Blocks in a batch: the most the service reads between two verbs. Two, so a verb
+/// waits at most one batch and one analysis pass (40 ms at 12 800 Hz on NI).
+pub const BLOCKS_PER_BATCH: u64 = 2;
+
+/// The scheduling-health jitter allowance of a capture-only run, effectively none.
+/// A capture-only run drives nothing, so a late read cannot starve an output: the
+/// frames wait in the station's input buffer, and a read so late that the buffer
+/// overflows is an error the station reports, which ends the run in its words.
+pub const CAPTURE_ONLY_JITTER_FRAC: f64 = 1e12;
+
+/// The per-block compute budget of a capture-only run, for the same reason: work
+/// that runs late delays the next read, it does not lose a frame.
+pub const CAPTURE_ONLY_COMPUTE_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Frames per acquisition block the recorder REQUESTS at configure. The engine's
 /// `frames_per_tick` then comes from what the backend answers, not from this
@@ -91,10 +100,6 @@ pub const DEFAULT_SEGMENT_FRAMES: u64 = 16_384;
 /// `RecorderService::with_block_frames`, and the recorder's drive is silent zeros
 /// either way, so the block only ever affects the INPUT cadence here.
 const DEFAULT_BLOCK_FRAMES: usize = hertzforge_engine::SIM_NATURAL_BLOCK_FRAMES;
-
-/// Bounded retry count for a spurious wall-clock [`StopReason::SchedulingFault`]
-/// (the deterministic harness timing artifact).
-const MAX_SEGMENT_ATTEMPTS: u32 = 8;
 
 /// The HERTZFORGE-SIM abort-watchdog debounce, in RAW FRAMES (~61 us at the Sim
 /// plant's 65 536 Hz). Unchanged from the value this module has always used.
@@ -265,6 +270,8 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     block_frames: usize,
     /// Whether the backend has been brought up (open/configure/arm/start).
     backend_up: bool,
+    /// The run's one engine, built when the station is up.
+    engine: Option<Engine>,
 
     /// The enabled-input slot count (interleave width).
     n_input: usize,
@@ -321,15 +328,7 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// Recordings finished since start.
     recordings_saved: u64,
 
-    /// How many [`StopReason::SchedulingFault`] retries this session has taken.
-    ///
-    /// It is OBSERVABILITY ONLY - nothing reads it to make a decision, and the retry
-    /// behavior is byte-for-byte what it was. It exists because the soak gate's
-    /// predicate is ZERO SchedulingFault over 30+ minutes, and `run_segment` swallows
-    /// the retry by design (a spurious wall-clock overrun on a deterministic harness is
-    /// not a real fault). Swallowed and uncounted, the predicate was unmeasurable: a
-    /// soak could retry a hundred segments and report a clean run. Counted, the
-    /// operator sees the number and the gate means something.
+    /// Scheduling faults this run has seen: at most one, since one ends the run.
     scheduling_faults: u64,
 }
 
@@ -430,12 +429,9 @@ impl<B: Backend> RecorderService<B> {
         // station replaces it in `bring_backend_up`, where the ACTUAL rate is
         // known - see the constants note there.
         ecfg.watchdog_sustain = SIM_WATCHDOG_SUSTAIN_FRAMES;
-        // Deterministic single-threaded harness: it runs the engine flat out
-        // between segments, so wall-clock tick spacing carries no information.
-        ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
-        // The tick-period compute budget is meaningless for this harness; relax it
-        // explicitly instead of retrying the spurious ComputeOverrun it produces.
-        ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
+        // The capture-only health budget, by name: a late read loses nothing.
+        ecfg.jitter_frac = CAPTURE_ONLY_JITTER_FRAC;
+        ecfg.compute_budget = Some(CAPTURE_ONLY_COMPUTE_BUDGET);
 
         let (analysis, frf) = build_analysis(&cfg.acq, n_input, cfg.frf_pair);
         let fs_hz = cfg.acq.native_rate_hz;
@@ -454,6 +450,7 @@ impl<B: Backend> RecorderService<B> {
             ecfg,
             block_frames: DEFAULT_BLOCK_FRAMES,
             backend_up: false,
+            engine: None,
             n_input,
             analysis,
             frf,
@@ -483,9 +480,7 @@ impl<B: Backend> RecorderService<B> {
         })
     }
 
-    /// How many [`StopReason::SchedulingFault`]s this service has seen, retried or
-    /// not. OBSERVABILITY ONLY - see the field docs. The soak gate's predicate is
-    /// that this reads `0` after >= 30 minutes.
+    /// Scheduling faults this run has seen: 0, or 1 for the one that ended it.
     pub fn scheduling_faults(&self) -> u64 {
         self.scheduling_faults
     }
@@ -635,68 +630,86 @@ impl<B: Backend> RecorderService<B> {
     // The monitor loop pump (segment-run pattern)
     // ---------------------------------------------------------------------
 
-    /// Run ONE monitor segment ([`DEFAULT_SEGMENT_FRAMES`]) with the
-    /// SchedulingFault retry, then drain the captured frames into the
-    /// analysis / record / trigger paths. Returns the frames processed. A
-    /// `BackendError` or watchdog trip latches the service Faulted (message
-    /// preserved) and returns `Err`. Each segment is bounded so no call hangs.
+    /// Read ONE batch ([`BLOCKS_PER_BATCH`] blocks) and hand it to the overload
+    /// latches, the trigger, the recording and the analysis. Returns the frames read.
+    /// A verb waits at most this long for the service. Any reason the station or the
+    /// engine stops ends the run once, in its own words, every recording finalized,
+    /// and returns `Err`.
     pub fn pump(&mut self) -> Result<u64, RecorderError> {
-        self.pump_frames(DEFAULT_SEGMENT_FRAMES)
-    }
-
-    /// [`RecorderService::pump`] with an explicit per-segment frame budget
-    /// (exposed for fast tests).
-    pub fn pump_frames(&mut self, segment_frames: u64) -> Result<u64, RecorderError> {
         if !self.state.is_live() {
             return Err(RecorderError::BadState(format!(
                 "pump requires a live state, was {:?}",
                 self.state
             )));
         }
-        let (frames, reason) = self.run_segment(segment_frames)?;
-        match reason {
-            StopReason::BackendError(msg) => {
-                self.fault(format!("backend error: {msg}"));
-                return Err(RecorderError::Backend(msg));
-            }
-            StopReason::Disconnected(msg) => {
-                // The device link vanished mid-segment (USB re-enumeration /
-                // hot-unplug). Latch Faulted like a backend error - a recorder with
-                // no device is not recording - but keep the distinct wording so the
-                // operator sees "link lost", not a generic backend fault.
-                self.fault(format!("device link lost: {msg}"));
-                return Err(RecorderError::Backend(format!("device link lost: {msg}")));
-            }
-            StopReason::AbortTripped(trip) => {
-                let msg = format!(
-                    "watchdog trip: ch {} axis {:?} value {:.4} limit {:.4}",
-                    trip.channel_index, trip.axis, trip.value, trip.limit
-                );
-                self.fault(msg.clone());
-                return Err(RecorderError::Backend(msg));
-            }
-            StopReason::CaptureFatal(m) => {
-                self.fault(format!("capture fatal: {m}"));
-                return Err(RecorderError::Io(m));
-            }
-            // The acquisition went SILENT. A recorder whose
-            // input stalled is not recording, and the blanket `_ => {}` below would
-            // have let it pump empty segments forever while reporting healthy.
-            StopReason::InputStalled { elapsed } => {
-                let msg = format!("input stalled: no frames for {elapsed:?}");
-                self.fault(msg.clone());
-                return Err(RecorderError::Backend(msg));
-            }
-            // Raw frames the watchdog never examined, on a
-            // run with limits armed. A monitor that dropped frames did not monitor.
-            StopReason::RingOverrun { frames } => {
-                let msg = format!("raw ring overrun: {frames} frame(s) dropped with limits armed");
-                self.fault(msg.clone());
-                return Err(RecorderError::Backend(msg));
-            }
-            _ => {}
+        let Some(engine) = self.engine.as_mut() else {
+            return Err(RecorderError::BadState("the station is not up".into()));
+        };
+        let mut bridge = CaptureBridge::default();
+        if let Some(end) = self.last_batch_end {
+            let gap = end.elapsed();
+            self.batch_gap_max = Some(self.batch_gap_max.map_or(gap, |g| g.max(gap)));
         }
-        Ok(frames)
+        // `run_ticks`, not `run`: the run is one continuous acquisition, and the
+        // service owns the station's stop (`tear_backend_down`).
+        let report = engine.run_ticks(
+            &mut self.backend,
+            &mut NoDrive as &mut dyn ProcessStep,
+            &mut bridge as &mut dyn EngineCaptureSink,
+            BLOCKS_PER_BATCH,
+        );
+        self.last_batch_end = Some(std::time::Instant::now());
+        self.batches += 1;
+        let frames = bridge.n_frames;
+        let interleaved = std::mem::take(&mut bridge.frames);
+        // The frames read before any stop are kept: they are drained first.
+        self.drain_segment(&interleaved, frames)?;
+
+        let words = match report.reason {
+            // The batch's budget: the normal end of a batch.
+            StopReason::InputEnded if report.ticks >= BLOCKS_PER_BATCH => return Ok(frames),
+            StopReason::InputEnded => "the station ended its input stream".to_string(),
+            StopReason::BackendError(msg) => format!("station error: {msg}"),
+            StopReason::Disconnected(msg) => format!("device link lost: {msg}"),
+            StopReason::InputStalled { elapsed } => {
+                format!("input stalled: no frames for {elapsed:?}")
+            }
+            StopReason::SchedulingFault(h) => {
+                self.scheduling_faults += 1;
+                format!("scheduling fault: {h:?}")
+            }
+            StopReason::AbortTripped(trip) => format!(
+                "watchdog trip: ch {} axis {:?} value {:.4} limit {:.4}",
+                trip.channel_index, trip.axis, trip.value, trip.limit
+            ),
+            StopReason::CaptureFatal(m) => format!("capture fatal: {m}"),
+            StopReason::RingOverrun { frames } => {
+                format!("raw ring overrun: {frames} frame(s) dropped with limits armed")
+            }
+            other => format!("the engine stopped: {other:?}"),
+        };
+        self.fault(words.clone());
+        Err(RecorderError::Backend(words))
+    }
+
+    /// Read batches until at least `frames` have been read or the run ends. A test's
+    /// convenience: it holds the service for the whole count.
+    pub fn pump_frames(&mut self, frames: u64) -> Result<u64, RecorderError> {
+        let mut read = 0u64;
+        // Bounded: a station that reads nothing for long ends the run by its stall
+        // deadline, and this count is the backstop.
+        let mut empty = 0u32;
+        while read < frames {
+            let n = self.pump()?;
+            read += n;
+            if n == 0 {
+                empty += 1;
+                if empty > 10_000 {
+                    break;
+                }
+            }
+        }
+        Ok(read)
     }
 
     /// Latch the service Faulted, finalizing any active recording and tearing
@@ -709,70 +722,6 @@ impl<B: Backend> RecorderService<B> {
         }
         self.tear_backend_down();
         self.transition(RecState::Faulted);
-    }
-
-    /// Run the engine for one segment with the SchedulingFault retry, returning
-    /// the captured frames + the accepted stop reason, then drain the frames.
-    fn run_segment(&mut self, segment_frames: u64) -> Result<(u64, StopReason), RecorderError> {
-        let mut bridge = CaptureBridge::default();
-        let mut reason;
-        let mut attempt = 0u32;
-        loop {
-            // Re-arm/start so the plant is Running with a clean drive path; the
-            // backend state persists so the plant/noise stream is continuous.
-            let _ = self.backend.arm();
-            let _ = self.backend.start();
-            let mut engine = Engine::new(clone_ecfg(&self.ecfg), &self.engine_table, &self.backend);
-            let mut step = NoDrive;
-            bridge.frames.clear();
-            bridge.n_frames = 0;
-            // The segment budget is FRAMES; the engine's run budget is TICKS.
-            // They were numerically equal for the HERTZFORGE-SIM plant's natural
-            // block of 1 frame, and that hidden equivalence became a defect the
-            // day a hardware station set a real block (2026-07-30): 16384
-            // "ticks" x 1024-frame blocks is 5.5 MINUTES of driver-paced
-            // acquisition per pump call, with the service mutex held the whole
-            // way - the daemon looked wedged, StopMonitor starved behind the
-            // lock, and the segment's capture bridge accumulated ~330 MB.
-            let fpt = self.ecfg.frames_per_tick.max(1) as u64;
-            let ticks = segment_frames.div_ceil(fpt);
-            // `run_ticks`, NOT `run`: the monitor session is ONE continuous
-            // acquisition; `run`'s backend-stop epilogue at every segment
-            // boundary stopped the NI tasks, the silent re-start below failed,
-            // and the next segment stalled against a dead AO (2026-07-30).
-            // The service owns the real stop (`tear_backend_down`).
-            if let Some(end) = self.last_batch_end {
-                let gap = end.elapsed();
-                self.batch_gap_max = Some(self.batch_gap_max.map_or(gap, |g| g.max(gap)));
-            }
-            let report = engine.run_ticks(
-                &mut self.backend,
-                &mut step as &mut dyn ProcessStep,
-                &mut bridge as &mut dyn EngineCaptureSink,
-                ticks,
-            );
-            self.last_batch_end = Some(std::time::Instant::now());
-            self.batches += 1;
-            reason = report.reason;
-            if matches!(reason, StopReason::SchedulingFault(_)) {
-                // COUNTED even when retried and even on the final attempt: the
-                // soak gate asks how many happened, not how many were fatal.
-                // See the field docs on `scheduling_faults`.
-                self.scheduling_faults += 1;
-            }
-            if matches!(reason, StopReason::SchedulingFault(_))
-                && attempt + 1 < MAX_SEGMENT_ATTEMPTS
-            {
-                attempt += 1;
-                continue; // spurious wall-clock overrun; retry a clean segment
-            }
-            break;
-        }
-
-        let frames = bridge.n_frames;
-        let interleaved = std::mem::take(&mut bridge.frames);
-        self.drain_segment(&interleaved, frames)?;
-        Ok((frames, reason))
     }
 
     /// Drain a segment's interleaved frames into: overload latches (real
@@ -1108,6 +1057,12 @@ impl<B: Backend> RecorderService<B> {
         self.backend
             .arm()
             .map_err(|e| RecorderError::Backend(format!("arm: {e}")))?;
+        // The run's one engine: built once, never re-armed or re-started per batch.
+        self.engine = Some(Engine::new(
+            clone_ecfg(&self.ecfg),
+            &self.engine_table,
+            &self.backend,
+        ));
         self.backend
             .start()
             .map_err(|e| RecorderError::Backend(format!("start: {e}")))?;
@@ -1116,6 +1071,7 @@ impl<B: Backend> RecorderService<B> {
     }
 
     fn tear_backend_down(&mut self) {
+        self.engine = None;
         if self.backend_up {
             let _ = self.backend.stop();
             let _ = self.backend.close();

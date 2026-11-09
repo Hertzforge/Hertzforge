@@ -278,19 +278,10 @@ impl RecorderHost {
             .map(|c| (c.index, c.control_group))
             .collect();
 
-        // Block policy is PER-STATION, exactly as `with_block_frames`'s own doc
-        // demands: a hardware station passes `default_block_frames(fs)`; the
-        // HERTZFORGE-SIM plant path leaves the sim-natural default (block = 1), which
-        // its tick is sized around - overriding THAT desynchronizes the engine
-        // from the plant and the pump produces nothing (found the hard way; the
-        // live pump test below stops it coming back). Leaving the hardware half
-        // of the contract unimplemented was the second 8/8-probe failure
-        // (2026-07-30): the recorder re-configures the NI task at its own block,
-        // so block=1 made the AO buffer (lookahead+1 blocks) THREE FRAMES - the
-        // device consumed it in ~58 us, output_space never opened, and the
-        // engine's stall deadman fired 500 ms in.
+        // Every station runs at the block nearest 20 ms of the rate: one pump reads one
+        // batch of two blocks, so a one-frame block would make a batch two frames.
         let native_rate = cfg.acq.native_rate_hz;
-        let mut svc = RecorderService::with_backend(
+        let svc = RecorderService::with_backend(
             cfg,
             table,
             station.backend,
@@ -300,9 +291,7 @@ impl RecorderHost {
         .map_err(|e| ProtocolError::Refused {
             message: e.to_string(),
         })?;
-        if station.station.is_hardware() {
-            svc = svc.with_block_frames(hertzforge_hal::default_block_frames(native_rate));
-        }
+        let mut svc = svc.with_block_frames(hertzforge_hal::default_block_frames(native_rate));
         svc.configure().map_err(|e| ProtocolError::Refused {
             message: e.to_string(),
         })?;
