@@ -163,11 +163,18 @@ fn recorder_every_wire_field_reaches_the_cores_config() {
         .unwrap()
         .build(&t);
     assert_eq!(other.frf_pair, None);
-    // The run name and the floor are the run's, not the core's: they reach it
-    // through the derived floor and the run folder.
+    // The run name is the run's (the run folder); the floor reaches the core too, which
+    // keeps it while the run records: the running core kept its 1 GiB least whatever was
+    // asked, so a run asked to keep more never ended at its floor.
     let w2 = parse(&with(example(), "capture.keep_free_gb", json!(3))).unwrap();
     let (_, d) = w2.check(&ctx(&t));
     assert_eq!(d.unwrap().floor_bytes, 3 * 1_073_741_824);
+    assert_eq!(w2.build(&t).keep_free_bytes, Some(3 * 1_073_741_824));
+    let frac = parse(&with(example(), "capture.keep_free_gb", json!(667.25))).unwrap();
+    assert_eq!(
+        frac.build(&t).keep_free_bytes,
+        Some((667.25 * 1_073_741_824.0f64).round() as u64)
+    );
     assert_eq!(
         parse(&with(example(), "capture.run_name", json!("bench")))
             .unwrap()
