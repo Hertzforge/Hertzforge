@@ -96,6 +96,9 @@
 			} else if (app.twr.actions.abort.enabled) {
 				e.preventDefault();
 				void app.twr.abort();
+			} else if (app.explorer.actions.abort.enabled) {
+				e.preventDefault();
+				void app.explorer.abort();
 			}
 			return;
 		}

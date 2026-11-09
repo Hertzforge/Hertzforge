@@ -19,6 +19,8 @@ import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
 import { SineViewsState } from '$lib/acquire/sine/sineViews.svelte';
 import { TwrStore } from '$lib/acquire/twr/twrStore.svelte';
 import { TwrViewsState } from '$lib/acquire/twr/twrViews.svelte';
+import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
+import { ExplorerViewsState } from '$lib/acquire/explorer/explorerViews.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -1591,6 +1593,10 @@ export class AppState {
 	readonly twr: TwrStore;
 	/** The TWR run's pages and this window's subscription. */
 	readonly twrViews: TwrViewsState;
+	/** Explorer's setup and run; the station and table are the Acquire store's. */
+	readonly explorer: ExplorerStore;
+	/** The Explorer run's pages and this window's subscription. */
+	readonly explorerViews: ExplorerViewsState;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -1615,6 +1621,7 @@ export class AppState {
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.twr = new TwrStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			testType: 'random',
@@ -1654,6 +1661,12 @@ export class AppState {
 			showing: () => twrPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'twr' && this.twr.step === 'run'),
 			page: twrPopout ? config.page : null
 		});
+		const explorerPopout = config.popout && config.popoutTest === 'explorer';
+		this.explorerViews = new ExplorerViewsState(this.control, {
+			setupTitle: () => this.explorer.status?.title ?? (config.popout ? null : this.explorer.setup.title),
+			showing: () => explorerPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'explorer' && this.explorer.step === 'run'),
+			page: explorerPopout ? config.page : null
+		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
 
@@ -1679,7 +1692,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr' | 'explorer' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -1698,6 +1711,7 @@ export class AppState {
 		const srs = this.config.popoutTest === 'srs';
 		const sine = this.config.popoutTest === 'sine';
 		const twr = this.config.popoutTest === 'twr';
+		const explorer = this.config.popoutTest === 'explorer';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -1727,19 +1741,25 @@ export class AppState {
 					if (this.control.status === 'open') void this.twr.sync();
 				});
 			}
+			if (explorer) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.explorer.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
 		else if (srs) this.srsViews.watch();
 		else if (sine) this.sineViews.watch();
 		else if (twr) this.twrViews.watch();
+		else if (explorer) this.explorerViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -1770,6 +1790,8 @@ export class AppState {
 		if (onSine || this.sine.isLive) return this.sine.source;
 		const onTwr = this.workspace === 'acquire' && this.tests.screen === 'twr';
 		if (onTwr || this.twr.isLive) return this.twr.source;
+		const onExplorer = this.workspace === 'acquire' && this.tests.screen === 'explorer';
+		if (onExplorer || this.explorer.isLive) return this.explorer.source;
 		return null;
 	}
 
@@ -1813,6 +1835,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.twr.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.explorer.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -1824,6 +1849,7 @@ export class AppState {
 		this.srs.watch();
 		this.sine.watch();
 		this.twr.watch();
+		this.explorer.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
@@ -1831,6 +1857,7 @@ export class AppState {
 		this.srsViews.watch();
 		this.sineViews.watch();
 		this.twrViews.watch();
+		this.explorerViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

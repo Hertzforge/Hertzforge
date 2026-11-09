@@ -261,7 +261,7 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	shutting_down: 'The Control Service Is Shutting Down'
 };
 
-/** Refusals of one test type's own methods (classical shock's, Sine's, TWR's), beside the shared ones. */
+/** Refusals of one test type's own methods (classical shock's, Sine's, TWR's, Explorer's), beside the shared ones. */
 const MORE_REFUSAL_TITLES: Record<string, string> = {
 	not_yet: 'Not Yet',
 	wrong_mode: 'Not in This Ladder Mode',
@@ -271,7 +271,8 @@ const MORE_REFUSAL_TITLES: Record<string, string> = {
 	adjust_refused: 'Parameter Not Changed',
 	reference_unreadable: 'The Reference Could Not Be Read',
 	not_converged: 'The Level Has Not Met Its Gate',
-	coherence_hold: 'Held at the Coherence Floor'
+	coherence_hold: 'Held at the Coherence Floor',
+	level_zero: 'The Level Is 0 V'
 };
 
 /** Why a live law parameter was not changed (`adjust_refused`'s `why`). */

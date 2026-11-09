@@ -13,6 +13,8 @@
 	import SineScreen from '$lib/acquire/sine/SineScreen.svelte';
 	import TwrScreen from '$lib/acquire/twr/TwrScreen.svelte';
 	import { TWR_STATE_WORDS } from '$lib/acquire/twr/twrWords';
+	import ExplorerScreen from '$lib/acquire/explorer/ExplorerScreen.svelte';
+	import { EXPLORER_STATE_WORDS } from '$lib/acquire/explorer/explorerWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
 
@@ -35,7 +37,9 @@
 							? STATE_WORDS[app.sine.status.state]
 							: app.twr.isLive && app.twr.status
 								? TWR_STATE_WORDS[app.twr.status.state]
-								: null
+								: app.explorer.isLive && app.explorer.status
+									? EXPLORER_STATE_WORDS[app.explorer.status.state]
+									: null
 	);
 </script>
 
@@ -53,6 +57,8 @@
 	<SineScreen {app} />
 {:else if tests.screen === 'twr'}
 	<TwrScreen {app} />
+{:else if tests.screen === 'explorer'}
+	<ExplorerScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}
