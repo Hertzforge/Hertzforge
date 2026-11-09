@@ -136,6 +136,12 @@ impl TwrLadderState {
         self.level_index
     }
 
+    /// The table level the run is on, or `None` while a manual trim has moved
+    /// it off the table's levels.
+    pub fn rung(&self) -> Option<usize> {
+        (self.manual_offset_db == 0.0).then_some(self.level_index)
+    }
+
     pub fn iterations_at_level(&self) -> u32 {
         self.iterations_at_level
     }

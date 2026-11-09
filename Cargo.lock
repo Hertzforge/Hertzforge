@@ -1175,11 +1175,36 @@ version = "0.1.0"
 dependencies = [
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
+ "hertzforge-sine",
  "wit-bindgen",
 ]
 
 [[package]]
 name = "hertzforge-law-shock-fdc"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-shock-law-math",
+]
+
+[[package]]
+name = "hertzforge-law-shock-srs-ratio"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-shock-law-math",
+]
+
+[[package]]
+name = "hertzforge-law-sine-servo"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-sine",
+]
+
+[[package]]
+name = "hertzforge-law-twr-correct"
 version = "0.1.0"
 dependencies = [
  "hertzforge-law-sdk",
@@ -1267,6 +1292,7 @@ dependencies = [
  "hertzforge-random",
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
+ "hertzforge-sine",
  "serde",
  "serde_json",
 ]
@@ -1372,6 +1398,7 @@ dependencies = [
  "hertzforge-shock-common",
  "hertzforge-shock-host",
  "hertzforge-shock-law-math",
+ "hertzforge-srs",
  "serde_json",
 ]
 
@@ -1392,6 +1419,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-sine-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-module-abi",
+ "hertzforge-random-laws",
+ "hertzforge-sdm",
+ "hertzforge-sine",
+]
+
+[[package]]
 name = "hertzforge-srs"
 version = "0.1.0"
 dependencies = [
@@ -1403,6 +1444,7 @@ dependencies = [
  "hertzforge-module-abi",
  "hertzforge-shaker-db",
  "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
  "serde",
  "serde_json",
 ]
@@ -1443,7 +1485,27 @@ dependencies = [
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-module-abi",
+ "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
  "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "hertzforge-twr-laws"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-module-abi",
+ "hertzforge-random-laws",
+ "hertzforge-sdm",
+ "hertzforge-shock-common",
+ "hertzforge-shock-law-math",
+ "hertzforge-twr",
  "serde_json",
 ]
 
@@ -1686,6 +1748,50 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-shock-template"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-misbehave"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-template"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-srs-misbehave"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-shock-law-math",
+]
+
+[[package]]
+name = "law-fixture-srs-template"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-twr-misbehave"
+version = "0.1.0"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-shock-law-math",
+]
+
+[[package]]
+name = "law-fixture-twr-template"
 version = "0.1.0"
 dependencies = [
  "hertzforge-law-sdk",
@@ -2298,9 +2404,14 @@ dependencies = [
  "hertzforge-shock-host",
  "hertzforge-shock-law-math",
  "hertzforge-shock-laws",
+ "hertzforge-sine",
+ "hertzforge-sine-laws",
+ "hertzforge-srs",
  "hertzforge-station",
  "hertzforge-twr",
+ "hertzforge-twr-laws",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
 ]

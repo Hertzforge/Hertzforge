@@ -1,5 +1,5 @@
-//! The classical shock control laws an operator can choose, and the one door
-//! every one of them goes through.
+//! The shock control laws an operator can choose, classical and SRS, and the
+//! one door every one of them goes through.
 //!
 //! - [`resolve_classical`] turns the operator's [`LawChoice`] into the
 //!   [`ClassicalLawFactory`] the classical service builds its law with
@@ -14,6 +14,9 @@
 //!   failed case ([`judge_classical`]). [`run_classical_check_case`] runs one
 //!   case under the core's guards on the backend it is handed; the controller
 //!   builds the simulated station for each case and records the result.
+//! - [`resolve_srs`], [`SrsCheckCase`] and [`run_srs_check_case`] are the same
+//!   for SRS shock: the built-in `srs_ratio` ([`DEFAULT_SRS_LAW_ID`]) or a
+//!   `shock-srs` law file, and the SRS check set.
 //!
 //! The law catalog, check records and the arming rule are
 //! `hertzforge-random-laws`'s, shared by every world.
@@ -28,6 +31,8 @@
 
 mod check;
 mod choice;
+mod srs;
+mod srs_wasm;
 mod wasm;
 
 pub use check::{
@@ -37,6 +42,14 @@ pub use check::{
     CLASSICAL_CHECK_VERSION,
 };
 pub use choice::{default_classical_choice, resolve_classical, DEFAULT_CLASSICAL_LAW_ID};
+pub use srs::{
+    default_srs_choice, judge_srs, resolve_srs, run_srs_check_case, srs_check_config,
+    srs_check_limit_frf, srs_check_record, BuiltinSrsFactory, SrsCaseEnd, SrsCaseMeasure,
+    SrsCheckCase, SrsCheckPlant, SrsRequirement, DEFAULT_SRS_LAW_ID, SRS_CHECK_DRIVE_ABORT_V,
+    SRS_CHECK_DRIVE_CEILING_V, SRS_CHECK_LEVELS_DB, SRS_CHECK_LIMIT_BOUND_G,
+    SRS_CHECK_LIMIT_HEADROOM_DB, SRS_CHECK_TARGET_G, SRS_CHECK_VERSION,
+};
+pub use srs_wasm::{srs_law_fault, WasmSrsLaw, WasmSrsLawFactory};
 pub use wasm::{classical_law_fault, WasmClassicalLaw, WasmClassicalLawFactory};
 
 /// The built-in law's factory: `fd_correct` natively, with its parameter values.

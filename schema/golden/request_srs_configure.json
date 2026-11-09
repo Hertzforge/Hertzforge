@@ -1,0 +1,197 @@
+{
+ "type": "request",
+ "id": 61,
+ "method": "srs.configure",
+ "params": {
+  "config": {
+   "title": "SRS 100 g, 100 to 2000 Hz",
+   "target": {
+    "kind": "breakpoints",
+    "points": [
+     [
+      100,
+      40
+     ],
+     [
+      1000,
+      100
+     ],
+     [
+      2500,
+      100
+     ]
+    ]
+   },
+   "bands": {
+    "f_lo_hz": 100,
+    "f_hi_hz": 2000,
+    "bands_per_octave": 3,
+    "q": 10
+   },
+   "synthesis": {
+    "engine": "wavsyn",
+    "components": null,
+    "max_iters": 50,
+    "tol_db": 1.5,
+    "max_gain_db_per_iter": 3
+   },
+   "envelope": {
+    "alarm_db": [
+     3,
+     3
+    ],
+    "abort_db": [
+     9,
+     6
+    ],
+    "per_band": null
+   },
+   "acquisition": {
+    "fs_hz": 51200,
+    "ring_out_s": 0.05,
+    "pvss": true
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels_db": [
+     -12,
+     -6,
+     0
+    ],
+    "pulses": [
+     2,
+     2,
+     3
+    ],
+    "start_db": -12,
+    "advance": "on_pass",
+    "max_pulses_per_level": 5
+   },
+   "spacing": {
+    "cooling_s": 1,
+    "settling_s": 0.5,
+    "compute_s": 0.25
+   },
+   "identification": {
+    "excitation": "shaped",
+    "level_db": -20,
+    "max_vpk": null,
+    "nfft": 1024,
+    "h_floor_frac": 0.05,
+    "min_mean_coherence": 0.8,
+    "review": true
+   },
+   "control": {
+    "law": {
+     "id": "srs_ratio",
+     "params": {
+      "max_db_per_pulse": 3
+     }
+    },
+    "law_budget": 0.25,
+    "law_misses": 3,
+    "max_pulses": 100,
+    "max_gain_rise_db": 6
+   },
+   "limits": {
+    "drive_vpk_ceiling": 0.5,
+    "drive_vpk_abort": 0.8,
+    "peak_accel_g": null,
+    "abort_factor": 2,
+    "kinematic": {
+     "accel_g": null,
+     "velocity_ips": null,
+     "disp_pp_in": null
+    },
+    "monitors": [
+     {
+      "channel": 2,
+      "unit": "A",
+      "peak_ceiling": 40,
+      "kind": "between_pulse"
+     }
+    ]
+   },
+   "limit_channels": {
+    "headroom_db": 1,
+    "channels": [
+     {
+      "channel": 3,
+      "bound": {
+       "kind": "flat",
+       "accel_g": 50
+      },
+      "frf": null
+     }
+    ]
+   },
+   "feasibility": {
+    "shaker": {
+     "name": "Bench shaker",
+     "manufacturer": "",
+     "model": "",
+     "notes": "",
+     "force_random": null,
+     "force_sine": {
+      "value": 2000,
+      "basis": "Peak"
+     },
+     "force_shock": {
+      "value": 4000,
+      "basis": "Peak"
+     },
+     "max_velocity_ips": {
+      "value": 70,
+      "basis": "Peak"
+     },
+     "max_displacement_in_pp": {
+      "value": 1,
+      "basis": "Peak"
+     },
+     "max_accel_bare_g": {
+      "value": 100,
+      "basis": "Peak"
+     },
+     "armature_mass_lb": 45,
+     "overturning_moment_limit_lbf_in": null,
+     "custom": []
+    },
+    "moving_mass_lb": {
+     "armature": 45,
+     "slip_table": 0,
+     "drive_adapter": 3,
+     "fixturing": 10,
+     "test_article": 12
+    },
+    "residual_velocity_ips": 0.1,
+    "residual_disp_in": 0.001
+   },
+   "capture": {
+    "auto_start": false,
+    "run_name": "srs_shock"
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "7"
+    },
+    {
+     "key": "test_article",
+     "label": "Test Article",
+     "value": "Bracket"
+    },
+    {
+     "key": "serial_number",
+     "label": "SN",
+     "value": "0042"
+    },
+    {
+     "key": "operator",
+     "label": "Operator",
+     "value": ""
+    }
+   ]
+  }
+ }
+}

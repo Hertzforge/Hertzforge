@@ -326,8 +326,8 @@ export interface MimoReportResult {
 
 // --- the law catalog -----------------------------------------------------------------------
 
-/** Which test a law is for: single-output Random, MIMO Random, or classical shock. */
-export type LawWorld = 'single' | 'mimo' | 'shock_classical';
+/** Which test a law is for: single-output Random, MIMO Random, classical shock, SRS shock, Sine or TWR. */
+export type LawWorld = 'single' | 'mimo' | 'shock_classical' | 'shock_srs' | 'sine' | 'twr';
 
 export type LawParam = { key: string; label: string; help: string } & (
 	| { kind: 'number' | 'per_channel'; unit: string; min: number; max: number; step: number; default: number }
@@ -361,6 +361,8 @@ export interface LawEntry {
 	diagnostics: { key: string; label: string; unit: string; help: string; layout: LawDiagnosticLayout | null }[];
 	shapes: MimoShape[] | null;
 	needs: ('last_drive' | 'response_drive_csd' | 'sysid_response' | 'sysid_drive' | 'sysid_noise')[] | null;
+	/** A Sine law's live parameters (the keys `sine.adjust` takes); only a Sine law's entry has it. */
+	live?: string[];
 }
 
 export interface LawsListParams {

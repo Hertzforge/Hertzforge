@@ -3893,6 +3893,8 @@ mod sine_rig {
             control_tick_frames: 512,
             fs_hz: None,
             metadata: Vec::new(),
+            law_guards: None,
+            control_tick_s: None,
         }
     }
 

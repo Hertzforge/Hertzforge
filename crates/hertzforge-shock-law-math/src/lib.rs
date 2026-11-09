@@ -1,4 +1,5 @@
-//! The math of the shock control laws: each law's declaration (name, version,
+//! The math of the shock and time waveform replication control laws: each
+//! law's declaration (name, version,
 //! parameters, the values it reports) and its arithmetic, with nothing around
 //! it.
 //!
@@ -8,11 +9,18 @@
 //!   plant times the reference, then a correction of the drive spectrum by a
 //!   fraction of the inverse times the error after each pulse, on the bins the
 //!   core trusts, with the growth of each bin limited per pulse.
+//! - [`twr`]: `twr_correct`, the built-in time waveform replication law: the
+//!   same correction over a whole replication record between plays, which
+//!   starts from the drive as played when the core clipped it.
+//! - [`srs`]: `srs_ratio`, the built-in SRS shock law. It seeds each
+//!   synthesis component from the inverse of the identified gain at its
+//!   frequency, then after each pulse scales it by the target over the
+//!   measured SRS at the nearest band, limited per pulse.
 //!
 //! The law files wrap this code in the law interface and the controller's
 //! built-in native laws wrap it in the controller's own law traits, so the two
 //! are one implementation. The controller applies its own protections to the
-//! drive either returns.
+//! drive or gains either returns.
 //!
 //! # Conventions
 //!
@@ -21,12 +29,18 @@
 //! `record_len / 2 + 1` bins. `hertzforge_dsp`'s FFT is positive-exponent; the
 //! spectra this crate forms are its conjugates, so a plant the core hands a law
 //! and the spectra a law forms itself agree.
+//!
+//! The SRS law follows the `shock-srs` world (`wit/control-law/shock-srs.wit`):
+//! every spectrum is a shock response spectrum on the test's band grid, and a
+//! law returns one gain per synthesis component.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod classical;
 pub mod spectrum;
+pub mod srs;
+pub mod twr;
 
 /// A complex value as `(re, im)`, the workspace's own representation.
 pub use hertzforge_dsp::fft::Cplx;

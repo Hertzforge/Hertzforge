@@ -39,16 +39,16 @@ describe('the test types', () => {
 		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
 	});
 
-	it('gives each of the twelve test types one plain line, and only Random, Classical Shock and MIMO Random can be chosen', () => {
+	it('gives each of the twelve test types one plain line, and only Random, Sine, Classical Shock, SRS, TWR and MIMO Random can be chosen', () => {
 		expect(TEST_TYPES).toHaveLength(12);
-		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'shock', 'mimo_random']);
+		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'sine', 'shock', 'srs', 'twr', 'mimo_random']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);
 			// What the test is, never a note to developers.
 			expect(t.summary).not.toMatch(/\b[QM]\d+\b|#\d+|todo|tbd|port|issue|milestone/i);
 		}
 		const { view } = viewOf(null);
-		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'shock', 'mimo_random']);
+		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'sine', 'shock', 'srs', 'twr', 'mimo_random']);
 		expect(TEST_TYPES.filter((t) => !t.ready).every((t) => view.whyNot(t.id) === 'Coming')).toBe(true);
 	});
 });
@@ -67,7 +67,7 @@ describe('the chooser', () => {
 		expect(view.last).toBeNull();
 
 		// A test type still to come is refused, and the chooser stays.
-		expect(view.choose('sine')).toBe(false);
+		expect(view.choose('explorer')).toBe(false);
 		expect(view.screen).toBe('chooser');
 		expect(view.takeFocus()).toBe(false);
 
@@ -172,6 +172,19 @@ describe('the chooser', () => {
 		// the shock store has not answered yet: whether a run is live is not known
 		expect(liveTestOf(random, 'open', mimo, { status: null, syncError: null })).toBeUndefined();
 		expect(liveTestOf(random, 'open', mimo, { status: null, syncError: 'refused' })).toBeNull();
+	});
+
+	it('reads a live SRS shock run, and waits for its store to answer too', () => {
+		const random = { run: { state: 'configured' } as RandomState, syncError: null };
+		const mimo = { status: { state: 'unconfigured' as const }, syncError: null };
+		const shock = { status: { state: 'finished' as const }, syncError: null };
+		expect(liveTestOf(random, 'open', mimo, shock, { status: { state: 'running' }, syncError: null })).toBe('srs');
+		expect(liveTestOf(random, 'open', mimo, shock, { status: { state: 'armed' }, syncError: null })).toBe('srs');
+		expect(liveTestOf(random, 'open', mimo, shock, { status: { state: 'configured' }, syncError: null })).toBeNull();
+		expect(liveTestOf(random, 'open', mimo, shock, { status: null, syncError: null })).toBeUndefined();
+		expect(liveTestOf(random, 'open', mimo, shock, { status: null, syncError: 'refused' })).toBeNull();
+		// SRS shock is served: its card can be chosen.
+		expect(new TestTypeView(() => null).whyNot('srs')).toBeNull();
 	});
 });
 

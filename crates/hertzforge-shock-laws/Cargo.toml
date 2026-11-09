@@ -5,11 +5,12 @@ edition.workspace = true
 license = "MIT"
 publish = false
 
-# The classical shock control laws an operator can choose from, and the door every
-# one of them goes through: the choice of law for a run (the built-in `fd_correct`
-# or a `shock-classical` law file from the catalog) resolved to the factory the
-# classical service builds its law with, and the check a law file passes on the
-# simulator before it may drive hardware. `hertzforge-shock-host` does not depend on
+# The shock control laws an operator can choose from, and the door every one of them
+# goes through: the choice of law for a run (the built-in `fd_correct` or a
+# `shock-classical` law file from the catalog; the built-in `srs_ratio` or a
+# `shock-srs` law file) resolved to the factory the classical or SRS service builds
+# its law with, and the check a law file passes on the simulator before it may drive
+# hardware. `hertzforge-shock-host` does not depend on
 # the law host (or on Wasmtime); this crate joins the two, as `hertzforge-random-laws`
 # does for Random. It names no backend: a check case runs on the backend it is
 # handed.
@@ -17,6 +18,8 @@ publish = false
 hertzforge-shock-host = { path = "../hertzforge-shock-host" }
 hertzforge-shock-common = { path = "../hertzforge-shock-common" }
 hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
+# The SRS service's law seam (`SrsLawFactory`) and its run, for the SRS choice and check.
+hertzforge-srs = { path = "../hertzforge-srs" }
 # The catalog, the choice of law, check records and the arming rule, shared with
 # Random so a law of any world is listed, chosen and cleared the same way.
 hertzforge-random-laws = { path = "../hertzforge-random-laws" }

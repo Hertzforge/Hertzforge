@@ -37,6 +37,8 @@ struct ScriptedPlayer {
     /// Injectable alignment provenance. `None` = this player makes no claim
     /// (the trait default); `Some(DerivedNoPeak)` scripts the no-peak xcorr.
     lag_provenance: Option<crate::player::LagSource>,
+    /// After this many plays the path returns no response record.
+    no_response_after: Option<usize>,
 }
 
 impl ScriptedPlayer {
@@ -53,6 +55,7 @@ impl ScriptedPlayer {
             cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             emergency_stopped: false,
             lag_provenance: None,
+            no_response_after: None,
         }
     }
 }
@@ -77,6 +80,9 @@ impl ReferencePlayer for ScriptedPlayer {
             });
         }
         self.plays += 1;
+        if matches!(self.no_response_after, Some(n) if self.plays > n) {
+            return Ok(None);
+        }
         let g = match self.misbehave_after {
             Some(n) if self.plays > n => self.gain * self.late_gain_factor,
             _ => self.gain,
@@ -698,17 +704,9 @@ fn report_carries_honesty_history_and_metadata() {
     // live banner does. It used to assert `contains("Sim")` against a hardcoded
     // string that claimed a station the run might not be on.
     assert_eq!(rep.honesty.note, rep.status.path_label);
-    assert!(
-        rep.honesty.note.contains("CHASSIS GATE PENDING"),
-        "the live evidence gap must ride the report: {}",
-        rep.honesty.note
-    );
-    assert!(
-        rep.honesty.note.contains("an unnamed station"),
-        "a scripted double names no station, and the label must say so rather \
-         than pick one: {}",
-        rep.honesty.note
-    );
+    // Plain: the path and the station, nothing else. A scripted double names
+    // no station, and the label says so rather than pick one.
+    assert_eq!(rep.honesty.note, "host delivery on an unnamed station");
     assert!(!rep.history.records.is_empty());
     assert!(rep.sysid.as_ref().unwrap().in_band_mean_coherence > 0.9);
     assert_eq!(rep.metadata.len(), 4);
@@ -734,4 +732,441 @@ fn capture_and_snapshot_write_files() {
     let snap = svc.save_snapshot(&run_dir, vec![]).unwrap();
     assert!(snap.exists());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---- the read surfaces: plays table, station time, rung, phase, mask, trips ----
+
+fn peak(v: &[f64]) -> f64 {
+    v.iter().fold(0.0f64, |m, &x| m.max(x.abs()))
+}
+
+/// The ranging excitation's length: what the identification play clocks on a
+/// player that states no frames of its own.
+fn sysid_frames(cfg: &TwrConfig) -> u64 {
+    cfg.sysid.build_excitation(FS).len() as u64
+}
+
+/// Every play after the identification has a row that agrees with the
+/// convergence table, and station time is the sum of every play's frames.
+///
+/// RED-MUTATION: drop the station-time accumulation in `play_through` and the
+/// start-frame chain reds at row 0; push the row before `ladder.on_iteration`
+/// and the iteration numbers red.
+#[test]
+fn every_play_has_a_row_and_station_time_counts_every_frame() {
+    let cfg = config();
+    let gate = cfg.schedule.gate_rms_error_pct;
+    let table = cfg.schedule.table_db.clone();
+    let id_frames = sysid_frames(&cfg);
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    assert!(svc.plays().is_empty());
+    assert_eq!(svc.station_frames(), 0);
+    let end = svc.run_to_completion(200).unwrap();
+    assert_eq!(end, TwrState::Complete);
+
+    let rows = svc.plays();
+    let recs = &svc.history().records;
+    assert_eq!(rows.len(), recs.len(), "one row per judged play");
+    let n = svc.grid().n as u64;
+    let mut expect_start = id_frames;
+    for (i, (row, rec)) in rows.iter().zip(recs.iter()).enumerate() {
+        assert_eq!(row.index, i as u64);
+        assert_eq!(row.level_db, rec.level_db);
+        assert_eq!(row.metrics, rec.metrics);
+        assert_eq!(row.clipped_samples, rec.clipped_samples);
+        assert_eq!(row.clamped_bins, rec.clamped_bins);
+        if rec.iteration > 0 {
+            assert_eq!(row.kind, crate::control::PlayKind::Iteration);
+            assert_eq!(row.iteration, Some(rec.iteration));
+        } else {
+            assert_eq!(row.kind, crate::control::PlayKind::Playback);
+            assert_eq!(row.iteration, None);
+        }
+        assert_eq!(row.gated, rec.metrics.rms_error_pct <= gate, "row {i}");
+        let rung = table.iter().position(|&l| l == rec.level_db);
+        assert_eq!(row.rung, rung, "row {i} at {} dB", rec.level_db);
+        assert_eq!(row.lag_frames, None);
+        assert_eq!(row.drift_frames, None);
+        assert_eq!(row.start_frame, expect_start, "row {i}");
+        assert_eq!(row.frames, n, "a scripted play clocks its record");
+        assert_eq!(row.at_s, row.start_frame as f64 / FS);
+        expect_start += row.frames;
+    }
+    assert_eq!(svc.station_frames(), expect_start);
+    let st = svc.status();
+    assert_eq!(st.station_frames, expect_start);
+    assert_eq!(st.station_s, expect_start as f64 / FS);
+    // Every level gated on its last correction play, so the rows of the
+    // ladder end gated at every rung.
+    for (k, &l) in table.iter().enumerate() {
+        let last = rows
+            .iter()
+            .rfind(|r| r.iteration.is_some() && r.level_db == l)
+            .unwrap();
+        assert!(last.gated, "{l} dB");
+        assert_eq!(last.rung, Some(k));
+    }
+    let last = rows.last().unwrap();
+    assert_eq!(last.drive_vpk, peak(svc.drive_time()));
+    assert_eq!(last.response_peak, peak(svc.achieved_time()));
+    assert!(svc.trip().is_none() && st.trip.is_none());
+}
+
+/// A manual trim takes the run off the table's levels, and the rows and the
+/// status say so; a jump puts it back on a rung.
+#[test]
+fn a_manual_trim_takes_the_run_off_the_table() {
+    let mut cfg = config();
+    cfg.schedule.mode = TwrRunMode::Manual;
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    assert_eq!(svc.status().rung, Some(0));
+    svc.advance().unwrap(); // identification
+    svc.advance().unwrap(); // iteration at -12 dB
+    assert_eq!(svc.plays()[0].rung, Some(0));
+    assert_eq!(svc.plays()[0].level_db, -12.0);
+
+    svc.step_level_up().unwrap();
+    assert_eq!(svc.status().rung, None);
+    svc.advance().unwrap();
+    let row = svc.plays().last().unwrap();
+    assert_eq!(
+        (row.rung, row.level_db, row.iteration),
+        (None, -11.0, Some(1))
+    );
+
+    svc.step_level_down().unwrap();
+    assert_eq!(svc.status().rung, Some(0), "back on the table's level");
+
+    svc.jump_to_level(2).unwrap();
+    svc.advance().unwrap();
+    let row = svc.plays().last().unwrap();
+    assert_eq!((row.rung, row.level_db), (Some(2), -6.0));
+}
+
+/// The FRF phase is the identification's: a plant that delays the drive by
+/// `d` frames reads `-360 f d / fs`, wrapped.
+///
+/// RED-MUTATION: report `re.atan2(im)` or the conjugate's phase and every
+/// in-band bin is off by tens of degrees.
+#[test]
+fn the_frf_phase_reads_the_plants_delay() {
+    let delay = 5usize;
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, delay), config()).unwrap();
+    assert!(
+        svc.frf_phase_deg().is_empty(),
+        "nothing before identification"
+    );
+    svc.advance().unwrap();
+    let phase = svc.frf_phase_deg();
+    let mag = svc.frf_mag();
+    assert_eq!(phase.len(), mag.len());
+    // The Welch estimate over 512-sample segments biases a delayed plant's
+    // phase by about a degree; a convention error is tens of degrees off at
+    // 50 Hz and more above it.
+    let mut checked = 0;
+    let mut worst = 0.0f64;
+    for (&(f, deg), &(fm, _)) in phase.iter().zip(mag.iter()) {
+        assert_eq!(f, fm);
+        assert!((-180.0..=180.0).contains(&deg));
+        if !(50.0..=1400.0).contains(&f) {
+            continue;
+        }
+        let expect = -360.0 * f * delay as f64 / FS;
+        let diff = (deg - expect + 540.0).rem_euclid(360.0) - 180.0;
+        assert!(diff.abs() < 3.0, "{f} Hz: {deg} against {expect}");
+        worst = worst.max(diff.abs());
+        checked += 1;
+    }
+    assert!(checked > 100, "{checked} bins checked");
+    println!("worst phase error {worst:.3} degrees over {checked} bins");
+}
+
+/// The trust mask as a curve on the record grid is the mask the correction
+/// runs on, bin for bin; nothing outside the correction band is trusted.
+#[test]
+fn the_trust_mask_curve_is_the_correction_mask() {
+    let cfg = config();
+    let (lo, hi) = (cfg.law.f_lo_hz, cfg.law.f_hi_hz);
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    assert!(svc.trust_mask().is_empty());
+    svc.advance().unwrap();
+    let curve = svc.trust_mask();
+    assert_eq!(curve.len(), svc.grid().n_bins());
+    assert_eq!(curve.len(), svc.mask.len());
+    for (k, (&(f, v), &m)) in curve.iter().zip(svc.mask.iter()).enumerate() {
+        assert_eq!(f, svc.grid().freq(k));
+        assert_eq!(v, if m { 1.0 } else { 0.0 });
+        if f < lo || f > hi {
+            assert_eq!(v, 0.0, "{f} Hz is outside the band");
+        }
+    }
+    assert!(curve.iter().any(|&(_, v)| v == 1.0));
+    svc.reset().unwrap();
+    assert!(svc.trust_mask().is_empty());
+}
+
+fn trip_of<P: ReferencePlayer>(svc: &TwrService<P>) -> crate::trip::TwrTrip {
+    assert_eq!(svc.state(), TwrState::Aborted);
+    let st = svc.status();
+    let trip = st.trip.clone().expect("the core tripped");
+    assert_eq!(svc.trip(), Some(&trip));
+    assert_eq!(trip.at_level_db, st.level_db);
+    trip
+}
+
+/// The response checks: the envelope and the response rms each end the run by
+/// kind, on the play they judged, which has its row.
+#[test]
+fn a_response_trip_names_its_kind_and_the_play_it_judged() {
+    use crate::trip::TripKind;
+    // Envelope: the plant's gain triples after the first iteration.
+    let mut player = ScriptedPlayer::well_behaved(2.0, 5);
+    player.misbehave_after = Some(2);
+    player.late_gain_factor = 3.0;
+    let mut cfg = config();
+    cfg.limits.divergence_n = 50;
+    let mut svc = TwrService::new(player, cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    let last = svc.plays().last().unwrap();
+    assert_eq!(trip.play, Some(last.index));
+    assert!(!last.gated);
+    assert_eq!(svc.plays().len(), svc.history().records.len() + 1);
+    match trip.kind {
+        TripKind::Envelope {
+            in_play,
+            worst_frac,
+            abort_frac,
+            samples,
+            at_sample,
+        } => {
+            assert!(!in_play);
+            assert_eq!(abort_frac, 0.5);
+            assert_eq!(samples, 8);
+            assert!(worst_frac > abort_frac);
+            assert!(at_sample >= samples - 1);
+        }
+        k => panic!("expected an envelope trip, got {k:?}"),
+    }
+    assert!(svc
+        .status()
+        .abort_reason
+        .unwrap()
+        .starts_with("response envelope abort"));
+
+    // Response rms: a limit the first correction play passes the envelope of
+    // but not the rms.
+    let mut cfg = config();
+    cfg.limits.response_rms_limit = Some(1e-6);
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    assert_eq!(trip.play, Some(0));
+    assert_eq!(svc.plays().len(), 1);
+    match trip.kind {
+        TripKind::ResponseRms { rms, limit } => {
+            assert_eq!(limit, 1e-6);
+            assert_eq!(rms, svc.plays()[0].metrics.response_rms);
+        }
+        k => panic!("expected a response rms trip, got {k:?}"),
+    }
+}
+
+/// The ladder's own ends: divergence and a level that does not gate.
+#[test]
+fn divergence_and_not_converged_name_their_numbers() {
+    use crate::trip::TripKind;
+    let mut player = ScriptedPlayer::well_behaved(2.0, 5);
+    player.misbehave_after = Some(1);
+    player.late_gain_factor = -0.8;
+    let mut cfg = config();
+    cfg.limits.envelope_abort_frac = 50.0;
+    cfg.limits.envelope_alarm_frac = 25.0;
+    cfg.schedule.max_iterations_per_level = 20;
+    let mut svc = TwrService::new(player, cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    let last = svc.plays().last().unwrap().clone();
+    assert_eq!(trip.play, Some(last.index));
+    assert_eq!(
+        trip.kind,
+        TripKind::Divergence {
+            plays: 3,
+            error_pct: last.metrics.rms_error_pct
+        }
+    );
+
+    let mut p = ScriptedPlayer::well_behaved(2.0, 5);
+    p.disturbance = 0.05;
+    let mut cfg = config();
+    cfg.schedule.gate_rms_error_pct = 0.001;
+    cfg.schedule.max_iterations_per_level = 3;
+    cfg.sysid.min_mean_coherence = 0.2;
+    cfg.limits.envelope_abort_frac = 50.0;
+    cfg.limits.envelope_alarm_frac = 25.0;
+    cfg.limits.divergence_n = 50;
+    let mut svc = TwrService::new(p, cfg.clone()).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    let last = svc.plays().last().unwrap().clone();
+    assert_eq!(trip.play, Some(last.index));
+    assert_eq!(svc.plays().len(), 3);
+    assert_eq!(
+        trip.kind,
+        TripKind::NotConverged {
+            iterations: 3,
+            error_pct: last.metrics.rms_error_pct,
+            gate_pct: 0.001
+        }
+    );
+
+    // Under the hold policy the same level holds, with no trip.
+    let mut p = ScriptedPlayer::well_behaved(2.0, 5);
+    p.disturbance = 0.05;
+    cfg.schedule.on_gate_fail = GateFailPolicy::Hold;
+    let mut svc = TwrService::new(p, cfg).unwrap();
+    assert_eq!(svc.run_to_completion(200).unwrap(), TwrState::Holding);
+    assert!(svc.trip().is_none());
+}
+
+/// The drive checks refuse before the station sees the drive: no row, no
+/// frames, and a level step's refusal is marked predicted.
+#[test]
+fn a_drive_refusal_has_no_row_and_says_whether_it_was_predicted() {
+    use crate::trip::TripKind;
+    // The ceiling under the ranging excitation: nothing plays at all.
+    let mut cfg = config();
+    cfg.limits.max_drive_vpk = Some(0.001);
+    let ranging = peak(&cfg.sysid.build_excitation(FS));
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    assert_eq!(trip.play, None);
+    assert_eq!(svc.station_frames(), 0);
+    assert_eq!(
+        trip.kind,
+        TripKind::DriveVpk {
+            vpk: ranging,
+            ceiling_vpk: 0.001,
+            predicted: false
+        }
+    );
+
+    // The drive rms limit under the ranging excitation.
+    let mut cfg = config();
+    cfg.limits.drive_rms_limit = Some(1e-6);
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    assert_eq!(trip.play, None);
+    match trip.kind {
+        TripKind::DriveRms { vrms, limit_vrms } => {
+            assert_eq!(limit_vrms, 1e-6);
+            assert!(vrms > limit_vrms);
+        }
+        k => panic!("expected a drive rms trip, got {k:?}"),
+    }
+
+    // The AUTO ladder's +3 dB step projected over the ceiling: the -12 dB
+    // play fits and gates, the step to -9 dB is refused on its projection.
+    let auto = || {
+        let mut c = config();
+        c.sysid.drive_rms = 0.01;
+        c
+    };
+    let mut probe_cfg = auto();
+    probe_cfg.schedule.mode = TwrRunMode::Manual;
+    let mut probe = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), probe_cfg).unwrap();
+    probe.advance().unwrap();
+    probe.advance().unwrap();
+    assert!(
+        probe.plays()[0].gated,
+        "calibration premise: -12 dB gates at once"
+    );
+    let peak0 = peak(probe.drive_time());
+    let mut cfg = auto();
+    cfg.limits.max_drive_vpk = Some(peak0 * 1.2);
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    assert_eq!(trip.play, None, "nothing played for it");
+    assert_eq!(trip.at_level_db, -9.0, "refused at the level it stepped to");
+    assert_eq!(svc.plays().len(), 1);
+    match trip.kind {
+        TripKind::DriveVpk {
+            vpk,
+            ceiling_vpk,
+            predicted,
+        } => {
+            assert!(predicted);
+            assert_eq!(ceiling_vpk, peak0 * 1.2);
+            let step = 10f64.powf(3.0 / 20.0);
+            assert!(
+                (vpk - peak0 * step).abs() < 1e-9 * peak0,
+                "{vpk} against {}",
+                peak0 * step
+            );
+        }
+        k => panic!("expected a drive ceiling trip, got {k:?}"),
+    }
+    assert!(svc
+        .status()
+        .abort_reason
+        .unwrap()
+        .starts_with("auto ladder advance: state: level step +3.0 dB refused"));
+}
+
+/// The coverage floor at identification, the operator's abort, and a path
+/// that returns no response.
+#[test]
+fn coverage_operator_abort_and_no_response_end_as_they_are() {
+    use crate::trip::TripKind;
+    // A correction band off the burst's 200 Hz: almost nothing is covered.
+    let mut cfg = config();
+    cfg.law.f_lo_hz = 1000.0;
+    cfg.law.f_hi_hz = 1500.0;
+    let floor = cfg.law.min_masked_energy_frac;
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    assert_eq!(trip.play, None);
+    assert!(svc.plays().is_empty());
+    match trip.kind {
+        TripKind::Coverage {
+            coverage,
+            min_band_energy,
+            error_floor_pct,
+        } => {
+            assert!(coverage < floor);
+            assert_eq!(min_band_energy, floor);
+            assert_eq!(error_floor_pct, 100.0 * (1.0 - coverage).sqrt());
+        }
+        k => panic!("expected a coverage trip, got {k:?}"),
+    }
+    // Reset drops the trip, the rows and station time with the rest.
+    svc.reset().unwrap();
+    assert!(svc.trip().is_none());
+    assert_eq!(svc.station_frames(), 0);
+
+    // The operator's abort is not a trip.
+    let mut svc = TwrService::new(ScriptedPlayer::well_behaved(2.0, 5), config()).unwrap();
+    svc.advance().unwrap();
+    svc.advance().unwrap();
+    svc.abort("test");
+    assert_eq!(svc.state(), TwrState::Aborted);
+    assert!(svc.trip().is_none());
+    assert_eq!(svc.status().abort_reason.unwrap(), "operator abort: test");
+
+    // No response after the identification: the play clocked, nothing judged.
+    let mut player = ScriptedPlayer::well_behaved(2.0, 5);
+    player.no_response_after = Some(1);
+    let cfg = config();
+    let id_frames = sysid_frames(&cfg);
+    let mut svc = TwrService::new(player, cfg).unwrap();
+    svc.run_to_completion(200).unwrap();
+    let trip = trip_of(&svc);
+    assert_eq!(trip.kind, TripKind::NoResponse);
+    assert_eq!(trip.play, None);
+    assert!(svc.plays().is_empty());
+    assert_eq!(svc.station_frames(), id_frames + svc.grid().n as u64);
 }

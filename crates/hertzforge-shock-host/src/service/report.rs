@@ -633,7 +633,8 @@ pub struct PulseRow {
     /// [`PulseRow::at_wall_time_s`].
     pub at_run_time_s: f64,
     /// WALL-clock fire time, seconds on the service's injected `TrainPacer`
-    /// epoch - the timestamp taken immediately before the fire path was called.
+    /// epoch - the timestamp taken once the station's start call returned, its
+    /// clock running (`FireControl::hooks`), which is when the pulse started.
     ///
     /// THE spacing evidence for a single pulse, and the per-pulse analogue of
     /// `TrainRecord::wall_times_s`. It exists because the AUTO ladder had no
@@ -641,6 +642,11 @@ pub struct PulseRow {
     /// rate-model floor to the simulated clock and fired its rungs back to back,
     /// fastest at the highest drive.
     pub at_wall_time_s: f64,
+    /// The pulse's bring-up, timed: the drive's checks, the arm, the commit, the
+    /// wait for the time between pulses and the start call. `None` on a path
+    /// that reports no shot timing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bring_up: Option<hertzforge_shock_common::BringUp>,
     /// Whether a response was measured (false on the delegated path).
     pub measured: bool,
     /// Measured peak acceleration, g.

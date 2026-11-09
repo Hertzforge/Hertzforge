@@ -88,7 +88,7 @@
 <section class="runbar" class:compact aria-label="Run control" data-testid="run-bar">
 	<div class="status">
 		{#if acq.source}<ProvenanceBadge source={acq.source.source} cls={acq.source.cls} size="lg" measured={acq.frame !== null} />{/if}
-		<StateChip {run} words={acq.outcomeWords} />
+		<StateChip {run} words={acq.outcomeWords} stateWords={acq.stateWords} />
 		{#if run && run.state !== 'unconfigured'}
 			<span class="phase" data-testid="run-phase">{acq.phaseWords?.[run.phase] ?? phaseWord(run.phase)}</span>
 		{/if}

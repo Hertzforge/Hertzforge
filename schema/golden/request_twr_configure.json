@@ -1,0 +1,133 @@
+{
+ "type": "request",
+ "id": 81,
+ "method": "twr.configure",
+ "params": {
+  "config": {
+   "title": "Replication R1",
+   "reference": {
+    "sha256": "e551d2f9d33365529136c42ebd2fb483eae302569d52f0f8b085d4370d32c27e",
+    "path": "/Users/me/Eigen_Data/references/r1.csv"
+   },
+   "prep": {
+    "auto_resample": true,
+    "detrend": "mean",
+    "highpass_hz": 5,
+    "scale": 1,
+    "taper_frac": 0.02
+   },
+   "section": {
+    "start": 0,
+    "len": 2048
+   },
+   "pads": {
+    "pre": 512,
+    "post": 1024
+   },
+   "acquisition": {
+    "fs_hz": 12800
+   },
+   "identification": {
+    "excitation": "random",
+    "drive_vrms": 0.05,
+    "duration_s": 4,
+    "nfft": 2048,
+    "band_hz": [
+     20,
+     2000
+    ],
+    "min_mean_coherence": 0.8,
+    "review": true
+   },
+   "inverse": {
+    "tikhonov_floor": 0.05,
+    "coherence_floor": 0.9
+   },
+   "correction": {
+    "band_hz": [
+     20,
+     2000
+    ],
+    "ref_floor_db": 50,
+    "min_band_energy": 0.9
+   },
+   "control": {
+    "law": {
+     "id": "twr_correct",
+     "params": {
+      "beta": 0.5
+     }
+    },
+    "law_budget": 0.25,
+    "law_misses": 3,
+    "max_peak_rise_db": 10,
+    "max_bin_rise_db": 10,
+    "first_drive_ratio": 2,
+    "alignment_frames": 1
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels_db": [
+     -12,
+     -9,
+     -6,
+     -3,
+     0
+    ],
+    "gate_pct": 10,
+    "max_iterations": 8,
+    "on_gate_fail": "abort"
+   },
+   "run": {
+    "schedule": "duration",
+    "duration_s": 60
+   },
+   "adaptation": {
+    "during_playback": false
+   },
+   "limits": {
+    "drive_vpk_ceiling": 0.5,
+    "drive_clip_vpk": 0.8,
+    "drive_vrms_limit": null,
+    "response_rms_limit": null,
+    "envelope_alarm_frac": 0.25,
+    "envelope_abort_frac": 0.5,
+    "envelope_debounce_samples": 8,
+    "divergence_plays": 3,
+    "divergence_rise_frac": 0.1
+   },
+   "feasibility": {
+    "peak_accel": null,
+    "peak_velocity_ips": null,
+    "disp_pkpk_in": 1.0,
+    "kinematics_hp_hz": 5
+   },
+   "capture": {
+    "auto_start": false,
+    "run_name": "twr_run"
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "7"
+    },
+    {
+     "key": "test_article",
+     "label": "Test Article",
+     "value": "Bracket"
+    },
+    {
+     "key": "serial_number",
+     "label": "SN",
+     "value": "0042"
+    },
+    {
+     "key": "operator",
+     "label": "Operator",
+     "value": ""
+    }
+   ]
+  }
+ }
+}

@@ -2,6 +2,8 @@
 	/**
 	 * The run's state as a shape, a word and a color together. Running pulses; a finished run shows
 	 * its outcome, and every outcome but a completed schedule or the operator's stop reads as an abort.
+	 * A test type with a state of its own (TWR's coherence hold) gives its words, and the hold reads
+	 * as a pause.
 	 */
 	import type { RunHead } from './actions';
 	import { OUTCOME_WORDS, outcomeTone, STATE_WORDS } from './words';
@@ -10,13 +12,15 @@
 		run: RunHead | null;
 		/** A test type's own words for its outcomes (classical shock's); the shared ones otherwise. */
 		words?: Record<string, string>;
+		/** A test type's own words for its states (TWR's `held`); the shared ones otherwise. */
+		stateWords?: Record<string, string>;
 	}
-	let { run, words }: Props = $props();
+	let { run, words, stateWords }: Props = $props();
 
 	const state = $derived(run?.state ?? 'unconfigured');
 	const outcome = $derived(run?.end?.outcome ?? null);
 	const tone = $derived(outcome ? outcomeTone(outcome) : null);
-	const word = $derived(state === 'finished' && outcome ? (words?.[outcome] ?? OUTCOME_WORDS[outcome] ?? outcome) : STATE_WORDS[state]);
+	const word = $derived(state === 'finished' && outcome ? (words?.[outcome] ?? OUTCOME_WORDS[outcome] ?? outcome) : (stateWords?.[state] ?? STATE_WORDS[state] ?? state));
 	const shape = $derived.by(() => {
 		if (state === 'finished') return tone === 'pass' ? 'check' : tone === 'info' ? 'square' : 'octagon';
 		return state;
@@ -37,7 +41,7 @@
 			<path d="M7 2a5 5 0 010 10z" fill="currentColor" />
 		{:else if shape === 'running'}
 			<circle cx="7" cy="7" r="5.2" fill="currentColor" />
-		{:else if shape === 'review'}
+		{:else if shape === 'review' || (shape as string) === 'held'}
 			<rect x="3.2" y="2.5" width="2.6" height="9" rx="0.8" fill="currentColor" />
 			<rect x="8.2" y="2.5" width="2.6" height="9" rx="0.8" fill="currentColor" />
 		{:else if shape === 'stopping'}
@@ -89,7 +93,8 @@
 		animation: pulse 1.2s ease-in-out infinite;
 	}
 
-	.chip.blocked {
+	.chip.blocked,
+	.chip.held {
 		color: var(--amber-1);
 		border-color: var(--amber-line);
 		background: var(--amber-weak);

@@ -27,9 +27,10 @@ A run goes through these steps in order:
 4. **Seed.** The control law builds the first drive from the identified system. The controller
    predicts the full-level drive and its response; a drive predicted over the drive abort ends the
    run before anything fires.
-5. **Pulses.** For each pulse: wait out the time between pulses; check the drive (its volts, its
-   predicted peak and kinematics, at rest at both ends); fire; measure and judge it against the
-   standard; let the law propose the next drive; check the law's drive; move the ladder.
+5. **Pulses.** For each pulse: check the drive (its volts, its predicted peak and kinematics, at
+   rest at both ends); bring the station up with the pulse loaded; wait out the time between
+   pulses; start it; measure and judge it against the standard; let the law propose the next
+   drive; check the law's drive; move the ladder.
 6. **End.** The schedule completes, or the run stops, aborts, fails to converge, or the law gives
    no usable drive.
 
@@ -94,8 +95,9 @@ a warning, not an error: the test may run, and longer, lower shoulders bring it 
 - **When a level is done:** on passing pulses (the usual choice: the law keeps correcting until a
   level's pulses pass, and too many tries at one level end the run as not converged), or after its
   pulses, passed or not.
-- **Time between pulses:** at least the largest of the cooling, settling and computing times. It
-  also sets the control law's time budget, a share of it.
+- **Time between pulses:** at least the largest of the cooling, settling and computing times,
+  from the moment the station starts one pulse to the moment it starts the next. It also sets the
+  control law's time budget, a share of it.
 
 ## Identification
 
@@ -138,7 +140,8 @@ the pulses in a row with a growing error that end the run.
 ## Trains and Capture
 
 On the manual ladder, a **train** fires a count of pulses at the present level, at least the time
-between pulses apart, and a **gunfire burst** fires rounds at a rate. Each fires the drive in force,
+between pulses apart (its first pulse too, from the pulse before it), and a **gunfire burst** fires
+rounds at a rate. Each fires the drive in force,
 with no law call inside it, and every pulse is judged. The capture can start when the run arms;
 fields kept with the run (a run number, an operator) are listed here.
 
