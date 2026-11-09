@@ -347,3 +347,95 @@ fn recorder_a_station_error_ends_the_run_once_with_its_words() {
     svc.stop_monitor().unwrap();
     assert_eq!(svc.recordings_list(None)[0].frames, 3000);
 }
+
+// ---------------------------------------------------------------------------------
+// G3: the reading thread never touches the disk. Every recording call runs on the
+// record thread; the pump hands frames over and never waits.
+// ---------------------------------------------------------------------------------
+
+/// A burst of 1.0 lasting 32 frames every `every` frames from `first`, on column 0.
+fn bursts_every(first: u64, every: u64) -> support::Signal {
+    Box::new(move |n, c| {
+        if c == 0 && n >= first && (n - first) % every < 32 {
+            1.0
+        } else {
+            0.0
+        }
+    })
+}
+
+fn level_on_column_0(holdoff_s: f64) -> TriggerMode {
+    TriggerMode::Level(hertzforge_recorder::LevelTrigger {
+        channel_index: 0,
+        threshold_eu: 0.5,
+        slope: hertzforge_recorder::Slope::Rising,
+        hysteresis_eu: 0.1,
+        holdoff_s,
+    })
+}
+
+#[test]
+fn recorder_the_reading_thread_never_touches_the_disk() {
+    // A store that takes 2 s to start and to finish each recording: the station's
+    // whole input buffer on NI. Five level-triggered recordings, 4.2 s apart, read in
+    // real time.
+    let fs = 2048.0;
+    let station = ScriptedStation::new(2, fs, bursts_every(1024, (4.2 * fs) as u64)).paced();
+    let (mut store, log) = support::StoreDouble::new(2);
+    store.start_delay = std::time::Duration::from_secs(2);
+    store.finish_delay = std::time::Duration::from_secs(2);
+    let mut cfg = manual(fs);
+    cfg.trigger_mode = level_on_column_0(0.0);
+    cfg.pretrigger_s = Some(0.25);
+    cfg.timed_record_s = Some(0.5);
+    cfg.auto_rearm = 4;
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        temp_root("g3_thread"),
+    )
+    .unwrap()
+    .with_block_frames(64)
+    .with_store(Box::new(store));
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.arm().unwrap();
+    let pump_thread = std::thread::current().id();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while svc.status(u64::MAX).recordings_saved < 5 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "five recordings in a minute"
+        );
+        svc.pump().unwrap();
+    }
+    let gap = svc.status(u64::MAX).batch_gap_ms_max.unwrap();
+    svc.stop_monitor().unwrap();
+
+    let log = log.lock().unwrap();
+    let on_pump = log
+        .calls
+        .iter()
+        .filter(|c| match c {
+            support::StoreCall::Start { thread, .. }
+            | support::StoreCall::Push { thread, .. }
+            | support::StoreCall::Finish { thread } => *thread == pump_thread,
+        })
+        .count();
+    assert_eq!(
+        on_pump, 0,
+        "no store call on the thread that reads the station"
+    );
+    let finishes = log
+        .calls
+        .iter()
+        .filter(|c| matches!(c, support::StoreCall::Finish { .. }))
+        .count();
+    assert_eq!(finishes, 5, "five complete recordings");
+    assert!(
+        gap < 50.0,
+        "the longest gap between batches is {gap} ms: the reading thread waited on the store"
+    );
+}
