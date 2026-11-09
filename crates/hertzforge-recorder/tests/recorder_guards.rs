@@ -635,10 +635,10 @@ fn recorder_falling_behind_the_disk_ends_the_run() {
 
 #[test]
 fn recorder_a_timed_recording_holds_exactly_its_frames() {
-    let fs = 8192.0;
+    let fs: f64 = 8192.0;
     // 0.3 s is 2457.6 frames: 2458, not a whole number of 512-frame batches.
-    let record = (0.3 * fs as f64).round() as u64;
-    let pre = (0.1 * fs as f64).round() as u64;
+    let record = (0.3 * fs).round() as u64;
+    let pre = (0.1 * fs).round() as u64;
     let open = |mode: TriggerMode, signal: support::Signal, tag: &str| {
         let mut cfg = manual(fs);
         cfg.trigger_mode = mode;
@@ -718,4 +718,175 @@ fn recorder_a_timed_recording_holds_exactly_its_frames() {
         ramp(5000 - pre, 1),
         "the file begins a pre-window before the burst"
     );
+}
+
+// ---------------------------------------------------------------------------------
+// G8: station time. Every recording states its station frames, the holdoff runs in
+// station time from the trigger, and a re-armed trigger waits for a full pre-window
+// acquired after the last recording ended.
+// ---------------------------------------------------------------------------------
+
+#[test]
+fn recorder_recordings_carry_station_frames() {
+    let fs: f64 = 8192.0;
+    let pre = (0.1 * fs).round() as u64;
+    let burst = bursts_every(5000, 1_000_000);
+    let mut cfg = manual(fs);
+    cfg.trigger_mode = level_on_column_0(0.0);
+    cfg.pretrigger_s = Some(0.1);
+    cfg.timed_record_s = Some(0.3);
+    let root = temp_root("g8_frames");
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        inputs(2),
+        ScriptedStation::new(
+            2,
+            fs,
+            Box::new(move |n, c| if c == 0 { burst(n, 0) } else { ramp(n, 1) }),
+        ),
+        hertzforge_module_abi::StationClass::NiSimulated,
+        root.clone(),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    // Monitor a while before arming: the trigger's own count then differs from the
+    // station's.
+    svc.pump_frames(3072).unwrap();
+    svc.arm().unwrap();
+    for _ in 0..30 {
+        svc.pump().unwrap();
+    }
+    svc.stop_monitor().unwrap();
+    let rec = json_at(&root.join("rec_0001").join("recorder.json"));
+    assert_eq!(rec["trigger_station_frame"], 5000, "{rec}");
+    assert_eq!(rec["first_station_frame"], 5000 - pre, "{rec}");
+    assert_eq!(rec["pre_frames"], pre, "{rec}");
+    assert_eq!(rec["pre_frames_asked"], pre, "{rec}");
+    assert_eq!(rec["trigger"], "level", "{rec}");
+    assert_eq!(rec["rows"], serde_json::json!([1, 2]), "{rec}");
+    assert_eq!(rec["units"], serde_json::json!(["g", "g"]), "{rec}");
+    let mut r = RecordingReader::open(&root.join("rec_0001")).unwrap();
+    assert_eq!(r.read_region(0, 1).unwrap()[1], ramp(5000 - pre, 1));
+
+    // A manual recording armed briefly: its trigger is the next batch's first frame,
+    // and its pre-window states it had not filled.
+    let root = temp_root("g8_manual");
+    let mut cfg = manual(fs);
+    cfg.pretrigger_s = Some(1.0);
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        inputs(2),
+        ScriptedStation::new(2, fs, Box::new(ramp)),
+        hertzforge_module_abi::StationClass::NiSimulated,
+        root.clone(),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.pump_frames(2048).unwrap();
+    svc.arm().unwrap();
+    svc.pump_frames(1024).unwrap();
+    svc.record_now().unwrap();
+    svc.pump_frames(1024).unwrap();
+    svc.stop_monitor().unwrap();
+    let rec = json_at(&root.join("rec_0001").join("recorder.json"));
+    assert_eq!(rec["trigger"], "manual", "{rec}");
+    assert_eq!(rec["trigger_station_frame"], 3072, "{rec}");
+    assert_eq!(rec["pre_frames"], 1024, "{rec}");
+    assert_eq!(rec["pre_frames_asked"], 8192, "{rec}");
+    assert_eq!(rec["first_station_frame"], 2048, "{rec}");
+}
+
+#[test]
+fn recorder_holdoff_counts_station_time_from_the_trigger() {
+    // Bursts every 1.0 s from 0.5 s; each recording 1.0 s; a 2.9 s holdoff. The
+    // holdoff ends 2.9 s of station time after a trigger, so the burst 3 s after it
+    // fires; counted in armed time it would skip the recording's second too. Read in
+    // real time, as a run is: unpaced, the 2 s queue to the record thread would fill
+    // ahead of any disk.
+    let fs: f64 = 2048.0;
+    let mut cfg = manual(fs);
+    cfg.trigger_mode = level_on_column_0(2.9);
+    cfg.pretrigger_s = Some(0.25);
+    cfg.timed_record_s = Some(1.0);
+    cfg.auto_rearm = 2;
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        inputs(2),
+        ScriptedStation::new(2, fs, bursts_every(1024, 2048)).paced(),
+        hertzforge_module_abi::StationClass::NiSimulated,
+        temp_root("g8_holdoff"),
+    )
+    .unwrap()
+    .with_block_frames(64);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.arm().unwrap();
+    let mut fires: Vec<u64> = Vec::new();
+    for _ in 0..2000 {
+        svc.pump().unwrap();
+        let s = svc.status(u64::MAX);
+        if let Some(f) = s.last_fire_station_frame {
+            if fires.last() != Some(&f) {
+                fires.push(f);
+            }
+        }
+        if fires.len() == 3 {
+            break;
+        }
+    }
+    svc.stop_monitor().unwrap();
+    assert_eq!(fires.len(), 3, "{fires:?}");
+    assert_eq!(
+        (fires[1] - fires[0], fires[2] - fires[1]),
+        (3 * 2048, 3 * 2048),
+        "each trigger 3 s of station time after the last: {fires:?}"
+    );
+
+    // A holdoff shorter than a recording: a re-armed trigger still waits for a full
+    // pre-window acquired after the recording ended, so no frame is in two
+    // recordings. Bursts every 0.3 s, recordings 0.1 s, pre-window 0.25 s.
+    let mut cfg = manual(fs);
+    cfg.trigger_mode = level_on_column_0(0.0);
+    cfg.pretrigger_s = Some(0.25);
+    cfg.timed_record_s = Some(0.1);
+    cfg.auto_rearm = 2;
+    let root = temp_root("g8_fresh");
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        inputs(2),
+        ScriptedStation::new(2, fs, bursts_every(1024, 614)).paced(),
+        hertzforge_module_abi::StationClass::NiSimulated,
+        root.clone(),
+    )
+    .unwrap()
+    .with_block_frames(64);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.arm().unwrap();
+    for _ in 0..2000 {
+        svc.pump().unwrap();
+        if svc.status(u64::MAX).recordings_saved == 3 {
+            break;
+        }
+    }
+    svc.stop_monitor().unwrap();
+    let mut spans = Vec::new();
+    for name in ["rec_0001", "rec_0002", "rec_0003"] {
+        let rec = json_at(&root.join(name).join("recorder.json"));
+        let first = rec["first_station_frame"]
+            .as_u64()
+            .expect("first station frame");
+        let frames = RecordingReader::open(&root.join(name))
+            .unwrap()
+            .info()
+            .frames;
+        spans.push((first, first + frames));
+    }
+    for w in spans.windows(2) {
+        assert!(w[1].0 >= w[0].1, "a frame in two recordings: {spans:?}");
+    }
 }
