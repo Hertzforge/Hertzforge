@@ -59,14 +59,19 @@ function toTyped(node: unknown): unknown {
 	return node;
 }
 
-/** A plot's channels and point count, each only where the quantity takes it. */
-function keysAsTheServiceTakes(plots: { quantity: ExplorerLiveQuantity; channels?: unknown; points?: number | null }[], sent: boolean) {
+/**
+ * A plot's channels and point count, each only where the quantity takes it. The shell's own
+ * subscriptions name the channels of every spectrum plot and send a point count with the time
+ * history only (the survey is drawn on its own points).
+ */
+function keysAsTheServiceTakes(plots: { quantity: ExplorerLiveQuantity; channels?: unknown; points?: number | null }[], shells: boolean) {
 	for (const p of plots) {
-		expect('channels' in p && p.channels !== undefined).toBe(EXPLORER_CHANNEL_QUANTITIES.includes(p.quantity));
+		const hasChannels = 'channels' in p && p.channels !== undefined;
+		if (hasChannels) expect(EXPLORER_CHANNEL_QUANTITIES).toContain(p.quantity);
+		if (shells) expect(hasChannels).toBe(EXPLORER_CHANNEL_QUANTITIES.includes(p.quantity));
 		const takesPoints = p.quantity === 'time' || p.quantity === 'survey';
 		if (!takesPoints) expect('points' in p && p.points !== undefined).toBe(false);
-		// the shell sends a point count with the time history only; the answer fills the survey's in
-		if (sent && p.quantity === 'survey') expect(p.points ?? null).toBeNull();
+		if (shells && p.quantity === 'survey') expect(p.points ?? null).toBeNull();
 	}
 }
 
@@ -264,6 +269,11 @@ describe("the mock control service's Explorer frames have the service's form", (
 		await client.whenOpen();
 		await acq.sync();
 		await acq.claim();
+		// the goldens' table: a control row, the drive, and a monitor
+		const rows = acq.rows.map((r) => ({ ...r }));
+		rows.push({ ...rows[0], index: 3, description: 'Fixture', role: 'monitor', physical: null });
+		acq.rows = rows;
+		expect(await acq.applyTable()).toBe(true);
 		const explorer = new ExplorerStore(acq, { local: null, checkDelayMs: 0 });
 		await explorer.sync();
 		const config = testConfig();

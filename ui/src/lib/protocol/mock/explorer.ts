@@ -143,6 +143,8 @@ interface Run {
 	/** The last frequency a point was taken at, for a pass through a span. */
 	lastPointHz: number | null;
 	health: ExplorerHealth;
+	/** Batches run: the gap between two is known from the second. */
+	batches: number;
 	timer: ReturnType<typeof setInterval> | null;
 }
 
@@ -403,6 +405,7 @@ export function createExplorerMock(host: ExplorerMockHost): ExplorerMock {
 			surveyRevision: 0,
 			lastPointHz: null,
 			health: { engine_ticks: 0, worst_tick_ms: 0.4, budget_ms: round((1000 * fig.block) / fs, 3), health_faults: 0, ring_overruns: 0, blocks_dropped: 0, driver_warnings: 0, pass_ms: { last: null, worst: null }, batch_gap_ms: null },
+			batches: 0,
 			timer: null
 		};
 	}
@@ -563,7 +566,7 @@ export function createExplorerMock(host: ExplorerMockHost): ExplorerMock {
 		r.health.engine_ticks += Math.max(1, Math.round((dt * r.fs) / r.block));
 		const pass = round(0.5 + 0.3 * Math.abs(Math.sin(r.frames)), 2);
 		r.health.pass_ms = { last: pass, worst: Math.max(r.health.pass_ms.worst ?? 0, pass) };
-		r.health.batch_gap_ms = Math.max(r.health.batch_gap_ms ?? 0, round(TICK_MS * 0.1, 2));
+		if (++r.batches >= 2) r.health.batch_gap_ms = Math.max(r.health.batch_gap_ms ?? 0, round(TICK_MS * 0.1, 2));
 		slewDrive(r, dt);
 		if (r.state === 'stopping') {
 			r.rampT += dt;
@@ -606,6 +609,8 @@ export function createExplorerMock(host: ExplorerMockHost): ExplorerMock {
 			x.push(f);
 			y.push(y0 + clamp(u, 0, 1) * (y1 - y0));
 		}
+		// A span narrower than the grid's spacing (a single point) is drawn on the survey's own points.
+		if (x.length < 2) return { x: pts.map((p) => p[0]), y: pts.map((p) => p[1]) };
 		return { x, y };
 	}
 
@@ -638,7 +643,8 @@ export function createExplorerMock(host: ExplorerMockHost): ExplorerMock {
 		const m = row?.units === 'g' ? motion(r) : null;
 		const peak = peakOf(r);
 		const meas = measuredHz(r);
-		const num = (v: number | null, d: number) => (v === null ? '-' : round(v, d));
+		// A number the run does not have yet reads `none`, as the service writes it.
+		const num = (v: number | null, d: number) => (v === null ? 'none' : round(v, d));
 		const rows: ReadingRow[] = [
 			{ label: 'Frequency', value: round(r.freq, 3), unit: 'Hz', status: 'info' },
 			{ label: 'Target', value: round(r.targetHz, 3), unit: 'Hz', status: 'info' },
@@ -648,9 +654,9 @@ export function createExplorerMock(host: ExplorerMockHost): ExplorerMock {
 			{ label: 'Ceiling', value: r.config.max_drive_vpk, unit: 'V', status: 'info' },
 			{ label: 'Sweep', value: sweepWord(r.sweep), unit: null, status: 'info' },
 			{ label: 'Control rms', value: round(levelAt(r, row) / Math.SQRT2 + NOISE, 5), unit: row?.units ?? null, status: 'info' },
-			{ label: 'Velocity', value: m ? round(m.v, 5) : '-', unit: 'in/s', status: 'info' },
-			{ label: 'Displacement', value: m ? round(m.d, 5) : '-', unit: 'mil', status: 'info' },
-			{ label: 'Peak', value: peak ? round(peak.hz, 3) : '-', unit: 'Hz', status: 'info' },
+			{ label: 'Velocity', value: m ? round(m.v, 5) : 'none', unit: 'in/s', status: 'info' },
+			{ label: 'Displacement', value: m ? round(m.d, 5) : 'none', unit: 'mil', status: 'info' },
+			{ label: 'Peak', value: peak ? round(peak.hz, 3) : 'none', unit: 'Hz', status: 'info' },
 			{ label: 'Pipeline', value: r.pipeline, unit: 'frames', status: 'info' }
 		];
 		return { view: 'reading', title: 'Run', rows };
@@ -675,7 +681,7 @@ export function createExplorerMock(host: ExplorerMockHost): ExplorerMock {
 			const amp = levelAt(r, row);
 			const x = Array.from({ length: n }, (_, i) => i * df);
 			const y = x.map((_, i) => (i === bin ? amp : Math.abs(i - bin) === 1 ? amp * 0.5 : NOISE * (1 + 0.3 * Math.sin(i * 1.3 + row.index))));
-			return { view: 'spectrum', title: titleOf(row), x: { label: 'Frequency', unit: 'Hz', scale: 'linear' }, y: { label: 'Amplitude', unit: row.units, scale: 'linear' }, series: [{ name: `Channel ${row.index}`, role: 'measured', x: f64(x), y: f64(y) }] } as SpectrumView;
+			return { view: 'spectrum', title: titleOf(row), x: { label: 'Frequency', unit: 'Hz', scale: 'linear' }, y: { label: 'Amplitude', unit: row.units, scale: 'linear' }, series: [{ name: `Channel ${row.index}`, role: 'measured', x: f64(x), y: f64(y) }], link: 'frequency' } as SpectrumView;
 		});
 	}
 
