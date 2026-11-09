@@ -44,7 +44,7 @@ The desktop crate is a Cargo workspace of its own, so the controller's `cargo te
 `cargo clippy` do not compile the window toolkit. Its own checks:
 
 ```bash
-npm --prefix desktop ci && npm --prefix desktop run icons   # the icons, from ui/static/favicon.svg
+npm --prefix desktop ci && npm --prefix desktop run icons   # the icons, from desktop/icon.png
 cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked -- -D warnings
 cargo test --manifest-path desktop/Cargo.toml --locked
 cargo deny --manifest-path desktop/Cargo.toml --config desktop/deny.toml check

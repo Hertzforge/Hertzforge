@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: lts/*
-      - name: The icons the build embeds (made from ui/static/favicon.svg)
+      - name: The icons the build embeds (made from desktop/icon.png)
         run: npm --prefix desktop ci && npm --prefix desktop run icons
       - name: Formatting
         run: cargo fmt --manifest-path desktop/Cargo.toml --check
