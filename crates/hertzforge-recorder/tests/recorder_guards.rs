@@ -561,5 +561,8 @@ fn recorder_the_free_space_floor_ends_the_run_and_says_so() {
         rec["fault"].as_str().is_some_and(|f| f.contains("floor")),
         "the recording names the fault: {rec}"
     );
-    assert!(bytes > 0 && bytes % (rows as u64 * 4) == 0, "{bytes} bytes");
+    assert!(
+        bytes > 0 && bytes.is_multiple_of(rows as u64 * 4),
+        "{bytes} bytes"
+    );
 }
