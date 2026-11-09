@@ -379,3 +379,33 @@ fn explorer_derived_values_are_the_stations_arithmetic() {
         );
     }
 }
+
+/// G5: a drive slew whose 40 dB stop outlasts the service's stop wait is refused, so a
+/// stop can always finish before the service gives up on it and aborts.
+#[test]
+fn explorer_a_stop_longer_than_the_stop_wait_is_refused() {
+    let at = |slew: f64| {
+        let mut c = full();
+        c["slew"]["drive_db_per_s"] = json!(slew);
+        check(&c)
+    };
+    // 1 dB/s: a 40 s stop against the 30 s wait.
+    let (r, d) = at(1.0);
+    assert!(d.is_none());
+    assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+    let item = r.errors[0].to_json();
+    assert_eq!(item["reason"], json!("safe_stop_budget"));
+    assert_eq!(item["field"], json!("slew.drive_db_per_s"));
+    assert_eq!(
+        item["message"],
+        json!(
+            "At 1 dB/s the stop takes 40 s, longer than the 30 s the service waits for a \
+             stop; raise the drive slew above 1.333 dB/s."
+        )
+    );
+    // Just under 40/30 dB/s is refused, just over is not.
+    assert_eq!(at(1.333).0.errors[0].reason, "safe_stop_budget");
+    let (r, d) = at(1.334);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(d.unwrap().stop_s < 30.0);
+}
