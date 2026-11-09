@@ -72,6 +72,8 @@ cat > "$STAGE/tauri.stage.json" <<JSON
 JSON
 args=(build --config "$(native "$STAGE/tauri.stage.json")" ${FEATURES[@]+"${FEATURES[@]}"})
 [[ -n "$BUNDLES" ]] && args+=(--bundles "$BUNDLES")
+# On a runner, what the bundlers print: linuxdeploy says nothing of why it failed otherwise.
+[[ -n "${CI:-}" ]] && args+=(--verbose)
 (cd "$DESKTOP" && npx --no-install tauri "${args[@]}")
 echo "build.sh: installers in $TARGET_DIR/release/bundle/"
 ls "$TARGET_DIR/release/bundle/"* 2>/dev/null || true
