@@ -627,3 +627,95 @@ fn recorder_falling_behind_the_disk_ends_the_run() {
         .iter()
         .any(|c| matches!(c, support::StoreCall::Finish { .. })));
 }
+
+// ---------------------------------------------------------------------------------
+// G6: a timed recording holds exactly its frames after the trigger, plus its
+// pre-window, whatever the batch.
+// ---------------------------------------------------------------------------------
+
+#[test]
+fn recorder_a_timed_recording_holds_exactly_its_frames() {
+    let fs = 8192.0;
+    // 0.3 s is 2457.6 frames: 2458, not a whole number of 512-frame batches.
+    let record = (0.3 * fs as f64).round() as u64;
+    let pre = (0.1 * fs as f64).round() as u64;
+    let open = |mode: TriggerMode, signal: support::Signal, tag: &str| {
+        let mut cfg = manual(fs);
+        cfg.trigger_mode = mode;
+        cfg.timed_record_s = Some(0.3);
+        cfg.pretrigger_s = Some(0.1);
+        let root = temp_root(tag);
+        let mut svc = RecorderService::with_backend(
+            cfg,
+            inputs(2),
+            ScriptedStation::new(2, fs, signal),
+            hertzforge_module_abi::StationClass::NiSimulated,
+            root.clone(),
+        )
+        .unwrap()
+        .with_block_frames(256);
+        svc.configure().unwrap();
+        svc.start_monitor().unwrap();
+        (svc, root)
+    };
+    let frames_of = |svc: &RecorderService<ScriptedStation>, root: &std::path::Path| {
+        let list = svc.recordings_list(None);
+        assert_eq!(list.len(), 1);
+        let mut r = RecordingReader::open(&root.join(&list[0].name)).unwrap();
+        let first = r.read_region(0, 1).unwrap()[0];
+        (list[0].frames, first)
+    };
+
+    // Manual, not armed: no pre-window.
+    let (mut svc, root) = open(TriggerMode::Manual, Box::new(ramp), "g6_manual");
+    svc.pump_frames(1000).unwrap();
+    svc.record_now().unwrap();
+    for _ in 0..20 {
+        svc.pump().unwrap();
+    }
+    assert_eq!(
+        svc.state(),
+        RecState::Monitoring,
+        "the timed recording ended"
+    );
+    svc.stop_monitor().unwrap();
+    assert_eq!(
+        frames_of(&svc, &root).0,
+        record,
+        "exactly round(record_s x fs)"
+    );
+
+    // Manual, armed: the pre-window, then exactly the length.
+    let (mut svc, root) = open(TriggerMode::Manual, Box::new(ramp), "g6_armed");
+    svc.arm().unwrap();
+    svc.pump_frames(2048).unwrap();
+    svc.record_now().unwrap();
+    for _ in 0..20 {
+        svc.pump().unwrap();
+    }
+    svc.stop_monitor().unwrap();
+    assert_eq!(frames_of(&svc, &root).0, pre + record);
+
+    // Level: the trigger mid-batch, the pre-window, then exactly the length.
+    let burst = bursts_every(5000, 1_000_000);
+    let (mut svc, root) = open(
+        level_on_column_0(0.0),
+        Box::new(move |n, c| if c == 0 { burst(n, 0) } else { ramp(n, 1) }),
+        "g6_level",
+    );
+    svc.arm().unwrap();
+    for _ in 0..30 {
+        svc.pump().unwrap();
+    }
+    svc.stop_monitor().unwrap();
+    let (frames, first) = frames_of(&svc, &root);
+    assert_eq!(frames, pre + record);
+    let mut r = RecordingReader::open(&root.join(&svc.recordings_list(None)[0].name)).unwrap();
+    let second = r.read_region(0, 1).unwrap()[1];
+    assert_eq!(first, 0.0);
+    assert_eq!(
+        second,
+        ramp(5000 - pre, 1),
+        "the file begins a pre-window before the burst"
+    );
+}
