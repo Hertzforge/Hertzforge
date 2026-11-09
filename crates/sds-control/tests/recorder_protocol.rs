@@ -238,7 +238,23 @@ async fn recorder_log_reaches_every_connection_and_names_the_folder() {
     for e in entries.as_array().unwrap() {
         schema.assert_valid(e, Some("logEntry"));
     }
-    let log = obs.ok("recorder.log", json!({})).await;
+    // The first recording's line follows the folder's, once the recording opens: read the log
+    // until it is there (one read could come between the two).
+    let mut log = obs.ok("recorder.log", json!({})).await;
+    for _ in 0..100 {
+        let began = log["entries"].as_array().is_some_and(|l| {
+            l.iter().any(|e| {
+                e["text"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("rec_0001 began at station frame 0"))
+            })
+        });
+        if began {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        log = obs.ok("recorder.log", json!({})).await;
+    }
     let texts: Vec<&str> = log["entries"]
         .as_array()
         .unwrap()
