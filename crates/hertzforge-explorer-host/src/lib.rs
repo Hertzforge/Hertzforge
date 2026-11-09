@@ -63,6 +63,7 @@ pub mod floor;
 pub mod freq;
 pub mod guards;
 pub mod host;
+pub mod intent;
 pub mod level;
 pub mod profile_raster;
 pub mod ring;
@@ -70,6 +71,9 @@ pub mod service;
 pub mod slew;
 pub mod step;
 
+pub use intent::{
+    Adoption, FrequencyPart, IntentKind, IntentRecord, LevelPart, Steered, StopCause,
+};
 pub use service::{
     ExplorerCommand, ExplorerHostConfig, ExplorerHostService, ExplorerStatus, RunState,
     ServiceError,

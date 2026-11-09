@@ -144,8 +144,26 @@ impl ProfileRaster {
         self.points.is_empty()
     }
 
-    /// Forget everything. (Not reached today - the pump owns one profile per run - but the
-    /// type would be wrong without it, and a future "clear profile" verb lands here.)
+    /// The visited `(frequency, level)` points, ascending by frequency: the survey line
+    /// itself, before any rendering onto a grid.
+    pub fn points(&self) -> &[(f64, f32)] {
+        &self.points
+    }
+
+    /// The highest visited point, `(frequency, level)`, or `None` while nothing has been
+    /// visited. On equal levels the lower frequency is the peak.
+    pub fn peak(&self) -> Option<(f64, f32)> {
+        self.points
+            .iter()
+            .copied()
+            .fold(None, |best: Option<(f64, f32)>, p| match best {
+                Some(b) if b.1 >= p.1 => Some(b),
+                _ => Some(p),
+            })
+    }
+
+    /// Forget everything: the points and the traversal anchor, so the next visit wipes
+    /// nothing. The operator's "clear the survey".
     pub fn clear(&mut self) {
         self.points.clear();
         self.last_hz = None;

@@ -252,6 +252,10 @@ pub struct StepHandles {
     /// starts at zero for this run rather than inheriting a device counter, so a
     /// "seconds into the run" readout means what it says across a re-arm.
     pub frames_generated: Arc<AtomicU64>,
+    /// Input frames the step has been handed (and copied into the ring), since arm: the
+    /// station's own count of acquired frames, which is what places a drained block in
+    /// station time.
+    pub frames_acquired: Arc<AtomicU64>,
 }
 
 /// The persistent Explorer host control step. See the module docs.
@@ -301,6 +305,9 @@ pub struct ExplorerProcessStep {
     // --- shared surfaces ------------------------------------------------------
     ring: Arc<SampleRing>,
     frames_generated: Arc<AtomicU64>,
+    frames_acquired: Arc<AtomicU64>,
+    /// Interleave width of an acquired frame, to count the frames a block carries.
+    n_interleave: usize,
 }
 
 impl ExplorerProcessStep {
@@ -338,9 +345,11 @@ impl ExplorerProcessStep {
             b.n_interleave,
         ));
         let frames_generated = Arc::new(AtomicU64::new(0));
+        let frames_acquired = Arc::new(AtomicU64::new(0));
         let handles = StepHandles {
             ring: ring.clone(),
             frames_generated: frames_generated.clone(),
+            frames_acquired: frames_acquired.clone(),
         };
 
         let step = ExplorerProcessStep {
@@ -363,6 +372,8 @@ impl ExplorerProcessStep {
             sweep_oct_per_frame: 0.0,
             ring,
             frames_generated,
+            frames_acquired,
+            n_interleave: b.n_interleave.max(1),
         };
         Ok((step, handles))
     }
@@ -501,6 +512,11 @@ impl ExplorerProcessStep {
         self.frames_generated.load(Ordering::Relaxed)
     }
 
+    /// The run-relative count of input frames this step has been handed.
+    pub fn frames_acquired(&self) -> u64 {
+        self.frames_acquired.load(Ordering::Relaxed)
+    }
+
     // --- the per-frame arithmetic ----------------------------------------------
 
     /// Advance the sweep's TARGET one frame. The slew below then decides how much of
@@ -624,6 +640,8 @@ impl ProcessStep for ExplorerProcessStep {
         //    display with the data that arrived.
         if !input.is_empty() {
             self.ring.push(input);
+            self.frames_acquired
+                .fetch_add((input.len() / self.n_interleave) as u64, Ordering::Relaxed);
         }
 
         // 2. Synthesis, one frame at a time.
