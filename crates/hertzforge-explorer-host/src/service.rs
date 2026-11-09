@@ -129,6 +129,11 @@ pub const MAX_INTENT_RECORDS: usize = 1024;
 /// taken, oldest dropped first. The survey line itself keeps every point it should.
 pub const MAX_RECENT_POINTS: usize = 4096;
 
+/// The most batches a ramped stop waits, with the drive at zero, for its zeros to reach the
+/// output (see `run_batches`): far beyond any station's pipeline (four blocks on the NI
+/// chassis), so it ends a stop only where the station has stopped acquiring.
+const STOP_ZERO_WAIT_BATCHES: u32 = 64;
+
 /// Errors from an [`ExplorerHostService`] operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServiceError {
@@ -339,6 +344,10 @@ pub struct ExplorerStatus {
     /// How many readings have matured this run. A reader that wants each new reading
     /// (rather than the latest) compares this.
     pub measured_readings: u64,
+    /// A ramped stop's first zero: the generated frame where its drive reached zero. The
+    /// stop's ramp runs from its intent's frame to this; the run then ends once this has
+    /// played.
+    pub stop_zero_frame: Option<u64>,
     /// The amplitude being generated right now, volts peak.
     pub commanded_vpk: f64,
     /// The amplitude the operator asked for, volts peak.
@@ -604,6 +613,10 @@ pub struct ExplorerHostService {
     /// [`ExplorerStatus::measured_freq_hz`]), and how many have matured this run.
     held_measured_hz: Option<f64>,
     measured_readings: u64,
+    /// The ramped stop's wait for its zeros to reach the output: the generated frame of the
+    /// first zero, and the batches waited for it.
+    stop_zero_at: Option<u64>,
+    stop_wait_batches: u32,
 
     // --- read surfaces --------------------------------------------------------
     /// The survey line: every point the profile capture recorded, folded in by frequency
@@ -728,6 +741,8 @@ impl ExplorerHostService {
             meter_skip: 0,
             held_measured_hz: None,
             measured_readings: 0,
+            stop_zero_at: None,
+            stop_wait_batches: 0,
             survey: None,
             survey_revision: 0,
             recent_points: VecDeque::new(),
@@ -1266,6 +1281,8 @@ impl ExplorerHostService {
         ));
         self.held_measured_hz = None;
         self.measured_readings = 0;
+        self.stop_zero_at = None;
+        self.stop_wait_batches = 0;
         self.floor = Some(NoiseFloorProbe::new(self.n_interleave));
         // The survey line on the display spectra's own grid, at the ADOPTED rate, so it
         // renders onto the same frequencies the spectra are drawn against.
@@ -1521,9 +1538,23 @@ impl ExplorerHostService {
             if self.state.is_terminal() {
                 return Ok(false);
             }
-            // The RAMPED stop completes here, not in the tick: the drive is at zero, so
-            // stopping the tasks can no longer put a step into anything.
-            if self.state == RunState::Stopping && self.drive_is_zero() {
+            // The RAMPED stop completes here, not in the tick, once the drive is at zero AT
+            // THE OUTPUT. The generator reaching zero is not enough: the queue still holds
+            // up to the lookahead of drive written before it, the last of the ramp's tail,
+            // and stopping the tasks then cuts it while the converter is playing it. A held
+            // converter (the 9263) keeps that sample until the backend's taper brings it
+            // down: 1.64 mV for about 0.2 s after a safe stop on the NI loopback (X8,
+            // 2026-11-09). AI and AO share one clock, so the input frames acquired are the
+            // output frames played; the first zero has played once they pass it, plus the
+            // acquisition's group delay. Bounded, so a station that stops acquiring cannot
+            // hold the stop open.
+            if self.state == RunState::Stopping && self.drive_is_zero() && !self.zeros_played() {
+                self.stop_wait_batches += 1;
+            }
+            if self.state == RunState::Stopping
+                && self.drive_is_zero()
+                && (self.zeros_played() || self.stop_wait_batches > STOP_ZERO_WAIT_BATCHES)
+            {
                 if let Some(b) = self.backend.as_mut() {
                     b.stop()
                         .map_err(|e| ServiceError::Plant(format!("stop: {e}")))?;
@@ -1571,6 +1602,28 @@ impl ExplorerHostService {
 
     fn drive_is_zero(&self) -> bool {
         self.step.as_ref().map(|s| s.drive_vpk()).unwrap_or(0.0) == 0.0
+    }
+
+    /// Whether the first zero the generator wrote has reached the output. The frame it was
+    /// written at is taken the first time this is asked with the drive at zero.
+    fn zeros_played(&mut self) -> bool {
+        let generated = self
+            .handles
+            .as_ref()
+            .map(|h| h.frames_generated.load(Ordering::Relaxed))
+            .unwrap_or(0);
+        let zero_at = *self.stop_zero_at.get_or_insert(generated);
+        let played = self
+            .engine
+            .as_ref()
+            .map(|e| e.health().frames_in)
+            .unwrap_or(0);
+        let group = self
+            .configured
+            .as_ref()
+            .and_then(|c| c.group_delay_frames)
+            .unwrap_or(0) as u64;
+        played >= zero_at + group
     }
 
     /// Drain the mailbox and apply every intent. Between batches, never on the tick.
@@ -2136,6 +2189,7 @@ impl ExplorerHostService {
                 .unwrap_or(0.0),
             measured_freq_hz,
             measured_readings: self.measured_readings,
+            stop_zero_frame: self.stop_zero_at,
             commanded_vpk: self.step.as_ref().map(|s| s.drive_vpk()).unwrap_or(0.0),
             target_vpk: self
                 .step

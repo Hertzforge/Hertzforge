@@ -74,6 +74,8 @@ struct Data {
     notes: Vec<(&'static str, String)>,
     /// The input frames acquired when the stop began.
     stop_input_frame: Option<u64>,
+    /// The stop intent's generated frame: where the ramp began.
+    stop_frame: Option<u64>,
     pump_done: bool,
 }
 
@@ -117,6 +119,10 @@ impl RunData {
 
     fn stop_input_frame(&self) -> Option<u64> {
         lock(&self.data).stop_input_frame
+    }
+
+    fn stop_frame(&self) -> Option<u64> {
+        lock(&self.data).stop_frame
     }
 
     fn pump_done(&self) -> bool {
@@ -179,6 +185,7 @@ impl HostSink for ViewSink {
         for i in intents {
             if matches!(i.kind, IntentKind::Stop { .. }) && d.stop_input_frame.is_none() {
                 d.stop_input_frame = Some(i.input_frame);
+                d.stop_frame = Some(i.frame);
             }
         }
         d.intents.extend_from_slice(intents);
@@ -647,10 +654,17 @@ impl ExplorerRun {
         let rec = st.end.clone();
         let at_s = Some(round(st.frames_in as f64 / fs, 4));
         let (at_hz, vpk) = track.tone;
-        let ramp_s = self
-            .data
-            .stop_input_frame()
-            .map(|f| round(st.frames_in.saturating_sub(f) as f64 / fs, 4));
+        // The ramp's length: from the stop's frame to its first zero, both generated. The
+        // run ends once that zero has played, a pipeline later, so the end's input frame
+        // less the stop's would add the pipeline; that is the fallback where the zero's
+        // frame is not known.
+        let ramp_s = match (self.data.stop_frame(), st.stop_zero_frame) {
+            (Some(f), Some(z)) => Some(round(z.saturating_sub(f) as f64 / fs, 4)),
+            _ => self
+                .data
+                .stop_input_frame()
+                .map(|f| round(st.frames_in.saturating_sub(f) as f64 / fs, 4)),
+        };
         let by = self
             .shared
             .ended_by()

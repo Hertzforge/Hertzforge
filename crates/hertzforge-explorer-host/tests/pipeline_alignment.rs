@@ -112,6 +112,10 @@ struct Pipelined {
     /// input frame `n + group_delay_frames` - which is what the service's pipeline
     /// arithmetic adds the reported figure for.
     group_delay_frames: u32,
+    /// At `stop()`: the largest |sample| still queued (written, never played), and the last
+    /// sample played, which a held converter keeps on its output.
+    at_stop: std::sync::Arc<std::sync::Mutex<Option<(f32, f32)>>>,
+    last_played: f32,
 }
 
 impl Pipelined {
@@ -125,6 +129,8 @@ impl Pipelined {
             lookahead_frames: LOOKAHEAD_FRAMES,
             coerce_rate_hz: None,
             group_delay_frames: 0,
+            at_stop: Default::default(),
+            last_played: 0.0,
         }
     }
 
@@ -141,6 +147,8 @@ impl Pipelined {
             lookahead_frames: (2 * block_frames) as u32,
             coerce_rate_hz: Some(CHASSIS_RATE_HZ),
             group_delay_frames: CHASSIS_GROUP_DELAY,
+            at_stop: Default::default(),
+            last_played: 0.0,
         }
     }
 }
@@ -197,6 +205,10 @@ impl Backend for Pipelined {
         self.inner.start()
     }
     fn stop(&mut self) -> Result<(), HalError> {
+        let queued = self.fifo.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        if let Ok(mut a) = self.at_stop.lock() {
+            *a = Some((queued, self.last_played));
+        }
         self.inner.stop()
     }
     fn read_input(&mut self, out: &mut [f32]) -> Result<InputRead, HalError> {
@@ -205,6 +217,7 @@ impl Backend for Pipelined {
         let take = want.min(self.fifo.len());
         if take > 0 {
             let chunk: Vec<f32> = self.fifo.drain(..take).collect();
+            self.last_played = chunk[chunk.len() - 1];
             let _ = self.inner.write_drive(&chunk);
         }
         self.inner.read_input(out)
@@ -927,4 +940,54 @@ fn the_measured_frequency_reads_the_new_tone_behind_a_deep_pipeline() {
         run.pipeline_frames
     );
     assert_meter_reads_the_settled_tone(&run);
+}
+
+/// **A RAMPED STOP ENDS ON ZERO AT THE OUTPUT, not at the generator.** The stop ramps the
+/// drive to zero and then stops the station's tasks; done the moment the GENERATOR reached
+/// zero, the queue still held up to the lookahead of drive written before it, the last of
+/// the ramp's tail, and stopping the tasks cut it while the converter was still playing it.
+/// A held converter (the 9263) then keeps that sample until the backend's shutdown taper
+/// brings it down: on the NI loopback (X8, 2026-11-09) a safe stop held 1.64 mV above the
+/// floor for about 0.2 s; an operator stop (X6) happened to land near zero.
+#[test]
+fn explorer_a_ramped_stop_stops_the_station_only_once_the_zeros_have_played() {
+    let backend = Pipelined::chassis(wire_plant(), 128);
+    let probe = backend.at_stop.clone();
+    let cfg = ExplorerHostConfig {
+        fs_hz: FS_HZ,
+        band_hz: (50.0, 2_000.0),
+        start_hz: 250.0,
+        max_drive_vpk: 0.5,
+        slew: SlewLimits {
+            freq_oct_per_s: 1.0,
+            drive_db_per_s: 60.0,
+        },
+        ramp: AmplitudeRamp::default(),
+        display_nfft: 2_048,
+        ring_blocks: 16,
+    };
+    let mut svc =
+        ExplorerHostService::new(cfg, table(), Box::new(backend), StationClass::HertzforgeSim)
+            .expect("a wire behind the pipeline is a valid Explorer station")
+            .with_block_frames(128);
+    svc.arm().expect("arms");
+    svc.start().expect("runs");
+    svc.set_amplitude_vpk(0.2).unwrap();
+    for _ in 0..400 {
+        svc.run_batches(1).expect("no fault");
+        svc.service_analysis();
+    }
+    svc.request_stop();
+    for _ in 0..4_000 {
+        if !svc.run_batches(1).expect("no fault") {
+            break;
+        }
+        svc.service_analysis();
+    }
+    let (queued, held) = probe.lock().unwrap().expect("the stop reached the station");
+    assert!(
+        queued == 0.0 && held == 0.0,
+        "at the station's stop {queued} V of drive was still queued and {held} V was on the \
+         output"
+    );
 }
