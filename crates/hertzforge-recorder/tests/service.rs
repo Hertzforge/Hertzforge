@@ -130,10 +130,8 @@ struct ScriptedBackend {
     state_armed: bool,
     state_started: bool,
     estops: u32,
-    /// Stand-in for the provisional `[H]` abort-latency bound the NI backend
-    /// seeds. A hardware-station arm REFUSES
-    /// without one, so the hardware watchdog tests must publish it; the
-    /// HERTZFORGE-SIM tests leave it `None` and are unaffected.
+    /// The abort-latency bound the station publishes (none: a capture-only run
+    /// needs none).
     abort_latency_bound: Option<std::time::Duration>,
 }
 
@@ -152,12 +150,6 @@ impl ScriptedBackend {
             estops: 0,
             abort_latency_bound: None,
         }
-    }
-
-    /// Publish an abort-latency bound, as an NI station does.
-    fn with_abort_latency_bound(mut self, d: std::time::Duration) -> Self {
-        self.abort_latency_bound = Some(d);
-        self
     }
 }
 
@@ -350,228 +342,6 @@ fn pump_budget_is_frames_not_ticks_under_a_hardware_block() {
     svc.stop_monitor().unwrap();
 }
 
-/// With abort limits on the user table and `watchdog_enabled = false`
-/// (default), a limit-violating signal does NOT trip (the engine table clone
-/// strips the limits). With `watchdog_enabled = true` on a scripted backend
-/// delivering a violating signal, the watchdog DOES trip -> Faulted.
-#[test]
-fn watchdog_off_by_default_strips_limits() {
-    // ---- watchdog OFF: a big constant signal does not trip ----
-    let mut table = input_table(2);
-    // Tight abort limit on channel 0 (1 g); the Sim noise stays tiny, but even
-    // a large signal must not trip because the clone strips limits.
-    table.channels[0].abort = AbortLimits {
-        accel_g: Some(0.001),
-        velocity_ips: None,
-        displacement_mil: None,
-    };
-    let cfg = RecorderConfig {
-        acq: fast_acq(),
-        watchdog_enabled: false,
-        ..Default::default()
-    };
-    let mut svc = sim_service(cfg, table.clone(), SimConfig::new(), temp_root("f10off")).unwrap();
-    svc.configure().unwrap();
-    svc.start_monitor().unwrap();
-    for _ in 0..4 {
-        svc.pump_frames(1024).expect("watchdog off: no trip");
-    }
-    assert_eq!(svc.state(), RecState::Monitoring, "off: no trip");
-    svc.stop_monitor().unwrap();
-
-    // ---- watchdog ON: a violating scripted signal trips -> Faulted ----
-    let n = 2usize;
-    let fs = 8_192.0;
-    // 4096 frames of a large constant 50 g on both channels: well over the 1 g
-    // accel limit, sustained, so the watchdog trips.
-    let n_frames = 4096;
-    let mut frames = Vec::with_capacity(n_frames * n);
-    for _ in 0..n_frames {
-        frames.push(50.0f32);
-        frames.push(50.0f32);
-    }
-    let mut wtable = input_table(2);
-    wtable.channels[0].abort = AbortLimits {
-        accel_g: Some(1.0),
-        velocity_ips: None,
-        displacement_mil: None,
-    };
-    wtable.channels[1].abort = AbortLimits {
-        accel_g: Some(1.0),
-        velocity_ips: None,
-        displacement_mil: None,
-    };
-    let cfg_on = RecorderConfig {
-        acq: {
-            let mut a = fast_acq();
-            a.native_rate_hz = fs;
-            a
-        },
-        watchdog_enabled: true,
-        overload_fraction: 10.0, // keep the overload proxy out of the way
-        ..Default::default()
-    };
-    let backend = ScriptedBackend::new(n, fs, frames);
-    let mut svc = RecorderService::with_backend(
-        cfg_on,
-        wtable,
-        backend,
-        hertzforge_module_abi::StationClass::HertzforgeSim,
-        temp_root("f10on"),
-    )
-    .unwrap();
-    svc.configure().unwrap();
-    svc.start_monitor().unwrap();
-    let mut faulted = false;
-    for _ in 0..8 {
-        if svc.pump_frames(1024).is_err() {
-            faulted = true;
-            break;
-        }
-        if svc.state() == RecState::Faulted {
-            faulted = true;
-            break;
-        }
-    }
-    assert!(faulted, "watchdog on: violating signal must trip");
-    assert_eq!(svc.state(), RecState::Faulted, "trip records Faulted");
-}
-
-/// On a HARDWARE station, a config nobody touched
-/// arms the watchdog when the table carries abort limits — and the arming is
-/// real, not just a flag: the same violating signal that does NOT trip on
-/// HERTZFORGE-SIM (the test above) DOES trip here, through the same code path.
-///
-/// The pair matters more than either half. `watchdog_off_by_default_strips_limits`
-/// pins the HERTZFORGE-SIM behaviour unchanged; this pins that the hardware default is
-/// the opposite; and both drive the SAME scripted signal, so the difference can
-/// only be the station.
-///
-/// RED-MUTATION: delete the hardware arm in `config::resolve_watchdog` (flipping
-/// the default back to off) and this test reds while the HERTZFORGE-SIM one stays
-/// green. Nothing else in the suite notices — which is exactly why this test has
-/// to exist at the service level and not only at the resolver.
-#[test]
-fn a_hardware_station_arms_the_watchdog_with_no_operator_action() {
-    let n = 2usize;
-    let fs = 8_192.0;
-    let n_frames = 4096;
-    let mut frames = Vec::with_capacity(n_frames * n);
-    for _ in 0..n_frames {
-        frames.push(50.0f32);
-        frames.push(50.0f32);
-    }
-
-    let mut table = input_table(2);
-    for ch in table.channels.iter_mut() {
-        ch.abort = AbortLimits {
-            accel_g: Some(1.0),
-            velocity_ips: None,
-            displacement_mil: None,
-        };
-    }
-
-    // The operator touched NOTHING: watchdog_enabled is the field default
-    // (false) and watchdog_explicit is false. On HERTZFORGE-SIM this is the
-    // limits-stripped case; on a hardware station it must arm.
-    let cfg = RecorderConfig {
-        acq: {
-            let mut a = fast_acq();
-            a.native_rate_hz = fs;
-            a
-        },
-        overload_fraction: 10.0, // keep the overload proxy out of the way
-        ..Default::default()
-    };
-    assert!(!cfg.watchdog_enabled && !cfg.watchdog_explicit);
-
-    let mut svc = RecorderService::with_backend(
-        cfg,
-        table,
-        // The provisional [H] bound an NI station publishes; without one the
-        // arm gate refuses a hardware station outright (and rightly so).
-        ScriptedBackend::new(n, fs, frames)
-            .with_abort_latency_bound(std::time::Duration::from_millis(160)),
-        hertzforge_module_abi::StationClass::NiSimulated,
-        temp_root("p4_hw_watchdog"),
-    )
-    .unwrap();
-
-    // The service reports what it decided, and why, before anything runs.
-    let w = svc.watchdog().clone();
-    assert!(
-        w.armed,
-        "an untouched config must arm on a hardware station"
-    );
-    assert!(!w.disarmed_with_limits);
-    assert!(w.basis.contains("ARMED by default"), "{}", w.basis);
-
-    svc.configure().unwrap();
-    svc.start_monitor().unwrap();
-    let mut faulted = false;
-    for _ in 0..8 {
-        if svc.pump_frames(1024).is_err() || svc.state() == RecState::Faulted {
-            faulted = true;
-            break;
-        }
-    }
-    assert!(
-        faulted,
-        "the armed watchdog must actually trip on the violating signal — a flag \
-         that does not reach build_engine_table is not a watchdog"
-    );
-    assert_eq!(svc.state(), RecState::Faulted);
-    assert!(
-        svc.status(u64::MAX).watchdog_armed,
-        "and the status says so"
-    );
-}
-
-/// The disarm is still the operator's call — it simply announces itself.
-#[test]
-fn an_explicit_disarm_on_hardware_survives_into_the_status() {
-    let mut table = input_table(2);
-    table.channels[0].abort = AbortLimits {
-        accel_g: Some(0.001),
-        velocity_ips: None,
-        displacement_mil: None,
-    };
-    let cfg = RecorderConfig {
-        acq: fast_acq(),
-        watchdog_enabled: false,
-        watchdog_explicit: true,
-        ..Default::default()
-    };
-    let mut svc = RecorderService::with_backend(
-        cfg,
-        table,
-        ScriptedBackend::new(2, 8_192.0, vec![50.0f32; 4096 * 2])
-            .with_abort_latency_bound(std::time::Duration::from_millis(160)),
-        hertzforge_module_abi::StationClass::NiReal,
-        temp_root("p4_hw_disarm"),
-    )
-    .unwrap();
-    svc.configure().unwrap();
-    svc.start_monitor().unwrap();
-    for _ in 0..4 {
-        svc.pump_frames(1024).expect("disarmed: no trip");
-    }
-    assert_eq!(
-        svc.state(),
-        RecState::Monitoring,
-        "the operator's choice stands"
-    );
-
-    let s = svc.status(u64::MAX);
-    assert!(!s.watchdog_armed);
-    assert!(s.limits_disarmed, "the banner flag must reach the UI");
-    assert!(
-        s.watchdog_basis.contains("LIMITS DISARMED"),
-        "{}",
-        s.watchdog_basis
-    );
-}
-
 /// A scripted burst at frame K with a level trigger + pre-trigger. The
 /// recording must contain the pre-window intact, joined gap-free with the live
 /// continuation (read back via RecordingReader; t=0 at the trigger sample).
@@ -728,21 +498,9 @@ fn timed_recording_gap_free() {
     let list = svc.recordings_list(None);
     assert_eq!(list.len(), 1, "exactly one recording");
     assert!(list[0].gap_free, "timed recording must be gap-free");
-    // The writer stops on the first frame >= target; because segments arrive in
-    // whole ticks, the file holds AT LEAST the target (never fewer) and less
-    // than target + one segment.
-    assert!(
-        list[0].frames >= target,
-        "frames {} should be >= target {}",
-        list[0].frames,
-        target
-    );
-    assert!(
-        list[0].frames < target + 512,
-        "frames {} should be within one segment of the target {}",
-        list[0].frames,
-        target
-    );
+    // A timed recording holds exactly its frames: the batch that reaches the target
+    // gives it only the frames it still needs.
+    assert_eq!(list[0].frames, target, "exactly the target");
 }
 
 /// A scripted 2-channel backend with y = biquad(x). The live FRF |H1|
@@ -989,8 +747,8 @@ fn auto_rearm_respects_holdoff() {
     );
 }
 
-/// serde round-trips for status + report, and the report carries the
-/// concurrent-recording honesty line verbatim.
+/// serde round-trips for status + report, and the report states that a run records
+/// its own station only.
 #[test]
 fn status_and_report_serialize() {
     let table = input_table(3);
@@ -1021,12 +779,12 @@ fn status_and_report_serialize() {
     let rj = serde_json::to_string(&report).unwrap();
     let _rback: hertzforge_recorder::ReportData = serde_json::from_str(&rj).unwrap();
     assert!(
-        report.honesty.concurrent.contains(
-            "v1 records its own acquisition session; concurrent capture during another \
-             module's test requires the shared-acquisition layer."
-        ),
-        "the concurrent-recording honesty line must be present verbatim, got: {}",
-        report.honesty.concurrent
+        report
+            .facts
+            .concurrent
+            .contains("cannot record during another module's run"),
+        "the report states it records its own station only, got: {}",
+        report.facts.concurrent
     );
     // Default metadata is present.
     let keys: Vec<&str> = report.metadata.iter().map(|m| m.key.as_str()).collect();

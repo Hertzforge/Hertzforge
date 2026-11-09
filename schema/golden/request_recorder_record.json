@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 104,
+ "method": "recorder.record",
+ "params": {}
+}

@@ -2396,6 +2396,7 @@ dependencies = [
  "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-random-laws",
+ "hertzforge-recorder",
  "hertzforge-reference",
  "hertzforge-sdm",
  "hertzforge-shaker-db",

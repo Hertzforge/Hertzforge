@@ -1,48 +1,46 @@
-//! `hertzforge-recorder` - the Data Recorder module core.
+//! `hertzforge-recorder`: the Recorder's core. It records a station's inputs and
+//! drives nothing.
 //!
-//! Four pure-library pieces, no engine dependency yet:
+//! * [`acq`] - [`AcquisitionConfig`]: the acquisition and analysis selection (rate,
+//!   block, window, overlap, averaging, analysis decimation) with its derived readouts
+//!   (df, lines, span). Recordings are always at the rate the station programmed; the
+//!   decimation is the analysis's only.
+//! * [`trigger`] - [`TriggerEngine`] and [`PreTriggerRing`]: a level trigger with a
+//!   hysteresis band and a holdoff, and a pre-window whose frames join the recording
+//!   with no gap, counted in station frames.
+//! * [`recording`] - [`RecordingWriter`] puts a recording onto the capture crate's
+//!   writer thread ([`CaptureSink`](hertzforge_capture::CaptureSink)), in chunks of
+//!   about 100 ms, with position-accurate gap records, and writes the recording's own
+//!   record (`recorder.json`) before any frame and again when it ends.
+//!   [`RecordingReader`] reads a recording back and takes its length from the file,
+//!   never from a record.
+//! * [`store`] - [`RecordStore`], the seam between the service and the writer, with
+//!   [`WriterStore`] behind it.
+//! * [`record`] - the record thread, the one thread that touches a recording's files.
+//! * [`analysis`] - the analysis on hertzforge-dsp: [`ChannelDecimator`] ->
+//!   [`BlockAssembler`] -> [`SpectrumPipeline`] and [`FrfPipeline`] (H1, Hv and
+//!   coherence, the coherence withheld until two averages), time statistics, velocity
+//!   and displacement, and the offline region functions [`analyze_region`] and
+//!   [`analyze_region_frf`] built from the same parts.
+//! * [`service`] - [`RecorderService`]: a run on one station.
 //!
-//! * [`acq`] - [`AcquisitionConfig`]: the operator's "standard DAQ selection tools"
-//!   as a first-class, validated, serializable type (sample-rate ladder, block size,
-//!   window, overlap, averaging) plus the derived readouts (df, spectral lines,
-//!   span). HONEST SEMANTICS: recording is always at the native rate; the decimation
-//!   selector models the ANALYSIS-side ladder only.
-//! * [`trigger`] - [`TriggerEngine`] + [`PreTriggerRing`]: hysteresis-armed level
-//!   triggering in the frame domain (EU samples), an interleaved pre-trigger ring
-//!   whose snapshot joins gap-free with the live continuation, holdoff that
-//!   never re-arms before the ring has refilled, and auto-rearm counting.
-//! * [`recording`] - [`RecordingWriter`] bridges onto the testkit
-//!   [`CaptureSink`](hertzforge_capture::CaptureSink) (~100 ms batched pushes,
-//!   position-accurate gap accounting) and owns a crash-safe provisional
-//!   `recorder.json` sidecar. [`RecordingReader`] reads the run back
-//!   (chunked region reads, min/max overview, trigger-relative time axis) and
-//!   DISTRUSTS sidecars: the file size is the authority on frame count.
-//! * [`analysis`] - the analysis pipeline on hertzforge-dsp:
-//!   [`ChannelDecimator`] (anti-aliased analysis-span ladder) ->
-//!   [`BlockAssembler`] (lockstep overlap blocks) -> [`SpectrumPipeline`]
-//!   (EU output-type taxonomy) and [`FrfPipeline`] (H1 default +
-//!   labeled Hv + coherence with the single-average trap gated),
-//!   plus time stats (vibration-convention kurtosis), velocity/
-//!   displacement derivation (spectral omega-arithmetic + trimmed time-domain
-//!   integration), and the OFFLINE region functions [`analyze_region`] /
-//!   [`analyze_region_frf`] that reuse the same structs.
+//! ## A recording on disk
 //!
-//! ## On-disk run format
+//! A recording's folder holds:
 //!
-//! A run directory contains:
-//!
-//! * `telemetry.f32` - headerless interleaved little-endian f32 frames (testkit
-//!   contract; frame = `n_channels` consecutive f32s).
-//! * `capture.json` - hertzforge-capture's [`CaptureSidecar`](hertzforge_capture::CaptureSidecar)
-//!   (written by `CaptureSink::finish`; MISSING when the writer died mid-run).
-//! * `recorder.json` - this crate's [`RecorderSidecar`]: written PROVISIONALLY
-//!   (`clean: false`) before any data, finalized (`clean: true` + gap list) at
-//!   stop. Zero testkit changes; the recorder sidecar rides alongside.
+//! * `telemetry.f32` - no header; little-endian f32 frames, one value per recorded row.
+//! * `capture.json` - the writer's record ([`CaptureSidecar`](hertzforge_capture::CaptureSidecar)),
+//!   written before any frame with `complete: false` and finalized at the end.
+//! * `recorder.json` - the recording's record ([`RecorderSidecar`]): its rows, rates,
+//!   station frames, pre-window, gaps, marks and fault, `complete: false` until the
+//!   recording ends.
 
 pub mod acq;
 pub mod analysis;
+pub mod record;
 pub mod recording;
 pub mod service;
+pub mod store;
 pub mod trigger;
 
 pub use acq::{AcquisitionConfig, AveragingKind, WindowKind};
@@ -54,8 +52,9 @@ pub use analysis::{
 };
 pub use recording::{
     recorder_capture_config, recorder_disk_budget_seconds, GapRecord, RecorderSidecar,
-    RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter,
+    RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter, StationFacts, WriterFacts,
 };
+pub use store::{RecordStore, RecordingSpec, WriterStore};
 pub use trigger::{LevelTrigger, PreTriggerRing, Slope, TriggerEngine, TriggerEvent, TriggerMode};
 
 pub use service::{
@@ -63,5 +62,5 @@ pub use service::{
     RecorderService, RecordingInfoLite, ReportData,
 };
 
-// Re-export the testkit disk-budget primitive so service glue has one import surface.
+// The capture crate's disk budget, so a caller has one import surface.
 pub use hertzforge_capture::disk_budget_max_seconds;

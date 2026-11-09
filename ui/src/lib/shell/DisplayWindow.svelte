@@ -15,6 +15,7 @@
 	import SineRunView from '$lib/acquire/sine/SineRunView.svelte';
 	import TwrRunView from '$lib/acquire/twr/TwrRunView.svelte';
 	import ExplorerRunView from '$lib/acquire/explorer/ExplorerRunView.svelte';
+	import RecorderRunView from '$lib/acquire/recorder/RecorderRunView.svelte';
 	import { runBandsOf, runGeometryOf } from '$lib/acquire/mimo/runFrame';
 	import type { AppState } from '$lib/app/state.svelte';
 	import { theme } from '$lib/theme/theme.svelte';
@@ -32,17 +33,19 @@
 	const sineRun = $derived(app.config.popoutTest === 'sine');
 	const twrRun = $derived(app.config.popoutTest === 'twr');
 	const explorerRun = $derived(app.config.popoutTest === 'explorer');
+	const recorderRun = $derived(app.config.popoutTest === 'recorder');
 	const mimo = $derived(app.mimo);
 	const shock = $derived(app.shock);
 	const srs = $derived(app.srs);
 	const sine = $derived(app.sine);
 	const twr = $derived(app.twr);
 	const explorer = $derived(app.explorer);
+	const recorder = $derived(app.recorder);
 	const views = $derived(app.mimoViews);
 	const acq = $derived(app.acquire);
 	const display = $derived(app.display);
-	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : 'Random');
-	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : display.page.name);
+	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : 'Random');
+	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
@@ -84,6 +87,11 @@
 					e.preventDefault();
 					void explorer.abort();
 				}
+			} else if (recorderRun) {
+				if (recorder.actions.abort.enabled) {
+					e.preventDefault();
+					void recorder.abort();
+				}
 			} else if (acq.actions.abort.enabled) {
 				e.preventDefault();
 				void acq.abort();
@@ -116,7 +124,7 @@
 		</div>
 	</header>
 	<div class="top">
-		<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : twrRun ? twr : explorerRun ? explorer : acq} onoverride={() => {}} {abortKeys} compact />
+		<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : acq} onoverride={() => {}} {abortKeys} compact />
 	</div>
 	<div class="body">
 		{#if mimoRun}
@@ -131,6 +139,8 @@
 			<TwrRunView {twr} views={app.twrViews} compact onpopout={(id) => app.openDisplayWindow(id, 'twr')} />
 		{:else if explorerRun}
 			<ExplorerRunView {explorer} views={app.explorerViews} compact onpopout={(id) => app.openDisplayWindow(id, 'explorer')} />
+		{:else if recorderRun}
+			<RecorderRunView {recorder} views={app.recorderViews} compact onpopout={(id) => app.openDisplayWindow(id, 'recorder')} />
 		{:else}
 			<RunView {acq} {display} compact onpopout={(id) => app.openDisplayWindow(id)} />
 		{/if}

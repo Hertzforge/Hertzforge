@@ -1,0 +1,61 @@
+{
+ "type": "response",
+ "id": 107,
+ "result": {
+  "recordings": [
+   {
+    "name": "rec_0001",
+    "folder": "recordings/rec_0001",
+    "trigger": "level",
+    "requested_fs_hz": 12800,
+    "fs_hz": 12800,
+    "group_delay_frames": 38.44,
+    "rows": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "first_station_frame": 102422,
+    "trigger_station_frame": 108822,
+    "pre_frames": 6400,
+    "pre_frames_asked": 6400,
+    "frames": 19200,
+    "seconds": 1.5,
+    "bytes": 307200,
+    "gap_free": true,
+    "gaps": [],
+    "marks": 0,
+    "complete": true,
+    "fault": null
+   },
+   {
+    "name": "rec_0002",
+    "folder": "recordings/rec_0002",
+    "trigger": "level",
+    "requested_fs_hz": 12800,
+    "fs_hz": 12800,
+    "group_delay_frames": 38.44,
+    "rows": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "first_station_frame": 128022,
+    "trigger_station_frame": 134422,
+    "pre_frames": 6400,
+    "pre_frames_asked": 6400,
+    "frames": 16384,
+    "seconds": 1.28,
+    "bytes": 262144,
+    "gap_free": true,
+    "gaps": [],
+    "marks": 0,
+    "complete": false,
+    "fault": null
+   }
+  ],
+  "next": 2
+ }
+}

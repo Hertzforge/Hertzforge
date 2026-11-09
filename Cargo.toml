@@ -27,6 +27,7 @@ hertzforge-hal-sim = { path = "crates/hertzforge-hal-sim" }
 hertzforge-module-abi = { path = "crates/hertzforge-module-abi" }
 hertzforge-random = { path = "crates/hertzforge-random" }
 hertzforge-random-laws = { path = "crates/hertzforge-random-laws" }
+hertzforge-recorder = { path = "crates/hertzforge-recorder" }
 hertzforge-reference = { path = "crates/hertzforge-reference" }
 hertzforge-sdm = { path = "crates/hertzforge-sdm" }
 hertzforge-law-host = { path = "crates/hertzforge-law-host" }

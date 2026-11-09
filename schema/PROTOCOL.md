@@ -868,7 +868,7 @@ plain words: it never names a protocol method.
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
-| `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, TWR or Explorer configuration has errors (for Explorer, also at `explorer.start` when the table no longer carries the run) | `errors`, `warnings` |
+| `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
 | `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` with reason `gate_failed` goes on anyway | `gates` |
@@ -880,19 +880,20 @@ plain words: it never names a protocol method.
 | `law_params_invalid` | `bad_request` | `laws.check` parameter values the law does not accept | `id` |
 | `law_check_unsupported` | `refused` | `laws.check` names a single-output Random law, or a law the check cannot build, or a case of a check cannot be run at all (the message names it) | |
 | `not_yet` | `refused` | `shock.fire`, `shock.train`, `shock.burst` or `srs.fire` before the time between pulses has passed, or while a pulse is in flight | `seconds` |
-| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire`, `srs.level`, `twr.iterate` or `twr.play` while the ladder is automatic, or `twr.level` then anywhere but `holding` | `mode` |
+| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire`, `srs.level`, `twr.iterate` or `twr.play` while the ladder is automatic, or `twr.level` then anywhere but `holding`; `recorder.record` outside the `manual` trigger mode, `recorder.arm` and `recorder.disarm` in the `start` mode | `mode` |
 | `drive_ceiling` | `refused` | `shock.level` or `srs.level` to a level where the identified drive would pass the drive abort; `twr.level` to a level where the drive in force would pass the drive ceiling | `vpk`, `abort_vpk` (for TWR `ceiling_vpk`, and `vpk` null when the service cannot state it), `level_db` |
 | `reference_unreadable` | `refused` | `twr.reference.import`: the file cannot be read, or its content is not a record (the message names the line or field) | `path` (null for pasted text), `line` (null when no line is at fault) |
 | `not_converged` | `refused` | `twr.play` before the present level has gated | `level_db`, `gate_pct` |
 | `coherence_hold` | `refused` | `twr.proceed`, `twr.iterate` or `twr.play` while the coherence hold holds the run; `twr.reset` alone releases it | `coherence_mean` (null when not measured), `min_mean_coherence` |
 | `level_zero` | `refused` | `explorer.steer` with `step_db` while the target level is 0 V: a step in dB has nothing to step from; set a level in volts first | |
+| `not_enough_space` | `refused` | `recorder.start` while the data volume's free space is under the run's free-space floor | `free_bytes`, `floor_bytes` |
 | `not_a_sweep` | `refused` | `sine.reverse`, `sine.jog` or `sine.goto` when the test is not a sweep | `test` |
 | `out_of_band` | `refused` | `sine.goto` to a frequency outside the test's band | `band_hz` |
 | `adjust_refused` | `refused` | `sine.adjust` of a parameter that is not one of the law's live parameters, or out of its range, or that the law refused | `key`, `why` (`unknown_key`, `not_live`, `out_of_range` or `law_refused`) |
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
 | `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm`, `srs.arm`, `sine.arm` or `twr.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared), or for `twr.arm` a passed check of an earlier check version; run `laws.check` first | `twr.arm` with an earlier check: `tool_version`, `current` |
-| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust`, `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level`, and `explorer.start`, `steer` and `sweep` are refused | |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust`, `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level`, `explorer.start`, `steer` and `sweep`, and `recorder.start`, `arm` and `record` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -914,6 +915,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | Sine | `out_of_range`, `profile_too_short`, `frequency_not_positive`, `frequency_not_ascending`, `value_not_positive`, `quantity_ambiguous`, `profile_not_covering`, `band_above_grid`, `levels_empty`, `levels_not_ascending`, `start_not_a_level`, `end_before_full_level`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `limit_on_control_channel`, `cola_needs_two_outputs`, `safe_stop_budget`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `profile_file` from the import | `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag`; `units_column_ignored` from the import |
 | TWR | `out_of_range`, `reference_unknown`, `reference_changed`, `units_mismatch`, `rate_mismatch`, `section_outside_reference`, `record_too_long`, `band_above_grid`, `band_outside_identification`, `highpass_above_band`, `identification_too_short`, `levels_empty`, `levels_not_ascending`, `alarm_wider_than_abort`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `reference_resampled` |
 | Explorer | `out_of_range`, `band_above_grid`, `ceiling_over_range`, `safe_stop_budget`, `no_drive_channel`, `extra_drive_channels`, `no_input_channel` | |
+| Recorder | `out_of_range`, `not_power_of_two`, `row_not_recorded`, `frf_same_row`, `no_input_channel` | `drive_channel_present` |
 
 A refusal not listed here is a defect in the service.
 
@@ -1494,7 +1496,8 @@ specified with the run-file format, not here.
 
 Multiple-input multiple-output Random: up to 24 drives and 72 control channels, controlled to a
 reference spectral density matrix. The service runs one test at a time, so a MIMO run and a
-single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine, TWR or Explorer run)
+single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine, TWR, Explorer or
+Recorder run)
 exclude each other exactly as two Random runs would: each is refused `run_active` while the other
 is live. The controller and observer rules
 are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
@@ -1856,8 +1859,8 @@ identifies the system with band-limited random at a stated drive in volts, inver
 plant, and seeds the control law from it; after each pulse is fired, measured and judged, the law
 proposes the next full-level drive and the service checks it before it plays. The drive is in
 volts throughout. The run is one test like any other: a classical shock run, a Random run, a MIMO
-run, an SRS shock run, a Sine run, a TWR run, an Explorer run and a `sim.start` run exclude each
-other, each refused `run_active` while another is live.
+run, an SRS shock run, a Sine run, a TWR run, an Explorer run, a Recorder run and a `sim.start` run
+exclude each other, each refused `run_active` while another is live.
 **Any connected screen may stop or abort** (`shock.stop`, `shock.abort`); `shock.configure`
 (other than a dry run), `arm`, `start`, `proceed`, `fire`, `level`, `train`, `burst`, `reset`
 and `clear` need control; everything that only reads is open to every connection. While the
@@ -2201,8 +2204,8 @@ system with a burst of that synthesis at a stated peak in volts, and seeds the c
 the identified gain at each component; after each pulse is fired, measured and judged, the law
 proposes a gain for each component, and the service caps the gains and checks the drive before it
 plays. The drive is in volts throughout. The run is one test like any other: an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a Sine run, a TWR run, an Explorer run and a
-`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a Sine run, a TWR run, an Explorer run, a Recorder
+run and a `sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`srs.stop`, `srs.abort`); `srs.configure` (other than a dry run), `arm`, `start`, `proceed`,
 `fire`, `level`, `reset` and `clear` need control; everything that only reads or only computes is
 open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
@@ -2500,8 +2503,8 @@ channels' notch and the drive ceiling, and judges the response against the profi
 and abort bands at the present frequency. The frequency, the sweep and its direction, the
 tone's phase and the level schedule are the service's, never the law's. The drive is in volts
 peak on hardware. The run is one test like any other: a Sine run, an SRS shock run, a
-classical shock run, a Random run, a MIMO run, a TWR run, an Explorer run and a `sim.start` run
-exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a TWR run, an Explorer run, a Recorder run and a
+`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`sine.stop`, `sine.abort`); `sine.configure` (other than a dry run), `arm`, `start`,
 `proceed`, `level`, `mode`, `hold`, `resume`, `reverse`, `jog`, `goto`, `adjust`, `reset` and
 `clear` need control; everything that only reads or only computes is open to every
@@ -2955,8 +2958,8 @@ the response, aligns it, judges it and gates it at its level; after a play the s
 corrected, the law proposes the next full-level drive and the service checks it before it plays.
 The level ladder, the gate, the playback schedule and every abort are the service's, never the
 law's. The drive is in volts throughout. The run is one test like any other: a TWR run, a Sine
-run, an SRS shock run, a classical shock run, a Random run, a MIMO run, an Explorer run and a
-`sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may
+run, an SRS shock run, a classical shock run, a Random run, a MIMO run, an Explorer run, a Recorder
+run and a `sim.start` run exclude each other, each refused `run_active` while another is live. **Any connected screen may
 stop or abort** (`twr.stop`, `twr.abort`); `twr.configure` (other than a dry run), `arm`,
 `start`, `proceed`, `iterate`, `play`, `level`, `freeze`, `reset` and `clear` need control;
 everything that only reads or only computes is open to every connection. While the service is
@@ -3446,8 +3449,8 @@ never asked for in any other unit. The run starts quiet: the tone runs at exactl
 operator raises the level, which is why Explorer has no review hold. While the tone moves the
 service remembers the response level at each frequency it has visited, the survey line, from
 which the operator reads a resonance. The run is one test like any other: an Explorer run, a TWR
-run, a Sine run, an SRS shock run, a classical shock run, a Random run, a MIMO run and a
-`sim.start` run exclude each other, each refused `run_active` while another is live. **Any
+run, a Sine run, an SRS shock run, a classical shock run, a Random run, a MIMO run, a Recorder run
+and a `sim.start` run exclude each other, each refused `run_active` while another is live. **Any
 connected screen may stop or abort** (`explorer.stop`, `explorer.abort`); `explorer.configure`
 (other than a dry run), `start`, `steer`, `sweep`, `hold`, `survey.clear`, `reset` and `clear`
 need control; everything that only reads or only computes is open to every connection. While the
@@ -3811,6 +3814,461 @@ to, in table order, and null for the rest;
 
 A plot is empty (`views` empty) until there is something to draw: `survey` until its first
 point, the others until the first analysis pass.
+
+## Recorder
+
+The Recorder records the inputs and drives nothing. A run opens the station with no outputs,
+acquires every enabled input row of the channel table, shows each row's level, time history and
+spectrum live, and saves recordings of those rows into its run folder: from the run's first frame,
+when the operator asks, or each time a row crosses a level. Drive rows of the table are not opened
+and not recorded, so the one table serves the drive modules and the Recorder alike. Monitoring
+saves no samples; only a recording does. The run is one test like any other: a Recorder run,
+an Explorer run, a TWR run, a Sine run, an SRS shock run, a classical shock run, a Random run, a
+MIMO run and a `sim.start` run exclude each other, each refused `run_active` while another is
+live. **Any connected screen may stop or abort** (`recorder.stop`, `recorder.abort`);
+`recorder.configure` (other than a dry run), `start`, `arm`, `disarm`, `record`, `cut`, `reset`
+and `clear` need control; everything that only reads is open to every connection. While the
+service is shutting down, `recorder.start`, `arm` and `record` are refused `shutting_down`;
+`recorder.disarm`, `cut`, `stop` and `abort` are not.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `recorder.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived"}` |
+| `recorder.config` | `{}` | any | `{"run_id","config","derived"}` |
+| `recorder.start` | `{}` | `configured` | state, once acquisition runs |
+| `recorder.arm` | `{}` | `running` (`monitoring`); `manual` and `level` modes | `{"pre_frames","held_frames"}` |
+| `recorder.disarm` | `{}` | `running` (`armed`) | state |
+| `recorder.record` | `{}` | `running` (`monitoring` or `armed`); `manual` mode | `{"name","station_frame","pre_frames"}` |
+| `recorder.cut` | `{}` | `running` (`recording`) | `{"name","last_station_frame"}` |
+| `recorder.stop` | `{}` | any | state |
+| `recorder.abort` | `{}` | any | state |
+| `recorder.recordings` | `{"since"}` (optional, default 0) | any | `{"recordings","next"}` |
+| `recorder.marks` | `{"since"}` (optional, default 0) | any | `{"marks","next"}` |
+| `recorder.reset` | `{}` | any but live | state |
+| `recorder.clear` | `{}` | any but live | state |
+| `recorder.state` | `{}` | any | state |
+| `recorder.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `recorder.subscribe` | see "Recorder Display" | any | as there |
+
+"state" in the Result column is the `recorder.state` object below. A run is live while it is
+starting, running or stopping. `recorder.configure` replaces a run that is not live;
+`recorder.reset` returns an ended run to `configured` with its configuration on the present table
+and station, the recordings list, the marks and the log empty (the files stay on disk);
+`recorder.clear` forgets it (`unconfigured`). While a run is live both are refused `run_active`
+(naming that run), and so is `recorder.reset` while another module's run is live, as a configure
+would be. `recorder.start` on a run already started is refused `wrong_state`. A verb used in a
+trigger mode it does not apply to is refused `wrong_mode` with `detail.mode`; in a phase it does
+not apply to, `wrong_state` with `detail.state` and `detail.phase`.
+
+### Recorder Configuration
+
+```
+{"title":"Fixture A, run 4",
+ "acquisition":{"fs_hz":12800},
+ "trigger":{"mode":"level","row":1,"level":0.25,"slope":"rising","hysteresis":null,
+            "pre_s":0.5,"record_s":1.0,"count":5,"holdoff_s":0},
+ "analysis":{"block":2048,"window":"hann","overlap_pct":null,"averaging":"linear",
+             "averages":8,"decimation":1,"frf":{"reference":2,"response":4}},
+ "capture":{"run_name":"recorder","keep_free_gb":1},
+ "metadata":[{"key":"run_number","label":"Run Number","value":"4"}]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `acquisition.fs_hz` | 12800 | The rate asked of the station, 1000 to 204800 Hz. A station may program another rate; the run adopts it, records at it, derives every per-frame number from it and reports both (`grid`) |
+| `trigger.mode` | `manual` | What starts a recording: `start` (the run's first frame), `manual` (`recorder.record`) or `level` (a row crossing `level`) |
+| `trigger.row` | (required in `level` mode) | The `index` of the row the level is read on: a recorded row (`row_not_recorded`) |
+| `trigger.level` | (required in `level` mode) | The level, in the row's unit, within the row's `range_max` either side of zero (`out_of_range`) |
+| `trigger.slope` | `rising` | `rising` or `falling` |
+| `trigger.hysteresis` | null: 1% of the row's `range_max` | The band, in the row's unit, above 0 and at most `range_max`: before the detector arms the signal must have been below `level - hysteresis` (rising) or above `level + hysteresis` (falling), so a signal hovering at the level fires at most once |
+| `trigger.pre_s` | 1.0 | The pre-window, seconds, 0 to 10: the frames before the trigger that a `manual` or `level` recording begins with |
+| `trigger.record_s` | null | Each recording's length after its trigger, seconds, above 0. Null: until `recorder.cut` or the run's end. Required in `level` mode |
+| `trigger.count` | 1 | `level` mode: how many recordings the trigger saves after `recorder.arm`, at least 1, or null for until the run ends |
+| `trigger.holdoff_s` | 0 | `level` mode: the least station time, seconds, from one trigger to the next, at least 0 |
+| `analysis.block` | 2048 | The analysis block, frames at the analysis rate, a power of two from 256 to 65536 |
+| `analysis.window` | `hann` | `hann`, `flattop`, `rectangular` or `blackman_harris` |
+| `analysis.overlap_pct` | null: the window's own | 0 to 95. The window's own: Hann 50, flat top 75, rectangular 0, Blackman-Harris 66.7 |
+| `analysis.averaging` | `linear` | `linear`, `exponential` or `peak_hold` |
+| `analysis.averages` | 8 | At least 1: blocks in a linear average, the time constant in blocks of an exponential one |
+| `analysis.decimation` | 1 | A power of two from 1 to 256. The analysis rate is the station's rate over it; recordings are always at the station's rate |
+| `analysis.frf` | null | `{"reference","response"}`, two different recorded rows by `index` (`frf_same_row`, `row_not_recorded`), for the live FRF; or null |
+| `capture.run_name` | `recorder` | The run folder's name under the local data root (see "Recorder Records"), a plain name with no path in it |
+| `capture.keep_free_gb` | 1 | The free space the run leaves on the data volume, GiB (1 GiB is 1 073 741 824 bytes), at least 1 |
+| `metadata` | the default fields | Random's: `{"key","label","value"}`, `label` the key when absent |
+
+The recorded rows are every enabled input row (`control`, `monitor` or `reference`), in table
+order, and each recording holds one column per recorded row in that order. Enabled `drive` rows
+are not opened and not recorded: configure answers the warning `drive_channel_present` naming
+them, and nothing else changes. The table must have at least one enabled input row
+(`no_input_channel`). A row's `abort` limits do not stop a Recorder run: a row passing one is
+marked and recording goes on (see "Recorder Marks"). A configuration whose shape is wrong is
+refused `bad_params` naming the field in `detail.param` as the request's own path
+(`config.trigger.level`): a missing required field (in `level` mode `trigger.row`,
+`trigger.level` and `trigger.record_s`), a value of the wrong type or not one of its names, or a
+key the configuration does not have. Its content errors are refused `config_invalid` with the
+items, located by `field`, the path inside the configuration (`trigger.pre_s`, with no `config.`
+before it). `dry_run: true` checks without replacing anything and needs no control.
+
+Item reasons (Recorder): errors `out_of_range`, `not_power_of_two` (`analysis.block`,
+`analysis.decimation`), `row_not_recorded` (the trigger row or an FRF row is not an enabled input
+row), `frf_same_row`, `no_input_channel`; warnings `drive_channel_present`.
+
+**Result.** `state` is the `recorder.state` object (`configured`). `derived`, here for an NI
+station with four recorded rows at 12 800 Hz and the configuration above:
+
+```
+{"grid":{"fs_hz":12800,"block_frames":256,"batch_frames":512,"group_delay_frames":38.44,
+         "actual":false},
+ "outputs":"none","rows":[1,2,3,4],
+ "analysis":{"fs_hz":12800,"df_hz":6.25,"lines":800,"span_hz":5000,"block_s":0.16,
+             "overlap_pct":50,"averages_s":0.72},
+ "trigger":{"pre_frames":6400,"record_frames":12800,"holdoff_frames":0},
+ "disk":{"bytes_per_s":204800,"floor_bytes":1073741824,"free_bytes":107374182400,
+         "seconds_above_floor":519045}}
+```
+
+- `grid`: the requested rate, and the block, the batch (two blocks: the most the service reads
+  between two verbs) and the input group delay the selected station works in at it; `actual` is
+  true once the run has started and all of them are the station's. The block is the power of two
+  nearest 20 ms of the rate. The group delay is in frames as the station states it, to 0.01: on an
+  NI input path 38.4 + 3.2e-6 times the rate (38.44 at 12 800 Hz), on the simulator 0.
+- `outputs` is always `"none"`: a Recorder run opens no output.
+- `rows`: the recorded rows' `index`es, in column order.
+- `analysis`: the analysis rate (the station's rate over `decimation`), the line spacing, the
+  alias-free lines (the block over 2.56) and span (the analysis rate over 2.56), a block's
+  length in seconds, the overlap in force, and how long after start the first full average is
+  complete: the block plus `averages - 1` hops (a hop is the block less the overlap), at the
+  analysis rate.
+- `trigger`: the pre-window, a recording's length after its trigger (null until cut) and the
+  holdoff, in frames at the rate, each `round(seconds x fs_hz)`.
+- `disk`: the bytes a second a recording writes (4 bytes a row a frame), the free-space floor
+  (the larger of `keep_free_gb` and twice one recording's bytes, the pre-window included, when
+  `record_s` is set), the data volume's free bytes now, and the whole seconds of recording that
+  fit above the floor now. `free_bytes` and `seconds_above_floor` are null when the free space
+  cannot be read.
+
+### Running a Recorder Test
+
+- **`recorder.start`** opens the station at `acquisition.fs_hz` with no outputs, adopts the rate
+  it programs, passes the arm gate as a capture-only run, makes the run folder and starts
+  acquisition (`starting`, `opening`, while the station opens). It answers once acquisition runs:
+  `running`, `monitoring`, or in `start` mode `recording`, the first recording beginning at the
+  run's first frame (station frame 0, no pre-window). Refusals, in the order they are checked:
+  `shutting_down`, `not_controller`, `not_configured`, `run_finished` (reset first), `wrong_state`
+  (already started), `run_active` (another module's run is live; it names that run, so a live
+  Explorer run refuses a Recorder start and a live Recorder run refuses an Explorer start, each
+  naming the other), `table_invalid`, `config_invalid` (the table, as it is now, no longer carries
+  the run: the same items as configure), `not_enough_space` (the free space is under the floor;
+  `detail` `free_bytes` and `floor_bytes`), then, once the station is being opened,
+  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused; the
+  message is the controller's own). No refusal makes a folder. A refusal once the station is being
+  opened ends the run `arm_refused`, and `recorder.reset` comes before another start.
+- **`recorder.arm`** (`manual` and `level` modes, from `monitoring`) starts filling the
+  pre-window with the frames acquired from the next batch on, and in `level` mode arms the
+  detector. It answers `pre_frames`, the pre-window asked, and `held_frames`, the frames it holds
+  now. Refused `wrong_mode` in `start` mode and `wrong_state` outside `monitoring`.
+- **`recorder.disarm`** returns an armed run to `monitoring` and drops the pre-window. Refused
+  `wrong_mode` in `start` mode and `wrong_state` outside `armed`.
+- **`recorder.record`** (`manual` mode, from `monitoring` or `armed`) begins a recording. Its
+  trigger is the first frame of the next batch: `station_frame` in the answer. Armed, the
+  recording begins with the pre-window held, at most `pre_s`; a pre-window that has not filled is
+  stated in the recording (`pre_frames` under `pre_frames_asked`). Not armed, it has no
+  pre-window. Refused `wrong_mode` outside `manual` mode and `wrong_state` in a recording.
+- **`recorder.cut`** ends the recording in progress with the batch the request is taken in;
+  `last_station_frame` is its last frame. Refused `wrong_state` outside a recording.
+- **A level trigger** fires on the first sample of `trigger.row` at or over `level` (rising) or
+  at or under it (falling) once the detector has armed; that sample is the recording's trigger,
+  the pre-window before it. The recording holds exactly `round(record_s x fs_hz)` frames from the
+  trigger on, plus its pre-window. After it the trigger re-arms by itself until `count`
+  recordings have been saved since `recorder.arm`, then the run returns to `monitoring`. A
+  re-armed trigger fires no sooner than `holdoff_s` of station time after the last trigger, and
+  not before a full pre-window of frames acquired after the last recording ended, so no frame is
+  in two recordings. The first fire after `recorder.arm` may come before the pre-window has
+  filled; the recording then states the pre-window it holds.
+- **A recording ends** at its length (`record_s`), at `recorder.cut` (`start` and `manual`
+  modes), or with the run. When a `start` or `manual` recording ends the run returns to
+  `monitoring`, not armed.
+- **`recorder.stop`** and **`recorder.abort`** end acquisition at the next batch; every recording
+  is finalized with every frame acquired, and nothing is discarded (`stopping`, `closing`, while
+  the files are finished). Only the outcome differs: `operator_stop` or `operator_abort`. Each
+  answers at once, with the state as it stands.
+- **The disk.** Recordings are written by the run's own record thread, never by the thread that
+  reads the station; the reading thread hands each batch to it through a queue that holds 2 s of
+  frames. A write that fails (the disk refuses it, an I/O error, or the free space falls under the
+  floor) ends the run `write_failed` with the fault's own words; the recording is finalized with
+  what reached the disk and names the fault. A disk so far behind that a batch cannot be queued
+  ends the recording there, with the gap recorded, and the run `write_behind`. The backlog is in
+  the state (`recording.backlog_s`).
+- **The station.** An input buffer overflow, a lost device, an input stall or any other failure
+  of the station or of the service's loop ends the run `fault` with the controller's words, every
+  recording finalized.
+- **When nobody holds control** the run goes on unchanged, recordings included; after
+  `timeout_s` it ends `safe_stop` with every recording finalized, as a stop does. While the
+  service shuts down it ends the same way.
+
+**Time is the station's.** `t_s` in the state and the live frames, `end.at_s`, the answers' and
+the recordings' station frames, the marks' and the time plots' `first_frame` count the station's
+own input frames from the run's first frame (station frame 0) at the rate it programmed, never the
+service's clock. A station that states an input group delay of `g` frames reads at station frame
+`n` the signal that reached its input `g` frames earlier, so an event at the input at station time
+`t` is recorded at frame `t x fs_hz + g`. The safe stop's countdown (`orphan_s`) is the only
+number timed by the service's clock.
+
+### Recorder Run State
+
+```
+{"run_id":"recorder-0002","state":"running","phase":"recording","title":"Fixture A, run 4",
+ "source":"HARDWARE","station":{"kind":"ni","class":"ni_real","devices":[...]},
+ "grid":{"requested_fs_hz":12800,"fs_hz":12800,"block_frames":256,"batch_frames":512,
+         "group_delay_frames":38.44,"actual":true},"clock":"shared",
+ "outputs":"none","rows":[1,2,3,4],"mode":"level","t_s":11.36,"station_frames":145408,
+ "trigger":{"armed":false,"pre_frames":6400,"held_frames":0,"fires":2,
+            "last_station_frame":134422,"saved":1,"left":3,"holdoff_left_s":0},
+ "recording":{"name":"rec_0002","trigger":"level","first_station_frame":128022,
+              "trigger_station_frame":134422,"pre_frames":6400,"pre_frames_asked":6400,
+              "frames_fed":17386,"frames_on_disk":16384,"target_frames":19200,
+              "seconds":0.858,"length_s":1,"backlog_s":0.078},
+ "recordings":1,"marks":0,
+ "disk":{"free_bytes":107373363200,"floor_bytes":1073741824,"seconds_above_floor":519041,
+         "fault":null},
+ "health":{"batches":284,"blocks_dropped":0,"driver_warnings":0,"station_errors":0,
+           "pass_ms":{"last":1.2,"worst":2.8},"batch_gap_ms":3.9},
+ "stop":null,"end":null}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
+| `starting` | `opening` | `recorder.start`: the station is opening; nothing is recorded |
+| `running` | `monitoring` | Acquiring and showing; nothing is being saved |
+| `running` | `armed` | The pre-window is filling; in `level` mode the detector waits (a holdoff included) |
+| `running` | `recording` | A recording is being saved |
+| `stopping` | `closing` | Acquisition has ended; the record thread is finishing the files |
+| `finished` | `stopped`, `aborted`, `faulted` | Ended; `end` says how |
+
+- A finished run's phase is `stopped` after `operator_stop` or `safe_stop`, `aborted` after
+  `operator_abort`, and `faulted` after `write_failed`, `write_behind`, `fault` or `arm_refused`.
+- `grid`: as in `derived`, with `requested_fs_hz` the rate asked and `fs_hz` the rate the station
+  programmed once started (the request until then). `clock` as Random's.
+- `outputs` and `rows` as in `derived`; `mode` is `trigger.mode`.
+- `t_s`: station time since start, and `station_frames` the frames acquired; both null before.
+- `trigger` is null in `start` mode, else: `armed` (the detector or the manual pre-window is
+  armed), the pre-window asked and the frames it holds now, the triggers since start (`fires`),
+  the station frame of the last (null before one), the recordings `saved` since the last
+  `recorder.arm`, the recordings of `count` not yet begun (`left`; null when `count` is null or
+  in `manual` mode), and in `level` mode the holdoff left, seconds of station time (0 when none).
+- `recording` is null, or the recording in progress: its name, its trigger mode, the station frame
+  of its first frame and of its trigger, the pre-window held and asked, the frames handed to the
+  record thread (`frames_fed`) and those on disk, `target_frames` (the pre-window plus
+  `record_frames`, null until cut), `seconds` recorded after the trigger, `length_s`
+  (`record_s`, null until cut) and `backlog_s`, the frames fed and not yet on disk, in seconds.
+- `recordings` counts the recordings saved; `marks` counts the limit marks (see "Recorder Marks").
+- `disk`: the free bytes, the floor and the seconds above it, read once a second (null when the
+  free space cannot be read), and `fault`, null or the record thread's fault in its own words.
+- `health` is null until the run has started, then: batches read, display blocks the analysis
+  dropped, driver warnings so far (each is in the log), station errors, the analysis pass's last
+  and worst time and the longest gap between the end of one batch and the start of the next (ms;
+  null until two batches have run).
+- `stop` is null until a stop begins, then its cause: `operator`, `safe_stop` (nobody held
+  control) or `shutdown`.
+- `end` is null until the run finishes, then `{"outcome","message","at_s","recordings"}`:
+  `at_s` the station time at which acquisition ended, `recordings` the recordings saved. The
+  messages: `operator_stop` "Stopped by <name>: every recording is saved."; `safe_stop` "Nobody
+  held control: the run stopped and every recording is saved." or, at a shutdown, "The service
+  shut down: the run stopped and every recording is saved."; `operator_abort` "Aborted by
+  <name>: every recording is saved."; `write_failed` the fault's words and the recording that
+  holds what was written; `write_behind` how far behind the disk was; a fault is the controller's
+  words.
+
+| `outcome` | How the run ended |
+|---|---|
+| `operator_stop` | `recorder.stop` |
+| `safe_stop` | Nobody held control for `timeout_s`, or the service was shut down; `message` says which |
+| `operator_abort` | `recorder.abort`, from any connection |
+| `write_failed` | A write failed or the free space fell under the floor; `message` is the fault's words |
+| `write_behind` | The disk fell so far behind that a batch could not be queued |
+| `fault` | The station or the service's loop failed (an input buffer overflow, a lost device, an input stall); `message` is the controller's words |
+| `arm_refused` | The station or the arm gate refused the start; nothing was recorded |
+
+### Recorder Recordings
+
+`recorder.recordings` lists the run's recordings from `since` (a position in the list, from 0),
+the one in progress last with `complete` false, and `next`, the position after the last:
+
+```
+{"name":"rec_0001","folder":"recordings/rec_0001","trigger":"level",
+ "requested_fs_hz":12800,"fs_hz":12800,"group_delay_frames":38.44,"rows":[1,2,3,4],
+ "first_station_frame":102422,"trigger_station_frame":108822,"pre_frames":6400,
+ "pre_frames_asked":6400,"frames":19200,"seconds":1.5,"bytes":307200,
+ "gap_free":true,"gaps":[],"marks":0,"complete":true,"fault":null}
+```
+
+`folder` is relative to the run folder. `frames` and `bytes` are the file's, `seconds` its frames
+over `fs_hz`; `gaps` lists every place frames are missing, `{"at_frame","dropped_frames"}` (the
+file frame the missing frames would have started at, and how many); `marks` counts the limit marks
+inside it. The other fields are its `recorder.json`'s (see "Recorder Records").
+
+### Recorder Marks
+
+A row's `abort` limits are marks, not stops: the Recorder drives nothing, so ending acquisition
+would protect nothing and lose the event. `abort.accel_g` is checked on every sample of a row in
+g, and `velocity_ips` and `displacement_mil` on a row's derived velocity and displacement (rows in
+g). A row passing a limit is marked at the station frame of its first sample past it; the same
+row and limit is marked again only after it has stayed within the limit for one second of station
+time. Each row also has an overload indicator: it latches the first time a sample's magnitude
+reaches 0.9 of the row's `range_max`, holds for the run, and is marked once. The station's own
+overload words, where it says any, are in the log.
+
+`recorder.marks` gives them from `since` (a position, from 0) with `next`:
+`{"kind":"limit","row","axis","value","limit","station_frame","recording"}` (`axis` `accel`,
+`velocity` or `displacement`, in the axis's unit: g, in/s, mil) or
+`{"kind":"overload","row","value","level","station_frame","recording"}` (`level` 0.9 of the
+row's `range_max`); `recording` names the recording the mark fell in, or null.
+
+### Recorder Records
+
+Each run writes its folder `capture.run_name` under the local data root (`HERTZFORGE_DATA_ROOT`,
+else `Hertzforge_Data` in the home folder; the log names the folder at start, "records in
+<path>"); a name already taken gets the first free `<name>-<n>`, so no run writes over another.
+The wire offers no other place.
+
+```
+<run folder>/run.json
+             log.jsonl
+             marks.jsonl
+             end.json
+             recordings/rec_0001/telemetry.f32
+                                 capture.json
+                                 recorder.json
+```
+
+- `run.json`, written at start: `run_id`, `title`, `source`, `station` (as in the state),
+  `config` (the configuration as sent), `requested_fs_hz` and `fs_hz` (the rate asked and the
+  rate the station programmed), `group_delay_frames`, `outputs` (`"none"`), `rows` (each recorded
+  row's `index`, `description`, `role`, `unit` and `range_max`, in column order), `derived` (as
+  configure's, at the programmed rate, `actual` true) and `overload` (`fraction`, 0.9, and
+  `definition`, the indicator's definition in words).
+- `log.jsonl` and `marks.jsonl`: a line for every log entry (`{"seq","at_unix","kind","text"}`)
+  and every mark, as `recorder.log` and `recorder.marks` give them, each a compact JSON object.
+- `end.json`, written when the run finishes: `run_id`, `end` (as in the state), `station_frames`
+  (the frames acquired) and `rows`, each recorded row's statistics over the whole run
+  (`index`, `mean`, `rms`, `peak`, `crest` and `kurtosis`, kurtosis 3 for a Gaussian signal).
+- `recordings/rec_NNNN/`, numbered from `rec_0001` in the order they began:
+  - `telemetry.f32`: no header; little-endian 32-bit floats, one frame after another, each frame
+    one value per recorded row in `rows` order, in the row's unit, at `fs_hz`. The file's size is
+    the authority on its length: a reader counts its frames as the size over 4 times the rows.
+  - `capture.json`: the writer's own record: the channel table at capture time, the rate
+    (`config.sample_rate_hz`, the programmed rate), `frames_written`, `chunks_dropped`, `flushes`,
+    `free_space_floor_bytes`, `complete` and `fault`.
+  - `recorder.json`: the recording's facts, written provisionally before any frame and
+    finalized when the recording ends.
+
+| `recorder.json` field | Meaning |
+|---|---|
+| `complete` | False until the recording is finalized: a recording found with `complete` false was cut short by a crash, and its file holds what reached the disk |
+| `name`, `trigger` | `rec_NNNN`; `start`, `manual` or `level` |
+| `requested_fs_hz`, `fs_hz` | The rate asked and the rate the station programmed; the file is at `fs_hz` |
+| `group_delay_frames` | The station's stated input group delay, frames |
+| `rows`, `units` | The recorded rows' `index`es and units, in column order |
+| `first_station_frame` | The station frame of the file's first frame |
+| `trigger_station_frame` | The station frame of the trigger, file frame `pre_frames`; t = 0 |
+| `pre_frames`, `pre_frames_asked` | The pre-window held and asked; held less than asked when it had not filled |
+| `frames` | The frames written, as the writer counted them |
+| `gaps` | `[{"at_frame","dropped_frames"}]`, empty when gap-free |
+| `marks` | The marks inside the recording, as `recorder.marks` gives them |
+| `fault` | Null, or the write fault's words |
+
+A frame's time from the trigger is `(file frame - pre_frames) / fs_hz` seconds, and its station
+frame is `first_station_frame` plus its file frame plus the frames missing before it. A reader
+ignores fields it does not know. Every file is written by the run's own thread or its record
+thread, never by the thread that reads the station; the record thread flushes and syncs the data
+every 5 s, so a crash loses at most the last 5 s.
+
+### The Recorder on the Simulator
+
+The simulator's plant moves only when it is driven, and a Recorder run drives nothing. So on the
+simulator a Recorder run's inputs carry a stated source, added to the plant's noise: the k-th
+recorded row, in table order, carries row k of the table below, and a fifth row and after repeat
+the four in order. The source repeats every 2.000 s from the run's first frame; each tone starts
+at phase 0 and makes whole cycles in that period. Levels are peak, in each row's unit: the
+simulator works in the row's unit, so a row's sensitivity does not scale it. The shell names the
+source whenever a Recorder run is on the simulator. The wire offers no way to change it.
+
+| Row | Signal |
+|---|---|
+| 1 | Markers: a half-sine of 0.5 peak lasting 10 ms, beginning 0.5 s into every 2.000 s period; 0 between |
+| 2 | 250 Hz, 0.2 peak |
+| 3 | 433 Hz, 0.1 peak |
+| 4 | 1000 Hz, 0.15 peak |
+
+At station time `t = n / fs_hz` (frame `n` over the rate the station programmed), row 1 is
+`0.5 sin(pi (t - t_k) / 0.010)` for `t_k <= t < t_k + 0.010`, `t_k = 0.5 + 2k` s, and 0
+otherwise; rows 2 to 4 are `A sin(2 pi f t)`. At 12 800 Hz a marker begins at station frame
+6 400 + 25 600 k and lasts 128 frames, and rises through 0.25 at 1.667 ms (21.33 frames) after
+it begins. At 12 800 Hz the 250 and 1000 Hz tones make whole cycles in every 2048 frames and
+the 433 Hz tone does not, so a frame missing from a recording moves its phase.
+
+### Recorder Display
+
+Event topics:
+
+- `recorder.state` (text): the state object on every change of `state`, `phase`, `stop` or `end`.
+- `recorder.log` (text, to every connection): new log entries, as Random's, of the kinds
+  `state`, `station`, `recording` (a recording began or was saved), `mark`, `overload` and
+  `note`: when the station programs another rate than asked, "sample rate coerced: requested
+  <fs> Hz, device programmed <fs> Hz"; then "the station programmed <fs> Hz (asked <fs> Hz)",
+  "records in <path>" (the run folder's absolute path) and "outputs: none" at start (naming any
+  drive row not opened), every trigger and recording ("rec_0002 began at station frame <n>",
+  "rec_0002 saved: <frames> frames, <seconds> s, no gaps"), every mark and overload, every driver
+  warning (`note`, "driver: " and the driver's own text), "stop began: <cause>" and "ended
+  <outcome>: <message>".
+- `recorder.live` (binary, to every connection without a Recorder subscription of its own, 10
+  times a second from start until the run has finished, then once more).
+- `recorder.data` (binary, to one subscribed connection, in place of `recorder.live`):
+  `recorder.live`'s fields but `views`, and `plots`, at `rate_hz` (default 10), and at once on
+  subscribe once the run has started.
+
+```
+{"run_id","source","class","state","phase","t_s","station_frames",
+ "grid":{"requested_fs_hz":12800,"fs_hz":12800,"group_delay_frames":38.44},
+ "rows":[{"index":1,"description":"Table","role":"control","unit":"g","rms":0.1414,
+          "peak":0.2004,"overload":false,"marks":0}, ...],
+ "trigger","recording","recordings","marks","disk","health",
+ "views":[run readings]}
+```
+
+- `t_s`, `station_frames`, `trigger`, `recording`, `recordings`, `marks`, `disk` and `health`: as
+  in the state.
+- `rows` lists every recorded row in table order: its rms over the last second of station time
+  and its largest magnitude since start, in its unit (DC included), whether its overload
+  indicator has latched, and its limit marks so far.
+- `views` is **Run** (a `reading`, in this order: `Rate` Hz (the rate the station programmed),
+  `Asked` Hz, `Group delay` frames, `Recording` (the name, or `none`), `Recorded` s after the
+  trigger, `Backlog` s, `Saved`, `Fires`, `Marks`, `Free above floor` s; all `info`).
+
+`recorder.subscribe` takes Random's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
+default 10; at most 64 plots, each `id` unique, 1 to 64 characters) or `{"default":true}` (back to
+`recorder.live`); a key a quantity does not take is `bad_params` naming it. A plot is
+`{"id","quantity","channels","points","seconds"}`: `channels` applies to `time` and `spectrum` (a
+list of recorded rows' indexes, or `"all"`; default `"all"`), `points` and `seconds` to `time`
+(`points` 64 to 8192, default 1024; `seconds` above 0 and at most 2, default 2). The result is
+`{"default","rate_hz","plots","quantities"}`, every default filled in: each plot comes back with
+the keys its quantity takes (`time` `channels`, `points` and `seconds`; `spectrum` `channels`;
+`frf` and `readings` none). In `recorder.data` each plot
+is `{"id","quantity","channels","first_frame","views"}`: `channels` the indexes it resolved to, in
+table order, and null for the rest; `first_frame` the station frame of a `time` plot's first
+sample, and null for the rest.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `time` | one `spectrum` | **Time**: each resolved row's last `seconds` of samples, x `Time` s of station time, y `Amplitude` in the rows' unit, linear: `Channel <index>` (`measured`), an envelope at `points` (`y` the largest and `y_min` the smallest sample of each interval) |
+| `spectrum` | one `spectrum` per resolved row | Titled `Channel <index>: <description>` (the role when there is no description), x `Frequency` Hz linear from 0 to the analysis span at the line spacing, y `PSD` in the row's unit squared per Hz, log: `Channel <index>` (`measured`), the average so far; `link` `frequency` |
+| `frf` | three `spectrum` | For the configured pair, each x `Frequency` Hz linear over the analysis span, `link` `frequency`: **FRF** (y `Magnitude`, the response row's unit over the reference row's, log: `H1`), **Phase** (y `Phase` degrees, linear: `H1`) and **Coherence** (y `Coherence`, 0 to 1, linear) |
+| `readings` | one `reading` | The live frame's **Run** reading |
+
+A plot is empty (`views` empty) until there is something to draw: `time` until the first batch,
+`spectrum` and `frf` until the first average, `frf` without a pair always.
 
 ## Control Laws
 

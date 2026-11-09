@@ -1,0 +1,47 @@
+{
+ "type": "request",
+ "id": 101,
+ "method": "recorder.configure",
+ "params": {
+  "config": {
+   "title": "Fixture A, run 4",
+   "acquisition": {
+    "fs_hz": 12800
+   },
+   "trigger": {
+    "mode": "level",
+    "row": 1,
+    "level": 0.25,
+    "slope": "rising",
+    "hysteresis": null,
+    "pre_s": 0.5,
+    "record_s": 1.0,
+    "count": 5,
+    "holdoff_s": 0
+   },
+   "analysis": {
+    "block": 2048,
+    "window": "hann",
+    "overlap_pct": null,
+    "averaging": "linear",
+    "averages": 8,
+    "decimation": 1,
+    "frf": {
+     "reference": 2,
+     "response": 4
+    }
+   },
+   "capture": {
+    "run_name": "recorder",
+    "keep_free_gb": 1
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "4"
+    }
+   ]
+  }
+ }
+}

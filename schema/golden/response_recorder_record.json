@@ -1,0 +1,9 @@
+{
+ "type": "response",
+ "id": 104,
+ "result": {
+  "name": "rec_0003",
+  "station_frame": 204800,
+  "pre_frames": 12800
+ }
+}

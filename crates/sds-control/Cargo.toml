@@ -73,6 +73,11 @@ hertzforge-twr-laws.workspace = true
 # finished station backend and names none, and holds the Sim only as a
 # dev-dependency (tests/forbidden_deps.rs).
 hertzforge-explorer-host.workspace = true
+# The Recorder (src/recorder/): the controller's acquisition and recording core, its
+# trigger, recording writer and reader, and analysis pass. It is handed a finished
+# station backend and names none, and holds the Sim only as a dev-dependency
+# (tests/forbidden_deps.rs).
+hertzforge-recorder.workspace = true
 serde_json.workspace = true
 # A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
 # or Apache-2.0, as the reference reader already has it).

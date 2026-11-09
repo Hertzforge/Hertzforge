@@ -44,16 +44,17 @@ pub enum AveragingKind {
 /// The acquisition / analysis configuration - the operator's "standard selection
 /// tools" (sample rate, windowing, block sizes) front and center.
 ///
-/// # HONEST SEMANTICS
+/// # The rate
 ///
-/// **Recording rate is always native.** `analysis_decimation` affects ANALYSIS
-/// ONLY and requires the anti-alias decimator (`hertzforge-dsp::decimate`) wired at
-/// analysis time - this type only models/validates the selection. The capture
-/// path writes `telemetry.f32` at `native_rate_hz` with decimation 1, no
-/// exceptions; the selector never implies the capture rate changes.
+/// Recordings are always at the station's rate, with no decimation:
+/// `analysis_decimation` is the analysis's only, through the anti-alias decimator
+/// (`hertzforge-dsp::decimate`). A service sets `native_rate_hz` to the rate the
+/// station programmed once it is up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcquisitionConfig {
-    /// The backend's native sample rate in Hz (from backend caps; 65,536 for now).
+    /// The acquisition rate in Hz: the rate asked of the station, and once it is up
+    /// the rate it programmed. A caller always states one; the default is a
+    /// placeholder.
     pub native_rate_hz: f64,
     /// ANALYSIS-side decimation rung: a power of two in `1..=256`. The analysis
     /// rate is `native_rate_hz / analysis_decimation`. Capture is ALWAYS native.
@@ -72,8 +73,8 @@ pub struct AcquisitionConfig {
 }
 
 impl Default for AcquisitionConfig {
-    /// Hann window, 50% overlap, Linear averaging count 8, block 2048,
-    /// decimation 1, native 65,536 Hz.
+    /// Hann window, 50% overlap, linear averaging over 8 blocks, block 2048,
+    /// decimation 1, and a placeholder rate of 65 536 Hz that a caller replaces.
     fn default() -> Self {
         Self {
             native_rate_hz: 65_536.0,
