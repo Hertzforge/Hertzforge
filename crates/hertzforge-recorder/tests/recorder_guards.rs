@@ -229,3 +229,121 @@ fn recorder_records_at_the_rate_the_station_programmed() {
     assert_eq!(cap["config"]["sample_rate_hz"], serde_json::json!(fs));
     assert_eq!(RecordingReader::open(&dir).unwrap().info().rate_hz, fs);
 }
+
+// ---------------------------------------------------------------------------------
+// G9: one engine for the run, batches of two blocks, and any stop reason ends the run
+// once, in its own words.
+// ---------------------------------------------------------------------------------
+
+#[test]
+fn recorder_a_batch_holds_the_service_for_two_blocks() {
+    let station = ScriptedStation::new(2, 12_800.0, Box::new(ramp));
+    let calls = station.calls();
+    let mut svc = RecorderService::with_backend(
+        manual(12_800.0),
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        temp_root("g9_batch"),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    for _ in 0..20 {
+        let frames = svc.pump().unwrap();
+        assert_eq!(
+            frames, 512,
+            "one pump is one batch of two 256-frame blocks: a verb waits at most that long"
+        );
+    }
+    assert_eq!(Calls::get(&calls.opens), 1);
+    assert_eq!(
+        (Calls::get(&calls.arms), Calls::get(&calls.starts)),
+        (1, 1),
+        "the station is armed and started once for the run, never per batch"
+    );
+    assert_eq!(svc.status(u64::MAX).station_frames, 20 * 512);
+}
+
+#[test]
+fn recorder_a_station_error_ends_the_run_once_with_its_words() {
+    let count = |svc: &RecorderService<ScriptedStation>, words: &str| {
+        svc.report_data()
+            .event_log
+            .events()
+            .iter()
+            .filter(|e| e.text.contains(words))
+            .count()
+    };
+
+    // A station error mid-run: the run ends once, saying what the station said, and
+    // the recording in progress is finished with every frame read.
+    let mut station = ScriptedStation::new(2, 8192.0, Box::new(ramp));
+    station.fail_after = Some((3000, "input buffer overflow (-200279)".into()));
+    let calls = station.calls();
+    let root = temp_root("g9_error");
+    let mut svc = RecorderService::with_backend(
+        manual(8192.0),
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        root.clone(),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.record_now().unwrap();
+    let mut ended = false;
+    for _ in 0..40 {
+        if svc.pump_frames(512).is_err() {
+            ended = true;
+            break;
+        }
+    }
+    assert!(ended, "the station's error ends the run");
+    assert_eq!(svc.state(), RecState::Faulted);
+    for _ in 0..3 {
+        assert!(svc.pump().is_err(), "an ended run reads nothing more");
+    }
+    assert_eq!(count(&svc, "input buffer overflow (-200279)"), 1);
+    assert_eq!(Calls::get(&calls.arms), 1, "nothing re-arms the station");
+    svc.stop_monitor().unwrap();
+    let list = svc.recordings_list(None);
+    assert_eq!(list.len(), 1);
+    assert_eq!(
+        list[0].frames, 3000,
+        "every frame read before the error is saved"
+    );
+
+    // A station whose input stream ends: a continuous acquisition that stops
+    // delivering has failed, and the run ends saying so, once.
+    let station = ScriptedStation::new(2, 8192.0, Box::new(ramp)).frames(3000);
+    let mut svc = RecorderService::with_backend(
+        manual(8192.0),
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        temp_root("g9_ended"),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.record_now().unwrap();
+    for _ in 0..40 {
+        if !svc.state().is_live() {
+            break;
+        }
+        let _ = svc.pump_frames(512);
+    }
+    assert_eq!(
+        svc.state(),
+        RecState::Faulted,
+        "a station that stops delivering ends the run; it does not idle on as if monitoring"
+    );
+    assert_eq!(count(&svc, "the station ended its input stream"), 1);
+    svc.stop_monitor().unwrap();
+    assert_eq!(svc.recordings_list(None)[0].frames, 3000);
+}
