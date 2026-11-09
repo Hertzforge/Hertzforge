@@ -14,8 +14,10 @@
 //! 1. **A visit is a POINT, not a cell.** `(f, level)` goes into a list kept sorted by
 //!    frequency. Nothing is quantized on the way in; the display grid enters only at
 //!    render.
-//! 2. **A revisit OVERWRITES.** A visit within [`ProfileRaster::tolerance_hz`] (half a
-//!    display bin) of an existing point replaces it. Not a max-hold - that would weld a
+//! 2. **A revisit OVERWRITES.** A visit in the same display bin as an existing point
+//!    replaces it (the render could never separate the two). The same BIN, not "within
+//!    half a bin of the new point": a slow sweep's consecutive points are a fraction of a
+//!    bin apart, and that rule deleted each one as the next arrived. Not a max-hold - that would weld a
 //!    single transient overload into the operator's saved graph for the rest of the run
 //!    and make a fixed drive read as a rising one - and not a decay, which would erase the
 //!    low end of a slow sweep before the high end was measured.
@@ -74,13 +76,13 @@ pub struct ProfileRaster {
     f0_hz: f64,
     df_hz: f64,
     n_bins: usize,
-    /// The visited `(frequency, level)` points, ASCENDING by frequency and never closer
-    /// together than [`Self::tolerance_hz`].
+    /// The visited `(frequency, level)` points, ASCENDING by frequency, at most one per
+    /// display bin.
     ///
-    /// That spacing invariant is also what BOUNDS this vector, which is the only thing
-    /// standing between a long survey and unbounded growth: every insert first removes
-    /// every point within a tolerance of itself, so the list can never hold more than
-    /// about two points per display bin however long the operator sweeps.
+    /// That invariant is also what BOUNDS this vector, which is the only thing standing
+    /// between a long survey and unbounded growth: every insert first removes any point
+    /// in its own bin, so the list can never hold more than one point per display bin
+    /// however long the operator sweeps.
     points: Vec<(f64, f32)>,
     /// The frequency of the previously recorded point - the far end of the traversal the
     /// next visit closes (rule 3). `None` before the first visit of a run.
@@ -176,9 +178,15 @@ impl ProfileRaster {
             Some(prev) => (freq_hz, prev),
             None => (freq_hz, freq_hz),
         };
-        let tol = self.tolerance_hz();
+        // The frequency line is the display BIN the visit renders into: a revisit there
+        // overwrites, because the render could never separate two points in one bin. Not
+        // "within half a bin of the new point": consecutive points of a slow sweep are a
+        // small fraction of a bin apart, so that rule deleted the previous point at every
+        // visit and the trail collapsed to one moving point (bench X3, 2026-11-09).
+        let (f0, df) = (self.f0_hz, self.df_hz);
+        let bin = raw.round();
         self.points
-            .retain(|(f, _)| !((*f > lo && *f < hi) || (*f - freq_hz).abs() <= tol));
+            .retain(|(f, _)| !((*f > lo && *f < hi) || ((*f - f0) / df).round() == bin));
         let at = self.points.partition_point(|(f, _)| *f < freq_hz);
         self.points.insert(at, (freq_hz, amplitude as f32));
         self.last_hz = Some(freq_hz);
@@ -600,5 +608,39 @@ mod tests {
             2,
             "a cleared profile starts a new traversal"
         );
+    }
+
+    /// THE BENCH FINDING (NI loopback, X3, 2026-11-09): a SLOW sweep must leave its trail.
+    /// Consecutive points of a sweep are a small fraction of a bin apart at the low end
+    /// (0.14 Hz a pass at 20 Hz and 0.5 oct/s, against a 3.125 Hz bin), so a rule that
+    /// replaced every point within half a bin of the new one deleted the previous point at
+    /// every visit: the trail collapsed to one moving point, and a 20 to 2000 Hz sweep at
+    /// 30 oct/min left nothing below 113 Hz on the chassis. A frequency line is a display
+    /// BIN: the sweep keeps one point per bin it crossed.
+    #[test]
+    fn a_slow_sweep_leaves_a_point_in_every_bin_it_crosses() {
+        let df = 12_800.0 / 4_096.0;
+        let mut r = ProfileRaster::new(0.0, df, 2_049);
+        // 0.5 oct/s, a pass every 20 ms.
+        let step = 2f64.powf(0.5 * 0.02);
+        let mut f = 20.0;
+        while f <= 2_000.0 {
+            r.visit(f, 0.2);
+            f *= step;
+        }
+        let pts = r.points();
+        assert!(pts[0].0 <= 21.0, "the trail starts at {} Hz", pts[0].0);
+        assert!(pts[pts.len() - 1].0 >= 1_990.0);
+        // No gap wider than two bins or the sweep's own step there (two bins a pass at 900 Hz).
+        for w in pts.windows(2) {
+            assert!(
+                w[1].0 - w[0].0 <= (2.0 * df).max(w[0].0 * (step - 1.0) * 1.01),
+                "a hole from {} to {} Hz",
+                w[0].0,
+                w[1].0
+            );
+        }
+        // Bounded all the same: at most one point per bin.
+        assert!(pts.len() <= r.grid().2);
     }
 }
