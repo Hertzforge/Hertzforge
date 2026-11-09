@@ -11,6 +11,7 @@
  * store keeps the operator's edits beside it and sends them when the operator says so.
  */
 
+import { regresses } from '../runOrder';
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import type { ChannelRow, LadderMode, LogEntry } from '$lib/protocol/types';
@@ -502,6 +503,8 @@ export class SineStore {
 
 	private onStatus(s: SineState) {
 		const was = this.status;
+		// A reply older than the run's own word that it finished is not applied.
+		if (regresses(was, s)) return;
 		this.status = s;
 		// The state is newer than the live frame held: it is the run's word until the next frame.
 		this.liveNewer = false;

@@ -349,6 +349,22 @@ describe('the Sine store', () => {
 		expect(await sine.adjust('kp', 1.2)).toEqual({ key: 'kp', value: 1.2 });
 	}, 15000);
 
+	it('keeps a finished run finished when a stale reply arrives after it', async () => {
+		// The stop's reply carries the state at the stop, "stopping". When the run finishes before
+		// that reply lands (the mock ends a stop within one tick; a loaded runner reorders the two),
+		// the reply must not take the screen back to "stopping", where no later event would correct it.
+		const { sine } = await screen();
+		short(sine);
+		await running(sine);
+		const live = sine.status!;
+		const finished = { ...live, state: 'finished' } as typeof live;
+		const stale = { ...live, state: 'stopping' } as typeof live;
+		(sine as unknown as { onStatus(s: typeof live): void }).onStatus(finished);
+		(sine as unknown as { onStatus(s: typeof live): void }).onStatus(stale);
+		expect(sine.status?.state).toBe('finished');
+		await sine.abort();
+	});
+
 	it('stops with the ramp from the level in force; an observer may stop and abort but not hold', async () => {
 		const { sine, observer } = await screen();
 		short(sine);

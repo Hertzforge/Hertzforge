@@ -11,6 +11,7 @@
  * Nothing here draws or computes a measurement. Every number on screen comes from the service.
  */
 
+import { regresses } from './runOrder';
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import type {
@@ -810,6 +811,8 @@ export class AcquireState {
 
 	private onState(s: RandomState) {
 		const prev = this.run;
+		// A reply older than the run's own word that it finished is not applied.
+		if (regresses(prev, s)) return;
 		this.run = s;
 		if (!s.run_id || s.state === 'unconfigured') this.held = null;
 		else if (this.held?.runId !== s.run_id) void this.readHeld(s.run_id);
