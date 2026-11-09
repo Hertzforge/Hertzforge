@@ -3463,9 +3463,9 @@ the shell are being built against; until they ship, every `explorer.*` method is
 | `explorer.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived"}` |
 | `explorer.config` | `{}` | any | `{"run_id","config","derived"}` |
 | `explorer.start` | `{}` | `configured` | state, once the tone runs at 0 V |
-| `explorer.steer` | a frequency part (`{"hz"}`, `{"step_hz"}` or `{"step_oct"}`), a level part (`{"vpk"}` or `{"step_db"}`), or one of each | `running` | `{"hz","vpk","clamped","frame"}` |
-| `explorer.sweep` | `{"direction","rate_oct_per_min"}` | `running` | `{"direction","rate_oct_per_min","clamped","frame"}` |
-| `explorer.hold` | `{}` | `running` | `{"hz","frame"}` |
+| `explorer.steer` | a frequency part (`{"hz"}`, `{"step_hz"}` or `{"step_oct"}`), a level part (`{"vpk"}` or `{"step_db"}`), or one of each | `running` | `{"hz","vpk","clamped","frame","input_frame"}` |
+| `explorer.sweep` | `{"direction","rate_oct_per_min"}` | `running` | `{"direction","rate_oct_per_min","clamped","frame","input_frame"}` |
+| `explorer.hold` | `{}` | `running` | `{"hz","frame","input_frame"}` |
 | `explorer.stop` | `{}` | any | state |
 | `explorer.abort` | `{}` | any | state |
 | `explorer.survey` | `{"since"}` (optional) | any | `{"revision","channel","unit","points","peak"}` |
@@ -3574,10 +3574,11 @@ station at 12 800 Hz:
   ramps; down to 0 V it ramps to 1% of where it was, then steps to 0. A `step_db` while the target
   level is 0 V is refused `level_zero`: set a level in volts first. The answer is what the service
   adopted: `hz` and `vpk` are the targets in force after the steer, `clamped` is
-  `{"hz","vpk"}`, true where a part was clamped (false for a part not sent), and `frame` is the
-  generated frame the change first appears in. Refused `wrong_state` outside `running`: before
-  start, while starting, once a stop has begun (`state` `stopping`: nothing raises or moves the
-  drive after that) and after the end.
+  `{"hz","vpk"}`, true where a part was clamped (false for a part not sent), `frame` is the
+  generated frame the change first appears in, and `input_frame` the input frames acquired when
+  the service took it (see "Time is the station's"); the sweep and hold answers carry both too.
+  Refused `wrong_state` outside `running`: before start, while starting, once a stop has begun
+  (`state` `stopping`: nothing raises or moves the drive after that) and after the end.
 - **`explorer.sweep`** sweeps the tone from where it stands toward the band's `up` or `down` edge
   at `rate_oct_per_min` (above 0), clamped to `derived.sweep_max_oct_per_min`; the answer is the
   rate used and whether it was clamped. At the edge the tone parks and holds (`at_edge`); a sweep
@@ -3606,10 +3607,12 @@ station at 12 800 Hz:
 
 **Time is the station's.** `t_s` in the state and the live frames, `end.at_s` and `end.ramp_s`
 count the station's own input frames at the rate it adopted (frames acquired since start over
-`grid.fs_hz`), never the service's clock. The steering answers' `frame` and the time plots'
-`first_frame` count the same sample clock from the start of the run: generated frame n plays at
-the clock's n-th sample, and its response reaches the input at input frame n plus the station's
-input group delay. The safe stop's countdown (`orphan_s`) is the only number timed by the
+`grid.fs_hz`), never the service's clock. The output and the input run on one sample clock and
+start together, and the steering answers' `frame` (generated frames) and `input_frame`, and the
+time plots' `first_frame` (input frames), count it from the start of the run: generated frame n
+plays at the clock's n-th sample, and its response reaches the input at input frame n plus the
+station's input group delay. So a change the service takes at `input_frame` reaches the input
+`pipeline_frames` later, at `frame` plus the group delay. The safe stop's countdown (`orphan_s`) is the only number timed by the
 service's clock.
 
 ### Explorer Run State

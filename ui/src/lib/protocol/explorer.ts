@@ -159,6 +159,8 @@ export interface ExplorerSteerResult {
 	clamped: { hz: boolean; vpk: boolean };
 	/** The generated frame the change first appears in. */
 	frame: number;
+	/** The input frames acquired when the service took the change. */
+	input_frame: number;
 }
 
 export interface ExplorerSweepParams {
@@ -173,12 +175,14 @@ export interface ExplorerSweepResult {
 	rate_oct_per_min: number;
 	clamped: boolean;
 	frame: number;
+	input_frame: number;
 }
 
 /** `explorer.hold`: where the tone now holds. */
 export interface ExplorerHoldResult {
 	hz: number;
 	frame: number;
+	input_frame: number;
 }
 
 // --- run state -----------------------------------------------------------------------------
