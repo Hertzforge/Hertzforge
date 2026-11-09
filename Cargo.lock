@@ -2390,6 +2390,7 @@ dependencies = [
  "hertzforge-capture",
  "hertzforge-channel-table",
  "hertzforge-dsp",
+ "hertzforge-explorer-host",
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-law-host",

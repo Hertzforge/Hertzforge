@@ -68,6 +68,11 @@ hertzforge-sine-laws.workspace = true
 # and the law check). The TWR service itself is `hertzforge-twr` above. Reviewed
 # 2026-11-08: it runs a check case on the backend it is handed and names none.
 hertzforge-twr-laws.workspace = true
+# Explorer (src/explorer/): the controller's hand-steered open-loop sine, its process
+# step, run service, analysis pass and run host. Reviewed 2026-11-08: it is handed a
+# finished station backend and names none, and holds the Sim only as a
+# dev-dependency (tests/forbidden_deps.rs).
+hertzforge-explorer-host.workspace = true
 serde_json.workspace = true
 # A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
 # or Apache-2.0, as the reference reader already has it).
