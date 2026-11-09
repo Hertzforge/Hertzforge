@@ -72,11 +72,11 @@ fn recorder_records_on_a_station_with_no_outputs() {
     let first = r.read_region(0, 1).unwrap();
     assert_eq!(first, vec![ramp(0, 0), ramp(0, 1)]);
 
-    // The same on the simulator built with no output at all.
+    // The same on the simulator with no drive row in its table (the simulator keeps a
+    // drive slot of its own; nothing writes to it).
     let sim = hertzforge_hal_sim::SimConfig::new()
         .sample_rate_hz(8192.0)
         .max_input_channels(2)
-        .max_output_channels(0)
         .build();
     let mut svc = RecorderService::with_backend(
         manual(8192.0),
@@ -88,7 +88,8 @@ fn recorder_records_on_a_station_with_no_outputs() {
     .unwrap()
     .with_block_frames(256);
     svc.configure().unwrap();
-    svc.start_monitor().expect("the simulator with no output");
+    svc.start_monitor()
+        .expect("the simulator with no drive row");
     svc.record_now().unwrap();
     for _ in 0..4 {
         svc.pump_frames(1024).expect("the simulator records");

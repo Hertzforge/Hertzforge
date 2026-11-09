@@ -247,11 +247,10 @@ impl RecorderHost {
             },
             ni: NiSelection {
                 inputs: hertzforge_station::physical_from_table(&table).0,
-                outputs: hertzforge_station::physical_from_table(&table).1,
+                // A Recorder run is capture only: the station is built with no output.
+                outputs: Vec::new(),
                 derive_inputs: n_input,
-                // The recorder's synthetic drive row: monitor-only, but the engine
-                // needs an output slot to write its silence into.
-                derive_outputs: 1,
+                derive_outputs: 0,
                 iepe: false,
                 restrict_devices: self.ni_devices.clone(),
             },

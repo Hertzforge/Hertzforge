@@ -11,11 +11,11 @@
 //!
 //! [`Engine`] runs against a CLONE of the user channel table with two edits:
 //!
-//! * **One synthetic Drive channel is injected** (`"SILENT (recorder)"`).
-//!   a host-loop backend's `write_drive` errors when the table maps ZERO Drive rows, and
-//!   the engine drive path runs on every `HostClosesLoop` tick, so a table with
-//!   no Drive row would fault on tick 1. The injected drive is fed zeros by
-//!   [`SilentDrive`] (harmless; the recorder drives nothing).
+//! * **The table's drive rows are left out.** A Recorder run is capture only: the
+//!   station is configured with the enabled input rows and nothing else, the engine
+//!   has no output channel (its drive path does nothing with none), and the arm gate is
+//!   asked for a capture-only run. The operator's table keeps its drive rows for the
+//!   modules that drive; this run neither opens nor records them.
 //! * **When `watchdog_enabled == false` (the default) all abort
 //!   limits are STRIPPED from the clone.** The engine watchdog skips channels
 //!   with no abort axes, so it monitors nothing. The per-channel OVERLOAD
@@ -47,7 +47,7 @@ use std::path::PathBuf;
 
 use hertzforge_channel_table::{AbortLimits, Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_engine::capture::{BlockMeta, CaptureError, CaptureSink as EngineCaptureSink};
-use hertzforge_engine::{Engine, EngineConfig, ProcessStep, SilentDrive, StopReason};
+use hertzforge_engine::{Engine, EngineConfig, ProcessStep, StopReason};
 use hertzforge_hal::Backend;
 
 use crate::analysis::{
@@ -66,8 +66,12 @@ pub use report::{
     RecordingInfoLite, ReportData, SessionRecording,
 };
 
-/// The synthetic-drive channel label injected into the engine table clone.
-pub const SILENT_DRIVE_LABEL: &str = "SILENT (recorder)";
+/// The process step of a capture-only run: it reads and produces nothing.
+struct NoDrive;
+
+impl ProcessStep for NoDrive {
+    fn process(&mut self, _input: &[f32], _n_frames: usize, _drive_out: &mut Vec<f32>) {}
+}
 
 /// Default segment length in frames (~0.25 s of the 65,536 Hz native rate,
 /// rounded to a power of two): short enough that a scheduling-fault blip only
@@ -409,17 +413,11 @@ impl<B: Backend> RecorderService<B> {
             })
             .collect();
 
-        // The engine interleave: in = enabled input channels, out = drive
-        // channels in the clone (always >= 1 after injection).
-        let n_drive = engine_table
-            .channels
-            .iter()
-            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
-            .count()
-            .max(1);
-        // Placeholder cadence: the real one is derived in `open_backend` from what
+        // The engine interleave: in = enabled input channels, out = none. A Recorder
+        // run is capture only.
+        // Placeholder cadence: the real one is derived in `bring_backend_up` from what
         // the backend configured, which is the only place the block is known.
-        let mut ecfg = EngineConfig::new(n_input, n_drive);
+        let mut ecfg = EngineConfig::new(n_input, 0);
         ecfg.frames_per_tick = DEFAULT_BLOCK_FRAMES;
         // A deliberately deep watchdog tap for a monitor: the recorder's whole job
         // is not to miss frames. `bring_backend_up` only ever RAISES this to the
@@ -726,9 +724,7 @@ impl<B: Backend> RecorderService<B> {
             let _ = self.backend.arm();
             let _ = self.backend.start();
             let mut engine = Engine::new(clone_ecfg(&self.ecfg), &self.engine_table, &self.backend);
-            let mut step = SilentDrive {
-                out_channels: self.ecfg.out_channels,
-            };
+            let mut step = NoDrive;
             bridge.frames.clear();
             bridge.n_frames = 0;
             // The segment budget is FRAMES; the engine's run budget is TICKS.
@@ -1084,34 +1080,19 @@ impl<B: Backend> RecorderService<B> {
             );
         }
 
-        // THE ARM GATE. The Recorder requests `{HostSynthesized, None}`: the
-        // host produces drive samples and NOTHING corrects them.
-        //
-        // Note the deliberate divergence from the `hertzforge-module-abi` resolution table,
-        // whose row 14 lists "Recorder / any -> {None, None}, CaptureOnly falls out".
-        // That describes a recorder with no drive path. THIS recorder has one: the
-        // service injects a synthetic drive channel into the engine table because the
-        // engine's drive path runs on every `HostClosesLoop` tick and a host-loop
-        // backend's `write_drive` errors on a table with zero Drive rows, so
-        // `SilentDrive` feeds it zeros. Requesting `{None, None}` would let this
-        // service ARM against a device-loop backend and then fault on tick 1 when
-        // `write_drive` came back `Unsupported` - which is exactly the failure the gate
-        // exists to move forward to arm time. The request must name the drive path the
-        // module actually uses, not the one it wishes it had.
-        //
-        // Consequence, and it is the conservative one: on a hardware station
-        // the abort-latency rule now binds the Recorder too. Its drive is
-        // zeros and energizes nothing, but a safety gate that reasons about
-        // what the samples CONTAIN rather than whether a drive path exists is
-        // a gate that can be argued around later.
+        // THE ARM GATE, asked for a capture-only run (`{None, None}`): no drive
+        // path, nothing to correct, so the abort-latency rule does not bind. It is
+        // given the programmed rate as the run's rate, so a station that programs a
+        // rate that does not exist (zero, negative, not finite) is refused by the
+        // gate's rate policy before anything is derived from it.
         //
         // The factory supplies the class; it is held on the service from
         // construction so the gate reads the SAME value the caller stated.
         hertzforge_module_abi::arm_gate(
             &self.backend.caps(),
             self.station,
-            hertzforge_module_abi::Resolution::host_open_loop(),
-            None,
+            hertzforge_module_abi::Resolution::capture_only(),
+            Some(actual.actual_rate_hz),
             actual.actual_rate_hz,
         )
         .map_err(|reason| RecorderError::Backend(format!("arm refused: {reason}")))?;
@@ -1119,25 +1100,6 @@ impl<B: Backend> RecorderService<B> {
         self.backend
             .arm()
             .map_err(|e| RecorderError::Backend(format!("arm: {e}")))?;
-        // An NI-class AO REFUSES to start on an empty buffer (-200462, found by
-        // the first cross-host wire probe, 2026-07-25). The recorder's drive is
-        // ALWAYS silence (SilentDrive feeds the injected synthetic row), so the
-        // prefill is a lookahead of zeros written between arm and start. Sim
-        // accepts-and-ignores this; a backend with no output contract skips it.
-        let caps = self.backend.caps();
-        if let Some(contract) = caps.output_buffer {
-            let n_out = caps.max_output_channels as usize;
-            if n_out > 0 && contract.min_lookahead_frames > 0 {
-                let zeros = vec![0.0f32; contract.min_lookahead_frames as usize * n_out];
-                let mut offset = 0usize;
-                while offset < zeros.len() {
-                    match self.backend.write_drive(&zeros[offset..]) {
-                        Ok(0) | Err(_) => break, // no space / not supported: start decides
-                        Ok(frames) => offset += frames * n_out,
-                    }
-                }
-            }
-        }
         self.backend
             .start()
             .map_err(|e| RecorderError::Backend(format!("start: {e}")))?;
@@ -1352,23 +1314,17 @@ impl<B: Backend> RecorderService<B> {
     }
 }
 
-/// Build the engine table clone: the user table with (a) ONE
-/// synthetic Drive channel injected (fed zeros by SilentDrive), and (b) all
-/// abort limits stripped when `watchdog_enabled == false`.
+/// Build the engine table clone: the user table with (a) its drive rows left out,
+/// so the station is configured with the input rows only, and (b) all abort limits
+/// stripped when `watchdog_enabled == false`.
 fn build_engine_table(user: &ChannelTable, watchdog_enabled: bool) -> ChannelTable {
     let mut clone = user.clone();
+    clone.channels.retain(|c| c.role != ChannelRole::Drive);
     if !watchdog_enabled {
         for ch in clone.channels.iter_mut() {
             ch.abort = AbortLimits::default();
         }
     }
-    let next_index = clone.channels.iter().map(|c| c.index).max().unwrap_or(0) + 1;
-    let mut drive = Channel::new(next_index);
-    drive.role = ChannelRole::Drive;
-    drive.enabled = true;
-    drive.save = false;
-    drive.description = SILENT_DRIVE_LABEL.to_string();
-    clone.channels.push(drive);
     clone
 }
 
@@ -1385,8 +1341,10 @@ fn clone_ecfg(c: &EngineConfig) -> EngineConfig {
     e
 }
 
+/// A duration in ms to the microsecond: the status carries it as a short decimal, so
+/// it reads back from JSON exactly.
 fn ms(d: std::time::Duration) -> f64 {
-    d.as_secs_f64() * 1e3
+    d.as_micros() as f64 / 1e3
 }
 
 fn empty_stats() -> TimeStats {
