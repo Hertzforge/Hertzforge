@@ -110,6 +110,10 @@ pub struct RecorderConfig {
     pub metadata: Vec<MetaField>,
     /// Data root for run directories. `None` = the service's supplied default.
     pub data_root: Option<PathBuf>,
+    /// The free space a run leaves on the data volume, bytes; `None` for the
+    /// writer's least floor.
+    #[serde(default)]
+    pub keep_free_bytes: Option<u64>,
 }
 
 impl Default for RecorderConfig {
@@ -126,6 +130,7 @@ impl Default for RecorderConfig {
             frf_pair: None,
             metadata: default_metadata(),
             data_root: None,
+            keep_free_bytes: None,
         }
     }
 }

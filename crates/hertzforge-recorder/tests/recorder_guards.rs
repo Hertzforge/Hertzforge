@@ -439,3 +439,127 @@ fn recorder_the_reading_thread_never_touches_the_disk() {
         "the longest gap between batches is {gap} ms: the reading thread waited on the store"
     );
 }
+
+// ---------------------------------------------------------------------------------
+// G4: a run that cannot write ends and says so, and the recording is finalized with
+// what reached the disk and the fault's words.
+// ---------------------------------------------------------------------------------
+
+fn logged(svc: &RecorderService<ScriptedStation>, words: &str) -> usize {
+    svc.report_data()
+        .event_log
+        .events()
+        .iter()
+        .filter(|e| e.text.contains(words))
+        .count()
+}
+
+/// Pump until the run ends or `limit` passes, letting the record thread answer.
+fn pump_until_ended(svc: &mut RecorderService<ScriptedStation>, limit: usize) {
+    for _ in 0..limit {
+        if !svc.state().is_live() {
+            return;
+        }
+        let _ = svc.pump();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn recorder_a_failed_write_ends_the_run_and_says_so() {
+    let station = ScriptedStation::new(2, 8192.0, Box::new(ramp));
+    let (mut store, log) = support::StoreDouble::new(2);
+    store.fail_after_pushes = Some((
+        5,
+        "the disk refused the write: no space left on device".into(),
+    ));
+    let mut svc = RecorderService::with_backend(
+        manual(8192.0),
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        temp_root("g4_failed"),
+    )
+    .unwrap()
+    .with_block_frames(256)
+    .with_store(Box::new(store));
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.record_now().unwrap();
+    pump_until_ended(&mut svc, 2000);
+    assert_eq!(
+        svc.state(),
+        RecState::Faulted,
+        "a run whose writes fail ends; it does not record on into nothing"
+    );
+    assert_eq!(
+        logged(&svc, "the disk refused the write: no space left on device"),
+        1,
+        "the run ends once, in the fault's own words"
+    );
+    svc.stop_monitor().unwrap();
+    let log = log.lock().unwrap();
+    assert!(
+        log.calls
+            .iter()
+            .any(|c| matches!(c, support::StoreCall::Finish { .. })),
+        "the recording is finalized with what reached the disk"
+    );
+    assert_eq!(
+        log.recordings[0].len(),
+        5 * 512 * 2,
+        "the five batches written before the fault"
+    );
+}
+
+#[test]
+fn recorder_the_free_space_floor_ends_the_run_and_says_so() {
+    // A real writer on a real folder, with the floor a few megabytes under the free
+    // space now: sixteen rows at 204 800 Hz in real time cross it in about a second.
+    let fs = 204_800.0;
+    let rows = 16;
+    let root = temp_root("g4_floor");
+    let free = hertzforge_capture::free_space_bytes_for(&root).expect("free space");
+    let station = ScriptedStation::new(rows, fs, Box::new(ramp)).paced();
+    let mut cfg = manual(fs);
+    cfg.acq.block_size = 4096;
+    cfg.keep_free_bytes = Some(free - 16 * 1024 * 1024);
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        inputs(rows as u32),
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        root.clone(),
+    )
+    .unwrap()
+    .with_block_frames(4096)
+    .with_store(Box::new(
+        hertzforge_recorder::WriterStore::with_flush_interval(std::time::Duration::from_millis(50)),
+    ));
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.record_now().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while svc.state().is_live() && std::time::Instant::now() < deadline {
+        let _ = svc.pump();
+    }
+    let ended = svc.state();
+    let said = logged(&svc, "floor");
+    svc.stop_monitor().unwrap();
+    let dir = root.join("rec_0001");
+    let sidecar = std::fs::read_to_string(dir.join("recorder.json")).unwrap_or_default();
+    let bytes = std::fs::metadata(dir.join("telemetry.f32"))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let _ = std::fs::remove_dir_all(&root);
+
+    assert_eq!(ended, RecState::Faulted, "crossing the floor ends the run");
+    assert_eq!(said, 1, "and says so, naming the floor");
+    let rec: serde_json::Value = serde_json::from_str(&sidecar).unwrap();
+    assert_eq!(rec["complete"], serde_json::json!(true), "{rec}");
+    assert!(
+        rec["fault"].as_str().is_some_and(|f| f.contains("floor")),
+        "the recording names the fault: {rec}"
+    );
+    assert!(bytes > 0 && bytes % (rows as u64 * 4) == 0, "{bytes} bytes");
+}
