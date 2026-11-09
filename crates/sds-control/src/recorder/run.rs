@@ -181,6 +181,8 @@ pub struct RecorderRun {
     saved_at_arm: Mutex<u64>,
     /// The pump's way of letting a waiting verb or the status thread at the service.
     handoff: Handoff,
+    /// The run's marks, kept when the service is released at the end.
+    final_marks: Mutex<Vec<Mark>>,
 }
 
 impl RecorderRun {
@@ -207,6 +209,7 @@ impl RecorderRun {
             folder: Mutex::new(None),
             saved_at_arm: Mutex::new(0),
             handoff: Handoff::default(),
+            final_marks: Mutex::new(Vec::new()),
         }
     }
 
@@ -225,6 +228,15 @@ impl RecorderRun {
 
     fn service(&self) -> Option<Arc<Mutex<RecorderService>>> {
         lock(&self.svc).clone()
+    }
+
+    /// Drop the run's own handle on the core's service, so the station closes once the last
+    /// handle goes.
+    fn release_service(&self) {
+        if let Some(svc) = self.service() {
+            *lock(&self.final_marks) = self.handoff.take(&svc).marks().to_vec();
+        }
+        *lock(&self.svc) = None;
     }
 
     fn publish(&self, v: RecorderView) {
@@ -441,6 +453,8 @@ impl RecorderRun {
                 .name("hertzforge-recorder-pump".into())
                 .spawn(move || {
                     run.pump(&svc, programmed, hardware);
+                    // This thread's handle on the service goes before it says it is done.
+                    drop(svc);
                     done.store(true, Ordering::SeqCst);
                 });
         }
@@ -449,8 +463,17 @@ impl RecorderRun {
             let _ = std::thread::Builder::new()
                 .name("hertzforge-recorder-run".into())
                 .spawn(move || {
-                    let _guard = guard;
-                    run.watch(&svc, &pump_done, records, warnings);
+                    let last = run.watch(&svc, &pump_done, records, warnings);
+                    // The run is finished only once the hardware is free: the service (and with
+                    // it the station) goes, then the lock, then the finished state is published.
+                    // Published first, a start sent on it found the lock still held and was
+                    // refused as if another program held the NI hardware.
+                    drop(svc);
+                    run.release_service();
+                    drop(guard);
+                    if let Some(v) = last {
+                        run.publish(v);
+                    }
                 });
         }
         Ok(())
@@ -661,7 +684,7 @@ impl RecorderRun {
         pump_done: &AtomicBool,
         records: Records,
         warnings: Warnings,
-    ) {
+    ) -> Option<RecorderView> {
         let fs_asked = self.wire.fs_hz;
         let mut free: Option<u64> = None;
         let mut free_read: Option<Instant> = None;
@@ -798,14 +821,15 @@ impl RecorderRun {
                     })).collect::<Vec<_>>(),
                 }));
             }
-            self.publish(v);
             if finished {
-                // The log's last lines.
+                // The log's last lines; the caller publishes the finished state once the
+                // hardware is free.
                 for e in self.shared.log_since(log_written).0.iter() {
                     records.log(&[e.to_json()]);
                 }
-                break;
+                return Some(v);
             }
+            self.publish(v);
             let _ = fs_asked;
             std::thread::sleep(PUBLISH_PERIOD);
         }
@@ -1034,11 +1058,11 @@ impl RecorderRun {
 
     /// The run's marks from `since`.
     pub fn marks(&self, since: u64) -> (Vec<Value>, u64) {
-        let Some(svc) = self.service() else {
-            return (Vec::new(), 0);
+        // Once the run has ended its service is released: its marks were kept.
+        let all: Vec<Mark> = match self.service() {
+            Some(svc) => self.handoff.take(&svc).marks().to_vec(),
+            None => lock(&self.final_marks).clone(),
         };
-        let s = self.handoff.take(&svc);
-        let all = s.marks();
         let next = all.len() as u64;
         (
             all.iter()
