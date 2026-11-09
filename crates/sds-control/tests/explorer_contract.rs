@@ -1,11 +1,8 @@
-//! The Explorer contract before the service serves it (schema/PROTOCOL.md, "Explorer").
+//! The Explorer contract (schema/PROTOCOL.md, "Explorer").
 //!
-//! Two things are pinned until the `explorer.*` methods ship. Every method in the
-//! contract's table is refused `unknown_method`, as the section's status line says, so
-//! the line cannot go stale while the service grows. And the configuration defaults the
-//! contract states are the Explorer core's own, with the stop budget's arithmetic, so the
-//! wire's defaults and the core's cannot drift apart unseen. When the methods ship, the
-//! first test becomes the positive one and the status line goes.
+//! Every method in the contract's table is the service's; and the configuration defaults
+//! the contract states are the Explorer core's own, with the stop budget's arithmetic, so
+//! the wire's defaults and the core's cannot drift apart unseen.
 
 use hertzforge_explorer_host::slew::SlewLimits;
 use hertzforge_explorer_host::{AmplitudeRamp, ExplorerHostConfig};
@@ -33,21 +30,34 @@ const EXPLORER_METHODS: [&str; 15] = [
 ];
 
 #[tokio::test]
-async fn explorer_methods_are_refused_until_the_service_serves_them() {
+async fn explorer_methods_are_served() {
     let svc = Service::new();
     let conn = svc.connect("explorer contract".into());
-    // A method the service does serve answers, so the refusals below are the dispatch's
-    // answer and not a service that answers nothing.
-    assert!(svc.call(&conn, "session.state", &Map::new()).await.is_ok());
+    // Every method of the contract's table is the service's: none is an unknown method,
+    // whatever it answers without a configuration or control.
     for method in EXPLORER_METHODS {
-        match svc.call(&conn, method, &Map::new()).await {
-            Ok(_) => panic!(
-                "{method} answered: the service now serves Explorer, so PROTOCOL.md's status \
-                 line and this test must change with it"
-            ),
-            Err(e) => assert_eq!(e.code, ErrorCode::UnknownMethod, "{method}: {e:?}"),
+        if let Err(e) = svc.call(&conn, method, &Map::new()).await {
+            assert_ne!(e.code, ErrorCode::UnknownMethod, "{method}: {e:?}");
         }
     }
+    // The read-only ones answer.
+    for method in [
+        "explorer.state",
+        "explorer.config",
+        "explorer.log",
+        "explorer.survey",
+    ] {
+        assert!(
+            svc.call(&conn, method, &Map::new()).await.is_ok(),
+            "{method}"
+        );
+    }
+    // A method the contract does not have still is one.
+    let e = svc
+        .call(&conn, "explorer.nope", &Map::new())
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::UnknownMethod);
 }
 
 #[test]

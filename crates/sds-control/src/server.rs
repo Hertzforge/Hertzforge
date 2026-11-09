@@ -50,6 +50,8 @@ mod srs_methods;
 #[path = "server_sine.rs"]
 mod sine_methods;
 
+#[path = "server_explorer.rs"]
+mod explorer_methods;
 #[path = "server_twr.rs"]
 mod twr_methods;
 
@@ -74,7 +76,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 38] = [
+const DRIVE_METHODS: [&str; 41] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -113,6 +115,9 @@ const DRIVE_METHODS: [&str; 38] = [
     "twr.iterate",
     "twr.play",
     "twr.level",
+    "explorer.start",
+    "explorer.steer",
+    "explorer.sweep",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -137,7 +142,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     sine.state, sine.log, sine.subscribe, twr.configure, twr.config, twr.reference.import, \
     twr.reference.preview, twr.arm, twr.start, twr.proceed, twr.iterate, twr.play, twr.level, \
     twr.freeze, twr.stop, twr.abort, twr.reset, twr.clear, twr.state, twr.log, twr.subscribe, \
-    twr.plays, twr.record, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
+    twr.plays, twr.record, explorer.configure, explorer.config, explorer.start, explorer.steer, \
+    explorer.sweep, explorer.hold, explorer.stop, explorer.abort, explorer.survey, \
+    explorer.survey.clear, explorer.reset, explorer.clear, explorer.state, explorer.log, \
+    explorer.subscribe, laws.list, laws.import, laws.check, sim.profiles, sim.start, \
     sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -252,6 +260,7 @@ pub enum Feed {
     Srs,
     Sine,
     Twr,
+    Explorer,
 }
 
 /// A frame for every connection.
@@ -367,6 +376,12 @@ struct Inner {
     twr_log_sent: (String, u64),
     twr_rows_sent: u64,
     twr_ident_sent: bool,
+    /// The Explorer configuration and its run, beside the others, and what of it has
+    /// been sent.
+    explorer: Option<Arc<crate::explorer::run::ExplorerRun>>,
+    explorer_runs: u64,
+    explorer_state_key: String,
+    explorer_log_sent: (String, u64),
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -402,6 +417,12 @@ impl Inner {
         self.twr.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
+    fn explorer_live(&self) -> bool {
+        self.explorer
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     /// Any run live, Random, MIMO, classical shock, SRS shock, Sine or TWR: what
     /// the session's orphan clock guards.
     fn any_live(&self) -> bool {
@@ -411,6 +432,7 @@ impl Inner {
             || self.srs_live()
             || self.sine_live()
             || self.twr_live()
+            || self.explorer_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -499,6 +521,21 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.explorer {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "Explorer run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         Ok(())
     }
 
@@ -552,6 +589,18 @@ pub struct Service {
     /// TWR runs' publishes, in order.
     twr_notify: mpsc::UnboundedSender<crate::twr::run::Notice>,
     twr_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::twr::run::Notice>>>,
+    /// The connections with an Explorer display subscription.
+    explorer_displays: std::sync::Mutex<HashMap<ConnId, explorer_methods::ExplorerDisplay>>,
+    /// Explorer runs' publishes, in order.
+    explorer_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::explorer::view::ExplorerView>>,
+    explorer_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<
+                crate::pulse::rails::Notice<crate::explorer::view::ExplorerView>,
+            >,
+        >,
+    >,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -588,6 +637,7 @@ impl Service {
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
+        let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
@@ -619,6 +669,10 @@ impl Service {
                 twr_log_sent: (String::new(), 0),
                 twr_rows_sent: 0,
                 twr_ident_sent: false,
+                explorer: None,
+                explorer_runs: 0,
+                explorer_state_key: String::new(),
+                explorer_log_sent: (String::new(), 0),
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -644,6 +698,9 @@ impl Service {
             twr_displays: std::sync::Mutex::new(HashMap::new()),
             twr_notify,
             twr_notices: std::sync::Mutex::new(Some(twr_notices)),
+            explorer_displays: std::sync::Mutex::new(HashMap::new()),
+            explorer_notify,
+            explorer_notices: std::sync::Mutex::new(Some(explorer_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -707,6 +764,7 @@ impl Service {
             Feed::Srs => self.srs_displays().contains_key(&conn),
             Feed::Sine => self.sine_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
+            Feed::Explorer => self.explorer_displays().contains_key(&conn),
         }
     }
 
@@ -828,6 +886,15 @@ impl Service {
                 }
             });
         }
+        let explorer_notices = self.explorer_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = explorer_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.explorer_changed(&run_id, &view).await;
+                }
+            });
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -895,8 +962,16 @@ impl Service {
             let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
+            let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = explorer {
+                explorer_methods::stop_explorer(
+                    &s,
+                    hertzforge_explorer_host::StopCause::SafeStop,
+                    "the service (nobody held control)".into(),
+                );
+            }
             if let Some(s) = twr {
                 twr_methods::stop_twr(
                     &s,
@@ -958,7 +1033,7 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
-        let (random, sim, shock, srs, sine, twr) = {
+        let (random, sim, shock, srs, sine, twr, explorer) = {
             let inner = self.inner.lock().await;
             (
                 inner.random.clone(),
@@ -967,7 +1042,37 @@ impl Service {
                 inner.srs.clone(),
                 inner.sine.clone(),
                 inner.twr.clone(),
+                inner.explorer.clone(),
             )
+        };
+        // An Explorer run takes its controlled stop, the ramp at its drive slew.
+        // Should it still be live well after (twice its stop, at least ten seconds),
+        // it is aborted.
+        let explorer_said = match explorer.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                explorer_methods::stop_explorer(
+                    &s,
+                    hertzforge_explorer_host::StopCause::Shutdown,
+                    rrun::SHUTDOWN_BY.into(),
+                );
+                let asked = Instant::now();
+                let patience = explorer_methods::wait_for(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        let host = s.host.clone();
+                        let _ = tokio::task::spawn_blocking(move || host.abort("shutdown")).await;
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
         };
         // A TWR run takes its controlled stop: nothing more plays, and a play in
         // flight is cancelled at its next block and brought to rest. Should it still
@@ -1072,7 +1177,11 @@ impl Service {
             let _ = tokio::task::spawn_blocking(move || sim.wait(STOP_WAIT)).await;
         }
         let Some(run) = random.filter(|r| r.view().state.is_live()) else {
-            return shock_said.or(srs_said).or(sine_said).or(twr_said);
+            return shock_said
+                .or(srs_said)
+                .or(sine_said)
+                .or(twr_said)
+                .or(explorer_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -1124,6 +1233,7 @@ impl Service {
         self.srs_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
+        self.explorer_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
             // Nobody holds control now: a TWR run starts no new play until control
@@ -1373,6 +1483,21 @@ impl Service {
             "twr.play" => self.twr_play(conn).await,
             "twr.level" => self.twr_level(conn, params).await,
             "twr.freeze" => self.twr_freeze(conn, params).await,
+            "explorer.configure" => self.explorer_configure(conn, params).await,
+            "explorer.config" => Ok(self.explorer_config().await),
+            "explorer.start" => self.explorer_start(conn).await,
+            "explorer.steer" => self.explorer_steer(conn, params).await,
+            "explorer.sweep" => self.explorer_sweep(conn, params).await,
+            "explorer.hold" => self.explorer_hold(conn).await,
+            "explorer.stop" => self.explorer_end(conn, false).await,
+            "explorer.abort" => self.explorer_end(conn, true).await,
+            "explorer.survey" => self.explorer_survey(params).await,
+            "explorer.survey.clear" => self.explorer_survey_clear(conn).await,
+            "explorer.reset" => self.explorer_reset(conn).await,
+            "explorer.clear" => self.explorer_clear(conn).await,
+            "explorer.state" => Ok(self.explorer_state_now().await),
+            "explorer.log" => self.explorer_log(params).await,
+            "explorer.subscribe" => self.explorer_subscribe(conn, params).await,
             "twr.stop" => self.twr_end(conn, false).await,
             "twr.abort" => self.twr_end(conn, true).await,
             "twr.reset" => self.twr_reset(conn).await,
@@ -1875,6 +2000,7 @@ impl Service {
                 || inner.srs_live()
                 || inner.sine_live()
                 || inner.twr_live()
+                || inner.explorer_live()
             {
                 inner.run_active()?;
             }
@@ -2153,6 +2279,7 @@ impl Service {
             || inner.srs_live()
             || inner.sine_live()
             || inner.twr_live()
+            || inner.explorer_live()
         {
             inner.run_active()?;
         }
