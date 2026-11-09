@@ -627,16 +627,20 @@ fn explorer_the_run_host_hands_on_the_survey_the_intents_and_each_blocks_frame()
         "the end",
         |v| matches!(v, HostView::Status(st) if st.state.is_terminal()),
     );
-    let end = match host.snapshot().view {
-        HostView::Status(st) => st,
-        other => panic!("{other:?}"),
-    };
-    assert_eq!(end.stop, Some(StopCause::SafeStop));
     let deadline = Instant::now() + Duration::from_secs(5);
     while !seen.lock().unwrap().finished {
         assert!(Instant::now() < deadline, "the pump finishes");
         std::thread::sleep(Duration::from_millis(5));
     }
+    // The status AFTER the pump's final pass: that pass drains the blocks still in the
+    // ring and can record one more survey point, so a status read the moment the run
+    // turned terminal can trail the last line handed on by one revision (seen once under
+    // load, 2026-11-09).
+    let end = match host.snapshot().view {
+        HostView::Status(st) => st,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(end.stop, Some(StopCause::SafeStop));
     let s = seen.lock().unwrap();
 
     // The intents, in order, as the answers named them.
