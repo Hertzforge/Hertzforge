@@ -61,8 +61,8 @@ use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
 pub use config::{MetaField, RecState, RecorderConfig};
 pub use report::{
-    ChannelMeter, ChannelRow, ChannelStat, EventLog, FrfSnapshot, Honesty, RecEvent, RecStatus,
-    RecordingInfoLite, ReportData, SessionRecording,
+    ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Honesty, RecEvent,
+    RecStatus, RecordingInfoLite, ReportData, RunFault, SessionRecording,
 };
 
 /// The process step of a capture-only run: it reads and produces nothing.
@@ -333,6 +333,8 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     last_fire_station_frame: Option<u64>,
     /// Recordings finished since start.
     recordings_saved: u64,
+    /// How the run ended on its own, if it did.
+    run_fault: Option<RunFault>,
 
     /// Scheduling faults this run has seen: at most one, since one ends the run.
     scheduling_faults: u64,
@@ -484,6 +486,7 @@ impl<B: Backend> RecorderService<B> {
             trigger_fires: 0,
             last_fire_station_frame: None,
             recordings_saved: 0,
+            run_fault: None,
             scheduling_faults: 0,
         })
     }
@@ -531,6 +534,27 @@ impl<B: Backend> RecorderService<B> {
     /// for 8192); the run records at the programmed rate and states both.
     pub fn actual_rate_hz(&self) -> f64 {
         self.fs_hz
+    }
+
+    /// The free-space floor a recording keeps: the larger of the floor asked (the
+    /// writer's least, 1 GiB, when none) and twice a timed recording's bytes, its
+    /// pre-window included.
+    pub fn floor_bytes(&self) -> u64 {
+        let keep = self
+            .cfg
+            .keep_free_bytes
+            .unwrap_or(hertzforge_capture::MIN_FREE_FLOOR_BYTES);
+        let pre = (self
+            .cfg
+            .pretrigger_s
+            .unwrap_or(DEFAULT_PRETRIGGER_S)
+            .clamp(0.0, crate::trigger::MAX_PRETRIGGER_S)
+            * self.fs_hz)
+            .round() as u64;
+        let twice = self
+            .timed_record_frames()
+            .map_or(0, |f| 2 * (f + pre) * self.n_input as u64 * 4);
+        keep.max(twice)
     }
 
     /// The acquisition selection at the programmed rate.
@@ -740,6 +764,12 @@ impl<B: Backend> RecorderService<B> {
         // The frames read before any stop are kept: they are drained first.
         self.drain_segment(&interleaved, frames)?;
 
+        // A recording that cannot be written ends the run, read every pass.
+        if let Some(words) = self.rec.as_ref().and_then(|r| r.fault()) {
+            self.end_with(EndCause::WriteFailed, words.clone());
+            return Err(RecorderError::Io(words));
+        }
+
         let words = match report.reason {
             // The batch's budget: the normal end of a batch.
             StopReason::InputEnded if report.ticks >= BLOCKS_PER_BATCH => return Ok(frames),
@@ -763,7 +793,7 @@ impl<B: Backend> RecorderService<B> {
             }
             other => format!("the engine stopped: {other:?}"),
         };
-        self.fault(words.clone());
+        self.end_with(EndCause::Fault, words.clone());
         Err(RecorderError::Backend(words))
     }
 
@@ -787,11 +817,20 @@ impl<B: Backend> RecorderService<B> {
         Ok(read)
     }
 
-    /// Latch the service Faulted, finalizing any active recording and tearing
-    /// the backend down, with the fault message logged.
-    fn fault(&mut self, msg: String) {
+    /// End the run on its own, once: the cause and its words logged and held, the
+    /// recording in progress finalized with what reached the disk, the station torn
+    /// down.
+    fn end_with(&mut self, cause: EndCause, msg: String) {
+        if self.run_fault.is_some() {
+            return;
+        }
         self.log
             .push(self.session_seconds(), format!("FAULT: {msg}"));
+        self.run_fault = Some(RunFault {
+            cause,
+            message: msg,
+            station_frame: self.session_frames,
+        });
         if self.recording {
             let _ = self.finish_recording();
         }
@@ -968,6 +1007,7 @@ impl<B: Backend> RecorderService<B> {
             table: self.record_table.clone(),
             acq: self.acq_now(),
             requested_fs_hz: self.cfg.acq.native_rate_hz,
+            floor_bytes: self.floor_bytes(),
             pretrigger,
         });
         let real_name = run_name;
@@ -1215,6 +1255,7 @@ impl<B: Backend> RecorderService<B> {
                 0
             },
             write_fault: self.rec.as_ref().and_then(|r| r.fault()),
+            run_fault: self.run_fault.clone(),
         }
     }
 

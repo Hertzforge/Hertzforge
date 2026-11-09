@@ -69,7 +69,7 @@ fn bit_exact_round_trip_with_pretrigger_and_trigger_t0() {
     // The PROVISIONAL recorder.json exists before any data is finalized.
     let provisional_text = std::fs::read_to_string(writer.run_dir().join("recorder.json")).unwrap();
     let provisional: RecorderSidecar = serde_json::from_str(&provisional_text).unwrap();
-    assert!(!provisional.clean);
+    assert!(!provisional.complete);
     assert_eq!(provisional.pretrigger_frames, 40);
     assert_eq!(provisional.trigger_frame_global, Some(40));
     assert_eq!(provisional.t0_convention, "trigger");
@@ -163,7 +163,7 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
     std::fs::write(run_dir.join("telemetry.f32"), &bytes).unwrap();
 
     let provisional = RecorderSidecar {
-        clean: false,
+        complete: false,
         config: acq_at(2048.0),
         pretrigger_frames: 0,
         trigger_frame_global: None,
@@ -172,6 +172,8 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
         n_channels: 3,
         requested_fs_hz: 2048.0,
         fs_hz: 2048.0,
+        frames: 0,
+        fault: None,
     };
     std::fs::write(
         run_dir.join("recorder.json"),

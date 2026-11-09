@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use hertzforge_capture::DEFAULT_FLUSH_INTERVAL;
+use hertzforge_capture::{DurabilityConfig, FreeSpaceFloor, DEFAULT_FLUSH_INTERVAL};
 use hertzforge_channel_table::ChannelTable;
 
 use crate::acq::AcquisitionConfig;
@@ -31,6 +31,10 @@ pub struct RecordingSpec {
     pub acq: AcquisitionConfig,
     /// The rate asked of the station, Hz.
     pub requested_fs_hz: f64,
+    /// The free space the recording leaves on the data volume, bytes: it is not
+    /// begun under it, and it stops writing, with the fault stated, if the volume
+    /// falls under it.
+    pub floor_bytes: u64,
     /// The trigger that began it, if any; its pre-window is the file's first frames.
     pub pretrigger: Option<TriggerEvent>,
 }
@@ -97,6 +101,11 @@ impl RecordStore for WriterStore {
             spec.pretrigger,
             WriterFacts {
                 requested_fs_hz: Some(spec.requested_fs_hz),
+                durability: DurabilityConfig {
+                    flush_interval: self.flush_interval,
+                    free_space_floor: FreeSpaceFloor::Bytes(spec.floor_bytes),
+                    allow_unknown_free_space: false,
+                },
                 ..WriterFacts::default()
             },
         )

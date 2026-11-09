@@ -18,7 +18,9 @@
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use hertzforge_capture::{disk_budget_max_seconds, CaptureConfig, CaptureSidecar, CaptureSink};
+use hertzforge_capture::{
+    disk_budget_max_seconds, CaptureConfig, CaptureSidecar, CaptureSink, DurabilityConfig,
+};
 use hertzforge_channel_table::ChannelTable;
 use serde::{Deserialize, Serialize};
 
@@ -53,10 +55,11 @@ pub struct GapRecord {
 /// any data, finalized at [`RecordingWriter::finish`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecorderSidecar {
-    /// `false` until the writer finishes cleanly. A run found on disk with
-    /// `clean: false` died mid-run (or mid-finalize) and must be recovered
-    /// from the file itself.
-    pub clean: bool,
+    /// `false` until the recording is finalized. A recording found on disk with
+    /// `complete: false` was cut short by a crash, and its file holds what reached
+    /// the disk.
+    #[serde(alias = "clean")]
+    pub complete: bool,
     /// The acquisition selection at record time (analysis-side settings ride
     /// along for review; capture itself is always native / decimation 1).
     pub config: AcquisitionConfig,
@@ -79,6 +82,12 @@ pub struct RecorderSidecar {
     /// The rate the station programmed, Hz: the file is at this rate.
     #[serde(alias = "native_rate_hz")]
     pub fs_hz: f64,
+    /// The frames written, as the writer counted them (0 until finalized).
+    #[serde(default)]
+    pub frames: u64,
+    /// The write fault's words, if writing stopped on one.
+    #[serde(default)]
+    pub fault: Option<String>,
 }
 
 /// Summary returned by [`RecordingWriter::finish`].
@@ -182,6 +191,8 @@ pub struct WriterFacts {
     pub requested_fs_hz: Option<f64>,
     /// The writer's ring depth, in chunks.
     pub ring_capacity: usize,
+    /// The flush cadence and the free-space floor the writer keeps.
+    pub durability: DurabilityConfig,
 }
 
 impl Default for WriterFacts {
@@ -189,6 +200,7 @@ impl Default for WriterFacts {
         Self {
             requested_fs_hz: None,
             ring_capacity: DEFAULT_RING_CAPACITY,
+            durability: DurabilityConfig::default(),
         }
     }
 }
@@ -315,7 +327,7 @@ impl RecordingWriter {
         write_recorder_sidecar(
             &run_dir,
             &RecorderSidecar {
-                clean: false,
+                complete: false,
                 config: acq.clone(),
                 pretrigger_frames,
                 trigger_frame_global,
@@ -324,6 +336,8 @@ impl RecordingWriter {
                 n_channels,
                 requested_fs_hz,
                 fs_hz: acq.native_rate_hz,
+                frames: 0,
+                fault: None,
             },
         )?;
 
@@ -331,7 +345,15 @@ impl RecordingWriter {
         cfg.ring_capacity = ring_capacity;
         let run_config_json = serde_json::to_string(acq)
             .map_err(|e| io::Error::other(format!("acquisition config serialize: {e}")))?;
-        let sink = CaptureSink::start(data_root, &name, cfg, table, run_config_json)?;
+        let sink = CaptureSink::start_durable(
+            data_root,
+            &name,
+            cfg,
+            table,
+            run_config_json,
+            facts.durability,
+        )
+        .map_err(io::Error::from)?;
 
         // ~100 ms of frames, rounded up to a power of two (8,192 at 65,536 Hz).
         let chunk_frames = ((acq.native_rate_hz * 0.1).round() as usize)
@@ -462,7 +484,7 @@ impl RecordingWriter {
         write_recorder_sidecar(
             &self.run_dir,
             &RecorderSidecar {
-                clean: true,
+                complete: true,
                 config: self.acq.clone(),
                 pretrigger_frames: self.pretrigger_frames,
                 trigger_frame_global: self.trigger_frame_global,
@@ -471,6 +493,8 @@ impl RecordingWriter {
                 n_channels: self.n_channels,
                 requested_fs_hz: self.requested_fs_hz,
                 fs_hz: self.acq.native_rate_hz,
+                frames: capture_sidecar.frames_written,
+                fault: capture_sidecar.fault.clone(),
             },
         )?;
 
@@ -609,7 +633,7 @@ impl RecordingReader {
 
         let recovered = capture_sidecar.is_none();
         let clean = match &recorder_sidecar {
-            Some(r) => r.clean,
+            Some(r) => r.complete,
             // Legacy testkit-only run: capture.json presence is the best signal.
             None => capture_sidecar.is_some(),
         };

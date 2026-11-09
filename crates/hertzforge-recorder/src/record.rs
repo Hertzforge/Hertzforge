@@ -13,9 +13,10 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crate::recording::RecordingSummary;
 use crate::store::{RecordStore, RecordingSpec};
@@ -163,13 +164,34 @@ impl Drop for RecordThread {
     }
 }
 
+/// How often an idle record thread reads the store's frames on disk and fault again:
+/// the store's own writer moves them between commands.
+const REFRESH: Duration = Duration::from_millis(20);
+
+fn refresh(store: &dyn RecordStore, shared: &Shared) {
+    shared
+        .on_disk
+        .store(store.frames_on_disk(), Ordering::SeqCst);
+    if let Some(f) = store.fault() {
+        *lock(&shared.fault) = Some(f);
+    }
+}
+
 fn run(
     mut store: Box<dyn RecordStore>,
     rx: Receiver<Cmd>,
     shared: Arc<Shared>,
 ) -> Box<dyn RecordStore> {
     let mut name: Option<String> = None;
-    while let Ok(cmd) = rx.recv() {
+    loop {
+        let cmd = match rx.recv_timeout(REFRESH) {
+            Ok(cmd) => cmd,
+            Err(RecvTimeoutError::Timeout) => {
+                refresh(store.as_ref(), &shared);
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
         match cmd {
             Cmd::Start(spec) => {
                 let asked = spec.name.clone();
@@ -201,12 +223,7 @@ fn run(
                 break;
             }
         }
-        shared
-            .on_disk
-            .store(store.frames_on_disk(), Ordering::SeqCst);
-        if let Some(f) = store.fault() {
-            *lock(&shared.fault) = Some(f);
-        }
+        refresh(store.as_ref(), &shared);
         shared.pending.fetch_sub(1, Ordering::SeqCst);
     }
     store

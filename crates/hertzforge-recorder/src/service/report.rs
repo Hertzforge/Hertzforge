@@ -184,6 +184,31 @@ pub struct RecStatus {
     /// The writer's fault in its own words, if writing has failed.
     #[serde(default)]
     pub write_fault: Option<String>,
+    /// How the run ended on its own, if it did.
+    #[serde(default)]
+    pub run_fault: Option<RunFault>,
+}
+
+/// Why a run ended on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndCause {
+    /// The station or the service's loop failed (an input buffer overflow, a lost
+    /// device, an input stall, an ended input stream).
+    Fault,
+    /// A write failed, or the free space fell under the floor.
+    WriteFailed,
+    /// The disk fell so far behind that a batch could not be queued.
+    WriteBehind,
+}
+
+/// How a run ended on its own: the cause, its words, and the station frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunFault {
+    pub cause: EndCause,
+    pub message: String,
+    /// The station frames read when it ended.
+    pub station_frame: u64,
 }
 
 /// A single event in the recorder log: a monotonic session-second timestamp +

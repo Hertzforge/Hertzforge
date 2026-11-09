@@ -239,9 +239,10 @@ fn recorder_status_names_the_writer_fault_in_its_words() {
     svc.start_monitor().unwrap();
     svc.record_now().unwrap();
     assert_eq!(svc.status(u64::MAX).write_fault, None);
-    // The record thread takes the frames; its fault is read once it has.
+    // The record thread takes the frames; its fault is read once it has (and ends
+    // the run, so the pass that reads it answers an error).
     for _ in 0..500 {
-        svc.pump_frames(1024).unwrap();
+        let _ = svc.pump_frames(1024);
         if svc.status(u64::MAX).write_fault.is_some() {
             break;
         }
