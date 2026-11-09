@@ -449,6 +449,12 @@ impl RecordingWriter {
         self.n_channels
     }
 
+    /// Note frames this recording never received (the queue to the record thread
+    /// could not take them), at the file position they would have started at.
+    pub fn note_gap(&mut self, gap: GapRecord) {
+        self.gaps.push(gap);
+    }
+
     /// Frames the writer thread has written to `telemetry.f32` so far.
     pub fn frames_written(&self) -> u64 {
         self.sink.frames_written()

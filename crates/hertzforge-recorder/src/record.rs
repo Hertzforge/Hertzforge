@@ -18,13 +18,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::recording::RecordingSummary;
+use crate::recording::{GapRecord, RecordingSummary};
 use crate::store::{RecordStore, RecordingSpec};
 
 /// What the record thread is asked to do, in order.
 enum Cmd {
     Start(Box<RecordingSpec>),
     Frames(Vec<f32>, usize),
+    Gap(GapRecord),
     Finish,
     Quit,
 }
@@ -111,6 +112,11 @@ impl RecordThread {
         true
     }
 
+    /// Note frames the recording in progress never received. Returns at once.
+    pub fn gap(&self, gap: GapRecord) {
+        self.send(Cmd::Gap(gap));
+    }
+
     /// Finish the recording in progress. Returns at once; its summary comes back
     /// through [`RecordThread::take_finished`].
     pub fn finish(&self) {
@@ -147,11 +153,13 @@ impl RecordThread {
         self.shared.pending.load(Ordering::SeqCst) == 0
     }
 
-    /// Finish everything queued, stop the thread and give the store back. Waits for
-    /// the disk: never called on the thread that reads the station while it reads.
-    pub fn close(mut self) -> Option<Box<dyn RecordStore>> {
+    /// Finish everything queued, stop the thread, and give back the store and the
+    /// recordings finished and not yet collected. Waits for the disk: never called on
+    /// the thread that reads the station while it reads.
+    pub fn close(mut self) -> (Option<Box<dyn RecordStore>>, Vec<Finished>) {
         let _ = self.tx.send(Cmd::Quit);
-        self.join.take().and_then(|j| j.join().ok())
+        let store = self.join.take().and_then(|j| j.join().ok());
+        (store, self.take_finished())
     }
 }
 
@@ -208,6 +216,11 @@ fn run(
                     store.push(&frames, n);
                 }
                 shared.queued.fetch_sub(n as u64, Ordering::SeqCst);
+            }
+            Cmd::Gap(gap) => {
+                if name.is_some() {
+                    store.gap(gap);
+                }
             }
             Cmd::Finish => {
                 if let Some(asked) = name.take() {

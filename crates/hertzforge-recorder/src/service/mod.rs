@@ -55,7 +55,7 @@ use crate::analysis::{
     TimeStatsAccumulator,
 };
 use crate::record::RecordThread;
-use crate::recording::{recorder_disk_budget_seconds, RecordingInfo, RecordingReader};
+use crate::recording::{recorder_disk_budget_seconds, GapRecord, RecordingInfo, RecordingReader};
 use crate::store::{RecordStore, RecordingSpec, WriterStore};
 use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
@@ -289,8 +289,15 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// recording's files.
     rec: Option<RecordThread>,
     /// The recordings handed to the record thread to finish, oldest first, with
-    /// their pre-windows, until it reports them.
-    finishing: std::collections::VecDeque<u64>,
+    /// their pre-windows and the gaps the service recorded, until it reports them.
+    finishing: std::collections::VecDeque<(u64, Vec<GapRecord>)>,
+    /// Frames of the recording in progress the record thread took (the file's next
+    /// position).
+    record_queued: u64,
+    /// Gaps the service recorded in the recording in progress.
+    record_gaps: Vec<GapRecord>,
+    /// The disk fell behind on this pass: its words.
+    behind: Option<String>,
     /// Whether a recording is in progress in the store.
     recording: bool,
     /// Frames written to the active recording.
@@ -466,6 +473,9 @@ impl<B: Backend> RecorderService<B> {
             store: Some(Box::new(WriterStore::default())),
             rec: None,
             finishing: std::collections::VecDeque::new(),
+            record_queued: 0,
+            record_gaps: Vec::new(),
+            behind: None,
             recording: false,
             record_frames: 0,
             record_target_frames: None,
@@ -668,8 +678,7 @@ impl<B: Backend> RecorderService<B> {
     /// what it reports, and take the store back. Called once acquisition has ended.
     fn close_record_thread(&mut self) {
         if let Some(rec) = self.rec.take() {
-            let reported = rec.take_finished();
-            let store = rec.close();
+            let (store, reported) = rec.close();
             self.collect_finished(reported);
             if let Some(store) = store {
                 self.store = Some(store);
@@ -689,7 +698,7 @@ impl<B: Backend> RecorderService<B> {
 
     fn collect_finished(&mut self, reported: Vec<crate::record::Finished>) {
         for f in reported {
-            let pre = self.finishing.pop_front().unwrap_or(0);
+            let (pre, service_gaps) = self.finishing.pop_front().unwrap_or_default();
             let session_s = self.session_seconds();
             let summary = match f.result {
                 Ok(s) => s,
@@ -701,6 +710,13 @@ impl<B: Backend> RecorderService<B> {
             };
             self.recordings_saved += 1;
             let name = f.name;
+            let mut summary = summary;
+            for g in service_gaps {
+                if !summary.gaps.contains(&g) {
+                    summary.gaps.push(g);
+                    summary.gap_free = false;
+                }
+            }
             self.log.push(
                 session_s,
                 format!(
@@ -764,6 +780,11 @@ impl<B: Backend> RecorderService<B> {
         // The frames read before any stop are kept: they are drained first.
         self.drain_segment(&interleaved, frames)?;
 
+        // A disk too far behind to take a batch ends the run, the gap recorded.
+        if let Some(words) = self.behind.take() {
+            self.end_with(EndCause::WriteBehind, words.clone());
+            return Err(RecorderError::Io(words));
+        }
         // A recording that cannot be written ends the run, read every pass.
         if let Some(words) = self.rec.as_ref().and_then(|r| r.fault()) {
             self.end_with(EndCause::WriteFailed, words.clone());
@@ -909,12 +930,36 @@ impl<B: Backend> RecorderService<B> {
     }
 
     /// Hand frames of the recording in progress to the record thread, never waiting.
+    /// Frames the queue cannot take are a gap, and the run ends at the pass's end
+    /// (`behind`): a disk that far behind cannot be caught up from.
     fn hand_to_record_thread(&mut self, frames: &[f32], n: usize) {
-        let queued = self.rec.as_ref().is_some_and(|r| r.push(frames, n));
-        self.record_frames += n as u64;
-        if !queued {
-            self.record_gap_free = false;
+        if self.behind.is_some() {
+            return;
         }
+        let Some(rec) = self.rec.as_ref() else {
+            return;
+        };
+        self.record_frames += n as u64;
+        if rec.push(frames, n) {
+            self.record_queued += n as u64;
+            return;
+        }
+        let gap = GapRecord {
+            at_frame: self.record_queued,
+            dropped_frames: n as u64,
+        };
+        rec.gap(gap.clone());
+        self.record_gaps.push(gap);
+        self.record_gap_free = false;
+        let behind_s = (self.record_frames - n as u64).saturating_sub(rec.frames_on_disk()) as f64
+            / self.fs_hz;
+        self.behind = Some(format!(
+            "the disk fell {behind_s:.1} s behind the inputs and the record thread's \
+             {:.1} s queue could not take a batch; {} ends at file frame {}",
+            Self::RECORD_QUEUE_S,
+            self.active_run_name.clone().unwrap_or_default(),
+            self.record_queued
+        ));
     }
 
     /// Feed the analysis pipelines (per-channel spectra + stats + optional
@@ -1013,6 +1058,8 @@ impl<B: Backend> RecorderService<B> {
         let real_name = run_name;
         self.recording = true;
         self.record_frames = pre_frames;
+        self.record_queued = pre_frames;
+        self.record_gaps.clear();
         self.record_gap_free = true;
         self.record_pretrigger_frames = pre_frames;
         self.active_run_name = Some(real_name.clone());
@@ -1075,7 +1122,11 @@ impl<B: Backend> RecorderService<B> {
         if let Some(rec) = self.rec.as_ref() {
             rec.finish();
         }
-        self.finishing.push_back(self.record_pretrigger_frames);
+        self.finishing.push_back((
+            self.record_pretrigger_frames,
+            std::mem::take(&mut self.record_gaps),
+        ));
+        self.record_queued = 0;
         self.record_frames = 0;
         self.record_target_frames = None;
         self.record_gap_free = true;

@@ -14,7 +14,7 @@ use hertzforge_capture::{DurabilityConfig, FreeSpaceFloor, DEFAULT_FLUSH_INTERVA
 use hertzforge_channel_table::ChannelTable;
 
 use crate::acq::AcquisitionConfig;
-use crate::recording::{RecordingSummary, RecordingWriter, WriterFacts};
+use crate::recording::{GapRecord, RecordingSummary, RecordingWriter, WriterFacts};
 use crate::trigger::TriggerEvent;
 
 /// What a recording is, given to the store when it begins.
@@ -56,6 +56,8 @@ pub trait RecordStore: Send {
     fn gap_free(&self) -> bool {
         true
     }
+    /// Note frames the recording in progress never received, at a file position.
+    fn gap(&mut self, _gap: GapRecord) {}
 }
 
 /// The crate's own writer behind the seam.
@@ -143,5 +145,11 @@ impl RecordStore for WriterStore {
 
     fn gap_free(&self) -> bool {
         self.writer.as_ref().is_none_or(|w| w.gaps().is_empty())
+    }
+
+    fn gap(&mut self, gap: GapRecord) {
+        if let Some(w) = self.writer.as_mut() {
+            w.note_gap(gap);
+        }
     }
 }
