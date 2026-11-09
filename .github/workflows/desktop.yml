@@ -2,8 +2,8 @@ name: desktop
 
 # The desktop app (desktop/, docs/desktop-app.md): its own lint, tests and
 # dependency checks, and its installers for macOS, Windows and Linux. It is not a
-# required check. A tag v* builds them and drafts a release with the signed macOS
-# images on it, to be looked at and published by hand (publishing is what starts
+# required check. A tag v* builds them and drafts a release with all of them on it
+# (the macOS images signed), to be looked at and published by hand (publishing is what starts
 # release.yml). A run started by hand on main builds them as a test and publishes
 # nothing; its images are artifacts, for a maintainer to try. A push to the desktop
 # branch on a maintainer's fork builds them too, unsigned: a fork has no certificate.
@@ -181,13 +181,13 @@ jobs:
             target/release/bundle/macos/*.app.tar.gz
             target/release/bundle/macos/*.app.tar.gz.sig
 
-  # Waits for both images, so a draft is never missing one. The draft is not public
-  # until someone publishes it. The assets carry no version in their names, so the
-  # site's links through releases/latest/download stay the same from release to
+  # Waits for every installer, so a draft is never missing one. The draft is not
+  # public until someone publishes it. The assets carry no version in their names, so
+  # the site's links through releases/latest/download stay the same from release to
   # release; the release's own page says which version it is.
   draft:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: macos
+    needs: [macos, installers]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -195,12 +195,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
-          pattern: hertzforge-macos-*
+          pattern: hertzforge-*
           merge-multiple: true
           path: images
+      # Each artifact keeps the bundle folders it was uploaded from (dmg/, macos/, deb/,
+      # appimage/), so the files are brought up to one level first.
       - name: Stable names
         run: |
           cd images
+          find . -mindepth 2 -type f -exec mv {} . \;
+          find . -mindepth 1 -type d -empty -delete
           for f in *; do
             case "$f" in
               *aarch64*.dmg|*arm64*.dmg) mv "$f" Hertzforge-macOS-AppleSilicon.dmg ;;
@@ -209,11 +213,14 @@ jobs:
               *x86_64*.app.tar.gz) mv "$f" Hertzforge-macOS-Intel.app.tar.gz ;;
               *arm64*.app.tar.gz.sig) mv "$f" Hertzforge-macOS-AppleSilicon.app.tar.gz.sig ;;
               *x86_64*.app.tar.gz.sig) mv "$f" Hertzforge-macOS-Intel.app.tar.gz.sig ;;
+              *-setup.exe) mv "$f" Hertzforge-Windows-x64-setup.exe ;;
+              *.deb) mv "$f" Hertzforge-Linux-x64.deb ;;
+              *.AppImage) mv "$f" Hertzforge-Linux-x64.AppImage ;;
             esac
           done
           ls -l
       - name: Checksums
-        run: cd images && sha256sum *.dmg > SHA256SUMS && cat SHA256SUMS
+        run: cd images && sha256sum *.dmg *.exe *.deb *.AppImage > SHA256SUMS && cat SHA256SUMS
       - name: The updater's manifest
         run: python3 desktop/packaging/updater_manifest.py "${GITHUB_REF_NAME}" images
       - uses: softprops/action-gh-release@v3

@@ -158,12 +158,12 @@ yet tried as a copy downloaded on another Mac.
 
 The desktop workflow builds the macOS images on GitHub's runners, one for Apple silicon and one for
 Intel, signs and notarizes them with `sign_macos.sh`, and fails if Apple has not accepted both the app
-and the image. Pushing a tag `v*` also drafts a GitHub release with the two images and their
-`SHA256SUMS` on it. Nothing is public until the draft is published, and publishing it is what starts
+and the image. Pushing a tag `v*` also drafts a GitHub release with the two images, the Windows and
+Linux installers, and their `SHA256SUMS` on it. Nothing is public until the draft is published, and publishing it is what starts
 `release.yml`. A run started by hand on main builds the same images as a test and leaves them as
 artifacts for 14 days. A push to `feature/desktop-app` on a maintainer's fork still builds the images,
-unsigned, because a fork has no certificate. Windows stays unsigned, as Visual Dynamics' builds are, and
-the Windows and Linux installers are artifacts of every run, not on the release.
+unsigned, because a fork has no certificate. Windows and Linux stay unsigned;
+their installers are on the release beside the Mac images.
 
 The credentials are secrets of the `release` environment, which admits only `v*` tags and main, so a
 workflow on another branch cannot read them. An admin of the repository can change that rule. The
@@ -207,9 +207,11 @@ handing it on.
 A release is a tag. Set the version in `pyproject.toml`, `src/hertzforge/__init__.py`,
 `desktop/tauri.conf.json`, `desktop/package.json` and the workspace `Cargo.toml` to the same number,
 merge, then tag that commit `v<version>` and push the tag. The desktop workflow builds, signs and
-notarizes both Mac images, renames them `Hertzforge-macOS-AppleSilicon.dmg` and
-`Hertzforge-macOS-Intel.dmg`, and drafts the release with them, their `SHA256SUMS` and, when the
-updater key is set, the update archives and `latest.json`. Publishing the draft is a person's click;
+notarizes both Mac images, builds the Windows and Linux installers, renames them
+`Hertzforge-macOS-AppleSilicon.dmg`, `Hertzforge-macOS-Intel.dmg`, `Hertzforge-Windows-x64-setup.exe`,
+`Hertzforge-Linux-x64.AppImage` and `Hertzforge-Linux-x64.deb`, and drafts the release with them, their
+`SHA256SUMS` and, when the updater key is set, the update archives and `latest.json`. The draft waits
+for every installer, so a failed one leaves no draft. Publishing the draft is a person's click;
 it starts `release.yml`, which publishes the Python package to PyPI. The site's Download section
 links the images through `releases/latest/download/<name>`, which GitHub answers with the newest
 published release's asset of that name, so the page needs no change per release; its script fills
