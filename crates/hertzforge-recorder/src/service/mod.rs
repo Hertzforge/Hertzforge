@@ -1,42 +1,40 @@
-//! `RecorderService` - the Data Recorder run orchestration.
+//! `RecorderService`: a Recorder run on one station.
 //!
-//! The service owns a backend (whatever the station factory built; the seam is generic
-//! so a real backend drops in later), runs the engine MONITOR-ONLY (SilentDrive feeds
-//! zeros into a synthetic drive channel), streams every input frame into the analysis
-//! pipeline always and into the recording writer + trigger engine while
-//! armed/recording, and assembles the live [`RecStatus`] + serde [`ReportData`]
-//! surfaces.
+//! The service owns the station's backend and a record thread, and on each pump reads
+//! one batch of two blocks from the station through the run's one engine. It hands
+//! the batch, frame-exact, to the overload indicators and the limit marks, the
+//! trigger, the recording in progress (through the record thread, which alone touches
+//! a recording's files) and the analysis, and keeps the live [`RecStatus`] and the
+//! serde [`ReportData`].
 //!
 //! # The engine table clone
 //!
-//! [`Engine`] runs against a CLONE of the user channel table with two edits:
+//! [`Engine`] runs against a clone of the operator's channel table with two edits:
 //!
 //! * **The table's drive rows are left out.** A Recorder run is capture only: the
 //!   station is configured with the enabled input rows and nothing else, the engine
-//!   has no output channel (its drive path does nothing with none), and the arm gate is
-//!   asked for a capture-only run. The operator's table keeps its drive rows for the
-//!   modules that drive; this run neither opens nor records them.
+//!   has no output channel, and the arm gate is asked for a capture-only run. The
+//!   operator's table keeps its drive rows for the modules that drive; this run
+//!   neither opens nor records them.
 //! * **The abort limits are stripped from the clone.** A Recorder drives nothing,
 //!   so ending acquisition on a limit would protect nothing and lose the event: a
 //!   row passing a limit is marked, and recording goes on. The service checks each
-//!   enabled row's limits, and its overload indicator, on every sample of the
-//!   analysis pass, against the real table.
+//!   enabled row's limits, and its overload indicator, on every sample, against the
+//!   operator's table.
 //!
-//! # The segment-run monitor loop
+//! # Time
 //!
-//! The engine is run per SEGMENT ([`Engine::new`] + [`Engine::run`] with a
-//! bounded `max_ticks_per_segment`), exactly like hertzforge-random's `PlantLoop`
-//! and the sine service, WITH the [`StopReason::SchedulingFault`] RETRY (a
-//! wall-clock artifact of the deterministic harness): re-arm / re-start /
-//! re-run, bounded attempts. Each segment's captured frames flow through the
-//! [`CaptureBridge`] (an [`EngineCaptureSink`]) and the service then drains
-//! them into analysis (always) and the record/trigger paths (when
-//! armed/recording). The bridge's `finalize()` is an IDEMPOTENT NO-OP - a
-//! segment boundary calls it, but the record writer is closed only at service
-//! stop. The RECORD path has priority; analysis is drop-tolerant.
+//! Everything per frame is counted at the rate the station programmed, which may
+//! differ from the rate asked, and in station frames from the run's first frame: the
+//! trigger's fires and holdoff, a timed length, the pre-window, every recording's
+//! station frames and the session clock.
 //!
-//! Timed recordings count FRAMES (`timed_record_s * native_rate`), because the
-//! Sim plant free-runs with no wall clock.
+//! # Ends
+//!
+//! Any reason the engine stops (a station error, a lost link, an input stall, an
+//! ended stream), a write the record thread reports failed, or a batch the record
+//! queue cannot take ends the run once, in its words ([`RunFault`]), with the
+//! recording in progress finalized with what reached the disk.
 
 pub mod config;
 pub mod report;
@@ -60,8 +58,8 @@ use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
 pub use config::{MetaField, RecState, RecorderConfig};
 pub use report::{
-    ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Honesty, Mark,
-    RecEvent, RecStatus, RecordingInfoLite, ReportData, RunFault, SessionRecording,
+    ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Mark, RecEvent,
+    RecStatus, RecordingInfoLite, ReportData, RunFacts, RunFault, SessionRecording,
 };
 
 /// The process step of a capture-only run: it reads and produces nothing.
@@ -85,18 +83,10 @@ pub const CAPTURE_ONLY_JITTER_FRAC: f64 = 1e12;
 /// that runs late delays the next read, it does not lose a frame.
 pub const CAPTURE_ONLY_COMPUTE_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Frames per acquisition block the recorder REQUESTS at configure. The engine's
-/// `frames_per_tick` then comes from what the backend answers, not from this
-/// constant.
-///
-/// It used to be a hard-coded 1 with a comment citing "the Sim latches ONE
-/// drive value per block". That constraint was removed (the Sim now
-/// buffers the full per-frame drive stream), so the comment was false. The
-/// recorder keeps the HERTZFORGE-SIM natural block for the reason named by
-/// `SIM_NATURAL_BLOCK_FRAMES` - its segment budget is counted in SAMPLES and
-/// handed to the engine as `max_ticks`. A hardware station overrides it via
-/// `RecorderService::with_block_frames`, and the recorder's drive is silent zeros
-/// either way, so the block only ever affects the INPUT cadence here.
+/// Frames per acquisition block the service requests when the caller states none
+/// (`RecorderService::with_block_frames`); the engine's block is what the station
+/// answers. A station's own block is the power of two nearest 20 ms of the rate, which
+/// every caller on a station passes.
 const DEFAULT_BLOCK_FRAMES: usize = hertzforge_engine::SIM_NATURAL_BLOCK_FRAMES;
 
 /// Errors from a recorder service operation.
@@ -151,7 +141,7 @@ struct ChannelAnalysisState {
 }
 
 /// The FRF lockstep path state (two decimators + one 2-channel assembler),
-/// carried across segments so the block boundaries are continuous.
+/// carried across batches so the block boundaries are continuous.
 struct FrfState {
     /// The pair in enabled-input slots.
     pair: (usize, usize),
@@ -163,35 +153,16 @@ struct FrfState {
     pipeline: FrfPipeline,
 }
 
-// REMOVED 2026-07-16: `FrameToSampleAdapter`.
-//
-// It wrapped the backend and multiplied `read_input`'s FRAME count by the input-channel
-// count, so that the engine's (incorrect) `return / in_channels` division would cancel it
-// back out and recover the true frame count. Its own doc said it "drops away the moment
-// the engine's contract is unified." That has now happened: `hertzforge-engine`'s scheduler
-// takes `read_input`'s return as FRAMES, which is what `hertzforge_hal::Backend::read_input`
-// always specified and what every backend always returned. With the division gone, the
-// compensating multiply here would over-count by `in_channels` squared, so the adapter is
-// deleted rather than kept.
-//
-// The recorder was the only module carrying this antidote, which is why it was the only
-// one that survived multi-channel input; every other module stalled on tick 1 or silently
-// dropped (N-1)/N of the block. See `hertzforge-engine/tests/engine.rs`
-// `multichannel_tail_breach_still_reaches_the_watchdog` for the regression that pins it.
-
-/// The capture-sink BRIDGE: an [`EngineCaptureSink`] the engine writes each
-/// tick's raw block through. It BUFFERS the segment's interleaved input frames;
-/// the service drains the buffer into the analysis / record / trigger paths
-/// after each segment returns. This avoids a re-entrant borrow (the engine
-/// borrows the sink while also borrowing the backend), keeps the RECORD path
-/// prioritized, and makes the analysis path drop-countable. `finalize()`
-/// defaults to a no-op: a segment boundary must not close the
-/// record sink.
+/// The capture-sink bridge: an [`EngineCaptureSink`] the engine writes each block
+/// through. It holds the batch's interleaved input frames; the service hands them on
+/// once the engine returns, which keeps the engine's borrow of the sink apart from
+/// the service's own state. `finalize()` is the default no-op: a batch's end closes
+/// nothing.
 #[derive(Default)]
 struct CaptureBridge {
-    /// Interleaved input frames captured this segment (`n_channels` per frame).
+    /// Interleaved input frames read this batch (`n_channels` per frame).
     frames: Vec<f32>,
-    /// Frame count captured this segment.
+    /// Frames read this batch.
     n_frames: u64,
 }
 
@@ -201,20 +172,15 @@ impl EngineCaptureSink for CaptureBridge {
         self.n_frames += meta.n_frames;
         Ok(())
     }
-    // finalize() -> default no-op (idempotent segment boundary).
 }
 
-/// The host-side Recorder run service. Owns the backend + the analysis pipeline
-/// + the recording lifecycle + the event log.
+/// A Recorder run on one station: the backend, the record thread, the trigger, the
+/// analysis, the marks and the event log.
 ///
 /// Generic over the backend `B`, defaulting to the station factory's product
-/// `Box<dyn Backend>`. Nothing in the loop assumes a Sim plant.
-///
-/// The default type parameter was `SimBackend` and a `RecorderService<SimBackend>`
-/// constructor built one from a `SimConfig`, which pinned the Tauri layer's four
-/// type annotations to a concrete Sim. Both are gone - `with_backend` is now the
-/// only constructor and it takes the backend AND the station class the arm gate
-/// will be given.
+/// `Box<dyn Backend>`. Nothing in the loop assumes a simulated station.
+/// [`RecorderService::with_backend`] is the only constructor; it takes the backend
+/// and the station class the arm gate is given.
 pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     cfg: RecorderConfig,
     /// The rate the station programmed once it is up; the rate asked until then.
@@ -223,8 +189,7 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     fs_hz: f64,
     /// The REAL user channel table (overload latches + report run on this).
     user_table: ChannelTable,
-    /// The engine table clone: synthetic drive injected, abort limits stripped
-    /// when the watchdog is off.
+    /// The engine table clone: the input rows, their abort limits stripped.
     engine_table: ChannelTable,
     /// The recording table: the enabled INPUT channels only, matching the
     /// interleaved frame width the bridge forwards.
@@ -232,9 +197,7 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     state: RecState,
     data_root: PathBuf,
 
-    /// The owned backend. Used directly: the engine's
-    /// frame accounting is correct for multi-channel input as of the 2026-07-16 scheduler
-    /// fix, so the former `FrameToSampleAdapter` wrapper is gone.
+    /// The station's backend.
     backend: B,
     /// The station class the arm gate is given. Supplied
     /// with the backend at construction; never inferred from `B`.
@@ -337,21 +300,15 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
 }
 
 impl<B: Backend> RecorderService<B> {
-    /// Build a service against a backend `B` - the station factory's
-    /// `Box<dyn Backend>`, or a scripted test double. The backend must deliver
-    /// exactly the enabled INPUT channels per frame via `read_input` and accept
-    /// the synthetic drive via `write_drive`. It must already be sized to the
-    /// table's enabled-input count; sizing is the factory's job, not the
-    /// service's (a service that resizes its own backend is a service that can
-    /// only ever have a synthetic one).
+    /// Build a service against a backend `B`: the station factory's
+    /// `Box<dyn Backend>`, or a scripted test double. The backend delivers exactly
+    /// the enabled input rows per frame through `read_input`; nothing is ever written
+    /// to it. It is already sized to the table's enabled inputs: sizing is the
+    /// factory's job, not the service's.
     ///
     /// `station` is the class the arm gate is given. It travels with the backend
     /// because the class is a property of what the backend is bound to, not of
     /// its type.
-    ///
-    /// This ABSORBED the old `RecorderService::<SimBackend>::new(cfg, table,
-    /// sim_cfg, data_root)`, which built a Sim from a `SimConfig` and sized it
-    /// here.
     pub fn with_backend(
         cfg: RecorderConfig,
         table: ChannelTable,
@@ -507,10 +464,9 @@ impl<B: Backend> RecorderService<B> {
     /// The seconds of frames the queue to the record thread holds.
     pub const RECORD_QUEUE_S: f64 = 2.0;
 
-    /// Request a specific acquisition block (frames per `read_input`) at
-    /// configure. A hardware station passes `hertzforge_engine::default_block_frames(fs)`;
-    /// the HERTZFORGE-SIM plant path leaves the default (see [`DEFAULT_BLOCK_FRAMES`]).
-    /// Must be set BEFORE the backend is brought up.
+    /// Request a specific acquisition block (frames per `read_input`) at configure:
+    /// a caller on a station passes `hertzforge_hal::default_block_frames(fs)`. A pump
+    /// reads two of them. Set before the station is up.
     pub fn with_block_frames(mut self, frames: usize) -> Self {
         self.block_frames = frames.max(1);
         self
@@ -521,11 +477,7 @@ impl<B: Backend> RecorderService<B> {
         self.state
     }
 
-    /// The monotonic session seconds (frame-derived).
-    /// The configured native acquisition rate in Hz. The daemon's pump uses it
-    /// to rate-lock delivery pacing (frames delivered are worth `n/rate` seconds
-    /// of wall clock, and delivering faster than that on an unpaced backend
-    /// would spin a thread hot).
+    /// The rate asked of the station, Hz.
     pub fn native_rate_hz(&self) -> f64 {
         self.cfg.acq.native_rate_hz
     }
@@ -751,7 +703,7 @@ impl<B: Backend> RecorderService<B> {
     }
 
     // ---------------------------------------------------------------------
-    // The monitor loop pump (segment-run pattern)
+    // The pump: one batch at a time
     // ---------------------------------------------------------------------
 
     /// Read ONE batch ([`BLOCKS_PER_BATCH`] blocks) and hand it to the overload
@@ -788,7 +740,7 @@ impl<B: Backend> RecorderService<B> {
         let frames = bridge.n_frames;
         let interleaved = std::mem::take(&mut bridge.frames);
         // The frames read before any stop are kept: they are drained first.
-        self.drain_segment(&interleaved, frames)?;
+        self.drain_batch(&interleaved, frames)?;
 
         // A disk too far behind to take a batch ends the run, the gap recorded.
         if let Some(words) = self.behind.take() {
@@ -869,10 +821,10 @@ impl<B: Backend> RecorderService<B> {
         self.transition(RecState::Faulted);
     }
 
-    /// Drain a segment's interleaved frames into: overload latches (real
-    /// table), trigger engine (while armed), recording writer (while
-    /// recording; RECORD path has priority), and analysis (always).
-    fn drain_segment(&mut self, interleaved: &[f32], n_frames: u64) -> Result<(), RecorderError> {
+    /// Hand a batch's interleaved frames on: the marks (limits and overload
+    /// indicators, on the operator's table), the trigger (while armed), the recording
+    /// in progress (through the record thread), and the analysis (always).
+    fn drain_batch(&mut self, interleaved: &[f32], n_frames: u64) -> Result<(), RecorderError> {
         if n_frames == 0 || self.n_input == 0 {
             return Ok(());
         }
@@ -1444,7 +1396,7 @@ impl<B: Backend> RecorderService<B> {
     }
 
     /// Assemble the serde report data (settings echo, channel snapshot, recordings,
-    /// event log, metadata, honesty notes incl. the concurrent-recording line).
+    /// event log, metadata, and the run's facts in plain words).
     pub fn report_data(&self) -> ReportData {
         let channels = self
             .user_table
@@ -1470,7 +1422,7 @@ impl<B: Backend> RecorderService<B> {
             event_log: self.log.clone(),
             metadata: self.cfg.metadata.clone(),
             channel_stats,
-            honesty: Honesty::default(),
+            facts: RunFacts::default(),
         }
     }
 

@@ -747,8 +747,8 @@ fn auto_rearm_respects_holdoff() {
     );
 }
 
-/// serde round-trips for status + report, and the report carries the
-/// concurrent-recording honesty line verbatim.
+/// serde round-trips for status + report, and the report states that a run records
+/// its own station only.
 #[test]
 fn status_and_report_serialize() {
     let table = input_table(3);
@@ -779,12 +779,12 @@ fn status_and_report_serialize() {
     let rj = serde_json::to_string(&report).unwrap();
     let _rback: hertzforge_recorder::ReportData = serde_json::from_str(&rj).unwrap();
     assert!(
-        report.honesty.concurrent.contains(
-            "v1 records its own acquisition session; concurrent capture during another \
-             module's test requires the shared-acquisition layer."
-        ),
-        "the concurrent-recording honesty line must be present verbatim, got: {}",
-        report.honesty.concurrent
+        report
+            .facts
+            .concurrent
+            .contains("cannot record during another module's run"),
+        "the report states it records its own station only, got: {}",
+        report.facts.concurrent
     );
     // Default metadata is present.
     let keys: Vec<&str> = report.metadata.iter().map(|m| m.key.as_str()).collect();

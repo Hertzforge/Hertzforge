@@ -1,9 +1,8 @@
-//! The recorder service's live surfaces + report data (mirrors the
-//! RandomService status/report SHAPE).
+//! The Recorder service's live surfaces and its report data.
 //!
-//! * [`RecStatus`] - the one-poll live snapshot the UI reads.
-//! * [`ReportData`] - the serde-serializable report the UI's report dialog
-//!   consumes; carries the concurrent-recording honesty line verbatim.
+//! * [`RecStatus`] - the one-poll live snapshot a front end reads.
+//! * [`ReportData`] - the serde-serializable report: the settings, the rows, the
+//!   recordings, the log and the run's facts in plain words ([`RunFacts`]).
 //! * [`EventLog`] - a growing list of monotonic-session-second timestamped
 //!   event strings (state changes, trigger fires, gaps, overloads, faults).
 //! * [`ChannelMeter`] / [`FrfSnapshot`] / [`RecordingInfoLite`] - the small
@@ -101,8 +100,7 @@ pub struct RecordingInfoLite {
 pub struct RecStatus {
     /// The run state.
     pub state: RecState,
-    /// Monotonic seconds the engine loop has been live this session (monitor +
-    /// record). Frame-derived (Sim free-runs), not wall-clock.
+    /// Station seconds since start: the frames read over the programmed rate.
     pub monitoring_seconds: f64,
     /// The active recording's run name (when Recording).
     pub recording_run: Option<String>,
@@ -265,45 +263,35 @@ impl EventLog {
     }
 }
 
-/// The honest limitations carried verbatim into every recorder report. The
-/// concurrent-recording line is the load-bearing one: the recorder monitors ITS OWN acquisition
-/// session and cannot capture during another module's running test.
+/// What every Recorder run is, stated in its report in plain words.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Honesty {
-    /// Concurrent-recording honesty.
+pub struct RunFacts {
+    /// What a run records.
     pub concurrent: String,
-    /// Capture-rate honesty: recording is always native; the sample
-    /// selector is analysis-side decimation.
+    /// The rate the recordings are at.
     pub capture_rate: String,
-    /// Watchdog honesty: off by default; a monitor should not
-    /// e-stop a test it is not driving.
-    pub watchdog: String,
-    /// Overload-proxy honesty: a host-side proxy, not observed ADC
-    /// saturation.
-    pub overload_proxy: String,
+    /// What a row's limits do.
+    pub limits: String,
+    /// What the overload indicator is.
+    pub overload: String,
 }
 
-impl Default for Honesty {
+impl Default for RunFacts {
     fn default() -> Self {
         Self {
-            concurrent:
-                "v1 records its own acquisition session; concurrent capture during another \
-                 module's test requires the shared-acquisition layer."
-                    .into(),
-            capture_rate:
-                "Recording rate is always native (65,536 Hz, decimation 1). The sample-rate \
-                 selector is ANALYSIS-side anti-aliased decimation; it never changes the \
-                 capture rate (RD1 / audit F2)."
-                    .into(),
-            watchdog:
-                "The kinematic abort watchdog is OFF by default: a monitor module should not \
-                 e-stop a test it is not driving (RD2). When enabled it acts on the recorder's \
-                 OWN backend only. Per-channel overload latches always run."
-                    .into(),
-            overload_proxy:
-                "The per-channel overload indicator is a HOST-SIDE PROXY (|eu| >= fraction * \
-                 range_max), not observed ADC saturation (finding C3)."
-                    .into(),
+            concurrent: "A Recorder run records its own station's inputs; it cannot record \
+                         during another module's run."
+                .into(),
+            capture_rate: "Recordings are at the rate the station programmed, with no \
+                           decimation; the analysis decimation changes the analysis only."
+                .into(),
+            limits: "A row's limits are marks: a row passing one is marked at its first \
+                     sample past it, once in each episode, and recording goes on."
+                .into(),
+            overload: "A row's overload indicator latches the first time a sample's \
+                       magnitude reaches 0.9 of the row's range, and holds for the run. It \
+                       is computed from the samples, not read from the converter."
+                .into(),
         }
     }
 }
@@ -352,6 +340,6 @@ pub struct ReportData {
     /// Per-channel final time stats (last accumulated window), enabled-input
     /// slot order.
     pub channel_stats: Vec<ChannelStat>,
-    /// The honest limitations, including the concurrent-recording line.
-    pub honesty: Honesty,
+    /// What every Recorder run is, in plain words.
+    pub facts: RunFacts,
 }
