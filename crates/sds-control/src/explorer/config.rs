@@ -515,8 +515,24 @@ impl WireExplorer {
                 num(MAX_DRIVE_DB_PER_S)
             ),
         );
+        // The controlled stop inside the service's own stop wait: 40 dB at the drive
+        // slew, then the step to 0 V.
         let span_db = AmplitudeRamp::default().ramp_span_db;
         let stop_s = span_db / g;
+        if g_ok && stop_s > ctx.timeout_s {
+            r.errors.push(Item::field(
+                "safe_stop_budget",
+                "slew.drive_db_per_s",
+                format!(
+                    "At {} dB/s the stop takes {} s, longer than the {} s the service waits \
+                     for a stop; raise the drive slew above {} dB/s.",
+                    num(g),
+                    num(round(stop_s, 3)),
+                    num(ctx.timeout_s),
+                    num(round(span_db / ctx.timeout_s, 3))
+                ),
+            ));
+        }
 
         let n = self.nfft;
         out_of_range(
