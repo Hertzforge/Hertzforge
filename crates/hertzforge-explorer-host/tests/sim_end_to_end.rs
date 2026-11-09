@@ -543,13 +543,22 @@ fn a_steady_tone_reads_its_own_frequency_whatever_its_phase_against_the_block() 
         assert!((svc.set_frequency(hz).unwrap() - hz).abs() < 1e-9);
         // The THIRD matured reading: a steady tone, well clear of the retune.
         let mut readings = Vec::new();
+        let mut seen = svc
+            .status_cell()
+            .read()
+            .map(|s| s.measured_readings)
+            .unwrap_or(0);
         pump_until(
             &mut svc,
             400,
             "three matured readings at a held tone",
             |s| {
-                if let Some(m) = s.measured_freq_hz {
-                    readings.push(m);
+                // Each NEW reading once: the status holds the latest on every pass.
+                if s.measured_readings != seen {
+                    seen = s.measured_readings;
+                    if let Some(m) = s.measured_freq_hz {
+                        readings.push(m);
+                    }
                 }
                 readings.len() >= 3
             },
@@ -627,8 +636,18 @@ fn a_ring_drop_breaks_the_measured_stream() {
     for &hz in &[777.0, 1_234.5, 333.0] {
         svc.set_frequency(hz).unwrap();
         let mut readings = Vec::new();
+        let mut seen = svc
+            .status_cell()
+            .read()
+            .map(|s| s.measured_readings)
+            .unwrap_or(0);
         for _ in 0..1_000 {
-            if let Some(m) = lagging(&mut svc).measured_freq_hz {
+            let st = lagging(&mut svc);
+            if st.measured_readings == seen {
+                continue;
+            }
+            seen = st.measured_readings;
+            if let Some(m) = st.measured_freq_hz {
                 readings.push(m);
                 if readings.len() >= 10 {
                     break;
@@ -666,4 +685,51 @@ fn a_ring_drop_breaks_the_measured_stream() {
         worst.0,
         worst.1
     );
+}
+
+/// **A READING IS STATE, NOT AN EDGE.** The status is published to a cell that a reader
+/// samples at its own pace (the run's live frame, every 100 ms, against a pass every
+/// 20 ms on the chassis). A measured frequency that appears only on the pass whose window
+/// matured is lost whenever that pass falls between two reads: on the NI loopback
+/// (2026-11-09, X1) retunes to 1010, 1020, 515 and 20 Hz showed no measured frequency for
+/// over a second, then one a window later. The reading stays on every status while the
+/// tone it measured holds, and goes when the tone moves.
+#[test]
+fn the_measured_frequency_holds_on_every_status_until_the_tone_moves() {
+    let mut svc = armed_service();
+    svc.set_amplitude_vpk(0.2).unwrap();
+    pump_until(&mut svc, 400, "the drive ramp to reach 0.2 Vpk", |s| {
+        (s.commanded_vpk - 0.2).abs() < 1e-9
+    });
+    let first = pump_until(&mut svc, 400, "a matured frequency measurement", |s| {
+        s.measured_freq_hz.is_some()
+    });
+    let reading = first.measured_freq_hz.unwrap();
+    let count = first.measured_readings;
+    assert!(count >= 1, "a matured reading is counted");
+    // The passes after it, before the next window matures: the reading is still there.
+    for n in 1..=5 {
+        let st = pump(&mut svc, 1);
+        assert_eq!(
+            st.measured_freq_hz,
+            Some(reading),
+            "pass {n} after the reading matured dropped it"
+        );
+        assert_eq!(
+            st.measured_readings, count,
+            "no new window matured in 5 passes"
+        );
+    }
+    // A retune: the reading belonged to the old tone, and goes.
+    svc.set_frequency(400.0).unwrap();
+    let st = pump(&mut svc, 1);
+    assert_eq!(
+        st.measured_freq_hz, None,
+        "the old tone's reading stayed after the retune"
+    );
+    let next = pump_until(&mut svc, 400, "the new tone's reading", |s| {
+        s.measured_freq_hz.is_some()
+    });
+    assert!((next.measured_freq_hz.unwrap() / 400.0 - 1.0).abs() < 1e-5);
+    assert!(next.measured_readings > count);
 }

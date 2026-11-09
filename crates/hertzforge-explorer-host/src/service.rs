@@ -331,7 +331,14 @@ pub struct ExplorerStatus {
     /// at zero or a window that has not filled. The window opens only once the drive in
     /// flight from before the tone settled has been acquired ([`Self::pipeline_frames`]),
     /// so the first reading after a retune is the NEW tone's, not a blend with the old.
+    ///
+    /// HELD on every status while the tone it measured holds, and cleared when the tone
+    /// moves or the drive goes to zero: the status is read by sampling, so a reading that
+    /// appeared on one pass only would be lost between two reads.
     pub measured_freq_hz: Option<f64>,
+    /// How many readings have matured this run. A reader that wants each new reading
+    /// (rather than the latest) compares this.
+    pub measured_readings: u64,
     /// The amplitude being generated right now, volts peak.
     pub commanded_vpk: f64,
     /// The amplitude the operator asked for, volts peak.
@@ -593,6 +600,10 @@ pub struct ExplorerHostService {
     /// sample: the drive that was already in flight when the generator last changed state.
     /// Re-armed to [`Self::pipeline_frames`] by every pass that is not measurable.
     meter_skip: usize,
+    /// The latest matured reading for the tone now held (see
+    /// [`ExplorerStatus::measured_freq_hz`]), and how many have matured this run.
+    held_measured_hz: Option<f64>,
+    measured_readings: u64,
 
     // --- read surfaces --------------------------------------------------------
     /// The survey line: every point the profile capture recorded, folded in by frequency
@@ -715,6 +726,8 @@ impl ExplorerHostService {
             last_tone_hz: f64::NAN,
             ring_dropped_seen: 0,
             meter_skip: 0,
+            held_measured_hz: None,
+            measured_readings: 0,
             survey: None,
             survey_revision: 0,
             recent_points: VecDeque::new(),
@@ -1251,6 +1264,8 @@ impl ExplorerHostService {
             fs,
             WindowedFreqMeasure::DEFAULT_WINDOW,
         ));
+        self.held_measured_hz = None;
+        self.measured_readings = 0;
         self.floor = Some(NoiseFloorProbe::new(self.n_interleave));
         // The survey line on the display spectra's own grid, at the ADOPTED rate, so it
         // renders onto the same frequencies the spectra are drawn against.
@@ -2052,6 +2067,17 @@ impl ExplorerHostService {
         } else {
             None
         };
+        // HELD while the tone it measured holds: the status is read by sampling, so a
+        // reading published on its one pass only is lost whenever that pass falls between
+        // two reads (the run's live frame is 100 ms, a pass 20 ms on the chassis).
+        if !measurable {
+            self.held_measured_hz = None;
+        }
+        if let Some(hz) = measured_freq_hz {
+            self.held_measured_hz = Some(hz);
+            self.measured_readings += 1;
+        }
+        let measured_freq_hz = self.held_measured_hz;
 
         if let Some(h) = self.handles.as_ref() {
             h.ring.recycle(&mut drained);
@@ -2109,6 +2135,7 @@ impl ExplorerHostService {
                 .map(|s| s.target_freq_hz())
                 .unwrap_or(0.0),
             measured_freq_hz,
+            measured_readings: self.measured_readings,
             commanded_vpk: self.step.as_ref().map(|s| s.drive_vpk()).unwrap_or(0.0),
             target_vpk: self
                 .step
