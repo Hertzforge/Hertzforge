@@ -322,3 +322,109 @@ pub fn result_json(sub: Option<&Subscription>) -> Value {
     m.insert("quantities".into(), quantities());
     Value::Object(m)
 }
+
+impl Subscription {
+    /// The time between two frames.
+    pub fn period(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(1.0 / self.rate_hz)
+    }
+}
+
+/// What a subscribed frame is built from, beside the view.
+pub struct DataContext<'a> {
+    pub view: &'a super::view::ExplorerView,
+    /// The survey line's own points, `(hz, level)`.
+    pub survey: &'a [(f64, f64)],
+    /// The latest display window per acquired channel: `(index, df_hz, magnitudes)`.
+    pub spectra: &'a [(u32, f64, Vec<f64>)],
+    /// The control row's most recent samples: `(first input frame, rate, samples)`.
+    pub time: Option<(u64, f64, &'a [f64])>,
+}
+
+/// The `explorer.data` frame for one connection's subscription.
+pub fn data_json(
+    ctx: &DataContext<'_>,
+    sub: &Subscription,
+    arrays: &mut crate::codec::Arrays,
+) -> Value {
+    use super::view;
+    let v = ctx.view;
+    let mut m = view::live_head(v);
+    let plots: Vec<Value> = sub
+        .plots
+        .iter()
+        .map(|p| {
+            let mut channels = Value::Null;
+            let mut first_frame = Value::Null;
+            let views: Vec<Value> = match p.quantity {
+                Quantity::Survey => {
+                    if ctx.survey.is_empty() {
+                        Vec::new()
+                    } else {
+                        let pts = match p.points {
+                            Points::N(n) => view::draw_survey(ctx.survey, v.band_hz, n),
+                            _ => ctx.survey.to_vec(),
+                        };
+                        vec![view::survey_view(&pts, &v.control_unit, arrays)]
+                    }
+                }
+                Quantity::Spectrum => {
+                    let control = v.control.as_ref().map(|c| c.index);
+                    let picked: Vec<&super::view::LiveChannel> = v
+                        .channels
+                        .iter()
+                        .filter(|c| match &p.channels {
+                            Some(Channels::Control) => Some(c.index) == control,
+                            Some(Channels::Ids(ids)) => ids.contains(&c.index),
+                            _ => true,
+                        })
+                        .collect();
+                    channels = Value::Array(picked.iter().map(|c| Value::from(c.index)).collect());
+                    picked
+                        .iter()
+                        .filter_map(|c| {
+                            let (_, df, mags) = ctx.spectra.iter().find(|s| s.0 == c.index)?;
+                            let name = if c.description.is_empty() {
+                                c.role
+                            } else {
+                                c.description.as_str()
+                            };
+                            Some(view::channel_view(
+                                c.index, name, &c.unit, *df, mags, arrays,
+                            ))
+                        })
+                        .collect()
+                }
+                Quantity::Time => match (ctx.time, v.control.as_ref()) {
+                    (Some((first, fs, samples)), Some(c)) if !samples.is_empty() => {
+                        let n = match p.points {
+                            Points::N(n) => n,
+                            _ => DEFAULT_TIME_POINTS,
+                        };
+                        let skip = samples.len().saturating_sub(n);
+                        first_frame = Value::from(first + skip as u64);
+                        vec![view::time_view(
+                            c.index,
+                            &v.control_unit,
+                            fs,
+                            first + skip as u64,
+                            &samples[skip..],
+                            arrays,
+                        )]
+                    }
+                    _ => Vec::new(),
+                },
+                Quantity::Readings => vec![view::run_reading(v)],
+            };
+            let mut e = Map::new();
+            e.insert("id".into(), Value::from(p.id.as_str()));
+            e.insert("quantity".into(), Value::from(p.quantity.name()));
+            e.insert("channels".into(), channels);
+            e.insert("first_frame".into(), first_frame);
+            e.insert("views".into(), Value::Array(views));
+            Value::Object(e)
+        })
+        .collect();
+    m.insert("plots".into(), Value::Array(plots));
+    Value::Object(m)
+}
