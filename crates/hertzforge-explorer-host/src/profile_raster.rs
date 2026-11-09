@@ -184,7 +184,7 @@ impl ProfileRaster {
         // overwrites, because the render could never separate two points in one bin. Not
         // "within half a bin of the new point": consecutive points of a slow sweep are a
         // small fraction of a bin apart, so that rule deleted the previous point at every
-        // visit and the trail collapsed to one moving point (bench X3, 2026-11-09).
+        // visit and the trail collapsed to one moving point (seen on the NI loopback).
         let (f0, df) = (self.f0_hz, self.df_hz);
         let bin = raw.round();
         self.points
@@ -624,7 +624,7 @@ mod tests {
         );
     }
 
-    /// THE BENCH FINDING (NI loopback, X3, 2026-11-09): a SLOW sweep must leave its trail.
+    /// FOUND ON THE NI LOOPBACK: a SLOW sweep must leave its trail.
     /// Consecutive points of a sweep are a small fraction of a bin apart at the low end
     /// (0.14 Hz a pass at 20 Hz and 0.5 oct/s, against a 3.125 Hz bin), so a rule that
     /// replaced every point within half a bin of the new one deleted the previous point at
@@ -661,7 +661,7 @@ mod tests {
     /// One point a bin: two neighbouring points can sit in adjacent bins with no bin
     /// centre between them, where the chord between them has nothing to fill. Each point
     /// still lands on its nearest bin, as a lone point does, or the curve renders empty
-    /// while it holds points (the backend's profile test, 2026-11-09).
+    /// while it holds points (the backend's peak-profile test).
     #[test]
     fn points_with_no_bin_centre_between_them_land_on_their_nearest_bins() {
         let mut r = ProfileRaster::new(0.0, 16.0, 257);

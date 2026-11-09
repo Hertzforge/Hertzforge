@@ -691,7 +691,7 @@ fn a_ring_drop_breaks_the_measured_stream() {
 /// samples at its own pace (the run's live frame, every 100 ms, against a pass every
 /// 20 ms on the chassis). A measured frequency that appears only on the pass whose window
 /// matured is lost whenever that pass falls between two reads: on the NI loopback
-/// (2026-11-09, X1) retunes to 1010, 1020, 515 and 20 Hz showed no measured frequency for
+/// retunes to 1010, 1020, 515 and 20 Hz showed no measured frequency for
 /// over a second, then one a window later. The reading stays on every status while the
 /// tone it measured holds, and goes when the tone moves.
 #[test]

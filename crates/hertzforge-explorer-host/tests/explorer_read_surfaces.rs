@@ -635,7 +635,7 @@ fn explorer_the_run_host_hands_on_the_survey_the_intents_and_each_blocks_frame()
     // The status AFTER the pump's final pass: that pass drains the blocks still in the
     // ring and can record one more survey point, so a status read the moment the run
     // turned terminal can trail the last line handed on by one revision (seen once under
-    // load, 2026-11-09).
+    // load).
     let end = match host.snapshot().view {
         HostView::Status(st) => st,
         other => panic!("{other:?}"),

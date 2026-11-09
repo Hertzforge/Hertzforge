@@ -657,8 +657,8 @@ impl ProfileTracer {
         // signal it holds, the part cycle hardly counts. That is a sweep: the window is
         // whole cycles of the COMMANDED frequency while its samples are the response to drive
         // a pipeline earlier, about 3 % lower at 30 oct/min behind the chassis's 1 063
-        // frames, and a plain mean square over three cycles read +-2.2 % on the bench (X3,
-        // 2026-11-09). Tapered: within 0.1 %.
+        // frames, and a plain mean square over three cycles read +-2.2 % on the NI loopback.
+        // Tapered: within 0.1 %.
         let start = n - m;
         let w = |i: usize| {
             0.5 - 0.5 * (std::f64::consts::TAU * ((i - start) as f64 + 0.5) / m as f64).cos()
@@ -1338,7 +1338,7 @@ mod tests {
         assert!(vel.abs() > 0.0, "derived velocity is nonzero after settle");
     }
 
-    /// THE BENCH FINDING (NI loopback, X3, 2026-11-09): a slow sweep's survey points at the
+    /// FOUND ON THE NI LOOPBACK: a slow sweep's survey points at the
     /// low end. The window holds whole cycles of the COMMANDED frequency, but its samples
     /// are the response to drive a pipeline earlier, about 3 % lower in a 30 oct/min sweep
     /// behind the chassis's 1 063 frames; a plain RMS over a part cycle more or less than

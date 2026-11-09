@@ -947,8 +947,8 @@ fn the_measured_frequency_reads_the_new_tone_behind_a_deep_pipeline() {
 /// zero, the queue still held up to the lookahead of drive written before it, the last of
 /// the ramp's tail, and stopping the tasks cut it while the converter was still playing it.
 /// A held converter (the 9263) then keeps that sample until the backend's shutdown taper
-/// brings it down: on the NI loopback (X8, 2026-11-09) a safe stop held 1.64 mV above the
-/// floor for about 0.2 s; an operator stop (X6) happened to land near zero.
+/// brings it down: on the NI loopback a safe stop held 1.64 mV above the
+/// floor for about 0.2 s; an operator stop happened to land near zero.
 #[test]
 fn explorer_a_ramped_stop_stops_the_station_only_once_the_zeros_have_played() {
     let backend = Pipelined::chassis(wire_plant(), 128);

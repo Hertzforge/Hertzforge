@@ -1543,8 +1543,8 @@ impl ExplorerHostService {
             // up to the lookahead of drive written before it, the last of the ramp's tail,
             // and stopping the tasks then cuts it while the converter is playing it. A held
             // converter (the 9263) keeps that sample until the backend's taper brings it
-            // down: 1.64 mV for about 0.2 s after a safe stop on the NI loopback (X8,
-            // 2026-11-09). AI and AO share one clock, so the input frames acquired are the
+            // down: 1.64 mV for about 0.2 s after a safe stop on the NI loopback.
+            // AI and AO share one clock, so the input frames acquired are the
             // output frames played; the first zero has played once they pass it, plus the
             // acquisition's group delay. Bounded, so a station that stops acquiring cannot
             // hold the stop open.

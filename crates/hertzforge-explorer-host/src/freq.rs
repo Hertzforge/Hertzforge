@@ -14,7 +14,7 @@ use std::time::Duration;
 /// of a window, divided by the time between them. A crossing COUNT divided by the window's
 /// duration is quantized to one crossing per window, which is 1 Hz on a 0.5 s window at
 /// any frequency: 0.1 % at 1 kHz and 2 % at 50 Hz, where the stated cross-check is 0.05 %.
-/// Measured on the NI loopback 2026-11-09 (X1, X11): 1010 Hz read 1010.729, 50.6 Hz read
+/// Measured on the NI loopback: 1010 Hz read 1010.729, 50.6 Hz read
 /// 50.008, 43.0 Hz read 42.563. Timing the crossings has no such floor: a clean tone reads
 /// to parts per million, and the noise on the chassis (about 120 uV rms against a 0.2 V
 /// tone) moves a crossing by microseconds.
@@ -392,7 +392,7 @@ mod tests {
         panic!("no reading matured");
     }
 
-    /// THE BENCH FINDING (NI loopback, 2026-11-09): a crossing COUNT over a 0.5 s window is
+    /// FOUND ON THE NI LOOPBACK: a crossing COUNT over a 0.5 s window is
     /// quantized to 1 Hz at every frequency, so tones off a whole number of crossings per
     /// window read up to 1 Hz off (1010 Hz read 1010.729, 50.6 Hz read 50.008, 43.0 Hz read
     /// 42.563), against a stated 0.05 %. Timed crossings read each of them to 5 ppm.
