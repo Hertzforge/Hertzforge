@@ -1,8 +1,8 @@
 /**
  * The classical shock run's pages and what each asks the service for (PROTOCOL.md, "Classical
- * Shock Display"), the plain-data form a layout is saved in, and the pulses an operator picks in
- * the pulse table to lay over the Pulse and SRS pages. Nothing here computes a measurement: an
- * overlay only places the service's own series side by side, each named for its pulse.
+ * Shock Display"), on the pulse-by-pulse pages both shock types share (`../pulse/pulseLayout`):
+ * the plain-data form a layout is saved in, and the pulses an operator picks in the pulse table to
+ * lay over the Pulse and SRS pages.
  *
  * The pages until the operator changes them: Pulse (the reference at the level fired with its
  * tolerance band, the measured pulse and the drive played), SRS, Kinematics (velocity and
@@ -10,9 +10,21 @@
  * pulse table and the run's numbers) and Law (the law's reported values).
  */
 
-import type { ShockQuantity, ShockSubscribePlot } from '$lib/protocol/shock';
-import type { Series, SpectrumView, View } from '$lib/protocol/types';
-import { pointsForWidth } from '../display/mimoLayout';
+import type { ShockQuantity } from '$lib/protocol/shock';
+import {
+	defaultPulseLayout,
+	pulseLayoutFromSaved,
+	pulseLayoutToSaved,
+	pulsePagePlots,
+	pulsePlotId,
+	pulseSubscribeParams,
+	type PulseLayout,
+	type PulsePageSet,
+	type PulsePageSpec,
+	type PulsePlotSpec
+} from '../pulse/pulseLayout';
+
+export { MAX_OVERLAY, pulseViewOf, toggleOverlay, withOverlay } from '../pulse/pulseLayout';
 
 export type ShockPageKind = 'pulse' | 'srs' | 'kinematics' | 'identification' | 'pulses' | 'law';
 
@@ -36,44 +48,14 @@ export const SHOCK_PAGE_HELP: Record<ShockPageKind, string> = {
 	law: "The control law's reported values on its last call, and the run in numbers."
 };
 
-export interface ShockPageSpec {
-	id: string;
-	name: string;
-	kind: ShockPageKind;
-}
-
-export interface ShockLayout {
-	version: 1;
-	/** Frames per second the window asks for (the service sends once per pulse and on subscribe). */
-	rate: number;
-	serial: number;
-	pages: ShockPageSpec[];
-}
+export type ShockPageSpec = PulsePageSpec<ShockPageKind>;
+export type ShockLayout = PulseLayout<ShockPageKind>;
+/** One plot a page subscribes to. */
+export type ShockPlotSpec = PulsePlotSpec<ShockQuantity>;
 
 export const SHOCK_RATES = [1, 2, 5];
 export const SHOCK_DEFAULT_RATE = 2;
 export const MAX_SHOCK_PAGES = 12;
-/** Pulses laid over the Pulse and SRS pages at once. */
-export const MAX_OVERLAY = 6;
-
-export function defaultShockLayout(): ShockLayout {
-	return {
-		version: 1,
-		rate: SHOCK_DEFAULT_RATE,
-		serial: SHOCK_PAGE_KINDS.length,
-		pages: SHOCK_PAGE_KINDS.map((kind, i) => ({ id: `sp-${i + 1}`, name: SHOCK_PAGE_WORDS[kind], kind }))
-	};
-}
-
-/** One plot a page subscribes to. */
-export interface ShockPlotSpec {
-	id: string;
-	quantity: ShockQuantity;
-	points: number;
-}
-
-/** The plot id a page uses for one of its parts. */
-export const shockPlotId = (page: ShockPageSpec, part: string) => `${page.id}:${part}`;
 
 /** The quantities each page draws, in order. */
 export const PAGE_QUANTITIES: Record<ShockPageKind, ShockQuantity[]> = {
@@ -85,84 +67,48 @@ export const PAGE_QUANTITIES: Record<ShockPageKind, ShockQuantity[]> = {
 	law: ['law', 'readings']
 };
 
-/** Everything a page subscribes to, at its drawn width (CSS pixels). */
-export function shockPagePlots(page: ShockPageSpec, width = 900, pixelRatio = 1): ShockPlotSpec[] {
-	const points = pointsForWidth(width, pixelRatio);
-	return PAGE_QUANTITIES[page.kind].map((quantity) => ({ id: shockPlotId(page, quantity), quantity, points }));
-}
-
 /** The quantities drawn as time histories: the only plots that take a point count. */
 export const TIME_QUANTITIES: readonly ShockQuantity[] = ['pulse', 'velocity', 'displacement'];
+
+/** Classical shock's pages, as the shared run view reads them. */
+export const SHOCK_PAGES: PulsePageSet<ShockPageKind, ShockQuantity> = {
+	testType: 'shock',
+	prefix: 'sp',
+	kinds: SHOCK_PAGE_KINDS,
+	words: SHOCK_PAGE_WORDS,
+	help: SHOCK_PAGE_HELP,
+	quantities: PAGE_QUANTITIES,
+	timeQuantities: TIME_QUANTITIES,
+	rates: SHOCK_RATES,
+	defaultRate: SHOCK_DEFAULT_RATE,
+	maxPages: MAX_SHOCK_PAGES
+};
+
+export function defaultShockLayout(): ShockLayout {
+	return defaultPulseLayout(SHOCK_PAGES);
+}
+
+/** The plot id a page uses for one of its parts. */
+export const shockPlotId = (page: ShockPageSpec, part: string) => pulsePlotId(page, part);
+
+/** Everything a page subscribes to, at its drawn width (CSS pixels). */
+export function shockPagePlots(page: ShockPageSpec, width = 900, pixelRatio = 1): ShockPlotSpec[] {
+	return pulsePagePlots(SHOCK_PAGES, page, width, pixelRatio);
+}
 
 /** What a window sends: its plots, or the default subscription when it shows none. A point count
  * goes with the time histories only; the service refuses it on any other plot. */
 export function shockSubscribeParams(plots: ShockPlotSpec[], rate: number): Record<string, unknown> {
-	const wanted: ShockSubscribePlot[] = plots.map((p) =>
-		TIME_QUANTITIES.includes(p.quantity) ? { id: p.id, quantity: p.quantity, points: p.points } : { id: p.id, quantity: p.quantity }
-	);
-	return wanted.length ? { rate_hz: rate, plots: wanted } : { default: true };
+	return pulseSubscribeParams(SHOCK_PAGES, plots, rate);
 }
 
 // ---------------------------------------------------------------------------------------------
 // Saved form
 
-const isKind = (v: unknown): v is ShockPageKind => typeof v === 'string' && (SHOCK_PAGE_KINDS as string[]).includes(v);
-
 export function shockLayoutFromSaved(text: string | null): ShockLayout | null {
-	if (!text) return null;
-	try {
-		const raw = JSON.parse(text) as Partial<ShockLayout>;
-		if (raw.version !== 1 || !Array.isArray(raw.pages)) return null;
-		const pages = raw.pages
-			.filter((p): p is ShockPageSpec => !!p && typeof p.id === 'string' && typeof p.name === 'string' && isKind(p.kind))
-			.slice(0, MAX_SHOCK_PAGES)
-			.map((p) => ({ id: p.id, name: p.name.slice(0, 40), kind: p.kind }));
-		if (!pages.length || new Set(pages.map((p) => p.id)).size !== pages.length) return null;
-		const rate = SHOCK_RATES.includes(raw.rate as number) ? (raw.rate as number) : SHOCK_DEFAULT_RATE;
-		const serial = Number.isInteger(raw.serial) ? (raw.serial as number) : pages.length;
-		return { version: 1, rate, serial, pages };
-	} catch {
-		return null;
-	}
+	return pulseLayoutFromSaved(SHOCK_PAGES, text);
 }
 
 export function shockLayoutToSaved(layout: ShockLayout): string {
-	return JSON.stringify({ version: 1, rate: layout.rate, serial: layout.serial, pages: layout.pages.map((p) => ({ id: p.id, name: p.name, kind: p.kind })) });
-}
-
-// ---------------------------------------------------------------------------------------------
-// Pulses laid over the Pulse and SRS pages
-
-/**
- * The pulses picked to lay over the Pulse and SRS pages, after a click on a row: picked again, it
- * is taken off; a new one goes last, and the oldest falls off past `max`.
- */
-export function toggleOverlay(picked: readonly number[], index: number, max = MAX_OVERLAY): number[] {
-	if (picked.includes(index)) return picked.filter((i) => i !== index);
-	const next = [...picked, index];
-	return next.length > max ? next.slice(next.length - max) : next;
-}
-
-/** Which of a pulse's views is its pulse (time) view, and which its SRS. */
-export function pulseViewOf(views: readonly View[], kind: 'pulse' | 'srs'): SpectrumView | null {
-	const spectra = views.filter((v): v is SpectrumView => v.view === 'spectrum');
-	const titled = spectra.find((v) => (kind === 'srs' ? /\bsrs\b|shock response/i.test(v.title) : /^pulse\b|\bpulse$/i.test(v.title.trim())));
-	if (titled) return titled;
-	if (kind === 'srs') return spectra.find((v) => v.x.unit === 'Hz' && v.x.scale === 'log') ?? null;
-	return spectra.find((v) => v.x.unit !== 'Hz' && (v.y.unit ?? '') === 'g') ?? null;
-}
-
-/**
- * The page's view with each picked pulse's measured series laid over it, named for the pulse
- * ("Pulse 2, measured"). The base view's own series stay as the service sent them.
- */
-export function withOverlay(base: SpectrumView | null, picked: readonly { index: number; views: readonly View[] }[], kind: 'pulse' | 'srs'): SpectrumView | null {
-	if (!base) return null;
-	const extra: Series[] = [];
-	for (const p of picked) {
-		const v = pulseViewOf(p.views, kind);
-		if (!v) continue;
-		for (const s of v.series) if (s.role === 'measured') extra.push({ ...s, name: `Pulse ${p.index + 1}, ${s.name.toLowerCase()}`, follows: undefined });
-	}
-	return extra.length ? { ...base, series: [...base.series, ...extra] } : base;
+	return pulseLayoutToSaved(layout);
 }

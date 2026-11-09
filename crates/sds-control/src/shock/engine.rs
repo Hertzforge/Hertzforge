@@ -159,6 +159,24 @@ pub trait ShockEngine: Send {
     fn misses(&self) -> u32;
     /// Log lines since the last call.
     fn take_log(&mut self) -> Vec<(&'static str, String)>;
+    /// When the device started the last pulse, as the controller stamped it once
+    /// the station's clock ran: the moment the time between pulses is held from.
+    /// `None` leaves the run thread its own moment of asking for the pulse.
+    fn last_pulse_start(&self) -> Option<Instant> {
+        None
+    }
+    /// How far ahead of a pulse's due time the run thread asks for it in `auto`:
+    /// the controller brings the shot up (arms the station, commits the record)
+    /// and waits out the rest of the time between pulses itself, so only the
+    /// start lands on the due time. Zero asks at the due time.
+    fn lead(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+    /// Each pulse's bring-up since the last call, timed, by pulse index, for the
+    /// service log. An engine that times nothing has none.
+    fn take_bring_ups(&mut self) -> Vec<(u64, hertzforge_shock_common::BringUp)> {
+        Vec::new()
+    }
 }
 
 /// What an engine is built with: the run's signals and its progress cell, and the
@@ -487,6 +505,8 @@ pub struct ServiceEngine {
     rows_seen: usize,
     log_seen: usize,
     log: Vec<(&'static str, String)>,
+    /// Each pulse's bring-up not yet in the service log.
+    bring_ups: Vec<(u64, hertzforge_shock_common::BringUp)>,
 }
 
 impl ServiceEngine {
@@ -501,6 +521,7 @@ impl ServiceEngine {
             rows_seen: 0,
             log_seen: 0,
             log: Vec::new(),
+            bring_ups: Vec::new(),
         }
     }
 
@@ -565,6 +586,9 @@ impl ServiceEngine {
         for p in report.pulses.iter().skip(self.rows_seen) {
             out.rows.push(row_of(p));
             out.figures.push(self.figures_of(svc, p));
+            if let Some(b) = p.bring_up {
+                self.bring_ups.push((p.pulse, b));
+            }
         }
         self.rows_seen = report.pulses.len();
         forward_log(&mut self.log_seen, &mut self.log, svc);
@@ -1156,5 +1180,21 @@ impl ShockEngine for ServiceEngine {
 
     fn take_log(&mut self) -> Vec<(&'static str, String)> {
         std::mem::take(&mut self.log)
+    }
+
+    fn last_pulse_start(&self) -> Option<Instant> {
+        // The age first, then the instant: the instant read after the age can
+        // only make the start later, never earlier, so a countdown from it is
+        // never short.
+        let age = self.svc.as_ref()?.since_last_pulse_start_s()?;
+        Instant::now().checked_sub(std::time::Duration::from_secs_f64(age))
+    }
+
+    fn lead(&self) -> std::time::Duration {
+        crate::pulse::rails::lead_for(self.svc.as_ref().and_then(|s| s.last_bring_up()))
+    }
+
+    fn take_bring_ups(&mut self) -> Vec<(u64, hertzforge_shock_common::BringUp)> {
+        std::mem::take(&mut self.bring_ups)
     }
 }

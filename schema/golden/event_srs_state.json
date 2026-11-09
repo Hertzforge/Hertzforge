@@ -1,0 +1,98 @@
+{
+ "type": "event",
+ "topic": "srs.state",
+ "seq": 150,
+ "data": {
+  "run_id": "srs-0004",
+  "state": "running",
+  "phase": "waiting",
+  "title": "SRS 100 g, 100 to 2000 Hz",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": []
+  },
+  "grid": {
+   "fs_hz": 51200,
+   "record_len": 14336,
+   "actual": true
+  },
+  "clock": "shared",
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -6,
+   0
+  ],
+  "level_db": -6,
+  "rung": 1,
+  "pulses": {
+   "fired": 3,
+   "passed": 2,
+   "at_level": 1,
+   "of_level": 2
+  },
+  "next_pulse_s": 0.6,
+  "elapsed_s": 9.5,
+  "alarm": false,
+  "identification": {
+   "excitation": "shaped",
+   "drive_vpk": 0.05,
+   "max_vpk": 0.05,
+   "coherence_mean": 0.97,
+   "min_mean_coherence": 0.8,
+   "passed": true
+  },
+  "prediction": {
+   "drive_vpk": 0.41,
+   "drive_vpk_ceiling": 0.5,
+   "drive_vpk_abort": 0.8,
+   "response_peak_g": 72.1,
+   "velocity_pk_ips": 14.1,
+   "displacement_pk_pk_in": 0.031
+  },
+  "notch": {
+   "notched_bands": 2,
+   "worst_before_db": 3.1,
+   "worst_after_db": -0.6,
+   "converged": true
+  },
+  "last_pulse": {
+   "index": 2,
+   "origin": "ladder",
+   "scheduled_db": -6,
+   "commanded_db": -6,
+   "limit_scale": 1,
+   "drive_vpk": 0.205,
+   "peak_g": 36.3,
+   "velocity_pk_ips": 7.1,
+   "displacement_pk_pk_in": 0.016,
+   "worst_err_db": -1.2,
+   "worst_band_hz": 630,
+   "alarm_bands": 0,
+   "abort_bands": 0,
+   "passed": true,
+   "limited_components": 2,
+   "worst_limit_db": -0.7,
+   "at_s": 7.5,
+   "law": {
+    "used": true,
+    "miss": null,
+    "call_ms": 0.2
+   }
+  },
+  "law": {
+   "id": "srs_ratio",
+   "name": "SRS ratio",
+   "version": "0.1.0",
+   "sha256": null,
+   "misses": 0
+  },
+  "feasibility": {
+   "verdict": "pass",
+   "message": "The pulse is within the shaker's ratings."
+  },
+  "end": null
+ }
+}

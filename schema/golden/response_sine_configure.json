@@ -1,0 +1,106 @@
+{
+ "type": "response",
+ "id": 71,
+ "result": {
+  "state": {
+   "run_id": "sine-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Sine 1 g, 20 to 2000 Hz",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 16384,
+    "tick_frames": 164,
+    "tick_s": 0.0100098,
+    "actual": false
+   },
+   "clock": null,
+   "test": "sweep",
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -6,
+    0
+   ],
+   "level_db": null,
+   "rung": null,
+   "frequency_hz": null,
+   "direction": null,
+   "sweeps": null,
+   "held": false,
+   "elapsed_s": null,
+   "at_level_s": null,
+   "remaining_s": null,
+   "alarm": false,
+   "notch": false,
+   "identification": null,
+   "law": {
+    "id": "servo_blend",
+    "name": "Servo blend",
+    "version": "0.1.0",
+    "sha256": null,
+    "misses": 0,
+    "capped_ticks": 0,
+    "live": {
+     "blend_w": 0.5
+    }
+   },
+   "feasibility": null,
+   "end": null
+  },
+  "derived": {
+   "band_hz": [
+    20,
+    2000
+   ],
+   "grid": {
+    "fs_hz": 16384,
+    "tick_frames": 164,
+    "tick_s": 0.0100098,
+    "actual": false
+   },
+   "profile": {
+    "crossovers": [
+     {
+      "freq_hz": 44.9,
+      "from": "disp_pp_in",
+      "to": "accel_g"
+     }
+    ],
+    "peak_accel_g": 1.004,
+    "peak_velocity_ips": 1.371,
+    "peak_disp_pp_in": 0.0097
+   },
+   "test_s": 797.3,
+   "identification_s": 128,
+   "call_budget_s": 0.0025024,
+   "stop_ramp_db_per_s": 120,
+   "safe_stop_s": 0.95,
+   "tracking": {
+    "verdict": "ok",
+    "ratio": 0.00722,
+    "at_hz": null,
+    "message": null
+   },
+   "law": {
+    "id": "servo_blend",
+    "name": "Servo blend",
+    "version": "0.1.0",
+    "sha256": null,
+    "live": [
+     "blend_w"
+    ]
+   },
+   "feasibility": {
+    "verdict": "pass",
+    "message": "The profile is within the shaker's ratings."
+   }
+  },
+  "warnings": []
+ }
+}

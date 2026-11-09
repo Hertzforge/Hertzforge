@@ -242,6 +242,13 @@ pub struct SimPlantSpec {
     /// Which plant: the resonator bank above (the default), a standard
     /// cross-coupled modal plant, or a plant that plays a given FRF matrix.
     pub plant: SimPlant,
+    /// The output lookahead the station states in its caps, frames. `None` is
+    /// the simulator's own (4 frames). A station shaped as a hardware chassis
+    /// states that chassis's (512 frames for the NI chassis at 12 800 Hz in
+    /// 256-frame blocks), so a module's own lookahead arithmetic (lead-ins,
+    /// derived lags, rest pads) runs as it does on hardware. Stated in the caps
+    /// only: the plant does not change.
+    pub output_lookahead_frames: Option<u32>,
 }
 
 /// Which plant a HERTZFORGE-SIM station simulates.
@@ -297,6 +304,7 @@ impl Default for SimPlantSpec {
             max_output_channels: 2,
             shared_clock: false,
             plant: SimPlant::Resonators,
+            output_lookahead_frames: None,
         }
     }
 }
@@ -698,6 +706,9 @@ fn build_sim(plant: &SimPlantSpec) -> StationBackend {
         cfg = cfg
             .plant(model)
             .transport_delay_samples(plant.transport_delay_samples);
+    }
+    if let Some(frames) = plant.output_lookahead_frames {
+        cfg = cfg.min_lookahead_frames(frames);
     }
     let backend = cfg.build();
     StationBackend {
@@ -1310,6 +1321,64 @@ mod tests {
             direct.clock,
             hertzforge_hal::ClockDomain::Unknown,
             "the Sim's own posture is UNPROVEN until a caller claims otherwise"
+        );
+    }
+
+    /// A spec that states an output lookahead reports it in the caps, and only
+    /// there; a spec that does not leaves the caps exactly the simulator's.
+    ///
+    /// RED-MUTATION: drop the `min_lookahead_frames` call in `build_sim` and the
+    /// 512 assertion reds (the caps keep the simulator's 4).
+    #[test]
+    fn a_stated_output_lookahead_reaches_the_caps_and_nothing_else() {
+        let caps_of = |spec: &StationSpec| {
+            try_build_station_backend(BackendKind::Sim, spec)
+                .expect("builds")
+                .backend
+                .caps()
+        };
+        let plain = StationSpec {
+            sim: SimPlantSpec {
+                sample_rate_hz: 12_800.0,
+                transport_delay_samples: 41,
+                shared_clock: true,
+                ..SimPlantSpec::default()
+            },
+            ..StationSpec::default()
+        };
+        let deep = StationSpec {
+            sim: SimPlantSpec {
+                output_lookahead_frames: Some(512),
+                ..plain.sim.clone()
+            },
+            ..StationSpec::default()
+        };
+        let plain_caps = caps_of(&plain);
+        let deep_caps = caps_of(&deep);
+        let lookahead = |c: &hertzforge_hal::Caps| {
+            c.output_buffer
+                .as_ref()
+                .expect("the simulator states an output buffer")
+                .min_lookahead_frames
+        };
+        assert_eq!(lookahead(&plain_caps), 4, "unstated: the simulator's own");
+        assert_eq!(lookahead(&deep_caps), 512, "stated: the spec's");
+        // Nothing else moves: the same caps once the lookahead is put back.
+        let mut back = deep_caps.clone();
+        back.output_buffer
+            .as_mut()
+            .expect("an output buffer")
+            .min_lookahead_frames = 4;
+        assert_eq!(back, plain_caps);
+        assert_eq!(
+            plain_caps,
+            hertzforge_hal_sim::SimConfig::new()
+                .sample_rate_hz(12_800.0)
+                .transport_delay_samples(41)
+                .shared_clock(true)
+                .build()
+                .caps(),
+            "without the field the station is the simulator as it always was"
         );
     }
 

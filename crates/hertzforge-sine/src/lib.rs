@@ -36,13 +36,20 @@
 //! cycles, step-sine, the RSTD search/settle/capture/dwell orchestration, and the
 //! level ladder.
 //!
+//! The [`law`] module is the control-law seam: what a Sine law sees each tick
+//! and returns, the factory that builds it, and the guards the core runs every
+//! law under. It is the native side of the `sine-single` world.
+//!
 //! Pure library: no I/O beyond what serde does; no `unwrap`/`expect`/`panic!` in
 //! library paths (validation returns errors).
 
 pub mod control;
+#[cfg(feature = "service")]
 pub mod feasibility;
+pub mod law;
 pub mod profile;
 pub mod scheduler;
+#[cfg(feature = "service")]
 pub mod service;
 pub mod sweep_raster;
 
@@ -51,7 +58,13 @@ pub use control::{
     BlendLaw, CompositeMode, CompressionPreset, ControlError, DriveGuard, DriveVerdict,
     FeedforwardConfig, FeedforwardTable, LimitChannelTick, NotchGovernor, NotchGovernorConfig,
 };
+#[cfg(feature = "service")]
 pub use feasibility::assess_sine;
+pub use law::{
+    Hold, Identification, LawClock, LawDescriptor, LawFault, LawGuards, LawValues, LiveParam,
+    MonotonicClock, ParamSetting, SineControlLaw, SineLawFactory, SineLawSetup, SineOutputRule,
+    TickInputs, TickOutputs,
+};
 pub use profile::{
     accel_g_pk_of, crossover_hz, displacement_in_pp_from_accel, import_with_report, pct_to_db,
     velocity_ips_pk_from_accel, ProfileError, ProfileRow, ProfileWarning, Quantity, SineProfile,
@@ -63,20 +76,28 @@ pub use scheduler::{
     StepSineConfig, StepSineProgress, StepSpacing, SweepDirection, SweepProgress, SweepState,
     SweepTarget,
 };
+#[cfg(feature = "service")]
 pub use service::config::{
     CaptureConfig, CaptureRule, ColaConfig, ColaWaveform, ConfigError, ControlChannel, ControlSet,
     LimitProfile, MetaField, SineMode, SineTestConfig,
 };
+#[cfg(feature = "service")]
+pub use service::display::{
+    SineCurves, SineDisplay, SineInputCurves, DISPLAY_GRID_POINTS, DISPLAY_HISTORY_POINTS,
+    DISPLAY_HISTORY_S,
+};
+#[cfg(feature = "service")]
 pub use service::report::{
     ChannelRow, ChannelTrace, EventKind, EventLog, FeasibilityDigest, FrfDisplay, Honesty,
-    LevelHistoryEntry, ReportData, RunSettings, RunState, SineStatus, TracePoint, TripKind,
-    TripRecord,
+    LevelHistoryEntry, ReportData, RunSettings, RunState, SineIdentificationFacts,
+    SineInputReading, SineLawStatus, SineStatus, TripKind, TripRecord,
 };
+#[cfg(feature = "service")]
 pub use service::{
     RunMode, ServiceError, SineDisplayChannel, SineDisplaySnapshot, SineService,
     SineSnapshotPayload,
 };
-pub use sweep_raster::{resample_at, SweepRaster, SWEEP_RASTER_POINTS};
+pub use sweep_raster::{resample_at, SweepRaster, TracePoint, SWEEP_RASTER_POINTS};
 
 /// Re-export the hertzforge-dsp sweep-rate law so config authors have one import path
 /// for the whole sine config surface (it appears in [`BidirSweepConfig::rate`]

@@ -30,12 +30,16 @@ hertzforge-reference = { path = "crates/hertzforge-reference" }
 hertzforge-sdm = { path = "crates/hertzforge-sdm" }
 hertzforge-law-host = { path = "crates/hertzforge-law-host" }
 hertzforge-shaker-db = { path = "crates/hertzforge-shaker-db" }
+hertzforge-sine = { path = "crates/hertzforge-sine" }
+hertzforge-sine-laws = { path = "crates/hertzforge-sine-laws" }
 hertzforge-shock-common = { path = "crates/hertzforge-shock-common" }
 hertzforge-shock-host = { path = "crates/hertzforge-shock-host" }
 hertzforge-shock-law-math = { path = "crates/hertzforge-shock-law-math" }
 hertzforge-shock-laws = { path = "crates/hertzforge-shock-laws" }
+hertzforge-srs = { path = "crates/hertzforge-srs" }
 hertzforge-station = { path = "crates/hertzforge-station" }
 hertzforge-twr = { path = "crates/hertzforge-twr" }
+hertzforge-twr-laws = { path = "crates/hertzforge-twr-laws" }
 # `preserve_order`: protocol headers keep the key order they were written in, which
 # the golden frames pin byte for byte.
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -84,4 +88,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.hertzforge-mimo-random]
+opt-level = 3
+
+# The Sine core: its law check's seven cases took 24.2 s unoptimized on the ten-core Mac and
+# 14.6 s with this.
+[profile.dev.package.hertzforge-sine]
 opt-level = 3

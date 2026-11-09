@@ -25,8 +25,8 @@ export interface ShellConfig {
 	/** `?runlog_file=<path>`: the log to open there. */
 	runLogFile: string | null;
 	page: string | null;
-	/** `&test=mimo_random` or `&test=shock`: the pop-out shows that run's page; otherwise Random's. */
-	popoutTest: 'random' | 'mimo_random' | 'shock';
+	/** `&test=mimo_random`, `&test=shock`, `&test=srs`, `&test=sine` or `&test=twr`: the pop-out shows that run's page; otherwise Random's. */
+	popoutTest: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr';
 	/**
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
@@ -64,7 +64,7 @@ export function readConfig(search: string): ShellConfig {
 		runLog: q.get('runlog') === '1',
 		runLogFile: q.get('runlog_file'),
 		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
-		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : q.get('test') === 'shock' ? 'shock' : 'random',
+		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : q.get('test') === 'shock' ? 'shock' : q.get('test') === 'srs' ? 'srs' : q.get('test') === 'sine' ? 'sine' : q.get('test') === 'twr' ? 'twr' : 'random',
 		mockControl: {
 			speed: num(q.get('mock_speed')),
 			niReal: q.get('mock_ni') === 'real' ? true : undefined,

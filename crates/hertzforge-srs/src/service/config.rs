@@ -18,9 +18,14 @@
 //! - the shaker + moving mass for the DETERMINISTIC feasibility gate (crest = 1.0);
 //! - the [`DriveLimit`] peak ceilings (the honesty split: enforcement, not
 //!   prediction);
-//! - the optional reduced-level system ID (Path-B-only).
+//! - the optional reduced-level system ID (Path-B-only);
+//! - the closed loop's settings ([`SrsControl`]: the drive ceiling and abort in
+//!   volts, the identification cap, pacing, the law's guards), which the
+//!   control service always sets.
 
-use crate::iterate::SynthesisOpts;
+use crate::control::SrsControl;
+use crate::iterate::{SynthesisEngine, SynthesisOpts};
+use crate::table::{DampedSineTable, WaveletTable};
 use hertzforge_dsp::srs::{octave_freqs, OctaveFraction};
 use hertzforge_shaker_db::{MovingMass, ShakerRecord};
 use hertzforge_shock_common::{DriveLimit, FeasibilityTolerances, ShockLevelSchedule};
@@ -594,6 +599,20 @@ pub struct SrsTestConfig {
     pub review_after_sysid: bool,
     /// User metadata.
     pub metadata: Vec<MetaField>,
+    /// The closed loop: the drive ceiling and abort in volts, the
+    /// identification burst's cap and coherence hold, pacing between pulses,
+    /// the law's guards and the core's gain cap. `None` is the run as it was
+    /// before the drive was in volts, kept for the old daemon host and the
+    /// recorded trace only; the control service always sets it. Left out of
+    /// the serialized settings when `None`, so an existing record is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<SrsControl>,
+    /// The component table the run starts from, before the offline synthesis
+    /// fits it to the target. `None`: one component per band (the default
+    /// table). Its engine must be [`Self::engine`]. Left out of the serialized
+    /// settings when `None`, so an existing record is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<SynthesisEngine>,
 }
 
 /// The serde default for [`SrsTestConfig::review_after_sysid`].
@@ -632,7 +651,28 @@ impl SrsTestConfig {
             ring_out_s: DEFAULT_RING_OUT_S,
             review_after_sysid: default_review_after_sysid(),
             metadata: MetaField::defaults(),
+            control: None,
+            components: None,
         }
+    }
+
+    /// The component table the run starts from: [`Self::components`] when
+    /// given, otherwise one component per band for [`Self::engine`].
+    pub fn seed_table(&self) -> Result<SynthesisEngine, ConfigError> {
+        if let Some(t) = &self.components {
+            return Ok(t.clone());
+        }
+        let frac = self.fraction.into();
+        Ok(match self.engine {
+            EngineKind::Wavsyn => SynthesisEngine::Wavsyn(
+                WaveletTable::default_over_band(self.f_lo_hz, self.f_hi_hz, frac)
+                    .map_err(|e| ConfigError::BadConfig(e.to_string()))?,
+            ),
+            EngineKind::Seds => SynthesisEngine::Seds(
+                DampedSineTable::default_over_band(self.f_lo_hz, self.f_hi_hz, frac)
+                    .map_err(|e| ConfigError::BadConfig(e.to_string()))?,
+            ),
+        })
     }
 
     /// The analysis band grid: fractional-octave centers over
@@ -820,6 +860,36 @@ impl SrsTestConfig {
                 "ring_out_s must be finite and >= 0".into(),
             ));
         }
+        if let Some(t) = &self.components {
+            let (kind, rows, checked) = match t {
+                SynthesisEngine::Wavsyn(t) => {
+                    (EngineKind::Wavsyn, t.components.len(), t.validate())
+                }
+                SynthesisEngine::Seds(t) => (EngineKind::Seds, t.components.len(), t.validate()),
+            };
+            if kind != self.engine {
+                return Err(ConfigError::BadConfig(format!(
+                    "synthesis.components: the table is for {kind:?} and the engine is {:?}",
+                    self.engine
+                )));
+            }
+            if rows == 0 {
+                return Err(ConfigError::BadConfig(
+                    "synthesis.components: the table has no rows".into(),
+                ));
+            }
+            checked.map_err(|e| ConfigError::BadConfig(format!("synthesis.components: {e}")))?;
+        }
+        if let Some(c) = &self.control {
+            if self.sysid.is_none() {
+                return Err(ConfigError::BadConfig(
+                    "the closed loop needs system identification: the drive in volts comes \
+                     from the identified plant"
+                        .into(),
+                ));
+            }
+            c.validate().map_err(ConfigError::BadConfig)?;
+        }
         Ok(())
     }
 }
@@ -849,4 +919,87 @@ fn log_log_interp(points: &[(f64, f64)], f: f64) -> f64 {
     let (f1, g1) = points[hi];
     let t = (f / f0).ln() / (f1 / f0).ln();
     g0 * (g1 / g0).powf(t)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_config_without_control_serializes_as_before_and_one_with_it_round_trips() {
+        // `control: None` adds nothing to the settings record, so existing
+        // records and their readers are unchanged.
+        let open = SrsTestConfig::flat(100.0, 2000.0, 50.0);
+        let json = serde_json::to_value(&open).unwrap();
+        assert!(json.get("control").is_none(), "{json}");
+        let back: SrsTestConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(back.control, None);
+        assert_eq!(serde_json::to_value(&back).unwrap(), json);
+
+        let mut c = open;
+        c.control = Some(SrsControl::new(0.5, 0.8));
+        c.validate().unwrap();
+        let text = serde_json::to_string(&c).unwrap();
+        let back: SrsTestConfig = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, c);
+    }
+
+    #[test]
+    fn a_component_table_seeds_the_run_and_must_be_for_the_engine() {
+        let mut c = SrsTestConfig::flat(100.0, 2000.0, 50.0);
+        let json = serde_json::to_value(&c).unwrap();
+        assert!(json.get("components").is_none(), "{json}");
+        let default_rows = match c.seed_table().unwrap() {
+            SynthesisEngine::Wavsyn(t) => t.components.len(),
+            SynthesisEngine::Seds(_) => panic!("the default engine is wavsyn"),
+        };
+        assert_eq!(default_rows, c.band_freqs().len(), "one per band");
+
+        let mut table = WaveletTable::default_over_band(200.0, 1000.0, c.fraction.into()).unwrap();
+        table.components[0].amplitude_g = 2.5;
+        c.components = Some(SynthesisEngine::Wavsyn(table.clone()));
+        c.validate().unwrap();
+        assert_eq!(
+            c.seed_table().unwrap(),
+            SynthesisEngine::Wavsyn(table.clone()),
+            "the configured table is the seed"
+        );
+        // Through JSON (the parser may round a last bit, so compare the rows).
+        let back: SrsTestConfig =
+            serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        match back.components {
+            Some(SynthesisEngine::Wavsyn(t)) => {
+                assert_eq!(t.components.len(), table.components.len());
+                assert_eq!(t.components[0].amplitude_g, 2.5);
+            }
+            other => panic!("the table did not survive JSON: {other:?}"),
+        }
+
+        c.engine = EngineKind::Seds;
+        let e = c.validate().unwrap_err().to_string();
+        assert!(e.contains("synthesis.components"), "{e}");
+        c.engine = EngineKind::Wavsyn;
+        c.components = Some(SynthesisEngine::Wavsyn(WaveletTable::new()));
+        assert!(c.validate().unwrap_err().to_string().contains("no rows"));
+        table.components[0].half_cycles = 4;
+        c.components = Some(SynthesisEngine::Wavsyn(table));
+        assert!(c
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("synthesis.components"));
+    }
+
+    #[test]
+    fn a_bad_closed_loop_setting_or_a_closed_loop_without_identification_is_refused() {
+        let mut c = SrsTestConfig::flat(100.0, 2000.0, 50.0);
+        c.control = Some(SrsControl::new(0.5, 0.4));
+        let e = c.validate().unwrap_err();
+        assert!(e.to_string().contains("drive_vpk_abort"), "{e}");
+
+        c.control = Some(SrsControl::new(0.5, 0.8));
+        c.sysid = None;
+        let e = c.validate().unwrap_err();
+        assert!(e.to_string().contains("identification"), "{e}");
+    }
 }

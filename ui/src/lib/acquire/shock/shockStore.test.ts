@@ -124,6 +124,24 @@ describe('the classical shock store', () => {
 		expect(shock.status?.end?.outcome).toBe('operator_stop');
 	});
 
+	it("offers Fire again once the live frame says the time between pulses has passed", async () => {
+		const { shock } = await screen({ speed: 4 });
+		ready(shock);
+		shock.setup.schedule.mode = 'manual';
+		shock.setup.identification.review = false;
+		expect(await shock.apply()).toBe(true);
+		await shock.start();
+		await until(() => shock.verbs.fire.enabled, 4000);
+		expect(await shock.fire()).toBe(true);
+		await until(() => shock.pulses.length === 1 && shock.status?.phase === 'waiting');
+		expect(shock.verbs.fire.enabled).toBe(false);
+		// the state said the next pulse was a while off; the live frames count it down
+		await until(() => shock.live?.phase === 'waiting' && (shock.now?.next_pulse_s ?? 1) <= 0.05, 4000);
+		expect(shock.verbs.fire.reason).toBeNull();
+		expect(shock.verbs.fire.enabled).toBe(true);
+		await shock.abort();
+	});
+
 	it('refuses the manual verbs on an automatic schedule, and the run slot both ways with Random', async () => {
 		const { client, shock } = await screen({ speed: 1 });
 		ready(shock);

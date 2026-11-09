@@ -525,7 +525,14 @@ impl BlendLaw {
     /// derives it from the servo's before/after drive scale, or 0 while the
     /// servo is held).
     pub fn step(&mut self, f_now_hz: f64, servo_step_db: f64, ff: &FeedforwardTable) -> f64 {
-        let ff_now = ff.ff_db(f_now_hz);
+        self.step_parts(ff.ff_db(f_now_hz), servo_step_db).0
+    }
+
+    /// [`BlendLaw::step`] on the prediction at this tick's frequency
+    /// (`ff_now`, dB; `None` where it is not trusted), returning the clamped
+    /// total and the prediction's own part (`w` times its change since the
+    /// last tick), both dB.
+    pub fn step_parts(&mut self, ff_now: Option<f64>, servo_step_db: f64) -> (f64, f64) {
         let prediction = match (self.ff_prev_db, ff_now) {
             (Some(prev), Some(now)) => self.cfg.w * (now - prev),
             // Either end untrusted / out of grid: benign - prediction 0.
@@ -539,10 +546,11 @@ impl BlendLaw {
         } else {
             servo_step_db
         };
-        (prediction + servo).clamp(
+        let total = (prediction + servo).clamp(
             -self.cfg.max_step_db_per_tick,
             self.cfg.max_step_db_per_tick,
-        )
+        );
+        (total, prediction)
     }
 }
 

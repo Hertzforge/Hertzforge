@@ -23,6 +23,10 @@ hertzforge-mimo-laws = { path = "../hertzforge-mimo-laws" }
 # The built-in classical shock law's declaration (`fd_correct`'s parameters and
 # values), for its catalog entry. Plain math, no controller crate.
 hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
+# The built-in Sine law's declaration (`servo_blend`'s parameters, values and
+# live parameters), for its catalog entry. The control core alone, without the
+# run service.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
 hertzforge-sdm = { path = "../hertzforge-sdm" }
 # `default_data_root()`: law files live in the local data root, never in a
 # synced folder.
