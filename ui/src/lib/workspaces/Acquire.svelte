@@ -15,6 +15,8 @@
 	import { TWR_STATE_WORDS } from '$lib/acquire/twr/twrWords';
 	import ExplorerScreen from '$lib/acquire/explorer/ExplorerScreen.svelte';
 	import { EXPLORER_STATE_WORDS } from '$lib/acquire/explorer/explorerWords';
+	import RecorderScreen from '$lib/acquire/recorder/RecorderScreen.svelte';
+	import { RECORDER_STATE_WORDS } from '$lib/acquire/recorder/recorderWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
 
@@ -39,7 +41,9 @@
 								? TWR_STATE_WORDS[app.twr.status.state]
 								: app.explorer.isLive && app.explorer.status
 									? EXPLORER_STATE_WORDS[app.explorer.status.state]
-									: null
+									: app.recorder.isLive && app.recorder.status
+										? RECORDER_STATE_WORDS[app.recorder.status.state]
+										: null
 	);
 </script>
 
@@ -59,6 +63,8 @@
 	<TwrScreen {app} />
 {:else if tests.screen === 'explorer'}
 	<ExplorerScreen {app} />
+{:else if tests.screen === 'recorder'}
+	<RecorderScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}

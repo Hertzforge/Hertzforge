@@ -99,6 +99,9 @@
 			} else if (app.explorer.actions.abort.enabled) {
 				e.preventDefault();
 				void app.explorer.abort();
+			} else if (app.recorder.actions.abort.enabled) {
+				e.preventDefault();
+				void app.recorder.abort();
 			}
 			return;
 		}
