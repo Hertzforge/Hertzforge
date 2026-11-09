@@ -189,6 +189,32 @@ pub struct RecStatus {
     pub run_fault: Option<RunFault>,
 }
 
+/// A mark: a row passing one of its limits, or its overload indicator latching.
+/// Marks are held: once made, a mark stays in the run's list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Mark {
+    /// A row passed a limit: `axis` `accel`, `velocity` or `displacement`, the value
+    /// of its first sample past the limit, in the axis's unit (g, in/s, mil).
+    Limit {
+        row: u32,
+        axis: String,
+        value: f64,
+        limit: f64,
+        station_frame: u64,
+        recording: Option<String>,
+    },
+    /// A row's overload indicator latched: its first sample whose magnitude reached
+    /// `level`, 0.9 of the row's range.
+    Overload {
+        row: u32,
+        value: f64,
+        level: f64,
+        station_frame: u64,
+        recording: Option<String>,
+    },
+}
+
 /// Why a run ended on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

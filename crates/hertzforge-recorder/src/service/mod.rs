@@ -61,8 +61,8 @@ use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
 pub use config::{MetaField, RecState, RecorderConfig};
 pub use report::{
-    ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Honesty, RecEvent,
-    RecStatus, RecordingInfoLite, ReportData, RunFault, SessionRecording,
+    ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Honesty, Mark,
+    RecEvent, RecStatus, RecordingInfoLite, ReportData, RunFault, SessionRecording,
 };
 
 /// The process step of a capture-only run: it reads and produces nothing.
@@ -514,6 +514,11 @@ impl<B: Backend> RecorderService<B> {
     pub fn with_group_delay_frames(mut self, frames: f64) -> Self {
         self.group_delay_given = Some(frames);
         self
+    }
+
+    /// The run's marks, in the order they were made.
+    pub fn marks(&self) -> &[Mark] {
+        &[]
     }
 
     /// The input group delay every recording states, frames.

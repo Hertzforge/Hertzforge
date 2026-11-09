@@ -890,3 +890,107 @@ fn recorder_holdoff_counts_station_time_from_the_trigger() {
         assert!(w[1].0 >= w[0].1, "a frame in two recordings: {spans:?}");
     }
 }
+
+// ---------------------------------------------------------------------------------
+// G7: limits are marks. A row passing a limit is marked and recording goes on.
+// ---------------------------------------------------------------------------------
+
+#[test]
+fn recorder_a_limit_crossing_is_marked_and_recording_goes_on() {
+    use hertzforge_recorder::service::Mark;
+    // Row 1: a 250 Hz tone of 0.5 g from 0.5 s to 1.0 s of every 2 s, quiet between;
+    // row 2: 0.2 g of 250 Hz always. Both rows limited at 0.4 g; row 1's range 0.5 g
+    // (its overload indicator at 0.45 g). On a hardware station.
+    let fs: f64 = 2048.0;
+    let period = 2 * 2048u64;
+    let row1 = move |n: u64| -> f32 {
+        let k = n % period;
+        if (1024..2048).contains(&k) {
+            (0.5 * (std::f64::consts::TAU * 250.0 * n as f64 / fs).sin()) as f32
+        } else {
+            0.0
+        }
+    };
+    let row2 = move |n: u64| -> f32 {
+        (0.2 * (std::f64::consts::TAU * 250.0 * n as f64 / fs).sin()) as f32
+    };
+    let station = ScriptedStation::new(
+        2,
+        fs,
+        Box::new(move |n, c| if c == 0 { row1(n) } else { row2(n) }),
+    )
+    .paced();
+    let mut table = inputs(2);
+    table.channels[0].range_max = 0.5;
+    for c in table.channels.iter_mut() {
+        c.abort.accel_g = Some(0.4);
+    }
+    let mut cfg = manual(fs);
+    cfg.timed_record_s = Some(6.0);
+    cfg.overload_fraction = 0.9;
+    let root = temp_root("g7_marks");
+    let mut svc = RecorderService::with_backend(
+        cfg,
+        table,
+        station,
+        hertzforge_module_abi::StationClass::NiSimulated,
+        root.clone(),
+    )
+    .unwrap()
+    .with_block_frames(64);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.record_from_start().unwrap();
+    while svc.state() == RecState::Recording {
+        svc.pump().expect("a limit crossing does not end the run");
+    }
+    assert_eq!(
+        svc.state(),
+        RecState::Monitoring,
+        "the recording ran its length"
+    );
+    let marks = svc.marks().to_vec();
+    svc.stop_monitor().unwrap();
+    assert_eq!(svc.recordings_list(None)[0].frames, 6 * 2048);
+
+    // One limit mark per episode on row 1, at its first sample past 0.4 g.
+    let first_over = |from: u64| (from..).find(|&n| row1(n).abs() > 0.4).unwrap();
+    let want: Vec<u64> = (0..3).map(|k| first_over(k * period)).collect();
+    let limits: Vec<(u32, u64, f64)> = marks
+        .iter()
+        .filter_map(|m| match m {
+            Mark::Limit {
+                row,
+                station_frame,
+                value,
+                recording,
+                ..
+            } => {
+                assert_eq!(recording.as_deref(), Some("rec_0001"));
+                Some((*row, *station_frame, *value))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        limits.iter().map(|l| l.1).collect::<Vec<_>>(),
+        want,
+        "a mark at each episode's first crossing, none on row 2: {limits:?}"
+    );
+    assert!(limits.iter().all(|l| l.0 == 1 && l.2 > 0.4));
+    let overloads: Vec<&Mark> = marks
+        .iter()
+        .filter(|m| matches!(m, Mark::Overload { .. }))
+        .collect();
+    assert_eq!(
+        overloads.len(),
+        1,
+        "the row's overload indicator latches once"
+    );
+    let rec = json_at(&root.join("rec_0001").join("recorder.json"));
+    assert_eq!(
+        rec["marks"].as_array().unwrap().len(),
+        4,
+        "the marks inside it: {rec}"
+    );
+}
