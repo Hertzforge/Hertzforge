@@ -29,6 +29,8 @@
 //!   subscriptions and the law check.
 //! - [`explorer`]: Explorer, the hand-steered sine: its configuration and its
 //!   subscriptions.
+//! - [`recorder`]: the Recorder, the inputs recorded with no drive: its
+//!   configuration.
 //! - [`laws`]: the control-law catalog on the wire.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
@@ -45,6 +47,7 @@ pub mod profiles;
 pub mod protocol;
 pub mod pulse;
 pub mod random;
+pub mod recorder;
 pub mod server;
 pub mod session;
 pub mod shock;
