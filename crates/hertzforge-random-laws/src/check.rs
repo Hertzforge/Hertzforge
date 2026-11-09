@@ -7,7 +7,7 @@
 //! writes records is separate; this module reads and writes them and decides,
 //! from a catalog entry, whether a law may drive hardware.
 
-use crate::catalog::{CatalogEntry, CheckStatus};
+use crate::catalog::{CatalogEntry, CheckStatus, LawWorld};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -160,7 +160,19 @@ pub enum ArmRefusal {
     },
     /// The law file's check record could not be read, or is not for this file.
     CheckUnreadable(String),
+    /// The law file passed a check the current check has replaced.
+    CheckOutdated {
+        /// The check that cleared it.
+        tool_version: String,
+        /// The check in force.
+        current: String,
+    },
 }
+
+/// The version of the TWR law check in force. A TWR law file is cleared for
+/// hardware only by a record of this check: a change to its plant set or its
+/// rules changes this, and a file checked before must be checked again.
+pub const TWR_CHECK_VERSION: &str = "twr-check 1";
 
 impl fmt::Display for ArmRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -182,6 +194,14 @@ impl fmt::Display for ArmRefusal {
                      the simulator only"
                 )
             }
+            ArmRefusal::CheckOutdated {
+                tool_version,
+                current,
+            } => write!(
+                f,
+                "this control law passed {tool_version}, which {current} has replaced; check it \
+                 again before it drives hardware"
+            ),
             ArmRefusal::CheckUnreadable(why) => write!(
                 f,
                 "this control law's check record cannot be used ({why}); check it again before \
@@ -213,6 +233,14 @@ pub fn may_arm_on_hardware(entry: &CatalogEntry) -> Result<(), ArmRefusal> {
                     "the record is for the law file {}",
                     record.law_sha256
                 )));
+            }
+            // A TWR record clears a file only at the check in force. The
+            // other worlds' records are not held to their version yet.
+            if entry.world == LawWorld::Twr && record.tool_version != TWR_CHECK_VERSION {
+                return Err(ArmRefusal::CheckOutdated {
+                    tool_version: record.tool_version.clone(),
+                    current: TWR_CHECK_VERSION.into(),
+                });
             }
             if record.passed {
                 Ok(())

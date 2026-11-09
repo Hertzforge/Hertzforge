@@ -283,6 +283,32 @@ impl FdCorrect {
         })
     }
 
+    /// Take `drive` (a full-level record of `record_len` samples) as the law's
+    /// own drive, as though it had asked for it: `D` becomes its spectrum and
+    /// the next call's drive change is reported against its peak.
+    ///
+    /// Time waveform replication calls this when the core clipped the last
+    /// play's drive, so the next correction starts from what played. The
+    /// classical law never calls it.
+    pub fn adopt(&mut self, drive: &[f64]) -> Result<(), String> {
+        if drive.len() != self.record_len {
+            return Err(format!(
+                "the drive has {} samples; the record has {}",
+                drive.len(),
+                self.record_len
+            ));
+        }
+        if self.drive_spectrum.is_empty() {
+            return Err("the law was asked to take a drive before its seed".into());
+        }
+        if drive.iter().any(|v| !v.is_finite()) {
+            return Err("the drive holds a value that is not a finite number".into());
+        }
+        self.drive_spectrum = rfft_half(drive)?;
+        self.last_peak = peak(drive);
+        Ok(())
+    }
+
     /// The next drive, from the last pulse's `response` referred to full level
     /// (`record_len` samples): `D += beta G (R - Y)` on the trusted bins, each
     /// bin's magnitude allowed to grow by at most `max_db_per_pulse` (shrinking

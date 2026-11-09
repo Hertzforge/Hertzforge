@@ -86,8 +86,10 @@ deny = [
     "hertzforge-recorder",
     "hertzforge-shock-host",
     "hertzforge-sine",
+    "hertzforge-sine-laws",
     "hertzforge-srs",
     "hertzforge-twr",
+    "hertzforge-twr-laws",
   ] },
 ]
 # Not listed: `hertzforge-backendd`, the headless daemon. It reaches hardware only through

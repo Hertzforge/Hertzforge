@@ -42,9 +42,8 @@
 //! No RNG, no time, no I/O. A given `(config, fs_hz)` always yields the same
 //! waveform, so a preview is reproducible and a golden test can pin it.
 
-use crate::iterate::{synthesize_to_target, SynthesisEngine};
+use crate::iterate::synthesize_to_target;
 use crate::service::config::{ConfigError, EngineKind, SrsTestConfig};
-use crate::table::{DampedSineTable, WaveletTable};
 use hertzforge_dsp::shock::{pulse_kinematic_series, pulse_kinematics};
 use hertzforge_dsp::srs::srs_analyze;
 use serde::{Deserialize, Serialize};
@@ -149,18 +148,9 @@ pub fn synthesize_preview(
     let band_freqs = cfg.band_freqs();
     let target = cfg.target_on_grid()?;
 
-    // The SAME seed the service builds in `default_engine`: one component per band.
-    let frac = cfg.fraction.into();
-    let seed = match cfg.engine {
-        EngineKind::Wavsyn => SynthesisEngine::Wavsyn(
-            WaveletTable::default_over_band(cfg.f_lo_hz, cfg.f_hi_hz, frac)
-                .map_err(|e| ConfigError::BadConfig(e.to_string()))?,
-        ),
-        EngineKind::Seds => SynthesisEngine::Seds(
-            DampedSineTable::default_over_band(cfg.f_lo_hz, cfg.f_hi_hz, frac)
-                .map_err(|e| ConfigError::BadConfig(e.to_string()))?,
-        ),
-    };
+    // The SAME seed the service builds in `default_engine`: the configured
+    // component table, or one component per band.
+    let seed = cfg.seed_table()?;
 
     let result = synthesize_to_target(&target, &band_freqs, fs_hz, seed, cfg.synthesis);
 

@@ -87,6 +87,15 @@
 			} else if (app.shock.actions.abort.enabled) {
 				e.preventDefault();
 				void app.shock.abort();
+			} else if (app.srs.actions.abort.enabled) {
+				e.preventDefault();
+				void app.srs.abort();
+			} else if (app.sine.actions.abort.enabled) {
+				e.preventDefault();
+				void app.sine.abort();
+			} else if (app.twr.actions.abort.enabled) {
+				e.preventDefault();
+				void app.twr.abort();
 			}
 			return;
 		}

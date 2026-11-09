@@ -41,7 +41,8 @@ BINARY = {
 def test_every_shock_golden_is_checked_here():
     # The Rust, TypeScript and Python suites read the same files in schema/golden/.
     names = {p.name.split('.')[0] for p in GOLDEN.iterdir()
-             if 'shock' in p.name and not p.name.endswith('.expected.json')}
+             if 'shock' in p.name and 'shock_srs' not in p.name
+             and not p.name.endswith('.expected.json')}
     assert names == set(TEXT) | set(BINARY), sorted(names ^ (set(TEXT) | set(BINARY)))
 
 

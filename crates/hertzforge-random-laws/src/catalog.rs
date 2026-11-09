@@ -22,6 +22,8 @@ use hertzforge_law_host::{
 };
 use hertzforge_mimo_laws::BuiltinMimo;
 use hertzforge_shock_law_math::classical as fdc;
+use hertzforge_shock_law_math::srs as srsr;
+use hertzforge_shock_law_math::twr as twrc;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -56,25 +58,40 @@ pub enum LawWorld {
     Mimo,
     /// Classical shock (`shock-classical`).
     ShockClassical,
+    /// SRS shock (`shock-srs`).
+    ShockSrs,
+    /// Single-output Sine (`sine-single`).
+    Sine,
+    /// Time waveform replication (`twr-single`). Listed with no entries until
+    /// its built-in law and its law files are served.
+    Twr,
 }
 
 impl LawWorld {
-    /// The stable wire name: `single`, `mimo` or `shock_classical`.
+    /// The stable wire name: `single`, `mimo`, `shock_classical`,
+    /// `shock_srs`, `sine` or `twr`.
     pub fn as_str(self) -> &'static str {
         match self {
             LawWorld::Single => "single",
             LawWorld::Mimo => "mimo",
             LawWorld::ShockClassical => "shock_classical",
+            LawWorld::ShockSrs => "shock_srs",
+            LawWorld::Sine => "sine",
+            LawWorld::Twr => "twr",
         }
     }
 
     /// The test type, in words, for a refusal: "single-output Random",
-    /// "multiple-output Random" or "classical shock".
+    /// "multiple-output Random", "classical shock", "SRS shock", "Sine" or
+    /// "TWR".
     pub fn test_type(self) -> &'static str {
         match self {
             LawWorld::Single => "single-output Random",
             LawWorld::Mimo => "multiple-output Random",
             LawWorld::ShockClassical => "classical shock",
+            LawWorld::ShockSrs => "SRS shock",
+            LawWorld::Sine => "Sine",
+            LawWorld::Twr => "TWR",
         }
     }
 }
@@ -86,12 +103,131 @@ pub const CLASSICAL_BUILTIN_ID: &str = fdc::ID;
 /// `hertzforge-shock-law-math`: the same manifest its law file
 /// (`laws/shock-fdc`) describes.
 pub fn classical_builtin_manifest() -> Manifest {
+    math_manifest(
+        fdc::NAME,
+        fdc::VERSION,
+        fdc::SUMMARY,
+        fdc::KNOBS,
+        fdc::DIAGNOSTICS,
+    )
+}
+
+/// The catalog id of the built-in SRS shock law, `srs_ratio`.
+pub const SRS_BUILTIN_ID: &str = srsr::ID;
+
+/// The built-in SRS shock law's manifest, from its declaration in
+/// `hertzforge-shock-law-math`: the same manifest its law file
+/// (`laws/shock-srs-ratio`) describes.
+pub fn srs_builtin_manifest() -> Manifest {
+    math_manifest(
+        srsr::NAME,
+        srsr::VERSION,
+        srsr::SUMMARY,
+        srsr::KNOBS,
+        srsr::DIAGNOSTICS,
+    )
+}
+
+/// The catalog id of the built-in TWR law, `twr_correct`.
+pub const TWR_BUILTIN_ID: &str = twrc::ID;
+
+/// The built-in TWR law's manifest, from its declaration in
+/// `hertzforge-shock-law-math`: the same manifest its law file
+/// (`laws/twr-correct`) describes.
+pub fn twr_builtin_manifest() -> Manifest {
+    math_manifest(
+        twrc::NAME,
+        twrc::VERSION,
+        twrc::SUMMARY,
+        twrc::KNOBS,
+        twrc::DIAGNOSTICS,
+    )
+}
+
+/// The catalog id of the built-in Sine law, `servo_blend`.
+pub const SINE_BUILTIN_ID: &str = hertzforge_sine::law::SERVO_BLEND_ID;
+
+/// The built-in Sine law's manifest, from its declaration in
+/// `hertzforge-sine` (`law::servo_blend::KNOBS` and `DIAGNOSTICS`): the same
+/// manifest its law file (`laws/sine-servo`) describes.
+pub fn sine_builtin_manifest() -> Manifest {
+    use hertzforge_law_host::{ChoiceSpec, DiagnosticSpec};
+    use hertzforge_sine::law::servo_blend as sb;
     Manifest {
-        name: fdc::NAME.into(),
-        version: fdc::VERSION.into(),
+        name: sb::NAME.into(),
+        version: sb::VERSION.into(),
+        author: sb::AUTHOR.into(),
+        summary: sb::SUMMARY.into(),
+        params: sb::KNOBS
+            .iter()
+            .map(|k| ParamSpec {
+                key: k.key.into(),
+                label: k.label.into(),
+                help: k.help.into(),
+                kind: match k.kind {
+                    sb::KnobKind::Number {
+                        unit,
+                        min,
+                        max,
+                        step,
+                        default,
+                    } => ParamKind::Number(NumberSpec {
+                        unit: unit.into(),
+                        min,
+                        max,
+                        step,
+                        default,
+                    }),
+                    sb::KnobKind::Choice { options, default } => ParamKind::Choice(ChoiceSpec {
+                        options: options.iter().map(|o| o.to_string()).collect(),
+                        default: default.into(),
+                    }),
+                },
+            })
+            .collect(),
+        diagnostics: sb::DIAGNOSTICS
+            .iter()
+            .map(|d| DiagnosticSpec {
+                key: d.key.into(),
+                label: d.label.into(),
+                unit: d.unit.into(),
+                help: d.help.into(),
+            })
+            .collect(),
+    }
+}
+
+/// The built-in Sine law's live parameters: the keys an operator may change
+/// while the test runs.
+pub fn sine_builtin_live() -> Vec<String> {
+    hertzforge_sine::law::servo_blend::KNOBS
+        .iter()
+        .filter(|k| k.live)
+        .map(|k| k.key.to_string())
+        .collect()
+}
+
+fn sine_builtin_entry() -> CatalogEntry {
+    CatalogEntry {
+        live: sine_builtin_live(),
+        ..shock_builtin_entry(SINE_BUILTIN_ID, sine_builtin_manifest(), LawWorld::Sine)
+    }
+}
+
+/// A built-in shock law's manifest from its declaration.
+fn math_manifest(
+    name: &str,
+    version: &str,
+    summary: &str,
+    knobs: &[hertzforge_shock_law_math::NumberParam],
+    diagnostics: &[hertzforge_shock_law_math::DiagnosticDecl],
+) -> Manifest {
+    Manifest {
+        name: name.into(),
+        version: version.into(),
         author: hertzforge_shock_law_math::AUTHOR.into(),
-        summary: fdc::SUMMARY.into(),
-        params: fdc::KNOBS
+        summary: summary.into(),
+        params: knobs
             .iter()
             .map(|k| ParamSpec {
                 key: k.key.into(),
@@ -106,7 +242,7 @@ pub fn classical_builtin_manifest() -> Manifest {
                 }),
             })
             .collect(),
-        diagnostics: fdc::DIAGNOSTICS
+        diagnostics: diagnostics
             .iter()
             .map(|d| DiagnosticSpec {
                 key: d.key.into(),
@@ -119,9 +255,24 @@ pub fn classical_builtin_manifest() -> Manifest {
 }
 
 fn classical_builtin_entry() -> CatalogEntry {
-    let manifest = classical_builtin_manifest();
+    shock_builtin_entry(
+        CLASSICAL_BUILTIN_ID,
+        classical_builtin_manifest(),
+        LawWorld::ShockClassical,
+    )
+}
+
+fn srs_builtin_entry() -> CatalogEntry {
+    shock_builtin_entry(SRS_BUILTIN_ID, srs_builtin_manifest(), LawWorld::ShockSrs)
+}
+
+fn twr_builtin_entry() -> CatalogEntry {
+    shock_builtin_entry(TWR_BUILTIN_ID, twr_builtin_manifest(), LawWorld::Twr)
+}
+
+fn shock_builtin_entry(id: &str, manifest: Manifest, world: LawWorld) -> CatalogEntry {
     CatalogEntry {
-        id: CLASSICAL_BUILTIN_ID.into(),
+        id: id.into(),
         identity: LawIdentity {
             name: manifest.name.clone(),
             version: manifest.version.clone(),
@@ -131,8 +282,9 @@ fn classical_builtin_entry() -> CatalogEntry {
         manifest,
         builtin: true,
         check: CheckStatus::BuiltIn,
-        world: LawWorld::ShockClassical,
+        world,
         mimo: None,
+        live: Vec::new(),
     }
 }
 
@@ -157,6 +309,9 @@ pub struct CatalogEntry {
     /// the optional inputs it reads and the layout of each diagnostic (its
     /// `law` is [`Self::manifest`]).
     pub mimo: Option<MimoManifest>,
+    /// For a Sine law, the number parameters the operator may change while
+    /// the test runs; empty for every other world.
+    pub live: Vec<String>,
 }
 
 /// A file in the laws folder that is not in the catalog, and why.
@@ -369,12 +524,70 @@ impl LawCatalog {
             .collect()
     }
 
+    /// Every SRS shock law, the built-in `srs_ratio` (the default) first,
+    /// then the imported `shock-srs` law files by name, version and hash.
+    pub fn shock_srs_entries(&self) -> Vec<CatalogEntry> {
+        std::iter::once(srs_builtin_entry())
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::ShockSrs(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
+    /// Every Sine law, the built-in `servo_blend` (the default) first, then
+    /// the imported `sine-single` law files by name, version and hash.
+    pub fn sine_entries(&self) -> Vec<CatalogEntry> {
+        std::iter::once(sine_builtin_entry())
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::Sine(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
+    /// The imported Sine law file with `id` (its SHA-256).
+    pub fn sine_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedSineLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::Sine(l)) => Some(l),
+            _ => None,
+        }
+    }
+
+    /// Every TWR law, the built-in `twr_correct` (the default) first, then the
+    /// imported `twr-single` law files by name, version and hash.
+    pub fn twr_entries(&self) -> Vec<CatalogEntry> {
+        std::iter::once(twr_builtin_entry())
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::Twr(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
+    /// The imported TWR law file with `id` (its SHA-256).
+    pub fn twr_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedTwrLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::Twr(l)) => Some(l),
+            _ => None,
+        }
+    }
+
     /// Every law of `world`.
     pub fn entries_for(&self, world: LawWorld) -> Vec<CatalogEntry> {
         match world {
             LawWorld::Single => self.entries(),
             LawWorld::Mimo => self.mimo_entries(),
             LawWorld::ShockClassical => self.shock_classical_entries(),
+            LawWorld::ShockSrs => self.shock_srs_entries(),
+            LawWorld::Sine => self.sine_entries(),
+            LawWorld::Twr => self.twr_entries(),
         }
     }
 
@@ -382,6 +595,14 @@ impl LawCatalog {
     pub fn classical_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedClassicalLaw> {
         match self.imported_law(id).map(|i| &i.law) {
             Some(AnyLaw::ShockClassical(l)) => Some(l),
+            _ => None,
+        }
+    }
+
+    /// The imported SRS shock law file with `id` (its SHA-256).
+    pub fn srs_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedSrsLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::ShockSrs(l)) => Some(l),
             _ => None,
         }
     }
@@ -396,6 +617,15 @@ impl LawCatalog {
         }
         if id == CLASSICAL_BUILTIN_ID {
             return Some(classical_builtin_entry());
+        }
+        if id == SRS_BUILTIN_ID {
+            return Some(srs_builtin_entry());
+        }
+        if id == SINE_BUILTIN_ID {
+            return Some(sine_builtin_entry());
+        }
+        if id == TWR_BUILTIN_ID {
+            return Some(twr_builtin_entry());
         }
         self.imported_law(id).map(imported_entry)
     }
@@ -467,6 +697,7 @@ fn builtin_entry(b: BuiltinLaw) -> CatalogEntry {
         check: CheckStatus::BuiltIn,
         world: LawWorld::Single,
         mimo: None,
+        live: Vec::new(),
     }
 }
 
@@ -485,6 +716,7 @@ fn builtin_mimo_entry(b: BuiltinMimo) -> CatalogEntry {
         check: CheckStatus::BuiltIn,
         world: LawWorld::Mimo,
         mimo: Some(m),
+        live: Vec::new(),
     }
 }
 
@@ -497,6 +729,9 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
             Some(l.manifest().clone()),
         ),
         AnyLaw::ShockClassical(l) => (l.manifest().clone(), LawWorld::ShockClassical, None),
+        AnyLaw::ShockSrs(l) => (l.manifest().clone(), LawWorld::ShockSrs, None),
+        AnyLaw::Sine(l) => (l.manifest().clone(), LawWorld::Sine, None),
+        AnyLaw::Twr(l) => (l.manifest().clone(), LawWorld::Twr, None),
     };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),
@@ -506,6 +741,10 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
         check: i.check.clone(),
         world,
         mimo,
+        live: match &i.law {
+            AnyLaw::Sine(l) => l.live().to_vec(),
+            _ => Vec::new(),
+        },
     }
 }
 

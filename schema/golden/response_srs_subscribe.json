@@ -1,0 +1,65 @@
+{
+ "type": "response",
+ "id": 62,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "srs",
+    "quantity": "srs"
+   },
+   {
+    "id": "pulse",
+    "quantity": "pulse",
+    "points": 1024
+   },
+   {
+    "id": "vel",
+    "quantity": "velocity",
+    "points": 1024
+   },
+   {
+    "id": "id",
+    "quantity": "identification"
+   },
+   {
+    "id": "comp",
+    "quantity": "components"
+   },
+   {
+    "id": "lim",
+    "quantity": "limit_channels"
+   },
+   {
+    "id": "frf",
+    "quantity": "limit_frf"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "table",
+    "quantity": "pulses"
+   }
+  ],
+  "quantities": [
+   "srs",
+   "pulse",
+   "velocity",
+   "displacement",
+   "identification",
+   "components",
+   "limit_channels",
+   "limit_frf",
+   "law",
+   "readings",
+   "pulses"
+  ]
+ }
+}

@@ -267,6 +267,22 @@ pub fn guarded<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     })
 }
 
+/// How far ahead of an `auto` pulse's due time a run thread asks the controller
+/// for it, from the last pulse's bring-up: twice the work the controller does
+/// before its own wait (the drive's checks, the arm, the commit) and 50 ms,
+/// held between 50 ms and 1 s. The controller then waits out the rest, so the
+/// bring-up is done inside the time between pulses and only the start lands on
+/// the due time. Nothing is known before the first pulse, which is due at once.
+pub fn lead_for(bring_up: Option<hertzforge_shock_common::BringUp>) -> Duration {
+    match bring_up {
+        Some(b) => {
+            let ms = (2.0 * b.ahead_ms() + 50.0).clamp(50.0, 1000.0);
+            Duration::from_micros((ms * 1e3).round() as u64)
+        }
+        None => Duration::ZERO,
+    }
+}
+
 /// How a wait for the next pulse ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Waited {
@@ -314,6 +330,22 @@ pub fn words(x: f64, digits: i32) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lead_is_twice_the_work_before_the_wait_and_50_ms_held_to_50_ms_and_1_s() {
+        use hertzforge_shock_common::BringUp;
+        let b = |ahead_ms: f64| BringUp {
+            checks_ms: 0.0,
+            arm_ms: ahead_ms,
+            commit_ms: 0.0,
+            wait_ms: 4000.0,
+            start_ms: 2.0,
+        };
+        assert_eq!(lead_for(None), Duration::ZERO);
+        assert_eq!(lead_for(Some(b(125.0))), Duration::from_millis(300));
+        assert_eq!(lead_for(Some(b(0.0))), Duration::from_millis(50));
+        assert_eq!(lead_for(Some(b(2000.0))), Duration::from_secs(1));
+    }
 
     #[test]
     fn a_wait_ends_on_its_deadline_on_a_stop_or_when_its_caller_asks() {

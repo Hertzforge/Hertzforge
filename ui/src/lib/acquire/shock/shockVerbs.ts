@@ -14,10 +14,13 @@ import type { ActionId, ActionState, SetupStatus } from '../actions';
 
 export type ShockVerbId = 'fire' | 'levelDown' | 'levelUp' | 'rung' | 'train' | 'burst';
 
+/** What the verbs read of a pulse-by-pulse run's state (classical shock's, SRS shock's). */
+export type ShockVerbRun = Pick<ShockState, 'state' | 'phase' | 'mode' | 'levels_db' | 'level_db' | 'next_pulse_s'>;
+
 export interface ShockVerbContext {
 	connected: boolean;
 	controller: boolean;
-	run: ShockState | null;
+	run: ShockVerbRun | null;
 	setup: SetupStatus;
 	/** Errors in the setup and the channel table. */
 	setupErrors: number;
@@ -36,6 +39,19 @@ export function shockIsLive(run: { state: ShockState['state'] } | null | undefin
 }
 
 const hidden: ActionState = { visible: false, enabled: false, reason: null };
+
+/** What the manual ladder's verbs need of a test type's store (classical shock's, SRS shock's). */
+export interface ShockVerbHost {
+	verbs: Record<ShockVerbId, ActionState>;
+	status: { levels_db: number[] | null } | null;
+	now: { level_db: number | null } | null;
+	busy: string | null;
+	fire(): unknown;
+	level(deltaDb: number): unknown;
+	toRung(rung: number): unknown;
+	train(): unknown;
+	burst(): unknown;
+}
 
 function gateWith(ctx: ShockVerbContext) {
 	return (visible: boolean, verb: string, own: string | null, needsControl = true): ActionState => {

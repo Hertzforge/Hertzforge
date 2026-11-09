@@ -122,7 +122,7 @@ export function plannedPulses(pulsesPerLevel: number[] | null | undefined, level
  * The pulse coming, or playing: "Pulse 3 of 7 at -6 dB". In manual there is no plan to count
  * against; past the plan (a level repeated until it passes) the count says so.
  */
-export function pulseWords(s: ShockState, planned: number): string | null {
+export function pulseWords(s: Pick<ShockState, 'state' | 'phase' | 'pulses' | 'level_db' | 'mode'>, planned: number): string | null {
 	if (s.state !== 'running' && s.state !== 'stopping') return null;
 	if (s.phase === 'sysid') return null;
 	const n = s.pulses.fired + (s.phase === 'firing' ? 0 : 1);
@@ -134,7 +134,7 @@ export function pulseWords(s: ShockState, planned: number): string | null {
 }
 
 /** "Next pulse in 0.6 s", "Ready to fire", or null when no pulse is due. */
-export function nextPulseWords(s: ShockState): string | null {
+export function nextPulseWords(s: Pick<ShockState, 'state' | 'phase' | 'next_pulse_s' | 'mode'>): string | null {
 	if (s.state !== 'running' || s.phase !== 'waiting') return null;
 	if (s.next_pulse_s !== null && s.next_pulse_s > 0.05) return `Next pulse in ${s.next_pulse_s.toFixed(1)} s`;
 	return s.mode === 'manual' ? 'Ready to fire' : null;

@@ -14,7 +14,8 @@
 //! inverse: G(f) = conj(H) / (|H|^2 + eps)      (Tikhonov; eps from beta_floor)
 //! init:    D_0(f)     = G(f) * R_L(f)          (R_L = level-scaled target FFT)
 //! iterate: D_{n+1}(f) = D_n(f) + beta * G(f) * (R_L(f) - Y_n(f))
-//! gate:    rms_error_pct = 100 * ||y - r_L|| / ||r_L||  <= gate  -> next level
+//! gate:    rms_error_pct = 100 * ||e - mean e|| / ||r_L - mean r_L||  <= gate  -> next level
+//!          (e = y - r_L; the 0 Hz bin is not judged, see `metrics`)
 //! ```
 //!
 //! per-bin trust gating (coherence floor + reference dynamic-range floor + band
@@ -32,16 +33,23 @@
 //! - [`inverse`] - regularized inverse on the sysid grid + interpolation onto the
 //!   record grid + the per-bin trust mask.
 //! - [`law`] - the pure iterative correction law (unit-testable with no backend).
+//! - [`builtin`] - the built-in law, `twr_correct`, as a native law.
+//! - [`control`] - the control-law seam: what a changeable law sees and
+//!   returns ([`control::TwrLaw`], [`control::TwrLawFactory`]) and the
+//!   closed-loop settings the core runs it under ([`control::TwrControl`]).
 //! - [`metrics`] - error metrics + convergence history + debounced divergence
 //!   detection.
 //! - [`schedule`] - the convergence-gated dB ladder + the run schedule
 //!   (once / loop N / duration; section from-to).
 //! - [`limits`] - response abort envelope, drive clip/RMS ceilings, feasibility
 //!   hard-block + override-ack.
+//! - [`trip`] - why the core ended a run itself, by kind with its numbers.
 //! - [`player`] - the Backend-agnostic drive-delivery seam (direct
 //!   Backend playout, NOT through `hertzforge_engine::Engine`).
 //! - [`service`] - the run orchestration state machine + status/report surface.
 
+pub mod builtin;
+pub mod control;
 pub mod grid;
 pub mod inverse;
 pub mod law;
@@ -52,7 +60,13 @@ pub mod reference;
 pub mod schedule;
 pub mod service;
 pub mod sysid;
+pub mod trip;
 
+pub use builtin::{TwrCorrectFactory, TwrCorrectLaw};
+pub use control::{
+    PlayInputs, PlayKind, PlayOutputs, TwrControl, TwrLaw, TwrLawFactory, TwrLawSetup, TwrPlant,
+    Verdict,
+};
 pub use grid::RecordGrid;
 pub use inverse::{GridInverse, InverseConfig};
 pub use law::LawConfig;
@@ -62,8 +76,11 @@ pub use player::{BackendReferencePlayer, ReferencePlayer, TwrPath};
 pub use reference::{ReferenceWaveform, WaveformError};
 pub use schedule::{RunSchedule, Section, TwrLadderState, TwrLevelSchedule};
 pub use service::config::TwrConfig;
-pub use service::{TwrService, TwrState, TwrStatus};
+pub use service::{
+    PlayLawCall, PlayRow, TwrCallPayload, TwrCallRecord, TwrService, TwrState, TwrStatus,
+};
 pub use sysid::{Excitation, SysIdConfig, SysIdResult};
+pub use trip::{TripKind, TwrTrip};
 
 /// The module-wide error type.
 #[derive(Debug, Clone, PartialEq)]

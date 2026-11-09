@@ -3,17 +3,31 @@
 	 * The level schedule: an automatic ladder that fires itself from the first level to full level,
 	 * or a manual one that fires on the operator's word; each level's pulses; when a level is done
 	 * (after its pulses, or on a passing pulse with a limit on tries); and the time between pulses.
+	 * SRS shock's setup shows the same section; it has no trains or bursts.
 	 */
 	import { formatNumber } from '$lib/viz/format';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
+	import type { FieldErrors } from '../setup';
 	import { db } from '../words';
-	import type { ShockStore } from './shockStore.svelte';
+	import type { ShockDraft } from './shockSetup';
+
+	/** What the section reads of a test type's store (classical shock's, SRS shock's). */
+	interface ScheduleStore {
+		setup: { schedule: ShockDraft['schedule']; spacing: ShockDraft['spacing'] };
+		locked: boolean;
+		fieldErrors: FieldErrors;
+		check: { derived: { spacing_s: number; call_budget_s: number } | null } | null;
+		checkedKey: string;
+		key: string;
+	}
 
 	interface Props {
-		shock: ShockStore;
+		shock: ScheduleStore;
+		/** The manual ladder also fires trains and bursts. */
+		trains?: boolean;
 	}
-	let { shock }: Props = $props();
+	let { shock, trains = true }: Props = $props();
 
 	const d = $derived(shock.setup);
 	const s = $derived(d.schedule);
@@ -41,7 +55,9 @@
 		<p class="aq-small aq-muted">
 			{s.mode === 'auto'
 				? 'The run fires the schedule by itself, level by level, at the time between pulses.'
-				: 'The run waits for Fire. You step the level, go to a level of the table, fire a train or a burst. The mode is fixed for the run.'}
+				: trains
+					? 'The run waits for Fire. You step the level, go to a level of the table, fire a train or a burst. The mode is fixed for the run.'
+					: 'The run waits for Fire. You step the level or go to a level of the table. The mode is fixed for the run.'}
 		</p>
 		<table class="aq-table levels" data-testid="shock-level-table">
 			<thead><tr><th>Level</th><th class="r">dB</th><th class="r">Pulses</th><th aria-label="Remove"></th></tr></thead>
