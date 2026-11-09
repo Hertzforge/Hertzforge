@@ -871,50 +871,43 @@ impl<B: Backend> RecorderService<B> {
         // 1. Overload latches on the real table.
         self.update_overloads(interleaved, n);
 
-        // 2. Trigger engine (while Armed). A fire starts a recording with the
-        //    pre-window prepended, then this segment's frames from the trigger
-        //    index onward are written as the gap-free live continuation. The
-        //    trigger borrow is scoped and dropped BEFORE begin_recording so the
-        //    &mut self call is legal.
-        if self.state == RecState::Armed {
-            let fire: Option<(TriggerEvent, usize)> = self.trigger.as_mut().and_then(|trig| {
-                trig.feed(interleaved, n).map(|ev| {
-                    // feed advances the full block, so the trigger's global
-                    // counter is now the segment END; the segment START is
-                    // `end - n`, and the trigger's local index is
-                    // `trigger_global - (end - n)`.
-                    let end = trig.global_frame();
-                    let seg_start_global = end.saturating_sub(n as u64);
-                    let local = ev.trigger_frame_global.saturating_sub(seg_start_global) as usize;
-                    (ev, local)
-                })
-            });
-            if let Some((ev, local)) = fire {
-                self.trigger_fires += 1;
-                self.last_fire_station_frame = Some(self.session_frames + local as u64);
-                self.begin_recording(Some(ev))?;
-                if local < n {
-                    if self.recording {
-                        let tail = &interleaved[local * self.n_input..];
-                        let tail_frames = n - local;
-                        self.hand_to_record_thread(tail, tail_frames);
-                    }
-                    if let Some(target) = self.record_target_frames {
-                        if self.record_frames >= target {
-                            self.complete_recording()?;
-                        }
+        // 2. The trigger and the recording, frame-exact: a level fire mid-batch
+        //    begins a recording at its frame; a timed recording takes exactly the
+        //    frames it still needs, and the rest of the batch goes on (back to the
+        //    trigger when it re-arms).
+        let w = self.n_input;
+        let mut at = 0usize;
+        while at < n {
+            match self.state {
+                RecState::Armed => {
+                    let start_frame = self.session_frames + at as u64;
+                    let (fire, used) = match self.trigger.as_mut() {
+                        Some(trig) => trig.feed_until_fire(&interleaved[at * w..], n - at),
+                        None => (None, n - at),
+                    };
+                    at += used;
+                    if let Some(ev) = fire {
+                        self.trigger_fires += 1;
+                        self.last_fire_station_frame = Some(start_frame + used as u64);
+                        self.begin_recording(Some(ev))?;
                     }
                 }
-            }
-        } else if self.state == RecState::Recording {
-            // 3. RECORD path (priority): write every frame.
-            if self.recording {
-                self.hand_to_record_thread(interleaved, n);
-            }
-            if let Some(target) = self.record_target_frames {
-                if self.record_frames >= target {
-                    self.complete_recording()?;
+                RecState::Recording if self.recording => {
+                    let left = (n - at) as u64;
+                    let take = match self.record_target_frames {
+                        Some(target) => left.min(target.saturating_sub(self.record_frames)),
+                        None => left,
+                    } as usize;
+                    self.hand_to_record_thread(&interleaved[at * w..(at + take) * w], take);
+                    at += take;
+                    if self
+                        .record_target_frames
+                        .is_some_and(|target| self.record_frames >= target)
+                    {
+                        self.complete_recording()?;
+                    }
                 }
+                _ => break,
             }
         }
 
@@ -1063,7 +1056,8 @@ impl<B: Backend> RecorderService<B> {
         self.record_gap_free = true;
         self.record_pretrigger_frames = pre_frames;
         self.active_run_name = Some(real_name.clone());
-        self.record_target_frames = self.timed_record_frames();
+        // Exactly the length after the trigger, plus the pre-window.
+        self.record_target_frames = self.timed_record_frames().map(|t| t + pre_frames);
         let session_s = self.session_seconds();
         self.log.push(
             session_s,

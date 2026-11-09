@@ -728,21 +728,9 @@ fn timed_recording_gap_free() {
     let list = svc.recordings_list(None);
     assert_eq!(list.len(), 1, "exactly one recording");
     assert!(list[0].gap_free, "timed recording must be gap-free");
-    // The writer stops on the first frame >= target; because segments arrive in
-    // whole ticks, the file holds AT LEAST the target (never fewer) and less
-    // than target + one segment.
-    assert!(
-        list[0].frames >= target,
-        "frames {} should be >= target {}",
-        list[0].frames,
-        target
-    );
-    assert!(
-        list[0].frames < target + 512,
-        "frames {} should be within one segment of the target {}",
-        list[0].frames,
-        target
-    );
+    // A timed recording holds exactly its frames: the batch that reaches the target
+    // gives it only the frames it still needs.
+    assert_eq!(list[0].frames, target, "exactly the target");
 }
 
 /// A scripted 2-channel backend with y = biquad(x). The live FRF |H1|
