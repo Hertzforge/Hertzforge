@@ -54,9 +54,8 @@ use crate::analysis::{
     BlockAssembler, ChannelDecimator, FrfPipeline, SpectrumPipeline, TimeStats,
     TimeStatsAccumulator,
 };
-use crate::recording::{
-    recorder_disk_budget_seconds, RecordingInfo, RecordingReader, RecordingSummary,
-};
+use crate::record::RecordThread;
+use crate::recording::{recorder_disk_budget_seconds, RecordingInfo, RecordingReader};
 use crate::store::{RecordStore, RecordingSpec, WriterStore};
 use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
@@ -283,8 +282,15 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// The trigger engine (active while Armed/Recording).
     trigger: Option<TriggerEngine>,
 
-    /// What writes the recordings (the crate's writer unless a test supplies one).
-    store: Box<dyn RecordStore>,
+    /// What writes the recordings (the crate's writer unless a test supplies one),
+    /// held here until the run starts and moved to the record thread for the run.
+    store: Option<Box<dyn RecordStore>>,
+    /// The record thread, while the run is up: the only thread that touches a
+    /// recording's files.
+    rec: Option<RecordThread>,
+    /// The recordings handed to the record thread to finish, oldest first, with
+    /// their pre-windows, until it reports them.
+    finishing: std::collections::VecDeque<u64>,
     /// Whether a recording is in progress in the store.
     recording: bool,
     /// Frames written to the active recording.
@@ -455,7 +461,9 @@ impl<B: Backend> RecorderService<B> {
             analysis,
             frf,
             trigger: None,
-            store: Box::new(WriterStore::default()),
+            store: Some(Box::new(WriterStore::default())),
+            rec: None,
+            finishing: std::collections::VecDeque::new(),
             recording: false,
             record_frames: 0,
             record_target_frames: None,
@@ -488,9 +496,12 @@ impl<B: Backend> RecorderService<B> {
     /// Put another record store behind the seam (a test double, or a writer with
     /// other settings). Must be set before a recording begins.
     pub fn with_store(mut self, store: Box<dyn RecordStore>) -> Self {
-        self.store = store;
+        self.store = Some(store);
         self
     }
+
+    /// The seconds of frames the queue to the record thread holds.
+    pub const RECORD_QUEUE_S: f64 = 2.0;
 
     /// Request a specific acquisition block (frames per `read_input`) at
     /// configure. A hardware station passes `hertzforge_engine::default_block_frames(fs)`;
@@ -622,8 +633,71 @@ impl<B: Backend> RecorderService<B> {
         }
         self.trigger = None;
         self.tear_backend_down();
-        self.transition(RecState::Stopped);
+        self.close_record_thread();
+        if self.state != RecState::Faulted {
+            self.transition(RecState::Stopped);
+        }
         Ok(())
+    }
+
+    /// Wait for the record thread to finish every recording handed to it, collect
+    /// what it reports, and take the store back. Called once acquisition has ended.
+    fn close_record_thread(&mut self) {
+        if let Some(rec) = self.rec.take() {
+            let reported = rec.take_finished();
+            let store = rec.close();
+            self.collect_finished(reported);
+            if let Some(store) = store {
+                self.store = Some(store);
+            }
+        }
+    }
+
+    /// Take what the record thread has reported, without waiting.
+    fn poll_record_thread(&mut self) {
+        let reported = self
+            .rec
+            .as_ref()
+            .map(|r| r.take_finished())
+            .unwrap_or_default();
+        self.collect_finished(reported);
+    }
+
+    fn collect_finished(&mut self, reported: Vec<crate::record::Finished>) {
+        for f in reported {
+            let pre = self.finishing.pop_front().unwrap_or(0);
+            let session_s = self.session_seconds();
+            let summary = match f.result {
+                Ok(s) => s,
+                Err(e) => {
+                    self.log
+                        .push(session_s, format!("{} could not be finished: {e}", f.name));
+                    continue;
+                }
+            };
+            self.recordings_saved += 1;
+            let name = f.name;
+            self.log.push(
+                session_s,
+                format!(
+                    "record stop: {name} ({} frames, gap_free={})",
+                    summary.frames_written, summary.gap_free
+                ),
+            );
+            if !summary.gaps.is_empty() {
+                self.log.push(
+                    session_s,
+                    format!("gaps in {name}: {} drop record(s)", summary.gaps.len()),
+                );
+            }
+            self.session_recordings.push(SessionRecording {
+                name,
+                frames: summary.frames_written,
+                gap_free: summary.gap_free,
+                gaps: summary.gaps,
+                pretrigger_frames: pre,
+            });
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -642,6 +716,7 @@ impl<B: Backend> RecorderService<B> {
                 self.state
             )));
         }
+        self.poll_record_thread();
         let Some(engine) = self.engine.as_mut() else {
             return Err(RecorderError::BadState("the station is not up".into()));
         };
@@ -762,9 +837,7 @@ impl<B: Backend> RecorderService<B> {
                     if self.recording {
                         let tail = &interleaved[local * self.n_input..];
                         let tail_frames = n - local;
-                        self.store.push(tail, tail_frames);
-                        self.record_frames += tail_frames as u64;
-                        self.record_gap_free = self.store.gap_free();
+                        self.hand_to_record_thread(tail, tail_frames);
                     }
                     if let Some(target) = self.record_target_frames {
                         if self.record_frames >= target {
@@ -776,9 +849,7 @@ impl<B: Backend> RecorderService<B> {
         } else if self.state == RecState::Recording {
             // 3. RECORD path (priority): write every frame.
             if self.recording {
-                self.store.push(interleaved, n);
-                self.record_frames += n as u64;
-                self.record_gap_free = self.store.gap_free();
+                self.hand_to_record_thread(interleaved, n);
             }
             if let Some(target) = self.record_target_frames {
                 if self.record_frames >= target {
@@ -796,6 +867,15 @@ impl<B: Backend> RecorderService<B> {
 
         self.session_frames += n_frames;
         Ok(())
+    }
+
+    /// Hand frames of the recording in progress to the record thread, never waiting.
+    fn hand_to_record_thread(&mut self, frames: &[f32], n: usize) {
+        let queued = self.rec.as_ref().is_some_and(|r| r.push(frames, n));
+        self.record_frames += n as u64;
+        if !queued {
+            self.record_gap_free = false;
+        }
     }
 
     /// Feed the analysis pipelines (per-channel spectra + stats + optional
@@ -876,22 +956,24 @@ impl<B: Backend> RecorderService<B> {
         self.run_counter += 1;
         let run_name = format!("rec_{:04}", self.run_counter);
         let pre_frames = pretrigger.as_ref().map_or(0, |e| e.pretrigger_frames);
-        // The store's name may differ from the requested name after sanitize and
-        // de-collision; track the real one.
-        let real_name = self
-            .store
-            .start(RecordingSpec {
-                data_root: self.data_root.clone(),
-                name: run_name,
-                table: self.record_table.clone(),
-                acq: self.acq_now(),
-                requested_fs_hz: self.cfg.acq.native_rate_hz,
-                pretrigger,
-            })
-            .map_err(RecorderError::Io)?;
+        // Handed to the record thread: the folder, the sidecar, the free-space check
+        // and the writer are made there, never on the thread that reads the station.
+        let rec = self
+            .rec
+            .as_ref()
+            .ok_or_else(|| RecorderError::BadState("the station is not up".into()))?;
+        rec.start(RecordingSpec {
+            data_root: self.data_root.clone(),
+            name: run_name.clone(),
+            table: self.record_table.clone(),
+            acq: self.acq_now(),
+            requested_fs_hz: self.cfg.acq.native_rate_hz,
+            pretrigger,
+        });
+        let real_name = run_name;
         self.recording = true;
         self.record_frames = pre_frames;
-        self.record_gap_free = self.store.gap_free();
+        self.record_gap_free = true;
         self.record_pretrigger_frames = pre_frames;
         self.active_run_name = Some(real_name.clone());
         self.record_target_frames = self.timed_record_frames();
@@ -949,34 +1031,11 @@ impl<B: Backend> RecorderService<B> {
             return Ok(());
         }
         self.recording = false;
-        let summary: RecordingSummary = self.store.finish().map_err(RecorderError::Io)?;
-        self.recordings_saved += 1;
-        let name = summary
-            .run_dir
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let session_s = self.session_seconds();
-        self.log.push(
-            session_s,
-            format!(
-                "record stop: {name} ({} frames, gap_free={})",
-                summary.frames_written, summary.gap_free
-            ),
-        );
-        if !summary.gaps.is_empty() {
-            self.log.push(
-                session_s,
-                format!("gaps in {name}: {} drop record(s)", summary.gaps.len()),
-            );
+        // Finished by the record thread; its summary comes back on a later pass.
+        if let Some(rec) = self.rec.as_ref() {
+            rec.finish();
         }
-        self.session_recordings.push(SessionRecording {
-            name,
-            frames: summary.frames_written,
-            gap_free: summary.gap_free,
-            gaps: summary.gaps,
-            pretrigger_frames: self.record_pretrigger_frames,
-        });
+        self.finishing.push_back(self.record_pretrigger_frames);
         self.record_frames = 0;
         self.record_target_frames = None;
         self.record_gap_free = true;
@@ -1057,6 +1116,18 @@ impl<B: Backend> RecorderService<B> {
         self.backend
             .arm()
             .map_err(|e| RecorderError::Backend(format!("arm: {e}")))?;
+        // The record thread for the run, behind a queue of RECORD_QUEUE_S of frames.
+        if self.rec.is_none() {
+            let store = self
+                .store
+                .take()
+                .unwrap_or_else(|| Box::new(WriterStore::default()));
+            let capacity = (Self::RECORD_QUEUE_S * self.fs_hz).round().max(1.0) as u64;
+            self.rec = Some(
+                RecordThread::spawn(store, capacity)
+                    .map_err(|e| RecorderError::Io(format!("record thread: {e}")))?,
+            );
+        }
         // The run's one engine: built once, never re-armed or re-started per batch.
         self.engine = Some(Engine::new(
             clone_ecfg(&self.ecfg),
@@ -1139,11 +1210,11 @@ impl<B: Backend> RecorderService<B> {
                 0
             },
             frames_on_disk: if self.recording {
-                self.store.frames_on_disk()
+                self.rec.as_ref().map_or(0, |r| r.frames_on_disk())
             } else {
                 0
             },
-            write_fault: self.store.fault(),
+            write_fault: self.rec.as_ref().and_then(|r| r.fault()),
         }
     }
 

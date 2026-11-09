@@ -41,6 +41,7 @@
 
 pub mod acq;
 pub mod analysis;
+pub mod record;
 pub mod recording;
 pub mod service;
 pub mod store;

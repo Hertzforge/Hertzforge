@@ -210,6 +210,14 @@ fn recorder_status_counts_recordings_and_the_frames_fed_and_on_disk() {
     );
     assert_eq!(s.recordings_saved, 0);
     svc.stop_recording().unwrap();
+    // The record thread finishes the recording; the next passes collect it.
+    for _ in 0..500 {
+        if svc.status(u64::MAX).recordings_saved == 1 {
+            break;
+        }
+        svc.pump_frames(256).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+    }
     assert_eq!(svc.status(u64::MAX).recordings_saved, 1);
 }
 
@@ -231,8 +239,14 @@ fn recorder_status_names_the_writer_fault_in_its_words() {
     svc.start_monitor().unwrap();
     svc.record_now().unwrap();
     assert_eq!(svc.status(u64::MAX).write_fault, None);
-    svc.pump_frames(1024).unwrap();
-    svc.pump_frames(1024).unwrap();
+    // The record thread takes the frames; its fault is read once it has.
+    for _ in 0..500 {
+        svc.pump_frames(1024).unwrap();
+        if svc.status(u64::MAX).write_fault.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
     assert_eq!(
         svc.status(u64::MAX).write_fault.as_deref(),
         Some("the disk refused the write")
@@ -348,6 +362,8 @@ fn recorder_every_recording_goes_through_the_store_seam() {
     }
     svc.stop_recording().unwrap();
     assert_eq!(svc.state(), RecState::Monitoring);
+    // The record thread finishes it; stopping waits for that.
+    svc.stop_monitor().unwrap();
 
     let log = log.lock().unwrap();
     let starts = log
