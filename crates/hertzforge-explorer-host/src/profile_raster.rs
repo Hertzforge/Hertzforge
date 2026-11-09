@@ -26,7 +26,9 @@
 //!    strictly inside that span is REMOVED. This is the operator's "wipe out the old
 //!    values at each frequency line as the tone passes it again": a second walk over a
 //!    band leaves that band showing the second walk, never a stitch of both.
-//! 4. **Between two points, a straight line; outside them, NOTHING.** The render joins
+//! 4. **Between two points, a straight line; outside them, NOTHING.** Where no bin centre
+//!    lies between the outermost points, each point lands on its nearest bin, as a lone
+//!    point does. The render joins
 //!    adjacent points with LINEAR INTERPOLATION IN LOG FREQUENCY across a gap of ANY
 //!    width - log, because the pane this lands on is a log-x sweep plot and a linear-in-Hz
 //!    fill would bend visibly against its own axis. Below the lowest point and above the
@@ -236,6 +238,18 @@ impl ProfileRaster {
             let (fa, va) = self.points[seg];
             let (fb, vb) = self.points[seg + 1];
             *cell = interpolate_log(fa, va, fb, vb, fk);
+        }
+        // No bin centre between the outermost points (one point a bin lets two neighbours
+        // sit in adjacent bins with nothing between their centres): the chords drew nothing,
+        // and each point lands on its nearest bin, as a lone point does, rather than the
+        // curve rendering empty while it holds points.
+        if out.iter().all(|v| v.is_nan()) {
+            for &(f, v) in &self.points {
+                let b = ((f - self.f0_hz) / self.df_hz).round();
+                if b >= 0.0 && (b as usize) < self.n_bins {
+                    out[b as usize] = v;
+                }
+            }
         }
         Some(out)
     }
@@ -560,9 +574,9 @@ mod tests {
         assert!(out[hi + 1].is_nan(), "still nothing above the walk");
     }
 
-    /// The point list cannot grow without bound however long the survey runs: every point
-    /// is at least a tolerance from its neighbours, so a full-band walk at a step far finer
-    /// than the grid still ends up with about one point per bin.
+    /// The point list cannot grow without bound however long the survey runs: at most one
+    /// point a display bin, so a full-band walk at a step far finer than the grid ends up
+    /// with about one point per bin.
     #[test]
     fn a_long_survey_cannot_grow_the_point_list_without_bound() {
         let df = 2.0;
@@ -642,5 +656,21 @@ mod tests {
         }
         // Bounded all the same: at most one point per bin.
         assert!(pts.len() <= r.grid().2);
+    }
+
+    /// One point a bin: two neighbouring points can sit in adjacent bins with no bin
+    /// centre between them, where the chord between them has nothing to fill. Each point
+    /// still lands on its nearest bin, as a lone point does, or the curve renders empty
+    /// while it holds points (the backend's profile test, 2026-11-09).
+    #[test]
+    fn points_with_no_bin_centre_between_them_land_on_their_nearest_bins() {
+        let mut r = ProfileRaster::new(0.0, 16.0, 257);
+        r.visit(100.5, 0.2); // bin 6.28: nearest 6
+        r.visit(104.0, 0.3); // bin 6.5: nearest 7, and no centre in [100.5, 104]
+        assert_eq!(r.points().len(), 2);
+        let out = r.render().unwrap();
+        assert!((out[6] - 0.2).abs() < 1e-6, "bin 6: {}", out[6]);
+        assert!((out[7] - 0.3).abs() < 1e-6, "bin 7: {}", out[7]);
+        assert_eq!(out.iter().filter(|v| v.is_finite()).count(), 2);
     }
 }
