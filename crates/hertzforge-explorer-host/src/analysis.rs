@@ -652,18 +652,33 @@ impl ProfileTracer {
         } else {
             n
         };
+        // The mean square under a HANN taper, its weighted mean removed. Exact for whole
+        // cycles, like a plain mean square; and where the window is NOT whole cycles of the
+        // signal it holds, the part cycle hardly counts. That is a sweep: the window is
+        // whole cycles of the COMMANDED frequency while its samples are the response to drive
+        // a pipeline earlier, about 3 % lower at 30 oct/min behind the chassis's 1 063
+        // frames, and a plain mean square over three cycles read +-2.2 % on the bench (X3,
+        // 2026-11-09). Tapered: within 0.1 %.
         let start = n - m;
-        let mut sum = 0.0f64;
+        let w = |i: usize| {
+            0.5 - 0.5 * (std::f64::consts::TAU * ((i - start) as f64 + 0.5) / m as f64).cos()
+        };
+        let (mut sw, mut sum) = (0.0f64, 0.0f64);
         for i in start..n {
-            sum += self.window[i];
+            let wi = w(i);
+            sw += wi;
+            sum += wi * self.window[i];
         }
-        let mean = sum / m as f64;
+        if sw <= 0.0 {
+            return None;
+        }
+        let mean = sum / sw;
         let mut sq = 0.0f64;
         for i in start..n {
             let d = self.window[i] - mean;
-            sq += d * d;
+            sq += w(i) * d * d;
         }
-        let amp = (sq / m as f64).sqrt() * std::f64::consts::SQRT_2;
+        let amp = (sq / sw).sqrt() * std::f64::consts::SQRT_2;
         amp.is_finite().then_some(amp)
     }
 
@@ -1321,5 +1336,59 @@ mod tests {
         let (vel, _disp) = d.last();
         // 1 g @ 100 Hz -> velocity amplitude ~ (386.09)/(2*pi*100) ~= 0.61 in/s.
         assert!(vel.abs() > 0.0, "derived velocity is nonzero after settle");
+    }
+
+    /// THE BENCH FINDING (NI loopback, X3, 2026-11-09): a slow sweep's survey points at the
+    /// low end. The window holds whole cycles of the COMMANDED frequency, but its samples
+    /// are the response to drive a pipeline earlier, about 3 % lower in a 30 oct/min sweep
+    /// behind the chassis's 1 063 frames; a plain RMS over a part cycle more or less than
+    /// that ripples by about 1/(2 pi N), and three cycles read +-2.2 % on the bench (+-2.3 %
+    /// here). Weighted by a Hann taper the part cycle hardly counts: within 0.2 %.
+    #[test]
+    fn a_slow_sweeps_low_end_points_read_the_level_behind_the_pipeline() {
+        let fs = 12_800.0;
+        let block = 256usize;
+        let pipeline = 1_063usize;
+        let rate = 0.5; // oct/s
+        let f_at = |k: usize| 20.0 * 2f64.powf(rate * k as f64 / fs);
+        let n = (fs * 2.2) as usize;
+        let mut phase = 0.0f64;
+        let mut drive = Vec::with_capacity(n);
+        for k in 0..n {
+            drive.push(0.2 * phase.sin());
+            phase += std::f64::consts::TAU * f_at(k) / fs;
+        }
+        // The input is the drive a pipeline late.
+        let input: Vec<f64> = (0..n)
+            .map(|k| {
+                if k >= pipeline {
+                    drive[k - pipeline]
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let mut tracer = ProfileTracer::new(1, fs).with_block_frames(block);
+        let mut worst = (0.0f64, 0.0f64);
+        for (b, chunk) in input.chunks(block).enumerate() {
+            let k_now = (b + 1) * block;
+            tracer.observe_pipelined(chunk, f_at(k_now), pipeline, true);
+            for p in tracer.take_points() {
+                // Clear of the start, and in the band the bench failed (20 to 80 Hz).
+                if k_now > pipeline + (fs * 0.3) as usize && p.freq_hz < 80.0 {
+                    let err = p.amplitude / 0.2 - 1.0;
+                    if err.abs() > worst.1.abs() {
+                        worst = (p.freq_hz, err);
+                    }
+                }
+            }
+        }
+        assert!(worst.0 > 0.0, "no point recorded below 80 Hz");
+        assert!(
+            worst.1.abs() < 2e-3,
+            "a swept point at {:.1} Hz read {:+.2} %",
+            worst.0,
+            worst.1 * 100.0
+        );
     }
 }
