@@ -1,15 +1,17 @@
 # Publishes to PyPI by trusted publishing when a release tagged vX.Y.Z is
-# published on GitHub. The PyPI publisher is tied to this file name and to
+# published on GitHub: by hand (the release event), or by desktop.yml, which
+# starts this by name on the tag once it has published the release. The PyPI publisher is tied to this file name and to
 # the `pypi` environment, so renaming either breaks publishing.
 name: release
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   pypi:
-    if: startsWith(github.event.release.tag_name, 'v')
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
