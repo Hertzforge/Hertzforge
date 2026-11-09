@@ -26,6 +26,7 @@ enum Cmd {
     Start(Box<RecordingSpec>),
     Frames(Vec<f32>, usize),
     Gap(GapRecord),
+    Marks(Vec<serde_json::Value>),
     Finish,
     Quit,
 }
@@ -115,6 +116,13 @@ impl RecordThread {
     /// Note frames the recording in progress never received. Returns at once.
     pub fn gap(&self, gap: GapRecord) {
         self.send(Cmd::Gap(gap));
+    }
+
+    /// Note marks inside the recording in progress. Returns at once.
+    pub fn marks(&self, marks: Vec<serde_json::Value>) {
+        if !marks.is_empty() {
+            self.send(Cmd::Marks(marks));
+        }
     }
 
     /// Finish the recording in progress. Returns at once; its summary comes back
@@ -220,6 +228,11 @@ fn run(
             Cmd::Gap(gap) => {
                 if name.is_some() {
                     store.gap(gap);
+                }
+            }
+            Cmd::Marks(marks) => {
+                if name.is_some() {
+                    store.marks(marks);
                 }
             }
             Cmd::Finish => {

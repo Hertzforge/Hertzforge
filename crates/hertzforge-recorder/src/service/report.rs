@@ -126,18 +126,9 @@ pub struct RecStatus {
     pub averages_complete: bool,
     /// Whether the live FRF coherence is valid (>= 2 averages).
     pub coherence_valid: bool,
-    /// Whether the abort watchdog is ARMED for this session (the resolved value,
-    /// not the config request). See `config::resolve_watchdog`.
+    /// The marks made so far (limit crossings and overload latches).
     #[serde(default)]
-    pub watchdog_armed: bool,
-    /// True when a HARDWARE station's table carries abort limits and the
-    /// watchdog was explicitly turned off anyway. The pane renders a persistent
-    /// LIMITS DISARMED banner on this flag.
-    #[serde(default)]
-    pub limits_disarmed: bool,
-    /// The one-line basis for whatever the watchdog policy decided, verbatim.
-    #[serde(default)]
-    pub watchdog_basis: String,
+    pub marks: u64,
     /// The rate asked of the station, Hz.
     #[serde(default)]
     pub requested_fs_hz: f64,

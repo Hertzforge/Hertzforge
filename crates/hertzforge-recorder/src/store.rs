@@ -61,6 +61,8 @@ pub trait RecordStore: Send {
     }
     /// Note frames the recording in progress never received, at a file position.
     fn gap(&mut self, _gap: GapRecord) {}
+    /// Note marks that fell inside the recording in progress, for its record.
+    fn marks(&mut self, _marks: Vec<serde_json::Value>) {}
 }
 
 /// The crate's own writer behind the seam.
@@ -154,6 +156,12 @@ impl RecordStore for WriterStore {
     fn gap(&mut self, gap: GapRecord) {
         if let Some(w) = self.writer.as_mut() {
             w.note_gap(gap);
+        }
+    }
+
+    fn marks(&mut self, marks: Vec<serde_json::Value>) {
+        if let Some(w) = self.writer.as_mut() {
+            w.note_marks(marks);
         }
     }
 }

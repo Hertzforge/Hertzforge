@@ -16,13 +16,11 @@
 //!   has no output channel (its drive path does nothing with none), and the arm gate is
 //!   asked for a capture-only run. The operator's table keeps its drive rows for the
 //!   modules that drive; this run neither opens nor records them.
-//! * **When `watchdog_enabled == false` (the default) all abort
-//!   limits are STRIPPED from the clone.** The engine watchdog skips channels
-//!   with no abort axes, so it monitors nothing. The per-channel OVERLOAD
-//!   latches still run on the REAL table inside the service. When
-//!   `watchdog_enabled == true`, `AbortWatchdog::poll` may call
-//!   `emergency_stop` on the recorder's OWN backend only (the recorder owns no
-//!   other device); a trip faults the run.
+//! * **The abort limits are stripped from the clone.** A Recorder drives nothing,
+//!   so ending acquisition on a limit would protect nothing and lose the event: a
+//!   row passing a limit is marked, and recording goes on. The service checks each
+//!   enabled row's limits, and its overload indicator, on every sample of the
+//!   analysis pass, against the real table.
 //!
 //! # The segment-run monitor loop
 //!
@@ -47,6 +45,7 @@ use std::path::PathBuf;
 
 use hertzforge_channel_table::{AbortLimits, Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_engine::capture::{BlockMeta, CaptureError, CaptureSink as EngineCaptureSink};
+use hertzforge_engine::limits::ChannelIntegrator;
 use hertzforge_engine::{Engine, EngineConfig, ProcessStep, StopReason};
 use hertzforge_hal::Backend;
 
@@ -99,21 +98,6 @@ pub const CAPTURE_ONLY_COMPUTE_BUDGET: std::time::Duration = std::time::Duration
 /// `RecorderService::with_block_frames`, and the recorder's drive is silent zeros
 /// either way, so the block only ever affects the INPUT cadence here.
 const DEFAULT_BLOCK_FRAMES: usize = hertzforge_engine::SIM_NATURAL_BLOCK_FRAMES;
-
-/// The HERTZFORGE-SIM abort-watchdog debounce, in RAW FRAMES (~61 us at the Sim
-/// plant's 65 536 Hz). Unchanged from the value this module has always used.
-const SIM_WATCHDOG_SUSTAIN_FRAMES: u32 = 4;
-
-/// The abort-watchdog debounce on a HARDWARE station, in SECONDS.
-///
-/// The same ~60 us [`SIM_WATCHDOG_SUSTAIN_FRAMES`] represents at the Sim rate,
-/// in the unit that survives a rate change. A monitor should not false-trip on a
-/// single stray sample, and it also must not sit over a limit for a rate-
-/// dependent length of time before acting - see
-/// `hertzforge_engine::watchdog_sustain_frames`. At any rate below ~16 kHz this
-/// collapses to 1 frame, which is the correct direction: fewer samples per unit
-/// time means a shorter debounce, not a longer one.
-const WATCHDOG_SUSTAIN_SECONDS: f64 = 0.00006;
 
 /// Errors from a recorder service operation.
 #[derive(Debug, Clone, PartialEq)]
@@ -255,11 +239,12 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// The station class the arm gate is given. Supplied
     /// with the backend at construction; never inferred from `B`.
     station: hertzforge_module_abi::StationClass,
-    /// What the watchdog policy decided at construction, and why. Reported on
-    /// every status poll so the pane can render the persistent disarmed banner
-    /// without re-deriving the rule (a second copy of a safety rule is a second
-    /// rule).
-    watchdog: crate::service::config::WatchdogArming,
+    /// Each recorded row's limit episodes, for its marks.
+    row_marks: Vec<RowMarks>,
+    /// The run's marks, in the order made.
+    marks: Vec<Mark>,
+    /// The marks inside the recording in progress, for its record.
+    record_marks: Vec<serde_json::Value>,
     /// The engine config (interleave width + tick + watchdog knobs). Its
     /// `frames_per_tick` / `ring_frames` are re-derived from `ConfiguredActual`
     /// in `bring_backend_up`.
@@ -402,20 +387,10 @@ impl<B: Backend> RecorderService<B> {
         let mut record_table = ChannelTable::new();
         record_table.channels.extend(input_channels.iter().cloned());
 
-        // The engine table clone: user table + one synthetic drive; abort
-        // limits stripped when the watchdog is off.
-        //
-        // WHAT ARMS is `resolve_watchdog`, not `cfg.watchdog_enabled`: on a hardware
-        // station a table that carries abort limits arms by default, because otherwise
-        // those limits render in the grid, export into the report, and enforce nothing.
-        // `cfg.watchdog_enabled` is the request; this is the answer, and it states its
-        // own basis.
-        let watchdog = crate::service::config::resolve_watchdog(
-            &cfg,
-            station,
-            crate::service::config::table_has_abort_limits(&table),
-        );
-        let engine_table = build_engine_table(&table, watchdog.armed);
+        // The engine table clone: the input rows, their abort limits stripped (a
+        // limit is a mark, checked by the service).
+        let engine_table = build_engine_table(&table);
+        let row_marks = input_channels.iter().map(RowMarks::new).collect();
 
         // Overload latches on the REAL table (enabled non-drive channels).
         let overloads: Vec<OverloadLatch> = input_channels
@@ -435,16 +410,10 @@ impl<B: Backend> RecorderService<B> {
         // the backend configured, which is the only place the block is known.
         let mut ecfg = EngineConfig::new(n_input, 0);
         ecfg.frames_per_tick = DEFAULT_BLOCK_FRAMES;
-        // A deliberately deep watchdog tap for a monitor: the recorder's whole job
-        // is not to miss frames. `bring_backend_up` only ever RAISES this to the
-        // block-derived floor.
+        // The engine's raw tap: its watchdog monitors nothing (the limits are
+        // stripped), so the depth only bounds a tap no one reads. `bring_backend_up`
+        // raises it to the block-derived floor.
         ecfg.ring_frames = 4096;
-        // A passive monitor should not false-trip on transients; give the
-        // watchdog a small sustain. (Moot when the watchdog is off - the clone
-        // carries no limits.) HERTZFORGE-SIM keeps this frame count; a hardware
-        // station replaces it in `bring_backend_up`, where the ACTUAL rate is
-        // known - see the constants note there.
-        ecfg.watchdog_sustain = SIM_WATCHDOG_SUSTAIN_FRAMES;
         // The capture-only health budget, by name: a late read loses nothing.
         ecfg.jitter_frac = CAPTURE_ONLY_JITTER_FRAC;
         ecfg.compute_budget = Some(CAPTURE_ONLY_COMPUTE_BUDGET);
@@ -462,7 +431,9 @@ impl<B: Backend> RecorderService<B> {
             data_root,
             backend,
             station,
-            watchdog,
+            row_marks,
+            marks: Vec::new(),
+            record_marks: Vec::new(),
             ecfg,
             block_frames: DEFAULT_BLOCK_FRAMES,
             backend_up: false,
@@ -518,7 +489,7 @@ impl<B: Backend> RecorderService<B> {
 
     /// The run's marks, in the order they were made.
     pub fn marks(&self) -> &[Mark] {
-        &[]
+        &self.marks
     }
 
     /// The input group delay every recording states, frames.
@@ -907,8 +878,8 @@ impl<B: Backend> RecorderService<B> {
         }
         let n = n_frames as usize;
 
-        // 1. Overload latches on the real table.
-        self.update_overloads(interleaved, n);
+        // 1. Marks: each row's limits and overload indicator, on every sample.
+        let mut batch_marks = self.batch_marks(interleaved, n);
 
         // 2. The trigger and the recording, frame-exact: a level fire mid-batch
         //    begins a recording at its frame; a timed recording takes exactly the
@@ -938,6 +909,15 @@ impl<B: Backend> RecorderService<B> {
                         None => left,
                     } as usize;
                     self.hand_to_record_thread(&interleaved[at * w..(at + take) * w], take);
+                    let name = self.active_run_name.clone();
+                    for (local, mark) in batch_marks.iter_mut() {
+                        if (at..at + take).contains(local) {
+                            set_recording(mark, name.clone());
+                            if let Ok(v) = serde_json::to_value(&*mark) {
+                                self.record_marks.push(v);
+                            }
+                        }
+                    }
                     at += take;
                     if let Some(t) = self.trigger.as_mut() {
                         t.skip(take as u64);
@@ -951,6 +931,13 @@ impl<B: Backend> RecorderService<B> {
                 }
                 _ => break,
             }
+        }
+
+        // 3. The batch's marks join the run's, and the log.
+        for (_, mark) in batch_marks {
+            let text = mark_words(&mark);
+            self.log.push(self.session_seconds(), text);
+            self.marks.push(mark);
         }
 
         // 4. Analysis path (ALWAYS; drop-tolerant), timed.
@@ -1036,33 +1023,55 @@ impl<B: Backend> RecorderService<B> {
         }
     }
 
-    /// Update the per-channel overload latches from a segment's frames.
-    fn update_overloads(&mut self, interleaved: &[f32], n_frames: usize) {
+    /// The marks this batch makes, each with its frame in the batch: every row's
+    /// limits (rows in g) and its overload indicator, on every sample.
+    fn batch_marks(&mut self, interleaved: &[f32], n_frames: usize) -> Vec<(usize, Mark)> {
         let n_ch = self.n_input;
-        let session_s = self.session_seconds();
-        let mut newly: Vec<usize> = Vec::new();
-        for latch in self.overloads.iter_mut() {
-            if latch.latched {
-                continue;
-            }
+        let fs = self.fs_hz;
+        let base = self.session_frames;
+        let mut out = Vec::new();
+        let mut made = Vec::new();
+        for slot in 0..n_ch {
+            let row = self.row_marks[slot].row;
+            let limited = self.row_marks[slot].has_limit();
+            let latch = &mut self.overloads[slot];
             for f in 0..n_frames {
-                let v = f64::from(interleaved[f * n_ch + latch.slot]).abs();
-                if v >= latch.trip_level {
+                let v = f64::from(interleaved[f * n_ch + slot]);
+                if !latch.latched && v.abs() >= latch.trip_level {
                     latch.latched = true;
-                    if !latch.logged {
-                        latch.logged = true;
-                        newly.push(latch.slot);
+                    latch.logged = true;
+                    out.push((
+                        f,
+                        Mark::Overload {
+                            row,
+                            value: v.abs(),
+                            level: latch.trip_level,
+                            station_frame: base + f as u64,
+                            recording: None,
+                        },
+                    ));
+                }
+                if limited {
+                    made.clear();
+                    self.row_marks[slot].push(v, fs, &mut made);
+                    for (axis, value, limit) in made.drain(..) {
+                        out.push((
+                            f,
+                            Mark::Limit {
+                                row,
+                                axis: axis.to_string(),
+                                value,
+                                limit,
+                                station_frame: base + f as u64,
+                                recording: None,
+                            },
+                        ));
                     }
-                    break;
                 }
             }
         }
-        for slot in newly {
-            self.log.push(
-                session_s,
-                format!("overload latched on channel slot {slot}"),
-            );
-        }
+        out.sort_by_key(|(f, _)| *f);
+        out
     }
 
     // ---------------------------------------------------------------------
@@ -1175,7 +1184,9 @@ impl<B: Backend> RecorderService<B> {
         }
         self.recording = false;
         // Finished by the record thread; its summary comes back on a later pass.
+        let marks = std::mem::take(&mut self.record_marks);
         if let Some(rec) = self.rec.as_ref() {
+            rec.marks(marks);
             rec.finish();
         }
         self.finishing.push_back((
@@ -1222,23 +1233,8 @@ impl<B: Backend> RecorderService<B> {
         let derived =
             EngineConfig::with_block(self.ecfg.in_channels, self.ecfg.out_channels, &actual);
         self.ecfg.frames_per_tick = derived.frames_per_tick;
-        // The derivation is a FLOOR, never a ceiling: a recorder that deliberately
-        // asked for a deeper watchdog tap keeps it. Shrinking a configured ring to
-        // a computed minimum would quietly reduce how far the watchdog may fall
-        // behind before raw frames start being dropped.
+        // The derivation is a floor, never a ceiling.
         self.ecfg.ring_frames = self.ecfg.ring_frames.max(derived.ring_frames);
-        // Constants note: `watchdog_sustain` counts RAW FRAMES, so the module's 4
-        // is a time only against the HERTZFORGE-SIM plant's rate. This is the ONLY place
-        // the ACTUAL rate is known, and it matters more here than in any other
-        // module: this watchdog ARMS BY DEFAULT on a hardware station carrying
-        // abort limits, so its debounce is a live safety number rather than a
-        // monitor's tuning preference.
-        if self.station.is_hardware() {
-            self.ecfg.watchdog_sustain = hertzforge_engine::watchdog_sustain_frames(
-                WATCHDOG_SUSTAIN_SECONDS,
-                actual.actual_rate_hz,
-            );
-        }
 
         // THE ARM GATE, asked for a capture-only run (`{None, None}`): no drive
         // path, nothing to correct, so the abort-latency rule does not bind. It is
@@ -1333,9 +1329,7 @@ impl<B: Backend> RecorderService<B> {
             n_averages,
             averages_complete,
             coherence_valid,
-            watchdog_armed: self.watchdog.armed,
-            limits_disarmed: self.watchdog.disarmed_with_limits,
-            watchdog_basis: self.watchdog.basis.clone(),
+            marks: self.marks.len() as u64,
             requested_fs_hz: self.cfg.acq.native_rate_hz,
             fs_hz: self.fs_hz,
             station_frames: self.session_frames,
@@ -1367,11 +1361,6 @@ impl<B: Backend> RecorderService<B> {
             write_fault: self.rec.as_ref().and_then(|r| r.fault()),
             run_fault: self.run_fault.clone(),
         }
-    }
-
-    /// What the watchdog policy decided at construction, and why.
-    pub fn watchdog(&self) -> &crate::service::config::WatchdogArming {
-        &self.watchdog
     }
 
     /// The per-channel PSD spectra (enabled-input slot order).
@@ -1500,18 +1489,96 @@ impl<B: Backend> RecorderService<B> {
     }
 }
 
-/// Build the engine table clone: the user table with (a) its drive rows left out,
-/// so the station is configured with the input rows only, and (b) all abort limits
-/// stripped when `watchdog_enabled == false`.
-fn build_engine_table(user: &ChannelTable, watchdog_enabled: bool) -> ChannelTable {
+/// Build the engine table clone: the user table with its drive rows left out, so
+/// the station is configured with the input rows only, and its abort limits
+/// stripped, so the engine's watchdog monitors nothing (limits are marks).
+fn build_engine_table(user: &ChannelTable) -> ChannelTable {
     let mut clone = user.clone();
     clone.channels.retain(|c| c.role != ChannelRole::Drive);
-    if !watchdog_enabled {
-        for ch in clone.channels.iter_mut() {
-            ch.abort = AbortLimits::default();
-        }
+    for ch in clone.channels.iter_mut() {
+        ch.abort = AbortLimits::default();
     }
     clone
+}
+
+/// The high-pass corner of the velocity and displacement a limit is checked on, Hz.
+const MARK_HP_HZ: f64 = 5.0;
+
+/// A row passing a limit is marked once per episode: the episode ends when the row
+/// has stayed within the limit for this long, seconds of station time.
+const MARK_EPISODE_S: f64 = 1.0;
+
+/// One axis of a row's limits, and whether an episode past it is open.
+#[derive(Debug, Clone)]
+struct Episode {
+    axis: &'static str,
+    limit: Option<f64>,
+    open: bool,
+    /// Frames within the limit since the last frame past it.
+    within: u64,
+}
+
+/// A recorded row's limits as marks.
+#[derive(Debug, Clone)]
+struct RowMarks {
+    row: u32,
+    /// Only rows in g carry acceleration, velocity and displacement limits.
+    in_g: bool,
+    integ: Option<ChannelIntegrator>,
+    axes: [Episode; 3],
+}
+
+impl RowMarks {
+    fn new(c: &Channel) -> Self {
+        let lim = &c.abort;
+        let ep = |axis, limit| Episode {
+            axis,
+            limit,
+            open: false,
+            within: 0,
+        };
+        Self {
+            row: c.index,
+            in_g: c.units == Units::AccelG,
+            integ: None,
+            axes: [
+                ep("accel", lim.accel_g),
+                ep("velocity", lim.velocity_ips),
+                ep("displacement", lim.displacement_mil),
+            ],
+        }
+    }
+
+    fn has_limit(&self) -> bool {
+        self.in_g && self.axes.iter().any(|a| a.limit.is_some())
+    }
+
+    /// One sample at `station_frame`: the marks it makes, `(axis, value, limit)`.
+    fn push(&mut self, sample: f64, fs_hz: f64, out: &mut Vec<(&'static str, f64, f64)>) {
+        let (vel, disp) = if self.axes[1].limit.is_some() || self.axes[2].limit.is_some() {
+            self.integ
+                .get_or_insert_with(|| ChannelIntegrator::new(fs_hz, MARK_HP_HZ))
+                .push(sample)
+        } else {
+            (0.0, 0.0)
+        };
+        let quiet = (MARK_EPISODE_S * fs_hz).round() as u64;
+        for (ep, value) in self.axes.iter_mut().zip([sample, vel, disp]) {
+            let Some(limit) = ep.limit else { continue };
+            if value.abs() > limit {
+                if !ep.open {
+                    out.push((ep.axis, value.abs(), limit));
+                }
+                ep.open = true;
+                ep.within = 0;
+            } else if ep.open {
+                ep.within += 1;
+                if ep.within >= quiet {
+                    ep.open = false;
+                }
+            }
+        }
+    }
 }
 
 /// The analysis state for `n_input` rows at `acq`'s rate, and the FRF pair's when one
@@ -1580,5 +1647,42 @@ fn units_name(u: &Units) -> String {
         Units::ForceLbf => "lbf".to_string(),
         Units::VoltageV => "V".to_string(),
         Units::Custom(s) => s.clone(),
+    }
+}
+
+fn set_recording(mark: &mut Mark, name: Option<String>) {
+    match mark {
+        Mark::Limit { recording, .. } | Mark::Overload { recording, .. } => *recording = name,
+    }
+}
+
+/// A mark in words, for the log.
+fn mark_words(mark: &Mark) -> String {
+    match mark {
+        Mark::Limit {
+            row,
+            axis,
+            value,
+            limit,
+            station_frame,
+            recording,
+        } => format!(
+            "mark: row {row} {axis} {value:.4} past its limit {limit} at station frame \
+             {station_frame}{}",
+            recording
+                .as_ref()
+                .map(|r| format!(", in {r}"))
+                .unwrap_or_default()
+        ),
+        Mark::Overload {
+            row,
+            value,
+            level,
+            station_frame,
+            ..
+        } => format!(
+            "overload: row {row} reached {value:.4}, at or over {level:.4} (0.9 of its \
+             range), at station frame {station_frame}"
+        ),
     }
 }
