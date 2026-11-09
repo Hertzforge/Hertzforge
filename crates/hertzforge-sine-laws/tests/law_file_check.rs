@@ -37,7 +37,7 @@ fn fixture(host: &LawHost, mode: &str, after: i64) -> WasmSineLawFactory {
 }
 
 #[test]
-fn a_law_file_that_misbehaves_fails_the_check_and_the_same_file_behaving_passes() {
+fn a_sine_law_file_that_misbehaves_fails_the_check_and_the_same_file_behaving_passes() {
     let host = LawHost::new(HostConfig::default()).unwrap();
     let case = SineCheckCase::Noise;
     let m = run_check_case(case, Arc::new(fixture(&host, "ok", 0)), station_for(case)).unwrap();

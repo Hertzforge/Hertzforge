@@ -238,8 +238,9 @@ hertzforge-law-host  test:sine_host  a_late_sine_law_is_stopped_within_its_tick_
 hertzforge-law-host  test:sine_host  each_misbehaviour_is_a_named_error
 hertzforge-sine-laws  test:law_call_timing  a_sine_law_file_call_at_the_default_tick_is_well_inside_its_budget
 # The check's cases judge each law call against its budget on the wall clock: in the parallel
-# pass on a macOS runner one call took 3.2 ms against 2.5 ms and failed the noise case
+# pass on a macOS runner one call took 3.2 ms against 2.5 ms (the built-in) and 8.6 ms (a law file)
 hertzforge-sine-laws  test:check_cases  the_sine_built_in_passes_every_check_case
+hertzforge-sine-laws  test:law_file_check  a_sine_law_file_that_misbehaves_fails_the_check_and_the_same_file_behaving_passes
 
 # The template law file on a simulated station with the NI chassis's output queue: each run goes
 # through the law host, whose call deadline is on the wall clock, so a starved call is a miss
