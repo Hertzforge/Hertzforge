@@ -1521,11 +1521,38 @@ impl ExplorerHostService {
                     b.stop()
                         .map_err(|e| ServiceError::Plant(format!("stop: {e}")))?;
                 }
-                self.finish(
-                    RunState::Stopped,
-                    "operator stop: drive ramped to zero, tasks stopped".into(),
-                    None,
-                );
+                // The end names why the stop began: the operator, nobody at the controls,
+                // the service shutting down, or the secondary monitor's breach (whose trip
+                // is the end's).
+                let cause = self.stop_cause.unwrap_or(StopCause::Operator);
+                let tail = "drive ramped to zero, tasks stopped";
+                let (reason, trip) = match cause {
+                    StopCause::Operator => (format!("operator stop: {tail}"), None),
+                    StopCause::SafeStop => {
+                        (format!("safe stop: nobody held control; {tail}"), None)
+                    }
+                    StopCause::Shutdown => (
+                        format!("shutdown: the service is shutting down; {tail}"),
+                        None,
+                    ),
+                    StopCause::Limit => match self.observed_trip {
+                        Some(t) => (
+                            format!(
+                                "limit stop: channel {} {:?} {:.4} past limit {:.4}; {tail}",
+                                t.channel_index, t.axis, t.value, t.limit
+                            ),
+                            Some(t),
+                        ),
+                        None => (format!("limit stop: {tail}"), None),
+                    },
+                };
+                self.end_with(EndRecord {
+                    state: RunState::Stopped,
+                    reason,
+                    trip,
+                    stop: Some(cause),
+                    drive: None,
+                });
                 return Ok(false);
             }
             if !self.run_one_batch()? {
