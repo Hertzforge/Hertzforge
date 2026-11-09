@@ -4,5 +4,7 @@
 //! run's records.
 
 pub mod config;
+pub mod records;
+pub mod run;
 pub mod subscribe;
 pub mod view;
