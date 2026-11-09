@@ -137,3 +137,95 @@ fn recorder_writes_no_drive_sample() {
         "the station is configured with no drive row: the table's drive row is not opened"
     );
 }
+
+// ---------------------------------------------------------------------------------
+// G1: the rate. The station is asked the rate configured, and everything derived and
+// written follows the rate it programs.
+// ---------------------------------------------------------------------------------
+
+fn json_at(path: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn recorder_records_at_the_rate_the_station_programmed() {
+    // A delta-sigma device whose own rate is 51 200 Hz: it programs a rate on its
+    // ladder, so 12 800 Hz exactly and 8192 Hz as 8533.33 Hz.
+    let device = |asked: f64| {
+        let mut st = ScriptedStation::new(2, 51_200.0, Box::new(ramp));
+        st.program = support::delta_sigma_ladder;
+        let calls = st.calls();
+        let mut cfg = manual(asked);
+        cfg.frf_pair = Some((0, 1));
+        cfg.pretrigger_s = Some(0.5);
+        cfg.timed_record_s = Some(0.25);
+        let root = temp_root("g1_rate");
+        let mut svc = RecorderService::with_backend(
+            cfg,
+            inputs(2),
+            st,
+            hertzforge_module_abi::StationClass::NiSimulated,
+            root.clone(),
+        )
+        .unwrap()
+        .with_block_frames(256);
+        svc.configure().unwrap();
+        svc.start_monitor().unwrap();
+        (svc, calls, root)
+    };
+
+    let (mut svc, calls, _) = device(12_800.0);
+    assert_eq!(
+        calls.asked_rate(),
+        12_800.0,
+        "the station is asked the rate configured"
+    );
+    assert_eq!(svc.status(u64::MAX).fs_hz, 12_800.0);
+    svc.stop_monitor().unwrap();
+
+    let (mut svc, calls, root) = device(8192.0);
+    let fs = 13_107_200.0 / 256.0 / 6.0;
+    assert_eq!(calls.asked_rate(), 8192.0);
+    let s = svc.status(u64::MAX);
+    assert_eq!(
+        (s.requested_fs_hz, s.fs_hz),
+        (8192.0, fs),
+        "both rates are stated"
+    );
+    assert_eq!(
+        svc.timed_record_frames(),
+        Some((0.25 * fs).round() as u64),
+        "a timed length is counted at the programmed rate"
+    );
+    svc.arm().unwrap();
+    assert_eq!(
+        svc.status(u64::MAX).pre_frames_asked,
+        (0.5 * fs).round() as u64,
+        "the pre-window is counted at the programmed rate"
+    );
+    let mut n = 0;
+    for _ in 0..16 {
+        n += svc.pump_frames(1024).unwrap();
+    }
+    assert!((svc.session_seconds() - n as f64 / fs).abs() < 1e-9);
+    let df = svc.frf().unwrap().df_hz;
+    assert!((df - fs / 256.0).abs() < 1e-9, "the analysis grid: df {df}");
+
+    svc.record_now().unwrap();
+    for _ in 0..4 {
+        svc.pump_frames(1024).unwrap();
+    }
+    svc.stop_monitor().unwrap();
+    let name = svc.recordings_list(None)[0].name.clone();
+    let dir = root.join(name);
+    let rec = json_at(&dir.join("recorder.json"));
+    assert_eq!(rec["fs_hz"], serde_json::json!(fs), "recorder.json: {rec}");
+    assert_eq!(
+        rec["requested_fs_hz"],
+        serde_json::json!(8192.0),
+        "recorder.json: {rec}"
+    );
+    let cap = json_at(&dir.join("capture.json"));
+    assert_eq!(cap["config"]["sample_rate_hz"], serde_json::json!(fs));
+    assert_eq!(RecordingReader::open(&dir).unwrap().info().rate_hz, fs);
+}

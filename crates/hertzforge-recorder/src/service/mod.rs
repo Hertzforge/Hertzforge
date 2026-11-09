@@ -545,6 +545,12 @@ impl<B: Backend> RecorderService<B> {
         self.actual_rate_hz.unwrap_or(self.cfg.acq.native_rate_hz)
     }
 
+    /// A timed recording's length after its trigger, in frames, or `None` when
+    /// recordings run until cut.
+    pub fn timed_record_frames(&self) -> Option<u64> {
+        self.cfg.timed_record_frames()
+    }
+
     pub fn session_seconds(&self) -> f64 {
         self.session_frames as f64 / self.cfg.acq.native_rate_hz
     }
