@@ -59,7 +59,7 @@ use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 pub use config::{MetaField, RecState, RecorderConfig};
 pub use report::{
     ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Mark, RecEvent,
-    RecStatus, RecordingInfoLite, ReportData, RunFacts, RunFault, SessionRecording,
+    RecStatus, RecordingInfoLite, RecordingNow, ReportData, RunFacts, RunFault, SessionRecording,
 };
 
 /// The process step of a capture-only run: it reads and produces nothing.
@@ -250,6 +250,15 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     record_gaps: Vec<GapRecord>,
     /// The disk fell behind on this pass: its words.
     behind: Option<String>,
+    /// The recording in progress's station facts: what began it, its first and its
+    /// trigger station frame, and the pre-window asked.
+    record_kind: &'static str,
+    record_first_frame: u64,
+    record_trigger_frame: u64,
+    record_pre_asked: u64,
+    /// The last batch's frames, interleaved, and the station frame of its first.
+    last_frames: Vec<f32>,
+    last_first_frame: u64,
     /// Whether a recording is in progress in the store.
     recording: bool,
     /// Frames written to the active recording.
@@ -407,6 +416,12 @@ impl<B: Backend> RecorderService<B> {
             record_queued: 0,
             record_gaps: Vec::new(),
             behind: None,
+            record_kind: "manual",
+            record_first_frame: 0,
+            record_trigger_frame: 0,
+            record_pre_asked: 0,
+            last_frames: Vec::new(),
+            last_first_frame: 0,
             recording: false,
             record_frames: 0,
             record_target_frames: None,
@@ -605,6 +620,34 @@ impl<B: Backend> RecorderService<B> {
         self.begin_recording(pretrigger, "manual")
     }
 
+    /// Armed -> Monitoring: the detector disarmed and the pre-window dropped.
+    pub fn disarm(&mut self) -> Result<(), RecorderError> {
+        if self.state != RecState::Armed {
+            return Err(RecorderError::BadState(format!(
+                "disarm requires Armed, was {:?}",
+                self.state
+            )));
+        }
+        self.trigger = None;
+        self.transition(RecState::Monitoring);
+        Ok(())
+    }
+
+    /// The last batch read: the station frame of its first frame, and its frames,
+    /// interleaved one value per recorded row.
+    pub fn last_batch(&self) -> (u64, &[f32]) {
+        (self.last_first_frame, &self.last_frames)
+    }
+
+    /// Each recorded row's statistics over the whole run, in column order.
+    pub fn row_stats(&self) -> Vec<report::ChannelStat> {
+        self.analysis
+            .iter()
+            .enumerate()
+            .map(|(slot, a)| report::ChannelStat::from_stats(slot, &a.last_stats))
+            .collect()
+    }
+
     /// Begin the run's recording from its first frame, with no pre-window: the
     /// `start` mode. Valid before the first batch is read.
     pub fn record_from_start(&mut self) -> Result<(), RecorderError> {
@@ -739,8 +782,11 @@ impl<B: Backend> RecorderService<B> {
         self.batches += 1;
         let frames = bridge.n_frames;
         let interleaved = std::mem::take(&mut bridge.frames);
+        self.last_first_frame = self.session_frames;
         // The frames read before any stop are kept: they are drained first.
-        self.drain_batch(&interleaved, frames)?;
+        let drained = self.drain_batch(&interleaved, frames);
+        self.last_frames = interleaved;
+        drained?;
 
         // A disk too far behind to take a batch ends the run, the gap recorded.
         if let Some(words) = self.behind.take() {
@@ -1067,6 +1113,16 @@ impl<B: Backend> RecorderService<B> {
             },
         });
         let real_name = run_name;
+        self.record_kind = match kind {
+            "start" => "start",
+            "level" => "level",
+            _ => "manual",
+        };
+        // The trigger's station frame: the fire's (set just before a recording
+        // begins), the next frame for a manual or start recording.
+        self.record_trigger_frame = self.last_fire_station_frame.unwrap_or(self.session_frames);
+        self.record_first_frame = self.record_trigger_frame.saturating_sub(pre_frames);
+        self.record_pre_asked = pre_frames_asked;
         self.recording = true;
         self.record_frames = pre_frames;
         self.record_queued = pre_frames;
@@ -1312,6 +1368,17 @@ impl<B: Backend> RecorderService<B> {
             },
             write_fault: self.rec.as_ref().and_then(|r| r.fault()),
             run_fault: self.run_fault.clone(),
+            recording: self.recording.then(|| RecordingNow {
+                name: self.active_run_name.clone().unwrap_or_default(),
+                trigger: self.record_kind.to_string(),
+                first_station_frame: self.record_first_frame,
+                trigger_station_frame: self.record_trigger_frame,
+                pre_frames: self.record_pretrigger_frames,
+                pre_frames_asked: self.record_pre_asked.max(self.record_pretrigger_frames),
+                frames_fed: self.record_frames,
+                frames_on_disk: self.rec.as_ref().map_or(0, |r| r.frames_on_disk()),
+                target_frames: self.record_target_frames,
+            }),
         }
     }
 

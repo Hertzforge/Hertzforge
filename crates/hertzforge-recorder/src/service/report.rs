@@ -176,6 +176,9 @@ pub struct RecStatus {
     /// How the run ended on its own, if it did.
     #[serde(default)]
     pub run_fault: Option<RunFault>,
+    /// The recording in progress, if any.
+    #[serde(default)]
+    pub recording: Option<RecordingNow>,
 }
 
 /// A mark: a row passing one of its limits, or its overload indicator latching.
@@ -202,6 +205,28 @@ pub enum Mark {
         station_frame: u64,
         recording: Option<String>,
     },
+}
+
+/// The recording in progress, as the status states it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordingNow {
+    /// Its name, `rec_NNNN`.
+    pub name: String,
+    /// What began it: `start`, `manual` or `level`.
+    pub trigger: String,
+    /// The station frame of its first frame.
+    pub first_station_frame: u64,
+    /// The station frame of its trigger (t = 0).
+    pub trigger_station_frame: u64,
+    /// The pre-window it holds, and the pre-window asked.
+    pub pre_frames: u64,
+    pub pre_frames_asked: u64,
+    /// Frames handed to the record thread (its pre-window included).
+    pub frames_fed: u64,
+    /// Frames on disk.
+    pub frames_on_disk: u64,
+    /// The frames it will hold when timed (the pre-window plus its length), or none.
+    pub target_frames: Option<u64>,
 }
 
 /// Why a run ended on its own.

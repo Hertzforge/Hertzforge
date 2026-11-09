@@ -397,3 +397,48 @@ fn recorder_every_recording_goes_through_the_store_seam() {
         "the store's first frame is the next frame read"
     );
 }
+
+#[test]
+fn recorder_status_states_the_recording_in_progress_and_the_last_batch() {
+    let station = ScriptedStation::new(2, FS, Box::new(|n, c| n as f32 + c as f32 * 0.5));
+    let mut c = cfg(TriggerMode::Manual);
+    c.pretrigger_s = Some(0.25);
+    c.timed_record_s = Some(1.0);
+    let mut svc = RecorderService::with_backend(
+        c,
+        inputs(2),
+        station,
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        temp_root("rs_now"),
+    )
+    .unwrap()
+    .with_block_frames(256);
+    svc.configure().unwrap();
+    svc.start_monitor().unwrap();
+    svc.arm().unwrap();
+    svc.pump_frames(4096).unwrap();
+    let (first, frames) = svc.last_batch();
+    assert_eq!(first, 4096 - 512, "the last batch's first station frame");
+    assert_eq!(frames.len(), 512 * 2);
+    assert_eq!(frames[0], first as f32);
+    assert_eq!(svc.status(u64::MAX).recording, None);
+    svc.record_now().unwrap();
+    let now = svc
+        .status(u64::MAX)
+        .recording
+        .expect("a recording in progress");
+    assert_eq!(now.name, "rec_0001");
+    assert_eq!(now.trigger, "manual");
+    assert_eq!(now.trigger_station_frame, 4096);
+    assert_eq!((now.pre_frames, now.pre_frames_asked), (2048, 2048));
+    assert_eq!(now.first_station_frame, 4096 - 2048);
+    assert_eq!(now.target_frames, Some(2048 + 8192));
+    svc.stop_recording().unwrap();
+    // Disarm returns an armed run to monitoring.
+    svc.arm().unwrap();
+    assert_eq!(svc.state(), RecState::Armed);
+    svc.disarm().unwrap();
+    assert_eq!(svc.state(), RecState::Monitoring);
+    assert!(svc.disarm().is_err(), "disarm applies only while armed");
+    assert_eq!(svc.row_stats().len(), 2);
+}
