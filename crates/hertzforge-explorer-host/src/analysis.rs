@@ -22,7 +22,7 @@
 //!
 //! Nothing here spawns a thread or defers work. [`ChannelSpectrum::push`] transforms
 //! IN LINE the moment a window fills, so the cost lands on whichever thread pushed the
-//! sample that completed it. That was harmless on the delegated path, where samples arrive
+//! sample that completed it. That is harmless where samples arrive
 //! on a polling loop with no deadline. It is NOT harmless on a host-closes-loop
 //! backend: the measured transform is ~24 ms against a ~15 ms block period, so a
 //! process step that fed this engine from the engine tick would overrun its own
@@ -34,7 +34,6 @@
 //! purpose - the scheduling decision belongs to the consumer, which is the only layer
 //! that knows what its deadline is.
 
-use hertzforge_dsp::sine::TrackingFilter;
 use hertzforge_dsp::{fft, window};
 use hertzforge_engine::limits::ChannelIntegrator;
 use serde::{Deserialize, Serialize};
@@ -310,14 +309,9 @@ struct PendingTone {
 /// the tone is swept or walked. Feed it the raw acceleration samples for one channel plus
 /// the frequency they were acquired at.
 ///
-/// Two entry points, for two different shapes of caller - see [`Self::observe`] (the
-/// host-closes-loop service: a level per analysis pass, overwritten as the dwell
-/// continues) and [`Self::push_run`] (the delegated path: one settled tracking-filter reading
-/// per telemetry chunk).
+/// The entry point is [`Self::observe_pipelined`]: a level per analysis pass, overwritten
+/// as the dwell continues, aligned to when each commanded tone reaches the input.
 pub struct ProfileTracer {
-    filter: TrackingFilter,
-    decimate: usize,
-    counter: usize,
     trace: ProfileTrace,
     /// Sample rate the samples arrive at, Hz.
     fs_hz: f64,
@@ -342,18 +336,9 @@ pub struct ProfileTracer {
 }
 
 impl ProfileTracer {
-    /// Build a tracer for channel `ch` at sample rate `fs_hz`, with tracking-filter
-    /// bandwidth `bandwidth_hz` and a `decimate` factor (record one profile point every
-    /// `decimate` samples). A bandwidth a few times the sweep rate at the filter is the
-    /// standard choice (see [`sine::TrackingFilter`]).
-    ///
-    /// `bandwidth_hz` and `decimate` shape [`Self::push`] / [`Self::push_run`] only;
-    /// [`Self::observe`] uses neither.
-    pub fn new(ch: u32, fs_hz: f64, bandwidth_hz: f64, decimate: usize) -> Self {
+    /// Build a tracer for channel `ch` at sample rate `fs_hz`.
+    pub fn new(ch: u32, fs_hz: f64) -> Self {
         let mut t = Self {
-            filter: TrackingFilter::new(fs_hz, bandwidth_hz),
-            decimate: decimate.max(1),
-            counter: 0,
             trace: ProfileTrace {
                 ch,
                 points: Vec::new(),
@@ -380,90 +365,8 @@ impl ProfileTracer {
         self
     }
 
-    /// Push one acceleration sample at the current instantaneous estimated frequency.
-    /// Records a `(freq, amplitude)` point every `decimate` samples.
-    ///
-    /// NOTE: this per-sample form is exact only when `inst_freq_hz` varies SMOOTHLY per
-    /// sample (a true continuous sweep). When telemetry arrives in chunks at a single
-    /// measured frequency, prefer [`ProfileTracer::push_run`], which settles the filter
-    /// over the whole chunk before recording so the tracking-filter startup transient
-    /// does not spuriously peak the profile at the sweep's start frequency.
-    pub fn push(&mut self, sample: f64, inst_freq_hz: f64) {
-        let (amp, _phase) = self.filter.update(sample, inst_freq_hz);
-        self.counter += 1;
-        if self.counter >= self.decimate {
-            self.counter = 0;
-            self.trace.points.push(ProfilePoint {
-                freq_hz: inst_freq_hz,
-                amplitude: amp,
-            });
-        }
-    }
-
-    /// Record an externally MEASURED `(freq, amplitude)` point: the device-RMS survey path
-    /// (2026-09-07), where the level is the box's own broadband RMS x sqrt 2 rather than
-    /// this tracer's filter. Bounded: past 200 k points the oldest half is dropped.
-    pub fn record_point(&mut self, freq_hz: f64, amplitude: f64) {
-        const CAP: usize = 200_000;
-        if self.trace.points.len() >= CAP {
-            self.trace.points.drain(..CAP / 2);
-        }
-        self.trace.points.push(ProfilePoint { freq_hz, amplitude });
-    }
-
-    /// Process a whole run of samples at ONE measured frequency (a telemetry chunk is a
-    /// single tone), then record ONE `(freq, settled-amplitude)` point. The filter locks
-    /// on the chunk's tone as it processes the run; the amplitude recorded is the SETTLED
-    /// value from the tail of the run, which rejects the two-pole low-pass startup
-    /// overshoot that would otherwise spuriously peak the profile at the start frequency.
-    /// This is the robust chunked-telemetry entry point for the delegated path
-    /// (the delegated Explorer service), where a chunk is long against the filter's settling
-    /// time. The HOST-closes-loop service does NOT use it: its analysis pass is ~30 ms,
-    /// which is shorter than the filter settles, and an operator clicking the tone along
-    /// at a few hertz never waits for it. That path uses [`Self::observe`].
-    pub fn push_run(&mut self, samples: &[f64], inst_freq_hz: f64) {
-        if samples.is_empty() {
-            return;
-        }
-        // A telemetry chunk is a SINGLE tone at `inst_freq_hz`. Re-lock the filter to
-        // this chunk's frequency from a clean phase so cross-chunk phase discontinuities
-        // (the frequency jumps between chunks during a stepped/fast sweep) cannot corrupt
-        // the demodulation, then settle within the chunk. A long chunk is many settling
-        // times (chunk ~62 ms at 4096/65536; filter time-constant ~2/(2*pi*bw) ~= 6 ms at
-        // bw 50 Hz), so the tail amplitude is the true locked amplitude.
-        //
-        // THE RESET IS CONDITIONAL, and the condition is the reason it exists: it guards
-        // against a frequency JUMP between chunks. A chunk at the same frequency as the
-        // last one has no discontinuity to guard against, and resetting there throws away
-        // a filter that had already settled. That is not hypothetical - on a station whose
-        // natural acquisition block is short (HERTZFORGE-SIM's is ONE FRAME) every chunk was
-        // shorter than the filter's settling time, so every point recorded the startup
-        // transient instead of the amplitude: a dwell read ~0 while the drive was live.
-        // Continuing the filter across chunks at a held tone is what makes a DWELL - the
-        // manual-walk case the peak profile is for - measure the tone rather than the
-        // filter's own startup.
-        if (inst_freq_hz - self.last_run_hz).abs() > f64::EPSILON {
-            self.filter.reset();
-        }
-        self.last_run_hz = inst_freq_hz;
-        let mut amp = 0.0f64;
-        // The last quarter of the run, and at least the final sample: `len - len/4` alone
-        // is `len` for `len < 4`, which selects NOTHING and records a hard zero.
-        let settle_tail = samples.len().saturating_sub((samples.len() / 4).max(1));
-        for (i, &s) in samples.iter().enumerate() {
-            let (a, _phase) = self.filter.update(s, inst_freq_hz);
-            if i >= settle_tail {
-                amp = amp.max(a);
-            }
-        }
-        self.trace.points.push(ProfilePoint {
-            freq_hz: inst_freq_hz,
-            amplitude: amp,
-        });
-    }
-
     /// Record the level at the tone the acquisition is CURRENTLY carrying, overwriting the
-    /// point already held for that frequency. The Explorer/SMART survey capture.
+    /// point already held for that frequency. The Explorer survey capture.
     ///
     /// The zero-pipeline form of [`Self::observe_pipelined`]: correct for a caller whose
     /// drive reaches the input immediately, and the shape every unit test in this module
@@ -525,7 +428,7 @@ impl ProfileTracer {
     /// [`Self::push_run`]'s settled tail-max is a tracking-filter reading, and a tracking
     /// filter cannot answer faster than it settles: at the bandwidths a survey uses that
     /// is a couple of hundred milliseconds, which is the whole of a hand-clicked dwell.
-    /// MEASURED against the operator's workflow (2026-08-08): with clicks arriving ~3/s
+    /// Measured against an operator's workflow: with clicks arriving ~3/s
     /// the profile never reached the plant's level before the tone moved on, and the
     /// remembered curve read low everywhere. A short-window RMS has no settling time of
     /// its own - it is exact for a steady tone the moment the window is full - and it
@@ -535,7 +438,7 @@ impl ProfileTracer {
     ///
     /// # Why the pipeline term had to be added on top of that
     ///
-    /// MEASURED 2026-08-08 (`tests/pipeline_alignment.rs`), against a two-mode plant
+    /// Measured (`tests/pipeline_alignment.rs`) against a two-mode plant
     /// behind a 250 ms pipeline: a 5 clicks/s walk recorded, at each stop, the level of a
     /// stop it had already left - 275 Hz read 0.429 V where a paused walk read 1.504 V,
     /// and 0.429 V is what the paused walk read at 190 Hz. The curve was the plant's own
@@ -624,7 +527,7 @@ impl ProfileTracer {
             // whatever window it leaves behind, so the last thing recorded for a tone is
             // the freshest CLEAN window it ever had. An extra `record_current()` here
             // would be exactly that call again; it was written, MEASURED to be redundant
-            // by deleting it (2026-08-08, no test moved), and removed rather than left as
+            // by deleting it (no test moved), and removed rather than left as
             // a line a reader would take for load-bearing.
             recorded |= self.absorb(&rest[..boundary]);
             let arrived = self
@@ -779,7 +682,7 @@ impl ProfileTracer {
     /// [`Self::take_trace`] swaps in `ProfileTrace::default()`, whose `ch` is 0. That is
     /// fine for the one-shot end-of-run report it was written for and wrong for a caller
     /// that drains REPEATEDLY: every take after the first would answer for "channel 0".
-    /// A streaming consumer (the daemon's peak-profile raster) wants the points since its
+    /// A streaming consumer (the service's survey line) wants the points since its
     /// last read and nothing else, so it gets its own accessor rather than a second
     /// meaning bolted onto that one.
     ///
@@ -915,36 +818,6 @@ mod tests {
         assert_eq!(frames[1].ch, 2);
     }
 
-    #[test]
-    fn profile_trace_peaks_near_the_tracked_resonance() {
-        // Simulate a sweep across a resonance: amplitude peaks when the swept frequency
-        // matches a synthetic resonance at 250 Hz. The tracker follows amplitude vs the
-        // instantaneous frequency, so the profile peak should land near 250 Hz.
-        let fs = 65536.0;
-        let mut tracer = ProfileTracer::new(1, fs, 50.0, 64);
-        let f_res = 250.0;
-        let q = 15.0;
-        // Sweep 100 -> 500 Hz slowly; response amplitude ~ resonance magnitude.
-        let n = 400_000usize;
-        let mut phase = 0.0f64;
-        for k in 0..n {
-            let frac = k as f64 / n as f64;
-            let f = 100.0 + 400.0 * frac;
-            // 2nd-order resonance magnitude at f (normalized).
-            let r = f / f_res;
-            let mag = 1.0 / ((1.0 - r * r).powi(2) + (r / q).powi(2)).sqrt();
-            phase += TAU * f / fs;
-            let s = mag * phase.sin();
-            tracer.push(s, f);
-        }
-        let peak = tracer.trace().peak().expect("profile has points");
-        assert!(
-            (peak.freq_hz - f_res).abs() < 30.0,
-            "profile peak at {} Hz, want ~{f_res}",
-            peak.freq_hz
-        );
-    }
-
     /// The shipped chassis: the 9234 coerces a requested 8192 Hz to 8533.33, and the
     /// engine's block there is ~256 frames (~30 ms).
     const SIM_FS: f64 = 13_107_200.0 / (256.0 * 6.0);
@@ -986,7 +859,7 @@ mod tests {
         }
     }
 
-    /// THE ACCEPTANCE CASE (operator, 2026-08-08: "the reference controller creates a smooth
+    /// THE ACCEPTANCE CASE (an operator's words: "it should create a smooth
     /// curve with rapid clicks"). Three retunes a second - a ~333 ms dwell each - and EVERY visited
     /// frequency must come out of the survey with a level, at the plant's steady
     /// amplitude for that frequency.
@@ -996,7 +869,7 @@ mod tests {
     /// filter is still climbing when the dwell ends, so every point reads low.
     #[test]
     fn a_three_click_per_second_walk_lands_every_frequency_at_the_plant_level() {
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let mut plant = Plant::new();
         let mut run = Vec::new();
         // Two ticks per analysis pass is the service's batch, so a pass is 2 blocks.
@@ -1049,7 +922,7 @@ mod tests {
     /// is a slew setting, not a capture rule (see the Freq slew help text).
     #[test]
     fn a_slewed_walk_records_where_the_tone_landed_and_nowhere_between() {
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let pass_frames = 2 * SIM_BLOCK;
         let passes_per_click = ((0.333 * SIM_FS) / pass_frames as f64).round() as usize;
         // 1 oct/s, the shipped default, applied per frame exactly as the step does it.
@@ -1098,7 +971,7 @@ mod tests {
     /// retune is inside it (2 blocks is exactly one pass), and the very next one records.
     #[test]
     fn the_transient_guard_is_one_pass_then_every_pass_records() {
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let mut plant = Plant::new();
         let mut run = Vec::new();
         let pass_frames = 2 * SIM_BLOCK;
@@ -1128,7 +1001,7 @@ mod tests {
     /// this reds still reading the OLD level after the drive was raised.
     #[test]
     fn a_dwell_follows_a_level_change_without_a_retune() {
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let pass_frames = 2 * SIM_BLOCK;
         let f = 250.0;
         let mut phase = 0.0f64;
@@ -1171,7 +1044,7 @@ mod tests {
     /// this reds with zero points.
     #[test]
     fn a_swept_tone_keeps_recording_while_it_travels() {
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let mut plant = Plant::new();
         let mut run = Vec::new();
         let pass_frames = 2 * SIM_BLOCK;
@@ -1207,10 +1080,10 @@ mod tests {
     /// LONG dwell comes out right whatever the alignment rule is. The defect survives only
     /// when the tone DEPARTS while the window still straddles the click, i.e. while
     /// `dwell < pipeline + window`. A test that dwelt longer would pass with the pipeline
-    /// term deleted - which the first cut of these tests did, on 2026-08-08.
+    /// term deleted - which the first cut of these tests did.
     fn pipelined_walk(plan: &[(f64, f64)], pipe: usize, dwell_passes: usize) -> ProfileTracer {
         let pass_frames = 2 * SIM_BLOCK;
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let mut phase = 0.0f64;
         let mut arriving: VecDeque<(usize, f64, f64)> = VecDeque::new();
         let (mut cur_f, mut cur_a) = plan[0];
@@ -1287,7 +1160,7 @@ mod tests {
     /// **THE PIPELINE RULE.** A retune is measured from when its tone REACHES THE INPUT,
     /// not from when it was commanded.
     ///
-    /// RED-MUTATION, RUN 2026-08-08: replace `arrive_in: pipeline_frames` with
+    /// RED-MUTATION: replace `arrive_in: pipeline_frames` with
     /// `arrive_in: 0` in `observe_pipelined` (which is exactly what aligning to the
     /// COMMAND means) and every stop past the first records the amplitude of the stop
     /// BEFORE it - the operator's defect, reproduced in eleven lines.
@@ -1318,7 +1191,7 @@ mod tests {
     /// measuring a tone at the moment the operator clicked away would have nothing left to
     /// record for ANY stop but the last. Every stop having a point is the claim.
     ///
-    /// RED-MUTATION, RUN 2026-08-08: apply the OBVIOUS half-fix - keep the guard anchored
+    /// RED-MUTATION: apply the OBVIOUS half-fix - keep the guard anchored
     /// to the command and just make it longer (`arrive_in: 0`, `settle: pipeline_frames +
     /// guard_samples(..)`) - and this walk records ONE point, at the last stop. That is
     /// what the pipeline term costs without the departure half, and it is why the fix is
@@ -1353,7 +1226,7 @@ mod tests {
         // 30 Hz: one cycle is 284 samples at this rate, so three cycles is 853 - more than
         // the 512-frame pass. The guard eats the first pass, the second gives 512, and
         // that is still short of three cycles.
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let pass_frames = 2 * SIM_BLOCK;
         let f = 30.0;
         let mut phase = 0.0f64;
@@ -1394,7 +1267,7 @@ mod tests {
     /// nothing - neither a point nor samples that could leak into the next window.
     #[test]
     fn a_parked_oscillator_records_nothing() {
-        let mut tracer = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut tracer = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let quiet = vec![0.0f64; 2 * SIM_BLOCK];
         assert!(!tracer.observe(&quiet, 0.0, false));
         assert!(!tracer.observe(&quiet, f64::NAN, false));
@@ -1406,8 +1279,8 @@ mod tests {
     #[test]
     fn a_dc_offset_does_not_inflate_the_level() {
         let f = 200.0;
-        let mut plain = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
-        let mut offset = ProfileTracer::new(1, SIM_FS, 50.0, 1).with_block_frames(SIM_BLOCK);
+        let mut plain = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
+        let mut offset = ProfileTracer::new(1, SIM_FS).with_block_frames(SIM_BLOCK);
         let n = 2 * SIM_BLOCK;
         let mut phase = 0.0f64;
         let mut a = Vec::with_capacity(n);

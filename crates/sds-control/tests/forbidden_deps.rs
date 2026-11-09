@@ -109,7 +109,7 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // hand-steered open-loop sine (`hertzforge-explorer-host`, MIT, imported): its
     // process step, run service, analysis pass and run host. Its `[dependencies]` are
     // `hertzforge-dsp`, `hertzforge-channel-table`, `hertzforge-engine`,
-    // `hertzforge-capture`, `hertzforge-hal`, `hertzforge-module-abi` and `serde`, the
+    // `hertzforge-hal`, `hertzforge-module-abi` and `serde`, the
     // controller crates all already on this list, and it names no backend: the run
     // service is handed a finished `Box<dyn Backend>` by the station factory, and the
     // Sim is a dev-dependency only. It runs no control law.

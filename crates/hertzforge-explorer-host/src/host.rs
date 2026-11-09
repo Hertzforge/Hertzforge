@@ -1,9 +1,8 @@
 //! The run host around [`ExplorerHostService`]: the pump thread, the asynchronous arm,
 //! the lock-free status snapshot, the stall watchdog and the abort tail.
 //!
-//! Every front end that runs an Explorer in-process (the headless daemon, the desktop
-//! app) needs the same machinery around the service, and each used to be one copy of it
-//! away from drifting. A front end now supplies two things: the service, built on its
+//! Every front end that runs an Explorer in-process needs the same machinery around the
+//! service. A front end supplies two things: the service, built on its
 //! own station, and a [`HostSink`] for what the pump produces (display frames and journal
 //! lines). Validation of its own payload, wording and wire vocabulary stay with it.
 //!

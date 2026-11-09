@@ -1,35 +1,13 @@
-//! THE PEAK-LEVEL SWEEP PROFILE: the reference controller's Fn-sweep curve, kept as a
-//! SORTED LIST OF VISITED POINTS and rasterized onto Hertzforge's display spectrum grid only at
+//! THE SURVEY LINE: the response level at each frequency the tone has visited, kept as a
+//! SORTED LIST OF VISITED POINTS and rasterized onto the display spectrum grid only at
 //! render time.
 //!
-//! # What the operator asked for
-//!
-//! While the tone moves - swept OR walked by hand - the response level at each frequency
-//! is REMEMBERED, and the remembered curve persists after the tone has gone somewhere
-//! else. That is what an operator reads a resonance survey off, and it is the graph that
-//! ends up in a trip report. Commercial controllers have done it for decades and the workflow
-//! is built around it.
-//!
-//! # What the reference controller actually draws (the evidence, 2026-08-08)
-//!
-//! Its setup table gives the graph a frequency axis of its own: `Low`/`High` inside
-//! 2-5000 Hz, **"2000 frequency points are provided across the full range"**, with a
-//! `Spacing: Log / Linear` radio choosing how those points are distributed, and the graph
-//! cursor stepping "one frequency-resolution point" per arrow press
-//! (its options manual, sections 2.2 and 2.1-H). That axis is
-//! the OSCILLATOR's point list, not an FFT bin grid - so its curve is a value per
-//! frequency point along a log axis, which is a sorted point list by construction.
-//!
-//! The manual is SILENT on the accumulation mechanism itself: nothing in the manual
-//! chapters says whether a revisit overwrites, whether anything is held or decayed, or
-//! what is drawn between two points the tone did not stop at. Section 5's own
-//! open-questions list does not even raise it. So the mechanism below is read off the
-//! PLOTS rather than off prose - two screen grabs of the reference controller's
-//! Fn sweep from a 2026-08-05 field job: a single continuous
-//! polyline spanning the whole surveyed 200-3000 Hz span, no gaps anywhere, and at the
-//! sharp 2.3 kHz resonances a NEAR-VERTICAL straight segment between two adjacent points.
-//! A straight chord across a steep step is what joining a sorted point list looks like; it
-//! is not what a bin raster with unvisited cells looks like.
+//! While the tone moves, swept or walked by hand, the response level at each frequency is
+//! REMEMBERED, and the remembered curve persists after the tone has gone somewhere else.
+//! That is what an operator reads a resonance survey off. A curve made of a value per
+//! visited frequency along a log axis is a sorted point list by construction: joining it
+//! draws a single continuous polyline, with a straight chord across a steep step between
+//! two adjacent points.
 //!
 //! # The four rules, stated once
 //!
@@ -54,10 +32,10 @@
 //!    (`SpectrumPane`'s `padTo` pads with it and the cursor readout refuses to print it),
 //!    so an unsurveyed band reads as absent rather than as a measured zero.
 //!
-//! # The two defects this model replaced (round 3, 2026-08-08)
+//! # Why points, not bins
 //!
-//! The first cut remembered per display BIN and interpolated between whichever bins held a
-//! number. Both of the operator's complaints fall out of that one choice:
+//! A curve remembered per display BIN, interpolated between whichever bins held a number,
+//! has two defects, both from that one choice:
 //!
 //! * **Coarse clicks left the plot "full of holes."** A coarse walk lands on a handful of
 //!   bins and passes OVER the rest, so every bin an earlier pass had written kept its old
@@ -75,18 +53,15 @@
 //!
 //! # Lifetime: what clears this, and what does not
 //!
-//! The profile is owned by the Explorer pump thread, so it lives exactly as long as one
-//! RUN. Concretely:
+//! The survey line is owned by the run's service, so it lives exactly as long as one RUN.
+//! Concretely:
 //!
 //! * **Stopping a sweep does NOT clear it** - the tone parks and the profile stands. This
 //!   is the whole point of "remember until overwritten".
 //! * **Continuing to sweep does not clear it** either; a second pass rewrites the span it
 //!   crosses (rule 3) and leaves the rest.
-//! * **A new Run clears it**, because `ExplorerHost::start` spawns a new pump and the
-//!   pump owns it.
-//! * **A profile change clears it**, because `ExplorerHost::set_profile` builds a new
-//!   service (and refuses while a run is live), so the next Run is a new pump either way.
-//!   It has to: `display_nfft` and the adopted rate define the render grid, and a curve
+//! * **A new run clears it**, because every run builds a new service, and so does a
+//!   reconfiguration. It has to: `display_nfft` and the adopted rate define the render grid, and a curve
 //!   carried across a grid change would be plotted against the wrong frequencies.
 
 /// The peak-level sweep profile: the visited points, and the display grid they are
@@ -382,10 +357,9 @@ mod tests {
         }
     }
 
-    /// THE COARSE-WALK ACCEPTANCE CASE (operator, 2026-08-08: coarse clicks left the plot
-    /// "full of holes"). Three hand clicks, nothing between them, and the curve must be
-    /// CONTINUOUS from the first to the last - the reference controller's screen grabs draw a chord
-    /// across a two-octave step exactly as they draw one across a fine one.
+    /// THE COARSE-WALK CASE: coarse clicks must not leave the plot "full of holes". Three
+    /// hand clicks, nothing between them, and the curve must be CONTINUOUS from the first to
+    /// the last: a chord across a two-octave step exactly as across a fine one.
     ///
     /// RED-MUTATION: render only the bins that were visited and this reds on the very
     /// first unvisited bin, which is the shipped defect.

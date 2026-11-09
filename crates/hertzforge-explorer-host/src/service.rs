@@ -855,9 +855,8 @@ impl ExplorerHostService {
     /// level being the short-window RMS amplitude of the freshest signal at that tone
     /// (see [`crate::analysis::ProfileTracer::observe`]). At most one point per VISITED
     /// FREQUENCY, not one per pass: a dwell overwrites its own point rather than adding
-    /// to it. The consumer that remembers them is the daemon's peak-profile raster;
-    /// draining here is what keeps the tracer's vector from growing for the length of a
-    /// survey.
+    /// to it. The service's own survey line ([`Self::survey`]) remembers them; this is the
+    /// stream, for a caller that keeps its own.
     ///
     /// The service folds the same points into its own survey line as they are recorded
     /// ([`Self::survey`]); this is the stream of them, for a caller that keeps its own.
@@ -1238,18 +1237,11 @@ impl ExplorerHostService {
             self.cfg.display_nfft,
         ));
         self.derived = Some(DerivedTracer::new(fs, DERIVED_HP_HZ, SETTLE_HP_CONSTANTS));
-        // The profile tracer's tracking-filter bandwidth and decimation shape its
-        // per-sample / chunked entry points, neither of which this service calls: it uses
-        // `ProfileTracer::observe`, which measures the level over a short window of the
-        // freshest signal. What DOES matter here is the acquisition block, because half
-        // the post-retune transient guard is expressed in blocks.
-        let profile_bw = (self.cfg.slew.freq_oct_per_s * self.band_hz.0).max(5.0);
+        // Half the post-retune transient guard is expressed in acquisition blocks.
         self.profile = Some(
             ProfileTracer::new(
                 self.input_indices[self.control_slot.min(self.input_indices.len() - 1)],
                 fs,
-                profile_bw,
-                1,
             )
             .with_block_frames(block),
         );
@@ -1845,7 +1837,7 @@ impl ExplorerHostService {
         // a window the tone SWEPT across, it is the average of everything in it and
         // belongs to no frequency at all - which is not merely imprecise, it is a number
         // the panel would print beside the commanded frequency as its cross-check.
-        // MEASURED, 2026-08-08: without this gate a retune from 100 Hz to 400 Hz read
+        // Measured: without this gate a retune from 100 Hz to 400 Hz read
         // back as 232 Hz - the mean of the traversal, indistinguishable on the panel
         // from a device that had failed to follow the command.
         let steady_now = self
@@ -1878,7 +1870,7 @@ impl ExplorerHostService {
         let measurable = driving && tone_held;
         // THE PIPELINE, applied to the measured window - the half the gate above cannot do
         // on its own, because it reads the GENERATOR and the samples are the INPUT.
-        // MEASURED, 2026-11-01 (the NI chassis gate): a retune 100 -> 400 Hz read back
+        // Measured on the NI chassis: a retune 100 -> 400 Hz read back
         // 379.41 Hz, 5.15 % low, while a meter on the jumper read the tone at 400 Hz. A
         // manual retune lands in ONE generated frame and `measurable` held from the second
         // pass after it, but that pass's samples are the response to drive written up to
@@ -1967,11 +1959,11 @@ impl ExplorerHostService {
                 // CONTIGUOUS, not per chunk: these blocks are one unbroken acquisition
                 // (a ring drop is the only gap, and it breaks the stream above), so the
                 // interval between two blocks is a sample interval like any other and its
-                // crossing must be counted. Fed through `push_chunk`, every block boundary
-                // was time the window counted and a crossing it never tested - MEASURED
-                // 2026-11-01 at the chassis's 8533.33 Hz / 128-frame block: a steady
-                // 1066.67 Hz read 1033.33 Hz, every window, and 777 Hz read -0.83 %
-                // (`tests/sim_end_to_end.rs`).
+                // crossing must be counted. Fed a chunk at a time with the boundary
+                // untested, every block boundary was time the window counted and a crossing
+                // it never tested; measured at the chassis's 8533.33 Hz / 128-frame block,
+                // a steady 1066.67 Hz read 1033.33 Hz, every window, and 777 Hz read
+                // -0.83 % (`tests/sim_end_to_end.rs`).
                 //
                 // The pipeline skip first. `control_buf` is ONE channel (de-interleaved
                 // above), so its length is this block's frame count and the skip is spent
@@ -2026,14 +2018,11 @@ impl ExplorerHostService {
 
         // THE MEASURED-FREQUENCY GATE, in two halves.
         //
-        // 1. **Are we driving at all?** The delegated path could not answer this - its drive
-        //    was an open-loop nudge-count estimate, so the only defence against measuring
-        //    the noise floor was an amplitude threshold, and a threshold needs a floor to
-        //    be measured against. THIS path commands volts natively, so it KNOWS. While
-        //    the commanded drive is zero there is nothing to measure and the window is
-        //    reset rather than accumulated: a crossing count taken off the floor is a
-        //    number with no referent (2026-07-16, a frozen-near-zero drive walked the
-        //    displayed estimate 45.9 -> 44.4 -> 42.0 while the operator touched nothing).
+        // 1. **Are we driving at all?** This path commands volts natively, so it KNOWS.
+        //    While the commanded drive is zero there is nothing to measure and the window
+        //    is reset rather than accumulated: a crossing count taken off the floor is a
+        //    number with no referent, and an estimate fed by one walks while the operator
+        //    touches nothing.
         //    This is a STRONGER gate than the amplitude one, not a replacement for it,
         //    because it cannot be defeated by a loud noise floor.
         // 2. **Is the signal above the floor?** Applied ON TOP, as soon as the floor

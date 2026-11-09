@@ -64,9 +64,8 @@
 //! is in motion (`ProfileTracer::observe_pipelined` queues a fresh pending tone and re-arms
 //! the transient guard on every frequency change that is not a sweep), so a hand-walked
 //! coarse survey at three clicks a second spent all of its time travelling and anchored few
-//! or no profile points - the floor the bench observed. The reference instrument the operator is
-//! comparing against (a commercial controller's Fn-sweep) retunes on the up-button
-//! INSTANTLY. Travel time now collapses to one frame, leaving only the acquisition pipeline
+//! or no profile points. An operator stepping a tone by hand expects it to move INSTANTLY.
+//! Travel time now collapses to one frame, leaving only the acquisition pipeline
 //! (~65 ms on the NI chassis), the post-arrival transient guard and the measurement window
 //! between a click
 //! and its recorded point - comfortably inside a 300 ms click.
@@ -208,8 +207,8 @@ pub struct StepBuild {
 ///
 /// This is defence in depth, not the primary gate: the arm gate's rate policy refuses an
 /// unusable rate before this constructor is reached (see
-/// `ExplorerHostService::arm`). Found by RUNNING the `Some(fs)` -> `None` red mutation
-/// on 2026-08-08 - with the gate's rate check removed, arm reached this constructor and
+/// `ExplorerHostService::arm`). Found by RUNNING the `Some(fs)` -> `None` red mutation:
+/// with the gate's rate check removed, arm reached this constructor and
 /// panicked inside `hertzforge-dsp` instead of refusing. The gate was restored AND this
 /// refusal added, because a safety layer whose failure mode is a panic three crates down
 /// is one whose failure mode nobody has looked at.
