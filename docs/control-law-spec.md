@@ -4,7 +4,7 @@
 (section 6) and MIMO (section 7), classical shock (section 8), SRS shock (section 9) and
 single-output Sine (section 10) are implemented: the host loads them and the built-in laws run
 through them. While the interface is 0.x it may still change (R15). Comments are wanted on every
-part, and on the questions still open (section 13).
+part, and on the questions still open (section 14).
 
 ## 1. Purpose
 
@@ -481,7 +481,82 @@ outside the settle window and not held by the notch; for the transport delay cas
 2 s after the engage, settle window or not. Every case also asks that every call is answered in time with no miss and no
 refused output, and reports the slowest call and the capped ticks.
 
-## 11. Later test types
+## 11. Time waveform replication (`twr-single`)
+
+A time waveform replication (TWR) law closes the loop between whole records: it proposes the next
+drive record, and the controller checks it, scales it to the commanded level, plays it, measures,
+aligns and judges the response, and calls the law again. The world is
+`wit/control-law/twr-single.wit`; its plant is the classical world's (`classical-types.plant`).
+
+**When it runs.** Never while a record plays. Once at proceed, after the identification and its
+review (`seed`); then after each correction play that did not meet the gate, unless adaptation is
+frozen, and after each playback play when adaptation during playback is on (`iterate`). A play
+that gates is carried to the next level with no call. Each call has a budget of a fraction of the
+record (`law_budget`, default 0.25, times the longer of the record and 4 s: 1.28 s for a 5.12 s
+record); a law file's host deadline is the same number.
+
+**What it sees.** Fixed for the run: the rate and the record length (a power of two), the
+correction band, the full-level reference on the record grid (the prepared section between its
+quiet pads, with the section's first sample and length), the identified plant on the grid's bins
+(`H` in EU per volt, coherence, the controller's regularized inverse
+`conj(H) / (|H|^2 + epsilon)` with its epsilon, and the bins the controller trusts: in the band,
+coherence at or over its floor, reference within its dynamic-range floor), and the drive ceiling.
+Each call: the play index (0 at the seed), whether the last play was a correction or a playback,
+the last response referred to full level by the scale the controller actually commanded, the drive
+as played (after the controller's clip and taper) referred the same way, the controller's verdict
+(gated, RMS error in percent, peak error in percent, spectral error in dB) and whether the
+controller clipped that drive. Spectra are one-sided under the negative-exponent transform; the
+controller forms the plant in that convention. The identification's judgement is the
+controller's for every law: the trust mask, the regularization floor and the coverage floor.
+
+**What it returns.** The next full-level drive in volts, `record-len` finite samples, and up to
+eight values its manifest declares. It does not decide the level, the ladder, the gate, when a
+play starts, the playback schedule, adaptation, the trust mask or any abort.
+
+**What the controller enforces, for every law.**
+
+| Guard | Rule |
+|---|---|
+| Drive ceiling | On the record as it will play (scaled, clipped, tapered): over the ceiling it is refused and the run aborts (`drive_vpk`). At proceed in AUTO, the controller's own full-level drive (the inverse applied to the full-level reference) over the ceiling ends the run before any play (`drive_vpk`, predicted); in MANUAL a level move whose projected peak passes the ceiling is refused |
+| Clip and RMS limits | The per-sample clip, the drive RMS limit and the response RMS limit, as configured |
+| At rest | The outer half of each quiet pad tapers to zero on a raised cosine, so every play starts and ends at 0 V |
+| Output checks | Length, finite, at most eight declared values |
+| Change caps | At full level, the drive's peak and any bin may rise at most `max_peak_rise_db` and `max_bin_rise_db` (default 10 dB each) over the drive last played, never tighter than the built-in's own limit plus 1 dB; bins under -40 dB of the largest count as that small |
+| Predicted response | Through `H`: each drive's predicted response peak at most `1 + envelope_abort_frac` times the level target's; the seed's at most `first_drive_ratio` (default 2) times it, or the run ends `first_drive` before anything plays |
+| Misses | A late, failed, crashed or refused call is a miss; the next play replays the drive in force. `law_misses` (default 3) in a row take the controlled stop (`law_fault`); a seed miss plays nothing |
+| Envelope | Watched as each block of a play arrives, against the level target at the run's lag: outside the abort band (default 50% of the target's peak) for the debounce count of samples (default 8) cuts the play short with the emergency stop (`envelope`, during the play). Judged again over the whole record after it |
+| Alignment | Each play's lag is fitted from its response against the response `H` predicts to its drive, on the trusted bins; a drift of more than `alignment_frames` (default 1) from the identification's ends the run (`alignment`) before anything is corrected from that play |
+| Convergence | `max_iterations` correction plays at a level without a gate end the run `not_converged` (or hold, by policy); the error rising on `divergence_plays` plays in a row at one level trips `divergence`; the coverage floor and the coherence hold stop a run whose identification cannot support it |
+
+**The built-in law, `twr_correct`.** The frequency-domain correction: `D0 = G R` on the trusted
+bins, then `D += beta G (R - Y)` after each correction play, each bin's growth limited per call;
+when the controller clipped the last drive, `D` first becomes the spectrum of the drive as played.
+Parameters `beta` (0.05 to 1, default 0.5), `max_db_per_iter` (1 to 9, default 6) and
+`initial_backoff_db` (0 to 12, default 0). It is classical shock's `fd_correct` over a whole
+record, bin for bin; it runs natively and as the law file `laws/twr-correct`, and the two give the
+same run.
+
+**Records.** At proceed the run folder gets `law.json` (the law's identity and parameters, the
+guards and the caps); every call goes to `law_calls` (an index line per call: play, seed or
+iteration, used or the miss reason, call time, the rises it asked for, its predicted peak, the
+play's fitted lag, its values; the drive it returned as `f32` in the payload), written between
+plays. Every play's row carries the call behind its drive. The report carries the law's name,
+version and short hash and the call counts.
+
+**The check.** Eight simulated test articles at 12 800 Hz, each a whole run under these guards on
+a 2 s field-like reference through the AUTO ladder: a wire (every rung gates on its first play,
+full level within 5%), one mode (400 Hz, Q 10), the simulated station's plant (200 and 550 Hz,
+Q 2.5) and one mode behind a 2 ms delay (each: every rung gates within its eight plays, full level
+within 10%), a wire on a station that keeps its output 512 frames ahead in 256-frame blocks, as a
+hardware chassis does (as the wire, and the run aligned on the lag the identification measured),
+an identification error (the identified gain +3 dB: the first rung gated by play 4, every later
+on its first), measurement noise 30 dB under the first rung's response (full level within 10%)
+and a 30 dB notch at 300 Hz under the coherence floor (survive: complete, or be ended by the
+controller's own judgement; never over the ceiling, never an envelope abort). Every case asks
+every call answered in time, with no miss and no refused output. A record clears a law file for
+hardware only at the check in force (`twr-check 1`).
+
+## 12. Later test types
 
 Each test type gets its own world, built on the same mechanism.
 
@@ -489,11 +564,11 @@ Each test type gets its own world, built on the same mechanism.
 |---|---|---|
 | Classical shock | Between pulses | Built: section 8 |
 | SRS shock | Between pulses | Built: section 9 |
-| Time waveform replication | Between passes | Slack time budget |
+| Time waveform replication | Between plays | Built: section 11 |
 | Sine | Every control tick | Built: section 10 |
 | MIMO variants of the above | As above | After MIMO Random |
 
-## 12. Writing a law
+## 13. Writing a law
 
 Hertzforge publishes a Rust crate for law authors (the interface bindings for both worlds, plus
 helpers such as the default level servo and, for MIMO, the controller's own matrix types and
@@ -502,7 +577,7 @@ per-line linear algebra), a template project, and a worked example for each worl
 against the WIT files can produce a law file (C and C++ can, for example); only Rust is supported
 for now. A law should pass `law check` before it is used on hardware.
 
-## 13. Open questions for reviewers
+## 14. Open questions for reviewers
 
 1. **MIMO inputs.** *Answered:* the inputs of section 7. The large optional ones (the last drive,
    the response-drive cross spectrum, the identification response, drive and noise) are declared in

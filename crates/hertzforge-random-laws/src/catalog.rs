@@ -23,6 +23,7 @@ use hertzforge_law_host::{
 use hertzforge_mimo_laws::BuiltinMimo;
 use hertzforge_shock_law_math::classical as fdc;
 use hertzforge_shock_law_math::srs as srsr;
+use hertzforge_shock_law_math::twr as twrc;
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -61,11 +62,14 @@ pub enum LawWorld {
     ShockSrs,
     /// Single-output Sine (`sine-single`).
     Sine,
+    /// Time waveform replication (`twr-single`). Listed with no entries until
+    /// its built-in law and its law files are served.
+    Twr,
 }
 
 impl LawWorld {
     /// The stable wire name: `single`, `mimo`, `shock_classical`,
-    /// `shock_srs` or `sine`.
+    /// `shock_srs`, `sine` or `twr`.
     pub fn as_str(self) -> &'static str {
         match self {
             LawWorld::Single => "single",
@@ -73,11 +77,13 @@ impl LawWorld {
             LawWorld::ShockClassical => "shock_classical",
             LawWorld::ShockSrs => "shock_srs",
             LawWorld::Sine => "sine",
+            LawWorld::Twr => "twr",
         }
     }
 
     /// The test type, in words, for a refusal: "single-output Random",
-    /// "multiple-output Random", "classical shock", "SRS shock" or "Sine".
+    /// "multiple-output Random", "classical shock", "SRS shock", "Sine" or
+    /// "TWR".
     pub fn test_type(self) -> &'static str {
         match self {
             LawWorld::Single => "single-output Random",
@@ -85,6 +91,7 @@ impl LawWorld {
             LawWorld::ShockClassical => "classical shock",
             LawWorld::ShockSrs => "SRS shock",
             LawWorld::Sine => "Sine",
+            LawWorld::Twr => "TWR",
         }
     }
 }
@@ -118,6 +125,22 @@ pub fn srs_builtin_manifest() -> Manifest {
         srsr::SUMMARY,
         srsr::KNOBS,
         srsr::DIAGNOSTICS,
+    )
+}
+
+/// The catalog id of the built-in TWR law, `twr_correct`.
+pub const TWR_BUILTIN_ID: &str = twrc::ID;
+
+/// The built-in TWR law's manifest, from its declaration in
+/// `hertzforge-shock-law-math`: the same manifest its law file
+/// (`laws/twr-correct`) describes.
+pub fn twr_builtin_manifest() -> Manifest {
+    math_manifest(
+        twrc::NAME,
+        twrc::VERSION,
+        twrc::SUMMARY,
+        twrc::KNOBS,
+        twrc::DIAGNOSTICS,
     )
 }
 
@@ -241,6 +264,10 @@ fn classical_builtin_entry() -> CatalogEntry {
 
 fn srs_builtin_entry() -> CatalogEntry {
     shock_builtin_entry(SRS_BUILTIN_ID, srs_builtin_manifest(), LawWorld::ShockSrs)
+}
+
+fn twr_builtin_entry() -> CatalogEntry {
+    shock_builtin_entry(TWR_BUILTIN_ID, twr_builtin_manifest(), LawWorld::Twr)
 }
 
 fn shock_builtin_entry(id: &str, manifest: Manifest, world: LawWorld) -> CatalogEntry {
@@ -531,6 +558,27 @@ impl LawCatalog {
         }
     }
 
+    /// Every TWR law, the built-in `twr_correct` (the default) first, then the
+    /// imported `twr-single` law files by name, version and hash.
+    pub fn twr_entries(&self) -> Vec<CatalogEntry> {
+        std::iter::once(twr_builtin_entry())
+            .chain(
+                self.imported
+                    .iter()
+                    .filter(|i| matches!(i.law, AnyLaw::Twr(_)))
+                    .map(imported_entry),
+            )
+            .collect()
+    }
+
+    /// The imported TWR law file with `id` (its SHA-256).
+    pub fn twr_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedTwrLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::Twr(l)) => Some(l),
+            _ => None,
+        }
+    }
+
     /// Every law of `world`.
     pub fn entries_for(&self, world: LawWorld) -> Vec<CatalogEntry> {
         match world {
@@ -539,6 +587,7 @@ impl LawCatalog {
             LawWorld::ShockClassical => self.shock_classical_entries(),
             LawWorld::ShockSrs => self.shock_srs_entries(),
             LawWorld::Sine => self.sine_entries(),
+            LawWorld::Twr => self.twr_entries(),
         }
     }
 
@@ -574,6 +623,9 @@ impl LawCatalog {
         }
         if id == SINE_BUILTIN_ID {
             return Some(sine_builtin_entry());
+        }
+        if id == TWR_BUILTIN_ID {
+            return Some(twr_builtin_entry());
         }
         self.imported_law(id).map(imported_entry)
     }
@@ -679,6 +731,7 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
         AnyLaw::ShockClassical(l) => (l.manifest().clone(), LawWorld::ShockClassical, None),
         AnyLaw::ShockSrs(l) => (l.manifest().clone(), LawWorld::ShockSrs, None),
         AnyLaw::Sine(l) => (l.manifest().clone(), LawWorld::Sine, None),
+        AnyLaw::Twr(l) => (l.manifest().clone(), LawWorld::Twr, None),
     };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),

@@ -1,0 +1,443 @@
+{
+ "type": "response",
+ "id": 87,
+ "result": {
+  "law": {
+   "id": "twr_correct",
+   "world": "twr",
+   "builtin": true,
+   "name": "frequency-domain correction",
+   "version": "0.1.0",
+   "author": "Hertzforge contributors",
+   "summary": "Starts from the inverse of the identified plant applied to the reference record, then after each correction play corrects the drive spectrum by a fraction of the inverse times the error, on the bins the controller trusts. Each bin's growth is limited per correction. When the controller clipped a play's drive, the correction starts from the drive as played.",
+   "sha256": null,
+   "check": {
+    "status": "built_in",
+    "date": null,
+    "tool_version": null,
+    "cases": [],
+    "hardware": true,
+    "message": "Built in: cleared for hardware."
+   },
+   "params": [
+    {
+     "key": "beta",
+     "label": "Correction gain",
+     "help": "The fraction of each play's error corrected before the next play. 1 corrects the whole error at once; smaller values settle more gently when the plant estimate is uncertain.",
+     "kind": "number",
+     "unit": "",
+     "min": 0.05,
+     "max": 1,
+     "step": 0.05,
+     "default": 0.5
+    },
+    {
+     "key": "max_db_per_iter",
+     "label": "Largest rise per correction",
+     "help": "The most any one frequency of the drive may grow from one correction to the next. A frequency may always fall.",
+     "kind": "number",
+     "unit": "dB",
+     "min": 1,
+     "max": 9,
+     "step": 0.5,
+     "default": 6
+    },
+    {
+     "key": "initial_backoff_db",
+     "label": "First play backoff",
+     "help": "How far under the predicted drive the first play starts. The correction brings the level up over the next plays.",
+     "kind": "number",
+     "unit": "dB",
+     "min": 0,
+     "max": 12,
+     "step": 1,
+     "default": 0
+    }
+   ],
+   "diagnostics": [
+    {
+     "key": "corrected_bins",
+     "label": "Corrected bins",
+     "unit": "bins",
+     "help": "Bins whose drive the law moved on this call.",
+     "layout": null
+    },
+    {
+     "key": "clamped_bins",
+     "label": "Bins at the rise limit",
+     "unit": "bins",
+     "help": "Bins whose rise the law held to its largest rise per correction on this call.",
+     "layout": null
+    },
+    {
+     "key": "drive_change_db",
+     "label": "Drive change",
+     "unit": "dB",
+     "help": "The drive's peak against the last drive's, in dB (0 at the seed).",
+     "layout": null
+    }
+   ],
+   "shapes": null,
+   "needs": null
+  },
+  "report": {
+   "passed": true,
+   "recorded": false,
+   "tool_version": "twr-check 1",
+   "cases": [
+    {
+     "name": "flat",
+     "plant": "a wire",
+     "requirement": "first_play",
+     "passed": true,
+     "detail": "completed; 6 plays; 1 calls, slowest 2.5 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 6,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 1.5,
+     "lag_frames": 4,
+     "lag_measured": true,
+     "calls": 1,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": null,
+     "worst_bin_rise_db": null,
+     "worst_call_ms": 2.5,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1
+    },
+    {
+     "name": "one mode",
+     "plant": "one mode, 400 Hz, Q 10",
+     "requirement": "every_rung",
+     "passed": true,
+     "detail": "completed; 9 plays; 3 calls, slowest 2.75 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 9,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 3
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 4.5,
+     "lag_frames": 4,
+     "lag_measured": true,
+     "calls": 3,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 12,
+     "worst_peak_rise_db": 3.5,
+     "worst_bin_rise_db": 6,
+     "worst_call_ms": 2.75,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1.25
+    },
+    {
+     "name": "station plant",
+     "plant": "two modes, 200 and 550 Hz, Q 2.5",
+     "requirement": "every_rung",
+     "passed": true,
+     "detail": "completed; 8 plays; 2 calls, slowest 2.5 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 8,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 2
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 5.25,
+     "lag_frames": 4,
+     "lag_measured": true,
+     "calls": 2,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": 1.5,
+     "worst_bin_rise_db": 4,
+     "worst_call_ms": 2.5,
+     "budget_ms": 1000,
+     "max_drive_vpk": 2.5
+    },
+    {
+     "name": "transport delay",
+     "plant": "one mode, 400 Hz, Q 10, behind 2 ms",
+     "requirement": "every_rung",
+     "passed": true,
+     "detail": "completed; 9 plays; 3 calls, slowest 2.75 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 9,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 3
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 6.5,
+     "lag_frames": 30,
+     "lag_measured": true,
+     "calls": 3,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": 3.5,
+     "worst_bin_rise_db": 6,
+     "worst_call_ms": 2.75,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1.25
+    },
+    {
+     "name": "deep queue",
+     "plant": "a wire behind 41 samples, the output 512 frames ahead in 256-frame blocks",
+     "requirement": "first_play",
+     "passed": true,
+     "detail": "completed; 6 plays; 1 calls, slowest 2.5 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 6,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 1.75,
+     "lag_frames": 41,
+     "lag_measured": true,
+     "calls": 1,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": null,
+     "worst_bin_rise_db": null,
+     "worst_call_ms": 2.5,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1
+    },
+    {
+     "name": "identification error",
+     "plant": "a wire",
+     "requirement": "first_rung_by",
+     "passed": true,
+     "detail": "completed; 9 plays; 4 calls, slowest 2.5 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 9,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 4
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 3.25,
+     "lag_frames": 4,
+     "lag_measured": true,
+     "calls": 4,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": 2.5,
+     "worst_bin_rise_db": 2.5,
+     "worst_call_ms": 2.5,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1
+    },
+    {
+     "name": "measurement noise",
+     "plant": "one mode, 400 Hz, Q 10",
+     "requirement": "full_level",
+     "passed": true,
+     "detail": "completed; 10 plays; 4 calls, slowest 2.75 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 10,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 3
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 2
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 7.5,
+     "lag_frames": 4,
+     "lag_measured": true,
+     "calls": 4,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": 3.5,
+     "worst_bin_rise_db": 6,
+     "worst_call_ms": 2.75,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1.25
+    },
+    {
+     "name": "anti-resonance",
+     "plant": "a 30 dB notch at 300 Hz",
+     "requirement": "survive",
+     "passed": true,
+     "detail": "completed; 6 plays; 1 calls, slowest 2.5 ms of 1000 ms",
+     "end": "completed",
+     "trip": null,
+     "plays": 6,
+     "rungs": [
+      {
+       "level_db": -12,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -9,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -6,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": -3,
+       "plays_to_gate": 1
+      },
+      {
+       "level_db": 0,
+       "plays_to_gate": 1
+      }
+     ],
+     "full_level_error_pct": 8.25,
+     "lag_frames": 4,
+     "lag_measured": true,
+     "calls": 1,
+     "misses": 0,
+     "refused": 0,
+     "clamped_bins": 0,
+     "worst_peak_rise_db": null,
+     "worst_bin_rise_db": null,
+     "worst_call_ms": 2.5,
+     "budget_ms": 1000,
+     "max_drive_vpk": 1.5
+    }
+   ]
+  }
+ }
+}

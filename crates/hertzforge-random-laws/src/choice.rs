@@ -168,6 +168,10 @@ impl LawCatalog {
                     id: choice.id.clone(),
                     law_is_for: "Sine",
                 }),
+                Some(AnyLaw::Twr(_)) => Err(ChoiceError::WrongTestType {
+                    id: choice.id.clone(),
+                    law_is_for: "TWR",
+                }),
                 None => Err(ChoiceError::UnknownLaw(choice.id.clone())),
             },
         }

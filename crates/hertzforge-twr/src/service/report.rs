@@ -15,7 +15,7 @@ use crate::service::{TwrService, TwrState, TwrStatus};
 pub struct Honesty {
     pub path: TwrPath,
     pub capabilities: TwrPathCapabilities,
-    /// The acceptance statement - Sim-validated, real delegated drive pending.
+    /// The status label, verbatim: which delivery path, on which station.
     pub note: String,
 }
 
@@ -54,6 +54,26 @@ pub struct TwrReport {
     pub metadata: Vec<MetaField>,
     /// Serialized config echo (setups round-trip).
     pub config_json: String,
+    /// The control law the run ran under and its counts; `None` without one.
+    pub law: Option<LawReportLine>,
+}
+
+/// The report's line for the control law: its identity and how its calls went.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LawReportLine {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    /// The first 12 hex digits of a law file's SHA-256; `None` for a native law.
+    pub short_hash: Option<String>,
+    /// Calls made, the seed included.
+    pub calls: u64,
+    /// Calls not used, over the run.
+    pub misses: u64,
+    /// Of those, outputs the core refused.
+    pub refused: u64,
+    /// The longest call, milliseconds.
+    pub worst_call_ms: f64,
 }
 
 impl TwrReport {
@@ -74,10 +94,8 @@ impl TwrReport {
             honesty: Honesty {
                 path,
                 capabilities: TwrPathCapabilities::for_path(path),
-                // The SAME derived sentence the live banner carries, so the
-                // report and the panel cannot drift apart. It used to be a
-                // second hardcoded copy naming a station the run might not be
-                // on and a gap that was no longer the live one.
+                // The SAME derived sentence the status label carries, so the
+                // report and the panel cannot drift apart.
                 note: status.path_label.clone(),
             },
             reference_label: svc.config().reference.label.clone(),
@@ -93,6 +111,7 @@ impl TwrReport {
             events: svc.events().to_vec(),
             metadata: svc.config().metadata.clone(),
             config_json: serde_json::to_string(svc.config()).unwrap_or_default(),
+            law: svc.law_report_line(),
             status,
         }
     }

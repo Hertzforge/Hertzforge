@@ -16,7 +16,9 @@ import { untrack } from 'svelte';
 import type { ConnectionStatus } from '$lib/protocol/client.svelte';
 import type { RandomRunState, RandomState } from '$lib/protocol/types';
 import type { ShockRunState } from '$lib/protocol/shock';
+import type { TwrRunState } from '$lib/protocol/twr';
 import { isLive, LIVE_STATES } from './actions';
+import { TWR_LIVE_STATES } from './twr/twrVerbs';
 
 export type TestTypeId =
 	| 'random'
@@ -62,7 +64,7 @@ export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'sine', group: 'single', title: 'Sine', summary: 'One frequency at a time, swept across a range or held, at a controlled amplitude.', ready: true },
 	{ id: 'shock', group: 'single', title: 'Classical Shock', summary: 'Short pulses of a standard shape, such as a half-sine, at a set peak and duration.', ready: true },
 	{ id: 'srs', group: 'single', title: 'SRS', summary: 'Shock response spectrum: a short transient built to meet a target response spectrum.', ready: true },
-	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: false },
+	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: true },
 	{ id: 'explorer', group: 'single', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: false },
 	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: true },
 	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: false },
@@ -84,8 +86,8 @@ export type AcquireView = 'chooser' | TestTypeId;
 export type LiveTest = TestTypeId | null | undefined;
 
 /**
- * Which test type holds a live run, from the Random, MIMO Random, classical shock, SRS shock and
- * Sine stores and their connection. Before the first read the answer is not known yet; a service that
+ * Which test type holds a live run, from the Random, MIMO Random, classical shock, SRS shock, Sine
+ * and TWR stores and their connection. Before the first read the answer is not known yet; a service that
  * cannot be reached, or that refused the read, has nothing live to show.
  */
 export function liveTestOf(
@@ -94,16 +96,18 @@ export function liveTestOf(
 	mimo?: { status: { state: RandomRunState } | null; syncError: string | null },
 	shock?: { status: { state: ShockRunState } | null; syncError: string | null },
 	srs?: { status: { state: ShockRunState } | null; syncError: string | null },
-	sine?: { status: { state: RandomRunState } | null; syncError: string | null }
+	sine?: { status: { state: RandomRunState } | null; syncError: string | null },
+	twr?: { status: { state: TwrRunState } | null; syncError: string | null }
 ): LiveTest {
 	if (acq.run !== null && isLive(acq.run)) return 'random';
 	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
 	if (shock?.status && LIVE_STATES.includes(shock.status.state)) return 'shock';
 	if (srs?.status && LIVE_STATES.includes(srs.status.state)) return 'srs';
 	if (sine?.status && LIVE_STATES.includes(sine.status.state)) return 'sine';
+	if (twr?.status && TWR_LIVE_STATES.includes(twr.status.state)) return 'twr';
 	// Every run read has answered (or one could not be read): nothing is live.
 	const answered = (s?: { status: unknown; syncError: string | null }) => !s || s.status !== null || s.syncError !== null;
-	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine)) return null;
+	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

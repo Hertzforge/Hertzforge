@@ -39,6 +39,7 @@ hertzforge-shock-laws = { path = "crates/hertzforge-shock-laws" }
 hertzforge-srs = { path = "crates/hertzforge-srs" }
 hertzforge-station = { path = "crates/hertzforge-station" }
 hertzforge-twr = { path = "crates/hertzforge-twr" }
+hertzforge-twr-laws = { path = "crates/hertzforge-twr-laws" }
 # `preserve_order`: protocol headers keep the key order they were written in, which
 # the golden frames pin byte for byte.
 serde_json = { version = "1", features = ["preserve_order"] }

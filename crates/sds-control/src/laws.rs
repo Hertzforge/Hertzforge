@@ -21,6 +21,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
         LawWorld::ShockClassical => "shock_classical",
         LawWorld::ShockSrs => "shock_srs",
         LawWorld::Sine => "sine",
+        LawWorld::Twr => "twr",
     }
 }
 
@@ -173,7 +174,7 @@ fn entry_json_common(e: &CatalogEntry) -> Value {
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
 /// first, then multiple-output Random, then classical shock, then SRS shock, then
-/// Sine).
+/// Sine, then TWR).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
     for w in [
@@ -182,6 +183,7 @@ pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
         LawWorld::ShockClassical,
         LawWorld::ShockSrs,
         LawWorld::Sine,
+        LawWorld::Twr,
     ] {
         if world.is_none_or(|x| x == w) {
             laws.extend(catalog.entries_for(w).iter().map(entry_json));
@@ -205,10 +207,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         Some("shock_classical") => Ok(Some(LawWorld::ShockClassical)),
         Some("shock_srs") => Ok(Some(LawWorld::ShockSrs)),
         Some("sine") => Ok(Some(LawWorld::Sine)),
+        Some("twr") => Ok(Some(LawWorld::Twr)),
         Some(_) => Err(MethodError::bad_params(
             "world",
-            "\"world\" is \"single\", \"mimo\", \"shock_classical\", \"shock_srs\" or \
-             \"sine\", or absent for every world",
+            "\"world\" is \"single\", \"mimo\", \"shock_classical\", \"shock_srs\", \
+             \"sine\" or \"twr\", or absent for every world",
         )),
     }
 }
@@ -299,6 +302,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockClassical => Ok(()),
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Err("Sine"),
+            LawWorld::Twr => Err("TWR"),
         },
         params: e.manifest.params.clone(),
     }
@@ -345,6 +349,7 @@ pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockClassical => Err("classical shock"),
             LawWorld::ShockSrs => Ok(()),
             LawWorld::Sine => Err("Sine"),
+            LawWorld::Twr => Err("TWR"),
         },
         params: e.manifest.params.clone(),
     }
@@ -392,6 +397,7 @@ pub fn sine_facts(e: &CatalogEntry) -> crate::sine::config::LawFacts {
             LawWorld::ShockClassical => Err("classical shock"),
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Ok(()),
+            LawWorld::Twr => Err("TWR"),
         },
         params: e.manifest.params.clone(),
         live: e.live.clone(),
@@ -412,4 +418,55 @@ pub fn sine_lookup(
         return Some(sine_facts(&e));
     }
     (id == SINE_BUILTIN_ID).then(builtin_sine_facts)
+}
+
+/// A catalog entry as a TWR configuration's checks see it: a law of another world
+/// is refused by the test type it is for.
+pub fn twr_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
+    crate::shock::config::LawFacts {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: match e.world {
+            LawWorld::Single => Err("single-output Random"),
+            LawWorld::Mimo => Err("multiple-output Random"),
+            LawWorld::ShockClassical => Err("classical shock"),
+            LawWorld::ShockSrs => Err("SRS shock"),
+            LawWorld::Sine => Err("Sine"),
+            LawWorld::Twr => Ok(()),
+        },
+        params: e.manifest.params.clone(),
+    }
+}
+
+/// The built-in TWR law's id.
+pub use hertzforge_twr_laws::DEFAULT_TWR_LAW_ID as TWR_BUILTIN_ID;
+
+/// The built-in TWR law as a TWR configuration's checks see it when the catalog
+/// cannot be opened: its identity and parameters from its own manifest (the
+/// catalog lists the same entry first).
+pub fn builtin_twr_facts() -> crate::shock::config::LawFacts {
+    let m = hertzforge_random_laws::twr_builtin_manifest();
+    crate::shock::config::LawFacts {
+        id: TWR_BUILTIN_ID.to_owned(),
+        name: m.name.clone(),
+        version: m.version.clone(),
+        sha256: String::new(),
+        builtin: true,
+        world: Ok(()),
+        params: m.params.clone(),
+    }
+}
+
+/// Look a TWR law up by id: the catalog's entry, or the built-in.
+pub fn twr_lookup(
+    catalog: Option<&LawCatalog>,
+    id: &str,
+) -> Option<crate::shock::config::LawFacts> {
+    if let Some(e) = catalog.and_then(|c| c.entry(id)) {
+        return Some(twr_facts(&e));
+    }
+    (id == TWR_BUILTIN_ID).then(builtin_twr_facts)
 }

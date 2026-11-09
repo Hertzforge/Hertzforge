@@ -775,6 +775,7 @@ impl SrsEngine for ServiceEngine {
             progress: self.ctx.progress.clone(),
             expected: self.expected.clone(),
             speed: if hardware { 0.0 } else { self.ctx.sim_speed },
+            abort: None,
         };
         let wait = watch.clone();
         let backend: Box<dyn hertzforge_hal::Backend> =

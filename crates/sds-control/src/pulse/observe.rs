@@ -11,6 +11,9 @@
 //! - **The simulator's pace**: on the simulator, input is read no faster than
 //!   `speed` times real time from the fire's start, so a simulated run takes the
 //!   time a real one would.
+//! - **The abort's taper**, when the run asks for it ([`Watch::abort`]): a fire
+//!   cancelled by an abort is brought to rest by the backend's emergency stop
+//!   rather than its controlled stop.
 //!
 //! Nothing here changes a sample, a refusal or an order of calls: what the
 //! controller asks of the backend is what the backend does.
@@ -39,6 +42,10 @@ pub struct Watch {
     pub expected: Arc<AtomicU64>,
     /// Simulated seconds per wall second; 0 runs unpaced.
     pub speed: f64,
+    /// The run's abort flag, for a controller whose own stop at the end of a
+    /// cancelled fire would take the controlled stop's taper: while it is raised,
+    /// the backend's stop is its emergency stop. `None` leaves every stop as asked.
+    pub abort: Option<Arc<AtomicBool>>,
 }
 
 impl Watch {
@@ -137,7 +144,16 @@ impl Backend for Observed {
     }
 
     fn stop(&mut self) -> Result<(), HalError> {
-        let r = self.inner.stop();
+        let aborting = self
+            .watch
+            .abort
+            .as_ref()
+            .is_some_and(|a| a.load(Ordering::SeqCst));
+        let r = if aborting {
+            self.inner.emergency_stop()
+        } else {
+            self.inner.stop()
+        };
         self.started = None;
         self.watch.progress.end();
         r
@@ -193,6 +209,7 @@ mod tests {
             progress: Arc::new(Progress::default()),
             expected: Arc::new(AtomicU64::new(0)),
             speed,
+            abort: None,
         }
     }
 
@@ -226,5 +243,115 @@ mod tests {
         assert!(w.own.load(Ordering::SeqCst), "the stop was bridged");
         b.stop().unwrap();
         assert_eq!(w.progress.now(), None);
+    }
+
+    /// The station's backend, counting the stops it is asked for.
+    struct Counting {
+        inner: Box<dyn Backend>,
+        stops: Arc<AtomicU64>,
+        emergencies: Arc<AtomicU64>,
+    }
+
+    impl Backend for Counting {
+        fn caps(&self) -> Caps {
+            self.inner.caps()
+        }
+        fn open(&mut self) -> Result<(), HalError> {
+            self.inner.open()
+        }
+        fn close(&mut self) -> Result<(), HalError> {
+            self.inner.close()
+        }
+        fn configure(
+            &mut self,
+            table: &ChannelTable,
+            acq: &AcquisitionConfig,
+        ) -> Result<ConfiguredActual, HalError> {
+            self.inner.configure(table, acq)
+        }
+        fn arm(&mut self) -> Result<(), HalError> {
+            self.inner.arm()
+        }
+        fn start(&mut self) -> Result<(), HalError> {
+            self.inner.start()
+        }
+        fn stop(&mut self) -> Result<(), HalError> {
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            self.inner.stop()
+        }
+        fn read_input(&mut self, out: &mut [f32]) -> Result<InputRead, HalError> {
+            self.inner.read_input(out)
+        }
+        fn write_drive(&mut self, drive: &[f32]) -> Result<usize, HalError> {
+            self.inner.write_drive(drive)
+        }
+        fn poll_status(&mut self) -> BackendStatus {
+            self.inner.poll_status()
+        }
+        fn emergency_stop(&mut self) -> Result<(), HalError> {
+            self.emergencies.fetch_add(1, Ordering::SeqCst);
+            self.inner.emergency_stop()
+        }
+    }
+
+    #[test]
+    fn a_stop_is_the_emergency_stop_while_the_abort_is_raised_and_only_then() {
+        let sim = hertzforge_station::try_build_station_backend(
+            BackendKind::Sim,
+            &StationSpec::default(),
+        )
+        .unwrap();
+        let stops = Arc::new(AtomicU64::new(0));
+        let emergencies = Arc::new(AtomicU64::new(0));
+        let inner = Box::new(Counting {
+            inner: sim.backend,
+            stops: stops.clone(),
+            emergencies: emergencies.clone(),
+        });
+        let abort = Arc::new(AtomicBool::new(false));
+        let w = Watch {
+            abort: Some(abort.clone()),
+            ..watch(0.0)
+        };
+        let mut b = Observed::new(inner, w);
+        b.open().unwrap();
+        b.stop().unwrap();
+        assert_eq!(
+            (
+                stops.load(Ordering::SeqCst),
+                emergencies.load(Ordering::SeqCst)
+            ),
+            (1, 0)
+        );
+        abort.store(true, Ordering::SeqCst);
+        b.stop().unwrap();
+        assert_eq!(
+            (
+                stops.load(Ordering::SeqCst),
+                emergencies.load(Ordering::SeqCst)
+            ),
+            (1, 1)
+        );
+        // Without an abort flag every stop is the stop asked for.
+        let sim = hertzforge_station::try_build_station_backend(
+            BackendKind::Sim,
+            &StationSpec::default(),
+        )
+        .unwrap();
+        let (s2, e2) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let mut plain = Observed::new(
+            Box::new(Counting {
+                inner: sim.backend,
+                stops: s2.clone(),
+                emergencies: e2.clone(),
+            }),
+            watch(0.0),
+        );
+        plain.open().unwrap();
+        plain.stop().unwrap();
+        assert_eq!(
+            (s2.load(Ordering::SeqCst), e2.load(Ordering::SeqCst)),
+            (1, 0)
+        );
     }
 }

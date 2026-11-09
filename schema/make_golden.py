@@ -2185,6 +2185,491 @@ SINE_TEXT_GOLDENS = {
 }
 
 
+# --- Time waveform replication (PROTOCOL.md, "Time Waveform Replication") ---
+#
+# As the other modules': the configuration golden is the contract's example with
+# every field given, and its `derived` is what the control service computes for it
+# (the Rust golden test recomputes it from the record below). The reference is a
+# 200 Hz triangle starting at rest, every sample exact in binary, kept under the
+# SHA-256 of its record (rate, unit and samples in the service's byte layout).
+# The binary goldens carry short records whose values are exact in binary, laid
+# out as the service's view builders lay them out (each series' x then y, every
+# array numbered in traversal order).
+
+TWR_FS = 12800.0
+TWR_MAGIC = b'hertzforge twr reference 1\n'
+
+
+def _twr_sha256(fs: float, units: str, samples: list) -> str:
+    import hashlib
+    u = units.encode('utf-8')
+    b = (TWR_MAGIC + struct.pack('<d', fs) + struct.pack('<I', len(u)) + u
+         + struct.pack('<Q', len(samples)) + struct.pack(f'<{len(samples)}d', *samples))
+    return hashlib.sha256(b).hexdigest()
+
+
+#: The configuration golden's reference: 2048 samples of a 200 Hz triangle.
+TWR_R1 = [0.25 * (1 - abs(((i + 16) % 64) - 32) / 16) for i in range(2048)]
+TWR_R1_SHA = _twr_sha256(TWR_FS, 'g', TWR_R1)
+#: The import golden's reference: 16 samples, pasted.
+TWR_TINY = [0.0, 0.25, 0.5, 0.25, 0.0, -0.25, -0.5, -0.25] * 2
+TWR_TINY_SHA = _twr_sha256(TWR_FS, 'g', TWR_TINY)
+
+TWR_METADATA = [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
+                {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
+                {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
+                {'key': 'operator', 'label': 'Operator', 'value': ''}]
+
+TWR_CONFIG = {
+    'title': 'Replication R1',
+    'reference': {'sha256': TWR_R1_SHA, 'path': '/Users/me/Eigen_Data/references/r1.csv'},
+    'prep': {'auto_resample': True, 'detrend': 'mean', 'highpass_hz': 5, 'scale': 1,
+             'taper_frac': 0.02},
+    'section': {'start': 0, 'len': 2048},
+    'pads': {'pre': 512, 'post': 1024},
+    'acquisition': {'fs_hz': 12800},
+    'identification': {'excitation': 'random', 'drive_vrms': 0.05, 'duration_s': 4,
+                       'nfft': 2048, 'band_hz': [20, 2000], 'min_mean_coherence': 0.8,
+                       'review': True},
+    'inverse': {'tikhonov_floor': 0.05, 'coherence_floor': 0.9},
+    'correction': {'band_hz': [20, 2000], 'ref_floor_db': 50, 'min_band_energy': 0.9},
+    'control': {'law': {'id': 'twr_correct', 'params': {'beta': 0.5}},
+                'law_budget': 0.25, 'law_misses': 3, 'max_peak_rise_db': 10,
+                'max_bin_rise_db': 10, 'first_drive_ratio': 2, 'alignment_frames': 1},
+    'schedule': {'mode': 'auto', 'levels_db': [-12, -9, -6, -3, 0], 'gate_pct': 10,
+                 'max_iterations': 8, 'on_gate_fail': 'abort'},
+    'run': {'schedule': 'duration', 'duration_s': 60},
+    'adaptation': {'during_playback': False},
+    'limits': {'drive_vpk_ceiling': 0.5, 'drive_clip_vpk': 0.8, 'drive_vrms_limit': None,
+               'response_rms_limit': None, 'envelope_alarm_frac': 0.25,
+               'envelope_abort_frac': 0.5, 'envelope_debounce_samples': 8,
+               'divergence_plays': 3, 'divergence_rise_frac': 0.1},
+    'feasibility': {'peak_accel': None, 'peak_velocity_ips': None, 'disp_pkpk_in': 1.0,
+                    'kinematics_hp_hz': 5},
+    'capture': {'auto_start': False, 'run_name': 'twr_run'},
+    'metadata': TWR_METADATA,
+}
+
+TWR_GRID = {'fs_hz': 12800, 'record_len': 4096, 'df_hz': 3.125, 'record_s': 0.32,
+            'section_start': 512, 'section_len': 2048, 'actual': False}
+TWR_GRID_ACTUAL = dict(TWR_GRID, actual=True)
+
+TWR_PREVIEW_DERIVED = {
+    'grid': TWR_GRID,
+    'section': {'peak': 0.254232, 'rms': 0.14249, 'duration_s': 0.16},
+    'kinematics': {'peak_accel': 0.254232, 'peak_velocity_ips': 0.0902058,
+                   'disp_pkpk_in': 0.000781673, 'kinematics_hp_hz': 5},
+    'coverage': {'band_hz': [20, 2000], 'ref_floor_db': 50, 'fraction': 0.999267,
+                 'error_floor_pct': 2.708},
+    'feasibility': {'verdict': 'pass',
+                    'message': 'The section at full level is within its kinematic ceilings.',
+                    'checks': [{'name': 'disp_pkpk_in', 'value': 0.000781673, 'limit': 1,
+                                'pass': True}]},
+}
+
+TWR_DERIVED = dict(TWR_PREVIEW_DERIVED)
+TWR_DERIVED.update({
+    'reference': {'sha256': TWR_R1_SHA, 'name': 'r1', 'fs_hz': 12800, 'units': 'g',
+                  'resampled': False},
+    'call_budget_s': 1, 'plays_target': 375, 'identification_s': 4,
+})
+
+TWR_LEVELS = [-12, -9, -6, -3, 0]
+TWR_LAW_REF = {'id': 'twr_correct', 'name': 'frequency-domain correction',
+               'version': '0.1.0', 'sha256': None, 'misses': 0}
+TWR_FEASIBILITY = {'verdict': 'pass',
+                   'message': 'The section at full level is within its kinematic ceilings.'}
+
+
+def _twr_counts(done=0, at_level=0, of_level=8, playback=0, of_playback=375):
+    return {'done': done, 'at_level': at_level, 'of_level': of_level, 'playback': playback,
+            'of_playback': of_playback}
+
+
+def _twr_state(**over) -> dict:
+    s = {
+        'run_id': 'twr-0001', 'state': 'configured', 'phase': 'idle',
+        'title': TWR_CONFIG['title'], 'source': 'SIM', 'station': SHOCK_STATION,
+        'grid': TWR_GRID, 'clock': None, 'mode': 'auto', 'levels_db': TWR_LEVELS,
+        'level_db': None, 'rung': None, 'plays': _twr_counts(), 'frozen': False, 't_s': None,
+        'alarm': False, 'identification': None, 'prediction': None, 'last_play': None,
+        'law': TWR_LAW_REF, 'feasibility': None, 'end': None,
+    }
+    s.update(over)
+    return s
+
+
+def _twr_law_call(used, miss, call_ms, peak, bins, ratio, values):
+    return {'used': used, 'miss': miss, 'call_ms': call_ms, 'peak_rise_db': peak,
+            'bin_rise_db': bins, 'predicted_peak_ratio': ratio, 'values': values}
+
+
+def _twr_row(index, kind, level_db, rung, iteration, rms, peak, spectral, gated, clamped,
+             drive, response, start, at_s, law):
+    return {'index': index, 'kind': kind, 'level_db': level_db, 'rung': rung,
+            'iteration': iteration, 'rms_error_pct': rms, 'peak_error_pct': peak,
+            'spectral_error_db': spectral, 'gated': gated, 'clipped_samples': 0,
+            'clamped_bins': clamped, 'drive_vpk': drive, 'response_peak': response,
+            'lag_frames': None, 'drift_frames': None, 'start_frame': start, 'frames': 5120,
+            'at_s': at_s, 'law': law}
+
+
+#: The first three plays of the golden run, at -12 dB: two corrections and a gate.
+TWR_ROWS = [
+    _twr_row(0, 'iteration', -12, 0, 1, 25, 50, 1.25, False, 3, 0.0625, 0.046875, 52224, 4.08,
+             _twr_law_call(True, None, 3.25, 0.5, 1.25, 1,
+                           {'corrected_bins': 812, 'clamped_bins': 3, 'drive_change_db': 0.5})),
+    _twr_row(1, 'iteration', -12, 0, 2, 12.5, 25, 0.625, False, 0, 0.0625, 0.0546875, 57344,
+             4.48,
+             _twr_law_call(True, None, 3.5, 0.25, 0.75, 1,
+                           {'corrected_bins': 812, 'clamped_bins': 0,
+                            'drive_change_db': 0.25})),
+    _twr_row(2, 'iteration', -12, 0, 3, 6.25, 12.5, 0.375, True, 0, 0.0625, 0.059,
+             62464, 4.88,
+             _twr_law_call(False, 'over_budget', 1500, None, None, None, {})),
+]
+
+#: The golden run's last play: a playback play at full level, no call behind it.
+TWR_LAST_PLAY = _twr_row(9, 'playback', 0, 4, None, 1.75, 4.5, 0.125, True, 0, 0.25,
+                         0.2539, 46080, 3.6, None)
+
+TWR_RUNNING = _twr_state(
+    run_id='twr-0003', state='running', phase='playing', grid=TWR_GRID_ACTUAL, clock='shared',
+    level_db=0, rung=4, plays=_twr_counts(10, 1, 8, 2, 375), t_s=4.25,
+    identification={'excitation': 'random', 'drive_vrms': 0.05, 'drive_vpk': 0.2297,
+                    'coherence_mean': 0.9999971, 'min_mean_coherence': 0.8,
+                    'coverage': 0.999267, 'lag_frames': 41, 'lag_source': 'measured',
+                    'passed': True},
+    prediction={'drive_vpk': 0.25, 'drive_vpk_ceiling': 0.5, 'level_db': 0},
+    last_play=TWR_LAST_PLAY, feasibility=TWR_FEASIBILITY)
+
+TWR_HEAD = {
+    'run_id': 'twr-0003', 'source': 'SIM', 'state': 'running', 'phase': 'playing',
+    'mode': 'auto', 't_s': 4.25, 'level_db': 0, 'rung': 4,
+    'plays': _twr_counts(10, 1, 8, 2, 375),
+    'play': {'index': 10, 'kind': 'playback', 'iteration': None, 'frames_done': 2560,
+             'frames': 5120},
+    'last': {'rms_error_pct': 1.75, 'peak_error_pct': 4.5, 'spectral_error_db': 0.125,
+             'gated': True},
+}
+
+#: Four samples of every record the golden plots show, exact in binary.
+TWR_T = [i / TWR_FS for i in range(4)]
+TWR_TARGET = [0.0, 0.25, 0.5, 0.25]
+TWR_RESPONSE = [0.0, 0.25, 0.53125, 0.25]
+TWR_DRIVE = [0.0, 0.125, 0.25, 0.125]
+TWR_ERROR = [0.0, 0.0, 0.03125, 0.0]
+TWR_SCOPE_T = [4.0 + i / TWR_FS for i in range(4)]
+TWR_SCOPE = [0.0, 0.125, 0.25, 0.125]
+TWR_F = [100.0, 200.0, 300.0]
+
+_TWR_ACC = _axis('Acceleration', 'g', 'linear')
+
+
+def _twr_scope_view(a: _Arr) -> dict:
+    return _spectrum('Scope', _TIME, _TWR_ACC,
+                     [a.series('Control', 'measured', TWR_SCOPE_T, TWR_SCOPE)], 'time')
+
+
+def _twr_band(frac, sign):
+    return [t + sign * frac * 0.5 for t in TWR_TARGET]
+
+
+TWR_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Level', 'value': 0, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Plays', 'value': 10, 'unit': None, 'status': 'info'},
+    {'label': 'Playback', 'value': '2 of 375', 'unit': None, 'status': 'info'},
+    {'label': 'Last error', 'value': 1.75, 'unit': '%', 'status': 'pass'},
+    {'label': 'Gate', 'value': 10, 'unit': '%', 'status': 'info'},
+    {'label': 'Last drive peak', 'value': 0.25, 'unit': 'V', 'status': 'info'},
+    {'label': 'Last response peak', 'value': 0.2539, 'unit': 'g', 'status': 'info'},
+    {'label': 'Drive in force', 'value': 0.25, 'unit': 'V', 'status': 'info'},
+    {'label': 'Station time', 'value': 4.25, 'unit': 's', 'status': 'info'},
+]}
+
+TWR_LAW_SPECS = [('corrected_bins', 'Corrected bins', 'bins'),
+                 ('clamped_bins', 'Bins at the rise limit', 'bins'),
+                 ('drive_change_db', 'Drive change', 'dB')]
+
+TWR_PLAYS_TABLE = {
+    'view': 'table', 'title': 'Plays',
+    'columns': ['Play', 'Kind', 'Level (dB)', 'Iteration', 'Error (%)', 'Peak error (%)',
+                'Spectral error (dB)', 'Gated', 'Drive peak (V)', 'Clipped samples',
+                'Clamped bins', 'Lag (frames)'],
+    'rows': [['1', 'iteration', '-12', '1', '25', '50', '1.25', 'no', '0.0625', '0', '3', ''],
+             ['2', 'iteration', '-12', '2', '12.5', '25', '0.63', 'no', '0.0625', '0', '0', ''],
+             ['3', 'iteration', '-12', '3', '6.25', '12.5', '0.38', 'yes', '0.0625', '0', '0',
+              '']],
+}
+
+TWR_SUBSCRIBE_PLOTS = [
+    {'id': 'tgt', 'quantity': 'target'},
+    {'id': 'rep', 'quantity': 'response', 'points': 1024},
+    {'id': 'err', 'quantity': 'error'},
+    {'id': 'drv', 'quantity': 'drive'},
+    {'id': 'env', 'quantity': 'envelope'},
+    {'id': 'frf', 'quantity': 'frf'},
+    {'id': 'coh', 'quantity': 'coherence'},
+    {'id': 'trust', 'quantity': 'mask'},
+    {'id': 'spec', 'quantity': 'spectra'},
+    {'id': 'conv', 'quantity': 'convergence'},
+    {'id': 'law', 'quantity': 'law'},
+    {'id': 'scope', 'quantity': 'scope'},
+    {'id': 'run', 'quantity': 'readings'},
+    {'id': 'plays', 'quantity': 'plays'},
+]
+TWR_POINTS_QUANTITIES = {'target', 'response', 'error', 'drive', 'envelope', 'scope'}
+TWR_QUANTITIES = ['target', 'response', 'error', 'drive', 'envelope', 'frf', 'coherence',
+                  'mask', 'spectra', 'convergence', 'law', 'scope', 'readings', 'plays']
+
+
+def _twr_subscribed() -> list:
+    return [dict(p, points=p.get('points', 1024)) if p['quantity'] in TWR_POINTS_QUANTITIES
+            else p for p in TWR_SUBSCRIBE_PLOTS]
+
+
+def _twr_live_build() -> tuple[dict, dict]:
+    a = _Arr()
+    data = dict(TWR_HEAD)
+    data['views'] = [_twr_scope_view(a)]
+    return {'type': 'event', 'topic': 'twr.live', 'seq': 181, 'data': data}, a.arrays
+
+
+def _twr_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    freq = _axis('Frequency', 'Hz', 'log')
+    ends = [TWR_F[0], TWR_F[-1]]
+    views = {
+        'tgt': [_spectrum('Target', _TIME, _TWR_ACC,
+                          [a.series('Target', 'reference', TWR_T, TWR_TARGET)], 'time')],
+        'rep': [_spectrum('Response', _TIME, _TWR_ACC,
+                          [a.series('Response', 'measured', TWR_T, TWR_RESPONSE),
+                           a.series('Target', 'reference', TWR_T, TWR_TARGET)], 'time')],
+        'err': [_spectrum('Error', _TIME, _axis('Error', 'g', 'linear'),
+                          [a.series('Error', 'measured', TWR_T, TWR_ERROR)], 'time')],
+        'drv': [_spectrum('Drive', _TIME, _axis('Drive', 'V', 'linear'),
+                          [a.series('Drive', 'drive', TWR_T, TWR_DRIVE)], 'time')],
+        'env': [_spectrum('Envelope', _TIME, _TWR_ACC,
+                          [a.series('Response', 'measured', TWR_T, TWR_RESPONSE),
+                           a.series('Alarm high', 'tolerance', TWR_T, _twr_band(0.25, 1)),
+                           a.series('Alarm low', 'tolerance', TWR_T, _twr_band(0.25, -1)),
+                           a.series('Abort high', 'abort', TWR_T, _twr_band(0.5, 1)),
+                           a.series('Abort low', 'abort', TWR_T, _twr_band(0.5, -1))],
+                          'time')],
+        'frf': [_spectrum('Identification Gain', freq, _axis('Gain', 'g/V', 'log'),
+                          [a.series('Gain', 'measured', TWR_F, [1.0, 0.5, 0.25])], 'frequency'),
+                _spectrum('Identification Phase', freq, _axis('Phase', 'deg', 'linear'),
+                          [a.series('Phase', 'measured', TWR_F, [-10.0, -20.0, -30.0])],
+                          'frequency')],
+        'coh': [_spectrum('Coherence', freq, _axis('Coherence', None, 'linear'),
+                          [a.series('Coherence', 'measured', TWR_F, [0.99, 0.5, 0.98]),
+                           a.series('Trust floor', 'tolerance', ends, [0.9, 0.9]),
+                           a.series('Hold', 'abort', ends, [0.8, 0.8])], 'frequency')],
+        'trust': [_spectrum('Trust', freq, _axis('Trusted', None, 'linear'),
+                            [a.series('Trusted', 'measured', TWR_F, [1.0, 0.0, 1.0]),
+                             a.series('Reference', 'reference', TWR_F, [0.5, 1.0, 0.75])],
+                            'frequency')],
+        'spec': [_spectrum('Spectra', freq, _axis('Magnitude', 'g', 'log'),
+                           [a.series('Target', 'reference', TWR_F, [0.5, 1.0, 0.75]),
+                            a.series('Response', 'measured', TWR_F, [0.5, 1.0, 0.8125]),
+                            a.series('Drive', 'drive', TWR_F, [0.25, 0.5, 0.375])],
+                           'frequency')],
+        'conv': [{'view': 'spectrum', 'title': 'Convergence',
+                  'x': _axis('Play', None, 'linear'), 'y': _axis('Error', '%', 'log'),
+                  'series': [a.series('Error', 'measured', [0.0, 1.0, 2.0],
+                                      [25.0, 12.5, 6.25]),
+                             a.series('Gate', 'tolerance', [0.0, 2.0], [10.0, 10.0])]}],
+        'law': [{'view': 'spectrum', 'title': 'Law', 'x': _axis('Play', None, 'linear'),
+                 'y': _axis('Value', None, 'linear'),
+                 'series': [a.series('Corrected bins', 'measured', [0.0, 1.0], [812.0, 812.0]),
+                            a.series('Bins at the rise limit', 'measured', [0.0, 1.0],
+                                     [3.0, 0.0]),
+                            a.series('Drive change', 'measured', [0.0, 1.0], [0.5, 0.25])]},
+                {'view': 'reading', 'title': 'Law Values', 'rows': [
+                    {'label': 'Corrected bins', 'value': 812, 'unit': 'bins', 'status': 'info'},
+                    {'label': 'Bins at the rise limit', 'value': 0, 'unit': 'bins',
+                     'status': 'info'},
+                    {'label': 'Drive change', 'value': 0.25, 'unit': 'dB', 'status': 'info'},
+                    {'label': 'Unusable calls in a row', 'value': 0, 'unit': None,
+                     'status': 'pass'}]}],
+        'scope': [_twr_scope_view(a)],
+        'run': [TWR_RUN_READING],
+        'plays': [TWR_PLAYS_TABLE],
+    }
+    plots = [{'id': p['id'], 'quantity': p['quantity'], 'views': views[p['id']]}
+             for p in TWR_SUBSCRIBE_PLOTS]
+    data = dict(TWR_HEAD)
+    data['plots'] = plots
+    return {'type': 'event', 'topic': 'twr.data', 'seq': 182, 'data': data}, a.arrays
+
+
+def _twr_import_build() -> tuple[dict, dict]:
+    a = _Arr()
+    t = [i / TWR_FS for i in range(len(TWR_TINY))]
+    view = _spectrum('Reference', _TIME, _axis('Reference', 'g', 'linear'),
+                     [a.series('Reference', 'reference', t, TWR_TINY)], 'time')
+    result = {'reference': {'sha256': TWR_TINY_SHA, 'path': None, 'name': 'pasted',
+                            'format': 'text', 'fs_hz': 12800, 'samples': 16,
+                            'duration_s': 0.00125, 'units': 'g', 'peak': 0.5,
+                            'rms': 0.306186},
+              'warnings': [], 'views': [view]}
+    return {'type': 'response', 'id': 82, 'result': result}, a.arrays
+
+
+#: The preview golden's figures: four samples of each record, exact in binary.
+TWR_PV_F = [0.0, 3200.0, 6400.0]
+TWR_PV_SPECTRUM = [0.0, 1.0, 0.5]
+TWR_PV_VELOCITY = [0.0, 0.5, 1.5, 2.0]
+TWR_PV_DISPLACEMENT = [0.0, 0.0625, 0.25, 0.5]
+
+
+def _twr_preview_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [
+        _spectrum('Section', _TIME, _axis('Reference', 'g', 'linear'),
+                  [a.series('Reference', 'reference', TWR_T, TWR_TARGET)], 'time'),
+        _spectrum('Spectrum', _axis('Frequency', 'Hz', 'linear'), _axis('Magnitude', 'g', 'log'),
+                  [a.series('Reference', 'reference', TWR_PV_F, TWR_PV_SPECTRUM),
+                   a.series('Reference floor', 'tolerance', [20.0, 2000.0],
+                            [0.003125, 0.003125])], 'frequency'),
+        _spectrum('Velocity', _TIME, _axis('Velocity', 'in/s', 'linear'),
+                  [a.series('Velocity', 'reference', TWR_T, TWR_PV_VELOCITY)], 'time'),
+        _spectrum('Displacement', _TIME, _axis('Displacement', 'in', 'linear'),
+                  [a.series('Displacement', 'reference', TWR_T, TWR_PV_DISPLACEMENT)], 'time'),
+    ]
+    result = {'derived': TWR_PREVIEW_DERIVED, 'views': views}
+    return {'type': 'response', 'id': 83, 'result': result}, a.arrays
+
+
+#: The built-in TWR law's catalog entry, from its own declaration.
+LAW_TWR_CORRECT = {
+    'id': 'twr_correct', 'world': 'twr', 'builtin': True,
+    'name': 'frequency-domain correction', 'version': '0.1.0',
+    'author': 'Hertzforge contributors',
+    'summary': 'Starts from the inverse of the identified plant applied to the reference record, '
+               'then after each correction play corrects the drive spectrum by a fraction of the '
+               'inverse times the error, on the bins the controller trusts. Each bin\'s growth is '
+               'limited per correction. When the controller clipped a play\'s drive, the '
+               'correction starts from the drive as played.',
+    'sha256': None,
+    'check': {'status': 'built_in', 'date': None, 'tool_version': None, 'cases': [],
+              'hardware': True, 'message': 'Built in: cleared for hardware.'},
+    'params': [
+        {'key': 'beta', 'label': 'Correction gain',
+         'help': "The fraction of each play's error corrected before the next play. 1 corrects "
+                 'the whole error at once; smaller values settle more gently when the plant '
+                 'estimate is uncertain.',
+         'kind': 'number', 'unit': '', 'min': 0.05, 'max': 1, 'step': 0.05, 'default': 0.5},
+        {'key': 'max_db_per_iter', 'label': 'Largest rise per correction',
+         'help': 'The most any one frequency of the drive may grow from one correction to the '
+                 'next. A frequency may always fall.',
+         'kind': 'number', 'unit': 'dB', 'min': 1, 'max': 9, 'step': 0.5, 'default': 6},
+        {'key': 'initial_backoff_db', 'label': 'First play backoff',
+         'help': 'How far under the predicted drive the first play starts. The correction brings '
+                 'the level up over the next plays.',
+         'kind': 'number', 'unit': 'dB', 'min': 0, 'max': 12, 'step': 1, 'default': 0}],
+    'diagnostics': [
+        {'key': 'corrected_bins', 'label': 'Corrected bins', 'unit': 'bins',
+         'help': 'Bins whose drive the law moved on this call.', 'layout': None},
+        {'key': 'clamped_bins', 'label': 'Bins at the rise limit', 'unit': 'bins',
+         'help': 'Bins whose rise the law held to its largest rise per correction on this call.',
+         'layout': None},
+        {'key': 'drive_change_db', 'label': 'Drive change', 'unit': 'dB',
+         'help': "The drive's peak against the last drive's, in dB (0 at the seed).",
+         'layout': None}],
+    'shapes': None, 'needs': None,
+}
+
+
+def _twr_case(name, plant, requirement, *, plays, rungs, full, lag=41, calls, ms, vpk,
+              clamped=0, peak=None, bins=None, end='completed', trip=None, passed=True):
+    detail = f'{end}; {plays} plays; {calls} calls, slowest {ms} ms of 1000 ms'
+    return {'name': name, 'plant': plant, 'requirement': requirement, 'passed': passed,
+            'detail': detail, 'end': end, 'trip': trip, 'plays': plays,
+            'rungs': [{'level_db': l, 'plays_to_gate': p} for l, p in rungs],
+            'full_level_error_pct': full, 'lag_frames': lag, 'lag_measured': True,
+            'calls': calls, 'misses': 0, 'refused': 0, 'clamped_bins': clamped,
+            'worst_peak_rise_db': peak, 'worst_bin_rise_db': bins, 'worst_call_ms': ms,
+            'budget_ms': 1000, 'max_drive_vpk': vpk}
+
+
+_TWR_FIRST = [(-12, 1), (-9, 1), (-6, 1), (-3, 1), (0, 1)]
+TWR_CHECK_REPORT = {'passed': True, 'recorded': False, 'tool_version': 'twr-check 1', 'cases': [
+    _twr_case('flat', 'a wire', 'first_play', plays=6, rungs=_TWR_FIRST, full=1.5, lag=4,
+              calls=1, ms=2.5, vpk=1),
+    _twr_case('one mode', 'one mode, 400 Hz, Q 10', 'every_rung', plays=9,
+              rungs=[(-12, 3), (-9, 1), (-6, 1), (-3, 1), (0, 1)], full=4.5, lag=4, calls=3,
+              ms=2.75, vpk=1.25, clamped=12, peak=3.5, bins=6),
+    _twr_case('station plant', 'two modes, 200 and 550 Hz, Q 2.5', 'every_rung', plays=8,
+              rungs=[(-12, 2), (-9, 1), (-6, 1), (-3, 1), (0, 1)], full=5.25, lag=4, calls=2,
+              ms=2.5, vpk=2.5, peak=1.5, bins=4),
+    _twr_case('transport delay', 'one mode, 400 Hz, Q 10, behind 2 ms', 'every_rung', plays=9,
+              rungs=[(-12, 3), (-9, 1), (-6, 1), (-3, 1), (0, 1)], full=6.5, lag=30, calls=3,
+              ms=2.75, vpk=1.25, peak=3.5, bins=6),
+    _twr_case('deep queue',
+              'a wire behind 41 samples, the output 512 frames ahead in 256-frame blocks',
+              'first_play', plays=6, rungs=_TWR_FIRST, full=1.75, calls=1, ms=2.5, vpk=1),
+    _twr_case('identification error', 'a wire', 'first_rung_by', plays=9,
+              rungs=[(-12, 4), (-9, 1), (-6, 1), (-3, 1), (0, 1)], full=3.25, lag=4, calls=4,
+              ms=2.5, vpk=1, peak=2.5, bins=2.5),
+    _twr_case('measurement noise', 'one mode, 400 Hz, Q 10', 'full_level', plays=10,
+              rungs=[(-12, 3), (-9, 2), (-6, 1), (-3, 1), (0, 1)], full=7.5, lag=4, calls=4,
+              ms=2.75, vpk=1.25, peak=3.5, bins=6),
+    _twr_case('anti-resonance', 'a 30 dB notch at 300 Hz', 'survive', plays=6,
+              rungs=_TWR_FIRST, full=8.25, lag=4, calls=1, ms=2.5, vpk=1.5),
+]}
+
+TWR_TEXT_GOLDENS = {
+    'request_twr_configure': {
+        'type': 'request', 'id': 81, 'method': 'twr.configure',
+        'params': {'config': TWR_CONFIG},
+    },
+    'response_twr_configure': {
+        'type': 'response', 'id': 81,
+        'result': {'state': _twr_state(), 'derived': TWR_DERIVED, 'warnings': []},
+    },
+    'event_twr_state': {
+        'type': 'event', 'topic': 'twr.state', 'seq': 180, 'data': TWR_RUNNING,
+    },
+    'request_twr_subscribe': {
+        'type': 'request', 'id': 84, 'method': 'twr.subscribe',
+        'params': {'rate_hz': 2, 'plots': TWR_SUBSCRIBE_PLOTS},
+    },
+    'response_twr_subscribe': {
+        'type': 'response', 'id': 84,
+        'result': {'default': False, 'rate_hz': 2, 'plots': _twr_subscribed(),
+                   'quantities': TWR_QUANTITIES},
+    },
+    'response_twr_plays': {
+        'type': 'response', 'id': 85, 'result': {'plays': TWR_ROWS, 'next': 3},
+    },
+    'response_laws_list_twr': {
+        'type': 'response', 'id': 86,
+        'result': {'laws': [LAW_TWR_CORRECT], 'problems': []},
+    },
+    'response_laws_check_twr': {
+        'type': 'response', 'id': 87,
+        'result': {'law': LAW_TWR_CORRECT, 'report': TWR_CHECK_REPORT},
+    },
+    'response_error_twr_config_invalid': {
+        'type': 'response', 'id': 89,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 3 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'band_outside_identification', 'field': 'correction.band_hz',
+                       'message': "The correction band (10 to 3000 Hz) leaves the "
+                                  "identification's (20 to 2000 Hz); the inverse is not known "
+                                  "outside the band identified."},
+                      {'reason': 'out_of_range', 'field': 'limits.drive_vpk_ceiling',
+                       'message': 'The drive ceiling is 12; it is above 0 and at most 10 V.'},
+                      {'reason': 'alarm_wider_than_abort', 'field': 'limits.envelope_alarm_frac',
+                       'message': 'The alarm band (0.6) is wider than the abort band (0.5); the '
+                                  'alarm comes first.'}],
+                      'warnings': []}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -2319,8 +2804,15 @@ def main() -> None:
     write('event_sine_data', *_sine_data_build())
     write('response_sine_profile_validate', *_sine_validate_build())
 
+    # TWR: the live frame, a subscription's data, an import and a preview
+    write('event_twr_live', *_twr_live_build())
+    write('event_twr_data', *_twr_data_build())
+    write('response_twr_reference_import', *_twr_import_build())
+    write('response_twr_reference_preview', *_twr_preview_build())
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
-                          **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS}.items():
+                          **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS,
+                          **TWR_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

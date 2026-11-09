@@ -854,8 +854,8 @@ plain words: it never names a protocol method.
 | `run_finished` | `refused` | `random.arm` or `random.start` on a finished run; reset or configure first | `outcome` |
 | `wrong_state` | `refused` | The verb does not apply in the run's present state | `state`, `phase` |
 | `manual_mode_required` | `refused` | `random.level` or `sine.level` while the ladder is automatic | `mode` |
-| `not_a_rung` | `bad_request` | `random.level` or `sine.level` `to_db` is not a level of the schedule | `levels_db` |
-| `feasibility_exceeded` | `refused` | The profile exceeds the shaker's ratings; the run is blocked until armed with an acknowledgement | `feasibility` |
+| `not_a_rung` | `bad_request` | `random.level` or `sine.level` `to_db` is not a level of the schedule, or `twr.level` names a rung the table does not have or steps past its ends | `levels_db` |
+| `feasibility_exceeded` | `refused` | The profile exceeds the shaker's ratings, or a TWR section its feasibility ceilings; the run is blocked until armed with an acknowledgement | `feasibility` |
 | `override_not_needed` | `refused` | `override_ack` sent while the run is not blocked | |
 | `arm_refused` | `refused` | The station refused to arm: the rate it programmed, the analysis grid at that rate, its sample clock, or the driver. The message is the controller's own | |
 | `ni_driver_unavailable` | `refused` | The NI-DAQmx runtime is not installed on this computer | |
@@ -868,7 +868,7 @@ plain words: it never names a protocol method.
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
-| `config_invalid` | `bad_request` | The Random, classical shock, SRS shock or Sine configuration has errors | `errors`, `warnings` |
+| `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine or TWR configuration has errors | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
 | `gate_failed` | `refused` | `mimo_random.proceed` after identification failed a gate; `mimo_random.override` with reason `gate_failed` goes on anyway | `gates` |
@@ -878,17 +878,20 @@ plain words: it never names a protocol method.
 | `catalog_unavailable` | `refused` | The control-law catalog in the data folder cannot be read | |
 | `law_unknown` | `not_found` | `laws.check` names an id the catalog does not hold | `id` |
 | `law_params_invalid` | `bad_request` | `laws.check` parameter values the law does not accept | `id` |
-| `law_check_unsupported` | `refused` | `laws.check` names a single-output Random law, or a Sine law while the Sine check is not served, or a case of a shock law's check cannot be run at all (the message names it) | |
+| `law_check_unsupported` | `refused` | `laws.check` names a single-output Random law, or a law the check cannot build, or a case of a check cannot be run at all (the message names it) | |
 | `not_yet` | `refused` | `shock.fire`, `shock.train`, `shock.burst` or `srs.fire` before the time between pulses has passed, or while a pulse is in flight | `seconds` |
-| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire` or `srs.level` while the ladder is automatic | `mode` |
-| `drive_ceiling` | `refused` | `shock.level` or `srs.level` to a level where the identified drive would pass the drive abort | `vpk`, `abort_vpk`, `level_db` |
+| `wrong_mode` | `refused` | `shock.fire`, `shock.level`, `shock.train`, `shock.burst`, `srs.fire`, `srs.level`, `twr.iterate` or `twr.play` while the ladder is automatic, or `twr.level` then anywhere but `holding` | `mode` |
+| `drive_ceiling` | `refused` | `shock.level` or `srs.level` to a level where the identified drive would pass the drive abort; `twr.level` to a level where the drive in force would pass the drive ceiling | `vpk`, `abort_vpk` (for TWR `ceiling_vpk`, and `vpk` null when the service cannot state it), `level_db` |
+| `reference_unreadable` | `refused` | `twr.reference.import`: the file cannot be read, or its content is not a record (the message names the line or field) | `path` (null for pasted text), `line` (null when no line is at fault) |
+| `not_converged` | `refused` | `twr.play` before the present level has gated | `level_db`, `gate_pct` |
+| `coherence_hold` | `refused` | `twr.proceed`, `twr.iterate` or `twr.play` while the coherence hold holds the run; `twr.reset` alone releases it | `coherence_mean` (null when not measured), `min_mean_coherence` |
 | `not_a_sweep` | `refused` | `sine.reverse`, `sine.jog` or `sine.goto` when the test is not a sweep | `test` |
 | `out_of_band` | `refused` | `sine.goto` to a frequency outside the test's band | `band_hz` |
 | `adjust_refused` | `refused` | `sine.adjust` of a parameter that is not one of the law's live parameters, or out of its range, or that the law refused | `key`, `why` (`unknown_key`, `not_live`, `out_of_range` or `law_refused`) |
 | `law_check_running` | `refused` | `laws.check` while another check runs | |
 | `law_check_not_recorded` | `refused` | The check ran but its record could not be written | |
-| `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm`, `srs.arm` or `sine.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared); run `laws.check` first | |
-| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, and `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust` are refused | |
+| `law_not_checked` | `refused` | `mimo_random.start`, `shock.arm`, `srs.arm`, `sine.arm` or `twr.arm` on a hardware station with a law file that has no passed check for its exact file (the simulator runs any law; built-in laws are cleared), or for `twr.arm` a passed check of an earlier check version; run `laws.check` first | `twr.arm` with an earlier check: `tool_version`, `current` |
+| `shutting_down` | `refused` | The control service is shutting down (see "Shutting Down"): `random.arm`, `random.start`, `random.proceed`, `random.level`, `random.mode`, `sim.start`, `shock.arm`, `start`, `proceed`, `fire`, `level`, `train` and `burst`, `srs.arm`, `start`, `proceed`, `fire` and `level`, `sine.arm`, `start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog`, `goto` and `adjust`, and `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level` are refused | |
 
 `errors` and `warnings` are lists of items, `{"reason","message"}` plus whichever of `channel`
 (a table row's `index`), `row` (a breakpoint row, from 0) and `field` (a configuration field
@@ -908,6 +911,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
 | SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
 | Sine | `out_of_range`, `profile_too_short`, `frequency_not_positive`, `frequency_not_ascending`, `value_not_positive`, `quantity_ambiguous`, `profile_not_covering`, `band_above_grid`, `levels_empty`, `levels_not_ascending`, `start_not_a_level`, `end_before_full_level`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `limit_on_control_channel`, `cola_needs_two_outputs`, `safe_stop_budget`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `profile_file` from the import | `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag`; `units_column_ignored` from the import |
+| TWR | `out_of_range`, `reference_unknown`, `reference_changed`, `units_mismatch`, `rate_mismatch`, `section_outside_reference`, `record_too_long`, `band_above_grid`, `band_outside_identification`, `highpass_above_band`, `identification_too_short`, `levels_empty`, `levels_not_ascending`, `alarm_wider_than_abort`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `reference_resampled` |
 
 A refusal not listed here is a defect in the service.
 
@@ -1488,8 +1492,9 @@ specified with the run-file format, not here.
 
 Multiple-input multiple-output Random: up to 24 drives and 72 control channels, controlled to a
 reference spectral density matrix. The service runs one test at a time, so a MIMO run and a
-single-output Random run (or a `sim.start` run) exclude each other exactly as two Random runs
-would: each is refused `run_active` while the other is live. The controller and observer rules
+single-output Random run (or a `sim.start` run, or a classical shock, SRS shock, Sine or TWR run)
+exclude each other exactly as two Random runs would: each is refused `run_active` while the other
+is live. The controller and observer rules
 are Random's: **any connected screen may stop or abort** (`mimo_random.stop`,
 `mimo_random.abort`); `mimo_random.setup` (other than a dry run), `start`, `proceed`,
 `override`, `exclude` and `iterate_prediction` need control; everything that only reads is open to every
@@ -1849,7 +1854,8 @@ identifies the system with band-limited random at a stated drive in volts, inver
 plant, and seeds the control law from it; after each pulse is fired, measured and judged, the law
 proposes the next full-level drive and the service checks it before it plays. The drive is in
 volts throughout. The run is one test like any other: a classical shock run, a Random run, a MIMO
-run and a `sim.start` run exclude each other, each refused `run_active` while another is live.
+run, an SRS shock run, a Sine run, a TWR run and a `sim.start` run exclude each other, each
+refused `run_active` while another is live.
 **Any connected screen may stop or abort** (`shock.stop`, `shock.abort`); `shock.configure`
 (other than a dry run), `arm`, `start`, `proceed`, `fire`, `level`, `train`, `burst`, `reset`
 and `clear` need control; everything that only reads is open to every connection. While the
@@ -2193,8 +2199,8 @@ system with a burst of that synthesis at a stated peak in volts, and seeds the c
 the identified gain at each component; after each pulse is fired, measured and judged, the law
 proposes a gain for each component, and the service caps the gains and checks the drive before it
 plays. The drive is in volts throughout. The run is one test like any other: an SRS shock run, a
-classical shock run, a Random run, a MIMO run and a `sim.start` run exclude each other, each
-refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a Sine run, a TWR run and a `sim.start` run
+exclude each other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`srs.stop`, `srs.abort`); `srs.configure` (other than a dry run), `arm`, `start`, `proceed`,
 `fire`, `level`, `reset` and `clear` need control; everything that only reads or only computes is
 open to every connection. While the service is shutting down, `srs.arm`, `start`, `proceed`,
@@ -2492,8 +2498,8 @@ channels' notch and the drive ceiling, and judges the response against the profi
 and abort bands at the present frequency. The frequency, the sweep and its direction, the
 tone's phase and the level schedule are the service's, never the law's. The drive is in volts
 peak on hardware. The run is one test like any other: a Sine run, an SRS shock run, a
-classical shock run, a Random run, a MIMO run and a `sim.start` run exclude each other, each
-refused `run_active` while another is live. **Any connected screen may stop or abort**
+classical shock run, a Random run, a MIMO run, a TWR run and a `sim.start` run exclude each
+other, each refused `run_active` while another is live. **Any connected screen may stop or abort**
 (`sine.stop`, `sine.abort`); `sine.configure` (other than a dry run), `arm`, `start`,
 `proceed`, `level`, `mode`, `hold`, `resume`, `reverse`, `jog`, `goto`, `adjust`, `reset` and
 `clear` need control; everything that only reads or only computes is open to every
@@ -2935,15 +2941,508 @@ last 60 s, at most 1200 points.
 A plot is empty (`views` empty) until there is something to draw: `identification` until the
 gate has run, the others until the loop has engaged.
 
+## Time Waveform Replication
+
+A time waveform replication (TWR) test reproduces a recorded time history at the control channel,
+one whole record at a time, and closes the loop between records. The service prepares the
+reference (resample, detrend, high-pass, scale, taper), places the section to replicate between
+quiet pads on a record of a power-of-two length, checks its kinematics against the feasibility
+ceilings, identifies the system with band-limited random at a stated drive in volts, inverts the
+identified plant, and seeds the control law from it. Each play plays the whole record, measures
+the response, aligns it, judges it and gates it at its level; after a play the service wants
+corrected, the law proposes the next full-level drive and the service checks it before it plays.
+The level ladder, the gate, the playback schedule and every abort are the service's, never the
+law's. The drive is in volts throughout. The run is one test like any other: a TWR run, a Sine
+run, an SRS shock run, a classical shock run, a Random run, a MIMO run and a `sim.start` run
+exclude each other, each refused `run_active` while another is live. **Any connected screen may
+stop or abort** (`twr.stop`, `twr.abort`); `twr.configure` (other than a dry run), `arm`,
+`start`, `proceed`, `iterate`, `play`, `level`, `freeze`, `reset` and `clear` need control;
+everything that only reads or only computes is open to every connection. While the service is
+shutting down, `twr.arm`, `start`, `proceed`, `iterate`, `play` and `level` are refused
+`shutting_down`; `twr.freeze`, `stop` and `abort` are not.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `twr.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
+| `twr.config` | `{}` | any | `{"run_id","config","derived","views"}` |
+| `twr.reference.import` | `{"path"}` or `{"text"}`, and `{"fs_hz","column","units","name"}` (optional) | any | `{"reference","warnings","views"}` |
+| `twr.reference.preview` | `{"reference","prep","section","pads","acquisition","correction","feasibility"}` (all but `reference` optional) | any | `{"derived","views"}` |
+| `twr.arm` | `{"override_ack"}` (optional) | `configured`, `blocked` | state |
+| `twr.start` | `{}` | `configured`, `armed` | state |
+| `twr.proceed` | `{}` | `review` | state |
+| `twr.iterate` | `{}` | `running`, in `manual`, between plays | state |
+| `twr.play` | `{}` | `running`, in `manual`, between plays, the level gated | state |
+| `twr.level` | `{"delta_db"}` (1 or -1) or `{"rung"}` (from 0) | `running` or `review` in `manual`, between plays; in `auto` only at `holding` | `{"level_db"}` |
+| `twr.freeze` | `{"frozen"}` | `running` or `review` | `{"frozen"}`, at once |
+| `twr.stop` | `{}` | any | state |
+| `twr.abort` | `{}` | any | state |
+| `twr.reset` | `{}` | `held`, or any but live | state (`configured`) |
+| `twr.clear` | `{}` | any but live | state |
+| `twr.state` | `{}` | any | state |
+| `twr.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `twr.subscribe` | see "TWR Display" | any | as there |
+| `twr.plays` | `{"since"}` (optional, default 0) | any | `{"plays":[row...],"next"}` |
+| `twr.record` | `{"index","points"}` (`points` optional) | any | `{"play":row,"views"}` |
+
+"state" in the Result column is the `twr.state` object below. A run is live while it is armed,
+running, holding for review, held by the coherence hold or stopping. `twr.configure` replaces a
+run that is not live; `twr.reset` configures the present run's configuration again on the present
+table and station (from the coherence hold it first ends the held run, `operator_stop`), and is
+the only release from the coherence hold; `twr.clear` forgets the run (`unconfigured`). A result
+that carries views travels as a binary frame: `twr.configure` with `dry_run`, `twr.config`,
+`twr.reference.import`, `twr.reference.preview` and `twr.record`.
+
+### TWR References
+
+A reference reaches the service by the path of its file on the computer that runs the test, or
+as pasted text; it is never uploaded. **`twr.reference.import`** reads it, keeps the raw record
+in the data folder (`twr/references/`) under its SHA-256, and answers with its facts. The format
+follows the file's extension (`.csv`, `.tsv`, `.wav`, `.json`), else its content; pasted text is
+`text` (or `json` when it is a JSON object). A delimited record (CSV, TSV, pasted text) is read a
+row at a time, numbers separated by commas, tabs, semicolons or spaces; lines starting `#` and
+header rows before the data are skipped. Without `fs_hz` its first column is time, evenly spaced
+within 1% of its median step, and the rate follows from it; with `fs_hz` every column is data.
+`column` (default 0) picks the data column of a delimited record, or the channel of a WAV file
+(PCM16 or float32, its own rate); JSON is the reference record format and carries its own rate
+and unit. `units` (default `g`) names the record's unit, which must be the control row's; `name`
+(default: the file's name without its extension, or `pasted`) labels it. A record holds at least
+2 and at most 8388608 samples, every one finite.
+
+The SHA-256 is of the record as read, not of the file: its rate, its unit and its samples, in the
+service's own byte layout. One file read at two columns is two records; the same samples pasted
+and read from a file are one. A configuration that names the file it came from (`reference.path`)
+is checked by reading that file again as it was imported and comparing the two hashes.
+
+```
+{"reference":{"sha256":"9f2c0e...","path":"/Users/me/Eigen_Data/references/r1.csv","name":"r1",
+              "format":"csv","fs_hz":12800,"samples":51200,"duration_s":4,"units":"g",
+              "peak":0.2,"rms":0.058},
+ "warnings":[],
+ "views":[reference]}
+```
+
+`views` is **Reference** (`spectrum`, x `Time` s linear, y in the record's unit: `Reference`
+(`reference`), min/max-decimated to 2048 points). Refusals: `bad_params` (neither `path` nor
+`text`, or both; a relative path; `fs_hz` not above 0; `column` not a whole number),
+`reference_unreadable` (the file cannot be read, or its content is not a record: `message` names
+the line or field).
+
+**`twr.reference.preview`** prepares a stored reference as a configuration would (`reference` is
+`{"sha256"}`; the others as in "TWR Configuration", their defaults when left out, the correction
+band the default identification's when not given) and answers with what the run would
+replicate, so a screen never repeats the preparation. Its refusals: `bad_params` naming the
+parameter for a wrong shape (`reference.sha256` that is not 64 lowercase hexadecimal digits, a
+`prep`, `section`, `pads`, `acquisition`, `correction` or `feasibility` of the wrong type), and
+`config_invalid` with the items a configuration would get for the parts given:
+`reference_unknown` at `reference.sha256` (no stored reference has it), `rate_mismatch`,
+`section_outside_reference`, `record_too_long`, `highpass_above_band`, `band_above_grid` and
+`out_of_range`, each at its field:
+
+```
+{"derived":{"grid":{"fs_hz":12800,"record_len":65536,"df_hz":0.1953125,"record_s":5.12,
+                    "section_start":512,"section_len":51200,"actual":false},
+            "section":{"peak":0.2,"rms":0.058,"duration_s":4},
+            "kinematics":{"peak_accel":0.2,"peak_velocity_ips":0.041,"disp_pkpk_in":0.000059,
+                          "kinematics_hp_hz":5},
+            "coverage":{"band_hz":[20,2000],"ref_floor_db":50,"fraction":0.9996,
+                        "error_floor_pct":2.0},
+            "feasibility":{"verdict":"pass","message":"...",
+                           "checks":[{"name":"disp_pkpk_in","value":0.000059,"limit":1.0,"pass":true}]}},
+ "views":[section, spectrum, velocity, displacement]}
+```
+
+- `grid`: the record every play is played and measured as: the section between its pads,
+  padded to a power of two, at the requested rate (`actual` false).
+- `section`: the prepared section at full level. `kinematics`: its peak acceleration, peak
+  velocity and peak-to-peak displacement, integrated after a high-pass at `kinematics_hp_hz`.
+- `coverage`: the fraction of the section's spectral energy inside the correction band and above
+  the reference floor, before identification (identification can only lower it, by its
+  coherence), and the error floor it sets, `100 sqrt(1 - fraction)` percent.
+- `feasibility`: the kinematics against the ceilings set (`pass`, `exceeded`, or
+  `not_evaluated` when none is), each check named by its ceiling's field (`peak_accel`,
+  `peak_velocity_ips`, `disp_pkpk_in`).
+- `views`: **Section** (the prepared record on the grid, time), **Spectrum** (`abs(R)` on the
+  record grid from 0 to half the rate, with the reference floor across the correction band),
+  **Velocity** and **Displacement** (time), each min/max-decimated to 1024 points.
+
+### TWR Configuration
+
+```
+{"title":"Field Transient R1",
+ "reference":{"sha256":"9f2c0e...","path":"/Users/me/Eigen_Data/references/r1.csv"},
+ "prep":{"auto_resample":true,"detrend":"mean","highpass_hz":5,"scale":1,"taper_frac":0.02},
+ "section":{"start":0,"len":51200},
+ "pads":{"pre":512,"post":1024},
+ "acquisition":{"fs_hz":12800},
+ "identification":{"excitation":"random","drive_vrms":0.05,"duration_s":4,"nfft":2048,
+                   "band_hz":[20,2000],"min_mean_coherence":0.8,"review":true},
+ "inverse":{"tikhonov_floor":0.05,"coherence_floor":0.9},
+ "correction":{"band_hz":[20,2000],"ref_floor_db":50,"min_band_energy":0.9},
+ "control":{"law":{"id":"twr_correct","params":{"beta":0.5}},
+            "law_budget":0.25,"law_misses":3,"max_peak_rise_db":10,"max_bin_rise_db":10,
+            "first_drive_ratio":2,"alignment_frames":1},
+ "schedule":{"mode":"auto","levels_db":[-12,-9,-6,-3,0],"gate_pct":10,"max_iterations":8,
+             "on_gate_fail":"abort"},
+ "run":{"schedule":"duration","duration_s":60},
+ "adaptation":{"during_playback":false},
+ "limits":{"drive_vpk_ceiling":0.5,"drive_clip_vpk":0.8,"drive_vrms_limit":null,
+           "response_rms_limit":null,"envelope_alarm_frac":0.25,"envelope_abort_frac":0.5,
+           "envelope_debounce_samples":8,"divergence_plays":3,"divergence_rise_frac":0.1},
+ "feasibility":{"peak_accel":null,"peak_velocity_ips":null,"disp_pkpk_in":1.0,
+                "kinematics_hp_hz":5},
+ "capture":{"auto_start":false,"run_name":"twr_run"},
+ "metadata":[{"key":"run_number","label":"Run Number","value":"7"}]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `reference.sha256` | (required) | The stored reference (`twr.reference.import`), by its SHA-256 |
+| `reference.path` | null | The file it was imported from. When given, it must be a file this record was imported from and still read to it, as it was imported (`reference_changed`); the run plays the stored record either way |
+| `prep.auto_resample` | true | Resample the reference to the station's rate when they differ (upward only; a reference above the rate is refused, `rate_mismatch`). Off, a rate difference is refused (`rate_mismatch`) |
+| `prep.detrend` | `mean` | `none`, `mean` or `linear` |
+| `prep.highpass_hz` | 5 | A drift high-pass, Hz, above 0 and at most the correction band's low edge; null for none |
+| `prep.scale` | 1 | Multiplies the reference (a unit correction); finite, not 0 |
+| `prep.taper_frac` | 0.02 | A cosine taper at each end, a fraction of the reference (above 0, at most 0.5); null for none |
+| `section` | the whole reference | The samples of the prepared reference to replicate: `start` and `len` |
+| `pads.pre`, `pads.post` | 512, 1024 | Quiet samples before and after the section on the record (drive pre-ring and ring-down room). The record is the section and the pads padded to a power of two, at most 1048576 samples (`record_too_long`) |
+| `acquisition.fs_hz` | the reference's rate | The rate requested of the station. The record and its section are prepared at it, and a station that runs at another rate is refused at arm (`arm_refused`); the run reports the rate it ran at |
+| `identification.excitation` | `random` | `random` (band-limited, flat) or `log_chirp` |
+| `identification.drive_vrms` | 0.05 | Its drive, volts rms; its peak is held under the drive ceiling and the clip |
+| `identification.duration_s`, `nfft` | 4, 2048 | Its length, seconds, and the block it is estimated in (a power of two, at least 64, at most half the samples) |
+| `identification.band_hz` | [20, 2000] | The band it excites, below half the rate |
+| `identification.min_mean_coherence` | 0.8 | A mean in-band coherence under it holds the run (`held`, the coherence hold) |
+| `identification.review` | true | Hold for the operator after a passing identification (`review`) |
+| `inverse.tikhonov_floor` | 0.05 | The inverse's floor, a fraction of the in-band peak gain (above 0, below 1) |
+| `inverse.coherence_floor` | 0.9 | Bins identified under this coherence are not trusted (0 to 1) |
+| `correction.band_hz` | as `identification.band_hz` | The correction band, inside the identification band |
+| `correction.ref_floor_db` | 50 | Bins of the reference more than this far under its in-band peak are not trusted |
+| `correction.min_band_energy` | 0.9 | The fraction of the reference's energy the trusted bins must cover, or the run ends before any play (`aborted`, `coverage`); above 0, below 1 |
+| `control.law` | `{"id":"twr_correct"}` | The control law, by its catalog `id` (see "Control Laws", world `twr`), and values for the parameters its manifest declares (`params` by key; defaults fill the rest) |
+| `control.law_budget` | 0.25 | One law call's time, a fraction of the longer of the record and 4 s (`derived.call_budget_s`); above 0, at most 1 |
+| `control.law_misses` | 3 | Unusable calls in a row that end the run `law_fault`; 1 to 100 |
+| `control.max_peak_rise_db`, `max_bin_rise_db` | 10, 10 | The most the drive's peak, and any bin of it, may rise from one call to the next at full level, dB (above 0, at most 40; bins more than 40 dB under the largest are held to that floor first). With `twr_correct`, each is at least its `max_db_per_iter` plus 1 |
+| `control.first_drive_ratio` | 2 | The seed's predicted response peak is at most this times the level target's (1 to 10) |
+| `control.alignment_frames` | 1 | The most a play's fitted lag may drift from the identification's, frames, before the run ends (`aborted`, `alignment`); above 0, at most 16 |
+| `schedule.mode` | `auto` | `auto` walks the levels, gating each; `manual` waits for `twr.iterate`, `twr.play` and `twr.level` |
+| `schedule.levels_db` | [-12, -9, -6, -3, 0] | The level table, dB, non-decreasing, from -60 to 12; the last is full level |
+| `schedule.gate_pct` | 10 | A play gates its level at an rms error at most this, percent (above 0, at most 100) |
+| `schedule.max_iterations` | 8 | Correction plays at one level without a gate before `on_gate_fail` applies; 1 to 100 |
+| `schedule.on_gate_fail` | `abort` | `abort` ends the run `not_converged`; `hold` holds at the level (`holding`) for a level verb or an abort |
+| `run.schedule` | `once` | The playback once full level has gated: `once`, `loop` (`count` plays, 1 to 100000) or `duration` (`duration_s` seconds of section time, above 0, at most 86400: the section played `duration_s` over its length times, rounded up) |
+| `adaptation.during_playback` | false | Keep correcting after each playback play (the law is called then too) |
+| `limits.drive_vpk_ceiling` | (required) | The drive ceiling, volts peak (above 0, at most 10). A drive whose peak is over it is refused and the run aborts (`drive_vpk`); it is never clipped to fit |
+| `limits.drive_clip_vpk` | null | A per-sample clip, volts; the law sees the drive as clipped (`limited`) |
+| `limits.drive_vrms_limit` | null | A drive whose rms is over it is refused and the run aborts (`drive_rms`) |
+| `limits.response_rms_limit` | null | A response whose rms is over it aborts the run (`response_rms`), in the control unit |
+| `limits.envelope_alarm_frac`, `envelope_abort_frac` | 0.25, 0.5 | The response's band around the level target, a fraction of the target's peak: outside the alarm band raises the alarm, outside the abort band for `envelope_debounce_samples` samples in a row aborts (`envelope`), during a play or after it. Alarm at most abort |
+| `limits.envelope_debounce_samples` | 8 | 1 to 10000 |
+| `limits.divergence_plays`, `divergence_rise_frac` | 3, 0.1 | Correction plays in a row at one level, above the gate, each with its error up more than this fraction of the last, that end the run (`aborted`, `divergence`) |
+| `feasibility.peak_accel`, `peak_velocity_ips`, `disp_pkpk_in` | null | Ceilings on the prepared section's kinematics at full level (control unit, in/s, in pk-pk). Over any, arming is blocked until acknowledged (`feasibility_exceeded`); null for none |
+| `feasibility.kinematics_hp_hz` | 5 | The high-pass the kinematics are integrated after, Hz |
+| `capture`, `metadata` | as shown | Random's |
+
+The control channel is the table's first enabled `control` row; the drive is its first enabled
+`drive` row. A configuration whose shape is wrong is refused `bad_params` naming the field. Its
+content errors are refused `config_invalid` with the items, located by `field`; `dry_run: true`
+checks without replacing anything and needs no control.
+
+**Result.** `state` is the `twr.state` object (`configured`). `derived` is the preview's
+(`grid`, `section`, `kinematics`, `coverage`, `feasibility`), and:
+
+```
+{"reference":{"sha256":"9f2c0e...","name":"r1","fs_hz":12800,"units":"g","resampled":false},
+ "call_budget_s":1.28,"plays_target":15,"identification_s":4}
+```
+
+`reference` is the stored record the run plays and whether it is resampled to the grid's rate;
+`call_budget_s` one law call's time; `plays_target` the playback plays the run schedule asks for;
+`identification_s` the identification's length. `views` are the preview's.
+
+Item reasons (TWR): errors `out_of_range`, `reference_unknown` (no stored reference has that
+SHA-256), `reference_changed` (the file at `reference.path` no longer has it), `units_mismatch`
+(the reference's unit is not the control row's), `rate_mismatch`, `section_outside_reference`,
+`record_too_long`, `band_above_grid`, `band_outside_identification` (the correction band leaves
+the identification band), `highpass_above_band`, `identification_too_short` (fewer than two
+blocks), `levels_empty`, `levels_not_ascending`, `alarm_wider_than_abort`, `no_control_channel`,
+`no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`;
+warnings `reference_resampled`.
+
+### Running a TWR Test
+
+- **`twr.arm`** builds the station, prepares the record at the rate the run asks
+  (`acquisition.fs_hz`) and checks feasibility. A section over a feasibility ceiling is refused
+  `feasibility_exceeded` and the state becomes `blocked`; `twr.arm` with a non-empty
+  `override_ack` arms past it (`override_not_needed` when nothing blocks). An imported law without
+  a passed check for its exact file is refused `law_not_checked` on a hardware station, as is one
+  whose passed check is of an earlier check version than the one in force (its `detail` names
+  both: `{"tool_version","current"}`). Then the station is opened at the rate asked, the rate it
+  programs is adopted and its arm gate passed. Nothing is driven. A station that programs another
+  rate than the record's is refused `arm_refused` (the message names both rates), as is one the
+  driver cannot open; the run's state is unchanged. The station's other refusals are Random's. The
+  armed `grid` (`actual` true) is the station's rate and the record at it.
+- **`twr.start`** from `configured` arms first. It runs identification (`phase` `sysid`): the
+  excitation at `drive_vrms`, measuring the plant and its coherence on the identification grid,
+  and the response's lag behind the drive by cross-correlation. A mean in-band coherence under
+  `min_mean_coherence`, or a correlation with no peak, holds the run (`held`, phase
+  `coherence_hold`): nothing drives, `twr.proceed` is refused `coherence_hold`, and `twr.reset`
+  alone releases it. Trusted bins covering less than `min_band_energy` of the reference end the
+  run (`aborted`, `coverage`). Otherwise it holds for review (`review`) or, without one, goes on
+  as `twr.proceed` does. It answers at once.
+- **`twr.proceed`** builds the law and seeds it (a law that cannot be built, or a seed that is
+  not usable, ends the run `law_fault` before any play; a seed whose predicted response peak is
+  over `first_drive_ratio` times the level target's is refused, `first_drive`). In `auto`, if the
+  service's own prediction of the full-level drive (the inverse applied to the full-level
+  reference) is over the drive ceiling, the run ends `aborted` (`drive_vpk`, `predicted: true`)
+  before any play; then it plays the ladder. In `manual` it waits for `twr.iterate`.
+- **Each play** scales the drive in force to the level, clips it (when `drive_clip_vpk` is set),
+  tapers the outer half of each pad to zero so the play starts and ends at rest, and refuses a
+  drive over the ceiling. It plays the whole record; each block is checked as it arrives against
+  the abort band, and the debounce count outside it cancels the play with the station's own stop
+  (`aborted`, `envelope`, `in_play: true`; the play has no row). After the play the response is
+  aligned at the run's lag, and the play's own lag is fitted by cross-correlating the response
+  with the response the identified plant predicts to the drive as played, on the trusted bins,
+  within 16 frames either way: a
+  drift over `alignment_frames` ends the run (`aborted`, `alignment`) before any correction from
+  that play. Then the play is judged (the metrics, the envelope, the response rms) and gated at
+  its level.
+- **The law is called** after a correction play that did not gate, unless adaptation is frozen,
+  and after a playback play when `adaptation.during_playback` is on. Its drive is checked: the
+  record's length, every sample finite, the values declared and at most 8, the peak and bin rises
+  against `max_peak_rise_db` and `max_bin_rise_db`, and the drive's predicted response peak at
+  most `1 + envelope_abort_frac` times the level target's. A late, failed, panicked or refused
+  call is a miss: the next play replays the drive in force; a usable call resets the count;
+  `law_misses` in a row end the run (`law_fault`) and the law is not called again.
+- **In `auto`** a play that gates moves to the next level, the drive carried forward scaled by
+  the step; once full level gates, playback runs `run.schedule`. A level that spends
+  `max_iterations` correction plays without a gate ends the run `not_converged`, or with `hold`
+  holds it (`phase` `holding`) for `twr.level` or an abort.
+- **`twr.iterate`** plays one correction play at the present level; **`twr.play`** begins
+  playback from it, refused `not_converged` until the present level has gated, and the playback
+  schedule then plays out as in `auto`. Both are refused `wrong_mode` in `auto`, `wrong_state`
+  while a play is in flight or once playback has begun, and `coherence_hold` at the coherence
+  hold.
+- **`twr.level`** steps ±1 dB (`delta_db`) or goes to a level of the table (`rung`, from 0),
+  between plays and before playback, the drive carried forward by the exact ratio; from
+  `holding` it releases the hold and the run goes on from the new level. From `review` it steps
+  from the table's first level. In `auto` it is taken only at `holding` (a level that failed its
+  gate under `hold`); anywhere else in `auto` it is refused `wrong_mode`. Refused `wrong_state`
+  while a play is in flight,
+  `not_a_rung` (a rung the table does not have, or a step past its first or last level), and
+  `drive_ceiling` when the drive's peak at the new level would pass the ceiling (with `vpk`,
+  null when the service cannot state it, `ceiling_vpk` and `level_db`); the level and the drive
+  are then unchanged.
+- **`twr.freeze`** with `frozen` true stops the law's corrections (the drive in force replays);
+  false resumes them. It answers at once with `frozen` as asked, takes effect before the next play
+  (a play in flight is corrected after as it would have been) and is logged; `state.frozen`
+  follows.
+- **`twr.stop`** cancels the play in flight at the next block: what the station already holds
+  plays out (at most its lookahead and a block), then the drive falls along a 250 ms raised
+  cosine, and the run ends `operator_stop` with `end.frames_done`. Between plays, or from `armed`,
+  `review` or `held`, it ends at once. **`twr.abort`** does the same with a 25 ms taper and ends
+  `operator_abort`. Both answer at once, and nothing plays after either.
+- **When nobody holds control** no new play starts; the play in flight finishes; a claim within
+  `timeout_s` resumes the run, and otherwise a play still in flight is cancelled with the stop's
+  taper and the run ends `safe_stop`. The same holds at `review` and at the coherence hold.
+
+**Time is the station's.** `t_s`, each play's `at_s` and `end.at_s` count the frames the station
+clocked over every play and pad since the run armed, at the rate it adopted, never the service's
+clock. The safe stop's countdown (`orphan_s`) is the only number timed by the service's clock.
+
+### TWR Run State
+
+```
+{"run_id":"twr-0002","state":"running","phase":"playing","title":"Field Transient R1",
+ "source":"SIM","station":{"kind":"sim","class":"sim","devices":[]},
+ "grid":{"fs_hz":12800,"record_len":65536,"df_hz":0.1953125,"record_s":5.12,
+         "section_start":512,"section_len":51200,"actual":true},"clock":"shared",
+ "mode":"auto","levels_db":[-12,-9,-6,-3,0],"level_db":0,"rung":4,
+ "plays":{"done":8,"at_level":1,"of_level":8,"playback":2,"of_playback":15},
+ "frozen":false,"t_s":61.4,"alarm":false,
+ "identification":{"excitation":"random","drive_vrms":0.05,"drive_vpk":0.23,
+                   "coherence_mean":0.9999,"min_mean_coherence":0.8,"coverage":0.9996,
+                   "lag_frames":41,"lag_source":"measured","passed":true},
+ "prediction":{"drive_vpk":0.2,"drive_vpk_ceiling":0.5,"level_db":0},
+ "last_play":{row},
+ "law":{"id":"twr_correct","name":"frequency-domain correction","version":"0.1.0",
+        "sha256":null,"misses":0},
+ "feasibility":{"verdict":"pass","message":"..."},"end":null}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
+| `blocked` | `feasibility_blocked` | Feasibility exceeded; arming needs an acknowledgement |
+| `armed` | `armed` | Station open and gated; nothing driven yet |
+| `running` | `sysid`, `iterating`, `playing`, `waiting`, `holding` | Identification; a correction play; a playback play; between plays (in `manual` waiting for a verb, or paused while nobody holds control); a level that failed its gate under `hold` |
+| `review` | `awaiting_review` | Identification passed; nothing plays until `twr.proceed` |
+| `held` | `coherence_hold` | Identification did not reach its coherence; nothing drives until `twr.reset` |
+| `stopping` | `stopping` | A stop or an abort is bringing the play in flight to rest |
+| `finished` | `stopped`, `aborted` | Ended; `end` says how |
+
+- `level_db` is the commanded level, null until `twr.proceed` (or a level move from `review`);
+  `rung` its place in `levels_db` (null when a manual step has left the table's levels).
+- `plays`: `done` the plays judged over the run (identification not counted); `at_level` the
+  correction plays judged at this level (not the one in flight) and `of_level` the most it may
+  take (`max_iterations`); `playback` the playback plays done and `of_playback` the schedule's
+  (`derived.plays_target`).
+- `frozen` is true while `twr.freeze` holds the law's corrections off. `t_s` is station time.
+  `alarm` is true once a play's response has left the alarm band (latched for the run).
+- `identification` and `prediction` are null until identification is done. `identification` is
+  the drive it played (rms and peak), its mean in-band coherence against the hold, the trusted
+  bins' coverage of the reference, and the lag it aligns every play at, with `lag_source`
+  `measured` or `derived`. At the coherence hold `coverage` is null and `coherence_mean` is
+  the mean the identification measured, null when the hold is the lag's (no correlation peak, so
+  no coherence was measured); `lag_frames` is null when no lag was found.
+  `prediction` is the peak of the drive in force at the present level against the ceiling: it
+  follows what the law changed, never the seed alone, and is null while the service cannot state
+  it.
+- `last_play` is the last play's row (below); `law` the run's law and its unusable calls in a row
+  now; `feasibility` is null until arm.
+- `end` is null until the run finishes, then `{"outcome","message","at_s","level_db","play",
+  "frames_done","trip"}`: `at_s` station time, `play` the play it ended at (the last judged, or
+  the one a stop or an abort cancelled; null before any), `frames_done` the frames of that play
+  the station had taken when a stop or an abort cancelled it (null otherwise).
+
+| `outcome` | How the run ended |
+|---|---|
+| `completed` | The playback schedule finished |
+| `operator_stop` | `twr.stop` |
+| `operator_abort` | `twr.abort` |
+| `safe_stop` | Nobody held control for `timeout_s`, or the service was shut down; `message` says which |
+| `aborted` | A protection tripped; `trip` says which |
+| `not_converged` | A level spent `max_iterations` correction plays without a gate, under `on_gate_fail` `abort` |
+| `law_fault` | The law gave no usable drive `law_misses` times in a row, or could not be built or seeded; the drive in force replayed through the misses, then the run ended. `trip` says why |
+| `fault` | The run or the station failed, or the delivery path returned no response to judge; `message` is the controller's words |
+
+`trip` is null unless `outcome` is `aborted`, `not_converged` or `law_fault`; it has `kind`,
+`play` (the row the trip judged, or for a play the in-play envelope check cut short the index it
+would have had; null at identification and when a drive was refused before it played),
+`at_level_db` and its kind's facts. `predicted: true` marks a trip found on a prediction
+before a play, so nothing was driven for it. A law whose first drive is refused ends
+`law_fault` with the reason `first_drive`.
+
+| `kind` | Facts |
+|---|---|
+| `envelope` | `in_play` (found during the play, from a block), `worst_frac`, `abort_frac`, `samples`, `at_sample` (the record sample it tripped at) |
+| `drive_vpk` | `vpk`, `ceiling_vpk`, `predicted` |
+| `drive_rms` | `vrms`, `limit_vrms` |
+| `response_rms` | `rms`, `limit` |
+| `alignment` | `lag_frames` (the play's fitted lag), `identification_lag_frames`, `drift_frames`, `limit_frames` |
+| `coverage` | `coverage`, `min_band_energy`, `error_floor_pct` |
+| `divergence` | `plays`, `error_pct` |
+| `not_converged` | `iterations`, `error_pct`, `gate_pct` |
+| `law_fault` | `reason`, `consecutive` |
+
+A `law_fault` trip's `reason` is `error` (the law reported one, or could not be built),
+`panicked` (it panicked or, for a law file, trapped), `over_budget`, `over_memory` (a law file),
+`wrong_length`, `non_finite`, `undeclared_value`, `too_many_values`, `peak_rise`, `bin_rise` (the
+per-call caps), `predicted_peak` (the drive's predicted response peak over its bound), or
+`first_drive` (the seed's predicted response peak over its bound; nothing played).
+
+### TWR Plays
+
+Every play after the identification has a row. `twr.plays` returns the rows from `since` (the row
+`index`, from 0) and `next`, the index after the last. `twr.record` returns one row and its
+records as views: **Replication** (the level target and the response), **Error** (the response
+less the target) and **Drive** (the drive as played), each over the record from its first
+sample, min/max-decimated to `points` points (default 1024, 64 to 8192; `0` sends every sample).
+The records of the most recent 8 plays are held; an older play's are refused `not_found`, its
+row is still in `twr.plays`.
+
+```
+{"index":7,"kind":"iteration","level_db":0,"rung":4,"iteration":1,
+ "rms_error_pct":1.6,"peak_error_pct":4.2,"spectral_error_db":0.11,"gated":true,
+ "clipped_samples":0,"clamped_bins":0,"drive_vpk":0.2,"response_peak":0.2,
+ "lag_frames":41.02,"drift_frames":0.02,"start_frame":409600,"frames":66560,"at_s":32,
+ "law":{"used":true,"miss":null,"call_ms":3.2,"peak_rise_db":0.4,"bin_rise_db":1.1,
+        "predicted_peak_ratio":1.01,"values":{"corrected_bins":812,"clamped_bins":0,
+                                              "drive_change_db":0.2}}}
+```
+
+- `kind` is `iteration` (a correction play on the ladder) or `playback`; `level_db` and `rung`
+  where it played; `iteration` its count at that level (from 1; null for a playback play).
+- `rms_error_pct`, `peak_error_pct`, `spectral_error_db` (over the trusted bins) and `gated` are
+  the service's judgement; `clipped_samples` the samples the clip held, `clamped_bins` the bins
+  the law's own growth limit or the service's cap held back. The rms and peak errors compare the
+  response with the level target over the whole record, each about its mean: a constant on the
+  measured input (a DC-coupled channel's offset) is not counted, since no correction acts at 0 Hz.
+- `drive_vpk` and `response_peak` are the peaks as played and measured; `lag_frames` the play's
+  fitted lag and `drift_frames` its drift from the identification's (the alignment check), each
+  null until the run's alignment check has measured them.
+- `start_frame` is the station frame the play started at and `frames` the frames the station
+  clocked for it (the record and its rest pad); `at_s` its start in station time.
+- A play that was played and measured has a row, the one a response check after the play ended
+  the run on included (not gated). A drive refused before it played, a play the in-play envelope
+  check cut short, and a play a stop or an abort cancelled, have none; their frames still count in
+  station time.
+- `law` is the call that produced the drive this play played (`used` false and `miss` the reason
+  when the drive in force was replayed after a miss): its time, the peak and worst bin rise it
+  asked for over the drive before it, dB, its predicted peak over the level target's, and the
+  values it reported. Null for a play with no call behind it (a gated level carried forward, or
+  a frozen run).
+
+### TWR Display
+
+Event topics:
+
+- `twr.state` (text): the state object on every change: after every judged play (its
+  `last_play`, so a screen can append the rows from it), on every change of state or phase, and
+  after `twr.freeze` takes effect. The station time alone changing sends none.
+- `twr.log` (text): new log entries, as Random's, driver warnings included, and after every
+  judged play a note of the frames the station took before it started the play.
+- `twr.live` (binary, to every connection without a TWR subscription of its own, as Random's and
+  Sine's live frames, 5 times a second from arm until the run has finished, then once more):
+  `{"run_id","source","state","phase","mode","t_s","level_db","rung",
+  "plays","play","last","views"}`. `play` is the play in flight, `{"index","kind","iteration",
+  "frames_done","frames"}`, or null between plays; `last` is the last play's
+  `{"rms_error_pct","peak_error_pct","spectral_error_db","gated"}` (null before any); `views` is
+  **Scope** (the control channel's most recent samples, from the station's display tap, x `Time`
+  s, at most 1024 points).
+- `twr.data` (binary, to one subscribed connection, in place of `twr.live`): `twr.live`'s fields
+  but `views`, and `plots`: at its `rate_hz` while a play is in flight, whatever its plots show,
+  so `play.frames_done` moves on it; once when identification ends, once after each play, once
+  when the run has finished, and at once on subscribe (so a screen that joins late has the
+  latest play).
+
+`twr.subscribe` takes Random's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
+default 5; at most 64 plots, each `id` unique) or `{"default":true}` (no `twr.data`); a key a
+quantity does not take is `bad_params` naming it. A plot is `{"id","quantity","points"}`; `points`
+applies to `target`, `response`, `error`, `drive`, `envelope` and `scope` only (64 to 8192,
+default 1024; records are min/max-decimated to it). The result is
+`{"default","rate_hz","plots","quantities"}`, every default filled in. In `twr.data` each plot
+comes back as `{"id","quantity","views"}`.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `target` | one `spectrum` (x `Time` s) | **Target**: the level target over the record, control unit |
+| `response` | one `spectrum` (time) | **Response**: the last play's response (`measured`) with the level target (`reference`) |
+| `error` | one `spectrum` (time) | **Error**: the last play's response less the target |
+| `drive` | one `spectrum` (time) | **Drive**: the last play's drive as played, V |
+| `envelope` | one `spectrum` (time) | **Envelope**: the last play's response with the alarm (`tolerance`) and abort (`abort`) bands around the target |
+| `frf` | **Identification Gain**, **Identification Phase** (`spectrum`s, x `Frequency` Hz log) | `abs(H)` (control unit per volt) and its phase, degrees, on the identification grid in its band |
+| `coherence` | one `spectrum` | **Coherence**: the identification's coherence with `coherence_floor` and `min_mean_coherence` |
+| `mask` | one `spectrum` | **Trust**: the trusted bins on the record grid (1 trusted, 0 not), with the reference spectrum, scaled to 1 at its peak |
+| `spectra` | one `spectrum` | **Spectra**: `abs(R)` at the level, `abs(Y)` of the last play and `abs(D)` of its drive on the record grid, in the correction band |
+| `convergence` | one `spectrum` | **Convergence**: each play's rms error, percent, against the play index, with the gate |
+| `law` | **Law** (`spectrum`), **Law Values** (`reading`) | Each declared value against the play index of its call; the last used call's values by their labels, and the unusable calls in a row |
+| `scope` | one `spectrum` (time) | **Scope**: the control channel during the play in flight |
+| `readings` | one `reading` | The run's numbers |
+| `plays` | one `table` | The play rows |
+
+A plot of the last play is empty (`views` empty) until a play has been judged, `frf`,
+`coherence` and `mask` until identification has ended, `law` until the law has been called, and
+`scope` between plays.
+
 ## Control Laws
 
 The control laws an operator can choose, for single-output and MIMO Random, for classical and
-SRS shock and for Sine alike: the laws built into the program, and law files imported into the local data
+SRS shock, for Sine and for TWR alike: the laws built into the program, and law files imported into the local data
 folder.
 
 | Method | Params | Result |
 |---|---|---|
-| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, `sine`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
+| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, `sine`, `twr`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
 | `laws.import` | `{"path"}` | `{"law":entry}` |
 | `laws.check` | `{"id"}` or `{"path"}`, and `{"params"}` (optional) | `{"law":entry,"report":{"passed","recorded","tool_version","cases":[case...]}}` |
 
@@ -2977,6 +3476,8 @@ folder.
   most 8, reported once per control tick. It alone carries `live`: the keys of the number
   parameters the operator may change during a run (`sine.adjust`), each a declared number
   parameter; an empty list when there are none. The built-in `servo_blend` comes first.
+- A TWR law's entry has `world: "twr"`; its `diagnostics` are scalar values (`layout` null), at
+  most 8, reported once per call. The built-in `twr_correct` comes first.
 - `check.hardware` says whether the law may drive hardware: a built-in law always may; an
   imported law only with a passing check record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.
@@ -3105,3 +3606,42 @@ law is, with the same refusals. A case's result:
  "worst_limit_over_db":null,"worst_release_overshoot_db":null,"calls":18000,"misses":0,
  "refused":0,"capped_ticks":0,"worst_call_ms":0.01,"budget_ms":2.5,"max_drive_vpk":0.41}
 ```
+
+**A TWR law.** For a law of world `twr`, `laws.check` runs the TWR check set (`twr-check 1`),
+each case a whole run under the core's guards on a simulated station at 12800 Hz with one drive
+and one control channel at 1 V per g unless the case says otherwise: a 2.0 s field-like
+reference (three decaying tones over a multi-sine floor) peaking at 1 g, pads of 512 and 1024
+samples (a record of 32768 samples), the drive ceiling 10 V, identification with band-limited
+random at 0.125 V rms for 4 s over 20 to 2000 Hz without the review hold, AUTO
+`[-12, -9, -6, -3, 0]` dB with a 10% gate and at most 8 iterations a level, a gate failure
+ending the run, and playback once with adaptation off. The cases: a wire (`first_play`: every
+level gates on its first play, and full level within 5%); one mode at 400 Hz, Q 10; the
+simulated station's plant (200 and 550 Hz, Q 2.5); one mode behind a 2 ms delay (each
+`every_rung`: every level gates within its 8, and full level within 10%); a wire behind 41
+samples on a station stating a 512-frame output lookahead at 256-frame blocks, as the NI chassis
+at 12800 Hz (`first_play`, and the run's lag the measured 41 frames); a wire with the identified
+gain scaled +3 dB before inversion (`first_rung_by` 4: the first level gates by its fourth play,
+every later level on its first; a law that does not correct cannot pass it); one mode with
+measurement noise 30 dB under the response (`full_level`: within 10%); and a 30 dB notch at
+300 Hz with its coherence under the floor (`survive`: completed, or ended by the core's own
+judgement, `not_converged`, `divergence` or the coverage floor, never over the drive ceiling and
+never an envelope abort). Every case first asks that every call is answered, in time, with zero
+misses and zero refused outputs; the worst call, the clamped bins and the worst peak and bin
+rise per call are reported with every case. A TWR law is named by `id` or by `path` as a
+classical law is, with the same refusals; a law the check cannot build or a case it cannot run
+is refused `law_check_unsupported`. A case's result:
+
+```
+{"name":"one mode","plant":"one mode, 400 Hz, Q 10","requirement":"every_rung","passed":true,
+ "detail":"...","end":"completed","trip":null,"plays":11,
+ "rungs":[{"level_db":-12,"plays_to_gate":3},{"level_db":-9,"plays_to_gate":1},
+          {"level_db":-6,"plays_to_gate":1},{"level_db":-3,"plays_to_gate":1},
+          {"level_db":0,"plays_to_gate":1}],
+ "full_level_error_pct":3.1,"lag_frames":0,"lag_measured":true,"calls":3,"misses":0,
+ "refused":0,"clamped_bins":0,"worst_peak_rise_db":4.2,"worst_bin_rise_db":5.8,
+ "worst_call_ms":2.1,"budget_ms":1000,"max_drive_vpk":1.4}
+```
+
+`end` is `completed`, `not_converged`, `aborted`, `law_fault`, `held` (the coherence hold) or
+`fault`, with `trip` the trip's kind or the law fault's reason; `rungs` lists each level and the
+plays it took to gate (null when it did not gate or was not reached).

@@ -3,8 +3,8 @@
 A control law is the math the controller runs once per loop to decide the next drive. Hertzforge
 loads control laws from files, so a law can be written, built and shared without rebuilding
 Hertzforge. This page is a guide for someone writing one, for the test types with a law
-interface: single-output Random, and multiple-output (MIMO) Random, classical shock, SRS shock and
-Sine, which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
+interface: single-output Random, and multiple-output (MIMO) Random, classical shock, SRS shock,
+Sine and time waveform replication, which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
 specification, [`control-law-spec.md`](control-law-spec.md); where this guide and the
 specification differ, the specification governs.
 
@@ -562,6 +562,95 @@ output buffer and the tracking filter, and it overshoots there by several dB on 
 20 Hz; slow does not. It runs natively, and is also the law file `laws/sine-servo`; the two give the
 same run.
 
+## Time waveform replication laws
+
+A time waveform replication (TWR) law closes the loop between whole records. The controller
+identifies the system with band-limited random in volts, inverts the identified plant and holds for
+review; when the run proceeds it builds the law and calls it: once for the first drive, then after
+each correction play that did not meet its gate (and after each playback play when adaptation
+during playback is on). The law returns the next drive record at full level, in volts; the
+controller scales it to the commanded level, checks it, brings it to rest at both ends and plays
+it. The specification's section 11 states the world in full.
+
+What differs from a classical shock law:
+
+- **The record is the replicated section between quiet pads**, `record_len` samples (a power of
+  two) at `fs_hz`, often tens of thousands of samples. A call's lists are long, and copying them in
+  and out is part of every call's time.
+- **The controller calls the law only when it wants a correction.** A play that meets the gate is
+  carried to the next level by the controller alone, with no call.
+- **When the controller clipped the last drive**, `limited` is set and `drive` is the drive that
+  played. A law that corrects from that record, rather than from the one it asked for, measures
+  what really played; the built-in does, and so does the template.
+- The plant has the classical world's shape, and the same conventions: one-sided spectra under the
+  negative-exponent transform; `twr::rfft_half` and `twr::irfft_half` in the SDK are that pair.
+
+### Writing a TWR law in Rust
+
+Implement `TwrSingleLaw` (`describe`, `new`, `seed`, `iterate`) and export it with
+`export_twr_law!`. The template is `crates/hertzforge-law-sdk/template/twr`: the frequency-domain
+correction written plainly, with three parameters.
+
+| Key | What it does |
+|---|---|
+| `beta` | The fraction of each play's error corrected before the next play |
+| `correct` | Off: the first drive is held for the whole run |
+| `model_error_db` | Scales the law's own copy of the plant's inverse, for seeing how the controller's guards respond: -6 dB plays half the target (with `correct` off, the run ends not converged), -4 dB leaves 0.685 of the error after each correction at `beta` 0.5, +8 dB starts 2.5 times hot (the first-drive bound) |
+
+Build it with `cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with a TWR law's drive
+
+Every one of these holds whatever the law returns:
+
+- the drive's peak in volts against the drive ceiling, on the record as it will play, refused (and
+  the run aborted) if over; in AUTO, at proceed, the controller's own full-level drive against the
+  ceiling; in MANUAL, a level move that would pass it is refused;
+- the length, finite values and declared values of every output;
+- at full level, the drive's peak and every bin may rise at most 10 dB a call (by default) over the
+  drive last played; the drive's predicted response peak at most 1.5 times the level target's
+  (with the default envelope); the first drive's at most twice;
+- every record tapers to rest at both ends;
+- a late, failed, crashed or refused call is a miss and the next play replays the drive in force;
+  three in a row end the run;
+- the response is watched as each block arrives, and a play that leaves the abort band for eight
+  samples in a row is cut short with the emergency stop;
+- each play's lag is fitted against the identification's; a drift of more than a frame ends the
+  run before anything is corrected from that play;
+- a level that does not meet its gate in its iterations ends the run (or holds), as does the error
+  rising on three plays in a row.
+
+### Checking a TWR law before hardware
+
+An imported TWR law must pass the check before it may drive hardware. Each case is a whole run on
+a simulated station at 12 800 Hz: a 2 s field-like reference peaking at 1 g, AUTO from -12 dB to
+full level with a 10% gate and at most eight correction plays a rung, then one playback play.
+
+| Case | Plant | Asks for |
+|---|---|---|
+| flat | A wire | Every rung gates on its first play; full level within 5% |
+| one mode | 400 Hz, Q 10 | Every rung gates within its eight; full level within 10% |
+| station plant | 200 and 550 Hz, Q 2.5 | As one mode |
+| transport delay | One mode behind 2 ms | As one mode |
+| deep queue | A wire behind 41 samples, the station keeping its output 512 frames ahead in 256-frame blocks | As flat, and the run aligned on the lag the identification measured |
+| identification error | A wire; the identified gain scaled +3 dB before inversion | The first rung gated by play 4, every later rung on its first. A law that does not correct sits 29% low and cannot pass |
+| measurement noise | One mode, noise 30 dB under the first rung's response | Full level within 10% |
+| anti-resonance | A 30 dB notch at 300 Hz under the coherence floor | Survive: complete, or be ended by the controller's own judgement (not converged, divergence, the coverage floor); never over the drive ceiling, never an envelope abort |
+
+Every case also asks that every call is answered in time with no miss and no refused output. The
+built-in law and the template pass every case; a law that holds its first drive fails the
+identification-error case. A check record clears a law file only at the check in force; a file
+checked by an earlier one is checked again.
+
+### The built-in TWR law
+
+`twr_correct`, the frequency-domain correction: the plant's inverse applied to the reference, then
+after each correction play a fraction `beta` (default 0.5) of the inverse times the error, on the
+bins the controller trusts, each bin's rise held to `max_db_per_iter` (default 6 dB), the first
+play optionally `initial_backoff_db` under the prediction; after a clipped play it corrects from
+the drive that played. It runs natively, and is also the law file `laws/twr-correct`; the two give
+the same run, sample for sample.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and
@@ -587,8 +676,8 @@ Laws are separate files loaded at run time, so their authors can license them as
 
 ## The interface version
 
-The interface is `hertzforge:control-law@0.1.0`, with five worlds: `random-single`,
-`random-mimo`, `shock-classical`, `shock-srs` and `sine-single`. While it is at 0.x it may change between releases, and a law must be built against
+The interface is `hertzforge:control-law@0.1.0`, with six worlds: `random-single`,
+`random-mimo`, `shock-classical`, `shock-srs`, `sine-single` and `twr-single`. While it is at 0.x it may change between releases, and a law must be built against
 the version the host loads.
 
 ## Building and testing in this repository

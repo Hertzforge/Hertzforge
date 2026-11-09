@@ -271,3 +271,22 @@ sds-control  test:sine_sim_run  sim_7_the_template_law_passes_sim_1_and_the_buil
 sds-control  test:sine_sim_run  sim_8_a_live_sine_run_excludes_the_others_and_the_shutdown_refuses_its_verbs
 sds-control  test:sine_law_check  a_misbehaving_sine_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware
 sds-control  test:sine_law_check  the_built_in_sine_law_passes_every_case_and_is_not_recorded
+
+# TWR laws: the host's deadline on a TWR law file, and a law call's time at the bench record and
+# at the record cap against its budget
+hertzforge-law-host  test:twr_host  a_spinning_twr_law_is_stopped_within_a_tick_of_its_budget
+hertzforge-law-host  test:twr_host  a_late_twr_law_is_stopped_at_its_budget_and_stays_stopped
+hertzforge-law-host  test:twr_host  each_twr_misbehaviour_is_a_named_error
+hertzforge-twr-laws  test:law_call_timing  a_twr_law_call_at_the_bench_record_and_the_record_cap_is_well_inside_its_budget
+
+# The TWR service over its socket and on its run thread: runs on the simulated station paced to the
+# wall clock, a stop or an abort inside a play, the orphan timeout and the shutdown on the real clock
+sds-control  test:twr_protocol  manual_verbs_and_their_refusals_then_the_stop_mid_play
+sds-control  test:twr_protocol  a_twr_configuration_with_errors_is_refused_with_its_items
+sds-control  test:twr_protocol  shutdown_refuses_the_twr_verbs_and_safe_stops_the_run
+sds-control  test:twr_protocol  an_observer_aborts_inside_a_play
+sds-control  test:twr_protocol  plays_hold_when_the_controller_goes_resume_on_a_reclaim_and_safe_stop_after
+sds-control  test:twr_sim_run  sim_2_manual_verbs_then_a_stop_inside_a_play
+sds-control  test:twr_sim_run  sim_3_an_observer_aborts_inside_a_play_within_a_block
+sds-control  test:twr_sim_run  sim_5_a_closed_controller_and_a_shutdown_each_end_in_the_safe_stop
+sds-control  test:twr_sim_run  sim_6_a_law_past_its_budget_misses_three_times_then_the_run_ends

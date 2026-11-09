@@ -79,10 +79,13 @@ pub mod shock_classical;
 pub mod shock_srs;
 pub mod sine;
 mod ticker;
+pub mod twr;
 mod types;
 pub mod validate;
 
-pub use error::{ClassicalOutputRule, MimoOutputRule, SineOutputRule, SrsOutputRule};
+pub use error::{
+    ClassicalOutputRule, MimoOutputRule, SineOutputRule, SrsOutputRule, TwrOutputRule,
+};
 pub use error::{LawError, OutputRule};
 pub use host::{law_file_sha256, AnyLaw, HostConfig, LawHost, LawInstance, LoadedLaw};
 pub use mimo::{
@@ -98,6 +101,10 @@ pub use shock_srs::{
 pub use sine::{
     LoadedSineLaw, SineHold, SineIdentification, SineInputs, SineLawInstance, SineOutputs,
     SineSetup, MAX_SINE_VALUES,
+};
+pub use twr::{
+    LoadedTwrLaw, TwrInputs, TwrLawInstance, TwrOutputs, TwrPlayKind, TwrSetup, TwrVerdict,
+    MAX_TWR_VALUES,
 };
 pub use types::{
     Breakpoint, ChoiceSpec, CurveSpec, DiagnosticSpec, DiagnosticValue, GuestOutput, IntegerSpec,
@@ -117,3 +124,5 @@ pub const CLASSICAL_WORLD: &str = "shock-classical";
 pub const SRS_WORLD: &str = "shock-srs";
 /// The world a single-output Sine law file implements.
 pub const SINE_WORLD: &str = "sine-single";
+/// The world a time waveform replication law file implements.
+pub const TWR_WORLD: &str = "twr-single";
