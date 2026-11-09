@@ -290,3 +290,18 @@ sds-control  test:twr_sim_run  sim_2_manual_verbs_then_a_stop_inside_a_play
 sds-control  test:twr_sim_run  sim_3_an_observer_aborts_inside_a_play_within_a_block
 sds-control  test:twr_sim_run  sim_5_a_closed_controller_and_a_shutdown_each_end_in_the_safe_stop
 sds-control  test:twr_sim_run  sim_6_a_law_past_its_budget_misses_three_times_then_the_run_ends
+
+# Explorer: the run host's survey, intents and block frames and its pass and batch-gap timing on
+# the wall clock; the service over its socket and on its run thread, paced to the wall clock
+hertzforge-explorer-host  test:explorer_read_surfaces  explorer_the_run_host_hands_on_the_survey_the_intents_and_each_blocks_frame
+hertzforge-explorer-host  test:explorer_read_surfaces  explorer_a_pass_and_the_gap_between_batches_are_timed
+sds-control  test:explorer_protocol  explorer_a_run_through_the_protocol_from_configure_to_stop
+sds-control  test:explorer_protocol  explorer_the_table_and_an_observer_are_refused_by_name
+sds-control  test:explorer_protocol  explorer_nobody_at_the_controls_ends_in_the_safe_stop
+sds-control  test:explorer_sim_run  explorer_sim_1_dwells_meet_the_stations_response_and_the_peak_is_a_mode
+sds-control  test:explorer_sim_run  explorer_sim_2_steering_answers_what_the_step_adopted
+sds-control  test:explorer_sim_run  explorer_sim_3_an_observer_aborts_and_is_refused_a_steer
+sds-control  test:explorer_sim_run  explorer_sim_4_a_level_during_the_stop_is_refused_and_the_ramp_ends
+sds-control  test:explorer_sim_run  explorer_sim_5_a_lost_controller_and_a_shutdown_end_in_the_safe_stop
+sds-control  test:explorer_sim_run  explorer_sim_7_an_accel_limit_aborts_by_the_watchdog
+sds-control  test:explorer_sim_run  explorer_sim_8_a_simulation_run_and_an_explorer_run_exclude_each_other

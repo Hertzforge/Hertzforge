@@ -167,7 +167,7 @@ try {
 	await a.goto(URL_);
 	await until(a, 'the chooser', async (p) => (await attr(p, 'conn-control', 'data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
 	const offered = await a.locator('[data-testid="test-type-chooser"] [data-type]').evaluateAll((els) => els.filter((e) => e.getAttribute('aria-disabled') === 'false').map((e) => e.dataset.type));
-	check('the chooser offers Random, Sine, Classical Shock, SRS, TWR and MIMO Random', offered.join() === 'random,sine,shock,srs,twr,mimo_random', offered.join());
+	check('the chooser offers Random, Sine, Classical Shock, SRS, TWR, Explorer and MIMO Random', offered.join() === 'random,sine,shock,srs,twr,explorer,mimo_random', offered.join());
 	await tid(a, 'test-type-mimo_random').click();
 	await until(a, 'the MIMO Random screen', async (p) => tid(p, 'mimo-screen').isVisible());
 	check('MIMO Random opens on Setup, Channels', (await attr(a, 'flow-setup', 'aria-current')) === 'step' && (await attr(a, 'tab-channels', 'aria-selected')) === 'true');
