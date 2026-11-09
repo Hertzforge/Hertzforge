@@ -3941,8 +3941,8 @@ station with four recorded rows at 12 800 Hz and the configuration above:
 - `analysis`: the analysis rate (the station's rate over `decimation`), the line spacing, the
   alias-free lines (the block over 2.56) and span (the analysis rate over 2.56), a block's
   length in seconds, the overlap in force, and how long after start the first full average is
-  complete: the block plus `averages - 1` hops, at the analysis rate (0 overlap and one block for
-  peak hold).
+  complete: the block plus `averages - 1` hops (a hop is the block less the overlap), at the
+  analysis rate.
 - `trigger`: the pre-window, a recording's length after its trigger (null until cut) and the
   holdoff, in frames at the rate, each `round(seconds x fs_hz)`.
 - `disk`: the bytes a second a recording writes (4 bytes a row a frame), the free-space floor
