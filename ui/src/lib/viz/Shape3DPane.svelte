@@ -4,6 +4,8 @@
 	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
 </script>
 
+<svelte:window onkeydown={snapTurns} onkeyup={snapTurns} />
+
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
 	/**
@@ -62,7 +64,7 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -92,6 +94,13 @@
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
 	let handles: TransformControls | null = null;
 	let gizmoAnchor: Object3D | null = null;
+	/** How far the drag in hand has gone, said in the bar; null between drags. */
+	let gizmoSaid = $state<string | null>(null);
+	/** A turn snaps to whole degrees, and with Shift held to 15° steps, so an angle can be hit exactly. */
+	const DEGREE = Math.PI / 180;
+	function snapTurns(e: KeyboardEvent) {
+		handles?.setRotationSnap(e.shiftKey ? 15 * DEGREE : DEGREE);
+	}
 
 	/** Arrows and rings on `view.gizmo`, along its axes. A drag on one axis runs its act on release; the view it answers with redraws them. */
 	function buildGizmo() {
@@ -107,12 +116,24 @@
 		tc.setSpace('local');
 		tc.setMode(gizmoMode);
 		tc.setTranslationSnap(gridStep(view.unit));
+		tc.setRotationSnap(DEGREE);
 		tc.attach(anchor);
 		tc.addEventListener('change', () => (dirty = true));
+		tc.addEventListener('objectChange', () => {
+			const axis = (tc.axis ?? '').toLowerCase();
+			if (axis !== 'x' && axis !== 'y' && axis !== 'z') return;
+			if (tc.mode === 'translate') {
+				const along = new Vector3().fromArray(g.axes['xyz'.indexOf(axis)]);
+				gizmoSaid = gizmoReading('translate', axis, anchor.position.clone().sub(new Vector3().fromArray(g.origin)).dot(along), view.unit);
+			} else {
+				gizmoSaid = gizmoReading('rotate', axis, ((tc as unknown as { rotationAngle: number }).rotationAngle * 180) / Math.PI, view.unit);
+			}
+		});
 		tc.addEventListener('dragging-changed', (e) => {
 			const dragging = Boolean(e.value);
 			controls.enabled = !dragging;
 			if (dragging) return;
+			gizmoSaid = null;
 			const axis = (tc.axis ?? '').toLowerCase() as 'x' | 'y' | 'z';
 			if (axis !== 'x' && axis !== 'y' && axis !== 'z') return void resetGizmo();
 			const along = g.axes['xyz'.indexOf(axis)];
@@ -1149,7 +1170,7 @@
 		<div class="pickbar gizmobar" data-testid="shape3d-gizmo" role="toolbar" aria-label="What the handles do">
 			<button class="btn sm" class:primary={gizmoMode === 'translate'} data-testid="gizmo-move" onclick={() => setGizmoMode('translate')}>Move</button>
 			<button class="btn sm" class:primary={gizmoMode === 'rotate'} data-testid="gizmo-turn" onclick={() => setGizmoMode('rotate')}>Turn</button>
-			<span>Drag an arrow or a ring</span>
+			<span class:num={!!gizmoSaid} data-testid="gizmo-said">{gizmoSaid ?? (gizmoMode === 'rotate' ? 'Drag a ring: whole degrees, or 15° steps with Shift' : 'Drag an arrow or a ring')}</span>
 		</div>
 	{/if}
 

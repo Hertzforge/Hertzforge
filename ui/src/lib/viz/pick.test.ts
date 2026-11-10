@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+import { gizmoReading, gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 
 describe('nearestNode', () => {
 	const screen = [0, 0, 10, 0, 100, 100];
@@ -56,5 +56,14 @@ describe('the grid an arrow lands on', () => {
 	});
 	it('does not round the numbers of an undefined geometry', () => {
 		expect(gridStep('undefined')).toBeNull();
+	});
+});
+
+describe('the gimbal says how far a drag has gone', () => {
+	it('turns in degrees and moves in the view\'s unit, to its grid', () => {
+		expect(gizmoReading('rotate', 'z', 37, 'in')).toBe('Turn about Z: 37°');
+		expect(gizmoReading('rotate', 'x', -12.5, 'in')).toBe('Turn about X: -12.5°');
+		expect(gizmoReading('translate', 'x', 0.3, 'in')).toBe('Move along X: 0.3 in');
+		expect(gizmoReading('translate', 'y', 0.25, 'm')).toBe('Move along Y: 0.25 m');
 	});
 });
