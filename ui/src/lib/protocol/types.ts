@@ -555,6 +555,8 @@ export interface ActionRow {
 	candidates?: string[];
 	/** An operation on the part of a geometry picked in the tree. */
 	part?: true;
+	/** Params its form leaves out, since they do not apply to what is picked (a thickness for solid elements). */
+	omit?: string[];
 	/** Runs at once with what it is filled with (a shape added, then edited). */
 	instant?: true;
 	/** Its form applies each change as it is made: a field when it is left, a gimbal when it is let go. */

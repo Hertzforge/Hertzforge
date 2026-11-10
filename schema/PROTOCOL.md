@@ -586,7 +586,9 @@ with its defaults and picks the new solid. One solid picked offers its shape's A
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
 it, and a live form is run each time a changed field is left, with no Run button. Edit Solid stays for
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
-color, with the gimbal (`gizmo`) on it.
+color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
+do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
+plate thickness.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system. A connection starts

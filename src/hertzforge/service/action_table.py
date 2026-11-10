@@ -414,6 +414,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
         more: dict[str, Any] = {'part': True} if homes else {}
+        if (op.id == 'project.group_properties' and where == 'group'
+                and not _shells_among(project[fill['geometry']], verbs.picked_ids(part))):
+            # a thickness is a shell's: a group of solid or beam elements is not asked for one
+            more['omit'] = ['thickness']
         if where == 'solids' and op.id in _adds():
             # a shape is made at once and then edited (Brandon, 2026-11-10)
             more['instant'] = True
@@ -462,6 +466,17 @@ def _solid_edit_row(project: Any, geometry: str, solid_id: Any,
                   live=True)
     row['verb'] = 'Edit'
     return row
+
+
+def _shells_among(geometry: Any, groups: list[Any]) -> bool:
+    """Whether any of these element groups holds shells (face elements)."""
+    import numpy as np
+
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    held = np.isin(np.asarray(geometry.elem_group, dtype=int), [int(g) for g in groups])
+    kinds = np.unique(np.asarray(geometry.elem_type, dtype=int)[held])
+    return any(ELEMENT_TYPES.get(int(k), ('', 0, ''))[2] == 'face' for k in kinds)
 
 
 def _why_not(op: Operation, kinds: list[str]) -> str:
