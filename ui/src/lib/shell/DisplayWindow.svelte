@@ -49,9 +49,9 @@
 	const display = $derived(app.display);
 	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : 'Random');
 	/** The test types on the test screen's frame: one header line, and their run's own dock. */
-	const framed = $derived(sineRun || shockRun || srsRun || twrRun || explorerRun);
-	const framedHost = $derived(shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : sine);
-	const framedScreen = $derived(shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : app.sineViews);
+	const framed = $derived(sineRun || shockRun || srsRun || twrRun || explorerRun || recorderRun);
+	const framedHost = $derived(shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : sine);
+	const framedScreen = $derived(shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : recorderRun ? app.recorderViews : app.sineViews);
 	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
@@ -136,7 +136,7 @@
 		<ScreenHeader acq={framedHost} name={testName} {abortKeys} compact ends={framedHost.isLive && !framedScreen.cardInView('run')} />
 	{:else}
 		<div class="top">
-			<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : acq} onoverride={() => {}} {abortKeys} compact />
+			<RunBar acq={mimo} onoverride={() => {}} {abortKeys} compact />
 		</div>
 	{/if}
 	<div class="body" class:screen={randomRun || framed}>
@@ -163,7 +163,9 @@
 				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</ExplorerRunView>
 		{:else if recorderRun}
-			<RecorderRunView {recorder} views={app.recorderViews} compact onpopout={(id) => app.openDisplayWindow(id, 'recorder')} />
+			<RecorderRunView {recorder} views={app.recorderViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</RecorderRunView>
 		{:else}
 			<RunView {acq} {display} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id)} />
 		{/if}
