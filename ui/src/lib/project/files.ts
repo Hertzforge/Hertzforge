@@ -44,6 +44,7 @@ interface TauriGlobals {
 	dialog?: {
 		open(options: { multiple?: boolean; directory?: boolean; title?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
 		save(options: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
+		ask(text: string, options?: { title?: string; kind?: 'info' | 'warning' | 'error'; okLabel?: string; cancelLabel?: string }): Promise<boolean>;
 	};
 	webview?: {
 		getCurrentWebview(): { onDragDropEvent(handler: (event: DragDropEvent) => void): Promise<() => void> };
@@ -197,12 +198,20 @@ export async function chooseRunLog(purpose: 'open' | 'new'): Promise<string | nu
 	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
 }
 
+/** Whether to let a project's unsaved changes go: asked in the native dialog, or the browser's. */
+export async function discardUnsaved(title: string): Promise<boolean> {
+	const text = `${title} has unsaved changes. Discard them?`;
+	const dialog = tauri()?.dialog;
+	if (dialog) return dialog.ask(text, { title: 'Unsaved Changes', kind: 'warning', okLabel: 'Discard', cancelLabel: 'Cancel' });
+	return typeof window !== 'undefined' && window.confirm(text);
+}
+
 /** Whether the app has a File menu (the macOS desktop app): without one, the top bar has the buttons. */
 export function hasFileMenu(): boolean {
 	return hasNativeFiles() && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform || navigator.userAgent);
 }
 
-/** The File menu chosen ('open', 'import', 'save', 'save-as'); returns how to stop listening. */
+/** The File menu chosen ('new', 'open', 'import', 'save', 'save-as'); returns how to stop listening. */
 export function listenForFileMenu(onAct: (act: string) => void): () => void {
 	const events = tauri()?.event;
 	if (!events) return () => {};

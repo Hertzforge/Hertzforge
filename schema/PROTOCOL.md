@@ -558,15 +558,15 @@ report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number 
 typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
 not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent. A view already on screen is not converted again; the shell draws it again.
 
-**Projects.** Each connection has at most one project of its own, as a Visual Dynamics window
-has one, and it ends with the connection. A file reaches the service by its path on the service's
-machine; nothing is uploaded. `project.open` replaces the project with the one a `.hforge`, `.vdyn`,
-`.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`) file holds, and refuses any other file with a pointer to
-import it. `project.import` adds a file's objects to the project, making an empty one first when
-none is open. `units` declares what the file does not state, as the core's `import_file` options
+**Projects.** Each connection has one project of its own, and it ends with the connection. A
+connection starts with an empty project titled "Project", so every operation has one to work on. A
+file reaches the service by its path on the service's machine; nothing is uploaded. `project.open`
+replaces the project with the one a `.hforge`, `.vdyn`, `.mat` or ESCDF `.h5` (`.hdf5`, `.escdf`)
+file holds, and refuses any other file with a pointer to import it. `project.import` adds a file's
+objects to the project. `units` declares what the file does not state, as the core's `import_file` options
 (`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
-project came from; a `.vdyn` is opened but never written. `project.new` takes an optional `title`
-and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
+project came from; a `.vdyn` is opened but never written. `project.new` replaces the project with an
+empty one; it takes an optional `title` and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.
 With `index`, `project.rename` renames one photo of a Photos object instead (the photo at that
 index, from 0), and the report blocks that show it follow. `project.remove` takes `names`, a list,

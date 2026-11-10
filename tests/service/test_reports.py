@@ -97,8 +97,9 @@ def test_a_report_over_the_socket(validate, tmp_path):
         ('report.export', {'name': 'Plate Report', 'path': str(tmp_path / 'out.html')}),
         ('report.render', {}),
     ]))
-    none, _, made, shown, written, unnamed = (got[-1] for got in responses)
-    assert none['error']['code'] == 'refused'
+    empty, _, made, shown, written, unnamed = (got[-1] for got in responses)
+    # the connection's empty project takes a report like any other
+    assert empty['result']['name'] == 'Report'
     validate(made['result'], 'reportGenerateResult')
     assert made['result']['name'] == 'Plate Report' and made['result']['project']['modified']
     validate(shown['result'], 'reportRenderResult')
