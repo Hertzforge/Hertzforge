@@ -1,8 +1,9 @@
 /**
- * The action table's order: what the service answers, cut to the module and sorted. A column's
- * defaults come first, then what the picked part of a geometry offers, then what can run, and what
- * cannot goes last. Columns that can do something come before those that cannot, by the tree's order
- * of kinds, with "any object" at the end of the ones that can.
+ * The action table's order: what the service answers, cut to the module and to what can run now,
+ * and sorted. A row that cannot run is not shown at all (Brandon, 2026-11-10: only what can be
+ * done, for simplicity), though the service still says why. A column's defaults come first, then
+ * what the picked part of a geometry offers, then the rest; combination columns follow by the
+ * tree's order of kinds, with "any object" last, and one with nothing to run is not shown.
  */
 import { offeredIn } from '$lib/app/workspaces';
 import type { ActionColumn, ActionRow, ActionTable, Workspace } from '$lib/protocol/types';
@@ -10,7 +11,6 @@ import { kindRank } from './icons';
 
 function rowRank(row: ActionRow): number {
 	if (row.kind === 'default') return 0;
-	if (!row.ready) return 3;
 	return row.part ? 1 : 2;
 }
 
@@ -21,23 +21,22 @@ function sortedRows(rows: ActionRow[]): ActionRow[] {
 		.map(([row]) => row);
 }
 
-function columnRank(column: ActionColumn): [number, number] {
+function columnRank(column: ActionColumn): number {
 	const last = column.kinds[column.kinds.length - 1];
-	const ready = column.rows.some((row) => row.ready);
-	return [ready ? 0 : 1, last === '*' ? 10_000 : kindRank(last)];
+	return last === '*' ? 10_000 : kindRank(last);
 }
 
 /** One module's table: its rows only, and no combination column left with none. */
 export function columnsFor(table: ActionTable, module: Workspace): ActionColumn[] {
 	const kept = table.columns.map((column) => ({
 		...column,
-		rows: sortedRows(column.rows.filter((row) => offeredIn(row, module)))
+		rows: sortedRows(column.rows.filter((row) => row.ready && offeredIn(row, module)))
 	}));
 	const current = kept.filter((column) => column.current);
 	const others = kept
 		.filter((column) => !column.current && column.rows.length > 0)
 		.map((column) => [column, columnRank(column)] as const)
-		.sort((a, b) => a[1][0] - b[1][0] || a[1][1] - b[1][1])
+		.sort((a, b) => a[1] - b[1])
 		.map(([column]) => column);
 	return [...current, ...others];
 }
