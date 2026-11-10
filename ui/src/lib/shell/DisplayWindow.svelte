@@ -1,14 +1,15 @@
 <script lang="ts">
 	/**
-	 * A display window: one page of the Random run, opened from the main window to place on another
-	 * monitor. It observes the run with a subscription of its own, shows the run's state and level,
-	 * and keeps Stop and Abort in reach (Cmd or Ctrl and period aborts from here too). Its page can be
-	 * switched and its plots changed like the main window's; the layout is shared between windows.
+	 * A display window: one page of a run, opened from the main window to place on another monitor.
+	 * It observes the run with a subscription of its own, shows the run's state and level, and keeps
+	 * Stop and Abort in reach (Cmd or Ctrl and period aborts from here too). Its page can be switched
+	 * and its plots changed like the main window's; the layout is shared between windows.
 	 */
 	import { onMount } from 'svelte';
 	import '$lib/acquire/acquire.css';
 	import RunBar from '$lib/acquire/RunBar.svelte';
 	import RunView from '$lib/acquire/RunView.svelte';
+	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
 	import MimoRunView from '$lib/acquire/mimo/views/MimoRunView.svelte';
 	import ShockRunView from '$lib/acquire/shock/ShockRunView.svelte';
 	import SrsRunView from '$lib/acquire/srs/SrsRunView.svelte';
@@ -34,6 +35,7 @@
 	const twrRun = $derived(app.config.popoutTest === 'twr');
 	const explorerRun = $derived(app.config.popoutTest === 'explorer');
 	const recorderRun = $derived(app.config.popoutTest === 'recorder');
+	const randomRun = $derived(!mimoRun && !shockRun && !srsRun && !sineRun && !twrRun && !explorerRun && !recorderRun);
 	const mimo = $derived(app.mimo);
 	const shock = $derived(app.shock);
 	const srs = $derived(app.srs);
@@ -123,10 +125,14 @@
 			</button>
 		</div>
 	</header>
-	<div class="top">
-		<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : acq} onoverride={() => {}} {abortKeys} compact />
-	</div>
-	<div class="body">
+	{#if randomRun}
+		<ScreenHeader {acq} name="Random" {abortKeys} compact ends={acq.isLive && !display.cardInView('run')} />
+	{:else}
+		<div class="top">
+			<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : acq} onoverride={() => {}} {abortKeys} compact />
+		</div>
+	{/if}
+	<div class="body" class:screen={randomRun}>
 		{#if mimoRun}
 			<MimoRunView {views} compact onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []} />
 		{:else if shockRun}
@@ -142,7 +148,7 @@
 		{:else if recorderRun}
 			<RecorderRunView {recorder} views={app.recorderViews} compact onpopout={(id) => app.openDisplayWindow(id, 'recorder')} />
 		{:else}
-			<RunView {acq} {display} compact onpopout={(id) => app.openDisplayWindow(id)} />
+			<RunView {acq} {display} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id)} />
 		{/if}
 	</div>
 </div>
@@ -203,5 +209,9 @@
 		min-height: 0;
 		padding: var(--sp-2) var(--sp-3) var(--sp-3);
 		overflow: hidden;
+	}
+
+	.body.screen {
+		padding: 6px 6px 4px var(--sp-3);
 	}
 </style>
