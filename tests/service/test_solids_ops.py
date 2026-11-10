@@ -759,7 +759,8 @@ def test_a_geometry_with_no_nodes_is_refused_in_words_and_the_row_is_off(op):
     project = state.project
     project.new_geometry('Part', unit='m')
     run(project, 'project.add_solid_block')
-    table = projects.actions(state, {'objects': ['Part']})['table']
+    groups = {'name': 'Part', 'kind': 'group', 'id': 1, 'ids': [1, 2]}
+    table = projects.actions(state, {'objects': ['Part'], 'part': groups})['table']
     row = next(row for row in table['columns'][0]['rows'] if row['id'] == op)
     assert not row['ready'] and 'no nodes' in row['reason']
     by_id = {o.id: o for o in (*OPERATIONS, *MODEL)}

@@ -368,22 +368,23 @@ def rich():
     return state
 
 
-def _offered(state, name, verb, op_id):
+def _offered(state, name, verb, op_id, part=None):
     """The row with the words its operation would refuse on, for the same state."""
-    found = row(table(state, name)[0], verb)
+    found = row(table(state, name, part=part)[0], verb)
     assert found['id'] == op_id
     return found
 
 
 def test_mesh_says_a_geometry_has_no_solids_before_the_click(rich):
     geometry = named(rich, 'geometry')
-    found = _offered(rich, geometry, 'Mesh', 'project.mesh_solids')
+    solids = {'name': geometry, 'kind': 'solids', 'id': 0}
+    found = _offered(rich, geometry, 'Mesh', 'project.mesh_solids', solids)
     assert not found['ready'] and 'no solids' in found['reason']
     assert 'no solids' in _refusal(rich.project, found['id'], {'geometry': geometry})
     run = OPS['project.add_solid_block']
     run.run(rich.project, run.resolve(
         {'geometry': geometry}, objects={geometry: 'geometry'}, verbs={geometry: []}))
-    assert _offered(rich, geometry, 'Mesh', 'project.mesh_solids')['ready']
+    assert _offered(rich, geometry, 'Mesh', 'project.mesh_solids', solids)['ready']
 
 
 def test_unmark_shock_says_there_are_none_marked(rich):
