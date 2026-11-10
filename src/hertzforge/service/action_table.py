@@ -128,6 +128,15 @@ def _solids(project: Any, name: str) -> str:
     return '' if project[name].solids else 'It has no solids yet'
 
 
+def _made_of(project: Any, geometry: str, ids: list[Any]) -> bool:
+    """Whether one of these solids is made of others (a boolean or a pattern), so
+    taking it apart leaves something."""
+    from hertzforge.core import solids
+
+    held = project[geometry]
+    return any(solids.solid(held, int(i)).operands for i in ids)
+
+
 def _shocks_to_unmark(project: Any, name: str) -> str:
     history = project[name]
     if history.split_into_frames:
@@ -399,6 +408,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 fill[where] = str(part['id'])
             if any(p.name == f'{where}s' for p in op.params):
                 fill[f'{where}s'] = ', '.join(str(i) for i in picked)
+            if op.id == 'project.separate_solids' and not _made_of(project, fill['geometry'], picked):
+                rows.append(_op_row(op, 'It is not a boolean or a pattern', fill=fill, part=True))
+                continue
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
         more: dict[str, Any] = {'part': True} if home else {}

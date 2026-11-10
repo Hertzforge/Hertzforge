@@ -251,10 +251,18 @@ def test_solids_picked_together_combine(validate):
     columns = table(state, 'Part', part=picked, validate=validate)
     both = columns[0]
     assert both['parts'] == ['solid', 'solid']
-    for verb in ('Combine', 'Move Part', 'Pattern', 'Take Apart', 'Delete Solids'):
+    for verb in ('Combine', 'Move Part', 'Pattern', 'Delete Solids'):
         assert row(both, verb)['fill']['solids'] == '1, 3' and row(both, verb)['ready'], verb
     assert row(both, 'Edit Solid')['reason'] == 'Pick one solid in the tree'
     assert len(columns) == 1
+    assert row(one, 'Take Apart')['reason'] == 'It is not a boolean or a pattern'
+    combine = OPS['project.combine_solids']
+    combine.run(state.project, combine.resolve(
+        {'geometry': 'Part', 'operation': 'union', 'solids': '1, 2'},
+        objects={'Part': 'geometry'}, verbs={'Part': []}))
+    union = int(state.project['Part'].solids[-1].id)
+    made = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': union})[0]
+    assert row(made, 'Take Apart')['ready'] and row(made, 'Take Apart')['fill']['solids'] == str(union)
 
 
 def test_a_part_pairs_only_with_its_own_kind(plate):
