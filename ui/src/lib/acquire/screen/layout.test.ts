@@ -83,7 +83,8 @@ describe('reading a kept layout', () => {
 		l.pages[0].panels.push({ id: 'cd-5', kind: 'card', at: { x: 0, y: 0, w: 1, h: 1 }, card: 'log' });
 		l.pages[0].panels[0].at = { x: 1, y: 0, w: 11, h: 6 };
 		l.dock.cards[4].shown = false;
-		l.dock.side = 'bottom';
+		l.dock.side = 'collapsed';
+		l.dock.restore = 'bottom';
 		l.dock.size = 260;
 		l.serial = 5;
 		const back = fromSaved(toSaved(l), offer);

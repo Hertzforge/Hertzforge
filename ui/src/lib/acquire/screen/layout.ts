@@ -99,7 +99,7 @@ export const RANDOM_TYPES: PlotType[] = QUANTITY_ORDER.map((q) => {
 export const RANDOM_CARDS: CardKind[] = ['run', 'level', 'readings', 'inputs', 'log'];
 
 export function defaultDock(cards: CardKind[]): Dock {
-	return { side: 'right', size: DOCK_SIZE.right.start, cards: cards.map((kind) => ({ kind, open: true, shown: true })) };
+	return { side: 'right', restore: 'right', size: DOCK_SIZE.right.start, cards: cards.map((kind) => ({ kind, open: true, shown: true })) };
 }
 
 /** A page of plots tiled evenly. */
@@ -295,7 +295,8 @@ function readDock(v: unknown, offer: Offer, placed: Set<string>): Dock {
 	const d = defaultDock(offer.cards);
 	if (!isObj(v)) return { ...d, cards: d.cards.map((c) => ({ ...c, shown: !placed.has(c.kind) })) };
 	const side = oneOf(v.side, ['right', 'bottom', 'collapsed'], d.side);
-	const bounds = side === 'bottom' ? DOCK_SIZE.bottom : DOCK_SIZE.right;
+	const restore = side === 'collapsed' ? oneOf(v.restore, ['right', 'bottom'], d.restore) : side;
+	const bounds = restore === 'bottom' ? DOCK_SIZE.bottom : DOCK_SIZE.right;
 	const size = finiteOrNull(v.size);
 	const cards: DockCard[] = [];
 	for (const c of Array.isArray(v.cards) ? v.cards : []) {
@@ -305,7 +306,7 @@ function readDock(v: unknown, offer: Offer, placed: Set<string>): Dock {
 	for (const kind of offer.cards) if (!cards.some((c) => c.kind === kind)) cards.push({ kind, open: true, shown: true });
 	// A card on a page is not in the dock as well.
 	for (const c of cards) if (placed.has(c.kind)) c.shown = false;
-	return { side, size: size === null ? bounds.start : Math.round(Math.min(bounds.max, Math.max(bounds.min, size))), cards };
+	return { side, restore, size: size === null ? bounds.start : Math.round(Math.min(bounds.max, Math.max(bounds.min, size))), cards };
 }
 
 /** A layout read from storage, checked field by field; null when it is not one. */
@@ -411,7 +412,7 @@ export function toSaved(layout: ScreenLayout): string {
 	return JSON.stringify({
 		version: 2,
 		pages: layout.pages.map((p) => ({ id: p.id, name: p.name, cols: p.cols, rows: p.rows, linkTime: p.linkTime, panels: p.panels.map(savedPanel) })),
-		dock: { side: layout.dock.side, size: layout.dock.size, cards: layout.dock.cards.map((c) => ({ kind: c.kind, open: c.open, shown: c.shown })) },
+		dock: { side: layout.dock.side, restore: layout.dock.restore, size: layout.dock.size, cards: layout.dock.cards.map((c) => ({ kind: c.kind, open: c.open, shown: c.shown })) },
 		rate: layout.rate,
 		serial: layout.serial
 	});

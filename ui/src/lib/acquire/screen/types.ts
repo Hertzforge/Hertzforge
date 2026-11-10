@@ -46,6 +46,8 @@ export interface DockCard {
 
 export interface Dock {
 	side: 'right' | 'bottom' | 'collapsed';
+	/** Where the dock opens again from the rail. */
+	restore: 'right' | 'bottom';
 	/** Width (right) or height (bottom), CSS pixels. */
 	size: number;
 	cards: DockCard[];
