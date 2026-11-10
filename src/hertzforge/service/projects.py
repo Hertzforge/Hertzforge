@@ -14,6 +14,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 from hertzforge.project import describe
 
 from . import tree
@@ -468,6 +470,35 @@ def children(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, 
     if name not in state.project:
         raise not_found(f'no object named {name!r}')
     return tree.children(state.project, name)
+
+
+#: the most rows one `project.entity_rows` answers with
+ENTITY_ROWS_MOST = 5000
+
+
+def entity_rows(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.entity_rows`: rows `start` to `start + count` of an entity table that sent
+    only its first ones (its `more`), as `{'columns', 'rows'}` in the geometry's stored
+    unit; the server puts them in the display units as it does the table."""
+    from .ops_geometry import ID_ARRAYS, entity_columns, entity_rows, picked_rows
+
+    state = _open(state, 'project.entity_rows')
+    name = _name(params, 'geometry', 'project.entity_rows')
+    if name not in state.project:
+        raise not_found(f'no object named {name!r}')
+    geometry = state.project[name]
+    kind = params.get('kind')
+    if kind not in ID_ARRAYS or not hasattr(geometry, 'elem_group'):
+        raise bad_request(f'kind is one of {", ".join(ID_ARRAYS)}, on a geometry')
+    start, count = params.get('start'), params.get('count')
+    if (not isinstance(start, int) or not isinstance(count, int) or start < 0
+            or not 0 < count <= ENTITY_ROWS_MOST):
+        raise bad_request(f'start is a row from 0, and count from 1 to {ENTITY_ROWS_MOST}')
+    picked = picked_rows(geometry, kind, str(params.get('family') or ''),
+                         str(params.get('groups') or ''))
+    every = np.arange(len(getattr(geometry, ID_ARRAYS[kind]))) if picked is None else picked
+    return {'columns': entity_columns(geometry, kind),
+            'rows': entity_rows(geometry, kind, every[start:start + count])}
 
 
 def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:

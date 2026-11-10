@@ -355,10 +355,14 @@ operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and
 and the first `table` view of the answer takes the table's place; a value the operation refuses
 leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
 the block it covers, cell by cell. `rows`, when the table shows some of the object's rows, gives the
-row each shown row is, from 1. `remove` (`{"op","params","ids"}`) says the rows are the entities
+row each shown row is, from 1. `remove` (`{"op","params","column"}`) says the rows are the entities
 themselves, as in a geometry's entity tables: Delete removes the selected rows rather than clearing
-their cells, by running `op` with `params` and `ids`, the selected rows' entries of `ids` as runs
-(`"1-3, 7"`).
+their cells, by running `op` with `params` and `ids`, the selected rows' cells in `column` (their
+ids) as runs (`"1-3, 7"`). A table longer than a thousand rows sends its first thousand with `total`,
+its count, and `more` (`{"method","params"}`); the shell asks `method` with `params` and `start`
+and `count` (at most 5000) for the rows it scrolls to, in the display units as the table is. An
+entity table of a part says the part in its edit's and `more`'s params (`family` or `groups`), and
+`project.set_entity_cell` takes a row as that part's.
 
 With a part of a geometry picked (`part`), `project.show` draws its entities' table beside the
 geometry, with the click in the view that adds one: the nodes or the coordinate systems, a family's
@@ -458,6 +462,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
+| `project.entity_rows` | `{"geometry","kind","family"?,"groups"?,"start","count"}` | `{"rows"}`: more of an entity table that sent its first rows (its `more`) |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |

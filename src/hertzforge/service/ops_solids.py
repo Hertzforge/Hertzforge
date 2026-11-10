@@ -745,7 +745,7 @@ def pattern_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     total = len(ids) * copies
     return _result(name, geometry, f'Patterned in {name}', [
         v.row('Made', f'pattern {made}', None, 'pass'),
-        v.row('Copies', float(total), '', 'info'), _parts_row(geometry)])
+        v.row('Copies', float(total), '', 'info'), _parts_row(geometry)], [made])
 
 
 # ---- Mesh Solids ----------------------------------------------------------------
@@ -1417,7 +1417,7 @@ OPERATIONS = (
         summary='Copy parts in rows, columns and layers along X, Y and Z, the originals '
                 'counted, as one solid whose copies follow them.',
         params=(GEOMETRY, SOLIDS, *COUNTS, *SPACING), outputs=('reading', 'shape3d', 'table'),
-        run=pattern_solids, edits=True),
+        run=pattern_solids, edits=True, previews=True),
     Operation(
         id='project.mesh_solids', title='Mesh Solids', workspace='model',
         summary='Mesh parts into hexes, tetras or shells, each part an element group; the '
