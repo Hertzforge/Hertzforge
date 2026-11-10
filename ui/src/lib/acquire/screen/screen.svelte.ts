@@ -6,7 +6,10 @@
  *
  * A window asks for exactly the plots on the page it shows, at its own rate, and nothing while it
  * does not show them (PROTOCOL.md, "Live Data Subscriptions"). Adding, removing or changing a plot
- * sends the new list; the service answers with a frame at once, and the run is never touched.
+ * sends the new list; the service answers with a frame at once, and the run is never touched. A
+ * screen may have feeds besides its test's own, each for plot types of its own (Signals, the time
+ * history of any channel of any test): the plots of those types go to that feed and the rest to the
+ * test's, and either feed's data reaches its plots the same way.
  *
  * The layout is kept per test type and per setup, and shared between this browser's windows: an
  * edit in one window reaches the others through the storage event. Each window takes the layout as
@@ -62,6 +65,8 @@ export interface ScreenFeed {
 	topic: string;
 	/** The request's parameters for these plots at this rate. */
 	params(plots: PlotPanel[], rate: number): Record<string, unknown>;
+	/** The plot types it serves, as one of a screen's other feeds (`ScreenHooks.others`). */
+	quantities?: string[];
 }
 
 /** What a test type gives its screen. */
@@ -75,7 +80,10 @@ export interface ScreenHooks {
 	defaultLayout(aspect: number): ScreenLayout;
 	/** Where its layouts were kept in an earlier form, and how one is taken over. */
 	legacy?: { key(setupTitle: string | null): string; last: string; read(text: string | null): ScreenLayout | null };
+	/** The test's own feed: every plot no other feed serves. */
 	feed?: ScreenFeed;
+	/** Feeds for plot types of their own (Signals), each naming its `quantities`. */
+	others?: ScreenFeed[];
 }
 
 export interface ScreenOptions {
@@ -119,6 +127,87 @@ function write(storage: Storage | null, key: string, value: string) {
 	}
 }
 
+/**
+ * One feed's subscription on this window's connection: what is wanted, what was sent and what came
+ * back. One request in flight at a time: the service may take two in either order, so a change made
+ * while one is on its way is sent when it has been answered (the latest only).
+ */
+export class FeedLink<D extends ScreenFrame = ScreenFrame, A = unknown> {
+	/** The last frame for this window, or null. */
+	data = $state.raw<D | null>(null);
+	/** What the service accepted for this window, or null before the first answer. */
+	accepted = $state.raw<A | null>(null);
+	/** Why the last subscription was refused, in words, or null. */
+	error = $state<string | null>(null);
+
+	private want: { key: string; params: Record<string, unknown> } | null = null;
+	/** The subscription last sent on this connection, by key ('' for none). */
+	private sentKey = '';
+	private timer: ReturnType<typeof setTimeout> | null = null;
+	private inflight = false;
+
+	constructor(
+		readonly feed: ScreenFeed,
+		private readonly control: ServiceClient,
+		private readonly delayMs: number,
+		/** An other feed asks nothing until it has a plot: a window without one costs the service nothing. */
+		private readonly quietWhenEmpty: boolean
+	) {
+		control.on(feed.topic, (d) => (this.data = d as unknown as D));
+	}
+
+	/** The plots this feed is asked for now (`count` of them), or the connection closed. */
+	update(params: Record<string, unknown>, count: number, open: boolean): void {
+		if (!open) {
+			this.want = null;
+			this.sentKey = '';
+			this.cancel();
+			return;
+		}
+		if (this.quietWhenEmpty && count === 0 && this.sentKey === '') {
+			this.want = null;
+			this.cancel();
+			return;
+		}
+		this.want = { key: JSON.stringify(params), params };
+		if (this.want.key !== this.sentKey) this.schedule();
+	}
+
+	cancel(): void {
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = null;
+	}
+
+	/**
+	 * Send what is wanted after the debounce. A change while the timer runs does not restart it: the
+	 * timer sends whatever is wanted when it fires, so changes coming faster than the debounce delay
+	 * a subscription by one debounce at most and never hold it back.
+	 */
+	private schedule() {
+		if (this.timer) return;
+		this.timer = setTimeout(() => {
+			this.timer = null;
+			void this.send();
+		}, this.delayMs);
+	}
+
+	private async send() {
+		const want = this.want;
+		if (this.inflight || !want || want.key === this.sentKey) return;
+		this.inflight = true;
+		this.sentKey = want.key;
+		try {
+			this.accepted = await this.control.request<A>(this.feed.method, want.params);
+			this.error = null;
+		} catch (err) {
+			this.error = toRefusal('Show the plots', err).message;
+		} finally {
+			this.inflight = false;
+			if (this.want && this.want.key !== this.sentKey) void this.send();
+		}
+	}
+}
+
 export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 	readonly control: ServiceClient;
 	readonly hooks: ScreenHooks;
@@ -138,14 +227,12 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 	renaming = $state<string | null>(null);
 	/** The page area's width over its height, as last measured. */
 	aspect = $state(DEFAULT_ASPECT);
-	/** The last frame for this window, or null. */
-	data = $state.raw<D | null>(null);
-	/** What the service accepted for this window, or null before the first answer. */
-	accepted = $state.raw<A | null>(null);
-	/** Why the last subscription was refused, in words, or null. */
-	error = $state<string | null>(null);
 	/** Where the layout on screen is kept. */
 	key = $state('');
+	/** The test's own feed's link, or null. */
+	readonly main: FeedLink<D, A> | null;
+	/** The other feeds' links, in the hooks' order. */
+	readonly others: FeedLink[];
 
 	/**
 	 * The layout as this window last found it in storage or wrote it there, under `key` (its saved
@@ -153,11 +240,6 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 	 * never written back: two windows never echo each other's edits.
 	 */
 	private stored: string | null = null;
-	private want: { key: string; params: Record<string, unknown> } | null = null;
-	/** The subscription last sent on this connection, by key ('' for none). */
-	private sentKey = '';
-	private timer: ReturnType<typeof setTimeout> | null = null;
-	private inflight = false;
 
 	constructor(control: ServiceClient, hooks: ScreenHooks, opts: ScreenOptions) {
 		this.control = control;
@@ -168,7 +250,34 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 		this.pageKey = `hertzforge.screen.page:${hooks.testType}`;
 		this.layout = hooks.defaultLayout(DEFAULT_ASPECT);
 		this.pageId = opts.page ?? read(this.session, this.pageKey) ?? this.layout.pages[0].id;
-		if (hooks.feed) control.on(hooks.feed.topic, (d) => (this.data = d as unknown as D));
+		const delay = opts.subscribeDelayMs ?? 40;
+		this.main = hooks.feed ? new FeedLink<D, A>(hooks.feed, control, delay, false) : null;
+		this.others = (hooks.others ?? []).map((f) => new FeedLink(f, control, delay, true));
+	}
+
+	/** The last frame of the test's own feed for this window, or null. */
+	get data(): D | null {
+		return this.main?.data ?? null;
+	}
+
+	/** What the service accepted of the test's own feed for this window, or null. */
+	get accepted(): A | null {
+		return this.main?.accepted ?? null;
+	}
+
+	/** Why a subscription of this window was refused, in words, or null. */
+	get error(): string | null {
+		return this.main?.error ?? this.others.find((l) => l.error)?.error ?? null;
+	}
+
+	/** The feed a plot of `quantity` is asked through: an other feed serving it, else the test's own. */
+	linkFor(quantity: string): FeedLink | null {
+		return this.others.find((l) => l.feed.quantities?.includes(quantity)) ?? this.main;
+	}
+
+	/** The plots on screen that `link` is asked for. */
+	wantedBy(link: FeedLink): PlotPanel[] {
+		return this.wanted.filter((p) => this.linkFor(p.plot.quantity) === link);
 	}
 
 	// =========================================================================================
@@ -230,9 +339,13 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 		return this.opts.showing() ? this.page.panels.filter((p): p is PlotPanel => p.kind === 'plot') : [];
 	}
 
-	/** A plot's data in the last frame, or null. */
+	/** A plot's data in the last frame of the feed it is asked through, or null. */
 	frame(id: string): FramePlot | null {
-		return this.data?.plots.find((p) => p.id === id) ?? null;
+		for (const link of [this.main, ...this.others]) {
+			const found = link?.data?.plots.find((p) => p.id === id);
+			if (found) return found;
+		}
+		return null;
 	}
 
 	views(id: string): View[] {
@@ -527,29 +640,21 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 					write(this.storage, lastScreenKey(this.hooks.testType), text);
 				});
 			});
-			// The subscription follows the plots on screen, on every connection: a subscription belongs
-			// to its connection, so a new one is asked again.
-			const feed = this.hooks.feed;
-			if (feed) {
+			// Each feed's subscription follows its plots on screen, on every connection: a subscription
+			// belongs to its connection, so a new one is asked again.
+			for (const link of [this.main, ...this.others]) {
+				if (!link) continue;
 				$effect(() => {
-					const params = feed.params($state.snapshot(this.wanted) as PlotPanel[], this.layout.rate);
+					const plots = $state.snapshot(this.wantedBy(link)) as PlotPanel[];
+					const params = link.feed.params(plots, this.layout.rate);
 					const open = this.control.status === 'open';
-					untrack(() => {
-						if (!open) {
-							this.want = null;
-							this.sentKey = '';
-							this.cancelTimer();
-							return;
-						}
-						this.want = { key: JSON.stringify(params), params };
-						if (this.want.key !== this.sentKey) this.schedule();
-					});
+					untrack(() => link.update(params, plots.length, open));
 				});
 			}
 		});
 		return () => {
 			events?.removeEventListener('storage', onStorage);
-			this.cancelTimer();
+			for (const link of [this.main, ...this.others]) link?.cancel();
 			stop();
 		};
 	}
@@ -595,44 +700,5 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 		if (!next.pages.some((p) => p.id === this.pageId)) this.pageId = next.pages[0].id;
 		if (this.maximized && !this.find(this.maximized)) this.maximized = null;
 		if (this.options && !this.find(this.options)) this.options = null;
-	}
-
-	/**
-	 * Send what is wanted after the debounce. A change while the timer runs does not restart it: the
-	 * timer sends whatever is wanted when it fires, so changes coming faster than the debounce delay
-	 * a subscription by one debounce at most and never hold it back.
-	 */
-	private schedule() {
-		if (this.timer) return;
-		this.timer = setTimeout(() => {
-			this.timer = null;
-			void this.send();
-		}, this.opts.subscribeDelayMs ?? 40);
-	}
-
-	private cancelTimer() {
-		if (this.timer) clearTimeout(this.timer);
-		this.timer = null;
-	}
-
-	/**
-	 * One subscription in flight at a time: the service may take two requests in either order, so
-	 * a change made while one is on its way is sent when it has been answered (the latest only).
-	 */
-	private async send() {
-		const want = this.want;
-		const feed = this.hooks.feed;
-		if (this.inflight || !want || !feed || want.key === this.sentKey) return;
-		this.inflight = true;
-		this.sentKey = want.key;
-		try {
-			this.accepted = await this.control.request<A>(feed.method, want.params);
-			this.error = null;
-		} catch (err) {
-			this.error = toRefusal('Show the plots', err).message;
-		} finally {
-			this.inflight = false;
-			if (this.want && this.want.key !== this.sentKey) void this.send();
-		}
 	}
 }

@@ -9,6 +9,7 @@
 	import type { Snippet } from 'svelte';
 	import PlotBody from '../plots/PlotBody.svelte';
 	import PlotOptions from '../plots/PlotOptions.svelte';
+	import { isSignals } from '../signals/signals';
 	import { cardWords } from './layout';
 	import MenuItem from './MenuItem.svelte';
 	import Popover from './Popover.svelte';
@@ -29,6 +30,8 @@
 		card: Snippet<[CardKind]>;
 		/** The test's channels, for a plot's channel choice. */
 		channels: { index: number; name: string }[];
+		/** The channels a Signals plot chooses from, drives too; `channels` when not given. */
+		signalChannels?: { index: number; name: string }[];
 		/** What the plot says while it has nothing to draw. */
 		empty: string;
 		/** Live data: ranges held steady across frames. */
@@ -36,10 +39,11 @@
 		/** A drag starts on the title (move) or the corner (resize). */
 		onstart: (e: PointerEvent, mode: 'move' | 'resize') => void;
 	}
-	let { screen, panel, at, maximized, hidden, lifted, card, channels, empty, live, onstart }: Props = $props();
+	let { screen, panel, at, maximized, hidden, lifted, card, channels, signalChannels, empty, live, onstart }: Props = $props();
 
 	const title = $derived(panel.kind === 'plot' ? screen.titleOf(panel) : cardWords(panel.card));
 	const type = $derived(panel.kind === 'plot' ? screen.typeOf(panel.plot.quantity) : null);
+	const choices = $derived(type && isSignals(type.id) && signalChannels ? signalChannels : channels);
 	const optionsOpen = $derived(screen.options === panel.id);
 	let menuOpen = $state(false);
 	let optBtn = $state<HTMLElement | null>(null);
@@ -165,7 +169,7 @@
 
 {#if optionsOpen && panel.kind === 'plot'}
 	<Popover anchor={optBtn} label="Options for {title}" align="end" testid="plot-options-pop" onclose={() => screen.openOptions(null)}>
-		<PlotOptions spec={panel.plot} types={screen.hooks.types} {channels} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
+		<PlotOptions spec={panel.plot} types={screen.hooks.types} channels={choices} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
 	</Popover>
 {/if}
 

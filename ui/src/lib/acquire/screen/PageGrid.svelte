@@ -17,12 +17,14 @@
 		card: Snippet<[CardKind]>;
 		/** The test's channels, for a plot's channel choice. */
 		channels: { index: number; name: string }[];
+		/** The channels a Signals plot chooses from, drives too; `channels` when not given. */
+		signalChannels?: { index: number; name: string }[];
 		/** What an empty plot says. */
 		empty: (panel: PlotPanel) => string;
 		/** Live data: ranges held steady across frames. */
 		live: boolean;
 	}
-	let { screen, card, channels, empty, live }: Props = $props();
+	let { screen, card, channels, signalChannels, empty, live }: Props = $props();
 
 	const page = $derived(screen.page);
 	const plots = $derived(page.panels.filter((p) => p.kind === 'plot').length);
@@ -209,6 +211,7 @@
 			lifted={drag?.active && drag.mode === 'move' && drag.id === p.id ? { dx: drag.dx, dy: drag.dy } : null}
 			{card}
 			{channels}
+			{signalChannels}
 			empty={p.kind === 'plot' ? empty(p) : ''}
 			{live}
 			onstart={(e, mode) => start(e, p, mode)}
