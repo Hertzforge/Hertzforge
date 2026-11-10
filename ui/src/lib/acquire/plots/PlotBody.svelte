@@ -22,6 +22,7 @@
 	import { paneMarks, placeCursor } from './cursors';
 	import { plotTitle } from './display';
 	import { Holder, withHolds } from './hold';
+	import { timeLinks } from './linkTime.svelte';
 	import { isShown, present, traceList } from './present';
 	import type { AxisDisplay, PlotDisplay, PlotPanelSpec, PlotType, TraceStyle } from './types';
 
@@ -39,8 +40,15 @@
 		band?: [number, number] | null;
 		/** The display stopped on what it shows, while the data keeps arriving. */
 		frozen?: boolean;
+		/** The plot's channels, one per view in the views' order (`DataPlot.channels`): they name the panes and the lines. */
+		channels?: number[] | null;
+		/**
+		 * Time plots with the same key share one time window: they zoom and pan together, and freeze
+		 * and run again together. Null for a plot of its own.
+		 */
+		linkKey?: string | null;
 	}
-	let { views, type, spec, empty, live = true, onspec, band = null, frozen = $bindable(false) }: Props = $props();
+	let { views, type, spec, empty, live = true, onspec, band = null, frozen = $bindable(false), channels = null, linkKey = null }: Props = $props();
 
 	const display = $derived(spec.display);
 	const time = $derived(type?.time ?? false);
@@ -69,11 +77,50 @@
 	});
 	const shown = $derived(still ?? held);
 
+	// Linked time axes: the link holds the x range, the freeze and the window of every plot in it.
+	const linked = $derived(time && linkKey ? linkKey : null);
+	$effect(() => {
+		if (linked) return timeLinks.join(linked);
+	});
+	const link = $derived(linked ? timeLinks.get(linked) : null);
+	// a plot that joins takes the link's freeze and window; a change made on any plot goes to all
+	let sentFrozen: boolean | undefined;
+	$effect(() => {
+		const f = frozen;
+		if (!linked) return;
+		untrack(() => {
+			if (sentFrozen !== undefined && f !== sentFrozen && timeLinks.get(linked).frozen !== f) timeLinks.set(linked, { frozen: f });
+			sentFrozen = f;
+		});
+	});
+	$effect(() => {
+		const f = link?.frozen;
+		if (f === undefined) return;
+		untrack(() => {
+			sentFrozen = f;
+			if (frozen !== f) frozen = f;
+		});
+	});
+	let sentWindow: number | null | undefined;
+	let windowSeen = false;
+	$effect(() => {
+		const w = display.window_s;
+		if (!linked) return;
+		untrack(() => {
+			const now = timeLinks.get(linked).window;
+			if (now === undefined || (windowSeen && w !== sentWindow)) timeLinks.set(linked, { window: w });
+			sentWindow = w;
+			windowSeen = true;
+		});
+	});
+	/** The spec drawn: the panel's own, in the link's time window when it has one. */
+	const drawnSpec = $derived(link && link.window !== undefined && link.window !== display.window_s ? { ...spec, display: { ...display, window_s: link.window } } : spec);
+
 	/** Columns before the panes are known: a time plot's lanes are full width. */
 	const cols0 = $derived(time ? 1 : spec.arrange === 'overlay' ? 1 : 2);
 	/** The body's width: an envelope keeps about one interval per pixel. */
 	let width = $state(600);
-	const presented = $derived(present(shown, spec, type, { band, buckets: Math.max(50, Math.round(width / Math.max(1, cols0))) }));
+	const presented = $derived(present(shown, drawnSpec, type, { band, channels, buckets: Math.max(50, Math.round(width / Math.max(1, cols0))) }));
 	const panes = $derived(presented.panes);
 	const readings = $derived(presented.readings);
 	const drawn = $derived(panes.some((p) => p.view.series.length > 0) || readings.length > 0);
@@ -98,12 +145,19 @@
 		// a time plot stops on what it shows while zoomed, and runs again when the zoom is let go
 		if (time && z.x) frozen = true;
 		if (time && z.x === null) frozen = false;
+		if (linked) {
+			// the time axis is the link's: every plot in it shows the zoom
+			if (z.x !== undefined) timeLinks.set(linked, { x: z.x, frozen: z.x !== null });
+			if (z.y !== undefined) change({ y: zoomed(display.y, z.y) });
+			return;
+		}
 		change({ x: zoomed(display.x, z.x), y: zoomed(display.y, z.y) });
 	}
 
 	/** Run again: a time plot's zoom on the frozen times is let go, since the times move on. */
 	function resume() {
 		frozen = false;
+		if (linked) timeLinks.set(linked, { x: null, frozen: false });
 		if (time && display.x.range === 'held') change({ x: zoomed(display.x, null) });
 	}
 
@@ -258,7 +312,7 @@
 			<div class="panes" class:lanes={presented.layout === 'lanes'} style:--cols={cols}>
 				{#each panes as p, i (p.key)}
 					{@const logX = p.view.x.scale === 'log'}
-					<div class="pane">
+					<div class="pane" data-testid="plot-pane">
 						<SpectrumPane
 							bind:this={paneRefs[i]}
 							view={p.view}
@@ -273,7 +327,7 @@
 							readout={display.readout}
 							styles={p.styles}
 							onlegend={onspec ? (k) => toggleTrace(p.view.series[k].name) : undefined}
-							xFixed={p.xFixed}
+							xFixed={link?.x ?? p.xFixed}
 							yFixed={p.yFixed}
 							zoomY
 							onZoom={onspec ? zoom : undefined}
@@ -312,6 +366,7 @@
 	.body {
 		position: relative;
 		display: flex;
+		flex: 1 1 0;
 		flex-direction: column;
 		gap: var(--sp-2);
 		min-height: 0;

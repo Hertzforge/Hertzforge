@@ -124,15 +124,17 @@ export function envelopeOf(s: Series, buckets: number): Series {
 /**
  * Several views on one pane: every series of every view, under the first view's axes (a panel
  * shows one quantity, so they agree). A name that more than one view uses is told apart by its
- * view's title, so the legend, the readout and a trace's look each name one line.
+ * view's channel (`channels`, one per view) or else its title, so the legend, the readout and a
+ * trace's look each name one line.
  */
-export function overlay(views: SpectrumView[], title: string): SpectrumView {
+export function overlay(views: SpectrumView[], title: string, channels?: readonly (number | undefined)[]): SpectrumView {
 	const uses = new Map<string, number>();
 	for (const v of views) for (const s of v.series) uses.set(s.name, (uses.get(s.name) ?? 0) + 1);
 	const taken = new Set<string>();
 	const series = views.flatMap((v, vi) =>
 		v.series.map((s) => {
-			let name = (uses.get(s.name) ?? 0) > 1 ? `${s.name}, ${v.title}` : s.name;
+			const ch = channels?.[vi];
+			let name = (uses.get(s.name) ?? 0) > 1 ? `${s.name}, ${ch !== undefined ? `channel ${ch}` : v.title}` : s.name;
 			if (taken.has(name)) name = `${name} (${vi + 1})`;
 			taken.add(name);
 			// a follower's index points into its own view's series
@@ -215,12 +217,20 @@ export const isShown = (styles: (SeriesOverride | undefined)[], i: number) => st
 
 /**
  * The panes a panel draws. `band` is the test's band, for an x range held to it; without one the
- * band is read from the reference line. `buckets` is the envelope's resolution.
+ * band is read from the reference line. `buckets` is the envelope's resolution. `channels` are
+ * the plot's channels, one per view in the views' order, which name the panes and the lines.
  */
-export function present(views: View[], spec: PlotPanelSpec, type: PlotType | null, opts: { band?: [number, number] | null; buckets?: number } = {}): Presented {
+export function present(
+	views: View[],
+	spec: PlotPanelSpec,
+	type: PlotType | null,
+	opts: { band?: [number, number] | null; buckets?: number; channels?: readonly number[] | null } = {}
+): Presented {
 	const d = spec.display;
 	const time = type?.time ?? false;
 	const spectra = views.filter((v): v is SpectrumView => v.view === 'spectrum');
+	// a channel to each view only when there is one for every view
+	const channels = opts.channels && opts.channels.length === spectra.length ? opts.channels : null;
 	const readings = views.filter((v): v is ReadingView => v.view === 'reading');
 	let shown = spectra.map((v) => withoutFamilies(v, d.hidden));
 	if (time && d.window_s !== null) shown = shown.map((v) => cropWindow(v, d.window_s));
@@ -229,12 +239,13 @@ export function present(views: View[], spec: PlotPanelSpec, type: PlotType | nul
 		shown = shown.map((v) => ({ ...v, series: v.series.map((s) => (isData(s) ? envelopeOf(s, buckets) : s)) }));
 	}
 	const overlaid = shown.length > 1 && (time ? d.lanes === 'overlay' : spec.arrange === 'overlay');
-	if (overlaid) shown = [overlay(shown, plotTitle(spec, type))];
+	if (overlaid) shown = [overlay(shown, plotTitle(spec, type), channels ?? undefined)];
+	else if (channels) shown = shown.map((v, i) => (v.title ? v : { ...v, title: `Channel ${channels[i]}` }));
 	const band = opts.band ?? bandOf(spectra);
 	const panes = shown.map((v, i): Pane => {
 		const view = withScales(v, d);
 		return {
-			key: overlaid ? 'overlay' : `${i}:${v.title}`,
+			key: overlaid ? 'overlay' : channels ? `channel ${channels[i]}` : `${i}:${v.title}`,
 			view,
 			styles: traceOverrides(view, d.traces),
 			xFixed: axisRange(d.x, view.x.scale === 'log', time ? null : band),

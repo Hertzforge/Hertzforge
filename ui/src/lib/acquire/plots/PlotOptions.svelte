@@ -8,7 +8,8 @@
 	 * A plot panel's options menu, in sections: Data, Axes, Display, Cursors and Marks, Hold,
 	 * Export. A section, or a choice, that does not apply to the plot's type is not shown. Every
 	 * change applies at once. Escape closes; focus stays in the menu while it is open and goes
-	 * back where it was when it closes.
+	 * back where it was when it closes. It draws no frame of its own: it sits in the popover that
+	 * opens it, which scrolls it when it is taller than the window.
 	 */
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import { MARKER_WORDS, TRACE_COLORS } from '$lib/viz/roles';
@@ -229,8 +230,8 @@
 
 	function onkeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
+			// not stopped here: a popover around the menu closes too and gives its button the keyboard
 			e.preventDefault();
-			e.stopPropagation();
 			onclose();
 			return;
 		}
@@ -268,7 +269,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="opts" role="dialog" aria-label="Plot options" tabindex="-1" bind:this={root} {onkeydown} data-testid="plot-options">
+<div class="opts" role="group" aria-label="Plot options" bind:this={root} {onkeydown} data-testid="plot-options">
 	<div class="tabs" role="tablist" aria-label="Plot options">
 		{#each sections as [id, words], i (id)}
 			<button
@@ -632,26 +633,16 @@
 	.opts {
 		display: flex;
 		flex-direction: column;
-		width: 360px;
-		max-width: calc(100vw - 16px);
+		width: min(390px, calc(100vw - 40px));
 		max-height: min(78vh, 600px);
 		font-size: var(--text-xs);
 		color: var(--text-1);
-		background: var(--bg-2);
-		border: 1px solid var(--line-2);
-		border-radius: var(--radius-md);
-		box-shadow: var(--shadow-pop);
-	}
-
-	.opts:focus {
-		outline: none;
 	}
 
 	.tabs {
 		display: flex;
 		flex: none;
 		gap: 2px;
-		padding: var(--sp-1) var(--sp-1) 0;
 		border-bottom: 1px solid var(--line-1);
 		overflow-x: auto;
 	}
@@ -687,7 +678,7 @@
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow: auto;
-		padding: var(--sp-2) var(--sp-3);
+		padding: var(--sp-2) 2px;
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
@@ -697,7 +688,7 @@
 		display: flex;
 		flex: none;
 		justify-content: flex-end;
-		padding: var(--sp-1) var(--sp-2);
+		padding-top: var(--sp-2);
 		border-top: 1px solid var(--line-1);
 	}
 

@@ -1555,6 +1555,13 @@
 		}
 	}
 
+	/* a plot too short to hold a box over its lines (a lane) keeps its lines clear */
+	@container (max-height: 90px) {
+		.inbox {
+			display: none;
+		}
+	}
+
 	.inbox .val {
 		margin-left: auto;
 		min-width: 7ch;

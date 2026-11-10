@@ -2,7 +2,9 @@
 	/**
 	 * `+ Plot`: every plot type the test offers, grouped (Frequency, Time, Numbers, Other), each
 	 * with its one line of help. The first entry takes focus; the arrows, Home, End and a letter
-	 * move through the list, Enter picks, Escape closes.
+	 * move through the list, Enter picks, Escape closes. Each entry is a menu item named by its
+	 * type's words, the help its description. It draws no frame of its own: it sits in the popover
+	 * that opens it.
 	 */
 	import { onMount } from 'svelte';
 	import { stepIndex, typeAhead } from './keys';
@@ -38,8 +40,8 @@
 		const list = items();
 		const at = list.indexOf(document.activeElement as HTMLButtonElement);
 		if (e.key === 'Escape') {
+			// not stopped here: a popover around the menu closes too and gives its button the keyboard
 			e.preventDefault();
-			e.stopPropagation();
 			onclose();
 			return;
 		}
@@ -60,9 +62,9 @@
 		<div class="group" role="group" aria-labelledby="{uid}-{g.id}">
 			<div class="head" id="{uid}-{g.id}">{g.words}</div>
 			{#each g.types as t (t.id)}
-				<button role="menuitem" class="item" tabindex="-1" data-testid="add-plot-{t.id}" onclick={() => onpick(t)}>
+				<button role="menuitem" class="item" tabindex="-1" aria-label={t.words} aria-describedby={t.help ? `${uid}-${t.id}-help` : undefined} data-testid="add-plot-{t.id}" onclick={() => onpick(t)}>
 					<span class="words">{t.words}</span>
-					{#if t.help}<span class="help">{t.help}</span>{/if}
+					{#if t.help}<span class="help" id="{uid}-{t.id}-help">{t.help}</span>{/if}
 				</button>
 			{/each}
 		</div>
@@ -73,15 +75,9 @@
 
 <style>
 	.menu {
-		width: 300px;
-		max-width: calc(100vw - 16px);
+		width: min(300px, calc(100vw - 40px));
 		max-height: min(70vh, 520px);
 		overflow: auto;
-		padding: var(--sp-1);
-		background: var(--bg-2);
-		border: 1px solid var(--line-2);
-		border-radius: var(--radius-md);
-		box-shadow: var(--shadow-pop);
 	}
 
 	.menu:focus {

@@ -65,6 +65,12 @@ describe('several channels on one pane', () => {
 		expect(v.series.map((x) => x.name)).toEqual(['Response', 'Limit, Channel 1', 'Channel 2', 'Limit, Channel 2']);
 	});
 
+	it('tells them apart by channel when the channels are known', () => {
+		const a = psd('Channel 1: Accel', [s('Response', [1], [1]), s('Limit', [1], [2], 'limit')]);
+		const b = psd('Channel 4: Monitor', [s('Response', [1], [3])]);
+		expect(overlay([a, b], 'Responses', [1, 4]).series.map((x) => x.name)).toEqual(['Response, channel 1', 'Limit', 'Response, channel 4']);
+	});
+
 	it('keeps a follower on its own measurement', () => {
 		const a = psd('A', [s('M', [1], [1])]);
 		const b = psd('B', [s('N', [1], [1]), { ...s('Fit', [1], [1]), follows: 0 }]);
@@ -131,6 +137,17 @@ describe('a panel presented', () => {
 		expect(one.panes.length).toBe(1);
 		expect(one.panes[0].view.title).toBe('Response Spectra');
 		expect(traceList(one).map((t) => t.name)).toEqual(['Channel 1', 'Limit', 'Channel 2']);
+	});
+
+	it('keys and names split panes by channel, when there is a channel for every view', () => {
+		const spec = newPlotSpec(RESPONSE, [3, 7]);
+		const untitled = [psd('', [s('A', [1], [1])]), psd('Channel 7', [s('B', [1], [1])])];
+		const p = present(untitled, spec, RESPONSE, { channels: [3, 7] });
+		expect(p.panes.map((x) => [x.key, x.view.title])).toEqual([
+			['channel 3', 'Channel 3'],
+			['channel 7', 'Channel 7']
+		]);
+		expect(present(untitled, spec, RESPONSE, { channels: [3] }).panes.map((x) => x.key)).toEqual(['0:', '1:Channel 7']);
 	});
 
 	it('stacks a time plot\'s channels as lanes when asked, and overlays them by default', () => {
