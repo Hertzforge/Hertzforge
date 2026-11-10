@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** Where a long table was scrolled to, by its title: an edit or a delete draws it again, and it stays put. */
+	const scrolls = new Map<string, number>();
+</script>
+
 <script lang="ts">
 	/**
 	 * Rows of text under column headings. The headings stay at the top as the rows scroll; a cell
@@ -16,7 +21,7 @@
 	 */
 	import { tick } from 'svelte';
 	import type { TableView } from '$lib/protocol/types';
-	import { blockText, DRAWN_FROM, drawnRows, fillTargets, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
 
 	interface Props {
 		view: TableView;
@@ -25,9 +30,11 @@
 		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
 		/** The rows are entities (`edit.remove`): the selected rows' ids, removed; resolves to the refusal's words, or null. */
 		onremove?: (ids: string[]) => Promise<string | null>;
+		/** A table that sent its first rows (`view.more`): rows `start` to `start + count`, asked for as they scroll into view. */
+		onrows?: (start: number, count: number) => Promise<string[][]>;
 	}
 
-	let { view, showTitle = true, onedit, onremove }: Props = $props();
+	let { view, showTitle = true, onedit, onremove, onrows }: Props = $props();
 	let copied = $state(false);
 	let anchor = $state<{ row: number; col: number } | null>(null);
 	let focus = $state<{ row: number; col: number } | null>(null);
@@ -45,13 +52,28 @@
 	let scrollTop = $state(0);
 	let viewHeight = $state(420);
 	let rowHeight = $state(27);
-	const long = $derived(view.rows.length > DRAWN_FROM);
-	const span = $derived(drawnRows(view.rows.length, scrollTop, viewHeight, rowHeight));
-	const drawn = $derived(long ? view.rows.slice(span[0], span[1]) : view.rows);
+	/** Rows past the first page of a table that sent only those (`view.more`), as they arrive. */
+	let fetched = $state.raw<Map<number, string[]>>(new Map());
+	const asked = new Set<number>();
+	const PAGE = 500;
+	const count = $derived(Math.max(view.total ?? 0, view.rows.length));
+	/** Every row by its number; the ones not come yet are holes. */
+	const known = $derived.by(() => {
+		if (count === view.rows.length) return view.rows;
+		const all = view.rows.slice();
+		all.length = count;
+		for (const [r, row] of fetched) all[r] = row;
+		return all;
+	});
+	const blank = $derived(view.columns.map(() => ''));
+	const long = $derived(count > DRAWN_FROM);
+	const span = $derived(drawnRows(count, scrollTop, viewHeight, rowHeight));
+	const drawn = $derived(long ? Array.from(known.slice(span.first, span.last), (row) => row ?? blank) : known);
 	function scrolled() {
 		if (!grid) return;
 		scrollTop = grid.scrollTop;
 		viewHeight = grid.clientHeight;
+		if (long) scrolls.set(view.title, scrollTop);
 	}
 	$effect(() => {
 		void view;
@@ -60,14 +82,36 @@
 		const height = row?.getBoundingClientRect().height;
 		if (height && Math.abs(height - rowHeight) > 0.5) rowHeight = height;
 		viewHeight = grid.clientHeight;
+		const was = scrolls.get(view.title);
+		if (was && !scrollTop) {
+			grid.scrollTop = was;
+			scrolled();
+		}
+	});
+	// the rows scrolled to that have not come, asked for a page at a time
+	$effect(() => {
+		if (!onrows || count <= view.rows.length) return;
+		for (let page = Math.floor(span.first / PAGE) * PAGE; page < span.last; page += PAGE) {
+			const from = Math.max(page, view.rows.length);
+			const to = Math.min(page + PAGE, count);
+			if (from >= to || asked.has(page)) continue;
+			asked.add(page);
+			onrows(from, to - from)
+				.then((rows) => {
+					const next = new Map(fetched);
+					rows.forEach((row, k) => next.set(from + k, row));
+					fetched = next;
+				})
+				.catch(() => asked.delete(page));
+		}
 	});
 	/** A row moved to by the keyboard, scrolled into view in a long table, where it may not be drawn. */
 	function reveal(row: number) {
 		if (!long || !grid) return;
 		const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? rowHeight;
-		const top = row * rowHeight;
-		if (top < grid.scrollTop) grid.scrollTop = top;
-		else if (top + rowHeight > grid.scrollTop + grid.clientHeight - head) grid.scrollTop = top + rowHeight + head - grid.clientHeight;
+		const rows = Math.max(1, Math.floor((grid.clientHeight - head) / rowHeight));
+		if (row < span.first + 30) grid.scrollTop = scrollFor(count, row, viewHeight, rowHeight);
+		else if (row >= span.first + 30 + rows) grid.scrollTop = scrollFor(count, row - rows + 1, viewHeight, rowHeight);
 		scrolled();
 	}
 
@@ -80,7 +124,7 @@
 	async function toggleFlag(row: number, col: number) {
 		if (!onedit || saving || !editable(col)) return;
 		select(row, col);
-		await apply([{ row, key: keys[col] as string, value: flagOn(view.rows[row]?.[col] ?? '') ? 'False' : 'True' }]);
+		await apply([{ row, key: keys[col] as string, value: flagOn(known[row]?.[col] ?? '') ? 'False' : 'True' }]);
 	}
 	const editable = (col: number) => !!keys[col];
 	const block = $derived(anchor && focus ? spanned(anchor, focus) : null);
@@ -109,7 +153,12 @@
 
 	/** Delete in a table of entities: the block's rows go, and the selection with them. */
 	async function removeRows(b: Block) {
-		const ids = view.edit?.remove?.ids.slice(b.r0, b.r1 + 1) ?? [];
+		const column = view.edit?.remove?.column ?? 0;
+		const ids: string[] = [];
+		for (let r = b.r0; r <= b.r1; r++) {
+			const id = known[r]?.[column];
+			if (id) ids.push(id);
+		}
 		if (!onremove || !ids.length || saving) return;
 		saving = true;
 		refusal = await onremove(ids);
@@ -131,7 +180,7 @@
 		if (!editable(col) || saving || !onedit) return;
 		const many = block && (block.r1 > block.r0 || block.c1 > block.c0) && inside(block, row, col) ? block : null;
 		editing = { row, col, block: many };
-		draft = seed ?? view.rows[row]?.[col] ?? '';
+		draft = seed ?? known[row]?.[col] ?? '';
 		await tick();
 		field?.focus();
 		if (seed === undefined) field?.select();
@@ -146,7 +195,7 @@
 			await apply(everywhere(at.block, draft));
 			return;
 		}
-		const was = view.rows[at.row]?.[at.col] ?? '';
+		const was = known[at.row]?.[at.col] ?? '';
 		if (draft !== was) {
 			await apply([{ row: at.row, key: keys[at.col] as string, value: draft }]);
 			if (refusal) return;
@@ -154,7 +203,7 @@
 		let row = at.row + dr;
 		let col = at.col + dc;
 		while (dc && col >= 0 && col < keys.length && !editable(col)) col += dc;
-		if (row >= 0 && row < view.rows.length && col >= 0 && col < keys.length) select(row, col);
+		if (row >= 0 && row < count && col >= 0 && col < keys.length) select(row, col);
 		else select(at.row, at.col);
 	}
 
@@ -177,7 +226,7 @@
 		const step = moves[e.key];
 		if (step) {
 			e.preventDefault();
-			const row = Math.max(0, Math.min(view.rows.length - 1, focus.row + step[0]));
+			const row = Math.max(0, Math.min(count - 1, focus.row + step[0]));
 			const col = Math.max(0, Math.min(view.columns.length - 1, focus.col + step[1]));
 			select(row, col, e.shiftKey);
 		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block && view.edit?.remove && onremove) {
@@ -188,7 +237,7 @@
 			void apply(everywhere(block, ''));
 		} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && block) {
 			e.preventDefault();
-			void navigator.clipboard.writeText(blockText(view.rows, block));
+			void navigator.clipboard.writeText(blockText(known, block));
 		} else if (e.key === 'Enter' || e.key === 'F2') {
 			e.preventDefault();
 			void open(focus.row, focus.col);
@@ -206,7 +255,7 @@
 		if (editing && !multi) return;
 		e.preventDefault();
 		editing = null;
-		if (multi) await apply(pasteTargets(parseTsv(text), block.r0, block.c0, keys, view.rows.length));
+		if (multi) await apply(pasteTargets(parseTsv(text), block.r0, block.c0, keys, count));
 		else await apply(everywhere(block, text.replace(/\n$/, '')));
 	}
 
@@ -240,7 +289,7 @@
 		const wasFill = dragging === 'fill';
 		dragging = null;
 		if (wasFill && block && fillTo) {
-			const targets = fillTargets(view.rows, block, fillTo.row, fillTo.col, keys);
+			const targets = fillTargets(known, block, fillTo.row, fillTo.col, keys);
 			const to = fillTo;
 			fillTo = null;
 			void apply(targets).then(() => {
@@ -253,17 +302,22 @@
 	/** Double-click on the handle: the block down to the last row. */
 	function fillDown() {
 		if (!block) return;
-		void apply(fillTargets(view.rows, block, view.rows.length - 1, block.c1, keys));
+		void apply(fillTargets(known, block, count - 1, block.c1, keys));
 	}
 
 	/** The whole table on the clipboard as text and as HTML at once, so a spreadsheet pastes cells and a document a table. */
 	async function copy() {
-		const text = tableText(view);
+		let rows = view.rows;
+		if (onrows && count > view.rows.length) {
+			rows = view.rows.slice();
+			for (let start = view.rows.length; start < count; start += 5000) rows.push(...(await onrows(start, Math.min(5000, count - start))));
+		}
+		const text = tableText({ columns: view.columns, rows });
 		try {
 			await navigator.clipboard.write([
 				new ClipboardItem({
 					'text/plain': new Blob([text], { type: 'text/plain' }),
-					'text/html': new Blob([tableHtml(view)], { type: 'text/html' })
+					'text/html': new Blob([tableHtml({ columns: view.columns, rows })], { type: 'text/html' })
 				})
 			]);
 		} catch {
@@ -293,9 +347,9 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#if long && span[0] > 0}<tr class="spacer" aria-hidden="true" style:height="{span[0] * rowHeight}px"><td colspan={view.columns.length}></td></tr>{/if}
-				{#each drawn as row, k (span[0] + k)}
-					{@const r = long ? span[0] + k : k}
+				{#if long && span.before > 0}<tr class="spacer" aria-hidden="true" style:height="{span.before}px"><td colspan={view.columns.length}></td></tr>{/if}
+				{#each drawn as row, k (span.first + k)}
+					{@const r = long ? span.first + k : k}
 					<tr>
 						{#each row as cell, i (i)}
 							{#if editing && editing.row === r && editing.col === i}
@@ -334,10 +388,10 @@
 						{/each}
 					</tr>
 				{/each}
-				{#if long && span[1] < view.rows.length}<tr class="spacer" aria-hidden="true" style:height="{(view.rows.length - span[1]) * rowHeight}px"><td colspan={view.columns.length}></td></tr>{/if}
+				{#if long && span.after > 0}<tr class="spacer" aria-hidden="true" style:height="{span.after}px"><td colspan={view.columns.length}></td></tr>{/if}
 			</tbody>
 		</table>
-		{#if view.rows.length === 0}<p class="empty">No rows.</p>{/if}
+		{#if count === 0}<p class="empty">No rows.</p>{/if}
 	</div>
 	{#if saving}<p class="note" role="status">Saving.</p>{/if}
 	{#if refusal}<p class="refusal" role="alert" data-testid="table-refusal">{refusal}</p>{/if}

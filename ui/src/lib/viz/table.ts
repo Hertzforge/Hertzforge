@@ -4,17 +4,46 @@ import type { TableView } from '$lib/protocol/types';
 /** Past this many rows a table draws only the rows in view, and some above and below. */
 export const DRAWN_FROM = 300;
 
+/** The tallest a long table is laid out: a browser stops an element growing near 2^24 pixels. */
+export const TALLEST = 15_000_000;
+
+/** What a long table draws for a scroll: rows [first, last), and the space before and after them. */
+export interface Window {
+	first: number;
+	last: number;
+	before: number;
+	after: number;
+}
+
 /**
- * The rows of a long table to draw, [first, last), for a scroll of `top` pixels in a viewport
- * `height` pixels tall, each row `rowHeight` tall, with `spare` rows either side so a quick
- * scroll does not show a gap. A table of `DRAWN_FROM` rows or fewer is drawn whole.
+ * The rows of a long table to draw for a scroll of `top` pixels in a viewport `height` pixels
+ * tall, each row `rowHeight` tall, with `spare` rows either side so a quick scroll shows no gap,
+ * and the space above and below them. Past `TALLEST` pixels the table is laid out at that height
+ * and the scroll bar spans its rows in proportion, so a million rows reach their end. A table of
+ * `DRAWN_FROM` rows or fewer is drawn whole.
  */
-export function drawnRows(count: number, top: number, height: number, rowHeight: number, spare = 30): [number, number] {
-	if (count <= DRAWN_FROM) return [0, count];
+export function drawnRows(count: number, top: number, height: number, rowHeight: number, spare = 30): Window {
+	if (count <= DRAWN_FROM) return { first: 0, last: count, before: 0, after: 0 };
 	const step = Math.max(1, rowHeight);
-	const first = Math.max(0, Math.floor(top / step) - spare);
-	const last = Math.min(count, Math.ceil((top + height) / step) + spare);
-	return [Math.min(first, last), last];
+	const full = count * step;
+	const laid = Math.min(full, TALLEST);
+	// how many pixels of rows one pixel of scroll passes over
+	const ratio = laid > height ? Math.max(1, (full - height) / (laid - height)) : 1;
+	const reached = Math.min(top, Math.max(0, laid - height)) * ratio;
+	const showing = Math.floor(reached / step);
+	const first = Math.max(0, showing - spare);
+	const last = Math.min(count, showing + Math.ceil(height / step) + spare);
+	const before = Math.max(0, top - (reached - first * step));
+	return { first, last, before, after: Math.max(0, laid - before - (last - first) * step) };
+}
+
+/** Where to scroll a long table so row `row` is at its top: the inverse of `drawnRows`. */
+export function scrollFor(count: number, row: number, height: number, rowHeight: number): number {
+	const step = Math.max(1, rowHeight);
+	const full = count * step;
+	const laid = Math.min(full, TALLEST);
+	const ratio = laid > height ? Math.max(1, (full - height) / (laid - height)) : 1;
+	return (row * step) / ratio;
 }
 
 export function numeric(cell: string): boolean {
