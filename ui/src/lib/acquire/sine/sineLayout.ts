@@ -1,30 +1,22 @@
 /**
- * The Sine run's pages and what each asks the service for (PROTOCOL.md, "Sine Display"), on the
- * page layer the shock types share (`../pulse/pulseLayout`). The service draws every plot: against
- * frequency on the run's sweep grid in a sweep or a step test, against test time in a dwell.
+ * The Sine run's screen (PROTOCOL.md, "Sine Display"): every quantity the service draws offered as
+ * a plot type, and the page kinds a screen opens with, on the frame the pulse page layer shares
+ * (`../pulse/pulseScreen`). The service draws every plot: against frequency on the run's sweep grid
+ * in a sweep or a step test, against test time in a dwell.
  *
  * The pages until the operator changes them: Control (the control amplitude against the profile
  * with its alarm and abort bands, and the drive as played), Limits (each limit channel against its
  * bound), Responses (every input's tracked amplitude and its phase against the drive),
  * Identification (the identified gain with its trust floor and the coherence) and Law (the law's
- * values on its last call and the run in numbers). Phase, Distortion and Time History pages can be
- * added.
+ * values on its last call and the run in numbers). A layout kept with pages of these kinds, or of
+ * the Phase, Distortion and Time History kinds, is taken over as it was.
  */
 
 import type { SineLiveQuantity } from '$lib/protocol/sine';
 import type { ChannelSelector } from '$lib/protocol/types';
-import {
-	defaultPulseLayout,
-	pulseLayoutFromSaved,
-	pulseLayoutToSaved,
-	pulsePagePlots,
-	pulsePlotId,
-	pulseSubscribeParams,
-	type PulseLayout,
-	type PulsePageSet,
-	type PulsePageSpec,
-	type PulsePlotSpec
-} from '../pulse/pulseLayout';
+import { pulsePlotTypes, type PulseScreenSpec } from '../pulse/pulseScreen';
+import type { PulsePageSet } from '../pulse/pulseLayout';
+import type { PlotType } from '../plots/types';
 
 export type SinePageKind = 'control' | 'limits' | 'responses' | 'identification' | 'law' | 'phase' | 'distortion' | 'time';
 
@@ -54,10 +46,6 @@ export const SINE_PAGE_HELP: Record<SinePageKind, string> = {
 	distortion: "The control channel's total harmonic distortion.",
 	time: "Every input's samples from the last batch."
 };
-
-export type SinePageSpec = PulsePageSpec<SinePageKind>;
-export type SineLayout = PulseLayout<SinePageKind>;
-export type SinePlotSpec = PulsePlotSpec<SineLiveQuantity>;
 
 export const SINE_RATES = [1, 2, 5, 10];
 export const SINE_DEFAULT_RATE = 5;
@@ -103,26 +91,21 @@ export const SINE_PAGES: PulsePageSet<SinePageKind, SineLiveQuantity> = {
 	channels: SINE_PAGE_CHANNELS
 };
 
-export const sinePlotId = pulsePlotId;
+/** Sine's screen: its plot types, cards and first pages. */
+export const SINE_SCREEN: PulseScreenSpec<SinePageKind, SineLiveQuantity> = {
+	pages: SINE_PAGES,
+	plots: [
+		['control', { words: 'Control', help: 'The control amplitude against the profile at the present level, with its alarm and abort bands.', group: 'frequency', families: ['measured', 'reference', 'tolerance', 'abort'] }],
+		['drive', { words: 'Drive', help: 'The drive as played.', group: 'frequency', families: ['drive'] }],
+		['response', { words: 'Response', help: "Each input's tracked amplitude at the tone's frequency, and a limit channel's bound.", group: 'frequency', families: ['measured', 'limit'] }],
+		['phase', { words: 'Phase', help: "Each input's phase against the drive.", group: 'frequency', families: ['measured'] }],
+		['thd', { words: 'Distortion', help: "The control channel's total harmonic distortion.", group: 'frequency', families: ['measured'] }],
+		['time', { words: 'Time History', help: "Each input's samples from the last batch.", group: 'time', families: ['measured'] }],
+		['identification', { words: 'Identification', help: 'The identified gain to the control channels with its trust floor, and the coherence with the trusted frequencies.', group: 'frequency', families: ['measured', 'reference', 'tolerance'] }],
+		['law', { words: 'Law Values', help: "The control law's values on its last call.", group: 'numbers' }],
+		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
+	],
+	cards: ['run', 'level', 'law', 'station']
+};
 
-export function defaultSineLayout(): SineLayout {
-	return defaultPulseLayout(SINE_PAGES);
-}
-
-/** Everything a page subscribes to, at its drawn width (CSS pixels). */
-export function sinePagePlots(page: SinePageSpec, width = 900, pixelRatio = 1): SinePlotSpec[] {
-	return pulsePagePlots(SINE_PAGES, page, width, pixelRatio);
-}
-
-/** What a window sends: channels on the plots that take them, a point count on the time history only. */
-export function sineSubscribeParams(plots: SinePlotSpec[], rate: number): Record<string, unknown> {
-	return pulseSubscribeParams(SINE_PAGES, plots, rate);
-}
-
-export function sineLayoutFromSaved(text: string | null): SineLayout | null {
-	return pulseLayoutFromSaved(SINE_PAGES, text);
-}
-
-export function sineLayoutToSaved(layout: SineLayout): string {
-	return pulseLayoutToSaved(layout);
-}
+export const SINE_PLOT_TYPES: PlotType[] = pulsePlotTypes(SINE_SCREEN);
