@@ -489,7 +489,7 @@ and answer with the project, as every act does.
 Dynamics' window shows it: `objects` are the selected objects' names, `records` maps an object's name
 to the record indices picked in its grid (a mode's or a channel's index for a shape set or a channel
 table), and `part` names a part of a geometry picked (`{"kind","id"}`: a family, an element group, a
-solid, a mate) or is null. One object shows by its kind: a geometry draws; a data object is its
+solid, a mate; `ids` too for element groups picked together) or is null. One object shows by its kind: a geometry draws; a data object is its
 waterfall, or the records picked as curves; a shape set is its modes on the geometry of its group (or
 the active one) with its mode table, or the table and its MAC against itself without one; a channel
 table is its table. Two together show what the pair means: data on a geometry animates it (a shape set,
@@ -546,7 +546,12 @@ is the operation's), and `self` for an act on the selection that is not an opera
 `self.`). A row that cannot run has `ready` false and a `reason` to show. A row without `modules` is
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
-as `project.show` takes it, adds the operations on that part, which carry `"part": true`.
+as `project.show` takes it, offers the operations on that part alone, each carrying `"part": true`,
+and none of the geometry's own: the shapes to build from and Mesh on the Solids row, Add Element and
+Add Group on an element family (the family filled in), and on element groups what sets their
+properties, merges, aligns or mates them, with every group picked filled into `groups`. Element
+groups picked together come as `{"kind": "group", "id", "ids"}`, `ids` every group picked; merging,
+aligning and mating need two or more and are not ready with one.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system, as Visual Dynamics draws its window in the system its selector names. A connection starts

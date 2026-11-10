@@ -7,7 +7,7 @@
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
 import { chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, pastedFiles } from '$lib/project/files';
-import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
+import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
@@ -207,7 +207,7 @@ class AnalyzeState {
 				{
 					objects: selection.objects,
 					records: selection.records,
-					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
+					part: partForService(selection),
 					prefs: {
 						flat: this.prefs.flat,
 						log_frequency: this.prefs.log_frequency,
@@ -249,7 +249,7 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<Actions>('project.actions', {
 				objects: selection.objects,
 				records: selection.records,
-				part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null
+				part: partForService(selection)
 			});
 			if (seq !== this.actionSeq) return;
 			this.actions = res;
@@ -1169,8 +1169,8 @@ export class ProjectState {
 		this.selected(clickRecord(this.selection, name, index, mods, block));
 	}
 
-	clickPart(name: string, kind: string, id: string | number): void {
-		this.selected(clickPart(this.selection, name, kind, id));
+	clickPart(name: string, kind: string, id: string | number, mods: Modifiers = {}, order: (string | number)[] = []): void {
+		this.selected(clickPart(this.selection, name, kind, id, mods, order));
 	}
 
 	clearSelection(): void {
@@ -1298,7 +1298,6 @@ export class ProjectState {
 		else if (id === 'self.name_group' && one) this.namingGroup = one;
 		else if (id === 'self.copy') await this.duplicate(picked);
 		else if (id === 'self.rename' && one) this.renaming = one;
-		else if (id === 'self.remove') this.confirming = true;
 		else if (id === 'self.fit' || id === 'self.edit_fit') {
 			if (coherent) {
 				this.app.analyze.fitWeighing = true;

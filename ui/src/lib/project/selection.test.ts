@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY, clickObject, clickPart, clickRecord, pruned, rectangle, renamed } from './selection';
+import { EMPTY, clickObject, clickPart, clickRecord, partForService, partIsPicked, pruned, rectangle, renamed } from './selection';
 
 const order = ['Geometry', 'Table', 'Time', 'FRF', 'Modes'];
 
@@ -87,5 +87,39 @@ describe('parts and the project changing', () => {
 		const moved = renamed(s, 'Time', 'Run 1');
 		expect(moved.objects).toEqual(['FRF', 'Run 1']);
 		expect(moved.records).toEqual({ 'Run 1': [1] });
+	});
+});
+
+describe('element groups picked together', () => {
+	const order = [1, 2, 3, 4];
+	const one = clickPart(EMPTY, 'Plate', 'group', 2);
+
+	it('Cmd adds a group of the same geometry and takes it away again', () => {
+		const two = clickPart(one, 'Plate', 'group', 4, { toggle: true }, order);
+		expect(two.part).toEqual({ name: 'Plate', kind: 'group', id: 2, ids: [2, 4] });
+		expect(partIsPicked(two, 'Plate', 'group', 4)).toBe(true);
+		expect(partForService(two)).toEqual({ kind: 'group', id: 2, ids: [2, 4] });
+		const back = clickPart(two, 'Plate', 'group', 4, { toggle: true }, order);
+		expect(back.part).toEqual({ name: 'Plate', kind: 'group', id: 2 });
+		expect(partForService(back)).toEqual({ kind: 'group', id: 2 });
+	});
+
+	it('Shift picks the run from the last group picked plainly', () => {
+		const run = clickPart(one, 'Plate', 'group', 4, { extend: true }, order);
+		expect(run.part?.ids).toEqual([2, 3, 4]);
+		expect(run.part?.id).toBe(2);
+	});
+
+	it('a plain click, another kind of part or another geometry starts again', () => {
+		const two = clickPart(one, 'Plate', 'group', 3, { toggle: true }, order);
+		expect(clickPart(two, 'Plate', 'group', 1, {}, order).part).toEqual({ name: 'Plate', kind: 'group', id: 1 });
+		expect(clickPart(two, 'Plate', 'family', 'hexes', { toggle: true }).part).toEqual({ name: 'Plate', kind: 'family', id: 'hexes' });
+		expect(clickPart(two, 'Frame', 'group', 3, { toggle: true }, order).part).toEqual({ name: 'Frame', kind: 'group', id: 3 });
+	});
+
+	it('taking the last group away leaves the geometry selected', () => {
+		const none = clickPart(one, 'Plate', 'group', 2, { toggle: true }, order);
+		expect(none.part).toBeNull();
+		expect(none.objects).toEqual(['Plate']);
 	});
 });
