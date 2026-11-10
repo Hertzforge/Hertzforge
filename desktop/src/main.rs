@@ -144,7 +144,8 @@ fn startup(app: AppHandle) {
         paths.resource_dir(),
         paths.app_log_dir(),
     ) {
-        (Ok(exe), Ok(res), Ok(logs)) => Layout::installed(exe.parent().unwrap_or(&exe), &res, logs),
+        (Ok(exe), Ok(res), Ok(logs)) => Layout::development(logs.clone())
+            .unwrap_or_else(|| Layout::installed(exe.parent().unwrap_or(&exe), &res, logs)),
         _ => return fail(&app, "The app's own folders could not be found."),
     };
     let services = match Services::start(&layout) {

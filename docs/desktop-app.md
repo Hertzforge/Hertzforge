@@ -3,7 +3,7 @@
 `desktop/` is the Hertzforge desktop app: a Tauri 2 window that shows the shell (`ui/`), with the
 control service and the analysis service started beside it. Nothing else needs installing: the app
 carries its own Python. The browser setup (`scripts/dev.sh`, `?mock=1`) stays as it was and is for
-development.
+development; `scripts/dev_app.sh` runs the app itself from the checkout (Trying a Change in the App).
 
 ## What the Installers Contain
 
@@ -24,6 +24,32 @@ The CI workflow `.github/workflows/desktop.yml` builds on every push to the desk
 demand: a `.dmg` for macOS on Apple silicon, an NSIS installer (`*-setup.exe`) for Windows x64, and
 a `.deb` and an AppImage for Linux x64, as workflow artifacts kept for 14 days. It is not a required
 check.
+
+## Trying a Change in the App
+
+`scripts/dev_app.sh` opens the app from the checkout without packaging it: the real window, menus
+and file dialogs (Tauri's development mode), the shell from its development server, and both
+services from the checkout. It builds the control service (release, only what changed), starts the
+shell's development server on port 5191 unless one is already there, and runs `tauri dev` with
+`HERTZFORGE_DEV_CONTROL` and `HERTZFORGE_DEV_PYTHON` naming the two services. Only a development
+build reads those; a release build starts the services it carries, whatever the environment says.
+
+```bash
+scripts/dev_app.sh
+```
+
+A change saved under `ui/` shows in the window at once. A change to the Python package or to the
+control service shows the next time it runs: quit the app and run it again, a matter of seconds once
+the first run (a few minutes) has built everything. A change under `desktop/` rebuilds and restarts
+the app by itself. The analysis service runs on the Python `python3` resolves to in the checkout,
+which must have the package installed for development (`pip install -e .`); `HERTZFORGE_DEV_PYTHON`
+names another. The script resolves a pyenv shim to the interpreter itself, since the app starts the
+service from another folder, where the shim would choose another Python.
+
+On a Mac, a launcher in `~/Applications` can run it in a Terminal window, which shows the build and
+the services' output; quitting the app ends it. It is an AppleScript applet,
+`tell application "Terminal" to do script "cd ~/hertzforge && scripts/dev_app.sh"`, compiled with
+`osacompile`.
 
 ## Building It Locally
 
