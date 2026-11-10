@@ -178,11 +178,11 @@ PARTS = {f'project.{name}': part for name, part in {
 
 #: operations kept off the action table, though they stay operations: a hole
 #: is a cylinder to subtract (Brandon, 2026-10-20); an object is placed in a
-#: group by dragging it there in the tree, and a geometry's entities are seen
-#: and deleted by picking their part in the tree, which shows their table
-#: (Brandon, 2026-11-10)
-UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.view_entities',
-                       'project.delete_entities'})
+#: group, and a solid among its siblings, by dragging it there in the tree; and
+#: a geometry's entities are seen and deleted by picking their part in the
+#: tree, which shows their table (Brandon, 2026-11-10)
+UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
+                       'project.view_entities', 'project.delete_entities'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',

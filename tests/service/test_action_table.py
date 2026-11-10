@@ -203,6 +203,7 @@ def test_a_part_offers_its_own_verbs_alone(plate):
     solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
     assert set(SHAPES) | {'Show Solids', 'Mesh'} <= set(solids)
     assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Combine'} & set(solids)
+    assert 'Reorder' not in solids, 'a solid is reordered by dragging it in the tree'
     nodes = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0])
     assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
 
