@@ -15,10 +15,10 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import { TWR_TOPICS, type TwrData, type TwrLive, type TwrPlaysResult } from '$lib/protocol/twr';
 import type { SpectrumView } from '$lib/protocol/types';
 import { SineStore } from '../sine/sineStore.svelte';
+import type { PlotPanel } from '../screen/screen.svelte';
 import { AcquireState } from '../store.svelte';
-import { twrPagePlots, twrSubscribeParams, TWR_PAGES } from './twrLayout';
 import { TwrStore } from './twrStore.svelte';
-import { TwrViewsState } from './twrViews.svelte';
+import { TWR_HOOKS, TwrViewsState } from './twrViews.svelte';
 import { twrLevelStatus } from './twrWords';
 
 const until = async (cond: () => boolean, ms = 8000) => {
@@ -480,10 +480,13 @@ describe("the TWR mock's subscriptions, as the service takes them", () => {
 		expect([ok.rate_hz, ok.plots[0].points]).toEqual([5, 1024]);
 	});
 
-	it("every page the shell offers is a subscription the mock accepts", async () => {
+	it('every page the shell opens with, and every plot type on its own, is a subscription the mock accepts', async () => {
 		const { client } = await screen();
-		for (const kind of TWR_PAGES.kinds) {
-			const params = twrSubscribeParams(twrPagePlots({ id: 'p', name: kind, kind }), 5);
+		const layout = TWR_HOOKS.defaultLayout(1.4);
+		const plots = layout.pages.map((pg) => pg.panels.filter((x): x is PlotPanel => x.kind === 'plot'));
+		const one = TWR_HOOKS.types.map((t, i): PlotPanel => ({ ...plots[0][0], id: `pl-${i}`, plot: { ...plots[0][0].plot, quantity: t.id } }));
+		for (const list of [...plots, ...one.map((p) => [p])]) {
+			const params = TWR_HOOKS.feed!.params(list, 5);
 			await expect(client.request('twr.subscribe', params)).resolves.toMatchObject({ default: false });
 		}
 	});

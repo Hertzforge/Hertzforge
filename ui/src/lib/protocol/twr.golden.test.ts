@@ -36,7 +36,9 @@ import { createControlServer } from './mock/control';
 import { mockSocketFactory } from './mock/socket';
 import { lawsOfWorld } from '$lib/acquire/law/lawForm';
 import { AcquireState } from '$lib/acquire/store.svelte';
-import { TWR_PAGES, TWR_QUANTITIES, twrPagePlots, twrSubscribeParams } from '$lib/acquire/twr/twrLayout';
+import { defaultPulseScreen, pulseSubscription } from '$lib/acquire/pulse/pulseScreen';
+import type { PlotPanel } from '$lib/acquire/screen/screen.svelte';
+import { TWR_PLOT_TYPES, TWR_QUANTITIES, TWR_SCREEN } from '$lib/acquire/twr/twrLayout';
 import { defaultTwrSetup, fromTwrConfig, toTwrConfig, twrByKey, twrSectionOf } from '$lib/acquire/twr/twrSetup';
 import { TwrStore } from '$lib/acquire/twr/twrStore.svelte';
 import { playProgress, twrLevelStatus } from '$lib/acquire/twr/twrWords';
@@ -224,11 +226,14 @@ describe('TWR goldens through the shell', () => {
 		}
 	});
 
-	it('every page the shell offers subscribes with a point count on the record plots only', () => {
-		for (const kind of TWR_PAGES.kinds) {
-			const sent = twrSubscribeParams(twrPagePlots({ id: 'p', name: kind, kind }), 5) as { plots: { quantity: TwrQuantity }[] };
+	it('every plot type the shell offers subscribes with a point count on the record plots only', () => {
+		const first = defaultPulseScreen(TWR_SCREEN, TWR_PLOT_TYPES).pages.flatMap((pg) => pg.panels.filter((x): x is PlotPanel => x.kind === 'plot'));
+		const one = TWR_PLOT_TYPES.map((t, i): PlotPanel => ({ ...first[0], id: `pl-${i}`, plot: { ...first[0].plot, quantity: t.id } }));
+		for (const plots of [first, one]) {
+			const sent = pulseSubscription(TWR_PLOT_TYPES, plots, 5) as { plots: { quantity: TwrQuantity }[] };
 			keysAsTheServiceTakes(sent.plots, true);
 		}
+		expect(TWR_PLOT_TYPES.map((t) => t.id).sort()).toEqual(TWR_QUANTITIES.filter((q) => q !== 'plays').sort());
 	});
 
 	it.skipIf(!has('response_twr_subscribe.json'))('the subscription is answered with every default filled in', () => {
