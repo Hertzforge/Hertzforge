@@ -1,12 +1,12 @@
 <script lang="ts" module>
 	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
 	/**
-	 * Where the camera stood on each object drawn, by the view's title (the object): the view
-	 * belongs to the person, so picking a part, clicking away or an edit drawing the object again
-	 * opens where they left it. `radius` is the model's size then; one grown or shrunk past a
-	 * quarter (a block's widths typed) is fitted again instead (Brandon, 2026-11-10).
+	 * Where the camera stood, one for every 3-D view: the view belongs to the person, so picking
+	 * another object or a part, clicking away or an edit drawing the model again opens where
+	 * they left it. `radius` is the model's size then; a model grown or shrunk past a quarter (a
+	 * block's widths typed, a larger geometry picked) is fitted again (Brandon, 2026-11-10).
 	 */
-	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; radius: number }>();
+	let kept: { position: number[]; target: number[]; up: number[]; radius: number } | null = null;
 
 </script>
 
@@ -778,7 +778,6 @@
 
 		// the pane's shape first: the fit depends on it
 		resize();
-		const kept = poses.get(view.title);
 		const pose = kept && stillFramed(kept.radius, sphere.radius) ? kept : undefined;
 		if (pose) {
 			camera.position.fromArray(pose.position);
@@ -1000,7 +999,7 @@
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
-		poses.set(view.title, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), radius: framedRadius });
+		kept = { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), radius: framedRadius };
 		handles?.detach();
 		handles?.getHelper().removeFromParent();
 		handles?.dispose();
