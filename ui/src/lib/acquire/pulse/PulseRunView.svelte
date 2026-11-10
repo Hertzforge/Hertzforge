@@ -9,7 +9,7 @@
 	import type { Snippet } from 'svelte';
 	import type { ActionId, RunBarHost } from '../actions';
 	import RunVerbs from '../RunVerbs.svelte';
-	import type { PlotBodies } from '../screen/bodies';
+	import type { PlotBodies, PlotDataSnippet } from '../screen/bodies';
 	import Dock from '../screen/Dock.svelte';
 	import PageGrid from '../screen/PageGrid.svelte';
 	import PageTabs from '../screen/PageTabs.svelte';
@@ -34,6 +34,8 @@
 		cards: Snippet<[CardKind]>;
 		/** The type's own bodies for some of its plot types. */
 		bodies?: PlotBodies;
+		/** The type's own choices in a plot's options menu. */
+		data?: PlotDataSnippet;
 		/** The run's inputs, for a plot's channel choice. */
 		channels: { index: number; name: string }[];
 		/** What an empty plot says. */
@@ -48,7 +50,7 @@
 		/** A window on another monitor: the plots and the cards, with Stop and Abort the only verbs. */
 		compact?: boolean;
 	}
-	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false }: Props = $props();
+	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, data, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false }: Props = $props();
 
 	const run = $derived(host.run);
 	const end = $derived(run?.state === 'finished' ? run.end : null);
@@ -118,7 +120,7 @@
 <div class="live" class:compact class:bottom={screen.dock.side === 'bottom'} data-testid="{prefix}-run-view" {...attrs}>
 	<div class="area">
 		<div class="pageview" data-testid="{prefix}-page-view" data-page={page.id}>
-			<PageGrid {screen} {card} {channels} {empty} {live} {bodies} />
+			<PageGrid {screen} {card} {channels} {empty} {live} {bodies} {data} />
 		</div>
 		<PageTabs {screen} {onpopout} />
 	</div>
