@@ -117,6 +117,15 @@ const METERS: Record<string, number> = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, 
  * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
  * whose numbers have no unit to round in.
  */
+/** What a gimbal drag has done so far, for the bar under the view: the amount along or about one axis. */
+export function gizmoReading(mode: 'translate' | 'rotate', axis: string, amount: number, unit: string): string {
+	const about = axis.toUpperCase();
+	if (mode === 'rotate') return `Turn about ${about}: ${Number(amount.toFixed(1))}°`;
+	const step = gridStep(unit);
+	const places = step ? Math.max(0, Math.ceil(-Math.log10(step))) : 3;
+	return `Move along ${about}: ${amount.toFixed(places)} ${unit}`;
+}
+
 export function gridStep(unit: string): number | null {
 	const meters = METERS[unit];
 	if (meters === undefined) return null;

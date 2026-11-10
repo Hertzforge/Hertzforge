@@ -427,6 +427,10 @@ export interface TableEdit {
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
 	/** The row each shown row is in the object, from 1, when the table shows a pick of them. */
 	rows?: number[];
+	/** A column shown in the display units, by key: [scale, offset] taking a value typed back to SI. */
+	to_si?: Record<string, [number, number]>;
+	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' `ids`, as runs. */
+	remove?: { op: string; params: Record<string, unknown>; ids: string[] };
 }
 
 /** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */
@@ -547,6 +551,10 @@ export interface ActionRow {
 	candidates?: string[];
 	/** An operation on the part of a geometry picked in the tree. */
 	part?: true;
+	/** Runs at once with what it is filled with (a shape added, then edited). */
+	instant?: true;
+	/** Its form applies each change as it is made: a field when it is left, a gimbal when it is let go. */
+	live?: true;
 	/** Export: the formats this object can be written in. */
 	formats?: ExportFormat[];
 }

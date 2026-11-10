@@ -4,8 +4,8 @@
 	 * what the selection shows. A module (`only`) differs in which verbs the table offers. An act's
 	 * result joins the tree; a reading takes the view until its default row is clicked.
 	 */
-	import type { AppState } from '$lib/app/state.svelte';
-	import type { Workspace } from '$lib/protocol/types';
+	import { foldKey, type AppState } from '$lib/app/state.svelte';
+	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionTable from './ActionTable.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
@@ -207,7 +207,8 @@
 					{@const views = a.shown.views.filter((v) => !(shapes && a.shapeView === 'mac' && v.view === 'shape3d' && !a.pair))}
 					{@const beside = views.filter((v) => v.view !== 'shape3d')}
 					<!-- every view is a pane that fills the frame, unless it is a table, which takes its rows; stacked on a narrow frame each keeps a working height and the frame scrolls -->
-					<div class="svviews panes" class:several={views.length > 1}
+					{@const isFolded = (v: View) => v.view === 'table' && views.length > 1 && a.folded.includes(foldKey(v.title))}
+					<div class="svviews panes" class:several={views.length > 1} class:folded={beside.length > 0 && views.some((v) => v.view === 'shape3d') && beside.every(isFolded)}
 						style:--rows={Math.max(1, beside.length)}
 						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
 						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
@@ -218,6 +219,9 @@
 									<!-- the pane's own header: its title and the controls that read this view; a lone view with nothing to set leaves its title to the frame -->
 									<header class="phead">
 										<h4>{v.title}</h4>
+										{#if v.view === 'table' && views.length > 1}
+											<button class="btn ghost sm" aria-expanded={!isFolded(v)} data-testid="fold-{foldKey(v.title)}" title={isFolded(v) ? 'Show the table' : 'Fold the table to its title, so the view beside it has the frame'} onclick={() => a.toggleFolded(foldKey(v.title))}>{isFolded(v) ? 'Show' : 'Hide'}</button>
+										{/if}
 										{#if v.view === 'shape3d'}
 											{#if offers.arrows}
 												<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
@@ -246,6 +250,7 @@
 										{/if}
 									</header>
 								{/if}
+								{#if !isFolded(v)}
 								<div class="pbody">
 									<ViewRenderer
 										view={v}
@@ -260,8 +265,11 @@
 										mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
 										overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
+										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
+										ongizmo={v.view === 'shape3d' && v.gizmo ? (act, patch) => a.dragOnSelection(act, patch) : undefined}
 									/>
 								</div>
+								{/if}
 							</div>
 						{/each}
 					</div>
@@ -525,6 +533,19 @@
 		.svviews.panes.several .view.shape3d {
 			grid-row: 1 / span var(--rows);
 		}
+	}
+
+	/* every table folded to its title: the 3-D view takes the frame's width, the titles a row each under it */
+	.svviews.panes.several.folded,
+	.svviews.panes.several.folded:has(.view.shape3d) {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: minmax(440px, 1fr);
+		grid-auto-rows: auto;
+	}
+
+	.svviews.panes.several.folded .view.shape3d {
+		grid-column: 1;
+		grid-row: 1;
 	}
 
 	/* a pane's track sizes it: a 3-D view or a matrix fills what the frame gives, a table takes its rows */

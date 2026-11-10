@@ -1115,7 +1115,19 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     if prefs['log_frequency']:
         _decades(views)
     if part and part.get('kind') and len(objects) == 1:
-        notes.append(f'{part["kind"]} {part.get("id", "")} picked; the whole geometry is drawn'.strip())
+        from .ops_geometry import part_entities
+        from .ops_solids import part_solids
+        from .verbs import part_key, picked_ids
+
+        held = project[objects[0]]
+        entities = part_entities(objects[0], held, part) if hasattr(held, 'elem_group') else None
+        if entities is None and part_key(part) in ('solids', 'solid'):
+            moved = [int(i) for i in picked_ids(part)] if part_key(part) == 'solid' else None
+            entities = part_solids(objects[0], held, moved)
+        if entities is not None:
+            views = entities
+        else:
+            notes.append(f'{part["kind"]} {part.get("id", "")} picked; the whole geometry is drawn'.strip())
     title = ' and '.join(objects) if len(objects) <= 3 else f'{objects[0]} and {len(objects) - 1} more'
     return {'title': title, 'views': views, 'note': '; '.join(n for n in notes if n),
             'offers': _offers(project, objects, prefs)}

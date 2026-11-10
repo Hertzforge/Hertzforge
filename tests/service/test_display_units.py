@@ -86,13 +86,15 @@ def test_export_writes_in_the_connections_system(tmp_path):
     assert rows['Units']['value'] == 'in-slinch-lbf-s'
 
 
-def test_a_tables_unit_columns_are_converted_but_not_the_ones_typed_into():
-    view = v.table('Nodes', ['Node', 'X [m]', 'Y [m]', 'Note [m]'],
-                   [['1', '0.0254', '0.0508', 'here']],
-                   v.editing('project.set_entity_cell', {}, ['id', None, 'y', None]))
+def test_a_tables_unit_columns_are_converted_and_a_typed_one_says_how_back():
+    view = v.table('Nodes', ['Node', 'X [m]', 'Y [m]', 'Note [m]', 'Size [m]'],
+                   [['1', '0.0254', '0.0508', 'here', '0.01 0.02']],
+                   v.editing('project.set_entity_cell', {}, ['id', None, 'y', None, 'size']))
     (out,) = display_units.convert([view], US)
-    assert out['columns'] == ['Node', 'X [in]', 'Y [m]', 'Note [in]']
-    assert out['rows'][0] == ['1', '1', '0.0508', 'here']
+    assert out['columns'] == ['Node', 'X [in]', 'Y [in]', 'Note [in]', 'Size [m]']
+    assert out['rows'][0] == ['1', '1', '2', 'here', '0.01 0.02']
+    # a value typed in inches goes back to meters; several numbers to a cell stay in SI
+    assert out['edit']['to_si'] == {'y': [pytest.approx(0.0254), 0.0]}
 
 
 def _plate(unit):

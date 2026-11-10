@@ -188,7 +188,9 @@ SHAPES = ['Add Block', 'Add Cylinder', 'Add Cone', 'Add Sphere', 'Add Section', 
 def test_the_geometry_row_leaves_its_parts_verbs_to_its_parts(plate):
     geometry = named(plate, 'geometry')
     own = verbs_in(table(plate, geometry)[0])
-    assert {'Export', 'Show Entities', 'Set View', 'Delete Picks'} <= set(own)
+    assert {'Export', 'Set View'} <= set(own)
+    # a part picked in the tree shows its entities' table, and Delete takes its rows
+    assert not {'Show Entities', 'Delete Picks'} & set(own)
     for verb in [*SHAPES, 'Show Solids', 'Mesh', 'Add Element', 'Add Group', 'Set Properties',
                  'Merge Nodes', 'Align', 'Mate', 'Add Node', 'Rotate']:
         assert verb not in own, verb
@@ -199,8 +201,10 @@ def test_the_geometry_row_leaves_its_parts_verbs_to_its_parts(plate):
 def test_a_part_offers_its_own_verbs_alone(plate):
     geometry = named(plate, 'geometry')
     solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
-    assert set(SHAPES) | {'Show Solids', 'Mesh'} <= set(solids)
+    assert set(SHAPES) | {'Mesh'} <= set(solids)
     assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Combine'} & set(solids)
+    assert 'Reorder' not in solids, 'a solid is reordered by dragging it in the tree'
+    assert 'Show Solids' not in solids, 'picking the row shows them'
     nodes = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0])
     assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
 
@@ -241,16 +245,27 @@ def test_solids_picked_together_combine(validate):
     one, together = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': 1},
                           validate=validate)
     assert one['parts'] == ['solid'] and 'Combine' not in verbs_in(one)
-    assert row(one, 'Edit Solid')['fill']['solid'] == '1'
+    # a block is edited in its own Add form, which takes the place of Edit Solid
+    assert row(one, 'Edit')['fill']['solid'] == '1' and 'Edit Solid' not in verbs_in(one)
+    # Mesh on the Solids row meshes every part; on solids picked, those
+    assert row(one, 'Mesh')['fill']['solids'] == '1' and 'geometry' in row(one, 'Mesh')['modules']
     assert row(together, 'Combine')['candidates'] == ['2', '3']
     picked = {'name': 'Part', 'kind': 'solid', 'id': 1, 'ids': [1, 3]}
     columns = table(state, 'Part', part=picked, validate=validate)
     both = columns[0]
     assert both['parts'] == ['solid', 'solid']
-    for verb in ('Combine', 'Move Part', 'Pattern', 'Take Apart', 'Delete Solids'):
+    for verb in ('Combine', 'Move Part', 'Pattern', 'Delete Solids'):
         assert row(both, verb)['fill']['solids'] == '1, 3' and row(both, verb)['ready'], verb
     assert row(both, 'Edit Solid')['reason'] == 'Pick one solid in the tree'
     assert len(columns) == 1
+    assert row(one, 'Take Apart')['reason'] == 'It is not a boolean or a pattern'
+    combine = OPS['project.combine_solids']
+    combine.run(state.project, combine.resolve(
+        {'geometry': 'Part', 'operation': 'union', 'solids': '1, 2'},
+        objects={'Part': 'geometry'}, verbs={'Part': []}))
+    union = int(state.project['Part'].solids[-1].id)
+    made = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': union})[0]
+    assert row(made, 'Take Apart')['ready'] and row(made, 'Take Apart')['fill']['solids'] == str(union)
 
 
 def test_a_part_pairs_only_with_its_own_kind(plate):

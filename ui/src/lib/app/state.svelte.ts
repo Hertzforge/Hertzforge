@@ -72,6 +72,9 @@ class AnalyzeState {
 	shown = $state.raw<Shown | null>(null);
 	/** The bar's choices, remembered across launches. */
 	prefs = $state<ShowPrefs>(readPrefs());
+	/** The tables folded down to their headers, by what they list ('Nodes', 'Solids'), so the
+	 * 3-D view beside them has the frame; remembered across launches. */
+	folded = $state<string[]>(readFolded());
 	/** The frequency the stage's shape is read at, from the plot's cursor; null for the loudest line. */
 	line = $state<number | null>(null);
 	private lineTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,7 +95,6 @@ class AnalyzeState {
 	shapeView = $state<ShapeView | null>(null);
 	/** The reading drawn in place of what the selection shows, by its row's id. */
 	readingId = $state<string | null>(null);
-	/** A combination's row whose partner is being picked in the tree. */
 	/** A combination waiting on its last pick in the tree: an object of `kind`, or with `part`, another part of that kind. */
 	picking = $state<{ verb: string; kind: string; row: ActionRow; part?: string } | null>(null);
 	/** The row to run once the object it needed has joined the selection. */
@@ -147,10 +149,16 @@ class AnalyzeState {
 	}
 
 	/** What the form asks: not the objects the selection already filled, and of a format only those the object can be written in. */
+	/** The open form's name: a solid's Add, opened on a solid already made, is its Edit. */
+	get formTitle(): string {
+		const title = this.op?.title ?? '';
+		return this.formRow?.live ? title.replace(/^Add /, 'Edit ') : title;
+	}
+
 	get formParams(): ParamDescriptor[] {
 		const row = this.formRow;
 		return this.params
-			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill))
+			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid'))
 			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
 
@@ -299,6 +307,10 @@ class AnalyzeState {
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
+		if (row.instant) {
+			await this.addThenEdit(row);
+			return;
+		}
 		if (!column.current && column.parts) {
 			const part = column.parts[column.parts.length - 1];
 			const picked = this.app.project.selection.part;
@@ -336,7 +348,8 @@ class AnalyzeState {
 		if (!op) return;
 		const filled = new Set(Object.keys(row.fill ?? {}));
 		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
-		if (asks.length) this.formOpen = true;
+		// a form that applies as it goes is filled in full and opens all the same
+		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
 	}
 
@@ -361,6 +374,40 @@ class AnalyzeState {
 		} catch (err) {
 			this.runError = message(err);
 		}
+	}
+
+	/**
+	 * A shape added at once with what its row is filled with, then picked in the tree with its
+	 * form open, which edits it from then on (Brandon, 2026-11-10: adding and editing are one).
+	 */
+	private async addThenEdit(row: ActionRow): Promise<void> {
+		const p = this.app.project;
+		const geometry = row.fill?.geometry;
+		if (!geometry) return;
+		const ids = (): number[] => {
+			const held = p.children[geometry];
+			return held?.kind === 'geometry' ? held.solids.map((s) => s.id) : [];
+		};
+		const before = new Set(ids());
+		this.runError = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: row.id, params: row.fill ?? {} }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) p.apply(res.project);
+			await p.loadChildren(geometry);
+		} catch (err) {
+			this.runError = message(err);
+			return;
+		}
+		const made = ids().find((id) => !before.has(id));
+		if (made === undefined) return;
+		this.joined = row.id;
+		p.clickPart(geometry, 'solid', made);
+	}
+
+	/** A form that applies as it goes (`live`): what it holds now is run, and it is filled again from what the change left. */
+	async applyLive(): Promise<void> {
+		await this.run();
+		await this.loadActions();
 	}
 
 	/** The object a combination needed was chosen: it joins the selection, and the row runs once the table has caught up. */
@@ -396,7 +443,8 @@ class AnalyzeState {
 		const values = { ...this.currentValues };
 		let changed = false;
 		for (const [key, text] of Object.entries(entry.fill)) {
-			const value = op.params.find((p) => p.name === key)?.type === 'integer' ? Number(text) : text;
+			const type = op.params.find((p) => p.name === key)?.type;
+			const value = type === 'integer' || type === 'number' ? Number(text) : text;
 			if (values[key] !== value) {
 				values[key] = value;
 				changed = true;
@@ -517,7 +565,7 @@ class AnalyzeState {
 			try {
 				const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params: values, preview: true });
 				if (seq !== this.previewSeq || this.opId !== op.id) return;
-				this.reading = { title: `${op.title}, preview`, views: res.views };
+				this.reading = { title: `${this.formTitle}, preview`, views: res.views };
 				this.previewDrawn = this.reading;
 				this.readingId = op.id;
 				this.runError = null;
@@ -538,6 +586,8 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
+			// a form that applies as it goes holds what the gimbal left
+			if (this.formRow?.live) void this.loadActions();
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
 			if (next?.view === 'shape3d' && next.pick && this.values[pick.op]) {
 				this.values = { ...this.values, [pick.op]: { ...this.values[pick.op], ...(next.pick.params as ParamValues) } };
@@ -546,6 +596,23 @@ class AnalyzeState {
 			this.runError = message(err);
 			this.redrawReading();
 		}
+	}
+
+	/**
+	 * The gimbal on what the selection shows (a solid picked in the tree) let go: its operation
+	 * runs, and the selection is shown again, the gimbal where the solid now is.
+	 */
+	async dragOnSelection(act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
+		this.runError = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: act.op, params: { ...act.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			const geometry = act.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+		} catch (err) {
+			this.runError = message(err);
+		}
+		void this.showSelection();
 	}
 
 	/** No new view is coming: the same ones again, so a handle let go where it was refused goes back. */
@@ -611,7 +678,7 @@ class AnalyzeState {
 				this.app.project.clickObject(added[0], order);
 				this.closeForm();
 			} else if (res.views.length) {
-				this.reading = { title: op.title, views: res.views };
+				this.reading = { title: this.formTitle, views: res.views };
 				this.readingId = op.id;
 			} else {
 				this.closeForm();
@@ -624,12 +691,36 @@ class AnalyzeState {
 		}
 	}
 
+	/** A table folded to its header, or opened again. */
+	toggleFolded(key: string): void {
+		this.folded = this.folded.includes(key) ? this.folded.filter((k) => k !== key) : [...this.folded, key];
+		try {
+			localStorage.setItem(FOLDED_KEY, JSON.stringify(this.folded));
+		} catch {
+			// a private window keeps it for the session only
+		}
+	}
+
+	/** Rows of a table of entities deleted (`edit.remove`): the project, the tree's counts and the tables follow. */
+	async removeShownRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			const geometry = remove.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			void this.showSelection();
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value } },
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.project) this.app.project.apply(res.project);
@@ -643,6 +734,37 @@ class AnalyzeState {
 		}
 	}
 }
+
+const FOLDED_KEY = 'hertzforge.foldedTables';
+
+function readFolded(): string[] {
+	try {
+		const held = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? '[]');
+		return Array.isArray(held) ? held.filter((k): k is string => typeof k === 'string') : [];
+	} catch {
+		return [];
+	}
+}
+
+/** What a table lists, the part of its title before " of ": the key it is folded by. */
+export function foldKey(title: string): string {
+	return title.split(' of ')[0];
+}
+
+/** A value typed into a column shown in the display units, taken back to SI as the column's `to_si` says. */
+export function inSi(edit: TableEdit, column: string, value: string): string {
+	const change = edit.to_si?.[column];
+	const number = Number(value);
+	if (!change || value.trim() === '' || !Number.isFinite(number)) return value;
+	return String(number * change[0] + change[1]);
+}
+
+/** The operation Delete runs for each part of a geometry it deletes, and the part in words. */
+const PART_DELETES: Record<string, { op: string; param: string; words: string }> = {
+	solid: { op: 'project.delete_solids', param: 'solids', words: 'solid' },
+	group: { op: 'project.delete_element_groups', param: 'groups', words: 'element group' },
+	mate: { op: 'project.delete_mated_surfaces', param: 'mates', words: 'mated surface' }
+};
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
@@ -1534,6 +1656,18 @@ export class ProjectState {
 	}
 
 	/**
+	 * What Delete takes with a part of a geometry picked: the solids, element groups or mated
+	 * surfaces picked, never the geometry. Null for a part Delete leaves alone (the nodes, a
+	 * family: their rows are deleted in their table).
+	 */
+	get partDeletion(): { name: string; op: string; param: string; ids: (string | number)[]; words: string } | null {
+		const part = this.selection.part;
+		const how = part ? PART_DELETES[part.kind] : undefined;
+		if (!part || !how) return null;
+		return { name: part.name, ...how, ids: part.ids ?? [part.id] };
+	}
+
+	/**
 	 * Remove what is selected, once confirmed: the picked sub-items when any are picked (a
 	 * co-selected object is context, not a target), else the objects.
 	 */
@@ -1541,6 +1675,16 @@ export class ProjectState {
 		const names = [...this.selection.objects];
 		const parts = this.pickedParts;
 		this.confirming = false;
+		if (this.selection.part) {
+			const gone = this.partDeletion;
+			if (!gone) return false;
+			const ok = await this.act(`Deleting ${gone.ids.length} ${gone.words}${gone.ids.length === 1 ? '' : 's'} of ${gone.name}`, gone.op, { geometry: gone.name, [gone.param]: gone.ids.join(', ') });
+			if (ok) {
+				this.selected({ objects: [gone.name], records: {}, part: null, anchor: gone.name });
+				void this.loadChildren(gone.name);
+			}
+			return ok;
+		}
 		if (Object.keys(parts).length) return this.deleteParts(parts);
 		if (!names.length) return false;
 		return this.remove(names);

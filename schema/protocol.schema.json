@@ -406,7 +406,16 @@
             "columns": {"type": "array", "items": {"type": ["string", "null"]}},
             "choices": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
             "kinds": {"type": "object", "additionalProperties": {"enum": ["choice", "flag", "date", "unit", "number", "text"]}},
-            "rows": {"type": "array", "items": {"type": "integer", "minimum": 1}}
+            "rows": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+            "to_si": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}},
+            "remove": {
+              "type": "object", "required": ["op", "params", "ids"], "additionalProperties": false,
+              "properties": {
+                "op": {"type": "string"},
+                "params": {"type": "object"},
+                "ids": {"type": "array", "items": {"type": "string"}}
+              }
+            }
           }
         }
       }
@@ -572,6 +581,8 @@
         "fill": {"type": "object", "additionalProperties": {"type": "string"}},
         "candidates": {"type": "array", "items": {"type": "string"}},
         "part": {"const": true},
+        "instant": {"const": true},
+        "live": {"const": true},
         "formats": {"type": "array", "items": {
           "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
           "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}

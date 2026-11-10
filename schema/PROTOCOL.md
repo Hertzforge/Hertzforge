@@ -354,7 +354,16 @@ gives each column's key, or null for a column that is read only. A cell typed in
 operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),
 and the first `table` view of the answer takes the table's place; a value the operation refuses
 leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
-the block it covers, cell by cell.
+the block it covers, cell by cell. `rows`, when the table shows some of the object's rows, gives the
+row each shown row is, from 1. `remove` (`{"op","params","ids"}`) says the rows are the entities
+themselves, as in a geometry's entity tables: Delete removes the selected rows rather than clearing
+their cells, by running `op` with `params` and `ids`, the selected rows' entries of `ids` as runs
+(`"1-3, 7"`).
+
+With a part of a geometry picked (`part`), `project.show` draws its entities' table beside the
+geometry, with the click in the view that adds one: the nodes or the coordinate systems, a family's
+elements, or picked element groups' table and their elements. The Solids row or a solid picked draws
+each part's surface, meshed or not, beside the solids table.
 
 ## Operations: Declarative Panels
 
@@ -559,14 +568,20 @@ as `project.show` takes it, offers the operations on that part alone, each carry
 and none of the geometry's own: the shapes to build from and Mesh on the Solids row, Add Element and
 Add Group on an element family (the family filled in), and on element groups what sets their
 properties, merges, aligns or mates them, with every group picked filled into `groups`, and on
-solids what edits, moves, patterns, takes apart or deletes them, with every solid picked filled into
+solids what edits, moves, patterns, takes apart, meshes or deletes them, with every solid picked filled into
 `solids`. Element groups or solids picked together come as `{"kind": "group", "id", "ids"}` (or
 `"solid"`), `ids` every one picked. With a part picked, the first column has `parts`, the part's kind
 once for each one picked, and the only other column is that part with one more of its kind (`parts`
 one longer): what two or more picked together offer (merging, aligning and mating element groups;
 combining solids), its `candidates` the ids of the geometry's other groups or standing solids. Picked
 together, those rows move to the first column. A row that acts on one part (Edit Solid) is not ready
-with several picked.
+with several picked. A shape's Add on the Solids row has `"instant": true`: the shell runs it at once
+with its defaults and picks the new solid. One solid picked offers its shape's Add as `Edit`, with
+`"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
+`solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
+it, and a live form is run each time a changed field is left, with no Run button. Edit Solid stays for
+booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
+color, with the gimbal (`gizmo`) on it.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system. A connection starts
@@ -576,7 +591,9 @@ in the default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
 operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
-typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
+typed into (`edit`) is converted too when each of its cells is one number, and `edit.to_si` gives,
+by column key, the [scale, offset] the shell takes a value typed back to SI by before it sends it;
+a column of several numbers to a cell stays in SI. A unit it does
 not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent; a `gizmo`'s `origin` is converted too, and its `to_si` takes a length dragged back. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has one project of its own, and it ends with the connection. A

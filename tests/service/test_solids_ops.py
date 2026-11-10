@@ -68,8 +68,9 @@ def test_a_block_is_added_drawn_and_listed(project, validate):
     reading, view, table = block(project, x=0.02, name='base')
     wire_views([reading, view, table], validate)
     assert rows(reading)['Volume']['value'] == pytest.approx(0.1 * 0.05 * 0.01)
-    assert view['view'] == 'shape3d' and len(view['triangles']) >= 12
-    assert np.ptp(view['nodes'][:, 0]) == pytest.approx(0.1, rel=1e-5)
+    # the block just added is drawn lit, in the view's bodies
+    assert view['view'] == 'shape3d' and len(view['bodies']['triangles']) >= 12
+    assert np.ptp(view['bodies']['nodes'][:, 0]) == pytest.approx(0.1, rel=1e-5)
     assert table['rows'][0][:3] == ['1', 'base', 'Block']
     assert table['rows'][0][3] == '0.1 m × 0.05 m × 0.01 m'
     assert table['rows'][0][4] == '(0.02 m, 0 m, 0 m)'
@@ -863,3 +864,67 @@ def test_a_part_taken_apart_and_remade_under_its_name_replaces_its_mesh(project)
     (reading, *_rest) = run(project, 'project.mesh_solids', solids='3', size=0.25, keep=True)
     assert rows(reading)['Replaced'] and len(geometry.elem_id) == before
     assert len(geometry.group_id) == 1
+
+
+SHAPES_ADDED = ('project.add_solid_block', 'project.add_solid_cylinder', 'project.add_solid_cone',
+                'project.add_solid_sphere', 'project.add_solid_plate', 'project.add_solid_disk',
+                'project.add_solid_section')
+
+
+def _edit_row(state, solid_id, system):
+    from hertzforge.service import display_units
+
+    table = display_units.running_in(system, projects.actions, state, {
+        'objects': ['Part'], 'part': {'kind': 'solid', 'id': solid_id}})
+    return next(row for row in table['table']['columns'][0]['rows'] if row['verb'] == 'Edit')
+
+
+def _run_typed(project, op_id, fill, system):
+    """An Edit form's values run as the server runs them: typed in `system`."""
+    from hertzforge.service import display_units
+
+    op = next(o for o in OPERATIONS if o.id == op_id)
+    kinds = {p.name: p.type for p in op.params}
+    # as the shell reads a row's fill into its form
+    fill = {key: int(text) if kinds.get(key) == 'integer' else float(text)
+            if kinds.get(key) == 'number' else text for key, text in fill.items()}
+    values = op.resolve(fill, objects={'Part': 'geometry'})
+    values = display_units.typed_lengths(op.params, values, system, project['Part'])
+    return op.run(project, values)
+
+
+@pytest.mark.parametrize('op_id', SHAPES_ADDED)
+def test_a_solid_picked_is_edited_in_its_own_add_form(op_id):
+    from hertzforge.service.display_units import running_in
+
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Part', unit='m')
+    views = run(project, op_id)
+    item = project['Part'].solids[-1]
+    assert 'gizmo' in views[1] and 'bodies' in views[1], 'the new solid lit, the gimbal on it'
+    before = item.as_record()
+    edit = _edit_row(state, item.id, 'in-slinch-lbf-s (g)')
+    assert edit['id'] == op_id and edit['live'] and edit['fill']['solid'] == str(item.id)
+    # its own values, run as typed in inches, leave it as it was
+    running_in('in-slinch-lbf-s (g)', _run_typed, project, op_id, edit['fill'], 'in-slinch-lbf-s (g)')
+    after = project['Part'].solids[-1].as_record()
+    for key, value in before.items():
+        assert after[key] == (pytest.approx(value, abs=1e-9) if key not in ('name', 'kind') else value), key
+    moved = {**edit['fill'], 'x': '2'}
+    views = _run_typed(project, op_id, moved, 'in-slinch-lbf-s (g)')
+    assert project['Part'].solids[-1].center[0] == pytest.approx(2 * 0.0254)
+    assert len(project['Part'].solids) == 1, 'changed, not added'
+    assert 'gizmo' in views[1]
+
+
+def test_the_solids_row_adds_at_once_and_a_wrong_kind_is_refused():
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Part', unit='m')
+    rows = projects.actions(state, {'objects': ['Part'], 'part': {'kind': 'solids', 'id': 0}})
+    rows = rows['table']['columns'][0]['rows']
+    assert all(row.get('instant') for row in rows if row['id'] in SHAPES_ADDED)
+    run(project, 'project.add_solid_block')
+    with pytest.raises(ProtocolError, match='is a block, not a sphere'):
+        run(project, 'project.add_solid_sphere', solid=1)

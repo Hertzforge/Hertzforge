@@ -17,6 +17,8 @@
 		idPrefix?: string;
 		/** data-testid on each field is `<testidPrefix>-<param name>`. */
 		testidPrefix?: string;
+		/** A form that applies as it goes: called when a changed field is left, or a choice made. */
+		oncommit?: () => void;
 	}
 
 	let {
@@ -26,8 +28,19 @@
 		layout = 'stack',
 		disabled = false,
 		idPrefix = 'pf',
-		testidPrefix = 'param'
+		testidPrefix = 'param',
+		oncommit
 	}: Props = $props();
+
+	/** The values last applied, so leaving a field that did not change applies nothing. */
+	let applied = JSON.stringify(values);
+	function commit() {
+		if (!oncommit) return;
+		const now = JSON.stringify(values);
+		if (now === applied) return;
+		applied = now;
+		oncommit();
+	}
 
 	/** Text being typed into number fields, so "1." or "-" can sit there while editing. */
 	let drafts = $state<Record<string, string>>({});
@@ -83,7 +96,9 @@
 	}
 </script>
 
-<div class="form {layout}">
+<!-- Enter in a field of a form that applies as it goes leaves the field, which applies it -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="form {layout}" onfocusout={commit} onchange={(e) => (e.target as HTMLElement).tagName === 'SELECT' || (e.target as HTMLInputElement).type === 'checkbox' ? commit() : undefined} onkeydown={(e) => oncommit && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && (e.target as HTMLElement).blur()} role="group">
 	{#each params as p (p.name)}
 		{@const id = `${idPrefix}-${p.name}`}
 		{@const err = errorFor(p)}

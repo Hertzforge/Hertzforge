@@ -128,6 +128,15 @@ def _solids(project: Any, name: str) -> str:
     return '' if project[name].solids else 'It has no solids yet'
 
 
+def _made_of(project: Any, geometry: str, ids: list[Any]) -> bool:
+    """Whether one of these solids is made of others (a boolean or a pattern), so
+    taking it apart leaves something."""
+    from hertzforge.core import solids
+
+    held = project[geometry]
+    return any(solids.solid(held, int(i)).operands for i in ids)
+
+
 def _shocks_to_unmark(project: Any, name: str) -> str:
     history = project[name]
     if history.split_into_frames:
@@ -359,8 +368,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         rows += _project_rows(project)
     where = verbs.part_key(part)
     for op in _rows_of(OPERATIONS):
-        home = verbs.PARTS.get(op.id)
-        if op.id in verbs.UNOFFERED or home != (where or None):
+        homes = verbs.homes_of(op.id)
+        if op.id in verbs.UNOFFERED or (where not in homes if homes else bool(where)):
             continue
         if not chosen:
             if not _object_params(op):
@@ -399,12 +408,22 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 fill[where] = str(part['id'])
             if any(p.name == f'{where}s' for p in op.params):
                 fill[f'{where}s'] = ', '.join(str(i) for i in picked)
+            if op.id == 'project.separate_solids' and not _made_of(project, fill['geometry'], picked):
+                rows.append(_op_row(op, 'It is not a boolean or a pattern', fill=fill, part=True))
+                continue
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
-        more: dict[str, Any] = {'part': True} if home else {}
+        more: dict[str, Any] = {'part': True} if homes else {}
+        if where == 'solids' and op.id in _adds():
+            # a shape is made at once and then edited (Brandon, 2026-11-10)
+            more['instant'] = True
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
         rows.append(_op_row(op, fill=fill, **more))
+    if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:
+        edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)
+        if edit is not None:
+            rows = [edit, *(row for row in rows if row['id'] != 'project.edit_solid')]
     # a part picked is acted on by its own rows; the geometry's are its row's
     if chosen and not where:
         rows += _own_rows(project, names)
@@ -412,6 +431,37 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     if where:
         column['parts'] = [where] * len(verbs.picked_ids(part))
     return column
+
+
+def _adds() -> set[str]:
+    from .ops_solids import ADD_OF_KIND
+
+    return set(ADD_OF_KIND.values())
+
+
+def _solid_edit_row(project: Any, geometry: str, solid_id: Any,
+                    operations: Iterable[Operation]) -> dict[str, Any] | None:
+    """A solid picked: its shape's Add, as Edit, filled with the solid's own values in the
+    display units, each change applied as it is made (`live`). None for a boolean or a
+    pattern, which Edit Solid changes."""
+    from hertzforge.core import solids
+
+    from . import display_units
+    from .ops_solids import ADD_OF_KIND, solid_fill
+
+    held = project[geometry]
+    try:
+        item = solids.solid(held, int(solid_id))
+    except (KeyError, ValueError):
+        return None
+    op = next((o for o in operations if o.id == ADD_OF_KIND.get(item.kind)), None)
+    if op is None:
+        return None
+    scale = display_units.words_in('length')[1] if held.units_defined else 1.0
+    row = _op_row(op, fill={'geometry': geometry, **solid_fill(item, scale)}, part=True,
+                  live=True)
+    row['verb'] = 'Edit'
+    return row
 
 
 def _why_not(op: Operation, kinds: list[str]) -> str:

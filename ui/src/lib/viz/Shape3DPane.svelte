@@ -4,6 +4,8 @@
 	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
 </script>
 
+<svelte:window onkeydown={snapTurns} onkeyup={snapTurns} />
+
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
 	/**
@@ -62,7 +64,7 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -92,6 +94,13 @@
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
 	let handles: TransformControls | null = null;
 	let gizmoAnchor: Object3D | null = null;
+	/** How far the drag in hand has gone, said in the bar; null between drags. */
+	let gizmoSaid = $state<string | null>(null);
+	/** A turn snaps to whole degrees, and with Shift held to 15° steps, so an angle can be hit exactly. */
+	const DEGREE = Math.PI / 180;
+	function snapTurns(e: KeyboardEvent) {
+		handles?.setRotationSnap(e.shiftKey ? 15 * DEGREE : DEGREE);
+	}
 
 	/** Arrows and rings on `view.gizmo`, along its axes. A drag on one axis runs its act on release; the view it answers with redraws them. */
 	function buildGizmo() {
@@ -107,12 +116,24 @@
 		tc.setSpace('local');
 		tc.setMode(gizmoMode);
 		tc.setTranslationSnap(gridStep(view.unit));
+		tc.setRotationSnap(DEGREE);
 		tc.attach(anchor);
 		tc.addEventListener('change', () => (dirty = true));
+		tc.addEventListener('objectChange', () => {
+			const axis = (tc.axis ?? '').toLowerCase();
+			if (axis !== 'x' && axis !== 'y' && axis !== 'z') return;
+			if (tc.mode === 'translate') {
+				const along = new Vector3().fromArray(g.axes['xyz'.indexOf(axis)]);
+				gizmoSaid = gizmoReading('translate', axis, anchor.position.clone().sub(new Vector3().fromArray(g.origin)).dot(along), view.unit);
+			} else {
+				gizmoSaid = gizmoReading('rotate', axis, ((tc as unknown as { rotationAngle: number }).rotationAngle * 180) / Math.PI, view.unit);
+			}
+		});
 		tc.addEventListener('dragging-changed', (e) => {
 			const dragging = Boolean(e.value);
 			controls.enabled = !dragging;
 			if (dragging) return;
+			gizmoSaid = null;
 			const axis = (tc.axis ?? '').toLowerCase() as 'x' | 'y' | 'z';
 			if (axis !== 'x' && axis !== 'y' && axis !== 'z') return void resetGizmo();
 			const along = g.axes['xyz'.indexOf(axis)];
@@ -281,7 +302,10 @@
 				if (n[i + k] > hi[k]) hi[k] = n[i + k];
 			}
 		}
-		return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
+		// no nodes (only bodies drawn) gives an infinite diagonal, and Infinity × 0 a NaN
+		// that puts every point nowhere
+		const across = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+		return Number.isFinite(across) && across > 0 ? across : 1;
 	});
 
 	const peak = $derived(amplitude * AMP_UNIT * diagonal);
@@ -553,9 +577,17 @@
 		geometry.setAttribute('shape', shapeAttr);
 		geometry.setAttribute('shapeImag', shapeImagAttr);
 		geometry.setAttribute('color', colorAttr);
-		if (view.triangles) geometry.setIndex(new BufferAttribute(view.triangles, 1));
+		// no triangles is no surface: unindexed, every three points would be drawn as one
+		// (a coordinate system's axes filled in as a gray wedge)
+		geometry.setIndex(new BufferAttribute(view.triangles ?? new Uint32Array(0), 1));
 		geometry.computeBoundingSphere();
-		const sphere = geometry.boundingSphere!;
+		const sphere = geometry.boundingSphere!.clone();
+		if (view.bodies && view.bodies.nodes.length) {
+			// bodies drawn in their own color (a solid being edited) are framed too, alone or not
+			const bodyBox = new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3));
+			const box = view.nodes.length ? new Box3().setFromBufferAttribute(position).union(bodyBox) : bodyBox;
+			box.getBoundingSphere(sphere);
+		}
 		centre.copy(sphere.center);
 		const radius = Math.max(sphere.radius, 1e-6);
 		homeDistance = (radius / Math.sin((camera.fov * Math.PI) / 360)) * 0.82;
@@ -732,6 +764,13 @@
 			camera.position.fromArray(pose.position);
 			camera.up.fromArray(pose.up);
 			controls.target.fromArray(pose.target);
+			// the camera kept from the last view may stand farther off than this one's own
+			// depth reaches: the model must not fall past the far plane
+			const reach = camera.position.distanceTo(centre) + Math.max(sphere.radius, 1e-6);
+			if (reach * 2 > camera.far) {
+				camera.far = reach * 2;
+				camera.updateProjectionMatrix();
+			}
 			controls.update();
 		} else resetView();
 		buildGizmo();
@@ -1147,7 +1186,7 @@
 		<div class="pickbar gizmobar" data-testid="shape3d-gizmo" role="toolbar" aria-label="What the handles do">
 			<button class="btn sm" class:primary={gizmoMode === 'translate'} data-testid="gizmo-move" onclick={() => setGizmoMode('translate')}>Move</button>
 			<button class="btn sm" class:primary={gizmoMode === 'rotate'} data-testid="gizmo-turn" onclick={() => setGizmoMode('rotate')}>Turn</button>
-			<span>Drag an arrow or a ring</span>
+			<span class:num={!!gizmoSaid} data-testid="gizmo-said">{gizmoSaid ?? (gizmoMode === 'rotate' ? 'Drag a ring: whole degrees, or 15° steps with Shift' : 'Drag an arrow or a ring')}</span>
 		</div>
 	{/if}
 
