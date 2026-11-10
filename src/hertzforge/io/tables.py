@@ -884,7 +884,7 @@ class _Matcher:
     """Headings to the columns of one kind of breakpoint table."""
 
     def __init__(self, columns: Sequence[Column]) -> None:
-        self.columns = {c.name: c for c in columns}
+        self.columns: dict[str, Column] = {c.name: c for c in columns}
         self.words: dict[str, str] = {}
         for c in columns:
             for word in (c.name, c.label, *c.aliases):
