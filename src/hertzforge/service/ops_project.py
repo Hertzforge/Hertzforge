@@ -475,7 +475,7 @@ MODAL_VERB_OPERATIONS = (
                 RIGID_NORMALIZE, RIGID_MASS, *RIGID_INERTIA, RIGID_KEEP),
         outputs=('shape3d', 'reading'), run=rigid_body_modes),
     Operation(
-        id='project.solve_modes', title='Solve Modes', workspace='model',
+        id='project.solve_modes', title='Solve Modes', workspace='geometry',
         summary='The normal modes of a geometry whose element groups have properties: a '
                 'number of them, or all up to a highest frequency. Free-free unless a '
                 'group of points is ground; the damping is given to every mode.',

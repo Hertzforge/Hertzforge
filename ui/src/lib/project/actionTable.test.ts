@@ -18,10 +18,10 @@ const table: ActionTable = {
 			rows: [
 				row('Off', { ready: false, reason: 'no' }),
 				row('Export'),
-				row('Solve', { modules: ['model'] }),
+				row('Solve', { modules: ['geometry'] }),
 				row('Add Node', { part: true }),
 				row('Plot', { kind: 'default', id: 'show.plot' }),
-				row('Mesh', { modules: ['model'] }),
+				row('Mesh', { modules: ['geometry'] }),
 				row('Averaging', { modules: ['signals', 'modal'] })
 			]
 		},
@@ -56,9 +56,9 @@ describe('the action table', () => {
 	});
 
 	it('counts what other modules offer the selection, by home', () => {
-		expect(moreIn(table, 'modal')).toEqual([{ module: 'model', count: 2 }]);
+		expect(moreIn(table, 'modal')).toEqual([{ module: 'geometry', count: 2 }]);
 		expect(moreIn(table, 'shock')).toEqual([
-			{ module: 'model', count: 2 },
+			{ module: 'geometry', count: 2 },
 			{ module: 'signals', count: 1 }
 		]);
 	});

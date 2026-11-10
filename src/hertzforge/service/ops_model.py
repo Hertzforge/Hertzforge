@@ -409,7 +409,7 @@ OPERATIONS = (
         params=(GEOMETRY,), outputs=('shape3d',), run=view_geometry),
     Operation(
         id='project.group_properties', title='Element Group Properties',
-        workspace='model',
+        workspace='geometry',
         summary='What element groups are made of, for Solve Modes: a library '
                 'material, and for plates a thickness. Every group when none '
                 'are named, or "1, 3".',
@@ -424,24 +424,24 @@ OPERATIONS = (
         outputs=('reading', 'shape3d'),
         run=merge_coincident_nodes, edits=True, edits_when=_kept),
     Operation(
-        id='project.element_groups', title='Element Groups', workspace='model',
+        id='project.element_groups', title='Element Groups', workspace='geometry',
         summary='A geometry\'s element groups: each one\'s name, what its elements are, '
                 'how many, and what it is made of.',
         params=(GEOMETRY,), outputs=('table',), run=element_groups),
     Operation(
-        id='project.merge_element_groups', title='Merge Element Groups', workspace='model',
+        id='project.merge_element_groups', title='Merge Element Groups', workspace='geometry',
         summary='Two or more element groups merged into the first named, which keeps its '
                 'name and properties, such as "1, 3".',
         params=(GEOMETRY, GROUPS_TO_MERGE), outputs=('table',), run=merge_element_groups,
         edits=True),
     Operation(
-        id='project.delete_element_groups', title='Delete Element Groups', workspace='model',
+        id='project.delete_element_groups', title='Delete Element Groups', workspace='geometry',
         summary='Element groups deleted with their elements and the nodes only they used, '
                 'keeping nodes where the project has data.',
         params=(GEOMETRY, GROUPS_TO_MERGE), outputs=('table',), run=delete_element_groups,
         edits=True),
     Operation(
-        id='project.tie_elements', title='Tie', workspace='model',
+        id='project.tie_elements', title='Tie', workspace='geometry',
         summary='A patch of elements tied rigidly to the part under it, each node to the '
                 'nearest node of an element group or a second patch.',
         params=(GEOMETRY, ELEMENTS, TIE_TO, TIE_SECOND, TIE_SIDE, TIE_ADD, TIE_DROP, TIE_KEEP),

@@ -18,7 +18,7 @@ from typing import Any
 
 #: the analysis modules, which share one host and one table
 STUDIES = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal', 'geometry',
-           'model', 'specify')
+           'specify')
 _RECORDED = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal')
 
 HIDDEN = frozenset(f'project.{name}' for name in (
@@ -125,7 +125,6 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'rename_dof': (*_RECORDED, 'geometry'),
     'set_control': ('geometry', 'random', 'shock', 'transient', 'sine'),
     'compute_psds': ('sysid', 'random', 'transient'),
-    'mesh_solids': ('geometry', 'model'),
     'compute_frfs': ('sysid', 'modal'),
     'compute_multiple_coherence': ('sysid', 'random'),
     'conditioning': ('sysid', 'modal'),

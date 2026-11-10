@@ -448,7 +448,7 @@
         "length": {"type": "boolean"}
       }
     },
-    "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},
+    "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "specify", "report"]},
     "operation": {
       "type": "object", "required": ["id", "title", "workspace", "modules", "params", "outputs"],
       "properties": {

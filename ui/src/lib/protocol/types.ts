@@ -457,7 +457,7 @@ export type ViewKind = View['view'];
  * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
  * project type.
  */
-export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'model' | 'specify' | 'report';
+export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'specify' | 'report';
 
 export type ParamType = 'number' | 'integer' | 'enum' | 'boolean' | 'string';
 
