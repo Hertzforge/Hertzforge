@@ -2900,6 +2900,14 @@ class Model:
         if ticker is not None:
             ticker.tick()
         shapes = np.linalg.solve(factor.T, vectors)
+        # each mode's Rayleigh quotient on K and M themselves: eigh's
+        # eigenvalues carry round-off of the largest one's size, which on a
+        # light rod with a tip mass was a 1e-6 split from the sparse solve on
+        # one LAPACK and not another (2026-11-10)
+        eigenvalues = (np.einsum('ij,ij->j', shapes, reduced_k @ shapes)
+                       / np.einsum('ij,ij->j', shapes, reduced_m @ shapes))
+        order = np.argsort(eigenvalues, kind='stable')
+        eigenvalues, shapes = eigenvalues[order], shapes[:, order]
 
         full = transform @ shapes
         return eigenvalues, full, stiffness
