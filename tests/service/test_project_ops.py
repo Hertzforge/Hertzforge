@@ -454,7 +454,7 @@ def test_a_top_frequency_below_every_mode_is_refused_with_the_lowest():
     project = Project()
     project.add('G', _cantilever())
     with pytest.raises(ProtocolError, match='no mode up to 1 Hz; its lowest is at'):
-        run(project, 'project.solve_modes', source='G', maximum_frequency=1.0)
+        run(project, 'project.solve_modes', source='G', by='frequency', maximum_frequency=1.0)
     assert [name for name in project] == ['G']
 
 
@@ -465,7 +465,7 @@ def test_a_model_with_no_length_unit_has_no_mass_unit():
     bare = _cantilever(defined=False)
     project.add('Bare', bare)
     assert not bare.units_defined
-    run(project, 'project.solve_modes', source='Bare', num_modes=2, maximum_frequency=0)
+    run(project, 'project.solve_modes', source='Bare', num_modes=2)
     assert project['Bare Modes'].mass_unit is None
 
 
@@ -537,3 +537,20 @@ def test_records_outside_the_object_are_refused(text):
     with pytest.raises(ProtocolError) as error:
         chosen_records(text, 13)
     assert error.value.code == 'refused'
+
+
+def test_solve_modes_asks_for_a_number_of_modes_or_a_highest_frequency():
+    """One field or the other, by a choice: a number of modes unless asked otherwise."""
+    from hertzforge import Project
+
+    op = OPS['project.solve_modes'].to_json()
+    shown = {p['name']: p.get('shown_with') for p in op['params']}
+    assert next(p for p in op['params'] if p['name'] == 'by')['default'] == 'count'
+    assert shown['num_modes'] == ['by', 'count']
+    assert shown['maximum_frequency'] == ['by', 'frequency']
+    project = Project()
+    project.add('G', _cantilever())
+    run(project, 'project.solve_modes', source='G', num_modes=3)
+    assert project['G Modes'].num_shapes == 3
+    with pytest.raises(ProtocolError, match='above 0 Hz'):
+        run(project, 'project.solve_modes', source='G', by='frequency', maximum_frequency=0.0)

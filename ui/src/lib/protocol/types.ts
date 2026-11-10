@@ -480,6 +480,8 @@ export interface ParamDescriptor {
 	length?: boolean;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
+	/** Shown only while another param holds a value: [its name, the value]. */
+	shown_with?: [string, unknown];
 }
 
 /** One object of the open project (schema/PROTOCOL.md, Projects). */

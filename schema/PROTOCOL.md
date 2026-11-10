@@ -411,6 +411,10 @@ as it is on a geometry whose units are not defined. The descriptor says `m`; the
 system's length unit for its `unit` and for `[m]` in its label, none on an undefined geometry, and
 when the system changes it converts what the form holds, which changes nothing in the model.
 
+A param with `"shown_with":[name, value]` is shown only while the param `name` holds `value`: of two
+ways to say a thing, the panel shows the field of the one chosen (Solve Modes: `by` is `count`, with
+`num_modes`, or `frequency`, with `maximum_frequency`).
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
