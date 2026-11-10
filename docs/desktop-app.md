@@ -46,10 +46,16 @@ which must have the package installed for development (`pip install -e .`); `HER
 names another. The script resolves a pyenv shim to the interpreter itself, since the app starts the
 service from another folder, where the shim would choose another Python.
 
-On a Mac, a launcher in `~/Applications` can run it in a Terminal window, which shows the build and
-the services' output; quitting the app ends it. It is an AppleScript applet,
-`tell application "Terminal" to do script "cd ~/hertzforge && scripts/dev_app.sh"`, compiled with
-`osacompile`.
+On a Mac, `scripts/make_dev_launcher.sh` makes "Hertzforge Dev" in `~/Applications` (or in the
+folder it is given), a launcher for the Dock or Spotlight that runs `scripts/dev_app.sh` from this
+checkout in a Terminal window, which shows the build and the services' output; quitting the app ends
+it. Its icon is the app's with an orange DEV band, so it is not mistaken for an installed Hertzforge.
+It is an AppleScript applet compiled with `osacompile`, its icon drawn with Swift, which the Xcode
+command line tools the Rust build needs already provide. Run it again after moving the checkout.
+
+```bash
+scripts/make_dev_launcher.sh
+```
 
 ## Building It Locally
 
