@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flagOn, tableHtml } from './table';
+import { DRAWN_FROM, drawnRows, flagOn, tableHtml } from './table';
 import { blockText, fillTargets, numeric, parseTsv, pasteTargets, spanned, tableText } from './table';
 
 describe('table', () => {
@@ -80,5 +80,17 @@ describe('flagOn', () => {
 	it('reads the table\'s True and a file\'s yes or 1 as set', () => {
 		expect(['True', 'true', 'yes', '1'].every(flagOn)).toBe(true);
 		expect(['False', '', 'no', '0'].some(flagOn)).toBe(false);
+	});
+});
+
+describe('a long table draws the rows in view', () => {
+	it('draws a short table whole', () => {
+		expect(drawnRows(DRAWN_FROM, 5000, 400, 24)).toEqual([0, DRAWN_FROM]);
+	});
+
+	it('draws the rows the scroll shows and some either side, never past the ends', () => {
+		expect(drawnRows(1_000_000, 0, 400, 25, 30)).toEqual([0, 46]);
+		expect(drawnRows(1_000_000, 25 * 500_000, 400, 25, 30)).toEqual([499_970, 500_046]);
+		expect(drawnRows(1_000_000, 25 * 1_000_000, 400, 25, 30)).toEqual([999_970, 1_000_000]);
 	});
 });

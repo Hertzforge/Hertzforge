@@ -16,7 +16,7 @@
 	 */
 	import { tick } from 'svelte';
 	import type { TableView } from '$lib/protocol/types';
-	import { blockText, fillTargets, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
 
 	interface Props {
 		view: TableView;
@@ -40,6 +40,37 @@
 	let dragging = $state<'select' | 'fill' | null>(null);
 	let fillTo = $state<{ row: number; col: number } | null>(null);
 
+	// a long table (a mesh's elements) draws only the rows in view: a hundred thousand rows
+	// drawn whole froze the page
+	let scrollTop = $state(0);
+	let viewHeight = $state(420);
+	let rowHeight = $state(27);
+	const long = $derived(view.rows.length > DRAWN_FROM);
+	const span = $derived(drawnRows(view.rows.length, scrollTop, viewHeight, rowHeight));
+	const drawn = $derived(long ? view.rows.slice(span[0], span[1]) : view.rows);
+	function scrolled() {
+		if (!grid) return;
+		scrollTop = grid.scrollTop;
+		viewHeight = grid.clientHeight;
+	}
+	$effect(() => {
+		void view;
+		if (!grid || !long) return;
+		const row = grid.querySelector('tbody tr:not(.spacer)');
+		const height = row?.getBoundingClientRect().height;
+		if (height && Math.abs(height - rowHeight) > 0.5) rowHeight = height;
+		viewHeight = grid.clientHeight;
+	});
+	/** A row moved to by the keyboard, scrolled into view in a long table, where it may not be drawn. */
+	function reveal(row: number) {
+		if (!long || !grid) return;
+		const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? rowHeight;
+		const top = row * rowHeight;
+		if (top < grid.scrollTop) grid.scrollTop = top;
+		else if (top + rowHeight > grid.scrollTop + grid.clientHeight - head) grid.scrollTop = top + rowHeight + head - grid.clientHeight;
+		scrolled();
+	}
+
 	const keys = $derived(onedit && view.edit ? view.edit.columns : []);
 	/** How a column is edited: a flag by its check box, a choice from its list, a date in a date field. */
 	const kindOf = (col: number) => view.edit?.kinds?.[keys[col] ?? ''] ?? 'text';
@@ -58,6 +89,7 @@
 	function select(row: number, col: number, extend = false) {
 		if (!extend || !anchor) anchor = { row, col };
 		focus = { row, col };
+		reveal(row);
 		grid?.focus();
 	}
 
@@ -252,7 +284,7 @@
 		</button>
 	</header>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div class="scroll" bind:this={grid} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
+	<div class="scroll" class:long bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
 		aria-label={onedit && view.edit ? `${view.title}, editable` : undefined} onkeydown={gridKey} onpaste={paste} data-testid="table-grid">
 		<table>
 			<thead>
@@ -261,7 +293,9 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each view.rows as row, r (r)}
+				{#if long && span[0] > 0}<tr class="spacer" aria-hidden="true" style:height="{span[0] * rowHeight}px"><td colspan={view.columns.length}></td></tr>{/if}
+				{#each drawn as row, k (span[0] + k)}
+					{@const r = long ? span[0] + k : k}
 					<tr>
 						{#each row as cell, i (i)}
 							{#if editing && editing.row === r && editing.col === i}
@@ -300,6 +334,7 @@
 						{/each}
 					</tr>
 				{/each}
+				{#if long && span[1] < view.rows.length}<tr class="spacer" aria-hidden="true" style:height="{(view.rows.length - span[1]) * rowHeight}px"><td colspan={view.columns.length}></td></tr>{/if}
 			</tbody>
 		</table>
 		{#if view.rows.length === 0}<p class="empty">No rows.</p>{/if}
@@ -353,6 +388,16 @@
 
 	td {
 		color: var(--text-1);
+	}
+
+	/* a long table's rows are one line each, so where a row is follows from its number */
+	.long td {
+		white-space: nowrap;
+	}
+
+	.spacer td {
+		padding: 0;
+		border: 0;
 	}
 
 	td.num {

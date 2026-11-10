@@ -1,6 +1,22 @@
 import type { TableView } from '$lib/protocol/types';
 
 /** Whether a cell reads as a number ('439.2', '-0.5', '1e-3', '0.5-0.25j', '+2.1 %'). */
+/** Past this many rows a table draws only the rows in view, and some above and below. */
+export const DRAWN_FROM = 300;
+
+/**
+ * The rows of a long table to draw, [first, last), for a scroll of `top` pixels in a viewport
+ * `height` pixels tall, each row `rowHeight` tall, with `spare` rows either side so a quick
+ * scroll does not show a gap. A table of `DRAWN_FROM` rows or fewer is drawn whole.
+ */
+export function drawnRows(count: number, top: number, height: number, rowHeight: number, spare = 30): [number, number] {
+	if (count <= DRAWN_FROM) return [0, count];
+	const step = Math.max(1, rowHeight);
+	const first = Math.max(0, Math.floor(top / step) - spare);
+	const last = Math.min(count, Math.ceil((top + height) / step) + spare);
+	return [Math.min(first, last), last];
+}
+
 export function numeric(cell: string): boolean {
 	return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?([+-](\d+\.?\d*|\.\d+)([eE][+-]?\d+)?j)?( ?%)?$/.test(cell.trim());
 }
