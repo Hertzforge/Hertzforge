@@ -89,6 +89,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'detach_run_log': 'Detach Log', 'index_run_log_files': 'Index Log', 'report_identity': 'Identity',
     'amend_report': 'Amend', 'new_channel_table': 'New Table', 'add_channels': 'Add Channel',
     'set_sensor_model': 'Sensor Model', 'calibration_check': 'Calibration',
+    'add_controller_settings': 'Add Controller', 'remove_controller_settings': 'Drop Controller',
     'create_specification': 'Create Spec', 'edit_specification': 'Edit Spec',
     'set_breakpoint': 'Breakpoint', 'add_breakpoint': 'Add Breakpoint',
     'remove_breakpoint': 'Remove Breakpoint', 'scale_specification': 'Scale Spec',

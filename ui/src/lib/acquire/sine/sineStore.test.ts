@@ -439,14 +439,20 @@ describe('the Sine store', () => {
 			['control', null, null],
 			['drive', null, null]
 		]);
-		views.selectPage(views.pages.find((p) => p.kind === 'limits')!.id);
+		views.selectPage(views.pages.find((p) => p.name === 'Limits')!.id);
 		await until(() => views.accepted?.plots?.[0]?.quantity === 'response');
 		expect(views.accepted?.plots?.[0].channels).toBe('limited');
-		views.selectPage(views.pages.find((p) => p.kind === 'responses')!.id);
+		views.selectPage(views.pages.find((p) => p.name === 'Responses')!.id);
 		await until(() => views.accepted?.plots?.length === 2 && views.accepted.plots[1].quantity === 'phase');
+		const response = views.page.panels.find((p) => p.kind === 'plot' && p.plot.quantity === 'response')!.id;
+		// a time history added to the page is asked for with its point count
+		const time = views.addPlot('time') as string;
+		await until(() => views.accepted?.plots?.length === 3);
+		expect(views.accepted?.plots?.map((p) => [p.id, p.quantity, p.points ?? null])[2]).toEqual([time, 'time', 1024]);
 		await running(sine);
-		await until(() => (views.plotViews(`${views.page.id}:response`).length ?? 0) > 0);
-		expect(views.plotViews(`${views.page.id}:response`)[0].view).toBe('spectrum');
+		await until(() => views.views(response).length > 0);
+		expect(views.views(response)[0].view).toBe('spectrum');
+		expect(views.frame(response)?.channels?.length).toBeGreaterThan(0);
 		const bad = async (plot: Record<string, unknown>) => (await refusal(client.request('sine.subscribe', { plots: [{ id: 'p', ...plot }] }))).detail?.param;
 		expect(await bad({ quantity: 'control', channels: 'all' })).toBe('plots[0].channels');
 		expect(await bad({ quantity: 'response', points: 512 })).toBe('plots[0].points');

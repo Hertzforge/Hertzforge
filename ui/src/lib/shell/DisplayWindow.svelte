@@ -9,6 +9,7 @@
 	import '$lib/acquire/acquire.css';
 	import RunBar from '$lib/acquire/RunBar.svelte';
 	import RunView from '$lib/acquire/RunView.svelte';
+	import StationPanel from '$lib/acquire/StationPanel.svelte';
 	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
 	import MimoRunView from '$lib/acquire/mimo/views/MimoRunView.svelte';
 	import ShockRunView from '$lib/acquire/shock/ShockRunView.svelte';
@@ -47,6 +48,10 @@
 	const acq = $derived(app.acquire);
 	const display = $derived(app.display);
 	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : 'Random');
+	/** The test types on the test screen's frame: one header line, and their run's own dock. */
+	const framed = $derived(sineRun || shockRun || srsRun || twrRun || explorerRun || recorderRun);
+	const framedHost = $derived(shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : sine);
+	const framedScreen = $derived(shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : recorderRun ? app.recorderViews : app.sineViews);
 	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
@@ -127,26 +132,40 @@
 	</header>
 	{#if randomRun}
 		<ScreenHeader {acq} name="Random" {abortKeys} compact ends={acq.isLive && !display.cardInView('run')} />
+	{:else if framed}
+		<ScreenHeader acq={framedHost} name={testName} {abortKeys} compact ends={framedHost.isLive && !framedScreen.cardInView('run')} />
 	{:else}
 		<div class="top">
-			<RunBar acq={mimoRun ? mimo : shockRun ? shock : srsRun ? srs : sineRun ? sine : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : acq} onoverride={() => {}} {abortKeys} compact />
+			<RunBar acq={mimo} onoverride={() => {}} {abortKeys} compact />
 		</div>
 	{/if}
-	<div class="body" class:screen={randomRun}>
+	<div class="body" class:screen={randomRun || framed}>
 		{#if mimoRun}
 			<MimoRunView {views} compact onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []} />
 		{:else if shockRun}
-			<ShockRunView {shock} views={app.shockViews} compact onpopout={(id) => app.openDisplayWindow(id, 'shock')} />
+			<ShockRunView {shock} views={app.shockViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'shock')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</ShockRunView>
 		{:else if srsRun}
-			<SrsRunView {srs} views={app.srsViews} compact onpopout={(id) => app.openDisplayWindow(id, 'srs')} />
+			<SrsRunView {srs} views={app.srsViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'srs')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</SrsRunView>
 		{:else if sineRun}
-			<SineRunView {sine} views={app.sineViews} compact onpopout={(id) => app.openDisplayWindow(id, 'sine')} />
+			<SineRunView {sine} views={app.sineViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'sine')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</SineRunView>
 		{:else if twrRun}
-			<TwrRunView {twr} views={app.twrViews} compact onpopout={(id) => app.openDisplayWindow(id, 'twr')} />
+			<TwrRunView {twr} views={app.twrViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'twr')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</TwrRunView>
 		{:else if explorerRun}
-			<ExplorerRunView {explorer} views={app.explorerViews} compact onpopout={(id) => app.openDisplayWindow(id, 'explorer')} />
+			<ExplorerRunView {explorer} views={app.explorerViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'explorer')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</ExplorerRunView>
 		{:else if recorderRun}
-			<RecorderRunView {recorder} views={app.recorderViews} compact onpopout={(id) => app.openDisplayWindow(id, 'recorder')} />
+			<RecorderRunView {recorder} views={app.recorderViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</RecorderRunView>
 		{:else}
 			<RunView {acq} {display} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id)} />
 		{/if}

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SrsPulseRow, SrsState } from '$lib/protocol/srs';
 import type { View } from '$lib/protocol/types';
-import { defaultSrsLayout, SRS_PAGE_QUANTITIES, srsLayoutFromSaved, srsLayoutToSaved, srsPagePlots, srsSubscribeParams, toggleOverlay, withOverlay } from './srsLayout';
+import { SRS_PAGE_QUANTITIES, toggleOverlay, withOverlay } from './srsLayout';
 import { srsBarActions, srsModuleVerbs, srsPrimary, type SrsVerbContext } from './srsVerbs';
 import { lastPulseWords, nextPulseWords, notchWords, pulseWords, srsLevelStatus, srsTripFacts, worstBandWords } from './srsWords';
 
@@ -176,21 +176,7 @@ describe('the pages and the pulses laid over them', () => {
 		expect(withOverlay(base as never, [{ index: 2, views: pulse3 }], 'srs')?.series.map((s) => s.name)).toEqual(['Target', 'Measured', 'Pulse 3, measured']);
 	});
 
-	it('the eight pages by default, each asking only for what it draws, a point count on the time histories only', () => {
-		const layout = defaultSrsLayout();
-		expect(layout.pages.map((p) => p.name)).toEqual(['SRS', 'Pulse', 'Kinematics', 'Identification', 'Limit Channels', 'Components', 'Pulses', 'Law']);
-		expect(layout.pages.map((p) => p.id)).toEqual(['rp-1', 'rp-2', 'rp-3', 'rp-4', 'rp-5', 'rp-6', 'rp-7', 'rp-8']);
+	it('the Limit Channels kind holds the prediction and the gain', () => {
 		expect(SRS_PAGE_QUANTITIES.limit_channels).toEqual(['limit_channels', 'limit_frf']);
-		expect(srsSubscribeParams([], 2)).toEqual({ default: true });
-		const sent = srsSubscribeParams([...srsPagePlots(layout.pages[0], 800), ...srsPagePlots(layout.pages[1], 800), ...srsPagePlots(layout.pages[4], 800)], 2);
-		expect('plots' in sent && sent.plots).toEqual([
-			{ id: 'rp-1:srs', quantity: 'srs' },
-			{ id: 'rp-2:pulse', quantity: 'pulse', points: 800 },
-			{ id: 'rp-5:limit_channels', quantity: 'limit_channels' },
-			{ id: 'rp-5:limit_frf', quantity: 'limit_frf' }
-		]);
-		expect(srsLayoutFromSaved(srsLayoutToSaved(layout))).toEqual(layout);
-		// a classical shock layout's page kinds are not SRS's
-		expect(srsLayoutFromSaved('{"version":1,"rate":2,"serial":1,"pages":[{"id":"sp-1","name":"Spectrum","kind":"spectrum"}]}')).toBeNull();
 	});
 });

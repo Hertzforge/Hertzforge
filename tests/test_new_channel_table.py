@@ -33,10 +33,10 @@ def test_channels_are_numbered_on_from_the_highest():
 def test_a_new_channel_is_blank_but_its_number():
     table = _empty()
     table.add_channels()
-    for name, spec in ChannelTable.COLUMNS.items():
+    for name in table.column_names:
         if name == 'channel':
             continue
-        assert str(table[name][0]) == spec.default, name
+        assert str(table[name][0]) == ChannelTable.COLUMNS[name].default, name
     assert table['daq_range'][0] == '' and table['sensor_range'][0] == '', \
         'unstated until someone says'
 

@@ -19,6 +19,8 @@ export interface PlotType {
 	group: 'frequency' | 'time' | 'numbers' | 'other';
 	/** Takes a channel selector. */
 	channels: boolean;
+	/** The named channel choices the service takes for it; all three when absent. */
+	selectors?: ('all' | 'control' | 'limited')[];
 	/** Drawn against time: takes a point count and a time window, waveform or envelope. */
 	time: boolean;
 	/** Unit choices the service offers for the quantity; absent when it has one. */

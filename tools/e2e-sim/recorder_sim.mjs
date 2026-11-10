@@ -142,12 +142,18 @@ async function section(page, id) {
 	await page.locator('#recorder-panel').evaluate((el) => el.scrollTo({ top: 0 }));
 }
 
-/** A run page by its name. */
+/** The page a window shows, by its tab under the plots. */
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** A run page by its name, from the page tabs under the plots. */
 async function showPage(page, name) {
-	const sel = page.locator('[data-testid="recorder-page-select"]');
-	const value = await sel.locator('option', { hasText: name }).first().getAttribute('value');
-	await sel.selectOption(value);
-	await until(page, `the ${name} page`, async (p) => (await p.locator('[data-testid="recorder-page-view"]').getAttribute('data-page')) === value);
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
+}
+/** The page on screen in a window of its own, from the page's menu. */
+async function popout(page) {
+	await tid(page, 'page-menu').click();
+	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(page, 'page-popout').click()]);
+	return win;
 }
 
 const view = (page, name) => attr(page, 'recorder-run-view', name);
@@ -208,7 +214,7 @@ try {
 
 	// ---- Station & Channels: four recorded rows, the drive row left alone ------------------------
 	await section(a, 'station');
-	for (let k = 0; k < 3; k++) await tid(a, 'add-input').click();
+	for (const k of [2, 3, 4]) await a.locator(`[data-testid="channel-on-${k}"]`).check({ force: true });
 	// row 1 (the markers) at a 5 g range, so the level trigger's usual hysteresis is 0.05 g
 	await fill(a.locator('#ch-0-range'), 5);
 	await until(a, 'the table check', async (p) => tid(p, 'table-apply').isEnabled(), 10_000);
@@ -248,8 +254,8 @@ try {
 	await proceedAndStart(a);
 	await until(a, 'monitoring', async (p) => (await text(p, 'recorder-status')) === 'Monitoring: nothing is being saved', 20_000);
 	check('Start: the card says monitoring saves nothing', true);
-	check('the run bar has no Arm of its own and no level in dB', (await tid(a, 'act-arm').count()) === 0 && (await tid(a, 'run-level').count()) === 0);
-	check('the run bar offers Arm, and in level mode no Record and no Cut', (await tid(a, 'act-rec-arm').isVisible()) && (await tid(a, 'act-rec-record').count()) === 0 && (await tid(a, 'act-rec-cut').count()) === 0);
+	check('the Run card has no shared Arm and the header no level in dB', (await tid(a, 'act-arm').count()) === 0 && (await tid(a, 'run-level').count()) === 0);
+	check('the Run card offers Arm, and in level mode no Record and no Cut', (await tid(a, 'act-rec-arm').isVisible()) && (await tid(a, 'act-rec-record').count()) === 0 && (await tid(a, 'act-rec-cut').count()) === 0);
 	await neverLive(a, 'monitoring');
 
 	// ---- The Time and Spectra pages move -------------------------------------------------------------
@@ -294,7 +300,7 @@ try {
 	await until(a, 'the readings', async (p) => /Group delay/.test(await text(p, 'recorder-page-view')), 20_000);
 	check('the Readings page shows the run in numbers and its marks', /Free above floor/.test(await text(a, 'recorder-page-view')) && (await attr(a, 'recorder-mark-list', 'data-count')) === '0');
 	await showPage(a, 'Time');
-	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'recorder-page-popout').click()]);
+	const win = await popout(a);
 	await until(win, 'the display window', async (p) => tid(p, 'recorder-run-view').isVisible(), 30_000);
 	await until(win, 'the window to read the run', async (p) => Number.isFinite(await num(p, 'data-t')), 30_000);
 	const w0 = await num(win, 'data-t');
@@ -311,7 +317,7 @@ try {
 	await neverLive(a, 'after the stop');
 
 	// ---- Manual: Arm, Record and Cut by hand ----------------------------------------------------------
-	await tid(a, 'back-to-setup').click();
+	await tid(a, 'flow-setup').click();
 	await section(a, 'trigger');
 	await tid(a, 'recorder-mode-manual').click();
 	const lenOff = tid(a, 'recorder-length-off');

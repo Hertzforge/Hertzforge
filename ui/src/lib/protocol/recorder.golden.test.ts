@@ -28,7 +28,9 @@ import { ServiceClient } from './client.svelte';
 import { createControlServer } from './mock/control';
 import { mockSocketFactory } from './mock/socket';
 import { AcquireState } from '$lib/acquire/store.svelte';
-import { RECORDER_PAGES, RECORDER_QUANTITIES, recorderPagePlots, recorderSubscribeParams } from '$lib/acquire/recorder/recorderLayout';
+import { defaultPulseScreen, pulseSubscription } from '$lib/acquire/pulse/pulseScreen';
+import { RECORDER_PLOT_TYPES, RECORDER_QUANTITIES, RECORDER_SCREEN } from '$lib/acquire/recorder/recorderLayout';
+import type { PlotPanel } from '$lib/acquire/screen/screen.svelte';
 import { defaultRecorderSetup, fromRecorderConfig, recorderByKey, recorderSectionOf, toRecorderConfig } from '$lib/acquire/recorder/recorderSetup';
 import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { recorderCardStatus, RECORDER_OUTCOME_WORDS, savedWords } from '$lib/acquire/recorder/recorderWords';
@@ -241,12 +243,15 @@ describe('Recorder goldens through the shell', () => {
 		}
 	});
 
-	it('every Recorder page the shell offers subscribes with each key only where it applies', () => {
-		for (const kind of RECORDER_PAGES.kinds) {
-			const sent = recorderSubscribeParams(recorderPagePlots({ id: 'p', name: kind, kind }), 10) as { default?: true; plots?: { quantity: RecorderLiveQuantity; channels?: unknown; points?: number }[] };
-			if (kind === 'recordings') expect(sent).toEqual({ default: true });
-			else keysAsTheServiceTakes(sent.plots!, true);
+	it('every Recorder plot type the shell offers subscribes with each key only where it applies', () => {
+		const first = defaultPulseScreen(RECORDER_SCREEN, RECORDER_PLOT_TYPES).pages.flatMap((pg) => pg.panels.filter((x): x is PlotPanel => x.kind === 'plot'));
+		const one = RECORDER_PLOT_TYPES.map((t, i): PlotPanel => ({ ...first[0], id: `pl-${i}`, plot: { ...first[0].plot, quantity: t.id } }));
+		for (const plots of [first, one]) {
+			const sent = pulseSubscription(RECORDER_PLOT_TYPES, plots, 10) as { plots: { quantity: RecorderLiveQuantity; channels?: unknown; points?: number }[] };
+			keysAsTheServiceTakes(sent.plots, true);
 		}
+		expect(pulseSubscription(RECORDER_PLOT_TYPES, [], 10)).toEqual({ default: true });
+		expect(RECORDER_PLOT_TYPES.map((t) => t.id)).toEqual([...RECORDER_QUANTITIES]);
 	});
 
 	it.skipIf(!has('response_recorder_subscribe.json'))('the Recorder subscription is answered with every default filled in', () => {

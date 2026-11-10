@@ -2,12 +2,16 @@
 	/**
 	 * The reference profile: breakpoint rows, each a PSD anchor or a slope from the row before,
 	 * with the profile's alarm and abort bands and, on any row, its own. Findings from the editor
-	 * and from the service's dry run sit on the row and the cell they name.
+	 * and from the service's dry run sit on the row and the cell they name. The rows and their own
+	 * bands are saved to and opened from a breakpoint table file (`random_profile`).
 	 */
 	import type { BandDb } from '$lib/protocol/types';
+	import type { LoadedTable } from '$lib/tables/tableFiles';
+	import { profileRows, profileTable } from './breakpointFile';
 	import Findings from './Findings.svelte';
 	import NumberField from './NumberField.svelte';
 	import { newBreakpoint, under, type BreakpointDraft, type ProfileHost } from './setup';
+	import TableFileBar from './TableFileBar.svelte';
 
 	interface Props {
 		acq: ProfileHost;
@@ -22,8 +26,10 @@
 		showBands?: boolean;
 		/** The PSD's unit. */
 		unit?: string;
+		/** What the table is called in the file dialogs and as a new file's name. */
+		fileName?: string;
 	}
-	let { acq, heading = 'Profile', sub = 'The reference PSD the run controls to, at full level.', showTitle = true, rowBands = true, showBands = true, unit = 'g²/Hz' }: Props = $props();
+	let { acq, heading = 'Profile', sub = 'The reference PSD the run controls to, at full level.', showTitle = true, rowBands = true, showBands = true, unit = 'g²/Hz', fileName = 'Random Profile' }: Props = $props();
 
 	const d = $derived(acq.setup);
 	const locked = $derived(acq.locked);
@@ -81,6 +87,13 @@
 	function remove(i: number) {
 		d.breakpoints.splice(i, 1);
 		open = {};
+	}
+
+	function openFile(loaded: LoadedTable) {
+		const { rows, notes } = profileRows(loaded, { bands: rowBands, unit, base: { alarm_db: d.alarm_db, abort_db: d.abort_db } });
+		d.breakpoints.splice(0, d.breakpoints.length, ...rows);
+		open = {};
+		return notes;
 	}
 </script>
 
@@ -170,9 +183,9 @@
 			</tbody>
 		</table>
 	</div>
-	<div class="aq-actions add">
+	<TableFileBar client={acq.tableFiles ?? null} tableKind="random_profile" name={fileName} table={() => profileTable(d.breakpoints, { bands: rowBands, unit })} onopen={openFile} {locked} testid="bp">
 		<button class="btn sm" data-testid="bp-add" disabled={locked} onclick={() => insertAfter(d.breakpoints.length - 1)}>Add Row</button>
-	</div>
+	</TableFileBar>
 
 	{#if showBands}
 	<div class="aq-group bands-group">
@@ -248,10 +261,6 @@
 
 	.own-bands .lbl {
 		grid-column: 1 / -1;
-	}
-
-	.add {
-		margin-top: var(--sp-2);
 	}
 
 	.bands-group {

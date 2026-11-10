@@ -8,7 +8,8 @@ project, running an operation, framing a large result) runs in a worker
 thread so the event loop stays responsive.
 
 Each connection has at most one project of its own (`project.*`), which
-every operation runs on and which ends with it.
+every operation runs on and which ends with it. Table files (`tables.*`) are
+read and written by path beside it, without touching it.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import display_units, fitting, frames, projects, reports, run_logs, verbs
+from . import display_units, fitting, frames, projects, reports, run_logs, table_files, verbs
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
@@ -556,6 +557,10 @@ class Connection:
                                                           method, params, project, self.system)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in table_files.TABLE_METHODS:
+                result = await self.service.in_worker(table_files.request, method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in fitting.FIT_METHODS:
                 result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(
@@ -568,7 +573,8 @@ class Connection:
                     'answers catalog.list, op.run, '
                     f'{", ".join(PROJECT_METHODS)}, '
                     f'{", ".join(fitting.FIT_METHODS)}, '
-                    f'{", ".join(run_logs.RUN_LOG_METHODS)} and '
+                    f'{", ".join(run_logs.RUN_LOG_METHODS)}, '
+                    f'{", ".join(table_files.TABLE_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)

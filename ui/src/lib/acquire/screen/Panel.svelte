@@ -9,6 +9,7 @@
 	import type { Snippet } from 'svelte';
 	import PlotBody from '../plots/PlotBody.svelte';
 	import PlotOptions from '../plots/PlotOptions.svelte';
+	import { customBody, type PlotBodies, type PlotExtras } from './bodies';
 	import { cardWords } from './layout';
 	import MenuItem from './MenuItem.svelte';
 	import Popover from './Popover.svelte';
@@ -35,8 +36,12 @@
 		live: boolean;
 		/** A drag starts on the title (move) or the corner (resize). */
 		onstart: (e: PointerEvent, mode: 'move' | 'resize') => void;
+		/** A test type's own bodies for some of its plot types, drawn in place of the plain plot body. */
+		bodies?: PlotBodies;
 	}
-	let { screen, panel, at, maximized, hidden, lifted, card, channels, empty, live, onstart }: Props = $props();
+	let { screen, panel, at, maximized, hidden, lifted, card, channels, empty, live, onstart, bodies }: Props = $props();
+
+	const custom = $derived(customBody(bodies, panel));
 
 	const title = $derived(panel.kind === 'plot' ? screen.titleOf(panel) : cardWords(panel.card));
 	const type = $derived(panel.kind === 'plot' ? screen.typeOf(panel.plot.quantity) : null);
@@ -88,6 +93,12 @@
 		{ label: 'Shorter', d: [0, -1], keys: 'Shift Up' }
 	] as const;
 </script>
+
+{#snippet draw(extra: PlotExtras)}
+	{#if panel.kind === 'plot'}
+		<PlotBody bind:this={body} views={screen.views(panel.id)} channels={screen.frame(panel.id)?.channels ?? null} linkKey={screen.page.linkTime ? `${screen.hooks.testType}:${screen.page.id}` : null} {type} spec={panel.plot} {empty} {live} onspec={(spec) => screen.updatePlot(panel.id, spec)} marker={extra.marker ?? null} guides={extra.guides ?? []} onrange={extra.onrange} />
+	{/if}
+{/snippet}
 
 <section
 	class="panel"
@@ -148,8 +159,10 @@
 	</header>
 
 	<div class="body">
-		{#if panel.kind === 'plot'}
-			<PlotBody bind:this={body} views={screen.views(panel.id)} channels={screen.frame(panel.id)?.channels ?? null} linkKey={screen.page.linkTime ? `${screen.hooks.testType}:${screen.page.id}` : null} {type} spec={panel.plot} {empty} {live} onspec={(spec) => screen.updatePlot(panel.id, spec)} />
+		{#if panel.kind === 'plot' && custom}
+			{@render custom(panel, draw)}
+		{:else if panel.kind === 'plot'}
+			{@render draw({})}
 		{:else}
 			<div class="cardbody">{@render card(panel.card)}</div>
 		{/if}

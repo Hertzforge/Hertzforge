@@ -34,7 +34,9 @@ import { createControlServer } from './mock/control';
 import { mockSocketFactory } from './mock/socket';
 import { lawsOfWorld } from '$lib/acquire/law/lawForm';
 import { AcquireState } from '$lib/acquire/store.svelte';
-import { SINE_CHANNEL_QUANTITIES, SINE_PAGES, SINE_QUANTITIES, SINE_TIME_QUANTITIES, sinePagePlots, sineSubscribeParams } from '$lib/acquire/sine/sineLayout';
+import { defaultPulseScreen, pulseSubscription } from '$lib/acquire/pulse/pulseScreen';
+import type { PlotPanel } from '$lib/acquire/screen/screen.svelte';
+import { SINE_CHANNEL_QUANTITIES, SINE_PLOT_TYPES, SINE_QUANTITIES, SINE_SCREEN, SINE_TIME_QUANTITIES } from '$lib/acquire/sine/sineLayout';
 import { fromSineConfig, profileDraftOf, profileOf, sineByKey, sineSectionOf, toSineConfig, defaultSineSetup } from '$lib/acquire/sine/sineSetup';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
 import { errorWords, progressOf, sineLevelStatus, sweepWords } from '$lib/acquire/sine/sineWords';
@@ -206,11 +208,14 @@ describe('Sine goldens through the shell', () => {
 			for (const plot of p.plots) expect(QUANTITIES).toContain(plot.quantity);
 			keysAsTheServiceTakes(p.plots);
 		}
-		// and so does every page the shell offers
-		for (const kind of SINE_PAGES.kinds) {
-			const sent = sineSubscribeParams(sinePagePlots({ id: 'p', name: kind, kind }), 5) as { plots: { quantity: SineLiveQuantity }[] };
+		// and so does every plot type the shell offers, on its first pages and added on its own
+		const first = defaultPulseScreen(SINE_SCREEN, SINE_PLOT_TYPES).pages.flatMap((pg) => pg.panels.filter((x): x is PlotPanel => x.kind === 'plot'));
+		const one = SINE_PLOT_TYPES.map((t, i): PlotPanel => ({ ...first[0], id: `pl-${i}`, plot: { ...first[0].plot, quantity: t.id } }));
+		for (const plots of [first, one]) {
+			const sent = pulseSubscription(SINE_PLOT_TYPES, plots, 5) as { plots: { quantity: SineLiveQuantity }[] };
 			keysAsTheServiceTakes(sent.plots);
 		}
+		expect(SINE_PLOT_TYPES.map((t) => t.id)).toEqual([...SINE_QUANTITIES]);
 	});
 
 	it.skipIf(!has('response_sine_subscribe.json'))('the subscription is answered with every default filled in', () => {

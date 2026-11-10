@@ -7,6 +7,7 @@
 	 * the page.
 	 */
 	import type { Snippet } from 'svelte';
+	import type { PlotBodies } from './bodies';
 	import * as grid from './grid';
 	import Panel from './Panel.svelte';
 	import type { PlotPanel, ScreenState } from './screen.svelte';
@@ -21,8 +22,10 @@
 		empty: (panel: PlotPanel) => string;
 		/** Live data: ranges held steady across frames. */
 		live: boolean;
+		/** A test type's own bodies for some of its plot types. */
+		bodies?: PlotBodies;
 	}
-	let { screen, card, channels, empty, live }: Props = $props();
+	let { screen, card, channels, empty, live, bodies }: Props = $props();
 
 	const page = $derived(screen.page);
 	const plots = $derived(page.panels.filter((p) => p.kind === 'plot').length);
@@ -211,6 +214,7 @@
 			{channels}
 			empty={p.kind === 'plot' ? empty(p) : ''}
 			{live}
+			{bodies}
 			onstart={(e, mode) => start(e, p, mode)}
 		/>
 	{/each}

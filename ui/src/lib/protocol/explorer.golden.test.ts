@@ -28,7 +28,9 @@ import { ServiceClient } from './client.svelte';
 import { createControlServer } from './mock/control';
 import { mockSocketFactory } from './mock/socket';
 import { AcquireState } from '$lib/acquire/store.svelte';
-import { EXPLORER_CHANNEL_QUANTITIES, EXPLORER_PAGES, EXPLORER_QUANTITIES, explorerPagePlots, explorerSubscribeParams } from '$lib/acquire/explorer/explorerLayout';
+import { EXPLORER_CHANNEL_QUANTITIES, EXPLORER_PLOT_TYPES, EXPLORER_QUANTITIES, EXPLORER_SCREEN } from '$lib/acquire/explorer/explorerLayout';
+import { defaultPulseScreen, pulseSubscription } from '$lib/acquire/pulse/pulseScreen';
+import type { PlotPanel } from '$lib/acquire/screen/screen.svelte';
 import { defaultExplorerSetup, explorerByKey, explorerSectionOf, fromExplorerConfig, toExplorerConfig } from '$lib/acquire/explorer/explorerSetup';
 import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
 import { explorerLevelStatus } from '$lib/acquire/explorer/explorerWords';
@@ -224,11 +226,14 @@ describe('Explorer goldens through the shell', () => {
 		}
 	});
 
-	it('every Explorer page the shell offers subscribes with each key only where it applies', () => {
-		for (const kind of EXPLORER_PAGES.kinds) {
-			const sent = explorerSubscribeParams(explorerPagePlots({ id: 'p', name: kind, kind }), 10) as { plots: { quantity: ExplorerLiveQuantity; channels?: unknown; points?: number }[] };
+	it('every Explorer plot type the shell offers subscribes with each key only where it applies', () => {
+		const first = defaultPulseScreen(EXPLORER_SCREEN, EXPLORER_PLOT_TYPES).pages.flatMap((pg) => pg.panels.filter((x): x is PlotPanel => x.kind === 'plot'));
+		const one = EXPLORER_PLOT_TYPES.map((t, i): PlotPanel => ({ ...first[0], id: `pl-${i}`, plot: { ...first[0].plot, quantity: t.id } }));
+		for (const plots of [first, one]) {
+			const sent = pulseSubscription(EXPLORER_PLOT_TYPES, plots, 10) as { plots: { quantity: ExplorerLiveQuantity; channels?: unknown; points?: number }[] };
 			keysAsTheServiceTakes(sent.plots, true);
 		}
+		expect(EXPLORER_PLOT_TYPES.map((t) => t.id)).toEqual([...EXPLORER_QUANTITIES]);
 	});
 
 	it.skipIf(!has('response_explorer_subscribe.json'))('the Explorer subscription is answered with every default filled in', () => {

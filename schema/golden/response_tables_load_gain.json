@@ -1,0 +1,29 @@
+{
+ "type": "response",
+ "id": 44,
+ "result": {
+  "kind": "breakpoints",
+  "table_kind": "drive_gain",
+  "columns": [
+   "freq_hz",
+   "gain"
+  ],
+  "rows": [
+   [
+    50,
+    0.8
+   ],
+   [
+    400,
+    4
+   ],
+   [
+    2000,
+    1.5
+   ]
+  ],
+  "warnings": [],
+  "x_unit": "Hz",
+  "y_unit": "g/V"
+ }
+}

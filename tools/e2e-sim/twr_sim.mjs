@@ -165,12 +165,18 @@ async function section(page, id) {
 	await page.locator('#twr-panel').evaluate((el) => el.scrollTo({ top: 0 }));
 }
 
-/** A run page by its name. */
+/** The page a window shows, by its tab under the plots. */
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** A run page by its name, from the page tabs under the plots. */
 async function showPage(page, name) {
-	const sel = page.locator('[data-testid="twr-page-select"]');
-	const value = await sel.locator('option', { hasText: name }).first().getAttribute('value');
-	await sel.selectOption(value);
-	await until(page, `the ${name} page`, async (p) => (await p.locator('[data-testid="twr-page-view"]').getAttribute('data-page')) === value);
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
+}
+/** The page on screen in a window of its own, from the page's menu. */
+async function popout(page) {
+	await tid(page, 'page-menu').click();
+	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(page, 'page-popout').click()]);
+	return win;
 }
 
 const runState = (page) => attr(page, 'twr-run-view', 'data-state');
@@ -233,7 +239,7 @@ async function runFromSetup(page) {
 	await until(page, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	await tid(page, 'act-start').click();
 	await until(page, 'the review hold', async (p) => (await runState(p)) === 'review', 120_000);
-	await tid(page, 'act-proceed').click();
+	await tid(page, 'review-proceed').click();
 }
 
 try {
@@ -288,7 +294,7 @@ try {
 	await tid(a, 'act-start').click();
 	await until(a, 'the review hold', async (p) => (await runState(p)) === 'review', 120_000);
 	check('the review hold says what it waits for', await tid(a, 'twr-review').isVisible());
-	check('and brings the identification forward', (await a.locator('[data-testid="twr-page-view"]').getAttribute('data-kind')) === 'identification');
+	check('and brings the identification forward', (await pageName(a)) === 'Identification');
 	await until(a, 'the identification drawn', async (p) => {
 		const t = await text(p, 'twr-page-view');
 		return /Gain/.test(t) && /Coherence/.test(t) && /Trust/.test(t);
@@ -296,7 +302,7 @@ try {
 	check('the gain, the coherence and the trusted bins are drawn', true, await text(a, 'twr-identification-facts'));
 	await neverLive(a, 'review');
 	await shot(a, 'review');
-	await tid(a, 'act-proceed').click();
+	await tid(a, 'review-proceed').click();
 	await until(a, 'a play in flight', async (p) => Number.isFinite(await num(p, 'data-progress')), 60_000);
 	const p0 = await num(a, 'data-progress');
 	await until(a, 'the play to move through the record', async (p) => (await num(p, 'data-progress')) > p0 || (await num(p, 'data-plays')) > 0, 30_000);
@@ -311,7 +317,7 @@ try {
 
 	// A page in a window of its own follows the run.
 	await showPage(a, 'Replication');
-	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'twr-page-popout').click()]);
+	const win = await popout(a);
 	await until(win, 'the display window', async (p) => tid(p, 'twr-run-view').isVisible(), 30_000);
 	await until(win, 'the window to read the run', async (p) => Number((await p.locator('[data-testid="twr-run-view"]').getAttribute('data-plays')) ?? 0) > 0, 60_000);
 	const w0 = Number(await win.locator('[data-testid="twr-run-view"]').getAttribute('data-plays'));
@@ -392,7 +398,7 @@ try {
 		await until(a, 'a new run', async (p) => (await attr(p, 'run-state', 'data-state')) === 'configured', 20_000);
 		await tid(a, 'act-start').click();
 		await until(a, 'the review hold', async (p) => (await runState(p)) === 'review', 120_000);
-		await tid(a, 'act-proceed').click();
+		await tid(a, 'review-proceed').click();
 		await until(a, 'the manual ladder waiting', async (p) => (await runPhase(p)) === 'waiting', 60_000);
 		await a.close();
 		await until(b, 'the countdown', async (p) => tid(p, 'orphan').isVisible(), 20_000);
