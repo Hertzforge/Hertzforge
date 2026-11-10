@@ -12,8 +12,11 @@ export interface Selection {
 	objects: string[];
 	/** The records picked in each selected object's grid, by object; an object absent is whole. */
 	records: Record<string, number[]>;
-	/** A part of a geometry picked: a family, an element group, a solid, a mate, the nodes. */
-	part: { name: string; kind: string; id: string | number } | null;
+	/**
+	 * A part of a geometry picked: a family, an element group, a solid, a mate, the nodes. Element
+	 * groups picked together are `ids`, `id` being where a Shift range starts.
+	 */
+	part: { name: string; kind: string; id: string | number; ids?: (string | number)[] } | null;
 	/** Where a Shift extension starts: the last row picked without Shift. */
 	anchor: string | null;
 }
@@ -84,9 +87,46 @@ export function rectangle(grid: number[][], from: number, to: number): number[] 
 	return out;
 }
 
-/** A part of a geometry clicked: the geometry is selected, with the part named. */
-export function clickPart(selection: Selection, name: string, kind: string, id: string | number): Selection {
+/**
+ * A part of a geometry clicked: the geometry is selected, with the part named. Element groups take
+ * the modifiers as objects do, within one geometry: Cmd (Ctrl) adds or takes one away, Shift picks
+ * the run from the last one picked plainly. `order` is the geometry's groups as the tree lists them.
+ */
+export function clickPart(
+	selection: Selection,
+	name: string,
+	kind: string,
+	id: string | number,
+	mods: Modifiers = {},
+	order: (string | number)[] = []
+): Selection {
+	const was = selection.part;
+	if (kind === 'group' && was?.kind === 'group' && was.name === name && (mods.toggle || mods.extend)) {
+		const held = was.ids ?? [was.id];
+		let ids: (string | number)[];
+		if (mods.extend) {
+			const a = order.indexOf(was.id);
+			const b = order.indexOf(id);
+			ids = a < 0 || b < 0 ? [...held, id] : order.slice(Math.min(a, b), Math.max(a, b) + 1);
+		} else ids = held.includes(id) ? held.filter((g) => g !== id) : [...held, id];
+		if (!ids.length) return { objects: [name], records: {}, part: null, anchor: name };
+		const anchor = ids.includes(was.id) ? was.id : ids[0];
+		return { objects: [name], records: {}, part: { name, kind, id: anchor, ...(ids.length > 1 ? { ids } : {}) }, anchor: name };
+	}
 	return { objects: [name], records: {}, part: { name, kind, id }, anchor: name };
+}
+
+/** Whether a part is picked: the one part, or one of the element groups picked together. */
+export function partIsPicked(selection: Selection, name: string, kind: string, id: string | number): boolean {
+	const part = selection.part;
+	return !!part && part.name === name && part.kind === kind && (part.ids ? part.ids.includes(id) : part.id === id);
+}
+
+/** The picked part as the service reads it: `{kind, id}`, and `ids` for groups picked together. */
+export function partForService(selection: Selection): { kind: string; id: string | number; ids?: (string | number)[] } | null {
+	const part = selection.part;
+	if (!part) return null;
+	return part.ids ? { kind: part.kind, id: part.id, ids: part.ids } : { kind: part.kind, id: part.id };
 }
 
 /** The project's objects changed: anything selected that is gone leaves the selection. */
