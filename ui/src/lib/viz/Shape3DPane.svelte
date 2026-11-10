@@ -553,7 +553,9 @@
 		geometry.setAttribute('shape', shapeAttr);
 		geometry.setAttribute('shapeImag', shapeImagAttr);
 		geometry.setAttribute('color', colorAttr);
-		if (view.triangles) geometry.setIndex(new BufferAttribute(view.triangles, 1));
+		// no triangles is no surface: unindexed, every three points would be drawn as one
+		// (a coordinate system's axes filled in as a gray wedge)
+		geometry.setIndex(new BufferAttribute(view.triangles ?? new Uint32Array(0), 1));
 		geometry.computeBoundingSphere();
 		const sphere = geometry.boundingSphere!;
 		centre.copy(sphere.center);

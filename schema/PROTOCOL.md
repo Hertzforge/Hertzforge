@@ -583,7 +583,9 @@ in the default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
 operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column
-typed into (`edit`) stays in SI, so a value typed means what its operation reads. A unit it does
+typed into (`edit`) is converted too when each of its cells is one number, and `edit.to_si` gives,
+by column key, the [scale, offset] the shell takes a value typed back to SI by before it sends it;
+a column of several numbers to a cell stays in SI. A unit it does
 not recognize and a `matrix` are sent as they are. A `shape3d`'s coordinates are put in the system's length unit (its `unit` says which) and a measured motion's values in theirs; its shapes stay as they are, and a `point` pick carries `to_si` [scale, offset], what each coordinate clicked is taken back to SI by (SI = value × scale + offset) before it is sent; a `gizmo`'s `origin` is converted too, and its `to_si` takes a length dragged back. A view already on screen is not converted again; the shell draws it again.
 
 **Projects.** Each connection has one project of its own, and it ends with the connection. A

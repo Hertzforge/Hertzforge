@@ -267,11 +267,14 @@ def new_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
         _solids_table(added, geometry)]
 
 
-def part_solids(name: str, geometry: Any) -> list[dict]:
-    """What the Solids row or a solid picked in the tree shows: each part's surface
+def part_solids(name: str, geometry: Any, ids: list[int] | None = None) -> list[dict]:
+    """What the Solids row or solids picked in the tree show: each part's surface
     drawn with the mesh, before it is meshed too, and the solids table with their ids
-    (Brandon, 2026-11-10). A part the kernel cannot make is said above them."""
+    (Brandon, 2026-11-10). Solids picked (`ids`) carry the gimbal, whose drag runs
+    Move Part on them. A part the kernel cannot make is said above them."""
     view, notes = _drawn(name, geometry)
+    if ids:
+        view['gizmo'] = _solids_gizmo(name, geometry, ids)
     return [*([v.reading(f'Solids of {name}', notes)] if notes else []), view,
             _solids_table(name, geometry)]
 

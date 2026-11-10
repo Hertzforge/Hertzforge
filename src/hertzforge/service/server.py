@@ -28,7 +28,7 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import display_units, fitting, frames, projects, reports, run_logs
+from . import display_units, fitting, frames, projects, reports, run_logs, verbs
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
@@ -321,6 +321,9 @@ class Connection:
             shown = await call(display_units.running_in, self.units, projects.show, self.project,
                                params)
             display_units.convert(shown['views'], self.units)
+            if verbs.part_key(params.get('part')) in ('solids', 'solid'):
+                # the solids table says its lengths in words, as Move Part's own answer does
+                display_units.say_lengths(shown['views'], self.units)
             return shown
         if method == 'project.define_units':
             _only(params, ('name', 'units'), method)

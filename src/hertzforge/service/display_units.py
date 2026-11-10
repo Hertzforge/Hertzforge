@@ -15,9 +15,9 @@ operation writes it in the system to begin with: the server runs it under
 
 Converted: a `spectrum`'s axes, its series (and a stepped series' edges)
 and regions; a `reading`'s rows; a `waterfall`'s axes, values and stage marks; a
-`table`'s columns headed "<name> [<SI unit>]", each number in them, except
-a column typed into (`edit`), which stays in SI so a value typed means what
-the operation reads. A `shape3d`'s coordinates are put in the system's
+`table`'s columns headed "<name> [<SI unit>]", each number in them; a column
+typed into (`edit`) too when each of its cells is one number, its `to_si`
+taking a value typed back to SI, and otherwise it stays in SI. A `shape3d`'s coordinates are put in the system's
 length unit, and a
 measured motion's values in their own; its shapes are a picture and stay as
 they are, and a click that places a point (`pick`) says how to take its
@@ -166,15 +166,31 @@ def _cell(text: str, change: tuple[float, float, str]) -> str:
     return f'{float(_values(number, change)):.6g}'
 
 
+def _number(text: str) -> bool:
+    try:
+        float(text)
+    except ValueError:
+        return False
+    return True
+
+
 def _table(view: dict, system: Any) -> None:
-    edited = (view.get('edit') or {}).get('columns') or []
+    edit = view.get('edit') or {}
+    edited = edit.get('columns') or []
     for k, heading in enumerate(view['columns']):
         found = HEADING.match(heading)
-        if not found or (k < len(edited) and edited[k]):
+        if not found:
             continue
         change = _change(found.group(2), system)
         if change is None:
             continue
+        key = edited[k] if k < len(edited) else None
+        if key:
+            # typed into: shown in the system when every cell is one number, and what is
+            # typed taken back to SI by `to_si` (SI = value * scale + offset)
+            if any(row[k].strip() and not _number(row[k]) for row in view['rows']):
+                continue
+            edit.setdefault('to_si', {})[key] = [change[0], change[1]]
         view['columns'][k] = f'{found.group(1)} [{change[2]}]'
         for row in view['rows']:
             row[k] = _cell(row[k], change)

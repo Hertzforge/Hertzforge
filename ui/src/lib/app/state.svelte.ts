@@ -643,7 +643,7 @@ class AnalyzeState {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value } },
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.project) this.app.project.apply(res.project);
@@ -656,6 +656,14 @@ class AnalyzeState {
 			return message(err);
 		}
 	}
+}
+
+/** A value typed into a column shown in the display units, taken back to SI as the column's `to_si` says. */
+export function inSi(edit: TableEdit, column: string, value: string): string {
+	const change = edit.to_si?.[column];
+	const number = Number(value);
+	if (!change || value.trim() === '' || !Number.isFinite(number)) return value;
+	return String(number * change[0] + change[1]);
 }
 
 /** The operation Delete runs for each part of a geometry it deletes, and the part in words. */
