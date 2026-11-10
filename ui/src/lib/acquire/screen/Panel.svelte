@@ -9,7 +9,7 @@
 	import type { Snippet } from 'svelte';
 	import PlotBody from '../plots/PlotBody.svelte';
 	import PlotOptions from '../plots/PlotOptions.svelte';
-	import { customBody, type PlotBodies, type PlotExtras } from './bodies';
+	import { customBody, type PlotBodies, type PlotDataSnippet, type PlotExtras } from './bodies';
 	import { isSignals } from '../signals/signals';
 	import { cardWords } from './layout';
 	import MenuItem from './MenuItem.svelte';
@@ -41,8 +41,10 @@
 		onstart: (e: PointerEvent, mode: 'move' | 'resize') => void;
 		/** A test type's own bodies for some of its plot types, drawn in place of the plain plot body. */
 		bodies?: PlotBodies;
+		/** A test type's own choices in the options menu, under what the plot shows. */
+		data?: PlotDataSnippet;
 	}
-	let { screen, panel, at, maximized, hidden, lifted, card, channels, signalChannels, empty, live, onstart, bodies }: Props = $props();
+	let { screen, panel, at, maximized, hidden, lifted, card, channels, signalChannels, empty, live, onstart, bodies, data }: Props = $props();
 
 	const custom = $derived(customBody(bodies, panel));
 
@@ -182,7 +184,7 @@
 
 {#if optionsOpen && panel.kind === 'plot'}
 	<Popover anchor={optBtn} label="Options for {title}" align="end" testid="plot-options-pop" onclose={() => screen.openOptions(null)}>
-		<PlotOptions spec={panel.plot} types={screen.hooks.types} channels={choices} traces={body?.traces() ?? []} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
+		<PlotOptions spec={panel.plot} types={screen.hooks.types} channels={choices} traces={body?.traces() ?? []} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} {data} />
 	</Popover>
 {/if}
 

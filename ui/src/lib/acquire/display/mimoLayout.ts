@@ -285,7 +285,8 @@ export function mimoPlotTitle(p: MimoPlotSpec, labels: string[] = [], driveLabel
 const QUANTITIES = new Set<string>(MIMO_QUANTITY_ORDER);
 const SCALES = new Set<string>(['auto', 'log', 'linear']);
 
-function readSelectorSpec(v: unknown): SelectorSpec | null {
+/** A selector as kept, checked field by field; null when it is not one. */
+export function readSelectorSpec(v: unknown): SelectorSpec | null {
 	if (typeof v !== 'object' || v === null) return null;
 	const o = v as Record<string, unknown>;
 	switch (o.kind) {
@@ -330,12 +331,12 @@ export function readMimoPlot(v: unknown): MimoPlotSpec | null {
 	};
 }
 
-// ---- the MIMO run views' pages ----------------------------------------------------------------
+// ---- the MIMO run views' pages, as they were kept before the test screen's frame ---------------
 
 /**
- * The four kinds of page the MIMO run view offers. A page of each kind draws its own view and
- * holds its own choices (the grid's window, the heatmap's mode, the pair a plant plot shows); the
- * plots it subscribes to follow from those choices and its size on screen.
+ * The four kinds of page the MIMO run view offered, each drawing its own view and holding its own
+ * choices (the grid's window, the heatmap's mode, the pair a plant plot showed). Layouts kept in
+ * this form are read and taken over by the test screen (`mimo/views/mimoScreen.ts`).
  */
 export type MimoPageKind = 'grid' | 'heatmap' | 'plant' | 'geometry';
 
@@ -365,39 +366,9 @@ export interface MimoLayout {
 	serial: number;
 }
 
-/** A default layout and the page each window opens on, first the main window. */
-export interface MimoWindows {
-	layout: MimoLayout;
-	windows: string[];
-}
-
 export const MIMO_RATES = [1, 2, 5, 10];
 export const MIMO_DEFAULT_RATE = 5;
 export const MAX_MIMO_PAGES = 12;
-
-/**
- * The MIMO Random pages until the operator changes them: the four views, one page each. On one
- * monitor the window opens on the error heatmap, the overview of every control at once. On two,
- * the main window opens on the matrix grid and the second on the heatmap, so the overview stays
- * up while the grid is worked; a third and fourth monitor take the drive and plant page and the
- * geometry.
- */
-export function defaultMimoLayout(monitors = 1): MimoWindows {
-	const layout: MimoLayout = {
-		version: 1,
-		rate: MIMO_DEFAULT_RATE,
-		serial: 4,
-		pages: [
-			{ id: 'mp-1', name: MIMO_PAGE_WORDS.heatmap, kind: 'heatmap', settings: {} },
-			{ id: 'mp-2', name: MIMO_PAGE_WORDS.grid, kind: 'grid', settings: {} },
-			{ id: 'mp-3', name: MIMO_PAGE_WORDS.plant, kind: 'plant', settings: {} },
-			{ id: 'mp-4', name: MIMO_PAGE_WORDS.geometry, kind: 'geometry', settings: {} }
-		]
-	};
-	const m = Math.min(4, Math.max(1, Math.round(monitors) || 1));
-	const windows = m === 1 ? ['mp-1'] : ['mp-2', 'mp-1', 'mp-3', 'mp-4'].slice(0, m);
-	return { layout, windows };
-}
 
 /** A MIMO layout read from storage, checked field by field; null when it is not one. */
 export function readMimoLayout(raw: unknown): MimoLayout | null {

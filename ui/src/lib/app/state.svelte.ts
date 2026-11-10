@@ -10,7 +10,7 @@ import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUns
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
-import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
+import { MimoScreenState } from '$lib/acquire/mimo/views/mimoScreenState.svelte';
 import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
 import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
@@ -1695,8 +1695,8 @@ export class AppState {
 	readonly tests: TestTypeView;
 	/** The Random run's display: its pages and plots, and the data this window asks for. */
 	readonly display: DisplayState;
-	/** The MIMO Random run's views: its pages and this window's subscription. */
-	readonly mimoViews: MimoViewsState;
+	/** The MIMO Random run's pages and plots, and the data this window asks for. */
+	readonly mimoViews: MimoScreenState;
 	/** Classical shock's setup and run; the station and table are the Acquire store's. */
 	readonly shock: ShockStore;
 	/** The classical shock run's pages and this window's subscription. */
@@ -1755,11 +1755,10 @@ export class AppState {
 			page: config.page
 		});
 		const mimoPopout = config.popout && config.popoutTest === 'mimo_random';
-		this.mimoViews = new MimoViewsState(this.control, {
+		this.mimoViews = new MimoScreenState(this.control, {
 			setupTitle: () => this.mimo.status?.title ?? (config.popout ? null : this.mimo.setup.title),
 			showing: () => mimoPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_random' && this.mimo.step === 'run'),
-			page: mimoPopout ? config.page : null,
-			windowIndex: mimoPopout ? 1 : 0
+			page: mimoPopout ? config.page : null
 		});
 		const shockPopout = config.popout && config.popoutTest === 'shock';
 		this.shockViews = new ShockViewsState(

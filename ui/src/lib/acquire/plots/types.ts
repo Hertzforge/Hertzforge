@@ -19,15 +19,35 @@ export interface PlotType {
 	group: 'frequency' | 'time' | 'numbers' | 'other';
 	/** Takes a channel selector. */
 	channels: boolean;
-	/** The named channel choices the service takes for it; all three when absent. */
-	selectors?: ('all' | 'control' | 'limited')[];
+	/**
+	 * The choices the service takes for it. With channels, the named channel choices (all three
+	 * when absent). Without, a test type's own selector kinds, the first the one a new plot starts
+	 * with (MIMO's one position or every one, a pair, rows, a block, a diagnostic), kept in the
+	 * plot's `select`.
+	 */
+	selectors?: PlotSelector[];
 	/** Drawn against time: takes a point count and a time window, waveform or envelope. */
 	time: boolean;
 	/** Unit choices the service offers for the quantity; absent when it has one. */
 	units?: { id: string; words: string }[];
 	/** The families of lines it draws, which the Display section switches on and off. */
 	families?: LineFamily[];
+	/**
+	 * Drawn by the test type's own body rather than as lines (a grid of plots, a heatmap, a 3-D
+	 * view): its options menu holds what it shows and its title, and nothing about lines or axes.
+	 */
+	own?: boolean;
 }
+
+/** A choice a plot type takes: a named channel choice, or a test type's own selector kind. */
+export type PlotSelector = 'all' | 'control' | 'limited' | 'index' | 'pair' | 'rows' | 'diagonal' | 'block' | 'key';
+
+/**
+ * A test type's own choice of what a plot shows where a channel selector does not say it (a
+ * control, a pair, a block of controls, a heatmap's rows and order), and its own settings for a
+ * plot it draws itself. Plain data: the test type reads and checks it, and the layout keeps it.
+ */
+export type PlotSelect = Record<string, unknown>;
 
 /** The line families a plot may draw, by the role the service gives each series. */
 export type LineFamily = 'measured' | 'reference' | 'tolerance' | 'abort' | 'limit' | 'drive' | 'other';
@@ -120,6 +140,8 @@ export interface PlotPanelSpec {
 	/** Null for the plot type's own title. */
 	title: string | null;
 	display: PlotDisplay;
+	/** The test type's own choice of what it shows, where channels do not say it; absent otherwise. */
+	select?: PlotSelect;
 }
 
 export function defaultAxis(): AxisDisplay {

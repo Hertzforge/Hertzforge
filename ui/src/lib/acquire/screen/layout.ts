@@ -270,13 +270,40 @@ export function readDisplay(v: unknown): PlotDisplay {
 	};
 }
 
+/**
+ * Plain data as it was kept: booleans, null, finite numbers, short strings, and short lists and
+ * records a few levels deep, with the records' keys in order so equal data saves as equal text.
+ * Anything else is left out (undefined).
+ */
+export function plainData(v: unknown, depth = 0): unknown {
+	if (v === null || typeof v === 'boolean') return v;
+	if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+	if (typeof v === 'string') return v.length <= 200 ? v : undefined;
+	if (depth >= 4) return undefined;
+	if (Array.isArray(v)) {
+		const list: unknown[] = [];
+		for (const x of v.slice(0, 128)) {
+			const y = plainData(x, depth + 1);
+			if (y !== undefined) list.push(y);
+		}
+		return list;
+	}
+	if (!isObj(v)) return undefined;
+	const out: Raw = {};
+	for (const k of Object.keys(v).sort().slice(0, 32)) {
+		const x = k.length <= 40 ? plainData(v[k], depth + 1) : undefined;
+		if (x !== undefined) out[k] = x;
+	}
+	return out;
+}
+
 /** A plot panel's choice, field by field; null when its plot type is not one the test offers. */
 export function readSpec(v: unknown, types: PlotType[]): PlotPanelSpec | null {
 	if (!isObj(v)) return null;
 	const type = types.find((t) => t.id === v.quantity);
 	if (!type) return null;
 	const base = newPlotSpec(type);
-	return {
+	const spec: PlotPanelSpec = {
 		quantity: type.id,
 		channels: type.channels ? readSelector(v.channels) : 'all',
 		arrange: oneOf(v.arrange, ['split', 'overlay'], base.arrange),
@@ -284,6 +311,8 @@ export function readSpec(v: unknown, types: PlotType[]): PlotPanelSpec | null {
 		title: textOrNull(v.title, 80),
 		display: readDisplay(v.display)
 	};
+	if (isObj(v.select)) spec.select = plainData(v.select) as Raw;
+	return spec;
 }
 
 function readCell(v: unknown): Cell | null {
@@ -404,7 +433,8 @@ function savedDisplay(d: PlotDisplay) {
 }
 
 function savedSpec(s: PlotPanelSpec) {
-	return { quantity: s.quantity, channels: Array.isArray(s.channels) ? [...s.channels] : s.channels, arrange: s.arrange, points: s.points, title: s.title, display: savedDisplay(s.display) };
+	const out = { quantity: s.quantity, channels: Array.isArray(s.channels) ? [...s.channels] : s.channels, arrange: s.arrange, points: s.points, title: s.title, display: savedDisplay(s.display) };
+	return s.select ? { ...out, select: plainData(s.select) } : out;
 }
 
 function savedPanel(p: Panel) {

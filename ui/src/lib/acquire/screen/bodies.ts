@@ -6,6 +6,7 @@
  */
 
 import type { Snippet } from 'svelte';
+import type { PlotPanelSpec } from '../plots/types';
 import type { Panel } from './types';
 
 /** What a test type adds to a plot drawn with the plot body. */
@@ -32,3 +33,9 @@ export function customBody(bodies: PlotBodies | null | undefined, panel: Panel):
 	if (panel.kind !== 'plot' || !bodies || !Object.hasOwn(bodies, panel.plot.quantity)) return null;
 	return bodies[panel.plot.quantity] ?? null;
 }
+
+/**
+ * A test type's own choices in a plot's options menu, under what the plot shows: the plot's choice
+ * and how to change it (a control or a pair, a grid's pinned controls, a heatmap's order).
+ */
+export type PlotDataSnippet = Snippet<[PlotPanelSpec, (spec: PlotPanelSpec) => void]>;

@@ -1,25 +1,26 @@
 <script lang="ts">
 	/**
-	 * The operator's screen for MIMO Random, in the format single-output Random set: a link back
-	 * to the test-type chooser, three steps (Setup, Predict, Run), the run bar always in view, and
-	 * the setup in sections (Channels, Reference, Control, Schedule, Backend) with the setup
-	 * summary beside every section, so whatever is missing is one click away. After
-	 * identification the service holds for the prediction, which comes forward by itself; engaging
-	 * brings the run forward.
+	 * The operator's screen for MIMO Random, in three steps: Setup (the setup in sections, Channels,
+	 * Reference, Control, Schedule and Backend, with the setup summary beside every one, so whatever
+	 * is missing is one click away, and Apply Setup and Proceed to Run in the bar at the bottom),
+	 * Predict (after identification the service holds for the prediction, which comes forward by
+	 * itself), then Run (the pages of plots and the control dock; engaging brings it forward). One
+	 * header line heads all three: the way back to the test types while no run is live, the steps,
+	 * the run's state, clock and level, where the data comes from, and who holds control.
 	 */
 	import { onMount } from 'svelte';
 	import '$lib/acquire/acquire.css';
 	import type { AppState } from '$lib/app/state.svelte';
 	import Findings from '../Findings.svelte';
 	import Notices from '../Notices.svelte';
-	import RunBar from '../RunBar.svelte';
 	import ScheduleEditor from '../ScheduleEditor.svelte';
+	import StationPanel from '../StationPanel.svelte';
+	import ScreenHeader from '../screen/ScreenHeader.svelte';
 	import MimoBackend from './MimoBackend.svelte';
 	import MimoChannels from './MimoChannels.svelte';
 	import MimoControl from './MimoControl.svelte';
 	import MimoPredict from './MimoPredict.svelte';
 	import MimoReference from './MimoReference.svelte';
-	import StationPanel from '../StationPanel.svelte';
 	import { runBandsOf, runGeometryOf } from './runFrame';
 	import MimoRunView from './views/MimoRunView.svelte';
 	import MimoSpace from './MimoSpace.svelte';
@@ -32,11 +33,13 @@
 	let { app }: Props = $props();
 
 	const mimo = $derived(app.mimo);
+	const screen = $derived(app.mimoViews);
 	const tests = $derived(app.tests);
-	let heading: HTMLElement;
+	let heading = $state<HTMLElement | null>(null);
 
+	// Arriving from the chooser or the run pill, the keyboard lands on the screen's name.
 	onMount(() => {
-		if (app.tests.takeFocus()) heading.focus();
+		if (app.tests.takeFocus()) heading?.focus();
 	});
 
 	type SetupSection = Exclude<MimoSection, 'predict'>;
@@ -52,10 +55,9 @@
 	const section = $derived((mimo.section === 'predict' ? 'channels' : mimo.section) as SetupSection);
 	const step = $derived(mimo.step);
 	const review = $derived(mimo.status?.state === 'review');
-	/** What the run views draw against: each controlled quantity's bands, and where the sensors are. */
+	/** What the run's plots draw against: each controlled quantity's bands, and where the sensors are. */
 	const runBands = $derived(runBandsOf(mimo.status));
 	const geometry = $derived(runGeometryOf(mimo.setup, mimo.status));
-	const liveDot = $derived(mimo.status?.state === 'running' || mimo.status?.state === 'stopping');
 
 	/** Why Proceed to Run waits, or null. An observer only looks, so it never waits. */
 	const proceedWhy = $derived.by(() => {
@@ -74,6 +76,7 @@
 	});
 	let proceeding = $state(false);
 
+	/** Setup to Run: apply the setup if this screen holds control and it changed, then show the run. */
 	async function proceed() {
 		if (proceedWhy || proceeding) return;
 		if (mimo.isController && !mimo.isLive && mimo.setupStatus !== 'applied' && mimo.setupStatus !== 'unread' && mimo.actions.apply.enabled) {
@@ -90,9 +93,19 @@
 		mimo.section = s;
 	}
 
+	const apply = $derived(mimo.actions.apply);
+	let applying = $state(false);
+	async function applySetup() {
+		if (!apply.enabled || applying) return;
+		applying = true;
+		await mimo.apply();
+		applying = false;
+	}
+
 	let tablist = $state<HTMLElement | null>(null);
 	let body = $state<HTMLElement | null>(null);
 
+	// Each section opens at its top.
 	$effect(() => {
 		void mimo.section;
 		void mimo.step;
@@ -115,48 +128,35 @@
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
-	const STEPS = [
-		{ id: 'setup' as const, n: 1, label: 'Setup' },
-		{ id: 'predict' as const, n: 2, label: 'Predict' },
-		{ id: 'run' as const, n: 3, label: 'Run' }
-	];
+	/** Stop and Abort stay in reach: in the header whenever a live run's Run card is out of view. */
+	const endsInHeader = $derived(mimo.isLive && !(step === 'run' && screen.cardInView('run')));
+	/** What the state chip says on hover: how the run ended, why it holds, or what the next step waits on. */
+	const reason = $derived.by(() => {
+		const s = mimo.status;
+		if (s?.state === 'finished' && s.end) return s.end.message;
+		if (s?.state === 'review') return 'Nothing drives at test level until you proceed.';
+		const p = mimo.primary;
+		return p && mimo.actions[p].visible && !mimo.actions[p].enabled ? mimo.actions[p].reason : null;
+	});
 </script>
 
 <div class="acquire" data-testid="mimo-screen">
-	<div class="top">
-		<div class="crumb">
-			{#if tests.canLeave && mimo.status?.state !== 'review'}
-				<button class="btn ghost sm back" data-testid="test-type-back" onclick={() => tests.toChooser()}>
-					<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-					Test type
-				</button>
-				<span class="sep" aria-hidden="true">/</span>
-			{/if}
-			<h1 class="here" tabindex="-1" bind:this={heading}>MIMO Random</h1>
-			<ol class="flow" aria-label="Steps">
-				{#each STEPS as st, i (st.id)}
-					{#if i > 0}
-						<li aria-hidden="true" class="arrow"><svg viewBox="0 0 12 12" width="10" height="10"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></li>
-					{/if}
-					<li>
-						<button
-							class="step"
-							class:on={step === st.id}
-							aria-current={step === st.id ? 'step' : undefined}
-							data-testid="flow-{st.id}"
-							onclick={() => (st.id === 'run' && step === 'setup' ? proceed() : (mimo.step = st.id))}
-						>
-							<span class="n">{st.n}</span>{st.label}
-							{#if st.id === 'predict' && review}<span class="mark wait" aria-label="waiting for you"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><rect x="1.5" y="1" width="2.4" height="8" rx="0.6" fill="currentColor" /><rect x="6.1" y="1" width="2.4" height="8" rx="0.6" fill="currentColor" /></svg></span>{/if}
-							{#if st.id === 'run' && liveDot}<span class="mark dot" aria-label="running"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg></span>{/if}
-						</button>
-					</li>
-				{/each}
-			</ol>
-		</div>
-		<RunBar acq={mimo} onoverride={() => (mimo.step = 'predict')} {abortKeys} />
-		<Notices acq={mimo} />
-	</div>
+	<ScreenHeader
+		acq={mimo}
+		name="MIMO Random"
+		{step}
+		onsetup={() => (mimo.step = 'setup')}
+		onrun={() => (step === 'setup' ? proceed() : (mimo.step = 'run'))}
+		predict={{ onopen: () => (mimo.step = 'predict'), waiting: review }}
+		runWhy={step === 'setup' ? proceedWhy : null}
+		onleave={tests.canLeave && !review ? () => tests.toChooser() : null}
+		{reason}
+		ends={endsInHeader}
+		{abortKeys}
+		bind:heading
+	/>
+	<!-- Notices float over the top of the page, so one never pushes the plots down. -->
+	<div class="notices"><div class="float"><Notices acq={mimo} /></div></div>
 
 	{#if step === 'setup'}
 		<div class="tabs" role="tablist" aria-label="MIMO Random setup sections" bind:this={tablist} tabindex="-1" onkeydown={onTabKey}>
@@ -188,7 +188,7 @@
 			<div class="withsum">
 				<div class="main">
 					{#if section === 'channels'}
-						<div class="stack">
+						<div class="column">
 							<section class="aq-panel titlep">
 								<label for="mm-title" class="lbl">Test title</label>
 								<input id="mm-title" class="field" bind:value={mimo.setup.title} disabled={mimo.locked} aria-invalid={(mimo.fieldErrors.title ?? []).length > 0} data-testid="mimo-title" />
@@ -222,6 +222,12 @@
 				{/if}
 				{flowNote.text}
 			</p>
+			{#if apply.visible}
+				<button class="btn" data-testid="act-apply" aria-disabled={!apply.enabled || applying} class:off={!apply.enabled} title={apply.reason ?? 'Send this setup to the control service.'} onclick={applySetup}>
+					{#if applying}<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>{/if}
+					Apply Setup
+				</button>
+			{/if}
 			<button class="btn primary" data-testid="proceed-to-run" aria-disabled={!!proceedWhy || proceeding} class:off={!!proceedWhy} title={proceedWhy ?? 'Apply the setup and show the run: start identification from there.'} onclick={proceed}>
 				Proceed to Run
 				<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -232,15 +238,9 @@
 			<MimoPredict {mimo} />
 		</div>
 	{:else}
-		<div class="body fit" bind:this={body} data-testid="run-view">
-			<MimoRunView views={app.mimoViews} onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} {geometry} bands={runBands} diagnostics={mimo.law?.diagnostics ?? []}>
+		<div class="run" id="mm-panel-live" data-testid="run-view">
+			<MimoRunView {mimo} {screen} onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} {geometry} bands={runBands} diagnostics={mimo.law?.diagnostics ?? []} {abortKeys}>
 				{#snippet station()}<StationPanel acq={mimo.acq} />{/snippet}
-				{#snippet end()}
-					<button class="btn sm" data-testid="back-to-setup" onclick={() => (mimo.step = 'setup')} title={mimo.isLive ? 'Look at the setup. It stays locked while the run is live.' : 'Back to the setup.'}>
-						<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-						Back to Setup
-					</button>
-				{/snippet}
 			</MimoRunView>
 		</div>
 	{/if}
@@ -254,96 +254,36 @@
 		min-height: 0;
 	}
 
-	.top {
+	.notices {
+		position: relative;
+		height: 0;
+		z-index: 40;
+	}
+
+	.float {
+		position: absolute;
+		top: var(--sp-2);
+		left: 50%;
+		transform: translateX(-50%);
+		width: min(640px, calc(100% - 32px));
 		display: flex;
 		flex-direction: column;
 		gap: var(--sp-2);
-		padding: var(--sp-2) var(--sp-5) 0;
+		pointer-events: none;
 	}
 
-	.crumb {
-		display: flex;
-		align-items: center;
-		gap: var(--sp-1);
-		min-height: 24px;
-		min-width: 0;
+	.float > :global(*) {
+		pointer-events: auto;
+		box-shadow: var(--shadow-pop);
 	}
 
-	.crumb .back {
-		gap: 4px;
-		margin-left: calc(-1 * var(--sp-2));
-		color: var(--text-2);
+	/* The tinted notices are translucent: lay them on the page colour so a plot never shows through. */
+	.float > :global(.aq-notice.warn) {
+		background: linear-gradient(var(--amber-weak), var(--amber-weak)), var(--bg-2);
 	}
 
-	.crumb .sep {
-		color: var(--text-4);
-	}
-
-	.here {
-		font-size: var(--text-md);
-		font-weight: var(--weight-strong);
-		color: var(--text-1);
-	}
-
-	.here:focus {
-		outline: none;
-	}
-
-	.flow {
-		display: flex;
-		align-items: center;
-		gap: 2px;
-		margin: 0 0 0 var(--sp-3);
-		padding: 0;
-		list-style: none;
-	}
-
-	.flow .arrow {
-		display: inline-flex;
-		color: var(--text-4);
-	}
-
-	.step {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		height: 26px;
-		padding: 0 10px 0 4px;
-		font-size: var(--text-sm);
-		font-weight: var(--weight-medium);
-		color: var(--text-3);
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: 13px;
-	}
-
-	.step:hover {
-		color: var(--text-1);
-		background: var(--bg-2);
-	}
-
-	.step .n {
-		display: inline-grid;
-		place-items: center;
-		width: 18px;
-		height: 18px;
-		font-size: var(--text-2xs);
-		font-weight: var(--weight-strong);
-		border: 1.3px solid currentColor;
-		border-radius: 50%;
-	}
-
-	.step.on {
-		color: var(--text-1);
-		font-weight: var(--weight-strong);
-		background: var(--blue-weak);
-		border-color: var(--blue-line);
-	}
-
-	.step.on .n {
-		color: var(--bg-1);
-		background: var(--blue-2);
-		border-color: var(--blue-2);
+	.float > :global(.aq-notice.pass) {
+		background: linear-gradient(var(--blue-weak), var(--blue-weak)), var(--bg-2);
 	}
 
 	.tabs {
@@ -408,15 +348,6 @@
 		color: var(--amber-2);
 	}
 
-	.mark.dot {
-		color: var(--blue-2);
-		animation: pulse 1.2s ease-in-out infinite;
-	}
-
-	.mark.wait {
-		color: var(--blue-2);
-	}
-
 	.locked {
 		display: inline-flex;
 		align-items: center;
@@ -439,17 +370,6 @@
 		outline: none;
 	}
 
-	/* The run fills the window when there is room, so the pages and the numbers are all in view
-	   during a run; on a small window it scrolls like the rest. */
-	@media (min-height: 700px) and (min-width: 1101px) {
-		.body.fit {
-			display: flex;
-			flex-direction: column;
-			overflow: hidden;
-			padding-bottom: var(--sp-3);
-		}
-	}
-
 	.withsum {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 300px;
@@ -461,7 +381,7 @@
 		min-width: 0;
 	}
 
-	.stack {
+	.column {
 		display: flex;
 		flex-direction: column;
 		gap: var(--sp-3);
@@ -487,10 +407,6 @@
 
 	.narrow {
 		max-width: 720px;
-	}
-
-	.back {
-		margin-top: var(--sp-3);
 	}
 
 	.flowbar {
@@ -526,10 +442,21 @@
 		cursor: default;
 	}
 
-	@keyframes pulse {
-		50% {
-			opacity: 0.35;
+	.flowbar .spin {
+		animation: spin 0.8s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
 		}
+	}
+
+	/* The run fills what the header leaves: the plots on their page, the controls beside them. */
+	.run {
+		flex: 1;
+		min-height: 0;
+		padding: 6px 6px 4px var(--sp-3);
 	}
 
 	@media (max-width: 1100px) {
@@ -539,7 +466,6 @@
 	}
 
 	@media (max-width: 760px) {
-		.top,
 		.body {
 			padding-left: var(--sp-3);
 			padding-right: var(--sp-3);
