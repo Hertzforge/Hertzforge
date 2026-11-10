@@ -267,6 +267,15 @@ def new_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
         _solids_table(added, geometry)]
 
 
+def part_solids(name: str, geometry: Any) -> list[dict]:
+    """What the Solids row or a solid picked in the tree shows: each part's surface
+    drawn with the mesh, before it is meshed too, and the solids table with their ids
+    (Brandon, 2026-11-10). A part the kernel cannot make is said above them."""
+    view, notes = _drawn(name, geometry)
+    return [*([v.reading(f'Solids of {name}', notes)] if notes else []), view,
+            _solids_table(name, geometry)]
+
+
 def view_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.solids`: a geometry's solids listed, with the geometry drawn; it changes nothing."""
     name, geometry = _geometry(project, params)

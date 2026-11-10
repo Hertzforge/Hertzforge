@@ -362,7 +362,8 @@ their cells, by running `op` with `params` and `ids`, the selected rows' entries
 
 With a part of a geometry picked (`part`), `project.show` draws its entities' table beside the
 geometry, with the click in the view that adds one: the nodes or the coordinate systems, a family's
-elements, or picked element groups' table and their elements.
+elements, or picked element groups' table and their elements. The Solids row or a solid picked draws
+each part's surface, meshed or not, beside the solids table.
 
 ## Operations: Declarative Panels
 

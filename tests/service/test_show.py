@@ -150,8 +150,8 @@ def test_a_part_of_a_geometry_shows_its_table_or_is_noted(plate, validate):
     out = shown(plate, geometry, part={'kind': 'family', 'id': 'quads'}, validate=validate)
     assert [v['view'] for v in out['views']] == ['shape3d', 'table']
     assert out['views'][1]['title'] == f'Elements of {geometry}: quads'
-    out = shown(plate, geometry, part={'kind': 'solids', 'id': 0}, validate=validate)
-    assert out['views'][0]['view'] == 'shape3d' and 'solids 0' in out['note']
+    out = shown(plate, geometry, part={'kind': 'mates', 'id': 0}, validate=validate)
+    assert out['views'][0]['view'] == 'shape3d' and 'mates 0' in out['note']
 
 
 def test_what_cannot_be_shown_is_refused_or_said(plate):

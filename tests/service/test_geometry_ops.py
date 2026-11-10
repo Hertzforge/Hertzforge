@@ -506,6 +506,18 @@ def test_delete_in_a_parts_table_takes_its_rows(project, validate):
     assert len(project['Geometry'].node_id) == before
 
 
-def test_solids_and_mates_have_no_table(project, validate):
-    views = _picked(project, {'kind': 'solids', 'id': 0}, validate)
-    assert [v['view'] for v in views] == ['shape3d']
+def test_the_solids_row_or_a_solid_shows_the_solids(validate):
+    from hertzforge.service import show
+    from hertzforge.service.ops_solids import OPERATIONS as SOLIDS
+
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Geometry', unit='m')
+    block = next(op for op in SOLIDS if op.id == 'project.add_solid_block')
+    block.run(project, block.resolve({'geometry': 'Geometry'}, objects={'Geometry': 'geometry'}))
+    for part in ({'kind': 'solids', 'id': 0}, {'kind': 'solid', 'id': 1}):
+        views = show.show(project, ['Geometry'], {}, part)['views']
+        wire_views(views, validate)
+        drawn, table = views
+        assert len(drawn['triangles']) == 12, 'the block drawn before it is meshed'
+        assert table['title'] == 'Solids of Geometry' and table['rows'][0][0] == '1'
