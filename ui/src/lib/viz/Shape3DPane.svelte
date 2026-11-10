@@ -278,11 +278,17 @@
 		if (!groupsFor || groupsFor.nodes !== view.nodes) groupsFor = { nodes: view.nodes, groups: coincidentGroups(view.nodes) };
 		return nodeCaption(n, view.node_ids, groupsFor.groups);
 	}
-	/** The slider's top, typed: 0.1 to 1000; the slider is pulled down to it when it was above. */
+	/**
+	 * The slider's top, typed as the peak deflection at its right end in the display units, the
+	 * unit the slider's own readout uses: the two read alike (Brandon, 2026-11-10). It was a bare
+	 * multiple of `AMP_UNIT`, which a full slider's inches did not match. Held as that multiple,
+	 * 0.1 to 1000; the slider is pulled down to it when it was above.
+	 */
 	function setAmplitudeMax(text: string) {
 		const value = Number(text);
-		if (!Number.isFinite(value)) return;
-		amplitudeMax = Math.min(1000, Math.max(0.1, value));
+		const perUnit = AMP_UNIT * diagonal * display.factor;
+		if (!Number.isFinite(value) || !(perUnit > 0)) return;
+		amplitudeMax = Math.min(1000, Math.max(0.1, value / perUnit));
 		if (amplitude > amplitudeMax) amplitude = amplitudeMax;
 	}
 	let fps = $state<number | null>(null);
@@ -338,6 +344,8 @@
 		if (view.unit === 'm' && peak < 1) return { factor: 1000, unit: 'mm' };
 		return { factor: 1, unit: view.unit };
 	});
+	/** The slider's top as the peak deflection there, in the display units. */
+	const topPeak = $derived(amplitudeMax * AMP_UNIT * diagonal * display.factor);
 
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
@@ -1290,12 +1298,13 @@
 			</button>
 			<label class="amp">
 				<span class="lbl">Amplitude</span>
-				<input type="range" data-testid="shape3d-amplitude" min="0" max={amplitudeMax} step={amplitudeMax / 400} bind:value={amplitude} aria-valuetext="Amplitude {formatFixed(amplitude, 3)}, peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
+				<input type="range" data-testid="shape3d-amplitude" min="0" max={amplitudeMax} step="any" bind:value={amplitude} aria-valuetext="Amplitude {formatFixed(amplitude, 3)}, peak {formatFixed(peak * display.factor, 3)} {display.unit}" />
 				<span class="ampval num">{formatFixed(peak * display.factor, 3)} {display.unit}</span>
 			</label>
-			<label class="scale" title="The slider's top: the amplitude at its right end, 0.1 to 1000">
+			<label class="scale" title="The slider's top: the peak deflection at its right end">
 				<span class="lbl">to</span>
-				<input class="field mono num" data-testid="shape3d-amplitude-max" type="number" min="0.1" max="1000" step="any" value={Number(amplitudeMax.toPrecision(3))} onchange={(e) => setAmplitudeMax(e.currentTarget.value)} aria-label="The slider's top amplitude" />
+				<input class="field mono num" data-testid="shape3d-amplitude-max" type="number" min="0" step="any" value={Number(topPeak.toPrecision(3))} onchange={(e) => setAmplitudeMax(e.currentTarget.value)} aria-label="The slider's top, the peak deflection at its right end" />
+				<span class="lbl">{display.unit}</span>
 			</label>
 			{/if}
 			<div class="seg" role="radiogroup" aria-label="Surface style">
