@@ -374,11 +374,16 @@ describe('the Explorer store', () => {
 		const views = new ExplorerViewsState(client, { setupTitle: () => 'x', showing: () => true, storage: null, session: null, events: null, subscribeDelayMs: 0 });
 		for (const page of views.pages) {
 			views.selectPage(page.id);
-			const { explorerSubscribeParams } = await import('./explorerLayout');
-			const params = explorerSubscribeParams(views.wanted, views.layout.rate);
+			const params = views.hooks.feed!.params(views.wanted, views.layout.rate);
 			const res = await client.request<{ default: boolean }>('explorer.subscribe', params);
 			expect(res.default).toBe(false);
 		}
+		// a spectrum asked for the limited channels, which the service does not take, is sent as every channel
+		const spectrum = views.addPlot('spectrum') as string;
+		views.updatePlot(spectrum, { channels: 'limited' });
+		const sent = views.hooks.feed!.params(views.wanted, views.layout.rate) as { plots: { quantity: string; channels?: unknown }[] };
+		expect(sent.plots.find((p) => p.quantity === 'spectrum')?.channels).toBe('all');
+		await expect(client.request('explorer.subscribe', sent)).resolves.toMatchObject({ default: false });
 	});
 
 	it('safe-stops an Explorer run with its ramp once nobody has held control for the timeout', async () => {
