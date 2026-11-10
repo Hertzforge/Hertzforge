@@ -501,6 +501,26 @@ def entity_rows(state: OpenProject | None, params: Mapping[str, Any]) -> dict[st
             'rows': entity_rows(geometry, kind, every[start:start + count])}
 
 
+def mesh_size(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.mesh_size`: the element size the solids `solids` ("1, 3") of `geometry` are
+    likely to hold at as `elements`, in meters: Mesh's Detect button."""
+    from .ops_solids import likely_size
+    from .parsing import parse_id_runs
+
+    state = _open(state, 'project.mesh_size')
+    name = _name(params, 'geometry', 'project.mesh_size')
+    if name not in state.project:
+        raise not_found(f'no object named {name!r}')
+    ids = parse_id_runs(str(params.get('solids') or ''))
+    if not ids:
+        raise bad_request('project.mesh_size needs "solids", the ids picked')
+    try:
+        size = likely_size(state.project[name], ids, str(params.get('elements') or 'hexes'))
+    except (ValueError, KeyError) as error:
+        raise refused(str(error)) from None
+    return {'value': float(size), 'defined': state.project[name].units_defined}
+
+
 def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
     """`project.show`: what a selection in the tree shows (`service.show`)."""
     from . import show as showing

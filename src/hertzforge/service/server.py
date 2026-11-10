@@ -57,7 +57,7 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.sav
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
-                   'project.journal',
+                   'project.mesh_size', 'project.journal',
                    'project.show', 'project.actions')
 
 #: the largest frame a client may send; requests are small
@@ -315,6 +315,12 @@ class Connection:
         if method == 'project.children':
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
+        if method == 'project.mesh_size':
+            # the whole form comes along; only these are read
+            found = await call(projects.mesh_size, self.project, params)
+            scale = display_units.length_of(self.units)['to_si'] if found['defined'] else 1.0
+            # to four figures, as the row's own fill is
+            return {'value': float(f"{found['value'] / scale:.4g}")}
         if method == 'project.entity_rows':
             _only(params, ('geometry', 'kind', 'family', 'groups', 'start', 'count'), method)
             page = await call(projects.entity_rows, self.project, params)
