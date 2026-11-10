@@ -198,7 +198,8 @@ def test_a_pattern_copies_its_solids(project, validate):
     wire_views([reading, view, table], validate)
     assert rows(reading)['Copies']['value'] == 5.0
     assert table['rows'][0][3] == '3 × 2 × 1, spacing 0.05 m, 0.04 m, 0 m'
-    assert np.ptp(view['nodes'][:, 0]) == pytest.approx(0.12, rel=1e-3)
+    # the pattern just made is drawn lit, in the view's bodies
+    assert np.ptp(view['bodies']['nodes'][:, 0]) == pytest.approx(0.12, rel=1e-3)
     refused(project, 'project.pattern_solids', 'needs a spacing', solids='2', count_y=2,
             spacing_y=0.0)
     refused(project, 'project.pattern_solids', 'no copies yet', solids='2', count_x=1)
@@ -928,3 +929,24 @@ def test_the_solids_row_adds_at_once_and_a_wrong_kind_is_refused():
     run(project, 'project.add_solid_block')
     with pytest.raises(ProtocolError, match='is a block, not a sphere'):
         run(project, 'project.add_solid_sphere', solid=1)
+
+
+def test_a_pattern_is_previewed_as_it_is_typed():
+    import asyncio
+
+    from .test_projects import _exchange
+
+    out = asyncio.run(_exchange([
+        ('op.run', {'op': 'project.new_geometry', 'params': {}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': {'geometry': 'Geometry'}}),
+        ('op.run', {'op': 'project.pattern_solids', 'preview': True, 'params': {
+            'geometry': 'Geometry', 'solids': '1', 'count_x': 3, 'spacing_x': 2.0}}),
+        ('project.children', {'name': 'Geometry'}),
+    ]))
+    preview = out[2][-1]['result']
+    reading = next(view for view in preview['views'] if view['view'] == 'reading')
+    assert rows(reading)['Would make']['value'] == 'pattern 2'
+    drawn = next(view for view in preview['views'] if view['view'] == 'shape3d')
+    assert 'bodies' in drawn, 'the pattern drawn lit'
+    # nothing reached the project: its one block stands alone
+    assert [solid['id'] for solid in out[3][-1]['result']['solids']] == [1]

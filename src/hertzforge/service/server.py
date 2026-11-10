@@ -150,7 +150,7 @@ def _preview_copy(project: Any, name: str) -> Any:
 
 
 #: a reading's labels as a preview says them: nothing has happened yet
-AS_PREVIEW = {'Added': 'Would add', 'Changed': 'Would change'}
+AS_PREVIEW = {'Added': 'Would add', 'Changed': 'Would change', 'Made': 'Would make'}
 
 
 def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, Any]]:
