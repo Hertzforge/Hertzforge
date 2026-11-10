@@ -285,7 +285,8 @@ export function mimoPlotTitle(p: MimoPlotSpec, labels: string[] = [], driveLabel
 const QUANTITIES = new Set<string>(MIMO_QUANTITY_ORDER);
 const SCALES = new Set<string>(['auto', 'log', 'linear']);
 
-function readSelectorSpec(v: unknown): SelectorSpec | null {
+/** A selector as kept, checked field by field; null when it is not one. */
+export function readSelectorSpec(v: unknown): SelectorSpec | null {
 	if (typeof v !== 'object' || v === null) return null;
 	const o = v as Record<string, unknown>;
 	switch (o.kind) {
