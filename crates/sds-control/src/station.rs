@@ -424,7 +424,25 @@ pub enum StationPlan {
 
 /// Build the station a run arms on. The simulator through the factory; NI from a
 /// fresh scan through the factory's own classification. Never a simulator for NI.
+/// Either way the backend is [`tapped`], so every test type's signals can be shown.
 pub fn build(plan: &StationPlan, scanner: &dyn NiScanner) -> Result<StationBackend, MethodError> {
+    build_untapped(plan, scanner).map(tapped)
+}
+
+/// A station's backend wrapped in the process's signals tap ([`crate::signals`]): what
+/// it reads and the drive it accepts are kept for `signals.subscribe`.
+pub fn tapped(mut station: StationBackend) -> StationBackend {
+    station.backend = Box::new(crate::signals::Tapped::new(
+        station.backend,
+        crate::signals::global(),
+    ));
+    station
+}
+
+fn build_untapped(
+    plan: &StationPlan,
+    scanner: &dyn NiScanner,
+) -> Result<StationBackend, MethodError> {
     match plan {
         StationPlan::Sim { fs_hz } => {
             let spec = StationSpec {

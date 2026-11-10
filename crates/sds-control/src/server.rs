@@ -54,6 +54,8 @@ mod sine_methods;
 mod explorer_methods;
 #[path = "server_recorder.rs"]
 mod recorder_methods;
+#[path = "server_signals.rs"]
+mod signals_methods;
 #[path = "server_twr.rs"]
 mod twr_methods;
 
@@ -153,8 +155,8 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     explorer.subscribe, recorder.configure, recorder.config, recorder.start, recorder.arm, \
     recorder.disarm, recorder.record, recorder.cut, recorder.stop, recorder.abort, \
     recorder.recordings, recorder.marks, recorder.reset, recorder.clear, recorder.state, \
-    recorder.log, recorder.subscribe, laws.list, laws.import, laws.check, sim.profiles, \
-    sim.start, sim.stop and sim.state";
+    recorder.log, recorder.subscribe, signals.subscribe, signals.unsubscribe, laws.list, \
+    laws.import, laws.check, sim.profiles, sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
 pub fn check_loopback(host: &str) -> Result<(), String> {
@@ -270,6 +272,8 @@ pub enum Feed {
     Twr,
     Explorer,
     Recorder,
+    /// The signals of whatever run acquires (`signals.data`).
+    Signals,
 }
 
 /// A frame for every connection.
@@ -653,6 +657,8 @@ pub struct Service {
     /// The signal a Recorder run on the simulator carries (the stated source unless a
     /// test installs another).
     recorder_signal: recorder_methods::SignalSlot,
+    /// The connections with a Signals subscription.
+    signals_displays: std::sync::Mutex<HashMap<ConnId, signals_methods::SignalsDisplay>>,
     /// The control-law catalog, opened on first use.
     catalog: Arc<std::sync::Mutex<Option<hertzforge_random_laws::LawCatalog>>>,
     /// Set when shutdown begins: [`DRIVE_METHODS`] are refused from then on.
@@ -762,6 +768,7 @@ impl Service {
             recorder_notify,
             recorder_notices: std::sync::Mutex::new(Some(recorder_notices)),
             recorder_signal: std::sync::Mutex::new(None),
+            signals_displays: std::sync::Mutex::new(HashMap::new()),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -827,6 +834,7 @@ impl Service {
             Feed::Twr => self.twr_displays().contains_key(&conn),
             Feed::Explorer => self.explorer_displays().contains_key(&conn),
             Feed::Recorder => self.recorder_displays().contains_key(&conn),
+            Feed::Signals => self.signals_displays().contains_key(&conn),
         }
     }
 
@@ -973,6 +981,17 @@ impl Service {
             loop {
                 tick.tick().await;
                 svc.orphan_clock().await;
+            }
+        });
+        // The signals of whatever run acquires, to the connections that ask.
+        let svc = self.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(signals_methods::TICK);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                let acquiring = svc.inner.lock().await.any_live();
+                svc.signals_tick(acquiring);
             }
         });
     }
@@ -1345,6 +1364,7 @@ impl Service {
         self.twr_displays().remove(&conn.id);
         self.explorer_displays().remove(&conn.id);
         self.recorder_displays().remove(&conn.id);
+        self.signals_displays().remove(&conn.id);
         let mut inner = self.inner.lock().await;
         if inner.session.holder_conn() == Some(conn.id) {
             // Nobody holds control now: a TWR run starts no new play until control
@@ -1625,6 +1645,8 @@ impl Service {
             "recorder.state" => Ok(self.recorder_state_now().await),
             "recorder.log" => self.recorder_log(params).await,
             "recorder.subscribe" => self.recorder_subscribe(conn, params).await,
+            "signals.subscribe" => self.signals_subscribe(conn.id, params).await,
+            "signals.unsubscribe" => self.signals_unsubscribe(conn.id, params),
             "twr.stop" => self.twr_end(conn, false).await,
             "twr.abort" => self.twr_end(conn, true).await,
             "twr.reset" => self.twr_reset(conn).await,
