@@ -4,7 +4,7 @@
 	 * on screen, closes on Escape, Tab out of a menu or a click outside, and gives the keyboard back
 	 * to its button. Arrow keys move between menu items.
 	 */
-	import { onMount, type Snippet } from 'svelte';
+	import { onMount, tick, type Snippet } from 'svelte';
 	import './screen.css';
 
 	interface Props {
@@ -79,20 +79,31 @@
 
 	onMount(() => {
 		place();
-		const first = menu ? items()[0] : el?.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]:not([tabindex="-1"])');
-		first?.focus({ preventScroll: true });
+		// Once it is drawn (a hidden element takes no focus): the first item, or the first field.
+		void tick().then(() => {
+			const first = menu ? items()[0] : el?.querySelector<HTMLElement>('input, select, textarea, button, [tabindex]:not([tabindex="-1"])');
+			first?.focus({ preventScroll: true });
+		});
 		const outside = (e: PointerEvent) => {
 			const t = e.target as Node | null;
 			if (!t || el?.contains(t) || anchor?.contains(t)) return;
 			close(false);
 		};
+		// Escape closes it wherever the keyboard is.
+		const escape = (e: KeyboardEvent) => {
+			if (e.key !== 'Escape' || e.defaultPrevented) return;
+			e.preventDefault();
+			close(el?.contains(document.activeElement) ?? false);
+		};
 		const again = () => place();
 		document.addEventListener('pointerdown', outside, true);
+		window.addEventListener('keydown', escape);
 		window.addEventListener('resize', again);
 		const ro = typeof ResizeObserver === 'undefined' || !el ? null : new ResizeObserver(again);
 		if (el) ro?.observe(el);
 		return () => {
 			document.removeEventListener('pointerdown', outside, true);
+			window.removeEventListener('keydown', escape);
 			window.removeEventListener('resize', again);
 			ro?.disconnect();
 		};

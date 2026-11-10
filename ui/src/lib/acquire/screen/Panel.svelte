@@ -100,7 +100,7 @@
 	data-quantity={panel.kind === 'plot' ? panel.plot.quantity : undefined}
 	data-card={panel.kind === 'card' ? panel.card : undefined}
 	aria-label={title}
-	aria-hidden={hidden || undefined}
+	inert={hidden || undefined}
 	style:grid-column="{at.x + 1} / span {at.w}"
 	style:grid-row="{at.y + 1} / span {at.h}"
 	style:transform={lifted ? `translate(${lifted.dx}px, ${lifted.dy}px)` : undefined}

@@ -7,7 +7,7 @@
 	 * the cards and moves the dock.
 	 */
 	import type { Snippet } from 'svelte';
-	import { cardWords, DOCK_SIZE } from './layout';
+	import { cardWords, DOCK_SIZE, MAX_PANELS } from './layout';
 	import MenuItem from './MenuItem.svelte';
 	import Popover from './Popover.svelte';
 	import type { ScreenState } from './screen.svelte';
@@ -242,7 +242,7 @@
 	<Popover anchor={moreBtns[kind] ?? null} label="{cardWords(kind)} menu" menu align="end" testid="dock-card-menu-pop" onclose={() => (cardMenu = null)}>
 		<MenuItem label="Move {before}" disabled={i <= 0} onclick={() => moveTo(kind, i - 1)} />
 		<MenuItem label="Move {after}" disabled={i < 0 || i >= shown.length - 1} onclick={() => moveTo(kind, i + 1)} />
-		<MenuItem label="Place on the Page" testid="dock-place-{kind}" disabled={screen.page.panels.length >= 16} reason="This page is full." onclick={() => placeOnPage(kind)} />
+		<MenuItem label="Place on the Page" testid="dock-place-{kind}" disabled={screen.page.panels.length >= MAX_PANELS} reason="This page is full." onclick={() => placeOnPage(kind)} />
 		{#if !fixed.includes(kind)}
 			<MenuItem label="Hide" testid="dock-hide-{kind}" onclick={() => ((cardMenu = null), screen.showCard(kind, false))} />
 		{/if}

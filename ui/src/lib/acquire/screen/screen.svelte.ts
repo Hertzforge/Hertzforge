@@ -37,7 +37,7 @@ import {
 	toSaved,
 	type Offer
 } from './layout';
-import type { CardKind, Dock, Panel, ScreenLayout, ScreenPage } from './types';
+import { GRID_COLS, GRID_ROWS, type CardKind, type Dock, type Panel, type ScreenLayout, type ScreenPage } from './types';
 
 export type PlotPanel = Extract<Panel, { kind: 'plot' }>;
 export type CardPanel = Extract<Panel, { kind: 'card' }>;
@@ -270,7 +270,7 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 		if (!this.canAddPage) return null;
 		const id = nextId(this.layout, 'pg');
 		const clean = (name && cleanName(name)) || freePageName(this.layout);
-		this.layout.pages.push({ id, name: clean, cols: 12, rows: 12, panels: [], linkTime: false });
+		this.layout.pages.push({ id, name: clean, cols: GRID_COLS, rows: GRID_ROWS, panels: [], linkTime: false });
 		this.selectPage(id);
 		return id;
 	}
