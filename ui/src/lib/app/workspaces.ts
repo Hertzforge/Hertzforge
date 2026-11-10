@@ -5,6 +5,8 @@ export interface WorkspaceInfo {
 	title: string;
 	/** Rail label, two lines at most. */
 	rail: string;
+	/** The rail's icon, when it is not the one named for the module's id. */
+	icon?: 'model';
 	/** One line for the palette and the rail's tooltip. */
 	summary: string;
 	/**
@@ -30,7 +32,9 @@ export const WORKSPACES: WorkspaceInfo[] = [
 	{ id: 'transient', title: 'Transient', rail: 'Transient', study: true, summary: 'A waveform replicated on a shaker: whether it fits, its waveform error, its segments.' },
 	{ id: 'sine', title: 'Sine', rail: 'Sine', study: true, summary: 'Sine sweeps and dwells: extracted levels, distortion, frequency, sweep rate.' },
 	{ id: 'modal', title: 'Modal', rail: 'Modal', study: true, summary: 'FRFs fitted to modes, shape sets compared, matched and projected.' },
-	{ id: 'geometry', title: 'Geometry', rail: 'Geometry', study: true, summary: 'Nodes, coordinate systems, elements and solids; sensors and channel tables on them.' },
+	// shown as Model, its id still geometry, which projects, the service and scripts name
+	// (Brandon, 2026-11-10: the module holds a geometry and its finite element model)
+	{ id: 'geometry', title: 'Model', rail: 'Model', icon: 'model', study: true, summary: 'A geometry and its finite element model: nodes, coordinate systems, solids, meshing, properties and modes; sensors and channel tables on them.' },
 	{ id: 'specify', title: 'Specify', rail: 'Specify', study: true, summary: 'Test specifications derived, authored and predicted.' },
 	{ id: 'report', title: 'Report', rail: 'Report', summary: 'Reports from every workspace.' }
 ];

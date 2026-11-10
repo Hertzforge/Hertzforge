@@ -33,7 +33,7 @@
 			title="{w.title}{i < 9 ? ` (Alt+${i + 1})` : ''}: {w.summary}"
 			onclick={() => onselect(w.id)}
 		>
-			<span class="ico"><Icon name={w.id} size={20} /></span>
+			<span class="ico"><Icon name={w.icon ?? w.id} size={20} /></span>
 			<span class="lbl">{w.rail}</span>
 		</button>
 	{/each}
