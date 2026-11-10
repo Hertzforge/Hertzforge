@@ -575,3 +575,25 @@ def test_animate_is_promised_only_for_a_history_that_plays(rich):
     added = [c for c in table(rich, shapes, physical)
              if c['kinds'] == ['shape_set', 'time_history', 'geometry']]
     assert not added or 'Animate' not in verbs_in(added[0])
+
+
+def test_a_group_with_no_shells_is_not_asked_for_a_thickness(plate):
+    """A thickness is a shell's: Set Properties on hexes leaves it out of the form."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    geometry = named(plate, 'geometry')
+    held = plate.project[geometry]
+    group = int(held.group_id[0])
+    face = ELEMENT_TYPES[int(held.elem_type[0])][2] == 'face'
+    found = row(table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': group})[0],
+                'Set Properties')
+    assert ('omit' in found) is not face
+    solid = projects.new({'title': 'x'})
+    solid.project.new_geometry('Part', unit='m')
+    for op_id, given in (('project.add_solid_block', {}),
+                         ('project.mesh_solids', {'size': 0.5, 'keep': True})):
+        OPS[op_id].run(solid.project, OPS[op_id].resolve(
+            {'geometry': 'Part', **given}, objects={'Part': 'geometry'}, verbs={'Part': []}))
+    hexes = row(table(solid, 'Part', part={'name': 'Part', 'kind': 'group', 'id': 1})[0],
+                'Set Properties')
+    assert hexes['omit'] == ['thickness']

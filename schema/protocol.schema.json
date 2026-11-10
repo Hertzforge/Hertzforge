@@ -581,6 +581,7 @@
         "fill": {"type": "object", "additionalProperties": {"type": "string"}},
         "candidates": {"type": "array", "items": {"type": "string"}},
         "part": {"const": true},
+        "omit": {"type": "array", "items": {"type": "string"}},
         "instant": {"const": true},
         "live": {"const": true},
         "formats": {"type": "array", "items": {
