@@ -54,6 +54,8 @@ export type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 export type CursorMode = 'none' | 'one' | 'two' | 'peak' | 'peaks' | 'harmonics';
 export type HoldMode = 'none' | 'peak' | 'min' | 'average' | 'exponential';
 export type Dash = 'solid' | 'dashed' | 'dotted' | 'dashdot';
+/** A shape drawn along a line at intervals: a cue besides colour and dash. */
+export type Marker = 'none' | 'circle' | 'square' | 'triangle' | 'diamond' | 'cross';
 
 /** One series' look, by the series' name; null fields keep the role's own look. */
 export interface TraceStyle {
@@ -61,6 +63,8 @@ export interface TraceStyle {
 	width: number | null;
 	dash: Dash | null;
 	color: string | null;
+	/** Absent or null keeps the plot's own choice. */
+	marker?: Marker | null;
 }
 
 /** A note placed on the plot, at fractions of its drawing area. */
@@ -84,11 +88,15 @@ export interface PlotDisplay {
 	/** By series name. */
 	traces: Record<string, TraceStyle>;
 	cursor: CursorMode;
+	/** Where the two cursors sit on x (the second only with `two`); null where not placed. */
+	cursorAt?: [number | null, number | null];
 	/** How many peaks `peaks` marks, and how many harmonics `harmonics` marks. */
 	count: number;
 	hold: HoldMode;
 	/** Frames in an average, or the exponential average's time constant in frames. */
 	average: number;
+	/** Raised by Reset: a hold starts again whenever it changes. */
+	holdEpoch?: number;
 	/** Time plots: each sample, or each pixel's minimum and maximum. */
 	timeRender: 'waveform' | 'envelope';
 	/** Several channels on a time plot: on one pane, or one lane each. */
