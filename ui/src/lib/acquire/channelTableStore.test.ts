@@ -49,7 +49,8 @@ describe('the channel table sized from the station', () => {
 		acq.toggleDevice('cDAQ1Mod1');
 		acq.toggleDevice('cDAQ1Mod2');
 		expect(await acq.useStation()).toBe(true);
-		expect(acq.bindRows()).toBe(2);
+		// the change of station bound the two rows; nothing is left to bind
+		expect(acq.bindRows()).toBe(0);
 		// the two bound rows, then the other six channels of the two modules, off
 		expect(acq.sized.map((s) => s.status)).toEqual(Array(8).fill('present'));
 		expect(acq.sized.filter((s) => s.virtual)).toHaveLength(6);
@@ -58,6 +59,45 @@ describe('the channel table sized from the station', () => {
 		expect(await acq.useStation()).toBe(true);
 		await until(() => acq.sized.some((s) => s.status === 'missing'));
 		expect(acq.sized.map((s) => s.status)).toEqual(['present', 'missing', 'present', 'present', 'present']);
+		control.close();
+		analysis.close();
+	});
+
+	it('a change of station fits the table to it: unbound rows take the free channels, untouched rows go', async () => {
+		const { acq, control, analysis } = await screen();
+		await acq.claim();
+		acq.editRows([2, 3, 4, 5], { field: 'enabled', value: true });
+		acq.editRows([2, 3, 4, 5], { field: 'role', value: 'control' });
+		expect(acq.sized).toHaveLength(9);
+		acq.chooseStation('ni');
+		acq.toggleDevice('cDAQ1Mod1');
+		acq.toggleDevice('cDAQ1Mod2');
+		expect(await acq.useStation()).toBe(true);
+		// the service's word on the station change arrives too, and the fit holds
+		await new Promise((r) => setTimeout(r, 50));
+		const key = (r: { physical: { device: string; channel: string } | null }) => (r.physical ? `${r.physical.device}/${r.physical.channel}` : null);
+		expect(acq.rows.map((r) => [r.index, r.role, key(r)])).toEqual([
+			[1, 'control', 'cDAQ1Mod1/ai0'],
+			[2, 'drive', 'cDAQ1Mod2/ao0'],
+			[3, 'control', 'cDAQ1Mod1/ai1'],
+			[4, 'control', 'cDAQ1Mod1/ai2'],
+			[5, 'control', 'cDAQ1Mod1/ai3'],
+			[6, 'control', null]
+		]);
+		expect(acq.sized).toHaveLength(9);
+		expect(acq.sized.map((s) => s.status)).toEqual(['present', 'present', 'present', 'present', 'present', 'unbound', 'present', 'present', 'present']);
+		await acq.checkTable();
+		expect(acq.tableCheck?.errors.map((e) => [e.reason, e.channel])).toEqual([['channel_unbound', 6]]);
+
+		// and back to the simulator: bindings kept, the untouched drives past its one output gone
+		acq.editRows([5], { field: 'enabled', value: false });
+		acq.materializeTable();
+		acq.chooseStation('sim');
+		expect(await acq.useStation()).toBe(true);
+		await new Promise((r) => setTimeout(r, 50));
+		expect(acq.rows.map((r) => r.index)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(key(acq.rows[0])).toBe('cDAQ1Mod1/ai0');
+		expect(acq.sized).toHaveLength(9);
 		control.close();
 		analysis.close();
 	});

@@ -45,7 +45,7 @@ import type {
 import { CONTROL_TOPICS as T } from '$lib/protocol/types';
 import { isLive, runActions, primaryAction, type ActionId, type ActionState, type RunContext, type SetupStatus } from './actions';
 import { byField, configKey, defaultSetup, errorCount, fromConfig, localErrors, mergeErrors, toConfig, type FieldErrors, type SetupDraft } from './setup';
-import { bindUnbound, bulkEdit, hardwareOf, materialize, moveOnto, nextIndex, newRow, rowFindings, sameRows, sizeTable, tableChanges, type Hardware, type RowEdit } from './table';
+import { bindUnbound, bulkEdit, fitToHardware, hardwareKey, hardwareOf, materialize, moveOnto, nextIndex, newRow, rowFindings, sameRows, sizeTable, tableChanges, type Hardware, type RowEdit } from './table';
 import { channelFile, channelRowsFrom, renumbered, type ChannelExtras } from './channelFile';
 import type { TableData, TableFileClient } from '$lib/tables/tableFiles';
 import { toRefusal, type Refusal } from './words';
@@ -186,6 +186,8 @@ export class AcquireState {
 	tableOrder = $state.raw<string[]>([]);
 	/** The file the table was last opened from or saved to. */
 	tableFile = $state<string | null>(null);
+	/** The hardware the draft was last fitted to (`hardwareKey`); null until the service first says. */
+	private fittedFor: string | null = null;
 	/** The carried columns as they were when this screen last applied the table. */
 	private appliedExtras: { extras: ChannelExtras; order: string[] } = { extras: {}, order: [] };
 
@@ -564,7 +566,25 @@ export class AcquireState {
 			!before ||
 			(this.stationDraft.kind === before.kind && JSON.stringify([...this.stationDraft.devices].sort()) === JSON.stringify([...before.devices].sort()));
 		if (followed) this.stationDraft = { kind: list.selected.kind, devices: [...list.selected.devices] };
+		this.refit();
 		this.scheduleSetupCheck();
+	}
+
+	/**
+	 * When the station changes, or a rescan finds other channels, fit the draft to the new hardware
+	 * (`fitToHardware`): unbound rows take the free channels, and untouched rows it has no place for
+	 * go. The table the service first reports is shown as it is.
+	 */
+	private refit() {
+		const hw = this.hardware;
+		const key = hardwareKey(hw);
+		if (key === null || key === this.fittedFor) return;
+		const first = this.fittedFor === null;
+		this.fittedFor = key;
+		if (first || !this.drafts || this.locked) return;
+		const rows = $state.snapshot(this.rows) as ChannelRow[];
+		const fitted = fitToHardware(rows, hw);
+		if (!sameRows(rows, fitted)) this.rows = fitted;
 	}
 
 	chooseStation(kind: 'sim' | 'ni') {
@@ -601,6 +621,7 @@ export class AcquireState {
 		if (!res) return false;
 		if (this.stations) this.stations = { ...this.stations, selected: res.selected };
 		this.stationDraft = { kind: res.selected.kind, devices: [...res.selected.devices] };
+		this.refit();
 		return true;
 	}
 
@@ -619,8 +640,14 @@ export class AcquireState {
 	private onTable(t: ChannelTable) {
 		const prev = this.server;
 		this.server = t;
-		if (!this.tableDirty || (prev && sameRows($state.snapshot(this.rows) as ChannelRow[], t.channels))) {
+		const rows = $state.snapshot(this.rows) as ChannelRow[];
+		// a draft that differs from the service's table only by being fitted to the station holds
+		// no edit of this screen's: the service's table is taken, fitted the same way
+		const fittedOnly = this.tableDirty && sameRows(rows, fitToHardware(this.baseRows, this.hardware));
+		if (!this.tableDirty || fittedOnly || (prev && sameRows(rows, t.channels))) {
 			this.adoptTable(t);
+			const fitted = fittedOnly ? fitToHardware(structuredClone(t.channels), this.hardware) : t.channels;
+			if (!sameRows(fitted, t.channels)) this.rows = fitted;
 		} else if (t.revision !== this.base) {
 			// Never merged silently: the table carries the abort limits.
 			this.tableChange = { revision: t.revision, changes: tableChanges(this.baseRows, t.channels), server: structuredClone(t.channels) };

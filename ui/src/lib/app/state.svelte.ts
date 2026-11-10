@@ -1749,7 +1749,6 @@ export class AppState {
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
-			testType: 'random',
 			// The layout belongs to the setup the service holds, else to the one being edited here.
 			setupTitle: () => this.acquire.held?.config.title ?? (config.popout ? null : this.acquire.setup.title),
 			showing: () => config.popout || (this.workspace === 'acquire' && this.tests.screen === 'random' && this.acquire.tab === 'live'),

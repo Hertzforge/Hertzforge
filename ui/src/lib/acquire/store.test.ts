@@ -175,13 +175,18 @@ describe('station and channel table', () => {
 		expect(acq.selected?.class).toBe('ni_simulated');
 		expect(acq.source?.source).toBe('SIM');
 
-		await until(() => (acq.tableReport?.errors ?? []).some((e) => e.reason === 'channel_unbound'));
-		expect(acq.findings.rows.get(1)?.[0].cell).toBe('physical');
-
-		expect(acq.bindRows()).toBe(2);
+		// the change of station fits the table to it: its unbound rows take the first free channels
 		expect(acq.rows[0].physical).toEqual({ device: 'cDAQ1Mod1', channel: 'ai0' });
 		expect(acq.rows[1].physical).toEqual({ device: 'cDAQ1Mod2', channel: 'ao0' });
 		expect(acq.rows[0].interface).toBe('single_ended');
+
+		// a row taken off its channel is refused until it is bound again
+		acq.rows[0].physical = null;
+		await acq.checkTable();
+		expect((acq.tableReport?.errors ?? []).map((e) => e.reason)).toContain('channel_unbound');
+		expect(acq.findings.rows.get(1)?.[0].cell).toBe('physical');
+		expect(acq.bindRows()).toBe(1);
+		expect(acq.rows[0].physical).toEqual({ device: 'cDAQ1Mod1', channel: 'ai0' });
 		await acq.checkTable();
 		expect(acq.tableCheck?.errors).toEqual([]);
 		expect(await acq.applyTable()).toBe(true);
