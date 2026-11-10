@@ -464,8 +464,8 @@ TEXT_GOLDENS = {
             'kind': 'breakpoints', 'table_kind': 'random_profile',
             'columns': ['freq_hz', 'psd_g2_hz', 'slope_db_oct'],
             'rows': [[20, None, 3], [80, 0.04, None], [350, 0.04, None], [2000, None, -3]],
-            'warnings': ["Left out the column 'Note': it is not a column of a random "
-                         'profile.'],
+            'warnings': [("Left out the column 'Note': it is not a column of a random "
+                          'profile.')],
             'x_unit': 'Hz', 'y_unit': 'g²/Hz'},
     },
 }
