@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gizmoReading, gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 
 describe('nearestNode', () => {
 	const screen = [0, 0, 10, 0, 100, 100];
@@ -65,5 +65,15 @@ describe('the gimbal says how far a drag has gone', () => {
 		expect(gizmoReading('rotate', 'x', -12.5, 'in')).toBe('Turn about X: -12.5°');
 		expect(gizmoReading('translate', 'x', 0.3, 'in')).toBe('Move along X: 0.3 in');
 		expect(gizmoReading('translate', 'y', 0.25, 'm')).toBe('Move along Y: 0.25 m');
+	});
+});
+
+describe('a kept camera frames a model of about the same size', () => {
+	it('keeps the camera for a move or a part picked, and fits again when the model grows or shrinks', () => {
+		expect(stillFramed(0.87, 0.87)).toBe(true);
+		expect(stillFramed(0.87, 1.0)).toBe(true);
+		expect(stillFramed(0.87, 1.66)).toBe(false);
+		expect(stillFramed(1.66, 0.87)).toBe(false);
+		expect(stillFramed(0, 1)).toBe(false);
 	});
 });

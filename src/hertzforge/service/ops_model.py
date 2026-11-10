@@ -52,9 +52,17 @@ ALIGN_KEEP = Param('keep', 'Align (else mark the moves)', 'boolean', default=Fal
 
 
 def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.view_geometry`: a geometry on its own, nodes and elements."""
+    """`project.view_geometry`: a geometry on its own, nodes and elements, and the
+    surfaces of solids not meshed yet, so the geometry and its parts draw the same model
+    and the camera stays put between them (Brandon, 2026-11-10)."""
+    from hertzforge.core import solids
+
+    from .ops_solids import _drawn
+
     name = params['geometry']
     geometry = project[name]
+    if solids.top_level(geometry):
+        return [_drawn(name, geometry)[0]]
     rows, triangles, lines = drawn_mesh(geometry)
     return [v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
                       np.asarray(geometry.node_xyz, dtype=float)[rows], [],

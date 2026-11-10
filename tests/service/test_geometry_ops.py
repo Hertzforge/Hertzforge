@@ -563,3 +563,18 @@ def test_a_long_entity_table_sends_a_page_and_the_rest_on_asking(validate):
     page = out[4][-1]['result']['rows']
     assert [row[0] for row in page] == [str(PAGE_ROWS + k + 1) for k in range(5)]
     assert out[5][-1]['error']['code'] == 'bad_request'
+
+
+def test_a_geometry_alone_draws_its_solids_as_its_parts_do():
+    """The geometry picked and a part of it picked draw the same model, so the camera stays."""
+    from hertzforge.service import show
+    from hertzforge.service.ops_solids import OPERATIONS as SOLIDS
+
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Geometry', unit='m')
+    block = next(op for op in SOLIDS if op.id == 'project.add_solid_block')
+    block.run(project, block.resolve({'geometry': 'Geometry'}, objects={'Geometry': 'geometry'}))
+    alone = show.show(project, ['Geometry'], {}, None)['views'][0]
+    row = show.show(project, ['Geometry'], {}, {'kind': 'solids', 'id': 0})['views'][0]
+    assert len(alone['triangles']) == len(row['triangles']) == 12

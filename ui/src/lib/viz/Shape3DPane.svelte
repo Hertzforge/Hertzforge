@@ -1,7 +1,13 @@
 <script lang="ts" module>
 	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
-	/** Where the camera stood in each result's view that takes clicks: a click replaces the view, and the view belongs to the person, so the new one opens where they left it. */
-	const poses = new Map<string, { position: number[]; target: number[]; up: number[] }>();
+	/**
+	 * Where the camera stood, one for every 3-D view: the view belongs to the person, so picking
+	 * another object or a part, clicking away or an edit drawing the model again opens where
+	 * they left it. `radius` is the model's size then; a model grown or shrunk past a quarter (a
+	 * block's widths typed, a larger geometry picked) is fitted again (Brandon, 2026-11-10).
+	 */
+	let kept: { position: number[]; target: number[]; up: number[]; radius: number } | null = null;
+
 </script>
 
 <svelte:window onkeydown={snapTurns} onkeyup={snapTurns} />
@@ -64,7 +70,7 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gizmoReading, gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -376,6 +382,14 @@
 	let fpsWindowStart = 0;
 	let resizeObs: ResizeObserver | null = null;
 	let homeDistance = 1;
+	/** How far off the camera stands to frame the model: by the narrower of the two fields of
+	 * view, so a long block in a tall pane is not cut off at its ends. */
+	function fitDistance(): number {
+		const vertical = (camera.fov * Math.PI) / 180;
+		const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * (camera.aspect || 1));
+		const narrower = Math.min(vertical, horizontal);
+		return narrower >= vertical ? homeDistance : (Math.max(framedRadius, 1e-6) / Math.sin(narrower / 2)) * 0.9;
+	}
 	/** Playback position in samples, fractional so a slow speed still advances. */
 	let position = 0;
 	let shownSample = -1;
@@ -538,13 +552,15 @@
 		if (!renderer) return;
 		const dir = new Vector3(0.55, -1.2, 0.58).normalize();
 		controls.target.set(centre.x, centre.y, centre.z);
-		camera.position.copy(centre).addScaledVector(dir, homeDistance);
+		camera.position.copy(centre).addScaledVector(dir, fitDistance());
 		camera.up.set(0, 0, 1);
 		controls.update();
 		dirty = true;
 	}
 
 	const centre = new Vector3();
+	/** The model's size as this view framed it, kept with its camera. */
+	let framedRadius = 0;
 
 	function init() {
 		try {
@@ -590,6 +606,7 @@
 		}
 		centre.copy(sphere.center);
 		const radius = Math.max(sphere.radius, 1e-6);
+		framedRadius = radius;
 		homeDistance = (radius / Math.sin((camera.fov * Math.PI) / 360)) * 0.82;
 		camera.near = radius / 100;
 		camera.far = radius * 100;
@@ -759,7 +776,9 @@
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
-		const pose = (view.pick || view.gizmo) && scope ? poses.get(scope) : undefined;
+		// the pane's shape first: the fit depends on it
+		resize();
+		const pose = kept && stillFramed(kept.radius, sphere.radius) ? kept : undefined;
 		if (pose) {
 			camera.position.fromArray(pose.position);
 			camera.up.fromArray(pose.up);
@@ -980,7 +999,7 @@
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
-		if ((view.pick || view.gizmo) && scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray() });
+		kept = { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), radius: framedRadius };
 		handles?.detach();
 		handles?.getHelper().removeFromParent();
 		handles?.dispose();
