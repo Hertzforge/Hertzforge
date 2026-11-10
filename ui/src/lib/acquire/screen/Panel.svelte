@@ -44,7 +44,7 @@
 	let menuOpen = $state(false);
 	let optBtn = $state<HTMLElement | null>(null);
 	let grip = $state<HTMLElement | null>(null);
-	let body = $state<{ copyImage(): Promise<void>; saveImage(name: string): Promise<void>; saveCsv(name: string): Promise<void> } | null>(null);
+	let body = $state<{ copyImage(): Promise<void>; saveImage(name: string): Promise<void>; saveCsv(name: string): Promise<void>; traces(): { name: string; role: string }[] } | null>(null);
 
 	function onexport(what: 'copy' | 'image' | 'csv') {
 		if (!body) return;
@@ -149,7 +149,7 @@
 
 	<div class="body">
 		{#if panel.kind === 'plot'}
-			<PlotBody bind:this={body} views={screen.views(panel.id)} {type} spec={panel.plot} {empty} {live} onspec={(spec) => screen.updatePlot(panel.id, spec)} />
+			<PlotBody bind:this={body} views={screen.views(panel.id)} channels={screen.frame(panel.id)?.channels ?? null} linkKey={screen.page.linkTime ? `${screen.hooks.testType}:${screen.page.id}` : null} {type} spec={panel.plot} {empty} {live} onspec={(spec) => screen.updatePlot(panel.id, spec)} />
 		{:else}
 			<div class="cardbody">{@render card(panel.card)}</div>
 		{/if}
@@ -165,7 +165,7 @@
 
 {#if optionsOpen && panel.kind === 'plot'}
 	<Popover anchor={optBtn} label="Options for {title}" align="end" testid="plot-options-pop" onclose={() => screen.openOptions(null)}>
-		<PlotOptions spec={panel.plot} types={screen.hooks.types} {channels} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
+		<PlotOptions spec={panel.plot} types={screen.hooks.types} {channels} traces={body?.traces() ?? []} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
 	</Popover>
 {/if}
 

@@ -74,6 +74,8 @@
 {#snippet card(kind: CardKind)}
 	{#if kind === 'run'}
 		<div class="runcard">
+			<!-- The verbs first: Stop and Abort stay in view however short the card is. -->
+			<RunVerbs {acq} {onoverride} {abortKeys} {compact} layout="card" {omit} />
 			{#if end}
 				<div class="line end {tone}" role={tone === 'fail' ? 'alert' : 'status'} data-testid="run-end" data-outcome={end.outcome}>
 					<span class="mk" aria-hidden="true">
@@ -120,7 +122,6 @@
 				</div>
 			{/if}
 
-			<RunVerbs {acq} {onoverride} {abortKeys} {compact} layout="card" {omit} />
 		</div>
 	{:else if kind === 'level'}
 		<LevelCard {run} frame={f} {channelName} {compact} />
