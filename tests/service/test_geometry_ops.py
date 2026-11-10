@@ -460,3 +460,52 @@ def test_a_cell_typed_on_a_row_of_a_repeated_id_changes_that_row():
     run(project, 'project.set_entity_cell', geometry='Q', kind='elements', row=2, column='nodes',
         value='1 4')
     assert [c.tolist() for c in geometry.elem_conn] == [[1, 2], [1, 4]]
+
+
+def _picked(project, part, validate):
+    from hertzforge.service import show
+
+    views = show.show(project, ['Geometry'], {}, part)['views']
+    wire_views(views, validate)
+    return views
+
+
+def test_a_part_picked_shows_its_entities_table(project, validate):
+    drawn, nodes = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
+    assert drawn['view'] == 'shape3d' and drawn['pick']['op'] == 'project.add_node'
+    assert len(nodes['rows']) == len(project['Geometry'].node_id)
+    assert nodes['edit']['remove'] == {
+        'op': 'project.delete_entities', 'params': {'geometry': 'Geometry', 'kind': 'nodes'},
+        'ids': [row[0] for row in nodes['rows']]}
+    _drawn, systems = _picked(project, {'kind': 'part', 'id': 'coordinate_systems'}, validate)
+    assert systems['title'] == 'Coordinate systems of Geometry'
+
+
+def test_a_family_or_group_shows_its_own_elements_only(project, validate):
+    geometry = project['Geometry']
+    run(project, 'project.add_element', family='beams', nodes='101 102')
+    drawn, beams = _picked(project, {'kind': 'family', 'id': 'beams'}, validate)
+    assert len(beams['rows']) == 1
+    assert drawn['pick']['params']['family'] == 'beams'
+    at = beams['edit']['rows'][0] - 1
+    assert beams['rows'][0][0] == str(int(geometry.elem_id[at])), 'its rows stay the object\'s rows'
+    group = int(geometry.group_id[0])
+    _drawn, groups, elements = _picked(project, {'kind': 'group', 'id': group}, validate)
+    assert [row[0] for row in groups['rows']] == [str(group)]
+    assert len(elements['rows']) == int(np.sum(np.asarray(geometry.elem_group) == group))
+
+
+def test_delete_in_a_parts_table_takes_its_rows(project, validate):
+    _drawn, nodes = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
+    remove = nodes['edit']['remove']
+    before = len(project['Geometry'].node_id)
+    run(project, 'project.add_node', x=1.0, y=1.0, z=1.0)
+    assert len(project['Geometry'].node_id) == before + 1
+    added = str(int(project['Geometry'].node_id[-1]))
+    run(project, remove['op'], **remove['params'], ids=added)
+    assert len(project['Geometry'].node_id) == before
+
+
+def test_solids_and_mates_have_no_table(project, validate):
+    views = _picked(project, {'kind': 'solids', 'id': 0}, validate)
+    assert [v['view'] for v in views] == ['shape3d']

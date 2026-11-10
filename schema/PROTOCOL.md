@@ -354,7 +354,15 @@ gives each column's key, or null for a column that is read only. A cell typed in
 operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),
 and the first `table` view of the answer takes the table's place; a value the operation refuses
 leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
-the block it covers, cell by cell.
+the block it covers, cell by cell. `rows`, when the table shows some of the object's rows, gives the
+row each shown row is, from 1. `remove` (`{"op","params","ids"}`) says the rows are the entities
+themselves, as in a geometry's entity tables: Delete removes the selected rows rather than clearing
+their cells, by running `op` with `params` and `ids`, the selected rows' entries of `ids` as runs
+(`"1-3, 7"`).
+
+With a part of a geometry picked (`part`), `project.show` draws its entities' table beside the
+geometry, with the click in the view that adds one: the nodes or the coordinate systems, a family's
+elements, or picked element groups' table and their elements.
 
 ## Operations: Declarative Panels
 

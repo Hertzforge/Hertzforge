@@ -145,10 +145,13 @@ def test_a_pair_with_no_joint_reading_shows_each_on_its_own(plate, validate):
     assert len(three['views']) == 3
 
 
-def test_a_part_of_a_geometry_is_noted(plate, validate):
-    out = shown(plate, named(plate, 'geometry'), part={'kind': 'family', 'id': 'quads'},
-                validate=validate)
-    assert out['views'][0]['view'] == 'shape3d' and 'family quads' in out['note']
+def test_a_part_of_a_geometry_shows_its_table_or_is_noted(plate, validate):
+    geometry = named(plate, 'geometry')
+    out = shown(plate, geometry, part={'kind': 'family', 'id': 'quads'}, validate=validate)
+    assert [v['view'] for v in out['views']] == ['shape3d', 'table']
+    assert out['views'][1]['title'] == f'Elements of {geometry}: quads'
+    out = shown(plate, geometry, part={'kind': 'solids', 'id': 0}, validate=validate)
+    assert out['views'][0]['view'] == 'shape3d' and 'solids 0' in out['note']
 
 
 def test_what_cannot_be_shown_is_refused_or_said(plate):

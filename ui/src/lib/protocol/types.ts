@@ -427,6 +427,8 @@ export interface TableEdit {
 	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
 	/** The row each shown row is in the object, from 1, when the table shows a pick of them. */
 	rows?: number[];
+	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' `ids`, as runs. */
+	remove?: { op: string; params: Record<string, unknown>; ids: string[] };
 }
 
 /** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */

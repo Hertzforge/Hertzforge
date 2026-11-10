@@ -188,7 +188,9 @@ SHAPES = ['Add Block', 'Add Cylinder', 'Add Cone', 'Add Sphere', 'Add Section', 
 def test_the_geometry_row_leaves_its_parts_verbs_to_its_parts(plate):
     geometry = named(plate, 'geometry')
     own = verbs_in(table(plate, geometry)[0])
-    assert {'Export', 'Show Entities', 'Set View', 'Delete Picks'} <= set(own)
+    assert {'Export', 'Set View'} <= set(own)
+    # a part picked in the tree shows its entities' table, and Delete takes its rows
+    assert not {'Show Entities', 'Delete Picks'} & set(own)
     for verb in [*SHAPES, 'Show Solids', 'Mesh', 'Add Element', 'Add Group', 'Set Properties',
                  'Merge Nodes', 'Align', 'Mate', 'Add Node', 'Rotate']:
         assert verb not in own, verb

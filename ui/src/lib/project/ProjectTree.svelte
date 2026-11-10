@@ -377,7 +377,7 @@
 		{#if open}
 			{@const kids = held(o.name)}
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-			<div class="kids" role="group" data-testid="children-{o.name}" onkeydown={(e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length && !(e.target as HTMLElement).closest('input')) { e.preventDefault(); p.confirming = true; } }}>
+			<div class="kids" role="group" data-testid="children-{o.name}" onkeydown={(e) => { if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length && !(e.target as HTMLElement).closest('input')) { e.preventDefault(); if (!p.selection.part || p.partDeletion) p.confirming = true; } }}>
 				{#if !kids}
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}

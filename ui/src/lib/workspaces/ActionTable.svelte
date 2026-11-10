@@ -144,8 +144,12 @@
 	{/if}
 	{#if p.confirming && picked.length}
 		{@const parts = Object.entries(p.pickedParts)}
+		{@const gone = p.partDeletion}
 		<div class="banner" data-testid="action-confirm">
-			{#if parts.length}
+			{#if gone}
+				<span>Delete {gone.ids.length === 1 ? `${gone.words} ${gone.ids[0]}` : `${gone.ids.length} ${gone.words}s`} of {gone.name}?</span>
+				<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Delete</button>
+			{:else if parts.length}
 				<span>Delete {parts.map(([name, picks]) => `${picks.length} of ${name}`).join(', ')}?</span>
 				<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Delete</button>
 			{:else}

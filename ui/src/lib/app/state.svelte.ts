@@ -625,6 +625,20 @@ class AnalyzeState {
 	}
 
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
+	/** Rows of a table of entities deleted (`edit.remove`): the project, the tree's counts and the tables follow. */
+	async removeShownRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			const geometry = remove.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			void this.showSelection();
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
@@ -643,6 +657,13 @@ class AnalyzeState {
 		}
 	}
 }
+
+/** The operation Delete runs for each part of a geometry it deletes, and the part in words. */
+const PART_DELETES: Record<string, { op: string; param: string; words: string }> = {
+	solid: { op: 'project.delete_solids', param: 'solids', words: 'solid' },
+	group: { op: 'project.delete_element_groups', param: 'groups', words: 'element group' },
+	mate: { op: 'project.delete_mated_surfaces', param: 'mates', words: 'mated surface' }
+};
 
 /** How long an operation may take: fitting or computing on a large project is not quick. */
 const RUN_TIMEOUT_MS = 120_000;
@@ -1534,6 +1555,18 @@ export class ProjectState {
 	}
 
 	/**
+	 * What Delete takes with a part of a geometry picked: the solids, element groups or mated
+	 * surfaces picked, never the geometry. Null for a part Delete leaves alone (the nodes, a
+	 * family: their rows are deleted in their table).
+	 */
+	get partDeletion(): { name: string; op: string; param: string; ids: (string | number)[]; words: string } | null {
+		const part = this.selection.part;
+		const how = part ? PART_DELETES[part.kind] : undefined;
+		if (!part || !how) return null;
+		return { name: part.name, ...how, ids: part.ids ?? [part.id] };
+	}
+
+	/**
 	 * Remove what is selected, once confirmed: the picked sub-items when any are picked (a
 	 * co-selected object is context, not a target), else the objects.
 	 */
@@ -1541,6 +1574,16 @@ export class ProjectState {
 		const names = [...this.selection.objects];
 		const parts = this.pickedParts;
 		this.confirming = false;
+		if (this.selection.part) {
+			const gone = this.partDeletion;
+			if (!gone) return false;
+			const ok = await this.act(`Deleting ${gone.ids.length} ${gone.words}${gone.ids.length === 1 ? '' : 's'} of ${gone.name}`, gone.op, { geometry: gone.name, [gone.param]: gone.ids.join(', ') });
+			if (ok) {
+				this.selected({ objects: [gone.name], records: {}, part: null, anchor: gone.name });
+				void this.loadChildren(gone.name);
+			}
+			return ok;
+		}
 		if (Object.keys(parts).length) return this.deleteParts(parts);
 		if (!names.length) return false;
 		return this.remove(names);

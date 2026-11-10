@@ -132,11 +132,14 @@ def _number(value: Any) -> str:
     return f'{float(value):.6g}'
 
 
-def entity_table(geometry: Any, kind: str, title: str, name: str | None = None) -> dict:
+def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
+                 only: list[int] | None = None) -> dict:
     """One kind of a geometry's entities, lengths in the
     geometry's stored unit: meters once its units are declared. With the
     geometry's `name`, its cells are typed into in place
-    (`project.set_entity_cell`), a column per field of `FIELDS`."""
+    (`project.set_entity_cell`), a column per field of `FIELDS`, and Delete
+    removes its rows (`project.delete_entities`). `only` shows those rows,
+    by index, and no others."""
     from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
     from hertzforge.rotate import angles_of
 
@@ -176,9 +179,18 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None) 
             rows.append([str(group), geometry.group_name[k], id_runs_text(members),
                          group_cells.family(geometry, group) or 'empty', str(len(members)),
                          *group_cells.cells(geometry, group)])
+    if only is not None:
+        rows = [rows[k] for k in only]
     edit = None if name is None else v.editing(
         'project.set_entity_cell', {'geometry': name, 'kind': kind}, FIELDS[kind],
         group_cells.choices() if kind == 'groups' else None)
+    if edit is not None:
+        if only is not None:
+            edit['rows'] = [k + 1 for k in only]
+        # the rows are the entities, so Delete takes rows, not cells
+        edit['remove'] = {'op': 'project.delete_entities',
+                          'params': {'geometry': name, 'kind': kind},
+                          'ids': [row[0] for row in rows]}
     return v.table(title, columns, rows, edit)
 
 
@@ -210,10 +222,10 @@ def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -
 
 
 def _shown(name: str, geometry: Any, kind: str, said: str = '',
-           element: dict[str, Any] | None = None) -> list[dict]:
+           element: dict[str, Any] | None = None, only: list[int] | None = None) -> list[dict]:
     """The geometry drawn, with its coordinate systems' axes when they are
     the entities in hand and what a click in it adds (`_pick`), and the
-    table of `kind`."""
+    table of `kind` (of the rows `only` names, when it names them)."""
     words = {'nodes': 'Nodes', 'coordinate_systems': 'Coordinate systems',
              'elements': 'Elements', 'groups': 'Element groups'}[kind]
     extra = _triads(geometry) if kind == 'coordinate_systems' else (None, None)
@@ -222,7 +234,38 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     pick = _pick(name, geometry, kind, element)
     if pick is not None:
         drawn['pick'] = pick
-    return [drawn, entity_table(geometry, kind, title, name)]
+    return [drawn, entity_table(geometry, kind, title, name, only)]
+
+
+def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] | None:
+    """What a part of a geometry picked in the tree shows: its entities as a table
+    beside the geometry, cells typed over and rows deleted in place, as the earlier
+    toolset's edit mode had them (Brandon, 2026-11-10). The nodes or coordinate
+    systems; a family's elements; element groups and their elements. None for a part
+    with no table of its own (solids, mated surfaces)."""
+    from hertzforge.core.geometry import FAMILY_LABELS, element_family
+
+    from .verbs import part_key, picked_ids
+
+    where = part_key(part)
+    if where in ('part:nodes', 'part:coordinate_systems'):
+        return _shown(name, geometry, where.removeprefix('part:'))
+    if where == 'family':
+        family = str(part['id'])
+        only = [k for k, code in enumerate(geometry.elem_type)
+                if element_family(int(code)) == family]
+        element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
+        return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
+                      element, only)
+    if where == 'group':
+        groups = [int(g) for g in picked_ids(part)]
+        said = ('element group ' if len(groups) == 1 else 'element groups ') + id_runs_text(groups)
+        drawn, elements = _shown(name, geometry, 'elements', said, only=[
+            k for k, g in enumerate(geometry.elem_group) if int(g) in groups])
+        rows = [k for k, g in enumerate(geometry.group_id) if int(g) in groups]
+        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: '
+                                    + id_runs_text(groups), name, rows), elements]
+    return None
 
 
 # ---- View Entities and the edits ----------------------------------------------------

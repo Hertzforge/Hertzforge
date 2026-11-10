@@ -7,7 +7,8 @@
 	 * Every table with `edit` behaves alike. A click selects a
 	 * cell, a drag or Shift a block, and the arrows move. Typing, Enter or a double-click opens the
 	 * cell; Enter commits and moves down, Tab across, Escape cancels. Typed with a block selected,
-	 * the value goes to every cell of it (Batch Edit). Delete clears the block. Cmd or Ctrl+C copies
+	 * the value goes to every cell of it (Batch Edit). Delete clears the block, or, in a table whose rows
+ * are the entities themselves (a geometry's nodes or elements), removes its rows. Cmd or Ctrl+C copies
 	 * it, and tab-separated text pasted sets the cells it covers. The square at the selection's
 	 * corner is the fill handle: dragged, it repeats the block down, up or across; double-clicked,
 	 * down to the last row. Each value goes through the table's own operation, so one it refuses
@@ -22,9 +23,11 @@
 		showTitle?: boolean;
 		/** A cell typed into; resolves to the refusal's words, or null. */
 		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
+		/** The rows are entities (`edit.remove`): the selected rows' ids, removed; resolves to the refusal's words, or null. */
+		onremove?: (ids: string[]) => Promise<string | null>;
 	}
 
-	let { view, showTitle = true, onedit }: Props = $props();
+	let { view, showTitle = true, onedit, onremove }: Props = $props();
 	let copied = $state(false);
 	let anchor = $state<{ row: number; col: number } | null>(null);
 	let focus = $state<{ row: number; col: number } | null>(null);
@@ -70,6 +73,19 @@
 		saving = false;
 		await tick();
 		grid?.focus();
+	}
+
+	/** Delete in a table of entities: the block's rows go, and the selection with them. */
+	async function removeRows(b: Block) {
+		const ids = view.edit?.remove?.ids.slice(b.r0, b.r1 + 1) ?? [];
+		if (!onremove || !ids.length || saving) return;
+		saving = true;
+		refusal = await onremove(ids);
+		saving = false;
+		if (!refusal) {
+			anchor = null;
+			focus = null;
+		}
 	}
 
 	/** The editable cells of a block, each set to `value`: Delete clears with '', Batch Edit types. */
@@ -132,6 +148,9 @@
 			const row = Math.max(0, Math.min(view.rows.length - 1, focus.row + step[0]));
 			const col = Math.max(0, Math.min(view.columns.length - 1, focus.col + step[1]));
 			select(row, col, e.shiftKey);
+		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block && view.edit?.remove && onremove) {
+			e.preventDefault();
+			void removeRows(block);
 		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block) {
 			e.preventDefault();
 			void apply(everywhere(block, ''));
