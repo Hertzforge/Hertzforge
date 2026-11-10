@@ -2,7 +2,8 @@
 	/**
 	 * A table's File menu: Open, Save, Save As, and Export in each form a table file has. Files go
 	 * through the analysis service by path: in the desktop app the native dialogs give the path, and
-	 * in a browser the path is typed. What happened is handed to `onresult` for the table to show.
+	 * in a browser the path is typed. A breakpoint table is opened in the units the table holds where
+	 * the file says none. What happened is handed to `onresult` for the table to show.
 	 */
 	import { hasNativeFiles } from '$lib/project/files';
 	import { TABLE_FORMATS, chooseTableOpen, chooseTableSave, loadTable, pathName, saveTable, withForm, type FileResult, type LoadedTable, type TableData, type TableFileClient, type TableForm, type TableKind } from './tableFiles';
@@ -17,8 +18,11 @@
 		name: string;
 		/** The table as it is to be written. */
 		table: () => TableData;
-		/** A file read, to take the table's place. */
-		onopen: (loaded: LoadedTable, path: string) => void;
+		/**
+		 * A file read, to take the table's place; what the table changed or left out in taking it, if
+		 * anything. Throwing refuses the file, in the error's words, and leaves the table as it was.
+		 */
+		onopen: (loaded: LoadedTable, path: string) => void | FileResult[];
 		/** The file the table was last opened from or saved to. */
 		path?: string | null;
 		disabled?: boolean;
@@ -27,9 +31,11 @@
 		/** Asked before a file read takes the table's place; false keeps the table. */
 		confirmOpen?: (path: string) => boolean | Promise<boolean>;
 		onresult?: (items: FileResult[]) => void;
+		/** Which edge of the button the menu lines up with: the end (right) or the start (left). */
+		align?: 'start' | 'end';
 		testid?: string;
 	}
-	let { client, kind, tableKind = null, name, table, onopen, path = $bindable(null), disabled = false, openBlocked = null, confirmOpen, onresult, testid = 'table-file' }: Props = $props();
+	let { client, kind, tableKind = null, name, table, onopen, path = $bindable(null), disabled = false, openBlocked = null, confirmOpen, onresult, align = 'end', testid = 'table-file' }: Props = $props();
 
 	type Act = { act: 'open' } | { act: 'save' } | { act: 'save-as' } | { act: 'export'; form: TableForm };
 
@@ -91,7 +97,7 @@
 		try {
 			const written = await saveTable(client, kind, tableKind, table(), target);
 			if (act.act !== 'export') path = written;
-			report([{ level: 'note', message: `${act.act === 'export' ? 'Exported' : 'Saved'} ${name.toLowerCase()} to ${written}.` }]);
+			report([{ level: 'note', message: `${act.act === 'export' ? 'Exported' : 'Saved'} to ${written}.` }]);
 			return true;
 		} catch (err) {
 			report([{ level: 'error', message: `${pathName(target)} was not written. ${(err as Error).message}` }]);
@@ -105,11 +111,12 @@
 		if (!client) return false;
 		busy = true;
 		try {
-			const loaded = await loadTable(client, kind, tableKind, target);
+			const units: Partial<TableData> = kind === 'breakpoints' ? table() : {};
+			const loaded = await loadTable(client, kind, tableKind, target, { x_unit: units.x_unit, y_unit: units.y_unit });
 			if (confirmOpen && !(await confirmOpen(target))) return false;
-			onopen(loaded, target);
+			const notes = onopen(loaded, target) ?? [];
 			path = target;
-			report([{ level: 'note', message: `Opened ${pathName(target)}.` }, ...loaded.warnings.map((message) => ({ level: 'warning' as const, message }))]);
+			report([{ level: 'note', message: `Opened ${pathName(target)}.` }, ...loaded.warnings.map((message) => ({ level: 'warning' as const, message })), ...notes]);
 			return true;
 		} catch (err) {
 			report([{ level: 'error', message: `${pathName(target)} was not opened. ${(err as Error).message}` }]);
@@ -181,7 +188,7 @@
 		<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 	</button>
 	{#if open}
-		<div class="menu" role="menu" tabindex="-1" aria-label="{name} file" bind:this={menu} onkeydown={onMenuKey}>
+		<div class="menu" class:start={align === 'start'} role="menu" tabindex="-1" aria-label="{name} file" bind:this={menu} onkeydown={onMenuKey}>
 			{#if path}<div class="current mono" title={path}>{pathName(path)}</div>{/if}
 			{#each items as item, k (item.id)}
 				{#if k === 3}<div class="sep" role="separator"></div>{/if}
@@ -190,7 +197,7 @@
 		</div>
 	{/if}
 	{#if asking}
-		<form class="ask" onsubmit={submit} data-testid="{testid}-path-form">
+		<form class="ask" class:start={align === 'start'} onsubmit={submit} data-testid="{testid}-path-form">
 			<label for="{testid}-path">{asking.act === 'export' ? `${PROMPT.export} ${TABLE_FORMATS.find((f) => asking?.act === 'export' && f.form === asking.form)?.label}` : PROMPT[asking.act]}</label>
 			<div class="row">
 				<input
@@ -233,6 +240,12 @@
 		border: 1px solid var(--line-2);
 		border-radius: var(--radius-md);
 		box-shadow: var(--shadow-pop);
+	}
+
+	.menu.start,
+	.ask.start {
+		right: auto;
+		left: 0;
 	}
 
 	.current {

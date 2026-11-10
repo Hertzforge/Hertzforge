@@ -93,10 +93,15 @@ export async function saveTable(client: TableFileClient, kind: TableKind, tableK
 	return res.path;
 }
 
-/** Read the table at `path`; a file of another kind is refused by the service in words. */
-export async function loadTable(client: TableFileClient, kind: TableKind, tableKind: string | null, path: string): Promise<LoadedTable> {
+/**
+ * Read the table at `path`; a file of another kind is refused by the service in words. A breakpoint
+ * table comes back in the units its file says, else in `units` (the table's it is opened into).
+ */
+export async function loadTable(client: TableFileClient, kind: TableKind, tableKind: string | null, path: string, units: { x_unit?: string; y_unit?: string } = {}): Promise<LoadedTable> {
 	const params: Record<string, unknown> = { kind, path };
 	if (tableKind) params.table_kind = tableKind;
+	if (units.x_unit !== undefined) params.x_unit = units.x_unit;
+	if (units.y_unit !== undefined) params.y_unit = units.y_unit;
 	return client.request<LoadedTable>('tables.load', params, { timeoutMs: FILE_TIMEOUT_MS });
 }
 

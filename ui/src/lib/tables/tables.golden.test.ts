@@ -32,8 +32,8 @@ function recording(result: unknown) {
 }
 
 describe('table file goldens', () => {
-	it('are the four this suite checks', () => {
-		expect(GOLDENS).toEqual(['request_tables_load', 'request_tables_save', 'response_tables_load', 'response_tables_save']);
+	it('are the seven this suite checks', () => {
+		expect(GOLDENS).toEqual(['request_tables_load', 'request_tables_load_gain', 'request_tables_save', 'request_tables_save_bound', 'response_tables_load', 'response_tables_load_gain', 'response_tables_save']);
 	});
 
 	for (const name of GOLDENS) {
@@ -62,6 +62,22 @@ describe('table file goldens', () => {
 		expect(sent).toEqual([{ method: 'tables.load', params: request.params }]);
 		expect(loaded).toEqual(response.result);
 		expect([loaded.x_unit, loaded.y_unit, loaded.warnings.length]).toEqual(['Hz', 'g²/Hz', 1]);
+	});
+
+	it('saveTable sends a Sine bound with its kind and units', async () => {
+		const p = JSON.parse(read('request_tables_save_bound')).params;
+		const { client, sent } = recording({ path: p.path });
+		await saveTable(client, 'breakpoints', 'sine_limit', { columns: p.columns, rows: p.rows, x_unit: p.x_unit, y_unit: p.y_unit }, p.path);
+		expect(sent).toEqual([{ method: 'tables.save', params: p }]);
+	});
+
+	it('loadTable sends the units a breakpoint file is opened into', async () => {
+		const request = JSON.parse(read('request_tables_load_gain'));
+		const response = JSON.parse(read('response_tables_load_gain'));
+		const { client, sent } = recording(response.result);
+		const loaded = await loadTable(client, 'breakpoints', 'drive_gain', request.params.path, { x_unit: 'Hz', y_unit: 'g/V' });
+		expect(sent).toEqual([{ method: 'tables.load', params: request.params }]);
+		expect(loaded).toEqual(response.result);
 	});
 });
 

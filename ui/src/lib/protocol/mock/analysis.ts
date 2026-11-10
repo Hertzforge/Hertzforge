@@ -33,6 +33,17 @@ function tablePath(raw: unknown): string {
 
 const kindWords = (kind: string) => (kind === 'channels' ? 'a channel table' : 'a breakpoint table');
 
+/** Each breakpoint table's name in a message, as the service says it. */
+const TABLE_KIND_WORDS: Record<string, string> = {
+	random_profile: 'a random profile',
+	sine_profile: 'a sine profile',
+	sine_limit: 'a sine limit',
+	srs_target: 'an SRS target',
+	limit: 'a limit',
+	drive_gain: 'a drive gain'
+};
+const tableKindWords = (k: string) => TABLE_KIND_WORDS[k] ?? `a ${k.replace(/_/g, ' ')}`;
+
 export function createAnalysisServer(): MockServer {
 	const files = new Map<string, StoredTable>();
 	return {
@@ -61,9 +72,15 @@ export function createAnalysisServer(): MockServer {
 				const name = path.split(/[\\/]/).pop();
 				if (found.kind !== params.kind) throw new MockError('refused', `${name} holds ${kindWords(found.kind)}, not ${kindWords(String(params.kind))}`);
 				if (params.table_kind && found.table_kind && params.table_kind !== found.table_kind) {
-					throw new MockError('refused', `${name} holds a ${found.table_kind.replace(/_/g, ' ')}, not a ${String(params.table_kind).replace(/_/g, ' ')}`);
+					throw new MockError('refused', `${name} holds ${tableKindWords(found.table_kind)}, not ${tableKindWords(String(params.table_kind))}`);
 				}
-				return { ...structuredClone(found), warnings: [] };
+				const out: StoredTable & { warnings: string[] } = { ...structuredClone(found), warnings: [] };
+				// units the file does not say are the ones it is opened into
+				if (found.kind === 'breakpoints') {
+					if (out.x_unit === undefined && typeof params.x_unit === 'string') out.x_unit = params.x_unit;
+					if (out.y_unit === undefined && typeof params.y_unit === 'string') out.y_unit = params.y_unit;
+				}
+				return out;
 			}
 		}
 	};
