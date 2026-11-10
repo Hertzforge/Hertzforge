@@ -936,7 +936,8 @@ def test_a_new_geometry_asks_for_nothing_and_takes_the_display_length():
 
     state = projects.new({'title': 'x'})
     rows = projects.actions(state, {'objects': []})['table']['columns'][0]['rows']
-    assert next(row for row in rows if row['id'] == 'project.new_geometry')['instant']
+    for made in ('project.new_geometry', 'project.new_channel_table'):
+        assert next(row for row in rows if row['id'] == made)['instant'], made
     op = OPS['project.new_geometry']
     running_in('in-slinch-lbf-s (g)', op.run, state.project, op.resolve({}, objects={}))
     running_in('mm-kg-N-s', op.run, state.project, op.resolve({}, objects={}))

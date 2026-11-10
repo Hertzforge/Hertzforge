@@ -85,7 +85,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 }
 
 #: the operations on the project row that run at once, asking nothing (Brandon, 2026-11-10)
-INSTANT = frozenset({'project.new_geometry'})
+INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 
 #: the rows that read a geometry's nodes, off until it has some
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
@@ -376,7 +376,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             continue
         if not chosen:
             if not _object_params(op):
-                # a new geometry asks for nothing: it is made at once and renamed in the tree
+                # a new geometry or channel table asks for nothing: it is made at once and
+                # renamed in the tree
                 more = {'instant': True} if op.id in INSTANT else {}
                 rows.append(_op_row(op, fill={}, **more))
             continue
