@@ -32,6 +32,8 @@
 		BufferAttribute,
 		BufferGeometry,
 		Color,
+		ConeGeometry,
+		Group,
 		DirectionalLight,
 		DoubleSide,
 		LineBasicMaterial,
@@ -57,6 +59,7 @@
 	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
+	import { AXIS_COLORS, AXIS_HEX } from './pick';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapGradient } from './colormap';
@@ -347,6 +350,33 @@
 	let ghostOutline: LineSegments | null = null;
 	/** The view's `marks`: DOF arrows and sensors, drawn still. */
 	let markLines: LineSegments | null = null;
+	/** The view's coordinate systems (`frames`), drawn as the gimbal is: X red, Y green, Z blue arrows. */
+	let frameGroup: Group | null = null;
+	function buildFrames() {
+		if (!view.frames?.length) return;
+		frameGroup = new Group();
+		for (const frame of view.frames) {
+			const origin = new Vector3().fromArray(frame.origin);
+			frame.axes.forEach((axis, k) => {
+				const dir = new Vector3().fromArray(axis).normalize();
+				const head = frame.length * 0.22;
+				const neck = origin.clone().addScaledVector(dir, frame.length - head);
+				const shaft = new BufferGeometry().setFromPoints([origin, neck]);
+				// drawn over the model, as the gimbal is: a system at a part's middle is inside it
+				frameGroup!.add(new LineSegments(shaft, new LineBasicMaterial({ color: AXIS_COLORS[k], depthTest: false })));
+				const cone = new Mesh(new ConeGeometry(head * 0.32, head, 16), new MeshBasicMaterial({ color: AXIS_COLORS[k], depthTest: false }));
+				cone.position.copy(neck).addScaledVector(dir, head / 2);
+				cone.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), dir);
+				frameGroup!.add(cone);
+			});
+		}
+		frameGroup.traverse((o) => {
+			o.frustumCulled = false;
+			o.renderOrder = 5;
+		});
+		scene.add(frameGroup);
+	}
+
 	/** The view's `bodies`: sensor solids, each point taking its node's motion. */
 	let bodies: Mesh | null = null;
 	let bodyShapeAttr: BufferAttribute | null = null;
@@ -582,10 +612,20 @@
 		geometry.setIndex(new BufferAttribute(view.triangles ?? new Uint32Array(0), 1));
 		geometry.computeBoundingSphere();
 		const sphere = geometry.boundingSphere!.clone();
+		const others: Box3[] = [];
 		if (view.bodies && view.bodies.nodes.length) {
 			// bodies drawn in their own color (a solid being edited) are framed too, alone or not
-			const bodyBox = new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3));
-			const box = view.nodes.length ? new Box3().setFromBufferAttribute(position).union(bodyBox) : bodyBox;
+			others.push(new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3)));
+		}
+		for (const frame of view.frames ?? []) {
+			// a coordinate system's arrows, framed with the model
+			const box = new Box3().setFromCenterAndSize(new Vector3().fromArray(frame.origin), new Vector3(0, 0, 0));
+			for (const axis of frame.axes) box.expandByPoint(new Vector3().fromArray(axis).multiplyScalar(frame.length).add(new Vector3().fromArray(frame.origin)));
+			others.push(box);
+		}
+		if (others.length) {
+			const box = view.nodes.length ? new Box3().setFromBufferAttribute(position) : others.shift()!;
+			for (const other of others) box.union(other);
 			box.getBoundingSphere(sphere);
 		}
 		centre.copy(sphere.center);
@@ -773,6 +813,7 @@
 			}
 			controls.update();
 		} else resetView();
+		buildFrames();
 		buildGizmo();
 		applyTheme();
 		loadMode();
@@ -977,6 +1018,12 @@
 			(markLines.material as Material).dispose();
 		}
 		bodies?.geometry.dispose();
+		frameGroup?.traverse((o) => {
+			if (o instanceof Mesh || o instanceof LineSegments) {
+				o.geometry.dispose();
+				(o.material as Material).dispose();
+			}
+		});
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
@@ -1332,12 +1379,20 @@
 
 		<div class="corner">
 			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
-				<line class="x" x1="24" y1="24" x2="39" y2="24" />
-				<line class="y" x1="24" y1="24" x2="24" y2="9" />
-				<line class="z" x1="24" y1="24" x2="30" y2="30" />
-				<text class="x" x="45" y="27">X</text>
-				<text class="y" x="24" y="6">Y</text>
-				<text class="z" x="33" y="36">Z</text>
+				<!-- the gimbal's colors and arrowheads: X red, Y green, Z blue -->
+				<defs>
+					{#each ['x', 'y', 'z'] as axis, k (axis)}
+						<marker id="triad-{axis}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+							<path d="M0,0 L10,5 L0,10 z" fill={AXIS_HEX[k]} />
+						</marker>
+					{/each}
+				</defs>
+				<line class="x" x1="24" y1="24" x2="39" y2="24" stroke={AXIS_HEX[0]} marker-end="url(#triad-x)" />
+				<line class="y" x1="24" y1="24" x2="24" y2="9" stroke={AXIS_HEX[1]} marker-end="url(#triad-y)" />
+				<line class="z" x1="24" y1="24" x2="30" y2="30" stroke={AXIS_HEX[2]} marker-end="url(#triad-z)" />
+				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
+				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
+				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
 			</svg>
 
 			<div class="stats num" aria-live="off">
@@ -1653,24 +1708,10 @@
 		stroke-linecap: round;
 	}
 
-	.triad line.x {
-		stroke: var(--blue-2);
-	}
-
-	.triad line.y {
-		stroke: var(--amber-2);
-		stroke-dasharray: 3 2;
-	}
-
-	.triad line.z {
-		stroke: var(--text-2);
-		stroke-dasharray: 1 2;
-	}
-
 	.triad text {
 		font-family: var(--font-mono);
 		font-size: 8.5px;
-		fill: var(--text-2);
+		font-weight: 600;
 		text-anchor: middle;
 	}
 

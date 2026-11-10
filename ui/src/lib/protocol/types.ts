@@ -222,6 +222,8 @@ export interface Shape3DView {
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	gizmo?: Gizmo3D;
+	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
+	frames?: { origin: number[]; axes: number[][]; length: number }[];
 }
 
 /** What a drag on a gizmo's arrow or ring runs. */

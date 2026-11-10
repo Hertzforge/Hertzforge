@@ -264,6 +264,9 @@ def _shape(view: dict, system: Any) -> None:
         bodies = view.get('bodies')
         if bodies is not None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)
+        for frame in view.get('frames', ()):
+            frame['origin'] = [float((v - change[1]) / change[0]) for v in frame['origin']]
+            frame['length'] = float(frame['length'] / change[0])
         gizmo = view.get('gizmo')
         if gizmo is not None:
             gizmo['origin'] = [float((v - change[1]) / change[0]) for v in gizmo['origin']]
