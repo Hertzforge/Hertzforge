@@ -124,6 +124,7 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'rename_dof': (*_RECORDED, 'geometry'),
     'set_control': ('geometry', 'random', 'shock', 'transient', 'sine'),
     'compute_psds': ('sysid', 'random', 'transient'),
+    'mesh_solids': ('geometry', 'model'),
     'compute_frfs': ('sysid', 'modal'),
     'compute_multiple_coherence': ('sysid', 'random'),
     'conditioning': ('sysid', 'modal'),
@@ -136,7 +137,8 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
 }.items()}
 
 #: the part of a geometry in the tree each of these operations belongs to:
-#: a part's kind, or 'part:<id>' for the nodes and the coordinate systems. A
+#: a part's kind, or 'part:<id>' for the nodes and the coordinate systems, or
+#: several (Mesh on the Solids row, every part, and on the solids picked). A
 #: part picked offers its own operations alone, and the geometry's row none
 #: of these: the shapes to build from on the Solids row, as the earlier
 #: toolset offered them (Brandon, 2026-10-11), and what ties or merges parts on the
@@ -150,7 +152,7 @@ PARTS = {f'project.{name}': part for name, part in {
     'add_solid_plate': 'solids',
     'add_solid_disk': 'solids',
     'solids': 'solids',
-    'mesh_solids': 'solids',
+    'mesh_solids': ('solids', 'solid'),
     'add_element': 'family',
     'add_element_group': 'family',
     'group_properties': 'group',
@@ -203,6 +205,12 @@ def modules_of(op: Any) -> tuple[str, ...]:
     if op.id in MODULES:
         return MODULES[op.id]
     return STUDIES if op.everywhere else (op.workspace,)
+
+
+def homes_of(op_id: str) -> tuple[str, ...]:
+    """The parts an operation is offered on (`PARTS`); none for the geometry's own."""
+    home = PARTS.get(op_id)
+    return () if home is None else (home,) if isinstance(home, str) else tuple(home)
 
 
 def part_key(part: Any) -> str:

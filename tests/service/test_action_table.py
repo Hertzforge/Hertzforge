@@ -246,6 +246,8 @@ def test_solids_picked_together_combine(validate):
                           validate=validate)
     assert one['parts'] == ['solid'] and 'Combine' not in verbs_in(one)
     assert row(one, 'Edit Solid')['fill']['solid'] == '1'
+    # Mesh on the Solids row meshes every part; on solids picked, those
+    assert row(one, 'Mesh')['fill']['solids'] == '1' and 'geometry' in row(one, 'Mesh')['modules']
     assert row(together, 'Combine')['candidates'] == ['2', '3']
     picked = {'name': 'Part', 'kind': 'solid', 'id': 1, 'ids': [1, 3]}
     columns = table(state, 'Part', part=picked, validate=validate)

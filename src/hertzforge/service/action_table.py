@@ -368,8 +368,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         rows += _project_rows(project)
     where = verbs.part_key(part)
     for op in _rows_of(OPERATIONS):
-        home = verbs.PARTS.get(op.id)
-        if op.id in verbs.UNOFFERED or home != (where or None):
+        homes = verbs.homes_of(op.id)
+        if op.id in verbs.UNOFFERED or (where not in homes if homes else bool(where)):
             continue
         if not chosen:
             if not _object_params(op):
@@ -413,7 +413,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 continue
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
-        more: dict[str, Any] = {'part': True} if home else {}
+        more: dict[str, Any] = {'part': True} if homes else {}
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
         rows.append(_op_row(op, fill=fill, **more))

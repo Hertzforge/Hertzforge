@@ -72,6 +72,9 @@ class AnalyzeState {
 	shown = $state.raw<Shown | null>(null);
 	/** The bar's choices, remembered across launches. */
 	prefs = $state<ShowPrefs>(readPrefs());
+	/** The tables folded down to their headers, by what they list ('Nodes', 'Solids'), so the
+	 * 3-D view beside them has the frame; remembered across launches. */
+	folded = $state<string[]>(readFolded());
 	/** The frequency the stage's shape is read at, from the plot's cursor; null for the loudest line. */
 	line = $state<number | null>(null);
 	private lineTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,7 +95,6 @@ class AnalyzeState {
 	shapeView = $state<ShapeView | null>(null);
 	/** The reading drawn in place of what the selection shows, by its row's id. */
 	readingId = $state<string | null>(null);
-	/** A combination's row whose partner is being picked in the tree. */
 	/** A combination waiting on its last pick in the tree: an object of `kind`, or with `part`, another part of that kind. */
 	picking = $state<{ verb: string; kind: string; row: ActionRow; part?: string } | null>(null);
 	/** The row to run once the object it needed has joined the selection. */
@@ -625,6 +627,16 @@ class AnalyzeState {
 	}
 
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
+	/** A table folded to its header, or opened again. */
+	toggleFolded(key: string): void {
+		this.folded = this.folded.includes(key) ? this.folded.filter((k) => k !== key) : [...this.folded, key];
+		try {
+			localStorage.setItem(FOLDED_KEY, JSON.stringify(this.folded));
+		} catch {
+			// a private window keeps it for the session only
+		}
+	}
+
 	/** Rows of a table of entities deleted (`edit.remove`): the project, the tree's counts and the tables follow. */
 	async removeShownRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
 		try {
@@ -656,6 +668,22 @@ class AnalyzeState {
 			return message(err);
 		}
 	}
+}
+
+const FOLDED_KEY = 'hertzforge.foldedTables';
+
+function readFolded(): string[] {
+	try {
+		const held = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? '[]');
+		return Array.isArray(held) ? held.filter((k): k is string => typeof k === 'string') : [];
+	} catch {
+		return [];
+	}
+}
+
+/** What a table lists, the part of its title before " of ": the key it is folded by. */
+export function foldKey(title: string): string {
+	return title.split(' of ')[0];
 }
 
 /** A value typed into a column shown in the display units, taken back to SI as the column's `to_si` says. */

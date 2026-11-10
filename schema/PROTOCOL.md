@@ -566,7 +566,7 @@ as `project.show` takes it, offers the operations on that part alone, each carry
 and none of the geometry's own: the shapes to build from and Mesh on the Solids row, Add Element and
 Add Group on an element family (the family filled in), and on element groups what sets their
 properties, merges, aligns or mates them, with every group picked filled into `groups`, and on
-solids what edits, moves, patterns, takes apart or deletes them, with every solid picked filled into
+solids what edits, moves, patterns, takes apart, meshes or deletes them, with every solid picked filled into
 `solids`. Element groups or solids picked together come as `{"kind": "group", "id", "ids"}` (or
 `"solid"`), `ids` every one picked. With a part picked, the first column has `parts`, the part's kind
 once for each one picked, and the only other column is that part with one more of its kind (`parts`
