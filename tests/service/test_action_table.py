@@ -619,7 +619,7 @@ def test_a_group_with_no_shells_is_not_asked_for_a_thickness(plate):
     face = ELEMENT_TYPES[int(held.elem_type[0])][2] == 'face'
     found = row(table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': group})[0],
                 'Set Properties')
-    assert ('omit' in found) is not face
+    assert ('thickness' in found['omit']) is not face and 'groups' in found['omit']
     solid = projects.new({'title': 'x'})
     solid.project.new_geometry('Part', unit='m')
     for op_id, given in (('project.add_solid_block', {}),
@@ -628,4 +628,5 @@ def test_a_group_with_no_shells_is_not_asked_for_a_thickness(plate):
             {'geometry': 'Part', **given}, objects={'Part': 'geometry'}, verbs={'Part': []}))
     hexes = row(table(solid, 'Part', part={'name': 'Part', 'kind': 'group', 'id': 1})[0],
                 'Set Properties')
-    assert hexes['omit'] == ['thickness']
+    # nor for the groups: the ones picked in the tree are the ones it sets
+    assert hexes['omit'] == ['groups', 'thickness'] and hexes['fill']['groups'] == '1'

@@ -602,7 +602,8 @@ it, and a live form is run each time a changed field is left, with no Run button
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
 color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
-plate thickness.
+plate thickness, and no row on a part picked asks again for what the pick fills (its groups,
+solids or mates: more are picked in the tree).
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system. A connection starts

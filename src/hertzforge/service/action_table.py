@@ -420,15 +420,22 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
         more: dict[str, Any] = {'part': True} if homes else {}
+        if where and part:
+            # what the pick fills is not asked again: the groups, solids or mates picked are
+            # the ones it acts on, and more are picked in the tree (Brandon, 2026-11-10)
+            picked_fields = [key for key in dict.fromkeys(
+                (where, f'{where}s', 'family')) if key in fill]
+            if picked_fields:
+                more['omit'] = picked_fields
         if op.id == 'project.mesh_solids' and where == 'solid':
             # the solids picked, all at one size: the size they are likely to hold at,
             # as shells when every one is flat
-            more['omit'] = ['solids', 'sizes', 'detect']
+            more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'solids', 'sizes', 'detect']))
             fill.update(_mesh_fill(project, fill['geometry'], verbs.picked_ids(part)))
         if (op.id == 'project.group_properties' and where == 'group'
                 and not _shells_among(project[fill['geometry']], verbs.picked_ids(part))):
             # a thickness is a shell's: a group of solid or beam elements is not asked for one
-            more['omit'] = ['thickness']
+            more['omit'] = [*more.get('omit', []), 'thickness']
         if where == 'solids' and op.id in _adds():
             # a shape is made at once and then edited (Brandon, 2026-11-10)
             more['instant'] = True
