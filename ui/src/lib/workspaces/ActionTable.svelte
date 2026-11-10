@@ -3,8 +3,8 @@
 	 * The action table beside the project tree (Brandon, 2026-11-06). Its first column is the
 	 * selection and stays put; each other column is the selection with one more object, and scrolls.
 	 * Rows are short verbs: a default is what the selection draws by itself, so it is not clicked
-	 * (until a reading has taken its place, when it is the way back); a verb runs or opens its form;
-	 * a grey verb says why it cannot. A combination's verb adds the object it needs, asking in the
+	 * (until a reading has taken its place, when it is the way back); a verb runs or opens its form,
+	 * and one that cannot run now is not shown. A combination's verb adds the object it needs, asking in the
 	 * tree when there is more than one. The form opens in this column, so the plot stays in view.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
@@ -77,7 +77,7 @@
 	function measure() {
 		if (!scroller) return;
 		const edge = scroller.getBoundingClientRect().right;
-		const heads = [...scroller.querySelectorAll('th.other:not(.off)')];
+		const heads = [...scroller.querySelectorAll('th.other')];
 		hidden = heads.filter((th) => th.getBoundingClientRect().left + 8 >= edge).length;
 	}
 	$effect(() => {
@@ -174,7 +174,7 @@
 							</th>
 							{#each others as column (column.kinds.join('+'))}
 								{@const last = column.kinds[column.kinds.length - 1]}
-								<th class="other" class:off={!column.rows.some((r) => r.ready)} scope="col" title="With a {kindWords(last)}" data-testid="action-head-{last}">
+								<th class="other" scope="col" title="With a {kindWords(last)}" data-testid="action-head-{last}">
 									<span class="heads">
 										{#each column.kinds.slice(0, -1).slice(0, 2) as kind, i (i)}<Glyph name={kind} size={16} />{/each}
 										{#if last === '*'}<span class="any" aria-label="any object">*</span>{:else}<Glyph name={last} size={16} />{/if}
@@ -193,10 +193,8 @@
 											{@const clickable = live(row, column)}
 											{#if clickable}
 												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{row.verb}</button>
-											{:else if row.kind === 'default' && row.ready}
-												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{row.verb}</span>
 											{:else}
-												<span class="verb gone" data-testid="action-{row.id}" title={row.reason}>{row.verb}</span>
+												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{row.verb}</span>
 											{/if}
 										{/if}
 									</td>
@@ -322,9 +320,6 @@
 		font-weight: normal;
 		white-space: nowrap;
 	}
-	th.off .heads {
-		opacity: 0.45;
-	}
 	.heads {
 		display: inline-flex;
 		align-items: center;
@@ -389,10 +384,6 @@
 	}
 	.verb.still {
 		font-weight: var(--weight-strong);
-		cursor: default;
-	}
-	.verb.gone {
-		color: var(--text-4);
 		cursor: default;
 	}
 	.fade {
