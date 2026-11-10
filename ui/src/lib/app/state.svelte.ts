@@ -550,6 +550,23 @@ class AnalyzeState {
 		}
 	}
 
+	/**
+	 * The gimbal on what the selection shows (a solid picked in the tree) let go: its operation
+	 * runs, and the selection is shown again, the gimbal where the solid now is.
+	 */
+	async dragOnSelection(act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
+		this.runError = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: act.op, params: { ...act.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			const geometry = act.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+		} catch (err) {
+			this.runError = message(err);
+		}
+		void this.showSelection();
+	}
+
 	/** No new view is coming: the same ones again, so a handle let go where it was refused goes back. */
 	private redrawReading(): void {
 		const was = this.reading;
