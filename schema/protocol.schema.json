@@ -445,7 +445,8 @@
         "options_from": {"type": "string", "pattern": "^(objects:[a-z][a-z0-9_]*(\\|[a-z][a-z0-9_]*)*|verb:[a-z][a-z0-9_]*)$"},
         "in_view": {"type": "boolean"},
         "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"},
-        "length": {"type": "boolean"}
+        "length": {"type": "boolean"},
+        "shown_with": {"type": "array", "prefixItems": [{"type": "string"}, {}], "minItems": 2, "maxItems": 2}
       }
     },
     "workspace": {"enum": ["acquire", "simulate", "signals", "sysid", "random", "shock", "transient", "sine", "modal", "geometry", "model", "specify", "report"]},
