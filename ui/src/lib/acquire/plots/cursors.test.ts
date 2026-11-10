@@ -111,6 +111,12 @@ describe("a pane's marks", () => {
 		expect(m.box).toEqual(['A  10.00 Hz', '   Control  4.000 g²/Hz', 'B  30.00 Hz', '   Control  6.000 g²/Hz', 'B-A  20.00 Hz', '   Control  2.000 g²/Hz']);
 	});
 
+	it('reads the measurements and the reference, not the alarm lines', () => {
+		const withAlarm: SpectrumView = { ...view, series: [...view.series, { name: 'Alarm high', role: 'tolerance', x: Float64Array.from([0, 30]), y: Float64Array.from([2, 2]) }] };
+		const m = paneMarks(withAlarm, { cursor: 'one', cursorAt: [10, null], count: 3 });
+		expect(m.box).toEqual(['A  10.00 Hz', '   Reference  1.000 g²/Hz', '   Control  4.000 g²/Hz']);
+	});
+
 	it('marks the peak of each measured series, and the top peaks of the first', () => {
 		expect(paneMarks(view, { cursor: 'peak', cursorAt: [null, null], count: 3 }).points).toEqual([{ x: 30, y: 6, label: 'Peak' }]);
 		expect(paneMarks(view, { cursor: 'peaks', cursorAt: [null, null], count: 2 }).points).toEqual([

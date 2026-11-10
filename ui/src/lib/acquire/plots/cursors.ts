@@ -104,6 +104,8 @@ export function placeCursor(at: [number | null, number | null], x: number, mode:
 	return d(a) <= d(b) ? [x, b] : [a, x];
 }
 
+const READ_ROLES: string[] = ['measured', 'drive', 'other', 'reference'];
+
 const num = (v: number | null) => (v === null || !Number.isFinite(v) ? '-' : formatFixed(v, 4));
 const unitOf = (u: string | null) => (u ? ` ${u}` : '');
 
@@ -130,6 +132,9 @@ export function paneMarks(view: SpectrumView, display: Pick<PlotDisplay, 'cursor
 	const s = p >= 0 ? view.series[p] : null;
 	const [a, b] = display.cursorAt ?? [null, null];
 	const read = (series: Series, x: number) => valueAt(series, x, logX, logY);
+	// the cursors read the measurements and the reference; the alarm, abort and limit lines are
+	// read from the legend's readout, so the box stays short
+	const reads = (i: number) => shown(i) && READ_ROLES.includes(view.series[i].role);
 
 	if (mode === 'one' || mode === 'two') {
 		const placed: [string, number][] = [];
@@ -139,13 +144,13 @@ export function paneMarks(view: SpectrumView, display: Pick<PlotDisplay, 'cursor
 			marks.lines.push({ x, label, dash: label === 'A' ? DASH_STYLES.solid.dash : DASH_STYLES.dashed.dash });
 			marks.box.push(`${label}  ${num(x)}${xu}`);
 			view.series.forEach((series, i) => {
-				if (shown(i)) marks.box.push(`   ${series.name}  ${num(read(series, x))}${yu}`);
+				if (reads(i)) marks.box.push(`   ${series.name}  ${num(read(series, x))}${yu}`);
 			});
 		}
 		if (mode === 'two' && a !== null && b !== null) {
 			marks.box.push(`B-A  ${num(b - a)}${xu}`);
 			view.series.forEach((series, i) => {
-				if (!shown(i)) return;
+				if (!reads(i)) return;
 				const d = difference(a, b, read(series, a), read(series, b), logY);
 				marks.box.push(logY ? `   ${series.name}  B/A ${num(d.ratio)}` : `   ${series.name}  ${num(d.dy)}${yu}`);
 			});

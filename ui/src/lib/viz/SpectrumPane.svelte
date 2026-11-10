@@ -559,7 +559,8 @@
 	/** A box dragged on the plot: its x span, and its y span where y zooms too. */
 	function takeSelection(u: uPlot) {
 		if (!ownZoom) return;
-		const sel = u.select;
+		// a copy: clearing the box below empties uPlot's own
+		const sel = { ...u.select };
 		const w = u.over.clientWidth;
 		const h = u.over.clientHeight;
 		const dx = sel.width > 1 && sel.width < w - 1;
@@ -1502,13 +1503,14 @@
 		position: absolute;
 		z-index: 2;
 		pointer-events: none;
+		container-type: size;
 	}
 
 	.inbox {
 		position: absolute;
 		max-width: calc(100% - 12px);
 		max-height: calc(100% - 12px);
-		overflow: auto;
+		overflow: hidden;
 		margin: 0;
 		padding: 4px 6px;
 		list-style: none;
@@ -1524,8 +1526,33 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		min-width: 0;
 		min-height: 16px;
 		white-space: nowrap;
+	}
+
+	.inbox .name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.inbox .entry {
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	/* a narrow plot keeps the swatch, which draws the dash and the marker, and drops their words */
+	@container (max-width: 300px) {
+		.inbox .style {
+			display: none;
+		}
+	}
+
+	@container (max-width: 180px) {
+		.inbox .val {
+			display: none;
+		}
 	}
 
 	.inbox .val {
@@ -1562,6 +1589,7 @@
 	}
 
 	.inbox.marks {
+		overflow: auto;
 		white-space: pre;
 		line-height: 16px;
 		color: var(--text-1);

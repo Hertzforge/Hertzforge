@@ -113,6 +113,7 @@
 
 	function rangeProblem(k: 'x' | 'y'): string | null {
 		const [a, b] = fixedText[k];
+		if (a.trim() === '' && b.trim() === '') return null;
 		if (a.trim() === '' || b.trim() === '') return 'Enter both ends of the range.';
 		const lo = Number(a);
 		const hi = Number(b);
@@ -123,7 +124,7 @@
 	}
 
 	function commitFixed(k: 'x' | 'y') {
-		if (rangeProblem(k)) return;
+		if (rangeProblem(k) || fixedText[k][0].trim() === '') return;
 		setAxis(k, { min: Number(fixedText[k][0]), max: Number(fixedText[k][1]) });
 	}
 
@@ -327,10 +328,10 @@
 				{/if}
 				{#if !time}
 					{@render seg(
-						'Several',
+						'Panes',
 						[
-							['split', 'One Pane Each'],
-							['overlay', 'Overlaid']
+							['split', 'One per Channel'],
+							['overlay', 'All on One']
 						],
 						spec.arrange,
 						(v) => set({ arrange: v })

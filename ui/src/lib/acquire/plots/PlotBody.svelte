@@ -69,7 +69,11 @@
 	});
 	const shown = $derived(still ?? held);
 
-	const presented = $derived(present(shown, spec, type, { band }));
+	/** Columns before the panes are known: a time plot's lanes are full width. */
+	const cols0 = $derived(time ? 1 : spec.arrange === 'overlay' ? 1 : 2);
+	/** The body's width: an envelope keeps about one interval per pixel. */
+	let width = $state(600);
+	const presented = $derived(present(shown, spec, type, { band, buckets: Math.max(50, Math.round(width / Math.max(1, cols0))) }));
 	const panes = $derived(presented.panes);
 	const readings = $derived(presented.readings);
 	const drawn = $derived(panes.some((p) => p.view.series.length > 0) || readings.length > 0);
@@ -95,6 +99,12 @@
 		if (time && z.x) frozen = true;
 		if (time && z.x === null) frozen = false;
 		change({ x: zoomed(display.x, z.x), y: zoomed(display.y, z.y) });
+	}
+
+	/** Run again: a time plot's zoom on the frozen times is let go, since the times move on. */
+	function resume() {
+		frozen = false;
+		if (time && display.x.range === 'held') change({ x: zoomed(display.x, null) });
 	}
 
 	function toggleTrace(name: string) {
@@ -240,7 +250,7 @@
 	}
 </script>
 
-<div class="body" bind:this={bodyEl} data-quantity={type?.id ?? spec.quantity} data-testid="plot-body">
+<div class="body" bind:this={bodyEl} bind:clientWidth={width} data-quantity={type?.id ?? spec.quantity} data-testid="plot-body">
 	{#if !drawn}
 		<p class="empty">{empty}</p>
 	{:else}
@@ -290,7 +300,7 @@
 	{#if frozen}
 		<div class="chip frozen" role="status">
 			<span>Frozen</span>
-			<button class="btn ghost sm" onclick={() => (frozen = false)}>Resume</button>
+			<button class="btn ghost sm" onclick={resume}>Resume</button>
 		</div>
 	{/if}
 	{#if status}
@@ -358,9 +368,8 @@
 	}
 
 	.chip.frozen {
-		top: 4px;
-		left: 50%;
-		transform: translateX(-50%);
+		left: 4px;
+		bottom: 4px;
 	}
 
 	.chip.said {
