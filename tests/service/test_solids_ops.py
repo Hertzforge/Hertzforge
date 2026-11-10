@@ -777,9 +777,12 @@ def test_picking_an_element_group_fills_merge_and_delete():
     run(project, 'project.add_solid_block')
     run(project, 'project.mesh_solids', size=0.5, keep=True)
     table = projects.actions(state, {'objects': ['Part'], 'part': {'kind': 'group', 'id': 1}})
-    rows_by_id = {row['id']: row for row in table['table']['columns'][0]['rows']}
-    for op in ('project.merge_element_groups', 'project.delete_element_groups'):
-        assert rows_by_id[op]['fill']['groups'] == '1'
+    own, together = table['table']['columns']
+    assert {row['id']: row for row in own['rows']}['project.delete_element_groups']['fill'] == {
+        'geometry': 'Part', 'groups': '1'}
+    merge = {row['id']: row for row in together['rows']}['project.merge_element_groups']
+    assert together['parts'] == ['group', 'group']
+    assert merge['candidates'] == [] and 'no other group' in merge['reason']
 
 
 def test_looking_at_a_view_first_operation_leaves_the_project_unmodified(tmp_path):

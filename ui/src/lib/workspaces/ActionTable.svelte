@@ -10,9 +10,10 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import { workspaceInfo } from '$lib/app/workspaces';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
-	import type { ActionColumn, ActionRow, Workspace } from '$lib/protocol/types';
+	import type { ActionColumn, ActionRow, SolidRow, Workspace } from '$lib/protocol/types';
 	import { columnsFor, kindWords, moreIn } from '$lib/project/actionTable';
 	import Glyph from '$lib/project/Glyph.svelte';
+	import { solidIcon } from '$lib/project/icons';
 	import UnitsEditor from '$lib/project/UnitsEditor.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import { rowGlyph } from './actionIcons';
@@ -36,6 +37,42 @@
 	const one = $derived(picked.length === 1 ? picked[0] : null);
 	const coherences = $derived((p.summary?.objects ?? []).filter((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence').map((o) => o.name));
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+	const part = $derived(p.selection.part);
+	const partIds = $derived(part ? (part.ids ?? [part.id]) : []);
+
+	function findSolid(rows: SolidRow[], id: string | number): SolidRow | undefined {
+		for (const row of rows) {
+			if (row.id === id) return row;
+			const inside = findSolid(row.children, id);
+			if (inside) return inside;
+		}
+		return undefined;
+	}
+
+	/** The tree's icon for a part of a geometry: a solid's by its shape when it is one picked. */
+	function partIcon(kind: string, id?: string | number): string {
+		if (kind.startsWith('part:')) return kind.slice('part:'.length);
+		if (kind === 'family') return String(id ?? 'hexes');
+		if (kind === 'group') return 'groups';
+		if (kind === 'mate' || kind === 'mates') return 'mates';
+		if (kind === 'solid' && part && id !== undefined) {
+			const kids = p.children[part.name];
+			const solid = kids?.kind === 'geometry' ? findSolid(kids.solids, id) : undefined;
+			if (solid) return solidIcon(solid.kind);
+		}
+		return 'solid_block';
+	}
+
+	/** A column's identity: its kinds, and its parts, since a column of parts has the selection's kinds. */
+	function columnKey(column: ActionColumn): string {
+		return [...column.kinds, ...(column.parts ?? []), column.current ? 'current' : ''].join('+');
+	}
+
+	/** A part kind in a sentence. */
+	function partWords(kind: string): string {
+		return kind === 'group' ? 'element group' : kind.replace(/^part:/, '').replace(/_/g, ' ');
+	}
 
 	let weight = $state('');
 	let groupName = $state('');
@@ -172,33 +209,42 @@
 					<thead>
 						<tr>
 							<th class="sel" scope="col" title={picked.length ? picked.join(', ') : 'The project'}>
-								{#if current.kinds.length}
+								{#if current.parts && part}
+									<span class="heads" data-testid="action-head-parts">{#each partIds.slice(0, 3) as id, i (i)}<Glyph name={partIcon(current.parts[0], id)} of="child" parent="geometry" size={16} />{/each}{#if partIds.length > 3}<span class="count">+{partIds.length - 3}</span>{/if}</span>
+								{:else if current.kinds.length}
 									<span class="heads">{#each current.kinds.slice(0, 3) as kind, i (i)}<Glyph name={kind} size={16} />{/each}{#if current.kinds.length > 3}<span class="count">+{current.kinds.length - 3}</span>{/if}</span>
 								{:else}
 									<span class="word">Project</span>
 								{/if}
 							</th>
-							{#each others as column (column.kinds.join('+'))}
+							{#each others as column (columnKey(column))}
 								{@const last = column.kinds[column.kinds.length - 1]}
+								{#if column.parts}
+									{@const kind = column.parts[column.parts.length - 1]}
+									<th class="other" scope="col" title="With another {partWords(kind)}" data-testid="action-head-{kind}">
+										<span class="heads"><Glyph name={partIcon(kind, partIds[0])} of="child" parent="geometry" size={16} /><Glyph name={partIcon(kind)} of="child" parent="geometry" size={16} /></span>
+									</th>
+								{:else}
 								<th class="other" scope="col" title="With a {kindWords(last)}" data-testid="action-head-{last}">
 									<span class="heads">
 										{#each column.kinds.slice(0, -1).slice(0, 2) as kind, i (i)}<Glyph name={kind} size={16} />{/each}
 										{#if last === '*'}<span class="any" aria-label="any object">*</span>{:else}<Glyph name={last} size={16} />{/if}
 									</span>
 								</th>
+								{/if}
 							{/each}
 						</tr>
 					</thead>
 					<tbody>
 						{#each { length: rowCount } as _, i (i)}
 							<tr>
-								{#each columns as column (column.kinds.join('+'))}
+								{#each columns as column (columnKey(column))}
 									{@const row = column.rows[i]}
 									<td class:sel={column.current}>
 										{#if row}
 											{@const clickable = live(row, column)}
 											{#if clickable}
-												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{@render glyph(row)}{row.verb}</button>
+												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : column.parts ? `Adds another ${partWords(column.parts[column.parts.length - 1])}` : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{@render glyph(row)}{row.verb}</button>
 											{:else}
 												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{@render glyph(row)}{row.verb}</span>
 											{/if}

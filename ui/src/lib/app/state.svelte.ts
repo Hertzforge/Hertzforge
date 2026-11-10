@@ -93,7 +93,8 @@ class AnalyzeState {
 	/** The reading drawn in place of what the selection shows, by its row's id. */
 	readingId = $state<string | null>(null);
 	/** A combination's row whose partner is being picked in the tree. */
-	picking = $state<{ verb: string; kind: string; row: ActionRow } | null>(null);
+	/** A combination waiting on its last pick in the tree: an object of `kind`, or with `part`, another part of that kind. */
+	picking = $state<{ verb: string; kind: string; row: ActionRow; part?: string } | null>(null);
 	/** The row to run once the object it needed has joined the selection. */
 	private joined: string | null = null;
 	/** The fit about to begin by hand, when a coherence could weight it. */
@@ -298,6 +299,14 @@ class AnalyzeState {
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
+		if (!column.current && column.parts) {
+			const part = column.parts[column.parts.length - 1];
+			const picked = this.app.project.selection.part;
+			const candidates = row.candidates ?? [];
+			if (picked && candidates.length === 1) this.joinPart(picked.name, part, Number(candidates[0]), row);
+			else this.picking = { verb: row.verb, kind: part === 'group' ? 'element_group' : part, row, part };
+			return;
+		}
 		if (!column.current) {
 			const partner = column.kinds[column.kinds.length - 1];
 			const candidates = row.candidates ?? [];
@@ -360,6 +369,13 @@ class AnalyzeState {
 		this.joined = row.kind === 'default' ? null : row.id;
 		const p = this.app.project;
 		p.clickObject(name, p.summary?.objects.map((o) => o.name) ?? [], { toggle: true });
+	}
+
+	/** The part a combination of parts needed was chosen: it is picked with the others, and the row runs once the table has caught up. */
+	joinPart(name: string, kind: string, id: string | number, row: ActionRow): void {
+		this.picking = null;
+		this.joined = row.id;
+		this.app.project.clickPart(name, kind, id, { toggle: true });
 	}
 
 	/** Back from a form to the table; a preview it had drawn goes with it, since nothing ran. */

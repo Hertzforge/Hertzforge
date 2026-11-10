@@ -200,7 +200,7 @@ def test_a_part_offers_its_own_verbs_alone(plate):
     geometry = named(plate, 'geometry')
     solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
     assert set(SHAPES) | {'Show Solids', 'Mesh'} <= set(solids)
-    assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Copy'} & set(solids)
+    assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Combine'} & set(solids)
     nodes = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0])
     assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
 
@@ -214,15 +214,49 @@ def test_a_family_fills_the_element_it_adds(plate):
 
 def test_element_groups_picked_together_fill_what_ties_them(plate):
     geometry = named(plate, 'geometry')
-    one = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1})[0]
+    one, together = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1})
+    assert one['parts'] == ['group'] and together['parts'] == ['group', 'group']
     assert row(one, 'Merge Nodes')['fill']['groups'] == '1'
+    others = [str(g) for g in plate.project[geometry].group_id if g != 1]
     for verb in ('Merge Groups', 'Align', 'Mate'):
-        assert row(one, verb)['ready'] is False
-        assert row(one, verb)['reason'] == 'Pick two element groups or more in the tree'
-    both = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1, 'ids': [1, 2]})[0]
+        assert verb not in verbs_in(one)
+        assert row(together, verb)['candidates'] == others
+        assert row(together, verb)['ready'] is bool(others)
+    columns = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1, 'ids': [1, 2]})
+    both = columns[0]
+    assert both['parts'] == ['group', 'group']
     for verb in ('Merge Nodes', 'Merge Groups', 'Align', 'Mate', 'Set Properties'):
         assert row(both, verb)['fill']['groups'] == '1, 2'
         assert row(both, verb)['ready'] is True
+    assert len(columns) == 1, 'nothing more for a third group to add'
+
+
+def test_solids_picked_together_combine(validate):
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Part', unit='m')
+    for _ in range(3):
+        OPS['project.add_solid_block'].run(project, OPS['project.add_solid_block'].resolve(
+            {'geometry': 'Part'}, objects={'Part': 'geometry'}, verbs={'Part': []}))
+    one, together = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': 1},
+                          validate=validate)
+    assert one['parts'] == ['solid'] and 'Combine' not in verbs_in(one)
+    assert row(one, 'Edit Solid')['fill']['solid'] == '1'
+    assert row(together, 'Combine')['candidates'] == ['2', '3']
+    picked = {'name': 'Part', 'kind': 'solid', 'id': 1, 'ids': [1, 3]}
+    columns = table(state, 'Part', part=picked, validate=validate)
+    both = columns[0]
+    assert both['parts'] == ['solid', 'solid']
+    for verb in ('Combine', 'Move Part', 'Pattern', 'Take Apart', 'Delete Solids'):
+        assert row(both, verb)['fill']['solids'] == '1, 3' and row(both, verb)['ready'], verb
+    assert row(both, 'Edit Solid')['reason'] == 'Pick one solid in the tree'
+    assert len(columns) == 1
+
+
+def test_a_part_pairs_only_with_its_own_kind(plate):
+    geometry = named(plate, 'geometry')
+    columns = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})
+    assert len(columns) == 1 and columns[0]['parts'] == ['part:nodes']
 
 
 def test_nothing_selected_is_the_project_alone(plate, validate):
