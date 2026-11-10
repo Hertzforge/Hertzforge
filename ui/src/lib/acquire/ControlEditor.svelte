@@ -2,13 +2,17 @@
 	/**
 	 * How the loop identifies the system, controls, protects and ramps, plus response and force
 	 * limits and the check against a shaker's ratings. Every field starts at the protocol's
-	 * default and says in a line what it does to the run.
+	 * default and says in a line what it does to the run. A limit's rows are saved to and opened
+	 * from a breakpoint table file (`limit`).
 	 */
 	import type { ChannelRow, LimitProfile } from '$lib/protocol/types';
+	import type { LoadedTable } from '$lib/tables/tableFiles';
+	import { pointsRows, pointsTable, type PointsFile } from './breakpointFile';
 	import Findings from './Findings.svelte';
 	import NumberField from './NumberField.svelte';
 	import { defaultControl, under, type ControlDraft } from './setup';
 	import type { AcquireState } from './store.svelte';
+	import TableFileBar from './TableFileBar.svelte';
 
 	interface Props {
 		acq: AcquireState;
@@ -78,6 +82,15 @@
 	}
 
 	const unitOf = (ch: number) => ctl.find((r: ChannelRow) => r.index === ch)?.units ?? 'g';
+
+	type LimitRow = LimitProfile['rows'][number];
+	const limitFile = (unit: string): PointsFile<LimitRow> => ({ keys: ['freq_hz', 'ceiling'], column: 'ceiling', unit });
+
+	function openLimit(lim: LimitProfile, unit: string, loaded: LoadedTable) {
+		const { rows, notes } = pointsRows(loaded, limitFile(unit));
+		lim.rows.splice(0, lim.rows.length, ...rows);
+		return notes;
+	}
 
 	async function loadShaker(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
@@ -223,7 +236,9 @@
 					</tbody>
 				</table>
 				<Findings items={under(E, `limits.${i}`).map((message) => ({ level: 'error' as const, message }))} />
-				<button class="btn sm" disabled={locked} onclick={() => lim.rows.push({ freq_hz: (lim.rows.at(-1)?.freq_hz ?? 10) * 2, ceiling: lim.rows.at(-1)?.ceiling ?? 1 })}>Add Row</button>
+				<TableFileBar client={acq.tableFiles} tableKind="limit" name="Limit" table={() => pointsTable(lim.rows, limitFile(unit))} onopen={(loaded) => openLimit(lim, unit, loaded)} {locked} testid="limit-{i}">
+					<button class="btn sm" disabled={locked} onclick={() => lim.rows.push({ freq_hz: (lim.rows.at(-1)?.freq_hz ?? 10) * 2, ceiling: lim.rows.at(-1)?.ceiling ?? 1 })}>Add Row</button>
+				</TableFileBar>
 			</div>
 		{/each}
 		<button class="btn sm" disabled={locked || inputRows.length === 0} onclick={addLimit} data-testid="limit-add">Add Limit</button>

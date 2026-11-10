@@ -96,7 +96,7 @@
 						</button>
 					</div>
 					<Findings items={errs(`limits.channels.${i}.channel`).map((message) => ({ level: 'error' as const, message }))} />
-					<SineProfileTable rows={ch.profile.rows} prefix="limits.channels.{i}.profile.rows" errors={{ ...E, [`limits.channels.${i}.profile.rows`]: [...errs(`limits.channels.${i}.profile.rows`), ...errs(`limits.channels.${i}.profile`)] }} warnings={W} {locked} testid="sine-limit-{i}-rows" label="Limit channel {i + 1} bound" valueWord="Bound" bands={false} />
+					<SineProfileTable rows={ch.profile.rows} prefix="limits.channels.{i}.profile.rows" errors={{ ...E, [`limits.channels.${i}.profile.rows`]: [...errs(`limits.channels.${i}.profile.rows`), ...errs(`limits.channels.${i}.profile`)] }} warnings={W} {locked} testid="sine-limit-{i}-rows" label="Limit channel {i + 1} bound" valueWord="Bound" bands={false} file={{ client: sine.acq.tableFiles, tableKind: 'sine_limit', name: 'Sine Limit' }} />
 				</div>
 			{:else}
 				<p class="aq-muted aq-small">None.</p>

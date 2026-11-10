@@ -79,6 +79,7 @@
 					make={(last) => ({ freq_hz: last ? Math.round(last.freq_hz * 2) : 100, accel_g: last?.accel_g ?? 100 })}
 					testid="srs-target-points"
 					label="Target breakpoints"
+					file={{ client: srs.acq.tableFiles, tableKind: 'srs_target', name: 'SRS Target', column: 'accel_g' }}
 				/>
 				<div class="aq-group">
 					<h3>Read From a File</h3>
