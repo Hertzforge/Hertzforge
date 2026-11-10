@@ -47,8 +47,13 @@
 		 * and run again together. Null for a plot of its own.
 		 */
 		linkKey?: string | null;
+		/** A test type's own marks on every pane: a line at `marker` and thin lines at `guides`, in x. */
+		marker?: number | null;
+		guides?: number[];
+		/** The x range the first pane draws, as it changes. */
+		onrange?: (low: number, high: number) => void;
 	}
-	let { views, type, spec, empty, live = true, onspec, band = null, frozen = $bindable(false), channels = null, linkKey = null }: Props = $props();
+	let { views, type, spec, empty, live = true, onspec, band = null, frozen = $bindable(false), channels = null, linkKey = null, marker = null, guides = [], onrange }: Props = $props();
 
 	const display = $derived(spec.display);
 	const time = $derived(type?.time ?? false);
@@ -342,6 +347,9 @@
 							yLabel={display.y.label}
 							envelope={time && display.timeRender === 'envelope'}
 							onPick={(x) => pick(x, logX)}
+							{marker}
+							{guides}
+							onRange={i === 0 ? onrange : undefined}
 						/>
 					</div>
 				{/each}

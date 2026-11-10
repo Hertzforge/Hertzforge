@@ -159,6 +159,17 @@ describe('a panel presented', () => {
 		expect(lanes.layout).toBe('lanes');
 	});
 
+	it('draws the parts of a plot that takes no channels one pane each, never overlaid', () => {
+		const PULSE: PlotType = { id: 'pulse', words: 'Pulse', help: '', group: 'time', channels: false, time: true };
+		const views = [wave('Pulse', [s('Measured', [0, 1], [0, 1])]), { ...wave('Drive', [s('Drive', [0, 1], [1, 0], 'drive')]), y: { label: 'Drive', unit: 'V', scale: 'linear' as const } }];
+		const spec = newPlotSpec(PULSE);
+		expect(spec.display.lanes).toBe('overlay');
+		const p = present(views, spec, PULSE);
+		expect([p.overlaid, p.panes.map((x) => x.view.title)]).toEqual([false, ['Pulse', 'Drive']]);
+		// the same views on a plot that takes channels are overlaid, as before
+		expect(present(views, newPlotSpec(TIME, 'all'), TIME).overlaid).toBe(true);
+	});
+
 	it('holds x to the band on a frequency plot', () => {
 		const spec = newPlotSpec(RESPONSE, [1]);
 		spec.display.x = { ...spec.display.x, range: 'band' };
