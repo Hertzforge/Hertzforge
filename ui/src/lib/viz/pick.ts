@@ -126,6 +126,11 @@ export function gizmoReading(mode: 'translate' | 'rotate', axis: string, amount:
 	return `Move along ${about}: ${amount.toFixed(places)} ${unit}`;
 }
 
+/** Whether a camera kept at a model of size `then` still frames one of size `now`: within a quarter either way. */
+export function stillFramed(then: number, now: number): boolean {
+	return then > 0 && now > 0 && now / then < 1.25 && then / now < 1.25;
+}
+
 export function gridStep(unit: string): number | null {
 	const meters = METERS[unit];
 	if (meters === undefined) return null;
