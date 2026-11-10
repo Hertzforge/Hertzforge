@@ -251,7 +251,7 @@ try {
 	await tid(a, 'proceed-to-run').click();
 	await until(a, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	check('Proceed to Run applies the setup: the run is configured', true);
-	check('there is no Arm and no level in dB on the run bar', (await tid(a, 'act-arm').count()) === 0 && (await tid(a, 'run-level').count()) === 0);
+	check('there is no Arm in the Run card and no level in dB in the header', (await tid(a, 'act-arm').count()) === 0 && (await tid(a, 'run-level').count()) === 0);
 	await tid(a, 'act-start').click();
 	await until(a, 'the tone at 0 V', async (p) => (await runState(p)) === 'running' && (await runPhase(p)) === 'quiet', 30_000);
 	check('Start runs the tone at 0 V', (await text(a, 'explorer-level-status')) === 'Quiet: the tone is at 0 V' && (await num(a, 'data-vpk')) === 0, await text(a, 'explorer-level-status'));

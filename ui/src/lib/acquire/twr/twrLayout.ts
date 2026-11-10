@@ -40,20 +40,6 @@ export const TWR_PAGE_WORDS: Record<TwrPageKind, string> = {
 	scope: 'Scope'
 };
 
-export const TWR_PAGE_HELP: Record<TwrPageKind, string> = {
-	replication: "The last play's response over the target at its level, across the record.",
-	error: "The last play's response less the target, across the record.",
-	spectra: 'The target at the level, the last response and the drive it played, in the correction band.',
-	identification: 'The identified gain and phase, the coherence against its floors, and the bins the correction trusts.',
-	convergence: "Each play's rms error against the gate.",
-	law: "The control law's values on each call, and the run in numbers.",
-	plays: 'Every play, with its error, its gate, its drive and the law call that made it.',
-	target: 'The target at the present level, across the record.',
-	drive: 'The drive the last play played, in volts.',
-	envelope: "The last play's response inside the alarm and abort bands around the target.",
-	scope: 'The control channel during the play in flight.'
-};
-
 export const TWR_RATES = [1, 2, 5, 10];
 export const TWR_DEFAULT_RATE = 5;
 export const MAX_TWR_PAGES = 12;
@@ -78,10 +64,8 @@ export const TWR_QUANTITIES: readonly TwrQuantity[] = ['target', 'response', 'er
 
 export const TWR_PAGES: PulsePageSet<TwrPageKind, TwrQuantity> = {
 	testType: 'twr',
-	prefix: 'tp',
 	kinds: TWR_PAGE_KINDS,
 	words: TWR_PAGE_WORDS,
-	help: TWR_PAGE_HELP,
 	quantities: TWR_PAGE_QUANTITIES,
 	timeQuantities: TWR_POINTS_QUANTITIES,
 	rates: TWR_RATES,

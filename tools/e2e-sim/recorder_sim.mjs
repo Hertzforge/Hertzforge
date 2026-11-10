@@ -254,8 +254,8 @@ try {
 	await proceedAndStart(a);
 	await until(a, 'monitoring', async (p) => (await text(p, 'recorder-status')) === 'Monitoring: nothing is being saved', 20_000);
 	check('Start: the card says monitoring saves nothing', true);
-	check('the run bar has no Arm of its own and no level in dB', (await tid(a, 'act-arm').count()) === 0 && (await tid(a, 'run-level').count()) === 0);
-	check('the run bar offers Arm, and in level mode no Record and no Cut', (await tid(a, 'act-rec-arm').isVisible()) && (await tid(a, 'act-rec-record').count()) === 0 && (await tid(a, 'act-rec-cut').count()) === 0);
+	check('the Run card has no shared Arm and the header no level in dB', (await tid(a, 'act-arm').count()) === 0 && (await tid(a, 'run-level').count()) === 0);
+	check('the Run card offers Arm, and in level mode no Record and no Cut', (await tid(a, 'act-rec-arm').isVisible()) && (await tid(a, 'act-rec-record').count()) === 0 && (await tid(a, 'act-rec-cut').count()) === 0);
 	await neverLive(a, 'monitoring');
 
 	// ---- The Time and Spectra pages move -------------------------------------------------------------

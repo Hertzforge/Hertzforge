@@ -30,15 +30,6 @@ export const SHOCK_PAGE_WORDS: Record<ShockPageKind, string> = {
 	law: 'Law'
 };
 
-export const SHOCK_PAGE_HELP: Record<ShockPageKind, string> = {
-	pulse: 'The reference at the level fired with its tolerance band, the measured pulse and the drive played.',
-	srs: "The measured pulse's shock response spectrum against the reference's, with the informational band.",
-	kinematics: 'Velocity and displacement of the measured pulse and of the reference.',
-	identification: "The identified system's magnitude and phase, the coherence with the trusted lines marked, and the pulse's spectra.",
-	pulses: 'Every pulse fired, with its verdicts, and the run in numbers.',
-	law: "The control law's reported values on its last call, and the run in numbers."
-};
-
 export const SHOCK_RATES = [1, 2, 5];
 export const SHOCK_DEFAULT_RATE = 2;
 export const MAX_SHOCK_PAGES = 12;
@@ -59,10 +50,8 @@ export const TIME_QUANTITIES: readonly ShockQuantity[] = ['pulse', 'velocity', '
 /** Classical shock's pages, as the shared run view reads them. */
 export const SHOCK_PAGES: PulsePageSet<ShockPageKind, ShockQuantity> = {
 	testType: 'shock',
-	prefix: 'sp',
 	kinds: SHOCK_PAGE_KINDS,
 	words: SHOCK_PAGE_WORDS,
-	help: SHOCK_PAGE_HELP,
 	quantities: PAGE_QUANTITIES,
 	timeQuantities: TIME_QUANTITIES,
 	rates: SHOCK_RATES,

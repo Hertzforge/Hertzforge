@@ -18,10 +18,8 @@ type Q = 'wave' | 'vel' | 'resp' | 'gain' | 'readings';
 
 const PAGES: PulsePageSet<K, Q> = {
 	testType: 'demo',
-	prefix: 'dp',
 	kinds: ['main', 'kin', 'table', 'spare'],
 	words: { main: 'Main', kin: 'Kinematics', table: 'Table', spare: 'Spare' },
-	help: { main: '', kin: '', table: '', spare: '' },
 	quantities: { main: ['wave', 'resp'], kin: ['vel', 'gain'], table: ['readings'], spare: ['resp'] },
 	timeQuantities: ['wave', 'vel'],
 	rates: [1, 2, 5],
@@ -116,17 +114,25 @@ describe('layouts kept by the page layer', () => {
 			pages: [
 				{ id: 'dp-3', name: 'Kin First', kind: 'kin' },
 				{ id: 'dp-1', name: 'Main', kind: 'main' },
-				{ id: 'dp-4', name: 'More Main', kind: 'main' }
+				{ id: 'dp-4', name: 'More Main', kind: 'main' },
+				{ id: 'dp-5', name: '  ', kind: 'table' }
 			]
 		});
 		const l = pulseFromSaved(SPEC, TYPES, text) as NonNullable<ReturnType<typeof pulseFromSaved>>;
 		expect(l.pages.map((p) => [p.name, p.panels.map((x) => (x.kind === 'plot' ? x.plot.quantity : x.card))])).toEqual([
 			['Kin First', ['vel', 'gain']],
 			['Main', ['wave', 'resp']],
-			['More Main', ['wave', 'resp']]
+			['More Main', ['wave', 'resp']],
+			// a page kept with no name takes its kind's
+			['Table', ['rows', 'readings']]
 		]);
 		expect(l.rate).toBe(5);
-		expect(l.dock.cards.every((c) => c.shown)).toBe(true);
+		expect(l.dock.cards.map((c) => [c.kind, c.shown])).toEqual([
+			['run', true],
+			['level', true],
+			['rows', false],
+			['station', true]
+		]);
 	});
 
 	it('takes nothing that is not one, nor another type\'s', () => {

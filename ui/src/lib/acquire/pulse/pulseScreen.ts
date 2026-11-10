@@ -14,7 +14,7 @@ import type { NoticesHost, RunBarHost, RunHead, SetupStatus } from '../actions';
 import { lastLayoutKey, layoutKey } from '../display/layout';
 import { newPlotSpec, type LineFamily, type PlotType } from '../plots/types';
 import { tiling } from '../screen/grid';
-import { DEFAULT_ASPECT, DEFAULT_RATE, defaultDock, RATES } from '../screen/layout';
+import { cleanName, DEFAULT_ASPECT, DEFAULT_RATE, defaultDock, RATES } from '../screen/layout';
 import type { PlotPanel, ScreenHooks } from '../screen/screen.svelte';
 import { GRID_COLS, GRID_ROWS, type CardKind, type Panel, type ScreenLayout, type ScreenPage } from '../screen/types';
 import { pulseLayoutFromSaved, type PulsePageSet } from './pulseLayout';
@@ -94,7 +94,7 @@ export function pulseScreenLayout<K extends string, Q extends string>(
 			const channels: ChannelSelector = (type.channels && spec.pages.channels?.[p.kind]) || 'all';
 			panels.push({ id: `pl-${++n}`, kind: 'plot', at: { x: 0, y: 0, w: 1, h: 1 }, plot: newPlotSpec(type, channels) });
 		}
-		return tiled(`pg-${i + 1}`, p.name, panels, aspect);
+		return tiled(`pg-${i + 1}`, cleanName(p.name) || spec.pages.words[p.kind], panels, aspect);
 	});
 	const dock = defaultDock(spec.cards);
 	for (const c of dock.cards) if (placed.has(c.kind)) c.shown = false;

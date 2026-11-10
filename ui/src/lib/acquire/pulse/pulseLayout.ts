@@ -1,14 +1,13 @@
 /**
- * The pages of a pulse-by-pulse run (classical shock, SRS shock), shared by both and by Sine's
- * fixed pages: a set of page kinds and the quantities each draws, the plain-data form a layout is
- * saved in, what a window subscribes to, and the pulses an operator picks in the pulse table to lay
- * over a page. Each test type names its own pages and quantities in a `PulsePageSet`; nothing here
- * computes a measurement: an overlay only places the service's own series side by side, each named
- * for its pulse.
+ * The page kinds of the test types on the pulse page layer (Sine, classical shock, SRS shock, TWR,
+ * Explorer and the Recorder): each type's kinds and the quantities each draws, which make a
+ * screen's first pages, and the form the page layer kept a layout in, read once to take it over.
+ * Also the pulses an operator picks in the pulse table to lay over a plot: nothing here computes a
+ * measurement; an overlay only places the service's own series side by side, each named for its
+ * pulse.
  */
 
 import type { ChannelSelector, Series, SpectrumView, View } from '$lib/protocol/types';
-import { pointsForWidth } from '../display/mimoLayout';
 
 /** One page of a run view. */
 export interface PulsePageSpec<K extends string = string> {
@@ -25,28 +24,20 @@ export interface PulseLayout<K extends string = string> {
 	pages: PulsePageSpec<K>[];
 }
 
-/** One plot a page subscribes to. */
-export interface PulsePlotSpec<Q extends string = string> {
-	id: string;
-	quantity: Q;
-	points: number;
-	/** The channels asked for, on a quantity that takes them (a page set's `channelQuantities`). */
-	channels?: ChannelSelector;
-}
-
-/** A test type's pages: their kinds, words and quantities, and the subscription's rules. */
+/**
+ * A test type's page kinds: their words and the quantities each draws, which quantities take a
+ * channel selector or a point count, and what a kept layout may hold.
+ */
 export interface PulsePageSet<K extends string, Q extends string> {
 	/** The test type a layout is kept under. */
 	testType: string;
-	/** The page ids' prefix (`sp-1`). */
-	prefix: string;
 	kinds: readonly K[];
 	words: Record<K, string>;
-	help: Record<K, string>;
 	/** The quantities each page draws, in order. */
 	quantities: Record<K, readonly Q[]>;
 	/** The quantities drawn as time histories: the only plots that take a point count. */
 	timeQuantities: readonly Q[];
+	/** The rates a kept layout may hold. */
 	rates: readonly number[];
 	defaultRate: number;
 	maxPages: number;
@@ -61,44 +52,7 @@ export interface PulsePageSet<K extends string, Q extends string> {
 /** Pulses laid over a page at once. */
 export const MAX_OVERLAY = 6;
 
-export function defaultPulseLayout<K extends string>(set: PulsePageSet<K, string>): PulseLayout<K> {
-	const kinds = set.defaults ?? set.kinds;
-	return {
-		version: 1,
-		rate: set.defaultRate,
-		serial: kinds.length,
-		pages: kinds.map((kind, i) => ({ id: `${set.prefix}-${i + 1}`, name: set.words[kind], kind }))
-	};
-}
-
-/** The plot id a page uses for one of its parts. */
-export const pulsePlotId = (page: { id: string }, part: string) => `${page.id}:${part}`;
-
-/** Everything a page subscribes to, at its drawn width (CSS pixels). */
-export function pulsePagePlots<K extends string, Q extends string>(set: PulsePageSet<K, Q>, page: PulsePageSpec<K>, width = 900, pixelRatio = 1): PulsePlotSpec<Q>[] {
-	const points = pointsForWidth(width, pixelRatio);
-	return set.quantities[page.kind].map((quantity) => {
-		const spec: PulsePlotSpec<Q> = { id: pulsePlotId(page, quantity), quantity, points };
-		if (set.channelQuantities?.includes(quantity)) spec.channels = set.channels?.[page.kind] ?? 'all';
-		return spec;
-	});
-}
-
-/**
- * What a window sends: its plots, or the default subscription when it shows none. A point count
- * goes with the time histories only, and a channel selector with the plots that carry one; the
- * service refuses either on any other plot.
- */
-export function pulseSubscribeParams<Q extends string>(set: { timeQuantities: readonly Q[] }, plots: PulsePlotSpec<Q>[], rate: number): Record<string, unknown> {
-	const wanted = plots.map((p) => {
-		const out: Record<string, unknown> = { id: p.id, quantity: p.quantity };
-		if (p.channels !== undefined) out.channels = Array.isArray(p.channels) ? [...p.channels] : p.channels;
-		if (set.timeQuantities.includes(p.quantity)) out.points = p.points;
-		return out;
-	});
-	return wanted.length ? { rate_hz: rate, plots: wanted } : { default: true };
-}
-
+/** A layout the page layer kept, read field by field; null when it is not one of this type's. */
 export function pulseLayoutFromSaved<K extends string>(set: PulsePageSet<K, string>, text: string | null): PulseLayout<K> | null {
 	if (!text) return null;
 	const isKind = (v: unknown): v is K => typeof v === 'string' && (set.kinds as readonly string[]).includes(v);
@@ -116,10 +70,6 @@ export function pulseLayoutFromSaved<K extends string>(set: PulsePageSet<K, stri
 	} catch {
 		return null;
 	}
-}
-
-export function pulseLayoutToSaved(layout: PulseLayout): string {
-	return JSON.stringify({ version: 1, rate: layout.rate, serial: layout.serial, pages: layout.pages.map((p) => ({ id: p.id, name: p.name, kind: p.kind })) });
 }
 
 // ---------------------------------------------------------------------------------------------

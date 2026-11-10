@@ -28,13 +28,6 @@ export const EXPLORER_PAGE_WORDS: Record<ExplorerPageKind, string> = {
 	readings: 'Readings'
 };
 
-export const EXPLORER_PAGE_HELP: Record<ExplorerPageKind, string> = {
-	survey: "The control channel's response level at each frequency the tone has visited, kept after the tone moves on. The tone and the highest point are marked.",
-	spectra: "Every acquired channel's latest display spectrum.",
-	time: "The control channel's most recent samples, on the station's clock.",
-	readings: 'The run in numbers.'
-};
-
 export const EXPLORER_RATES = [1, 2, 5, 10];
 export const EXPLORER_DEFAULT_RATE = 10;
 export const MAX_EXPLORER_PAGES = 12;
@@ -63,10 +56,8 @@ export const EXPLORER_QUANTITIES: readonly ExplorerLiveQuantity[] = ['survey', '
 
 export const EXPLORER_PAGES: PulsePageSet<ExplorerPageKind, ExplorerLiveQuantity> = {
 	testType: 'explorer',
-	prefix: 'xp',
 	kinds: EXPLORER_PAGE_KINDS,
 	words: EXPLORER_PAGE_WORDS,
-	help: EXPLORER_PAGE_HELP,
 	quantities: EXPLORER_PAGE_QUANTITIES,
 	timeQuantities: EXPLORER_TIME_QUANTITIES,
 	rates: EXPLORER_RATES,

@@ -36,17 +36,6 @@ export const SINE_PAGE_WORDS: Record<SinePageKind, string> = {
 	time: 'Time History'
 };
 
-export const SINE_PAGE_HELP: Record<SinePageKind, string> = {
-	control: 'The control amplitude against the profile at the present level, with its alarm and abort bands, and the drive as played.',
-	limits: 'Each limit channel against its bound.',
-	responses: "Every input's tracked amplitude at the tone's frequency, and its phase against the drive.",
-	identification: 'The identified gain to each control channel with its trust floor, and the coherence with the trusted frequencies.',
-	law: "The control law's values on its last call, and the run in numbers.",
-	phase: "Every input's phase against the drive.",
-	distortion: "The control channel's total harmonic distortion.",
-	time: "Every input's samples from the last batch."
-};
-
 export const SINE_RATES = [1, 2, 5, 10];
 export const SINE_DEFAULT_RATE = 5;
 export const MAX_SINE_PAGES = 12;
@@ -77,10 +66,8 @@ export const SINE_QUANTITIES: readonly SineLiveQuantity[] = ['control', 'drive',
 
 export const SINE_PAGES: PulsePageSet<SinePageKind, SineLiveQuantity> = {
 	testType: 'sine',
-	prefix: 'np',
 	kinds: SINE_PAGE_KINDS,
 	words: SINE_PAGE_WORDS,
-	help: SINE_PAGE_HELP,
 	quantities: SINE_PAGE_QUANTITIES,
 	timeQuantities: SINE_TIME_QUANTITIES,
 	rates: SINE_RATES,

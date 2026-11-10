@@ -31,14 +31,6 @@ export const RECORDER_PAGE_WORDS: Record<RecorderPageKind, string> = {
 	recordings: 'Recordings'
 };
 
-export const RECORDER_PAGE_HELP: Record<RecorderPageKind, string> = {
-	time: "Every recorded row's last two seconds on the station's clock, each interval's largest and smallest sample. Limit marks are drawn where they fell.",
-	spectra: "Every recorded row's PSD on the analysis grid, the average so far.",
-	frf: "The pair's FRF (H1): its magnitude, its phase and the coherence.",
-	readings: 'The run in numbers, and every mark.',
-	recordings: "The run's recordings: each folder and its facts, the one being written last."
-};
-
 export const RECORDER_RATES = [1, 2, 5, 10];
 export const RECORDER_DEFAULT_RATE = 10;
 export const MAX_RECORDER_PAGES = 12;
@@ -65,10 +57,8 @@ export const RECORDER_QUANTITIES: readonly RecorderLiveQuantity[] = ['time', 'sp
 
 export const RECORDER_PAGES: PulsePageSet<RecorderPageKind, RecorderLiveQuantity> = {
 	testType: 'recorder',
-	prefix: 'rc',
 	kinds: RECORDER_PAGE_KINDS,
 	words: RECORDER_PAGE_WORDS,
-	help: RECORDER_PAGE_HELP,
 	quantities: RECORDER_PAGE_QUANTITIES,
 	timeQuantities: RECORDER_TIME_QUANTITIES,
 	rates: RECORDER_RATES,

@@ -34,17 +34,6 @@ export const SRS_PAGE_WORDS: Record<SrsPageKind, string> = {
 	law: 'Law'
 };
 
-export const SRS_PAGE_HELP: Record<SrsPageKind, string> = {
-	srs: "The measured pulse's shock response spectrum against the target at the level fired, with its alarm and abort bands.",
-	pulse: 'The measured pulse, and the drive as played.',
-	kinematics: 'Velocity and displacement of the measured pulse.',
-	identification: "The identified gain to the control channel with its floor, and the coherence with the hold it must reach.",
-	limit_channels: "Each limit channel's predicted SRS for the last drive against its bound, and the gain to it, measured or supplied.",
-	components: "Each component's drive amplitude in the table in force, and the gains the control law last returned.",
-	pulses: 'Every pulse fired, with its worst band and verdict, and the run in numbers.',
-	law: "The control law's reported values on its last call, and the run in numbers."
-};
-
 export const SRS_RATES = [1, 2, 5];
 export const SRS_DEFAULT_RATE = 2;
 export const MAX_SRS_PAGES = 12;
@@ -69,10 +58,8 @@ export const SRS_QUANTITIES: readonly SrsQuantity[] = ['srs', 'pulse', 'velocity
 
 export const SRS_PAGES: PulsePageSet<SrsPageKind, SrsQuantity> = {
 	testType: 'srs',
-	prefix: 'rp',
 	kinds: SRS_PAGE_KINDS,
 	words: SRS_PAGE_WORDS,
-	help: SRS_PAGE_HELP,
 	quantities: SRS_PAGE_QUANTITIES,
 	timeQuantities: SRS_TIME_QUANTITIES,
 	rates: SRS_RATES,
