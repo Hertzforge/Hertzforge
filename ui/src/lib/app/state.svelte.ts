@@ -2130,10 +2130,11 @@ export class AppState {
 	}
 
 	start(): void {
-		// an address from before the split (#analyze) opens the recordings' module
+		// an address from before the split (#analyze) opens the recordings' module, and one from
+		// before Model joined Geometry (#model) opens Geometry (Brandon, 2026-11-10)
 		const named = (hash: string) => {
 			const h = hash.replace(/^#\/?/, '');
-			return h === 'analyze' ? 'signals' : h;
+			return h === 'analyze' ? 'signals' : h === 'model' ? 'geometry' : h;
 		};
 		const fromHash = named(location.hash);
 		if (isWorkspace(fromHash)) this.go(fromHash);

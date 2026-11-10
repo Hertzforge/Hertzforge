@@ -1425,7 +1425,7 @@ OPERATIONS = (
         params=(GEOMETRY, SOLIDS, *COUNTS, *SPACING), outputs=('reading', 'shape3d', 'table'),
         run=pattern_solids, edits=True, previews=True),
     Operation(
-        id='project.mesh_solids', title='Mesh Solids', workspace='model',
+        id='project.mesh_solids', title='Mesh Solids', workspace='geometry',
         summary='Mesh parts into hexes, tetras or shells, each part an element group; the '
                 'preview until Mesh is ticked. The size sets the time: a fine size is slow.',
         params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,

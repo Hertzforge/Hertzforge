@@ -432,8 +432,9 @@ the person picks one there.
 
 `workspace` is the module the operation belongs to, the rail entry that offers it: `acquire`,
 `simulate`, `signals` (recordings and what is read straight off them), `random`, `shock`, `sine`,
-`transient`, `sysid`, `modal`, `geometry`, `model`, `specify` or `report`. The analysis is split by what is studied, so a sine
-test is not offered shock tools. The modules share one project, one tree and one way of showing a
+`transient`, `sysid`, `modal`, `geometry`, `specify` or `report`. The analysis is split by what is studied, so a sine
+test is not offered shock tools. Geometry holds the finite element work too (meshing, element group
+properties, solving for modes), which was a `model` module of its own until 2026-11-10. The modules share one project, one tree and one way of showing a
 selection; they differ in which operations their action table offers. An operation's `modules`
 lists the modules that offer it: its own `workspace`, or more when several studies need it (Export
 in all of them, Averaging in Signals, Random and Modal).

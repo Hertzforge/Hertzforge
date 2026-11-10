@@ -1426,7 +1426,7 @@ OPERATIONS = (
            'elements through every node named.',
            (GEOMETRY, FAMILY, NODES, ELEMENT_TYPE, GROUP), DRAWN, add_element),
     _model('project.add_element_group', 'Add Element Group', 'An empty element group.',
-           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='model'),
+           (GEOMETRY, GROUP_NAME, NODE_ID), DRAWN, add_element_group, workspace='geometry'),
     _model('project.set_entity', 'Set Entity',
            'One field of a node, coordinate system, element or element group, as a cell '
            'of its table is typed over.',

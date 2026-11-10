@@ -154,7 +154,7 @@ def test_a_merge_only_pairs_objects_of_one_type(plate):
 def test_a_verb_that_cannot_run_says_why(plate):
     first = table(plate, named(plate, 'geometry'))[0]
     solve = row(first, 'Solve')
-    assert not solve['ready'] and 'properties' in solve['reason'] and solve['modules'] == ['model']
+    assert not solve['ready'] and 'properties' in solve['reason'] and solve['modules'] == ['geometry']
 
 
 def test_an_frf_starts_a_fit_in_modal_only(plate):

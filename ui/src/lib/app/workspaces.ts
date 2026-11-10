@@ -31,7 +31,6 @@ export const WORKSPACES: WorkspaceInfo[] = [
 	{ id: 'sine', title: 'Sine', rail: 'Sine', study: true, summary: 'Sine sweeps and dwells: extracted levels, distortion, frequency, sweep rate.' },
 	{ id: 'modal', title: 'Modal', rail: 'Modal', study: true, summary: 'FRFs fitted to modes, shape sets compared, matched and projected.' },
 	{ id: 'geometry', title: 'Geometry', rail: 'Geometry', study: true, summary: 'Nodes, coordinate systems, elements and solids; sensors and channel tables on them.' },
-	{ id: 'model', title: 'Model', rail: 'Model', study: true, summary: 'Finite element models: element groups, meshing, solving for modes.' },
 	{ id: 'specify', title: 'Specify', rail: 'Specify', study: true, summary: 'Test specifications derived, authored and predicted.' },
 	{ id: 'report', title: 'Report', rail: 'Report', summary: 'Reports from every workspace.' }
 ];

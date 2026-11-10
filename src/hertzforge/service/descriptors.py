@@ -17,13 +17,15 @@ from .protocol import bad_request, refused
 from .verbs import modules_of
 
 ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
-#: the module an operation belongs to: the shell's rail entry that offers it.
+#: the module an operation belongs to: the shell's rail entry that offers it. Geometry
+#: holds the finite element work too (meshing, properties, solving for modes): it was
+#: a module of its own, Model, until 2026-11-10.
 #: The analysis modules split the work by
 #: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
 #: is not offered shock tools; an operation every module needs (Plot
 #: Records, Save As, the averaging settings) says `everywhere`.
 Workspace = Literal['acquire', 'simulate', 'signals', 'sysid', 'random', 'shock', 'transient',
-                    'sine', 'modal', 'geometry', 'model', 'specify', 'report']
+                    'sine', 'modal', 'geometry', 'specify', 'report']
 ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
 
 #: marks a param with no default: the request must give it
