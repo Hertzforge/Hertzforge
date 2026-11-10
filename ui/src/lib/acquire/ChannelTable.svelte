@@ -255,19 +255,19 @@
 								{:else}
 									{@const free = freeChannels(sized, acq.hardware, i)}
 									<select class="field phys mono" aria-label="Channel {row.index} physical channel" data-testid="channel-physical-{i}" value={physicalKey(row) ?? ''} disabled={locked} aria-invalid={marked(row.index, 'physical')} onchange={(e) => e.currentTarget.value && e.currentTarget.value !== physicalKey(row) && acq.moveRow(i, e.currentTarget.value)}>
-										{#if row.physical}<option value={physicalKey(row)}>{physicalKey(row)}</option>{:else}<option value="">Not bound</option>{/if}
+										{#if row.physical}<option value={physicalKey(row)}>{physicalKey(row)}</option>{:else}<option value="">No channel</option>{/if}
 										{#each free as c (c.key)}<option value={c.key}>Move to {c.key}</option>{/each}
 									</select>
-									{#if s.status !== 'unbound'}
-										<span class="status" data-testid="channel-status-{i}">
-											{#if s.status === 'missing'}
-												<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 1.8" /><path d="M4.6 4.6l4.8 4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
-											{:else}
-												<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><rect x="1.8" y="3.4" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3" /><rect x="5.2" y="1.8" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
-											{/if}
-											{STATUS_WORDS[s.status]}
-										</span>
-									{/if}
+									<span class="status" data-testid="channel-status-{i}">
+										{#if s.status === 'unbound'}
+											<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 1.8" /></svg>
+										{:else if s.status === 'missing'}
+											<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><circle cx="7" cy="7" r="5.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 1.8" /><path d="M4.6 4.6l4.8 4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+										{:else}
+											<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><rect x="1.8" y="3.4" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3" /><rect x="5.2" y="1.8" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3" /></svg>
+										{/if}
+										{STATUS_WORDS[s.status]}
+									</span>
 								{/if}
 							</div>
 						</td>

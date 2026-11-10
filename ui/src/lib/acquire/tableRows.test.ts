@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ChannelRow, NiDevice, StationList } from '$lib/protocol/types';
-import { bulkEdit, freeChannels, hardwareOf, materialize, moveOnto, newRow, rolesFor, sizeTable, type Hardware } from './table';
+import { bulkEdit, fitToHardware, freeChannels, hardwareKey, hardwareOf, hardwareRow, materialize, moveOnto, newRow, rolesFor, sizeTable, untouched, type Hardware } from './table';
 
 const ch = (prefix: string, n: number) => Array.from({ length: n }, (_, k) => ({ id: `${prefix}${k}`, label: `${prefix}${k}` }));
 
@@ -178,3 +178,107 @@ describe('moving a row onto the hardware', () => {
 		expect(freeChannels(sized, hardwareOf(stations('sim')), 1)).toEqual([]);
 	});
 });
+
+describe('fitting the table to a station it was not made on', () => {
+	// four inputs and four outputs, as the mock's NI station has
+	const hw = ni([device('cDAQ1Mod1', 4, 0, 1), device('cDAQ1Mod2', 0, 4, 2)]);
+	const sim = hardwareOf(stations('sim'))!;
+	const on = (row: ChannelRow, over: Partial<ChannelRow> = {}): ChannelRow => ({ ...row, enabled: true, ...over });
+
+	/** The simulator's table with rows 3 to 6 switched on and made controls: the reproduction. */
+	function simTable(): ChannelRow[] {
+		let rows = materialize(sizeTable([newRow(1, 'control'), newRow(2, 'drive')], sim));
+		rows = bulkEdit(rows, sim, [2, 3, 4, 5], { field: 'enabled', value: true }).rows;
+		return bulkEdit(rows, sim, [2, 3, 4, 5], { field: 'role', value: 'control' }).rows;
+	}
+
+	it('the simulator table moved onto NI: unbound rows take the free channels in order, untouched ones go', () => {
+		const fitted = fitToHardware(simTable(), hw);
+		expect(fitted.map((r) => [r.index, physicalKey(r)])).toEqual([
+			[1, 'cDAQ1Mod1/ai0'],
+			[2, 'cDAQ1Mod2/ao0'],
+			[3, 'cDAQ1Mod1/ai1'],
+			[4, 'cDAQ1Mod1/ai2'],
+			[5, 'cDAQ1Mod1/ai3'],
+			[6, null]
+		]);
+		// one row per hardware channel, and the row left over marked
+		const sized = sizeTable(fitted, hw);
+		expect(sized).toHaveLength(9);
+		expect(sized.map((s) => s.status)).toEqual(['present', 'present', 'present', 'present', 'present', 'unbound', 'present', 'present', 'present']);
+		expect(sized.slice(6).map((s) => [s.virtual, s.row.physical?.channel])).toEqual([
+			[true, 'ao1'],
+			[true, 'ao2'],
+			[true, 'ao3']
+		]);
+	});
+
+	it('a row keeps every setting when it takes a channel', () => {
+		const row = on(newRow(4, 'control'), { description: 'Table top', units: 'in/s', sensitivity_mv_per_eu: 10.2, range_max: 5, interface: 'iepe', iepe_bias_v: 24, polarity: 'negative', control_group: 0, abort: { accel_g: 30, velocity_ips: null, displacement_mil: null } });
+		const [fitted] = fitToHardware([row], hw);
+		expect(fitted).toEqual({ ...row, physical: { device: 'cDAQ1Mod1', channel: 'ai0' } });
+		expect(row.physical).toBeNull();
+	});
+
+	it('bound rows keep their channels, and the unbound take the channels left, by direction', () => {
+		const bound = on(bound_(newRow(1, 'monitor'), 'cDAQ1Mod1', 'ai0'));
+		const drive = on(newRow(2, 'drive'));
+		const input = on(newRow(3, 'monitor'));
+		const fitted = fitToHardware([input, bound, drive], hw);
+		expect(fitted.map(physicalKey)).toEqual(['cDAQ1Mod1/ai1', 'cDAQ1Mod1/ai0', 'cDAQ1Mod2/ao0']);
+	});
+
+	it('an off row that was edited takes a channel too; an untouched one goes', () => {
+		const edited = { ...hardwareRow(1, 'input', null), description: 'Spare' };
+		const fresh = hardwareRow(2, 'input', null);
+		expect([untouched(edited), untouched(fresh)]).toEqual([false, true]);
+		expect(fitToHardware([fresh, edited], hw).map((r) => [r.index, physicalKey(r)])).toEqual([[1, 'cDAQ1Mod1/ai0']]);
+	});
+
+	it('an unbound row with no channel of its direction left stays, as does an edited off one', () => {
+		const one = hardwareOf(stations(['cDAQ1Mod1'], [device('cDAQ1Mod1', 1, 0)]))!;
+		const first = on(newRow(1, 'control'));
+		const second = on(newRow(2, 'control'));
+		const drive = on(newRow(3, 'drive'));
+		const offEdited = { ...hardwareRow(4, 'input', null), sensitivity_mv_per_eu: 9.81 };
+		const fitted = fitToHardware([first, second, drive, offEdited], one);
+		expect(fitted.map(physicalKey)).toEqual(['cDAQ1Mod1/ai0', null, null, null]);
+		expect(sizeTable(fitted, one).map((s) => s.status)).toEqual(['present', 'unbound', 'unbound', 'unbound']);
+	});
+
+	it('rows on hardware the station does not have keep their binding, marked missing', () => {
+		const gone = on(bound_(newRow(1, 'control'), 'cDAQ9Mod1', 'ai0'));
+		const fitted = fitToHardware([gone], hw);
+		expect(fitted).toEqual([gone]);
+		expect(sizeTable(fitted, hw)[0].status).toBe('missing');
+	});
+
+	it('back on the simulator: bindings kept, and untouched rows past its channels go', () => {
+		const table = materialize(sizeTable(fitToHardware(simTable(), hw), hw));
+		const fitted = fitToHardware(table, sim);
+		// the six rows that were set, then the hardware rows: ao1 to ao3 are untouched drives past the one output
+		expect(fitted.map((r) => r.index)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(fitted[0].physical).toEqual({ device: 'cDAQ1Mod1', channel: 'ai0' });
+		// a drive past the count that was switched on stays
+		const kept = fitToHardware([...table.slice(0, 7), { ...table[7], enabled: true }, table[8]], sim);
+		expect(kept.map((r) => r.index)).toEqual([1, 2, 3, 4, 5, 6, 8]);
+		// and the simulator sizes the table: eight inputs and its output
+		expect(sizeTable(fitted, sim)).toHaveLength(9);
+	});
+
+	it('fitting twice is fitting once, and no station changes nothing', () => {
+		const once = fitToHardware(simTable(), hw);
+		expect(fitToHardware(once, hw)).toEqual(once);
+		const rows = simTable();
+		expect(fitToHardware(rows, null)).toBe(rows);
+	});
+
+	it('a station is known by its channels', () => {
+		expect(hardwareKey(sim)).toBe('sim 8 1');
+		expect(hardwareKey(hw)).not.toBe(hardwareKey(ni([device('cDAQ1Mod1', 4, 0)])));
+		expect(hardwareKey(null)).toBeNull();
+	});
+});
+
+const bound_ = (row: ChannelRow, device: string, channel: string): ChannelRow => ({ ...row, physical: { device, channel } });
+const physicalKey = (r: ChannelRow) => (r.physical ? `${r.physical.device}/${r.physical.channel}` : null);

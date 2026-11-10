@@ -186,6 +186,13 @@ export function sameRows(a: ChannelRow[], b: ChannelRow[]): boolean {
 /** The station the table is sized from: the simulator's channel counts, or the scanned channels. */
 export type Hardware = { kind: 'sim'; inputs: number; outputs: number } | { kind: 'ni'; inputs: ChannelChoice[]; outputs: ChannelChoice[] };
 
+/** What the hardware is, as one string: two stations with the same key size a table alike. */
+export function hardwareKey(hw: Hardware | null): string | null {
+	if (!hw) return null;
+	if (hw.kind === 'sim') return `sim ${hw.inputs} ${hw.outputs}`;
+	return `ni ${hw.inputs.map((c) => c.key).join(',')} ${hw.outputs.map((c) => c.key).join(',')}`;
+}
+
 /** The selected station's channels, or null before the service has said which is selected. */
 export function hardwareOf(stations: StationList | null): Hardware | null {
 	const sel = stations?.selected;
@@ -259,6 +266,50 @@ export function sizeTable(rows: ChannelRow[], hw: Hardware | null): SizedRow[] {
 	}
 	for (const [dir, list] of [['input', hw.inputs], ['output', hw.outputs]] as const) {
 		for (const c of list) if (!claimed.has(c.key)) out.push({ row: hardwareRow(next++, dir, c), status: 'present', virtual: true, direction: dir });
+	}
+	return out;
+}
+
+/** Whether a row is off and as a hardware row starts, its binding apart: nothing anyone set would be lost with it. */
+export function untouched(row: ChannelRow): boolean {
+	const fresh = hardwareRow(row.index, isDrive(row) ? 'output' : 'input', null);
+	return !row.enabled && sameRows([{ ...row, physical: null }], [fresh]);
+}
+
+/**
+ * The table fitted to a station it was not made on, as when the station changes or a rescan finds
+ * other channels. On NI hardware, rows bound to a channel it has keep it; every unbound row, in
+ * table order, takes the next free channel of its direction (an input the next free input, a drive
+ * the next free output) with all its settings, except a row that is off and untouched, which goes;
+ * an unbound row left with no free channel stays, to be shown as not bound. Rows bound to hardware
+ * the station does not have stay, to be shown missing. On the simulator, which binds nothing,
+ * rows keep their bindings and its inputs and outputs are counted in table order: a row past its
+ * count that is off and untouched goes, and every other row stays.
+ */
+export function fitToHardware(rows: ChannelRow[], hw: Hardware | null): ChannelRow[] {
+	if (!hw) return rows;
+	if (hw.kind === 'sim') {
+		let ins = 0;
+		let outs = 0;
+		return rows.filter((row) => {
+			const drive = isDrive(row);
+			if ((drive ? outs >= hw.outputs : ins >= hw.inputs) && untouched(row)) return false;
+			if (drive) outs++;
+			else ins++;
+			return true;
+		});
+	}
+	const present = new Set([...hw.inputs, ...hw.outputs].map((c) => c.key));
+	const claimed = new Set(rows.map(physicalKey).filter((k): k is string => k !== null && present.has(k)));
+	const free = { input: hw.inputs.filter((c) => !claimed.has(c.key)), output: hw.outputs.filter((c) => !claimed.has(c.key)) };
+	const out: ChannelRow[] = [];
+	for (const row of rows) {
+		if (row.physical) out.push(row);
+		else if (untouched(row)) continue;
+		else {
+			const next = free[isDrive(row) ? 'output' : 'input'].shift();
+			out.push(next ? { ...structuredClone(row), physical: { device: next.device, channel: next.channel } } : row);
+		}
 	}
 	return out;
 }
