@@ -1739,7 +1739,7 @@ export class AppState {
 		this.console = new ConsoleState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
-		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
+		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});

@@ -214,7 +214,7 @@ try {
 
 	// ---- Station & Channels: four recorded rows, the drive row left alone ------------------------
 	await section(a, 'station');
-	for (let k = 0; k < 3; k++) await tid(a, 'add-input').click();
+	for (const k of [2, 3, 4]) await a.locator(`[data-testid="channel-on-${k}"]`).check({ force: true });
 	// row 1 (the markers) at a 5 g range, so the level trigger's usual hysteresis is 0.05 g
 	await fill(a.locator('#ch-0-range'), 5);
 	await until(a, 'the table check', async (p) => tid(p, 'table-apply').isEnabled(), 10_000);

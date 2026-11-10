@@ -1235,6 +1235,11 @@ _LOADERS = {'geometry': load_geometry,
             'run_log_extract': load_run_log_extract}
 
 
+#: the root groups of the single-table files `io.tables` writes that hold
+#: no object a project holds, by what each holds
+TABLE_FILES = {'breakpoint_table': 'a breakpoint table'}
+
+
 def _saver_for(obj):
     for cls, group_name, saver in _savers():
         if isinstance(obj, cls):
@@ -1654,4 +1659,11 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
     for group_name, loader in _LOADERS.items():
         if group_name in f:
             return loader(f[group_name])
+    # a breakpoint table file (`io.tables`) holds a table a test's table
+    # editor opens: neither a project nor an object a project holds
+    for group_name, what in TABLE_FILES.items():
+        if group_name in f:
+            raise ValueError(
+                f'{os.path.basename(path) or "This file"} holds {what}. A table file is '
+                'opened from the table it belongs to, not opened or imported as a project.')
     raise ValueError(f"No recognized content in {path}")

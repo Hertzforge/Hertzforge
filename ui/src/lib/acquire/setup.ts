@@ -17,6 +17,7 @@ import type {
 	RandomConfig,
 	ReportItem
 } from '$lib/protocol/types';
+import type { TableFileClient } from '$lib/tables/tableFiles';
 
 export interface BreakpointDraft {
 	freq_hz: number;
@@ -410,12 +411,16 @@ export function mergeErrors(a: FieldErrors, b: FieldErrors): FieldErrors {
 	return out;
 }
 
-/** What the profile editor reads and edits: a breakpoint table, its bands, and the findings on them. */
+/**
+ * What the profile editor reads and edits: a breakpoint table, its bands, and the findings on them;
+ * and the analysis service its table files go through, where there is one.
+ */
 export interface ProfileHost {
 	setup: { title: string; breakpoints: BreakpointDraft[]; alarm_db: BandDb; abort_db: BandDb };
 	locked: boolean;
 	fieldErrors: FieldErrors;
 	fieldWarnings: FieldErrors;
+	readonly tableFiles?: TableFileClient | null;
 }
 
 /** What the schedule editor reads and edits: the level schedule and the findings on it. */

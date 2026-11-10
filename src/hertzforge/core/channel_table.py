@@ -1,4 +1,5 @@
-"""Channel table: per-channel test metadata (sensor, DOF, engineering units).
+"""Channel table: per-channel test metadata (sensor, DOF, engineering units),
+and, when a test needs them, the settings a controller runs each channel at.
 
 The table has one fixed set of columns, each with a type and a rule for
 what it accepts, and a source's other columns are dropped. Because every
@@ -97,6 +98,12 @@ TITLES = {
     'unit_z': 'Unit Z',
     'nearest_axis': 'Nearest Axis',
     'axis_angle': 'Angle to Axis (deg)',
+    'iepe': 'IEPE',
+    'iepe_bias': 'IEPE Bias (V)',
+    'range_max': 'Range Max (Unit)',
+    'abort_accel_g': 'Abort Accel (g)',
+    'abort_velocity_ips': 'Abort Velocity (in/s)',
+    'abort_displacement_mil': 'Abort Displacement (mil)',
 }
 
 #: the columns a geometry adds beside the table's own, in order: the
@@ -319,7 +326,9 @@ class ChannelTable:
         The columns, by name, each with one entry per channel. Names are
         read through `canonical_name`, columns outside `COLUMNS` are
         dropped, missing ones take their default, and the values are
-        read leniently (see the module description). A channel type left
+        read leniently (see the module description). The controller's
+        columns (`CONTROLLER`) are there when the source has any of
+        them, and absent otherwise. A channel type left
         blank is filled in from the unit when the unit names one.
     environments : mapping of str to Environment, optional
         The run's control loops by name, each checked as
@@ -334,7 +343,8 @@ class ChannelTable:
     Attributes
     ----------
     frame : pandas.DataFrame
-        The table, one row per channel, columns in `SCHEMA` order. Every
+        The table, one row per channel, columns in `SCHEMA` order, then
+        the `CONTROLLER` columns on a table that carries them. Every
         cell is text except `channel`, which is an integer.
         `node` is text too, blank where no node was recorded.
     environments : dict of str to Environment
@@ -349,11 +359,15 @@ class ChannelTable:
     # different string.
 
     #: Every column, in the order the table shows them, each with the
-    #: rule its cells answer to. A source's other columns are dropped:
-    #: a Rattlesnake save carries its coupling, excitation and feedback
-    #: wiring, which describe the controller's run rather than the
-    #: measurement, and carrying them made this object a place data went
-    #: to be ignored.
+    #: rule its cells answer to: the measurement's columns (`SCHEMA`),
+    #: which every table has, then the settings a controller runs each
+    #: channel at (`CONTROLLER`), which a table has once it is converted
+    #: to carry them (`add_controller_settings`). One table serves a test
+    #: and its analysis: the controller reads its channels from the same
+    #: rows the analysis reads its DOFs and sensors from, and a table that
+    #: never ran a controller has no controller columns at all. A
+    #: source's other columns are dropped: a column no logic is written
+    #: about is a place data goes to be ignored.
     COLUMNS: ClassVar[dict[str, Spec]] = {
         # 'int' is a number the column must have; 'index' is one it may
         # have. A channel without a number is not a channel — it is the
@@ -383,8 +397,38 @@ class ChannelTable:
         'triax_dof': Spec('choice', choices=TRIAX),
         'expiration': Spec('date'),
         'comment': Spec('text'),
+        # The controller's settings (`CONTROLLER`). A channel's role in
+        # the control loop is read from three columns rather than kept in
+        # a fourth: a control channel is one with `control` checked, as it
+        # is for a run that was recorded; a drive is an output to a shaker
+        # amplifier (`drive`), which no measurement column says; a
+        # reference is a `role` of reference; any other input is a
+        # monitor. Off channels stay in the table with their settings,
+        # and a table that never said is on, as every channel of a
+        # recorded run was.
+        'enabled': Spec('flag', default='True'),
+        'drive': Spec('flag', default='False'),
+        # '<device>/<channel>' on the hardware, blank when unbound
+        'physical': Spec('text'),
+        'iepe': Spec('flag', default='False'),
+        'iepe_bias': Spec('float', minimum=0),
+        'polarity': Spec('choice', choices=('positive', 'negative')),
+        # the input's full scale in the channel's own unit, where the two
+        # ranges above are volts
+        'range_max': Spec('float', minimum=0),
+        'control_group': Spec('index', minimum=0),
+        # the levels at which a run aborts on this channel, at any level
+        # of the test
+        'abort_accel_g': Spec('float', minimum=0),
+        'abort_velocity_ips': Spec('float', minimum=0),
+        'abort_displacement_mil': Spec('float', minimum=0),
     }
-    SCHEMA = tuple(COLUMNS)
+    #: the controller's columns, last in `COLUMNS`: all of them or none
+    CONTROLLER = ('enabled', 'drive', 'physical', 'iepe', 'iepe_bias', 'polarity',
+                  'range_max', 'control_group', 'abort_accel_g', 'abort_velocity_ips',
+                  'abort_displacement_mil')
+    #: the columns every table has: all but the controller's, which are last
+    SCHEMA = tuple(COLUMNS)[:len(COLUMNS) - len(CONTROLLER)]
     #: What other people call these columns. Applied after a generic
     #: tidy — 'Serial Number' and 'serial-number' both reach
     #: `serial_number` without help — so this holds only the genuinely
@@ -412,6 +456,12 @@ class ChannelTable:
         'expiration': ('cal_due', 'calibration_due', 'cal_date', 'expires',
                        'expiration_date', 'calibration_expiration'),
         'comment': ('comments', 'note', 'notes', 'description'),
+        'enabled': ('on',),
+        'iepe_bias': ('iepe_bias_v',),
+        'control_group': ('ctrl_group',),
+        'abort_accel_g': ('abort_accel', 'abort_acceleration'),
+        'abort_velocity_ips': ('abort_velocity',),
+        'abort_displacement_mil': ('abort_displacement',),
     }
     #: the four a table is meaningless without; a source missing one is
     #: refused rather than filled in
@@ -443,12 +493,17 @@ class ChannelTable:
         for name in self.CORE:
             if name not in frame.columns:
                 raise ValueError(f'missing core column {name!r}')
-        for name, spec in self.COLUMNS.items():
+        # the controller's columns come as a group: a source with any of
+        # them is a converted table, and has them all
+        names = list(self.SCHEMA)
+        if any(name in frame.columns for name in self.CONTROLLER):
+            names += self.CONTROLLER
+        for name in names:
             if name not in frame.columns:
-                frame[name] = spec.default
+                frame[name] = self.COLUMNS[name].default
         # the schema and nothing else: an older file's extras, and a
-        # controller's run settings, stop here
-        self.frame: pd.DataFrame = self._typed(frame[list(self.SCHEMA)])
+        # controller's run settings it holds no column for, stop here
+        self.frame: pd.DataFrame = self._typed(frame[names])
         self.environments: dict[str, Environment] = {}
         for name, environment in (environments or {}).items():
             self.set_environment(name, environment)
@@ -460,6 +515,8 @@ class ChannelTable:
 
         frame = frame.reset_index(drop=True)
         for name, spec in cls.COLUMNS.items():
+            if name not in frame.columns:
+                continue
             values = []
             for raw in frame[name]:
                 try:
@@ -616,6 +673,9 @@ class ChannelTable:
         # reason, where a file gets the benefit of the doubt.
         if name not in self.COLUMNS:
             raise KeyError(f'no column {name!r}')
+        if name not in self.frame.columns:
+            raise KeyError(f'{name!r} is a controller setting, and this table has none; '
+                           'add the controller settings first')
         if name == 'control' and self.environments:
             raise ValueError(
                 'this table\'s control channels are per environment ('
@@ -758,7 +818,7 @@ class ChannelTable:
         numbers = list(range(start, start + count))
         added = self._typed(pd.DataFrame(
             {name: numbers if name == 'channel' else [spec.default] * count
-             for name, spec in self.COLUMNS.items()}))
+             for name, spec in self.COLUMNS.items() if name in self.frame.columns}))
         self.frame = pd.concat([self.frame, added], ignore_index=True)
         return numbers
 
@@ -857,6 +917,54 @@ class ChannelTable:
         """The table's column names, in order (`title_of` gives the
         headers shown)."""
         return [str(name) for name in self.frame.columns]
+
+    @property
+    def has_controller_settings(self) -> bool:
+        """Whether the table carries the controller's columns (`CONTROLLER`)."""
+        return all(name in self.frame.columns for name in self.CONTROLLER)
+
+    def add_controller_settings(self) -> None:
+        """Convert the table to carry the settings a controller runs each
+        channel at: the `CONTROLLER` columns, added after the others.
+
+        Nothing the table holds changes, and a table that has them already
+        is left as it is. The new columns start from what the table says:
+        every channel on, none a drive; the control channels are already
+        the Control column's and a reference its role of reference, since
+        a channel's role in the loop is read from those; and each input's
+        full scale in its own unit is its clip level in volts over its
+        sensitivity, where both are stated. The rest start blank: unbound,
+        no IEPE, positive polarity, no control group and no abort limits.
+
+        Returns
+        -------
+        None
+        """
+        import pandas as pd
+
+        if self.has_controller_settings:
+            return
+        with np.errstate(invalid='ignore', divide='ignore'):
+            full = self.clip_ranges() * 1000.0 / self.sensitivities()
+        starts = {name: [self.COLUMNS[name].default] * self.num_channels
+                  for name in self.CONTROLLER}
+        starts['range_max'] = [f'{value:.6g}' if np.isfinite(value) and value > 0 else ''
+                               for value in full]
+        for name in self.CONTROLLER:
+            # text, as every column but the channel number is
+            self.frame[name] = pd.Series(starts[name], dtype='string', index=self.frame.index)
+
+    def remove_controller_settings(self) -> None:
+        """Drop the controller's columns (`CONTROLLER`), and nothing else:
+        the table describes the measurement alone again. A table without
+        them is left as it is.
+
+        Returns
+        -------
+        None
+        """
+        self.frame = self.frame.drop(columns=[name for name in self.CONTROLLER
+                                              if name in self.frame.columns])
 
     def orientation(self, row: int, geometry: Any
                     ) -> tuple[np.ndarray | None, str | None, float | None]:

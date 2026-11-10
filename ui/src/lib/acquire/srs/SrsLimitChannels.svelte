@@ -115,6 +115,7 @@
 								make={(last) => ({ freq_hz: last ? Math.round(last.freq_hz * 2) : 100, mag: last?.mag ?? 1 })}
 								testid="srs-limit-{i}-frf"
 								label="Channel {ch.channel} gain"
+								file={{ client: srs.acq.tableFiles, tableKind: 'drive_gain', name: 'Drive Gain', column: 'gain' }}
 							/>
 						{:else}
 							<p class="aq-small aq-muted">Off: identification measures the gain to this channel along with the control channel's.</p>

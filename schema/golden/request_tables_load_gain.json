@@ -1,0 +1,12 @@
+{
+ "type": "request",
+ "id": 44,
+ "method": "tables.load",
+ "params": {
+  "path": "/Users/someone/tests/bracket/gain.csv",
+  "kind": "breakpoints",
+  "table_kind": "drive_gain",
+  "x_unit": "Hz",
+  "y_unit": "g/V"
+ }
+}

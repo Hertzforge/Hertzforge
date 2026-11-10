@@ -42,7 +42,7 @@ export function baseName(path: string): string {
 	return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-interface DialogFilter {
+export interface DialogFilter {
 	name: string;
 	extensions: string[];
 }
@@ -138,6 +138,28 @@ export async function chooseObjectFile(name: string, formats: ExportFormat[]): P
 		filters: formats.filter((f) => f.suffix).map((f) => ({ name: f.label, extensions: [f.suffix.slice(1)] }))
 	});
 	return path === null ? null : { path, format: formatForPath(path, formats) };
+}
+
+/** A file of one of `filters`' kinds chosen in the native open dialog; null when cancelled or in a browser. */
+export async function chooseOpenFile(title: string, filters: DialogFilter[]): Promise<string | null> {
+	const dialog = tauri()?.dialog;
+	if (!dialog) return null;
+	const chosen = await dialog.open({ title, multiple: false, filters });
+	return Array.isArray(chosen) ? (chosen[0] ?? null) : chosen;
+}
+
+/** Where to write a file, chosen in the native save dialog; null when cancelled or in a browser. */
+export async function chooseSaveFile(title: string, defaultPath: string, filters: DialogFilter[]): Promise<string | null> {
+	const dialog = tauri()?.dialog;
+	if (!dialog) return null;
+	return dialog.save({ title, defaultPath, filters });
+}
+
+/** Whether to go on, asked in the native dialog or the browser's. */
+export async function confirmFirst(text: string, ok: string, title = 'Hertzforge'): Promise<boolean> {
+	const ask = tauri()?.dialog?.ask;
+	if (ask) return ask(text, { title, okLabel: ok, cancelLabel: 'Cancel' });
+	return globalThis.confirm?.(text) ?? false;
 }
 
 /** A path for a report's page chosen in the native save dialog, or null when cancelled. */
