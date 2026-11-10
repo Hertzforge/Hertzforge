@@ -940,18 +940,19 @@ class ChannelTable:
         -------
         None
         """
+        import pandas as pd
+
         if self.has_controller_settings:
             return
         with np.errstate(invalid='ignore', divide='ignore'):
             full = self.clip_ranges() * 1000.0 / self.sensitivities()
+        starts = {name: [self.COLUMNS[name].default] * self.num_channels
+                  for name in self.CONTROLLER}
+        starts['range_max'] = [f'{value:.6g}' if np.isfinite(value) and value > 0 else ''
+                               for value in full]
         for name in self.CONTROLLER:
-            self.frame[name] = self.COLUMNS[name].default
-        self.frame['range_max'] = [f'{value:.6g}' if np.isfinite(value) and value > 0 else ''
-                                   for value in full]
-        import pandas as pd
-
-        for name in self.CONTROLLER:
-            self.frame[name] = pd.Series(list(self.frame[name]), dtype='string').fillna('')
+            # text, as every column but the channel number is
+            self.frame[name] = pd.Series(starts[name], dtype='string', index=self.frame.index)
 
     def remove_controller_settings(self) -> None:
         """Drop the controller's columns (`CONTROLLER`), and nothing else:
