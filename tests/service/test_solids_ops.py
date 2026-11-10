@@ -928,3 +928,15 @@ def test_the_solids_row_adds_at_once_and_a_wrong_kind_is_refused():
     run(project, 'project.add_solid_block')
     with pytest.raises(ProtocolError, match='is a block, not a sphere'):
         run(project, 'project.add_solid_sphere', solid=1)
+
+
+def test_a_new_geometry_asks_for_nothing_and_takes_the_display_length():
+    from hertzforge.service.display_units import running_in
+
+    state = projects.new({'title': 'x'})
+    rows = projects.actions(state, {'objects': []})['table']['columns'][0]['rows']
+    assert next(row for row in rows if row['id'] == 'project.new_geometry')['instant']
+    op = OPS['project.new_geometry']
+    running_in('in-slinch-lbf-s (g)', op.run, state.project, op.resolve({}, objects={}))
+    running_in('mm-kg-N-s', op.run, state.project, op.resolve({}, objects={}))
+    assert [state.project[n].length_unit for n in ('Geometry', 'Geometry (2)')] == ['in', 'mm']

@@ -576,7 +576,9 @@ one longer): what two or more picked together offer (merging, aligning and matin
 combining solids), its `candidates` the ids of the geometry's other groups or standing solids. Picked
 together, those rows move to the first column. A row that acts on one part (Edit Solid) is not ready
 with several picked. A shape's Add on the Solids row has `"instant": true`: the shell runs it at once
-with its defaults and picks the new solid. One solid picked offers its shape's Add as `Edit`, with
+with its defaults and picks the new solid. New Geometry on the project row is instant too: it adds a
+geometry named Geometry (then Geometry (2) and on) in the display system's length unit, unless its
+`unit` names another, and the shell picks it. One solid picked offers its shape's Add as `Edit`, with
 `"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
 it, and a live form is run each time a changed field is left, with no Run button. Edit Solid stays for
