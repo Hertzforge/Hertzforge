@@ -1,13 +1,15 @@
 """The BARC's removable component bolted to a fixture plate, a synthetic test system.
 
 The removable component (the two C-channels and the beam, in bricks, as
-`barc.solid_geometry` builds it) is bolted at its feet to a 10 x 1 x 10 in
-6061-T6 plate, free-free. The plate's top face is where the BARC's box top
-is, y = 3 in, and the plate is centered under the component, so the
-component sits at the BARC's own coordinates and its accelerometers are at
-the same places. The feet are joined to the plate as they are to the box: a
-rigid mated surface under each bolt's washer, and each bolt's mass at its
-head.
+`barc.solid_geometry` builds it, to match the wiki's calibrated model) is bolted at
+its feet to a 10 x 1 x 10 in aluminum plate of the same material, free-free.
+The plate's top face is where the BARC's box top is, y = 3 in, and the plate
+is centered under the component, so the component sits at the BARC's own
+coordinates and its accelerometers are at the same places. The feet are
+joined to the plate as they are to the box, each tied rigidly over its whole
+face, and each bolt's mass is at its head. The component is meshed at
+`barc.SOLID_SIZE`, and the plate at `PLATE_SIZE`, on the same grid lines, so
+each of the plate's nodes under a foot lies on one of the foot's.
 
 Twelve forces drive the plate, three at each corner. Each corner's three
 lines meet at a point `INSET` in from both side edges at the plate's
@@ -27,8 +29,8 @@ joins that group: the twelve drives and the 48 accelerometer axes, what a
 state-space export for a controller's simulation takes.
 
 This is the system the band-average control law study drives (2026-11-10).
-At `barc.SIZE` it has 60,903 nodes and 38 modes to 10 kHz, the first elastic
-one at 418.15 Hz; solving takes a few minutes and about 6 GB.
+It has 69,402 nodes and 38 modes to 10 kHz, the first elastic one at
+413.72 Hz; solving takes two and a half minutes and about 18 GB.
 
     from hertzforge.demo import rc_plate
 
@@ -49,6 +51,9 @@ from hertzforge.demo import barc
 
 #: the plate, inches: (center, widths); x -5..5, y 2..3, z -3.5..6.5
 PLATE = ((0.0, 2.5, 1.5), (10.0, 1.0, 10.0))
+#: the plate's element size, inches: eight bricks through its thickness. At
+#: the component's sixteenth of an inch it alone would be 440,000 nodes
+PLATE_SIZE = 0.125
 #: how far in from both side edges each corner's three drives meet, inches
 INSET = 0.5
 #: the modes: every mode to this frequency, Hz, each given this fraction of
@@ -64,7 +69,7 @@ DRIVE_IDS = 201
 #: parallel to z at z = 1.25 and 1.75. The left channel's outer face is its web
 #: at z = 1 (its C opens toward +z), so its pairs run along x instead.
 _PAIRS = {
-    **{f'beam top x={x:+g}': ((x, 5.125), (0, 1, 0)) for x in (-1.25, -0.5, 0.5, 1.25)},
+    **{f'beam top x={x:+g}': ((x, barc.HEAD_Y['top']), (0, 1, 0)) for x in (-1.25, -0.5, 0.5, 1.25)},
     'right channel web, upper': ((2.5, 4.5), (1, 0, 0)),
     'right channel web, lower': ((2.5, 3.5), (1, 0, 0)),
 }
@@ -92,14 +97,15 @@ def drives() -> dict[str, tuple[tuple[float, float, float], str]]:
     return out
 
 
-def solid_geometry(size: float = barc.SIZE) -> Any:
+def solid_geometry(size: float = barc.SOLID_SIZE) -> Any:
     """The plate and the removable component as bricks and point masses, joined
     at the feet and at the beam as `barc.solid_geometry` joins them.
 
     Parameters
     ----------
     size : float
-        The element size aimed at, in inches.
+        The removable component's element size, in inches; the plate's is
+        `PLATE_SIZE`.
 
     Returns
     -------
@@ -110,56 +116,53 @@ def solid_geometry(size: float = barc.SIZE) -> Any:
 
     project = Project('RC Plate')
     name = project.new_geometry('RC Plate', unit='in')
-    parts = [project.add_solid_block(name, *PLATE, name='plate', unit='in')]
+    plate = project.add_solid_block(name, *PLATE, name='plate', unit='in')
+    project.mesh_solids(name, [plate], PLATE_SIZE, unit='in')
+    parts = []
     for side, blocks in barc.CHANNEL_SOLIDS.items():
         made = [project.add_solid_block(name, center, widths,
                                         name=side if k == 0 else '', unit='in')
                 for k, (center, widths) in enumerate(blocks)]
         parts.append(project.combine_solids(name, 'subtract', made))
     parts.append(project.add_solid_block(name, *barc.BEAM_SOLID, name='beam', unit='in'))
-    project.mesh_solids(name, parts, size, unit='in', parts_apart=True)
+    project.mesh_solids(name, parts, size, unit='in', apart=True, parts_apart=True)
     whole = project[name]
     whole.view = barc.VIEW
-    whole.group_properties = {int(group): fem.GroupProperties(barc.MATERIAL)
+    whole.group_properties = {int(group): fem.GroupProperties(barc.SOLID_MATERIAL)
                               for group in whole.group_id}
     ids = dict(zip(whole.group_name, whole.group_id.tolist(), strict=True))
     for kind in ('foot', 'top'):
         for side in ('right channel', 'left channel'):
-            below, above = ('plate', side) if kind == 'foot' else (side, 'beam')
-            places = sorted({node for (bx, bz), k in barc.SOLID_BOLTS if k == kind
-                             and (bx > 0) == (side == 'right channel')
-                             for node in barc.bolt_places(whole, (bx, bz), kind)})
+            below = 'plate' if kind == 'foot' else side
+            above = side if kind == 'foot' else 'beam'
             groups = [ids[below], ids[above]]
             patch, = project.detect_mated_surfaces(
                 name, groups, 0.25 * whole.node_spacing(groups))
-            clamped = set(places) | set(barc._beneath(whole, ids[below], places))
+            pair, first, second = patch['groups'], patch['nodes_a'], patch['nodes_b']
+            if pair[0] != groups[0]:
+                # the finer foot came first: the plate's nodes are the ones
+                # tied, each to the node of the foot it lies on
+                pair, first, second = pair[::-1], second, first
             project.add_mated_surfaces(
-                name, patch['groups'], [n for n in patch['nodes_a'] if n in clamped],
-                patch['nodes_b'], name=f'{side.split()[0]} {kind} bolts')
-    xyz = whole.node_xyz / barc.INCH
-    for kind in ('foot', 'top'):
-        nodes = []
-        for (bx, bz), k in barc.SOLID_BOLTS:
-            if k != kind:
-                continue
-            on_face = np.flatnonzero(np.abs(xyz[:, 1] - barc.HEAD_Y[kind]) < 1e-6)
-            far = np.hypot(xyz[on_face, 0] - bx, xyz[on_face, 2] - bz)
-            tied = on_face[far <= far.min() + 1e-9]
-            nearest = tied[np.lexsort((xyz[tied, 2], xyz[tied, 0]))[0]]
-            nodes.append([int(whole.node_id[nearest])])
-        group = whole.add_group(f'{kind} bolts')
-        whole.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))
-        whole.group_properties[group] = fem.GroupProperties(
-            mass=barc.BOLT_MASS[kind] * barc.POUND)
+                name, pair, barc.mated_places(whole, first, kind, side), second,
+                name=f'{side.split()[0]} {kind} bolts')
+    barc.add_bolt_masses(whole)
     return whole
 
 
+#: how far from a channel's place its node may be, inches: the left channel's
+#: 0.12 in web puts a grid line at z = 1.12, so the nodes between it and z = 2
+#: are 0.063 in apart and the places at z = 1.25 are 0.004 in off a node
+NEAR = 0.01
+
+
 def node_at(geometry: Any, point: tuple[float, float, float]) -> int:
-    """The id of the node of `geometry` at `point`, inches."""
+    """The id of the node of `geometry` nearest `point`, inches, within
+    `NEAR`."""
     xyz = geometry.node_xyz / barc.INCH
     gap = np.linalg.norm(xyz - np.asarray(point), axis=1)
     k = int(gap.argmin())
-    if gap[k] > 1e-9:
+    if gap[k] > NEAR:
         raise ValueError(f'no node at {point} in; the nearest is {gap[k]:.3g} in off')
     return int(geometry.node_id[k])
 
@@ -220,7 +223,7 @@ def channels(model: Any) -> tuple[Any, Any]:
     return geometry, ChannelTable(columns)
 
 
-def project(size: float = barc.SIZE, solved: bool = False) -> Any:
+def project(size: float = barc.SOLID_SIZE, solved: bool = False) -> Any:
     """A project to open in the app: the plate with the removable component, its
     test geometry and channel table linked as the Basis group.
 
@@ -233,7 +236,7 @@ def project(size: float = barc.SIZE, solved: bool = False) -> Any:
     Parameters
     ----------
     size : float
-        The element size aimed at, in inches.
+        The removable component's element size, in inches.
     solved : bool, default False
         Solve the modes and project them as well.
 
@@ -257,7 +260,7 @@ def project(size: float = barc.SIZE, solved: bool = False) -> Any:
     return out
 
 
-def describe(size: float = barc.SIZE, modes: int = 10) -> None:
+def describe(size: float = barc.SOLID_SIZE, modes: int = 10) -> None:
     """Print the model's size and its first `modes` elastic frequencies (those
     above 1 Hz)."""
     from hertzforge.core import fem
