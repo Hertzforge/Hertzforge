@@ -323,7 +323,7 @@
 							view={p.view}
 							{live}
 							followX={time}
-							showTitle={panes.length > 1}
+							showTitle={panes.length > 1 && p.view.title !== (spec.title ?? type?.words)}
 							minHeight={60}
 							copyButton={false}
 							grid={display.grid}
