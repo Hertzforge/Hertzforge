@@ -2,11 +2,11 @@
 	/**
 	 * The operator's screen for a closed-loop Random test, in two steps as Eigen ran it: Setup
 	 * (station and channels, profile and schedule, control and limits, one section at a time, with
-	 * "Proceed to Run" once the setup checks clean), then Run (the display pages and their plots,
-	 * the level card, the run's numbers and log). A link back to the test-type chooser heads it
-	 * while no run is live. The run bar is always in view: where the data comes from, the run's
-	 * state, who holds control, the verbs that apply now, Stop and Abort. When a run starts driving
-	 * the Run step comes forward; Back to Setup shows the setup (locked while the run is live).
+	 * Apply Setup and "Proceed to Run" in the bar at the bottom), then Run (the pages of plots, and
+	 * the control dock with the run's verbs, level, numbers and log). One header line heads both:
+	 * the way back to the test types while no run is live, the steps, the run's state, clock and
+	 * level, where the data comes from, and who holds control. When a run starts driving the Run
+	 * step comes forward; the Setup step shows the setup (locked while the run is live).
 	 */
 	import { onMount } from 'svelte';
 	import '$lib/acquire/acquire.css';
@@ -18,10 +18,10 @@
 	import OverrideDialog from '$lib/acquire/OverrideDialog.svelte';
 	import ProfileEditor from '$lib/acquire/ProfileEditor.svelte';
 	import ReferencePreview from '$lib/acquire/ReferencePreview.svelte';
-	import RunBar from '$lib/acquire/RunBar.svelte';
 	import ScheduleEditor from '$lib/acquire/ScheduleEditor.svelte';
 	import SetupSummary from '$lib/acquire/SetupSummary.svelte';
 	import StationPanel from '$lib/acquire/StationPanel.svelte';
+	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
 	import type { AcquireTab } from '$lib/acquire/store.svelte';
 
 	interface Props {
@@ -34,11 +34,11 @@
 	const running = $derived(acq.tab === 'live');
 	const tests = $derived(app.tests);
 	let overrideOpen = $state(false);
-	let heading: HTMLElement;
+	let heading = $state<HTMLElement | null>(null);
 
 	// Arriving from the chooser or the run pill, the keyboard lands on the screen's name.
 	onMount(() => {
-		if (app.tests.takeFocus()) heading.focus();
+		if (app.tests.takeFocus()) heading?.focus();
 	});
 
 	const TEST_KEYS = ['title', 'profile', 'acquisition', 'schedule'];
@@ -131,37 +131,41 @@
 
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
-	const liveDot = $derived(acq.run?.state === 'running' || acq.run?.state === 'review' || acq.run?.state === 'stopping');
+	/** Stop and Abort stay in reach: in the header whenever a live run's Run card is out of view. */
+	const endsInHeader = $derived(acq.isLive && !(running && display.cardInView('run')));
+	/** What the state chip says on hover: how the run ended, why it holds, or what the next step waits on. */
+	const reason = $derived.by(() => {
+		const run = acq.run;
+		if (run?.state === 'finished' && run.end) return run.end.message;
+		if (run?.state === 'review') return 'Nothing drives at test level until you proceed.';
+		const p = acq.primary;
+		return p && acq.actions[p].visible && !acq.actions[p].enabled ? acq.actions[p].reason : null;
+	});
+	const apply = $derived(acq.actions.apply);
+	let applying = $state(false);
+	async function applySetup() {
+		if (!apply.enabled || applying) return;
+		applying = true;
+		await acq.apply();
+		applying = false;
+	}
 </script>
 
 <div class="acquire" data-testid="acquire">
-	<div class="top">
-		<div class="crumb">
-			{#if tests.canLeave}
-				<button class="btn ghost sm back" data-testid="test-type-back" onclick={() => tests.toChooser()}>
-					<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-					Test type
-				</button>
-				<span class="sep" aria-hidden="true">/</span>
-			{/if}
-			<h1 class="here" tabindex="-1" bind:this={heading}>Random</h1>
-			<ol class="flow" aria-label="Steps">
-				<li>
-					<button class="step" class:on={!running} aria-current={!running ? 'step' : undefined} data-testid="flow-setup" onclick={toSetup}><span class="n">1</span>Setup</button>
-				</li>
-				<li aria-hidden="true" class="arrow">
-					<svg viewBox="0 0 12 12" width="10" height="10"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-				</li>
-				<li>
-					<button class="step" class:on={running} aria-current={running ? 'step' : undefined} data-testid="flow-run" aria-disabled={!running && !!proceedWhy} title={!running && proceedWhy ? proceedWhy : undefined} onclick={() => (running ? null : proceed())}>
-						<span class="n">2</span>Run{#if liveDot}<span class="mark dot" aria-label="running"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg></span>{/if}
-					</button>
-				</li>
-			</ol>
-		</div>
-		<RunBar {acq} onoverride={() => (overrideOpen = true)} {abortKeys} />
-		<Notices {acq} />
-	</div>
+	<ScreenHeader
+		{acq}
+		name="Random"
+		step={running ? 'run' : 'setup'}
+		onsetup={toSetup}
+		onrun={proceed}
+		runWhy={proceedWhy}
+		onleave={tests.canLeave ? () => tests.toChooser() : null}
+		{reason}
+		ends={endsInHeader}
+		{abortKeys}
+		bind:heading
+	/>
+	<div class="notices"><Notices {acq} /></div>
 
 	{#if !running}
 	<div class="tabs" role="tablist" aria-label="Acquire and control sections" bind:this={tablist} tabindex="-1" onkeydown={onTabKey}>
@@ -232,21 +236,20 @@
 			{/if}
 			{flowNote.text}
 		</p>
+		{#if apply.visible}
+			<button class="btn" data-testid="act-apply" aria-disabled={!apply.enabled || applying} class:off={!apply.enabled} title={apply.reason ?? 'Send this setup to the control service.'} onclick={applySetup}>
+				{#if applying}<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>{/if}
+				Apply Setup
+			</button>
+		{/if}
 		<button class="btn primary" data-testid="proceed-to-run" aria-disabled={!!proceedWhy || proceeding} class:off={!!proceedWhy} title={proceedWhy ?? 'Show the run: the display pages, the level and the run\'s numbers.'} onclick={proceed}>
 			Proceed to Run
 			<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 		</button>
 	</footer>
 	{:else}
-	<div class="body fit" id="aq-panel-live" data-testid="run-view">
-		<RunView {acq} {display} onpopout={popout}>
-			{#snippet end()}
-				<button class="btn sm" data-testid="back-to-setup" onclick={toSetup} title={acq.isLive ? 'Look at the setup. It stays locked while the run is live.' : 'Back to the setup.'}>
-					<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M7.5 2.5L4 6l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-					Back to Setup
-				</button>
-			{/snippet}
-		</RunView>
+	<div class="run" id="aq-panel-live" data-testid="run-view">
+		<RunView {acq} {display} onpopout={popout} onoverride={() => (overrideOpen = true)} {abortKeys} />
 	</div>
 	{/if}
 </div>
@@ -259,41 +262,6 @@
 		flex-direction: column;
 		height: 100%;
 		min-height: 0;
-	}
-
-	.top {
-		display: flex;
-		flex-direction: column;
-		gap: var(--sp-2);
-		padding: var(--sp-2) var(--sp-5) 0;
-	}
-
-	.crumb {
-		display: flex;
-		align-items: center;
-		gap: var(--sp-1);
-		min-height: 24px;
-		min-width: 0;
-	}
-
-	.crumb .back {
-		gap: 4px;
-		margin-left: calc(-1 * var(--sp-2));
-		color: var(--text-2);
-	}
-
-	.crumb .sep {
-		color: var(--text-4);
-	}
-
-	.here {
-		font-size: var(--text-md);
-		font-weight: var(--weight-strong);
-		color: var(--text-1);
-	}
-
-	.here:focus {
-		outline: none;
 	}
 
 	.tabs {
@@ -358,72 +326,6 @@
 		color: var(--amber-2);
 	}
 
-	.mark.dot {
-		color: var(--blue-2);
-		animation: pulse 1.2s ease-in-out infinite;
-	}
-
-	.flow {
-		display: flex;
-		align-items: center;
-		gap: 2px;
-		margin: 0 0 0 var(--sp-3);
-		padding: 0;
-		list-style: none;
-	}
-
-	.flow .arrow {
-		display: inline-flex;
-		color: var(--text-4);
-	}
-
-	.step {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		height: 26px;
-		padding: 0 10px 0 4px;
-		font-size: var(--text-sm);
-		font-weight: var(--weight-medium);
-		color: var(--text-3);
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: 13px;
-	}
-
-	.step:hover {
-		color: var(--text-1);
-		background: var(--bg-2);
-	}
-
-	.step .n {
-		display: inline-grid;
-		place-items: center;
-		width: 18px;
-		height: 18px;
-		font-size: var(--text-2xs);
-		font-weight: var(--weight-strong);
-		border: 1.3px solid currentColor;
-		border-radius: 50%;
-	}
-
-	.step.on {
-		color: var(--text-1);
-		font-weight: var(--weight-strong);
-		background: var(--blue-weak);
-		border-color: var(--blue-line);
-	}
-
-	.step.on .n {
-		color: var(--bg-1);
-		background: var(--blue-2);
-		border-color: var(--blue-2);
-	}
-
-	.step[aria-disabled='true'] {
-		cursor: default;
-	}
-
 	.flowbar {
 		display: flex;
 		align-items: center;
@@ -479,14 +381,31 @@
 		outline: none;
 	}
 
-	/* The run fills the window when there is room, so the plots and the numbers are all in view
-	   during a run; on a small window it scrolls like the rest. */
-	@media (min-height: 700px) and (min-width: 1101px) {
-		.body.fit {
-			display: flex;
-			flex-direction: column;
-			overflow: hidden;
-			padding-bottom: var(--sp-3);
+	.notices {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-2);
+		padding: 0 var(--sp-4);
+	}
+
+	.notices > :global(:first-child) {
+		margin-top: var(--sp-2);
+	}
+
+	/* The run fills what the header leaves: the plots on their page, the controls beside them. */
+	.run {
+		flex: 1;
+		min-height: 0;
+		padding: 6px 6px 4px var(--sp-3);
+	}
+
+	.flowbar .spin {
+		animation: spin 0.8s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
 		}
 	}
 
@@ -508,12 +427,6 @@
 		max-width: 1180px;
 	}
 
-	@keyframes pulse {
-		50% {
-			opacity: 0.35;
-		}
-	}
-
 	@media (max-width: 1180px) {
 		.two {
 			grid-template-columns: minmax(0, 1fr);
@@ -521,7 +434,6 @@
 	}
 
 	@media (max-width: 760px) {
-		.top,
 		.body {
 			padding-left: var(--sp-3);
 			padding-right: var(--sp-3);

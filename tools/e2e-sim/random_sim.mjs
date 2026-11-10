@@ -15,13 +15,13 @@
 //    The workspace rail minimizes and stays minimized across a reload.
 // 1. One screen takes control, selects the simulator, sets the channel table (a control input, a
 //    drive and a monitored input with a response limit) and the bench loopback setup, sees the
-//    service draw the profile, applies, arms, proceeds to the Run step, starts, holds for review
+//    service draw the profile, applies, proceeds to the Run step, arms, starts, holds for review
 //    (identification at the reference -20 dB, read from the run log) and proceeds. During the run:
 //    the level card, the display pages (Control, Limits with the limit line, Responses), a plot
 //    added and removed and a page renamed, added and removed while the run goes on untouched, a
 //    connection of its own asking only for some plots and getting only those, and the rail
 //    minimized. Then it steps the level on the manual ladder and stops with the ramp, which starts
-//    at once and walks down smoothly (the run bar's live level, sampled ten times a second).
+//    at once and walks down smoothly (the header's live level, sampled ten times a second).
 //    After the run, "Test type" leads back to the chooser and Random comes back as it was left.
 // 1b. A page opened in a window of its own before the start, kept open through the run: the
 //    first window still asks for exactly its own page and plots each time it changes page and
@@ -212,15 +212,27 @@ async function chooser(page, what) {
 
 /** A setup section; from the Run step, back to the setup first. */
 async function tab(page, id) {
-	if (await page.locator('[data-testid="back-to-setup"]').count()) await tid(page, 'back-to-setup').click();
+	if ((await tid(page, 'flow-setup').getAttribute('aria-current')) !== 'step') await tid(page, 'flow-setup').click();
 	await tid(page, `tab-${id}`).click();
 }
 
 /** The page shown in a window's display. */
-const pageName = async (page) => (await tid(page, 'page-select').locator('option:checked').innerText()).trim();
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** The pages' names, in the order of their tabs. */
+const pageNames = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"]').allInnerTexts()).map((t) => t.trim());
 async function choosePage(page, name) {
-	await tid(page, 'page-select').selectOption({ label: name });
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
 	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
+}
+/** An item of the page's menu, at the right of the page tabs. */
+async function pageMenu(page, id) {
+	await tid(page, 'page-menu').click();
+	await tid(page, id).click();
+}
+/** A plot of a type added to the page, by its name in `+ Plot`. */
+async function addPlot(page, words) {
+	await tid(page, 'plot-add').click();
+	await page.locator('[data-testid="plot-add-pop"]').getByRole('menuitem', { name: words, exact: true }).click();
 }
 /** The drawn panes of a plot, by its test id. */
 const panes = (page, plotId) => page.locator(`[data-testid="plot-${plotId}"] [data-testid="plot-pane"] canvas`).count();
@@ -428,23 +440,24 @@ try {
 	check('after applying, the preview is the service\'s', (await tid(a, 'reference-preview').getAttribute('data-source')) === 'service');
 	check('Setup step: the footer says the service holds this setup', /service holds this setup/.test(await text(a, 'flow-check')), await text(a, 'flow-check'));
 
-	await verb(a, 'act-arm');
-	await until(a, 'armed', async (p) => (await stateOf(p)) === 'armed');
-	const gridNote = await text(a, 'grid-note');
-	check('Arm: armed, on the grid the station runs at', /Actual/.test(gridNote), gridNote);
-	await simBadge(a, 'armed');
-	await shot(a, '04-armed');
-
-	// Setup, then Run: armed, the setup is locked, and Proceed to Run shows the run.
-	check('Setup step: armed, the footer says the setup is locked', /setup is locked/.test(await text(a, 'flow-check')), await text(a, 'flow-check'));
+	// Setup, then Run: Proceed to Run shows the run, and its Run card arms it; the Setup step
+	// then shows the setup locked.
 	await tid(a, 'proceed-to-run').click();
 	await until(a, 'the Run step', async (p) => (await tid(p, 'run-view').isVisible()) && (await tid(p, 'flow-run').getAttribute('aria-current')) === 'step');
 	check('Proceed to Run: the Run step, on the Control page with its two plots', (await pageName(a)) === 'Control' && (await tid(a, 'page-view').getAttribute('data-plots')) === '2', `${await pageName(a)}, ${await tid(a, 'page-view').getAttribute('data-plots')} plots`);
-	await tid(a, 'back-to-setup').click();
+	await verb(a, 'act-arm');
+	await until(a, 'armed', async (p) => (await stateOf(p)) === 'armed');
+	await simBadge(a, 'armed');
+	await shot(a, '04-armed');
+	await tid(a, 'flow-setup').click();
 	await until(a, 'back at the setup', async (p) => (await tid(p, 'tab-station').isVisible()) && (await p.locator('[data-testid="run-view"]').count()) === 0);
+	await tid(a, 'tab-test').click();
+	const gridNote = await text(a, 'grid-note');
+	check('Arm: armed, on the grid the station runs at', /Actual/.test(gridNote), gridNote);
+	check('Setup step: armed, the footer says the setup is locked', /setup is locked/.test(await text(a, 'flow-check')), await text(a, 'flow-check'));
 	await tid(a, 'proceed-to-run').click();
 	await until(a, 'the Run step again', async (p) => tid(p, 'run-view').isVisible());
-	check('Back to Setup and Proceed to Run move between the steps', true);
+	check('Setup and Run move between the steps', true);
 
 	await verb(a, 'act-start');
 	await until(a, 'the review hold', async (p) => (await stateOf(p)) === 'review', 90_000);
@@ -533,16 +546,11 @@ try {
 	// A plot added during the run fills, and removed, goes; the run carries on untouched.
 	const loopOf = async (p) => Number((await text(p, 'live-lines')).match(/Loop\s*(\d+)/)?.[1] ?? NaN);
 	const loopBefore = await loopOf(a);
-	await tid(a, 'plot-add').click();
-	await tid(a, 'plot-quantity').selectOption('time');
-	await tid(a, 'plot-channels-pick').click();
-	await tid(a, 'plot-pick-1').uncheck().catch(() => {});
-	await tid(a, 'plot-pick-3').check();
-	await tid(a, 'plot-editor-done').click();
-	await until(a, 'the added time plot', async (p) => (await tid(p, 'page-view').getAttribute('data-plots')) === '2' && (await panes(p, 'pl-5')) === 1);
+	await addPlot(a, 'Time History');
+	await until(a, 'the added time plot', async (p) => (await tid(p, 'page-view').getAttribute('data-plots')) === '2' && (await panes(p, 'pl-5')) > 0);
 	const midState = await serviceCall(servicePort, 'random.state');
 	const loopAfter = await loopOf(a);
-	check('a time-history plot of channel 3, added during the run, fills at once; the run carries on', midState.run_id === runId && midState.state === 'running' && loopAfter > loopBefore, `${midState.run_id} ${midState.state}, loop ${loopBefore} to ${loopAfter}`);
+	check('a time-history plot, added during the run, fills at once; the run carries on', midState.run_id === runId && midState.state === 'running' && loopAfter > loopBefore, `${midState.run_id} ${midState.state}, loop ${loopBefore} to ${loopAfter}`);
 	await shot(a, '05c-plot-added-during-run');
 	await a.locator('[data-testid="plot-pl-5"] [data-testid="plot-remove"]').click();
 	await until(a, 'the plot removed', async (p) => (await tid(p, 'page-view').getAttribute('data-plots')) === '1');
@@ -550,7 +558,7 @@ try {
 	check('the plot removed during the run; the run carries on', after.run_id === runId && after.state === 'running', `${after.state}`);
 
 	// Pages renamed, added (with a plot of its own) and removed during the run.
-	await tid(a, 'page-rename').click();
+	await pageMenu(a, 'page-rename');
 	await tid(a, 'page-name').fill('All Inputs');
 	await tid(a, 'page-name').press('Enter');
 	await until(a, 'the renamed page', async (p) => (await pageName(p)) === 'All Inputs');
@@ -558,18 +566,15 @@ try {
 	await tid(a, 'page-name').fill('Drive Detail');
 	await tid(a, 'page-name').press('Enter');
 	await until(a, 'the new page', async (p) => (await pageName(p)) === 'Drive Detail' && (await tid(p, 'page-empty').isVisible()));
-	await tid(a, 'plot-add').click();
-	await tid(a, 'plot-quantity').selectOption('drive');
-	await tid(a, 'plot-y-fixed').check();
-	await tid(a, 'plot-editor-done').click();
+	await addPlot(a, 'Drive');
 	const newPlot = await a.locator('[data-testid="page-view"] [data-plot]').first().getAttribute('data-plot');
 	await until(a, 'the drive plot on the new page', async (p) => (await panes(p, newPlot)) === 1);
-	const pagesNow = await tid(a, 'page-select').locator('option').allInnerTexts();
-	check('pages: renamed, and a new one with a plot of its own, from the drop-down', pagesNow.join('|') === 'Control|Limits|All Inputs|Drive Detail', pagesNow.join(', '));
+	const pagesNow = await pageNames(a);
+	check('pages: renamed, and a new one with a plot of its own, in the page tabs', pagesNow.join('|') === 'Control|Limits|All Inputs|Drive Detail', pagesNow.join(', '));
 	await shot(a, '05d-new-page-with-a-plot');
-	await tid(a, 'page-remove').click();
+	await pageMenu(a, 'page-remove');
 	await tid(a, 'page-remove-yes').click();
-	await until(a, 'the page removed', async (p) => (await tid(p, 'page-select').locator('option').count()) === 3);
+	await until(a, 'the page removed', async (p) => (await pageNames(p)).length === 3);
 	await choosePage(a, 'Control');
 	check('the page removed; the run carries on', (await stateOf(a)) === 'running' && (await serviceCall(servicePort, 'random.state')).run_id === runId);
 
@@ -640,7 +645,7 @@ try {
 	await verb(a, 'act-reset');
 	await until(a, 'a new run', async (p) => (await stateOf(p)) === 'configured');
 	await choosePage(a, 'Limits');
-	const [early] = await Promise.all([ctxA.waitForEvent('page'), tid(a, 'page-popout').click()]);
+	const [early] = await Promise.all([ctxA.waitForEvent('page'), pageMenu(a, 'page-popout')]);
 	await early.setViewportSize({ width: 1280, height: 820 });
 	await until(early, 'the window opened before the start', async (p) => (await tid(p, 'display-window').isVisible()) && (await roleOf(p)) === 'observer', 30_000);
 	check(
@@ -657,9 +662,7 @@ try {
 	for (let round = 1; round <= 3; round++) {
 		const from = subsA.length;
 		await choosePage(a, 'All Inputs');
-		await tid(a, 'plot-add').click();
-		await tid(a, 'plot-quantity').selectOption('time');
-		await tid(a, 'plot-editor-done').click();
+		await addPlot(a, 'Time History');
 		const onScreen = await plotsOnPage(a);
 		const added = onScreen.at(-1);
 		const filled = await until(a, 'the new page and plot asked for and drawn', async (p) => subsA.at(-1) === onScreen.join() && (await panes(p, added)) > 0, 5_000).then(
@@ -720,7 +723,7 @@ try {
 
 	// The controlling screen opens its Limits page in a window of its own, for another monitor.
 	await choosePage(a, 'Limits');
-	const [w] = await Promise.all([ctxA.waitForEvent('page'), tid(a, 'page-popout').click()]);
+	const [w] = await Promise.all([ctxA.waitForEvent('page'), pageMenu(a, 'page-popout')]);
 	await w.setViewportSize({ width: 1280, height: 820 });
 	await until(w, 'the second window', async (p) => (await tid(p, 'display-window').isVisible()) && (await panes(p, 'pl-3')) > 0, 30_000);
 	check(

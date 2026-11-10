@@ -92,3 +92,45 @@ export function seriesLooks(series: Pick<Series, 'role' | 'follows'>[]): SeriesL
 	});
 	return looks;
 }
+
+/**
+ * Colours a person may give a line: the Okabe and Ito set, chosen to stay apart under the common
+ * colour-vision deficiencies. Each has a name for the menu and the legend, and a line given one
+ * keeps its dash and its marker, so colour is never the only cue.
+ */
+export const TRACE_COLORS: readonly { id: string; words: string; hex: string }[] = [
+	{ id: 'orange', words: 'Orange', hex: '#e69f00' },
+	{ id: 'sky', words: 'Sky Blue', hex: '#56b4e9' },
+	{ id: 'green', words: 'Bluish Green', hex: '#009e73' },
+	{ id: 'yellow', words: 'Yellow', hex: '#f0e442' },
+	{ id: 'blue', words: 'Blue', hex: '#0072b2' },
+	{ id: 'vermillion', words: 'Vermillion', hex: '#d55e00' },
+	{ id: 'purple', words: 'Reddish Purple', hex: '#cc79a7' },
+	{ id: 'gray', words: 'Gray', hex: '#999999' }
+];
+
+/** The palette entry for a colour, matched without regard to case; undefined when it is not one. */
+export function traceColor(hex: string | null | undefined): { id: string; words: string; hex: string } | undefined {
+	const h = hex?.toLowerCase();
+	return h ? TRACE_COLORS.find((c) => c.hex === h) : undefined;
+}
+
+/** The dash patterns a line may be given, the role patterns' own, with their words. */
+export const DASH_STYLES = {
+	solid: { dash: ROLE_STYLES.measured.dash, words: 'solid' },
+	dashed: { dash: ROLE_STYLES.reference.dash, words: 'dashed' },
+	dotted: { dash: ROLE_STYLES.tolerance.dash, words: 'dotted' },
+	dashdot: { dash: ROLE_STYLES.abort.dash, words: 'dash-dot' }
+} as const satisfies Record<string, { dash: readonly number[]; words: string }>;
+
+export type MarkerShape = 'circle' | 'square' | 'triangle' | 'diamond' | 'cross';
+
+/** Markers in the order a plot hands them out, with their words for the legend. */
+export const MARKER_WORDS: Record<MarkerShape, string> = {
+	circle: 'circles',
+	square: 'squares',
+	triangle: 'triangles',
+	diamond: 'diamonds',
+	cross: 'crosses'
+};
+export const MARKER_ORDER: MarkerShape[] = ['circle', 'square', 'triangle', 'diamond', 'cross'];

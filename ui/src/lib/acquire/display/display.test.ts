@@ -11,6 +11,7 @@ import type { DataPlot, RandomLiveHead, RandomState, SpectrumView } from '$lib/p
 import { defaultSetup } from '../setup';
 import { AcquireState } from '../store.svelte';
 import { levelStatus, ramping } from '../words';
+import { screenKey, toSaved as toSavedScreen } from '../screen/layout';
 import { DisplayState } from './display.svelte';
 import { defaultRandomLayout, fromSaved, layoutKey, newPlot, nextId, plotTitle, readLayout, subscriptionFor, toSaved } from './layout';
 import { fixedY, overlay, presented, withScales } from './views';
@@ -229,7 +230,7 @@ describe('one window against the control service', () => {
 		const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
 		const acq = new AcquireState(client, { session: null, local: null, checkDelayMs: 0 });
 		const showing = () => acq.tab === 'live';
-		const display = new DisplayState(client, { testType: 'random', setupTitle: () => acq.held?.config.title ?? null, showing, storage, session: null, page, subscribeDelayMs: 0 });
+		const display = new DisplayState(client, { setupTitle: () => acq.held?.config.title ?? null, showing, storage, session: null, page, subscribeDelayMs: 0 });
 		const stop = display.watch();
 		client.connect();
 		await client.whenOpen();
@@ -272,7 +273,7 @@ describe('one window against the control service', () => {
 		const id = a.display.addPlot('time') as string;
 		await until(() => (a.display.plotData(id)?.views.length ?? 0) > 0);
 		expect(a.display.plotData(id)?.channels).toEqual([1]);
-		a.display.removePlot(id);
+		a.display.removePanel(id);
 		await until(() => a.display.accepted?.plots?.length === 2);
 		expect(a.acq.run?.run_id).toBe(runId);
 		expect(a.acq.run?.state).toBe('running');
@@ -302,7 +303,7 @@ describe('one window against the control service', () => {
 		const server = createControlServer({ speed: 20 });
 		const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
 		const acq = new AcquireState(client, { session: null, local: null, checkDelayMs: 0 });
-		const display = new DisplayState(client, { testType: 'random', setupTitle: () => null, showing: () => acq.tab === 'live', storage: memoryStorage(), session: null, subscribeDelayMs: 40 });
+		const display = new DisplayState(client, { setupTitle: () => null, showing: () => acq.tab === 'live', storage: memoryStorage(), session: null, subscribeDelayMs: 40 });
 		const stop = display.watch();
 		client.connect();
 		await client.whenOpen();
@@ -327,7 +328,7 @@ describe('one window against the control service', () => {
 			if (method === 'random.subscribe') sent.push(Date.now());
 			return request(method, params, options);
 		}) as typeof client.request;
-		const display = new DisplayState(client, { testType: 'random', setupTitle: () => null, showing: () => true, storage: memoryStorage(), session: null, events: null, subscribeDelayMs: 40 });
+		const display = new DisplayState(client, { setupTitle: () => null, showing: () => true, storage: memoryStorage(), session: null, events: null, subscribeDelayMs: 40 });
 		const stop = display.watch();
 		try {
 			client.connect();
@@ -361,7 +362,7 @@ describe('one window against the control service', () => {
 		const open = async (page?: string) => {
 			const { storage, events } = shared.window();
 			const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
-			const display = new DisplayState(client, { testType: 'random', setupTitle: () => 'Bench', showing: () => true, storage, session: null, events, page, subscribeDelayMs: 40 });
+			const display = new DisplayState(client, { setupTitle: () => 'Bench', showing: () => true, storage, session: null, events, page, subscribeDelayMs: 40 });
 			stops.push(display.watch());
 			client.connect();
 			await client.whenOpen();
@@ -373,7 +374,7 @@ describe('one window against the control service', () => {
 			const a = await open();
 			const b = await open('pg-2');
 			await new Promise((r) => setTimeout(r, 50));
-			const key = layoutKey('random', 'Bench');
+			const key = screenKey('random', 'Bench');
 			const before = shared.writes(key);
 			// Two edits in a row, both written before the other window hears of the first (as a plot
 			// added, then its quantity changed, are on screen): the plot, then its quantity.
@@ -387,7 +388,7 @@ describe('one window against the control service', () => {
 			// The two edits were written once each; neither window wrote back what it read.
 			expect(shared.writes(key) - before).toBe(2);
 			// Both end on the same layout, and the other window still asks for its own page only.
-			expect(toSaved(b.layout)).toBe(toSaved(a.layout));
+			expect(toSavedScreen(b.layout)).toBe(toSavedScreen(a.layout));
 			expect(b.plot(id)?.quantity).toBe('time');
 			expect(ids(b)).toBe('pl-3');
 		} finally {
