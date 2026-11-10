@@ -111,6 +111,16 @@
 			},
 			...randomCommands(),
 			{
+				id: 'act:new-project',
+				group: 'Actions',
+				title: 'New Project',
+				subtitle: 'An empty project in place of this one',
+				keywords: 'new empty blank start project file',
+				icon: 'dataset',
+				disabledReason: app.analysis.isOpen ? null : 'Analysis service is not connected',
+				run: () => void app.project.newProject()
+			},
+			{
 				id: 'act:retry',
 				group: 'Actions',
 				title: 'Reconnect Services',

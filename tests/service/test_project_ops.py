@@ -156,8 +156,9 @@ def test_an_operation_on_the_project_returns_its_summary(tmp_path, validate):
         ('op.run', {'op': 'project.waterfall', 'params': {'data': 'Time History PSDs'}}),
         ('op.run', {'op': 'project.waterfall', 'handle': 'h1', 'params': {}}),
     ]))
+    # the connection's empty project has nothing to draw
     assert before['error']['code'] == 'refused'
-    assert 'none is open' in before['error']['message']
+    assert 'the project has none' in before['error']['message']
     assert imported['result']['project']['modified']
     result = computed['result']
     # saved, then added to: modified again; drawing adds nothing

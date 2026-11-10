@@ -11,6 +11,7 @@
 	import Modal from '$lib/workspaces/Modal.svelte';
 	import Simulate from '$lib/workspaces/Simulate.svelte';
 	import CommandPalette from './CommandPalette.svelte';
+	import { listenForUpdateMenu } from './updates';
 	import DisplayWindow from './DisplayWindow.svelte';
 	import Report from '$lib/workspaces/Report.svelte';
 	import Console from './Console.svelte';
@@ -24,7 +25,8 @@
 		if (app.config.popout) return;
 		theme.init(app.config.theme);
 		app.start();
-		const stopMenu = listenForFileMenu((act) => void app.project.fileAct(act as 'open' | 'import' | 'save' | 'save-as'));
+		const stopMenu = listenForFileMenu((act) => void app.project.fileAct(act as 'new' | 'open' | 'import' | 'save' | 'save-as'));
+		const stopUpdates = listenForUpdateMenu();
 		// files dropped anywhere on the window open or import by their paths (the desktop app)
 		const stopDrops = listenForDrops((paths) => {
 			if (paths) return void app.project.openPaths(paths);
@@ -33,13 +35,17 @@
 		});
 		return () => {
 			stopMenu();
+			stopUpdates();
 			stopDrops();
 		};
 	});
 
-	// each time the analysis service connects it is told the display units chosen before
+	// each time the analysis service connects it is told the display units chosen before, and the
+	// shell takes up the empty project the connection starts with
 	$effect(() => {
-		if (!app.config.popout && app.analysis.isOpen) void app.units.sync();
+		if (app.config.popout || !app.analysis.isOpen) return;
+		void app.units.sync();
+		void app.project.connected();
 	});
 
 	// `--run-log [file]`: the log alone, for the keeper's own computer, as Visual Dynamics launches it
@@ -113,7 +119,7 @@
 		// the File menu's keys, where there is no File menu to take them
 		if ((e.metaKey || e.ctrlKey) && !e.altKey && !hasFileMenu() && app.analysis.isOpen) {
 			const key = e.key.toLowerCase();
-			const act = key === 'o' ? 'open' : key === 's' ? (e.shiftKey ? 'save-as' : 'save') : null;
+			const act = key === 'n' ? 'new' : key === 'o' ? 'open' : key === 's' ? (e.shiftKey ? 'save-as' : 'save') : null;
 			if (act) {
 				e.preventDefault();
 				void app.project.fileAct(act);

@@ -20,10 +20,13 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with: {python-version: '3.14'}
+      # The tests CI runs before every merge (ci.yml's package job), so the upload
+      # waits on the same answer: the slow and timing tests run on their own there.
       - name: Test
         run: |
-          pip install -q . pytest
-          pytest -q
+          pip install -q . pytest pytest-xdist jsonschema
+          bash scripts/fetch_testdata.sh
+          python -m pytest tests -q -n auto -m "not slow and not timing"
       - name: Build
         run: |
           pip install -q build

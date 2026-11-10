@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, pastedFiles } from '$lib/project/files';
+import { chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, pastedFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
@@ -1193,7 +1193,9 @@ export class ProjectState {
 		}
 	}
 
-	open(path: string): Promise<boolean> {
+	/** Open a project file in place of this one, after asking when this one has unsaved changes. */
+	async open(path: string): Promise<boolean> {
+		if (!(await this.mayDiscard())) return false;
 		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
 	}
 
@@ -1205,8 +1207,25 @@ export class ProjectState {
 		return this.call('Saving', 'project.save', path ? { path } : {}, false);
 	}
 
-	newProject(title: string): Promise<boolean> {
-		return this.call('Starting a project', 'project.new', { title });
+	/** An empty project in place of this one, after asking when this one has unsaved changes. */
+	async newProject(): Promise<boolean> {
+		if (!(await this.mayDiscard())) return false;
+		return this.call('Starting a project', 'project.new', {}, false);
+	}
+
+	/** The service connected: every connection starts with an empty project, which the shell takes up. */
+	async connected(): Promise<void> {
+		if (this.summary) return;
+		try {
+			const res = await this.app.analysis.request<{ project: ProjectSummary }>('project.new', {});
+			if (!this.summary) this.apply(res.project);
+		} catch {
+			// the first open or import says what is wrong
+		}
+	}
+
+	private async mayDiscard(): Promise<boolean> {
+		return !this.summary?.modified || (await discardUnsaved(this.summary.title));
 	}
 
 	async rename(name: string, to: string): Promise<boolean> {
@@ -1232,7 +1251,11 @@ export class ProjectState {
 	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
 	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
 	 */
-	async fileAct(what: 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
+	async fileAct(what: 'new' | 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
+		if (what === 'new') {
+			await this.newProject();
+			return;
+		}
 		if (what === 'save' && this.summary?.file && !this.summary.file.endsWith('.vdyn')) {
 			await this.save();
 			return;
