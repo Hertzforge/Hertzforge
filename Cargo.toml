@@ -8,7 +8,7 @@ resolver = "2"
 members = ["crates/*", "modules/*", "laws/*", "crates/hertzforge-law-host/guests/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 
