@@ -173,7 +173,7 @@ def channels(model: Any) -> tuple[Any, Any]:
     -------
     (Geometry, ChannelTable)
     """
-    from hertzforge import ChannelTable, Geometry
+    from hertzforge import ChannelTable
     from hertzforge.core.instrumentation import surface_frame
 
     rows, ids, fe_nodes, frames = [], [], [], []
@@ -198,6 +198,21 @@ def channels(model: Any) -> tuple[Any, Any]:
                for name in ('node', 'direction', 'role', 'control',
                             'channel_type', 'unit', 'triax_dof', 'comment')}
     columns['channel'] = list(range(1, len(rows) + 1))
+    return test_geometry(model, ids, fe_nodes, frames), ChannelTable(columns)
+
+
+def test_geometry(model: Any, ids: list[int], fe_nodes: list[int], frames: list) -> Any:
+    """The channel locations as a geometry: nodes `ids` at the FE nodes
+    `fe_nodes` of `model`, each displacing in its own system, or in the global
+    system where `frames` holds None. Its nodes are numbered apart from the FE
+    model's, so anything that matches the two by node id instead of by
+    position shows up wrong.
+
+    Returns
+    -------
+    Geometry
+    """
+    from hertzforge import Geometry
 
     xyz = model.node_xyz[model.node_index(fe_nodes)]
     cs_matrix = [np.vstack([np.eye(3), np.zeros(3)])]
@@ -217,7 +232,7 @@ def channels(model: Any) -> tuple[Any, Any]:
         cs_type=np.zeros(count, dtype=np.int64), cs_matrix=np.array(cs_matrix),
         length_unit=model.length_unit)
     geometry.view = model.view
-    return geometry, ChannelTable(columns)
+    return geometry
 
 
 def project(size: float = barc.SIZE, solved: bool = False) -> Any:

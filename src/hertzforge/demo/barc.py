@@ -506,33 +506,128 @@ def solid_build(part: str = 'BARC', size: float = SIZE) -> fem.Model:
 PART_NAMES = {'BARC': 'BARC', 'removable component': 'Removable Component'}
 
 
+# ---- the band-average control study's BARC (2026-11-10) -----------------
+
+#: the study's modes: every mode to this frequency, Hz, each given this
+#: fraction of critical damping
+STUDY_SOLVE_TO = 10000.0
+DAMPING = 0.01
+#: the study's drives, (x, y, z) in inches: the box's four bottom corners,
+#: each driven along its three axes into the box
+DRIVES = {
+    'box bottom corner -X -Z': (-3.0, -3.0, 0.0),
+    'box bottom corner +X -Z': (3.0, -3.0, 0.0),
+    'box bottom corner -X +Z': (-3.0, -3.0, 3.0),
+    'box bottom corner +X +Z': (3.0, -3.0, 3.0),
+}
+#: the force CPSD: every drive flat at FORCE_LEVEL, lbf^2/Hz, over FORCE_BAND,
+#: Hz, on lines FORCE_DF apart from 0 to FORCE_TOP; uncorrelated
+FORCE_BAND = (20.0, 4000.0)
+FORCE_LEVEL = 0.001
+FORCE_DF = 1.0
+FORCE_TOP = 4096.0
+LBF = 4.4482216152605      # N
+
+
+def inward(point: tuple[float, float, float]) -> list[str]:
+    """Each drive axis at a box corner `point`, pointed into the box."""
+    x, _, z = point
+    return ['X+' if x < 0 else 'X-', 'Y+', 'Z+' if z < BOX_DEPTH / 2 else 'Z-']
+
+
+def force_cpsd(drives: list[str]) -> Any:
+    """The drives' force CPSD, every pair of `drives` (DOF labels) a record,
+    in SI: each drive flat at `FORCE_LEVEL` over `FORCE_BAND`, the cross terms
+    kept at zero so correlation can be typed in later."""
+    from hertzforge.core.data import Psd
+
+    freq = np.arange(0.0, FORCE_TOP + FORCE_DF / 2, FORCE_DF)
+    low, high = FORCE_BAND
+    level = np.where((freq >= low) & (freq <= high), FORCE_LEVEL * LBF ** 2, 0.0)
+    pairs = [(a, b) for a in drives for b in drives]
+    return Psd(freq, np.array([level if a == b else np.zeros_like(level) for a, b in pairs]),
+               response_dof=[a for a, _b in pairs], reference_dof=[b for _a, b in pairs],
+               ordinate_dim='force**2/frequency', ordinate_unit='N',
+               comment=['uncorrelated drives'] * len(pairs))
+
+
 def solid_project(size: float = SIZE, solved: bool = False) -> Any:
-    """A project to open in the app: the BARC of bricks (`solid_geometry`), its
-    element groups given their properties, so Solve Modes on it gives its modes.
+    """The BARC the band-average control study drives, as a project to open in
+    the app (Brandon, 2026-11-10: the example the downloads page offers).
 
         barc.solid_project(solved=True).save('barc.hforge')
 
-    With `solved`, the modes are already solved to `SOLVE_TO` (2000 Hz). That is
-    the example project the downloads page offers, in bricks as the RC plate's is
-    (Brandon, 2026-11-10).
+    The BARC of bricks (`solid_geometry`), twelve forces at the box's bottom
+    corners (`DRIVES`, `inward`) and the sixteen triaxial accelerometers the
+    RC plate carries (`rc_plate.CONTROLS`), on a test geometry and channel
+    table made as the RC plate's are, and the force CPSD (`force_cpsd`), the
+    three linked as the Basis group. With `solved`, the modes are solved to
+    `STUDY_SOLVE_TO`, each with `DAMPING`, and projected onto the drives
+    ('BARC Modes @ Force DOFs') and the accelerometers ('BARC Modes @ Response
+    DOFs'). The study goes on to the specification the RC test replicates,
+    which a person makes in the app in a few seconds: Compute Modal Responses
+    from the force CPSD and the first, Expand them through the second, and
+    Convert to Specification. The example leaves it out, since its 48 x 48
+    CPSD and limits would make the file 600 MB instead of about 50 (Brandon,
+    2026-11-10).
 
     Parameters
     ----------
     size : float
         The element size aimed at, in inches.
     solved : bool, default False
-        Solve the modes as well.
+        Solve the modes and project them as well.
 
     Returns
     -------
     Project
     """
+    from hertzforge import ChannelTable
+    from hertzforge.core.instrumentation import surface_frame
+    from hertzforge.demo import rc_plate
     from hertzforge.project import Project
 
+    model = solid_geometry('BARC', size)
+    rows, ids, fe_nodes, frames = [], [], [], []
+    for node, (label, point) in enumerate(DRIVES.items(), start=rc_plate.DRIVE_IDS):
+        fe = rc_plate.node_at(model, point)
+        ids.append(node)
+        fe_nodes.append(fe)
+        frames.append(None)
+        for direction in inward(point):
+            rows.append({'node': node, 'direction': direction, 'role': 'reference',
+                         'control': 'False', 'channel_type': 'force', 'unit': 'lbf',
+                         'comment': f'{label}, {direction[0]} drive (FE node {fe})'})
+    for node, (label, (point, normal)) in enumerate(rc_plate.CONTROLS.items(),
+                                                    start=rc_plate.ACCEL_IDS):
+        fe = rc_plate.node_at(model, point)
+        ids.append(node)
+        fe_nodes.append(fe)
+        frames.append(surface_frame(normal))
+        for axis in 'XYZ':
+            rows.append({'node': node, 'direction': f'{axis}+', 'role': 'response',
+                         'control': 'True', 'channel_type': 'acceleration',
+                         'unit': 'g', 'triax_dof': axis, 'comment': f'{label} (FE node {fe})'})
+    columns = {name: [row.get(name, '') for row in rows]
+               for name in ('node', 'direction', 'role', 'control',
+                            'channel_type', 'unit', 'triax_dof', 'comment')}
+    columns['channel'] = list(range(1, len(rows) + 1))
+
     out = Project('BARC')
-    out.add('BARC', solid_geometry('BARC', size))
+    out.add('BARC', model)
+    out.add('BARC Test Geometry', rc_plate.test_geometry(model, ids, fe_nodes, frames))
+    out.add('BARC Channels', ChannelTable(columns))
+    drives = [f"{row['node']}{row['direction']}" for row in rows if row['role'] == 'reference']
+    out.add('BARC Force CPSD', force_cpsd(drives))
+    out.set_basis('BARC Test Geometry', 'BARC Channels', 'BARC Force CPSD')
     if solved:
-        out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
+        modes = out.solve_modes('BARC', maximum_frequency=STUDY_SOLVE_TO, damping=DAMPING)
+        drive_rows = [i for i, row in enumerate(rows) if row['role'] == 'reference']
+        accel_rows = [i for i, row in enumerate(rows) if row['role'] == 'response']
+        out.project_onto_basis(modes, onto='BARC Channels', channels=drive_rows,
+                               name='BARC Modes @ Force DOFs')
+        out.project_onto_basis(modes, onto='BARC Channels', channels=accel_rows,
+                               name='BARC Modes @ Response DOFs')
     return out
 
 

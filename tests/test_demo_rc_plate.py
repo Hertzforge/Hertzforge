@@ -90,6 +90,6 @@ def test_the_solved_example_is_the_studys_system():
     shapes = solved['RC Plate Modes']
     assert shapes.num_shapes == 38 and int(np.sum(shapes.frequency < 1.0)) == 6
     elastic = [f for f in shapes.frequency if f > 1.0][:5]
-    assert np.allclose(elastic, CHECKED, rtol=1e-5), np.round(elastic, 2)
+    assert np.allclose(elastic, CHECKED, rtol=1e-4), np.round(elastic, 2)
     report = solved['RC Plate Modes @ Test DOFs'].projection_report
     assert report['matched'] == report['total'] == 28

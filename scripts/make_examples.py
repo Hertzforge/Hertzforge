@@ -5,7 +5,9 @@ of `hertzforge.demo` with its 30 lowest normal modes (six of them
 rigid), the Frame-Wing as `frame_wing.project`
 builds it (the frame, each wing alone and the frame with each wing,
 every one solved to 1500 Hz, a 170 MB file), the BARC of bricks as
-`barc.solid_project` builds it (solved to 2000 Hz), the BARC's removable
+`barc.solid_project` builds it (the band-average study's BARC: solved to
+10 kHz, with its drives, accelerometers, force CPSD and the modes at
+them), the BARC's removable
 component on a fixture plate as `rc_plate.project` builds it (bricks,
 solved to 10 kHz, with its test geometry, channels and modes at the test
 DOFs, the system the band-average control study drives), and the plate's
