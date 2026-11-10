@@ -88,7 +88,9 @@
 		notes?: PaneNote[];
 		/** A note dragged to a new place, at fractions of the plot area. */
 		onnote?: (id: string, fx: number, fy: number) => void;
-		ticks?: TickDensity;
+		/** How close the ticks sit on each axis. */
+		xTicks?: TickDensity;
+		yTicks?: TickDensity;
 		/** Axis labels in place of the view's; null keeps the view's. */
 		xLabel?: string | null;
 		yLabel?: string | null;
@@ -126,7 +128,8 @@
 		marks = null,
 		notes = [],
 		onnote,
-		ticks = 'normal',
+		xTicks = 'normal',
+		yTicks = 'normal',
 		xLabel = null,
 		yLabel = null,
 		envelope = false
@@ -198,7 +201,7 @@
 	}
 
 	/** What, beyond the view, changes how the plot is built: a change rebuilds it. */
-	const optionsKey = $derived(JSON.stringify([styles, grid, ticks, xLabel, yLabel, envelope, zoomY, ownZoom]));
+	const optionsKey = $derived(JSON.stringify([styles, grid, xTicks, yTicks, xLabel, yLabel, envelope, zoomY, ownZoom]));
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
@@ -263,7 +266,7 @@
 
 	/** Ticks for a log axis, as dense as its pixels (and the tick density asked for) allow and never denser. */
 	function logSplits(u: uPlot, axis: 0 | 1, min: number, max: number): number[] {
-		const ppd = pxPerDecade(u, axis, min, max) / TICK_SPACE[ticks];
+		const ppd = pxPerDecade(u, axis, min, max) / TICK_SPACE[axis === 0 ? xTicks : yTicks];
 		return logTicks(min, max, mantissasFor(ppd), decadeStride(ppd));
 	}
 
@@ -309,7 +312,6 @@
 
 		const ordered = drawOrder;
 		const plotData = [xs, ...ordered.map((o) => cols[o.index])] as uPlot.AlignedData;
-		const space = TICK_SPACE[ticks];
 		const gridShown = grid !== 'none';
 
 		const opts: uPlot.Options = {
@@ -362,7 +364,7 @@
 					labelGap: 2,
 					size: 34,
 					gap: 4,
-					space: (logX ? 36 : 56) * space,
+					space: (logX ? 36 : 56) * TICK_SPACE[xTicks],
 					grid: { show: gridShown, stroke: gridColor, width: 1 },
 					ticks: { stroke: gridColor, width: 1, size: 4 },
 					splits: logX ? (u, _i, min, max) => logSplits(u, 0, min, max) : undefined,
@@ -378,7 +380,7 @@
 					labelSize: 20,
 					labelGap: 0,
 					gap: 6,
-					space: 28 * space,
+					space: 28 * TICK_SPACE[yTicks],
 					grid: { show: gridShown, stroke: gridColor, width: 1 },
 					ticks: { stroke: gridColor, width: 1, size: 4 },
 					splits: logY ? (u, _i, min, max) => logSplits(u, 1, min, max) : undefined,
