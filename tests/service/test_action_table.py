@@ -201,7 +201,8 @@ def test_the_geometry_row_leaves_its_parts_verbs_to_its_parts(plate):
 def test_a_part_offers_its_own_verbs_alone(plate):
     geometry = named(plate, 'geometry')
     solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
-    assert set(SHAPES) | {'Mesh'} <= set(solids)
+    assert set(SHAPES) <= set(solids)
+    assert 'Mesh' not in solids, 'Mesh meshes the solids picked'
     assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Combine'} & set(solids)
     assert 'Reorder' not in solids, 'a solid is reordered by dragging it in the tree'
     assert 'Show Solids' not in solids, 'picking the row shows them'
@@ -424,16 +425,47 @@ def _offered(state, name, verb, op_id, part=None):
     return found
 
 
-def test_mesh_says_a_geometry_has_no_solids_before_the_click(rich):
+def test_mesh_meshes_the_solids_picked_at_the_size_they_hold_at(rich):
+    """No ids to type and no size per piece: the solids picked, at one size, the one they
+    are likely to hold at, as shells when they are flat."""
     geometry = named(rich, 'geometry')
-    solids = {'name': geometry, 'kind': 'solids', 'id': 0}
-    found = _offered(rich, geometry, 'Mesh', 'project.mesh_solids', solids)
-    assert not found['ready'] and 'no solids' in found['reason']
-    assert 'no solids' in _refusal(rich.project, found['id'], {'geometry': geometry})
-    run = OPS['project.add_solid_block']
-    run.run(rich.project, run.resolve(
-        {'geometry': geometry}, objects={geometry: 'geometry'}, verbs={geometry: []}))
-    assert _offered(rich, geometry, 'Mesh', 'project.mesh_solids', solids)['ready']
+    assert 'no solids' in _refusal(rich.project, 'project.mesh_solids', {'geometry': geometry})
+    for op_id in ('project.add_solid_block', 'project.add_solid_plate'):
+        run = OPS[op_id]
+        run.run(rich.project, run.resolve(
+            {'geometry': geometry}, objects={geometry: 'geometry'}, verbs={geometry: []}))
+    block, plate = (int(s.id) for s in rich.project[geometry].solids[-2:])
+    found = _offered(rich, geometry, 'Mesh', 'project.mesh_solids',
+                     {'name': geometry, 'kind': 'solid', 'id': block})
+    assert found['ready'] and found['fill']['solids'] == str(block)
+    assert found['fill']['elements'] == 'hexes' and float(found['fill']['size']) > 0
+    assert set(found['omit']) == {'solids', 'sizes', 'detect'}
+    flat = _offered(rich, geometry, 'Mesh', 'project.mesh_solids',
+                    {'name': geometry, 'kind': 'solid', 'id': plate})
+    assert flat['fill']['elements'] == 'quads'
+    both = _offered(rich, geometry, 'Mesh', 'project.mesh_solids',
+                    {'name': geometry, 'kind': 'solid', 'id': block, 'ids': [block, plate]})
+    assert both['fill']['solids'] == f'{block}, {plate}' and both['fill']['elements'] == 'hexes'
+
+
+def test_mesh_detects_a_size_for_the_element_type_chosen():
+    import asyncio
+
+    from .test_projects import _exchange
+
+    out = asyncio.run(_exchange([
+        ('units.system', {'name': 'in-slinch-lbf-s (g)'}),
+        ('op.run', {'op': 'project.new_geometry', 'params': {'name': 'Part', 'unit': 'in'}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': {'geometry': 'Part'}}),
+        ('project.mesh_size', {'geometry': 'Part', 'solids': '1', 'elements': 'hexes',
+                               'size': 0}),
+        ('project.mesh_size', {'geometry': 'Part', 'solids': '1', 'elements': 'tetras'}),
+        ('project.mesh_size', {'geometry': 'Part', 'elements': 'tetras'}),
+    ]))
+    hexes, tetras = out[3][-1]['result']['value'], out[4][-1]['result']['value']
+    # a block of 1 in: half its side as bricks, a third as tetras, in inches
+    assert hexes == 0.5 and tetras == 0.3333
+    assert out[5][-1]['error']['code'] == 'bad_request'
 
 
 def test_unmark_shock_says_there_are_none_marked(rich):

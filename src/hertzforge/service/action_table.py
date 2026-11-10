@@ -427,6 +427,11 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 (where, f'{where}s', 'family')) if key in fill]
             if picked_fields:
                 more['omit'] = picked_fields
+        if op.id == 'project.mesh_solids' and where == 'solid':
+            # the solids picked, all at one size: the size they are likely to hold at,
+            # as shells when every one is flat
+            more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'solids', 'sizes', 'detect']))
+            fill.update(_mesh_fill(project, fill['geometry'], verbs.picked_ids(part)))
         if (op.id == 'project.group_properties' and where == 'group'
                 and not _shells_among(project[fill['geometry']], verbs.picked_ids(part))):
             # a thickness is a shell's: a group of solid or beam elements is not asked for one
@@ -479,6 +484,27 @@ def _solid_edit_row(project: Any, geometry: str, solid_id: Any,
                   live=True)
     row['verb'] = 'Edit'
     return row
+
+
+def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:
+    """Mesh's element type and size for the solids picked: shells for flat parts, else
+    hexes, and the size they are likely to hold at, in the display units."""
+    from hertzforge.core import solids
+
+    from . import display_units
+    from .ops_solids import likely_size
+
+    held = project[geometry]
+    picked = [int(i) for i in ids]
+    elements = 'quads' if all(solids.is_flat(held, i) for i in picked) else 'hexes'
+    fill = {'elements': elements}
+    try:
+        size = likely_size(held, picked, elements)
+    except (ValueError, KeyError):
+        return fill
+    scale = display_units.words_in('length')[1] if held.units_defined else 1.0
+    fill['size'] = f'{size * scale:.4g}'
+    return fill
 
 
 def _shells_among(geometry: Any, groups: list[Any]) -> bool:

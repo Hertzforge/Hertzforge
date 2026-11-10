@@ -19,6 +19,8 @@
 		testidPrefix?: string;
 		/** A form that applies as it goes: called when a changed field is left, or a choice made. */
 		oncommit?: () => void;
+		/** A field with `suggest`: its value asked for, the button beside it pressed; null when none came. */
+		onsuggest?: (p: ParamDescriptor) => Promise<number | null>;
 	}
 
 	let {
@@ -29,8 +31,27 @@
 		disabled = false,
 		idPrefix = 'pf',
 		testidPrefix = 'param',
-		oncommit
+		oncommit,
+		onsuggest
 	}: Props = $props();
+
+	let suggesting = $state<string | null>(null);
+	/** The value a field's request says, filled in, as if typed. */
+	async function suggestFor(p: ParamDescriptor) {
+		if (!onsuggest || suggesting) return;
+		suggesting = p.name;
+		try {
+			const value = await onsuggest(p);
+			if (value !== null) {
+				delete drafts[p.name];
+				values[p.name] = value;
+				touched[p.name] = true;
+				commit();
+			}
+		} finally {
+			suggesting = null;
+		}
+	}
 
 	/** The values last applied, so leaving a field that did not change applies nothing. */
 	let applied = JSON.stringify(values);
@@ -153,6 +174,9 @@
 							</button>
 						</div>
 					</div>
+					{#if p.suggest && onsuggest}
+						<button type="button" class="btn ghost sm suggest" data-testid="{tid}-suggest" disabled={disabled || suggesting !== null} title="Fill in the value detected for what is picked" onclick={() => suggestFor(p)}>{suggesting === p.name ? 'Detecting' : 'Detect'}</button>
+					{/if}
 				{:else if p.type === 'enum'}
 					{@const opts = optionsFor(p)}
 					{#if segmented(p)}
@@ -214,6 +238,11 @@
 </div>
 
 <style>
+	.suggest {
+		align-self: flex-start;
+		margin-top: 4px;
+	}
+
 	.form.stack {
 		display: flex;
 		flex-direction: column;
