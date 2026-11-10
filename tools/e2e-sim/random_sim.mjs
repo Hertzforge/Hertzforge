@@ -353,7 +353,10 @@ try {
 	await simBadge(a, 'station');
 
 	// Channel table: one control input (1 g reads as 1 V, abort at 1.0 g), one drive (1 V range).
-	check('channel table: one control row and one drive row', (await a.locator('[data-testid^="channel-row-"]').count()) === 2);
+	// A row for each of the simulator's eight inputs and its output: the service's control and drive rows on, the rest off.
+	const shown = await a.locator('[data-testid^="channel-row-"]').count();
+	const on = await a.locator('[data-testid^="channel-on-"]').evaluateAll((els) => els.map((e) => e.checked));
+	check('channel table: a row per simulator channel, the control and drive rows on', shown === 9 && on.join() === [true, true, ...Array(7).fill(false)].join(), `${shown} rows, on ${on.join()}`);
 	await fill(a, '#ch-0-sens', 1000);
 	await fill(a, '#ch-0-range', 5);
 	await fill(a, '#ch-1-range', 1);
@@ -362,7 +365,7 @@ try {
 	if (await abortOff.isChecked()) await abortOff.uncheck();
 	await fill(a, '#ch-0-ab-g', 1.0);
 	// A monitored input, channel 3, for the response plots and a limit.
-	await tid(a, 'add-input').click();
+	await a.locator('[data-testid="channel-on-2"]').check({ force: true });
 	await a.getByLabel('Channel 3 description').fill('Fixture');
 	await fill(a, '#ch-2-sens', 1000);
 	await fill(a, '#ch-2-range', 5);

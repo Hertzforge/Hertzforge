@@ -175,10 +175,14 @@ try {
 	await until(a, 'control', async (p) => (await attr(p, 'session-role', 'data-role')) === 'controller');
 
 	// ---- Channels: four controls, four drives ---------------------------------------------------
-	const roleCount = async (role) => a.locator(`[data-testid^="mimo-row-"][data-role="${role}"]`).count();
-	while ((await roleCount('control')) < 4) await tid(a, 'mimo-add-input').click();
-	while ((await roleCount('drive')) < 4) await tid(a, 'mimo-add-drive').click();
-	const rows = await a.locator('[data-testid^="mimo-row-"]').evaluateAll((els) => els.map((e) => ({ id: e.dataset.testid.replace('mimo-row-', ''), role: e.dataset.role })));
+	// The table has a row per simulator channel: the service's control and drive rows on, the rest off.
+	// Three more of each, switched on and given their role.
+	const ids = await a.locator('[data-testid^="mimo-row-"]').evaluateAll((els) => els.map((e) => e.dataset.testid.replace('mimo-row-', '')));
+	for (const [k, id] of ids.slice(2, 8).entries()) {
+		await a.locator(`[data-testid="mimo-on-${id}"]`).check({ force: true });
+		await a.locator(`[data-testid="mimo-role-${id}"]`).selectOption(k < 3 ? 'control' : 'drive');
+	}
+	const rows = await a.locator('[data-testid^="mimo-row-"][data-on="true"]').evaluateAll((els) => els.map((e) => ({ id: e.dataset.testid.replace('mimo-row-', ''), role: e.dataset.role })));
 	check('four controls and four drives, nothing else', rows.filter((r) => r.role === 'control').length === 4 && rows.filter((r) => r.role === 'drive').length === 4 && rows.length === 8, rows.map((r) => `${r.id}:${r.role}`).join(' '));
 	// Name the rows plainly, so the plots and tables read as a bench would.
 	let k = 0;
