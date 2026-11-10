@@ -56,7 +56,8 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
-                   'project.units', 'project.define_units', 'project.children', 'project.journal',
+                   'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
+                   'project.journal',
                    'project.show', 'project.actions')
 
 #: the largest frame a client may send; requests are small
@@ -314,6 +315,16 @@ class Connection:
         if method == 'project.children':
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
+        if method == 'project.entity_rows':
+            _only(params, ('geometry', 'kind', 'family', 'groups', 'start', 'count'), method)
+            page = await call(projects.entity_rows, self.project, params)
+            # in the display units, as the table they continue was sent
+            from .ops_geometry import FIELDS
+
+            held = {'view': 'table', 'title': '', 'columns': page['columns'], 'rows': page['rows'],
+                    'edit': {'op': '', 'params': {}, 'columns': list(FIELDS[params['kind']])}}
+            display_units.convert([held], self.units)
+            return {'rows': held['rows']}
         if method == 'project.actions':
             _only(params, ('objects', 'records', 'part'), method)
             # an Edit row's values are filled in the display units

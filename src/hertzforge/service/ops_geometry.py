@@ -132,66 +132,108 @@ def _number(value: Any) -> str:
     return f'{float(value):.6g}'
 
 
-def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
-                 only: list[int] | None = None) -> dict:
-    """One kind of a geometry's entities, lengths in the
-    geometry's stored unit: meters once its units are declared. With the
-    geometry's `name`, its cells are typed into in place
-    (`project.set_entity_cell`), a column per field of `FIELDS`, and Delete
-    removes its rows (`project.delete_entities`). `only` shows those rows,
-    by index, and no others."""
+#: past this many rows an entity table sends its first rows and its count, and the shell
+#: asks for the rest as they scroll into view (`project.entity_rows`): a million elements
+#: whole took 2 s to write and 80 MB to send (2026-11-10)
+PAGE_ROWS = 1000
+
+
+def picked_rows(geometry: Any, kind: str, family: str = '', groups: str = '') -> np.ndarray | None:
+    """The rows, by index, of the part an entity table is about: a family's elements, or
+    element groups' elements or the groups themselves. None for every row."""
+    from hertzforge.core.geometry import element_family
+
+    if kind == 'elements' and family:
+        codes = np.asarray(geometry.elem_type, dtype=int)
+        kept = [c for c in np.unique(codes) if element_family(int(c)) == family]
+        return np.flatnonzero(np.isin(codes, kept))
+    if kind in ('elements', 'groups') and groups:
+        wanted = parse_id_runs(groups)
+        held = geometry.elem_group if kind == 'elements' else geometry.group_id
+        return np.flatnonzero(np.isin(np.asarray(held, dtype=int), wanted))
+    return None
+
+
+def entity_columns(geometry: Any, kind: str) -> list[str]:
+    """An entity table's column titles, lengths in the geometry's stored unit."""
+    unit = 'm' if geometry.units_defined else 'units undefined'
+    if kind == 'nodes':
+        return ['Node', f'X [{unit}]', f'Y [{unit}]', f'Z [{unit}]', 'Placement CS',
+                'Displacement CS']
+    if kind == 'coordinate_systems':
+        return ['CS', 'Name', 'Type', *(f'Origin {a} [{unit}]' for a in 'XYZ'),
+                *(f'Rotation {a} [°]' for a in 'XYZ')]
+    if kind == 'elements':
+        return ['Element', 'Type', 'Element group', 'Nodes']
+    return ['Element group', 'Name', 'Elements', 'Elements are', 'Count',
+            *group_cells.titles(geometry)]
+
+
+def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
+    """The cells of the entities at `indices`, and of no others: a page of a long table
+    is written without writing the rest."""
     from hertzforge.core.geometry import CS_TYPES, ELEMENT_TYPES
     from hertzforge.rotate import angles_of
 
-    unit = 'm' if geometry.units_defined else 'units undefined'
+    indices = [int(k) for k in indices]
     if kind == 'nodes':
-        columns = ['Node', f'X [{unit}]', f'Y [{unit}]', f'Z [{unit}]', 'Placement CS',
-                   'Displacement CS']
-        rows = [[str(int(node)), *(_number(c) for c in xyz), str(int(placed)),
-                 str(int(moved))]
-                for node, xyz, placed, moved in zip(
-                    geometry.node_id, np.asarray(geometry.node_xyz).reshape(-1, 3),
-                    geometry.node_def_cs, geometry.node_disp_cs, strict=True)]
-    elif kind == 'coordinate_systems':
-        columns = ['CS', 'Name', 'Type', *(f'Origin {a} [{unit}]' for a in 'XYZ'),
-                   *(f'Rotation {a} [°]' for a in 'XYZ')]
-        rows = [[str(int(cs)), name, CS_TYPES.get(int(kind_code), 'cartesian'),
-                 *(_number(c) for c in matrix[3]), *(_number(a) for a in angles_of(matrix))]
-                for cs, name, kind_code, matrix in zip(
-                    geometry.cs_id, geometry.cs_name, geometry.cs_type,
-                    np.asarray(geometry.cs_matrix).reshape(-1, 4, 3), strict=True)]
-    elif kind == 'elements':
-        labels = {int(g): _group_label(geometry, k) for k, g in enumerate(geometry.group_id)}
-        columns = ['Element', 'Type', 'Element group', 'Nodes']
-        rows = [[str(int(elem)), ELEMENT_TYPES.get(int(code), ('unknown',))[0],
-                 labels.get(int(group), ''), ' '.join(str(int(n)) for n in conn)]
-                for elem, code, group, conn in zip(
-                    geometry.elem_id, geometry.elem_type, geometry.elem_group,
-                    geometry.elem_conn, strict=True)]
-    else:
-        elem_group = np.asarray(geometry.elem_group)
-        columns = ['Element group', 'Name', 'Elements', 'Elements are', 'Count',
-                   *group_cells.titles(geometry)]
-        rows = []
-        for k, group in enumerate(geometry.group_id):
-            group = int(group)
-            members = np.asarray(geometry.elem_id)[elem_group == group]
-            rows.append([str(group), geometry.group_name[k], id_runs_text(members),
-                         group_cells.family(geometry, group) or 'empty', str(len(members)),
-                         *group_cells.cells(geometry, group)])
-    if only is not None:
-        rows = [rows[k] for k in only]
+        xyz = np.asarray(geometry.node_xyz).reshape(-1, 3)
+        return [[str(int(geometry.node_id[k])), *(_number(c) for c in xyz[k]),
+                 str(int(geometry.node_def_cs[k])), str(int(geometry.node_disp_cs[k]))]
+                for k in indices]
+    if kind == 'coordinate_systems':
+        matrices = np.asarray(geometry.cs_matrix).reshape(-1, 4, 3)
+        return [[str(int(geometry.cs_id[k])), geometry.cs_name[k],
+                 CS_TYPES.get(int(geometry.cs_type[k]), 'cartesian'),
+                 *(_number(c) for c in matrices[k][3]),
+                 *(_number(a) for a in angles_of(matrices[k]))] for k in indices]
+    if kind == 'elements':
+        labels = {int(g): _group_label(geometry, j) for j, g in enumerate(geometry.group_id)}
+        return [[str(int(geometry.elem_id[k])),
+                 ELEMENT_TYPES.get(int(geometry.elem_type[k]), ('unknown',))[0],
+                 labels.get(int(geometry.elem_group[k]), ''),
+                 ' '.join(str(int(n)) for n in geometry.elem_conn[k])] for k in indices]
+    elem_group = np.asarray(geometry.elem_group)
+    rows = []
+    for k in indices:
+        group = int(geometry.group_id[k])
+        members = np.asarray(geometry.elem_id)[elem_group == group]
+        rows.append([str(group), geometry.group_name[k], id_runs_text(members),
+                     group_cells.family(geometry, group) or 'empty', str(len(members)),
+                     *group_cells.cells(geometry, group)])
+    return rows
+
+
+def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
+                 family: str = '', groups: str = '') -> dict:
+    """One kind of a geometry's entities, lengths in the
+    geometry's stored unit: meters once its units are declared. With the
+    geometry's `name`, its cells are typed into in place
+    (`project.set_entity_cell`), a column per field of `FIELDS`, Delete
+    removes its rows (`project.delete_entities`), and past `PAGE_ROWS` rows
+    it sends its first and its count, the rest asked for as they are
+    scrolled to. `family` or `groups` keeps a part's rows (`picked_rows`),
+    and its edits and pages say the same part, so a row is the part's."""
+    picked = picked_rows(geometry, kind, family, groups)
+    count = len(getattr(geometry, ID_ARRAYS[kind])) if picked is None else len(picked)
+    sent = min(count, PAGE_ROWS) if name is not None else count
+    indices = np.arange(sent) if picked is None else picked[:sent]
+    rows = entity_rows(geometry, kind, indices)
+    part = {key: value for key, value in (('family', family), ('groups', groups)) if value}
     edit = None if name is None else v.editing(
-        'project.set_entity_cell', {'geometry': name, 'kind': kind}, FIELDS[kind],
+        'project.set_entity_cell', {'geometry': name, 'kind': kind, **part}, FIELDS[kind],
         group_cells.choices() if kind == 'groups' else None)
     if edit is not None:
-        if only is not None:
-            edit['rows'] = [k + 1 for k in only]
-        # the rows are the entities, so Delete takes rows, not cells
+        # the rows are the entities, so Delete takes rows, not cells: each by its id,
+        # the first column
         edit['remove'] = {'op': 'project.delete_entities',
-                          'params': {'geometry': name, 'kind': kind},
-                          'ids': [row[0] for row in rows]}
-    return v.table(title, columns, rows, edit)
+                          'params': {'geometry': name, 'kind': kind}, 'column': 0}
+    table = v.table(title, entity_columns(geometry, kind), rows, edit)
+    if name is not None and count > sent:
+        table['total'] = count
+        table['more'] = {'method': 'project.entity_rows',
+                         'params': {'geometry': name, 'kind': kind, **part}}
+    return table
 
 
 def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -> dict | None:
@@ -222,10 +264,10 @@ def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -
 
 
 def _shown(name: str, geometry: Any, kind: str, said: str = '',
-           element: dict[str, Any] | None = None, only: list[int] | None = None) -> list[dict]:
+           element: dict[str, Any] | None = None, **part: str) -> list[dict]:
     """The geometry drawn, with its coordinate systems' axes when they are
     the entities in hand and what a click in it adds (`_pick`), and the
-    table of `kind` (of the rows `only` names, when it names them)."""
+    table of `kind` (of a part's rows, when `family` or `groups` names one)."""
     words = {'nodes': 'Nodes', 'coordinate_systems': 'Coordinate systems',
              'elements': 'Elements', 'groups': 'Element groups'}[kind]
     extra = _triads(geometry) if kind == 'coordinate_systems' else (None, None)
@@ -234,7 +276,7 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     pick = _pick(name, geometry, kind, element)
     if pick is not None:
         drawn['pick'] = pick
-    return [drawn, entity_table(geometry, kind, title, name, only)]
+    return [drawn, entity_table(geometry, kind, title, name, **part)]
 
 
 def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] | None:
@@ -243,7 +285,7 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
     toolset's edit mode had them (Brandon, 2026-11-10). The nodes or coordinate
     systems; a family's elements; element groups and their elements. None for a part
     with no table of its own (solids, mated surfaces)."""
-    from hertzforge.core.geometry import FAMILY_LABELS, element_family
+    from hertzforge.core.geometry import FAMILY_LABELS
 
     from .verbs import part_key, picked_ids
 
@@ -252,19 +294,16 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
         return _shown(name, geometry, where.removeprefix('part:'))
     if where == 'family':
         family = str(part['id'])
-        only = [k for k, code in enumerate(geometry.elem_type)
-                if element_family(int(code)) == family]
         element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
         return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
-                      element, only)
+                      element, family=family)
     if where == 'group':
         groups = [int(g) for g in picked_ids(part)]
-        said = ('element group ' if len(groups) == 1 else 'element groups ') + id_runs_text(groups)
-        drawn, elements = _shown(name, geometry, 'elements', said, only=[
-            k for k, g in enumerate(geometry.elem_group) if int(g) in groups])
-        rows = [k for k, g in enumerate(geometry.group_id) if int(g) in groups]
-        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: '
-                                    + id_runs_text(groups), name, rows), elements]
+        runs = id_runs_text(groups)
+        said = ('element group ' if len(groups) == 1 else 'element groups ') + runs
+        drawn, elements = _shown(name, geometry, 'elements', said, groups=runs)
+        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
+                                    name, groups=runs), elements]
     return None
 
 
@@ -647,12 +686,20 @@ def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
     for the entity on that row."""
     geometry = project[params['geometry']]
     kind = params['kind']
-    ids = [int(i) for i in getattr(geometry, ID_ARRAYS[kind])]
-    if not 1 <= params['row'] <= len(ids):
-        raise refused(f'the {LABELS[kind]} table has {len(ids)} rows; there is no row '
+    part = {key: params.get(key, '') for key in ('family', 'groups')}
+    picked = picked_rows(geometry, kind, part['family'], part['groups'])
+    count = len(getattr(geometry, ID_ARRAYS[kind])) if picked is None else len(picked)
+    if not 1 <= params['row'] <= count:
+        raise refused(f'the {LABELS[kind]} table has {count} rows; there is no row '
                       f'{params["row"]}')
-    return _set_at_row(project, params['geometry'], kind, params['row'] - 1, params['column'],
-                       params['value'])
+    at = params['row'] - 1 if picked is None else int(picked[params['row'] - 1])
+    views = _set_at_row(project, params['geometry'], kind, at, params['column'],
+                        params['value'])
+    part = {key: value for key, value in part.items() if value}
+    if part:
+        # the part's own table again, not every row of the kind
+        views[-1] = entity_table(geometry, kind, views[-1]['title'], params['geometry'], **part)
+    return views
 
 
 IDS = Param('ids', 'Ids, as 1-3, 7', 'string', default='')
@@ -1445,7 +1492,9 @@ OPERATIONS = (
                 'tables edit through it.',
         params=(GEOMETRY, KIND, Param('row', 'Row', 'integer', default=1, min=1, step=1),
                 Param('column', 'Column', 'string', default='id'),
-                Param('value', 'Value', 'string', default='')),
+                Param('value', 'Value', 'string', default=''),
+                Param('family', 'Family whose elements the table shows', 'string', default=''),
+                Param('groups', 'Element groups the table shows', 'string', default='')),
         outputs=('shape3d', 'table'), run=set_entity_cell, edits=True),
     *(Operation(
         id=f'project.work_up_{module}', title=f'Work Up {test}', workspace=module,

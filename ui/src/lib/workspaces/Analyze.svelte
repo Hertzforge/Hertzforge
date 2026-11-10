@@ -266,6 +266,7 @@
 										overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
+										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
 										ongizmo={v.view === 'shape3d' && v.gizmo ? (act, patch) => a.dragOnSelection(act, patch) : undefined}
 									/>
 								</div>
