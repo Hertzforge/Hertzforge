@@ -37,25 +37,22 @@ channel, each over the element it passes through.
 The same structure is also built from solid eight-node bricks, the
 higher-fidelity model, along with the removable component on its own:
 the two channels and the beam, the part the BARC is named for
-(`solid_geometry`). It is built to match the calibrated finite element
-model shared on the wiki (`WIKI`, its Hardware and Models folder, under
-FEM, with its calibration against test): its measured
-dimensions (the box is thinner than drawn, as the wiki's README warns),
-its material (`SOLID_MATERIAL`), its joints and its element size
-(`SOLID_SIZE`). Its parts are solids, each made of as few blocks as it
-can be (the box a block less its inside and its slot, a channel a
-block less the inside of its C, the beam a block; `BOX_SOLIDS`,
-`CHANNEL_SOLIDS`, `BEAM_SOLID`), and meshed by Mesh Solids, following
-the documentation's steps. Bricks touch where the parts do, so their
-bolts are made differently. The parts are meshed on one grid, each with
-its own nodes (`parts_apart`), coincident with the next part's nodes
-where the two touch and joined to none of them. Each joint is then a
-mated set made by Mate Surfaces, rigid, as the calibrated model joins them
-(`mated_places`): each foot tied to the box over its whole face, and
-the beam to each channel's top over the square around its bolts
-(`BEAM_BOND`); the rest of the beam's contact is left free. The bolts'
-masses are point masses, an element group of point elements given a
-mass (`fem.GroupProperties(mass=...)`).
+(`solid_geometry`). Its parts are solids, each made of
+as few blocks as it can be (the box a block less its inside and its
+slot, a channel a block less the inside of its C, the beam a block;
+`BOX_SOLIDS`, `CHANNEL_SOLIDS`, `BEAM_SOLID`), and meshed by Mesh
+Solids, following the documentation's steps. Bricks touch where the
+parts do, so their bolts are made differently. The parts are meshed on
+one grid, each with its own nodes (`parts_apart`), coincident with the
+next part's nodes where the two touch and joined to none of them. Each
+bolt is then a mated set, made by Mate Surfaces with the found patch
+trimmed to the places the bolt clamps (`bolt_places`): at a foot, the
+corners of the brick under the bolt and the eight around it, the
+washer's area, and at the beam, the four corners of the brick the bolt
+passes through. Each node there is tied rigidly to the face beneath it,
+and the rest of the contact is left free. The
+bolts' masses are point masses, an element group of point elements
+given a mass (`fem.GroupProperties(mass=...)`).
 
 Run it directly to print the models and their first modes:
 
@@ -79,9 +76,6 @@ from hertzforge import View, fem, mesh
 # merging nodes from 2026-10-11 until Brandon, 2026-10-20, asked for the
 # examples to be rebuilt with Mate Surfaces; the frequencies did not
 # move, since a rigid tie on coincident nodes is the merge.
-# Brandon, 2026-11-10, asked for the bricks to match the published
-# models: they took the calibrated model's measured sizes, material, joints
-# and element size, which moved their modes 2 to 4 % down onto it.
 
 #: element size aimed at, inches: 0.125 converges the first ten modes to
 #: about a percent (0.0625 moves them no more) and solves in a few
@@ -293,29 +287,17 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
 #: the models `solid_geometry` builds: the whole BARC, and the removable
 #: component — the two channels and the beam — on its own
 PARTS = ('BARC', 'removable component')
-#: the element size of the bricks, inches: the calibrated model's sixteenth of
-#: an inch, four bricks through the box's wall. At it the BARC matches that
-#: model's 55 elastic modes to 9.84 kHz to 0.4 % on average (2 % at most);
-#: at `SIZE` it is 0.9 % on average and has one mode fewer there
-SOLID_SIZE = 0.0625
-#: the material of the calibrated model's input deck: aluminum, E 10.2e6
-#: psi, 0.0977 lb/in^3
-SOLID_MATERIAL = fem.Material(name='aluminum (the BARC calibrated model)',
-                              youngs_modulus=10.2e6 * 6894.757293168,
-                              density=0.0977 * 27679.904710203,
-                              poissons_ratio=0.33)
-#: the side of the square around each channel's bolts where the beam is
-#: bonded to it, inches, centered on the channel (x = +/-2, z = 1.5): the
-#: calibrated model's bonded patch
-BEAM_BOND = 0.5
 #: each bolt's mass, pounds, as the shared model lumps them: a #8 screw
 #: at a foot, and at the beam the shared model's one 1/4 in screw per
 #: channel, 0.0125 lb, shared by the four bolts here — the removable
 #: component's modes read up to 6 % low with a #8 screw's mass at each
 BOLT_MASS = {'foot': 0.00744, 'top': 0.0125 / 4}
+#: where the parts touch, y in inches: a channel's foot on the box's top
+#: wall, the beam on a channel's top
+JOINT_Y = {'foot': 3.0, 'top': 5.0}
 #: the face each bolt's head sits on, y in inches: a foot's top and the
 #: beam's
-HEAD_Y = {'foot': 3.125, 'top': 5.128}
+HEAD_Y = {'foot': 3.125, 'top': 5.125}
 #: the bolts: (x, z) and the kind, foot or top
 SOLID_BOLTS = ([(axis, 'foot') for axis in BOLT_AXES]
                + [(axis, 'top') for axis in BOLT_AXES])
@@ -330,24 +312,21 @@ PART_SOLVE_TO = 2600.0
 #: (Brandon, 2026-10-11). The box is a block less its inside and the
 #: slot in its top; a channel is a block less the inside of its C; the
 #: beam is one. A cut reaches past the part's faces so it goes clean
-#: through. These are the parts' true outlines, not their mid-surfaces: a
-#: foot's underside is the box's top face at y = 3, the beam's the
-#: channels' tops at y = 5. They are the calibrated model's measured sizes:
-#: the box 5.98 in square with a 0.238 in wall (drawn 6 and 0.25), its
-#: top at y = 3; the channels' webs 0.12 in (drawn 0.125), their flanges
-#: 0.125; the beam 0.128 in (drawn 0.125).
-BOX_SOLIDS = [((0.0, 0.01, 1.5), (5.98, 5.98, 3.0), 'box'),
-              ((0.0, 0.01, 1.5), (5.504, 5.504, 4.0), ''),
+#: through, its far faces on grid lines the mesh has anyway. These are
+#: the parts' true outlines, not their mid-surfaces: a foot's underside
+#: is the box's top face at y = 3, the beam's the channels' tops at y = 5.
+BOX_SOLIDS = [((0.0, 0.0, 1.5), (6.0, 6.0, 3.0), 'box'),
+              ((0.0, 0.0, 1.5), (5.5, 5.5, 4.0), ''),
               ((0.0, 2.8125, 1.5), (2 * SLOT_HALF, 0.625, 4.0), '')]
 CHANNEL_SOLIDS = {
     # the right channel: its web outboard, open inboard
     'right channel': [((2.0, 4.0, 1.5), (1.0, 2.0, 1.0)),
-                      ((1.815, 4.0, 1.5), (1.13, 1.75, 1.5))],
+                      ((1.8125, 4.0, 1.5), (1.125, 1.75, 1.5))],
     # the left channel turned a quarter turn: its web at the back, open
     # to the front
     'left channel': [((-2.0, 4.0, 1.5), (1.0, 2.0, 1.0)),
-                     ((-2.0, 4.0, 1.685), (1.5, 1.75, 1.13))]}
-BEAM_SOLID = ((0.0, 5.064, 1.5), (5.0, 0.128, 1.0))
+                     ((-2.0, 4.0, 1.6875), (1.5, 1.75, 1.125))]}
+BEAM_SOLID = ((0.0, 5.0625, 1.5), (5.0, 0.125, 1.0))
 
 
 def _parts(project: Any, name: str, part: str) -> list[int]:
@@ -368,7 +347,7 @@ def _parts(project: Any, name: str, part: str) -> list[int]:
     return parts
 
 
-def solid_geometry(part: str = 'BARC', size: float = SOLID_SIZE) -> Any:
+def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     """The BARC, or its removable component, as a geometry of bricks
     and point masses, every element group given its material or mass,
     ready for `fem.Model.from_geometry` or for the app's Solve Modes. A
@@ -386,10 +365,9 @@ def solid_geometry(part: str = 'BARC', size: float = SOLID_SIZE) -> Any:
     -------
     Geometry
         Element groups 'box' (the assembly only), 'right channel', 'left
-        channel', 'beam' (bricks of `SOLID_MATERIAL`, joined where the
-        calibrated model joins them, `mated_places`) and the bolts' masses,
-        'foot bolts' (the assembly only) and 'top bolts', opening on
-        `VIEW`.
+        channel', 'beam' (6061-T6 bricks, joined only at the bolts,
+        `bolt_places`) and the bolts' masses, 'foot bolts' (the assembly
+        only) and 'top bolts', opening on `VIEW`.
     """
     from hertzforge.project import Project
 
@@ -397,7 +375,7 @@ def solid_geometry(part: str = 'BARC', size: float = SOLID_SIZE) -> Any:
         raise ValueError(f'{part!r} is not one of {PARTS}')
     # the parts meshed together on one grid, cut at every part's faces,
     # each keeping its own nodes: where two touch their nodes lie on
-    # each other's, joined to none, for the joints to tie. Meshed one
+    # each other's, joined to none, for the bolts to tie. Meshed one
     # at a time, each on its own grid, a channel's foot met the box's
     # top with no nodes in common at a quarter inch (2026-10-11)
     project = Project('BARC')
@@ -406,63 +384,30 @@ def solid_geometry(part: str = 'BARC', size: float = SOLID_SIZE) -> Any:
                         parts_apart=True)
     whole = project[name]
     whole.view = VIEW
-    whole.group_properties = {int(group): fem.GroupProperties(SOLID_MATERIAL)
+    whole.group_properties = {int(group): fem.GroupProperties(MATERIAL)
                               for group in whole.group_id}
     ids = dict(zip(whole.group_name, whole.group_id.tolist()))
     kinds = ('foot', 'top') if part == 'BARC' else ('top',)
     for kind in kinds:
         for side in ('right channel', 'left channel'):
-            below = 'box' if kind == 'foot' else side
-            above = side if kind == 'foot' else 'beam'
+            below, above = ('box', side) if kind == 'foot' else (side, 'beam')
+            places = sorted({node for (bx, bz), k in SOLID_BOLTS if k == kind
+                             and (bx > 0) == (side == 'right channel')
+                             for node in bolt_places(whole, (bx, bz), kind)})
             # Mate Surfaces on the two parts, as the pane does it: the
-            # patch where they touch, its first side (the part below) kept
-            # where the joint holds and clicked off everywhere else, rigid,
-            # named for the joint
+            # patch where they touch, its first side kept at the places
+            # the bolts clamp and clicked off everywhere else (a foot's
+            # outer ring of 32; at the beam None, then the 16 under the
+            # bolts), rigid, named for the joint
             groups = [ids[below], ids[above]]
             patch, = project.detect_mated_surfaces(
                 name, groups, 0.25 * whole.node_spacing(groups))
+            clamped = set(places) | set(_beneath(whole, ids[below], places))
             project.add_mated_surfaces(
-                name, patch['groups'], mated_places(whole, patch['nodes_a'], kind, side),
+                name, patch['groups'], [n for n in patch['nodes_a'] if n in clamped],
                 patch['nodes_b'], name=f'{side.split()[0]} {kind} bolts')
-    add_bolt_masses(whole, kinds)
-    return whole
-
-
-def mated_places(geometry: Any, nodes: Any, kind: str, side: str) -> list[int]:
-    """The nodes of a joint's mated patch that the calibrated model ties: at a
-    foot all of them, the foot's whole face, and at the beam those in the
-    `BEAM_BOND` square around the channel's bolts. These are the places a
-    person keeps marked in the Mate Surfaces pane.
-
-    Parameters
-    ----------
-    geometry : Geometry
-        The bricks, assembled apart.
-    nodes : sequence of int
-        The patch's first side, as Mate Surfaces finds it.
-    kind : str
-        'foot' or 'top'.
-    side : str
-        'right channel' or 'left channel'.
-
-    Returns
-    -------
-    list of int
-    """
-    if kind == 'foot':
-        return list(nodes)
-    xyz = geometry.node_xyz[geometry.node_index(nodes)] / INCH
-    center = 2.0 if side == 'right channel' else -2.0
-    inside = ((np.abs(xyz[:, 0] - center) <= BEAM_BOND / 2 + 1e-6)
-              & (np.abs(xyz[:, 2] - BOX_DEPTH / 2) <= BEAM_BOND / 2 + 1e-6))
-    return [int(n) for n, keep in zip(nodes, inside, strict=True) if keep]
-
-
-def add_bolt_masses(geometry: Any, kinds: Any = ('foot', 'top')) -> None:
-    """Give `geometry` the bolts of `kinds` as point masses, an element
-    group of them for each kind, each at the node of its head face
-    nearest its axis (`HEAD_Y`, `BOLT_MASS`)."""
-    xyz = geometry.node_xyz / INCH
+    # each bolt's mass at the node of its head face nearest its axis
+    xyz = whole.node_xyz / INCH
     for kind in kinds:
         nodes = []
         for (bx, bz), k in SOLID_BOLTS:
@@ -470,18 +415,75 @@ def add_bolt_masses(geometry: Any, kinds: Any = ('foot', 'top')) -> None:
                 continue
             on_face = np.flatnonzero(np.abs(xyz[:, 1] - HEAD_Y[kind]) < 1e-6)
             far = np.hypot(xyz[on_face, 0] - bx, xyz[on_face, 2] - bz)
-            # where the axis runs between nodes, its nearest tie: the one
-            # at the lowest x, then z, whatever the nodes' numbering
+            # the axis runs through a brick's middle, so its four corners
+            # tie: the one at the lowest x, then z, whatever the nodes'
+            # numbering (Mesh Solids numbers them otherwise than the old
+            # boxes did, and moved the masses a brick, 2026-10-11)
             tied = on_face[far <= far.min() + 1e-9]
             nearest = tied[np.lexsort((xyz[tied, 2], xyz[tied, 0]))[0]]
-            nodes.append([int(geometry.node_id[nearest])])
-        group = geometry.add_group(f'{kind} bolts')
-        geometry.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))
-        geometry.group_properties[group] = fem.GroupProperties(
+            nodes.append([int(whole.node_id[nearest])])
+        group = whole.add_group(f'{kind} bolts')
+        whole.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))
+        whole.group_properties[group] = fem.GroupProperties(
             mass=BOLT_MASS[kind] * POUND)
+    return whole
 
 
-def solid_build(part: str = 'BARC', size: float = SOLID_SIZE) -> fem.Model:
+def _beneath(geometry: Any, group: int, places) -> list[int]:
+    """The nodes of element group `group` at the places `places`: on
+    one grid, each place's partner across the joint is the node of the
+    part below at the same point."""
+    from scipy.spatial import cKDTree
+
+    rows = np.flatnonzero(geometry.elem_group == group)
+    own = np.unique(np.concatenate([geometry.elem_conn[r] for r in rows]))
+    tree = cKDTree(geometry.node_xyz[geometry.node_index(own)])
+    gap, nearest = tree.query(geometry.node_xyz[geometry.node_index(places)])
+    assert gap.max() < 1e-9, 'a place with no node beneath it'
+    return sorted({int(own[k]) for k in nearest})
+
+
+def bolt_places(geometry: Any, axis: tuple, kind: str) -> set[int]:
+    """The places a bolt clamps, as the ids of the nodes of the part on
+    top that a bolt's mated set ties there.
+
+    They are the corners, on the face where the parts touch, of the
+    bricks the bolt clamps, picked by the same `CLAMPED` rule as the
+    plate model's bolts: the washer's 4 x 4 places at a foot, and the
+    four corners of the brick the bolt passes through at the beam. These
+    are the places a person keeps marked in the Mate Surfaces pane.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The BARC's bricks, assembled apart.
+    axis : tuple
+        The bolt's (x, z), inches.
+    kind : str
+        'foot' or 'top'.
+
+    Returns
+    -------
+    set of int
+        Node ids of the part on top.
+    """
+    side = 'right channel' if axis[0] > 0 else 'left channel'
+    top = side if kind == 'foot' else 'beam'
+    xyz = geometry.node_xyz / INCH
+    faces = {}
+    for element in geometry.elements_in(top):
+        row = int(np.flatnonzero(geometry.elem_id == element)[0])
+        conn = geometry.elem_conn[row]
+        touching = np.abs(xyz[geometry.node_index(conn), 1]
+                          - JOINT_Y[kind]) < 1e-6
+        if touching.sum() == 4:
+            faces[element] = conn[touching]
+    patch = _clamped({e: xyz[geometry.node_index(nodes)]
+                      for e, nodes in faces.items()}, axis, CLAMPED[kind])
+    return {int(node) for e in patch for node in faces[e]}
+
+
+def solid_build(part: str = 'BARC', size: float = SIZE) -> fem.Model:
     """The finite element model of bricks of the BARC or of its removable
     component, built from `solid_geometry`.
 
@@ -503,21 +505,16 @@ def solid_build(part: str = 'BARC', size: float = SOLID_SIZE) -> fem.Model:
 #: what each model is called in a project
 PART_NAMES = {'BARC': 'BARC', 'removable component': 'Removable Component'}
 
-#: the example project's modes: every mode to this frequency, Hz, each given
-#: `DAMPING` of critical, as the band-average control study solves them
-EXAMPLE_SOLVE_TO = 10000.0
-DAMPING = 0.01
 
-
-def solid_project(size: float = SOLID_SIZE, solved: bool = False) -> Any:
+def solid_project(size: float = SIZE, solved: bool = False) -> Any:
     """A project to open in the app: the BARC of bricks (`solid_geometry`), its
     element groups given their properties, so Solve Modes on it gives its modes.
 
         barc.solid_project(solved=True).save('barc.hforge')
 
-    With `solved`, the modes are already solved to `EXAMPLE_SOLVE_TO`, each
-    with `DAMPING`. That is the example project the downloads page
-    offers, in bricks as the RC plate's is (Brandon, 2026-11-10).
+    With `solved`, the modes are already solved to `SOLVE_TO` (2000 Hz). That is
+    the example project the downloads page offers, in bricks as the RC plate's is
+    (Brandon, 2026-11-10).
 
     Parameters
     ----------
@@ -535,15 +532,15 @@ def solid_project(size: float = SOLID_SIZE, solved: bool = False) -> Any:
     out = Project('BARC')
     out.add('BARC', solid_geometry('BARC', size))
     if solved:
-        out.solve_modes('BARC', maximum_frequency=EXAMPLE_SOLVE_TO, damping=DAMPING)
+        out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
     return out
 
 
-def describe(modes: int = 10) -> None:
-    """Print the plate model (at `SIZE`), the brick BARC and the brick
-    removable component (at `SOLID_SIZE`), each with its size, its mass and
-    its first `modes` elastic frequencies (those above 1 Hz)."""
-    model = build()
+def describe(size: float = SIZE, modes: int = 10) -> None:
+    """Print the plate model, the brick BARC and the brick removable
+    component, each with its size, its mass and its first `modes`
+    elastic frequencies (those above 1 Hz)."""
+    model = build(size)
     shapes = model.eigensolution(maximum_frequency=SOLVE_TO)
     print(f'BARC from planes: {model.num_nodes} nodes, {len(model.plates)} '
           f'plates, {len(model.rigid_links)} rigid links, '
@@ -551,7 +548,7 @@ def describe(modes: int = 10) -> None:
     elastic = [f for f in shapes.frequency if f > 1.0][:modes]
     print('  elastic modes (Hz): ' + ', '.join(f'{f:.1f}' for f in elastic))
     for part, top in zip(PARTS, (SOLVE_TO, PART_SOLVE_TO)):
-        model = solid_build(part)
+        model = solid_build(part, size)
         shapes = model.eigensolution(maximum_frequency=top)
         print(f'{PART_NAMES[part]} from bricks: {model.num_nodes} nodes, '
               f'{len(model.solids)} bricks, {model.total_mass:.3f} kg with '

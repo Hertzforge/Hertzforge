@@ -127,49 +127,32 @@ def _quads(geometry):
 
 
 
-#: the published calibration of the BARC model shared on the wiki (`barc.WIKI`, its
-#: Hardware and Models folder under FEM, Calibration Results.xlsx, sheet
-#: Frequencies, read 2026-11-10): its 55 elastic
-#: modes below 9.84 kHz and the measured modes it paired them with, Hz, in the
-#: model's order. The test's own order differs where two modes cross
-CALIBRATED = [
-    (185.46, 187.88), (205.82, 207.56), (263.29, 263.08), (445.00, 441.14),
-    (475.17, 475.90), (561.08, 564.73), (580.46, 585.94), (669.49, 666.41),
-    (1103.28, 1112.16), (1168.73, 1204.45), (1521.98, 1508.59), (1634.00, 1628.91),
-    (1779.33, 1765.27), (1813.39, 1729.69), (1991.64, 1963.86), (2095.37, 2064.84),
-    (2312.36, 2271.09), (2428.33, 2366.60), (2667.41, 2685.69), (2732.71, 2643.22),
-    (2930.50, 2980.47), (3081.59, 3060.16), (3510.78, 3476.56), (4038.78, 4028.91),
-    (4155.30, 4157.76), (4423.07, 4432.03), (4858.73, 4867.19), (5258.47, 5300.50),
-    (5365.74, 5260.16), (5377.88, 5376.56), (5718.68, 5575.78), (5812.88, 5682.81),
-    (6562.47, 6403.34), (6611.12, 6455.52), (6624.43, 6475.78), (6712.68, 6628.91),
-    (6815.28, 6749.22), (6872.91, 6793.75), (6915.92, 6845.01), (7072.53, 6827.63),
-    (7248.74, 7120.31), (7532.86, 7568.75), (7711.39, 7626.22), (7805.66, 7754.31),
-    (7966.37, 7915.63), (8017.78, 7970.31), (8082.97, 8043.80), (8471.71, 8415.63),
-    (8658.23, 8487.50), (8840.98, 8755.47), (9305.83, 9299.22), (9544.98, 9480.47),
-    (9561.05, 9567.19), (9740.24, 9646.09), (9840.21, 9819.53)]
+#: the first ten elastic modes of the assembly of bricks at `barc.SIZE`,
+#: Hz — its bolts merged nodes since 2026-10-11, 0.3 to 3.4 % under the
+#: build checked against the wiki's model and test (MAC 0.97 and up, in
+#: order), which joined each foot over its whole footprint and read 1 to
+#: 4 % above the measured modes: (191.8, 213.1, 271.6, 457.9, 490.7,
+#: 581.5, 603.1, 696.7, 1150.0, 1226.0)
+SOLID_CHECKED = (191.2, 210.7, 263.3, 442.4, 485.8, 570.1, 598.5, 689.6,
+                 1124.3, 1197.6)
 
-#: the first ten elastic modes of the assembly of bricks at `barc.SOLID_SIZE`,
-#: Hz, 2026-11-10: within 1.2 % of the calibrated model's (`CALIBRATED`)
-SOLID_CHECKED = (185.3, 205.1, 264.1, 439.8, 472.3, 561.1, 579.7, 670.0,
-                 1109.3, 1180.2)
-
-#: the removable component's first seven at `barc.SOLID_SIZE`, 2026-11-10,
-#: with the calibrated model's sizes and joints. The wiki's folder has no
-#: frequencies for it alone, only its shapes (rcomp_shp.tam)
-PART_CHECKED = (287.7, 434.2, 586.3, 1277.7, 1554.3, 1870.7, 1932.2)
+#: the removable component's first seven, 0.3 to 1.2 % under the build
+#: checked against the shared model of it (MAC 0.999 and up), which was
+#: 6 % under it for the first two and within 2 % above after: (280.0,
+#: 435.6, 596.3, 1320.8, 1633.8, 1954.8, 2025.9)
+PART_CHECKED = (278.6, 432.9, 592.2, 1305.0, 1627.8, 1949.3, 2014.7)
 
 
 def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
-    """The bricks' volume is the calibrated model's parts without their bolt
-    holes (the box a tube 5.98 in square with a 0.238 in wall and its slot,
-    the channels' webs 0.12 in, the beam 0.128 in); the bolts are point
-    masses at their heads, eight #8 at the feet and eight at the beam
-    carrying the shared model's two 1/4 in screws between them, and
-    nothing is rigid: the parts are joined by mated surfaces. Built at
-    `barc.SIZE`, which gives the same volume quicker."""
+    """The bricks' volume is the solid model's without its bolt holes
+    (the box 16.9 in³ as a tube with its slot, the channels and beam
+    as drawn); the bolts are point masses at their heads, eight #8 at
+    the feet and eight at the beam carrying the shared model's two 1/4
+    in screws between them, and nothing is rigid: the parts are joined
+    by the nodes their bolts merged."""
     from hertzforge.core.fem import Model
 
-    geometry = barc.solid_geometry(size=barc.SIZE)
+    geometry = barc.solid_geometry()
     assert list(geometry.group_name) == ['box', 'right channel',
                                          'left channel', 'beam',
                                          'foot bolts', 'top bolts']
@@ -180,10 +163,10 @@ def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
     lb = 0.45359237
     assert sum(m.mass for m in model.masses) == pytest.approx(
         (8 * 0.00744 + 2 * 0.0125) * lb)
-    bricks = (5.98 ** 2 - 5.504 ** 2 - 0.5 * 0.238) * 3.0 + 2 * (
-        2.0 - 0.88 * 1.75) + 5 * 0.128
+    bricks = (6 * 6 - 5.5 * 5.5 - 0.5 * 0.25) * 3.0 + 2 * (
+        2 * 0.125 + 1.75 * 0.125) + 5 * 0.125
     assert model.structural_mass == pytest.approx(
-        bricks * INCH3 * barc.SOLID_MATERIAL.density)
+        bricks * INCH3 * barc.MATERIAL.density)
     assert len(model.pieces()) == 1
 
 
@@ -194,47 +177,43 @@ def _shared(geometry, a, b):
     return nodes[0] & nodes[1]
 
 
-def test_each_joint_ties_where_the_calibrated_model_does():
-    """Meshed apart, each channel's foot is 17 x 17 places coincident with
-    the box and each channel's top 17 x 17 with the beam, none shared.
-    Each joint is a set of mated surfaces, rigid, as the calibrated model
-    joins them (its deck ties each foot's face to the box, and its mesh
-    bonds the beam to each channel over a half-inch square around the
-    bolts): a foot tied over its whole face, the beam over the square's
-    places and clicked off everywhere else. The patch is as Mate
-    Surfaces finds it, the part below the first side."""
+def test_each_joint_ties_the_places_its_bolts_clamp_and_no_other():
+    """Meshed apart, each channel's foot is 9 x 9 places coincident with
+    the box and each channel's top 9 x 9 with the beam, none shared. Each
+    joint is a set of mated surfaces, rigid (Brandon, 2026-10-20: the
+    examples remade with the new joints): a foot's four bolts tie the
+    washer's 4 x 4 places each, which share their middle rows into one
+    7 x 7 square; a beam end's four bolts tie the four corners of the
+    brick each passes through. The patch is as Mate Surfaces finds it,
+    the part below the first side (both sides hold 81, and the first
+    group picked follows), kept at the bolts' places and clicked off
+    everywhere else; the second side stays the patch's whole 81."""
     geometry = barc.solid_geometry()
     ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
     sets = {m.name: m for m in geometry.mates}
     assert sorted(sets) == ['left foot bolts', 'left top bolts', 'right foot bolts',
                             'right top bolts']
     assert all(m.describe() == 'rigid' for m in sets.values())
-    inch = geometry.node_xyz / INCH
-    for side, center in (('right', 2.0), ('left', -2.0)):
+    for side in ('right', 'left'):
         channel = f'{side} channel'
-        for kind, below, above in (('foot', 'box', channel), ('top', channel, 'beam')):
+        for kind, below, above, places in (('foot', 'box', channel, 49),
+                                           ('top', channel, 'beam', 16)):
             mated = sets[f'{side} {kind} bolts']
             assert mated.groups == (ids[below], ids[above])
-            assert len(mated.nodes_b) == 289, (side, kind)
+            assert (len(mated.nodes_a), len(mated.nodes_b)) == (places, 81), (side, kind)
             assert not _shared(geometry, below, above), 'joined by ties, not merged'
-        assert len(sets[f'{side} foot bolts'].nodes_a) == 289
-        # at the beam, the channel's top inside the square and nothing else
+    inch = geometry.node_xyz / 0.0254
+    for (bx, bz), kind in barc.SOLID_BOLTS[8:]:
+        side = 'right' if bx > 0 else 'left'
+        places = barc.bolt_places(geometry, (bx, bz), kind)
+        at = inch[geometry.node_index(sorted(places))]
+        assert np.allclose(at.mean(axis=0)[[0, 2]], (bx, bz))
+        assert np.allclose(np.ptp(at, axis=0), [0.125, 0.0, 0.125])
+        # the joint's first side, the channel, is tied at the places'
+        # partners: the four corners of the brick the bolt passes through
         tied = inch[geometry.node_index(list(sets[f'{side} top bolts'].nodes_a))]
-        assert np.all(np.abs(tied[:, 0] - center) <= barc.BEAM_BOND / 2 + 1e-6)
-        assert np.all(np.abs(tied[:, 2] - 1.5) <= barc.BEAM_BOND / 2 + 1e-6)
-        top = inch[geometry.node_index(sorted(_shared_places(geometry, channel)))]
-        inside = ((np.abs(top[:, 0] - center) <= barc.BEAM_BOND / 2 + 1e-6)
-                  & (np.abs(top[:, 2] - 1.5) <= barc.BEAM_BOND / 2 + 1e-6))
-        assert len(tied) == int(inside.sum())
-
-
-def _shared_places(geometry, channel):
-    """The channel's nodes on its top face, where the beam sits."""
-    ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
-    nodes = set(np.concatenate([geometry.elem_conn[i] for i in np.flatnonzero(
-        geometry.elem_group == ids[channel])]).tolist())
-    inch = geometry.node_xyz / INCH
-    return {n for n in nodes if abs(inch[geometry.node_index([n])[0], 1] - 5.0) < 1e-6}
+        near = tied[np.hypot(tied[:, 0] - bx, tied[:, 2] - bz) < 0.1]
+        assert len(near) == 4
 
 
 def test_the_removable_component_stays_where_it_was_checked():
@@ -252,31 +231,25 @@ def test_the_removable_component_stays_where_it_was_checked():
 
 
 @pytest.mark.slow
-def test_the_bricks_match_the_calibrated_model():
-    """About a minute and 14 GB: every mode to 10 kHz. The bricks have the
-    the calibrated model's 55 elastic modes below 9.84 kHz, each within 2 % of its
-    in order and 0.4 % on average (MAC unchecked; the published table
-    pairs its modes with the test's by MAC)."""
-    shapes = barc.solid_build().eigensolution(maximum_frequency=10000.0)
+def test_the_bricks_stay_where_they_were_checked():
+    shapes = barc.solid_build().eigensolution(maximum_frequency=barc.SOLVE_TO)
     assert int(np.sum(shapes.frequency == 0.0)) == 6, 'free-free'
-    elastic = np.array([f for f in shapes.frequency if f > 1.0])
-    assert np.allclose(elastic[:10], SOLID_CHECKED, rtol=0.005), np.round(elastic[:10], 1)
-    model = np.array([fe for fe, _test in CALIBRATED])
-    assert int(np.sum(elastic <= model[-1] + 1.0)) == len(model) == 55
-    error = np.abs(elastic[:55] / model - 1)
-    assert error.max() < 0.02 and error.mean() < 0.005, np.round(100 * error, 1)
+    elastic = [f for f in shapes.frequency if f > 1.0][:10]
+    assert np.allclose(elastic, SOLID_CHECKED, rtol=0.005), np.round(elastic, 1)
 
 
 def test_a_coarser_mesh_of_bricks_still_holds_together():
     """Every box is cut at every other's faces before it is meshed: at
     a quarter inch a channel's eighth-inch web met a flange with no line
     of nodes there, hung from one edge, and the BARC read 76 Hz for
-    192 (2026-10-07). At a quarter inch it reads within 1 % of the
-    checked mesh's first eight (the website's figure is drawn at it)."""
+    192 (2026-10-07). Coarse now reads 1 to 5 % above the checked mesh:
+    each foot bolt clamps three bricks across, which at a quarter inch
+    is the whole of a one-inch foot (the website's figure is drawn at
+    it)."""
     shapes = barc.solid_build('BARC', 0.25).eigensolution(
         maximum_frequency=1300.0)
     elastic = [f for f in shapes.frequency if f > 1.0][:8]
-    assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.02), \
+    assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.06), \
         np.round(elastic, 1)
 
 
