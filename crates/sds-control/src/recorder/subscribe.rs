@@ -360,8 +360,7 @@ fn plot_views(ctx: &DataContext<'_>, p: &Plot, arrays: &mut Arrays) -> (Value, V
             let keep = ((p.seconds * fs).round() as usize).clamp(1, have);
             let skip = have - keep;
             let start = first + skip as u64;
-            let points = (p.points as usize).min(keep);
-            let span = keep.div_ceil(points);
+            let span = views::envelope_span(keep, p.points as usize);
             let n_points = keep.div_ceil(span);
             let x: Vec<f64> = (0..n_points)
                 .map(|i| (start + (i * span) as u64) as f64 / fs)
@@ -377,17 +376,7 @@ fn plot_views(ctx: &DataContext<'_>, p: &Plot, arrays: &mut Arrays) -> (Value, V
                 .filter_map(|index| {
                     let col = rows.iter().position(|r| r == index)?;
                     let samples = &cols.get(col)?[skip..];
-                    let mut hi = Vec::with_capacity(n_points);
-                    let mut lo = Vec::with_capacity(n_points);
-                    for chunk in samples.chunks(span) {
-                        let (mut a, mut b) = (f64::INFINITY, f64::NEG_INFINITY);
-                        for v in chunk {
-                            a = a.min(f64::from(*v));
-                            b = b.max(f64::from(*v));
-                        }
-                        hi.push(b);
-                        lo.push(a);
-                    }
+                    let (hi, lo) = views::envelope(samples, span);
                     let mut s =
                         Series::new(&format!("Channel {index}"), Role::Measured, x.clone(), hi);
                     s.y_min = Some(lo);
