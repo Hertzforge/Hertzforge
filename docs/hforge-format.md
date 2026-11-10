@@ -5,8 +5,10 @@ the extension does not mean a new container. Rename one to `.h5` and
 HDFView browses it, `h5py` walks it, and MATLAB's `h5read` reads every
 dataset. This page writes the layout down so that a file can be read
 without reading the source. In the code the layout is defined in
-`hertzforge.io.native`, and `tests/test_hforge_corpus.py` holds the code
-to it with the frozen files in `testdata/hforge_corpus/`.
+`hertzforge.io.native` (the breakpoint table files in
+`hertzforge.io.tables`), and
+`tests/test_hforge_corpus.py` holds the code to it with the frozen files
+in `testdata/hforge_corpus/`.
 
 The layout started as the `.vdyn` schema 3, and every
 object is stored the way `.vdyn` stores it. Three things differ: the
@@ -49,6 +51,12 @@ its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
 `predictions/` or `run_log_extract/`. The loader recognizes the file by
 the group it finds.
+
+A breakpoint table file is a single-object file too, holding one of a
+test's tables rather than an object a project holds: `breakpoint_table/`
+(below). It is opened from the table it belongs to; opening or importing
+one as a project is refused, saying so. A test's channel table is the
+`channel_table/` object, saved on its own like any other.
 
 A whole project is an `objects/` container of numbered groups (`0000`,
 `0001`, and so on, which keep the order). Each group has two
@@ -294,6 +302,11 @@ Present only where they mean something:
 
 ## `channel_table/`
 
+One table for a test and its analysis: what the analysis reads (each
+channel's DOF, role, sensor and calibration) and, when the table has
+been converted to carry them, the settings a controller runs each
+channel at.
+
     attrs   column_order         every column, in the file's order
     dsets   channel              integers (the schema's one 'int' column)
             <every other column> strings, verbatim (node included: a
@@ -309,6 +322,49 @@ Present only where they mean something:
 
 Columns are read by the type they were stored as, so a column the
 schema has since dropped still reads.
+
+The columns are `channel`, `node`, `direction`, `role`, `control`,
+`channel_type`, `unit`, `sensitivity` (mV per unit), `daq_range`,
+`sensor_range` (volts), `serial_number`, `make`, `model`, `triax_dof`,
+`expiration` and `comment`.
+
+The controller's settings are an optional group of columns after them,
+all present or none: `enabled` ('True' or 'False'), `drive` ('True' for
+an output to a shaker amplifier), `physical` (the hardware channel,
+'<device>/<channel>', blank when unbound), `iepe` ('True' for an IEPE
+input) and `iepe_bias` (volts), `polarity` ('positive' or 'negative',
+blank for positive), `range_max` (the input's full scale in the
+channel's unit), `control_group`, and the abort limits `abort_accel_g`,
+`abort_velocity_ips` and `abort_displacement_mil`, blank where none is
+set. Their presence in `column_order` is the record that the table was
+converted to carry them; a table that never was has none of them and
+reads exactly as before. A channel's role in a control loop is read
+from three columns: a drive is `drive`, a control channel is `control`,
+a reference is a `role` of reference, and any other input is a monitor.
+Converting a table adds the group at its defaults: every channel on,
+none a drive, each full scale its clip level in volts over its
+sensitivity where both are stated, and the rest blank.
+
+## `breakpoint_table/`
+
+One breakpoint table behind a test's profile, target or limits.
+
+    attrs   column_order         the columns, in the file's order
+            table_kind           which table it is: 'random_profile',
+                                 'sine_profile', 'srs_target' or 'limit'
+            x_unit, y_unit       the units of the x column and of the
+                                 levels ('' where the rows say, as a
+                                 Sine profile's quantity does)
+    dsets   <every column>       float64, NaN where the row has none;
+                                 a text column (a Sine profile's
+                                 quantity) as strings
+
+The x column is `freq_hz`. The other columns are the table kind's: a
+Random profile's `psd_g2_hz` and `slope_db_oct` (one of the two on each
+row), a Sine profile's `quantity` (`accel_g`, `velocity_ips` or
+`disp_pp_in`) and `value`, an SRS target's `accel_g`, a limit's
+`ceiling`, and on a profile's rows the bands `alarm_below_db`,
+`alarm_above_db`, `abort_below_db` and `abort_above_db`, in dB.
 
 ## `report/`, `photos/`, `matches/`
 

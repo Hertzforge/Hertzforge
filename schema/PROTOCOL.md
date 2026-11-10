@@ -449,6 +449,8 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
+| `tables.load` | `{"path","kind","table_kind"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"}}` |
 | `fit.*` | see Fitting modes below | |
 
@@ -644,6 +646,63 @@ A reader that can count reports its progress while an import runs, as event topi
 `project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A
 file the core cannot read is refused in the core's own words (`refused`, or `not_found` for a path
 with no file).
+
+**Table files.** A channel table or a breakpoint table saved to a file and opened from one, by
+path, as projects are; neither request touches the connection's project. `kind` is `channels` (the
+channel table: one table that holds what the analysis reads and, converted for a test, the
+settings the control service runs each channel at) or `breakpoints` (a profile, target or limit table, which
+`table_kind` names: `random_profile`, `sine_profile`, `srs_target` or `limit`). `columns` names the
+table's columns and each row holds one value per column.
+
+A channel table's columns are the channel table object's own (`channel`, `node`, `direction`,
+`role`, `control`, `channel_type`, `unit`, `sensitivity`, the two ranges, the sensor's identity,
+`comment`), then the controller's settings, an optional group present on a table converted to
+carry them: `enabled`, `drive`, `physical`, `iepe`, `iepe_bias`, `polarity`, `range_max`,
+`control_group`, `abort_accel_g`, `abort_velocity_ips` and `abort_displacement_mil`. A value is a whole number for `channel`, a whole number or `null` for
+`node` and `control_group`, a number or `null` for the measurements (`sensitivity`, the ranges,
+the bias, the abort limits), `true` or `false` for a flag, and text (`""` for blank) for the rest.
+A control channel row maps onto them so: its `index` is `channel`, `description` is `comment`,
+`units` is `unit`, `sensitivity_mv_per_eu` is `sensitivity`, `physical` is
+`"<device>/<channel>"` (`""` when unbound), `interface` is `iepe` (true for IEPE), `iepe_bias_v`
+is `iepe_bias`, and the abort limits are the three abort columns. Its role is read from three
+columns: `drive` true is a drive, else `control` true is a control, else a `role` of
+`reference` is a reference, and any other is a monitor. `tables.load` answers with every column
+of the channel table, the controller's included: a table without them is converted on the way in
+(every channel on, none a drive, each full scale from its clip level and sensitivity where both
+are stated), and `warnings` says so. A client that edits only some columns keeps the others'
+values for each row and sends them back with its own, so a table opened and saved loses
+nothing. A table saved with the controller's columns among its columns is written converted;
+one saved without them is written as the measurement's table alone.
+
+A breakpoint table's columns are its kind's: `freq_hz` and `psd_g2_hz`, `slope_db_oct` for a
+Random profile; `freq_hz`, `quantity` and `value` for a Sine profile; `freq_hz` and `accel_g` for
+an SRS target; `freq_hz` and `ceiling` for a limit; and for a profile the bands,
+`alarm_below_db`, `alarm_above_db`, `abort_below_db` and `abort_above_db`, `null` where a row has
+none. `x_unit` and `y_unit` are its units, its kind's own when not given.
+
+`tables.save` writes the table to `path` in the form its suffix names: `.hforge` (a single-object
+file, `docs/hforge-format.md`), `.csv`, `.tsv` or `.txt` (tab-delimited) or `.xlsx`; a path with no
+suffix is given `.hforge`. A write is strict: a column that is not the kind's, a value the column
+cannot hold (a sensitivity of 0, a polarity that is not `positive` or `negative`, a channel number
+used twice) or a row of the wrong length is refused `bad_request`, naming the row and column, and
+nothing is written. The file is replaced in one step, so a failed save leaves it as it was. A
+channel table is written as the channel table object writes itself: `.hforge` as its
+`channel_table/` object and `.xlsx` as its workbook, and the text forms under the same headings.
+The text and workbook forms of a breakpoint table start with comment lines saying which table they
+hold (`# Hertzforge table: breakpoint_table`, its `table_kind`, `x_unit` and `y_unit`).
+
+`tables.load` reads the file at `path`. A channel table is read as the channel table reads any
+source: a heading is matched to a column by name or alias, with a unit in it ignored
+(`Sensitivity (mV/g)`), a column the table does not have is left out, and a value it cannot read
+takes the column's default; each is named in `warnings`. A breakpoint table is read leniently too:
+headings by name or alias, in any case and spacing and with a unit in them, comment lines (`#`,
+`//`) and blank rows skipped, and a column that is not the table's left out and named in
+`warnings`; only the columns found come back, in the table's order, and a cell it cannot read is
+refused, naming its row and column. A file that holds another kind of table, or another
+`table_kind`, is refused (`refused`) in words. Without `table_kind` a breakpoint file's own is
+taken. A missing file is `not_found`. A channel table file opens as a project holding the table,
+as any single-object file does; opening or importing a breakpoint table file as a project is
+refused with a message saying it is opened from the table it belongs to.
 
 **Fitting modes.** One mode at a time, on the residual; the session is the core's `ModalFitSession`. Each connection has at most one fit, on its
 project, and opening or starting another project ends it.

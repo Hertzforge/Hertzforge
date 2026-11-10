@@ -37,8 +37,10 @@ from .waterfalls import unit_text
 
 TABLE = Param('table', 'Channel table', 'enum', options_from='objects:channel_table')
 ROW = Param('row', 'Row', 'integer', default=1, min=1, step=1)
+# every column, the controller's among them: a table converted to carry them
+# edits them as it does the others
 COLUMN = Param('column', 'Column', 'enum', default='node', options=tuple(
-    Option(key, title_of(key)) for key in ChannelTable.SCHEMA))
+    Option(key, title_of(key)) for key in ChannelTable.COLUMNS))
 VALUE = Param('value', 'Value', 'string', default='')
 TABLE_NAME = Param('name', 'Name', 'string', default='Channel Table')
 COUNT = Param('count', 'Channels to add', 'integer', default=1, min=1, step=1)
@@ -93,6 +95,47 @@ def channel_table(project: Any, name: str, title: str | None = None,
     return v.table(title or name, headers, rows,
                    edit=v.editing('project.set_channel_cell', {'table': name}, keys,
                                   choices=choices, kinds=kinds))
+
+
+def add_controller_settings(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.add_controller_settings`: the channel table converted to
+    carry the settings a controller runs each channel at
+    (`ChannelTable.add_controller_settings`), so a test can run on it; a
+    table that has them is left as it is."""
+    name = params['table']
+    table = project[name]
+    if table.has_controller_settings:
+        return [channel_table(project, name),
+                v.reading(f'{name}: controller settings', [
+                    v.row('Unchanged', 'the table has the controller settings already', None,
+                          'info')])]
+    table.add_controller_settings()
+    project.record_call(name, 'add_controller_settings')
+    added = ', '.join(title_of(key) for key in ChannelTable.CONTROLLER)
+    return [channel_table(project, name),
+            v.reading(f'{name}: controller settings added', [
+                v.row('Added', added, None, 'pass'),
+                v.row('Started from', 'every channel on; the control channels and the '
+                      'references as the table has them; each full scale from the clip '
+                      'level and the sensitivity, where both are stated', None, 'info')])]
+
+
+def remove_controller_settings(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.remove_controller_settings`: the controller's columns taken
+    out of the channel table (`ChannelTable.remove_controller_settings`),
+    every other column as it was."""
+    name = params['table']
+    table = project[name]
+    if not table.has_controller_settings:
+        return [channel_table(project, name),
+                v.reading(f'{name}: controller settings', [
+                    v.row('Unchanged', 'the table has no controller settings', None, 'info')])]
+    table.remove_controller_settings()
+    project.record_call(name, 'remove_controller_settings')
+    return [channel_table(project, name),
+            v.reading(f'{name}: controller settings removed', [
+                v.row('Removed', ', '.join(title_of(key) for key in ChannelTable.CONTROLLER),
+                      None, 'pass')])]
 
 
 def _cell(table: Any, row: int, key: str) -> str:
@@ -863,6 +906,21 @@ OPERATIONS = (
                 'through it.',
         params=(TABLE, ROW, COLUMN, VALUE), outputs=('table', 'reading'),
         run=set_channel_cell, edits=True),
+    Operation(
+        id='project.add_controller_settings', title='Add Controller Settings',
+        workspace='geometry',
+        summary='The channel table converted to carry the settings a controller runs each '
+                'channel at: on and off, drive, physical channel, IEPE, polarity, range, '
+                'control group and abort limits, started from what the table says.',
+        params=(TABLE,), outputs=('table', 'reading'), run=add_controller_settings,
+        edits=True),
+    Operation(
+        id='project.remove_controller_settings', title='Remove Controller Settings',
+        workspace='geometry',
+        summary='The controller settings taken out of the channel table; every other column '
+                'stays as it is.',
+        params=(TABLE,), outputs=('table', 'reading'), run=remove_controller_settings,
+        edits=True),
     Operation(
         id='project.set_sensor_model', title='Sensor Model', workspace='geometry',
         summary='A channel\'s model picked from the sensor catalog: its maker fills a blank '

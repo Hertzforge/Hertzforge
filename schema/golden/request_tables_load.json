@@ -1,0 +1,10 @@
+{
+ "type": "request",
+ "id": 42,
+ "method": "tables.load",
+ "params": {
+  "path": "/Users/someone/tests/bracket/profile.csv",
+  "kind": "breakpoints",
+  "table_kind": "random_profile"
+ }
+}
