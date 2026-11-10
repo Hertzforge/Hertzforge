@@ -4,10 +4,15 @@
 	 * velocity in in/s peak, or displacement in in peak to peak), the value in that quantity's own
 	 * unit, and optionally alarm and abort bands of its own from it to the next row. Rows are added
 	 * after the last and removed one at a time. A finding on a cell shows beside it; the table's own
-	 * findings show under it. The control profile and every limit channel's bound use it.
+	 * findings show under it. The control profile and every limit channel's bound use it, each saved
+	 * to and opened from its own kind of breakpoint table file.
 	 */
+	import type { BandDb } from '$lib/protocol/types';
+	import type { LoadedTable, TableFileClient } from '$lib/tables/tableFiles';
+	import { sineRows, sineTable, type SineTableKind } from '../breakpointFile';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
+	import TableFileBar from '../TableFileBar.svelte';
 	import { newRow, QUANTITIES, type SineRowDraft } from './sineSetup';
 
 	interface Props {
@@ -23,8 +28,13 @@
 		valueWord?: string;
 		/** Offer bands on each row (the control profile); a bound has none. */
 		bands?: boolean;
+		/**
+		 * The table as a file: the analysis service, which kind of Sine table it is, its name, and the
+		 * bands a row with only some of its own takes for the rest (the profile's).
+		 */
+		file?: { client: TableFileClient | null; tableKind: SineTableKind; name: string; base?: () => { alarm_db: BandDb; abort_db: BandDb } };
 	}
-	let { rows, prefix, errors, warnings = {}, locked, testid, label, valueWord = 'Value', bands = true }: Props = $props();
+	let { rows, prefix, errors, warnings = {}, locked, testid, label, valueWord = 'Value', bands = true, file }: Props = $props();
 
 	const errs = (k: string) => errors[k] ?? [];
 	const tableErrors = $derived(errs(prefix));
@@ -37,6 +47,12 @@
 
 	function setPair(pair: [number, number], i: 0 | 1, v: number | null) {
 		pair[i] = v ?? NaN;
+	}
+
+	function openFile(tableKind: SineTableKind, loaded: LoadedTable) {
+		const opened = sineRows(loaded, { tableKind, bands, base: file?.base?.() });
+		rows.splice(0, rows.length, ...opened.rows);
+		return opened.notes;
 	}
 </script>
 
@@ -93,7 +109,14 @@
 			{/each}
 		</tbody>
 	</table>
-	<button class="btn sm ghost add" disabled={locked} onclick={add} data-testid="{testid}-add">Add Row</button>
+	{#if file}
+		{@const tableKind = file.tableKind}
+		<TableFileBar client={file.client} {tableKind} name={file.name} table={() => sineTable(rows, { tableKind, bands })} onopen={(loaded) => openFile(tableKind, loaded)} {locked} {testid}>
+			<button class="btn sm ghost" disabled={locked} onclick={add} data-testid="{testid}-add">Add Row</button>
+		</TableFileBar>
+	{:else}
+		<button class="btn sm ghost add" disabled={locked} onclick={add} data-testid="{testid}-add">Add Row</button>
+	{/if}
 	<Findings items={[...tableErrors.map((message) => ({ level: 'error' as const, message })), ...tableWarnings.map((message) => ({ level: 'warning' as const, message }))]} testid="{testid}-findings" />
 </div>
 
@@ -130,5 +153,9 @@
 
 	.add {
 		align-self: flex-start;
+	}
+
+	.ptable :global(.tfb) {
+		margin-top: 0;
 	}
 </style>

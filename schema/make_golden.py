@@ -428,6 +428,71 @@ TEXT_GOLDENS = {
                 {'name': 'Geometry', 'kind': 'geometry', 'units_defined': True,
                  'groups': []}]}},
     },
+    # table files by path: a channel table saved, a breakpoint table opened
+    'request_tables_save': {
+        'type': 'request', 'id': 41, 'method': 'tables.save',
+        'params': {
+            'kind': 'channels', 'path': '/Users/someone/tests/bracket/channels.hforge',
+            'columns': ['channel', 'enabled', 'comment', 'role', 'control', 'drive', 'physical',
+                        'iepe', 'iepe_bias', 'unit', 'sensitivity', 'range_max', 'polarity',
+                        'control_group', 'abort_accel_g', 'abort_velocity_ips',
+                        'abort_displacement_mil', 'node', 'direction', 'serial_number'],
+            'rows': [
+                [1, True, 'Table top', 'response', True, False, 'cDAQ1Mod1/ai0', True, 24, 'g',
+                 10.2, 50, 'positive', 0, 30, None, None, 101, 'Z+', 'A1023'],
+                [2, True, 'Fixture', 'reference', False, False, 'cDAQ1Mod1/ai1', False, None,
+                 'lbf', 2.25, 500, 'negative', None, None, None, None, 7, 'X-', ''],
+                [3, False, '', '', False, False, '', False, None, 'in/s', 100, 100, 'positive',
+                 None, None, 5.5, 200, None, '', ''],
+                [4, True, 'Drive', '', False, True, 'cDAQ1Mod2/ao0', False, None, 'V', 1000, 10,
+                 'positive', None, None, None, None, None, '', ''],
+                [5, True, 'Mil gauge', '', True, False, 'cDAQ1Mod1/ai2', False, None, 'mil', 50,
+                 20, 'negative', 1, None, None, 300, None, '', '']]},
+    },
+    'response_tables_save': {
+        'type': 'response', 'id': 41,
+        'result': {'path': '/Users/someone/tests/bracket/channels.hforge'},
+    },
+    'request_tables_load': {
+        'type': 'request', 'id': 42, 'method': 'tables.load',
+        'params': {'path': '/Users/someone/tests/bracket/profile.csv', 'kind': 'breakpoints',
+                   'table_kind': 'random_profile'},
+    },
+    'response_tables_load': {
+        'type': 'response', 'id': 42,
+        'result': {
+            'kind': 'breakpoints', 'table_kind': 'random_profile',
+            'columns': ['freq_hz', 'psd_g2_hz', 'slope_db_oct'],
+            'rows': [[20, None, 3], [80, 0.04, None], [350, 0.04, None], [2000, None, -3]],
+            'warnings': [("Left out the column 'Note': it is not a column of a random "
+                          'profile.')],
+            'x_unit': 'Hz', 'y_unit': 'g²/Hz'},
+    },
+    # a Sine limit channel's bound saved, each row in its own quantity
+    'request_tables_save_bound': {
+        'type': 'request', 'id': 43, 'method': 'tables.save',
+        'params': {
+            'kind': 'breakpoints', 'table_kind': 'sine_limit',
+            'path': '/Users/someone/tests/bracket/bound.hforge',
+            'columns': ['freq_hz', 'quantity', 'bound'],
+            'rows': [[5, 'disp_pp_in', 0.5], [20, 'velocity_ips', 2], [100, 'accel_g', 3],
+                     [2000, 'accel_g', 3]],
+            'x_unit': 'Hz', 'y_unit': ''},
+    },
+    # a limit channel's gain opened into a table in Hz and g/V, which the file does not say
+    'request_tables_load_gain': {
+        'type': 'request', 'id': 44, 'method': 'tables.load',
+        'params': {'path': '/Users/someone/tests/bracket/gain.csv', 'kind': 'breakpoints',
+                   'table_kind': 'drive_gain', 'x_unit': 'Hz', 'y_unit': 'g/V'},
+    },
+    'response_tables_load_gain': {
+        'type': 'response', 'id': 44,
+        'result': {
+            'kind': 'breakpoints', 'table_kind': 'drive_gain',
+            'columns': ['freq_hz', 'gain'],
+            'rows': [[50, 0.8], [400, 4], [2000, 1.5]],
+            'warnings': [], 'x_unit': 'Hz', 'y_unit': 'g/V'},
+    },
 }
 
 

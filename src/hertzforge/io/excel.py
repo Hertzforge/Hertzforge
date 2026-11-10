@@ -268,9 +268,19 @@ def load(path: str | os.PathLike, **_kwargs: Any) -> ChannelTable:
 
     Raises ValueError when no header row is found.
     """
-    from openpyxl import load_workbook
-
     from ..core.channel_table import ChannelTable
+
+    return ChannelTable(read_columns(path))
+
+
+def read_columns(path: str | os.PathLike) -> dict[str, list[str]]:
+    """The columns `load` makes its table from: each headed column's text
+    under its `canonical_name`, whether the channel table has it or not,
+    and the four the table needs blank where the sheet does not have them.
+
+    Raises ValueError when no header row is found.
+    """
+    from openpyxl import load_workbook
 
     book = load_workbook(str(path), read_only=True, data_only=True)
     try:
@@ -308,4 +318,4 @@ def load(path: str | os.PathLike, **_kwargs: Any) -> ChannelTable:
     # which is a channel waiting to be told rather than a refusal
     for core in ('channel', 'node', 'direction', 'unit'):
         columns.setdefault(core, [''] * len(columns['channel']))
-    return ChannelTable(columns)
+    return columns

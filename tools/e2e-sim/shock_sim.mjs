@@ -142,12 +142,18 @@ async function section(page, id) {
 	await page.locator('#sk-panel').evaluate((el) => el.scrollTo({ top: 0 }));
 }
 
-/** A run page by its name. */
+/** The page a window shows, by its tab under the plots. */
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** A run page by its name, from the page tabs under the plots. */
 async function showPage(page, name) {
-	const sel = page.locator('[data-testid="shock-page-select"]');
-	const value = await sel.locator('option', { hasText: name }).first().getAttribute('value');
-	await sel.selectOption(value);
-	await until(page, `the ${name} page`, async (p) => (await p.locator('[data-testid="shock-page-view"]').getAttribute('data-page')) === value);
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
+}
+/** The page on screen in a window of its own, from the page's menu. */
+async function popout(page) {
+	await tid(page, 'page-menu').click();
+	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(page, 'page-popout').click()]);
+	return win;
 }
 
 const runState = (page) => attr(page, 'shock-run-view', 'data-state');
@@ -205,7 +211,7 @@ async function runFromSetup(page) {
 	await until(page, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	await tid(page, 'act-start').click();
 	await until(page, 'identification done', async (p) => ['review', 'running', 'finished'].includes(await runState(p)) && (await runPhase(p)) !== 'sysid', 120_000);
-	if ((await runState(page)) === 'review') await tid(page, 'act-proceed').click();
+	if ((await runState(page)) === 'review') await tid(page, 'review-proceed').click();
 }
 
 try {
@@ -273,7 +279,7 @@ try {
 	await tid(a, 'act-start').click();
 	await until(a, 'the review hold', async (p) => (await runState(p)) === 'review', 120_000);
 	check('the review hold says what it waits for', await tid(a, 'shock-review').isVisible());
-	check('and brings the identified system forward', (await a.locator('[data-testid="shock-page-view"]').getAttribute('data-kind')) === 'identification');
+	check('and brings the identified system forward', (await pageName(a)) === 'Identification');
 	await until(a, 'the identified system', async (p) => {
 		const t = await text(p, 'shock-page-view');
 		return /\|H\||Gain/i.test(t) && /Coherence/.test(t);
@@ -281,7 +287,7 @@ try {
 	check('|H| and the coherence are drawn', true);
 	await neverLive(a, 'review');
 	await shot(a, 'review');
-	await tid(a, 'act-proceed').click();
+	await tid(a, 'review-proceed').click();
 	await until(a, 'three pulses', async (p) => (await pulsesFired(p)) >= 3, 120_000);
 	await showPage(a, 'Pulse');
 	const pulsePage = await text(a, 'shock-page-view');
@@ -293,7 +299,7 @@ try {
 	await shot(a, 'run_pulse');
 
 	// A page in a window of its own follows the run.
-	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'shock-page-popout').click()]);
+	const win = await popout(a);
 	await until(win, 'the display window', async (p) => tid(p, 'shock-run-view').isVisible(), 30_000);
 	const before = await pulsesFired(win);
 	await until(win, 'the window to follow a pulse', async (p) => (await pulsesFired(p)) > before || (await runState(p)) === 'finished', 120_000);
@@ -314,7 +320,7 @@ try {
 	await shot(a, 'run_pulses');
 
 	// ---- Manual -----------------------------------------------------------------------------------
-	await tid(a, 'back-to-setup').click();
+	await tid(a, 'flow-setup').click();
 	await section(a, 'schedule');
 	await tid(a, 'shock-mode-manual').click();
 	await section(a, 'identification');

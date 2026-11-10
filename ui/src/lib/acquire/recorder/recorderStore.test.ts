@@ -16,7 +16,6 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { RecorderData, RecorderLive, RecorderState } from '$lib/protocol/recorder';
 import { ExplorerStore } from '../explorer/explorerStore.svelte';
 import { AcquireState } from '../store.svelte';
-import { recorderSubscribeParams } from './recorderLayout';
 import { RecorderStore } from './recorderStore.svelte';
 import { RecorderViewsState } from './recorderViews.svelte';
 import { recorderCardStatus } from './recorderWords';
@@ -350,13 +349,20 @@ describe('the Recorder store', () => {
 			expect([e.reason, e.detail?.param]).toEqual(['bad_params', param]);
 		}
 		const views = new RecorderViewsState(client, { setupTitle: () => 'x', showing: () => true, storage: null, session: null, events: null, subscribeDelayMs: 0 });
-		expect(views.pages.map((p) => p.kind)).toEqual(['time', 'spectra', 'frf', 'readings', 'recordings']);
+		expect(views.pages.map((p) => p.name)).toEqual(['Time', 'Spectra', 'FRF', 'Readings', 'Recordings']);
 		for (const page of views.pages) {
 			views.selectPage(page.id);
-			const params = recorderSubscribeParams(views.wanted, views.layout.rate);
+			const params = views.hooks.feed!.params(views.wanted, views.layout.rate);
 			const res = await client.request<{ default: boolean }>('recorder.subscribe', params);
-			expect(res.default).toBe(page.kind === 'recordings');
+			expect(res.default).toBe(page.name === 'Recordings');
 		}
+		// time and spectra asked for the control channels, which the service does not take, are sent as every row
+		views.selectPage(views.pages[0].id);
+		const spectrum = views.addPlot('spectrum') as string;
+		views.updatePlot(spectrum, { channels: 'control' });
+		const sent = views.hooks.feed!.params(views.wanted, views.layout.rate) as { plots: { quantity: string; channels?: unknown }[] };
+		expect(sent.plots.map((p) => p.channels)).toEqual(['all', 'all']);
+		await expect(client.request('recorder.subscribe', sent)).resolves.toMatchObject({ default: false });
 	});
 
 	it('stops a Recorder run with every recording saved once nobody has held control for the timeout', async () => {

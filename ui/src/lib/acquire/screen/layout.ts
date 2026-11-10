@@ -59,7 +59,15 @@ export const CARD_WORDS: Record<string, string> = {
 	readings: 'Readings',
 	inputs: 'Inputs',
 	log: 'Log',
-	marks: 'Marks'
+	marks: 'Marks',
+	law: 'Law',
+	steer: 'Steering',
+	station: 'Station',
+	pulses: 'Pulses',
+	plays: 'Plays',
+	recording: 'Recording',
+	recordings: 'Recordings',
+	recmarks: 'Marks'
 };
 
 export function cardWords(kind: CardKind): string {

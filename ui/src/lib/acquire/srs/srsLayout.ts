@@ -1,6 +1,8 @@
 /**
- * The SRS shock run's pages and what each asks the service for (PROTOCOL.md, "SRS Shock Display"),
- * on the pulse-by-pulse pages both shock types share (`../pulse/pulseLayout`).
+ * The SRS shock run's screen (PROTOCOL.md, "SRS Shock Display"): every quantity the service draws
+ * offered as a plot type, the page kinds a screen opens with, and the pulses picked in the pulse
+ * table to lay over the SRS and Pulse plots, on the frame the pulse page layer shares
+ * (`../pulse/pulseScreen`).
  *
  * The pages until the operator changes them: SRS (the measured SRS against the target at the level
  * fired, with its alarm and abort bands), Pulse (the measured pulse and the drive played),
@@ -11,19 +13,11 @@
  */
 
 import type { SrsQuantity } from '$lib/protocol/srs';
-import {
-	defaultPulseLayout,
-	pulseLayoutFromSaved,
-	pulseLayoutToSaved,
-	pulsePagePlots,
-	pulseSubscribeParams,
-	type PulseLayout,
-	type PulsePageSet,
-	type PulsePageSpec,
-	type PulsePlotSpec
-} from '../pulse/pulseLayout';
+import type { PlotType } from '../plots/types';
+import type { PulsePageSet } from '../pulse/pulseLayout';
+import { pulsePlotTypes, type PulseScreenSpec } from '../pulse/pulseScreen';
 
-export { MAX_OVERLAY, overlaidViews, pulsePlotId as srsPlotId, toggleOverlay, withOverlay } from '../pulse/pulseLayout';
+export { MAX_OVERLAY, overlaidViews, toggleOverlay, withOverlay } from '../pulse/pulseLayout';
 
 export type SrsPageKind = 'srs' | 'pulse' | 'kinematics' | 'identification' | 'limit_channels' | 'components' | 'pulses' | 'law';
 
@@ -39,21 +33,6 @@ export const SRS_PAGE_WORDS: Record<SrsPageKind, string> = {
 	pulses: 'Pulses',
 	law: 'Law'
 };
-
-export const SRS_PAGE_HELP: Record<SrsPageKind, string> = {
-	srs: "The measured pulse's shock response spectrum against the target at the level fired, with its alarm and abort bands.",
-	pulse: 'The measured pulse, and the drive as played.',
-	kinematics: 'Velocity and displacement of the measured pulse.',
-	identification: "The identified gain to the control channel with its floor, and the coherence with the hold it must reach.",
-	limit_channels: "Each limit channel's predicted SRS for the last drive against its bound, and the gain to it, measured or supplied.",
-	components: "Each component's drive amplitude in the table in force, and the gains the control law last returned.",
-	pulses: 'Every pulse fired, with its worst band and verdict, and the run in numbers.',
-	law: "The control law's reported values on its last call, and the run in numbers."
-};
-
-export type SrsPageSpec = PulsePageSpec<SrsPageKind>;
-export type SrsLayout = PulseLayout<SrsPageKind>;
-export type SrsPlotSpec = PulsePlotSpec<SrsQuantity>;
 
 export const SRS_RATES = [1, 2, 5];
 export const SRS_DEFAULT_RATE = 2;
@@ -79,10 +58,8 @@ export const SRS_QUANTITIES: readonly SrsQuantity[] = ['srs', 'pulse', 'velocity
 
 export const SRS_PAGES: PulsePageSet<SrsPageKind, SrsQuantity> = {
 	testType: 'srs',
-	prefix: 'rp',
 	kinds: SRS_PAGE_KINDS,
 	words: SRS_PAGE_WORDS,
-	help: SRS_PAGE_HELP,
 	quantities: SRS_PAGE_QUANTITIES,
 	timeQuantities: SRS_TIME_QUANTITIES,
 	rates: SRS_RATES,
@@ -90,24 +67,23 @@ export const SRS_PAGES: PulsePageSet<SrsPageKind, SrsQuantity> = {
 	maxPages: MAX_SRS_PAGES
 };
 
-export function defaultSrsLayout(): SrsLayout {
-	return defaultPulseLayout(SRS_PAGES);
-}
+/** SRS shock's screen: its plot types, cards and first pages; the pulse table on the Pulses page. */
+export const SRS_SCREEN: PulseScreenSpec<SrsPageKind, SrsQuantity> = {
+	pages: SRS_PAGES,
+	plots: [
+		['srs', { words: 'SRS', help: "The measured pulse's shock response spectrum against the target at the level fired, with its alarm and abort bands.", group: 'frequency', families: ['measured', 'reference', 'tolerance', 'abort'] }],
+		['pulse', { words: 'Pulse', help: 'The measured pulse, and the drive as played.', group: 'time', families: ['measured', 'drive'] }],
+		['velocity', { words: 'Velocity', help: "The measured pulse's velocity.", group: 'time', families: ['measured'] }],
+		['displacement', { words: 'Displacement', help: "The measured pulse's displacement.", group: 'time', families: ['measured'] }],
+		['identification', { words: 'Identification', help: 'The identified gain to the control channel with its floor, and the coherence with the hold it must reach.', group: 'frequency', families: ['measured', 'tolerance'] }],
+		['components', { words: 'Components', help: "Each component's drive amplitude in the table in force, and the gains the control law last returned.", group: 'frequency', families: ['measured', 'drive'] }],
+		['limit_channels', { words: 'Limit Channels', help: "Each limit channel's predicted SRS for the last drive against its bound.", group: 'frequency', families: ['measured', 'limit'] }],
+		['limit_frf', { words: 'Limit Gains', help: 'The gain from the drive to each limit channel, measured or supplied.', group: 'frequency', families: ['measured'] }],
+		['law', { words: 'Law Values', help: "The control law's reported values on its last call.", group: 'numbers' }],
+		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
+	],
+	cards: ['run', 'level', 'pulses', 'station'],
+	pageCards: { pulses: ['pulses'] }
+};
 
-/** Everything a page subscribes to, at its drawn width (CSS pixels). */
-export function srsPagePlots(page: SrsPageSpec, width = 900, pixelRatio = 1): SrsPlotSpec[] {
-	return pulsePagePlots(SRS_PAGES, page, width, pixelRatio);
-}
-
-/** What a window sends: a point count with the time histories only, as the service requires. */
-export function srsSubscribeParams(plots: SrsPlotSpec[], rate: number): Record<string, unknown> {
-	return pulseSubscribeParams(SRS_PAGES, plots, rate);
-}
-
-export function srsLayoutFromSaved(text: string | null): SrsLayout | null {
-	return pulseLayoutFromSaved(SRS_PAGES, text);
-}
-
-export function srsLayoutToSaved(layout: SrsLayout): string {
-	return pulseLayoutToSaved(layout);
-}
+export const SRS_PLOT_TYPES: PlotType[] = pulsePlotTypes(SRS_SCREEN);

@@ -144,12 +144,18 @@ async function section(page, id) {
 	await page.locator('#sine-panel').evaluate((el) => el.scrollTo({ top: 0 }));
 }
 
-/** A run page by its name. */
+/** The page a window shows, by its tab under the plots. */
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** A run page by its name, from the page tabs under the plots. */
 async function showPage(page, name) {
-	const sel = page.locator('[data-testid="sine-page-select"]');
-	const value = await sel.locator('option', { hasText: name }).first().getAttribute('value');
-	await sel.selectOption(value);
-	await until(page, `the ${name} page`, async (p) => (await p.locator('[data-testid="sine-page-view"]').getAttribute('data-page')) === value);
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
+}
+/** The page on screen in a window of its own, from the page's menu. */
+async function popout(page) {
+	await tid(page, 'page-menu').click();
+	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(page, 'page-popout').click()]);
+	return win;
 }
 
 const runState = (page) => attr(page, 'sine-run-view', 'data-state');
@@ -211,7 +217,7 @@ async function runFromSetup(page) {
 	await until(page, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	await tid(page, 'act-start').click();
 	await until(page, 'identification done', async (p) => ['review', 'finished'].includes(await runState(p)) || ['engaged', 'full_level'].includes(await runPhase(p)), 180_000);
-	if ((await runState(page)) === 'review') await tid(page, 'act-proceed').click();
+	if ((await runState(page)) === 'review') await tid(page, 'review-proceed').click();
 	await until(page, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await num(p, 'data-hz')), 60_000);
 }
 
@@ -283,7 +289,7 @@ try {
 	await tid(a, 'act-start').click();
 	await until(a, 'the review hold', async (p) => (await runState(p)) === 'review', 180_000);
 	check('the review hold says what it waits for', await tid(a, 'sine-review').isVisible());
-	check('and brings the identified gain forward', (await a.locator('[data-testid="sine-page-view"]').getAttribute('data-kind')) === 'identification');
+	check('and brings the identified gain forward', (await pageName(a)) === 'Identification');
 	await until(a, 'the identified gain', async (p) => {
 		const t = await text(p, 'sine-page-view');
 		return /Gain/.test(t) && /Coherence/.test(t);
@@ -291,7 +297,7 @@ try {
 	check('the gain and the coherence are drawn', true, await text(a, 'sine-identification-facts'));
 	await neverLive(a, 'review');
 	await shot(a, 'review');
-	await tid(a, 'act-proceed').click();
+	await tid(a, 'review-proceed').click();
 	await until(a, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await num(p, 'data-t')), 60_000);
 	const r0 = await reading(a);
 	await until(a, 'the frequency to rise', async (p) => (await reading(p)).hz > r0.hz + 2, 30_000);
@@ -306,7 +312,7 @@ try {
 	await shot(a, 'run_control');
 
 	// A page in a window of its own follows the run.
-	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'sine-page-popout').click()]);
+	const win = await popout(a);
 	await until(win, 'the display window', async (p) => tid(p, 'sine-run-view').isVisible(), 30_000);
 	await until(win, 'the window to read the run', async (p) => Number.isFinite(await num(p, 'data-t')), 30_000);
 	const w0 = await num(win, 'data-t');
@@ -371,7 +377,7 @@ try {
 		await until(a, 'a new run', async (p) => (await attr(p, 'run-state', 'data-state')) === 'configured', 20_000);
 		await tid(a, 'act-start').click();
 		await until(a, 'the review hold', async (p) => (await runState(p)) === 'review', 180_000);
-		await tid(a, 'act-proceed').click();
+		await tid(a, 'review-proceed').click();
 		await until(a, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)), 60_000);
 		await a.close();
 		await until(b, 'the countdown', async (p) => tid(p, 'orphan').isVisible(), 20_000);

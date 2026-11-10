@@ -165,7 +165,8 @@
 		{abortKeys}
 		bind:heading
 	/>
-	<div class="notices"><Notices {acq} /></div>
+	<!-- Notices float over the top of the page, so one never pushes the plots down. -->
+	<div class="notices"><div class="stack"><Notices {acq} /></div></div>
 
 	{#if !running}
 	<div class="tabs" role="tablist" aria-label="Acquire and control sections" bind:this={tablist} tabindex="-1" onkeydown={onTabKey}>
@@ -382,14 +383,35 @@
 	}
 
 	.notices {
+		position: relative;
+		height: 0;
+		z-index: 40;
+	}
+
+	.stack {
+		position: absolute;
+		top: var(--sp-2);
+		left: 50%;
+		transform: translateX(-50%);
+		width: min(640px, calc(100% - 32px));
 		display: flex;
 		flex-direction: column;
 		gap: var(--sp-2);
-		padding: 0 var(--sp-4);
+		pointer-events: none;
 	}
 
-	.notices > :global(:first-child) {
-		margin-top: var(--sp-2);
+	.stack > :global(*) {
+		pointer-events: auto;
+		box-shadow: var(--shadow-pop);
+	}
+
+	/* The tinted notices are translucent: lay them on the page colour so a plot never shows through. */
+	.stack > :global(.aq-notice.warn) {
+		background: linear-gradient(var(--amber-weak), var(--amber-weak)), var(--bg-2);
+	}
+
+	.stack > :global(.aq-notice.pass) {
+		background: linear-gradient(var(--blue-weak), var(--blue-weak)), var(--bg-2);
 	}
 
 	/* The run fills what the header leaves: the plots on their page, the controls beside them. */

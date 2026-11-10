@@ -2,10 +2,14 @@
 	/**
 	 * A table of points, a frequency and a value in each row (a target's breakpoints, a limit
 	 * channel's gain), edited in place: rows are added after the last and removed one at a time.
-	 * A finding on a cell shows beside it; the table's own findings show under it.
+	 * A finding on a cell shows beside it; the table's own findings show under it. Given `file`,
+	 * the points are saved to and opened from a breakpoint table file of that kind.
 	 */
+	import type { LoadedTable, TableFileClient } from '$lib/tables/tableFiles';
+	import { pointsRows, pointsTable, type PointsFile } from '../breakpointFile';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
+	import TableFileBar from '../TableFileBar.svelte';
 
 	interface Column {
 		key: keyof R & string;
@@ -27,11 +31,20 @@
 		min?: number;
 		testid: string;
 		label: string;
+		/** The points as a file: the analysis service, the table's kind and name, and the value's column in the file. */
+		file?: { client: TableFileClient | null; tableKind: string; name: string; column: string };
 	}
-	let { rows, columns, prefix, errors, locked, make, min = 0, testid, label }: Props = $props();
+	let { rows, columns, prefix, errors, locked, make, min = 0, testid, label, file }: Props = $props();
 
 	const errs = (k: string) => errors[k] ?? [];
 	const tableErrors = $derived(errs(prefix));
+	const spec = (column: string): PointsFile<R> => ({ keys: [columns[0].key, columns[1].key], column, unit: columns[1].unit });
+
+	function openFile(column: string, loaded: LoadedTable) {
+		const opened = pointsRows(loaded, spec(column));
+		rows.splice(0, rows.length, ...opened.rows);
+		return opened.notes;
+	}
 </script>
 
 <div class="ptable" data-testid={testid}>
@@ -70,7 +83,14 @@
 		{/each}
 	</tbody>
 </table>
-<button class="btn sm ghost add" disabled={locked} onclick={() => rows.push(make(rows.at(-1)))} data-testid="{testid}-add">Add Row</button>
+{#if file}
+	{@const column = file.column}
+	<TableFileBar client={file.client} tableKind={file.tableKind} name={file.name} table={() => pointsTable(rows, spec(column))} onopen={(loaded) => openFile(column, loaded)} {locked} {testid}>
+		<button class="btn sm ghost" disabled={locked} onclick={() => rows.push(make(rows.at(-1)))} data-testid="{testid}-add">Add Row</button>
+	</TableFileBar>
+{:else}
+	<button class="btn sm ghost add" disabled={locked} onclick={() => rows.push(make(rows.at(-1)))} data-testid="{testid}-add">Add Row</button>
+{/if}
 <Findings items={tableErrors.map((message) => ({ level: 'error' as const, message }))} />
 </div>
 

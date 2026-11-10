@@ -75,6 +75,14 @@
 		if (t) onchange(withType(spec, t));
 	}
 
+	const CHANNEL_MODES: [string, string][] = [
+		['all', 'All'],
+		['control', 'Control'],
+		['limited', 'Limited'],
+		['pick', 'Chosen']
+	];
+	/** The channel choices the plot's type takes. */
+	const channelModes = $derived(CHANNEL_MODES.filter(([m]) => m === 'pick' || !type?.selectors || (type.selectors as string[]).includes(m)));
 	const channelMode = $derived(Array.isArray(spec.channels) ? 'pick' : spec.channels);
 	const picked = $derived(Array.isArray(spec.channels) ? spec.channels : []);
 	function setChannelMode(m: string) {
@@ -306,12 +314,7 @@
 			{#if type?.channels}
 				{@render seg(
 					'Channels',
-					[
-						['all', 'All'],
-						['control', 'Control'],
-						['limited', 'Limited'],
-						['pick', 'Chosen']
-					],
+					channelModes,
 					channelMode,
 					setChannelMode,
 					'plot-options-channels'

@@ -71,7 +71,7 @@
 				</div>
 			</div>
 			<p class="aq-lead aq-small spaced">Each row holds from its frequency to the next row's. Neighbours of one quantity are joined on log-log axes; where the quantity changes, the left row's value holds up to the next row. Values are in the row's own unit: g peak, in/s peak, or in peak to peak.</p>
-			<SineProfileTable rows={p.rows} prefix="profile.rows" errors={E} warnings={W} {locked} testid="sine-profile-rows" label="Profile rows" />
+			<SineProfileTable rows={p.rows} prefix="profile.rows" errors={E} warnings={W} {locked} testid="sine-profile-rows" label="Profile rows" file={{ client: sine.acq.tableFiles, tableKind: 'sine_profile', name: 'Sine Profile', base: () => p }} />
 
 			<div class="aq-group sep">
 				<h3>Bands</h3>

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ShockPulseRow, ShockState } from '$lib/protocol/shock';
 import type { View } from '$lib/protocol/types';
-import { defaultShockLayout, PAGE_QUANTITIES, shockLayoutFromSaved, shockLayoutToSaved, shockPagePlots, shockSubscribeParams, toggleOverlay, withOverlay, pulseViewOf } from './shockLayout';
+import { PAGE_QUANTITIES, toggleOverlay, withOverlay, pulseViewOf } from './shockLayout';
 import { shockBarActions, shockModuleVerbs, shockPrimary, type ShockVerbContext } from './shockVerbs';
 import { lastPulseWords, nextPulseWords, plannedPulses, pulseWords, shockLevelStatus, shockTripFacts } from './shockWords';
 
@@ -184,23 +184,7 @@ describe('the pages and the pulses laid over them', () => {
 		expect(withOverlay(null, [], 'pulse')).toBeNull();
 	});
 
-	it('the six pages by default, each asking only for what it draws', () => {
-		const layout = defaultShockLayout();
-		expect(layout.pages.map((p) => p.name)).toEqual(['Pulse', 'SRS', 'Kinematics', 'Identification', 'Pulses', 'Law']);
-		expect(shockPagePlots(layout.pages[2], 800).map((p) => [p.id, p.quantity, p.points])).toEqual([
-			['sp-3:velocity', 'velocity', 800],
-			['sp-3:displacement', 'displacement', 800]
-		]);
+	it('the pages hold the quantities each kind drew', () => {
 		expect(PAGE_QUANTITIES.identification).toEqual(['identification', 'spectrum']);
-		expect(shockSubscribeParams([], 2)).toEqual({ default: true });
-		// Only the time histories take a point count; the service refuses it on any other plot.
-		const sent = shockSubscribeParams([...shockPagePlots(layout.pages[3], 800), ...shockPagePlots(layout.pages[0], 800)], 2);
-		expect('plots' in sent && sent.plots).toEqual([
-			{ id: 'sp-4:identification', quantity: 'identification' },
-			{ id: 'sp-4:spectrum', quantity: 'spectrum' },
-			{ id: 'sp-1:pulse', quantity: 'pulse', points: 800 }
-		]);
-		expect(shockLayoutFromSaved(shockLayoutToSaved(layout))).toEqual(layout);
-		expect(shockLayoutFromSaved('{"version":1,"pages":[]}')).toBeNull();
 	});
 });

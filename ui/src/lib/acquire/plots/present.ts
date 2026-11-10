@@ -238,7 +238,9 @@ export function present(
 		const buckets = opts.buckets ?? 600;
 		shown = shown.map((v) => ({ ...v, series: v.series.map((s) => (isData(s) ? envelopeOf(s, buckets) : s)) }));
 	}
-	const overlaid = shown.length > 1 && (time ? d.lanes === 'overlay' : spec.arrange === 'overlay');
+	// Several views of a plot that takes no channels are its parts (a pulse and the drive that made
+	// it, a gain and its phase), each on its own axes: one pane each.
+	const overlaid = shown.length > 1 && type?.channels !== false && (time ? d.lanes === 'overlay' : spec.arrange === 'overlay');
 	if (overlaid) shown = [overlay(shown, plotTitle(spec, type), channels ?? undefined)];
 	else if (channels) shown = shown.map((v, i) => (v.title ? v : { ...v, title: `Channel ${channels[i]}` }));
 	const band = opts.band ?? bandOf(spectra);

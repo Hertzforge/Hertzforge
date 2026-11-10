@@ -1739,7 +1739,7 @@ export class AppState {
 		this.console = new ConsoleState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
-		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : {});
+		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -1762,17 +1762,25 @@ export class AppState {
 			windowIndex: mimoPopout ? 1 : 0
 		});
 		const shockPopout = config.popout && config.popoutTest === 'shock';
-		this.shockViews = new ShockViewsState(this.control, {
-			setupTitle: () => this.shock.status?.title ?? (config.popout ? null : this.shock.setup.title),
-			showing: () => shockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'shock' && this.shock.step === 'run'),
-			page: shockPopout ? config.page : null
-		});
+		this.shockViews = new ShockViewsState(
+			this.control,
+			{
+				setupTitle: () => this.shock.status?.title ?? (config.popout ? null : this.shock.setup.title),
+				showing: () => shockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'shock' && this.shock.step === 'run'),
+				page: shockPopout ? config.page : null
+			},
+			this.shock
+		);
 		const srsPopout = config.popout && config.popoutTest === 'srs';
-		this.srsViews = new SrsViewsState(this.control, {
-			setupTitle: () => this.srs.status?.title ?? (config.popout ? null : this.srs.setup.title),
-			showing: () => srsPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'srs' && this.srs.step === 'run'),
-			page: srsPopout ? config.page : null
-		});
+		this.srsViews = new SrsViewsState(
+			this.control,
+			{
+				setupTitle: () => this.srs.status?.title ?? (config.popout ? null : this.srs.setup.title),
+				showing: () => srsPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'srs' && this.srs.step === 'run'),
+				page: srsPopout ? config.page : null
+			},
+			this.srs
+		);
 		const sinePopout = config.popout && config.popoutTest === 'sine';
 		this.sineViews = new SineViewsState(this.control, {
 			setupTitle: () => this.sine.status?.title ?? (config.popout ? null : this.sine.setup.title),

@@ -73,7 +73,8 @@
 			setup: { title: d.title, breakpoints: rows, alarm_db: bands?.alarm_db ?? r.alarm_db, abort_db: bands?.abort_db ?? r.abort_db },
 			locked,
 			fieldErrors: strip(E),
-			fieldWarnings: strip(W)
+			fieldWarnings: strip(W),
+			tableFiles: mimo.acq.tableFiles
 		};
 	});
 
@@ -234,6 +235,7 @@
 							rowBands={false}
 							showBands={physical}
 							unit={r.method === 'rigid' && qi >= 3 ? `(${r.unit}/${d.reference.rigid.length_unit})²/Hz` : `${r.unit}²/Hz`}
+							fileName="Reference Profile"
 						/>
 					{/key}
 					<PairTable {mimo} {labels} />
