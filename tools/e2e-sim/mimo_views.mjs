@@ -7,15 +7,16 @@
 // It builds and starts `sds-control` (release, loopback, a free port) and the shell's dev server,
 // sets up and starts the run on the controller's own MIMO service (an inline reference on 72
 // controls, interpolated onto the run's grid) from a connection of its own, acknowledging any
-// hold on the way to full level, and mounts the run view on its own in Chrome (the MIMO screen's
-// Run step hosts the same view; tools/e2e-sim/mimo_sim.mjs drives it there):
+// hold on the way to full level, and mounts the run view on its own in Chrome, as a window that
+// observes the run (the MIMO screen's Run step hosts the same view; tools/e2e-sim/mimo_sim.mjs
+// drives it there):
 //
-// 1. One monitor: the four pages (error heatmap, matrix grid, drive and plant, geometry), each
-//    shown with data from the run and asking the service for exactly what it draws; a page added
-//    and removed during the run, and the subscription following it. A screenshot of each page.
-// 2. Two monitors: two windows sharing one layout, the grid in the main window and the heatmap in
-//    the second, both at 10 updates a second, and the frames per second each window keeps while
-//    both draw (the bar is 30).
+// 1. One window: the four first pages (error heatmap, matrix grid, drive and plant, geometry),
+//    chosen from the page tabs, each shown with data from the run and asking the service for
+//    exactly what it draws; a page added during the run with a plot on it, then removed, and the
+//    subscription following it. A screenshot of each page.
+// 2. Two windows: the grid in one and the heatmap in the other, both at 10 updates a second, and
+//    the frames per second each window keeps while both draw (the bar is 30).
 
 import { chromium } from 'playwright-core';
 import { execFileSync, spawn } from 'node:child_process';
@@ -185,7 +186,14 @@ async function shot(page, name) {
 }
 
 /** The plot ids and quantities this window's service accepted. */
-const accepted = (page) => page.evaluate(() => (globalThis.__mimoViews.feed.accepted?.plots ?? []).map((p) => `${p.id}=${p.quantity}`));
+const accepted = (page) => page.evaluate(() => (globalThis.__mimoViews.accepted?.plots ?? []).map((p) => `${p.id}=${p.quantity}`));
+/** The page a window shows, by its tab under the plots. */
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** A run page by its name, from the page tabs under the plots. */
+async function showPage(page, name) {
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await waitFor(`the ${name} page`, async () => (await pageName(page)) === name);
+}
 const hasData = (page, id) => page.evaluate((i) => !!globalThis.__mimoViews.plotData(i)?.views?.length, id);
 
 /** Frames per second this page draws over `ms`, from its own animation frames. */
@@ -305,23 +313,23 @@ try {
 	// ============ 1. One monitor ================================================================
 	const ctxA = await browser.newContext({ viewport });
 	const a = await ctxA.newPage();
-	await mountView(a, URL_, servicePort, { monitors: 1 });
+	await mountView(a, URL_, servicePort, {});
 
 	// The error heatmap first: every control, nothing else asked for.
 	await waitFor('the heatmap', async () => (await tid(a, 'heatmap').getAttribute('data-rows')) === String(CONTROLS), 30_000);
 	const heatSub = await accepted(a);
-	check('the heatmap page asks for its rows only', heatSub.length === 1 && heatSub[0] === 'mp-1:heat=error_db', heatSub.join());
+	check('the heatmap page asks for its rows only', heatSub.length === 1 && heatSub[0] === 'pl-1=error_db', heatSub.join());
 	await tid(a, 'heatmap-canvas').hover({ position: { x: 600, y: 200 } });
 	const readout = (await tid(a, 'heatmap-readout').textContent()).replace(/\s+/g, ' ').trim();
 	check('the heatmap cursor reads control, frequency and dB', /Hz/.test(readout) && /dB/.test(readout), readout);
 	await shot(a, `${PREFIX}_` + 'heatmap');
 
 	// The matrix grid: its window block and its 8 spectra.
-	await tid(a, 'mimo-page-select').selectOption('mp-2');
-	await waitFor('the grid data', () => hasData(a, 'mp-2:sdm'), 30_000);
-	await waitFor('the grid spectra', () => hasData(a, 'mp-2:psd:7'), 30_000);
+	await showPage(a, 'Matrix Grid');
+	await waitFor('the grid data', () => hasData(a, 'pl-2:sdm'), 30_000);
+	await waitFor('the grid spectra', () => hasData(a, 'pl-2:psd:7'), 30_000);
 	const gridSub = await accepted(a);
-	check('the grid page asks for one 8 by 8 block and 8 spectra', gridSub.length === 9 && gridSub[0] === 'mp-2:sdm=sdm' && gridSub.slice(1).every((s) => s.endsWith('=psd')), gridSub.join());
+	check('the grid page asks for one 8 by 8 block and 8 spectra', gridSub.length === 9 && gridSub[0] === 'pl-2:sdm=sdm' && gridSub.slice(1).every((s) => s.endsWith('=psd')), gridSub.join());
 	const box = await tid(a, 'grid-canvas').boundingBox();
 	await a.mouse.move(box.x + 96 + 2.5 * ((box.width - 96) / 8), box.y + 26 + 0.5 * ((box.height - 56) / 8));
 	await a.waitForTimeout(300);
@@ -329,48 +337,55 @@ try {
 	check('the grid cursor names the cell and gives its numbers', /Hz/.test(gridRead) && /reference/.test(gridRead), gridRead);
 	await shot(a, `${PREFIX}_` + 'grid');
 
-	// Scroll and pin: the subscription follows the window.
+	// Pin (from the plot's options) and scroll: the subscription follows the window.
+	await a.locator('[data-plot="pl-2"] [data-testid="plot-options"]').click();
 	await tid(a, 'grid-pin').selectOption('P20 Z');
+	await a.keyboard.press('Escape');
 	await a.locator('[aria-label="Next controls"]').click();
-	await waitFor('the scrolled window', async () => { const s = await accepted(a); return s.includes('mp-2:psd:59=psd') && s.includes('mp-2:psd:13=psd'); }, 10_000);
+	await waitFor('the scrolled window', async () => { const s = await accepted(a); return s.includes('pl-2:psd:59=psd') && s.includes('pl-2:psd:13=psd'); }, 10_000);
 	const scrolled = await accepted(a);
-	check('pinned and scrolled: the block follows the window', scrolled.includes('mp-2:psd:59=psd') && scrolled.length === 9, scrolled.slice(1).join());
+	check('pinned and scrolled: the block follows the window', scrolled.includes('pl-2:psd:59=psd') && scrolled.length === 9, scrolled.slice(1).join());
 	// A cell opened full size adds exactly its own plot.
 	await tid(a, 'grid-canvas').focus();
 	await a.keyboard.press('ArrowRight');
 	await a.keyboard.press('Enter');
-	await waitFor('the open cell', async () => (await accepted(a)).some((s) => s.startsWith('mp-2:open=')), 10_000);
-	await waitFor('the open cell data', () => hasData(a, 'mp-2:open'), 10_000);
+	await waitFor('the open cell', async () => (await accepted(a)).some((s) => s.startsWith('pl-2:open=')), 10_000);
+	await waitFor('the open cell data', () => hasData(a, 'pl-2:open'), 10_000);
 	const opened = await accepted(a);
-	check('an opened cell is subscribed as its own quantity', opened.includes('mp-2:open=coh'), opened.filter((s) => s.includes('open')).join());
+	check('an opened cell is subscribed as its own quantity', opened.includes('pl-2:open=coh'), opened.filter((s) => s.includes('open')).join());
 	await shot(a, `${PREFIX}_` + 'grid_open');
 	await tid(a, 'grid-close').click();
-	await waitFor('the open cell let go', async () => !(await accepted(a)).some((s) => s.startsWith('mp-2:open=')), 10_000);
+	await waitFor('the open cell let go', async () => !(await accepted(a)).some((s) => s.startsWith('pl-2:open=')), 10_000);
 
-	// Drive and plant.
-	await tid(a, 'mimo-page-select').selectOption('mp-3');
-	await waitFor('the plant data', () => hasData(a, 'mp-3:frf'), 30_000);
-	await waitFor('the drive data', () => hasData(a, 'mp-3:drive'), 30_000);
+	// Drive and plant: one plot each, pl-3 to pl-8.
+	await showPage(a, 'Drive and Plant');
+	await waitFor('the plant data', () => hasData(a, 'pl-5'), 30_000);
+	await waitFor('the drive data', () => hasData(a, 'pl-3'), 30_000);
 	const plantSub = await accepted(a);
 	check('the drive and plant page asks for its drive, pair, response, singular values, condition and caps', plantSub.map((s) => s.split('=')[1]).join() === 'drive_psd,drive_coh,frf,sv,cond,cap', plantSub.join());
 	await a.waitForTimeout(500);
 	await shot(a, `${PREFIX}_` + 'plant');
 
 	// Geometry: physical control, nothing subscribed; colors from the status.
-	await tid(a, 'mimo-page-select').selectOption('mp-4');
+	await showPage(a, 'Geometry');
 	await waitFor('the 3-D view', () => a.locator('[data-testid="shape3d-canvas"] canvas').count().then((n) => n > 0), 30_000);
 	await a.waitForTimeout(1200);
 	const geoSub = await accepted(a);
 	check('the geometry page under physical control asks for nothing', geoSub.length === 0, geoSub.join());
 	await shot(a, `${PREFIX}_` + 'geometry');
 
-	// A page added and removed during the run.
-	await tid(a, 'mimo-page-add').selectOption('heatmap');
-	await waitFor('the added page subscribed', async () => (await accepted(a)).some((s) => /^mp-5:heat=/.test(s)), 10_000);
-	check('a page added during the run is subscribed', true);
-	await tid(a, 'mimo-page-remove').click();
-	await tid(a, 'mimo-page-remove-yes').click();
-	await waitFor('the removed page let go', async () => !(await accepted(a)).some((s) => s.startsWith('mp-5:')), 10_000);
+	// A page added during the run, a heatmap put on it, then the page removed.
+	await tid(a, 'page-add').click();
+	await a.keyboard.press('Enter');
+	await tid(a, 'plot-add').click();
+	await tid(a, 'add-plot-error_db').click();
+	await waitFor('the added plot subscribed', async () => (await accepted(a)).some((s) => /^pl-\d+=error_db$/.test(s)), 10_000);
+	const added = (await accepted(a)).find((s) => s.endsWith('=error_db')).split('=')[0];
+	check('a plot added on a page added during the run is subscribed', added !== 'pl-1', added);
+	await tid(a, 'page-menu').click();
+	await tid(a, 'page-remove').click();
+	await tid(a, 'page-remove-yes').click();
+	await waitFor('the removed page let go', async () => !(await accepted(a)).some((s) => s.startsWith(`${added}=`)), 10_000);
 	check('a page removed during the run is let go', true, (await accepted(a)).join() || 'nothing');
 	check('the run went on untouched', ctl.status.last?.phase === 'full_level', ctl.status.last?.phase);
 	await ctxA.close();
@@ -379,12 +394,12 @@ try {
 	const ctxB = await browser.newContext({ viewport });
 	const main = await ctxB.newPage();
 	const second = await ctxB.newPage();
-	await mountView(main, URL_, servicePort, { monitors: 2, windowIndex: 0 });
-	await mountView(second, URL_, servicePort, { monitors: 2, windowIndex: 1, compact: true });
+	await mountView(main, URL_, servicePort, { page: 'pg-2' });
+	await mountView(second, URL_, servicePort, { page: 'pg-1', compact: true });
 	for (const p of [main, second]) await p.evaluate(() => globalThis.__mimoViews.setRate(10));
-	await waitFor('the main window on the grid', () => hasData(main, 'mp-2:sdm'), 30_000);
+	await waitFor('the main window on the grid', () => hasData(main, 'pl-2:sdm'), 30_000);
 	await waitFor('the second window on the heatmap', async () => (await tid(second, 'heatmap').getAttribute('data-rows')) === String(CONTROLS), 30_000);
-	check('two monitors: the grid in the main window, the heatmap in the second', (await accepted(main))[0] === 'mp-2:sdm=sdm' && (await accepted(second))[0] === 'mp-1:heat=error_db');
+	check('two windows: the grid in one, the heatmap in the other', (await accepted(main))[0] === 'pl-2:sdm=sdm' && (await accepted(second))[0] === 'pl-1=error_db');
 	// A10: both windows draw at 10 updates a second while the frame rate is counted.
 	const [fm, fs2] = await Promise.all([fps(main, 6000), fps(second, 6000)]);
 	const drawGrid = Number(await tid(main, 'matrix-grid').getAttribute('data-draw-ms'));

@@ -1,39 +1,39 @@
 <script lang="ts">
 	/**
-	 * The geometry page: the sensors and drives in three dimensions, placed from the channel
-	 * table's positions and directions and drawn by the shape pane. Under physical control each
-	 * sensor is colored by its control's current error on the heatmap's lightness scale; drives are
-	 * arrows along their directions, longer for more drive rms. Under virtual control the
-	 * rigid-body motion is animated from the six degrees of freedom's rms, and their errors are
-	 * listed beside it.
+	 * A geometry plot: the sensors and drives in three dimensions, placed from the channel table's
+	 * positions and directions and drawn by the shape pane. Under physical control each sensor is
+	 * shaded by its control's current error on the heatmap's lightness scale, and the list beside it
+	 * names each control's band in words; drives are arrows along their directions, longer for more
+	 * drive rms. Under virtual control the rigid-body motion is animated from the six degrees of
+	 * freedom's rms (switched in the plot's options), and their errors are listed beside it.
 	 */
-	import type { MimoPageSpec } from '$lib/acquire/display/mimoLayout';
 	import type { ReadingView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
-	import { formatDb, formatFixed, formatNumber } from '$lib/viz/format';
+	import { formatDb, formatNumber } from '$lib/viz/format';
 	import { arrowKey, buildGeometry, dofVector, nodeColors, type MimoGeometry } from '$lib/viz/geometry';
 	import { BAND_WORDS, bandClass, DEFAULT_BAND, errorCss, errorGradient, type RowBand } from '$lib/viz/scales';
-	import type { MimoViewsState } from './mimoViews.svelte';
-	import { geometrySettings, plotId } from './pages';
+	import type { BodyPanel } from '../../screen/bodies';
+	import { geometryChoice } from './mimoScreen';
+	import type { MimoScreenState } from './mimoScreenState.svelte';
 
 	interface Props {
-		views: MimoViewsState;
-		page: MimoPageSpec;
+		screen: MimoScreenState;
+		panel: BodyPanel;
 		/** Where the sensors and drives are, from the channel table; null when not entered. */
 		geometry?: MimoGeometry | null;
 		/** Each control's alarm and abort bands, in the setup's order. */
 		bands?: RowBand[];
 	}
-	let { views, page, geometry = null, bands = [] }: Props = $props();
+	let { screen, panel, geometry = null, bands = [] }: Props = $props();
 
 	const shape3d = () => import('$lib/viz/Shape3DPane.svelte');
 
-	const s = $derived(geometrySettings(page));
-	const status = $derived(views.status);
+	const s = $derived(geometryChoice(panel.plot.select));
+	const status = $derived(screen.status);
 	const virtual = $derived(status?.shape?.space === 'virtual');
 	const errors = $derived(status?.control_error_db ?? []);
 	const driveRms = $derived(status?.drive_rms_v ?? []);
-	const dofReading = $derived((views.plotData(plotId(page, 'dof'))?.views[0] as ReadingView | undefined) ?? null);
+	const dofReading = $derived((screen.plotData(panel.id)?.views[0] as ReadingView | undefined) ?? null);
 	const dof = $derived(virtual && s.motion && dofReading ? dofVector(dofReading.rows) : null);
 	const dofKey = $derived(dof ? dof.map((v) => v.toPrecision(2)).join(',') : '');
 	const tk = $derived<'light' | 'dark'>(theme.resolved);
@@ -58,11 +58,11 @@
 		return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 	}
 
-	const labels = $derived(views.labels);
+	const labels = $derived(screen.labels);
 	const band0 = $derived(bands[0] ?? DEFAULT_BAND);
 </script>
 
-<div class="geo" data-testid="mimo-geometry-page">
+<div class="geo" data-testid="mimo-geometry">
 	<div class="scene">
 		{#if mesh && colors}
 			{#await shape3d()}
@@ -91,9 +91,6 @@
 	</div>
 
 	<aside class="list" aria-label={virtual ? 'Degrees of freedom' : 'Controls'}>
-		{#if virtual}
-			<label class="motion"><input type="checkbox" checked={s.motion} onchange={(e) => views.patch(page.id, { motion: e.currentTarget.checked })} /> Animate the rigid-body motion</label>
-		{/if}
 		<table>
 			<thead><tr><th>{virtual ? 'DOF' : 'Control'}</th><th class="r">Error</th><th>Band</th>{#if dofReading}<th class="r">rms</th>{/if}</tr></thead>
 			<tbody>
@@ -112,38 +109,37 @@
 				{/each}
 			</tbody>
 		</table>
-		{#if driveRms.length}
-			<table>
-				<thead><tr><th>Drive</th><th class="r">V rms</th></tr></thead>
-				<tbody>
-					{#each views.driveLabels as d, k (k)}
-						<tr><td>{d}</td><td class="r num">{driveRms[k] === undefined ? '-' : formatFixed(driveRms[k], 3)}</td></tr>
-					{/each}
-				</tbody>
-			</table>
-		{/if}
 	</aside>
 </div>
 
 <style>
 	.geo {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 300px;
-		gap: var(--sp-3);
+		grid-template-columns: minmax(0, 1fr) 240px;
+		gap: var(--sp-2);
 		height: 100%;
 		min-height: 0;
+		container-type: inline-size;
 	}
 
 	.scene {
-		min-height: 360px;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	/* A narrow panel keeps the view and lists the controls under it. */
+	@container (max-width: 560px) {
+		.geo {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-rows: minmax(0, 1fr) minmax(0, 34%);
+		}
 	}
 
 	.waiting {
 		display: grid;
 		place-items: center;
 		height: 100%;
-		min-height: 300px;
-		padding: var(--sp-6);
+		padding: var(--sp-4);
 		color: var(--text-3);
 		font-size: var(--text-sm);
 		text-align: center;
@@ -180,22 +176,8 @@
 	}
 
 	.list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--sp-3);
 		min-height: 0;
-		padding: var(--sp-3);
 		overflow-y: auto;
-		background: var(--bg-1);
-		border: 1px solid var(--line-1);
-		border-radius: var(--radius-lg);
-	}
-
-	.motion {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		font-size: var(--text-sm);
 	}
 
 	table {

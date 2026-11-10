@@ -21,8 +21,9 @@
 // 6. The summary lists nothing missing; Proceed to Run applies; Start runs the noise floor and
 //    identification; the Predict page comes forward with the gates, each drive against its
 //    ceiling and each control's error; Predict Again; Engage; the run reaches the ladder.
-// 7. The Run step hosts the run view: each of its four pages during the run (error heatmap,
-//    matrix grid, drive and plant, geometry), a page opened in a window of its own, then the
+// 7. The Run step hosts the run view on the test screen's frame: each of its four first pages
+//    during the run (error heatmap, matrix grid, drive and plant, geometry), chosen from the page
+//    tabs under the plots, a page opened in a window of its own from the page menu, then the
 //    shell's dark theme over the run pages, the Predict page and every setup section; Stop.
 //
 // Screenshots (1,440 by 900): every section and the predict page, `<prefix>_<name>.png`; the run
@@ -130,6 +131,14 @@ async function section(page, id) {
 	if (!(await tid(page, `tab-${id}`).isVisible())) await tid(page, 'flow-setup').click();
 	await tid(page, `tab-${id}`).click();
 	await page.locator('#mm-panel').evaluate((el) => el.scrollTo({ top: 0 }));
+}
+
+/** The page a window shows, by its tab under the plots. */
+const pageName = async (page) => (await page.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+/** A run page by its name, from the page tabs under the plots. */
+async function showPage(page, name) {
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await pageName(p)) === name);
 }
 
 /** The reference the service last built, settled (not building, current with the edits). */
@@ -334,24 +343,25 @@ try {
 
 	// ---- The run view's pages during the run ------------------------------------------------------
 	const PAGES = [
-		['mp-1', 'heatmap', '[data-testid="heatmap-canvas"]'],
-		['mp-2', 'grid', 'canvas'],
-		['mp-3', 'plant', 'canvas, svg'],
-		['mp-4', 'geometry', '[data-testid="mimo-geometry-page"]']
+		['Error Heatmap', 'heatmap', '[data-testid="heatmap-canvas"]'],
+		['Matrix Grid', 'grid', '[data-testid="mimo-grid"] canvas'],
+		['Drive and Plant', 'plant', '[data-quantity="drive_psd"] canvas, [data-quantity="drive_psd"] svg'],
+		['Geometry', 'geometry', '[data-testid="mimo-geometry"]']
 	];
 	const runPages = async (prefix) => {
-		for (const [id, kind, drawn] of PAGES) {
-			await tid(a, 'mimo-page-select').selectOption(id);
-			await until(a, `the ${kind} page`, async (p) => (await p.locator('[data-testid="mimo-run-view"]').locator(drawn).count()) > 0, 20_000);
+		for (const [name, kind, drawn] of PAGES) {
+			await showPage(a, name);
+			await until(a, `the ${kind} page`, async (p) => (await p.locator('[data-testid="mimo-page-view"]').locator(drawn).count()) > 0, 20_000);
 			await a.waitForTimeout(2500);
-			const err = await tid(a, 'mimo-display-error').isVisible().catch(() => false);
-			check(`the run view's ${kind} page draws during the run${prefix ? ' (dark)' : ''}`, !err, err ? await text(a, 'mimo-display-error') : '');
+			const err = await tid(a, 'display-error').isVisible().catch(() => false);
+			check(`the run view's ${kind} page draws during the run${prefix ? ' (dark)' : ''}`, !err, err ? await text(a, 'display-error') : '');
 			await shot(a, `${prefix}run_${kind}`);
 		}
 	};
 	await runPages('');
 	// A page in a window of its own, for another monitor: the same run, observed.
-	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'mimo-page-popout').click()]);
+	await tid(a, 'page-menu').click();
+	const [win] = await Promise.all([ctx.waitForEvent('page'), tid(a, 'page-popout').click()]);
 	await win.setViewportSize({ width: 1280, height: 820 });
 	await until(win, 'the display window', async (p) => (await tid(p, 'mimo-run-view').isVisible()) && (await attr(p, 'mimo-run-view', 'data-phase')) !== '', 30_000);
 	check('a page opens in a window of its own showing the MIMO run', (await text(win, 'display-window-page')).length > 0, `${await text(win, 'display-window-page')}, ${await attr(win, 'mimo-run-view', 'data-phase')}`);

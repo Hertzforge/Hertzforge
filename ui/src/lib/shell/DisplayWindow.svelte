@@ -7,7 +7,6 @@
 	 */
 	import { onMount } from 'svelte';
 	import '$lib/acquire/acquire.css';
-	import RunBar from '$lib/acquire/RunBar.svelte';
 	import RunView from '$lib/acquire/RunView.svelte';
 	import StationPanel from '$lib/acquire/StationPanel.svelte';
 	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
@@ -44,15 +43,14 @@
 	const twr = $derived(app.twr);
 	const explorer = $derived(app.explorer);
 	const recorder = $derived(app.recorder);
-	const views = $derived(app.mimoViews);
 	const acq = $derived(app.acquire);
 	const display = $derived(app.display);
 	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : 'Random');
 	/** The test types on the test screen's frame: one header line, and their run's own dock. */
-	const framed = $derived(sineRun || shockRun || srsRun || twrRun || explorerRun || recorderRun);
-	const framedHost = $derived(shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : sine);
-	const framedScreen = $derived(shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : recorderRun ? app.recorderViews : app.sineViews);
-	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
+	const framed = $derived(mimoRun || sineRun || shockRun || srsRun || twrRun || explorerRun || recorderRun);
+	const framedHost = $derived(mimoRun ? mimo : shockRun ? shock : srsRun ? srs : twrRun ? twr : explorerRun ? explorer : recorderRun ? recorder : sine);
+	const framedScreen = $derived(mimoRun ? app.mimoViews : shockRun ? app.shockViews : srsRun ? app.srsViews : twrRun ? app.twrViews : explorerRun ? app.explorerViews : recorderRun ? app.recorderViews : app.sineViews);
+	const pageName = $derived(mimoRun ? app.mimoViews.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
 	const themeLabel = $derived(theme.pref === 'system' ? 'System' : theme.pref === 'dark' ? 'Dark' : 'Light');
@@ -134,14 +132,12 @@
 		<ScreenHeader {acq} name="Random" {abortKeys} compact ends={acq.isLive && !display.cardInView('run')} />
 	{:else if framed}
 		<ScreenHeader acq={framedHost} name={testName} {abortKeys} compact ends={framedHost.isLive && !framedScreen.cardInView('run')} />
-	{:else}
-		<div class="top">
-			<RunBar acq={mimo} onoverride={() => {}} {abortKeys} compact />
-		</div>
 	{/if}
 	<div class="body" class:screen={randomRun || framed}>
 		{#if mimoRun}
-			<MimoRunView {views} compact onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []} />
+			<MimoRunView {mimo} screen={app.mimoViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</MimoRunView>
 		{:else if shockRun}
 			<ShockRunView {shock} views={app.shockViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'shock')}>
 				{#snippet station()}<StationPanel {acq} />{/snippet}
@@ -216,10 +212,6 @@
 		display: flex;
 		align-items: center;
 		gap: var(--sp-2);
-	}
-
-	.top {
-		padding: var(--sp-2) var(--sp-3) 0;
 	}
 
 	.body {
