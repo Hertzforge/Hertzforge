@@ -302,7 +302,10 @@
 				if (n[i + k] > hi[k]) hi[k] = n[i + k];
 			}
 		}
-		return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1;
+		// no nodes (only bodies drawn) gives an infinite diagonal, and Infinity × 0 a NaN
+		// that puts every point nowhere
+		const across = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+		return Number.isFinite(across) && across > 0 ? across : 1;
 	});
 
 	const peak = $derived(amplitude * AMP_UNIT * diagonal);
@@ -578,7 +581,13 @@
 		// (a coordinate system's axes filled in as a gray wedge)
 		geometry.setIndex(new BufferAttribute(view.triangles ?? new Uint32Array(0), 1));
 		geometry.computeBoundingSphere();
-		const sphere = geometry.boundingSphere!;
+		const sphere = geometry.boundingSphere!.clone();
+		if (view.bodies && view.bodies.nodes.length) {
+			// bodies drawn in their own color (a solid being edited) are framed too, alone or not
+			const bodyBox = new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3));
+			const box = view.nodes.length ? new Box3().setFromBufferAttribute(position).union(bodyBox) : bodyBox;
+			box.getBoundingSphere(sphere);
+		}
 		centre.copy(sphere.center);
 		const radius = Math.max(sphere.radius, 1e-6);
 		homeDistance = (radius / Math.sin((camera.fov * Math.PI) / 360)) * 0.82;
@@ -755,6 +764,13 @@
 			camera.position.fromArray(pose.position);
 			camera.up.fromArray(pose.up);
 			controls.target.fromArray(pose.target);
+			// the camera kept from the last view may stand farther off than this one's own
+			// depth reaches: the model must not fall past the far plane
+			const reach = camera.position.distanceTo(centre) + Math.max(sphere.radius, 1e-6);
+			if (reach * 2 > camera.far) {
+				camera.far = reach * 2;
+				camera.updateProjectionMatrix();
+			}
 			controls.update();
 		} else resetView();
 		buildGizmo();

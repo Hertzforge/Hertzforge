@@ -315,7 +315,9 @@ class Connection:
             return await call(projects.children, self.project, params)
         if method == 'project.actions':
             _only(params, ('objects', 'records', 'part'), method)
-            return await call(projects.actions, self.project, params)
+            # an Edit row's values are filled in the display units
+            return await call(display_units.running_in, self.units, projects.actions,
+                              self.project, params)
         if method == 'project.show':
             _only(params, ('objects', 'records', 'part', 'prefs'), method)
             shown = await call(display_units.running_in, self.units, projects.show, self.project,

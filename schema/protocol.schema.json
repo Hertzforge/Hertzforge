@@ -581,6 +581,8 @@
         "fill": {"type": "object", "additionalProperties": {"type": "string"}},
         "candidates": {"type": "array", "items": {"type": "string"}},
         "part": {"const": true},
+        "instant": {"const": true},
+        "live": {"const": true},
         "formats": {"type": "array", "items": {
           "type": "object", "required": ["value", "label", "suffix"], "additionalProperties": false,
           "properties": {"value": {"type": "string"}, "label": {"type": "string"}, "suffix": {"type": "string"}}

@@ -245,7 +245,8 @@ def test_solids_picked_together_combine(validate):
     one, together = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': 1},
                           validate=validate)
     assert one['parts'] == ['solid'] and 'Combine' not in verbs_in(one)
-    assert row(one, 'Edit Solid')['fill']['solid'] == '1'
+    # a block is edited in its own Add form, which takes the place of Edit Solid
+    assert row(one, 'Edit')['fill']['solid'] == '1' and 'Edit Solid' not in verbs_in(one)
     # Mesh on the Solids row meshes every part; on solids picked, those
     assert row(one, 'Mesh')['fill']['solids'] == '1' and 'geometry' in row(one, 'Mesh')['modules']
     assert row(together, 'Combine')['candidates'] == ['2', '3']

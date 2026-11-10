@@ -49,6 +49,9 @@ ANGLES = tuple(_angle(axis) for axis in 'xyz')
 WIDTHS = tuple(_length(f'width_{axis}', f'Width along {axis.upper()}', 1.0, 0.0)
                for axis in 'xyz')
 CORNER = _length('corner', 'Corner radius', 0.0, 0.0)
+#: on each shape's Add: 0 adds one; a solid's id changes that solid instead, the form
+#: its Edit (Brandon, 2026-11-10: adding and editing a solid are one form)
+SOLID_ID = Param('solid', 'Solid (0: a new one)', 'integer', default=0, min=0, step=1)
 
 
 def _section_shapes() -> tuple[Option, ...]:
@@ -203,14 +206,19 @@ def _solids_table(name: str, geometry: Any) -> dict:
                                          'Angles', 'Operation'], rows)
 
 
-def _drawn(title: str, geometry: Any, defined: bool | None = None
-           ) -> tuple[dict, list[dict]]:
+#: the color a solid being added, edited or picked is drawn in
+HIGHLIGHT = (88, 166, 255)
+
+
+def _drawn(title: str, geometry: Any, defined: bool | None = None,
+           highlight: Any = ()) -> tuple[dict, list[dict]]:
     """The geometry as a `shape3d`: its elements as `view_geometry` draws
     them, and each part's surface as the kernel tessellates it
     (`solids.shape_triangles`). A part the
     kernel cannot make is left out and said in a row. `defined` says
     whether its lengths are meters, when it is a mesh not yet joined to
-    the geometry it was made from."""
+    the geometry it was made from. The parts in `highlight`, or the parts
+    holding those solids, are drawn in their own color (`bodies`)."""
     from hertzforge.core import solids
 
     used, triangles, lines = drawn_mesh(geometry)
@@ -218,11 +226,16 @@ def _drawn(title: str, geometry: Any, defined: bool | None = None
     faces = [triangles.reshape(-1, 3)]
     start = len(used)
     notes = []
+    lit = _parts_holding(geometry, highlight)
+    shown: list[np.ndarray] = []
     for item in solids.top_level(geometry):
         try:
             soup = solids.shape_triangles(solids.shape(geometry, item.id))
         except ValueError as error:
             notes.append(v.row(_label(item), f'not drawn: {error}', None, 'warn'))
+            continue
+        if item.id in lit:
+            shown.append(soup.reshape(-1, 3))
             continue
         count = 3 * len(soup)
         nodes.append(soup.reshape(-1, 3))
@@ -231,13 +244,37 @@ def _drawn(title: str, geometry: Any, defined: bool | None = None
     defined = geometry.units_defined if defined is None else defined
     view = v.shape3d(title, 'm' if defined else 'undefined',
                      np.concatenate(nodes), [], triangles=np.concatenate(faces), lines=lines)
+    if shown:
+        corners = np.concatenate(shown).astype(np.float32)
+        view['bodies'] = {
+            'nodes': corners, 'triangles': np.arange(len(corners), dtype=np.uint32).reshape(-1, 3),
+            'colors': np.tile(np.asarray(HIGHLIGHT, dtype=np.uint8), (len(corners), 1)),
+            'follow': np.zeros(len(corners), dtype=np.uint32)}
     return view, notes
 
 
-def _result(name: str, geometry: Any, title: str, rows: list[dict]) -> list[dict]:
+def _parts_holding(geometry: Any, ids: Any) -> set[int]:
+    """The standing parts these solids are, or are inside of."""
+    from hertzforge.core import solids
+
+    within = solids.used_by(geometry)
+    held = set()
+    for solid_id in ids:
+        solid_id = int(solid_id)
+        while solid_id in within:
+            solid_id = within[solid_id]
+        held.add(solid_id)
+    return held
+
+
+def _result(name: str, geometry: Any, title: str, rows: list[dict],
+            picked: list[int] | None = None) -> list[dict]:
     """What a solids operation answers with: what it did, the geometry
-    drawn, and its solids table."""
-    view, notes = _drawn(name, geometry)
+    drawn, and its solids table. The solids `picked` (one added or edited)
+    are highlighted and carry the gimbal."""
+    view, notes = _drawn(name, geometry, highlight=picked or ())
+    if picked:
+        view['gizmo'] = _solids_gizmo(name, geometry, picked)
     return [v.reading(title, rows + notes), view, _solids_table(name, geometry)]
 
 
@@ -272,7 +309,7 @@ def part_solids(name: str, geometry: Any, ids: list[int] | None = None) -> list[
     drawn with the mesh, before it is meshed too, and the solids table with their ids
     (Brandon, 2026-11-10). Solids picked (`ids`) carry the gimbal, whose drag runs
     Move Part on them. A part the kernel cannot make is said above them."""
-    view, notes = _drawn(name, geometry)
+    view, notes = _drawn(name, geometry, highlight=ids or ())
     if ids:
         view['gizmo'] = _solids_gizmo(name, geometry, ids)
     return [*([v.reading(f'Solids of {name}', notes)] if notes else []), view,
@@ -295,12 +332,131 @@ def _angles(params: dict[str, Any], prefix: str = 'angle') -> tuple[float, float
     return tuple(params[f'{prefix}_{axis}'] for axis in 'xyz')
 
 
-def _add(project: Any, params: dict[str, Any], make: Callable[[str], int]) -> list[dict]:
+#: each shape's Add by the kind of solid it makes; on a solid of that kind picked in the
+#: tree it is its Edit, the same form with the solid's own values
+ADD_OF_KIND = {'block': 'project.add_solid_block', 'cylinder': 'project.add_solid_cylinder',
+               'cone': 'project.add_solid_cone', 'sphere': 'project.add_solid_sphere',
+               'plate': 'project.add_solid_plate', 'disk': 'project.add_solid_disk',
+               **{shape: 'project.add_solid_section' for shape in SECTION_DEFAULTS}}
+
+
+def _recipe(kind: str, params: dict[str, Any]) -> dict[str, Any]:
+    """What an Add form's values set on a solid of `kind`, as `Project.edit_solid` takes them."""
+    from hertzforge.core.solids import SECTIONS
+
+    out: dict[str, Any] = {'center': _center(params)}
+    if kind != 'sphere':
+        out['angles'] = _angles(params)
+    if kind == 'block':
+        out['widths'] = [params[f'width_{a}'] for a in 'xyz']
+        out['corner'] = params['corner']
+    elif kind == 'plate':
+        out['widths'] = [params['width_x'], params['width_y']]
+    if kind in ('cylinder', 'cone', 'sphere', 'disk'):
+        out['radius'] = params['radius']
+    if kind == 'cylinder':
+        out['length'] = params['length']
+    elif kind == 'cone':
+        out['top_radius'] = params['top_radius']
+        out['length'] = params['height']
+    elif kind in SECTIONS:
+        out['length'] = params['length']
+        if params['dimensions'].strip():
+            out['dimensions'] = _numbers(params['dimensions'], 'the dimensions')
+    if params['name'].strip():
+        out['name'] = params['name'].strip()
+    return out
+
+
+def solid_fill(item: Any, scale: float) -> dict[str, str]:
+    """An Add form's values for the solid `item`, its Edit: lengths times `scale`, which
+    takes meters into the units the form is typed in."""
+    from hertzforge.core.solids import SECTIONS
+
+    def length(value: float) -> str:
+        return f'{value * scale:.6g}'
+
+    fill = {'solid': str(int(item.id)), 'name': item.name}
+    fill.update({axis: length(c) for axis, c in zip('xyz', item.center, strict=True)})
+    if item.kind != 'sphere':
+        fill.update({f'angle_{axis}': f'{a:.6g}' for axis, a in zip('xyz', item.angles, strict=True)})
+    if item.kind in ('block', 'plate'):
+        fill.update({f'width_{axis}': length(w) for axis, w in zip('xyz', item.widths, strict=False)
+                     if item.kind == 'block' or axis != 'z'})
+    if item.kind == 'block':
+        fill['corner'] = length(item.corner)
+    if item.kind in ('cylinder', 'cone', 'sphere', 'disk'):
+        fill['radius'] = length(item.radius)
+    if item.kind == 'cylinder':
+        fill['length'] = length(item.length)
+    elif item.kind == 'cone':
+        fill['top_radius'] = length(item.dimensions[0] if item.dimensions else 0.0)
+        fill['height'] = length(item.length)
+    elif item.kind in SECTIONS:
+        fill['shape'] = item.kind
+        fill['length'] = length(item.length)
+        fill['dimensions'] = ', '.join(length(d) for d in item.dimensions)
+    return fill
+
+
+def _solid_values(item: Any) -> dict[str, Any]:
+    """A solid's values under the names `_recipe` gives them."""
+    held: dict[str, Any] = {'center': item.center, 'angles': item.angles, 'name': item.name,
+                            'radius': item.radius, 'length': item.length, 'corner': item.corner,
+                            'dimensions': item.dimensions}
+    held['widths'] = item.widths[:2] if item.kind == 'plate' else item.widths
+    if item.kind == 'cone':
+        held['top_radius'] = item.dimensions[0] if item.dimensions else 0.0
+    return held
+
+
+def _same(value: Any, held: Any) -> bool:
+    """Whether a form's value is the solid's, to the six figures the form shows it in."""
+    if held is None:
+        return False
+    if isinstance(value, str) or isinstance(held, str):
+        return value == held
+    a, b = np.ravel(np.asarray(value, dtype=float)), np.ravel(np.asarray(held, dtype=float))
+    return a.shape == b.shape and bool(np.allclose(a, b, rtol=1e-5, atol=1e-12))
+
+
+def _edited(project: Any, name: str, geometry: Any, params: dict[str, Any],
+            kind: str) -> list[dict]:
+    """An Add form run on a solid already made (`solid`): that solid set to the form's
+    values, highlighted, with the gimbal on it."""
+    from hertzforge.core import solids
+
+    solid_id = int(params['solid'])
+    try:
+        item = solids.solid(geometry, solid_id)
+    except KeyError:
+        raise refused(f'{name} has no solid {solid_id}') from None
+    if item.kind != kind:
+        raise refused(f'solid {solid_id} is a {item.kind}, not a {kind}: add a new one')
+    # only what differs from the solid: a form shows a value to six figures, so the
+    # fields not touched come back a hair off and must not move it
+    now = _solid_values(item)
+    changes = {key: value for key, value in _recipe(kind, params).items()
+               if not _same(value, now.get(key))}
+    if changes:
+        _call(lambda: project.edit_solid(name, solid_id, **changes))
+    rows = [v.row('Changed' if changes else 'Unchanged',
+                  f'{_label(solids.solid(geometry, solid_id))}, solid {solid_id}', None,
+                  'pass' if changes else 'info')]
+    if geometry.num_nodes:
+        rows.append(v.row('Mesh', 'Mesh Solids again to mesh the change', None, 'info'))
+    return _result(name, geometry, f'Edited {name}', rows, [solid_id])
+
+
+def _add(project: Any, params: dict[str, Any], make: Callable[[str], int],
+         kind: str = '') -> list[dict]:
     """Add the solid `make` makes in the picked geometry, and say it: what it is, and
-    its volume, or a flat one's area."""
+    its volume, or a flat one's area. With `solid` set, change that solid instead."""
     from hertzforge.core import solids
 
     name, geometry = _geometry(project, params)
+    if params.get('solid'):
+        return _edited(project, name, geometry, params, kind)
     new = _call(lambda: make(name))
     item = solids.solid(geometry, new)
     rows = [v.row('Added', f'{_label(item)}, solid {new}', None, 'pass')]
@@ -316,7 +472,7 @@ def _add(project: Any, params: dict[str, Any], make: Callable[[str], int]) -> li
     except ValueError as error:
         rows.append(v.row('Volume', f'not read: {error}', None, 'warn'))
     rows.append(_parts_row(geometry))
-    return _result(name, geometry, f'Added to {name}', rows)
+    return _result(name, geometry, f'Added to {name}', rows, [new])
 
 
 def add_solid_block(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -324,7 +480,7 @@ def add_solid_block(project: Any, params: dict[str, Any]) -> list[dict]:
     centered and turned (`Project.add_solid_block`)."""
     return _add(project, params, lambda name: project.add_solid_block(
         name, _center(params), [params[f'width_{a}'] for a in 'xyz'], _angles(params),
-        params['name'], corner=params['corner']))
+        params['name'], corner=params['corner']), 'block')
 
 
 def add_solid_cylinder(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -332,7 +488,7 @@ def add_solid_cylinder(project: Any, params: dict[str, Any]) -> list[dict]:
     (`Project.add_solid_cylinder`)."""
     return _add(project, params, lambda name: project.add_solid_cylinder(
         name, _center(params), params['radius'], params['length'], _angles(params),
-        params['name']))
+        params['name']), 'cylinder')
 
 
 def add_solid_cone(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -340,14 +496,14 @@ def add_solid_cone(project: Any, params: dict[str, Any]) -> list[dict]:
     base below (`Project.add_solid_cone`)."""
     return _add(project, params, lambda name: project.add_solid_cone(
         name, _center(params), params['radius'], params['top_radius'], params['height'],
-        _angles(params), params['name']))
+        _angles(params), params['name']), 'cone')
 
 
 def add_solid_sphere(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_solid_sphere`: a sphere about its center
     (`Project.add_solid_sphere`)."""
     return _add(project, params, lambda name: project.add_solid_sphere(
-        name, _center(params), params['radius'], params['name']))
+        name, _center(params), params['radius'], params['name']), 'sphere')
 
 
 def add_solid_section(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -366,7 +522,7 @@ def add_solid_section(project: Any, params: dict[str, Any]) -> list[dict]:
                       f'{", ".join(SECTIONS[shape])}: {len(SECTIONS[shape])} numbers')
     return _add(project, params, lambda name: project.add_solid_section(
         name, shape, _center(params), dimensions, params['length'], _angles(params),
-        params['name']))
+        params['name']), shape)
 
 
 def add_solid_plate(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -374,14 +530,14 @@ def add_solid_plate(project: Any, params: dict[str, Any]) -> list[dict]:
     meshed later into shells (`Project.add_solid_plate`)."""
     return _add(project, params, lambda name: project.add_solid_plate(
         name, _center(params), (params['width_x'], params['width_y']), _angles(params),
-        params['name']))
+        params['name']), 'plate')
 
 
 def add_solid_disk(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_solid_disk`: a flat circle in its own XY plane,
     meshed later into shells (`Project.add_solid_disk`)."""
     return _add(project, params, lambda name: project.add_solid_disk(
-        name, _center(params), params['radius'], _angles(params), params['name']))
+        name, _center(params), params['radius'], _angles(params), params['name']), 'disk')
 
 
 def add_solid_hole(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -1152,26 +1308,26 @@ OPERATIONS = (
         id='project.add_solid_block', title='Add Block', workspace='geometry',
         summary='A block, its widths along its own axes, centered and turned; a corner radius '
                 'rounds its four edges along its own Z.',
-        params=(GEOMETRY, *CENTER, *WIDTHS, *ANGLES, CORNER, NAME),
+        params=(GEOMETRY, SOLID_ID, *CENTER, *WIDTHS, *ANGLES, CORNER, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_block, edits=True, previews=True),
     Operation(
         id='project.add_solid_cylinder', title='Add Cylinder', workspace='geometry',
         summary='A cylinder of a radius about its own Z and a length along it, centered and '
                 'turned; subtracted from a part it makes a hole.',
-        params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.25, 0.0),
+        params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Radius', 0.25, 0.0),
                 _length('length', 'Length', 1.0, 0.0), *ANGLES, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_cylinder, edits=True, previews=True),
     Operation(
         id='project.add_solid_cone', title='Add Cone', workspace='geometry',
         summary='A cone or frustum along its own Z, a radius at its base and its top (either '
                 'zero for a point), centered and turned.',
-        params=(GEOMETRY, *CENTER, _length('radius', 'Base radius', 0.5, 0.0),
+        params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Base radius', 0.5, 0.0),
                 _length('top_radius', 'Top radius', 0.25, 0.0),
                 _length('height', 'Height', 1.0, 0.0), *ANGLES, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_cone, edits=True, previews=True),
     Operation(
         id='project.add_solid_sphere', title='Add Sphere', workspace='geometry', summary='A sphere of a radius about its center.',
-        params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.5, 0.0), NAME),
+        params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Radius', 0.5, 0.0), NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_sphere, edits=True, previews=True),
     Operation(
         id='project.add_solid_section', title='Add Section', workspace='geometry',
@@ -1179,7 +1335,7 @@ OPERATIONS = (
                 'channel depth, flange width, flange thickness, web thickness; tee the same; '
                 'angle long leg, short leg, thickness; rectangular tube width, height, wall; '
                 'round tube outer diameter, wall. Empty for the shape\'s opening ones.',
-        params=(GEOMETRY, Param('shape', 'Shape', 'enum', default='I-beam',
+        params=(GEOMETRY, SOLID_ID, Param('shape', 'Shape', 'enum', default='I-beam',
                                 options=_section_shapes()),
                 Param('dimensions', 'Dimensions [m], in order', 'string', default='',
                       length=True),
@@ -1189,13 +1345,13 @@ OPERATIONS = (
         id='project.add_solid_plate', title='Add Plate', workspace='geometry',
         summary='A flat rectangle in its own XY plane, centered and turned; it is meshed '
                 'into shells, whose element group takes the thickness.',
-        params=(GEOMETRY, *CENTER, *WIDTHS[:2], *ANGLES, NAME),
+        params=(GEOMETRY, SOLID_ID, *CENTER, *WIDTHS[:2], *ANGLES, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_plate, edits=True, previews=True),
     Operation(
         id='project.add_solid_disk', title='Add Disk', workspace='geometry',
         summary='A flat circle in its own XY plane, centered and turned; it is meshed into '
                 'shells, whose element group takes the thickness.',
-        params=(GEOMETRY, *CENTER, _length('radius', 'Radius', 0.5, 0.0), *ANGLES, NAME),
+        params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Radius', 0.5, 0.0), *ANGLES, NAME),
         outputs=('reading', 'shape3d', 'table'), run=add_solid_disk, edits=True, previews=True),
     Operation(
         id='project.add_solid_hole', title='Add Hole', workspace='geometry',

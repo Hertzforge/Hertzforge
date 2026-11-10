@@ -519,7 +519,9 @@ def test_the_solids_row_or_a_solid_shows_the_solids(validate):
         views = show.show(project, ['Geometry'], {}, part)['views']
         wire_views(views, validate)
         drawn, table = views
-        assert len(drawn['triangles']) == 12, 'the block drawn before it is meshed'
+        # the block drawn before it is meshed: lit in the bodies when it is the one picked
+        lit = part['kind'] == 'solid'
+        assert len(drawn['bodies']['triangles'] if lit else drawn['triangles']) == 12
         assert table['title'] == 'Solids of Geometry' and table['rows'][0][0] == '1'
         # a solid picked carries the gimbal, whose drag moves it; the row as a whole does not
         assert ('gizmo' in drawn) is (part['kind'] == 'solid')

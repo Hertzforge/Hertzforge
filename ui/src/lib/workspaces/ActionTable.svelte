@@ -39,6 +39,8 @@
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 	const part = $derived(p.selection.part);
+	/** The form applies as it goes (a solid's Edit): no Run. */
+	const liveForm = $derived(!!a.formRow?.live);
 	const partIds = $derived(part ? (part.ids ?? [part.id]) : []);
 
 	function findSolid(rows: SolidRow[], id: string | number): SolidRow | undefined {
@@ -192,17 +194,21 @@
 		<section class="pane form" aria-labelledby="op-title">
 			<div class="phead">
 				<button class="btn ghost icon sm" data-testid="form-back" aria-label="Back to the table" title="Back to the table" onclick={() => a.closeForm()}><Icon name="chevron" size={13} /></button>
-				<h2 id="op-title">{a.op.title}</h2>
+				<h2 id="op-title">{a.formTitle}</h2>
 				<button class="btn ghost sm" onclick={() => a.resetParams()} title="Reset every field to its default">Defaults</button>
 			</div>
 			{#if a.op.summary}<p class="psum">{a.op.summary}</p>{/if}
-			<ParamForm params={a.formParams} bind:values={a.values[a.op.id]} showAllErrors={a.triedRun} idPrefix={a.op.id.replace('.', '-')} />
+			<ParamForm params={a.formParams} bind:values={a.values[a.op.id]} showAllErrors={a.triedRun} idPrefix={a.op.id.replace('.', '-')} oncommit={liveForm ? () => a.applyLive() : undefined} />
+			{#if liveForm}
+				<p class="muted live" data-testid="form-live">Each change applies when you leave its field, or let go of the gimbal.</p>
+			{:else}
 			<div class="runrow">
 				<button class="btn primary run" data-testid="run-op" onclick={() => a.run()} disabled={a.running || !app.analysis.isOpen}>
 					{#if a.running}Running{:else}<Icon name="play" size={13} /> Run{/if}
 				</button>
 				<span class="keys"><kbd>{isMac ? 'Cmd' : 'Ctrl'}</kbd><kbd>Enter</kbd></span>
 			</div>
+			{/if}
 			{#if a.runError}<p class="error" role="alert">{a.runError}</p>{/if}
 		</section>
 	{:else if current}

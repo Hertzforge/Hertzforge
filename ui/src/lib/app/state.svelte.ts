@@ -149,10 +149,16 @@ class AnalyzeState {
 	}
 
 	/** What the form asks: not the objects the selection already filled, and of a format only those the object can be written in. */
+	/** The open form's name: a solid's Add, opened on a solid already made, is its Edit. */
+	get formTitle(): string {
+		const title = this.op?.title ?? '';
+		return this.formRow?.live ? title.replace(/^Add /, 'Edit ') : title;
+	}
+
 	get formParams(): ParamDescriptor[] {
 		const row = this.formRow;
 		return this.params
-			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill))
+			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid'))
 			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
 
@@ -301,6 +307,10 @@ class AnalyzeState {
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
+		if (row.instant) {
+			await this.addThenEdit(row);
+			return;
+		}
 		if (!column.current && column.parts) {
 			const part = column.parts[column.parts.length - 1];
 			const picked = this.app.project.selection.part;
@@ -338,7 +348,8 @@ class AnalyzeState {
 		if (!op) return;
 		const filled = new Set(Object.keys(row.fill ?? {}));
 		const asks = this.paramsOf(op).filter((p) => !p.in_view && !filled.has(p.name));
-		if (asks.length) this.formOpen = true;
+		// a form that applies as it goes is filled in full and opens all the same
+		if (asks.length || row.live) this.formOpen = true;
 		else await this.run();
 	}
 
@@ -363,6 +374,40 @@ class AnalyzeState {
 		} catch (err) {
 			this.runError = message(err);
 		}
+	}
+
+	/**
+	 * A shape added at once with what its row is filled with, then picked in the tree with its
+	 * form open, which edits it from then on (Brandon, 2026-11-10: adding and editing are one).
+	 */
+	private async addThenEdit(row: ActionRow): Promise<void> {
+		const p = this.app.project;
+		const geometry = row.fill?.geometry;
+		if (!geometry) return;
+		const ids = (): number[] => {
+			const held = p.children[geometry];
+			return held?.kind === 'geometry' ? held.solids.map((s) => s.id) : [];
+		};
+		const before = new Set(ids());
+		this.runError = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: row.id, params: row.fill ?? {} }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) p.apply(res.project);
+			await p.loadChildren(geometry);
+		} catch (err) {
+			this.runError = message(err);
+			return;
+		}
+		const made = ids().find((id) => !before.has(id));
+		if (made === undefined) return;
+		this.joined = row.id;
+		p.clickPart(geometry, 'solid', made);
+	}
+
+	/** A form that applies as it goes (`live`): what it holds now is run, and it is filled again from what the change left. */
+	async applyLive(): Promise<void> {
+		await this.run();
+		await this.loadActions();
 	}
 
 	/** The object a combination needed was chosen: it joins the selection, and the row runs once the table has caught up. */
@@ -398,7 +443,8 @@ class AnalyzeState {
 		const values = { ...this.currentValues };
 		let changed = false;
 		for (const [key, text] of Object.entries(entry.fill)) {
-			const value = op.params.find((p) => p.name === key)?.type === 'integer' ? Number(text) : text;
+			const type = op.params.find((p) => p.name === key)?.type;
+			const value = type === 'integer' || type === 'number' ? Number(text) : text;
 			if (values[key] !== value) {
 				values[key] = value;
 				changed = true;
@@ -519,7 +565,7 @@ class AnalyzeState {
 			try {
 				const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params: values, preview: true });
 				if (seq !== this.previewSeq || this.opId !== op.id) return;
-				this.reading = { title: `${op.title}, preview`, views: res.views };
+				this.reading = { title: `${this.formTitle}, preview`, views: res.views };
 				this.previewDrawn = this.reading;
 				this.readingId = op.id;
 				this.runError = null;
@@ -540,6 +586,8 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
+			// a form that applies as it goes holds what the gimbal left
+			if (this.formRow?.live) void this.loadActions();
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
 			if (next?.view === 'shape3d' && next.pick && this.values[pick.op]) {
 				this.values = { ...this.values, [pick.op]: { ...this.values[pick.op], ...(next.pick.params as ParamValues) } };
@@ -630,7 +678,7 @@ class AnalyzeState {
 				this.app.project.clickObject(added[0], order);
 				this.closeForm();
 			} else if (res.views.length) {
-				this.reading = { title: op.title, views: res.views };
+				this.reading = { title: this.formTitle, views: res.views };
 				this.readingId = op.id;
 			} else {
 				this.closeForm();
@@ -643,7 +691,6 @@ class AnalyzeState {
 		}
 	}
 
-	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	/** A table folded to its header, or opened again. */
 	toggleFolded(key: string): void {
 		this.folded = this.folded.includes(key) ? this.folded.filter((k) => k !== key) : [...this.folded, key];
@@ -668,6 +715,7 @@ class AnalyzeState {
 		}
 	}
 
+	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {
 			const res = await this.app.analysis.request<OpResult>(
