@@ -307,8 +307,14 @@ class AnalyzeState {
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
-		if (row.instant) {
+		if (row.instant && row.part) {
 			await this.addThenEdit(row);
+			return;
+		}
+		if (row.instant) {
+			// made at once with its defaults; what it adds is picked in the tree
+			this.openRow(row);
+			await this.run();
 			return;
 		}
 		if (!column.current && column.parts) {

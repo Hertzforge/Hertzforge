@@ -285,21 +285,27 @@ def _parts_row(geometry: Any) -> dict:
 # ---- New Geometry and Solids ---------------------------------------------------
 
 GEOMETRY_NAME = Param('name', 'Name', 'string', default='Geometry')
-UNIT = Param('unit', 'Built in', 'enum', default='m', options=tuple(
-    Option(unit, label) for unit, label in (('m', 'm'), ('mm', 'mm'), ('in', 'in'),
-                                            ('ft', 'ft'))))
+UNIT = Param('unit', 'Length unit', 'enum', default='', options=tuple(
+    Option(unit, label) for unit, label in (('', 'The display units'), ('m', 'm'),
+                                            ('mm', 'mm'), ('in', 'in'), ('ft', 'ft'))))
 
 
 def new_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.new_geometry`: an empty geometry to build a part in from
-    solids (`Project.new_geometry`), recording the length unit it is built
-    in; its coordinates are held in SI either way."""
-    added = _call(lambda: project.new_geometry(params['name'].strip() or 'Geometry',
-                                               unit=params['unit']))
+    solids (`Project.new_geometry`), recording a length unit, the display
+    system's unless one is named; its coordinates are held in SI either way.
+    The app runs it at once, asking nothing (Brandon, 2026-11-10): a name is
+    changed in the tree."""
+    from .display_units import words_in
+
+    unit = params['unit'] or words_in('length')[0]
+    if unit not in ('m', 'mm', 'in', 'ft'):
+        unit = 'm'
+    added = _call(lambda: project.new_geometry(params['name'].strip() or 'Geometry', unit=unit))
     geometry = project[added]
     return [v.reading(f'New geometry {added}', [
         v.row('Added', added, None, 'pass'),
-        v.row('Built in', params['unit'], None, 'info'),
+        v.row('Length unit', unit, None, 'info'),
         v.row('Next', 'add a plate, a block or another solid to it', None, 'info')]),
         _solids_table(added, geometry)]
 
@@ -1296,8 +1302,8 @@ def set_view(project: Any, params: dict[str, Any]) -> list[dict]:
 OPERATIONS = (
     Operation(
         id='project.new_geometry', title='New Geometry', workspace='geometry',
-        summary='An empty geometry to build a part in from solids, recording the length '
-                'unit it is built in.',
+        summary='An empty geometry to build a part in from solids, in the display units '
+                'unless a length unit is named.',
         params=(GEOMETRY_NAME, UNIT), outputs=('reading', 'table'), run=new_geometry),
     Operation(
         id='project.solids', title='Solids', workspace='geometry',
