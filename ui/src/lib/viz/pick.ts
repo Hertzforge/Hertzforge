@@ -117,6 +117,11 @@ const METERS: Record<string, number> = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, 
  * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
  * whose numbers have no unit to round in.
  */
+/** The gimbal's colors, X red, Y green and Z blue (three's TransformControls): the corner
+ * axes and a coordinate system's arrows wear them too, so all three read alike. */
+export const AXIS_COLORS = [0xff0000, 0x00ff00, 0x0000ff] as const;
+export const AXIS_HEX = AXIS_COLORS.map((c) => `#${c.toString(16).padStart(6, '0')}`);
+
 /** What a gimbal drag has done so far, for the bar under the view: the amount along or about one axis. */
 export function gizmoReading(mode: 'translate' | 'rotate', axis: string, amount: number, unit: string): string {
 	const about = axis.toUpperCase();

@@ -63,29 +63,47 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
     nodes = xyz
     lines = used[lines].reshape(-1, 2)
+    triangles = used[triangles].reshape(-1, 3)
     if extra_nodes is not None and len(extra_nodes):
         nodes = np.vstack([xyz, np.asarray(extra_nodes, dtype=float).reshape(-1, 3)])
         lines = np.vstack([lines, np.asarray(extra_lines, dtype=np.int64).reshape(-1, 2)
                            + len(xyz)])
+    # the solids not meshed yet, after every node so a node's row stays its own: the model
+    # looks the same whatever part of it is picked (Brandon, 2026-11-10)
+    soup = _solid_surfaces(geometry)
+    if len(soup):
+        triangles = np.vstack([triangles, len(nodes) + np.arange(len(soup)).reshape(-1, 3)])
+        nodes = np.vstack([nodes, soup])
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
-                     triangles=used[triangles], lines=lines)
+                     triangles=triangles, lines=lines)
 
 
-def _triads(geometry: Any) -> tuple[np.ndarray, np.ndarray]:
-    """Each coordinate system's three axes from its origin, as extra
-    nodes and lines: what the view's triad shows of a system."""
+def _solid_surfaces(geometry: Any) -> np.ndarray:
+    """The corners of the triangles of every standing solid's surface, three to a triangle;
+    a solid the kernel cannot make is left out."""
+    from hertzforge.core import solids
+
+    soups = []
+    for item in solids.top_level(geometry):
+        try:
+            soups.append(solids.shape_triangles(solids.shape(geometry, item.id)).reshape(-1, 3))
+        except ValueError:
+            continue
+    return np.concatenate(soups) if soups else np.empty((0, 3))
+
+
+def frames(geometry: Any, drawn: Any = None) -> list[dict[str, Any]]:
+    """Each coordinate system's origin and three axes, and how long to draw them, as a
+    `shape3d`'s `frames`: the view draws them as the gimbal is drawn, X red, Y green and
+    Z blue arrows (Brandon, 2026-11-10). Their length is a share of the model's size, the
+    points `drawn` (solids too) when given, else its nodes."""
     matrices = np.asarray(geometry.cs_matrix, dtype=float).reshape(-1, 4, 3)
-    points = np.vstack([np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3),
-                        matrices[:, 3]])
-    length = 0.15 * _extent(points)
-    nodes, lines = [], []
-    for matrix in matrices:
-        base = len(nodes)
-        nodes.append(matrix[3])
-        for axis in range(3):
-            nodes.append(matrix[3] + length * matrix[axis])
-            lines.append((base, base + 1 + axis))
-    return np.asarray(nodes).reshape(-1, 3), np.asarray(lines).reshape(-1, 2)
+    model = np.asarray(geometry.node_xyz if drawn is None else drawn, dtype=float).reshape(-1, 3)
+    points = np.vstack([model, matrices[:, 3]])
+    length = 0.25 * _extent(points)
+    return [{'origin': [float(c) for c in matrix[3]],
+             'axes': [[float(c) for c in matrix[axis]] for axis in range(3)],
+             'length': float(length)} for matrix in matrices]
 
 
 def _arrow(start: np.ndarray, end: np.ndarray, nodes: list, lines: list) -> None:
@@ -270,9 +288,10 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     table of `kind` (of a part's rows, when `family` or `groups` names one)."""
     words = {'nodes': 'Nodes', 'coordinate_systems': 'Coordinate systems',
              'elements': 'Elements', 'groups': 'Element groups'}[kind]
-    extra = _triads(geometry) if kind == 'coordinate_systems' else (None, None)
     title = f'{words} of {name}' + (f': {said}' if said else '')
-    drawn = _drawn(name, geometry, *extra)
+    drawn = _drawn(name, geometry)
+    if kind == 'coordinate_systems':
+        drawn['frames'] = frames(geometry, drawn['nodes'])
     pick = _pick(name, geometry, kind, element)
     if pick is not None:
         drawn['pick'] = pick

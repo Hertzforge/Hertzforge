@@ -183,6 +183,14 @@
         "nodes": {"$ref": "#/$defs/arrayRef"},
         "lines": {"$ref": "#/$defs/arrayRef"},
         "triangles": {"$ref": "#/$defs/arrayRef"},
+        "frames": {"type": "array", "items": {
+          "type": "object", "required": ["origin", "axes", "length"], "additionalProperties": false,
+          "properties": {
+            "origin": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+            "axes": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "minItems": 3, "maxItems": 3},
+            "length": {"type": "number", "minimum": 0}
+          }
+        }},
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "node_ids": {"$ref": "#/$defs/arrayRef"},
         "cursor": {"const": "frequency"},

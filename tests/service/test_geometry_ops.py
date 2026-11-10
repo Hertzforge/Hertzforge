@@ -85,8 +85,11 @@ def test_a_coordinate_system_is_added_turned_and_drawn_with_its_axes(project, va
     assert added['Name'] == 'turned' and float(added['Rotation Z [°]']) == pytest.approx(90.0)
     geometry = project['Geometry']
     assert geometry.cs_matrix[1, 0] == pytest.approx([0.0, 1.0, 0.0], abs=1e-12)
-    # two systems, an origin and three tips each
-    assert len(view['nodes']) == geometry.num_nodes + 8 and len(view['lines']) == 6
+    # two systems, each drawn as the gimbal is: its origin and three axes
+    assert len(view['frames']) == 2
+    assert view['frames'][1]['origin'] == pytest.approx([0.1, 0.0, 0.0])
+    assert view['frames'][1]['axes'][0] == pytest.approx([0.0, 1.0, 0.0], abs=1e-12)
+    assert len(view['nodes']) == geometry.num_nodes
     with pytest.raises(ProtocolError, match='already exists'):
         run(project, 'project.add_coordinate_system', id=1)
 
