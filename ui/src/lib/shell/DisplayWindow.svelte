@@ -49,9 +49,9 @@
 	const display = $derived(app.display);
 	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : 'Random');
 	/** The test types on the test screen's frame: one header line, and their run's own dock. */
-	const framed = $derived(sineRun || shockRun);
-	const framedHost = $derived(shockRun ? shock : sine);
-	const framedScreen = $derived(shockRun ? app.shockViews : app.sineViews);
+	const framed = $derived(sineRun || shockRun || srsRun);
+	const framedHost = $derived(shockRun ? shock : srsRun ? srs : sine);
+	const framedScreen = $derived(shockRun ? app.shockViews : srsRun ? app.srsViews : app.sineViews);
 	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
@@ -147,7 +147,9 @@
 				{#snippet station()}<StationPanel {acq} />{/snippet}
 			</ShockRunView>
 		{:else if srsRun}
-			<SrsRunView {srs} views={app.srsViews} compact onpopout={(id) => app.openDisplayWindow(id, 'srs')} />
+			<SrsRunView {srs} views={app.srsViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'srs')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</SrsRunView>
 		{:else if sineRun}
 			<SineRunView {sine} views={app.sineViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'sine')}>
 				{#snippet station()}<StationPanel {acq} />{/snippet}

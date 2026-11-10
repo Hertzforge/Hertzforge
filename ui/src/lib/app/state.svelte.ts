@@ -1772,11 +1772,15 @@ export class AppState {
 			this.shock
 		);
 		const srsPopout = config.popout && config.popoutTest === 'srs';
-		this.srsViews = new SrsViewsState(this.control, {
-			setupTitle: () => this.srs.status?.title ?? (config.popout ? null : this.srs.setup.title),
-			showing: () => srsPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'srs' && this.srs.step === 'run'),
-			page: srsPopout ? config.page : null
-		});
+		this.srsViews = new SrsViewsState(
+			this.control,
+			{
+				setupTitle: () => this.srs.status?.title ?? (config.popout ? null : this.srs.setup.title),
+				showing: () => srsPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'srs' && this.srs.step === 'run'),
+				page: srsPopout ? config.page : null
+			},
+			this.srs
+		);
 		const sinePopout = config.popout && config.popoutTest === 'sine';
 		this.sineViews = new SineViewsState(this.control, {
 			setupTitle: () => this.sine.status?.title ?? (config.popout ? null : this.sine.setup.title),

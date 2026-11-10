@@ -263,7 +263,7 @@ describe("a window's subscription", () => {
 	it('asks only for what the page draws, a point count on the time histories only, and the service accepts it', async () => {
 		const { client, srs } = await screen();
 		let showing = true;
-		const views = new SrsViewsState(client, { setupTitle: () => 'srs test', showing: () => showing, storage: null, session: null, events: null, subscribeDelayMs: 0, pixelRatio: 1 });
+		const views = new SrsViewsState(client, { setupTitle: () => 'srs test', showing: () => showing, storage: null, session: null, events: null, subscribeDelayMs: 0 });
 		const stop = views.watch();
 		for (const page of views.pages) {
 			views.selectPage(page.id);
