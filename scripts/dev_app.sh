@@ -24,6 +24,9 @@ if ! command -v cargo >/dev/null && command -v rustup >/dev/null; then
 fi
 
 PY="${HERTZFORGE_DEV_PYTHON:-$(command -v python3)}"
+# the interpreter itself: a pyenv shim chooses its Python by the folder it runs in, and
+# the app starts the service from another folder
+PY="$("$PY" -c 'import sys; print(sys.executable)')"
 FROM="$("$PY" -I -c 'import hertzforge, pathlib; print(pathlib.Path(hertzforge.__file__).resolve().parent.parent)' 2>/dev/null || true)"
 if [[ "$FROM" != "$ROOT/src" ]]; then
   echo "dev_app.sh: $PY does not import hertzforge from $ROOT/src${FROM:+ (it imports it from $FROM)}." >&2
