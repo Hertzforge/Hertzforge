@@ -227,7 +227,7 @@ def test_errors_name_the_cause(validate):
              "No operation named 'random.nope'; catalog.list names the ones that exist."),
             (('op.run', {'op': 'project.waterfall', 'handle': 'h1'}), 'bad_request',
              "no 'handle'"),
-            (('op.run', {'op': 'project.waterfall'}), 'refused', 'none is open'),
+            (('op.run', {'op': 'project.waterfall'}), 'refused', 'the project has none'),
         ]
         for (method, params), code, words in cases:
             message = await client.call(method, params)
@@ -273,8 +273,9 @@ def test_a_project_belongs_to_its_connection():
                 await second.recv()
                 message = await Client(second).call('op.run', {
                     'op': 'project.plot', 'params': {'data': 'Time History'}})
-                assert message['error']['code'] == 'refused'
-                assert 'none is open' in message['error']['message']
+                # the second connection has its own project, empty
+                assert message['error']['code'] == 'bad_request'
+                assert "'Time History', which is not one of the choices" in message['error']['message']
         finally:
             server.close()
             await server.wait_closed()
