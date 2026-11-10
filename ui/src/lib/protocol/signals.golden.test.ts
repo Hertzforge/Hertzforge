@@ -67,7 +67,7 @@ describe('the Signals goldens', () => {
 		const bytes = readBin('event_signals_data.bin');
 		const decoded = decodeFrame(bytes) as unknown as Event<SignalsData>;
 		expect(decoded).toEqual(toTyped(readJson('event_signals_data.expected.json')));
-		expect(new Uint8Array(encodeFrame(decoded) as ArrayBuffer)).toEqual(bytes);
+		expect(new Uint8Array(encodeFrame(decoded as unknown as Record<string, unknown>) as ArrayBuffer)).toEqual(bytes);
 		expect(decoded.topic).toBe(SIGNALS_TOPICS.data);
 	});
 

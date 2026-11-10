@@ -4,7 +4,9 @@
 //!
 //! The pump reads the process's tap ([`crate::signals::global`]) and never anything a
 //! run holds: it takes the hub's lock only to find the current run, and copies its
-//! windows out of the ring without a lock.
+//! windows out of the ring without a lock. A run counts as acquiring while its tap is
+//! live and the service holds a live run: a module that keeps its station open after
+//! its run has ended is not taken for one still running.
 
 use super::{Feed, Out, Service, DATA_SLACK};
 use crate::codec::{self, Arrays};
@@ -64,9 +66,11 @@ impl Service {
         params: &Map<String, Value>,
     ) -> Result<Value, MethodError> {
         let sub = Arc::new(subscribe::parse(params)?);
-        let tap = signals::global().current();
-        let result = subscribe::result_json(&sub, tap.as_deref());
-        let live = tap.filter(|t| t.is_live());
+        let acquiring = self.inner.lock().await.any_live();
+        let live = signals::global()
+            .current()
+            .filter(|t| acquiring && t.is_live());
+        let result = subscribe::result_json(&sub, live.as_deref());
         let now = live.as_ref().map(|t| (t.id(), t.now()));
         let send = now.is_some_and(|(_, frames)| frames > 0);
         self.signals_displays().insert(
@@ -103,14 +107,15 @@ impl Service {
     /// One look of the pump: a frame to each subscribed connection whose period has
     /// passed while the run acquires and has read more since its last frame, and one
     /// last frame (`available` false) to each that saw the run, once it has ended. An
-    /// ended run is let go when nobody is owed its last frame.
-    pub(super) fn signals_tick(&self) {
+    /// ended run is let go when nobody is owed its last frame. `acquiring`: the service
+    /// holds a live run.
+    pub(super) fn signals_tick(&self, acquiring: bool) {
         let hub = signals::global();
         let Some(tap) = hub.current() else {
             return;
         };
         let now = Instant::now();
-        let live = tap.is_live();
+        let live = acquiring && tap.is_live();
         let frames = tap.now();
         let id = tap.id();
         let due: Vec<(ConnId, Arc<Subscription>)> = {

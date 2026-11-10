@@ -990,7 +990,8 @@ impl Service {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
-                svc.signals_tick();
+                let acquiring = svc.inner.lock().await.any_live();
+                svc.signals_tick(acquiring);
             }
         });
     }
