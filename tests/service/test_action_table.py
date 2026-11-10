@@ -57,6 +57,22 @@ def test_every_operation_has_a_verb_or_is_hidden():
     assert set(verbs.MODULES) <= ids and set(verbs.PARTS) <= ids
 
 
+def test_every_row_has_a_glyph():
+    """The shell draws each row with its glyph (ui/src/lib/workspaces/actionIcons.ts), so a new
+    operation, act or default needs one there."""
+    import re
+
+    icons = (Path(__file__).resolve().parents[2] / 'ui' / 'src' / 'lib' / 'workspaces'
+             / 'actionIcons.ts').read_text(encoding='utf-8')
+    glyphs = set(re.findall(r"^\t'([a-z_]+\.[a-z_]+)': '", icons, re.MULTILINE))
+    source = Path(action_table.__file__).read_text(encoding='utf-8')
+    own = set(re.findall(r"_row\('((?:self|show)\.[a-z_]+)'", source))
+    defaults = {f'show.{verb.lower()}' for verb in ('Plot', 'Stack', 'Table', 'Values', 'MAC', 'Animate')}
+    offered = {op for op in verbs.VERBS if op not in verbs.UNOFFERED}
+    assert 'project.compute_psds' in glyphs and 'self.rename' in glyphs
+    assert not (offered | own | defaults) - glyphs, 'a row needs a glyph in actionIcons.ts'
+
+
 def test_verbs_are_short():
     assert not [v for v in verbs.VERBS.values() if len(v.split()) > 2]
 

@@ -15,6 +15,7 @@
 	import Glyph from '$lib/project/Glyph.svelte';
 	import UnitsEditor from '$lib/project/UnitsEditor.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
+	import { rowGlyph } from './actionIcons';
 
 	interface Props {
 		app: AppState;
@@ -91,6 +92,11 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
+
+{#snippet glyph(row: ActionRow)}
+	{@const markup = rowGlyph(row.id)}
+	{#if markup}<svg class="glyph" viewBox="0 0 64 64" width="14" height="14" aria-hidden="true">{@html markup}</svg>{/if}
+{/snippet}
 
 <div class="column" data-testid="action-column">
 	{#if a.picking}
@@ -192,9 +198,9 @@
 										{#if row}
 											{@const clickable = live(row, column)}
 											{#if clickable}
-												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{row.verb}</button>
+												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{@render glyph(row)}{row.verb}</button>
 											{:else}
-												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{row.verb}</span>
+												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{@render glyph(row)}{row.verb}</span>
 											{/if}
 										{/if}
 									</td>
@@ -354,7 +360,9 @@
 		z-index: 2;
 	}
 	.verb {
-		display: block;
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		width: 100%;
 		padding: 3px 6px;
 		border: 0;
@@ -362,8 +370,13 @@
 		background: none;
 		color: var(--accent);
 		font: inherit;
-		text-align: center;
+		text-align: left;
 		white-space: nowrap;
+	}
+	/* the control gray of the glyphs it was drawn with, whatever color the word takes */
+	.glyph {
+		flex: none;
+		color: var(--text-3);
 	}
 	button.verb {
 		cursor: pointer;
