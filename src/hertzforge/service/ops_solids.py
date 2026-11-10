@@ -747,8 +747,8 @@ def pattern_solids(project: Any, params: dict[str, Any]) -> list[dict]:
 ELEMENTS = Param('elements', 'Elements', 'enum', default='hexes', options=(
     Option('hexes', 'Hexes'), Option('tetras', 'Tetras'),
     Option('quads', 'Shells (quads)'), Option('triangles', 'Shells (triangles)')))
-SIZE = Param('size', 'Element size (0 for the size it is likely to hold at)', 'number',
-             default=0.0, unit='m', min=0.0, step=0.001, length=True)
+SIZE = Param('size', 'Element size', 'number', default=0.0, unit='m', min=0.0, step=0.001,
+             length=True, suggest='project.mesh_size')
 APART = Param('apart', 'Keep apart from other groups', 'boolean', default=False)
 PARTS_APART = Param('parts_apart', 'Keep the parts apart from each other', 'boolean',
                     default=False)
@@ -764,6 +764,12 @@ MESH_KEEP = Param('keep', 'Mesh: add the elements (else the preview)', 'boolean'
 PREVIEW_BRICKS = 50_000
 PREVIEW_TETS = 5_000
 PREVIEW_FITTED = 1_500
+
+
+def likely_size(geometry: Any, ids: list[int], elements: str) -> float:
+    """The element size the parts `ids` are likely to hold at as `elements`, in meters:
+    what Mesh's size opens on, and what its Detect button fills in."""
+    return _likely_size(geometry, ids, elements)
 
 
 def _likely_size(geometry: Any, ids: list[int], elements: str) -> float:

@@ -415,6 +415,12 @@ as it is on a geometry whose units are not defined. The descriptor says `m`; the
 system's length unit for its `unit` and for `[m]` in its label, none on an undefined geometry, and
 when the system changes it converts what the form holds, which changes nothing in the model.
 
+A param with `"suggest"` names a request the panel asks, with the form's values, when the button
+beside the field is pressed; the `value` it answers with fills the field (Mesh's element size,
+`project.mesh_size`). Mesh is offered on the solids picked, filled with them, with shells for flat
+parts and hexes otherwise, and with the size they are likely to hold at; its row's `omit` leaves
+out the ids, a size per piece and detecting each piece's size.
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -459,6 +465,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
 | `project.entity_rows` | `{"geometry","kind","family"?,"groups"?,"start","count"}` | `{"rows"}`: more of an entity table that sent its first rows (its `more`) |
+| `project.mesh_size` | `{"geometry","solids","elements"}` (a Mesh form's values) | `{"value"}`: the element size those solids are likely to hold at, in the display units |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
@@ -570,7 +577,7 @@ would refuse what the selection holds, as far as that can be told with nothing t
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
 as `project.show` takes it, offers the operations on that part alone, each carrying `"part": true`,
-and none of the geometry's own: the shapes to build from and Mesh on the Solids row, Add Element and
+and none of the geometry's own: the shapes to build from on the Solids row, Add Element and
 Add Group on an element family (the family filled in), and on element groups what sets their
 properties, merges, aligns or mates them, with every group picked filled into `groups`, and on
 solids what edits, moves, patterns, takes apart, meshes or deletes them, with every solid picked filled into

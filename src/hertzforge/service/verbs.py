@@ -139,7 +139,7 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
 
 #: the part of a geometry in the tree each of these operations belongs to:
 #: a part's kind, or 'part:<id>' for the nodes and the coordinate systems, or
-#: several (Mesh on the Solids row, every part, and on the solids picked). A
+#: several. Mesh meshes the solids picked, and no others (Brandon, 2026-11-10). A
 #: part picked offers its own operations alone, and the geometry's row none
 #: of these: the shapes to build from on the Solids row, as the earlier
 #: toolset offered them (Brandon, 2026-10-11), and what ties or merges parts on the
@@ -153,7 +153,7 @@ PARTS = {f'project.{name}': part for name, part in {
     'add_solid_plate': 'solids',
     'add_solid_disk': 'solids',
     'solids': 'solids',
-    'mesh_solids': ('solids', 'solid'),
+    'mesh_solids': 'solid',
     'add_element': 'family',
     'add_element_group': 'family',
     'group_properties': 'group',

@@ -484,6 +484,8 @@ export interface ParamDescriptor {
 	length?: boolean;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
+	/** A request for this field's value, asked with the form's values by a button beside it; `{value}` comes back in the display units. */
+	suggest?: string;
 }
 
 /** One object of the open project (schema/PROTOCOL.md, Projects). */

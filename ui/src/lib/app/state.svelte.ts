@@ -691,6 +691,19 @@ class AnalyzeState {
 		}
 	}
 
+	/** A field's value asked for by its request (`suggest`), with the form's values; null, and the reason said, when refused. */
+	async suggest(p: ParamDescriptor): Promise<number | null> {
+		if (!p.suggest) return null;
+		try {
+			const res = await this.app.analysis.request<{ value: number }>(p.suggest, { ...this.currentValues });
+			this.runError = null;
+			return res.value;
+		} catch (err) {
+			this.runError = message(err);
+			return null;
+		}
+	}
+
 	/** More rows of a long table that sent only its first ones (`view.more`). */
 	async moreRows(more: { method: string; params: Record<string, unknown> }, start: number, count: number): Promise<string[][]> {
 		const res = await this.app.analysis.request<{ rows: string[][] }>(more.method, { ...more.params, start, count });

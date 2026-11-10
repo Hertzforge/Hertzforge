@@ -75,6 +75,10 @@ class Param:
     #: system: the service takes it to meters before the operation runs, and the shell shows
     #: the system's length unit for `unit`, and for '[m]' in the label
     length: bool = False
+    #: a request the panel asks for this field's value, with the form's values, when the
+    #: button beside it is pressed (Mesh's element size, detected for the parts and the
+    #: element type chosen): `{'value'}` comes back, in the display units
+    suggest: str | None = None
 
     def __post_init__(self) -> None:
         source = self.options_from
@@ -127,6 +131,8 @@ class Param:
             out['setting'] = self.setting
         if self.length:
             out['length'] = True
+        if self.suggest is not None:
+            out['suggest'] = self.suggest
         return out
 
     def check(self, value: Any, choices: Sequence[Any] | None) -> Any:
