@@ -414,6 +414,10 @@ export interface TableView {
 	rows: string[][];
 	/** Present when the cells are typed into: the operation that sets one, and each column's key (null: read only). */
 	edit?: TableEdit;
+	/** A long table's count of rows, when it sent only its first ones. */
+	total?: number;
+	/** How to ask for the rest: `method` with `params`, `start` and `count`. */
+	more?: { method: string; params: Record<string, unknown> };
 }
 
 /** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
@@ -429,8 +433,8 @@ export interface TableEdit {
 	rows?: number[];
 	/** A column shown in the display units, by key: [scale, offset] taking a value typed back to SI. */
 	to_si?: Record<string, [number, number]>;
-	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' `ids`, as runs. */
-	remove?: { op: string; params: Record<string, unknown>; ids: string[] };
+	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' ids, the cells in `column`, as runs. */
+	remove?: { op: string; params: Record<string, unknown>; column: number };
 }
 
 /** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */

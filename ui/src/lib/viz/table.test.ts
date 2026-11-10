@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flagOn, tableHtml } from './table';
+import { DRAWN_FROM, drawnRows, flagOn, scrollFor, tableHtml, TALLEST } from './table';
 import { blockText, fillTargets, numeric, parseTsv, pasteTargets, spanned, tableText } from './table';
 
 describe('table', () => {
@@ -80,5 +80,32 @@ describe('flagOn', () => {
 	it('reads the table\'s True and a file\'s yes or 1 as set', () => {
 		expect(['True', 'true', 'yes', '1'].every(flagOn)).toBe(true);
 		expect(['False', '', 'no', '0'].some(flagOn)).toBe(false);
+	});
+});
+
+describe('a long table draws the rows in view', () => {
+	it('draws a short table whole', () => {
+		expect(drawnRows(DRAWN_FROM, 5000, 400, 24)).toEqual({ first: 0, last: DRAWN_FROM, before: 0, after: 0 });
+	});
+
+	it('draws the rows the scroll shows and some either side, never past the ends', () => {
+		const top = drawnRows(10_000, 0, 400, 25, 30);
+		expect([top.first, top.last, top.before]).toEqual([0, 46, 0]);
+		const middle = drawnRows(10_000, 25 * 5000, 400, 25, 30);
+		expect([middle.first, middle.last, middle.before]).toEqual([4970, 5046, 4970 * 25]);
+		expect(middle.before + (middle.last - middle.first) * 25 + middle.after).toBe(10_000 * 25);
+	});
+
+	it('spans a million rows with a scroll no taller than a browser lays out', () => {
+		const rows = 1_000_000;
+		const laid = TALLEST;
+		const half = drawnRows(rows, (laid - 400) / 2, 400, 27);
+		expect(half.first + 30).toBeCloseTo(rows / 2, -2);
+		const end = drawnRows(rows, laid - 400, 400, 27);
+		expect(end.last).toBe(rows);
+		expect(end.before + (end.last - end.first) * 27 + end.after).toBeCloseTo(laid, -2);
+		// and back: the scroll that puts a row at the top shows that row
+		const at = drawnRows(rows, scrollFor(rows, 750_000, 400, 27), 400, 27);
+		expect(at.first + 30).toBeCloseTo(750_000, -1);
 	});
 });

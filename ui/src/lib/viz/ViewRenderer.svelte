@@ -40,6 +40,8 @@
 		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
 		/** A table whose rows are entities: the selected rows' ids, removed; resolves to the refusal's words, or null. */
 		onremove?: (ids: string[]) => Promise<string | null>;
+		/** A table that sent its first rows: the rest, asked for as they scroll into view. */
+		onrows?: (start: number, count: number) => Promise<string[][]>;
 		/** A click in a 3-D view with `pick`: what it chose, to run the pick's operation with. */
 		onpick?: (patch: Record<string, unknown>) => void;
 		/** A spectrum's handle let go at `decibels`. */
@@ -48,7 +50,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onremove, onspan, onpick, onhandle, ongizmo }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = null, scope, onedit, onremove, onrows, onspan, onpick, onhandle, ongizmo }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -91,7 +93,7 @@
 {:else if view.view === 'matrix'}
 	<MatrixPane {view} {showTitle} {selected} {picks} {onselect} />
 {:else if view.view === 'table'}
-	<TablePane {view} {showTitle} {onedit} {onremove} />
+	<TablePane {view} {showTitle} {onedit} {onremove} {onrows} />
 {:else if view.view === 'image'}
 	<ImagePane {view} {showTitle} />
 {:else}

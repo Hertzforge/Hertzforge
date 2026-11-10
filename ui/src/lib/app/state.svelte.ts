@@ -697,6 +697,12 @@ class AnalyzeState {
 		}
 	}
 
+	/** More rows of a long table that sent only its first ones (`view.more`). */
+	async moreRows(more: { method: string; params: Record<string, unknown> }, start: number, count: number): Promise<string[][]> {
+		const res = await this.app.analysis.request<{ rows: string[][] }>(more.method, { ...more.params, start, count });
+		return res.rows;
+	}
+
 	/** A table folded to its header, or opened again. */
 	toggleFolded(key: string): void {
 		this.folded = this.folded.includes(key) ? this.folded.filter((k) => k !== key) : [...this.folded, key];

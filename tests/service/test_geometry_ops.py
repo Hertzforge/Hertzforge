@@ -474,9 +474,10 @@ def test_a_part_picked_shows_its_entities_table(project, validate):
     drawn, nodes = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
     assert drawn['view'] == 'shape3d' and drawn['pick']['op'] == 'project.add_node'
     assert len(nodes['rows']) == len(project['Geometry'].node_id)
+    # Delete takes a row by its id, the first column
     assert nodes['edit']['remove'] == {
         'op': 'project.delete_entities', 'params': {'geometry': 'Geometry', 'kind': 'nodes'},
-        'ids': [row[0] for row in nodes['rows']]}
+        'column': 0}
     _drawn, systems = _picked(project, {'kind': 'part', 'id': 'coordinate_systems'}, validate)
     assert systems['title'] == 'Coordinate systems of Geometry'
 
@@ -487,8 +488,13 @@ def test_a_family_or_group_shows_its_own_elements_only(project, validate):
     drawn, beams = _picked(project, {'kind': 'family', 'id': 'beams'}, validate)
     assert len(beams['rows']) == 1
     assert drawn['pick']['params']['family'] == 'beams'
-    at = beams['edit']['rows'][0] - 1
-    assert beams['rows'][0][0] == str(int(geometry.elem_id[at])), 'its rows stay the object\'s rows'
+    # its edit says the family, so its row 1 is the beam, not the geometry's first element
+    assert beams['edit']['params'] == {'geometry': 'Geometry', 'kind': 'elements', 'family': 'beams'}
+    edited = run(project, 'project.set_entity_cell', **beams['edit']['params'], row=1,
+                 column='nodes', value='102 103')
+    beam = int(np.flatnonzero(np.asarray(geometry.elem_type) == 21)[0])
+    assert [int(n) for n in geometry.elem_conn[beam]] == [102, 103]
+    assert len(edited[-1]['rows']) == 1, 'the family\'s table again'
     group = int(geometry.group_id[0])
     _drawn, groups, elements = _picked(project, {'kind': 'group', 'id': group}, validate)
     assert [row[0] for row in groups['rows']] == [str(group)]
@@ -527,3 +533,33 @@ def test_the_solids_row_or_a_solid_shows_the_solids(validate):
         assert ('gizmo' in drawn) is (part['kind'] == 'solid')
     assert drawn['gizmo']['slide']['op'] == 'project.move_solids'
     assert drawn['gizmo']['slide']['params'] == {'geometry': 'Geometry', 'solids': '1'}
+
+
+def test_a_long_entity_table_sends_a_page_and_the_rest_on_asking(validate):
+    """A million elements whole took 2 s to write and 80 MB to send: past a thousand
+    rows a table sends its first and its count, and `project.entity_rows` the rest."""
+    import asyncio
+
+    from hertzforge.service.ops_geometry import PAGE_ROWS
+
+    from .test_projects import _exchange
+
+    out = asyncio.run(_exchange([
+        ('op.run', {'op': 'project.new_geometry', 'params': {}}),
+        ('op.run', {'op': 'project.add_solid_plate', 'params': {'geometry': 'Geometry'}}),
+        ('op.run', {'op': 'project.mesh_solids', 'params': {
+            'geometry': 'Geometry', 'elements': 'quads', 'size': 0.02, 'keep': True}}),
+        ('project.show', {'objects': ['Geometry'], 'part': {'kind': 'family', 'id': 'quads'}}),
+        ('project.entity_rows', {'geometry': 'Geometry', 'kind': 'elements', 'family': 'quads',
+                                 'start': PAGE_ROWS, 'count': 5}),
+        ('project.entity_rows', {'geometry': 'Geometry', 'kind': 'elements', 'start': 0,
+                                 'count': 99999}),
+    ]))
+    table = out[3][-1]['result']['views'][-1]
+    validate(table, 'tableView')
+    assert len(table['rows']) == PAGE_ROWS and table['total'] == 50 * 50
+    assert table['more'] == {'method': 'project.entity_rows', 'params': {
+        'geometry': 'Geometry', 'kind': 'elements', 'family': 'quads'}}
+    page = out[4][-1]['result']['rows']
+    assert [row[0] for row in page] == [str(PAGE_ROWS + k + 1) for k in range(5)]
+    assert out[5][-1]['error']['code'] == 'bad_request'
