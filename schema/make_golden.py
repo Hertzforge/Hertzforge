@@ -468,6 +468,31 @@ TEXT_GOLDENS = {
                           'profile.')],
             'x_unit': 'Hz', 'y_unit': 'g²/Hz'},
     },
+    # a Sine limit channel's bound saved, each row in its own quantity
+    'request_tables_save_bound': {
+        'type': 'request', 'id': 43, 'method': 'tables.save',
+        'params': {
+            'kind': 'breakpoints', 'table_kind': 'sine_limit',
+            'path': '/Users/someone/tests/bracket/bound.hforge',
+            'columns': ['freq_hz', 'quantity', 'bound'],
+            'rows': [[5, 'disp_pp_in', 0.5], [20, 'velocity_ips', 2], [100, 'accel_g', 3],
+                     [2000, 'accel_g', 3]],
+            'x_unit': 'Hz', 'y_unit': ''},
+    },
+    # a limit channel's gain opened into a table in Hz and g/V, which the file does not say
+    'request_tables_load_gain': {
+        'type': 'request', 'id': 44, 'method': 'tables.load',
+        'params': {'path': '/Users/someone/tests/bracket/gain.csv', 'kind': 'breakpoints',
+                   'table_kind': 'drive_gain', 'x_unit': 'Hz', 'y_unit': 'g/V'},
+    },
+    'response_tables_load_gain': {
+        'type': 'response', 'id': 44,
+        'result': {
+            'kind': 'breakpoints', 'table_kind': 'drive_gain',
+            'columns': ['freq_hz', 'gain'],
+            'rows': [[50, 0.8], [400, 4], [2000, 1.5]],
+            'warnings': [], 'x_unit': 'Hz', 'y_unit': 'g/V'},
+    },
 }
 
 

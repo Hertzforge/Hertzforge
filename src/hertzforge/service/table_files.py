@@ -23,7 +23,7 @@ TABLE_METHODS = ('tables.save', 'tables.load')
 
 #: the params each takes
 PARAMS = {'tables.save': ('kind', 'table_kind', 'columns', 'rows', 'path', 'x_unit', 'y_unit'),
-          'tables.load': ('path', 'kind', 'table_kind')}
+          'tables.load': ('path', 'kind', 'table_kind', 'x_unit', 'y_unit')}
 
 
 def request(method: str, params: Any) -> dict[str, Any]:
@@ -44,7 +44,7 @@ def request(method: str, params: Any) -> dict[str, Any]:
     try:
         if method == 'tables.save':
             return {'path': tables.write(path, _table(params, kind, table_kind))}
-        table = tables.read(path, kind, table_kind)
+        table = tables.read(path, kind, table_kind, *_units(params, kind, method))
     except tables.TableContentError as error:
         raise bad_request(f'{method}: {error}') from None
     except FileNotFoundError as error:
@@ -74,16 +74,20 @@ def _optional_text(params: Mapping[str, Any], key: str, method: str) -> str | No
     return value or None
 
 
+def _units(params: Mapping[str, Any], kind: str, method: str) -> tuple[str | None, str | None]:
+    """A request's `x_unit` and `y_unit`, refused on a channel table."""
+    x_unit = _optional_text(params, 'x_unit', method)
+    y_unit = _optional_text(params, 'y_unit', method)
+    if kind == 'channels' and (x_unit is not None or y_unit is not None):
+        raise bad_request(f'{method}: a channel table has no x_unit or y_unit')
+    return (params.get('x_unit') if 'x_unit' in params else None,
+            params.get('y_unit') if 'y_unit' in params else None)
+
+
 def _table(params: Mapping[str, Any], kind: str, table_kind: str | None) -> tables.Table:
     columns, rows = params.get('columns'), params.get('rows')
     if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
         raise bad_request('tables.save "columns" is a list of column names')
     if not isinstance(rows, list) or not all(isinstance(r, list) for r in rows):
         raise bad_request('tables.save "rows" is a list of rows, each a list of values')
-    x_unit = _optional_text(params, 'x_unit', 'tables.save')
-    y_unit = _optional_text(params, 'y_unit', 'tables.save')
-    if kind == 'channels' and (x_unit is not None or y_unit is not None):
-        raise bad_request('tables.save: a channel table has no x_unit or y_unit')
-    return tables.Table(kind, columns, rows, table_kind,
-                        params.get('x_unit') if 'x_unit' in params else None,
-                        params.get('y_unit') if 'y_unit' in params else None)
+    return tables.Table(kind, columns, rows, table_kind, *_units(params, kind, 'tables.save'))

@@ -351,7 +351,8 @@ One breakpoint table behind a test's profile, target or limits.
 
     attrs   column_order         the columns, in the file's order
             table_kind           which table it is: 'random_profile',
-                                 'sine_profile', 'srs_target' or 'limit'
+                                 'sine_profile', 'sine_limit',
+                                 'srs_target', 'limit' or 'drive_gain'
             x_unit, y_unit       the units of the x column and of the
                                  levels ('' where the rows say, as a
                                  Sine profile's quantity does)
@@ -362,9 +363,11 @@ One breakpoint table behind a test's profile, target or limits.
 The x column is `freq_hz`. The other columns are the table kind's: a
 Random profile's `psd_g2_hz` and `slope_db_oct` (one of the two on each
 row), a Sine profile's `quantity` (`accel_g`, `velocity_ips` or
-`disp_pp_in`) and `value`, an SRS target's `accel_g`, a limit's
-`ceiling`, and on a profile's rows the bands `alarm_below_db`,
-`alarm_above_db`, `abort_below_db` and `abort_above_db`, in dB.
+`disp_pp_in`) and `value`, a Sine limit's `quantity` and `bound`, an
+SRS target's `accel_g`, a limit's `ceiling`, a drive gain's `gain`
+(g/V, from the drive to a limit channel), and on a profile's rows the
+bands `alarm_below_db`, `alarm_above_db`, `abort_below_db` and
+`abort_above_db`, in dB.
 
 ## `report/`, `photos/`, `matches/`
 

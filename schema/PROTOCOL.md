@@ -450,7 +450,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
-| `tables.load` | `{"path","kind","table_kind"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
+| `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"}}` |
 | `fit.*` | see Fitting modes below | |
 
@@ -651,7 +651,8 @@ with no file).
 path, as projects are; neither request touches the connection's project. `kind` is `channels` (the
 channel table: one table that holds what the analysis reads and, converted for a test, the
 settings the control service runs each channel at) or `breakpoints` (a profile, target or limit table, which
-`table_kind` names: `random_profile`, `sine_profile`, `srs_target` or `limit`). `columns` names the
+`table_kind` names: `random_profile`, `sine_profile`, `sine_limit`, `srs_target`, `limit` or
+`drive_gain`). `columns` names the
 table's columns and each row holds one value per column.
 
 A channel table's columns are the channel table object's own (`channel`, `node`, `direction`,
@@ -675,10 +676,13 @@ nothing. A table saved with the controller's columns among its columns is writte
 one saved without them is written as the measurement's table alone.
 
 A breakpoint table's columns are its kind's: `freq_hz` and `psd_g2_hz`, `slope_db_oct` for a
-Random profile; `freq_hz`, `quantity` and `value` for a Sine profile; `freq_hz` and `accel_g` for
-an SRS target; `freq_hz` and `ceiling` for a limit; and for a profile the bands,
-`alarm_below_db`, `alarm_above_db`, `abort_below_db` and `abort_above_db`, `null` where a row has
-none. `x_unit` and `y_unit` are its units, its kind's own when not given.
+Random profile; `freq_hz`, `quantity` and `value` for a Sine profile; `freq_hz`, `quantity` and
+`bound` for a Sine limit channel's bound; `freq_hz` and `accel_g` for an SRS target; `freq_hz` and
+`ceiling` for a limit; `freq_hz` and `gain` for the gain from the drive to a limit channel (g/V);
+and for a profile the bands, `alarm_below_db`, `alarm_above_db`, `abort_below_db` and
+`abort_above_db`, `null` where a row has none. A Sine table's `quantity` is `accel_g`,
+`velocity_ips` or `disp_pp_in`, and each row's value is in its quantity's own unit, so its
+`y_unit` is `""`. `x_unit` and `y_unit` are its units, its kind's own when not given.
 
 `tables.save` writes the table to `path` in the form its suffix names: `.hforge` (a single-object
 file, `docs/hforge-format.md`), `.csv`, `.tsv` or `.txt` (tab-delimited) or `.xlsx`; a path with no
@@ -700,7 +704,11 @@ headings by name or alias, in any case and spacing and with a unit in them, comm
 `warnings`; only the columns found come back, in the table's order, and a cell it cannot read is
 refused, naming its row and column. A file that holds another kind of table, or another
 `table_kind`, is refused (`refused`) in words. Without `table_kind` a breakpoint file's own is
-taken. A missing file is `not_found`. A channel table file opens as a project holding the table,
+taken. The units that come back are the ones the file says (in its comment lines, its `.hforge`
+attributes or a heading's unit, `Frequency (Hz)`), else the request's `x_unit` and `y_unit` (the
+units of the table the file is opened into), else the kind's own; a client compares them with
+its own and converts or refuses. A channel table has no units, so `x_unit` or `y_unit` on one is
+`bad_request`. A missing file is `not_found`. A channel table file opens as a project holding the table,
 as any single-object file does; opening or importing a breakpoint table file as a project is
 refused with a message saying it is opened from the table it belongs to.
 

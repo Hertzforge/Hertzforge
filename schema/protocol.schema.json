@@ -828,7 +828,9 @@
       "properties": {
         "path": {"type": "string", "minLength": 1},
         "kind": {"$ref": "#/$defs/tableFileKind"},
-        "table_kind": {"type": ["string", "null"]}
+        "table_kind": {"type": ["string", "null"]},
+        "x_unit": {"type": ["string", "null"]},
+        "y_unit": {"type": ["string", "null"]}
       }
     },
     "tablesLoadResult": {

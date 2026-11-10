@@ -17,7 +17,10 @@ from .conftest import GOLDEN
 GOLDENS = {'request_tables_save': ('params', 'tablesSaveParams'),
            'response_tables_save': ('result', 'tablesSaveResult'),
            'request_tables_load': ('params', 'tablesLoadParams'),
-           'response_tables_load': ('result', 'tablesLoadResult')}
+           'response_tables_load': ('result', 'tablesLoadResult'),
+           'request_tables_save_bound': ('params', 'tablesSaveParams'),
+           'request_tables_load_gain': ('params', 'tablesLoadParams'),
+           'response_tables_load_gain': ('result', 'tablesLoadResult')}
 
 
 def _golden(name):
@@ -93,6 +96,32 @@ def test_a_breakpoint_table_opens_with_its_units_and_what_was_left_out(tmp_path,
     assert opened['result'] == expected
 
 
+@pytest.mark.parametrize('suffix', ('.hforge', '.csv', '.tsv', '.xlsx'))
+def test_the_golden_bound_saves_and_opens_in_every_form(tmp_path, suffix, validate):
+    params = dict(_golden('request_tables_save_bound')['params'],
+                  path=str(tmp_path / f'bound{suffix}'))
+    saved, opened = asyncio.run(_exchange([
+        ('tables.save', params),
+        ('tables.load', {'path': params['path'], 'kind': 'breakpoints',
+                         'table_kind': 'sine_limit', 'x_unit': 'Hz', 'y_unit': ''})]))
+    assert saved['result'] == {'path': params['path']}
+    validate(opened['result'], 'tablesLoadResult')
+    assert opened['result'] == {
+        'kind': 'breakpoints', 'table_kind': 'sine_limit', 'columns': params['columns'],
+        'rows': params['rows'], 'warnings': [], 'x_unit': 'Hz', 'y_unit': ''}
+
+
+def test_a_gain_opens_in_the_units_it_is_opened_into(tmp_path, validate):
+    path = tmp_path / 'gain.csv'
+    path.write_text('Frequency,Magnitude\n50,0.8\n400,4\n2000,1.5\n', encoding='utf-8')
+    params = dict(_golden('request_tables_load_gain')['params'], path=str(path))
+    (opened,) = asyncio.run(_exchange([('tables.load', params)]))
+    validate(opened['result'], 'tablesLoadResult')
+    assert opened['result'] == _golden('response_tables_load_gain')['result']
+    (lbf,) = asyncio.run(_exchange([('tables.load', dict(params, y_unit='lbf/V'))]))
+    assert lbf['result']['y_unit'] == 'lbf/V'
+
+
 @pytest.mark.parametrize(('method', 'params', 'code', 'words'), [
     ('tables.load', {'kind': 'channels'}, 'bad_request', 'needs "path"'),
     ('tables.load', {'path': 'x.csv', 'kind': 'shapes'}, 'bad_request', '"kind" is one of'),
@@ -110,6 +139,10 @@ def test_a_breakpoint_table_opens_with_its_units_and_what_was_left_out(tmp_path,
                      'rows': []}, 'bad_request', 'needs "table_kind"'),
     ('tables.save', {'kind': 'channels', 'path': 'x.csv', 'columns': ['channel'], 'rows': [],
                      'x_unit': 'Hz'}, 'bad_request', 'no x_unit or y_unit'),
+    ('tables.load', {'kind': 'channels', 'path': 'x.csv', 'y_unit': 'g'}, 'bad_request',
+     'no x_unit or y_unit'),
+    ('tables.load', {'kind': 'breakpoints', 'path': 'x.csv', 'y_unit': 2}, 'bad_request',
+     '"y_unit" is text'),
 ])
 def test_a_request_that_cannot_be_answered_says_why(tmp_path, monkeypatch, method, params,
                                                     code, words, validate):

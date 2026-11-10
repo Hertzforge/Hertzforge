@@ -153,6 +153,14 @@ NONE_WORDS = {'', 'none', 'null', 'nan', 'off', 'na', 'n/a', '-'}
 FREQUENCY = Column('freq_hz', 'Frequency', 'number', aliases=(
     'freq', 'frequency', 'hz', 'f', 'freqhz'))
 
+#: a Sine table's row quantity: what its value is, in that quantity's own unit
+QUANTITY = Column('quantity', 'Quantity', 'choice', 'accel_g', aliases=(
+    'quantity', 'kind', 'type', 'measure'),
+    values=('accel_g', 'velocity_ips', 'disp_pp_in'),
+    choices=_words('accel_g: accel acceleration g a gpk gpeak',
+                   'velocity_ips: velocity vel v ips in/s',
+                   'disp_pp_in: displacement disp d inpp pp disppp'))
+
 
 def _bands() -> tuple[Column, ...]:
     """The four band columns a profile's rows may carry, dB below and above
@@ -178,17 +186,18 @@ BREAKPOINT_KINDS: dict[str, BreakpointKind] = {
         positional=('freq_hz', 'psd_g2_hz', 'slope_db_oct')),
     'sine_profile': BreakpointKind(
         'Sine profile',
-        (FREQUENCY,
-         Column('quantity', 'Quantity', 'choice', 'accel_g', aliases=(
-             'quantity', 'kind', 'type', 'measure'),
-                values=('accel_g', 'velocity_ips', 'disp_pp_in'),
-                choices=_words('accel_g: accel acceleration g a gpk gpeak',
-                               'velocity_ips: velocity vel v ips in/s',
-                               'disp_pp_in: displacement disp d inpp pp disppp')),
+        (FREQUENCY, QUANTITY,
          Column('value', 'Value', 'number', aliases=('value', 'amplitude', 'level', 'amp')),
          *_bands()),
         x='freq_hz', x_unit='Hz', y_unit='', needs=('value',),
         positional=('freq_hz', 'value')),
+    'sine_limit': BreakpointKind(
+        'Sine limit',
+        (FREQUENCY, QUANTITY,
+         Column('bound', 'Bound', 'number', aliases=(
+             'bound', 'value', 'limit', 'ceiling', 'level', 'amplitude', 'amp'))),
+        x='freq_hz', x_unit='Hz', y_unit='', needs=('bound',),
+        positional=('freq_hz', 'bound')),
     'srs_target': BreakpointKind(
         'SRS target',
         (FREQUENCY,
@@ -203,6 +212,13 @@ BREAKPOINT_KINDS: dict[str, BreakpointKind] = {
              'ceiling', 'limit', 'level', 'max', 'psd', 'value')),),
         x='freq_hz', x_unit='Hz', y_unit='', needs=('ceiling',),
         positional=('freq_hz', 'ceiling')),
+    'drive_gain': BreakpointKind(
+        'Drive gain',
+        (FREQUENCY,
+         Column('gain', 'Gain', 'number', aliases=(
+             'gain', 'mag', 'magnitude', 'frf', 'h', 'gv', 'gpv')),),
+        x='freq_hz', x_unit='Hz', y_unit='g/V', needs=('gain',),
+        positional=('freq_hz', 'gain')),
 }
 
 
@@ -670,7 +686,8 @@ def _write_hforge(path: str, table: Table, form: str) -> None:
 # ---- reading ------------------------------------------------------------------------------
 
 
-def read(path: str | os.PathLike, kind: str, table_kind: str | None = None) -> Table:
+def read(path: str | os.PathLike, kind: str, table_kind: str | None = None,
+         x_unit: str | None = None, y_unit: str | None = None) -> Table:
     """Read the table a file holds, in the form its suffix names.
 
     Parameters
@@ -684,6 +701,10 @@ def read(path: str | os.PathLike, kind: str, table_kind: str | None = None) -> T
         For a breakpoint table, which one is wanted (`random_profile` and so
         on); a file that says it holds another is refused. When not given,
         the file's own is taken.
+    x_unit, y_unit : str, optional
+        For a breakpoint table, the units it is taken to be in where the
+        file does not say (the units of the table it is opened into); the
+        kind's own when not given.
 
     Returns
     -------
@@ -697,6 +718,11 @@ def read(path: str | os.PathLike, kind: str, table_kind: str | None = None) -> T
                                 f'not {kind!r}')
     if kind == 'channels' and table_kind:
         raise TableContentError('a channel table has no table_kind')
+    if kind == 'channels' and (x_unit is not None or y_unit is not None):
+        raise TableContentError('a channel table has no x_unit or y_unit')
+    for unit in (x_unit, y_unit):
+        if unit is not None and not isinstance(unit, str):
+            raise TableContentError('a unit is text')
     if table_kind is not None:
         _breakpoint_kind(table_kind)
     path = os.path.abspath(os.path.expanduser(str(path)))
@@ -706,10 +732,11 @@ def read(path: str | os.PathLike, kind: str, table_kind: str | None = None) -> T
     name = os.path.basename(path)
     if kind == 'channels':
         return _read_channels(path, form, name)
+    units = (x_unit, y_unit)
     if form == 'hforge':
-        return _read_hforge(path, name, table_kind)
+        return _read_hforge(path, name, table_kind, units)
     grid = _xlsx_rows(path, name) if form == 'xlsx' else _delimited_rows(path, form)
-    return _from_grid(grid, name, table_kind)
+    return _from_grid(grid, name, table_kind, units)
 
 
 @dataclass
@@ -891,7 +918,11 @@ def _names_a_channel(headings: Sequence[Any]) -> bool:
     return any(excel._key(h) in excel.HEADER_MARKERS for h in headings if h is not None)
 
 
-def _from_grid(grid: _Grid, name: str, table_kind: str | None) -> Table:
+def _from_grid(grid: _Grid, name: str, table_kind: str | None,
+               assumed: tuple[str | None, str | None] = (None, None)) -> Table:
+    """The breakpoint table a file's rows hold. Its units are the ones the
+    file says, in a comment line or a heading, else `assumed`, else the
+    kind's own."""
     if grid.said.get('hertzforgetable') is None and grid.rows and _names_a_channel(
             grid.rows[0][1]):
         raise TableFileError(f'{name} holds a channel table, not '
@@ -954,8 +985,11 @@ def _from_grid(grid: _Grid, name: str, table_kind: str | None) -> Table:
         raise TableFileError(f'{name} has no {needs} column, which '
                              f'{_kind_word("breakpoints", table_kind)} needs')
     y = next(c for c in bk.needs if c in out_columns)
-    x_unit = grid.said.get('xunit') or units.get(bk.x) or bk.x_unit
-    y_unit = grid.said.get('yunit') or units.get(y) or bk.y_unit
+    x_assumed, y_assumed = assumed
+    x_unit = grid.said.get('xunit') or units.get(bk.x) or (
+        bk.x_unit if x_assumed is None else x_assumed)
+    y_unit = grid.said.get('yunit') or units.get(y) or (
+        bk.y_unit if y_assumed is None else y_assumed)
     if not rows:
         warnings.append(f'{name} has no rows.')
     return Table('breakpoints', out_columns, rows, table_kind, x_unit, y_unit, warnings)
@@ -1034,7 +1068,8 @@ def _hforge_holding(path: str, name: str, kind: str) -> list[str]:
         return [_attr_text(v) for v in f[OBJECTS[kind]].attrs.get('column_order', [])]
 
 
-def _read_hforge(path: str, name: str, table_kind: str | None) -> Table:
+def _read_hforge(path: str, name: str, table_kind: str | None,
+                 assumed: tuple[str | None, str | None]) -> Table:
     import h5py
 
     order = _hforge_holding(path, name, 'breakpoints')
@@ -1058,7 +1093,7 @@ def _read_hforge(path: str, name: str, table_kind: str | None) -> Table:
     grid = _Grid({'hertzforgetable': OBJECTS['breakpoints'], 'xunit': said.get('xunit', ''),
                   'yunit': said.get('yunit', '')},
                  [(0, list(order)), *((k, row) for k, row in enumerate(rows, start=1))])
-    return _from_grid(grid, name, table_kind)
+    return _from_grid(grid, name, table_kind, assumed)
 
 
 def _attr_text(value: Any) -> str:

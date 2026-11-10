@@ -295,6 +295,91 @@ def test_a_breakpoint_table_of_another_kind_is_refused(tmp_path, suffix):
         t.read(path, 'breakpoints', 'srs_target')
 
 
+#: a Sine limit channel's bound, as the shell saves one
+BOUND = json.loads((GOLDEN / 'request_tables_save_bound.json').read_text(encoding='utf-8'))[
+    'params']
+
+
+def bound():
+    return t.Table('breakpoints', list(BOUND['columns']), [list(r) for r in BOUND['rows']],
+                   table_kind='sine_limit', x_unit='Hz', y_unit='')
+
+
+def gain():
+    return t.Table('breakpoints', ['freq_hz', 'gain'], [[50.0, 0.8], [400.0, 4.0]],
+                   table_kind='drive_gain')
+
+
+@pytest.mark.parametrize('suffix', FORMS)
+@pytest.mark.parametrize('make', (bound, gain), ids=('sine_limit', 'drive_gain'))
+def test_a_sine_bound_and_a_drive_gain_read_back_as_saved(tmp_path, suffix, make):
+    table = make()
+    path = t.write(tmp_path / f'table{suffix}', table)
+    read = t.read(path, 'breakpoints', table.table_kind)
+    expected = [[float(v) if isinstance(v, int) else v for v in row] for row in table.rows]
+    assert (read.columns, read.rows, read.warnings) == (table.columns, expected, [])
+    units = {'sine_limit': ('Hz', ''), 'drive_gain': ('Hz', 'g/V')}[table.table_kind]
+    assert (read.x_unit, read.y_unit) == units
+    assert t.read(path, 'breakpoints').table_kind == table.table_kind
+
+
+def test_every_kind_of_breakpoint_table_has_its_label():
+    assert t.table_kinds() == {
+        'random_profile': 'Random profile', 'sine_profile': 'Sine profile',
+        'sine_limit': 'Sine limit', 'srs_target': 'SRS target', 'limit': 'Limit',
+        'drive_gain': 'Drive gain'}
+
+
+@pytest.mark.parametrize('suffix', FORMS)
+def test_a_sine_bound_is_not_a_sine_profile(tmp_path, suffix):
+    path = t.write(tmp_path / f'bound{suffix}', bound())
+    with pytest.raises(t.TableFileError, match='holds a sine limit, not a sine profile'):
+        t.read(path, 'breakpoints', 'sine_profile')
+    path = t.write(tmp_path / f'gain{suffix}', gain())
+    with pytest.raises(t.TableFileError, match='holds a drive gain, not a limit'):
+        t.read(path, 'breakpoints', 'limit')
+
+
+def test_a_bound_and_a_gain_are_read_by_their_aliases(tmp_path):
+    path = tmp_path / 'bound.csv'
+    path.write_text('Frequency (Hz),Quantity,Limit\n10,displacement,0.2\n100,g,4\n',
+                    encoding='utf-8')
+    read = t.read(path, 'breakpoints', 'sine_limit')
+    assert (read.columns, read.rows) == (['freq_hz', 'quantity', 'bound'],
+                                         [[10.0, 'disp_pp_in', 0.2], [100.0, 'accel_g', 4.0]])
+    path = tmp_path / 'gain.txt'
+    path.write_text('Freq\tMagnitude (g/V)\n50\t0.8\n2000\t1.5\n', encoding='utf-8')
+    read = t.read(path, 'breakpoints', 'drive_gain')
+    assert (read.columns, read.rows, read.y_unit) == (['freq_hz', 'gain'],
+                                                      [[50.0, 0.8], [2000.0, 1.5]], 'g/V')
+
+
+@pytest.mark.parametrize('suffix', FORMS)
+def test_units_a_file_does_not_say_are_the_ones_it_is_opened_into(tmp_path, suffix):
+    plain = tmp_path / 'plain.csv'
+    plain.write_text('freq,psd\n20,0.01\n2000,0.01\n', encoding='utf-8')
+    read = t.read(plain, 'breakpoints', 'random_profile', x_unit='Hz', y_unit='lbf²/Hz')
+    assert (read.x_unit, read.y_unit) == ('Hz', 'lbf²/Hz')
+    assert t.read(plain, 'breakpoints', 'random_profile').y_unit == 'g²/Hz'
+    # a file that says its units keeps them, in every form
+    table = profile()
+    table.x_unit, table.y_unit = 'Hz', 'g²/Hz'
+    path = t.write(tmp_path / f'profile{suffix}', table)
+    read = t.read(path, 'breakpoints', 'random_profile', x_unit='kHz', y_unit='lbf²/Hz')
+    assert (read.x_unit, read.y_unit) == ('Hz', 'g²/Hz')
+    # and a unit in a heading is the file saying it
+    headed = tmp_path / 'headed.csv'
+    headed.write_text('Frequency (kHz),PSD (g^2/Hz)\n0.02,0.01\n', encoding='utf-8')
+    read = t.read(headed, 'breakpoints', 'random_profile', x_unit='Hz', y_unit='lbf²/Hz')
+    assert (read.x_unit, read.y_unit) == ('kHz', 'g^2/Hz')
+
+
+def test_a_channel_table_is_opened_without_units(tmp_path):
+    path = t.write(tmp_path / 'channels.csv', channels())
+    with pytest.raises(t.TableContentError, match='no x_unit or y_unit'):
+        t.read(path, 'channels', x_unit='Hz')
+
+
 def test_a_project_or_another_object_is_not_a_table(tmp_path):
     hz.Project('Survey').save(tmp_path / 'survey.hforge')
     with pytest.raises(t.TableFileError, match='holds a Hertzforge project, not a channel table'):
