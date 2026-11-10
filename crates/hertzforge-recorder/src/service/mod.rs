@@ -1,44 +1,40 @@
-//! `RecorderService` - the Data Recorder run orchestration.
+//! `RecorderService`: a Recorder run on one station.
 //!
-//! The service owns a backend (whatever the station factory built; the seam is generic
-//! so a real backend drops in later), runs the engine MONITOR-ONLY (SilentDrive feeds
-//! zeros into a synthetic drive channel), streams every input frame into the analysis
-//! pipeline always and into the recording writer + trigger engine while
-//! armed/recording, and assembles the live [`RecStatus`] + serde [`ReportData`]
-//! surfaces.
+//! The service owns the station's backend and a record thread, and on each pump reads
+//! one batch of two blocks from the station through the run's one engine. It hands
+//! the batch, frame-exact, to the overload indicators and the limit marks, the
+//! trigger, the recording in progress (through the record thread, which alone touches
+//! a recording's files) and the analysis, and keeps the live [`RecStatus`] and the
+//! serde [`ReportData`].
 //!
 //! # The engine table clone
 //!
-//! [`Engine`] runs against a CLONE of the user channel table with two edits:
+//! [`Engine`] runs against a clone of the operator's channel table with two edits:
 //!
-//! * **One synthetic Drive channel is injected** (`"SILENT (recorder)"`).
-//!   a host-loop backend's `write_drive` errors when the table maps ZERO Drive rows, and
-//!   the engine drive path runs on every `HostClosesLoop` tick, so a table with
-//!   no Drive row would fault on tick 1. The injected drive is fed zeros by
-//!   [`SilentDrive`] (harmless; the recorder drives nothing).
-//! * **When `watchdog_enabled == false` (the default) all abort
-//!   limits are STRIPPED from the clone.** The engine watchdog skips channels
-//!   with no abort axes, so it monitors nothing. The per-channel OVERLOAD
-//!   latches still run on the REAL table inside the service. When
-//!   `watchdog_enabled == true`, `AbortWatchdog::poll` may call
-//!   `emergency_stop` on the recorder's OWN backend only (the recorder owns no
-//!   other device); a trip faults the run.
+//! * **The table's drive rows are left out.** A Recorder run is capture only: the
+//!   station is configured with the enabled input rows and nothing else, the engine
+//!   has no output channel, and the arm gate is asked for a capture-only run. The
+//!   operator's table keeps its drive rows for the modules that drive; this run
+//!   neither opens nor records them.
+//! * **The abort limits are stripped from the clone.** A Recorder drives nothing,
+//!   so ending acquisition on a limit would protect nothing and lose the event: a
+//!   row passing a limit is marked, and recording goes on. The service checks each
+//!   enabled row's limits, and its overload indicator, on every sample, against the
+//!   operator's table.
 //!
-//! # The segment-run monitor loop
+//! # Time
 //!
-//! The engine is run per SEGMENT ([`Engine::new`] + [`Engine::run`] with a
-//! bounded `max_ticks_per_segment`), exactly like hertzforge-random's `PlantLoop`
-//! and the sine service, WITH the [`StopReason::SchedulingFault`] RETRY (a
-//! wall-clock artifact of the deterministic harness): re-arm / re-start /
-//! re-run, bounded attempts. Each segment's captured frames flow through the
-//! [`CaptureBridge`] (an [`EngineCaptureSink`]) and the service then drains
-//! them into analysis (always) and the record/trigger paths (when
-//! armed/recording). The bridge's `finalize()` is an IDEMPOTENT NO-OP - a
-//! segment boundary calls it, but the record writer is closed only at service
-//! stop. The RECORD path has priority; analysis is drop-tolerant.
+//! Everything per frame is counted at the rate the station programmed, which may
+//! differ from the rate asked, and in station frames from the run's first frame: the
+//! trigger's fires and holdoff, a timed length, the pre-window, every recording's
+//! station frames and the session clock.
 //!
-//! Timed recordings count FRAMES (`timed_record_s * native_rate`), because the
-//! Sim plant free-runs with no wall clock.
+//! # Ends
+//!
+//! Any reason the engine stops (a station error, a lost link, an input stall, an
+//! ended stream), a write the record thread reports failed, or a batch the record
+//! queue cannot take ends the run once, in its words ([`RunFault`]), with the
+//! recording in progress finalized with what reached the disk.
 
 pub mod config;
 pub mod report;
@@ -47,64 +43,51 @@ use std::path::PathBuf;
 
 use hertzforge_channel_table::{AbortLimits, Channel, ChannelRole, ChannelTable, Units};
 use hertzforge_engine::capture::{BlockMeta, CaptureError, CaptureSink as EngineCaptureSink};
-use hertzforge_engine::{Engine, EngineConfig, ProcessStep, SilentDrive, StopReason};
+use hertzforge_engine::limits::ChannelIntegrator;
+use hertzforge_engine::{Engine, EngineConfig, ProcessStep, StopReason};
 use hertzforge_hal::Backend;
 
 use crate::analysis::{
     BlockAssembler, ChannelDecimator, FrfPipeline, SpectrumPipeline, TimeStats,
     TimeStatsAccumulator,
 };
-use crate::recording::{
-    recorder_disk_budget_seconds, RecordingInfo, RecordingReader, RecordingSummary, RecordingWriter,
-};
+use crate::record::RecordThread;
+use crate::recording::{recorder_disk_budget_seconds, GapRecord, RecordingInfo, RecordingReader};
+use crate::store::{RecordStore, RecordingSpec, WriterStore};
 use crate::trigger::{TriggerEngine, TriggerEvent, DEFAULT_PRETRIGGER_S};
 
 pub use config::{MetaField, RecState, RecorderConfig};
 pub use report::{
-    ChannelMeter, ChannelRow, ChannelStat, EventLog, FrfSnapshot, Honesty, RecEvent, RecStatus,
-    RecordingInfoLite, ReportData, SessionRecording,
+    ChannelMeter, ChannelRow, ChannelStat, EndCause, EventLog, FrfSnapshot, Mark, RecEvent,
+    RecStatus, RecordingInfoLite, RecordingNow, ReportData, RunFacts, RunFault, SessionRecording,
 };
 
-/// The synthetic-drive channel label injected into the engine table clone.
-pub const SILENT_DRIVE_LABEL: &str = "SILENT (recorder)";
+/// The process step of a capture-only run: it reads and produces nothing.
+struct NoDrive;
 
-/// Default segment length in frames (~0.25 s of the 65,536 Hz native rate,
-/// rounded to a power of two): short enough that a scheduling-fault blip only
-/// costs one segment, long enough that per-segment overhead is negligible.
-pub const DEFAULT_SEGMENT_FRAMES: u64 = 16_384;
+impl ProcessStep for NoDrive {
+    fn process(&mut self, _input: &[f32], _n_frames: usize, _drive_out: &mut Vec<f32>) {}
+}
 
-/// Frames per acquisition block the recorder REQUESTS at configure. The engine's
-/// `frames_per_tick` then comes from what the backend answers, not from this
-/// constant.
-///
-/// It used to be a hard-coded 1 with a comment citing "the Sim latches ONE
-/// drive value per block". That constraint was removed (the Sim now
-/// buffers the full per-frame drive stream), so the comment was false. The
-/// recorder keeps the HERTZFORGE-SIM natural block for the reason named by
-/// `SIM_NATURAL_BLOCK_FRAMES` - its segment budget is counted in SAMPLES and
-/// handed to the engine as `max_ticks`. A hardware station overrides it via
-/// `RecorderService::with_block_frames`, and the recorder's drive is silent zeros
-/// either way, so the block only ever affects the INPUT cadence here.
+/// Blocks in a batch: the most the service reads between two verbs. Two, so a verb
+/// waits at most one batch and one analysis pass (40 ms at 12 800 Hz on NI).
+pub const BLOCKS_PER_BATCH: u64 = 2;
+
+/// The scheduling-health jitter allowance of a capture-only run, effectively none.
+/// A capture-only run drives nothing, so a late read cannot starve an output: the
+/// frames wait in the station's input buffer, and a read so late that the buffer
+/// overflows is an error the station reports, which ends the run in its words.
+pub const CAPTURE_ONLY_JITTER_FRAC: f64 = 1e12;
+
+/// The per-block compute budget of a capture-only run, for the same reason: work
+/// that runs late delays the next read, it does not lose a frame.
+pub const CAPTURE_ONLY_COMPUTE_BUDGET: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Frames per acquisition block the service requests when the caller states none
+/// (`RecorderService::with_block_frames`); the engine's block is what the station
+/// answers. A station's own block is the power of two nearest 20 ms of the rate, which
+/// every caller on a station passes.
 const DEFAULT_BLOCK_FRAMES: usize = hertzforge_engine::SIM_NATURAL_BLOCK_FRAMES;
-
-/// Bounded retry count for a spurious wall-clock [`StopReason::SchedulingFault`]
-/// (the deterministic harness timing artifact).
-const MAX_SEGMENT_ATTEMPTS: u32 = 8;
-
-/// The HERTZFORGE-SIM abort-watchdog debounce, in RAW FRAMES (~61 us at the Sim
-/// plant's 65 536 Hz). Unchanged from the value this module has always used.
-const SIM_WATCHDOG_SUSTAIN_FRAMES: u32 = 4;
-
-/// The abort-watchdog debounce on a HARDWARE station, in SECONDS.
-///
-/// The same ~60 us [`SIM_WATCHDOG_SUSTAIN_FRAMES`] represents at the Sim rate,
-/// in the unit that survives a rate change. A monitor should not false-trip on a
-/// single stray sample, and it also must not sit over a limit for a rate-
-/// dependent length of time before acting - see
-/// `hertzforge_engine::watchdog_sustain_frames`. At any rate below ~16 kHz this
-/// collapses to 1 frame, which is the correct direction: fewer samples per unit
-/// time means a shorter debounce, not a longer one.
-const WATCHDOG_SUSTAIN_SECONDS: f64 = 0.00006;
 
 /// Errors from a recorder service operation.
 #[derive(Debug, Clone, PartialEq)]
@@ -158,7 +141,7 @@ struct ChannelAnalysisState {
 }
 
 /// The FRF lockstep path state (two decimators + one 2-channel assembler),
-/// carried across segments so the block boundaries are continuous.
+/// carried across batches so the block boundaries are continuous.
 struct FrfState {
     /// The pair in enabled-input slots.
     pair: (usize, usize),
@@ -170,35 +153,16 @@ struct FrfState {
     pipeline: FrfPipeline,
 }
 
-// REMOVED 2026-07-16: `FrameToSampleAdapter`.
-//
-// It wrapped the backend and multiplied `read_input`'s FRAME count by the input-channel
-// count, so that the engine's (incorrect) `return / in_channels` division would cancel it
-// back out and recover the true frame count. Its own doc said it "drops away the moment
-// the engine's contract is unified." That has now happened: `hertzforge-engine`'s scheduler
-// takes `read_input`'s return as FRAMES, which is what `hertzforge_hal::Backend::read_input`
-// always specified and what every backend always returned. With the division gone, the
-// compensating multiply here would over-count by `in_channels` squared, so the adapter is
-// deleted rather than kept.
-//
-// The recorder was the only module carrying this antidote, which is why it was the only
-// one that survived multi-channel input; every other module stalled on tick 1 or silently
-// dropped (N-1)/N of the block. See `hertzforge-engine/tests/engine.rs`
-// `multichannel_tail_breach_still_reaches_the_watchdog` for the regression that pins it.
-
-/// The capture-sink BRIDGE: an [`EngineCaptureSink`] the engine writes each
-/// tick's raw block through. It BUFFERS the segment's interleaved input frames;
-/// the service drains the buffer into the analysis / record / trigger paths
-/// after each segment returns. This avoids a re-entrant borrow (the engine
-/// borrows the sink while also borrowing the backend), keeps the RECORD path
-/// prioritized, and makes the analysis path drop-countable. `finalize()`
-/// defaults to a no-op: a segment boundary must not close the
-/// record sink.
+/// The capture-sink bridge: an [`EngineCaptureSink`] the engine writes each block
+/// through. It holds the batch's interleaved input frames; the service hands them on
+/// once the engine returns, which keeps the engine's borrow of the sink apart from
+/// the service's own state. `finalize()` is the default no-op: a batch's end closes
+/// nothing.
 #[derive(Default)]
 struct CaptureBridge {
-    /// Interleaved input frames captured this segment (`n_channels` per frame).
+    /// Interleaved input frames read this batch (`n_channels` per frame).
     frames: Vec<f32>,
-    /// Frame count captured this segment.
+    /// Frames read this batch.
     n_frames: u64,
 }
 
@@ -208,29 +172,24 @@ impl EngineCaptureSink for CaptureBridge {
         self.n_frames += meta.n_frames;
         Ok(())
     }
-    // finalize() -> default no-op (idempotent segment boundary).
 }
 
-/// The host-side Recorder run service. Owns the backend + the analysis pipeline
-/// + the recording lifecycle + the event log.
+/// A Recorder run on one station: the backend, the record thread, the trigger, the
+/// analysis, the marks and the event log.
 ///
 /// Generic over the backend `B`, defaulting to the station factory's product
-/// `Box<dyn Backend>`. Nothing in the loop assumes a Sim plant.
-///
-/// The default type parameter was `SimBackend` and a `RecorderService<SimBackend>`
-/// constructor built one from a `SimConfig`, which pinned the Tauri layer's four
-/// type annotations to a concrete Sim. Both are gone - `with_backend` is now the
-/// only constructor and it takes the backend AND the station class the arm gate
-/// will be given.
+/// `Box<dyn Backend>`. Nothing in the loop assumes a simulated station.
+/// [`RecorderService::with_backend`] is the only constructor; it takes the backend
+/// and the station class the arm gate is given.
 pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     cfg: RecorderConfig,
-    /// Driver-programmed rate, retained from the last `configure` (None until
-    /// the backend has been up once). See [`RecorderService::actual_rate_hz`].
-    actual_rate_hz: Option<f64>,
+    /// The rate the station programmed once it is up; the rate asked until then.
+    /// Everything per frame is derived from it: the analysis grid, the pre-window,
+    /// the holdoff, a timed length, the session clock and both sidecars.
+    fs_hz: f64,
     /// The REAL user channel table (overload latches + report run on this).
     user_table: ChannelTable,
-    /// The engine table clone: synthetic drive injected, abort limits stripped
-    /// when the watchdog is off.
+    /// The engine table clone: the input rows, their abort limits stripped.
     engine_table: ChannelTable,
     /// The recording table: the enabled INPUT channels only, matching the
     /// interleaved frame width the bridge forwards.
@@ -238,18 +197,17 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     state: RecState,
     data_root: PathBuf,
 
-    /// The owned backend. Used directly: the engine's
-    /// frame accounting is correct for multi-channel input as of the 2026-07-16 scheduler
-    /// fix, so the former `FrameToSampleAdapter` wrapper is gone.
+    /// The station's backend.
     backend: B,
     /// The station class the arm gate is given. Supplied
     /// with the backend at construction; never inferred from `B`.
     station: hertzforge_module_abi::StationClass,
-    /// What the watchdog policy decided at construction, and why. Reported on
-    /// every status poll so the pane can render the persistent disarmed banner
-    /// without re-deriving the rule (a second copy of a safety rule is a second
-    /// rule).
-    watchdog: crate::service::config::WatchdogArming,
+    /// Each recorded row's limit episodes, for its marks.
+    row_marks: Vec<RowMarks>,
+    /// The run's marks, in the order made.
+    marks: Vec<Mark>,
+    /// The marks inside the recording in progress, for its record.
+    record_marks: Vec<serde_json::Value>,
     /// The engine config (interleave width + tick + watchdog knobs). Its
     /// `frames_per_tick` / `ring_frames` are re-derived from `ConfiguredActual`
     /// in `bring_backend_up`.
@@ -259,6 +217,12 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     block_frames: usize,
     /// Whether the backend has been brought up (open/configure/arm/start).
     backend_up: bool,
+    /// The run's one engine, built when the station is up.
+    engine: Option<Engine>,
+    /// The input group delay the station states, frames: given by the caller, else
+    /// the station's configured answer, else 0.
+    group_delay_given: Option<f64>,
+    group_delay_frames: f64,
 
     /// The enabled-input slot count (interleave width).
     n_input: usize,
@@ -270,8 +234,33 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// The trigger engine (active while Armed/Recording).
     trigger: Option<TriggerEngine>,
 
-    /// The active recording writer.
-    writer: Option<RecordingWriter>,
+    /// What writes the recordings (the crate's writer unless a test supplies one),
+    /// held here until the run starts and moved to the record thread for the run.
+    store: Option<Box<dyn RecordStore>>,
+    /// The record thread, while the run is up: the only thread that touches a
+    /// recording's files.
+    rec: Option<RecordThread>,
+    /// The recordings handed to the record thread to finish, oldest first, with
+    /// their pre-windows and the gaps the service recorded, until it reports them.
+    finishing: std::collections::VecDeque<(u64, Vec<GapRecord>)>,
+    /// Frames of the recording in progress the record thread took (the file's next
+    /// position).
+    record_queued: u64,
+    /// Gaps the service recorded in the recording in progress.
+    record_gaps: Vec<GapRecord>,
+    /// The disk fell behind on this pass: its words.
+    behind: Option<String>,
+    /// The recording in progress's station facts: what began it, its first and its
+    /// trigger station frame, and the pre-window asked.
+    record_kind: &'static str,
+    record_first_frame: u64,
+    record_trigger_frame: u64,
+    record_pre_asked: u64,
+    /// The last batch's frames, interleaved, and the station frame of its first.
+    last_frames: Vec<f32>,
+    last_first_frame: u64,
+    /// Whether a recording is in progress in the store.
+    recording: bool,
     /// Frames written to the active recording.
     record_frames: u64,
     /// Target frames for a timed recording (`None` = manual stop).
@@ -298,34 +287,37 @@ pub struct RecorderService<B: Backend = Box<dyn Backend>> {
     /// The name of the active recording's run directory (for status).
     active_run_name: Option<String>,
 
-    /// How many [`StopReason::SchedulingFault`] retries this session has taken.
-    ///
-    /// It is OBSERVABILITY ONLY - nothing reads it to make a decision, and the retry
-    /// behavior is byte-for-byte what it was. It exists because the soak gate's
-    /// predicate is ZERO SchedulingFault over 30+ minutes, and `run_segment` swallows
-    /// the retry by design (a spurious wall-clock overrun on a deterministic harness is
-    /// not a real fault). Swallowed and uncounted, the predicate was unmeasurable: a
-    /// soak could retry a hundred segments and report a clean run. Counted, the
-    /// operator sees the number and the gate means something.
+    /// Batches (engine calls) read so far.
+    batches: u64,
+    /// The analysis pass's last and worst time.
+    pass_last: Option<std::time::Duration>,
+    pass_worst: Option<std::time::Duration>,
+    /// When the last batch's read ended, and the longest gap from there to the next
+    /// batch's read.
+    last_batch_end: Option<std::time::Instant>,
+    batch_gap_max: Option<std::time::Duration>,
+    /// Trigger fires since start, and the station frame of the last.
+    trigger_fires: u64,
+    last_fire_station_frame: Option<u64>,
+    /// Recordings finished since start.
+    recordings_saved: u64,
+    /// How the run ended on its own, if it did.
+    run_fault: Option<RunFault>,
+
+    /// Scheduling faults this run has seen: at most one, since one ends the run.
     scheduling_faults: u64,
 }
 
 impl<B: Backend> RecorderService<B> {
-    /// Build a service against a backend `B` - the station factory's
-    /// `Box<dyn Backend>`, or a scripted test double. The backend must deliver
-    /// exactly the enabled INPUT channels per frame via `read_input` and accept
-    /// the synthetic drive via `write_drive`. It must already be sized to the
-    /// table's enabled-input count; sizing is the factory's job, not the
-    /// service's (a service that resizes its own backend is a service that can
-    /// only ever have a synthetic one).
+    /// Build a service against a backend `B`: the station factory's
+    /// `Box<dyn Backend>`, or a scripted test double. The backend delivers exactly
+    /// the enabled input rows per frame through `read_input`; nothing is ever written
+    /// to it. It is already sized to the table's enabled inputs: sizing is the
+    /// factory's job, not the service's.
     ///
     /// `station` is the class the arm gate is given. It travels with the backend
     /// because the class is a property of what the backend is bound to, not of
     /// its type.
-    ///
-    /// This ABSORBED the old `RecorderService::<SimBackend>::new(cfg, table,
-    /// sim_cfg, data_root)`, which built a Sim from a `SimConfig` and sized it
-    /// here.
     pub fn with_backend(
         cfg: RecorderConfig,
         table: ChannelTable,
@@ -355,29 +347,16 @@ impl<B: Backend> RecorderService<B> {
             ));
         }
 
-        // The record table: exactly the enabled input channels (frame width
-        // matches the bridge output). Re-index 1.. so it validates cleanly.
+        // The record table: exactly the enabled input channels, in table order and
+        // with their own indexes (the frame width the bridge forwards; every
+        // recording states these rows).
         let mut record_table = ChannelTable::new();
-        for (i, ch) in input_channels.iter().enumerate() {
-            let mut c = ch.clone();
-            c.index = (i + 1) as u32;
-            record_table.channels.push(c);
-        }
+        record_table.channels.extend(input_channels.iter().cloned());
 
-        // The engine table clone: user table + one synthetic drive; abort
-        // limits stripped when the watchdog is off.
-        //
-        // WHAT ARMS is `resolve_watchdog`, not `cfg.watchdog_enabled`: on a hardware
-        // station a table that carries abort limits arms by default, because otherwise
-        // those limits render in the grid, export into the report, and enforce nothing.
-        // `cfg.watchdog_enabled` is the request; this is the answer, and it states its
-        // own basis.
-        let watchdog = crate::service::config::resolve_watchdog(
-            &cfg,
-            station,
-            crate::service::config::table_has_abort_limits(&table),
-        );
-        let engine_table = build_engine_table(&table, watchdog.armed);
+        // The engine table clone: the input rows, their abort limits stripped (a
+        // limit is a mark, checked by the service).
+        let engine_table = build_engine_table(&table);
+        let row_marks = input_channels.iter().map(RowMarks::new).collect();
 
         // Overload latches on the REAL table (enabled non-drive channels).
         let overloads: Vec<OverloadLatch> = input_channels
@@ -391,58 +370,26 @@ impl<B: Backend> RecorderService<B> {
             })
             .collect();
 
-        // The engine interleave: in = enabled input channels, out = drive
-        // channels in the clone (always >= 1 after injection).
-        let n_drive = engine_table
-            .channels
-            .iter()
-            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
-            .count()
-            .max(1);
-        // Placeholder cadence: the real one is derived in `open_backend` from what
+        // The engine interleave: in = enabled input channels, out = none. A Recorder
+        // run is capture only.
+        // Placeholder cadence: the real one is derived in `bring_backend_up` from what
         // the backend configured, which is the only place the block is known.
-        let mut ecfg = EngineConfig::new(n_input, n_drive);
+        let mut ecfg = EngineConfig::new(n_input, 0);
         ecfg.frames_per_tick = DEFAULT_BLOCK_FRAMES;
-        // A deliberately deep watchdog tap for a monitor: the recorder's whole job
-        // is not to miss frames. `bring_backend_up` only ever RAISES this to the
-        // block-derived floor.
+        // The engine's raw tap: its watchdog monitors nothing (the limits are
+        // stripped), so the depth only bounds a tap no one reads. `bring_backend_up`
+        // raises it to the block-derived floor.
         ecfg.ring_frames = 4096;
-        // A passive monitor should not false-trip on transients; give the
-        // watchdog a small sustain. (Moot when the watchdog is off - the clone
-        // carries no limits.) HERTZFORGE-SIM keeps this frame count; a hardware
-        // station replaces it in `bring_backend_up`, where the ACTUAL rate is
-        // known - see the constants note there.
-        ecfg.watchdog_sustain = SIM_WATCHDOG_SUSTAIN_FRAMES;
-        // Deterministic single-threaded harness: it runs the engine flat out
-        // between segments, so wall-clock tick spacing carries no information.
-        ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
-        // The tick-period compute budget is meaningless for this harness; relax it
-        // explicitly instead of retrying the spurious ComputeOverrun it produces.
-        ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
+        // The capture-only health budget, by name: a late read loses nothing.
+        ecfg.jitter_frac = CAPTURE_ONLY_JITTER_FRAC;
+        ecfg.compute_budget = Some(CAPTURE_ONLY_COMPUTE_BUDGET);
 
-        let analysis = (0..n_input)
-            .map(|_| ChannelAnalysisState {
-                decim: ChannelDecimator::new(1, &cfg.acq),
-                asm: BlockAssembler::from_config(1, &cfg.acq),
-                spectrum: SpectrumPipeline::new(&cfg.acq),
-                stats: TimeStatsAccumulator::new(),
-                last_stats: empty_stats(),
-            })
-            .collect();
-
-        let frf = cfg
-            .frf_pair
-            .filter(|&(x, y)| x < n_input && y < n_input && x != y)
-            .map(|pair| FrfState {
-                pair,
-                decim: ChannelDecimator::new(2, &cfg.acq),
-                asm: BlockAssembler::from_config(2, &cfg.acq),
-                pipeline: FrfPipeline::new(&cfg.acq),
-            });
+        let (analysis, frf) = build_analysis(&cfg.acq, n_input, cfg.frf_pair);
+        let fs_hz = cfg.acq.native_rate_hz;
 
         Ok(Self {
             cfg,
-            actual_rate_hz: None,
+            fs_hz,
             user_table: table,
             engine_table,
             record_table,
@@ -450,15 +397,32 @@ impl<B: Backend> RecorderService<B> {
             data_root,
             backend,
             station,
-            watchdog,
+            row_marks,
+            marks: Vec::new(),
+            record_marks: Vec::new(),
             ecfg,
             block_frames: DEFAULT_BLOCK_FRAMES,
             backend_up: false,
+            engine: None,
+            group_delay_given: None,
+            group_delay_frames: 0.0,
             n_input,
             analysis,
             frf,
             trigger: None,
-            writer: None,
+            store: Some(Box::new(WriterStore::default())),
+            rec: None,
+            finishing: std::collections::VecDeque::new(),
+            record_queued: 0,
+            record_gaps: Vec::new(),
+            behind: None,
+            record_kind: "manual",
+            record_first_frame: 0,
+            record_trigger_frame: 0,
+            record_pre_asked: 0,
+            last_frames: Vec::new(),
+            last_first_frame: 0,
+            recording: false,
             record_frames: 0,
             record_target_frames: None,
             record_gap_free: true,
@@ -470,21 +434,54 @@ impl<B: Backend> RecorderService<B> {
             rearms_remaining: 0,
             run_counter: 0,
             active_run_name: None,
+            batches: 0,
+            pass_last: None,
+            pass_worst: None,
+            last_batch_end: None,
+            batch_gap_max: None,
+            trigger_fires: 0,
+            last_fire_station_frame: None,
+            recordings_saved: 0,
+            run_fault: None,
             scheduling_faults: 0,
         })
     }
 
-    /// How many [`StopReason::SchedulingFault`]s this service has seen, retried or
-    /// not. OBSERVABILITY ONLY - see the field docs. The soak gate's predicate is
-    /// that this reads `0` after >= 30 minutes.
+    /// Scheduling faults this run has seen: 0, or 1 for the one that ended it.
     pub fn scheduling_faults(&self) -> u64 {
         self.scheduling_faults
     }
 
-    /// Request a specific acquisition block (frames per `read_input`) at
-    /// configure. A hardware station passes `hertzforge_engine::default_block_frames(fs)`;
-    /// the HERTZFORGE-SIM plant path leaves the default (see [`DEFAULT_BLOCK_FRAMES`]).
-    /// Must be set BEFORE the backend is brought up.
+    /// State the station's input group delay, frames, for every recording's record
+    /// (a station's own figure to 0.01 frames, where its configured answer is whole).
+    pub fn with_group_delay_frames(mut self, frames: f64) -> Self {
+        self.group_delay_given = Some(frames);
+        self
+    }
+
+    /// The run's marks, in the order they were made.
+    pub fn marks(&self) -> &[Mark] {
+        &self.marks
+    }
+
+    /// The input group delay every recording states, frames.
+    pub fn group_delay_frames(&self) -> f64 {
+        self.group_delay_frames
+    }
+
+    /// Put another record store behind the seam (a test double, or a writer with
+    /// other settings). Must be set before a recording begins.
+    pub fn with_store(mut self, store: Box<dyn RecordStore>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    /// The seconds of frames the queue to the record thread holds.
+    pub const RECORD_QUEUE_S: f64 = 2.0;
+
+    /// Request a specific acquisition block (frames per `read_input`) at configure:
+    /// a caller on a station passes `hertzforge_hal::default_block_frames(fs)`. A pump
+    /// reads two of them. Set before the station is up.
     pub fn with_block_frames(mut self, frames: usize) -> Self {
         self.block_frames = frames.max(1);
         self
@@ -495,26 +492,58 @@ impl<B: Backend> RecorderService<B> {
         self.state
     }
 
-    /// The monotonic session seconds (frame-derived).
-    /// The configured native acquisition rate in Hz. The daemon's pump uses it
-    /// to rate-lock delivery pacing (frames delivered are worth `n/rate` seconds
-    /// of wall clock, and delivering faster than that on an unpaced backend
-    /// would spin a thread hot).
+    /// The rate asked of the station, Hz.
     pub fn native_rate_hz(&self) -> f64 {
         self.cfg.acq.native_rate_hz
     }
 
-    /// The rate the driver ACTUALLY programmed, once the backend is up; the
-    /// configured rate until then. The distinction is the HAL rate contract: the
-    /// 9234 coerces a 65 536 Hz request to 51 200 Hz, and every wall-clock
-    /// budget derived from the REQUEST (pump pacing, the soak's segment budget)
-    /// is ~28% wrong on real hardware.
+    /// The rate the station programmed, once it is up; the rate asked until then.
+    /// A station may program another rate than asked (the 9234 programs 8533.33 Hz
+    /// for 8192); the run records at the programmed rate and states both.
     pub fn actual_rate_hz(&self) -> f64 {
-        self.actual_rate_hz.unwrap_or(self.cfg.acq.native_rate_hz)
+        self.fs_hz
     }
 
+    /// The free-space floor a recording keeps: the larger of the floor asked (the
+    /// writer's least, 1 GiB, when none) and twice a timed recording's bytes, its
+    /// pre-window included.
+    pub fn floor_bytes(&self) -> u64 {
+        let keep = self
+            .cfg
+            .keep_free_bytes
+            .unwrap_or(hertzforge_capture::MIN_FREE_FLOOR_BYTES);
+        let pre = (self
+            .cfg
+            .pretrigger_s
+            .unwrap_or(DEFAULT_PRETRIGGER_S)
+            .clamp(0.0, crate::trigger::MAX_PRETRIGGER_S)
+            * self.fs_hz)
+            .round() as u64;
+        let twice = self
+            .timed_record_frames()
+            .map_or(0, |f| 2 * (f + pre) * self.n_input as u64 * 4);
+        keep.max(twice)
+    }
+
+    /// The acquisition selection at the programmed rate.
+    fn acq_now(&self) -> crate::acq::AcquisitionConfig {
+        crate::acq::AcquisitionConfig {
+            native_rate_hz: self.fs_hz,
+            ..self.cfg.acq.clone()
+        }
+    }
+
+    /// A timed recording's length after its trigger, in frames, or `None` when
+    /// recordings run until cut.
+    pub fn timed_record_frames(&self) -> Option<u64> {
+        self.cfg
+            .timed_record_s
+            .map(|s| (s * self.fs_hz).round().max(0.0) as u64)
+    }
+
+    /// Station seconds since start: the frames read over the programmed rate.
     pub fn session_seconds(&self) -> f64 {
-        self.session_frames as f64 / self.cfg.acq.native_rate_hz
+        self.session_frames as f64 / self.fs_hz
     }
 
     /// The data root run directories land under.
@@ -560,10 +589,13 @@ impl<B: Backend> RecorderService<B> {
         self.trigger = Some(TriggerEngine::new(
             self.cfg.trigger_mode.clone(),
             self.n_input,
-            self.cfg.acq.native_rate_hz,
+            self.fs_hz,
             pretrigger_s,
             self.cfg.auto_rearm,
         ));
+        if let Some(t) = self.trigger.as_mut() {
+            t.sync_to(self.session_frames);
+        }
         self.rearms_remaining = self.cfg.auto_rearm;
         self.transition(RecState::Armed);
         Ok(())
@@ -583,227 +615,371 @@ impl<B: Backend> RecorderService<B> {
             .as_mut()
             .map(|t| t.manual_fire())
             .filter(|ev| ev.pretrigger_frames > 0);
-        self.begin_recording(pretrigger)
+        self.trigger_fires += 1;
+        self.last_fire_station_frame = Some(self.session_frames);
+        self.begin_recording(pretrigger, "manual")
+    }
+
+    /// Armed -> Monitoring: the detector disarmed and the pre-window dropped.
+    pub fn disarm(&mut self) -> Result<(), RecorderError> {
+        if self.state != RecState::Armed {
+            return Err(RecorderError::BadState(format!(
+                "disarm requires Armed, was {:?}",
+                self.state
+            )));
+        }
+        self.trigger = None;
+        self.transition(RecState::Monitoring);
+        Ok(())
+    }
+
+    /// The last batch read: the station frame of its first frame, and its frames,
+    /// interleaved one value per recorded row.
+    pub fn last_batch(&self) -> (u64, &[f32]) {
+        (self.last_first_frame, &self.last_frames)
+    }
+
+    /// Each recorded row's statistics over the whole run, in column order.
+    pub fn row_stats(&self) -> Vec<report::ChannelStat> {
+        self.analysis
+            .iter()
+            .enumerate()
+            .map(|(slot, a)| report::ChannelStat::from_stats(slot, &a.last_stats))
+            .collect()
+    }
+
+    /// Begin the run's recording from its first frame, with no pre-window: the
+    /// `start` mode. Valid before the first batch is read.
+    pub fn record_from_start(&mut self) -> Result<(), RecorderError> {
+        if self.state != RecState::Monitoring || self.session_frames != 0 {
+            return Err(RecorderError::BadState(format!(
+                "record_from_start requires Monitoring before the first batch, was {:?} at \
+                 frame {}",
+                self.state, self.session_frames
+            )));
+        }
+        self.trigger = None;
+        self.trigger_fires += 1;
+        self.last_fire_station_frame = Some(0);
+        self.begin_recording(None, "start")
     }
 
     /// Stop the monitor loop entirely -> Stopped. Finalizes any active
     /// recording and tears the backend down.
     pub fn stop_monitor(&mut self) -> Result<(), RecorderError> {
-        if self.writer.is_some() {
+        if self.recording {
             self.finish_recording()?;
         }
         self.trigger = None;
         self.tear_backend_down();
-        self.transition(RecState::Stopped);
+        self.close_record_thread();
+        if self.state != RecState::Faulted {
+            self.transition(RecState::Stopped);
+        }
         Ok(())
     }
 
-    // ---------------------------------------------------------------------
-    // The monitor loop pump (segment-run pattern)
-    // ---------------------------------------------------------------------
-
-    /// Run ONE monitor segment ([`DEFAULT_SEGMENT_FRAMES`]) with the
-    /// SchedulingFault retry, then drain the captured frames into the
-    /// analysis / record / trigger paths. Returns the frames processed. A
-    /// `BackendError` or watchdog trip latches the service Faulted (message
-    /// preserved) and returns `Err`. Each segment is bounded so no call hangs.
-    pub fn pump(&mut self) -> Result<u64, RecorderError> {
-        self.pump_frames(DEFAULT_SEGMENT_FRAMES)
+    /// Wait for the record thread to finish every recording handed to it, collect
+    /// what it reports, and take the store back. Called once acquisition has ended.
+    fn close_record_thread(&mut self) {
+        if let Some(rec) = self.rec.take() {
+            let (store, reported) = rec.close();
+            self.collect_finished(reported);
+            if let Some(store) = store {
+                self.store = Some(store);
+            }
+        }
     }
 
-    /// [`RecorderService::pump`] with an explicit per-segment frame budget
-    /// (exposed for fast tests).
-    pub fn pump_frames(&mut self, segment_frames: u64) -> Result<u64, RecorderError> {
+    /// Take what the record thread has reported, without waiting.
+    fn poll_record_thread(&mut self) {
+        let reported = self
+            .rec
+            .as_ref()
+            .map(|r| r.take_finished())
+            .unwrap_or_default();
+        self.collect_finished(reported);
+    }
+
+    fn collect_finished(&mut self, reported: Vec<crate::record::Finished>) {
+        for f in reported {
+            let (pre, service_gaps) = self.finishing.pop_front().unwrap_or_default();
+            let session_s = self.session_seconds();
+            let summary = match f.result {
+                Ok(s) => s,
+                Err(e) => {
+                    self.log
+                        .push(session_s, format!("{} could not be finished: {e}", f.name));
+                    continue;
+                }
+            };
+            self.recordings_saved += 1;
+            let name = f.name;
+            let mut summary = summary;
+            for g in service_gaps {
+                if !summary.gaps.contains(&g) {
+                    summary.gaps.push(g);
+                    summary.gap_free = false;
+                }
+            }
+            self.log.push(
+                session_s,
+                format!(
+                    "record stop: {name} ({} frames, gap_free={})",
+                    summary.frames_written, summary.gap_free
+                ),
+            );
+            if !summary.gaps.is_empty() {
+                self.log.push(
+                    session_s,
+                    format!("gaps in {name}: {} drop record(s)", summary.gaps.len()),
+                );
+            }
+            self.session_recordings.push(SessionRecording {
+                name,
+                frames: summary.frames_written,
+                gap_free: summary.gap_free,
+                gaps: summary.gaps,
+                pretrigger_frames: pre,
+            });
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // The pump: one batch at a time
+    // ---------------------------------------------------------------------
+
+    /// Read ONE batch ([`BLOCKS_PER_BATCH`] blocks) and hand it to the overload
+    /// latches, the trigger, the recording and the analysis. Returns the frames read.
+    /// A verb waits at most this long for the service. Any reason the station or the
+    /// engine stops ends the run once, in its own words, every recording finalized,
+    /// and returns `Err`.
+    pub fn pump(&mut self) -> Result<u64, RecorderError> {
         if !self.state.is_live() {
             return Err(RecorderError::BadState(format!(
                 "pump requires a live state, was {:?}",
                 self.state
             )));
         }
-        let (frames, reason) = self.run_segment(segment_frames)?;
-        match reason {
-            StopReason::BackendError(msg) => {
-                self.fault(format!("backend error: {msg}"));
-                return Err(RecorderError::Backend(msg));
-            }
-            StopReason::Disconnected(msg) => {
-                // The device link vanished mid-segment (USB re-enumeration /
-                // hot-unplug). Latch Faulted like a backend error - a recorder with
-                // no device is not recording - but keep the distinct wording so the
-                // operator sees "link lost", not a generic backend fault.
-                self.fault(format!("device link lost: {msg}"));
-                return Err(RecorderError::Backend(format!("device link lost: {msg}")));
-            }
-            StopReason::AbortTripped(trip) => {
-                let msg = format!(
-                    "watchdog trip: ch {} axis {:?} value {:.4} limit {:.4}",
-                    trip.channel_index, trip.axis, trip.value, trip.limit
-                );
-                self.fault(msg.clone());
-                return Err(RecorderError::Backend(msg));
-            }
-            StopReason::CaptureFatal(m) => {
-                self.fault(format!("capture fatal: {m}"));
-                return Err(RecorderError::Io(m));
-            }
-            // The acquisition went SILENT. A recorder whose
-            // input stalled is not recording, and the blanket `_ => {}` below would
-            // have let it pump empty segments forever while reporting healthy.
-            StopReason::InputStalled { elapsed } => {
-                let msg = format!("input stalled: no frames for {elapsed:?}");
-                self.fault(msg.clone());
-                return Err(RecorderError::Backend(msg));
-            }
-            // Raw frames the watchdog never examined, on a
-            // run with limits armed. A monitor that dropped frames did not monitor.
-            StopReason::RingOverrun { frames } => {
-                let msg = format!("raw ring overrun: {frames} frame(s) dropped with limits armed");
-                self.fault(msg.clone());
-                return Err(RecorderError::Backend(msg));
-            }
-            _ => {}
+        self.poll_record_thread();
+        let Some(engine) = self.engine.as_mut() else {
+            return Err(RecorderError::BadState("the station is not up".into()));
+        };
+        let mut bridge = CaptureBridge::default();
+        if let Some(end) = self.last_batch_end {
+            let gap = end.elapsed();
+            self.batch_gap_max = Some(self.batch_gap_max.map_or(gap, |g| g.max(gap)));
         }
-        Ok(frames)
+        // `run_ticks`, not `run`: the run is one continuous acquisition, and the
+        // service owns the station's stop (`tear_backend_down`).
+        let report = engine.run_ticks(
+            &mut self.backend,
+            &mut NoDrive as &mut dyn ProcessStep,
+            &mut bridge as &mut dyn EngineCaptureSink,
+            BLOCKS_PER_BATCH,
+        );
+        self.last_batch_end = Some(std::time::Instant::now());
+        self.batches += 1;
+        let frames = bridge.n_frames;
+        let interleaved = std::mem::take(&mut bridge.frames);
+        self.last_first_frame = self.session_frames;
+        // The frames read before any stop are kept: they are drained first.
+        let drained = self.drain_batch(&interleaved, frames);
+        self.last_frames = interleaved;
+        drained?;
+
+        // A disk too far behind to take a batch ends the run, the gap recorded.
+        if let Some(words) = self.behind.take() {
+            self.end_with(EndCause::WriteBehind, words.clone());
+            return Err(RecorderError::Io(words));
+        }
+        // A recording that cannot be written ends the run, read every pass.
+        if let Some(words) = self.rec.as_ref().and_then(|r| r.fault()) {
+            self.end_with(EndCause::WriteFailed, words.clone());
+            return Err(RecorderError::Io(words));
+        }
+
+        let words = match report.reason {
+            // The batch's budget: the normal end of a batch.
+            StopReason::InputEnded if report.ticks >= BLOCKS_PER_BATCH => return Ok(frames),
+            StopReason::InputEnded => "the station ended its input stream".to_string(),
+            StopReason::BackendError(msg) => format!("station error: {msg}"),
+            StopReason::Disconnected(msg) => format!("device link lost: {msg}"),
+            StopReason::InputStalled { elapsed } => {
+                format!("input stalled: no frames for {elapsed:?}")
+            }
+            StopReason::SchedulingFault(h) => {
+                self.scheduling_faults += 1;
+                format!("scheduling fault: {h:?}")
+            }
+            StopReason::AbortTripped(trip) => format!(
+                "watchdog trip: ch {} axis {:?} value {:.4} limit {:.4}",
+                trip.channel_index, trip.axis, trip.value, trip.limit
+            ),
+            StopReason::CaptureFatal(m) => format!("capture fatal: {m}"),
+            StopReason::RingOverrun { frames } => {
+                format!("raw ring overrun: {frames} frame(s) dropped with limits armed")
+            }
+            other => format!("the engine stopped: {other:?}"),
+        };
+        self.end_with(EndCause::Fault, words.clone());
+        Err(RecorderError::Backend(words))
     }
 
-    /// Latch the service Faulted, finalizing any active recording and tearing
-    /// the backend down, with the fault message logged.
-    fn fault(&mut self, msg: String) {
+    /// Read batches until at least `frames` have been read or the run ends. A test's
+    /// convenience: it holds the service for the whole count.
+    pub fn pump_frames(&mut self, frames: u64) -> Result<u64, RecorderError> {
+        let mut read = 0u64;
+        // Bounded: a station that reads nothing for long ends the run by its stall
+        // deadline, and this count is the backstop.
+        let mut empty = 0u32;
+        while read < frames {
+            let n = self.pump()?;
+            read += n;
+            if n == 0 {
+                empty += 1;
+                if empty > 10_000 {
+                    break;
+                }
+            }
+        }
+        Ok(read)
+    }
+
+    /// End the run on its own, once: the cause and its words logged and held, the
+    /// recording in progress finalized with what reached the disk, the station torn
+    /// down.
+    fn end_with(&mut self, cause: EndCause, msg: String) {
+        if self.run_fault.is_some() {
+            return;
+        }
         self.log
             .push(self.session_seconds(), format!("FAULT: {msg}"));
-        if self.writer.is_some() {
+        self.run_fault = Some(RunFault {
+            cause,
+            message: msg,
+            station_frame: self.session_frames,
+        });
+        if self.recording {
             let _ = self.finish_recording();
         }
         self.tear_backend_down();
         self.transition(RecState::Faulted);
     }
 
-    /// Run the engine for one segment with the SchedulingFault retry, returning
-    /// the captured frames + the accepted stop reason, then drain the frames.
-    fn run_segment(&mut self, segment_frames: u64) -> Result<(u64, StopReason), RecorderError> {
-        let mut bridge = CaptureBridge::default();
-        let mut reason;
-        let mut attempt = 0u32;
-        loop {
-            // Re-arm/start so the plant is Running with a clean drive path; the
-            // backend state persists so the plant/noise stream is continuous.
-            let _ = self.backend.arm();
-            let _ = self.backend.start();
-            let mut engine = Engine::new(clone_ecfg(&self.ecfg), &self.engine_table, &self.backend);
-            let mut step = SilentDrive {
-                out_channels: self.ecfg.out_channels,
-            };
-            bridge.frames.clear();
-            bridge.n_frames = 0;
-            // The segment budget is FRAMES; the engine's run budget is TICKS.
-            // They were numerically equal for the HERTZFORGE-SIM plant's natural
-            // block of 1 frame, and that hidden equivalence became a defect the
-            // day a hardware station set a real block (2026-07-30): 16384
-            // "ticks" x 1024-frame blocks is 5.5 MINUTES of driver-paced
-            // acquisition per pump call, with the service mutex held the whole
-            // way - the daemon looked wedged, StopMonitor starved behind the
-            // lock, and the segment's capture bridge accumulated ~330 MB.
-            let fpt = self.ecfg.frames_per_tick.max(1) as u64;
-            let ticks = segment_frames.div_ceil(fpt);
-            // `run_ticks`, NOT `run`: the monitor session is ONE continuous
-            // acquisition; `run`'s backend-stop epilogue at every segment
-            // boundary stopped the NI tasks, the silent re-start below failed,
-            // and the next segment stalled against a dead AO (2026-07-30).
-            // The service owns the real stop (`tear_backend_down`).
-            let report = engine.run_ticks(
-                &mut self.backend,
-                &mut step as &mut dyn ProcessStep,
-                &mut bridge as &mut dyn EngineCaptureSink,
-                ticks,
-            );
-            reason = report.reason;
-            if matches!(reason, StopReason::SchedulingFault(_)) {
-                // COUNTED even when retried and even on the final attempt: the
-                // soak gate asks how many happened, not how many were fatal.
-                // See the field docs on `scheduling_faults`.
-                self.scheduling_faults += 1;
-            }
-            if matches!(reason, StopReason::SchedulingFault(_))
-                && attempt + 1 < MAX_SEGMENT_ATTEMPTS
-            {
-                attempt += 1;
-                continue; // spurious wall-clock overrun; retry a clean segment
-            }
-            break;
-        }
-
-        let frames = bridge.n_frames;
-        let interleaved = std::mem::take(&mut bridge.frames);
-        self.drain_segment(&interleaved, frames)?;
-        Ok((frames, reason))
-    }
-
-    /// Drain a segment's interleaved frames into: overload latches (real
-    /// table), trigger engine (while armed), recording writer (while
-    /// recording; RECORD path has priority), and analysis (always).
-    fn drain_segment(&mut self, interleaved: &[f32], n_frames: u64) -> Result<(), RecorderError> {
+    /// Hand a batch's interleaved frames on: the marks (limits and overload
+    /// indicators, on the operator's table), the trigger (while armed), the recording
+    /// in progress (through the record thread), and the analysis (always).
+    fn drain_batch(&mut self, interleaved: &[f32], n_frames: u64) -> Result<(), RecorderError> {
         if n_frames == 0 || self.n_input == 0 {
             return Ok(());
         }
         let n = n_frames as usize;
 
-        // 1. Overload latches on the real table.
-        self.update_overloads(interleaved, n);
+        // 1. Marks: each row's limits and overload indicator, on every sample.
+        let mut batch_marks = self.batch_marks(interleaved, n);
 
-        // 2. Trigger engine (while Armed). A fire starts a recording with the
-        //    pre-window prepended, then this segment's frames from the trigger
-        //    index onward are written as the gap-free live continuation. The
-        //    trigger borrow is scoped and dropped BEFORE begin_recording so the
-        //    &mut self call is legal.
-        if self.state == RecState::Armed {
-            let fire: Option<(TriggerEvent, usize)> = self.trigger.as_mut().and_then(|trig| {
-                trig.feed(interleaved, n).map(|ev| {
-                    // feed advances the full block, so the trigger's global
-                    // counter is now the segment END; the segment START is
-                    // `end - n`, and the trigger's local index is
-                    // `trigger_global - (end - n)`.
-                    let end = trig.global_frame();
-                    let seg_start_global = end.saturating_sub(n as u64);
-                    let local = ev.trigger_frame_global.saturating_sub(seg_start_global) as usize;
-                    (ev, local)
-                })
-            });
-            if let Some((ev, local)) = fire {
-                self.begin_recording(Some(ev))?;
-                if local < n {
-                    if let Some(w) = self.writer.as_mut() {
-                        let tail = &interleaved[local * self.n_input..];
-                        let tail_frames = n - local;
-                        w.push_frames(tail, tail_frames);
-                        self.record_frames = w.frames_fed();
-                        self.record_gap_free = w.gaps().is_empty();
+        // 2. The trigger and the recording, frame-exact: a level fire mid-batch
+        //    begins a recording at its frame; a timed recording takes exactly the
+        //    frames it still needs, and the rest of the batch goes on (back to the
+        //    trigger when it re-arms).
+        let w = self.n_input;
+        let mut at = 0usize;
+        while at < n {
+            match self.state {
+                RecState::Armed => {
+                    let start_frame = self.session_frames + at as u64;
+                    let (fire, used) = match self.trigger.as_mut() {
+                        Some(trig) => trig.feed_until_fire(&interleaved[at * w..], n - at),
+                        None => (None, n - at),
+                    };
+                    at += used;
+                    if let Some(ev) = fire {
+                        self.trigger_fires += 1;
+                        self.last_fire_station_frame = Some(start_frame + used as u64);
+                        self.begin_recording(Some(ev), "level")?;
                     }
-                    if let Some(target) = self.record_target_frames {
-                        if self.record_frames >= target {
-                            self.complete_recording()?;
+                }
+                RecState::Recording if self.recording => {
+                    let left = (n - at) as u64;
+                    let take = match self.record_target_frames {
+                        Some(target) => left.min(target.saturating_sub(self.record_frames)),
+                        None => left,
+                    } as usize;
+                    self.hand_to_record_thread(&interleaved[at * w..(at + take) * w], take);
+                    let name = self.active_run_name.clone();
+                    for (local, mark) in batch_marks.iter_mut() {
+                        if (at..at + take).contains(local) {
+                            set_recording(mark, name.clone());
+                            if let Ok(v) = serde_json::to_value(&*mark) {
+                                self.record_marks.push(v);
+                            }
                         }
                     }
+                    at += take;
+                    if let Some(t) = self.trigger.as_mut() {
+                        t.skip(take as u64);
+                    }
+                    if self
+                        .record_target_frames
+                        .is_some_and(|target| self.record_frames >= target)
+                    {
+                        self.complete_recording()?;
+                    }
                 }
-            }
-        } else if self.state == RecState::Recording {
-            // 3. RECORD path (priority): write every frame.
-            if let Some(w) = self.writer.as_mut() {
-                w.push_frames(interleaved, n);
-                self.record_frames = w.frames_fed();
-                self.record_gap_free = w.gaps().is_empty();
-            }
-            if let Some(target) = self.record_target_frames {
-                if self.record_frames >= target {
-                    self.complete_recording()?;
-                }
+                _ => break,
             }
         }
 
-        // 4. Analysis path (ALWAYS; drop-tolerant).
+        // 3. The batch's marks join the run's, and the log.
+        for (_, mark) in batch_marks {
+            let text = mark_words(&mark);
+            self.log.push(self.session_seconds(), text);
+            self.marks.push(mark);
+        }
+
+        // 4. Analysis path (ALWAYS; drop-tolerant), timed.
+        let pass = std::time::Instant::now();
         self.feed_analysis(interleaved, n);
+        let took = pass.elapsed();
+        self.pass_last = Some(took);
+        self.pass_worst = Some(self.pass_worst.map_or(took, |w| w.max(took)));
 
         self.session_frames += n_frames;
         Ok(())
+    }
+
+    /// Hand frames of the recording in progress to the record thread, never waiting.
+    /// Frames the queue cannot take are a gap, and the run ends at the pass's end
+    /// (`behind`): a disk that far behind cannot be caught up from.
+    fn hand_to_record_thread(&mut self, frames: &[f32], n: usize) {
+        if self.behind.is_some() {
+            return;
+        }
+        let Some(rec) = self.rec.as_ref() else {
+            return;
+        };
+        self.record_frames += n as u64;
+        if rec.push(frames, n) {
+            self.record_queued += n as u64;
+            return;
+        }
+        let gap = GapRecord {
+            at_frame: self.record_queued,
+            dropped_frames: n as u64,
+        };
+        rec.gap(gap.clone());
+        self.record_gaps.push(gap);
+        self.record_gap_free = false;
+        let behind_s = (self.record_frames - n as u64).saturating_sub(rec.frames_on_disk()) as f64
+            / self.fs_hz;
+        self.behind = Some(format!(
+            "the disk fell {behind_s:.1} s behind the inputs and the record thread's \
+             {:.1} s queue could not take a batch; {} ends at file frame {}",
+            Self::RECORD_QUEUE_S,
+            self.active_run_name.clone().unwrap_or_default(),
+            self.record_queued
+        ));
     }
 
     /// Feed the analysis pipelines (per-channel spectra + stats + optional
@@ -845,33 +1021,55 @@ impl<B: Backend> RecorderService<B> {
         }
     }
 
-    /// Update the per-channel overload latches from a segment's frames.
-    fn update_overloads(&mut self, interleaved: &[f32], n_frames: usize) {
+    /// The marks this batch makes, each with its frame in the batch: every row's
+    /// limits (rows in g) and its overload indicator, on every sample.
+    fn batch_marks(&mut self, interleaved: &[f32], n_frames: usize) -> Vec<(usize, Mark)> {
         let n_ch = self.n_input;
-        let session_s = self.session_seconds();
-        let mut newly: Vec<usize> = Vec::new();
-        for latch in self.overloads.iter_mut() {
-            if latch.latched {
-                continue;
-            }
+        let fs = self.fs_hz;
+        let base = self.session_frames;
+        let mut out = Vec::new();
+        let mut made = Vec::new();
+        for slot in 0..n_ch {
+            let row = self.row_marks[slot].row;
+            let limited = self.row_marks[slot].has_limit();
+            let latch = &mut self.overloads[slot];
             for f in 0..n_frames {
-                let v = f64::from(interleaved[f * n_ch + latch.slot]).abs();
-                if v >= latch.trip_level {
+                let v = f64::from(interleaved[f * n_ch + slot]);
+                if !latch.latched && v.abs() >= latch.trip_level {
                     latch.latched = true;
-                    if !latch.logged {
-                        latch.logged = true;
-                        newly.push(latch.slot);
+                    latch.logged = true;
+                    out.push((
+                        f,
+                        Mark::Overload {
+                            row,
+                            value: v.abs(),
+                            level: latch.trip_level,
+                            station_frame: base + f as u64,
+                            recording: None,
+                        },
+                    ));
+                }
+                if limited {
+                    made.clear();
+                    self.row_marks[slot].push(v, fs, &mut made);
+                    for (axis, value, limit) in made.drain(..) {
+                        out.push((
+                            f,
+                            Mark::Limit {
+                                row,
+                                axis: axis.to_string(),
+                                value,
+                                limit,
+                                station_frame: base + f as u64,
+                                recording: None,
+                            },
+                        ));
                     }
-                    break;
                 }
             }
         }
-        for slot in newly {
-            self.log.push(
-                session_s,
-                format!("overload latched on channel slot {slot}"),
-            );
-        }
+        out.sort_by_key(|(f, _)| *f);
+        out
     }
 
     // ---------------------------------------------------------------------
@@ -880,31 +1078,60 @@ impl<B: Backend> RecorderService<B> {
 
     /// Begin a recording (from a trigger fire or record_now). Prepends the
     /// pre-window when given. Transitions to Recording.
-    fn begin_recording(&mut self, pretrigger: Option<TriggerEvent>) -> Result<(), RecorderError> {
+    fn begin_recording(
+        &mut self,
+        pretrigger: Option<TriggerEvent>,
+        kind: &str,
+    ) -> Result<(), RecorderError> {
         self.run_counter += 1;
         let run_name = format!("rec_{:04}", self.run_counter);
         let pre_frames = pretrigger.as_ref().map_or(0, |e| e.pretrigger_frames);
-        let writer = RecordingWriter::start(
-            &self.data_root,
-            &run_name,
-            &self.cfg.acq,
-            self.record_table.clone(),
+        // Handed to the record thread: the folder, the sidecar, the free-space check
+        // and the writer are made there, never on the thread that reads the station.
+        let rec = self
+            .rec
+            .as_ref()
+            .ok_or_else(|| RecorderError::BadState("the station is not up".into()))?;
+        let pre_frames_asked = self
+            .trigger
+            .as_ref()
+            .map_or(0, |t| t.ring_capacity_frames() as u64);
+        rec.start(RecordingSpec {
+            data_root: self.data_root.clone(),
+            name: run_name.clone(),
+            table: self.record_table.clone(),
+            acq: self.acq_now(),
+            requested_fs_hz: self.cfg.acq.native_rate_hz,
+            floor_bytes: self.floor_bytes(),
             pretrigger,
-        )
-        .map_err(|e| RecorderError::Io(e.to_string()))?;
-        // The writer's run dir name may differ from the requested name after
-        // sanitize/de-collision; track the real one.
-        let real_name = writer
-            .run_dir()
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or(run_name);
-        self.record_frames = writer.frames_fed();
-        self.record_gap_free = writer.gaps().is_empty();
+            station: crate::recording::StationFacts {
+                name: run_name.clone(),
+                trigger: kind.to_string(),
+                group_delay_frames: self.group_delay_frames,
+                first_station_frame: self.session_frames,
+                pre_frames_asked,
+            },
+        });
+        let real_name = run_name;
+        self.record_kind = match kind {
+            "start" => "start",
+            "level" => "level",
+            _ => "manual",
+        };
+        // The trigger's station frame: the fire's (set just before a recording
+        // begins), the next frame for a manual or start recording.
+        self.record_trigger_frame = self.last_fire_station_frame.unwrap_or(self.session_frames);
+        self.record_first_frame = self.record_trigger_frame.saturating_sub(pre_frames);
+        self.record_pre_asked = pre_frames_asked;
+        self.recording = true;
+        self.record_frames = pre_frames;
+        self.record_queued = pre_frames;
+        self.record_gaps.clear();
+        self.record_gap_free = true;
         self.record_pretrigger_frames = pre_frames;
-        self.writer = Some(writer);
         self.active_run_name = Some(real_name.clone());
-        self.record_target_frames = self.cfg.timed_record_frames();
+        // Exactly the length after the trigger, plus the pre-window.
+        self.record_target_frames = self.timed_record_frames().map(|t| t + pre_frames);
         let session_s = self.session_seconds();
         self.log.push(
             session_s,
@@ -925,16 +1152,20 @@ impl<B: Backend> RecorderService<B> {
         self.finish_recording()?;
         if self.rearms_remaining > 0 {
             self.rearms_remaining -= 1;
-            // The trigger engine's own holdoff (>= ring depth) prevents the
-            // next pre-window from overlapping this run's tail. Re-arm the
-            // detector and keep the trigger active.
+            // Re-armed: the holdoff runs in station time from the trigger, and a
+            // fresh full pre-window is acquired before the next fire, so no frame is
+            // in two recordings.
             if let Some(trig) = self.trigger.as_mut() {
                 trig.rearm(self.rearms_remaining);
+                trig.restart_pre_window();
                 self.transition(RecState::Armed);
             } else {
                 self.transition(RecState::Monitoring);
             }
         } else {
+            // Back to monitoring, not armed: the next recording begins with no
+            // pre-window unless the run is armed again.
+            self.trigger = None;
             self.transition(RecState::Monitoring);
         }
         Ok(())
@@ -949,44 +1180,28 @@ impl<B: Backend> RecorderService<B> {
             )));
         }
         self.finish_recording()?;
+        self.trigger = None;
         self.transition(RecState::Monitoring);
         Ok(())
     }
 
     /// Finalize the active recording writer, record the session summary + event.
     fn finish_recording(&mut self) -> Result<(), RecorderError> {
-        let Some(writer) = self.writer.take() else {
+        if !self.recording {
             return Ok(());
-        };
-        let summary: RecordingSummary = writer
-            .finish()
-            .map_err(|e| RecorderError::Io(e.to_string()))?;
-        let name = summary
-            .run_dir
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let session_s = self.session_seconds();
-        self.log.push(
-            session_s,
-            format!(
-                "record stop: {name} ({} frames, gap_free={})",
-                summary.frames_written, summary.gap_free
-            ),
-        );
-        if !summary.gaps.is_empty() {
-            self.log.push(
-                session_s,
-                format!("gaps in {name}: {} drop record(s)", summary.gaps.len()),
-            );
         }
-        self.session_recordings.push(SessionRecording {
-            name,
-            frames: summary.frames_written,
-            gap_free: summary.gap_free,
-            gaps: summary.gaps,
-            pretrigger_frames: self.record_pretrigger_frames,
-        });
+        self.recording = false;
+        // Finished by the record thread; its summary comes back on a later pass.
+        let marks = std::mem::take(&mut self.record_marks);
+        if let Some(rec) = self.rec.as_ref() {
+            rec.marks(marks);
+            rec.finish();
+        }
+        self.finishing.push_back((
+            self.record_pretrigger_frames,
+            std::mem::take(&mut self.record_gaps),
+        ));
+        self.record_queued = 0;
         self.record_frames = 0;
         self.record_target_frames = None;
         self.record_gap_free = true;
@@ -1006,93 +1221,73 @@ impl<B: Backend> RecorderService<B> {
         self.backend
             .open()
             .map_err(|e| RecorderError::Backend(format!("open: {e}")))?;
-        let acq = hertzforge_hal::AcquisitionConfig::new(
-            self.backend.caps().sample_rate_hz,
-            self.block_frames,
-        );
+        // The station is asked the rate configured, and the rate it programs is
+        // adopted: a station that coerces the request (a delta-sigma device's ladder)
+        // records at its own rate, and the run says so rather than labelling the file
+        // with the rate it asked for.
+        let acq =
+            hertzforge_hal::AcquisitionConfig::new(self.cfg.acq.native_rate_hz, self.block_frames);
         let actual = self
             .backend
             .configure(&self.engine_table, &acq)
             .map_err(|e| RecorderError::Backend(format!("configure: {e}")))?;
-        self.actual_rate_hz = Some(actual.actual_rate_hz);
+        self.fs_hz = actual.actual_rate_hz;
+        self.group_delay_frames = self
+            .group_delay_given
+            .unwrap_or_else(|| actual.group_delay_frames.map_or(0.0, f64::from));
 
         // The engine's block cadence, ring depth and scheduling-health budget all
         // come from what the backend ACTUALLY configured, not from the request.
         let derived =
             EngineConfig::with_block(self.ecfg.in_channels, self.ecfg.out_channels, &actual);
         self.ecfg.frames_per_tick = derived.frames_per_tick;
-        // The derivation is a FLOOR, never a ceiling: a recorder that deliberately
-        // asked for a deeper watchdog tap keeps it. Shrinking a configured ring to
-        // a computed minimum would quietly reduce how far the watchdog may fall
-        // behind before raw frames start being dropped.
+        // The derivation is a floor, never a ceiling.
         self.ecfg.ring_frames = self.ecfg.ring_frames.max(derived.ring_frames);
-        // Constants note: `watchdog_sustain` counts RAW FRAMES, so the module's 4
-        // is a time only against the HERTZFORGE-SIM plant's rate. This is the ONLY place
-        // the ACTUAL rate is known, and it matters more here than in any other
-        // module: this watchdog ARMS BY DEFAULT on a hardware station carrying
-        // abort limits, so its debounce is a live safety number rather than a
-        // monitor's tuning preference.
-        if self.station.is_hardware() {
-            self.ecfg.watchdog_sustain = hertzforge_engine::watchdog_sustain_frames(
-                WATCHDOG_SUSTAIN_SECONDS,
-                actual.actual_rate_hz,
-            );
-        }
 
-        // THE ARM GATE. The Recorder requests `{HostSynthesized, None}`: the
-        // host produces drive samples and NOTHING corrects them.
-        //
-        // Note the deliberate divergence from the `hertzforge-module-abi` resolution table,
-        // whose row 14 lists "Recorder / any -> {None, None}, CaptureOnly falls out".
-        // That describes a recorder with no drive path. THIS recorder has one: the
-        // service injects a synthetic drive channel into the engine table because the
-        // engine's drive path runs on every `HostClosesLoop` tick and a host-loop
-        // backend's `write_drive` errors on a table with zero Drive rows, so
-        // `SilentDrive` feeds it zeros. Requesting `{None, None}` would let this
-        // service ARM against a device-loop backend and then fault on tick 1 when
-        // `write_drive` came back `Unsupported` - which is exactly the failure the gate
-        // exists to move forward to arm time. The request must name the drive path the
-        // module actually uses, not the one it wishes it had.
-        //
-        // Consequence, and it is the conservative one: on a hardware station
-        // the abort-latency rule now binds the Recorder too. Its drive is
-        // zeros and energizes nothing, but a safety gate that reasons about
-        // what the samples CONTAIN rather than whether a drive path exists is
-        // a gate that can be argued around later.
+        // THE ARM GATE, asked for a capture-only run (`{None, None}`): no drive
+        // path, nothing to correct, so the abort-latency rule does not bind. It is
+        // given the programmed rate as the run's rate, so a station that programs a
+        // rate that does not exist (zero, negative, not finite) is refused by the
+        // gate's rate policy before anything is derived from it.
         //
         // The factory supplies the class; it is held on the service from
         // construction so the gate reads the SAME value the caller stated.
         hertzforge_module_abi::arm_gate(
             &self.backend.caps(),
             self.station,
-            hertzforge_module_abi::Resolution::host_open_loop(),
-            None,
+            hertzforge_module_abi::Resolution::capture_only(),
+            Some(actual.actual_rate_hz),
             actual.actual_rate_hz,
         )
         .map_err(|reason| RecorderError::Backend(format!("arm refused: {reason}")))?;
 
+        // Everything per frame is built at the programmed rate, now that the gate has
+        // said it is one.
+        let (analysis, frf) = build_analysis(&self.acq_now(), self.n_input, self.cfg.frf_pair);
+        self.analysis = analysis;
+        self.frf = frf;
+
         self.backend
             .arm()
             .map_err(|e| RecorderError::Backend(format!("arm: {e}")))?;
-        // An NI-class AO REFUSES to start on an empty buffer (-200462, found by
-        // the first cross-host wire probe, 2026-07-25). The recorder's drive is
-        // ALWAYS silence (SilentDrive feeds the injected synthetic row), so the
-        // prefill is a lookahead of zeros written between arm and start. Sim
-        // accepts-and-ignores this; a backend with no output contract skips it.
-        let caps = self.backend.caps();
-        if let Some(contract) = caps.output_buffer {
-            let n_out = caps.max_output_channels as usize;
-            if n_out > 0 && contract.min_lookahead_frames > 0 {
-                let zeros = vec![0.0f32; contract.min_lookahead_frames as usize * n_out];
-                let mut offset = 0usize;
-                while offset < zeros.len() {
-                    match self.backend.write_drive(&zeros[offset..]) {
-                        Ok(0) | Err(_) => break, // no space / not supported: start decides
-                        Ok(frames) => offset += frames * n_out,
-                    }
-                }
-            }
+        // The record thread for the run, behind a queue of RECORD_QUEUE_S of frames.
+        if self.rec.is_none() {
+            let store = self
+                .store
+                .take()
+                .unwrap_or_else(|| Box::new(WriterStore::default()));
+            let capacity = (Self::RECORD_QUEUE_S * self.fs_hz).round().max(1.0) as u64;
+            self.rec = Some(
+                RecordThread::spawn(store, capacity)
+                    .map_err(|e| RecorderError::Io(format!("record thread: {e}")))?,
+            );
         }
+        // The run's one engine: built once, never re-armed or re-started per batch.
+        self.engine = Some(Engine::new(
+            clone_ecfg(&self.ecfg),
+            &self.engine_table,
+            &self.backend,
+        ));
         self.backend
             .start()
             .map_err(|e| RecorderError::Backend(format!("start: {e}")))?;
@@ -1101,6 +1296,7 @@ impl<B: Backend> RecorderService<B> {
     }
 
     fn tear_backend_down(&mut self) {
+        self.engine = None;
         if self.backend_up {
             let _ = self.backend.stop();
             let _ = self.backend.close();
@@ -1131,7 +1327,7 @@ impl<B: Backend> RecorderService<B> {
             recording_frames: self.record_frames,
             gap_free_so_far: self.record_gap_free,
             disk_budget_seconds: recorder_disk_budget_seconds(
-                &self.cfg.acq,
+                &self.acq_now(),
                 self.n_input,
                 free_bytes,
             ),
@@ -1141,15 +1337,49 @@ impl<B: Backend> RecorderService<B> {
             n_averages,
             averages_complete,
             coherence_valid,
-            watchdog_armed: self.watchdog.armed,
-            limits_disarmed: self.watchdog.disarmed_with_limits,
-            watchdog_basis: self.watchdog.basis.clone(),
+            marks: self.marks.len() as u64,
+            requested_fs_hz: self.cfg.acq.native_rate_hz,
+            fs_hz: self.fs_hz,
+            station_frames: self.session_frames,
+            batches: self.batches,
+            pass_ms_last: self.pass_last.map(ms),
+            pass_ms_worst: self.pass_worst.map(ms),
+            batch_gap_ms_max: self.batch_gap_max.map(ms),
+            trigger_fires: self.trigger_fires,
+            last_fire_station_frame: self.last_fire_station_frame,
+            pre_frames_held: self
+                .trigger
+                .as_ref()
+                .map_or(0, |t| t.pre_frames_held() as u64),
+            pre_frames_asked: self
+                .trigger
+                .as_ref()
+                .map_or(0, |t| t.ring_capacity_frames() as u64),
+            recordings_saved: self.recordings_saved,
+            frames_fed: if self.recording {
+                self.record_frames
+            } else {
+                0
+            },
+            frames_on_disk: if self.recording {
+                self.rec.as_ref().map_or(0, |r| r.frames_on_disk())
+            } else {
+                0
+            },
+            write_fault: self.rec.as_ref().and_then(|r| r.fault()),
+            run_fault: self.run_fault.clone(),
+            recording: self.recording.then(|| RecordingNow {
+                name: self.active_run_name.clone().unwrap_or_default(),
+                trigger: self.record_kind.to_string(),
+                first_station_frame: self.record_first_frame,
+                trigger_station_frame: self.record_trigger_frame,
+                pre_frames: self.record_pretrigger_frames,
+                pre_frames_asked: self.record_pre_asked.max(self.record_pretrigger_frames),
+                frames_fed: self.record_frames,
+                frames_on_disk: self.rec.as_ref().map_or(0, |r| r.frames_on_disk()),
+                target_frames: self.record_target_frames,
+            }),
         }
-    }
-
-    /// What the watchdog policy decided at construction, and why.
-    pub fn watchdog(&self) -> &crate::service::config::WatchdogArming {
-        &self.watchdog
     }
 
     /// The per-channel PSD spectra (enabled-input slot order).
@@ -1170,8 +1400,15 @@ impl<B: Backend> RecorderService<B> {
             .iter()
             .map(|&(re, im)| (re * re + im * im).sqrt())
             .collect();
+        let h1_phase_deg = frf
+            .pipeline
+            .h1()
+            .iter()
+            .map(|&(re, im)| im.atan2(re).to_degrees())
+            .collect();
         Some(FrfSnapshot {
             h1_mag,
+            h1_phase_deg,
             coherence: frf.pipeline.coherence(),
             valid: frf.pipeline.coherence_valid(),
             df_hz: frf.pipeline.df_hz(),
@@ -1226,7 +1463,7 @@ impl<B: Backend> RecorderService<B> {
     }
 
     /// Assemble the serde report data (settings echo, channel snapshot, recordings,
-    /// event log, metadata, honesty notes incl. the concurrent-recording line).
+    /// event log, metadata, and the run's facts in plain words).
     pub fn report_data(&self) -> ReportData {
         let channels = self
             .user_table
@@ -1252,7 +1489,7 @@ impl<B: Backend> RecorderService<B> {
             event_log: self.log.clone(),
             metadata: self.cfg.metadata.clone(),
             channel_stats,
-            honesty: Honesty::default(),
+            facts: RunFacts::default(),
         }
     }
 
@@ -1271,24 +1508,123 @@ impl<B: Backend> RecorderService<B> {
     }
 }
 
-/// Build the engine table clone: the user table with (a) ONE
-/// synthetic Drive channel injected (fed zeros by SilentDrive), and (b) all
-/// abort limits stripped when `watchdog_enabled == false`.
-fn build_engine_table(user: &ChannelTable, watchdog_enabled: bool) -> ChannelTable {
+/// Build the engine table clone: the user table with its drive rows left out, so
+/// the station is configured with the input rows only, and its abort limits
+/// stripped, so the engine's watchdog monitors nothing (limits are marks).
+fn build_engine_table(user: &ChannelTable) -> ChannelTable {
     let mut clone = user.clone();
-    if !watchdog_enabled {
-        for ch in clone.channels.iter_mut() {
-            ch.abort = AbortLimits::default();
+    clone.channels.retain(|c| c.role != ChannelRole::Drive);
+    for ch in clone.channels.iter_mut() {
+        ch.abort = AbortLimits::default();
+    }
+    clone
+}
+
+/// The high-pass corner of the velocity and displacement a limit is checked on, Hz.
+const MARK_HP_HZ: f64 = 5.0;
+
+/// A row passing a limit is marked once per episode: the episode ends when the row
+/// has stayed within the limit for this long, seconds of station time.
+const MARK_EPISODE_S: f64 = 1.0;
+
+/// One axis of a row's limits, and whether an episode past it is open.
+#[derive(Debug, Clone)]
+struct Episode {
+    axis: &'static str,
+    limit: Option<f64>,
+    open: bool,
+    /// Frames within the limit since the last frame past it.
+    within: u64,
+}
+
+/// A recorded row's limits as marks.
+#[derive(Debug, Clone)]
+struct RowMarks {
+    row: u32,
+    /// Only rows in g carry acceleration, velocity and displacement limits.
+    in_g: bool,
+    integ: Option<ChannelIntegrator>,
+    axes: [Episode; 3],
+}
+
+impl RowMarks {
+    fn new(c: &Channel) -> Self {
+        let lim = &c.abort;
+        let ep = |axis, limit| Episode {
+            axis,
+            limit,
+            open: false,
+            within: 0,
+        };
+        Self {
+            row: c.index,
+            in_g: c.units == Units::AccelG,
+            integ: None,
+            axes: [
+                ep("accel", lim.accel_g),
+                ep("velocity", lim.velocity_ips),
+                ep("displacement", lim.displacement_mil),
+            ],
         }
     }
-    let next_index = clone.channels.iter().map(|c| c.index).max().unwrap_or(0) + 1;
-    let mut drive = Channel::new(next_index);
-    drive.role = ChannelRole::Drive;
-    drive.enabled = true;
-    drive.save = false;
-    drive.description = SILENT_DRIVE_LABEL.to_string();
-    clone.channels.push(drive);
-    clone
+
+    fn has_limit(&self) -> bool {
+        self.in_g && self.axes.iter().any(|a| a.limit.is_some())
+    }
+
+    /// One sample at `station_frame`: the marks it makes, `(axis, value, limit)`.
+    fn push(&mut self, sample: f64, fs_hz: f64, out: &mut Vec<(&'static str, f64, f64)>) {
+        let (vel, disp) = if self.axes[1].limit.is_some() || self.axes[2].limit.is_some() {
+            self.integ
+                .get_or_insert_with(|| ChannelIntegrator::new(fs_hz, MARK_HP_HZ))
+                .push(sample)
+        } else {
+            (0.0, 0.0)
+        };
+        let quiet = (MARK_EPISODE_S * fs_hz).round() as u64;
+        for (ep, value) in self.axes.iter_mut().zip([sample, vel, disp]) {
+            let Some(limit) = ep.limit else { continue };
+            if value.abs() > limit {
+                if !ep.open {
+                    out.push((ep.axis, value.abs(), limit));
+                }
+                ep.open = true;
+                ep.within = 0;
+            } else if ep.open {
+                ep.within += 1;
+                if ep.within >= quiet {
+                    ep.open = false;
+                }
+            }
+        }
+    }
+}
+
+/// The analysis state for `n_input` rows at `acq`'s rate, and the FRF pair's when one
+/// is configured and in range.
+fn build_analysis(
+    acq: &crate::acq::AcquisitionConfig,
+    n_input: usize,
+    pair: Option<(usize, usize)>,
+) -> (Vec<ChannelAnalysisState>, Option<FrfState>) {
+    let analysis = (0..n_input)
+        .map(|_| ChannelAnalysisState {
+            decim: ChannelDecimator::new(1, acq),
+            asm: BlockAssembler::from_config(1, acq),
+            spectrum: SpectrumPipeline::new(acq),
+            stats: TimeStatsAccumulator::new(),
+            last_stats: empty_stats(),
+        })
+        .collect();
+    let frf = pair
+        .filter(|&(x, y)| x < n_input && y < n_input && x != y)
+        .map(|pair| FrfState {
+            pair,
+            decim: ChannelDecimator::new(2, acq),
+            asm: BlockAssembler::from_config(2, acq),
+            pipeline: FrfPipeline::new(acq),
+        });
+    (analysis, frf)
 }
 
 /// Clone an [`EngineConfig`] (it is not `Clone`).
@@ -1302,6 +1638,12 @@ fn clone_ecfg(c: &EngineConfig) -> EngineConfig {
     e.compute_budget = c.compute_budget;
     e.stall_deadline = c.stall_deadline;
     e
+}
+
+/// A duration in ms to the microsecond: the status carries it as a short decimal, so
+/// it reads back from JSON exactly.
+fn ms(d: std::time::Duration) -> f64 {
+    d.as_micros() as f64 / 1e3
 }
 
 fn empty_stats() -> TimeStats {
@@ -1324,5 +1666,42 @@ fn units_name(u: &Units) -> String {
         Units::ForceLbf => "lbf".to_string(),
         Units::VoltageV => "V".to_string(),
         Units::Custom(s) => s.clone(),
+    }
+}
+
+fn set_recording(mark: &mut Mark, name: Option<String>) {
+    match mark {
+        Mark::Limit { recording, .. } | Mark::Overload { recording, .. } => *recording = name,
+    }
+}
+
+/// A mark in words, for the log.
+fn mark_words(mark: &Mark) -> String {
+    match mark {
+        Mark::Limit {
+            row,
+            axis,
+            value,
+            limit,
+            station_frame,
+            recording,
+        } => format!(
+            "mark: row {row} {axis} {value:.4} past its limit {limit} at station frame \
+             {station_frame}{}",
+            recording
+                .as_ref()
+                .map(|r| format!(", in {r}"))
+                .unwrap_or_default()
+        ),
+        Mark::Overload {
+            row,
+            value,
+            level,
+            station_frame,
+            ..
+        } => format!(
+            "overload: row {row} reached {value:.4}, at or over {level:.4} (0.9 of its \
+             range), at station frame {station_frame}"
+        ),
     }
 }

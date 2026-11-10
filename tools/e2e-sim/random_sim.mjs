@@ -293,16 +293,16 @@ try {
 	);
 	const sections = await a.locator('[data-testid^="test-group-"] h2').allInnerTexts();
 	// A test type still to come cannot be opened (forced past the browser's own refusal to click it).
-	await tid(a, 'test-type-explorer').click({ force: true });
+	await tid(a, 'test-type-mimo_shock').click({ force: true });
 	const stayed = await tid(a, 'test-type-chooser').isVisible();
 	const inGroup = (g) => cards.filter((c) => c.group === g).map((c) => c.id).join();
 	check(
-		'Acquire opens on the test-type chooser: Single Output, MIMO and Data Acquisition sections, Random, Sine, Classical Shock, SRS, TWR and MIMO Random offered, the rest "Coming"',
+		'Acquire opens on the test-type chooser: Single Output, MIMO and Data Acquisition sections, Random, Sine, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder offered, the rest "Coming"',
 		sections.map((t) => t.toLowerCase()).join('|') === 'single output|mimo|data acquisition' &&
 			inGroup('single') === 'random,sine,shock,srs,twr,explorer' &&
 			inGroup('mimo') === 'mimo_random,mimo_shock,mimo_sine,mimo_mixed,mimo_twr' &&
 			inGroup('acquisition') === 'recorder' &&
-			cards.filter((c) => c.offered).map((c) => c.id).join() === 'random,sine,shock,srs,twr,mimo_random' &&
+			cards.filter((c) => c.offered).map((c) => c.id).join() === 'random,sine,shock,srs,twr,explorer,mimo_random,recorder' &&
 			cards.filter((c) => !c.offered).every((c) => /\bcoming\b/i.test(c.text)) &&
 			stayed,
 		`${sections.join(' | ')}: ${cards.map((c) => `${c.id} ${c.offered ? 'offered' : 'coming'}`).join(', ')}`

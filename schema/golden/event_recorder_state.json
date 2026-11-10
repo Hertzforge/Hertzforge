@@ -1,0 +1,86 @@
+{
+ "type": "event",
+ "topic": "recorder.state",
+ "seq": 210,
+ "data": {
+  "run_id": "recorder-0002",
+  "state": "running",
+  "phase": "recording",
+  "title": "Fixture A, run 4",
+  "source": "HARDWARE",
+  "station": {
+   "kind": "ni",
+   "class": "ni_real",
+   "devices": [
+    {
+     "id": "cDAQ2Mod1",
+     "serial": "01A2B3C4"
+    }
+   ]
+  },
+  "grid": {
+   "requested_fs_hz": 12800,
+   "fs_hz": 12800,
+   "block_frames": 256,
+   "batch_frames": 512,
+   "group_delay_frames": 38.44,
+   "actual": true
+  },
+  "clock": "shared",
+  "outputs": "none",
+  "rows": [
+   1,
+   2,
+   3,
+   4
+  ],
+  "mode": "level",
+  "t_s": 11.36,
+  "station_frames": 145408,
+  "trigger": {
+   "armed": false,
+   "pre_frames": 6400,
+   "held_frames": 0,
+   "fires": 2,
+   "last_station_frame": 134422,
+   "saved": 1,
+   "left": 3,
+   "holdoff_left_s": 0
+  },
+  "recording": {
+   "name": "rec_0002",
+   "trigger": "level",
+   "first_station_frame": 128022,
+   "trigger_station_frame": 134422,
+   "pre_frames": 6400,
+   "pre_frames_asked": 6400,
+   "frames_fed": 17386,
+   "frames_on_disk": 16384,
+   "target_frames": 19200,
+   "seconds": 0.858,
+   "length_s": 1,
+   "backlog_s": 0.078
+  },
+  "recordings": 1,
+  "marks": 0,
+  "disk": {
+   "free_bytes": 107373363200,
+   "floor_bytes": 1073741824,
+   "seconds_above_floor": 519041,
+   "fault": null
+  },
+  "health": {
+   "batches": 284,
+   "blocks_dropped": 0,
+   "driver_warnings": 0,
+   "station_errors": 0,
+   "pass_ms": {
+    "last": 1.2,
+    "worst": 2.8
+   },
+   "batch_gap_ms": 3.9
+  },
+  "stop": null,
+  "end": null
+ }
+}

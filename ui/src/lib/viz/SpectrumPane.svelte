@@ -26,6 +26,11 @@
 		view: SpectrumView;
 		/** Hold the y range steady across updates (live data). */
 		live?: boolean;
+		/**
+		 * A time history whose x moves with the data (station time): each frame is drawn over its
+		 * own x range, and the range of the frame before is not kept.
+		 */
+		followX?: boolean;
 		/** Minimum plot height in px. */
 		minHeight?: number;
 		/** Show the view's title above the legend. */
@@ -50,7 +55,7 @@
 		onhandle?: (handle: SpectrumHandle, decibels: number) => void;
 	}
 
-	let { view, live = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, guides = [], onMarkerDrag, onhandle, onspan }: Props = $props();
+	let { view, live = false, followX = false, minHeight = 180, showTitle = true, yFixed = null, scope, onPick, onRange, marker = null, guides = [], onMarkerDrag, onhandle, onspan }: Props = $props();
 
 	const paneId = `sp-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -181,7 +186,7 @@
 	function build() {
 		// the same plot rebuilt for a new series (a fit's synthesis arriving) keeps the x range the
 		// person zoomed to: the view belongs to them
-		const kept = plot && plot.scales.x.min != null && plot.scales.x.max != null && keptTitle === view.title
+		const kept = !followX && plot && plot.scales.x.min != null && plot.scales.x.max != null && keptTitle === view.title
 			? { min: plot.scales.x.min, max: plot.scales.x.max }
 			: null;
 		keptTitle = view.title;

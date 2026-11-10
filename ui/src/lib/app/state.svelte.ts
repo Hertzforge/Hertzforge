@@ -6,8 +6,8 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, hasNativeFiles, openingOrder, pastedFiles } from '$lib/project/files';
-import { EMPTY, clickObject, clickPart, clickRecord, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
+import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles } from '$lib/project/files';
+import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
@@ -19,6 +19,10 @@ import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
 import { SineViewsState } from '$lib/acquire/sine/sineViews.svelte';
 import { TwrStore } from '$lib/acquire/twr/twrStore.svelte';
 import { TwrViewsState } from '$lib/acquire/twr/twrViews.svelte';
+import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
+import { ExplorerViewsState } from '$lib/acquire/explorer/explorerViews.svelte';
+import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
+import { RecorderViewsState } from '$lib/acquire/recorder/recorderViews.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -216,7 +220,7 @@ class AnalyzeState {
 				{
 					objects: selection.objects,
 					records: selection.records,
-					part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null,
+					part: partForService(selection),
 					prefs: {
 						flat: this.prefs.flat,
 						log_frequency: this.prefs.log_frequency,
@@ -258,7 +262,7 @@ class AnalyzeState {
 			const res = await this.app.analysis.request<Actions>('project.actions', {
 				objects: selection.objects,
 				records: selection.records,
-				part: selection.part ? { kind: selection.part.kind, id: selection.part.id } : null
+				part: partForService(selection)
 			});
 			if (seq !== this.actionSeq) return;
 			this.actions = res;
@@ -1253,8 +1257,8 @@ export class ProjectState {
 		this.selected(clickRecord(this.selection, name, index, mods, block));
 	}
 
-	clickPart(name: string, kind: string, id: string | number): void {
-		this.selected(clickPart(this.selection, name, kind, id));
+	clickPart(name: string, kind: string, id: string | number, mods: Modifiers = {}, order: (string | number)[] = []): void {
+		this.selected(clickPart(this.selection, name, kind, id, mods, order));
 	}
 
 	clearSelection(): void {
@@ -1298,6 +1302,27 @@ export class ProjectState {
 		return this.call('Saving', 'project.save', path ? { path } : {}, false);
 	}
 
+	/** An empty project in place of this one, after asking when this one has unsaved changes. */
+	async newProject(): Promise<boolean> {
+		if (!(await this.mayDiscard())) return false;
+		return this.call('Starting a project', 'project.new', {}, false);
+	}
+
+	/** The service connected: every connection starts with an empty project, which the shell takes up. */
+	async connected(): Promise<void> {
+		if (this.summary) return;
+		try {
+			const res = await this.app.analysis.request<{ project: ProjectSummary }>('project.new', {});
+			if (!this.summary) this.apply(res.project);
+		} catch {
+			// the first open or import says what is wrong
+		}
+	}
+
+	private async mayDiscard(): Promise<boolean> {
+		return !this.summary?.modified || (await discardUnsaved(this.summary.title));
+	}
+
 	async rename(name: string, to: string): Promise<boolean> {
 		const ok = await this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
 		if (ok) {
@@ -1321,7 +1346,11 @@ export class ProjectState {
 	 * Open, Import, Save or Save As. In the desktop app these are the native dialogs; in a browser,
 	 * which never gives the shell a file's path, the top bar asks for one (files.ts).
 	 */
-	async fileAct(what: 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
+	async fileAct(what: 'new' | 'open' | 'import' | 'save' | 'save-as'): Promise<void> {
+		if (what === 'new') {
+			await this.newProject();
+			return;
+		}
 		if (what === 'save' && this.summary?.file && !this.summary.file.endsWith('.vdyn')) {
 			await this.save();
 			return;
@@ -1364,7 +1393,6 @@ export class ProjectState {
 		else if (id === 'self.name_group' && one) this.namingGroup = one;
 		else if (id === 'self.copy') await this.duplicate(picked);
 		else if (id === 'self.rename' && one) this.renaming = one;
-		else if (id === 'self.remove') this.confirming = true;
 		else if (id === 'self.fit' || id === 'self.edit_fit') {
 			if (coherent) {
 				this.app.analyze.fitWeighing = true;
@@ -1685,6 +1713,14 @@ export class AppState {
 	readonly twr: TwrStore;
 	/** The TWR run's pages and this window's subscription. */
 	readonly twrViews: TwrViewsState;
+	/** Explorer's setup and run; the station and table are the Acquire store's. */
+	readonly explorer: ExplorerStore;
+	/** The Explorer run's pages and this window's subscription. */
+	readonly explorerViews: ExplorerViewsState;
+	/** The Recorder's setup and run; the station and table are the Acquire store's. */
+	readonly recorder: RecorderStore;
+	/** The Recorder run's pages and this window's subscription. */
+	readonly recorderViews: RecorderViewsState;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -1709,6 +1745,8 @@ export class AppState {
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.twr = new TwrStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			testType: 'random',
@@ -1748,6 +1786,18 @@ export class AppState {
 			showing: () => twrPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'twr' && this.twr.step === 'run'),
 			page: twrPopout ? config.page : null
 		});
+		const explorerPopout = config.popout && config.popoutTest === 'explorer';
+		this.explorerViews = new ExplorerViewsState(this.control, {
+			setupTitle: () => this.explorer.status?.title ?? (config.popout ? null : this.explorer.setup.title),
+			showing: () => explorerPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'explorer' && this.explorer.step === 'run'),
+			page: explorerPopout ? config.page : null
+		});
+		const recorderPopout = config.popout && config.popoutTest === 'recorder';
+		this.recorderViews = new RecorderViewsState(this.control, {
+			setupTitle: () => this.recorder.status?.title ?? (config.popout ? null : this.recorder.setup.title),
+			showing: () => recorderPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'recorder' && this.recorder.step === 'run'),
+			page: recorderPopout ? config.page : null
+		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
 
@@ -1773,7 +1823,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr' | 'explorer' | 'recorder' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -1792,6 +1842,8 @@ export class AppState {
 		const srs = this.config.popoutTest === 'srs';
 		const sine = this.config.popoutTest === 'sine';
 		const twr = this.config.popoutTest === 'twr';
+		const explorer = this.config.popoutTest === 'explorer';
+		const recorder = this.config.popoutTest === 'recorder';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -1821,19 +1873,31 @@ export class AppState {
 					if (this.control.status === 'open') void this.twr.sync();
 				});
 			}
+			if (explorer) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.explorer.sync();
+				});
+			}
+			if (recorder) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.recorder.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
 		else if (srs) this.srsViews.watch();
 		else if (sine) this.sineViews.watch();
 		else if (twr) this.twrViews.watch();
+		else if (explorer) this.explorerViews.watch();
+		else if (recorder) this.recorderViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -1864,6 +1928,10 @@ export class AppState {
 		if (onSine || this.sine.isLive) return this.sine.source;
 		const onTwr = this.workspace === 'acquire' && this.tests.screen === 'twr';
 		if (onTwr || this.twr.isLive) return this.twr.source;
+		const onExplorer = this.workspace === 'acquire' && this.tests.screen === 'explorer';
+		if (onExplorer || this.explorer.isLive) return this.explorer.source;
+		const onRecorder = this.workspace === 'acquire' && this.tests.screen === 'recorder';
+		if (onRecorder || this.recorder.isLive) return this.recorder.source;
 		return null;
 	}
 
@@ -1907,6 +1975,12 @@ export class AppState {
 				if (this.control.status === 'open') void this.twr.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.explorer.sync();
+			});
+			$effect(() => {
+				if (this.control.status === 'open') void this.recorder.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -1918,6 +1992,8 @@ export class AppState {
 		this.srs.watch();
 		this.sine.watch();
 		this.twr.watch();
+		this.explorer.watch();
+		this.recorder.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
@@ -1925,6 +2001,8 @@ export class AppState {
 		this.srsViews.watch();
 		this.sineViews.watch();
 		this.twrViews.watch();
+		this.explorerViews.watch();
+		this.recorderViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

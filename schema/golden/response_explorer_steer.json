@@ -1,0 +1,14 @@
+{
+ "type": "response",
+ "id": 93,
+ "result": {
+  "hz": 1000,
+  "vpk": 0.5,
+  "clamped": {
+   "hz": false,
+   "vpk": true
+  },
+  "frame": 530432,
+  "input_frame": 529408
+ }
+}

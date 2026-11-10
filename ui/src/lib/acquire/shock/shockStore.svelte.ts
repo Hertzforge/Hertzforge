@@ -11,6 +11,7 @@
  * it and sends them when the operator says so.
  */
 
+import { regresses } from '../runOrder';
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import type { ChannelRow, LogEntry, View } from '$lib/protocol/types';
@@ -444,6 +445,8 @@ export class ShockStore {
 
 	private onStatus(s: ShockState) {
 		const was = this.status;
+		// A reply older than the run's own word that it finished is not applied.
+		if (regresses(was, s)) return;
 		this.status = s;
 		// The state is newer than any live frame held: the next frame takes over from it.
 		if (this.live && this.live.run_id === s.run_id) this.live = null;

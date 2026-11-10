@@ -1,0 +1,51 @@
+{
+ "type": "request",
+ "id": 91,
+ "method": "explorer.configure",
+ "params": {
+  "config": {
+   "title": "Survey, fixture A",
+   "acquisition": {
+    "fs_hz": 12800
+   },
+   "band_hz": [
+    20,
+    2000
+   ],
+   "start_hz": 250,
+   "max_drive_vpk": 0.5,
+   "slew": {
+    "freq_oct_per_s": 1,
+    "drive_db_per_s": 6
+   },
+   "display": {
+    "nfft": 4096
+   },
+   "capture": {
+    "run_name": "explorer"
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "3"
+    },
+    {
+     "key": "test_article",
+     "label": "Test Article",
+     "value": "Fixture A"
+    },
+    {
+     "key": "serial_number",
+     "label": "SN",
+     "value": ""
+    },
+    {
+     "key": "operator",
+     "label": "Operator",
+     "value": ""
+    }
+   ]
+  }
+ }
+}

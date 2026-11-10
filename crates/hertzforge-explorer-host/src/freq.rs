@@ -1,62 +1,55 @@
-//! The windowed zero-crossing frequency MEASUREMENT.
-//!
-//! It was already device-neutral - it consumes `f64` samples at a known rate and answers
-//! in Hz - and both halves of the Explorer module need it: the delegated path corrects its
-//! open-loop nudge estimate with it, and the HOST path
-//! ([`crate::service::ExplorerHostService`]) uses it as the measured cross-check against
-//! the frequency it commanded. One definition, so a "commanded vs measured" comparison
-//! can never be two different measurements wearing one name.
-//! The delegated Explorer service re-exports it at its original path.
+//! The windowed zero-crossing frequency MEASUREMENT: the cross-check of the frequency
+//! the service commands against the frequency its control channel carries
+//! ([`crate::service::ExplorerHostService`]).
 
 use std::time::Duration;
 
-/// The bench_probe-parity WINDOWED frequency measurement: a zero-crossing accumulator
-/// fed one telemetry chunk at a time, emitting a measurement only when enough signal
-/// has been observed (`bench_probe codrain`'s `RsAccum.ch1_hz`, the method that read
-/// the CORRECT frequency on hardware during the proven 2026-07-15 sweep).
+/// A windowed frequency measurement over an unbroken stream fed a block at a time,
+/// emitting a measurement only once enough signal has been observed.
 ///
-/// ## Why windowed, and why zero-crossing
+/// ## What it measures: the time between rising zero crossings
 ///
-/// * A single decoded chunk is one 64 KB block - under ~14 ms of signal. At the band
-///   low edge (5 Hz) that is 1/14th of a cycle: unmeasurable. The window accumulates
-///   ACROSS chunks until it has real cycles to count.
-/// * Chunks are internally contiguous at the device rate but chunk-to-chunk gaps exist
-///   (the proven `decode_every_n_reads = 8` drain decodes every 8th block). Crossings
-///   are counted WITHIN chunks only (the `prev` sample resets per chunk), and the time
-///   base is the ACCUMULATED FRAME COUNT / fs - so the decimated drain does NOT scale
-///   the measured Hz: both the crossing count and the duration cover the same decoded
-///   subset. (This is why bench_probe measured correct Hz under the same decimation.)
-/// * An UNBROKEN stream fed a piece at a time (the host path's acquisition blocks) is the
-///   other case, and it goes through [`WindowedFreqMeasure::push_contiguous`] instead: the
-///   interval between two pieces is a sample interval like any other, and leaving it
-///   untested while counting its time reads low by up to a crossing per piece.
-/// * Zero-crossing over >= `min_crossings` observed crossings is unbiased for a tone
-///   and cheap; no FFT bin quantization, no peak-picking on noise.
+/// Each rising crossing is placed BETWEEN its two samples by linear interpolation, and the
+/// frequency is the number of whole periods between the first and the last rising crossing
+/// of a window, divided by the time between them. A crossing COUNT divided by the window's
+/// duration is quantized to one crossing per window, which is 1 Hz on a 0.5 s window at
+/// any frequency: 0.1 % at 1 kHz and 2 % at 50 Hz, where the stated cross-check is 0.05 %.
+/// Measured on the NI loopback: 1010 Hz read 1010.729, 50.6 Hz read
+/// 50.008, 43.0 Hz read 42.563. Timing the crossings has no such floor: a clean tone reads
+/// to parts per million, and the noise on the chassis (about 120 uV rms against a 0.2 V
+/// tone) moves a crossing by microseconds.
 ///
-/// ## Starvation + maturity (deterministic: SIGNAL time, not wall time)
+/// * Rising crossings only, so the answer is a whole number of periods: a DC offset moves
+///   every rising crossing by the same time and cancels, where a span from a rising to a
+///   falling crossing would carry it (the loopback carries about 0.7 mV).
+/// * One acquisition block is too short to hold periods at the band's low edge, so the
+///   window accumulates ACROSS blocks until it holds real cycles.
+/// * The stream is unbroken between blocks, so [`WindowedFreqMeasure::push_contiguous`]
+///   tests the interval between two pushes like any other. Where the stream has a GAP
+///   ([`WindowedFreqMeasure::break_continuity`]) the time across it is unknown, so each
+///   unbroken run contributes its own periods over its own span, and the runs are summed.
 ///
-/// The window matures on accumulated SIGNAL duration (`frames / fs`, default 0.5 s)
-/// AND a minimum crossing count (so the +/-1 crossing quantization is bounded to a few
-/// percent). A low tone keeps accumulating until it has enough crossings; a window
-/// that reaches 5x the nominal duration without them is discarded (noise-floor / DC
-/// signal - NO measurement is the honest answer, never garbage). Under the proven
-/// every-8th-block drain the decoded signal accumulates slower than wall time, so the
-/// cadence stretches accordingly - the VALUE stays correct.
+/// ## Hysteresis: noise near zero is not a crossing
 ///
-/// ## Amplitude gate (2026-07-16): a crossing count is not evidence of a TONE
+/// Near zero a small tone's slope per sample can be comparable with the noise, and the
+/// noise then crosses zero two or three times where the tone crosses once. A rising
+/// crossing is COUNTED only once the signal has been below `-h` since the last one and then
+/// reaches `+h`; the time recorded is the last upward zero crossing before it reached
+/// `+h`. `h` is the amplitude gate ([`WindowedFreqMeasure::set_min_rms`]): a level the
+/// floor does not reach, and below any tone the gate lets mature.
 ///
-/// The crossing count alone cannot tell a tone from noise. NOISE crosses zero too, and
-/// when the drive sits at (or is clamped near) zero the counter happily accumulates its
-/// `min_crossings` from the noise floor and matures a number - an IN-BAND number, which
-/// the estimator's band gate cannot reject, because noise is broadband and part of it
-/// always lands in the band. That is what walked the operator's frequency estimate around
-/// while he touched nothing (2026-07-16: measured 56.9 -> 39.9 -> 35.0 Hz at a drive
-/// frozen near zero, dragging the estimate 45.9 -> 44.4 -> 42.0).
+/// ## Maturity, in SIGNAL time
 ///
-/// So the window ALSO tracks the signal's RMS and refuses to mature below
-/// [`WindowedFreqMeasure::min_rms`]. This is ADDITIVE to the estimator's band gate (Bug
-/// 2/3, 2026-07-15), not a replacement: the band gate rejects out-of-band artifacts, this
-/// rejects in-band noise. Both must pass.
+/// The window matures on accumulated SIGNAL duration (`frames / fs`, default 0.5 s) AND a
+/// minimum count of sign changes. A low tone keeps accumulating until it has enough; a
+/// window that reaches 5x the nominal duration without them is discarded (noise floor or
+/// DC: no measurement is the honest answer).
+///
+/// ## Amplitude gate: a crossing count is not evidence of a TONE
+///
+/// Noise crosses zero too, and a drive at or near zero would let the counter mature an
+/// in-band number from the noise floor. So the window also tracks the signal's RMS and
+/// refuses to mature below [`WindowedFreqMeasure::set_min_rms`]'s threshold.
 #[derive(Debug, Clone)]
 pub struct WindowedFreqMeasure {
     fs_hz: f64,
@@ -64,89 +57,78 @@ pub struct WindowedFreqMeasure {
     window: Duration,
     min_crossings: u64,
     /// Minimum accumulated signal RMS before a measurement can mature (the amplitude
-    /// gate). 0.0 disables the gate.
+    /// gate), and the hysteresis a rising crossing must clear. 0.0 disables both.
     min_rms: f64,
+    /// Strict sign changes about zero, both directions: the maturity count.
     crossings: u64,
     frames: u64,
-    /// The TIME the crossing count is divided by, in sample intervals: every frame for
-    /// [`Self::push_chunk`] (its historical time base), and exactly the intervals that were
-    /// tested for a crossing for [`Self::push_contiguous`] - one fewer than its samples
-    /// whenever a push starts a fresh stream, because that first sample has no interval
-    /// before it. Maturity and the RMS gate stay on `frames`.
-    span_frames: u64,
-    /// Sum of squares over the accumulated window, for the RMS amplitude gate. The
-    /// telemetry is AC data about zero (the same assumption `push_chunk`'s crossing count
-    /// makes), so this is the AC RMS without a mean removal that a sub-cycle chunk would
-    /// corrupt.
+    /// Sum of squares over the accumulated window, for the RMS amplitude gate (the AC
+    /// RMS about zero, as the crossing count assumes).
     sumsq: f64,
-    /// The window's samples (2026-09-07), so a matured window is measured by a Hann-windowed
-    /// FFT peak with parabolic refinement - noise-robust - and the crossing count is only
-    /// the fallback. On the bench a 0.24 mV tone at the 20 Hz start "measured" 300-350 Hz
-    /// by crossings (noise crossings), and the estimate, the sweep guard and the survey
-    /// line all followed that number. Bounded at [`Self::MAX_SAMPLES`].
-    samples: Vec<f64>,
-    /// Measure a matured window by the FFT peak (contiguous full-decode streams). Off by
-    /// default: the crossing count is the right instrument for the bursty every-8th
-    /// decode the tests below model, where a stitched buffer has no honest spectrum.
-    use_fft: bool,
-    /// The last nonzero sample of the previous [`Self::push_contiguous`], so the interval
-    /// BETWEEN two pushes of one unbroken stream is tested for a crossing like every other
-    /// interval. `None` after a reset, a [`Self::push_chunk`] (which promises nothing about
-    /// what follows it) or a [`Self::break_continuity`].
-    carry: Option<f64>,
+    /// The current unbroken run: its next sample's position in frames from the run's
+    /// first sample, and the last nonzero sample with its position, so the interval
+    /// BETWEEN two pushes is tested like every other. `None` after a reset or a
+    /// [`Self::break_continuity`].
+    carry: Option<Carry>,
+    /// The current run's counted rising crossings: the first and last time (in frames
+    /// from the run's first sample) and how many.
+    run_first_rise: f64,
+    run_last_rise: f64,
+    run_rises: u64,
+    /// The hysteresis state of the current run.
+    armed_low: bool,
+    candidate: Option<f64>,
+    /// Closed runs: whole periods and the frames they span.
+    periods: u64,
+    period_frames: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Carry {
+    /// Position, in frames from the run's first sample, of the next sample to arrive.
+    next_pos: f64,
+    /// The last nonzero sample and its position.
+    prev: f64,
+    prev_pos: f64,
 }
 
 impl WindowedFreqMeasure {
-    /// The default maturity window of accumulated SIGNAL (bench_probe integrated ~1 s
-    /// drain windows; 0.5 s of decoded signal bounds the crossing quantization to
-    /// ~2 % at 30 Hz while keeping the correction cadence responsive).
+    /// The default maturity window of accumulated SIGNAL: 0.5 s keeps the cross-check
+    /// responsive, and holds at least ten periods from 20 Hz up.
     pub const DEFAULT_WINDOW: Duration = Duration::from_millis(500);
-    /// Minimum observed crossings for a valid measurement (6 full cycles: bounds the
-    /// +/-1 crossing quantization to ~8 % worst-case at the band low edge).
+    /// Minimum observed sign changes for a valid measurement (6 full cycles).
     pub const MIN_CROSSINGS: u64 = 12;
-    /// Most samples retained for the FFT measurement (one second at 65.536 kHz; the
-    /// default window is half that).
-    pub const MAX_SAMPLES: usize = 65_536;
-    /// A spectral peak must stand this far above the median bin to count as a tone.
-    pub const MIN_PEAK_OVER_MEDIAN: f64 = 8.0;
 
     /// A measurer for signal at `fs_hz` maturing after `window` of accumulated signal.
     ///
     /// The amplitude gate starts CLOSED (`min_rms = INFINITY`): nothing matures until the
     /// caller supplies a threshold measured from the channel's real noise floor via
-    /// [`Self::set_min_rms`]. The first cut of this shipped a guessed 1e-3 default, which
-    /// silently encoded one bench's cabling and front-end gain into a number that had to be
-    /// right in two different unit systems at once. Starting closed means a caller that
-    /// forgets to measure gets NO measurement (the honest, fail-closed outcome) rather than
-    /// a measurement validated against a fiction.
+    /// [`Self::set_min_rms`], so a caller that forgets to measure gets no measurement
+    /// rather than one validated against a guessed number.
     pub fn new(fs_hz: f64, window: Duration) -> Self {
         Self {
             fs_hz,
             window,
             min_crossings: Self::MIN_CROSSINGS,
             min_rms: f64::INFINITY,
-            samples: Vec::new(),
-            use_fft: false,
             crossings: 0,
             frames: 0,
-            span_frames: 0,
             sumsq: 0.0,
             carry: None,
+            run_first_rise: 0.0,
+            run_last_rise: 0.0,
+            run_rises: 0,
+            armed_low: false,
+            candidate: None,
+            periods: 0,
+            period_frames: 0.0,
         }
     }
 
     /// Set the amplitude gate: the smallest window RMS that counts as a TONE rather than the
-    /// channel's noise floor, in the channel's own units. Derived by the caller from the
-    /// MEASURED floor (the noise-floor probe in [`crate::floor`]), so it carries no
-    /// assumption about units, cabling or gain. `0.0` disables the gate (tests only);
-    /// `INFINITY` keeps it closed.
-    /// Measure matured windows by the Hann-FFT peak (parabolic refined) instead of the
-    /// crossing count. For CONTIGUOUS streams only (the full deduplicated decode).
-    pub fn with_fft(mut self, on: bool) -> Self {
-        self.use_fft = on;
-        self
-    }
-
+    /// channel's noise floor, in the channel's own units, and the hysteresis a rising
+    /// crossing must clear. Derived by the caller from the MEASURED floor (the noise-floor
+    /// probe in [`crate::floor`]). `0.0` disables the gate; `INFINITY` keeps it closed.
     pub fn set_min_rms(&mut self, min_rms: f64) {
         self.min_rms = min_rms.max(0.0);
     }
@@ -171,135 +153,111 @@ impl WindowedFreqMeasure {
         (self.sumsq / self.frames as f64).max(0.0).sqrt()
     }
 
-    /// Feed one CONTIGUOUS chunk of the measured channel. Counts strict sign changes
-    /// about ZERO, exactly like bench_probe's `ChannelStats` (the telemetry is AC data
-    /// around zero; a chunk-local mean removal would MANUFACTURE crossings on a
-    /// sub-cycle chunk, whose partial sine arc has a large mean). Never carries `prev`
-    /// across chunks (chunk gaps under the decimated drain would otherwise add a
-    /// phase-random crossing per boundary). A fully DC-offset channel accumulates no
-    /// crossings and yields NO measurement - the honest outcome.
-    pub fn push_chunk(&mut self, signal: &[f64]) {
-        if signal.len() < 2 {
-            return;
+    fn hysteresis(&self) -> f64 {
+        if self.min_rms.is_finite() {
+            self.min_rms
+        } else {
+            0.0
         }
-        let mut prev = signal[0];
-        self.sumsq += prev * prev;
-        for &cur in &signal[1..] {
-            if (prev < 0.0 && cur > 0.0) || (prev > 0.0 && cur < 0.0) {
-                self.crossings += 1;
-            }
-            if cur != 0.0 {
-                prev = cur;
-            }
-            self.sumsq += cur * cur;
-        }
-        self.frames += signal.len() as u64;
-        self.span_frames += signal.len() as u64;
-        self.carry = None;
-        self.keep_samples(signal);
     }
 
     /// Feed the next piece of an UNBROKEN stream: the first sample of `signal` is the one
     /// that immediately followed the last sample of the previous `push_contiguous`.
     ///
-    /// # Why [`Self::push_chunk`] is wrong for such a stream
-    ///
-    /// `push_chunk` counts crossings within a chunk only, because its caller's chunks have
-    /// GAPS between them. The time base still counts every frame, so each chunk boundary is
-    /// one interval of time whose crossing is never counted. On a contiguous stream fed a
-    /// block at a time that is a bias LOW, and not a small one: averaged over phase it is
-    /// one interval per block (-0.78 % at a 128-frame block), but for a tone with a whole
-    /// or half number of cycles per block the boundary sits at the SAME phase every block,
-    /// so a boundary that holds a crossing holds one in every block.
-    /// MEASURED, 2026-11-01, the host Explorer on a wire at the chassis's 8533.33 Hz /
-    /// 128-frame geometry: steady tones at 533.33 Hz and 1066.67 Hz read 6.25 % and 3.13 %
-    /// low, every window (WHICH whole-cycle tones lose is set by where the boundary falls
-    /// in their phase), and 777 Hz, unrelated to the block, -0.83 %.
-    ///
-    /// The cure is two halves, and both are needed. The interval between two pushes is
-    /// TESTED (the carried sample); and where the stream starts afresh - the first push of
-    /// a window, or the first after [`Self::break_continuity`] - the first sample has no
-    /// interval before it, so it adds no TIME either. Breaking the stream at a gap without
-    /// the second half reads LOW by one interval per gap (measured: -4.5 Hz at 777 Hz with
-    /// a gap every 256 frames); carrying across a gap without the first reads a
-    /// phase-random extra crossing per gap.
-    ///
-    /// Same counting rule as `push_chunk` otherwise (strict sign changes about zero, an
-    /// exact zero does not replace `prev`). Call [`Self::break_continuity`] where the
-    /// stream has a gap, or the interval across the gap is tested as if it were one.
+    /// Counts strict sign changes about zero; an exact zero does not replace `prev`. Call
+    /// [`Self::break_continuity`] where the stream has a gap.
     pub fn push_contiguous(&mut self, signal: &[f64]) {
-        let Some((&first, rest)) = signal.split_first() else {
+        if signal.is_empty() {
             return;
-        };
-        let (mut prev, tail) = match self.carry {
-            Some(p) => (p, signal),
+        }
+        let h = self.hysteresis();
+        let mut c = match self.carry {
+            Some(c) => c,
             None => {
+                // A fresh run: its first sample has no interval before it.
+                let first = signal[0];
                 self.sumsq += first * first;
-                (first, rest)
+                self.frames += 1;
+                self.armed_low = first < -h;
+                self.candidate = None;
+                self.run_rises = 0;
+                let c = Carry {
+                    next_pos: 1.0,
+                    prev: first,
+                    prev_pos: 0.0,
+                };
+                self.carry = Some(c);
+                return self.push_contiguous(&signal[1..]);
             }
         };
-        // One interval of time per sample interval TESTED: `tail.len()` of them, whether
-        // the first is the one across from the carried sample or not.
-        self.span_frames += tail.len() as u64;
-        for &cur in tail {
-            if (prev < 0.0 && cur > 0.0) || (prev > 0.0 && cur < 0.0) {
+        for &cur in signal {
+            let pos = c.next_pos;
+            c.next_pos += 1.0;
+            self.sumsq += cur * cur;
+            self.frames += 1;
+            if (c.prev < 0.0 && cur > 0.0) || (c.prev > 0.0 && cur < 0.0) {
                 self.crossings += 1;
+                if c.prev < 0.0 {
+                    // Upward: the zero of the line through the two samples.
+                    let t = c.prev_pos + (pos - c.prev_pos) * (c.prev / (c.prev - cur));
+                    self.candidate = Some(t);
+                }
+            }
+            if cur < -h {
+                self.armed_low = true;
+                self.candidate = None;
+            } else if cur > h && self.armed_low {
+                if let Some(t) = self.candidate.take() {
+                    if self.run_rises == 0 {
+                        self.run_first_rise = t;
+                    }
+                    self.run_last_rise = t;
+                    self.run_rises += 1;
+                }
+                self.armed_low = false;
             }
             if cur != 0.0 {
-                prev = cur;
+                c.prev = cur;
+                c.prev_pos = pos;
             }
-            self.sumsq += cur * cur;
         }
-        self.frames += signal.len() as u64;
-        self.carry = Some(prev);
-        self.keep_samples(signal);
+        self.carry = Some(c);
     }
 
-    /// The stream has a GAP before the next push: do not test the interval across it.
-    /// Keeps the accumulated window - the crossings and the frames counted so far still
-    /// describe the same samples - and drops only the carried sample.
-    pub fn break_continuity(&mut self) {
+    /// Fold the current unbroken run into the window's periods.
+    fn close_run(&mut self) {
+        if self.run_rises >= 2 {
+            self.periods += self.run_rises - 1;
+            self.period_frames += self.run_last_rise - self.run_first_rise;
+        }
+        self.run_rises = 0;
+        self.candidate = None;
+        self.armed_low = false;
         self.carry = None;
     }
 
-    /// Retain `signal` for the FFT measurement, up to [`Self::MAX_SAMPLES`].
-    fn keep_samples(&mut self, signal: &[f64]) {
-        if self.use_fft && self.samples.len() < Self::MAX_SAMPLES {
-            let room = Self::MAX_SAMPLES - self.samples.len();
-            self.samples
-                .extend_from_slice(&signal[..signal.len().min(room)]);
-        }
+    /// The stream has a GAP before the next push: do not test the interval across it.
+    /// Keeps the accumulated window; the run before the gap keeps its periods.
+    pub fn break_continuity(&mut self) {
+        self.close_run();
     }
 
     /// Take a matured measurement (Hz), or `None` if the window is still accumulating.
     /// A window that reaches 5x the nominal signal duration without `min_crossings`
-    /// is discarded (noise-floor / DC signal). Taking (or discarding) resets the
-    /// accumulation.
+    /// is discarded (noise floor or DC). Taking (or discarding) resets the accumulation.
     ///
     /// A matured window whose RMS is below the amplitude gate is DISCARDED, not returned:
-    /// there is no tone to measure, and a crossing count taken off the noise floor is a
-    /// number without a referent. NO measurement is the honest answer.
+    /// a crossing count taken off the noise floor is a number without a referent.
     pub fn take(&mut self) -> Option<f64> {
         let seconds = self.frames as f64 / self.fs_hz;
         if seconds < self.window.as_secs_f64() {
             return None;
         }
         // Amplitude gate BEFORE the crossing test: a noise-floor window that happens to
-        // clear `min_crossings` must not mature. Discard it outright - waiting longer only
-        // accumulates more noise, never a tone.
-        // NB `<` (not `!(>=)`): a NaN rms must FAIL the gate, and NaN < x is false, so the
-        // explicit non-finite check carries it.
+        // clear `min_crossings` must not mature. A NaN rms must FAIL the gate.
         if self.min_rms > 0.0 && (!self.rms().is_finite() || self.rms() < self.min_rms) {
             self.reset();
             return None;
-        }
-        // The FFT peak is the measurement; the crossing count is the fallback for a
-        // window the spectrum cannot call (no peak clear of the median).
-        if self.use_fft {
-            if let Some(hz) = fft_peak_hz(&self.samples, self.fs_hz, Self::MIN_PEAK_OVER_MEDIAN) {
-                self.reset();
-                return Some(hz);
-            }
         }
         if self.crossings < self.min_crossings {
             if seconds >= 5.0 * self.window.as_secs_f64().max(0.1) {
@@ -307,11 +265,10 @@ impl WindowedFreqMeasure {
             }
             return None;
         }
-        // The crossings are divided by the time they were COUNTED over, which is the span,
-        // not the sample count (see `span_frames`; for `push_chunk` the two are equal).
-        let span_seconds = self.span_frames as f64 / self.fs_hz;
-        let hz = if span_seconds > 0.0 {
-            Some(self.crossings as f64 / 2.0 / span_seconds)
+        // The run in progress is part of this window; the next window starts afresh.
+        self.close_run();
+        let hz = if self.period_frames > 0.0 && self.periods > 0 {
+            Some(self.periods as f64 / self.period_frames * self.fs_hz)
         } else {
             None
         };
@@ -319,75 +276,19 @@ impl WindowedFreqMeasure {
         hz
     }
 
-    /// Discard the accumulation (run stop / link change), and the carried sample with it:
-    /// the next window starts a fresh stream, whose first sample adds no time.
+    /// Discard the accumulation, and the carried sample with it: the next window starts a
+    /// fresh stream, whose first sample adds no time.
     pub fn reset(&mut self) {
-        self.samples.clear();
         self.crossings = 0;
         self.frames = 0;
-        self.span_frames = 0;
         self.sumsq = 0.0;
         self.carry = None;
+        self.run_rises = 0;
+        self.candidate = None;
+        self.armed_low = false;
+        self.periods = 0;
+        self.period_frames = 0.0;
     }
-}
-
-/// Hann-windowed FFT peak of `signal` (mean removed) with parabolic sub-bin refinement,
-/// or `None` when the peak does not stand `min_peak_over_median` times above the median
-/// bin (no tone: the spectrum is flat noise) or the window is too short to resolve.
-pub fn fft_peak_hz(signal: &[f64], fs_hz: f64, min_peak_over_median: f64) -> Option<f64> {
-    let n = signal.len();
-    if n < 64 || fs_hz <= 0.0 {
-        return None;
-    }
-    let mean = signal.iter().sum::<f64>() / n as f64;
-    let nfft = hertzforge_dsp::fft::next_pow2(n);
-    let w = hertzforge_dsp::window::hann(n);
-    let mut buf: Vec<hertzforge_dsp::fft::Cplx> = Vec::with_capacity(nfft);
-    for i in 0..n {
-        buf.push(((signal[i] - mean) * w[i], 0.0));
-    }
-    buf.resize(nfft, (0.0, 0.0));
-    hertzforge_dsp::fft::fft_in_place(&mut buf);
-    let nout = nfft / 2 + 1;
-    let mags: Vec<f64> = buf
-        .iter()
-        .take(nout)
-        .map(|&c| hertzforge_dsp::fft::mag(c))
-        .collect();
-    let (mut peak_k, mut peak_mag) = (0usize, 0.0f64);
-    for (k, &m) in mags.iter().enumerate().skip(1) {
-        if m > peak_mag {
-            peak_mag = m;
-            peak_k = k;
-        }
-    }
-    if peak_k == 0 || peak_mag <= 0.0 {
-        return None;
-    }
-    // Tone test: the peak against the median bin (the noise floor of a flat spectrum).
-    let mut sorted: Vec<f64> = mags[1..].to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = sorted[sorted.len() / 2];
-    if median > 0.0 && peak_mag < min_peak_over_median * median {
-        return None;
-    }
-    let df = fs_hz / nfft as f64;
-    let k = peak_k;
-    let hz = if k >= 1 && k + 1 < nout {
-        let a = mags[k - 1].max(1e-30).ln();
-        let b = mags[k].max(1e-30).ln();
-        let c = mags[k + 1].max(1e-30).ln();
-        let denom = a - 2.0 * b + c;
-        let delta = if denom.abs() > 1e-30 {
-            0.5 * (a - c) / denom
-        } else {
-            0.0
-        };
-        (k as f64 + delta.clamp(-0.5, 0.5)) * df
-    } else {
-        k as f64 * df
-    };
-    Some(hz)
 }
 
 #[cfg(test)]
@@ -406,11 +307,11 @@ mod tests {
         let fs = 8_000.0;
         let mut m =
             WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW).with_min_rms(0.0);
-        m.push_chunk(&tone(fs, 250.0, 8_000, 1.0));
+        m.push_contiguous(&tone(fs, 250.0, 8_000, 1.0));
         let hz = m
             .take()
             .expect("a full second of a 250 Hz tone must mature");
-        assert!((hz - 250.0).abs() < 2.0, "measured {hz} Hz");
+        assert!((hz / 250.0 - 1.0).abs() < 1e-6, "measured {hz} Hz");
     }
 
     /// The move must not have dropped the amplitude gate: a window whose RMS is under
@@ -420,41 +321,14 @@ mod tests {
         let fs = 8_000.0;
         let mut m =
             WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW).with_min_rms(0.1);
-        m.push_chunk(&tone(fs, 250.0, 8_000, 1.0e-3));
+        m.push_contiguous(&tone(fs, 250.0, 8_000, 1.0e-3));
         assert_eq!(m.take(), None);
-    }
-
-    /// The bench case of 2026-09-07: a tone at the noise floor. Crossings over-read it by
-    /// an order of magnitude; the FFT peak calls it.
-    #[test]
-    fn a_noisy_low_tone_measures_by_the_fft_peak_not_the_crossings() {
-        let fs = 65_536.0;
-        let mut m = WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW)
-            .with_min_rms(0.0)
-            .with_fft(true);
-        let mut seed = 12345u64;
-        let mut rng = move || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed as f64 / u64::MAX as f64) - 0.5
-        };
-        let sig: Vec<f64> = (0..40_000)
-            .map(|k| 0.02 * (TAU * 20.0 * k as f64 / fs).sin() + 0.05 * rng())
-            .collect();
-        m.push_chunk(&sig);
-        let hz = m.take().expect("a measurement matures");
-        assert!(
-            (hz - 20.0).abs() < 1.0,
-            "fft peak should call 20 Hz, got {hz}"
-        );
     }
 
     /// THE BLOCK-BOUNDARY CROSSING. A tone with exactly 1.5 cycles per 64-frame block, its
     /// phase placed so a zero crossing falls between the last sample of every block and the
-    /// first of the next, fed a block at a time. `push_chunk` never tests that interval and
-    /// reads 2/3 of the tone (two crossings counted per block of three); `push_contiguous`
-    /// reads it exactly.
+    /// first of the next, fed a block at a time: `push_contiguous` counts that crossing and
+    /// reads the tone exactly.
     #[test]
     fn a_contiguous_stream_counts_the_crossing_between_two_pushes() {
         let fs = 8_192.0;
@@ -471,26 +345,14 @@ mod tests {
             "fixture: no crossing at the boundary"
         );
 
-        let mut chunked =
-            WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW).with_min_rms(0.0);
         let mut contiguous =
             WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW).with_min_rms(0.0);
         for b in sig.chunks(block) {
-            chunked.push_chunk(b);
             contiguous.push_contiguous(b);
         }
-        let lossy = chunked.take().expect("a second of tone matures");
         let exact = contiguous.take().expect("a second of tone matures");
         assert!(
-            (lossy / f - 2.0 / 3.0).abs() < 0.01,
-            "push_chunk should drop the boundary crossing of every block: read {lossy} Hz \
-             against {f} Hz"
-        );
-        // Within ONE crossing of a one-second window (0.5 Hz): the crossing quantization,
-        // which no counting rule can beat - the window's last crossing falls half a sample
-        // past its last sample.
-        assert!(
-            (exact - f).abs() <= 0.5 + 1e-9,
+            (exact / f - 1.0).abs() < 1e-6,
             "push_contiguous read {exact} Hz against {f} Hz"
         );
     }
@@ -514,21 +376,119 @@ mod tests {
             "an unbroken stream counts the boundary"
         );
         assert_eq!(m.frames, 6);
-        // Time: the broken stream TESTED 2 + 2 intervals, the unbroken one 2 + 3.
-        assert_eq!(m.span_frames, 4, "a fresh start's first sample added time");
-        assert_eq!(carried.span_frames, 5);
     }
 
+    /// Feed `sig` a 256-frame block at a time, as the chassis delivers it, and take the
+    /// first matured reading.
+    fn read_blocks(fs: f64, sig: &[f64], min_rms: f64) -> f64 {
+        let mut m =
+            WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW).with_min_rms(min_rms);
+        for b in sig.chunks(256) {
+            m.push_contiguous(b);
+            if let Some(hz) = m.take() {
+                return hz;
+            }
+        }
+        panic!("no reading matured");
+    }
+
+    /// FOUND ON THE NI LOOPBACK: a crossing COUNT over a 0.5 s window is
+    /// quantized to 1 Hz at every frequency, so tones off a whole number of crossings per
+    /// window read up to 1 Hz off (1010 Hz read 1010.729, 50.6 Hz read 50.008, 43.0 Hz read
+    /// 42.563), against a stated 0.05 %. Timed crossings read each of them to 5 ppm.
     #[test]
-    fn a_flat_noise_window_yields_no_fft_tone() {
-        let mut seed = 777u64;
-        let mut rng = move || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed as f64 / u64::MAX as f64) - 0.5
+    fn a_tone_off_a_whole_count_per_window_reads_to_parts_per_million() {
+        let fs = 12_800.0;
+        for &f in &[
+            20.0, 25.9, 43.0, 50.6, 100.0, 514.5, 515.0, 1_010.0, 1_999.7, 5_000.3,
+        ] {
+            // At the band's top (2.56 samples a period) the straight line between two
+            // samples places a crossing off the sine by up to a few hundredths of a sample,
+            // and the error at the window's two ends does not cancel: 30 ppm at 5 kHz.
+            let tol = if f > 2_000.0 { 1e-4 } else { 5e-6 };
+            // An arbitrary starting phase, so no crossing sits on a sample.
+            let sig: Vec<f64> = (0..12_800)
+                .map(|k| 0.2 * (TAU * f * k as f64 / fs + 0.37).sin())
+                .collect();
+            let hz = read_blocks(fs, &sig, 0.0);
+            assert!(
+                (hz / f - 1.0).abs() < tol,
+                "{f} Hz read {hz} Hz ({:+.4} %)",
+                (hz / f - 1.0) * 100.0
+            );
+        }
+    }
+
+    /// The loopback carries about 0.7 mV of DC. Rising crossings only: every one moves by
+    /// the same time and the period is unchanged.
+    #[test]
+    fn a_dc_offset_does_not_move_the_reading() {
+        let fs = 12_800.0;
+        for &f in &[20.0, 43.0, 250.0] {
+            let sig: Vec<f64> = (0..12_800)
+                .map(|k| 0.2 * (TAU * f * k as f64 / fs + 1.1).sin() + 0.000_7)
+                .collect();
+            let hz = read_blocks(fs, &sig, 0.0);
+            assert!((hz / f - 1.0).abs() < 5e-6, "{f} Hz with DC read {hz} Hz");
+        }
+    }
+
+    /// A small tone in the chassis's noise: 2 mV pk at 250 Hz moves 0.25 mV a sample at
+    /// its crossing against 0.12 mV rms of noise, so the noise adds crossings. The
+    /// hysteresis (the amplitude gate, three times the floor) counts one per period.
+    #[test]
+    fn noise_at_a_small_tones_crossing_is_not_counted_as_a_period() {
+        let fs = 12_800.0;
+        let f = 250.0;
+        let sigma = 0.000_12;
+        // A deterministic approximately Gaussian noise: the sum of twelve uniforms.
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut uniform = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 11) as f64 / (1u64 << 53) as f64
         };
-        let sig: Vec<f64> = (0..8192).map(|_| rng()).collect();
-        assert!(fft_peak_hz(&sig, 8192.0, WindowedFreqMeasure::MIN_PEAK_OVER_MEDIAN).is_none());
+        let sig: Vec<f64> = (0..12_800)
+            .map(|k| {
+                let g: f64 = (0..12).map(|_| uniform()).sum::<f64>() - 6.0;
+                0.002 * (TAU * f * k as f64 / fs).sin() + sigma * g
+            })
+            .collect();
+        let hz = read_blocks(fs, &sig, 3.0 * sigma);
+        assert!(
+            (hz / f - 1.0).abs() < 5e-4,
+            "a 2 mV tone in 0.12 mV of noise read {hz} Hz"
+        );
+    }
+
+    /// Across a gap each unbroken run counts its own periods over its own span.
+    #[test]
+    fn runs_either_side_of_a_gap_are_summed_not_bridged() {
+        let fs = 12_800.0;
+        let f = 777.0;
+        let sig: Vec<f64> = (0..38_400)
+            .map(|k| (TAU * f * k as f64 / fs + 0.2).sin())
+            .collect();
+        let mut m =
+            WindowedFreqMeasure::new(fs, WindowedFreqMeasure::DEFAULT_WINDOW).with_min_rms(0.0);
+        // Keep one block in three: two thirds of the stream dropped, a gap before each.
+        let mut hz = None;
+        for (i, b) in sig.chunks(256).enumerate() {
+            if i % 3 != 0 {
+                continue;
+            }
+            m.break_continuity();
+            m.push_contiguous(b);
+            if let Some(h) = m.take() {
+                hz = Some(h);
+                break;
+            }
+        }
+        let hz = hz.expect("a reading matures across gaps");
+        assert!(
+            (hz / f - 1.0).abs() < 1e-5,
+            "under gaps {f} Hz read {hz} Hz"
+        );
     }
 }

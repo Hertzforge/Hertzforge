@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Open, Import and Save in the top bar, where there is no File menu. In a browser they ask for a
+	 * New, Open, Import and Save in the top bar, where there is no File menu. In a browser they ask for a
 	 * path here, since a browser never gives the shell a file's path (files.ts).
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
@@ -32,6 +32,7 @@
 </script>
 
 <div class="files">
+	<button class="btn ghost sm" data-testid="project-new" onclick={() => p.fileAct('new')} disabled={!app.analysis.isOpen || p.busy !== null}>New</button>
 	<button class="btn ghost sm" data-testid="project-open" onclick={() => p.fileAct('open')} disabled={!app.analysis.isOpen || p.busy !== null}>Open</button>
 	<button class="btn ghost sm" data-testid="project-import" onclick={() => p.fileAct('import')} disabled={!app.analysis.isOpen || p.busy !== null}>Import</button>
 	{#if p.summary}<button class="btn ghost sm" data-testid="project-save" onclick={() => p.fileAct('save')} disabled={p.busy !== null}>Save</button>{/if}

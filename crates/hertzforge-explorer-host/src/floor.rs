@@ -24,7 +24,7 @@ pub enum FloorProbe {
 ///
 /// ## The window: armed, running, drive still at zero
 ///
-/// A run starts with the drive at its floor - on a delegated controller the device's run-control
+/// A run starts with the drive at its floor - the device's run-control
 /// restarts at the band low edge with the drive at its floor and the OEM's ~1.9 s pre-run
 /// blackout is already over by the time telemetry flows; on a host-synthesized drive the
 /// arm posture is 0.000 V by construction. So the first frames of a run are, by
@@ -47,7 +47,7 @@ pub enum FloorProbe {
 ///
 /// ## Interleave width is a parameter
 ///
-/// The probe was written against a delegated controller's fixed 8-channel telemetry frame
+/// The probe was written against a fixed 8-channel frame
 /// and stored its accumulators in `[f64; NCH]`. It now takes `n_interleave` at construction
 /// and keeps `Vec`s, because a host-closes-loop station's frame is as wide as its
 /// configured task. A slot at or beyond that width is [`FloorProbe::Unknown`] - the same

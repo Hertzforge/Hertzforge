@@ -1,0 +1,11 @@
+{
+ "type": "response",
+ "id": 94,
+ "result": {
+  "direction": "up",
+  "rate_oct_per_min": 60,
+  "clamped": true,
+  "frame": 531456,
+  "input_frame": 530432
+ }
+}

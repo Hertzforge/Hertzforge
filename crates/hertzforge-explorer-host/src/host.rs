@@ -1,9 +1,8 @@
 //! The run host around [`ExplorerHostService`]: the pump thread, the asynchronous arm,
 //! the lock-free status snapshot, the stall watchdog and the abort tail.
 //!
-//! Every front end that runs an Explorer in-process (the headless daemon, the desktop
-//! app) needs the same machinery around the service, and each used to be one copy of it
-//! away from drifting. A front end now supplies two things: the service, built on its
+//! Every front end that runs an Explorer in-process needs the same machinery around the
+//! service. A front end supplies two things: the service, built on its
 //! own station, and a [`HostSink`] for what the pump produces (display frames and journal
 //! lines). Validation of its own payload, wording and wire vocabulary stay with it.
 //!
@@ -34,6 +33,7 @@ use std::time::{Duration, Instant};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 
 use crate::analysis::SpectrumFrame;
+use crate::intent::{FrequencyPart, IntentRecord, LevelPart, Steered, StopCause};
 use crate::profile_raster::ProfileRaster;
 use crate::service::{
     EndRecord, ExplorerHostService, ExplorerStatus, RunState, ServiceError, StatusCell,
@@ -250,6 +250,27 @@ pub trait HostSink: Send + 'static {
     /// Lock held.
     fn block(&mut self, samples: &[f32], stride: usize);
 
+    /// [`HostSink::block`] with the block's first input frame, counted from the start of
+    /// the run on the station's clock. The pump calls this one; the default passes the
+    /// block on to [`HostSink::block`]. Lock held.
+    fn block_at(&mut self, first_frame: u64, samples: &[f32], stride: usize) {
+        let _ = first_frame;
+        self.block(samples, stride);
+    }
+
+    /// The survey line changed: its points, ascending by frequency, at `revision` (which
+    /// counts every change, a clear included). Lock held. The default ignores it.
+    fn survey(&mut self, revision: u64, points: &[(f64, f32)]) {
+        let _ = (revision, points);
+    }
+
+    /// The intents the run took since the last call, oldest first, each placed in the
+    /// run's time. Lock held, so they are buffered here and written elsewhere: the pump
+    /// is the station's reading thread. The default ignores them.
+    fn intents(&mut self, intents: &[IntentRecord]) {
+        let _ = intents;
+    }
+
     /// `frames` acquired frames the analysis ring dropped since the last call. They are
     /// older than anything still in the ring. Lock held.
     fn dropped(&mut self, frames: u64);
@@ -435,6 +456,37 @@ impl RunHost {
         Ok(())
     }
 
+    /// Steer: a frequency part, a level part or both, applied under one hold of the
+    /// service lock so both land in the same generated frame. Answers what the step
+    /// adopted and where it lands.
+    pub fn steer(
+        &self,
+        frequency: Option<FrequencyPart>,
+        level: Option<LevelPart>,
+    ) -> Result<Steered, HostError> {
+        self.with_svc(|s| s.steer(frequency, level))
+    }
+
+    /// Begin (or re-aim) a sweep, answering the intent record (the rate adopted, and
+    /// where it begins).
+    pub fn sweep(
+        &self,
+        direction: SweepDirection,
+        rate_oct_per_min: f64,
+    ) -> Result<IntentRecord, HostError> {
+        self.with_svc(|s| s.sweep(direction, rate_oct_per_min))
+    }
+
+    /// End the sweep, answering the intent record (the target in force).
+    pub fn hold(&self) -> Result<IntentRecord, HostError> {
+        self.with_svc(|s| s.hold())
+    }
+
+    /// Empty the survey line. Answers the new revision.
+    pub fn clear_survey(&self) -> Result<u64, HostError> {
+        self.with_svc(|s| Ok(s.clear_survey()))
+    }
+
     /// Absolute frequency intent. Answers with the CLAMPED value the step adopted.
     pub fn go_to_frequency(&self, hz: f64) -> Result<f64, HostError> {
         self.with_svc(|s| s.set_frequency(hz))
@@ -471,13 +523,18 @@ impl RunHost {
     /// run: raising it would halt the pump mid-ramp and leave the last commanded sample on
     /// the output.
     pub fn stop(&self) {
+        self.stop_for(StopCause::Operator);
+    }
+
+    /// [`RunHost::stop`], naming why the stop began.
+    pub fn stop_for(&self, cause: StopCause) {
         {
             let mut guard = self.lock_svc();
             match guard.as_mut() {
                 Some(s) => match s.state() {
                     RunState::Armed | RunState::Running | RunState::Stopping => {
                         self.stopping.store(true, Ordering::SeqCst);
-                        s.request_stop();
+                        s.request_stop_for(cause);
                         return;
                     }
                     // Idle (installed, never armed) or terminal: nothing is driving, so
@@ -724,11 +781,10 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
 
     // ---- PRIMING: open -> configure -> adopt -> gate -> build -> prefill -> start ----
     //
-    // The profile raster is built from the rate the driver ACTUALLY programmed and lives
-    // for this run only: a new run spawns a new pump, and a reinstall builds a new
-    // service, so it can never carry a previous grid. Every failure path here returns,
-    // so it is never observed unbuilt.
-    let (mut raster, block_frames, mut last_dropped, fs_hz) = {
+    // The survey line is the service's, built at arm from the rate the driver ACTUALLY
+    // programmed, and lives for this run only: a new run spawns a new pump, and a
+    // reinstall builds a new service, so it can never carry a previous grid.
+    let (block_frames, mut last_dropped, fs_hz) = {
         let guard = PrimingGuard(Arc::clone(&ctx.priming));
         let mut lock = match ctx.svc.lock() {
             Ok(g) => g,
@@ -762,7 +818,6 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
         let fs = s.actual_fs_hz();
         let nfft = s.display_nfft().max(2);
         sink.armed(fs, nfft);
-        let raster = ProfileRaster::new(0.0, fs / nfft as f64, nfft / 2 + 1);
         let dropped_at_arm = s.blocks_dropped();
         if let Err(e) = s.start() {
             sink.note(HostNote::StartRefused(&e));
@@ -782,7 +837,7 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
         // the armed run rather than "configured".
         let _ = s.service_analysis();
         drop(guard);
-        (raster, block_frames, dropped_at_arm, fs)
+        (block_frames, dropped_at_arm, fs)
     };
     ctx.beat.store(now_ms(), Ordering::Relaxed);
     let started = Instant::now();
@@ -793,6 +848,7 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
         .checked_sub(DISPLAY_PERIOD)
         .unwrap_or_else(Instant::now);
     let mut last_seq: u64 = 0;
+    let mut last_survey: u64 = 0;
     let mut last_logged_warning: Option<String> = None;
 
     while !ctx.stop.load(Ordering::Relaxed) && iters < MAX_PUMP_ITERS {
@@ -823,15 +879,11 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
                     }
                     // The off-RT analysis pass. It publishes the status cell the snapshot
                     // reads, and hands every drained block to the sink on the way past.
-                    let st = s.service_analysis_tapped(|blk, stride| sink.block(blk, stride));
-                    // THE PEAK PROFILE: every point the tracer recorded this pass, folded
-                    // in at its commanded frequency. Drained, so the tracer stays bounded
-                    // and the raster is the one thing that remembers.
-                    for p in s.take_profile_points() {
-                        raster.visit(p.freq_hz, p.amplitude);
-                    }
+                    let st =
+                        s.service_analysis_framed(|at, blk, stride| sink.block_at(at, blk, stride));
+                    hand_on(s, &mut last_survey, sink);
                     let published =
-                        due && offer_window(s.latest_spectra(), &mut last_seq, &raster, sink);
+                        due && offer_window(s.latest_spectra(), &mut last_seq, s.survey(), sink);
                     // Driver diagnostics, tracked by CONTENT, not by a count:
                     // `driver_warnings` is bounded and drains its oldest entries when it
                     // saturates, so a count watermark would stop advancing at the bound
@@ -862,7 +914,9 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
                     sink.note(HostNote::LoopFaulted(&e));
                     // Tapped like the healthy path: this pass drains the ring, and an
                     // untapped one would swallow the last samples before the fault.
-                    let _ = s.service_analysis_tapped(|blk, stride| sink.block(blk, stride));
+                    let _ =
+                        s.service_analysis_framed(|at, blk, stride| sink.block_at(at, blk, stride));
+                    hand_on(s, &mut last_survey, sink);
                     None
                 }
             }
@@ -913,14 +967,12 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
         if let Some(s) = g.as_mut() {
             // The same pass drains the last blocks the ring holds, so the time stream's
             // final samples are the ones that were actually acquired last.
-            let _ = s.service_analysis_tapped(|blk, stride| sink.block(blk, stride));
-            // The profile's last points and one final window carrying the finished curve:
-            // the raster dies with this thread, so a point recorded and never offered is
-            // a measurement the operator took and never saw.
-            for p in s.take_profile_points() {
-                raster.visit(p.freq_hz, p.amplitude);
-            }
-            offer_window(s.latest_spectra(), &mut last_seq, &raster, sink);
+            let _ = s.service_analysis_framed(|at, blk, stride| sink.block_at(at, blk, stride));
+            // The survey's last points and one final window carrying the finished curve:
+            // a point recorded and never offered is a measurement the operator took and
+            // never saw.
+            hand_on(s, &mut last_survey, sink);
+            offer_window(s.latest_spectra(), &mut last_seq, s.survey(), sink);
         }
     }
     sink.finish();
@@ -947,6 +999,20 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
     sink.note(HostNote::PumpExited { iters });
 }
 
+/// Hand the sink what the pass produced besides blocks: the survey line when it changed,
+/// and the intents the run took. Lock held.
+fn hand_on<S: HostSink>(s: &mut ExplorerHostService, last_survey: &mut u64, sink: &mut S) {
+    let revision = s.survey_revision();
+    if revision != *last_survey {
+        *last_survey = revision;
+        sink.survey(revision, s.survey_points());
+    }
+    let intents = s.take_intents();
+    if !intents.is_empty() {
+        sink.intents(&intents);
+    }
+}
+
 /// Offer the service's latest spectra to the sink when they are a NEW window, with the
 /// peak profile when it is on their grid. Returns whether the sink packed anything.
 ///
@@ -956,7 +1022,7 @@ fn pump_body<S: HostSink>(ctx: PumpCtx, sink: &mut S) {
 fn offer_window<S: HostSink>(
     frames: &[SpectrumFrame],
     last_seq: &mut u64,
-    raster: &ProfileRaster,
+    raster: Option<&ProfileRaster>,
     sink: &mut S,
 ) -> bool {
     let Some(first) = frames.first() else {
@@ -969,7 +1035,7 @@ fn offer_window<S: HostSink>(
     // the spectrum engine does, so this is an equality and not a resample. A mismatch
     // means one grid moved: withhold the profile rather than draw it against frequencies
     // it was not measured at.
-    let rendered = raster.render();
+    let rendered = raster.and_then(|r| r.render());
     let profile = match rendered.as_deref() {
         Some(mags) if mags.len() == first.mags.len() => Some(mags),
         Some(mags) => {

@@ -482,6 +482,8 @@ impl Service {
                 || inner.shock_live()
                 || inner.srs_live()
                 || inner.sine_live()
+                || inner.explorer_live()
+                || inner.recorder_live()
             {
                 inner.run_active()?;
             }

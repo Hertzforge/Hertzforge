@@ -64,9 +64,8 @@
 //! is in motion (`ProfileTracer::observe_pipelined` queues a fresh pending tone and re-arms
 //! the transient guard on every frequency change that is not a sweep), so a hand-walked
 //! coarse survey at three clicks a second spent all of its time travelling and anchored few
-//! or no profile points - the floor the bench observed. The reference instrument the operator is
-//! comparing against (a commercial controller's Fn-sweep) retunes on the up-button
-//! INSTANTLY. Travel time now collapses to one frame, leaving only the acquisition pipeline
+//! or no profile points. An operator stepping a tone by hand expects it to move INSTANTLY.
+//! Travel time now collapses to one frame, leaving only the acquisition pipeline
 //! (~65 ms on the NI chassis), the post-arrival transient guard and the measurement window
 //! between a click
 //! and its recorded point - comfortably inside a 300 ms click.
@@ -208,8 +207,8 @@ pub struct StepBuild {
 ///
 /// This is defence in depth, not the primary gate: the arm gate's rate policy refuses an
 /// unusable rate before this constructor is reached (see
-/// `ExplorerHostService::arm`). Found by RUNNING the `Some(fs)` -> `None` red mutation
-/// on 2026-08-08 - with the gate's rate check removed, arm reached this constructor and
+/// `ExplorerHostService::arm`). Found by RUNNING the `Some(fs)` -> `None` red mutation:
+/// with the gate's rate check removed, arm reached this constructor and
 /// panicked inside `hertzforge-dsp` instead of refusing. The gate was restored AND this
 /// refusal added, because a safety layer whose failure mode is a panic three crates down
 /// is one whose failure mode nobody has looked at.
@@ -252,6 +251,10 @@ pub struct StepHandles {
     /// starts at zero for this run rather than inheriting a device counter, so a
     /// "seconds into the run" readout means what it says across a re-arm.
     pub frames_generated: Arc<AtomicU64>,
+    /// Input frames the step has been handed (and copied into the ring), since arm: the
+    /// station's own count of acquired frames, which is what places a drained block in
+    /// station time.
+    pub frames_acquired: Arc<AtomicU64>,
 }
 
 /// The persistent Explorer host control step. See the module docs.
@@ -287,6 +290,12 @@ pub struct ExplorerProcessStep {
     /// intermediate frequency the operator never asked for. One frame cannot straddle a
     /// pass boundary, so the intermediate state does not exist to be observed.
     jump_pending: bool,
+    /// TEST ONLY: a gain on every generated sample after the amplitude clamp (1.0 in a
+    /// run), set through `ExplorerHostService::bypass_amplitude_clamp_for_test`.
+    pub(crate) test_gain: f64,
+    /// The first generated sample this run that passed the ceiling, `(|sample|, ceiling)`,
+    /// latched on the tick and taken by the service between batches.
+    drive_trip: Option<(f64, f64)>,
     /// The amplitude being generated right now, volts peak.
     vpk: f64,
     /// The amplitude the operator asked for, volts peak.
@@ -301,6 +310,9 @@ pub struct ExplorerProcessStep {
     // --- shared surfaces ------------------------------------------------------
     ring: Arc<SampleRing>,
     frames_generated: Arc<AtomicU64>,
+    frames_acquired: Arc<AtomicU64>,
+    /// Interleave width of an acquired frame, to count the frames a block carries.
+    n_interleave: usize,
 }
 
 impl ExplorerProcessStep {
@@ -338,9 +350,11 @@ impl ExplorerProcessStep {
             b.n_interleave,
         ));
         let frames_generated = Arc::new(AtomicU64::new(0));
+        let frames_acquired = Arc::new(AtomicU64::new(0));
         let handles = StepHandles {
             ring: ring.clone(),
             frames_generated: frames_generated.clone(),
+            frames_acquired: frames_acquired.clone(),
         };
 
         let step = ExplorerProcessStep {
@@ -356,6 +370,8 @@ impl ExplorerProcessStep {
             freq_hz: start,
             target_freq_hz: start,
             jump_pending: false,
+            test_gain: 1.0,
+            drive_trip: None,
             vpk: 0.0,
             target_vpk: 0.0,
             ramp_floor_vpk: 0.0,
@@ -363,6 +379,8 @@ impl ExplorerProcessStep {
             sweep_oct_per_frame: 0.0,
             ring,
             frames_generated,
+            frames_acquired,
+            n_interleave: b.n_interleave.max(1),
         };
         Ok((step, handles))
     }
@@ -470,9 +488,15 @@ impl ExplorerProcessStep {
     /// Start (or re-aim) a sweep. `rate_oct_per_min` is taken as a magnitude; the
     /// direction carries the sign. Starting a sweep clears any halt, so the operator can
     /// walk a parked tone off a band edge by sweeping the other way.
+    ///
+    /// The rate is held to the frequency slew, 60 times `freq_oct_per_s` in octaves per
+    /// minute, and [`Self::sweep`] states the rate used. A faster target would run ahead
+    /// of a tone the slew holds back, and a hold would then leave the tone travelling on
+    /// toward wherever the target had got to.
     pub fn start_sweep(&mut self, direction: SweepDirection, rate_oct_per_min: f64) {
+        let ceiling = 60.0 * self.slew.freq_oct_per_s.max(0.0);
         let rate = if rate_oct_per_min.is_finite() {
-            rate_oct_per_min.abs()
+            rate_oct_per_min.abs().min(ceiling)
         } else {
             0.0
         };
@@ -490,15 +514,31 @@ impl ExplorerProcessStep {
     }
 
     /// Stop the sweep. The tone stays exactly where it is (taking over
-    /// must never move the shaker).
+    /// must never move the shaker): a sweep still moving the tone leaves its target at the
+    /// tone. A sweep already halted by a click keeps the click's target, which is where
+    /// the operator put the tone.
     pub fn stop_sweep(&mut self) {
+        if self.sweep.is_some_and(|s| !s.halted) && !self.jump_pending {
+            self.target_freq_hz = self.freq_hz;
+        }
         self.sweep = None;
         self.sweep_oct_per_frame = 0.0;
+    }
+
+    /// Take the first sample past the ceiling, `(|sample|, ceiling)`, if one was
+    /// generated.
+    pub fn take_drive_trip(&mut self) -> Option<(f64, f64)> {
+        self.drive_trip.take()
     }
 
     /// The run-relative frame count this step has generated drive for.
     pub fn frames_generated(&self) -> u64 {
         self.frames_generated.load(Ordering::Relaxed)
+    }
+
+    /// The run-relative count of input frames this step has been handed.
+    pub fn frames_acquired(&self) -> u64 {
+        self.frames_acquired.load(Ordering::Relaxed)
     }
 
     // --- the per-frame arithmetic ----------------------------------------------
@@ -624,6 +664,8 @@ impl ProcessStep for ExplorerProcessStep {
         //    display with the data that arrived.
         if !input.is_empty() {
             self.ring.push(input);
+            self.frames_acquired
+                .fetch_add((input.len() / self.n_interleave) as u64, Ordering::Relaxed);
         }
 
         // 2. Synthesis, one frame at a time.
@@ -634,7 +676,21 @@ impl ProcessStep for ExplorerProcessStep {
             self.slew_frequency();
             self.slew_amplitude();
             let (sin, _inst_freq, _phase) = self.nco.next();
-            let sample = (sin * self.vpk) as f32;
+            let mut sample = (sin * self.vpk * self.test_gain) as f32;
+            // THE LAST CHECK ON THE DRIVE: every sample against the ceiling, after the
+            // clamp that should already hold it there. The clamp and the slew bound the
+            // amplitude; this bounds the sample itself, whatever produced it. A sample
+            // past the ceiling is clipped to it, so nothing past the ceiling is written,
+            // and the first one is latched for the service to abort the run on. The
+            // comparison is in f32, the drive's own type: rounding to f32 keeps order,
+            // so a sample the clamp held at or under the ceiling never trips it.
+            let ceiling = self.max_drive_vpk as f32;
+            if sample.abs() > ceiling {
+                if self.drive_trip.is_none() {
+                    self.drive_trip = Some((f64::from(sample.abs()), self.max_drive_vpk));
+                }
+                sample = sample.clamp(-ceiling, ceiling);
+            }
             drive_out.push(sample);
             for _ in 1..self.out_channels {
                 drive_out.push(0.0);

@@ -59,6 +59,22 @@ def test_every_operation_has_a_verb_or_is_hidden():
     assert set(verbs.MODULES) <= ids and set(verbs.PARTS) <= ids
 
 
+def test_every_row_has_a_glyph():
+    """The shell draws each row with its glyph (ui/src/lib/workspaces/actionIcons.ts), so a new
+    operation, act or default needs one there."""
+    import re
+
+    icons = (Path(__file__).resolve().parents[2] / 'ui' / 'src' / 'lib' / 'workspaces'
+             / 'actionIcons.ts').read_text(encoding='utf-8')
+    glyphs = set(re.findall(r"^\t'([a-z_]+\.[a-z_]+)': '", icons, re.MULTILINE))
+    source = Path(action_table.__file__).read_text(encoding='utf-8')
+    own = set(re.findall(r"_row\('((?:self|show)\.[a-z_]+)'", source))
+    defaults = {f'show.{verb.lower()}' for verb in ('Plot', 'Stack', 'Table', 'Values', 'MAC', 'Animate')}
+    offered = {op for op in verbs.VERBS if op not in verbs.UNOFFERED}
+    assert 'project.compute_psds' in glyphs and 'self.rename' in glyphs
+    assert not (offered | own | defaults) - glyphs, 'a row needs a glyph in actionIcons.ts'
+
+
 def test_verbs_are_short():
     assert not [v for v in verbs.VERBS.values() if len(v.split()) > 2]
 
@@ -163,6 +179,50 @@ def test_a_part_of_a_geometry_brings_its_own_verbs(plate):
     assert 'Rotate' not in verbs_in(with_part)
     systems = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'coordinate_systems'})[0]
     assert 'Rotate' in verbs_in(systems)
+
+
+SHAPES = ['Add Block', 'Add Cylinder', 'Add Cone', 'Add Sphere', 'Add Section', 'Add Plate',
+          'Add Disk']
+
+
+def test_the_geometry_row_leaves_its_parts_verbs_to_its_parts(plate):
+    geometry = named(plate, 'geometry')
+    own = verbs_in(table(plate, geometry)[0])
+    assert {'Export', 'Show Entities', 'Set View', 'Delete Picks'} <= set(own)
+    for verb in [*SHAPES, 'Show Solids', 'Mesh', 'Add Element', 'Add Group', 'Set Properties',
+                 'Merge Nodes', 'Align', 'Mate', 'Add Node', 'Rotate']:
+        assert verb not in own, verb
+    # placed by dragging in the tree, removed with Delete, a hole subtracted as a cylinder
+    assert not {'Place', 'Remove', 'Add Hole'} & set(own)
+
+
+def test_a_part_offers_its_own_verbs_alone(plate):
+    geometry = named(plate, 'geometry')
+    solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
+    assert set(SHAPES) | {'Show Solids', 'Mesh'} <= set(solids)
+    assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Copy'} & set(solids)
+    nodes = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0])
+    assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
+
+
+def test_a_family_fills_the_element_it_adds(plate):
+    geometry = named(plate, 'geometry')
+    family = table(plate, geometry, part={'name': geometry, 'kind': 'family', 'id': 'hexes'})[0]
+    assert row(family, 'Add Element')['fill']['family'] == 'hexes'
+    assert row(family, 'Add Element')['part'] is True and 'Add Group' in verbs_in(family)
+
+
+def test_element_groups_picked_together_fill_what_ties_them(plate):
+    geometry = named(plate, 'geometry')
+    one = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1})[0]
+    assert row(one, 'Merge Nodes')['fill']['groups'] == '1'
+    for verb in ('Merge Groups', 'Align', 'Mate'):
+        assert row(one, verb)['ready'] is False
+        assert row(one, verb)['reason'] == 'Pick two element groups or more in the tree'
+    both = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1, 'ids': [1, 2]})[0]
+    for verb in ('Merge Nodes', 'Merge Groups', 'Align', 'Mate', 'Set Properties'):
+        assert row(both, verb)['fill']['groups'] == '1, 2'
+        assert row(both, verb)['ready'] is True
 
 
 def test_nothing_selected_is_the_project_alone(plate, validate):

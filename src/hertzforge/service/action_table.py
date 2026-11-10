@@ -308,7 +308,7 @@ def _own_rows(project: Any, objects: list[str]) -> list[dict[str, Any]]:
     rows.append(_row('self.name_group', 'Name Group', 'self', not_grouped))
     rows.append(_row('self.copy', 'Copy', 'self'))
     rows.append(_row('self.rename', 'Rename', 'self', '' if one else 'Select one object'))
-    rows.append(_row('self.remove', 'Remove', 'self'))
+    # no Remove: Delete in the tree removes the selection (Brandon, 2026-11-10)
     return rows
 
 
@@ -360,7 +360,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     where = verbs.part_key(part)
     for op in _rows_of(OPERATIONS):
         home = verbs.PARTS.get(op.id)
-        if home is not None and home != where:
+        if op.id in verbs.UNOFFERED or home != (where or None):
             continue
         if not chosen:
             if not _object_params(op):
@@ -392,11 +392,21 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             for held in (where, f'{where}s'):
                 if any(p.name == held for p in op.params):
                     fill[held] = str(part['id'])
+        if where == 'family' and any(p.name == 'family' for p in op.params):
+            fill['family'] = str(part['id'])
+        if where == 'group' and any(p.name == 'groups' for p in op.params):
+            groups = verbs.picked_ids(part)
+            fill['groups'] = ', '.join(str(g) for g in groups)
+            if op.id in verbs.TWO_GROUPS and len(groups) < 2:
+                rows.append(_op_row(op, 'Pick two element groups or more in the tree',
+                                    fill=fill, part=True))
+                continue
         more: dict[str, Any] = {'part': True} if home else {}
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
         rows.append(_op_row(op, fill=fill, **more))
-    if chosen:
+    # a part picked is acted on by its own rows; the geometry's are its row's
+    if chosen and not where:
         rows += _own_rows(project, names)
     return {'kinds': kinds, 'current': True, 'rows': rows}
 

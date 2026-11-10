@@ -136,8 +136,27 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
 }.items()}
 
 #: the part of a geometry in the tree each of these operations belongs to:
-#: a part's kind, or 'part:<id>' for the nodes and the coordinate systems
+#: a part's kind, or 'part:<id>' for the nodes and the coordinate systems. A
+#: part picked offers its own operations alone, and the geometry's row none
+#: of these: the shapes to build from on the Solids row, as Visual Dynamics
+#: offered them (Brandon, 2026-10-11), and what ties or merges parts on the
+#: element groups picked together, never the whole geometry
 PARTS = {f'project.{name}': part for name, part in {
+    'add_solid_block': 'solids',
+    'add_solid_cylinder': 'solids',
+    'add_solid_cone': 'solids',
+    'add_solid_sphere': 'solids',
+    'add_solid_section': 'solids',
+    'add_solid_plate': 'solids',
+    'add_solid_disk': 'solids',
+    'solids': 'solids',
+    'mesh_solids': 'solids',
+    'add_element': 'family',
+    'add_element_group': 'family',
+    'group_properties': 'group',
+    'merge_coincident_nodes': 'group',
+    'align_meshes': 'group',
+    'mate_surfaces': 'group',
     'add_node': 'part:nodes',
     'add_coordinate_system': 'part:coordinate_systems',
     'rotate_coordinate_system': 'part:coordinate_systems',
@@ -157,6 +176,15 @@ PARTS = {f'project.{name}': part for name, part in {
     'delete_mated_surfaces': 'mate',
 }.items()}
 
+#: operations kept off the action table, though they stay operations: a hole
+#: is a cylinder to subtract (Brandon, 2026-10-20), and an object is placed in
+#: a group by dragging it there in the tree (Brandon, 2026-11-10)
+UNOFFERED = frozenset({'project.add_solid_hole', 'project.place'})
+
+#: the operations on element groups that tie or merge two or more of them
+TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',
+                        'project.mate_surfaces'})
+
 
 def modules_of(op: Any) -> tuple[str, ...]:
     """The modules that offer `op`: its list here, else every analysis module
@@ -171,3 +199,12 @@ def part_key(part: Any) -> str:
     if not part or not part.get('kind'):
         return ''
     return f'part:{part.get("id")}' if part['kind'] == 'part' else str(part['kind'])
+
+
+def picked_ids(part: Any) -> list[Any]:
+    """Every id of the part picked: the element groups picked together
+    (`ids`), else the one (`id`)."""
+    if not part:
+        return []
+    ids = part.get('ids')
+    return list(ids) if isinstance(ids, list) and ids else [part.get('id')]

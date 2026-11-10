@@ -237,6 +237,14 @@ hertzforge-law-host  test:sine_host  a_spinning_sine_law_is_stopped_within_two_e
 hertzforge-law-host  test:sine_host  a_late_sine_law_is_stopped_within_its_tick_budget_and_stays_stopped
 hertzforge-law-host  test:sine_host  each_misbehaviour_is_a_named_error
 hertzforge-sine-laws  test:law_call_timing  a_sine_law_file_call_at_the_default_tick_is_well_inside_its_budget
+# The check's cases judge each law call against its budget on the wall clock: in the parallel
+# pass on a macOS runner one call took 3.2 ms against 2.5 ms (the built-in) and 8.6 ms (a law file)
+hertzforge-sine-laws  test:check_cases  the_sine_built_in_passes_every_check_case
+hertzforge-sine-laws  test:law_file_check  a_sine_law_file_that_misbehaves_fails_the_check_and_the_same_file_behaving_passes
+# The built-in and its law file run the same: the law file's calls have the same 2.5 ms deadline on
+# the wall clock, and one missed under the parallel pass's load changed a discrete outcome
+hertzforge-sine-laws  test:same_door  the_built_in_and_its_law_file_run_the_same_at_both_parameter_sets
+hertzforge-sine-laws  test:same_door  the_limit_channel_case_is_reported
 
 # The template law file on a simulated station with the NI chassis's output queue: each run goes
 # through the law host, whose call deadline is on the wall clock, so a starved call is a miss
@@ -269,6 +277,11 @@ sds-control  test:sine_sim_run  sim_5_a_lost_controller_and_a_shutdown_each_safe
 sds-control  test:sine_sim_run  sim_6_a_law_that_runs_late_three_times_ends_law_fault_with_the_drive_held_then_ramped
 sds-control  test:sine_sim_run  sim_7_the_template_law_passes_sim_1_and_the_built_in_matches_its_law_file
 sds-control  test:sine_sim_run  sim_8_a_live_sine_run_excludes_the_others_and_the_shutdown_refuses_its_verbs
+# The Random and MIMO law check: each built-in and a passing law file must pass, and every seed and
+# call is judged against its budget on the wall clock; on a macOS runner in the parallel pass the
+# minimum-drive law's seed took 9.4 s and 14.0 s against 8.5 s
+sds-control  test:law_check  every_built_in_law_passes_the_check
+sds-control  test:law_check  a_passing_law_file_is_recorded_by_its_hash_and_cleared_for_hardware
 sds-control  test:sine_law_check  a_misbehaving_sine_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware
 sds-control  test:sine_law_check  the_built_in_sine_law_passes_every_case_and_is_not_recorded
 
@@ -290,3 +303,39 @@ sds-control  test:twr_sim_run  sim_2_manual_verbs_then_a_stop_inside_a_play
 sds-control  test:twr_sim_run  sim_3_an_observer_aborts_inside_a_play_within_a_block
 sds-control  test:twr_sim_run  sim_5_a_closed_controller_and_a_shutdown_each_end_in_the_safe_stop
 sds-control  test:twr_sim_run  sim_6_a_law_past_its_budget_misses_three_times_then_the_run_ends
+
+# Explorer: the run host's survey, intents and block frames and its pass and batch-gap timing on
+# the wall clock; the service over its socket and on its run thread, paced to the wall clock
+hertzforge-explorer-host  test:explorer_read_surfaces  explorer_the_run_host_hands_on_the_survey_the_intents_and_each_blocks_frame
+hertzforge-explorer-host  test:explorer_read_surfaces  explorer_a_pass_and_the_gap_between_batches_are_timed
+sds-control  test:explorer_protocol  explorer_a_run_through_the_protocol_from_configure_to_stop
+sds-control  test:explorer_protocol  explorer_the_table_and_an_observer_are_refused_by_name
+sds-control  test:explorer_protocol  explorer_nobody_at_the_controls_ends_in_the_safe_stop
+sds-control  test:explorer_sim_run  explorer_sim_1_dwells_meet_the_stations_response_and_the_peak_is_a_mode
+sds-control  test:explorer_sim_run  explorer_sim_2_steering_answers_what_the_step_adopted
+sds-control  test:explorer_sim_run  explorer_sim_3_an_observer_aborts_and_is_refused_a_steer
+sds-control  test:explorer_sim_run  explorer_sim_4_a_level_during_the_stop_is_refused_and_the_ramp_ends
+sds-control  test:explorer_sim_run  explorer_sim_5_a_lost_controller_and_a_shutdown_end_in_the_safe_stop
+sds-control  test:explorer_sim_run  explorer_sim_7_an_accel_limit_aborts_by_the_watchdog
+sds-control  test:explorer_sim_run  explorer_sim_8_a_simulation_run_and_an_explorer_run_exclude_each_other
+
+# Recorder: the core's guards that run a recording on the wall clock (the reading thread kept off
+# the disk, the free-space floor, falling behind the disk, the holdoff in station time, a limit
+# crossing marked), the service's simulated runs paced to the wall clock, and the wire's rules and
+# run folder on polling deadlines
+hertzforge-recorder  test:recorder_guards  recorder_the_reading_thread_never_touches_the_disk
+hertzforge-recorder  test:recorder_guards  recorder_the_free_space_floor_ends_the_run_and_says_so
+hertzforge-recorder  test:recorder_guards  recorder_falling_behind_the_disk_ends_the_run
+hertzforge-recorder  test:recorder_guards  recorder_holdoff_counts_station_time_from_the_trigger
+hertzforge-recorder  test:recorder_guards  recorder_a_limit_crossing_is_marked_and_recording_goes_on
+sds-control  test:recorder_sim_run  recorder_sim_records_from_the_first_frame_in_start_mode
+sds-control  test:recorder_sim_run  recorder_sim_manual_recordings_carry_their_pre_windows
+sds-control  test:recorder_sim_run  recorder_sim_level_trigger_records_at_the_markers
+sds-control  test:recorder_sim_run  recorder_sim_refuses_a_start_under_the_floor
+sds-control  test:recorder_sim_run  recorder_sim_a_lost_controller_and_a_shutdown_end_safely
+sds-control  test:recorder_sim_run  recorder_sim_an_observer_may_abort_but_not_record
+sds-control  test:recorder_sim_run  recorder_sim_limits_are_marks_and_the_recording_runs_on
+sds-control  test:recorder_sim_run  recorder_sim_runs_exclude_each_other_and_shutdown_refuses_starts
+sds-control  test:recorder_protocol  recorder_verbs_are_refused_by_name_in_every_state_and_mode
+sds-control  test:recorder_protocol  recorder_log_reaches_every_connection_and_names_the_folder
+sds-control  test:recorder_records  recorder_run_folder_holds_its_records

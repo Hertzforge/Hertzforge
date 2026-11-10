@@ -36,6 +36,9 @@ const MAIN: &str = "main";
 /// The menu item that quits through [`Quit::request`].
 #[cfg(target_os = "macos")]
 const QUIT_ID: &str = "quit";
+/// The app menu's Check for Updates: the shell asks the updater, as its palette does.
+#[cfg(target_os = "macos")]
+const UPDATE_ID: &str = "check-for-updates";
 
 /// The app's state once the services have started.
 struct Running {
@@ -141,7 +144,8 @@ fn startup(app: AppHandle) {
         paths.resource_dir(),
         paths.app_log_dir(),
     ) {
-        (Ok(exe), Ok(res), Ok(logs)) => Layout::installed(exe.parent().unwrap_or(&exe), &res, logs),
+        (Ok(exe), Ok(res), Ok(logs)) => Layout::development(logs.clone())
+            .unwrap_or_else(|| Layout::installed(exe.parent().unwrap_or(&exe), &res, logs)),
         _ => return fail(&app, "The app's own folders could not be found."),
     };
     let services = match Services::start(&layout) {
@@ -251,12 +255,14 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     // The standard menus, with Quit replaced: the predefined Quit ends the process
     // at once, past the question and the controlled stop.
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Hertzforge", true, Some("CmdOrCtrl+Q"))?;
+    let update = MenuItem::with_id(app, UPDATE_ID, "Check for Updates...", true, None::<&str>)?;
     let app_menu = Submenu::with_items(
         app,
         "Hertzforge",
         true,
         &[
             &P::about(app, None, None)?,
+            &update,
             &P::separator(app)?,
             &P::services(app, None)?,
             &P::separator(app)?,
@@ -287,6 +293,7 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         "File",
         true,
         &[
+            &MenuItem::with_id(app, "file-new", "New Project", true, Some("CmdOrCtrl+N"))?,
             &MenuItem::with_id(app, "file-open", "Open...", true, Some("CmdOrCtrl+O"))?,
             &MenuItem::with_id(app, "file-import", "Import...", true, Some("CmdOrCtrl+I"))?,
             &P::separator(app)?,
@@ -318,7 +325,7 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        // Check for Updates, from the shell's palette: the updater reads the latest
+        // Check for Updates, from the app menu or the shell's palette: the updater reads the latest
         // release's manifest, verifies the archive against the public key in
         // tauri.conf.json, installs it, and the process plugin relaunches.
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -344,6 +351,8 @@ fn main() {
     let builder = builder.on_menu_event(|app, event| {
         if event.id() == QUIT_ID {
             Quit::request(app);
+        } else if event.id() == UPDATE_ID {
+            let _ = tauri::Emitter::emit(app, "update-menu", ());
         } else if let Some(act) = event.id().as_ref().strip_prefix("file-") {
             // nothing to tell when the window is gone
             let _ = tauri::Emitter::emit(app, "file-menu", act);

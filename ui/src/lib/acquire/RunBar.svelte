@@ -97,16 +97,18 @@
 				<dt>Elapsed</dt>
 				<dd class="num" data-testid="run-elapsed">{clock(acq.elapsed)}</dd>
 			</div>
-			<div>
-				<dt>Level</dt>
-				<dd class="num" data-testid="run-level">
-					{#if levelNow !== null}
-						{db(levelNow)}{#if levelCommanded !== null && Math.abs(levelCommanded - levelNow) > 0.05}<span class="to" title="Commanded level">{' '}to {db(levelCommanded)}</span>{/if}
-					{:else}
-						{db(levelCommanded)}
-					{/if}
-				</dd>
-			</div>
+			{#if !acq.levelHidden}
+				<div>
+					<dt>Level</dt>
+					<dd class="num" data-testid="run-level">
+						{#if levelNow !== null}
+							{db(levelNow)}{#if levelCommanded !== null && Math.abs(levelCommanded - levelNow) > 0.05}<span class="to" title="Commanded level">{' '}to {db(levelCommanded)}</span>{/if}
+						{:else}
+							{db(levelCommanded)}
+						{/if}
+					</dd>
+				</div>
+			{/if}
 			{#if nums}
 				{@render nums()}
 			{:else}

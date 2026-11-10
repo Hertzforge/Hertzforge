@@ -3,7 +3,7 @@
 `desktop/` is the Hertzforge desktop app: a Tauri 2 window that shows the shell (`ui/`), with the
 control service and the analysis service started beside it. Nothing else needs installing: the app
 carries its own Python. The browser setup (`scripts/dev.sh`, `?mock=1`) stays as it was and is for
-development.
+development; `scripts/dev_app.sh` runs the app itself from the checkout (Trying a Change in the App).
 
 ## What the Installers Contain
 
@@ -25,6 +25,32 @@ demand: a `.dmg` each for macOS on Apple silicon and on Intel, an NSIS installer
 a `.deb` and an AppImage for Linux x64, as workflow artifacts kept for 14 days. It is not a required
 check.
 
+## Trying a Change in the App
+
+`scripts/dev_app.sh` opens the app from the checkout without packaging it: the real window, menus
+and file dialogs (Tauri's development mode), the shell from its development server, and both
+services from the checkout. It builds the control service (release, only what changed), starts the
+shell's development server on port 5191 unless one is already there, and runs `tauri dev` with
+`HERTZFORGE_DEV_CONTROL` and `HERTZFORGE_DEV_PYTHON` naming the two services. Only a development
+build reads those; a release build starts the services it carries, whatever the environment says.
+
+```bash
+scripts/dev_app.sh
+```
+
+A change saved under `ui/` shows in the window at once. A change to the Python package or to the
+control service shows the next time it runs: quit the app and run it again, a matter of seconds once
+the first run (a few minutes) has built everything. A change under `desktop/` rebuilds and restarts
+the app by itself. The analysis service runs on the Python `python3` resolves to in the checkout,
+which must have the package installed for development (`pip install -e .`); `HERTZFORGE_DEV_PYTHON`
+names another. The script resolves a pyenv shim to the interpreter itself, since the app starts the
+service from another folder, where the shim would choose another Python.
+
+On a Mac, a launcher in `~/Applications` can run it in a Terminal window, which shows the build and
+the services' output; quitting the app ends it. It is an AppleScript applet,
+`tell application "Terminal" to do script "cd ~/hertzforge && scripts/dev_app.sh"`, compiled with
+`osacompile`.
+
 ## Building It Locally
 
 You need the Rust toolchain `rust-toolchain.toml` names, Node.js (LTS), `curl`, and on Linux the
@@ -44,7 +70,7 @@ The desktop crate is a Cargo workspace of its own, so the controller's `cargo te
 `cargo clippy` do not compile the window toolkit. Its own checks:
 
 ```bash
-npm --prefix desktop ci && npm --prefix desktop run icons   # the icons, from ui/static/favicon.svg
+npm --prefix desktop ci && npm --prefix desktop run icons   # the icons, from desktop/icon.png
 cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked -- -D warnings
 cargo test --manifest-path desktop/Cargo.toml --locked
 cargo deny --manifest-path desktop/Cargo.toml --config desktop/deny.toml check
@@ -157,12 +183,12 @@ yet tried as a copy downloaded on another Mac.
 
 The desktop workflow builds the macOS images on GitHub's runners, one for Apple silicon and one for
 Intel, signs and notarizes them with `sign_macos.sh`, and fails if Apple has not accepted both the app
-and the image. Pushing a tag `v*` also drafts a GitHub release with the two images and their
-`SHA256SUMS` on it. Nothing is public until the draft is published, and publishing it is what starts
+and the image. Pushing a tag `v*` also publishes a GitHub release with the two images, the Windows and
+Linux installers, and their `SHA256SUMS` on it, once every one of them has built, and then starts
 `release.yml`. A run started by hand on main builds the same images as a test and leaves them as
 artifacts for 14 days. A push to `feature/desktop-app` on a maintainer's fork still builds the images,
-unsigned, because a fork has no certificate. Windows stays unsigned, and
-the Windows and Linux installers are artifacts of every run, not on the release.
+unsigned, because a fork has no certificate. Windows and Linux stay unsigned;
+their installers are on the release beside the Mac images.
 
 The credentials are secrets of the `release` environment, which admits only `v*` tags and main, so a
 workflow on another branch cannot read them. An admin of the repository can change that rule. The
@@ -206,10 +232,13 @@ handing it on.
 A release is a tag. Set the version in `pyproject.toml`, `src/hertzforge/__init__.py`,
 `desktop/tauri.conf.json`, `desktop/package.json` and the workspace `Cargo.toml` to the same number,
 merge, then tag that commit `v<version>` and push the tag. The desktop workflow builds, signs and
-notarizes both Mac images, renames them `Hertzforge-macOS-AppleSilicon.dmg` and
-`Hertzforge-macOS-Intel.dmg`, and drafts the release with them, their `SHA256SUMS` and, when the
-updater key is set, the update archives and `latest.json`. Publishing the draft is a person's click;
-it starts `release.yml`, which publishes the Python package to PyPI. The site's Download section
+notarizes both Mac images, builds the Windows and Linux installers, renames them
+`Hertzforge-macOS-AppleSilicon.dmg`, `Hertzforge-macOS-Intel.dmg`, `Hertzforge-Windows-x64-setup.exe`,
+`Hertzforge-Linux-x64.AppImage` and `Hertzforge-Linux-x64.deb`, and publishes the release with them, their
+`SHA256SUMS` and, when the updater key is set, the update archives and `latest.json`. It waits for
+every installer, so a failed one publishes nothing. It then starts `release.yml` on the tag, which
+tests the Python package and publishes it to PyPI. A release made with a workflow's own token starts
+no other workflow, which is why the desktop workflow starts it by name. The site's Download section
 links the images through `releases/latest/download/<name>`, which GitHub answers with the newest
 published release's asset of that name, so the page needs no change per release; its script fills
 the version, date and sizes from the GitHub API when the visitor's browser can reach it.

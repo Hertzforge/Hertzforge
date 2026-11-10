@@ -5,6 +5,9 @@
 //! - The analysis service, `python -I -B -m hertzforge serve`, from the Python runtime
 //!   shipped in the app's resources.
 //!
+//! A development build started by `scripts/dev_app.sh` takes both from the checkout instead
+//! ([`Layout::development`]), so a change is tried without packaging the app.
+//!
 //! Each child's standard output and error go to a log file of this launch, never to a
 //! pipe: a pipe would close if the app died, and a write to it would then fail inside
 //! the service. Each child's standard input is a pipe the app holds and never writes
@@ -59,6 +62,24 @@ impl Layout {
             python_exe: python,
             log_root,
         }
+    }
+
+    /// The parts a development build runs, from the checkout: the control service
+    /// `cargo` built and the Python the package is installed in for development, named
+    /// by `HERTZFORGE_DEV_CONTROL` and `HERTZFORGE_DEV_PYTHON` (`scripts/dev_app.sh` sets
+    /// both). None when either is unset. A release build has no such route.
+    #[cfg(debug_assertions)]
+    pub fn development(log_root: PathBuf) -> Option<Layout> {
+        Some(Layout {
+            control_exe: std::env::var_os("HERTZFORGE_DEV_CONTROL")?.into(),
+            python_exe: std::env::var_os("HERTZFORGE_DEV_PYTHON")?.into(),
+            log_root,
+        })
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn development(_log_root: PathBuf) -> Option<Layout> {
+        None
     }
 }
 

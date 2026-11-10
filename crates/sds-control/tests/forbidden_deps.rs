@@ -105,6 +105,24 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // `hertzforge-twr`, `hertzforge-random-laws` and `hertzforge-hal`, all on this
     // list. Written here, so on LAW_CRATES.
     "hertzforge-twr-laws",
+    // Explorer behind the wire's `explorer.*` methods, reviewed 2026-11-08: the
+    // hand-steered open-loop sine (`hertzforge-explorer-host`, MIT, imported): its
+    // process step, run service, analysis pass and run host. Its `[dependencies]` are
+    // `hertzforge-dsp`, `hertzforge-channel-table`, `hertzforge-engine`,
+    // `hertzforge-hal`, `hertzforge-module-abi` and `serde`, the
+    // controller crates all already on this list, and it names no backend: the run
+    // service is handed a finished `Box<dyn Backend>` by the station factory, and the
+    // Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-explorer-host",
+    // The Recorder behind the wire's `recorder.*` methods: the acquisition and recording
+    // core (`hertzforge-recorder`, MIT, imported): its trigger, recording writer and
+    // reader, analysis pass and run service. Its `[dependencies]` are
+    // `hertzforge-capture`, `hertzforge-channel-table`, `hertzforge-dsp`,
+    // `hertzforge-engine`, `hertzforge-hal`, `hertzforge-module-abi`, `serde` and
+    // `serde_json`, the controller crates all already on this list, and it names no
+    // backend: the run service is handed a finished `Box<dyn Backend>` by the station
+    // factory, and the Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-recorder",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for

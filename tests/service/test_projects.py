@@ -202,9 +202,12 @@ def test_refusals_over_the_socket_keep_the_project(tmp_path):
     assert len(second) == 2 * len(first)
 
 
-def test_save_with_nothing_open_is_refused():
-    (response,) = asyncio.run(_exchange([('project.save', {'path': '/tmp/x.hforge'})]))[0:1]
-    assert response[-1]['error']['code'] == 'refused'
+def test_a_connection_starts_with_an_empty_project_that_saves(tmp_path):
+    path = tmp_path / 'empty.hforge'
+    (response,) = asyncio.run(_exchange([('project.save', {'path': str(path)})]))
+    project = response[-1]['result']['project']
+    assert (project['title'], project['objects'], project['modified']) == ('Project', [], False)
+    assert path.exists()
 
 
 @pytest.mark.parametrize('name', ['request_project_import', 'event_project_progress',

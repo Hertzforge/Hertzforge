@@ -261,6 +261,35 @@ impl TriggerEngine {
         self.ring.capacity_frames()
     }
 
+    /// Count frames from `frame` on: the station frame of the next frame fed, so the
+    /// trigger's frames, its fires and its holdoff are station frames.
+    pub fn sync_to(&mut self, frame: u64) {
+        self.global_frame = frame;
+        self.holdoff_until_frame = self.holdoff_until_frame.min(frame);
+    }
+
+    /// Count `n` frames the trigger does not see (they went to a recording), so its
+    /// count stays the station's.
+    pub fn skip(&mut self, n: u64) {
+        self.global_frame += n;
+    }
+
+    /// Start a fresh pre-window: the frames held are dropped, and the detector does
+    /// not arm until a full pre-window has been acquired from here. After a recording
+    /// ends, this keeps every frame out of two recordings.
+    pub fn restart_pre_window(&mut self) {
+        let capacity = self.ring.capacity_frames();
+        self.ring = PreTriggerRing::new(self.n_channels, capacity);
+        self.holdoff_until_frame = self
+            .holdoff_until_frame
+            .max(self.global_frame + capacity as u64);
+    }
+
+    /// The frames the pre-window holds now.
+    pub fn pre_frames_held(&self) -> usize {
+        self.ring.len_frames()
+    }
+
     /// Frames consumed so far across all feeds.
     pub fn global_frame(&self) -> u64 {
         self.global_frame
@@ -334,6 +363,43 @@ impl TriggerEngine {
             self.global_frame += 1;
         }
         event
+    }
+
+    /// Feed frames up to the first fire and no further: answers the fire, if any,
+    /// and the frames consumed. The fire's frame is not consumed (it is the first
+    /// frame of the recording), so the caller hands the frames from it on to the
+    /// recording and, once the recording ends, the rest back here.
+    pub fn feed_until_fire(
+        &mut self,
+        frames: &[f32],
+        n_frames: usize,
+    ) -> (Option<TriggerEvent>, usize) {
+        let level = match &self.mode {
+            TriggerMode::Level(lt) => *lt,
+            TriggerMode::FreeRun | TriggerMode::Manual => {
+                self.feed(frames, n_frames);
+                return (None, n_frames);
+            }
+        };
+        for f in 0..n_frames {
+            let frame = &frames[f * self.n_channels..(f + 1) * self.n_channels];
+            let sample = f64::from(frame[level.channel_index as usize]);
+            if self.level_step(&level, sample) {
+                let pretrigger = self.ring.snapshot();
+                let pretrigger_frames = (pretrigger.len() / self.n_channels) as u64;
+                return (
+                    Some(TriggerEvent {
+                        trigger_frame_global: self.global_frame,
+                        pretrigger,
+                        pretrigger_frames,
+                    }),
+                    f,
+                );
+            }
+            self.ring.push_frames(frame);
+            self.global_frame += 1;
+        }
+        (None, n_frames)
     }
 
     /// One detector step on the trigger-channel sample. Returns true on fire.

@@ -16,6 +16,7 @@
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
+	import { partIsPicked } from './selection';
 
 	interface Props {
 		app: AppState;
@@ -267,8 +268,7 @@
 	const bad = (name: string, index: number) => (issueOf(name)?.sub_items ?? []).includes(index);
 
 	const picked = (name: string, index: number) => (p.selection.records[name] ?? []).includes(index);
-	const partPicked = (name: string, kind: string, id: string | number) =>
-		p.selection.part?.name === name && p.selection.part.kind === kind && p.selection.part.id === id;
+	const partPicked = (name: string, kind: string, id: string | number) => partIsPicked(p.selection, name, kind, id);
 	const held = (name: string): ProjectChildren | undefined => p.children[name];
 	/** How many rows and columns a grid shows before it scrolls. */
 	const roleWord = (role?: string) => (role ? ROLE_WORD[role as keyof typeof ROLE_WORD] : '');
@@ -378,7 +378,7 @@
 							<span class="label" class:dim={!family.count}>{family.label} ({family.count})</span>
 						</div>
 						{#each family.groups as group (group.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={() => p.clickPart(o.name, 'group', group.id)} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'group', group.id)}>
+							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => p.clickPart(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'group', group.id)}>
 								<Glyph name="groups" of="child" parent="geometry" size={14} />
 								<span class="label">{group.label} ({group.count})</span>
 							</div>

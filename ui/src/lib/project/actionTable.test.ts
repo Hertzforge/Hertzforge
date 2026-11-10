@@ -35,8 +35,8 @@ const table: ActionTable = {
 describe('the action table', () => {
 	const verbs = (i: number, module: 'modal' | 'report' = 'modal') => columnsFor(table, module)[i].rows.map((r) => r.verb);
 
-	it('puts defaults first, then the part, then what can run, then what cannot', () => {
-		expect(verbs(0)).toEqual(['Plot', 'Add Node', 'Export', 'Averaging', 'Off']);
+	it('puts defaults first, then the part, then the rest, and leaves out what cannot run', () => {
+		expect(verbs(0)).toEqual(['Plot', 'Add Node', 'Export', 'Averaging']);
 	});
 
 	it('cuts rows and empty combination columns to the module', () => {
@@ -45,8 +45,8 @@ describe('the action table', () => {
 		expect(columnsFor(table, 'report').map((c) => c.kinds.at(-1))).toContain('report');
 	});
 
-	it('orders columns that can run first, any object last among them, and off columns at the end', () => {
-		expect(columnsFor(table, 'modal').map((c) => c.kinds.at(-1))).toEqual(['geometry', 'time_history', '*', 'psd']);
+	it('orders combination columns by kind, any object last, and leaves out one with nothing to run', () => {
+		expect(columnsFor(table, 'modal').map((c) => c.kinds.at(-1))).toEqual(['geometry', 'time_history', '*']);
 	});
 
 	it('keeps the selection column when a module leaves it empty', () => {

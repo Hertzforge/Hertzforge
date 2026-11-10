@@ -2670,6 +2670,679 @@ TWR_TEXT_GOLDENS = {
 }
 
 
+# --- Explorer (PROTOCOL.md, "Explorer") ---
+#
+# As the other modules': the configuration golden is the contract's example with every
+# field given, and its `derived` is what the control service computes for it on the NI
+# station at 12 800 Hz (the Rust golden test recomputes it). The run goldens are one
+# moment of one run: the tone held at 250 Hz and 0.2 V pk, 41.38 s in. The binary goldens
+# carry short records whose values are exact in binary, laid out as the service's view
+# builders lay them out (each series' x then y, every array numbered in traversal order).
+
+EXPLORER_FS = 12800.0
+
+EXPLORER_METADATA = [{'key': 'run_number', 'label': 'Run Number', 'value': '3'},
+                     {'key': 'test_article', 'label': 'Test Article', 'value': 'Fixture A'},
+                     {'key': 'serial_number', 'label': 'SN', 'value': ''},
+                     {'key': 'operator', 'label': 'Operator', 'value': ''}]
+
+EXPLORER_CONFIG = {
+    'title': 'Survey, fixture A',
+    'acquisition': {'fs_hz': 12800},
+    'band_hz': [20, 2000], 'start_hz': 250, 'max_drive_vpk': 0.5,
+    'slew': {'freq_oct_per_s': 1, 'drive_db_per_s': 6},
+    'display': {'nfft': 4096},
+    'capture': {'run_name': 'explorer'},
+    'metadata': EXPLORER_METADATA,
+}
+
+EXPLORER_STATION = {'kind': 'ni', 'class': 'ni_real',
+                    'devices': [{'id': 'cDAQ2Mod1', 'serial': '01A2B3C4'},
+                                {'id': 'cDAQ2Mod2', 'serial': '01A2B3C5'}]}
+
+EXPLORER_DERIVED = {
+    'grid': {'fs_hz': 12800, 'block_frames': 256, 'lookahead_frames': 512, 'actual': False},
+    'band_hz': [20, 2000], 'pipeline_frames': 1063, 'pipeline_s': 0.08305,
+    'rise_s': 6.667, 'stop_s': 6.667, 'stop_wait_s': 30, 'sweep_max_oct_per_min': 60,
+    'display': {'df_hz': 3.125, 'window_s': 0.32},
+    'survey': {'tolerance_hz': 1.5625, 'first_point_s': [0.383, 0.125]},
+}
+
+EXPLORER_GRID = {'requested_fs_hz': 12800, 'fs_hz': 12800, 'block_frames': 256,
+                 'lookahead_frames': 512, 'actual': False}
+EXPLORER_GRID_ACTUAL = dict(EXPLORER_GRID, actual=True)
+EXPLORER_SLEW = {'freq_oct_per_s': 1, 'drive_db_per_s': 6}
+
+
+def _explorer_health(ticks, worst_tick_ms, pass_last, pass_worst, gap):
+    return {'engine_ticks': ticks, 'worst_tick_ms': worst_tick_ms, 'budget_ms': 20,
+            'health_faults': 0, 'ring_overruns': 0, 'blocks_dropped': 0, 'driver_warnings': 2,
+            'pass_ms': {'last': pass_last, 'worst': pass_worst}, 'batch_gap_ms': gap}
+
+
+def _explorer_state(**over) -> dict:
+    s = {
+        'run_id': 'explorer-0001', 'state': 'configured', 'phase': 'idle',
+        'title': EXPLORER_CONFIG['title'], 'source': 'HARDWARE', 'station': EXPLORER_STATION,
+        'grid': EXPLORER_GRID, 'clock': None, 'band_hz': [20, 2000], 'max_drive_vpk': 0.5,
+        'slew': EXPLORER_SLEW, 'pipeline_frames': 1063, 't_s': None, 'frequency_hz': None,
+        'target_hz': None, 'drive_vpk': None, 'target_vpk': None, 'sweep': None,
+        'health': None, 'stall': None, 'stop': None, 'end': None,
+    }
+    s.update(over)
+    return s
+
+
+EXPLORER_STARTED = _explorer_state(
+    state='running', phase='quiet', grid=EXPLORER_GRID_ACTUAL, clock='shared', t_s=0.04,
+    frequency_hz=250, target_hz=250, drive_vpk=0, target_vpk=0,
+    health=_explorer_health(2, 0.38, 1.2, 1.2, None))
+
+EXPLORER_RUNNING = _explorer_state(
+    run_id='explorer-0002', state='running', phase='steady', grid=EXPLORER_GRID_ACTUAL,
+    clock='shared', t_s=41.38, frequency_hz=250, target_hz=250, drive_vpk=0.2, target_vpk=0.2,
+    health=_explorer_health(2069, 0.41, 1.9, 3.4, 4.1))
+
+EXPLORER_HEAD = {
+    'run_id': 'explorer-0002', 'source': 'HARDWARE', 'class': 'ni_real', 'state': 'running',
+    'phase': 'steady', 't_s': 41.38, 'frequency_hz': 250, 'target_hz': 250,
+    'measured_hz': 250.02, 'drive_vpk': 0.2, 'target_vpk': 0.2, 'max_drive_vpk': 0.5,
+    'sweep': None,
+    'channels': [{'index': 1, 'description': 'Control', 'role': 'control', 'rms': 0.1413,
+                  'unit': 'g'},
+                 {'index': 3, 'description': 'Fixture', 'role': 'monitor', 'rms': 0.0706,
+                  'unit': 'g'}],
+    'control': {'index': 1, 'velocity_ips': 0.04916, 'displacement_mil': 0.0313,
+                'settling': False},
+    'pipeline_frames': 1063, 'peak': {'hz': 250, 'level': 0.1999}, 'blocks_dropped': 0,
+    'pass_ms': {'last': 1.9, 'worst': 3.4},
+}
+
+#: The survey line's points, and one display window of two channels, exact in binary.
+EXPLORER_SURVEY_HZ = [200.0, 250.0, 300.0, 400.0]
+EXPLORER_SURVEY_LEVEL = [0.125, 0.1999, 0.15625, 0.09375]
+EXPLORER_BINS = [0.0, 3.125, 6.25, 9.375]
+EXPLORER_SPECTRUM_1 = [0.0009765625, 0.001953125, 0.00048828125, 0.000244140625]
+EXPLORER_SPECTRUM_3 = [0.00048828125, 0.0009765625, 0.000244140625, 0.0001220703125]
+EXPLORER_FIRST_FRAME = 529408
+EXPLORER_TIME = [0.0, 0.125, 0.1875, 0.125]
+
+EXPLORER_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Frequency', 'value': 250, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Target', 'value': 250, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Measured', 'value': 250.02, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Drive', 'value': 0.2, 'unit': 'V', 'status': 'info'},
+    {'label': 'Target drive', 'value': 0.2, 'unit': 'V', 'status': 'info'},
+    {'label': 'Ceiling', 'value': 0.5, 'unit': 'V', 'status': 'info'},
+    {'label': 'Sweep', 'value': 'none', 'unit': None, 'status': 'info'},
+    {'label': 'Control rms', 'value': 0.1413, 'unit': 'g', 'status': 'info'},
+    {'label': 'Velocity', 'value': 0.04916, 'unit': 'in/s', 'status': 'info'},
+    {'label': 'Displacement', 'value': 0.0313, 'unit': 'mil', 'status': 'info'},
+    {'label': 'Peak', 'value': 250, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Pipeline', 'value': 1063, 'unit': 'frames', 'status': 'info'},
+]}
+
+
+def _explorer_survey_view(a: _Arr) -> dict:
+    return _spectrum('Survey', _FREQ, _axis('Level', 'g', 'log'),
+                     [a.series('Survey', 'measured', EXPLORER_SURVEY_HZ, EXPLORER_SURVEY_LEVEL)],
+                     'frequency')
+
+
+def _explorer_live_build() -> tuple[dict, dict]:
+    a = _Arr()
+    data = dict(EXPLORER_HEAD)
+    data['views'] = [_explorer_survey_view(a), EXPLORER_RUN_READING]
+    return {'type': 'event', 'topic': 'explorer.live', 'seq': 191, 'data': data}, a.arrays
+
+
+EXPLORER_SUBSCRIBE_PLOTS = [
+    {'id': 'srv', 'quantity': 'survey'},
+    {'id': 'spec', 'quantity': 'spectrum'},
+    {'id': 't', 'quantity': 'time'},
+    {'id': 'run', 'quantity': 'readings'},
+]
+EXPLORER_SUBSCRIBED = [
+    {'id': 'srv', 'quantity': 'survey', 'points': None},
+    {'id': 'spec', 'quantity': 'spectrum', 'channels': 'all'},
+    {'id': 't', 'quantity': 'time', 'points': 1024},
+    {'id': 'run', 'quantity': 'readings'},
+]
+EXPLORER_QUANTITIES = ['survey', 'spectrum', 'time', 'readings']
+
+
+def _explorer_channel_view(a: _Arr, index: int, name: str, mags: list) -> dict:
+    return _spectrum(f'Channel {index}: {name}', _axis('Frequency', 'Hz', 'linear'),
+                     _axis('Amplitude', 'g', 'linear'),
+                     [a.series(f'Channel {index}', 'measured', EXPLORER_BINS, mags)],
+                     'frequency')
+
+
+def _explorer_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    t = [(EXPLORER_FIRST_FRAME + i) / EXPLORER_FS for i in range(len(EXPLORER_TIME))]
+    plots = [
+        {'id': 'srv', 'quantity': 'survey', 'channels': None, 'first_frame': None,
+         'views': [_explorer_survey_view(a)]},
+        {'id': 'spec', 'quantity': 'spectrum', 'channels': [1, 3], 'first_frame': None,
+         'views': [_explorer_channel_view(a, 1, 'Control', EXPLORER_SPECTRUM_1),
+                   _explorer_channel_view(a, 3, 'Fixture', EXPLORER_SPECTRUM_3)]},
+        {'id': 't', 'quantity': 'time', 'channels': None, 'first_frame': EXPLORER_FIRST_FRAME,
+         'views': [{'view': 'spectrum', 'title': 'Time', 'x': _TIME,
+                    'y': _axis('Amplitude', 'g', 'linear'),
+                    'series': [a.series('Channel 1', 'measured', t, EXPLORER_TIME)]}]},
+        {'id': 'run', 'quantity': 'readings', 'channels': None, 'first_frame': None,
+         'views': [EXPLORER_RUN_READING]},
+    ]
+    data = dict(EXPLORER_HEAD)
+    data['plots'] = plots
+    return {'type': 'event', 'topic': 'explorer.data', 'seq': 192, 'data': data}, a.arrays
+
+
+EXPLORER_TEXT_GOLDENS = {
+    'request_explorer_configure': {
+        'type': 'request', 'id': 91, 'method': 'explorer.configure',
+        'params': {'config': EXPLORER_CONFIG},
+    },
+    'response_explorer_configure': {
+        'type': 'response', 'id': 91,
+        'result': {'state': _explorer_state(), 'derived': EXPLORER_DERIVED, 'warnings': []},
+    },
+    'request_explorer_start': {
+        'type': 'request', 'id': 92, 'method': 'explorer.start', 'params': {},
+    },
+    'response_explorer_start': {
+        'type': 'response', 'id': 92, 'result': EXPLORER_STARTED,
+    },
+    'request_explorer_steer': {
+        'type': 'request', 'id': 93, 'method': 'explorer.steer',
+        'params': {'hz': 1000, 'vpk': 0.9},
+    },
+    'response_explorer_steer': {
+        'type': 'response', 'id': 93,
+        'result': {'hz': 1000, 'vpk': 0.5, 'clamped': {'hz': False, 'vpk': True},
+                   'frame': 530432, 'input_frame': 529408},
+    },
+    'request_explorer_sweep': {
+        'type': 'request', 'id': 94, 'method': 'explorer.sweep',
+        'params': {'direction': 'up', 'rate_oct_per_min': 600},
+    },
+    'response_explorer_sweep': {
+        'type': 'response', 'id': 94,
+        'result': {'direction': 'up', 'rate_oct_per_min': 60, 'clamped': True,
+                   'frame': 531456, 'input_frame': 530432},
+    },
+    'event_explorer_state': {
+        'type': 'event', 'topic': 'explorer.state', 'seq': 190, 'data': EXPLORER_RUNNING,
+    },
+    'request_explorer_subscribe': {
+        'type': 'request', 'id': 95, 'method': 'explorer.subscribe',
+        'params': {'rate_hz': 5, 'plots': EXPLORER_SUBSCRIBE_PLOTS},
+    },
+    'response_explorer_subscribe': {
+        'type': 'response', 'id': 95,
+        'result': {'default': False, 'rate_hz': 5, 'plots': EXPLORER_SUBSCRIBED,
+                   'quantities': EXPLORER_QUANTITIES},
+    },
+    'response_explorer_survey': {
+        'type': 'response', 'id': 96,
+        'result': {'revision': 57, 'channel': 1, 'unit': 'g',
+                   'points': [[f, v] for f, v in zip(EXPLORER_SURVEY_HZ, EXPLORER_SURVEY_LEVEL)],
+                   'peak': {'hz': 250, 'level': 0.1999}},
+    },
+    'response_error_explorer_config_invalid': {
+        'type': 'response', 'id': 99,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 3 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'band_above_grid', 'field': 'band_hz',
+                       'message': "The band's high edge is 6000 Hz, over 0.45 times the "
+                                  "requested rate (5760 Hz); raise the rate or lower the band."},
+                      {'reason': 'ceiling_over_range', 'field': 'max_drive_vpk',
+                       'message': "The drive ceiling is 1.5 V, over the drive row's range of "
+                                  "1 V; lower the ceiling or raise the row's range."},
+                      {'reason': 'safe_stop_budget', 'field': 'slew.drive_db_per_s',
+                       'message': 'At 1 dB/s the stop takes 40 s, longer than the 30 s the '
+                                  'service waits for a stop; raise the drive slew above '
+                                  '1.333 dB/s.'}],
+                      'warnings': []}},
+    },
+}
+
+
+# --- Recorder (PROTOCOL.md, "Recorder") ---
+#
+# As the other modules': the configuration golden is the contract's example with every
+# field given, and its `derived` is what the control service computes for it on the NI
+# station at 12 800 Hz with four recorded rows (the Rust golden test recomputes it). The
+# run goldens are one moment of one level-triggered run, 11.36 s in, recording rec_0002.
+# The binary goldens carry short records whose values are exact in binary, laid out as
+# the service's view builders lay them out (each series' x then y, then y_min where it
+# has one, every array numbered in traversal order). The golden run folder is a short
+# simulator run with one manual recording of one second of two rows.
+
+RECORDER_FS = 12800.0
+
+RECORDER_CONFIG = {
+    'title': 'Fixture A, run 4',
+    'acquisition': {'fs_hz': 12800},
+    'trigger': {'mode': 'level', 'row': 1, 'level': 0.25, 'slope': 'rising',
+                'hysteresis': None, 'pre_s': 0.5, 'record_s': 1.0, 'count': 5,
+                'holdoff_s': 0},
+    'analysis': {'block': 2048, 'window': 'hann', 'overlap_pct': None, 'averaging': 'linear',
+                 'averages': 8, 'decimation': 1, 'frf': {'reference': 2, 'response': 4}},
+    'capture': {'run_name': 'recorder', 'keep_free_gb': 1},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '4'}],
+}
+
+RECORDER_STATION = {'kind': 'ni', 'class': 'ni_real',
+                    'devices': [{'id': 'cDAQ2Mod1', 'serial': '01A2B3C4'}]}
+
+RECORDER_FREE = 107374182400
+RECORDER_FLOOR = 1073741824
+
+RECORDER_DERIVED = {
+    'grid': {'fs_hz': 12800, 'block_frames': 256, 'batch_frames': 512,
+             'group_delay_frames': 38.44, 'actual': False},
+    'outputs': 'none', 'rows': [1, 2, 3, 4],
+    'analysis': {'fs_hz': 12800, 'df_hz': 6.25, 'lines': 800, 'span_hz': 5000,
+                 'block_s': 0.16, 'overlap_pct': 50, 'averages_s': 0.72},
+    'trigger': {'pre_frames': 6400, 'record_frames': 12800, 'holdoff_frames': 0},
+    'disk': {'bytes_per_s': 204800, 'floor_bytes': RECORDER_FLOOR, 'free_bytes': RECORDER_FREE,
+             'seconds_above_floor': 519045},
+}
+
+RECORDER_GRID = {'requested_fs_hz': 12800, 'fs_hz': 12800, 'block_frames': 256,
+                 'batch_frames': 512, 'group_delay_frames': 38.44, 'actual': False}
+RECORDER_GRID_ACTUAL = dict(RECORDER_GRID, actual=True)
+
+
+def _recorder_trigger(armed, held, fires, last, saved, left):
+    return {'armed': armed, 'pre_frames': 6400, 'held_frames': held, 'fires': fires,
+            'last_station_frame': last, 'saved': saved, 'left': left, 'holdoff_left_s': 0}
+
+
+def _recorder_disk(free, seconds):
+    return {'free_bytes': free, 'floor_bytes': RECORDER_FLOOR, 'seconds_above_floor': seconds,
+            'fault': None}
+
+
+def _recorder_health(batches, last, worst, gap):
+    return {'batches': batches, 'blocks_dropped': 0, 'driver_warnings': 0, 'station_errors': 0,
+            'pass_ms': {'last': last, 'worst': worst}, 'batch_gap_ms': gap}
+
+
+RECORDER_RECORDING = {
+    'name': 'rec_0002', 'trigger': 'level', 'first_station_frame': 128022,
+    'trigger_station_frame': 134422, 'pre_frames': 6400, 'pre_frames_asked': 6400,
+    'frames_fed': 17386, 'frames_on_disk': 16384, 'target_frames': 19200, 'seconds': 0.858,
+    'length_s': 1, 'backlog_s': 0.078,
+}
+
+
+def _recorder_state(**over) -> dict:
+    s = {
+        'run_id': 'recorder-0001', 'state': 'configured', 'phase': 'idle',
+        'title': RECORDER_CONFIG['title'], 'source': 'HARDWARE', 'station': RECORDER_STATION,
+        'grid': RECORDER_GRID, 'clock': None, 'outputs': 'none', 'rows': [1, 2, 3, 4],
+        'mode': 'level', 't_s': None, 'station_frames': None,
+        'trigger': _recorder_trigger(False, 0, 0, None, 0, 5), 'recording': None,
+        'recordings': 0, 'marks': 0, 'disk': _recorder_disk(RECORDER_FREE, 519045),
+        'health': None, 'stop': None, 'end': None,
+    }
+    s.update(over)
+    return s
+
+
+RECORDER_STARTED = _recorder_state(
+    state='running', phase='monitoring', grid=RECORDER_GRID_ACTUAL, clock='shared', t_s=0.04,
+    station_frames=512, health=_recorder_health(1, 1.2, 1.2, None))
+
+RECORDER_RUNNING = _recorder_state(
+    run_id='recorder-0002', state='running', phase='recording', grid=RECORDER_GRID_ACTUAL,
+    clock='shared', t_s=11.36, station_frames=145408,
+    trigger=_recorder_trigger(False, 0, 2, 134422, 1, 3), recording=RECORDER_RECORDING,
+    recordings=1, disk=_recorder_disk(107373363200, 519041),
+    health=_recorder_health(284, 1.2, 2.8, 3.9))
+
+RECORDER_ROWS = [
+    {'index': 1, 'description': 'Table', 'role': 'control', 'unit': 'g', 'rms': 0.0221,
+     'peak': 0.5, 'overload': False, 'marks': 0},
+    {'index': 2, 'description': 'Fixture', 'role': 'monitor', 'unit': 'g', 'rms': 0.1414,
+     'peak': 0.2, 'overload': False, 'marks': 0},
+    {'index': 3, 'description': 'Bracket', 'role': 'monitor', 'unit': 'g', 'rms': 0.0707,
+     'peak': 0.1, 'overload': False, 'marks': 0},
+    {'index': 4, 'description': 'Cover', 'role': 'monitor', 'unit': 'g', 'rms': 0.1061,
+     'peak': 0.15, 'overload': False, 'marks': 0},
+]
+
+RECORDER_HEAD = {
+    'run_id': 'recorder-0002', 'source': 'HARDWARE', 'class': 'ni_real', 'state': 'running',
+    'phase': 'recording', 't_s': 11.36, 'station_frames': 145408,
+    'grid': {'requested_fs_hz': 12800, 'fs_hz': 12800, 'group_delay_frames': 38.44},
+    'rows': RECORDER_ROWS,
+    'trigger': RECORDER_RUNNING['trigger'], 'recording': RECORDER_RECORDING,
+    'recordings': 1, 'marks': 0, 'disk': RECORDER_RUNNING['disk'],
+    'health': RECORDER_RUNNING['health'],
+}
+
+RECORDER_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Rate', 'value': 12800, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Asked', 'value': 12800, 'unit': 'Hz', 'status': 'info'},
+    {'label': 'Group delay', 'value': 38.44, 'unit': 'frames', 'status': 'info'},
+    {'label': 'Recording', 'value': 'rec_0002', 'unit': None, 'status': 'info'},
+    {'label': 'Recorded', 'value': 0.858, 'unit': 's', 'status': 'info'},
+    {'label': 'Backlog', 'value': 0.078, 'unit': 's', 'status': 'info'},
+    {'label': 'Saved', 'value': 1, 'unit': None, 'status': 'info'},
+    {'label': 'Fires', 'value': 2, 'unit': None, 'status': 'info'},
+    {'label': 'Marks', 'value': 0, 'unit': None, 'status': 'info'},
+    {'label': 'Free above floor', 'value': 519041, 'unit': 's', 'status': 'info'},
+]}
+
+
+def _recorder_live_build() -> tuple[dict, dict]:
+    data = dict(RECORDER_HEAD)
+    data['views'] = [RECORDER_RUN_READING]
+    return {'type': 'event', 'topic': 'recorder.live', 'seq': 211, 'data': data}, {}
+
+
+RECORDER_SUBSCRIBE_PLOTS = [
+    {'id': 't', 'quantity': 'time', 'channels': [1, 2], 'points': 64, 'seconds': 0.04},
+    {'id': 's', 'quantity': 'spectrum', 'channels': [1]},
+    {'id': 'f', 'quantity': 'frf'},
+    {'id': 'r', 'quantity': 'readings'},
+]
+RECORDER_SUBSCRIBED = [
+    {'id': 't', 'quantity': 'time', 'channels': [1, 2], 'points': 64, 'seconds': 0.04},
+    {'id': 's', 'quantity': 'spectrum', 'channels': [1]},
+    {'id': 'f', 'quantity': 'frf'},
+    {'id': 'r', 'quantity': 'readings'},
+]
+RECORDER_QUANTITIES = ['time', 'spectrum', 'frf', 'readings']
+
+#: The time plot: the last 512 frames of rows 1 and 2 at 64 points, 8 frames a point.
+RECORDER_TIME_FIRST = 145408 - 512
+RECORDER_TIME_STEP = 8
+RECORDER_TIME_HI = {1: [0.125 + (i % 4) / 64 for i in range(64)],
+                    2: [0.1875 - (i % 8) / 64 for i in range(64)]}
+RECORDER_TIME_LO = {k: [-v for v in vals] for k, vals in RECORDER_TIME_HI.items()}
+RECORDER_BINS = [0.0, 6.25, 12.5, 18.75]
+RECORDER_PSD_1 = [0.0009765625, 0.001953125, 0.00048828125, 0.000244140625]
+RECORDER_FRF_MAG = [0.5, 0.5, 0.5, 0.5]
+RECORDER_FRF_PHASE = [0.0, -0.17578125, -0.3515625, -0.52734375]
+RECORDER_FRF_COH = [0.0, 0.9990234375, 0.998046875, 0.9970703125]
+
+
+def _recorder_time_view(a: _Arr) -> dict:
+    x = [(RECORDER_TIME_FIRST + RECORDER_TIME_STEP * i) / RECORDER_FS for i in range(64)]
+    series = []
+    for index in (1, 2):
+        s = a.series(f'Channel {index}', 'measured', x, RECORDER_TIME_HI[index])
+        s['y_min'] = a.push(RECORDER_TIME_LO[index])
+        series.append(s)
+    return {'view': 'spectrum', 'title': 'Time', 'x': _TIME,
+            'y': _axis('Amplitude', 'g', 'linear'), 'series': series}
+
+
+def _recorder_frf_views(a: _Arr) -> list:
+    x = _axis('Frequency', 'Hz', 'linear')
+    return [
+        _spectrum('FRF', x, _axis('Magnitude', 'g/g', 'log'),
+                  [a.series('H1', 'measured', RECORDER_BINS, RECORDER_FRF_MAG)], 'frequency'),
+        _spectrum('Phase', x, _axis('Phase', 'deg', 'linear'),
+                  [a.series('H1', 'measured', RECORDER_BINS, RECORDER_FRF_PHASE)], 'frequency'),
+        _spectrum('Coherence', x, _axis('Coherence', None, 'linear'),
+                  [a.series('Coherence', 'measured', RECORDER_BINS, RECORDER_FRF_COH)],
+                  'frequency'),
+    ]
+
+
+def _recorder_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    plots = [
+        {'id': 't', 'quantity': 'time', 'channels': [1, 2], 'first_frame': RECORDER_TIME_FIRST,
+         'views': [_recorder_time_view(a)]},
+        {'id': 's', 'quantity': 'spectrum', 'channels': [1], 'first_frame': None,
+         'views': [_spectrum('Channel 1: Table', _axis('Frequency', 'Hz', 'linear'),
+                             _axis('PSD', 'g²/Hz', 'log'),
+                             [a.series('Channel 1', 'measured', RECORDER_BINS, RECORDER_PSD_1)],
+                             'frequency')]},
+        {'id': 'f', 'quantity': 'frf', 'channels': None, 'first_frame': None,
+         'views': _recorder_frf_views(a)},
+        {'id': 'r', 'quantity': 'readings', 'channels': None, 'first_frame': None,
+         'views': [RECORDER_RUN_READING]},
+    ]
+    data = dict(RECORDER_HEAD)
+    data['plots'] = plots
+    return {'type': 'event', 'topic': 'recorder.data', 'seq': 212, 'data': data}, a.arrays
+
+
+def _recorder_listed(name, first, trigger_frame, frames, complete):
+    return {'name': name, 'folder': f'recordings/{name}', 'trigger': 'level',
+            'requested_fs_hz': 12800, 'fs_hz': 12800, 'group_delay_frames': 38.44,
+            'rows': [1, 2, 3, 4], 'first_station_frame': first,
+            'trigger_station_frame': trigger_frame, 'pre_frames': 6400,
+            'pre_frames_asked': 6400, 'frames': frames, 'seconds': frames / RECORDER_FS,
+            'bytes': frames * 16, 'gap_free': True, 'gaps': [], 'marks': 0,
+            'complete': complete, 'fault': None}
+
+
+RECORDER_TEXT_GOLDENS = {
+    'request_recorder_configure': {
+        'type': 'request', 'id': 101, 'method': 'recorder.configure',
+        'params': {'config': RECORDER_CONFIG},
+    },
+    'response_recorder_configure': {
+        'type': 'response', 'id': 101,
+        'result': {'state': _recorder_state(), 'derived': RECORDER_DERIVED, 'warnings': [
+            {'reason': 'drive_channel_present', 'channel': 5,
+             'message': 'Row 5 is a drive row; a Recorder run does not open or record it.'}]},
+    },
+    'request_recorder_start': {
+        'type': 'request', 'id': 102, 'method': 'recorder.start', 'params': {},
+    },
+    'response_recorder_start': {
+        'type': 'response', 'id': 102, 'result': RECORDER_STARTED,
+    },
+    'request_recorder_arm': {
+        'type': 'request', 'id': 103, 'method': 'recorder.arm', 'params': {},
+    },
+    'response_recorder_arm': {
+        'type': 'response', 'id': 103, 'result': {'pre_frames': 6400, 'held_frames': 0},
+    },
+    'request_recorder_record': {
+        'type': 'request', 'id': 104, 'method': 'recorder.record', 'params': {},
+    },
+    'response_recorder_record': {
+        'type': 'response', 'id': 104,
+        'result': {'name': 'rec_0003', 'station_frame': 204800, 'pre_frames': 12800},
+    },
+    'request_recorder_cut': {
+        'type': 'request', 'id': 105, 'method': 'recorder.cut', 'params': {},
+    },
+    'response_recorder_cut': {
+        'type': 'response', 'id': 105,
+        'result': {'name': 'rec_0003', 'last_station_frame': 256511},
+    },
+    'event_recorder_state': {
+        'type': 'event', 'topic': 'recorder.state', 'seq': 210, 'data': RECORDER_RUNNING,
+    },
+    'request_recorder_subscribe': {
+        'type': 'request', 'id': 106, 'method': 'recorder.subscribe',
+        'params': {'rate_hz': 5, 'plots': RECORDER_SUBSCRIBE_PLOTS},
+    },
+    'response_recorder_subscribe': {
+        'type': 'response', 'id': 106,
+        'result': {'default': False, 'rate_hz': 5, 'plots': RECORDER_SUBSCRIBED,
+                   'quantities': RECORDER_QUANTITIES},
+    },
+    'response_recorder_recordings': {
+        'type': 'response', 'id': 107,
+        'result': {'recordings': [
+            _recorder_listed('rec_0001', 102422, 108822, 19200, True),
+            _recorder_listed('rec_0002', 128022, 134422, 16384, False),
+        ], 'next': 2},
+    },
+    'response_recorder_marks': {
+        'type': 'response', 'id': 108,
+        'result': {'marks': [
+            {'kind': 'overload', 'row': 1, 'value': 0.4502, 'level': 0.45,
+             'station_frame': 6460, 'recording': None},
+            {'kind': 'limit', 'row': 1, 'axis': 'accel', 'value': 0.4012, 'limit': 0.4,
+             'station_frame': 32044, 'recording': 'rec_0001'},
+        ], 'next': 2},
+    },
+    'response_error_recorder_config_invalid': {
+        'type': 'response', 'id': 109,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 3 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'row_not_recorded', 'field': 'trigger.row',
+                       'message': 'Row 5 is not an enabled input row of the channel table; '
+                                  'only those are recorded.'},
+                      {'reason': 'out_of_range', 'field': 'trigger.pre_s',
+                       'message': 'The pre-window is 12; it runs from 0 to 10 s.'},
+                      {'reason': 'not_power_of_two', 'field': 'analysis.block',
+                       'message': 'The analysis block is 3000; it is a power of two from 256 '
+                                  'to 65536.'}],
+                      'warnings': [
+                      {'reason': 'drive_channel_present', 'channel': 5,
+                       'message': 'Row 5 is a drive row; a Recorder run does not open or '
+                                  'record it.'}]}},
+    },
+}
+
+# --- the golden run folder: one manual recording, one second of two rows at 1024 Hz ---
+#
+# Row 1 is a triangle of period 64 frames from -1 to 1, row 2 a ramp over each 1024
+# frames from -0.5, both functions of the STATION frame and exact in binary, so a reader
+# can check that every file frame sits at its stated station frame.
+
+RECORDER_RUN_FS = 1024.0
+RECORDER_RUN_FIRST = 2048
+RECORDER_RUN_PRE = 256
+RECORDER_RUN_FRAMES = 1024
+RECORDER_RUN_TABLE_ROWS = [(1, 'Triangle', 'Control'), (2, 'Ramp', 'Monitor')]
+
+
+def _recorder_run_row(n: int) -> list:
+    tri = 1.0 - abs((n % 64) - 32) / 16.0
+    ramp = (n % 1024) / 1024.0 - 0.5
+    return [tri, ramp]
+
+
+def _recorder_channel(index, description, role):
+    return {'index': index, 'enabled': True, 'save': True, 'stream': False,
+            'interface': 'SingleEnded', 'iepe_bias_v': None, 'units': 'AccelG',
+            'sensitivity_mv_per_eu': 1000.0, 'range_max': 5.0, 'polarity': 'Positive',
+            'description': description, 'role': role, 'control_group': None,
+            'abort': {'accel_g': None, 'velocity_ips': None, 'displacement_mil': None},
+            'physical': None, 'analysis_tier': 'Full'}
+
+
+def _recorder_stats(values: list) -> dict:
+    n = len(values)
+    mean = sum(values) / n
+    rms = (sum(v * v for v in values) / n) ** 0.5
+    peak = max(abs(v) for v in values)
+    var = sum((v - mean) ** 2 for v in values) / n
+    kurt = (sum((v - mean) ** 4 for v in values) / n) / (var * var) if var > 0 else 0.0
+    return {'mean': round(mean, 6), 'rms': round(rms, 6), 'peak': round(peak, 6),
+            'crest': round(peak / rms, 6) if rms > 0 else 0.0, 'kurtosis': round(kurt, 6)}
+
+
+def write_recorder_run() -> None:
+    root = HERE / 'recorder_run'
+    rec = root / 'recordings' / 'rec_0001'
+    rec.mkdir(parents=True, exist_ok=True)
+    frames = [_recorder_run_row(RECORDER_RUN_FIRST + i) for i in range(RECORDER_RUN_FRAMES)]
+    flat = [v for f in frames for v in f]
+    (rec / 'telemetry.f32').write_bytes(struct.pack(f'<{len(flat)}f', *flat))
+    table = {'schema_version': 2,
+             'channels': [_recorder_channel(*r) for r in RECORDER_RUN_TABLE_ROWS],
+             'reference': None}
+    capture = {
+        'config': {'n_channels': 2, 'sample_rate_hz': RECORDER_RUN_FS, 'decimation': 1,
+                   'ring_capacity': 512},
+        'channel_table': table,
+        'start_unix_secs': 1794240000,
+        'run_config_json': '',
+        'chunks_written': 1, 'chunks_dropped': 0, 'frames_written': RECORDER_RUN_FRAMES,
+        'complete': True,
+        'layout': {'interleave': 'frame_interleaved', 'block_frames': RECORDER_RUN_FRAMES,
+                   'channel_order': [1, 2],
+                   'channel_order_source': 'channel_table_enabled_inputs'},
+        'flushes': 1, 'free_space_at_start_bytes': RECORDER_FREE,
+        'free_space_floor_bytes': RECORDER_FLOOR, 'fault': None,
+    }
+    (rec / 'capture.json').write_text(json.dumps(capture, indent=2) + '\n', encoding='utf-8')
+    sidecar = {
+        'complete': True, 'name': 'rec_0001', 'trigger': 'manual',
+        'requested_fs_hz': RECORDER_RUN_FS, 'fs_hz': RECORDER_RUN_FS,
+        'group_delay_frames': 0.0, 'rows': [1, 2], 'units': ['g', 'g'],
+        'first_station_frame': RECORDER_RUN_FIRST,
+        'trigger_station_frame': RECORDER_RUN_FIRST + RECORDER_RUN_PRE,
+        'pre_frames': RECORDER_RUN_PRE, 'pre_frames_asked': RECORDER_RUN_PRE,
+        'frames': RECORDER_RUN_FRAMES, 'gaps': [], 'marks': [], 'fault': None,
+    }
+    (rec / 'recorder.json').write_text(json.dumps(sidecar, indent=2) + '\n', encoding='utf-8')
+
+    config = {'title': 'Golden recording', 'acquisition': {'fs_hz': 1024},
+              'trigger': {'mode': 'manual', 'pre_s': 0.25},
+              'analysis': {'block': 256}, 'capture': {'run_name': 'recorder_run'}}
+    station_frames = 3072
+    run = {
+        'run_id': 'recorder-0004', 'title': config['title'], 'source': 'SIM',
+        'station': {'kind': 'sim', 'class': 'sim', 'devices': []}, 'config': config,
+        'requested_fs_hz': 1024, 'fs_hz': 1024, 'group_delay_frames': 0,
+        'outputs': 'none',
+        'rows': [{'index': 1, 'description': 'Triangle', 'role': 'control', 'unit': 'g',
+                  'range_max': 5},
+                 {'index': 2, 'description': 'Ramp', 'role': 'monitor', 'unit': 'g',
+                  'range_max': 5}],
+        'derived': {
+            'grid': {'fs_hz': 1024, 'block_frames': 64, 'batch_frames': 128,
+                     'group_delay_frames': 0, 'actual': True},
+            'outputs': 'none', 'rows': [1, 2],
+            'analysis': {'fs_hz': 1024, 'df_hz': 4, 'lines': 100, 'span_hz': 400,
+                         'block_s': 0.25, 'overlap_pct': 50, 'averages_s': 1.125},
+            'trigger': {'pre_frames': 256, 'record_frames': None, 'holdoff_frames': 0},
+            'disk': {'bytes_per_s': 8192, 'floor_bytes': RECORDER_FLOOR,
+                     'free_bytes': RECORDER_FREE,
+                     'seconds_above_floor': (RECORDER_FREE - RECORDER_FLOOR) // 8192}},
+        'overload': {'fraction': 0.9,
+                     'definition': "A row's overload indicator latches the first time a "
+                                   "sample's magnitude reaches 0.9 of the row's range_max, "
+                                   "and holds for the run."},
+    }
+    (root / 'run.json').write_text(json.dumps(run, indent=2) + '\n', encoding='utf-8')
+    log = [
+        (0, 'station', 'the station programmed 1024 Hz (asked 1024 Hz)'),
+        (1, 'note', 'records in recorder_run'),
+        (2, 'note', 'outputs: none'),
+        (3, 'state', 'running, monitoring'),
+        (4, 'recording', 'rec_0001 began at station frame 2304 (pre-window 256 frames)'),
+        (5, 'recording', 'rec_0001 saved: 1024 frames, 1.000 s, no gaps'),
+        (6, 'state', 'stop began: operator'),
+        (7, 'state', 'ended operator_stop: Stopped by golden: every recording is saved.'),
+    ]
+    (root / 'log.jsonl').write_text(''.join(
+        json.dumps({'seq': seq, 'at_unix': 1794240000.0 + seq, 'kind': kind, 'text': text},
+                   separators=(',', ':')) + '\n' for seq, kind, text in log), encoding='utf-8')
+    (root / 'marks.jsonl').write_text('', encoding='utf-8')
+    whole = [_recorder_run_row(n) for n in range(station_frames)]
+    end = {
+        'run_id': 'recorder-0004',
+        'end': {'outcome': 'operator_stop',
+                'message': 'Stopped by golden: every recording is saved.',
+                'at_s': station_frames / RECORDER_RUN_FS, 'recordings': 1},
+        'station_frames': station_frames,
+        'rows': [dict({'index': i + 1}, **_recorder_stats([f[i] for f in whole]))
+                 for i in range(2)],
+    }
+    (root / 'end.json').write_text(json.dumps(end, indent=2) + '\n', encoding='utf-8')
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -2810,9 +3483,19 @@ def main() -> None:
     write('response_twr_reference_import', *_twr_import_build())
     write('response_twr_reference_preview', *_twr_preview_build())
 
+    # Explorer: the live frame and a subscription's data
+    write('event_explorer_live', *_explorer_live_build())
+    write('event_explorer_data', *_explorer_data_build())
+
+    # Recorder: the live frame, a subscription's data and the golden run folder
+    write('event_recorder_live', *_recorder_live_build())
+    write('event_recorder_data', *_recorder_data_build())
+    write_recorder_run()
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS,
-                          **TWR_TEXT_GOLDENS}.items():
+                          **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
+                          **RECORDER_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

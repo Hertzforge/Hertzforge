@@ -14,7 +14,7 @@ use hertzforge_sine_laws::{
 use std::sync::Arc;
 
 #[test]
-fn the_built_in_passes_every_case() {
+fn the_sine_built_in_passes_every_check_case() {
     let mut failed = Vec::new();
     let mut worst_rise = 0f64;
     for case in SineCheckCase::ALL {

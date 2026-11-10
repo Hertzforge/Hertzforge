@@ -220,7 +220,9 @@ class Connection:
     def __init__(self, service: Service, socket: ServerConnection) -> None:
         self.service: Service = service
         self.socket: ServerConnection = socket
-        self.project: projects.OpenProject | None = None
+        #: an empty project to start, as the old app's window opened with one:
+        #: an import adds to it, an open or `project.new` replaces it
+        self.project: projects.OpenProject = projects.new({})
         #: one project request at a time: two imports must not add to one
         #: project at once, and a save must not write one half-imported
         self.project_lock: asyncio.Lock = asyncio.Lock()
@@ -323,17 +325,14 @@ class Connection:
         if method == 'project.define_units':
             _only(params, ('name', 'units'), method)
             converted = await call(projects.define_units, self.project, params)
-            assert self.project is not None
             return {'converted': converted, 'project': projects.summary(self.project)}
         if method in edits:
             edit, keys = edits[method]
             _only(params, keys, method)
             await call(edit, self.project, params)
-            assert self.project is not None
             return {'project': projects.summary(self.project)}
         _only(params, ('path', 'compress'), method)
         written = await call(projects.save, self.project, params)
-        assert self.project is not None
         return {'path': written, 'project': projects.summary(self.project)}
 
     async def project_op(self, params: Mapping[str, Any]) -> dict[str, Any]:
@@ -343,9 +342,6 @@ class Connection:
         op = self.service.operation(params)
         async with self.project_lock:
             state = self.project
-            if state is None:
-                raise refused(f'{op.title} works on a project, and none is open; '
-                              'project.open or project.import opens one')
             project = state.project
             values = op.resolve(
                 params.get('params', {}),
@@ -395,8 +391,6 @@ class Connection:
         _only(params, keys[method], method)
         call = self.service.in_worker
         async with self.project_lock:
-            if self.project is None:
-                raise refused(f'{method} works on a project, and none is open')
             project = self.project.project
             if method == 'report.generate':
                 name = await call(reports.generate, project, params)
@@ -453,8 +447,6 @@ class Connection:
                               f'{json_type(params)}')
         call = self.service.in_worker
         async with self.project_lock:
-            if self.project is None:
-                raise refused(f'{method} works on a project, and none is open')
             project = self.project.project
             if method == 'fit.start':
                 _only(params, ('frf', 'shapes', 'records', 'coherence'), method)

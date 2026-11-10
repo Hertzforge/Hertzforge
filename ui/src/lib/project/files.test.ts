@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { baseName, chooseFiles, chooseObjectFile, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops } from './files';
+import { baseName, chooseFiles, chooseObjectFile, discardUnsaved, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops } from './files';
 
 const g = globalThis as Record<string, unknown>;
 
@@ -120,5 +120,30 @@ describe('the save window for an object', () => {
 		await expect(chooseObjectFile('Plate', formats)).resolves.toBeNull();
 		g.__TAURI__ = { dialog: { save: vi.fn(async () => null) } };
 		await expect(chooseObjectFile('Plate', formats)).resolves.toBeNull();
+	});
+});
+
+describe('letting unsaved changes go', () => {
+	it('asks in the native dialog in the desktop app, and takes its answer', async () => {
+		const asked: { text: string; options: unknown }[] = [];
+		g.__TAURI__ = {
+			dialog: {
+				ask: (text: string, options: unknown) => {
+					asked.push({ text, options });
+					return Promise.resolve(false);
+				}
+			}
+		};
+		expect(await discardUnsaved('Plate')).toBe(false);
+		expect(asked[0].text).toBe('Plate has unsaved changes. Discard them?');
+		expect(asked[0].options).toMatchObject({ okLabel: 'Discard', cancelLabel: 'Cancel' });
+	});
+
+	it("asks with the browser's own question elsewhere", async () => {
+		const confirm = vi.fn(() => true);
+		vi.stubGlobal('window', { confirm });
+		expect(await discardUnsaved('Plate')).toBe(true);
+		expect(confirm).toHaveBeenCalledWith('Plate has unsaved changes. Discard them?');
+		vi.unstubAllGlobals();
 	});
 });

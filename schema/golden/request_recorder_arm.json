@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 103,
+ "method": "recorder.arm",
+ "params": {}
+}

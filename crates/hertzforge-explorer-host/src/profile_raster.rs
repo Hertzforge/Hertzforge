@@ -1,43 +1,23 @@
-//! THE PEAK-LEVEL SWEEP PROFILE: the reference controller's Fn-sweep curve, kept as a
-//! SORTED LIST OF VISITED POINTS and rasterized onto Hertzforge's display spectrum grid only at
+//! THE SURVEY LINE: the response level at each frequency the tone has visited, kept as a
+//! SORTED LIST OF VISITED POINTS and rasterized onto the display spectrum grid only at
 //! render time.
 //!
-//! # What the operator asked for
-//!
-//! While the tone moves - swept OR walked by hand - the response level at each frequency
-//! is REMEMBERED, and the remembered curve persists after the tone has gone somewhere
-//! else. That is what an operator reads a resonance survey off, and it is the graph that
-//! ends up in a trip report. Commercial controllers have done it for decades and the workflow
-//! is built around it.
-//!
-//! # What the reference controller actually draws (the evidence, 2026-08-08)
-//!
-//! Its setup table gives the graph a frequency axis of its own: `Low`/`High` inside
-//! 2-5000 Hz, **"2000 frequency points are provided across the full range"**, with a
-//! `Spacing: Log / Linear` radio choosing how those points are distributed, and the graph
-//! cursor stepping "one frequency-resolution point" per arrow press
-//! (its options manual, sections 2.2 and 2.1-H). That axis is
-//! the OSCILLATOR's point list, not an FFT bin grid - so its curve is a value per
-//! frequency point along a log axis, which is a sorted point list by construction.
-//!
-//! The manual is SILENT on the accumulation mechanism itself: nothing in the manual
-//! chapters says whether a revisit overwrites, whether anything is held or decayed, or
-//! what is drawn between two points the tone did not stop at. Section 5's own
-//! open-questions list does not even raise it. So the mechanism below is read off the
-//! PLOTS rather than off prose - two screen grabs of the reference controller's
-//! Fn sweep from a 2026-08-05 field job: a single continuous
-//! polyline spanning the whole surveyed 200-3000 Hz span, no gaps anywhere, and at the
-//! sharp 2.3 kHz resonances a NEAR-VERTICAL straight segment between two adjacent points.
-//! A straight chord across a steep step is what joining a sorted point list looks like; it
-//! is not what a bin raster with unvisited cells looks like.
+//! While the tone moves, swept or walked by hand, the response level at each frequency is
+//! REMEMBERED, and the remembered curve persists after the tone has gone somewhere else.
+//! That is what an operator reads a resonance survey off. A curve made of a value per
+//! visited frequency along a log axis is a sorted point list by construction: joining it
+//! draws a single continuous polyline, with a straight chord across a steep step between
+//! two adjacent points.
 //!
 //! # The four rules, stated once
 //!
 //! 1. **A visit is a POINT, not a cell.** `(f, level)` goes into a list kept sorted by
 //!    frequency. Nothing is quantized on the way in; the display grid enters only at
 //!    render.
-//! 2. **A revisit OVERWRITES.** A visit within [`ProfileRaster::tolerance_hz`] (half a
-//!    display bin) of an existing point replaces it. Not a max-hold - that would weld a
+//! 2. **A revisit OVERWRITES.** A visit in the same display bin as an existing point
+//!    replaces it (the render could never separate the two). The same BIN, not "within
+//!    half a bin of the new point": a slow sweep's consecutive points are a fraction of a
+//!    bin apart, and that rule deleted each one as the next arrived. Not a max-hold - that would weld a
 //!    single transient overload into the operator's saved graph for the rest of the run
 //!    and make a fixed drive read as a rising one - and not a decay, which would erase the
 //!    low end of a slow sweep before the high end was measured.
@@ -46,7 +26,9 @@
 //!    strictly inside that span is REMOVED. This is the operator's "wipe out the old
 //!    values at each frequency line as the tone passes it again": a second walk over a
 //!    band leaves that band showing the second walk, never a stitch of both.
-//! 4. **Between two points, a straight line; outside them, NOTHING.** The render joins
+//! 4. **Between two points, a straight line; outside them, NOTHING.** Where no bin centre
+//!    lies between the outermost points, each point lands on its nearest bin, as a lone
+//!    point does. The render joins
 //!    adjacent points with LINEAR INTERPOLATION IN LOG FREQUENCY across a gap of ANY
 //!    width - log, because the pane this lands on is a log-x sweep plot and a linear-in-Hz
 //!    fill would bend visibly against its own axis. Below the lowest point and above the
@@ -54,10 +36,10 @@
 //!    (`SpectrumPane`'s `padTo` pads with it and the cursor readout refuses to print it),
 //!    so an unsurveyed band reads as absent rather than as a measured zero.
 //!
-//! # The two defects this model replaced (round 3, 2026-08-08)
+//! # Why points, not bins
 //!
-//! The first cut remembered per display BIN and interpolated between whichever bins held a
-//! number. Both of the operator's complaints fall out of that one choice:
+//! A curve remembered per display BIN, interpolated between whichever bins held a number,
+//! has two defects, both from that one choice:
 //!
 //! * **Coarse clicks left the plot "full of holes."** A coarse walk lands on a handful of
 //!   bins and passes OVER the rest, so every bin an earlier pass had written kept its old
@@ -75,18 +57,15 @@
 //!
 //! # Lifetime: what clears this, and what does not
 //!
-//! The profile is owned by the Explorer pump thread, so it lives exactly as long as one
-//! RUN. Concretely:
+//! The survey line is owned by the run's service, so it lives exactly as long as one RUN.
+//! Concretely:
 //!
 //! * **Stopping a sweep does NOT clear it** - the tone parks and the profile stands. This
 //!   is the whole point of "remember until overwritten".
 //! * **Continuing to sweep does not clear it** either; a second pass rewrites the span it
 //!   crosses (rule 3) and leaves the rest.
-//! * **A new Run clears it**, because `ExplorerHost::start` spawns a new pump and the
-//!   pump owns it.
-//! * **A profile change clears it**, because `ExplorerHost::set_profile` builds a new
-//!   service (and refuses while a run is live), so the next Run is a new pump either way.
-//!   It has to: `display_nfft` and the adopted rate define the render grid, and a curve
+//! * **A new run clears it**, because every run builds a new service, and so does a
+//!   reconfiguration. It has to: `display_nfft` and the adopted rate define the render grid, and a curve
 //!   carried across a grid change would be plotted against the wrong frequencies.
 
 /// The peak-level sweep profile: the visited points, and the display grid they are
@@ -99,13 +78,13 @@ pub struct ProfileRaster {
     f0_hz: f64,
     df_hz: f64,
     n_bins: usize,
-    /// The visited `(frequency, level)` points, ASCENDING by frequency and never closer
-    /// together than [`Self::tolerance_hz`].
+    /// The visited `(frequency, level)` points, ASCENDING by frequency, at most one per
+    /// display bin.
     ///
-    /// That spacing invariant is also what BOUNDS this vector, which is the only thing
-    /// standing between a long survey and unbounded growth: every insert first removes
-    /// every point within a tolerance of itself, so the list can never hold more than
-    /// about two points per display bin however long the operator sweeps.
+    /// That invariant is also what BOUNDS this vector, which is the only thing standing
+    /// between a long survey and unbounded growth: every insert first removes any point
+    /// in its own bin, so the list can never hold more than one point per display bin
+    /// however long the operator sweeps.
     points: Vec<(f64, f32)>,
     /// The frequency of the previously recorded point - the far end of the traversal the
     /// next visit closes (rule 3). `None` before the first visit of a run.
@@ -144,8 +123,26 @@ impl ProfileRaster {
         self.points.is_empty()
     }
 
-    /// Forget everything. (Not reached today - the pump owns one profile per run - but the
-    /// type would be wrong without it, and a future "clear profile" verb lands here.)
+    /// The visited `(frequency, level)` points, ascending by frequency: the survey line
+    /// itself, before any rendering onto a grid.
+    pub fn points(&self) -> &[(f64, f32)] {
+        &self.points
+    }
+
+    /// The highest visited point, `(frequency, level)`, or `None` while nothing has been
+    /// visited. On equal levels the lower frequency is the peak.
+    pub fn peak(&self) -> Option<(f64, f32)> {
+        self.points
+            .iter()
+            .copied()
+            .fold(None, |best: Option<(f64, f32)>, p| match best {
+                Some(b) if b.1 >= p.1 => Some(b),
+                _ => Some(p),
+            })
+    }
+
+    /// Forget everything: the points and the traversal anchor, so the next visit wipes
+    /// nothing. The operator's "clear the survey".
     pub fn clear(&mut self) {
         self.points.clear();
         self.last_hz = None;
@@ -183,9 +180,15 @@ impl ProfileRaster {
             Some(prev) => (freq_hz, prev),
             None => (freq_hz, freq_hz),
         };
-        let tol = self.tolerance_hz();
+        // The frequency line is the display BIN the visit renders into: a revisit there
+        // overwrites, because the render could never separate two points in one bin. Not
+        // "within half a bin of the new point": consecutive points of a slow sweep are a
+        // small fraction of a bin apart, so that rule deleted the previous point at every
+        // visit and the trail collapsed to one moving point (seen on the NI loopback).
+        let (f0, df) = (self.f0_hz, self.df_hz);
+        let bin = raw.round();
         self.points
-            .retain(|(f, _)| !((*f > lo && *f < hi) || (*f - freq_hz).abs() <= tol));
+            .retain(|(f, _)| !((*f > lo && *f < hi) || ((*f - f0) / df).round() == bin));
         let at = self.points.partition_point(|(f, _)| *f < freq_hz);
         self.points.insert(at, (freq_hz, amplitude as f32));
         self.last_hz = Some(freq_hz);
@@ -235,6 +238,18 @@ impl ProfileRaster {
             let (fa, va) = self.points[seg];
             let (fb, vb) = self.points[seg + 1];
             *cell = interpolate_log(fa, va, fb, vb, fk);
+        }
+        // No bin centre between the outermost points (one point a bin lets two neighbours
+        // sit in adjacent bins with nothing between their centres): the chords drew nothing,
+        // and each point lands on its nearest bin, as a lone point does, rather than the
+        // curve rendering empty while it holds points.
+        if out.iter().all(|v| v.is_nan()) {
+            for &(f, v) in &self.points {
+                let b = ((f - self.f0_hz) / self.df_hz).round();
+                if b >= 0.0 && (b as usize) < self.n_bins {
+                    out[b as usize] = v;
+                }
+            }
         }
         Some(out)
     }
@@ -364,10 +379,9 @@ mod tests {
         }
     }
 
-    /// THE COARSE-WALK ACCEPTANCE CASE (operator, 2026-08-08: coarse clicks left the plot
-    /// "full of holes"). Three hand clicks, nothing between them, and the curve must be
-    /// CONTINUOUS from the first to the last - the reference controller's screen grabs draw a chord
-    /// across a two-octave step exactly as they draw one across a fine one.
+    /// THE COARSE-WALK CASE: coarse clicks must not leave the plot "full of holes". Three
+    /// hand clicks, nothing between them, and the curve must be CONTINUOUS from the first to
+    /// the last: a chord across a two-octave step exactly as across a fine one.
     ///
     /// RED-MUTATION: render only the bins that were visited and this reds on the very
     /// first unvisited bin, which is the shipped defect.
@@ -560,9 +574,9 @@ mod tests {
         assert!(out[hi + 1].is_nan(), "still nothing above the walk");
     }
 
-    /// The point list cannot grow without bound however long the survey runs: every point
-    /// is at least a tolerance from its neighbours, so a full-band walk at a step far finer
-    /// than the grid still ends up with about one point per bin.
+    /// The point list cannot grow without bound however long the survey runs: at most one
+    /// point a display bin, so a full-band walk at a step far finer than the grid ends up
+    /// with about one point per bin.
     #[test]
     fn a_long_survey_cannot_grow_the_point_list_without_bound() {
         let df = 2.0;
@@ -608,5 +622,55 @@ mod tests {
             2,
             "a cleared profile starts a new traversal"
         );
+    }
+
+    /// FOUND ON THE NI LOOPBACK: a SLOW sweep must leave its trail.
+    /// Consecutive points of a sweep are a small fraction of a bin apart at the low end
+    /// (0.14 Hz a pass at 20 Hz and 0.5 oct/s, against a 3.125 Hz bin), so a rule that
+    /// replaced every point within half a bin of the new one deleted the previous point at
+    /// every visit: the trail collapsed to one moving point, and a 20 to 2000 Hz sweep at
+    /// 30 oct/min left nothing below 113 Hz on the chassis. A frequency line is a display
+    /// BIN: the sweep keeps one point per bin it crossed.
+    #[test]
+    fn a_slow_sweep_leaves_a_point_in_every_bin_it_crosses() {
+        let df = 12_800.0 / 4_096.0;
+        let mut r = ProfileRaster::new(0.0, df, 2_049);
+        // 0.5 oct/s, a pass every 20 ms.
+        let step = 2f64.powf(0.5 * 0.02);
+        let mut f = 20.0;
+        while f <= 2_000.0 {
+            r.visit(f, 0.2);
+            f *= step;
+        }
+        let pts = r.points();
+        assert!(pts[0].0 <= 21.0, "the trail starts at {} Hz", pts[0].0);
+        assert!(pts[pts.len() - 1].0 >= 1_990.0);
+        // No gap wider than two bins or the sweep's own step there (two bins a pass at 900 Hz).
+        for w in pts.windows(2) {
+            assert!(
+                w[1].0 - w[0].0 <= (2.0 * df).max(w[0].0 * (step - 1.0) * 1.01),
+                "a hole from {} to {} Hz",
+                w[0].0,
+                w[1].0
+            );
+        }
+        // Bounded all the same: at most one point per bin.
+        assert!(pts.len() <= r.grid().2);
+    }
+
+    /// One point a bin: two neighbouring points can sit in adjacent bins with no bin
+    /// centre between them, where the chord between them has nothing to fill. Each point
+    /// still lands on its nearest bin, as a lone point does, or the curve renders empty
+    /// while it holds points (the backend's peak-profile test).
+    #[test]
+    fn points_with_no_bin_centre_between_them_land_on_their_nearest_bins() {
+        let mut r = ProfileRaster::new(0.0, 16.0, 257);
+        r.visit(100.5, 0.2); // bin 6.28: nearest 6
+        r.visit(104.0, 0.3); // bin 6.5: nearest 7, and no centre in [100.5, 104]
+        assert_eq!(r.points().len(), 2);
+        let out = r.render().unwrap();
+        assert!((out[6] - 0.2).abs() < 1e-6, "bin 6: {}", out[6]);
+        assert!((out[7] - 0.3).abs() < 1e-6, "bin 7: {}", out[7]);
+        assert_eq!(out.iter().filter(|v| v.is_finite()).count(), 2);
     }
 }

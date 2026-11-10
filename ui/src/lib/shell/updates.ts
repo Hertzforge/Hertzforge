@@ -2,8 +2,8 @@
  * Check for Updates, in the desktop app: the Tauri updater reads the latest release's manifest
  * (`latest.json`, written by the release workflow), says through the native dialogs whether a
  * newer version is published, and on a yes downloads the signed archive, verifies it against the
- * key built into the app, installs it and relaunches. Only when asked, never at startup. In a
- * browser there is no updater and the command is not offered.
+ * key built into the app, installs it and relaunches. Asked from the app menu or the palette,
+ * never at startup. In a browser there is no updater and the command is not offered.
  */
 
 interface Update {
@@ -14,6 +14,7 @@ interface Update {
 }
 
 interface TauriUpdates {
+	event?: { listen(name: string, handler: () => void): Promise<() => void> };
 	updater?: { check(): Promise<Update | null> };
 	process?: { relaunch(): Promise<void> };
 	dialog?: {
@@ -63,4 +64,19 @@ export async function checkForUpdates(): Promise<string> {
 	}
 	await t.process?.relaunch();
 	return `Hertzforge ${update.version} installed.`;
+}
+
+/** The app menu's Check for Updates (the macOS desktop app) runs the check; returns how to stop listening. */
+export function listenForUpdateMenu(check: () => unknown = checkForUpdates): () => void {
+	const events = tauri()?.event;
+	if (!events) return () => {};
+	let stop: (() => void) | null = null;
+	let stopped = false;
+	void events
+		.listen('update-menu', () => void check())
+		.then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
+	return () => {
+		stopped = true;
+		stop?.();
+	};
 }
