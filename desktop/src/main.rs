@@ -431,8 +431,14 @@ mod run_log_tests {
         let here = std::env::current_dir().unwrap().join("a.hflog");
         assert_eq!(
             query(&["--run-log", "a.hflog"]),
-            format!("&runlog=1&runlog_file={}", super::encode(&here.to_string_lossy()))
+            format!(
+                "&runlog=1&runlog_file={}",
+                super::encode(&here.to_string_lossy())
+            )
         );
-        assert_eq!(query(&["--run-log", "~/a.hflog"]), "&runlog=1&runlog_file=~%2Fa.hflog");
+        assert_eq!(
+            query(&["--run-log", "~/a.hflog"]),
+            "&runlog=1&runlog_file=~%2Fa.hflog"
+        );
     }
 }
