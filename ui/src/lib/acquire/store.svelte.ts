@@ -186,6 +186,8 @@ export class AcquireState {
 	tableOrder = $state.raw<string[]>([]);
 	/** The file the table was last opened from or saved to. */
 	tableFile = $state<string | null>(null);
+	/** The carried columns as they were when this screen last applied the table. */
+	private appliedExtras: { extras: ChannelExtras; order: string[] } = { extras: {}, order: [] };
 
 	// ---- setup ------------------------------------------------------------------------------
 	setup = $state<SetupDraft>(defaultSetup());
@@ -697,12 +699,22 @@ export class AcquireState {
 	}
 
 	discardTable() {
-		if (this.server) this.adoptTable(this.server);
+		if (!this.server) return;
+		this.adoptTable(this.server);
+		this.restoreExtras();
 	}
 
 	/** Drop this screen's edits and load the service's table (after it changed underneath). */
 	takeServerTable() {
-		if (this.server) this.adoptTable(this.server);
+		if (!this.server) return;
+		this.adoptTable(this.server);
+		this.restoreExtras();
+	}
+
+	/** The carried columns that go with the table this screen last applied, not with a file's edits since dropped. */
+	private restoreExtras() {
+		this.tableExtras = this.appliedExtras.extras;
+		this.tableOrder = this.appliedExtras.order;
 	}
 
 	/** Keep this screen's edits, now based on the service's present revision. The operator has seen what changed. */
@@ -729,6 +741,7 @@ export class AcquireState {
 		this.server = { revision: res.revision, channels: rows, report: res.report };
 		this.tableCheck = res.report;
 		this.tableChange = null;
+		this.appliedExtras = { extras: this.tableExtras, order: this.tableOrder };
 		this.note = { tone: 'pass', text: `Channel table applied (revision ${res.revision}).` };
 		return true;
 	}

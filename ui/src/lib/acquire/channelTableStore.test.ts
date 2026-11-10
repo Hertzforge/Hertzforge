@@ -107,6 +107,20 @@ describe('the channel table as a file', () => {
 		analysis.close();
 	});
 
+	it("discarding a file's rows drops its columns; those of the table applied stay", async () => {
+		const { acq, control, analysis } = await screen();
+		await acq.claim();
+		acq.openTable({ columns: ['channel', 'node', 'control', 'drive'], rows: [[1, 7, true, false], [2, 8, false, true]] });
+		expect(await acq.applyTable()).toBe(true);
+		acq.openTable({ columns: ['channel', 'node'], rows: [[1, 99]] });
+		expect(acq.tableExtras[1]?.node).toBe(99);
+		acq.discardTable();
+		expect(acq.tableExtras[1]?.node).toBe(7);
+		expect(acq.rows).toHaveLength(2);
+		control.close();
+		analysis.close();
+	});
+
 	it('a removed row takes its carried columns with it', async () => {
 		const { acq, control, analysis } = await screen();
 		acq.openTable({ columns: ['channel', 'node', 'drive'], rows: [[1, 7, false], [2, 8, true], [3, 9, false]] });
