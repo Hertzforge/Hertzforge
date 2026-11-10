@@ -45,7 +45,9 @@ import type {
 import { CONTROL_TOPICS as T } from '$lib/protocol/types';
 import { isLive, runActions, primaryAction, type ActionId, type ActionState, type RunContext, type SetupStatus } from './actions';
 import { byField, configKey, defaultSetup, errorCount, fromConfig, localErrors, mergeErrors, toConfig, type FieldErrors, type SetupDraft } from './setup';
-import { bindUnbound, nextIndex, newRow, rowFindings, sameRows, tableChanges } from './table';
+import { bindUnbound, bulkEdit, hardwareOf, materialize, moveOnto, nextIndex, newRow, rowFindings, sameRows, sizeTable, tableChanges, type Hardware, type RowEdit } from './table';
+import { channelFile, channelRowsFrom, renumbered, type ChannelExtras } from './channelFile';
+import type { TableData, TableFileClient } from '$lib/tables/tableFiles';
 import { toRefusal, type Refusal } from './words';
 
 const LEASE_KEY = 'hertzforge.acquire.lease';
@@ -91,6 +93,8 @@ export interface AcquireOptions {
 	checkDelayMs?: number;
 	/** Keep and check setup drafts (false for a window that only watches the run). */
 	drafts?: boolean;
+	/** The analysis service, which reads and writes the channel table's files. */
+	tables?: TableFileClient | null;
 }
 
 function storageOf(kind: 'sessionStorage' | 'localStorage'): Storage | null {
@@ -174,6 +178,14 @@ export class AcquireState {
 	baseRows = $state.raw<ChannelRow[]>([]);
 	tableCheck = $state.raw<ValidationReport | null>(null);
 	tableChange = $state.raw<TableChange | null>(null);
+	/** Where the channel table's files are read and written; null when no analysis service is there. */
+	readonly tableFiles: TableFileClient | null;
+	/** The columns of each channel a file brought that the control table does not edit, by channel number. */
+	tableExtras = $state.raw<ChannelExtras>({});
+	/** The column order of the file last opened, kept for the next save. */
+	tableOrder = $state.raw<string[]>([]);
+	/** The file the table was last opened from or saved to. */
+	tableFile = $state<string | null>(null);
 
 	// ---- setup ------------------------------------------------------------------------------
 	setup = $state<SetupDraft>(defaultSetup());
@@ -236,6 +248,7 @@ export class AcquireState {
 		this.localStore = options.local === undefined ? storageOf('localStorage') : options.local;
 		this.checkDelayMs = options.checkDelayMs ?? 250;
 		this.drafts = options.drafts ?? true;
+		this.tableFiles = options.tables ?? null;
 		this.lease = read(this.sessionStore, LEASE_KEY);
 		this.setup = loadSetup(this.localStore);
 		this.baseKey = read(this.localStore, BASE_KEY) ?? configKey(toConfig(defaultSetup()));
@@ -283,6 +296,14 @@ export class AcquireState {
 	}
 
 	readonly tableDirty = $derived(!sameRows($state.snapshot(this.rows) as ChannelRow[], this.baseRows));
+
+	/** The selected station's channels, which the table is sized from. */
+	get hardware(): Hardware | null {
+		return hardwareOf(this.stations);
+	}
+
+	/** The table as shown: its rows against the hardware, and an off row for every channel no row is on. */
+	readonly sized = $derived(sizeTable($state.snapshot(this.rows) as ChannelRow[], hardwareOf(this.stations)));
 
 	/** The report for what the operator sees: the dry run of the draft, else the service's. */
 	get tableReport(): ValidationReport | null {
@@ -611,7 +632,58 @@ export class AcquireState {
 	}
 
 	removeRow(position: number) {
-		this.rows.splice(position, 1);
+		const [gone] = this.rows.splice(position, 1);
+		if (gone && !this.rows.some((r) => r.index === gone.index)) {
+			const kept = { ...this.tableExtras };
+			delete kept[gone.index];
+			this.tableExtras = kept;
+		}
+	}
+
+	/**
+	 * An edit to the shown rows at `positions` (one, or every selected row), and to nothing else.
+	 * Returns how many rows took it and how many could not (an output asked to be a control).
+	 */
+	editRows(positions: number[], edit: RowEdit): { changed: number; skipped: number } {
+		const before = this.sized;
+		const { rows, changed, skipped } = bulkEdit($state.snapshot(this.rows) as ChannelRow[], this.hardware, positions, edit);
+		if (edit.field === 'index' && changed) {
+			const was = before[positions[0]]?.row.index;
+			if (was !== undefined) this.tableExtras = renumbered(this.tableExtras, was, edit.value);
+		}
+		if (changed) this.rows = rows;
+		return { changed, skipped };
+	}
+
+	/** Put the hardware's rows shown into the table, so the rows shown are the rows held, numbers and all. */
+	materializeTable() {
+		if (this.sized.some((s) => s.virtual)) this.rows = materialize(this.sized);
+	}
+
+	/** Move a row that is not on its hardware onto a free channel, settings and all. */
+	moveRow(position: number, key: string) {
+		this.rows = moveOnto($state.snapshot(this.rows) as ChannelRow[], this.hardware, position, key);
+	}
+
+	/** The table as a file holds it: every row shown, with the columns each channel's file brought. */
+	tableData(): TableData {
+		return channelFile(
+			this.sized.map((s) => s.row),
+			this.tableExtras,
+			this.tableOrder
+		);
+	}
+
+	/**
+	 * A table read from a file in place of the draft. Its rows meet the hardware by their physical
+	 * channels; a row on a channel the station does not have is shown missing. Apply checks it.
+	 */
+	openTable(table: TableData, path: string | null = null) {
+		const { rows, extras, order } = channelRowsFrom(table);
+		this.rows = rows;
+		this.tableExtras = extras;
+		this.tableOrder = order;
+		if (path !== null) this.tableFile = path;
 	}
 
 	/** Bind the unbound rows to the selected devices' free channels, in order. */
