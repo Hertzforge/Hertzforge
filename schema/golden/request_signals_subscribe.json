@@ -1,0 +1,24 @@
+{
+ "type": "request",
+ "id": 121,
+ "method": "signals.subscribe",
+ "params": {
+  "rate_hz": 10,
+  "plots": [
+   {
+    "id": "raw",
+    "channels": [
+     3
+    ],
+    "window_s": 0.0625,
+    "points": 64,
+    "arrange": "split"
+   },
+   {
+    "id": "env",
+    "window_s": 0.25,
+    "points": 64
+   }
+  ]
+ }
+}
