@@ -19,9 +19,7 @@ from ..units import is_compound_unit, plain_unit, pretty_unit
 
 # In core rather than beside the widgets that offer these lists: which
 # units an acceleration could be in is a fact about accelerations, and
-# `ChannelTable` needs it to narrow a channel's unit column. It lived in
-# `gui/` and core reached up into it, which is the one direction imports
-# must not go.
+# `ChannelTable` needs it to narrow a channel's unit column.
 
 LENGTH_UNITS = ['in', 'ft', 'm', 'mm', 'cm']
 

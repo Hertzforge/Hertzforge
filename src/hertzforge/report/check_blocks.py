@@ -68,6 +68,8 @@ from typing import Any
 
 import numpy as np
 
+from ..units import signed
+
 # P24 of the report-features plan (Kevin Cross, 2026-10-24): report
 # blocks for the checks the app already reads, each with its verdict,
 # its numbers and its plot, through the reading's own core function.
@@ -850,13 +852,6 @@ def _amount(value: float, dimension: str, us: Any) -> str:
     return f'{float(_level(value, dimension, us)):.4g} {_unit(dimension, us)}'
 
 
-def _signed(value: float, places: int = 1, unit: str = '') -> str:
-    if not np.isfinite(value):
-        return DASH
-    return (f'{value:+.{places}f}' + (f' {unit}' if unit else '')
-            ).replace('-', '−')
-
-
 def _decimated(x, y):
     from . import _decimate
 
@@ -915,6 +910,16 @@ _STAT_COLUMNS = (('mean', 'Mean'), ('rms', 'RMS'), ('skewness', 'Skewness'),
                  ('frames', 'Frames out'), ('rail', 'On the rail'))
 
 
+def _told_apart(history):
+    """Each record's label, with its quantity where one DOF carries two: a
+    drive point's force beside its acceleration."""
+    labels = [history.record_label(row) for row in range(history.num_records)]
+    return [f'{label} ({history.ordinate_dim[row]})'
+            if len({str(history.ordinate_dim[other])
+                    for other, same in enumerate(labels) if same == label}) > 1
+            else label for row, label in enumerate(labels)]
+
+
 def _show_time_statistics(reading, found, us):
     from ..core.kurtosis import NOMINAL, analyzed_span
     from ..core.time_statistics import statistic_name
@@ -925,8 +930,9 @@ def _show_time_statistics(reading, found, us):
         + ['Verdict']
     rows, marks, verdicts, flagged, unread = [], [], [], [], []
     first = None
+    labels = _told_apart(history)
     for row, stats, cause, _hist in reading:
-        label = history.record_label(row)
+        label = labels[row]
         if stats is None:
             rows.append([label] + [DASH] * len(_STAT_COLUMNS)
                         + [f'not judged: {cause}'])
@@ -1001,7 +1007,7 @@ def _show_time_statistics(reading, found, us):
     # channel outside a band, and for the channel furthest from
     # Gaussian when none is, so the record's distribution is shown
     # either way
-    judged_rows = [(row, history.record_label(row), stats, hist)
+    judged_rows = [(row, labels[row], stats, hist)
                    for row, stats, _cause, hist in reading
                    if stats is not None]
     if flagged:
@@ -1171,7 +1177,7 @@ def _show_srs_points(reading, found, us):
         judged.append((dof, event, result))
         verdict = {True: 'passes', False: 'fails', None: 'not judged'}[
             result['passed']]
-        worst = (f'{_signed(result["worst_db"], 1, "dB")} at '
+        worst = (f'{signed(result["worst_db"], "dB")} at '
                  f'{result["worst_frequency"]:.4g} Hz'
                  if np.isfinite(result['worst_db']) else DASH)
         rows.append([dof, event or DASH,
@@ -1188,6 +1194,10 @@ def _show_srs_points(reading, found, us):
     if refused:
         words += ' Not judged: ' + '; '.join(
             f'{dof}, {reason}' for dof, reason in refused) + '.'
+    unread = next((result['unread'] for _dof, _event, result in judged
+                   if result.get('unread')), None)
+    if unread:
+        words += f' Not read: {unread}.'
     criterion = ''
     figures = []
     if judged:
@@ -1360,7 +1370,7 @@ def _show_rms(reading, found, us):
         inside = check.passed or check.explained
         rows.append([label, _amount(check.spectrum_rms, dimension, us),
                      _amount(check.time_rms, dimension, us),
-                     _signed(gap, 3, 'dB'),
+                     signed(gap, 'dB', places=3, missing=DASH),
                      heading(check).removeprefix('rms check: ')])
         bad = None if inside else 'over'
         marks.append([None, None, None, bad, bad])

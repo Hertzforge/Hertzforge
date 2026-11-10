@@ -348,7 +348,7 @@ def test_an_optional_object_param_takes_none_or_a_tracked_level(validate):
 
 
 def test_a_drawn_notch_prediction_is_read_beside_a_notch_in_the_run_log(tmp_path):
-    """Visual Dynamics' dock shows the notch its window predicted beside the
+    """The dock shows the notch its window predicted beside the
     notch observed; here the prediction drawn for a project is the one its
     connection's run log shows."""
     from hertzforge.service import run_logs

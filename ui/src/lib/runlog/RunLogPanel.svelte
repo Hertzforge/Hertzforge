@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * The Run Log window, as Visual Dynamics' run-log dock: where the log keeper writes the run log
+	 * The Run Log window: where the log keeper writes the run log
 	 * while a test runs. It sits beside any workspace, or fills the window for a keeper who analyzes
 	 * elsewhere, and it is drawn larger than the rest of the shell, to be read across a room.
 	 *
@@ -39,7 +39,7 @@
 	let ticker: ReturnType<typeof setInterval> | undefined;
 	let dayList: HTMLOListElement | undefined = $state();
 	let pathTyped = $state('');
-	/** The export's view and scope, as VD's dock offers them. */
+	/** The export's view and scope. */
 	let exportView = $state<'text' | 'csv' | 'machine'>('text');
 	let exportWhole = $state(true);
 	const EXPORT_VIEWS: [typeof exportView, string, string][] = [
@@ -155,7 +155,7 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions (the window's own keys, as Visual Dynamics' dock has them) -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (the window's own keys) -->
 <section class="runlog" class:alone={rl.alone} data-testid="runlog" aria-label="Run log" onkeydown={onKey}>
 	<header class="bar">
 		<h2>Run Log</h2>

@@ -1,4 +1,4 @@
-"""Visual Dynamics' tools that generate, convert and predict: a signal made
+"""The tools that generate, convert and predict: a signal made
 from a spectrum, a specification or a channel table; a shock synthesized to
 a shock spectrum; how each mode of a shape set answers a record's forces;
 a sine sweep's rate against the modes it passes; the extreme response and
@@ -6,8 +6,8 @@ fatigue damage spectra of a record; the drives a specification asks for
 through an FRF; the notch a set of limit channels would cut; and the
 conditioning and realizability of a matrix.
 
-Generate Signal, SRS Synthesis and Compute Modal Responses add an object,
-as Visual Dynamics does, and draw what they added; the others are readings
+Generate Signal, SRS Synthesis and Compute Modal Responses add an object, and draw what
+they added; the others are readings
 of objects that exist and add nothing. Every number is the core's:
 `core.signals`, `core.shock_synthesis`, `core.modal_response`,
 `core.sweep_rate`, `core.fatigue`, `core.drive_prediction`,
@@ -21,10 +21,19 @@ from typing import Any
 
 import numpy as np
 
-from . import run_logs
+from . import display_units, run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .ops_sine_shock import STROKE_RATINGS, _flat, _trace
+from .ops_sine_shock import (
+    EDGE_WORDS,
+    STROKE_RATINGS,
+    _flat,
+    _positive,
+    _record,
+    _trace,
+    pulse_edge,
+)
+from .parsing import parse_optional_picks
 from .protocol import refused
 from .waterfalls import unit_text, waterfall_view
 
@@ -32,26 +41,8 @@ FREQUENCY = v.axis('Frequency', 'Hz', 'log')
 TIME = v.axis('Time', 's', 'linear')
 
 
-def _positive(name: str, role: Any, x: Any, y: Any) -> dict:
-    """A curve on log axes: the points finite and above zero."""
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0) & (y > 0.0)
-    return v.series(name, role, x[keep], y[keep])
-
-
-def _finite(name: str, role: Any, x: Any, y: Any) -> dict:
-    """A curve on a linear y axis: the finite points, x above zero."""
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    keep = np.isfinite(x) & np.isfinite(y) & (x > 0.0)
-    return v.series(name, role, x[keep], y[keep])
-
-
 def _sentence(text: str) -> str:
     return text[0].upper() + text[1:] if text else text
-
-
-def _notes(notes: Any, status: str = 'info') -> list[dict]:
-    return [v.row('Note', _sentence(note), None, status) for note in notes if note]
 
 
 def _core(call: Any) -> Any:
@@ -62,32 +53,8 @@ def _core(call: Any) -> Any:
         raise refused(str(error)) from None
 
 
-def _picked(text: str, count: int, what: str) -> list[int] | None:
-    """The 0-based items '1-3, 7' names, numbered from 1; None when blank,
-    which is all of them."""
-    if not text.strip():
-        return None
-    out: list[int] = []
-    for part in text.replace(' ', '').split(','):
-        first, dash, last = part.partition('-')
-        try:
-            low, high = int(first), int(last) if dash else int(first)
-        except ValueError:
-            raise refused(f'{part!r} is not a {what} number or a range such as 3-6') from None
-        if not 1 <= low <= high <= count:
-            raise refused(f'{what}s run from 1 to {count}; {part} is outside them')
-        out.extend(range(low - 1, high))
-    return sorted(set(out))
-
-
 def _dofs(text: str) -> tuple[str, ...] | None:
     return tuple(text.replace(',', ' ').split()) or None
-
-
-def _record(data: Any, number: int, name: str) -> int:
-    if number > data.num_records:
-        raise refused(f'{name} has {data.num_records} records; there is no record {number}')
-    return number - 1
 
 
 # ---- Generate Signal ----------------------------------------------------------------
@@ -123,7 +90,7 @@ SHAPE = Param('shape', 'Pulse shape', 'enum', default='half-sine', options=(
     Option('trapezoid', 'Trapezoid')))
 PULSE = Param('pulse_duration', 'Pulse duration', 'number', default=0.011, unit='s',
               min=1e-6, step=0.001)
-EDGE = Param('edge', 'Edge, 0 for none', 'number', default=0.0, unit='s', min=0.0, step=0.001)
+EDGE = Param('edge', EDGE_WORDS, 'number', default=0.0, unit='s', min=0.0, step=0.001)
 TONE = Param('tone', 'Tone', 'integer', default=1, min=1, step=1)
 DOFS = Param('dofs', 'DOFs, blank for all', 'string', default='')
 
@@ -131,7 +98,7 @@ DOFS = Param('dofs', 'DOFs, blank for all', 'string', default='')
 def _settings(source: Any, params: dict[str, Any]) -> dict[str, Any]:
     """The `SignalSettings` fields the params give, in SI; the sample
     rate the source suggests (`core.signals.suggested`) when none is
-    given, as Visual Dynamics' pane opens on it."""
+    given."""
     from hertzforge.core.signals import suggested
     from hertzforge.core.sine import SineSweepSpecification
 
@@ -151,7 +118,8 @@ def _settings(source: Any, params: dict[str, Any]) -> dict[str, Any]:
             'taper': params['taper'] / 100.0, 'periods': params['periods'],
             'repeats': params['repeats'] or None, 'at': params['at'],
             'width': params['width'], 'shape': params['shape'], 'peak': params['peak'],
-            'pulse_duration': params['pulse_duration'], 'edge': params['edge'] or None,
+            'pulse_duration': params['pulse_duration'],
+            'edge': pulse_edge(params['shape'], params['edge'], params['pulse_duration']),
             'band': (params['low'], params['high']), 'level': params['level'],
             'tone': tone}
 
@@ -172,7 +140,7 @@ def generate_signal(project: Any, params: dict[str, Any]) -> list[dict]:
     specification (its tone) or a channel table (the random kinds at its
     reference channels to a typed flat band and level, an impulse or a
     classical pulse), added beside its source (`Project.generate_signal`,
-    `core.signals.generate`). Drawn as Visual Dynamics previews it: the
+    `core.signals.generate`). Drawn: the
     random kinds' PSD over the target they were drawn to
     (`signals.target_at`), an impulse's trace and its spectrum
     (`signals.impulse_spectrum`), the others' trace; with the samples, the
@@ -288,8 +256,7 @@ def srs_synthesis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.srs_synthesis`: a shock a shaker can play, synthesized to a
     shock specification as a sum of wavelets and read against the shaker's
     shock ratings given (`core.shock_synthesis.synthesize`), added as a
-    time history (`Project.generate_signal` with the kind 'srs'). Drawn as
-    Visual Dynamics draws a synthesis (`plot.shock_synthesis`): the
+    time history (`Project.generate_signal` with the kind 'srs'). Drawn: the
     channel's stroke reading, then its spectrum against the requirement's
     band, with the wavelets, passes, event length and points inside."""
     import hertzforge as hz
@@ -307,7 +274,7 @@ def srs_synthesis(project: Any, params: dict[str, Any]) -> list[dict]:
     made = _core(lambda: synthesize(spec, sample_rate=rate,
                                     rating=SignalSettings(**settings).rating(),
                                     half_cycles=params['half_cycles'],
-                                    dofs=settings['dofs']))
+                                    dofs=settings['dofs'], unit_system=hz.SI))
     if params['record'] > len(made.channels):
         raise refused(f'the synthesis has {len(made.channels)} channels; there is no channel '
                       f'{params["record"]}')
@@ -357,15 +324,15 @@ def compute_modal_responses(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.compute_modal_responses`: how each mode of a shape set
     answers the forces in a time history, or a force CPSD, added as an
     object of its own beside the forces (`Project.compute_modal_responses`,
-    `core.modal_response`). Drawn as a waterfall, with the counts Visual
-    Dynamics' pane gives: the modes, the force channels, the samples or
+    `core.modal_response`). Drawn as a waterfall, with the counts the pane gives: the
+    modes, the force channels, the samples or
     lines and the highest mode, and a mode past the record's reach."""
     from hertzforge.core.data import Psd, channel_quantities
 
     name, set_name = params['source'], params['shapes']
     forces, shapes = project[name], project[set_name]
-    modes = _picked(params['modes'], shapes.num_shapes, 'mode')
-    records = _picked(params['records'], forces.num_records, 'record')
+    modes = parse_optional_picks(params['modes'], shapes.num_shapes, 'mode')
+    records = parse_optional_picks(params['records'], forces.num_records, 'record')
     extra: dict[str, Any] = {'quantity': params['response']}
     if modes is not None:
         extra['modes'] = modes
@@ -413,8 +380,7 @@ CROSSING_POINTS = 60
 
 
 def parse_modes(text: str) -> list[tuple[float, float]]:
-    """'22 40, 180 20' as [(22.0, 40.0), (180.0, 20.0)], as Visual
-    Dynamics' Sweep Rate pane reads its field: pairs of natural frequency
+    """'22 40, 180 20' as [(22.0, 40.0), (180.0, 20.0)]: pairs of natural frequency
     in Hz and Q, the pairs separated by commas or semicolons and the two
     numbers of a pair by spaces or a slash."""
     modes = []
@@ -451,8 +417,7 @@ SWEPT_LEVELS = Param('levels', 'Q read off', 'enum', default='',
 def _swept_q(project: Any, params: dict[str, Any], spec: Any, modes: list) -> list[dict]:
     """With a tracked sine level named, the Q read off it at each mode on
     each of its channels, judged against the rate it was swept at
-    (`core.sweep_rate.read_swept_q`), as Visual Dynamics lists them under
-    the passes when levels of the tone are selected."""
+    (`core.sweep_rate.read_swept_q`)."""
     from hertzforge.core.sweep_rate import read_swept_q
 
     name = params.get('levels') or ''
@@ -486,7 +451,7 @@ def sweep_rate(project: Any, params: dict[str, Any]) -> list[dict]:
     against typed modes (`core.sweep_rate.check_sweep_rate`): its path as
     frequency against time with each mode's half-power band across it,
     each pass through a band marked, too fast where its rate is over the
-    margin times the rule's, and every pass in Visual Dynamics' sweep-rate
+    margin times the rule's, and every pass in the sweep-rate
     table. With a tracked level named, the Q read off it at each mode is
     judged as well (`_swept_q`)."""
     from hertzforge.core.sweep_rate import check_sweep_rate, half_power_band
@@ -579,8 +544,7 @@ def fatigue(project: Any, params: dict[str, Any]) -> list[dict]:
     time history, through a resonator at each natural frequency
     (`core.fatigue.fatigue_spectra`), and with a candidate test, the two
     set against each other on the same natural frequencies
-    (`core.fatigue.compared`), as Visual Dynamics' Fatigue reading draws
-    them (`plot.fatigue`): the ERS, the FDS and the time-compression rule
+    (`core.fatigue.compared`): the ERS, the FDS and the time-compression rule
     with the cap and the exaggeration the test carries."""
     from hertzforge.core.data import TimeHistory
     from hertzforge.core.fatigue import CAP, compared, compression_ratio, fatigue_spectra
@@ -680,7 +644,7 @@ def fatigue(project: Any, params: dict[str, Any]) -> list[dict]:
                       'info' if pair is None else 'pass' if pair.covers else 'fail'))
     notes = list(field.notes) + ([] if pair is None else
                                  [f'test: {note}' for note in pair.test.notes])
-    rows += _notes(notes)
+    rows += v.notes(notes)
     return [ers, fds, rule, v.reading(f'Fatigue of {name}, {field.label}', rows)]
 
 
@@ -705,8 +669,7 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.drive_prediction`: the drives a specification asks for at
     its control channels through an FRF's regularized inverse, the
     responses they make and what they ask of the amplifiers and shakers
-    (`core.drive_prediction.predict_drives`), as Visual Dynamics' Drive
-    Prediction draws it (`plot.drive_prediction`): each drive's
+    (`core.drive_prediction.predict_drives`): each drive's
     autospectrum, one channel's predicted response against its target
     with the lines missed shaded, and every quantity against its
     rating."""
@@ -734,7 +697,7 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     rated = [d for d in drives if d.share is not None]
     lead = (max(rated, key=lambda d: d.share) if rated
             else max(drives, key=lambda d: d.peak) if drives else None)
-    top = v.spectrum(_sentence(lead.describe(_si())) if lead else 'Drives', FREQUENCY,
+    top = v.spectrum(_sentence(lead.describe(display_units.words_system())) if lead else 'Drives', FREQUENCY,
                      v.axis('Drive PSD', drive_unit, 'log'),
                      [_positive(f'drive at {label}', 'drive', f, prediction.drive_asd(j))
                       for j, label in enumerate(prediction.drives)], link='frequency')
@@ -762,25 +725,19 @@ def drive_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
         limited = [d for d in prediction.demands
                    if d.kind == 'response' and d.channel == label]
         if limited:
-            words = limited[0].describe(_si())
+            words = limited[0].describe(display_units.words_system())
     middle = v.spectrum(_sentence(words), FREQUENCY,
                         v.axis('PSD', unit_text(f'{quantity}**2/frequency'), 'log'), lines,
                         link='frequency', regions=regions)
-    lines_said = prediction.describe(_si())
+    lines_said = prediction.describe(display_units.words_system())
     rows = [v.row('Verdict', _sentence(lines_said[0]), None,
                   {True: 'pass', False: 'fail', None: 'info'}[prediction.fits])]
     for demand in prediction.demands:
         status = 'info' if demand.share is None else 'fail' if demand.exceeds else 'pass'
-        words = demand.describe(_si()).removeprefix(f'{demand.name}: ')
+        words = demand.describe(display_units.words_system()).removeprefix(f'{demand.name}: ')
         rows.append(v.row(_sentence(demand.name), words, None, status))
-    rows += _notes(lines_said[1 + len(prediction.demands):])
+    rows += v.notes(lines_said[1 + len(prediction.demands):])
     return [top, middle, v.reading(f'Drive prediction: {spec_name} through {frf_name}', rows)]
-
-
-def _si() -> Any:
-    import hertzforge as hz
-
-    return hz.SI
 
 
 # ---- Notch Prediction ---------------------------------------------------------------
@@ -797,8 +754,7 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
     its limit profile at full level and the notch the controller would cut
     in the control spectrum to hold it there, predicted from a
     transmissibility from the control channel
-    (`core.limit_prediction.predict_limits`), as Visual Dynamics' Notch
-    Prediction draws it (`plot.limit_prediction`): the control against
+    (`core.limit_prediction.predict_limits`): the control against
     the reference with each notch shaded, each limited channel against its
     profile, and a row a notch."""
     from hertzforge.core.limit_prediction import predict_limits
@@ -831,26 +787,26 @@ def notch_prediction(project: Any, params: dict[str, Any]) -> list[dict]:
         if channel.profile is not None:
             curves.append(_positive(f'{channel.label} limit profile', 'limit', f,
                                     channel.profile))
-        views.append(v.spectrum(_sentence(channel.describe(f, _si())), FREQUENCY,
+        views.append(v.spectrum(_sentence(channel.describe(f, display_units.words_system())), FREQUENCY,
                                 v.axis('PSD', channel_unit, 'log'), curves, link='frequency'))
-    table = prediction.table(_si())
+    table = prediction.table(display_units.words_system())
     if table:
         views.append(v.table(f'Notches in {prediction.control_label}',
                              ('Band [Hz]', 'Depth [dB]', 'Control left', 'Channels',
                               'Tolerance'),
                              [(r['band'], r['depth'], r['level'], r['channels'],
                                r['tolerance']) for r in table]))
-    said = prediction.describe(_si())
+    said = prediction.describe(display_units.words_system())
     verdict = prediction.within_tolerance
     rows = [v.row('Verdict', _sentence(said[0]), None,
                   {True: 'pass', False: 'fail', None: 'info'}[verdict])]
     for notch in prediction.notches:
         rows.append(v.row(f'Notch at {notch.frequency:.4g} Hz', _sentence(notch.describe(
-            prediction.dimension, prediction.tolerance, _si())), None,
+            prediction.dimension, prediction.tolerance, display_units.words_system())), None,
             'fail' if notch.outside else 'warn' if notch.outside is None else 'pass'))
-    rows += [v.row(c.label, _sentence(c.describe(f, _si())), None, 'info')
+    rows += [v.row(c.label, _sentence(c.describe(f, display_units.words_system())), None, 'info')
              for c in prediction.channels]
-    rows += _notes(said[1 + len(prediction.notches) + len(prediction.channels):])
+    rows += v.notes(said[1 + len(prediction.notches) + len(prediction.channels):])
     return [*views, v.reading(f'Notch prediction: {spec_name} through {frf_name}', rows)]
 
 
@@ -863,7 +819,7 @@ AT = Param('frequency', 'At, 0 for the first line flagged', 'number', default=0.
 
 
 def _cursor(frequency: np.ndarray, flagged: np.ndarray, given: float) -> float:
-    """Where Visual Dynamics puts its cursor: the frequency given, else
+    """Where the cursor starts: the frequency given, else
     the first flagged line off DC, else the middle of the span."""
     positive = frequency[frequency > 0.0]
     if given and positive.size and positive[0] <= given <= frequency[-1]:
@@ -886,9 +842,8 @@ def _span_regions(frequency: np.ndarray, flags: np.ndarray, label: str) -> list[
 def conditioning(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.conditioning`: the singular values and condition number of
     an FRF from several references, or of a CPSD, at every line
-    (`Frf.conditioning`, `Psd.conditioning`: `core.matrix_checks`), as
-    Visual Dynamics' Conditioning reading draws them
-    (`plot.matrix_checks`), and the reading at one line as its pane gives
+    (`Frf.conditioning`, `Psd.conditioning`: `core.matrix_checks`), and the reading at
+    one line as its pane gives
     it at the cursor."""
     from hertzforge.units import UNKNOWN
 
@@ -932,15 +887,14 @@ def conditioning(project: Any, params: dict[str, Any]) -> list[dict]:
         notes.insert(0, 'at this line an inverse of the matrix amplifies an error in it by up '
                         'to the condition number: the references reach the rows in nearly the '
                         'same proportions')
-    rows += _notes(notes)
+    rows += v.notes(notes)
     return [top, bottom, v.reading(f'Conditioning of {name}', rows)]
 
 
 def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.realizability`: whether some set of signals has a CPSD,
     line by line, from the eigenvalues of its coherence matrix
-    (`Psd.realizability`: `core.matrix_checks`), as Visual Dynamics'
-    Realizability reading draws it (`plot.matrix_checks`): the smallest
+    (`Psd.realizability`: `core.matrix_checks`): the smallest
     and largest eigenvalue with the failing lines shaded, and for the pair
     the repair moves most, its coherence and phase before and after; and
     the reading at one line as its pane gives it at the cursor. Make
@@ -950,9 +904,9 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     f = np.asarray(reading.frequency, dtype=float)
     judged = reading.judged & (f > 0.0)
     n = len(reading.channels)
-    lines = [_finite('smallest eigenvalue', 'measured', f[judged], reading.smallest[judged]),
-             _finite('largest eigenvalue', 'reference', f[judged], reading.largest[judged])]
-    lines += [_finite(f'eigenvalue {k + 1}', 'other', f[judged], reading.eigenvalues[k][judged])
+    lines = [v.drawable('smallest eigenvalue', 'measured', f[judged], reading.smallest[judged], x_above_zero=True),
+             v.drawable('largest eigenvalue', 'reference', f[judged], reading.largest[judged], x_above_zero=True)]
+    lines += [v.drawable(f'eigenvalue {k + 1}', 'other', f[judged], reading.eigenvalues[k][judged], x_above_zero=True)
               for k in range(1, n - 1)]
     lines.append(v.series('zero', 'tolerance', [f[judged][0], f[judged][-1]], [0.0, 0.0])
                  if judged.any() else v.series('zero', 'tolerance', [], []))
@@ -967,15 +921,15 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
         pair = f'{reading.channels[i]} and {reading.channels[j]}'
         views.append(v.spectrum(f'{pair}: coherence', FREQUENCY,
                                 v.axis('Coherence', None, 'linear'),
-                                [_finite(f'{pair} as written', 'measured', f[judged],
-                                         before[judged]),
-                                 _finite(f'{pair} repaired', 'reference', f[judged],
-                                         after[judged])], link='frequency'))
+                                [v.drawable(f'{pair} as written', 'measured', f[judged],
+                                         before[judged], x_above_zero=True),
+                                 v.drawable(f'{pair} repaired', 'reference', f[judged],
+                                         after[judged], x_above_zero=True)], link='frequency'))
         views.append(v.spectrum(f'{pair}: phase', FREQUENCY, v.axis('Phase', '°', 'linear'),
-                                [_finite(f'{pair} as written', 'measured', f[judged],
-                                         phase_before[judged]),
-                                 _finite(f'{pair} repaired', 'reference', f[judged],
-                                         phase_after[judged])], link='frequency'))
+                                [v.drawable(f'{pair} as written', 'measured', f[judged],
+                                         phase_before[judged], x_above_zero=True),
+                                 v.drawable(f'{pair} repaired', 'reference', f[judged],
+                                         phase_after[judged], x_above_zero=True)], link='frequency'))
     point = reading.at(_cursor(f, reading.failing, params['frequency']))
     shown = bool(point.eigenvalues) and not np.isnan(point.eigenvalues[0])
     rows = [v.row('Channels', float(n), '', 'info'),
@@ -999,7 +953,7 @@ def realizability(project: Any, params: dict[str, Any]) -> list[dict]:
     if shown and not point.realizable:
         notes.insert(0, 'at this line no set of signals has this matrix: a combination of the '
                         'channels is asked for negative power')
-    rows += _notes(notes)
+    rows += v.notes(notes)
     return [*views, v.reading(f'Realizability of {name}', rows)]
 
 

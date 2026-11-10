@@ -242,8 +242,8 @@ def test_a_check_block_is_saved_with_the_report_and_its_template(tmp_path):
                                    'duration': 0.011, 'band': 0.15})
     io.save(report, str(tmp_path / 'r.hforge'))
     assert io.load(str(tmp_path / 'r.hforge')).blocks == report.blocks
-    report_template.save(report, tmp_path / 'house.vdreport')
-    back = report_template.load(tmp_path / 'house.vdreport')
+    report_template.save(report, tmp_path / 'house.hftemplate')
+    back = report_template.load(tmp_path / 'house.hftemplate')
     assert back.blocks == report.blocks and back.features == [cb.FEATURE]
 
 
@@ -1104,12 +1104,6 @@ def test_a_caption_says_nothing_when_nothing_was_left_off():
         ' The first 4 of 6 shocks are drawn; the table holds every one.')
 
 
-def test_a_signed_number_has_a_minus_sign_and_a_dash_for_none():
-    assert cb._signed(float('nan')) == cb.DASH
-    assert cb._signed(-1.26) == '−1.3'
-    assert cb._signed(0.5, 2, 'dB') == '+0.50 dB'
-
-
 def test_two_shocks_are_told_apart_in_the_table_and_the_figures():
     from test_shock_check import compensated, times
 
@@ -1651,3 +1645,23 @@ def test_a_dead_frequency_channel_is_not_judged_and_does_not_pass(sweep):
     assert shown.status == cb.NOT_JUDGED
     assert shown.rows[0][-1] == 'not judged: no line could be judged'
     assert shown.rows[0][2:5] == [cb.DASH] * 3
+
+
+def test_time_statistics_tell_apart_two_quantities_at_one_dof():
+    """A drive point records a force and an acceleration at one DOF: a table
+    row, the words and a figure's caption each say which they mean."""
+    samples = np.random.default_rng(0).normal(size=(3, 4096))
+    samples[1, 2000] = 40.0
+    history = TimeHistory(abscissa=np.arange(4096) / 1024.0, ordinate=samples,
+                          response_dof=['1Z+', '1Z+', '2Z+'],
+                          ordinate_dim=['acceleration', 'force', 'acceleration'])
+    report = Report('R', features=[cb.FEATURE])
+    cb.add(report, 'time_statistics', {'source': 'History'})
+    page = _payload(render_html(report, {'History': history}))
+    table = next(block for block in page['blocks'] if block['kind'] == 'table')
+    assert [row[0] for row in table['rows']] == ['1Z+ (acceleration)', '1Z+ (force)', '2Z+']
+    words = ' '.join(str(block.get('html', '')) + str(block.get('text', ''))
+                     for block in page['blocks'] if block['kind'] == 'text')
+    assert '1Z+ (force), ' in words
+    assert any(str(block.get('caption', '')).startswith('1Z+ (force): the histogram')
+               for block in page['blocks'])

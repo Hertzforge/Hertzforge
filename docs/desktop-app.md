@@ -21,7 +21,7 @@ is not in it: the example projects are downloads on hertzforge.com (`scripts/mak
 writes them).
 
 The CI workflow `.github/workflows/desktop.yml` builds on every push to the desktop branch and on
-demand: a `.dmg` for macOS on Apple silicon, an NSIS installer (`*-setup.exe`) for Windows x64, and
+demand: a `.dmg` each for macOS on Apple silicon and on Intel, an NSIS installer (`*-setup.exe`) for Windows x64, and
 a `.deb` and an AppImage for Linux x64, as workflow artifacts kept for 14 days. It is not a required
 check.
 
@@ -85,7 +85,7 @@ computer has (`-I`), and never writing bytecode into the installed app (`-B`; th
 is compiled at build time, checked by hash). The interpreter build is named in `bundle_python.sh`
 and checked against its release's checksums.
 
-The other route, a PyInstaller freeze as Visual Dynamics ships, was not taken: PyInstaller's
+The other route, a PyInstaller freeze, was not taken: PyInstaller's
 bootloader is GPL-2.0 with an exception for the programs it starts, which would need a ruling under
 this project's license policy, and a freeze adds its own analysis and hooks to keep working. Both
 routes carry the same wheels, so the size is about the same either way.
@@ -98,12 +98,11 @@ listening 3.8 s after it was opened and its window up at 4.0 s.
 
 The modal solve factors its matrices with the fastest solver the machine has
 (`core/sparse_solve.py`): Apple's Accelerate on a Mac, Intel's PARDISO through oneMKL on x86-64
-Windows and Linux (`pypardiso`, a dependency there), and SuperLU anywhere else, as Visual Dynamics
-does. Intel's libraries are proprietary, the one exception to the permissive rule
+Windows and Linux (`pypardiso`, a dependency there), and SuperLU anywhere else. Intel's libraries are proprietary, the one exception to the permissive rule
 (`THIRD_PARTY_NOTICES.md`). The bundle keeps only the libraries PARDISO loads, threaded through TBB,
 and `bundle_python.sh` runs `hertzforge check-solver` on the bundled runtime before it is packed,
 so a build that fell back to SuperLU fails rather than ships. CI runs the same check on every
-runner. In Visual Dynamics a Windows model of 193,627 bricks that took 70 minutes through SuperLU
+runner. A Windows model of 193,627 bricks that took 70 minutes through SuperLU
 took four through PARDISO. The sizes the trimming leaves in Hertzforge's installers are not
 measured yet.
 
@@ -165,8 +164,8 @@ user sees because of it:
 
 On the developer's Mac, `desktop/packaging/sign_macos.sh` signs every binary in
 the app with the hardened runtime (`entitlements.plist`), notarizes and staples the app, then makes,
-signs and notarizes the disk image. It is adapted from Visual Dynamics' signed release route and finds
-the same credentials: the "Developer ID Application" identity in the keychain, and for notarization the
+signs and notarizes the disk image. It finds
+its credentials: the "Developer ID Application" identity in the keychain, and for notarization the
 app-specific password in the login-keychain item `vd-notary-password` (or the notarytool profile
 `vd-notary`). The team is the one the identity's name ends with. After a build:
 
@@ -176,7 +175,7 @@ desktop/packaging/sign_macos.sh "$CARGO_TARGET_DIR/release/bundle/macos/Hertzfor
 
 The first run, on November 3, 2026, signed and notarized the app and its image on the first try, and
 Gatekeeper assessed both as "Notarized Developer ID". The signed app started both services, and its
-bundled Python, under the hardened runtime with Visual Dynamics' entitlements, imported NumPy, SciPy,
+bundled Python, under the hardened runtime with `entitlements.plist`, imported NumPy, SciPy,
 pandas, netCDF4, h5py and the CAD kernel and computed a PSD from the plate data. The signed app is not
 yet tried as a copy downloaded on another Mac.
 
@@ -250,7 +249,7 @@ Check for Updates, in the shell's command palette, asks the Tauri updater: it re
 release's `latest.json`, says through a native dialog whether a newer version is published, and on
 Install downloads that release's `Hertzforge-macOS-<Arch>.app.tar.gz`, verifies it against the
 public key in `desktop/tauri.conf.json` (`plugins.updater.pubkey`), replaces the app and relaunches.
-Only when asked, never at startup, as Visual Dynamics checks. The archive is the signed, stapled app
+Only when asked, never at startup. The archive is the signed, stapled app
 the same run notarized, tarred after signing and signed again with the updater's key by
 `tauri signer sign`; `desktop/packaging/updater_manifest.py` writes the manifest beside it.
 
@@ -275,5 +274,5 @@ later app updates from.
   and Linux, which have no menu bar yet, those are buttons in the top bar. They use the native dialogs, and
   files dropped on the window open or import by their paths (`capabilities/main.json` grants the
   main window its events and the two dialogs; the display windows get nothing).
-- Intel Macs and Windows on Arm.
+- Windows on Arm.
 - Updates on Windows and Linux: the updater is wired for the macOS app only.

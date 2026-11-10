@@ -1,6 +1,6 @@
 /**
- * A drawing put on the clipboard as a PNG, as Visual Dynamics' Copy puts a plot or the 3-D view
- * there for a slide or a report; saved as a PNG file instead where the clipboard refuses an image.
+ * A drawing put on the clipboard as a PNG; saved as a PNG file instead where the clipboard refuses
+ * an image.
  * The canvas is flattened onto `background` (a WebGL canvas is drawn with a clear background), so
  * the image reads as it does on screen. A WebGL canvas must be copied in the same task it was
  * rendered in, before the browser clears it: `render` draws it first. Says which happened.

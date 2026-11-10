@@ -213,7 +213,7 @@ await caption('');
 
 // Closing card
 await card(`<h1>Built on Two Proven Cores</h1><div class="rule"></div>
-  <p>Analysis: the Visual Dynamics core, unchanged &middot; Control: the controller's Rust engine</p>
+  <p>Analysis: the Python core &middot; Control: the controller's Rust engine</p>
   <p>Next: Acquire &amp; Control, Model (FEM), Specify, Report</p>`);
 await pause(4200);
 await cdp.send('Page.stopScreencast');

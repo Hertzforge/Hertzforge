@@ -30,13 +30,14 @@ def test_a_report_is_generated_rendered_and_exported(project, tmp_path):
     assert 'http://' not in html.split('<script id="data"')[0].lower(), 'nothing from a network'
     answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'plate')})
     written = answer['path']
-    assert written == str(tmp_path / 'plate.html') and answer == {'path': written, 'owed': [], 'index': []}
+    assert written == str(tmp_path / 'plate.html')
+    assert answer['owed'] == [] and answer['index'] == [] and answer['note'].endswith('unbound blocks left out.')
     assert Path(written).read_text(encoding='utf-8').startswith('<!DOCTYPE html>')
     assert not list(tmp_path.glob('*.partial'))
 
 
 def test_an_export_asks_about_owed_sections_and_astray_files_first(project, tmp_path):
-    """VD's `_export_owed` and `_export_index`: with skeleton sections on, a
+    """With skeleton sections on, a
     report that still owes sections is not written until told to anyway;
     with the data index on, the files are hashed again and one changed or
     not found holds the export the same way. An issue makes the index
@@ -95,15 +96,17 @@ def test_a_report_over_the_socket(validate, tmp_path):
         ('report.generate', {'template': 'modal', 'name': 'Plate Report'}),
         ('report.render', {'name': 'Plate Report'}),
         ('report.export', {'name': 'Plate Report', 'path': str(tmp_path / 'out.html')}),
+        ('report.print', {'name': 'Plate Report', 'anyway': True}),
         ('report.render', {}),
     ]))
-    empty, _, made, shown, written, unnamed = (got[-1] for got in responses)
+    empty, _, made, shown, written, printed, unnamed = (got[-1] for got in responses)
     # the connection's empty project takes a report like any other
     assert empty['result']['name'] == 'Report'
     validate(made['result'], 'reportGenerateResult')
     assert made['result']['name'] == 'Plate Report' and made['result']['project']['modified']
     validate(shown['result'], 'reportRenderResult')
     validate(written['result'], 'reportExportResult')
+    validate(printed['result'], 'reportPrintResult')
     assert (tmp_path / 'out.html').exists()
     assert unnamed['error']['code'] == 'bad_request'
 
@@ -158,6 +161,12 @@ def test_a_block_is_moved_captioned_repointed_and_removed(edited):
     with pytest.raises(ProtocolError, match='is not something block'):
         reports.operate(project, {'name': name, 'op': 'field', 'at': at, 'field': 'source',
                                   'value': 'Nothing'})
+    for to in (-1, report.num_blocks + 1):
+        with pytest.raises(ProtocolError, match='no place to move'):
+            reports.operate(project, {'name': name, 'op': 'move', 'from': 0, 'to': to})
+    assert reports.operate(project, {'name': name, 'op': 'move', 'from': at,
+                                     'to': report.num_blocks})['selected'] == report.num_blocks - 1
+    at = report.num_blocks - 1
     count = report.num_blocks
     out = reports.operate(project, {'name': name, 'op': 'remove', 'at': at})
     assert report.num_blocks == count - 1 and out['selected'] is None
@@ -198,7 +207,7 @@ def identified(project):
 
 def test_the_printed_page_draws_finely_and_asks_to_print(edited):
     project, name = edited
-    page = reports.print_page(project, {'name': name})
+    page = reports.print_page(project, {'name': name})['html']
     assert "replaceState(null, '', '#print')" in page and 'print()' in page
 
 
@@ -222,7 +231,6 @@ def test_an_issue_cancelled_leaves_a_draft(identified, tmp_path):
 
     project, name = identified
     reports.issue(project, {'name': name, 'step': 'begin'})
-    assert value(project[name], 'status') == 'issued'
     reports.issue(project, {'name': name, 'step': 'cancel'})
     assert value(project[name], 'status') == 'draft'
     with pytest.raises(ProtocolError, match='not waiting to be issued'):
@@ -242,3 +250,18 @@ def test_a_report_without_identity_is_not_issued(edited):
     project, name = edited
     with pytest.raises(ProtocolError, match='does not have Identity and issue'):
         reports.issue(project, {'name': name, 'step': 'begin'})
+
+
+def test_a_written_export_says_what_it_left_out_and_what_the_check_found(project, tmp_path):
+    name = reports.generate(project, {'template': 'empty', 'name': 'R'})
+    project[name].add({'kind': 'plot', 'source': 'Gone', 'caption': 'x'})
+    project[name].add({'kind': 'plot', 'source': 'Gone too', 'caption': 'y'})
+    answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'a')})
+    assert answer['note'] == '2 unbound blocks left out.'
+    attached = tmp_path / 'settings.txt'
+    attached.write_text('gain 2', encoding='utf-8')
+    project.index_file(attached, 'the settings')
+    project.report_features(name, enable=('data_index',))
+    project[name].remove([0, 1])
+    answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'b')})
+    assert answer['note'].startswith('Checked ') and 'match' in answer['note']

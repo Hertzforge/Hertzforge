@@ -1,11 +1,8 @@
 """A time history's analysis settings, set from the shell: its averaging,
 its filter and its truncation span, which Compute Spectra and Compute
-PSDs, Apply Filter and Apply Truncation then read. Visual Dynamics sets
-them in its averaging, filter and truncate views; here each is an
+PSDs, Apply Filter and Apply Truncation then read. Each is an
 operation whose params open on the history's own settings (`setting`)
-and whose result draws the setting on one record, as VD draws it (the
-frames shaded, the filtered record over the recorded one, the cut ends
-grayed), and reads back what was stored.
+and whose result draws the setting on one record, and reads back what was stored.
 """
 
 from __future__ import annotations
@@ -112,7 +109,10 @@ def _text(held: Any) -> str:
 
 
 def _rate(history: Any) -> float:
-    return float(history.sample_rate)
+    try:
+        return float(history.sample_rate)
+    except ValueError as error:
+        raise refused(str(error)) from None
 
 
 def _shown(history: Any, name: str, params: dict[str, Any]) -> int:
@@ -125,8 +125,7 @@ def _shown(history: Any, name: str, params: dict[str, Any]) -> int:
 def _trace(history: Any, name: str, record: int, regions: list[dict],
            filtered: Any = None) -> dict:
     """One record of a history, peak-decimated, with `regions` shaded
-    behind it, as Visual Dynamics draws a setting on the record it
-    applies to. With `filtered` (the record through a filter) that is
+    behind it. With `filtered` (the record through a filter) that is
     drawn over the record, the unfiltered record thin behind it."""
     import hertzforge as hz
     from hertzforge.decimate import peak_decimate
@@ -149,7 +148,7 @@ def _trace(history: Any, name: str, record: int, regions: list[dict],
 
 def _frames_span(history: Any, name: str, record: int) -> list[dict]:
     """The span of every frame, dragged on the plot to slide the frames
-    along the record as Visual Dynamics' averaging region slides; the
+    along the record; the
     averaging run again with its settings as they are and the new start."""
     averaging = history.averaging
     rate = _rate(history)
@@ -212,6 +211,7 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
                       f'not {averaging.frames}')
     record = _shown(history, name, params)
     history.averaging = averaging
+    project.record_setting(name, 'averaging', averaging)
     return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
             _averaging_reading(name, history)]
 
@@ -227,6 +227,7 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         history.averaging = history.suggest_averaging()
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_setting(name, 'averaging', history.averaging)
     return [_trace(history, name, record, _frames(history) + _frames_span(history, name, record)),
             _averaging_reading(name, history)]
 
@@ -253,6 +254,7 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
     except ValueError as error:
         raise refused(str(error)) from None
     history.filtering = filtering
+    project.record_setting(name, 'filtering', filtering)
     # the preview is what Apply Filter will make of this record: the same
     # design, zero phase
     from scipy.signal import sosfiltfilt
@@ -284,10 +286,11 @@ def set_truncation(project: Any, params: dict[str, Any]) -> list[dict]:
         history.truncation = Truncation(start, stop)
     except ValueError as error:
         raise refused(str(error)) from None
+    project.record_setting(name, 'truncation', history.truncation)
     cut = [v.region(a, b, 'cut', label) for a, b, label in (
         (first, start, f'Cut, {first:g} to {start:g} s'),
         (stop, last, f'Cut, {stop:g} to {last:g} s')) if b > a]
-    # the kept span, its edges or the whole dragged as VD's truncation is
+    # the kept span, its edges or the whole dragged
     cut.append(v.region(start, stop, 'span', 'Drag an edge, or the middle to slide it',
                         v.dragging('project.set_truncation',
                                    {'source': name, 'record': record + 1}, 'start', 'stop')))

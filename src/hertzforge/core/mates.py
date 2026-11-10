@@ -145,12 +145,6 @@ class MatedSet:
         return replace(self, groups=kept_groups, nodes_a=a, nodes_b=b)
 
 
-def _skin_nodes(geometry: Any, group: int) -> list[int]:
-    from .mesh import group_skin
-
-    return sorted({int(n) for face in group_skin(geometry, group) for n in face})
-
-
 def _two_sided(geometry: Any, group: int) -> bool:
     """Whether a group's faces have no outside: plates, whose normals
     point whichever way their corners were listed."""

@@ -1,5 +1,5 @@
 """The native .hforge file format, which is HDF5, and the reader for
-Visual Dynamics' .vdyn files it started from.
+older .vdyn files it started from.
 
 A file with a single object has one group at the root, named for the
 object's kind ('geometry', 'data', 'shapes', and so on). A file with a
@@ -81,11 +81,11 @@ REFERENCE_FROM_BYTES = 64 * 2**20
 #: broken; a loop would otherwise never end
 REFERENCE_DEPTH = 8
 
-#: the stamp of a Visual Dynamics file
+#: the stamp of a .vdyn file
 VDYN_STAMP = 'visualdynamics_schema'
 
-#: the newest .vdyn schema there is. Visual Dynamics stopped at 3 (2
-#: added predictions, 3 the run log extract) when its core moved here.
+#: the newest .vdyn schema there is: 3 (2 added predictions, 3 the run log
+#: extract). The format stopped changing there.
 VDYN_SCHEMA = 3
 
 #: the suffix `save` adds
@@ -115,7 +115,7 @@ def compressed(on: bool = True) -> Iterator[None]:
     or more with gzip and the shuffle filter, chunked along its last axis
     (time, for a time history). Arrays are uncompressed otherwise: gzip
     saved 12% on a random-vibration run and wrote at 58 MB/s, so it is
-    for archiving, not for every save (FILE_FORMAT_PLAN.md, section 3).
+    for archiving, not for every save.
     Every HDF5 reader reads the file either way."""
     token = _compressing.set(on)
     try:
@@ -229,9 +229,8 @@ def _read_strings(group: h5py.Group, name: str) -> list[str]:
 
 
 #: the names `.vdyn` keeps for a geometry's element-group fields, by
-#: the name `.hforge` and the code use. Visual Dynamics called element
-#: groups blocks when its format was set and kept the old names on disk
-#: after the rename (2026-10-08), so its files load the same.
+#: the name `.hforge` and the code use: element groups were called blocks
+#: when the `.vdyn` format was set, and those names stayed on disk.
 VDYN_NAMES = {'elem_group': 'elem_block', 'group_id': 'block_id',
               'group_name': 'block_name',
               'group_properties': 'block_properties'}
@@ -239,7 +238,7 @@ VDYN_NAMES = {'elem_group': 'elem_block', 'group_id': 'block_id',
 
 def _on_disk(group: h5py.Group, name: str) -> str:
     """The name `name` is stored under in the file `group` is in: its
-    `.vdyn` name in a Visual Dynamics file, itself otherwise."""
+    `.vdyn` name in a `.vdyn` file, itself otherwise."""
     if VDYN_STAMP in group.file.attrs:
         return VDYN_NAMES.get(name, name)
     return name
@@ -300,6 +299,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         import json
 
         group.attrs['mates'] = json.dumps([m.as_record() for m in mates])
+    # which solids each element group was meshed from; absent when there are
+    # none, so a file from before it reads back the same
+    tied = getattr(geom, 'group_solids', None) or {}
+    if tied:
+        import json
+
+        group.attrs['group_solids'] = json.dumps({str(k): list(v) for k, v in tied.items()})
     # what each element group is made of, one subgroup per element group that has it:
     # the material's numbers, and a thickness or a section — the model
     # a geometry can build of itself (2026-09-25) — or, for an element group of
@@ -468,6 +474,11 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
         geometry.mates = [MatedSet.from_record(r)
                           for r in json.loads(group.attrs['mates'])]
+    if 'group_solids' in group.attrs:
+        import json
+
+        geometry.group_solids = {int(k): tuple(v)
+                                 for k, v in json.loads(group.attrs['group_solids']).items()}
     return geometry
 
 
@@ -948,6 +959,7 @@ def load_report(group: h5py.Group) -> Report:
     import json
 
     from ..core.report import Report
+    from ..report.identity import settled
 
     blocks = group['blocks'][()]
     if isinstance(blocks, bytes):
@@ -964,7 +976,7 @@ def load_report(group: h5py.Group) -> Report:
                   blocks=json.loads(blocks),
                   marking=str(group.attrs['marking']),
                   marking_color=str(group.attrs['marking_color']),
-                  features=features, identity=json.loads(identity))
+                  features=features, identity=settled(json.loads(identity)))
 
 
 def save_predictions(predictions: Predictions, group: h5py.Group) -> None:
@@ -1152,7 +1164,7 @@ def load_sine_specification(group: h5py.Group) -> SineSweepSpecification:
             frequency=sub['frequency'][()],
             amplitude=sub['amplitude'][()], phase=sub['phase'][()],
             segment_type=sub['segment_type'][()],
-            segment_rate=sub['segment_rate'][()], **limits))
+            segment_rate=sub['segment_rate'][()], from_file=True, **limits))
     return SineSweepSpecification(
         tones=tones, response_dof=_read_strings(group, 'response_dof'),
         ordinate_dim=str(group.attrs['ordinate_dim']),
@@ -1232,7 +1244,7 @@ def _saver_for(obj):
 
 def hforge_path(path: str | os.PathLike) -> str:
     """`path` with `.hforge` added when it does not end in it. A `.vdyn`
-    path is refused: Visual Dynamics' files are opened, never written."""
+    path is refused: `.vdyn` files are opened, never written."""
     path = str(path)
     if path.endswith('.vdyn'):
         raise ValueError(
@@ -1559,8 +1571,8 @@ def load(path: str | os.PathLike,
     Raises
     ------
     ValueError
-        When the file has neither stamp (it was not written by
-        Hertzforge or Visual Dynamics), was written with a newer schema,
+        When the file has neither the `.hforge` nor the `.vdyn` stamp, was
+        written with a newer schema,
         or holds nothing this reader recognizes.
     """
     import h5py
@@ -1583,9 +1595,9 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
         written, newest, writer = int(f.attrs[STAMP]), SCHEMA_VERSION, 'Hertzforge'
     elif VDYN_STAMP in f.attrs:
         written, newest, writer = (int(f.attrs[VDYN_STAMP]), VDYN_SCHEMA,
-                                   'Visual Dynamics')
+                                   'version of the .vdyn format')
     else:
-        raise ValueError(f'{path} is not a Hertzforge or Visual Dynamics '
+        raise ValueError(f'{path} is not a .hforge or .vdyn '
                          'file (no schema stamp)')
     if written > newest:
         raise ValueError(

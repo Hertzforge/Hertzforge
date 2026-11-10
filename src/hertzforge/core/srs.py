@@ -41,6 +41,8 @@ same analysis and where it goes wrong.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -58,6 +60,13 @@ KINDS = ('positive', 'negative', 'maximax')
 #: fine enough that a lightly damped peak is not stepped over and
 #: coarse enough to stay quick.
 PER_OCTAVE = 12
+
+#: samples times oscillators from which `peaks` spreads over threads,
+#: about 15 ms of work: a shorter pass spends more starting them, and a
+#: synthesis makes hundreds of short passes
+THREADS_FROM = 2_000_000
+#: the most threads a pass spreads over
+MOST_THREADS = 8
 
 
 def damping_for(q: float = DEFAULT_Q) -> float:
@@ -150,11 +159,26 @@ def peaks(signal: ArrayLike, frequencies: ArrayLike, sample_rate: float,
     b, a = ramp_invariant(frequencies, sample_rate, zeta)
     highest = np.zeros(len(b))
     lowest = np.zeros(len(b))
-    if x.size:
+    if not x.size:
+        return highest, lowest
+
+    def oscillator(k: int) -> None:
+        y = lfilter(b[k], a[k], x)
+        highest[k] = max(float(y.max()), 0.0)
+        lowest[k] = min(float(y.min()), 0.0)
+
+    # lfilter lets go of the GIL, so threads share the oscillators. Each
+    # is the same call on the same samples, so the numbers are the
+    # serial ones to the bit. Measured 2026-11-07, 60 s at 51.2 kHz and
+    # 121 lines on 8 threads: about six times the speed
+    if x.size * len(b) < THREADS_FROM:
         for k in range(len(b)):
-            y = lfilter(b[k], a[k], x)
-            highest[k] = max(float(y.max()), 0.0)
-            lowest[k] = min(float(y.min()), 0.0)
+            oscillator(k)
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(min(MOST_THREADS, os.cpu_count() or 1)) as pool:
+            list(pool.map(oscillator, range(len(b))))
     return highest, lowest
 
 

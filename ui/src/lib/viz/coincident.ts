@@ -1,6 +1,6 @@
 /**
  * Nodes that sit at one place: a drive point's two nodes, a mesh's seam, a node numbered twice.
- * Visual Dynamics' scene captions them together ("104, 200 (2 here)"), so the caption built here
+ * The scene captions them together ("104, 200 (2 here)"), so the caption built here
  * names every id at the hovered node's position.
  */
 

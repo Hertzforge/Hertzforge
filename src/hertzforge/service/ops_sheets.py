@@ -1,4 +1,4 @@
-"""Sheets an author fills in by hand: Visual Dynamics' channel table
+"""Sheets an author fills in by hand: the channel table
 (New Channel Table, Add Channel and its typed cells, with the sensor
 catalog filling a model's maker and a triax's other legs, and the
 calibration dates read against the test's), its specification sheet
@@ -28,6 +28,7 @@ from hertzforge.core.sensor_catalog import CATALOG
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .ops_project import chosen_records
+from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
 from .spec_lines import FREQUENCY, NAMES, ROLES, sig, spec_line
 from .waterfalls import unit_text
@@ -72,10 +73,10 @@ def cell_widgets() -> tuple[dict[str, str], dict[str, list[str]]]:
 
 def channel_table(project: Any, name: str, title: str | None = None,
                   environment: str | None = None) -> dict:
-    """A channel table as Visual Dynamics shows it (`core.tables.table_of`):
+    """A channel table:
     its columns, then the direction columns derived from the geometry
     linked with it, each of its own columns edited through
-    `project.set_channel_cell`, with VD's widgets (`cell_widgets`). The
+    `project.set_channel_cell`, with the widgets (`cell_widgets`). The
     derived columns are read only, and so is Control on a table whose
     control channels are per environment; `environment` names the loop
     whose control channels that column shows."""
@@ -130,8 +131,7 @@ def _rows_of(table: Any) -> dict:
 
 def new_channel_table(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.new_channel_table`: an empty channel table added to the
-    project to fill in by hand (`Project.new_channel_table`), as Visual
-    Dynamics' New Channel Table makes one; Add Channel adds its rows."""
+    project to fill in by hand (`Project.new_channel_table`); Add Channel adds its rows."""
     name = project.new_channel_table(params['name'].strip() or 'Channel Table')
     return [channel_table(project, name),
             v.reading(f'{name}: an empty channel table',
@@ -141,8 +141,7 @@ def new_channel_table(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def add_channels(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.add_channels`: blank channels added at the end of a channel
-    table, numbered on from its highest (`Project.add_channels`), as Visual
-    Dynamics' Add Channel adds one; their cells are typed in after."""
+    table, numbered on from its highest (`Project.add_channels`); their cells are typed in after."""
     name = params['table']
     try:
         numbers = project.add_channels(name, params['count'])
@@ -165,8 +164,7 @@ def _set_cell(project: Any, name: str, number: int, key: str, text: str) -> list
     noted = []
     if key == 'role' and project._role_partners(name):
         # linked with the time data it describes, the Role column is that
-        # data's roles, and the edit is the data's (Visual Dynamics'
-        # `_apply_channel_role`)
+        # data's roles, and the edit is the data's
         dof, quantity = table.dof_strings()[row], table.types()[row]
         role = text.strip().lower()
         try:
@@ -180,6 +178,7 @@ def _set_cell(project: Any, name: str, number: int, key: str, text: str) -> list
             table.set_cell(key, row, text)
         except (ValueError, KeyError) as error:
             raise refused(str(error).strip('"')) from None
+        project.record_call(name, 'set_cell', key, row, text)
     channel = table.frame.loc[row, 'channel']
     stored = _cell(table, row, key)
     rows = [v.row('Set', f'{title_of(key)} of channel {channel}: {stored or "blank"}', None,
@@ -209,7 +208,7 @@ def set_channel_cell(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def set_sensor_model(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_sensor_model`: a channel's model picked from the sensor
-    catalog (`core.sensor_catalog`), the drop-down of Visual Dynamics'
+    catalog (`core.sensor_catalog`), the drop-down of the
     Model cell, written as the cell is (`ChannelTable.set_cell`): its
     maker fills a blank Make, and a triax fills its other legs at the
     node."""
@@ -278,18 +277,14 @@ SCALE_DB = Param('decibels', 'Change', 'number', default=0.0, unit='dB', step=1.
 SHEET = (BREAKPOINTS, ENTRY, PAIRS, ALL_PAIRS, WARNING, ABORT, SYMMETRIC, UNIFORM, FORM,
          SPACING, DRAWN)
 
-#: why the first breakpoint's slope cell takes nothing (Visual Dynamics'
-#: `author_panel.NO_SLOPE_IN`)
+#: why the first breakpoint's slope cell takes nothing
 NO_SLOPE_IN = ('the first breakpoint has no slope into it; type its level, and a slope into '
                'each breakpoint after it')
 SLOPE = ' dB/oct'
 
 
 def _numbers(text: str, what: str) -> list[float]:
-    try:
-        return [float(t) for t in text.replace(',', ' ').split()]
-    except ValueError:
-        raise refused(f'{text.strip()!r} is not a list of numbers ({what})') from None
+    return parse_numbers(text, f'a list of numbers ({what})')
 
 
 def _lines(text: str) -> list[str]:
@@ -321,7 +316,7 @@ def _typed_breakpoints(draft: Any, text: str, entry: str) -> Any:
                           f'each of the {n} channels; {line!r} is not')
         rows.append(values)
     if entry == 'levels':
-        # typed out of order, the sheet re-sorts (Visual Dynamics' `Sheet.sort`)
+        # typed out of order, the sheet re-sorts
         rows.sort(key=lambda values: values[0])
     frequencies = [values[0] for values in rows]
     columns = [[values[1] if len(values) == 2 else values[1 + k] for values in rows]
@@ -370,7 +365,7 @@ def _typed_pairs(draft: Any, text: str) -> Any:
 
 def _spacing_hint(project: Any, name: str) -> float | None:
     """A line spacing when the sheet has none: a time history's averaging,
-    one linked with the object first (Visual Dynamics' `_spacing_hint`)."""
+    one linked with the object first."""
     from hertzforge.core.data import TimeHistory
 
     linked = [n for n in (project.object_group_of(name) or []) if n in project]
@@ -412,8 +407,10 @@ def _sheet(project: Any, name: str, draft: Any, params: dict[str, Any]) -> Any:
 
 
 def _autos(spec: Any) -> dict[str, int]:
+    from hertzforge.core.data import autospectrum
+
     return {str(spec.response_dof[k]): k for k in range(spec.num_records)
-            if spec.reference_dof is None or spec.reference_dof[k] == spec.response_dof[k]}
+            if autospectrum(spec, k)}
 
 
 def _density_unit(dim: str) -> str | None:
@@ -421,7 +418,7 @@ def _density_unit(dim: str) -> str | None:
 
 
 def breakpoint_table(name: str, draft: Any, channels: str = '') -> dict:
-    """The sheet's breakpoints as Visual Dynamics' grid shows them: a row
+    """The sheet's breakpoints: a row
     per breakpoint, its frequency and a level per channel in the channel's
     SI density, and by slope the slope into it beside each level; each
     cell edited through `project.set_breakpoint`."""
@@ -452,7 +449,7 @@ def breakpoint_table(name: str, draft: Any, channels: str = '') -> dict:
 
 def _band_handles(name: str, draft: Any, drawn: int, key: str, series: int,
                   channels: str) -> list[dict]:
-    """The handles on one band edge, one per run of segments as VD's flat plot has them:
+    """The handles on one band edge, one per run of segments:
     each at its run's middle on the edge's `series`, and what letting go runs. A sheet at
     lines has no segments to move."""
     if draft.form != 'breakpoints':
@@ -474,8 +471,7 @@ def _band_handles(name: str, draft: Any, drawn: int, key: str, series: int,
 def _spec_views(project: Any, name: str, draft: Any, drawn: int, said: str,
                 channels: str = '') -> list[dict]:
     """The specification drawn (each channel's target, and the drawn
-    channel's warning and abort limits, as Visual Dynamics draws the
-    sheet's preview), its breakpoint table, and a reading of the sheet."""
+    channel's warning and abort limits), its breakpoint table, and a reading of the sheet."""
     from hertzforge.core.author import band_notes
 
     spec = project[name]
@@ -540,8 +536,7 @@ def create_specification(project: Any, params: dict[str, Any]) -> list[dict]:
     channel table's control channels (`SpecificationDraft
     .at_control_channels`) or at picked rows whatever their role
     (`at_rows`), filled in, and written beside the table
-    (`Project.author_specification`), as Visual Dynamics' Create
-    Specification makes it. Left blank, the sheet is the starter: a flat
+    (`Project.author_specification`). Left blank, the sheet is the starter: a flat
     line from 20 to 2000 Hz at one SI unit of density, ±3 dB warning and
     ±6 dB abort, no cross term stated."""
     from hertzforge.core.author import SpecificationDraft
@@ -585,7 +580,7 @@ def _write(project: Any, name: str, draft: Any) -> None:
 
 
 def _areas_table(name: str, draft: Any, drawn: int) -> dict:
-    """VD's Areas and running rms: each segment of the drawn channel's breakpoints, its
+    """The Areas and running rms: each segment of the drawn channel's breakpoints, its
     slope, its area, its share of the whole and the rms accumulated to its end."""
     reading = draft.reading(drawn - 1)
     whole = reading.total_area or 1.0
@@ -593,8 +588,10 @@ def _areas_table(name: str, draft: Any, drawn: int) -> dict:
              f'{reading.slopes[k]:.3g}', f'{reading.areas[k]:.4g}',
              f'{100.0 * reading.areas[k] / whole:.1f}', f'{reading.running[k]:.4g}']
             for k in range(len(reading.areas))]
+    quantity = draft.dims[drawn - 1]
     return v.table(f'{name}, {draft.channels[drawn - 1]}: areas and running rms',
-                   ['Hz', 'dB/octave', 'Area', 'Share (%)', 'Running rms'], rows)
+                   ['Hz', 'dB/octave', f'Area [{unit_text(f"{quantity}**2")}]', 'Share (%)',
+                    f'Running rms [{unit_text(quantity)}]'], rows)
 
 
 def specification_areas(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -660,11 +657,11 @@ def scale_specification(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def set_band_edge(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_band_edge`: one edge of a band, in the segments named, set to a level in
-    decibels from the target (`SpecificationDraft.with_band_edge`), as a drag on VD's flat
+    decibels from the target (`SpecificationDraft.with_band_edge`), as a drag on the flat
     plot lands: it snaps to the grid, and a symmetric or uniform channel follows."""
     name = params['specification']
     draft = _opened(project, name, params['channels'])
-    segments = [int(part) for part in params['segments'].replace(' ', '').split(',') if part]
+    segments = parse_id_runs(params['segments'], 'a segment number')
     try:
         draft = draft.with_band_edge(params['kind'], params['side'], segments,
                                      params['decibels'])
@@ -681,7 +678,7 @@ def edit_specification(project: Any, params: dict[str, Any]) -> list[dict]:
     (`SpecificationDraft.from_specification`), on every channel or the
     ones named, the sheet's fields applied, and written back into it
     under its own name (`Project.author_specification` with replace), as
-    each edit on Visual Dynamics' Edit Specification sheet lands. Named
+    each edit on the Edit Specification sheet lands. Named
     channels are merged back; the others are unchanged."""
     name = params['specification']
     draft = _sheet(project, name, _opened(project, name, params['channels']), params)
@@ -704,9 +701,7 @@ def set_breakpoint(project: Any, params: dict[str, Any]) -> list[dict]:
     written into the specification (`Project.author_specification` with
     replace). A level is `SpecificationDraft.with_level` (by slope, every
     slope after it held), a slope `with_slope`. A frequency moves the
-    breakpoint and the rows re-sort, as Visual Dynamics' grid does it
-    (`author_panel._set_frequency`, computed here: the core has no call
-    for it)."""
+    breakpoint and the rows re-sort."""
     from hertzforge.core.breakpoints import levels_from_slopes, segment_slopes
 
     name = params['specification']

@@ -248,3 +248,48 @@ def test_a_foreign_file_is_written_in_the_units_asked_for(tmp_path, validate):
     assert (tmp_path / 'si.unv').read_bytes() != (tmp_path / 'inches.unv').read_bytes()
     with pytest.raises(ProtocolError, match="no unit system named 'cubits'"):
         ops_files.save_as(project, {**written, 'path': str(tmp_path / 'odd'), 'units': 'cubits'})
+
+
+# ---- a single object in a project file's format -----------------------------------
+
+@pytest.mark.parametrize('name, form', [('one.hforge', 'hforge'), ('one.mat', 'matlab')])
+def test_opening_a_single_object_file_gives_a_project_holding_it(tmp_path, name, form):
+    import numpy as np
+
+    import hertzforge as hz
+    from hertzforge.service import projects
+    from hertzforge.service.server import OPERATIONS
+
+    history = hz.TimeHistory(np.arange(8) / 8.0, np.ones((1, 8)), ['1X+'])
+    history.define_units('g')
+    project = hz.Project('p')
+    project.add('th', history)
+    op = next(o for o in OPERATIONS if o.id == 'project.save_as')
+    path = tmp_path / name
+    values = op.resolve({'object': 'th', 'format': form, 'path': str(path), 'units': 'si'},
+                        objects={'th': 'time_history'}, verbs={'th': projects.verbs_of(project, 'th')})
+    op.run(project, values)
+    opened = projects.open_file({'path': str(path)})
+    assert len(opened.project) == 1
+    assert opened.project.name == 'one'
+    assert opened.modified, 'nothing on disk is this project yet'
+    assert isinstance(next(iter(opened.project.values())), hz.TimeHistory)
+
+
+def test_a_project_file_imported_into_an_open_project_adds_to_it(tmp_path):
+    import numpy as np
+
+    import hertzforge as hz
+    from hertzforge.service import projects
+
+    history = hz.TimeHistory(np.arange(8) / 8.0, np.ones((1, 8)), ['1X+'])
+    saved = hz.Project('saved')
+    saved.add('th', history)
+    saved.compute_psds('th')
+    saved.save(tmp_path / 'saved.hforge')
+    state = projects.new({'title': 'here'})
+    state.project.add('mine', history)
+    state, added = projects.import_file(state, {'path': str(tmp_path / 'saved.hforge')})
+    assert set(state.project) == {'mine', 'th', 'th PSDs'}
+    assert set(added) == {'th', 'th PSDs'}
+    assert state.project.provenance['th PSDs']['source'] == 'th'

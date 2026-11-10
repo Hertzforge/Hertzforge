@@ -1144,51 +1144,6 @@ class TimeCompression:
         return said + f'; within the cap of {self.cap:g} on the ASD'
 
 
-def time_compression(*, b: float | None = None,
-                     time_ratio: float | None = None,
-                     factor: float | None = None,
-                     cap: float = CAP['asd']) -> TimeCompression:
-    """The equal-damage trade of time for level at exponent `b`, from
-    the time ratio (service over test) or from the exaggeration factor
-    on the ASD, whichever is given.
-
-    Parameters
-    ----------
-    b : float
-        The fatigue exponent, within `B_RANGE`.
-    time_ratio : float, optional
-        t2 / t1, the service time over the test time; above one
-        shortens the test.
-    factor : float, optional
-        W1 / W2, the test's ASD over the service's.
-    cap : float, default 4
-        The most the ASD factor may be, `CAP['asd']`.
-
-    Returns
-    -------
-    TimeCompression
-
-    Raises
-    ------
-    ValueError
-        Unless exactly one of `time_ratio` and `factor` is given, or
-        when b, the given one or the cap is out of sense.
-    """
-    if (time_ratio is None) == (factor is None):
-        raise ValueError('give the time ratio or the exaggeration factor, '
-                         'one of the two')
-    cap = float(cap)
-    if not (math.isfinite(cap) and cap >= 1.0):
-        raise ValueError(f'the cap {cap:g} on the ASD is below one')
-    if factor is None:
-        ratio = float(time_ratio)
-        return TimeCompression(checked_b(b), ratio, exaggeration(ratio, b),
-                               cap)
-    factor = float(factor)
-    return TimeCompression(checked_b(b), compression_ratio(factor, b),
-                           factor, cap)
-
-
 @dataclass(frozen=True)
 class Equivalence:
     """A test set against a field environment, resonator by resonator,

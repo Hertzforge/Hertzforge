@@ -20,7 +20,7 @@
 	 * node's largest travel over a cycle on a colorblind-safe sequential map with a numeric legend. GPU resources are
 	 * released on unmount and the WebGL context is dropped explicitly (WebKit caps live contexts).
 	 *
-	 * A view with `pick` takes clicks, as Visual Dynamics' Add mode and planning pane do: a press and
+	 * A view with `pick` takes clicks: a press and
 	 * release in one place places a point, picks a node, or leaves a surface out or puts it back, and
 	 * a drag still turns the view.
 	 */
@@ -61,8 +61,8 @@
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
-	import { alignedShape, nodeTravel } from './shape';
-	import { idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { alignedShape, followed, nodeTravel } from './shape';
+	import { gridStep, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 
 	interface Props {
@@ -106,6 +106,7 @@
 		const tc = new TransformControls(camera, renderer.domElement);
 		tc.setSpace('local');
 		tc.setMode(gizmoMode);
+		tc.setTranslationSnap(gridStep(view.unit));
 		tc.attach(anchor);
 		tc.addEventListener('change', () => (dirty = true));
 		tc.addEventListener('dragging-changed', (e) => {
@@ -168,7 +169,7 @@
 		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
 	}
 
-	/** The gray a geometry is drawn in when nothing moves, as Visual Dynamics draws one undeformed. */
+	/** The gray a geometry is drawn in when nothing moves. */
 	const REST_GRAY = 0.62;
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
@@ -181,13 +182,14 @@
 	/** The most nodes the hover caption projects on every pointer move. */
 	const HOVER_LIMIT = 60_000;
 
-	/** How long Record records: at least six seconds of whole cycles of a mode, as VD saves an animation, or that long of a motion. */
+	/** How long Record records: at least six seconds of whole cycles of a mode, or that long of a
+	 * motion. */
 	const RECORD_S = Math.ceil(6 / CYCLE_S) * CYCLE_S;
 	let recording = $state(false);
 
 	/**
-	 * The animation recorded from the view as it plays and saved as a video, as Visual Dynamics saves
-	 * an animation: MP4 where the web view can write it (Safari's can), WebM otherwise. The
+	 * The animation recorded from the view as it plays and saved as a video: MP4 where the web view
+	 * can write it (Safari's can), WebM otherwise. The
 	 * background is painted in for the recording, since the view is drawn on a clear one.
 	 */
 	async function record() {
@@ -232,9 +234,10 @@
 	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
 	let opacity = $state(1);
 	let ghost = $state(false);
-	/** Color by deflection, or one color for the surface (VD's colormap toggle). */
+	/** Color by deflection, or one color for the surface (the colormap toggle). */
 	let colored = $state(true);
-	/** The labeled axes about the model (VD's Plot axes): a box at the model's bounds, one edge per axis ticked with values and titled with the unit. */
+	/** The labeled axes about the model (the Plot axes): a box at the model's bounds, one edge per
+	 * axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);
@@ -320,6 +323,10 @@
 	let ghostOutline: LineSegments | null = null;
 	/** The view's `marks`: DOF arrows and sensors, drawn still. */
 	let markLines: LineSegments | null = null;
+	/** The view's `bodies`: sensor solids, each point taking its node's motion. */
+	let bodies: Mesh | null = null;
+	let bodyShapeAttr: BufferAttribute | null = null;
+	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
 	let overlayLineGeometry: BufferGeometry | null = null;
 	let overlayAttr: BufferAttribute;
@@ -415,8 +422,20 @@
 		shapeAttr.needsUpdate = true;
 		shapeImagAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
+		followBodies(true);
 		dirty = true;
 		paintColors();
+	}
+
+	/** Give the bodies their nodes' offsets: the real part, and the imaginary too when `both`. */
+	function followBodies(both: boolean) {
+		if (!view.bodies || !bodyShapeAttr || !bodyShapeImagAttr) return;
+		followed(shapeAttr.array as Float32Array, view.bodies.follow, bodyShapeAttr.array as Float32Array);
+		bodyShapeAttr.needsUpdate = true;
+		if (both) {
+			followed(shapeImagAttr.array as Float32Array, view.bodies.follow, bodyShapeImagAttr.array as Float32Array);
+			bodyShapeImagAttr.needsUpdate = true;
+		}
 	}
 
 	/**
@@ -449,6 +468,7 @@
 		const rgb: [number, number, number] = [0, 0, 0];
 		for (let n = 0; n < colors.length / 3; n++) paint(colors, n, 0, rgb);
 		shapeImagAttr.needsUpdate = true;
+		followBodies(true);
 		shownSample = -1;
 		showSample(Math.floor(position));
 	}
@@ -463,6 +483,7 @@
 		for (const n of moved) paint(colors, n, Math.hypot(offsets[3 * n], offsets[3 * n + 1], offsets[3 * n + 2]) / maxMag, rgb);
 		shapeAttr.needsUpdate = true;
 		colorAttr.needsUpdate = true;
+		followBodies(false);
 		shownSample = k;
 		sample = k;
 		dirty = true;
@@ -606,6 +627,24 @@
 			markLines = new LineSegments(g, new LineBasicMaterial({ color: new Color(cssVar('--text-1')), transparent: true, opacity: 0.95 }));
 			markLines.frustumCulled = false;
 			scene.add(markLines);
+		}
+
+		if (view.bodies && view.bodies.triangles.length) {
+			// sensor bodies: solids in their own colors, each point moving with its node
+			const { nodes: bn, triangles: bt, colors: bc, follow } = view.bodies;
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(bn, 3));
+			bodyShapeAttr = new BufferAttribute(new Float32Array(follow.length * 3), 3);
+			bodyShapeImagAttr = new BufferAttribute(new Float32Array(follow.length * 3), 3);
+			g.setAttribute('shape', bodyShapeAttr);
+			g.setAttribute('shapeImag', bodyShapeImagAttr);
+			const linear = new Float32Array(bc.length);
+			for (let i = 0; i < bc.length; i++) linear[i] = srgbToLinear(bc[i] / 255);
+			g.setAttribute('color', new BufferAttribute(linear, 3));
+			g.setIndex(new BufferAttribute(bt, 1));
+			bodies = new Mesh(g, displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true })));
+			bodies.frustumCulled = false;
+			scene.add(bodies);
 		}
 
 		if (view.lines && view.lines.length) {
@@ -898,6 +937,7 @@
 			markLines.geometry.dispose();
 			(markLines.material as Material).dispose();
 		}
+		bodies?.geometry.dispose();
 		cancelAnimationFrame(raf);
 		resizeObs?.disconnect();
 		if (!renderer) return;
@@ -1012,7 +1052,8 @@
 	}
 
 	function onPointerDown(e: PointerEvent) {
-		pressedAt = e.button === 0 ? at(e) : null;
+		// read at the press: the handles clear their axis on release, before the click would be asked
+		pressedAt = e.button === 0 && !handles?.axis ? at(e) : null;
 	}
 
 	function onPointerUp(e: PointerEvent) {

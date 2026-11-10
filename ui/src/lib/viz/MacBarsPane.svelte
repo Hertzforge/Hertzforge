@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * A `matrix` view as 3-D bars, height and color the value, as Visual Dynamics draws a MAC by
-	 * default (`viz/mac_bars.py`): one instanced mesh whatever the mode count, viridis pinned to
+	 * A `matrix` view as 3-D bars, height and color the value: one instanced mesh whatever the mode
+	 * count, viridis pinned to
 	 * the view's range, frequency labels along the two edges thinned as the grid's are, every bar
 	 * outlined in black up to `OUTLINE_LIMIT` a side. The marks match the flat grid's: picked pairs
 	 * get a blue outline, the active (animated) pair the overlay's orange, committed matches a red
@@ -20,7 +20,6 @@
 		InstancedMesh,
 		LineBasicMaterial,
 		LineSegments,
-		Matrix4,
 		Mesh,
 		MeshBasicMaterial,
 		MeshLambertMaterial,

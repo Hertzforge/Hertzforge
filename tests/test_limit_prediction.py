@@ -277,8 +277,8 @@ def test_the_reference_s_own_breakpoints_are_read_and_nothing_outside():
                        spec(0.18, band=(20.0, 1500.0)))
     assert np.isnan(p.reference[at(p, 10)]) and np.isnan(p.control[at(p, 10)])
     assert np.isnan(p.channels[0].response[at(p, 1600)])
-    # the 1500 Hz line's bin is half inside, and read over that half
-    assert p.reference[at(p, 1500)] == pytest.approx(LEVEL)
+    # the 1500 Hz line's bin is half inside, and holds that half
+    assert p.reference[at(p, 1500)] == pytest.approx(LEVEL / 2.0)
     assert np.isnan(p.reference[at(p, 1501)])
 
 
@@ -398,8 +398,11 @@ def test_a_line_that_is_not_a_number_is_not_predicted_and_said():
 
 
 def test_a_record_holding_one_nan_sample_predicts_nothing_and_says_why():
-    history = survey(nan_at=1000)
-    t = history.compute_frfs(references=['1Z+'], method='H1')
+    with pytest.raises(ValueError, match=r'response channel 2Z\+ holds samples'):
+        survey(nan_at=1000).compute_frfs(references=['1Z+'], method='H1')
+    # one from elsewhere is not a number at any line, and is said here too
+    t = survey().compute_frfs(references=['1Z+'], method='H1')
+    t.ordinate = np.full_like(t.ordinate, np.nan)
     p = predict_limits(t, survey_spec())
     assert p.verdict().startswith('nothing judged')
     assert any('is not a number at' in note and 'holds a value that is '

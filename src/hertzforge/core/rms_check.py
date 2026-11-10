@@ -170,15 +170,6 @@ class RmsCheck:
         return _gap(self.spectrum_rms, self.framed_rms)
 
     @property
-    def window_gap_db(self) -> float | None:
-        """The frames' rms over the record's, in dB: how much of the gap
-        the window's weighting of the samples accounts for. None when
-        the frames are not known."""
-        if self.framed_rms is None:
-            return None
-        return _gap(self.framed_rms, self.time_rms)
-
-    @property
     def passed(self) -> bool:
         """Whether the gap is within the threshold. False when there is
         no gap to judge (a record of zeros, a spectrum with no lines)."""
@@ -516,22 +507,6 @@ def _channel(history: TimeHistory, dof: str, dimension: str,
             'spectrum does not say which it is the density of')
     key, rows = next(iter(found.items()))
     return key, rows
-
-
-def matching_records(history: TimeHistory, dof: str, dimension: str,
-                     hint: str | None = None) -> list[int]:
-    """The records of `history` that are the channel a spectrum's record
-    is the autospectrum of (`TimeHistory.channel_key`): the same DOF,
-    measuring the quantity whose square per hertz `dimension` is
-    ('acceleration' for 'acceleration**2/frequency'), and for a spectrum
-    whose units are not declared, the channel its `hint` names. Every
-    capture of the channel is returned, in order; none when there is no
-    such channel or more than one could be meant.
-    """
-    try:
-        return _channel(history, dof, dimension, hint)[1]
-    except ValueError:
-        return []
 
 
 def refusal(spectrum: Psd, record: int = 0) -> str | None:

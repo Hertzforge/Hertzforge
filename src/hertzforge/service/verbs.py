@@ -22,7 +22,8 @@ STUDIES = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal', 
 _RECORDED = ('signals', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal')
 
 HIDDEN = frozenset(f'project.{name}' for name in (
-    # what a selection draws by itself
+    # what a selection draws by itself, or nearly: `mac`, `shape_values` and
+    # `channel_table_view` are drawn another way by `show`, and stay for the palette and scripts
     'plot', 'waterfall', 'view_geometry', 'mode_shapes', 'mac', 'dof_arrows', 'spec_spectra',
     'psd_overlay', 'srs_spectra', 'replication_waveforms', 'table', 'channel_table_view',
     'shape_values',
@@ -116,6 +117,8 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
     'set_averaging': ('signals', 'sysid', 'random', 'modal'),
     'detect_averaging': ('signals', 'sysid', 'random', 'modal'),
     'set_filter': _RECORDED,
+    'filter_data': _RECORDED,
+    'integrate': ('signals', 'shock'),
     'set_truncation': _RECORDED,
     'set_channel_role': (*_RECORDED, 'geometry'),
     'rename_dof': (*_RECORDED, 'geometry'),
@@ -135,8 +138,8 @@ MODULES: dict[str, tuple[str, ...]] = {f'project.{name}': modules for name, modu
 #: the part of a geometry in the tree each of these operations belongs to:
 #: a part's kind, or 'part:<id>' for the nodes and the coordinate systems. A
 #: part picked offers its own operations alone, and the geometry's row none
-#: of these: the shapes to build from on the Solids row, as Visual Dynamics
-#: offered them (Brandon, 2026-10-11), and what ties or merges parts on the
+#: of these: the shapes to build from on the Solids row, as the earlier
+#: toolset offered them (Brandon, 2026-10-11), and what ties or merges parts on the
 #: element groups picked together, never the whole geometry
 PARTS = {f'project.{name}': part for name, part in {
     'add_solid_block': 'solids',

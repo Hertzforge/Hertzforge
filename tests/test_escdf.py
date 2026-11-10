@@ -1,6 +1,5 @@
 """The Engineering Sciences Common Data Format's generic layer
-(`hertzforge.io.escdf`, 2026-09-30; PLAN.md "ESCDF: import and
-export first"), held to the reference implementation both ways.
+(`hertzforge.io.escdf`, 2026-09-30), held to the reference implementation both ways.
 
 The reference package (BSD-3-Clause, a dev dependency, never imported
 by the package itself) is the agreement oracle: a file it writes reads
@@ -160,14 +159,14 @@ def test_what_the_specification_does_not_define_survives(tmp_path):
     mystery.extras = {'group_name': ('str', np.array(['frame'], dtype=object)),
                       'group_id': ('u8', np.array([7], dtype=np.uint64))}
     file.metadata['m'] = mystery
-    unknown = escdf.Dataset('u', 'visualdynamics_report', 'a report')
+    unknown = escdf.Dataset('u', 'hertzforge_report', 'a report')
     file.activities['a'] = escdf.Activity('a', 'An activity', links=['m'],
                                           data={'u': unknown})
     unknown.extras = {'html': ('str', '<p>hi</p>')}
     assert file.problems() == []
     unknown.values = {'notes': ['x']}
     assert file.problems() == [
-        ("a/u: 'visualdynamics_report' is not a type the specifications define, "
+        ("a/u: 'hertzforge_report' is not a type the specifications define, "
          'so it can carry nothing but extras')]
     unknown.values = {}
     # a known type that is not a result is refused inside an activity, as

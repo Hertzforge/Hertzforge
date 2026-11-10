@@ -11,7 +11,7 @@
 # machine's. Nothing here runs at the app's run time: the installed app downloads
 # nothing.
 #
-# Why not a PyInstaller freeze, as Visual Dynamics ships: its bootloader is
+# Why not a PyInstaller freeze: its bootloader is
 # GPL-2.0 with a linking exception, and this runtime avoids the question. The
 # runtime is also an ordinary Python, so `-m hertzforge serve` is the same command a
 # developer runs. docs/desktop-app.md has the comparison.
@@ -86,8 +86,7 @@ PY
 )
 
 # oneMKL, PARDISO's library (core.sparse_solve), on x86-64 Windows and Linux, where
-# pypardiso is a dependency: only what PARDISO loads, threaded through TBB, as Visual
-# Dynamics' builds carry it. The runtime, the core and its interface, the TBB threading
+# pypardiso is a dependency: only what PARDISO loads, threaded through TBB. The runtime, the core and its interface, the TBB threading
 # layer, every processor's kernels and their vector math (another machine loads another
 # one), and TBB with its allocator and thread manager. Not the OpenMP runtime, which is
 # under Intel's developer-tools EULA and which TBB threading does not need, nor

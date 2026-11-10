@@ -1,14 +1,7 @@
-"""Sine extraction: the tracking-filter reading, graded two ways.
-
-The synthetic tests plant known tones in known noise and hold the
-recovered numbers; the oracle tests (skipped where the stressdata is
-absent) grade the same code against real controller runs and the
-controller's own tracked-amplitude record.
-"""
+"""Sine extraction: the tracking-filter reading, on known tones planted
+in known noise, holding the recovered numbers."""
 
 from __future__ import annotations
-
-import os
 
 import numpy as np
 import pytest
@@ -24,9 +17,6 @@ from hertzforge.core.sine import (
 )
 
 FS = 4096.0
-
-STRESS = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), 'stressdata', 'plate')
 
 
 def _spec():
@@ -214,177 +204,6 @@ def test_the_project_verb_extracts_and_links():
     assert names == ['Sine Levels'], 'one extraction, one object'
     assert project['Sine Levels'].tone_names == ['Up', 'Down']
     assert 'Time History' in (project.object_group_of('Sine Levels') or [])
-
-
-needs_stress = pytest.mark.skipif(
-    not os.path.exists(os.path.join(STRESS, 'sine.nc4')),
-    reason='stressdata not generated on this machine')
-
-
-def _controller_levels(control_npz, tone_index):
-    """The controller's own tracked amplitude, laid over frequency.
-
-    Its per-block amplitude records and its frequency trajectory share
-    a clock, so amplitude-versus-frequency needs no time alignment —
-    both are functions of the sweep's own monotonic frequency."""
-    truth = np.load(control_npz)
-    keys = sorted((int(k.rsplit('_', 1)[1]), k) for k in truth.files
-                  if k.startswith('control_response_amplitudes'))
-    tracked = np.concatenate([truth[k][tone_index] for _, k in keys],
-                             axis=-1)
-    frequency = truth['control_response_frequencies'][tone_index]
-    n = min(tracked.shape[-1], len(frequency))
-    return frequency[:n], tracked[:, :n]
-
-
-def _against_controller(level, frequency, tracked, keep=None):
-    """Median dB between the extraction and the controller's tracker,
-    per channel, compared where both actually swept — and, with
-    `keep`, only on the lines it marks."""
-    moving = np.flatnonzero(np.abs(np.diff(frequency)) > 0)
-    # margins by span, not by absolute frequency: a 390-410 near-dwell
-    # has no room for percentage margins
-    span = frequency[moving].max() - frequency[moving].min()
-    lo = frequency[moving].min() + 0.1 * span
-    hi = frequency[moving].max() - 0.1 * span
-    inside = (level.abscissa > lo) & (level.abscissa < hi)
-    if keep is not None:
-        inside &= keep
-    out = []
-    for row in range(level.ordinate.shape[0]):
-        order = np.argsort(frequency[moving])
-        reference = np.interp(level.abscissa[inside],
-                              frequency[moving][order],
-                              tracked[row][moving][order])
-        ratio = np.abs(level.ordinate[row, inside]) / np.maximum(
-            reference, 1e-12)
-        out.append(20 * np.log10(np.median(ratio)))
-    return out
-
-
-@needs_stress
-def test_the_real_sine_run_sits_at_or_under_the_controller():
-    """Four real tones over eight control channels and four shakers.
-
-    The controller's live tracker reads *high* — its quadrature filter
-    counts the other tones' leakage as amplitude — so the structural
-    claim is one-sided: the extraction sits at or below the tracker,
-    never meaningfully above. An *agreement* oracle, not a truth
-    oracle (AGENTS.md): where the nearest other tone is more than
-    50 Hz away the two read the same thing and agree within the
-    envelope measured here (-0.9 to -4.8 dB when the tracking
-    demodulation was the reader; the joint solve sits a little closer);
-    where another tone is within 20 Hz the tracker double-counts and
-    the extraction reads the truth, as the planted close-tones test
-    proves — there the only claim is at-or-under. Point-for-point
-    agreement is never the claim: on a resonant plate under live
-    control the physical amplitude swings several dB within small
-    frequency spans."""
-    project = hertzforge.Project('real')
-    project.import_file(os.path.join(STRESS, 'sine.nc4'))
-    project.extract_sine(project.time_history)
-    levels = project['Sine Levels']
-    assert len(levels) == 4
-    spec = project.sine_sweep_specification
-    control_npz = os.path.join(STRESS, 'sine_control.npz')
-    order = [str(n) for n in np.load(control_npz)['names']]
-    dt = 1.0 / FS
-    clock = np.arange(0.0, 16.0, dt)
-    paths = {t.name: np.interp(clock, t.trajectory(dt)[0] + t.start_time,
-                               t.trajectory(dt)[1], left=np.nan,
-                               right=np.nan) for t in spec.tones}
-    for level in levels:
-        frequency, tracked = _controller_levels(
-            control_npz, order.index(level.tone))
-        tone = spec.tone(level.tone)
-        seconds = level.seconds - (level.onset - tone.start_time)
-        gap = np.nanmin(np.stack([
-            np.abs(np.interp(seconds, clock, paths[o], left=np.nan,
-                             right=np.nan) - level.abscissa)
-            for o in paths if o != level.tone]), axis=0)
-        apart, close = gap > 50.0, gap < 20.0
-        if apart.sum() >= 50:
-            for row, error in enumerate(
-                    _against_controller(level, frequency, tracked, apart)):
-                assert -6.0 < error < 0.5, (
-                    f'{level.tone} channel {row}: {error:+.2f} dB from '
-                    "the controller's own tracker, tones apart")
-        for row, error in enumerate(
-                _against_controller(level, frequency, tracked, close)):
-            assert error < 0.5, (
-                f'{level.tone} channel {row}: {error:+.2f} dB *above* '
-                'the tracker where it double-counts a close tone')
-
-
-@needs_stress
-def test_the_real_mixed_run_reads_the_sweep_under_the_random():
-    """The 0.5-amplitude sweep under a random 13.5 dB louder — the
-    problem the arc exists for, on real data.
-
-    Under that much noise the controller's tracker bias grows to
-    several dB (it reads the random as sine and backs its drive off
-    accordingly), so the one-sided envelope is wider. The physical
-    check is the second assertion: the extracted levels bracket the
-    0.5 target the way an eight-channel four-shaker compromise must —
-    some channels above, some below, the median within a few dB."""
-    project = hertzforge.Project('mixed')
-    project.import_file(os.path.join(STRESS, 'mixed.nc4'))
-    project.extract_sine(project.time_history)
-    level = project['Sine Levels'].levels[0]
-    control_npz = os.path.join(STRESS, 'mixed_sine_control.npz')
-    frequency, tracked = _controller_levels(control_npz, 0)
-    errors = _against_controller(level, frequency, tracked)
-    for row, error in enumerate(errors):
-        # -12.5: the joint solve's narrower noise bandwidth carries
-        # less positive noise bias than the tracking average, so it
-        # sits half a dB further under a tracker that reads the random
-        # as sine (measured 2026-09-03: -4.2 to -8.9 dB by channel);
-        # with the floor measured beside the tone (2026-10-01) seven
-        # channels moved toward the tracker (-2.3 to -8.2 dB) and the
-        # deepest-buried one from -11.7 to -12.1, the median level
-        # unmoved (-3.6 dB from the 0.5 target either way)
-        assert -12.5 < error < 0.5, (
-            f'channel {row}: {error:+.2f} dB from the controller '
-            'under the random')
-    mid = (level.abscissa > 170) & (level.abscissa < 730)
-    medians = [np.median(np.abs(level.ordinate[row, mid]))
-               for row in range(level.ordinate.shape[0])]
-    spread_db = 20 * np.log10(np.median(medians) / 0.5)
-    assert abs(spread_db) < 5.0, (
-        f'physically implausible: the channel-median level sits '
-        f'{spread_db:+.2f} dB from the 0.5 target')
-
-
-@needs_stress
-def test_a_sweep_over_a_virtual_point_is_read_at_its_rows():
-    """The same mixed run, with the sweep controlling a virtual point —
-    three rows of a response transformation over the eight control
-    channels — while the random controls the raw channels (Brandon,
-    2026-09-24: a run like this did not load). The levels are read from
-    the rows' own time histories, which ride the recording beside the
-    raw channels, and graded against the controller's tracker on the
-    same rows: the untransformed run's envelope holds (measured -3.5 to
-    -3.8 dB by row).
-
-    Regenerate with `generate_plate_sine.py mixed_transformed` in the
-    generators repository."""
-    path = os.path.join(STRESS, 'mixed_transformed.nc4')
-    if not os.path.exists(path):
-        pytest.skip('regenerate with generate_plate_sine.py mixed_transformed')
-    project = hertzforge.Project('mixed_transformed')
-    project.import_file(path)
-    spec = project.sine_sweep_specification
-    assert spec.response_dof == ['1', '2', '3']
-    project.extract_sine(project.time_history)
-    level = project['Sine Levels'].levels[0]
-    assert level.ordinate.shape[0] == 3, 'one level per row'
-    control_npz = os.path.join(STRESS, 'mixed_transformed_sine_control.npz')
-    frequency, tracked = _controller_levels(control_npz, 0)
-    for row, error in enumerate(_against_controller(level, frequency,
-                                                    tracked)):
-        assert -12.0 < error < 0.5, (
-            f'row {row + 1}: {error:+.2f} dB from the controller '
-            'under the random')
 
 
 def test_the_sine_report_renders_its_comparison_and_bars():

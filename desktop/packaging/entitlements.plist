@@ -3,7 +3,7 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- For the bundled Python under the hardened runtime, as Visual Dynamics'
+  <!-- For the bundled Python under the hardened runtime, as an earlier app's
        signed builds (MIT, Brandon Zwink) carry them: CPython and the C
        libraries its packages load (ctypes callbacks among them) need writable,
        executable memory, and the hardened runtime kills the process without these. -->

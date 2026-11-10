@@ -19,6 +19,9 @@ from hertzforge.core.shapes import (
     ScaleComparison,
     ShapeSet,
     _split_sign,
+    alignment_factor,
+    alignment_phases,
+    cross_mac,
     pair_caption,
     scale_ratios,
     synthesize_overlay,
@@ -124,3 +127,26 @@ def test_damping_is_printed_as_a_percentage():
 def test_a_matrix_that_does_not_fit_its_coordinates_is_refused_with_both_counts():
     with pytest.raises(ValueError, match='shape_matrix has 3 columns but 2 coordinates'):
         ShapeSet([10.0], [0.0], ['1X+', '2X+'], [[1.0, 2.0, 3.0]])
+
+
+def test_the_mac_reads_a_dof_written_with_the_other_sign_as_the_same_dof():
+    motion = np.array([[1, 2, 3, 4.0], [4, -3, 2, 1.0]])
+    plain = ShapeSet([10.0, 20.0], [0.01, 0.01], ['1Z+', '2Z+', '3Z+', '4Z+'], motion)
+    signed = ShapeSet([10.0, 20.0], [0.01, 0.01], ['1Z-', '2Z-', '3Z+', '4Z+'],
+                      motion * [-1, -1, 1, 1])
+    assert np.allclose(cross_mac(plain, signed), plain.auto_mac())
+    assert alignment_factor(plain, 1, signed, 1) == pytest.approx(1.0)
+    assert np.allclose(alignment_phases(plain, [0, 1], signed, [0, 1]),
+                       np.angle(np.sign(motion @ motion.T)))
+    assert scale_ratios(plain, signed) == pytest.approx([1.0, 1.0])
+
+
+def test_a_modes_complex_damping_stays_with_it_through_the_sort_and_a_delete():
+    sorted_set = ShapeSet([20.0, 10.0], [0.01, 0.02], ['1X+', '2X+'], [[1, 0.0], [0, 1.0]],
+                          modal_damping=[1 + 1j, 2 + 2j])
+    assert list(sorted_set.frequency) == [10.0, 20.0]
+    assert list(sorted_set.modal_damping) == [2 + 2j, 1 + 1j]
+    cut = ShapeSet([10.0, 20.0, 30.0], [0.01, 0.02, 0.03], ['1X+', '2X+'],
+                   [[1, 0.0], [0, 1.0], [1, 1.0]], modal_damping=[1j, 2j, 3j])
+    cut.delete_modes([0])
+    assert list(cut.modal_damping) == [2j, 3j]

@@ -99,6 +99,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 from numpy.typing import ArrayLike
 
+from ..units import signed
+
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import DataArray, TimeHistory
 
@@ -223,9 +225,9 @@ class SegmentCheck:
         4 of 65 outside: fails'."""
         if not self.judged:
             return f'{self.reading}: nothing to judge'
-        span = (f'{_signed(self.low, self.unit)}' if self.judged == 1
-                else f'{_signed(self.low, self.unit)} to '
-                     f'{_signed(self.high, self.unit)}')
+        span = (f'{signed(self.low, self.unit, places=2)}' if self.judged == 1
+                else f'{signed(self.low, self.unit, places=2)} to '
+                     f'{signed(self.high, self.unit, places=2)}')
         text = f'{self.reading} {span} ({band_text(self.tolerance, self.unit)})'
         if self.judged > 1:
             text += f', {self.outside} of {self.judged} outside'
@@ -329,11 +331,6 @@ class SegmentedReplication:
             names = ', '.join(result.label for result in unjudged)
             text += f', {len(unjudged)} not judged ({names})'
         return text
-
-
-def _signed(value: float, unit: str) -> str:
-    """A reading with its sign and unit, minus as the minus sign."""
-    return f'{value:+.2f} {unit}'.replace('-', '\u2212')
 
 
 def band_text(tolerance: tuple[float, float], unit: str) -> str:

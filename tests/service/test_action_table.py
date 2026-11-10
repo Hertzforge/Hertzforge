@@ -4,12 +4,14 @@ itself is declared so the shell can name it before anything is drawn."""
 
 from __future__ import annotations
 
+import copy
+import itertools
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from hertzforge.core.data import Psd, Specification
+from hertzforge.core.data import Psd, Specification, TimeHistory
 from hertzforge.core.shapes import ShapeSet
 from hertzforge.service import action_table, projects, show, verbs
 from hertzforge.service.protocol import ProtocolError
@@ -120,12 +122,6 @@ def test_each_object_goes_on_the_param_that_takes_it_whichever_was_picked_first(
     finally:
         project.remove('Measured')
         project.remove('Spec')
-
-
-def test_an_act_changes_the_project_and_a_reading_does_not(plate):
-    first = table(plate, named(plate, 'time_history'))[0]
-    assert row(first, 'Compute FRFs')['kind'] == 'act' and row(first, 'Integrate')['kind'] == 'act'
-    assert row(first, 'Kurtosis')['kind'] == 'reading'
 
 
 def test_the_stage_rule_makes_no_false_combinations(plate):
@@ -341,8 +337,192 @@ def test_a_lone_shape_sets_views_are_a_verb_each(plate, validate):
         first = table(plate, 'Shapes', validate=validate)[0]
         default = first['rows'][0]
         assert (default['id'], default['kind'], default['ready']) == ('show.animate', 'default', True)
-        views = [r for r in first['rows'] if r['id'].startswith('show.') and r['kind'] == 'reading']
+        views = [r for r in first['rows'] if r['id'].startswith('show.') and r['kind'] == 'run']
         assert [(r['id'], r['verb'], r['ready']) for r in views] == [
             ('show.table', 'Table', True), ('show.mac', 'MAC', True), ('show.values', 'Values', True)]
     finally:
         project.remove('Shapes')
+
+
+OPS = {op.id: op for op in OPERATIONS}
+
+
+def _refusal(project, op_id, fill):
+    """What the operation answers on what the row fills, typing nothing: None when it runs."""
+    op = OPS[op_id]
+    values = op.resolve(fill, objects={n: projects.kind_of(o) for n, o in project.items()},
+                        verbs={n: projects.verbs_of(project, n) for n in project})
+    try:
+        op.run(copy.deepcopy(project), values)
+    except ProtocolError as error:
+        return error.message
+    return None
+
+
+@pytest.fixture
+def rich():
+    """Its own project: these rows are about what objects hold, and some of it is set here."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    projects.import_file(state, {'path': str(PLATE / 'geometry.unv'),
+                                 'units': {'length_unit': 'mm'}})
+    return state
+
+
+def _offered(state, name, verb, op_id, part=None):
+    """The row with the words its operation would refuse on, for the same state."""
+    found = row(table(state, name, part=part)[0], verb)
+    assert found['id'] == op_id
+    return found
+
+
+def test_mesh_says_a_geometry_has_no_solids_before_the_click(rich):
+    geometry = named(rich, 'geometry')
+    solids = {'name': geometry, 'kind': 'solids', 'id': 0}
+    found = _offered(rich, geometry, 'Mesh', 'project.mesh_solids', solids)
+    assert not found['ready'] and 'no solids' in found['reason']
+    assert 'no solids' in _refusal(rich.project, found['id'], {'geometry': geometry})
+    run = OPS['project.add_solid_block']
+    run.run(rich.project, run.resolve(
+        {'geometry': geometry}, objects={geometry: 'geometry'}, verbs={geometry: []}))
+    assert _offered(rich, geometry, 'Mesh', 'project.mesh_solids', solids)['ready']
+
+
+def test_unmark_shock_says_there_are_none_marked(rich):
+    history = named(rich, 'time_history')
+    found = _offered(rich, history, 'Unmark Shock', 'project.remove_shock')
+    assert not found['ready'] and 'no shocks' in found['reason']
+    assert _refusal(rich.project, found['id'], {'history': history})
+    rich.project.detect_shocks(history)
+    if rich.project[history].shocks:
+        assert _offered(rich, history, 'Unmark Shock', 'project.remove_shock')['ready']
+
+
+@pytest.mark.parametrize(('verb', 'op_id'), [('Conditioning', 'project.conditioning'),
+                                             ('Realizability', 'project.realizability')])
+def test_an_autospectrum_set_says_it_needs_cross_terms(rich, verb, op_id):
+    rich.project.add('Autos', Psd(**_psd()))
+    found = _offered(rich, 'Autos', verb, op_id)
+    assert not found['ready'] and found['reason'] == 'It needs cross terms'
+    assert 'no cross terms' in _refusal(rich.project, op_id, {'data': 'Autos'})
+    history = named(rich, 'time_history')
+    cross = rich.project.compute_cpsds(history)
+    assert _offered(rich, cross, verb, op_id)['ready']
+
+
+def test_transmissibility_says_an_frf_not_computed_here_has_nothing_behind_it(rich):
+    projects.import_file(rich, {'path': str(PLATE / 'frfs.unv')})
+    outside = next(n for n, o in rich.project.items() if projects.kind_of(o) == 'frf')
+    found = _offered(rich, outside, 'Transmissibility', 'project.transmissibility')
+    assert not found['ready'] and 'not computed' in found['reason']
+    assert 'not an FRF computed' in _refusal(rich.project, found['id'], {'frf': outside})
+    made = rich.project.compute_frfs(named(rich, 'time_history'))
+    held = {str(dof) for dof in rich.project[made].reference_dof}
+    computed = _offered(rich, made, 'Transmissibility', 'project.transmissibility')
+    assert computed['ready'] == (len(held) == 1)
+    assert _refusal(rich.project, found['id'], {'frf': made}) if len(held) > 1 else True
+
+
+def test_partial_coherence_says_a_coherence_not_computed_here_has_nothing_behind_it(rich):
+    project = rich.project
+    made = project.compute_multiple_coherence(named(rich, 'time_history'))
+    assert _offered(rich, made, 'Partial Coherence', 'project.partial_coherence')['ready']
+    project.add('Outside', project[made])
+    found = _offered(rich, 'Outside', 'Partial Coherence', 'project.partial_coherence')
+    assert not found['ready'] and 'not computed' in found['reason']
+    assert 'neither a time history' in _refusal(project, found['id'], {'coherence': 'Outside'})
+
+
+def test_sensors_says_a_table_names_no_sensor_model(rich):
+    name = named(rich, 'channel_table')
+    found = _offered(rich, name, 'Sensors', 'project.sensors')
+    assert not found['ready'] and 'no sensor model' in found['reason']
+    assert 'no sensor model' in _refusal(rich.project, found['id'], {'table': name})
+
+
+def test_apply_truncation_names_the_row_that_sets_a_span(rich):
+    history = named(rich, 'time_history')
+    found = _offered(rich, history, 'Apply Truncation', 'project.truncate_data')
+    assert not found['ready'] and 'Set Truncation' in found['reason']
+    assert 'Set Truncation' in _refusal(rich.project, found['id'], {'source': history})
+    rich.project[history].truncation = (0.0, 0.01)
+    assert _offered(rich, history, 'Apply Truncation', 'project.truncate_data')['ready']
+
+
+def test_a_set_with_no_mass_unit_says_so_for_a_state_space_model(rich):
+    project = rich.project
+    project.add('Unscaled', _shapes())
+    table_name = named(rich, 'channel_table')
+    found = row(table(rich, 'Unscaled', table_name)[0], 'Export Model')
+    assert not found['ready'] and 'mass unit' in found['reason']
+
+
+def _forces():
+    time = np.arange(50) / 100.0
+    return TimeHistory(time, np.sin(time)[None, :], ['1Z+'], ordinate_dim='force')
+
+
+def test_modal_responses_need_a_force_channel_and_the_partner_column_lists_only_those(rich):
+    project = rich.project
+    project.add('Shapes', _shapes())
+    project.add('Forces', _forces())
+    project.add('Quiet', TimeHistory(np.arange(50) / 100.0, np.zeros((1, 50)), ['1Z+'],
+                                     ordinate_dim='acceleration'))
+    words = 'Modal Responses'
+    quiet = row(table(rich, 'Shapes', 'Quiet')[0], words)
+    assert not quiet['ready'] and 'force channel' in quiet['reason']
+    assert row(table(rich, 'Shapes', 'Forces')[0], words)['ready']
+    partner = row(column(table(rich, 'Shapes'), 'shape_set', 'time_history'), words)
+    assert 'Forces' in partner['candidates'] and 'Quiet' not in partner['candidates']
+
+
+def test_the_table_and_the_core_agree_on_every_pair(rich):
+    """One rule for what a pair can do: `Project.selection_verbs`."""
+    from hertzforge.project import PARTNER_VERBS
+
+    project = rich.project
+    projects.import_file(rich, {'path': str(PLATE / 'frfs.unv')})
+    project.add('Shapes', _shapes())
+    project.add('Shapes 2', _shapes())
+    project.add('Autos', Psd(**_psd()))
+    project.add('Forces', _forces())
+    names = list(project)
+    for first, second in itertools.permutations(names, 2):
+        core = {verb for verb, _ in project.selection_verbs(first, second)} & set(PARTNER_VERBS)
+        rows = table(rich, first, second)[0]['rows']
+        here = {r['id'].removeprefix('project.') for r in rows
+                if r['id'].startswith('project.') and r['ready']} & set(PARTNER_VERBS)
+        assert here == core, (first, second)
+
+
+def _played(state):
+    project = state.project
+    shapes = project.generate_rigid_body_modes(named(state, 'geometry'))
+    held = project[shapes]
+    time = np.arange(50) / 100.0
+    project.add('Responses', TimeHistory(
+        time, np.vstack([np.sin((k + 1) * time) for k in range(held.num_shapes)]),
+        [f'M{k + 1}' for k in range(held.num_shapes)], ordinate_dim='modal_length',
+        comment=[f'{shapes}: modal displacement, mode {k + 1}' for k in range(held.num_shapes)]))
+    return shapes
+
+
+def test_animate_is_promised_only_for_a_history_that_plays(rich):
+    """A geometry, a shape set and modal coordinates play; a physical history beside the two
+    draws each on its own, so it has no default row and is no candidate for one."""
+    shapes = _played(rich)
+    geometry = named(rich, 'geometry')
+    physical = next(n for n, o in rich.project.items()
+                    if projects.kind_of(o) == 'time_history' and n != 'Responses')
+    drawn = projects.show(rich, {'objects': [geometry, shapes, physical], 'records': {}, 'prefs': {}})
+    assert 'motion' not in drawn['views'][0], 'what the table has to agree with'
+    played = projects.show(rich, {'objects': [geometry, shapes, 'Responses'], 'records': {}, 'prefs': {}})
+    assert 'motion' in played['views'][0]
+
+    assert 'Animate' not in verbs_in(table(rich, geometry, shapes, physical)[0])
+    assert 'Animate' in verbs_in(table(rich, geometry, shapes, 'Responses')[0])
+    offered = row(column(table(rich, geometry, shapes), 'geometry', 'shape_set', 'time_history'),
+                  'Animate')
+    assert offered['candidates'] == ['Responses']
+    added = [c for c in table(rich, shapes, physical)
+             if c['kinds'] == ['shape_set', 'time_history', 'geometry']]
+    assert not added or 'Animate' not in verbs_in(added[0])

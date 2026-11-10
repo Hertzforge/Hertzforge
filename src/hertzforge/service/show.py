@@ -1,9 +1,8 @@
 """What a selection in the project tree shows.
 
-Visual Dynamics' window draws whatever is selected in its tree
-(`gui.main_window.render_current`, `docs/guide/project-tree.md`): one
+The window draws whatever is selected in its tree: one
 object by its kind, records picked inside one, or several together when
-the combination means something. `project.show` answers the same from the
+the combination means something. `project.show` answers that from the
 operations the service already has, so the shell draws a selection the
 way a result is drawn.
 
@@ -80,8 +79,8 @@ def _geometry_for(project: Any, name: str) -> str | None:
     return found[0] if found else None
 
 
-#: how the window reads data, kept across selections as Visual Dynamics keeps
-#: its bar: the stage or the flat plot, decades on the frequency axis, and the
+#: how the window reads data, kept across selections: the stage or the flat plot,
+#: decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'shape_view': None,
@@ -93,7 +92,7 @@ TABLE_VIEWS = ('channels', 'response', 'reference')
 
 def _table_views(table: Any, prefs: dict[str, Any]) -> tuple[list[str], str | None, list[str], str]:
     """(environments, the one picked, the views it holds, the one picked)
-    for a channel table, as VD's two drop-downs read it: the picked
+    for a channel table: the picked
     environment while it still applies, else the first; the transformation
     views only when the loop holds them."""
     loops = list(table.environments)
@@ -110,7 +109,7 @@ def _table_views(table: Any, prefs: dict[str, Any]) -> tuple[list[str], str | No
     form = prefs.get('table_view') if prefs.get('table_view') in forms else 'channels'
     return loops, environment, forms, form
 
-#: past this many shape values the table is not offered (VD's limit)
+#: past this many shape values the table is not offered
 SHAPE_VALUES_CELL_LIMIT = 1_000_000
 
 #: a lone shape set's own DOFs are marked with arrows up to this many: a
@@ -119,7 +118,7 @@ SHAPE_VALUES_CELL_LIMIT = 1_000_000
 ARROW_DOF_LIMIT = 2_000
 
 #: where a shape set's values are read: every DOF, or a channel choice of the
-#: table in its group (VD's `_VALUES_CHOICES`)
+#: table in its group
 VALUES_CHOICES = {'all': 'All DOFs', 'control': 'Control channels', 'reference': 'References',
                   'response': 'Responses', 'monitor': 'Monitors'}
 
@@ -198,11 +197,11 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
 
 def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
            ) -> list[str]:
-    """DOF arrows and sensors over every stage the selection shows, as
-    VD's two toggles draw them on any animated view: static line work in
-    the geometry's coordinates (`marks` on the `shape3d`), the arrows as
-    `project.dof_arrows` draws them and the sensors as `project.sensors`
-    does. Returns the notes."""
+    """DOF arrows and sensors over every stage the selection shows, in the
+    geometry's coordinates: the arrows as static line work (`marks` on the
+    `shape3d`) as `project.dof_arrows` draws them, the sensors as solids
+    that move with their nodes (`bodies`) as `project.sensors` draws
+    them. Returns the notes."""
     stages = [view for view in views if view.get('view') == 'shape3d']
     if not stages or not (prefs['arrows'] or prefs['sensors']):
         return []
@@ -210,8 +209,9 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
     if geometry_name is None:
         return []
     from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+    from hertzforge.drawing.viz.sensors import rows_of, sensor_bodies
 
-    from .ops_geometry import _CORNERS, _EDGES, NOMINAL_MM, _arrow, _extent
+    from .ops_geometry import _arrow, _extent
 
     geometry = project[geometry_name]
     table = _table_on(project, geometry_name)
@@ -243,25 +243,17 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
         except (TypeError, ValueError):
             placed = []
         if placed:
-            if geometry.units_defined:
-                per_mm = 1e-3
-            else:
-                span = float(np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0))) if len(xyz) else 1.0
-                per_mm = NOMINAL_MM * (span or 1.0)
-            for sensor in placed:
-                half = 0.5 * np.asarray(sensor.entry.size, dtype=float) * per_mm
-                base = len(nodes)
-                nodes += list(sensor.center + (_CORNERS * half) @ sensor.frame.T)
-                lines += [(base + a, base + b) for a, b in _EDGES]
-                for axis in (0, 1, 2) if sensor.kind == 'triax' else (2,):
-                    _arrow(np.asarray(sensor.center, dtype=float),
-                           sensor.center + 2.0 * half[axis] * sensor.frame[:, axis], nodes, lines)
+            for stage in stages:
+                ids = stage.get('node_ids')
+                stage['bodies'] = sensor_bodies(
+                    placed, geometry, rows_of(geometry.node_id if ids is None else ids))[0]
             notes.append(f'{len(placed)} sensors')
     if nodes:
         marks = {'nodes': np.asarray(nodes, dtype=np.float32).reshape(-1, 3),
                  'lines': np.asarray(lines, dtype=np.uint32).reshape(-1, 2)}
         for stage in stages:
-            stage['marks'] = marks
+            # each its own, since converting a stage's units writes into it
+            stage['marks'] = dict(marks)
     return notes
 
 
@@ -349,7 +341,7 @@ def _alone(project: Any, name: str, picks: list[int],
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
 
     if isinstance(obj, Photos):
-        # every photo, or the picked ones, stacked as VD's `_render_photos`
+        # every photo, or the picked ones, stacked
         shown = [i for i in sorted(set(picks)) if i < obj.num_photos] or range(obj.num_photos)
         views = [v.image(obj.names[i], obj.formats[i], obj.images[i]) for i in shown]
         count = len(views)
@@ -365,7 +357,7 @@ def _alone(project: Any, name: str, picks: list[int],
             return _run(project, 'project.plot', data=name, records=_runs(picks),
                         component=component), []
         if prefs['flat']:
-            # the flat plot draws every record, as VD's does when 3D is off
+            # the flat plot draws every record
             return _run(project, 'project.plot', data=name,
                         records=_runs(list(range(int(obj.num_records)))),
                         component=component), []
@@ -383,21 +375,16 @@ def _alone(project: Any, name: str, picks: list[int],
     return [], [f'{name} ({_kind(obj).replace("_", " ")}) has no view of its own here yet']
 
 
-#: the sine readings a specification with its levels offers: the curves, or
-#: one signed number per tone per channel
-SINE_READINGS = ('curves', 'bars')
-
-
 def _sine(project: Any, spec_name: str | None, levels_name: str | None,
           records: dict[str, list[int]], prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
-    """A sine specification, extracted levels, or both together, as VD's
-    `_render_sine` reads them: one tone at a time (the bar's drop-down,
+    """A sine specification, extracted levels, or both together: one tone at a time (the
+    bar's drop-down,
     `prefs['tone']`), the levels at each control channel over the tone's
     requirement and limits, and with both objects the Level Error reading
     (`prefs['sine_reading']` 'bars'): each channel's signed RMS deviation
     in dB. The rows under either object are its control DOFs, and picks on
-    them restrict the reading. The stage (frequency across, time receding,
-    amplitude up) is not drawn yet."""
+    them restrict the reading. Without `prefs['flat']` the reading is the
+    stage: frequency across, time receding, amplitude up."""
     from hertzforge.core.compliance import SINE_ERROR_DB
 
     from .ops_sine_shock import sine_dofs, sine_error_rows, sine_lines
@@ -424,7 +411,7 @@ def _sine(project: Any, spec_name: str | None, levels_name: str | None,
         notes.append(f'{levels_name} holds no tone of {spec_name} ({", ".join(tones)})')
     where = f' at {", ".join(dofs)}' if dofs else ''
     if not prefs.get('flat'):
-        # VD's default reading of a sweep: the stage, frequency across, time
+        # The default reading of a sweep: the stage, frequency across, time
         # receding, amplitude up; the bar's Flat is the per-channel plot
         from .sine_stage import sine_stage
 
@@ -482,7 +469,7 @@ def _sine_pair(project: Any, first: str, second: str) -> tuple[str, str] | None:
 
 def _faced(views: list[dict], obj: Any) -> None:
     """A coherence opens on the map, the stage seen from above with the
-    channels down and frequency across, as VD's coherence does; the bar's
+    channels down and frequency across; the bar's
     Curves is the perspective."""
     from hertzforge.core.data import Coherence, MultipleCoherence
 
@@ -499,9 +486,7 @@ STACK_LIMIT = 500
 
 def _stacked(project: Any, names: list[str], prefs: dict[str, Any]
              ) -> tuple[list[dict], list[str]] | None:
-    """Several data objects of one type on one stage, as VD's
-    `_stacked_entry` draws two SRS or an FRF from each of two surveys
-    station by station: the same concrete type and the same abscissa,
+    """Several data objects of one type on one stage: the same concrete type and the same abscissa,
     their records stacked into one object for the drawing only. Nothing
     is merged or stored, so the merge rules' refusals (duplicate pairs,
     mixed capture counts) do not apply: they protect stored objects from
@@ -566,8 +551,8 @@ def _column(data: Any, picks: list[int]) -> list[int] | None:
     """The picked records as one CPSD reference column, or None: a column
     against one reference carries each response's magnitude and phase
     relative to it, an honest complex shape; a whole CPSD has no
-    reference chosen and the diagonal is the autos (VD's `_cpsd_column`)."""
-    from hertzforge.core.data import channel_quantities
+    reference chosen and the diagonal is the autos."""
+    from hertzforge.core.data import autospectrum, channel_quantities
 
     if len(picks) < 2 or data.reference_dof is None or not np.iscomplexobj(data.ordinate):
         return None
@@ -575,7 +560,7 @@ def _column(data: Any, picks: list[int]) -> list[int] | None:
     references = {(data.reference_dof[i], quantities[k][1]) for k, i in enumerate(picks)}
     if len(references) != 1:
         return None
-    if all(data.response_dof[i] == data.reference_dof[i] for i in picks):
+    if all(autospectrum(data, i) for i in picks):
         return None
     kinds = [response for response, _reference in quantities]
     wanted = max(set(kinds), key=kinds.count)
@@ -584,7 +569,7 @@ def _column(data: Any, picks: list[int]) -> list[int] | None:
 
 def _matched(project: Any, first: str, second: str) -> tuple[str, Any] | None:
     """The Matched Modes object between these two sets, (name, object), or
-    None (VD's `_matched_for`)."""
+    None."""
     from hertzforge.core.matches import MatchedModes
 
     return next(((name, obj) for name, obj in project.items()
@@ -601,7 +586,7 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     (`Project.comparison_mac`), and `prefs['projection']` animates the
     projection on the basis geometry instead of both sets by DOF name.
     Pairs already committed to a Matched Modes object ride on the matrix
-    as `matched`, as VD's red checker."""
+    as `matched`."""
     from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
@@ -683,8 +668,8 @@ def _three_played(project: Any, objects: list[str], records: dict[str, list[int]
 
 def _modal_motion(project: Any, geometry_name: str, data_name: str, picks: list[int],
                   shapes_name: str | None = None) -> tuple[list[dict], list[str]] | None:
-    """Modal coordinates played on a geometry through their shape set, as Visual Dynamics
-    plays them: the set selected with them, or the one they came from
+    """Modal coordinates played on a geometry through their shape set: the set selected
+    with them, or the one they came from
     (`Project.modal_basis`). Each frame is the modes' shapes scaled by their values at that
     sample and summed, by the shell, so the physical response is never formed
     (`deform.modal_deflection`). None when the records are not modal coordinates."""
@@ -793,7 +778,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
     asks for (`prefs['line']`, Hz), else the loudest. One shape the view
     sweeps, beside the records as curves, the two sharing the frequency
     cursor."""
-    from hertzforge.core.data import Psd
+    from hertzforge.core.data import Psd, autospectrum
     from hertzforge.deform import EnvelopeDeflection, OdsDeflection
 
     prefs = {**PREFS, **(prefs or {})}
@@ -810,8 +795,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
     elif isinstance(data, Psd) and data.reference_dof is not None:
         try:
             dofs, ordinate, used = data.principal_shapes()
-            records = [i for i in range(int(data.num_records))
-                       if data.response_dof[i] == data.reference_dof[i]]
+            records = [i for i in range(int(data.num_records)) if autospectrum(data, i)]
             flavor = f'Principal {used} shape'
         except ValueError as why:
             records, _quantity, notes = _played(data, picks)
@@ -981,7 +965,7 @@ def _resynthesis(project: Any, frf_name: str, set_name: str, records: dict[str, 
     """An FRF beside a shape set: the modal model's prediction of the
     picked records (the first few when none are picked), each synthesis
     following its measurement dashed in its colour
-    (`core.shapes.synthesize_overlay`, VD's Resynthesis reading); picked
+    (`core.shapes.synthesize_overlay`, the Resynthesis reading); picked
     modes limit the synthesis to them. Edit Fit is the act beside it."""
     import hertzforge as hz
     from hertzforge.core.shapes import synthesize_overlay
@@ -1088,7 +1072,7 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
 
 
 def _decades(views: list[dict]) -> None:
-    """Every frequency axis in log, as VD's Log f draws them for the session."""
+    """Every frequency axis in log."""
     for view in views:
         for key in ('x', 'z'):
             axis = view.get(key)

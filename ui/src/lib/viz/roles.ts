@@ -68,7 +68,7 @@ const FOLLOWER_DASH = ROLE_STYLES.reference.dash;
 /**
  * The look of each of a view's series. Series step through their role's colors in order; a
  * follower (`follows`, an earlier series that is not itself a follower) takes its measurement's
- * color dashed and draws just above it, as Visual Dynamics draws a synthesized FRF. A `follows`
+ * color dashed and draws just above it. A `follows`
  * that names no such series is ignored.
  */
 export function seriesLooks(series: Pick<Series, 'role' | 'follows'>[]): SeriesLook[] {

@@ -21,8 +21,8 @@ as the reference validates (every required property present, every
 shared dimension the same size wherever it appears, one alternative of
 every either-or group, every enumeration and pattern honored); `File`
 is the whole file with its activities. `read` and `write` move a `File`
-to and from disk with h5py. Converting these to and from Visual
-Dynamics objects is done in `escdf_objects`.
+to and from disk with h5py. Converting these to and from this package's
+objects is done in `escdf_objects`.
 
 The on-disk conventions, as measured from files the reference wrote:
 strings are variable-length UTF-8, and a scalar string is a
@@ -53,7 +53,7 @@ import h5py
 import numpy as np
 
 # Checked against the reference's own files in both directions while it was
-# written (2026-09-30; Visual Dynamics' PLAN.md "ESCDF: import and export first").
+# written (2026-09-30).
 
 __all__ = [
     'Activity',

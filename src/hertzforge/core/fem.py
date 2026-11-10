@@ -25,10 +25,9 @@ surface mesh and let `from_geometry`, given one material and one
 section, put a beam along every edge of it. That is the shortest route
 from any geometry to a set of modes.
 
-This is not a general finite element code. The quad plate is
-rectangular only: a skewed or warped quad is refused rather than solved
-badly, because the MITC4 tying assumes the element's natural axes run
-along its sides (`Plate`). The triangle takes any flat shape. Every
+This is not a general finite element code. The quad plate takes any flat
+convex quad (`Plate`); a warped one is refused rather than solved badly.
+The triangle takes any flat shape. Every
 shell is flat, so a curved surface is a faceted one. A solid carries
 three translations per node and no rotations, and the linear wedge and
 tetrahedron lock in bending where the brick does not (`Solid`). The
@@ -189,6 +188,26 @@ ZERO_ENERGY = 1e-12
 #: the element's own motion as the measure: a spring grounded at one end
 #: cancels nothing, so that trace read as 1.0, a full stretch.
 ZERO_ELEMENT_ENERGY = 1e-3
+
+#: how small one kind of a mode's motion is, against the other across the
+#: model's reach, to be the solver's trace rather than motion
+#: (`Model._strains_no_element`)
+RIGID_TRACE = 1e-6
+
+#: past this ratio of the mass factor's largest and smallest diagonal, squared,
+#: the mass matrix cannot be factored into a usable standard problem: a 5 kg lump
+#: on a rod of 1e-3 kg/m^3 reads 5e12 here and its second mode 15 % off, where
+#: 0.1 kg/m^3, at 5e10, is right to the digits printed. `Model._dense_modes`
+#: then works from the stiffness.
+MASS_FACTOR_LIMIT = 1e12
+
+#: the shift of that form, as a share of the stiffness over the mass: positive
+#: enough to factor a free model and small enough to leave the low modes alone
+STIFFNESS_FORM_SHIFT = 1e-8
+
+#: below this share of the largest, an eigenvalue of that form is round-off: a
+#: degree of freedom with next to no mass, which that form has no frequency for
+STIFFNESS_FORM_FLOOR = 1e-13
 
 #: past this many degrees of freedom `Model.eigensolution` solves sparse
 #: rather than dense: the dense solve of a 662-node plate model (3972
@@ -875,7 +894,8 @@ class Triangle:
 @dataclass
 class Solid:
     """One solid element: a hexahedron, a wedge or a tetrahedron, told
-    apart by how many nodes it names (8, 6 or 4).
+    apart by how many nodes it names (8, 6, 4, or 10 for a quadratic
+    tetrahedron).
 
     Each node has three translations and no rotations. A solid has no
     rotational stiffness, and the rotations of a node that only solids
@@ -1089,12 +1109,19 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
         vectors = vectors @ ritz
         k_v = stiffness @ vectors
         m_v = mass @ vectors
+        # each mode's own Rayleigh quotient, not the Ritz eigenvalue: eigh's
+        # round-off scales with the block's largest eigenvalue, and on a
+        # nearly massless beam, whose guard modes sit near infinity, a
+        # repeated pair stalled at a residual of 1e-4 and split by as much
+        # on one platform and not another (2026-11-08)
+        eigenvalues = np.einsum('ij,ij->j', vectors, k_v) / np.einsum('ij,ij->j', vectors, m_v)
         residuals = (np.linalg.norm(k_v - m_v * eigenvalues, axis=0)
                      / np.linalg.norm(k_v - sigma * m_v, axis=0))
         before, worst = worst, float(residuals[:wanted].max())
         if worst < POLISH_RESIDUAL or worst > 0.5 * before:
             break
-    return eigenvalues, vectors, residuals
+    order = np.argsort(eigenvalues, kind='stable')
+    return eigenvalues[order], vectors[:, order], residuals[order]
 
 
 class NotConverged(Exception):
@@ -2768,8 +2795,18 @@ class Model:
         """
         rotation = (np.arange(shapes.shape[0]) % 6) >= 3
         largest = np.abs(shapes)
-        scale = np.where(rotation[:, None], largest[rotation].max(axis=0),
-                         largest[~rotation].max(axis=0))
+        moved = largest[~rotation].max(axis=0)
+        turned = largest[rotation].max(axis=0)
+        # A roll about the line every node sits on has translations of round
+        # off alone, and on them a spring reads a full stretch: where one kind
+        # of motion is a trace of the other, the other sets the size, across
+        # the model's reach. A spring off that line is not a trace, and stays
+        # a mode of its own.
+        reach = float(np.ptp(np.array(list(self._nodes.values())), axis=0).max())
+        moved = np.where(moved < RIGID_TRACE * turned * reach, turned * reach, moved)
+        if reach > 0.0:
+            turned = np.where(turned * reach < RIGID_TRACE * moved, moved / reach, turned)
+        scale = np.where(rotation[:, None], turned, moved)
         worst = np.zeros(shapes.shape[1])
         for rows, k, _m in self._batches():
             if k is None:
@@ -2839,6 +2876,14 @@ class Model:
                 + (', '.join(starved[:6]) or 'none on the diagonal, so the '
                    'model is nearly a mechanism')) from None
 
+        thin = np.diag(factor)
+        if (thin.max() / thin.min()) ** 2 > MASS_FACTOR_LIMIT:
+            try:
+                return self._dense_from_stiffness(reduced_m, reduced_k, transform, stiffness,
+                                                  ticker)
+            except np.linalg.LinAlgError:
+                pass
+
         # M = L L^T, so K phi = lambda M phi becomes A y = lambda y with
         # A = L^-1 K L^-T and phi = L^-T y. y orthonormal then gives
         # phi^T M phi = y^T y = I exactly, which is the normalization we
@@ -2855,6 +2900,14 @@ class Model:
         if ticker is not None:
             ticker.tick()
         shapes = np.linalg.solve(factor.T, vectors)
+        # each mode's Rayleigh quotient on K and M themselves: eigh's
+        # eigenvalues carry round-off of the largest one's size, which on a
+        # light rod with a tip mass was a 1e-6 split from the sparse solve on
+        # one LAPACK and not another (2026-11-10)
+        eigenvalues = (np.einsum('ij,ij->j', shapes, reduced_k @ shapes)
+                       / np.einsum('ij,ij->j', shapes, reduced_m @ shapes))
+        order = np.argsort(eigenvalues, kind='stable')
+        eigenvalues, shapes = eigenvalues[order], shapes[:, order]
 
         full = transform @ shapes
         return eigenvalues, full, stiffness
@@ -2907,6 +2960,30 @@ class Model:
         reduced_k = (scale @ reduced_k @ scale).tocsc()
         reduced_m = (scale @ reduced_m @ scale).tocsc()
         return reduced_k, reduced_m, transform, scale, sigma, stiffness
+
+    def _dense_from_stiffness(self, reduced_m, reduced_k, transform, stiffness, ticker):
+        """(eigenvalues, shapes at every DOF, stiffness) for a mass matrix too
+        thin to factor well, from a factor of the shifted stiffness instead:
+        with K + s M = L L^T, M phi = mu (K + s M) phi is symmetric standard
+        in L^-1 M L^-T, and lambda = 1 / mu - s. Degrees of freedom with next
+        to no mass have mu of round-off and are left out, so the set may hold
+        fewer modes than degrees of freedom."""
+        shift = (STIFFNESS_FORM_SHIFT * float(np.trace(reduced_k))
+                 / float(np.trace(reduced_m)))
+        factor = np.linalg.cholesky(reduced_k + shift * reduced_m)
+        temporary = np.linalg.solve(factor, reduced_m)
+        standard = np.linalg.solve(factor, temporary.T).T
+        if ticker is not None:
+            ticker.tick()
+            ticker.busy()
+        mu, vectors = np.linalg.eigh((standard + standard.T) / 2.0)
+        if ticker is not None:
+            ticker.tick()
+        resolved = mu > STIFFNESS_FORM_FLOOR * mu.max()
+        mu, vectors = mu[resolved][::-1], vectors[:, resolved][:, ::-1]
+        # phi^T (K + s M) phi = 1 for phi = L^-T y, and that is phi^T M phi = mu
+        shapes = np.linalg.solve(factor.T, vectors) / np.sqrt(mu)
+        return 1.0 / mu - shift, transform @ shapes, stiffness
 
     def _sparse_modes(self, fixed, maximum_frequency, num_modes, ticker=None):
         """(eigenvalues, shapes at every DOF, stiffness) for the lowest

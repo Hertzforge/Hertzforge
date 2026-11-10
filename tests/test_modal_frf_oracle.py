@@ -4,11 +4,11 @@ The second, independent opinion on `ShapeSet.synthesize_frf`. The first
 is exact physics (`tests/test_frf_synthesis_exact.py`); this is the tool
 the audience already trusts, synthesizing the same modal model, frozen
 by `generate_modal_frf_oracle.py` in the private generators repository
-and read here as numbers — never an import (`AGENTS.md` hard rule 1).
+and read here as numbers — never an import.
 
 Real shapes in the second-order residue form, and complex shapes in the
 first-order pole-plus-conjugate form with the modal mass read as modal
-A — the branch Visual Dynamics gained on 2026-09-23. sdynpy divides
+A — the branch gained on 2026-09-23. sdynpy divides
 the conjugate term by modal A rather than its conjugate, which is right
 only for a real modal A, so a real modal A is what is frozen. A complex
 one is where sdynpy is wrong: 2.5% of peak on the non-proportionally

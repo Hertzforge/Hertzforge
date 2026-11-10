@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * The console along the bottom edge of the views, as Visual Dynamics' is: a tab that opens and
+	 * The console along the bottom edge of the views: a tab that opens and
 	 * closes it, and the session as Python inside, read-only, selectable and copyable. A tab, not
 	 * a menu, so the console shows that it exists; read-only by decision, because the journal's
 	 * value is copying out.

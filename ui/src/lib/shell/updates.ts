@@ -3,7 +3,7 @@
  * (`latest.json`, written by the release workflow), says through the native dialogs whether a
  * newer version is published, and on a yes downloads the signed archive, verifies it against the
  * key built into the app, installs it and relaunches. Asked from the app menu or the palette,
- * never at startup, as Visual Dynamics checks. In a browser there is no updater and the command is not offered.
+ * never at startup. In a browser there is no updater and the command is not offered.
  */
 
 interface Update {

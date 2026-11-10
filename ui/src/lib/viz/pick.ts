@@ -4,7 +4,7 @@
  * the cursor, and the params a click on a surface changes.
  */
 
-/** How near the cursor a node must be on screen to be picked, in CSS pixels (Visual Dynamics' 12). */
+/** How near the cursor a node must be on screen to be picked, in CSS pixels. */
 export const PICK_REACH = 12;
 
 /**
@@ -70,7 +70,7 @@ export function modelPlane(nodes: ArrayLike<number>, count: number): { point: Ve
 
 /**
  * Where a point clicked along the ray (`origin` + t `direction`) goes when it hits no surface,
- * as Visual Dynamics places one: on the model's plane when it is flat and the ray crosses it,
+ * on the model's plane when it is flat and the ray crosses it,
  * otherwise at the depth of `anchor`, the node nearest the click, so it lands near what was
  * clicked.
  */
@@ -107,4 +107,18 @@ export function toggledSurface(params: Record<string, unknown>, kept: number[], 
 	const drop = leaving ? back : out;
 	const added = idsIn(params[add]).filter((n) => n !== id);
 	return { [add]: idList([...added, id]), [drop]: idList(idsIn(params[drop]).filter((n) => n !== id)) };
+}
+
+/** Meters in a length unit the view can be drawn in. */
+const METERS: Record<string, number> = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, ft: 0.3048 };
+
+/**
+ * The grid an arrow's drag lands on, in the view's `unit`: a tenth of an inch for the inch family,
+ * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
+ * whose numbers have no unit to round in.
+ */
+export function gridStep(unit: string): number | null {
+	const meters = METERS[unit];
+	if (meters === undefined) return null;
+	return (unit === 'in' || unit === 'ft' ? 0.00254 : 0.01) / meters;
 }

@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, pastedFiles } from '$lib/project/files';
+import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
@@ -45,13 +45,13 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	SimStateResult,
 	TableEdit,
 	View,
-	Workspace, MatrixView, Pick3D } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, validateAll, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
+	Workspace, MatrixView } from '$lib/protocol/types';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, validateAll, withDisplayLengths, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { isWorkspace, offeredIn, STUDIES } from './workspaces';
+import { isWorkspace, STUDIES } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -70,7 +70,7 @@ class AnalyzeState {
 	runError = $state<string | null>(null);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
-	/** The bar's choices, remembered across launches as VD remembers 3D. */
+	/** The bar's choices, remembered across launches. */
 	prefs = $state<ShowPrefs>(readPrefs());
 	/** The frequency the stage's shape is read at, from the plot's cursor; null for the loudest line. */
 	line = $state<number | null>(null);
@@ -103,11 +103,6 @@ class AnalyzeState {
 
 	constructor(private readonly app: AppState) {}
 
-	/** The module's own tools and the ones every module offers, of those with something to run on. */
-	toolsFor(workspace: Workspace): OperationDescriptor[] {
-		return this.tools.filter((o) => offeredIn(o, workspace));
-	}
-
 	/** Tools follow the data: only the operations with an object in the project to run on. */
 	get tools(): OperationDescriptor[] {
 		if (!this.onProject) return [];
@@ -125,7 +120,25 @@ class AnalyzeState {
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		return withObjects(op.params, this.app.project.summary?.objects ?? []);
+		const params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		const length = this.app.units.length;
+		if (!length || !op.params.some((p) => p.length)) return params;
+		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
+	}
+
+	/** Whether the geometry an operation's form names has no units, its numbers its own. */
+	private undefinedGeometry(op: OperationDescriptor): boolean {
+		const name = this.values[op.id]?.geometry;
+		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
+	}
+
+	/** The display system changed: each form holds the same lengths, in the new unit. */
+	lengthsChanged(ratio: number): void {
+		const next = { ...this.values };
+		for (const op of this.app.catalog?.operations ?? []) {
+			if (next[op.id] && op.params.some((p) => p.length) && !this.undefinedGeometry(op)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+		}
+		this.values = next;
 	}
 
 	get params(): ParamDescriptor[] {
@@ -328,7 +341,7 @@ class AnalyzeState {
 		}
 	}
 
-	/** Export in the desktop app: the native save window says where and in which format, as in Visual Dynamics. */
+	/** Export in the desktop app: the native save window says where and in which format. */
 	private async exportObject(row: ActionRow, formats: ExportFormat[]): Promise<void> {
 		this.runError = null;
 		try {
@@ -349,12 +362,14 @@ class AnalyzeState {
 		p.clickObject(name, p.summary?.objects.map((o) => o.name) ?? [], { toggle: true });
 	}
 
-	/** Back from a form to the table. */
+	/** Back from a form to the table; a preview it had drawn goes with it, since nothing ran. */
 	closeForm(): void {
 		this.formOpen = false;
 		this.formRow = null;
 		this.runError = null;
 		this.triedRun = false;
+		this.forgetPreview();
+		this.dropPreview();
 	}
 
 	/** A row chosen in the action table: its tool, with the selection filled into its params. */
@@ -440,26 +455,62 @@ class AnalyzeState {
 	private previewTimer: ReturnType<typeof setTimeout> | null = null;
 	private previewKey = '';
 	private previewSeq = 0;
+	/** The reading that is a preview, while it is the one drawn. */
+	private previewDrawn: AnalyzeState['reading'] = null;
+
+	/** Nothing still to come from a preview asked for. */
+	private stopPreview(): void {
+		if (this.previewTimer) clearTimeout(this.previewTimer);
+		this.previewTimer = null;
+		this.previewSeq++;
+	}
+
+	/** As `stopPreview`, and the same values typed again preview again. */
+	private forgetPreview(): void {
+		this.stopPreview();
+		this.previewKey = '';
+	}
+
+	private dropPreview(): void {
+		if (this.reading && this.reading === this.previewDrawn) this.endReading();
+		this.previewDrawn = null;
+	}
+
+	/** Every field the form asks, but for what its row filled in, still holds its default. */
+	private untouched(op: OperationDescriptor, values: ParamValues): boolean {
+		const defaults = defaultValues(this.paramsOf(op));
+		const filled = this.formRow?.fill ?? {};
+		return this.formParams.every((p) => p.name in filled || values[p.name] === defaults[p.name]);
+	}
 
 	/** A form that previews, typed into: once the typing rests, what it would do is drawn, on a copy. */
 	followPreview(): void {
+		const open = this.formOpen;
 		const op = this.op;
 		const values = this.currentValues;
-		if (!op?.previews || !this.onProject || Object.keys(this.errors).length) return;
+		if (!open || !op?.previews || !this.onProject || Object.keys(this.errors).length) {
+			this.forgetPreview();
+			return;
+		}
 		const key = `${op.id}\u0000${JSON.stringify(values)}`;
 		if (key === this.previewKey) return;
 		this.previewKey = key;
-		if (this.previewTimer) clearTimeout(this.previewTimer);
-		const seq = ++this.previewSeq;
+		this.stopPreview();
+		const seq = this.previewSeq;
 		this.previewTimer = setTimeout(async () => {
 			try {
 				const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params: values, preview: true });
 				if (seq !== this.previewSeq || this.opId !== op.id) return;
 				this.reading = { title: `${op.title}, preview`, views: res.views };
+				this.previewDrawn = this.reading;
 				this.readingId = op.id;
 				this.runError = null;
 			} catch (err) {
-				if (seq === this.previewSeq && this.opId === op.id) this.runError = message(err);
+				if (seq !== this.previewSeq || this.opId !== op.id) return;
+				this.dropPreview();
+				// a form that waits for typing is refused as it opens: it has said nothing wrong yet
+				const waiting = err instanceof RequestError && err.code === 'refused' && this.untouched(op, values);
+				this.runError = waiting ? null : message(err);
 			}
 		}, 300);
 	}
@@ -468,7 +519,7 @@ class AnalyzeState {
 	async pickInReading(pick: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>): Promise<void> {
 		const title = this.reading?.title ?? '';
 		try {
-			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } });
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: pick.op, params: { ...pick.params, ...patch } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
 			const next = res.views.find((v) => v.view === 'shape3d' && v.pick?.op === pick.op);
@@ -477,7 +528,16 @@ class AnalyzeState {
 			}
 		} catch (err) {
 			this.runError = message(err);
+			this.redrawReading();
 		}
+	}
+
+	/** No new view is coming: the same ones again, so a handle let go where it was refused goes back. */
+	private redrawReading(): void {
+		const was = this.reading;
+		if (!was) return;
+		this.reading = { ...was, views: was.views.map((v) => ({ ...v })) };
+		if (was === this.previewDrawn) this.previewDrawn = this.reading;
 	}
 
 	/**
@@ -521,11 +581,13 @@ class AnalyzeState {
 		const params = { ...this.currentValues };
 		this.running = true;
 		this.runError = null;
+		// what is typed now is run, so its preview must not land on top of the answer
+		this.stopPreview();
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);
-			// as Visual Dynamics works: an act's result joins the tree and is selected; a reading
+			// an act's result joins the tree and is selected; a reading
 			// takes the view until Back
 			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
 			if (added.length) {
@@ -715,7 +777,7 @@ class SimState {
 const FILE_TIMEOUT_MS = 600_000;
 
 /**
- * The mode fit under way on the project (`fit.*`): Visual Dynamics' fitting loop, one mode at a time
+ * The mode fit under way on the project (`fit.*`): the fitting loop, one mode at a time
  * on the residual. The x range on screen is the search band Find Mode reads.
  */
 export class FitState {
@@ -729,7 +791,7 @@ export class FitState {
 
 	start(frf: string, shapes?: string, coherence?: string): Promise<boolean> {
 		this.range = null;
-		// records picked in the tree limit the fit, as in Visual Dynamics; an Edit Fit takes its set's own
+		// records picked in the tree limit the fit; an Edit Fit takes its set's own
 		const records = shapes ? [] : (this.app.project.selection.records[frf] ?? []);
 		return this.step('Starting the fit', 'fit.start', { frf, ...(shapes ? { shapes } : {}), ...(coherence ? { coherence } : {}), ...(records.length ? { records } : {}) });
 	}
@@ -819,7 +881,7 @@ export class FitState {
 }
 
 /**
- * The project's reports (`report.*`): Visual Dynamics' report, generated from a starter template and
+ * The project's reports (`report.*`): the report, generated from a starter template and
  * shown as the page the core writes.
  */
 export class ReportState {
@@ -828,14 +890,15 @@ export class ReportState {
 	html = $state<string | null>(null);
 	busy = $state<string | null>(null);
 	error = $state<string | null>(null);
-	/** Where the last export went. */
+	/** Where the last export went, and what the page left out and the check found. */
 	exported = $state<string | null>(null);
+	exportedNote = $state('');
 	/**
-	 * What an export or an issue is held on, as Visual Dynamics asks before a report leaves the
-	 * project: the sections still owed and the indexed files that do not match; the person says
-	 * anyway or lets it be.
+	 * What an export, a print or an issue is held on before a report leaves the project: the
+	 * sections still owed and the indexed files that do not match; the person says anyway or lets
+	 * it be.
 	 */
-	held = $state<{ act: 'export' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
+	held = $state<{ act: 'export' | 'print' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
 	/** The editor's pane for the selection, from the last `report.editor`. */
 	editor = $state.raw<ReportEditor | null>(null);
 	/** How far the page was scrolled, kept across the re-render an edit makes. */
@@ -865,38 +928,48 @@ export class ReportState {
 		if (!name) return;
 		this.held = null;
 		await this.act('Saving the page', async () => {
-			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+			const res = await this.app.analysis.request<{ path: string | null; owed: string[]; index: { name: string; status: string }[]; note?: string }>(
 				'report.export',
 				{ name, path, ...(anyway ? { anyway } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.path === null) this.held = { act: 'export', path, owed: res.owed, index: res.index };
-			else this.exported = res.path;
+			else {
+				this.exported = res.path;
+				this.exportedNote = res.note ?? '';
+			}
 		});
 	}
 
-	/** The held export or issue, done anyway. */
+	/** The held export, print or issue, done anyway. */
 	async anyway(): Promise<void> {
 		const held = this.held;
 		if (!held) return;
 		if (held.act === 'export' && held.path) await this.export(held.path, true);
+		else if (held.act === 'print') await this.print(true);
 		else await this.issue('begin', undefined, true);
 	}
 
 	/** The page being printed, in a frame of its own that asks for the print dialog. */
 	printing = $state<string | null>(null);
-	/** An issue under way: the report is marked issued and its page printed; the PDF is named next. */
+	/** An issue under way: the page that says issued is printed; the PDF is named next, which issues it. */
 	issuing = $state<string | null>(null);
 	/** The last issue recorded. */
 	issued = $state<Record<string, string> | null>(null);
 
 	/** Print the reader's page; the print dialog saves it as a PDF. */
-	async print(): Promise<void> {
+	async print(anyway = false): Promise<void> {
 		const name = this.name;
 		if (!name) return;
+		this.held = null;
 		await this.act('Preparing the page to print', async () => {
-			const res = await this.app.analysis.request<{ html: string }>('report.print', { name }, { timeoutMs: RUN_TIMEOUT_MS });
-			this.printing = res.html;
+			const res = await this.app.analysis.request<{ html: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+				'report.print',
+				{ name, ...(anyway ? { anyway } : {}) },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.html === null) this.held = { act: 'print', owed: res.owed, index: res.index };
+			else this.printing = res.html;
 		});
 	}
 
@@ -905,7 +978,7 @@ export class ReportState {
 		const name = this.name;
 		if (!name) return;
 		this.held = null;
-		const doing = { begin: 'Marking the report issued', record: 'Recording the issue', cancel: 'Putting the report back' }[step];
+		const doing = { begin: 'Preparing the page to issue', record: 'Recording the issue', cancel: 'Cancelling the issue' }[step];
 		await this.act(doing, async () => {
 			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
 				'report.issue',
@@ -981,17 +1054,25 @@ export class ReportState {
 	}
 }
 
+/** A unit system's length unit, and what takes it to meters. */
+interface LengthUnit {
+	unit: string;
+	to_si: number;
+}
+
 /** Where the chosen unit system is kept between launches. */
 const UNITS_KEY = 'hertzforge.units';
 
 /**
  * The display unit system (`units.system`): every plot and reading the analysis service sends is
- * in it, as Visual Dynamics' unit selector puts its window in one. Remembered between launches and
+ * in it. Remembered between launches and
  * told to the service each time it connects; a change draws the results on screen again.
  */
 export class UnitsState {
 	name = $state<string | null>(null);
 	systems = $state<string[]>([]);
+	/** The system's length unit, and what takes it to meters: what a solid's form is typed in. */
+	length = $state.raw<LengthUnit | null>(null);
 
 	constructor(private readonly app: AppState) {}
 
@@ -1007,12 +1088,16 @@ export class UnitsState {
 	async sync(): Promise<void> {
 		const wanted = this.stored();
 		try {
-			const res = await this.app.analysis.request<{ name: string; systems: string[] }>('units.system', {});
+			const res = await this.app.analysis.request<{ name: string; systems: string[]; length?: LengthUnit }>('units.system', {});
 			this.systems = res.systems;
 			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
-				const set = await this.app.analysis.request<{ name: string }>('units.system', { name: wanted });
+				const set = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name: wanted });
 				this.name = set.name;
-			} else this.name = res.name;
+				this.length = set.length ?? null;
+			} else {
+				this.name = res.name;
+				this.length = res.length ?? null;
+			}
 		} catch {
 			// an older service without units: its own SI stands
 		}
@@ -1020,8 +1105,11 @@ export class UnitsState {
 
 	async choose(name: string): Promise<void> {
 		if (name === this.name) return;
-		const res = await this.app.analysis.request<{ name: string }>('units.system', { name });
+		const res = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name });
 		this.name = res.name;
+		const before = this.length;
+		this.length = res.length ?? null;
+		if (before && this.length) this.app.analyze.lengthsChanged(before.to_si / this.length.to_si);
 		try {
 			localStorage.setItem(UNITS_KEY, res.name);
 		} catch {
@@ -1183,19 +1271,26 @@ export class ProjectState {
 	}
 
 	/**
-	 * Open or import each path, as a drop or a dialog gives them: a project file opens (replacing
-	 * the project), anything else is imported into it. Stops at the first refusal and says why.
+	 * Open or import each path, as a drop, a paste or File > Open gives them: the first project file
+	 * opens (replacing the project, after asking when that loses work), and everything else is
+	 * imported into it. Stops at the first refusal and says why.
 	 */
 	async openPaths(paths: string[]): Promise<void> {
+		const { opens, imports } = openingOrder(paths);
+		if (opens && !(await this.open(opens))) return;
+		await this.importPaths(imports);
+	}
+
+	/** Import each path into the open project, a project file's objects among them. */
+	async importPaths(paths: string[]): Promise<void> {
 		for (const path of paths) {
-			const ok = isProjectFile(path) ? await this.open(path) : await this.importFile(path);
-			if (!ok) return;
+			if (!(await this.importFile(path))) return;
 		}
 	}
 
-	/** Open a project file in place of this one, after asking when this one has unsaved changes. */
+	/** Open a project file in place of the project; false when the person keeps working instead. */
 	async open(path: string): Promise<boolean> {
-		if (!(await this.mayDiscard())) return false;
+		if (this.summary?.modified && !(await askToReplace(this.summary.title, baseName(path)))) return false;
 		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
 	}
 
@@ -1268,7 +1363,7 @@ export class ProjectState {
 				return;
 			}
 			const paths = await chooseFiles(asked);
-			if (paths) await this.openPaths(paths);
+			if (paths) await (asked === 'import' ? this.importPaths(paths) : this.openPaths(paths));
 			return;
 		}
 		this.asking = this.asking === asked ? null : asked;
@@ -1320,7 +1415,7 @@ export class ProjectState {
 		return this.call(`Drawing on ${geometry}`, 'project.activate', { geometry }, false);
 	}
 
-	/** Link the selected objects into one group, as VD's Link does; the group merges any they are in. */
+	/** Link the selected objects into one group; the group merges any they are in. */
 	link(names: string[]): Promise<boolean> {
 		const [first, second, ...more] = names;
 		return this.act(`Linking ${names.join(', ')}`, 'project.link', { first, second, more: more.join(', '), name: '' });
@@ -1330,7 +1425,7 @@ export class ProjectState {
 		return this.act(`Unlinking ${name}`, 'project.unlink', { object: name });
 	}
 
-	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V), as VD pastes its own objects. */
+	/** The objects copied from the tree (Cmd-C), pasted as copies (Cmd-V). */
 	copied = $state.raw<string[]>([]);
 
 	copySelection(): boolean {
@@ -1347,7 +1442,7 @@ export class ProjectState {
 	}
 
 	async paste(): Promise<boolean> {
-		// files copied elsewhere since, as VD reads the clipboard: a copy here puts text on it and no file
+		// files copied elsewhere since: a copy here puts text on it and no file
 		const paths = await pastedFiles();
 		if (paths.length) {
 			await this.openPaths(paths);
@@ -1362,7 +1457,7 @@ export class ProjectState {
 	}
 
 	/**
-	 * Objects dragged onto `target` join its group and leave their own, as VD's drag moves them;
+	 * Objects dragged onto `target` join its group and leave their own;
 	 * dragged onto nothing (`target` null) they leave their groups.
 	 */
 	async moveInto(names: string[], target: string | null): Promise<boolean> {
@@ -1391,7 +1486,8 @@ export class ProjectState {
 		return this.act(text.trim() ? `Naming the group of ${name}` : `Unnaming the group of ${name}`, 'project.name_object_group', { object: name, name: text });
 	}
 
-	/** A DOF typed over in `name`'s grid: that channel (its quantity's) on the object and what derives from it, as VD's grid does. */
+	/** A DOF typed over in `name`'s grid: that channel (its quantity's) on the object and what derives
+	 * from it. */
 	async renameDof(name: string, old: string, next: string, quantity: string): Promise<boolean> {
 		const ok = await this.act(`Renaming ${old} to ${next}`, 'project.rename_dof', { source: name, old, new: next, measured: quantity });
 		if (ok) void this.loadChildren(name);
@@ -1423,7 +1519,7 @@ export class ProjectState {
 
 	/**
 	 * Remove what is selected, once confirmed: the picked sub-items when any are picked (a
-	 * co-selected object is context, not a target, as in Visual Dynamics), else the objects.
+	 * co-selected object is context, not a target), else the objects.
 	 */
 	async removeSelected(): Promise<boolean> {
 		const names = [...this.selection.objects];
@@ -1525,7 +1621,7 @@ export class ProjectState {
 const CONSOLE_KEY = 'hertzforge.console.shown';
 
 /**
- * The console: the session as Python along the bottom of the window, as Visual Dynamics' is. It
+ * The console: the session as Python along the bottom of the window. It
  * shows the project's journal, every verb and settings change as the line that replays it,
  * read-only, to be copied into a script; nothing is typed into it (Brandon, 2026-08-30).
  */

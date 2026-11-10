@@ -44,11 +44,16 @@ def verbs_of(project: Any, name: str) -> list[str]:
     table the core offers them by (`Project.verbs`), in its order: what a
     `verb:` param lists the object under. A time history that a linked
     channel table describes also lists `overload_check`, which reads it
-    against that table's ranges: Visual Dynamics offers its Overload
-    reading there and nowhere else."""
+    against that table's ranges: the Overload reading is offered there
+    and nowhere else. A shock specification does not list
+    `generate_signal`: the one signal it makes is a synthesis, and that
+    has an operation of its own, `project.srs_synthesis`."""
     verbs = [verb for verb, _summary in project.verbs(name)]
-    if kind_of(project[name]) == 'time_history' and project.channel_table_for(name):
+    kind = kind_of(project[name])
+    if kind == 'time_history' and project.channel_table_for(name):
         verbs.append('overload_check')
+    if kind == 'shock_specification':
+        verbs.remove('generate_signal')
     return verbs
 
 
@@ -109,7 +114,7 @@ def summary(state: OpenProject) -> dict[str, Any]:
 
 
 def compatibility_issues(project: Any) -> dict[str, dict[str, Any]]:
-    """What does not fit, by object: Visual Dynamics' red rows
+    """What does not fit, by object: the red rows
     (`compatibility.check_compatibility`). An object is judged against the
     geometry of its group, else the active one; a modal object against the
     shape sets of its group. `sub_items` are the records, modes or channels
@@ -153,8 +158,11 @@ def new(params: Mapping[str, Any]) -> OpenProject:
 
 def open_file(params: Mapping[str, Any]) -> OpenProject:
     """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
-    file holds. Any other file is refused with a pointer to import it."""
+    file holds, or a new project holding the object when the file holds
+    one (Save As writes those formats for one object). Any other file is
+    refused with a pointer to import it."""
     import hertzforge as hz
+    from hertzforge.project import SingleObjectFile
 
     path = _path(params, 'project.open')
     if not path.lower().endswith(PROJECT_SUFFIXES):
@@ -164,10 +172,14 @@ def open_file(params: Mapping[str, Any]) -> OpenProject:
     if not os.path.exists(path):
         raise not_found(f'no file at {path}')
     try:
-        project = hz.Project.open(path)
+        try:
+            return OpenProject(hz.Project.open(path))
+        except SingleObjectFile:
+            project = hz.Project(os.path.splitext(os.path.basename(path))[0])
+            project.import_file(path)
+            return OpenProject(project, modified=True)
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
-    return OpenProject(project)
 
 
 #: the pictures `project.import` takes, by suffix (`core.photos.FORMATS`)
@@ -211,8 +223,7 @@ def import_file(state: OpenProject | None, params: Mapping[str, Any],
 def _import_photo(state: OpenProject | None, path: str) -> tuple[OpenProject, list[str]]:
     """A png or jpeg added to the project's Photos object, created on
     first use (`Photos()` is the replayable line; a photo is its bytes, so
-    the file is added by its path), as Visual Dynamics takes a dropped
-    picture. The Photos object is what was added."""
+    the file is added by its path). The Photos object is what was added."""
     import hertzforge as hz
     from hertzforge.core.photos import Photos
 
@@ -292,8 +303,7 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
 
 def _rename_photo(state: OpenProject, name: str, index: Any, new: str) -> None:
     """One photo renamed (`Photos.rename`), journaled as the call, and the
-    report blocks bound to it pointed at the new name, as VD's
-    `_apply_photo_name` does."""
+    report blocks bound to it pointed at the new name."""
     from hertzforge.core.photos import Photos
     from hertzforge.core.report import Report
 
@@ -330,8 +340,7 @@ def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.delete_parts`: the sub-items picked in the tree deleted
     from their objects, `parts` mapping each object's name to the indices
     picked: a data object's records, a shape set's modes, a channel table's
-    channels, a Photos object's photos, as Visual Dynamics' Delete takes
-    grid picks. Every item of an object is refused (delete the object
+    channels, a Photos object's photos. Every item of an object is refused (delete the object
     instead), nothing is deleted when any part is refused, and each
     deletion is journaled as the call a script would make."""
     from hertzforge.core.channel_table import ChannelTable
@@ -405,8 +414,8 @@ def _names(params: Mapping[str, Any], method: str, empty: bool = False) -> list[
 
 def duplicate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.duplicate`: a copy of each object named added beside it,
-    '<name> copy' (`Project.duplicate`), as Copy and Paste do in Visual
-    Dynamics' tree. A copy's arrays are its own; it is in no group."""
+    '<name> copy' (`Project.duplicate`), as Copy and Paste do in the tree. A copy's
+    arrays are its own; it is in no group."""
     state = _open(state, 'project.duplicate')
     names = _names(params, 'project.duplicate')
     missing = [name for name in names if name not in state.project]
@@ -436,7 +445,7 @@ def refresh(state: OpenProject | None, params: Mapping[str, Any]) -> None:
 def journal(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
     """`project.journal`: the session as Python, every verb and settings
     change since the project was made or opened as the line that replays
-    it (`Project.journal`), for Visual Dynamics' console: read-only, to be
+    it (`Project.journal`), for the console: read-only, to be
     copied into a script."""
     state = _open(state, 'project.journal')
     return {'lines': [str(line) for line in state.project.journal]}
@@ -540,8 +549,7 @@ def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[i
 
     state = _open(state, 'project.define_units')
     name = _name(params, 'name', 'project.define_units')
-    with state.project.journal_as(None):
-        converted = declared.define(state.project, name, params.get('units'))
+    converted = declared.define(state.project, name, params.get('units'))
     state.modified = True
     return converted
 
@@ -560,4 +568,5 @@ def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
                       'not a geometry')
     if state.project.active_geometry != name:
         state.project.active_geometry = name
+        state.project.journal.append(f'project.active_geometry = {name!r}')
         state.modified = True

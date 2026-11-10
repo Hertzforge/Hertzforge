@@ -1,13 +1,13 @@
 """Read and write sdynpy geometry files (.npz).
 
 The format is a NumPy .npz archive of structured arrays (self-describing;
-read with np.load):
+read with `plain_numpy`, because the connectivity columns are pickled):
 
 - node: id, coordinate (3,), color, def_cs, disp_cs;
 - coordinate_system: id, name, color, cs_type, matrix (4, 3), where
   rows 0-2 are the rotation and row 3 is the origin (a length);
 - traceline: id, color, description, connectivity (an object array of
-  node id arrays);
+  node id arrays, in which 0 lifts the pen, as in a universal file);
 - element: id, type (the universal file dataset 2412 descriptor code),
   color, connectivity (an object array).
 
@@ -29,8 +29,9 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 import numpy as np
 
-from ..core.geometry import Geometry, to_global, to_local
+from ..core.geometry import Geometry, pen_up_runs, to_global, to_local
 from ..units import si_factor
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 
@@ -50,15 +51,18 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     The file has no units; without `length_unit` the geometry imports
     with the file's coordinates and the units can be defined later. The
     elements are split into one element group per element family, and
-    each traceline id becomes one drawn line.
+    each traceline id becomes one drawn line. Raises ValueError for a file
+    holding Python objects beyond the numbers and text of a connectivity.
     """
     scale = 1.0 if length_unit is None else si_factor(length_unit, 'length')
 
-    with np.load(path, allow_pickle=True) as d:
+    with PlainNpz(path) as d:
         node = d['node']
         cs = d['coordinate_system']
-        tl = d['traceline'] if 'traceline' in d else np.empty(0, TRACELINE_DTYPE)
-        el = d['element'] if 'element' in d else np.empty(0, ELEMENT_DTYPE)
+        tl = (d.with_objects('traceline') if 'traceline' in d
+              else np.empty(0, TRACELINE_DTYPE))
+        el = (d.with_objects('element') if 'element' in d
+              else np.empty(0, ELEMENT_DTYPE))
 
     raw = cs['matrix'].astype(np.float64)
     matrix = raw.copy()
@@ -93,8 +97,8 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     by_id: dict[int, tuple[str, int, list]] = {}
     for tl_id, color, desc, conn in zip(tl['id'], tl['color'],
                                         tl['description'], tl['connectivity']):
-        _n, _c, runs = by_id.setdefault(int(tl_id), (str(desc), int(color), []))
-        runs.append([int(n) for n in conn])
+        for run in pen_up_runs(conn):
+            by_id.setdefault(int(tl_id), (str(desc), int(color), []))[2].append(run)
     geometry.attach_drawn_lines(list(by_id.values()))
     return geometry
 

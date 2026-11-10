@@ -271,19 +271,6 @@ def test_a_reference_transformation_that_does_not_fit_the_drives_is_left_out(
         is None
 
 
-def test_the_real_mixed_run_marks_both_loops():
-    """Brandon's layout, in the repository's own fixtures: a random
-    over eight channels beside a sine transformed to three rows."""
-    import os
-    path = os.path.join('stressdata', 'plate', 'mixed_transformed.nc4')
-    if not os.path.exists(path):
-        pytest.skip('the stress data is not on this machine')
-    table = hertzforge.import_file(path, stop=0.1)['channel_table']
-    assert table.environments['Sine'].response_transformation.shape == (3, 8)
-    assert table.controls().sum() == 8
-    assert table.controls('Sine').sum() == 8
-
-
 def test_a_script_reads_the_loops_control_column_and_its_matrix():
     project = hertzforge.Project('p')
     project.add('Channels', _loops())

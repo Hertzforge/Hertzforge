@@ -7,7 +7,7 @@ into block properties — and solved sparse, the frame's first ten
 elastic modes land within 0.2 % of Nastran's on the same mesh: the
 agreement oracle for the solid elements (2026-09-30, measured 0.09 %
 at worst). The files are not in this repository and do not travel with
-the package; point `VD_FRAME_WIKI` at an unpacked copy of
+the package; point `HERTZFORGE_FRAME_WIKI` at an unpacked copy of
 "Linderholt_Files_v2.zip"'s To_Wiki folder to run this. It takes two
 minutes and eight gigabytes, so it is `slow` as well.
 """
@@ -22,10 +22,10 @@ import pytest
 
 pytestmark = pytest.mark.slow
 
-WIKI = os.environ.get('VD_FRAME_WIKI')
+WIKI = os.environ.get('HERTZFORGE_FRAME_WIKI')
 
 
-@pytest.mark.skipif(not WIKI, reason='VD_FRAME_WIKI names the wiki files')
+@pytest.mark.skipif(not WIKI, reason='HERTZFORGE_FRAME_WIKI names the wiki files')
 def test_the_shared_frame_mesh_solves_to_nastrans_frequencies():
     from scipy.io import loadmat
 

@@ -5,17 +5,17 @@
 	 * result joins the tree; a reading takes the view until its default row is clicked.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
-	import type { View, Workspace } from '$lib/protocol/types';
+	import type { Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionTable from './ActionTable.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
 
-	/** A channel table's views, as VD's drop-down names them. */
+	/** A channel table's views. */
 	const TABLE_VIEWS: Record<string, string> = { channels: 'Channels', response: 'Response transformation', reference: 'Reference transformation' };
 
-	/** Where a shape set's values are read, as VD names the choices. */
+	/** Where a shape set's values are read. */
 	const VALUES_CHOICES: Record<string, string> = {
 		all: 'All DOFs',
 		control: 'Control channels',
@@ -215,7 +215,7 @@
 							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors))}
 							<div class="view pane {v.view}" data-testid="pane-{v.view}">
 								{#if headed && offers}
-									<!-- the pane's own header: its title and the controls that read this view, as VD's scene and data panes carry their own; a lone view with nothing to set leaves its title to the frame -->
+									<!-- the pane's own header: its title and the controls that read this view; a lone view with nothing to set leaves its title to the frame -->
 									<header class="phead">
 										<h4>{v.title}</h4>
 										{#if v.view === 'shape3d'}
@@ -406,8 +406,8 @@
 	}
 
 	/* the selection's views: what the tree's selection shows, filling the width. Several share rows two
-	   abreast, as VD's data pane puts a shape set's mode table beside its MAC. A 3-D view stands apart
-	   from the rest as VD's scene pane stands apart from its data pane: on a wide frame it takes the
+	   abreast. A 3-D view stands apart
+	   from the rest: on a wide frame it takes the
 	   left three fifths with the other views stacked beside it, on a narrow one a row of its own. */
 	.selected {
 		display: flex;

@@ -587,8 +587,8 @@ def test_the_sections_words_ride_in_the_project_file_and_the_template(tmp_path):
     sk.write(report, 'discussion', 'An opinion.', by='K.')
     io.save(report, str(tmp_path / 'r.hforge'))
     assert io.load(str(tmp_path / 'r.hforge')).blocks == report.blocks
-    report_template.save(report, tmp_path / 'house.vdreport')
-    back = report_template.load(tmp_path / 'house.vdreport')
+    report_template.save(report, tmp_path / 'house.hftemplate')
+    back = report_template.load(tmp_path / 'house.hftemplate')
     assert back.blocks == report.blocks and back.features == [sk.FEATURE]
 
 

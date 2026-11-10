@@ -1,9 +1,9 @@
 """Tables of a project's objects, and matching two shape sets' modes.
 
-Visual Dynamics shows a shape set, a channel table and a set of matched
-modes as a table when it is expanded (`core.tables.table_of`), a shape
-set's values at a choice of DOFs (`core.tables.shape_values`), and keeps
-the pairs picked on a MAC between two shape sets as a Matched Modes
+A shape set, a channel table and a set of matched
+modes each read as a table when expanded (`core.tables.table_of`), a shape
+set's values at a choice of DOFs (`core.tables.shape_values`), and the pairs picked on a
+MAC between two shape sets are kept as a Matched Modes
 object (`Project.match_modes`). Each is an operation here, its table a
 `table` view.
 """
@@ -52,7 +52,7 @@ def _table(project: Any, name: str) -> dict:
     from hertzforge.core.shapes import ShapeSet
 
     if isinstance(obj, ShapeSet):
-        # the Description column is typed into, as VD's mode table takes it
+        # the Description column is typed into
         return v.table(name, headers, rows, v.editing(
             'project.describe_mode', {'shapes': name}, [None, None, None, 'description'],
             kinds={'description': 'text'}))
@@ -76,8 +76,7 @@ def describe_mode(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def view_table(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.table`: an object's table, as Visual Dynamics shows it
-    expanded: a shape set's modes, a channel table's columns (with each
+    """`project.table`: an object's table: a shape set's modes, a channel table's columns (with each
     channel's direction on the geometry linked with it), or matched
     modes beside both sets' parameters."""
     return [_table(project, params['object'])]
@@ -108,7 +107,7 @@ def add_matches(project: Any, params: dict[str, Any]) -> list[dict]:
     modes of this pair of sets, with the MAC as the comparison shows it
     (`Project.comparison_mac`, after projection across geometries): the
     Matched Modes object is created on first use and added to after
-    (`MatchedModes.add`, journaled), as VD's Add Matches does."""
+    (`MatchedModes.add`, journaled)."""
     from .projects import kind_of as projects_kind
 
     first, second = params['first'], params['second']

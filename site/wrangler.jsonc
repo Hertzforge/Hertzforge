@@ -1,4 +1,4 @@
-// The hertzforge.com placeholder: static files in public/, served by a
+// The hertzforge.com page: static files in public/, served by a
 // Cloudflare Worker. `npx wrangler deploy` from this folder publishes it and
 // attaches both hostnames, creating their DNS records and certificates.
 // Videos go through src/index.js first, which answers byte-range requests;

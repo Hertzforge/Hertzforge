@@ -10,6 +10,7 @@ node_modules/
 ui/.svelte-kit/
 .DS_Store
 testdata/plate/
+testdata/plate_projects/
 # coverage data from a local `pytest --cov` run
 .coverage
 .coverage.*

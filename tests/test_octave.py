@@ -5,7 +5,7 @@ is what sdynpy uses — so the numbers below are sdynpy's own, recorded
 by running `nth_octave_freqs` once and written down here. Numbers are
 facts and not expression: the implementation was written from the
 standard, and these pin it to the same grid without the package ever
-importing a GPL library. See `tests/test_license_boundary.py`.
+importing a GPL library.
 """
 
 from __future__ import annotations
@@ -175,7 +175,7 @@ def test_a_spectrum_with_no_positive_frequency_is_refused():
         bare.to_octave(6)
 
 
-def test_it_round_trips_through_visualdynamics(tmp_path):
+def test_it_round_trips_through_hforge(tmp_path):
     banded = flat().to_octave(6)
     hertzforge.save(banded, tmp_path / 'banded')
     back = hertzforge.load(tmp_path / 'banded.hforge')

@@ -1,4 +1,4 @@
-"""Objects combined: Visual Dynamics' Merge, which makes one object of
+"""Objects combined: Merge, which makes one object of
 several of one type (`Project.merge`, by `core.merge`'s rules) and puts
 it in place of its parts.
 """

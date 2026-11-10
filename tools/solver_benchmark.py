@@ -73,7 +73,7 @@ def run_case(dims: tuple[int, int, int], modes: int, superlu: bool,
              timeout: float) -> dict:
     environment = dict(os.environ)
     if superlu:
-        environment['VISUALDYNAMICS_SPARSE_SOLVER'] = 'superlu'
+        environment['HERTZFORGE_SPARSE_SOLVER'] = 'superlu'
     started = time.perf_counter()
     try:
         done = subprocess.run([sys.executable, '-c', CASE, *map(str, dims), str(modes)],

@@ -18,6 +18,7 @@ as 'length' or 'acceleration', or a compound expression such as
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -98,10 +99,14 @@ _UNIT_SPELLINGS = (
     'strain', 'microstrain', 'dimensionless',
     'degC', 'degF', 'K', 'degR',
     'rad', 'radian', 'radians', 'deg', 'degree', 'degrees',
-    'Hz', 'kHz',
+    'Hz', 'kHz', 'rpm',
 )
 _FOLD = {spelling.lower(): spelling for spelling in _UNIT_SPELLINGS}
 _UNIT_TOKEN = re.compile(r'[A-Za-z_]+')
+# Pint reads a bare `G` as gauss, which this toolset does not track, and
+# gauss in a compound parses, so `G/lbf` and `G^2/Hz` never traded up to
+# their gravity readings. A prefixed `G` (`GHz`, `GPa`) is a different token.
+_BARE_CAPITAL_G = re.compile(r'(?<![A-Za-z0-9_])G(?![A-Za-z0-9_])')
 
 
 @lru_cache(maxsize=4096)
@@ -109,8 +114,9 @@ def fold_unit_case(unit: str) -> str:
     """`unit` with its letter case corrected, when only the corrected
     spelling is a unit this toolset can read.
 
-    `'G'` becomes `'g'`, `'LBF/IN'` becomes `'lbf/in'` and `'Volts'`
-    becomes `'volts'`. A string that already names a tracked quantity is
+    `'G'` becomes `'g'`, `'G/lbf'` becomes `'g/lbf'`, `'LBF/IN'` becomes
+    `'lbf/in'` and `'Volts'` becomes `'volts'`. A bare `G` is always gravity;
+    otherwise a string that already names a tracked quantity is
     returned unchanged, so `'mV'` stays millivolts and `'MV'` stays
     megavolts. A string that no change of case makes readable is also
     returned unchanged, so a caller can still tell an unknown unit from a
@@ -126,13 +132,18 @@ def fold_unit_case(unit: str) -> str:
     str
         The respelled unit, or `unit` itself.
     """
-    if not isinstance(unit, str) or _reading(unit) == 2:
+    if not isinstance(unit, str):
         return unit
+    # among units this toolset speaks: 'G per fortnight' is still nothing
+    gravity = (_BARE_CAPITAL_G.sub('g', unit)
+               if all(token.lower() in _FOLD for token in _UNIT_TOKEN.findall(unit))
+               else unit)
+    if _reading(gravity) == 2:
+        return gravity
     folded = _UNIT_TOKEN.sub(
-        lambda m: _FOLD.get(m.group(0).lower(), m.group(0)), unit)
-    if folded != unit and _reading(folded) > _reading(unit):
-        return folded
-    return unit
+        lambda m: _FOLD.get(m.group(0).lower(), m.group(0)), gravity)
+    best = folded if _reading(folded) > _reading(gravity) else gravity
+    return best if _reading(best) else unit
 
 
 def _reading(unit: str) -> int:
@@ -190,8 +201,7 @@ _DIMENSIONALITY = {
     # dimensionality of the word 'dimensionless' raises KeyError('')
     'strain': '',
     'dimensionless': '',
-    # Rotations about a point, for the virtual point transformation
-    # (Visual Dynamics' PLAN.md "The virtual point arc"): a unit rigid-body rotation
+    # Rotations about a point, for the virtual point transformation: a unit rigid-body rotation
     # shape is length per radian, so a response carried through it
     # comes out per radian. pint holds the radian dimensionless, which
     # is why an angle looks like a strain and an angular velocity like
@@ -217,8 +227,6 @@ _DIMENSIONALITY = {
 ANGULAR_UNITS = {'angle': 'rad', 'angular_velocity': 'rad/s',
                  'angular_acceleration': 'rad/s**2'}
 MODAL_QUANTITIES = ('acceleration', 'velocity', 'length', 'force')
-
-_ANGLE_TOKEN = re.compile(r'\b(rad|radian|radians|deg|degree|degrees)\b')
 
 
 def _derived_units(units: dict) -> dict:
@@ -449,6 +457,10 @@ def _parse_dimension_uncached(expression: str) -> list[tuple[str, int]]:
     return parts
 
 
+def _article(word: str) -> str:
+    return 'an' if word[:1] in 'aeiou' else 'a'
+
+
 @lru_cache(maxsize=4096)
 def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]:
     """(scale, offset) such that `si_value = value * scale + offset`.
@@ -475,10 +487,13 @@ def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]
     ureg = unit_registry()
     unit = normalize_unit(unit)
     try:
+        quantity = ureg.Quantity(1.0, unit)
         zero = ureg.Quantity(0.0, unit).to_base_units().magnitude
-        one = ureg.Quantity(1.0, unit).to_base_units().magnitude
+        one = quantity.to_base_units().magnitude
     except Exception as e:  # noqa: BLE001 - surface any pint failure uniformly
         raise UnitError(f"Cannot interpret unit {unit!r}: {e}")
+    if _logarithmic(quantity):
+        raise UnitError(f"Unit {unit!r} is logarithmic and has no scale to SI")
     scale = one - zero
     if dimension is not None and dimension != UNKNOWN:
         expected = _DIMENSIONALITY.get(dimension)
@@ -486,9 +501,14 @@ def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]
             raise UnitError(f"Unknown dimension {dimension!r}")
         actual = ureg.Quantity(1.0, unit).dimensionality
         if actual != ureg.get_dimensionality(expected):
-            article = 'an' if dimension[:1] in 'aeiou' else 'a'
-            raise UnitError(f"Unit {unit!r} is not {article} {dimension} unit "
+            raise UnitError(f"Unit {unit!r} is not {_article(dimension)} {dimension} unit "
                             f"(got {actual})")
+        # a rotation and a rate share a dimensionality, and their numbers
+        # differ by 2 pi
+        if (_angular(quantity) if dimension in ('frequency', 'dimensionless', 'strain')
+                else dimension == 'angular_velocity' and not _angular(quantity)):
+            raise UnitError(f"Unit {unit!r} is not {_article(dimension)} "
+                            f"{dimension} unit: one is built on an angle")
     return scale, zero
 
 
@@ -596,9 +616,10 @@ def dimension_of(unit: str) -> str | None:
 
     Only single tags are returned ('m/s**2' -> 'acceleration'). Compound
     quantities such as FRFs carry their dimension expression explicitly.
-    A dimensionless unit is 'angle' if it is spelled with an angle (rad,
-    deg) and 'dimensionless' otherwise, and rad/s is 'angular_velocity'
-    where Hz is 'frequency'.
+    A dimensionless unit is 'angle' if it is built on one (rad, deg) and
+    'dimensionless' otherwise, and rad/s and rpm are 'angular_velocity'
+    where Hz is 'frequency'. A logarithmic unit (dB) has no dimension
+    here, since it does not convert by a scale.
 
     Parameters
     ----------
@@ -614,18 +635,34 @@ def dimension_of(unit: str) -> str | None:
     return _dimension_of_spelled(normalize_unit(unit))
 
 
+def _logarithmic(quantity: Any) -> bool:
+    """A dB or a neper: it holds a ratio on a log scale, where the only other
+    units that do not multiply are the offset temperatures."""
+    return (not quantity._is_multiplicative
+            and '[temperature]' not in quantity.dimensionality)
+
+
+def _angular(quantity: Any) -> bool:
+    """Whether a unit is built on an angle. Pint holds the radian
+    dimensionless, so rad/s, rpm and Hz share a dimensionality, and only the
+    base units tell an rpm from 2 pi / 60 per second."""
+    return 'radian' in dict(quantity.to_base_units().unit_items())
+
+
+@lru_cache(maxsize=4096)
 def _dimension_of_spelled(unit: str) -> str | None:
     """`dimension_of` for a string that has already been through
     `normalize_unit` — the half that asks pint, kept apart so the case
     fold above can ask it without normalizing again."""
     ureg = unit_registry()
     try:
-        dimensionality = ureg.Quantity(1.0, unit).dimensionality
+        quantity = ureg.Quantity(1.0, unit)
+        dimensionality = quantity.dimensionality
+        if _logarithmic(quantity):
+            return None
+        angular = _angular(quantity)
     except Exception:  # noqa: BLE001 - any unparseable unit is simply unknown
         return None
-    # pint holds the radian dimensionless, so rad/s and Hz share a
-    # dimensionality; a unit spelled with an angle is the angular one
-    angular = bool(_ANGLE_TOKEN.search(unit))
     for tag, expr in _DIMENSIONALITY.items():
         if tag in ('dimensionless', 'strain', 'angle'):
             continue
@@ -1003,3 +1040,13 @@ SYSTEMS = {s.name: s for s in _COHERENT + _IN_G}
 # only: most exports still write the coherent system's in/s**2, since
 # most file formats cannot record "g" as a unit.
 DEFAULT_SYSTEM = SYSTEMS['in-slinch-lbf-s (g)']
+
+
+def signed(value: float, unit: str = '', places: int = 1, missing: str = 'not read') -> str:
+    """A reading with its sign and unit, the minus as the minus sign. What
+    rounds to zero reads +0.0, never -0.0; what is not finite reads
+    `missing`."""
+    if not math.isfinite(value):
+        return missing
+    value = 0.0 if round(value, places) == 0.0 else value
+    return f'{value:+.{places}f}'.replace('-', '\u2212') + (f' {unit}' if unit else '')

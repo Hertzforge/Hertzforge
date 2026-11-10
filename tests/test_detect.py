@@ -10,11 +10,8 @@ hundred channels — does not throw away what the answer depends on.
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import pytest
-from conftest import fixture_path
 
 from hertzforge.core import detect
 from hertzforge.core.data import TimeHistory
@@ -69,65 +66,51 @@ def test_what_the_trim_refuses():
             detect.trim(0, 100, bad)
 
 
-STRESS_RUN = fixture_path('..', 'stressdata', 'plate', 'random.nc4')
+def _stepped_run(wander=0.0):
+    """A closed-loop run in miniature: 256 Hz, level steps at -6, -3 and
+    0 dB, full level from 61 to 163 s, then the shaker stops, with the
+    level wandering at `wander` of its own size every two seconds."""
+    rng = np.random.default_rng(11)
+    rate = 256.0
+    t = np.arange(int(170 * rate)) / rate
+    level = np.select([t < 1.0, t < 31.0, t < 61.0, t < 163.0], [0.0, 0.5, 0.71, 1.0], 0.0)
+    level = level * (1.0 + wander * np.sin(2 * np.pi * t / 2.0))
+    rows = level * rng.standard_normal((3, t.size)) + 1e-4 * rng.standard_normal((3, t.size))
+    return TimeHistory(t, rows, response_dof=['1Z+', '2Z+', '3Z+'])
 
 
-@pytest.mark.skipif(not os.path.exists(STRESS_RUN),
-                    reason='stressdata is not in the repository')
-def test_the_real_run_lands_on_its_full_level_stretch():
-    """The run steps -6, -3 and 0 dB and then stops. Full level is
-    61-160 s, and what comes back is the settled middle of it.
-
-    The record is 21 MB of streamed time data and lives outside the
-    repository, so this is skipped wherever it has not been generated.
-    """
-    import hertzforge
-
-    data = next(v for v in hertzforge.import_file(STRESS_RUN).values()
-                if type(v).__name__ == 'TimeHistory')
+def test_a_stepped_run_lands_on_its_full_level_stretch():
+    """Inside the full-level stretch, not on either edge of it. Which part
+    of it is a judgment the numbers should not be pinned to; that it is
+    all of one level, and enough of it, is the claim."""
+    data = _stepped_run()
     averaging = detect.suggest(data)
     rate = data.sample_rate
     assert averaging.frame_length == 256, 'one second at 256 Hz'
     assert averaging.window == 'hann' and averaging.overlap == 0.5
-    # inside the full-level stretch, not on either edge of it. Which 
-    # part of it is a judgment the numbers should not be pinned to;
-    # that it is all of one level, and enough of it, is the claim.
     assert averaging.start >= 61.0, averaging.start
-    assert averaging.stop(rate) <= 160.0, averaging.stop(rate)
+    assert averaging.stop(rate) <= 163.0, averaging.stop(rate)
     assert averaging.frames >= 30, averaging.frames
     assert averaging.fits(len(data.abscissa), rate)
 
 
-@pytest.mark.skipif(not os.path.exists(STRESS_RUN),
-                    reason='stressdata is not in the repository')
-def test_most_of_the_full_level_stretch_is_found():
-    """What the smoothing buys, and the only thing that shows it. The
-    full-level stretch of a closed-loop run wanders by as much as the
-    step to the next level, so read hop by hop it breaks into fragments
-    and a fifth of it comes back. Median-filtered over a few seconds it
-    comes out nearly whole — which is averages, and averages are the
-    point."""
-    import hertzforge
-
-    data = next(v for v in hertzforge.import_file(STRESS_RUN).values()
-                if type(v).__name__ == 'TimeHistory')
+def test_most_of_a_wandering_full_level_stretch_is_found():
+    """What the smoothing buys: a full-level stretch that wanders by as much
+    as the step to the next level, read hop by hop, breaks into fragments.
+    Median-filtered over a few seconds it comes out nearly whole."""
+    data = _stepped_run(wander=0.15)
     first, last = detect.analysis_window(data, keep=(0.0, 1.0))
     rate = data.sample_rate
-    covered = (min(last / rate, 160.0) - max(first / rate, 61.0)) / 99.0
+    covered = (min(last / rate, 163.0) - max(first / rate, 61.0)) / 102.0
     assert covered > 0.75, f'only {covered:.0%} of the full-level stretch'
 
 
-@pytest.mark.skipif(not os.path.exists(STRESS_RUN),
-                    reason='stressdata is not in the repository')
-def test_the_real_run_is_not_averaged_across_a_level_change():
-    """The point of the exercise. Every frame has to be at one level, so
-    the window must not straddle 61 s, where the run steps to full."""
-    import hertzforge
-
-    data = next(v for v in hertzforge.import_file(STRESS_RUN).values()
-                if type(v).__name__ == 'TimeHistory')
+def test_a_stepped_run_is_not_averaged_across_a_level_change():
+    """Every frame has to be at one level, so the window must not straddle
+    a step."""
+    data = _stepped_run()
     rate = data.sample_rate
+    window = detect.suggest(data)
     for edge in (31.0, 61.0, 163.0):
-        window = detect.suggest(data)
         assert not (window.start < edge < window.stop(rate)), (
             f'the window straddles the step at {edge} s')

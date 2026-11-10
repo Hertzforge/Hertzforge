@@ -6,7 +6,7 @@ Whatever the format grows into, they must keep opening with their
 values intact. A frozen file is written once and never refreshed: the
 moment one fails, a change has orphaned every project saved before it.
 
-A Visual Dynamics project moves to Hertzforge by opening its `.vdyn`
+An older project moves to Hertzforge by opening its `.vdyn`
 and saving it, so each file in `testdata/vdyn_corpus/` is saved as
 `.hforge` here and opened again, and the last `.vdyn` schema is compared
 with its `.hforge` tree name by name.
@@ -164,13 +164,13 @@ def test_the_stamp_decides_not_the_suffix(tmp_path):
         os.path.join(VDYN_CORPUS, 'schema1.vdyn'))['Geometry']
     with h5py.File(renamed, 'r+') as f:
         del f.attrs[native.VDYN_STAMP]
-    with pytest.raises(ValueError, match='not a Hertzforge or Visual Dynamics file'):
+    with pytest.raises(ValueError, match=r'not a \.hforge or \.vdyn file'):
         native.load(renamed)
 
 
-def test_an_escdf_file_visual_dynamics_wrote_keeps_its_whole_objects(tmp_path):
-    """Visual Dynamics stored each object whole in an ESCDF attachment
-    named `visualdynamics.vdyn`, in the `.vdyn` layout. Read from the
+def test_an_older_escdf_file_keeps_its_whole_objects(tmp_path):
+    """An older file stored each object whole in an ESCDF attachment named
+    `escdf_objects.VDYN_WHOLE`, in the `.vdyn` layout. Read from the
     standard's fields alone, a geometry loses its element-group
     properties, so finding that attachment is what keeps them."""
     import io
@@ -178,9 +178,9 @@ def test_an_escdf_file_visual_dynamics_wrote_keeps_its_whole_objects(tmp_path):
     from hertzforge.io import escdf, escdf_objects
 
     geometry = native.load(os.path.join(CORPUS, 'schema1.hforge'))['Geometry']
-    project = Project('From Visual Dynamics')
+    project = Project('Older')
     project.add('Geometry', geometry)
-    path = tmp_path / 'vd.h5'
+    path = tmp_path / 'older.h5'
     project.save(path)
 
     file = escdf.read(path)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from hertzforge.service import projects
@@ -147,7 +148,7 @@ def _apart():
 
 
 def test_merge_marks_the_places_and_a_click_leaves_one_out(validate):
-    """VD's merge pane: every place is marked before anything merges, and a click on a
+    """The merge pane: every place is marked before anything merges, and a click on a
     place moves it between in and out, dim once it is out."""
     project = _apart()
     before = project['Geometry'].num_nodes
@@ -236,5 +237,127 @@ def test_tie_picks_its_patch_by_clicking_and_lists_the_groups(validate):
     _reading, view = run(project, 'project.tie_elements', geometry='Plate', elements=str(first),
                          side='second', add=str(first + 1))
     assert view['pick']['kept'] == [first + 1], 'the second patch is what shows'
-    assert view['pick']['params']['to'] == str(first + 1)
+    assert view['pick']['params']['second'] == str(first + 1)
     assert view['pick']['params']['elements'] == str(first)
+
+
+def _stacked():
+    """Two blocks a unit apart in Z, meshed apart: elements 1-8 and 9-16, groups 1 and 2."""
+    import hertzforge
+    from hertzforge import mesh
+
+    geometry = mesh.assemble(
+        mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 0.5, 'low'),
+        mesh.block((0, 0, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1), 0.5, 'high'), apart=True)
+    assert list(geometry.groups.ids) == [1, 2] and len(geometry.elem_id) == 16
+    project = hertzforge.Project('p')
+    project.add('G', geometry)
+    return project
+
+
+def _link_spans(project, before):
+    geometry = project['G']
+    spans = []
+    for conn in geometry.elem_conn[before:]:
+        a, b = geometry.node_xyz[geometry.node_index(conn)]
+        spans.append(float(np.linalg.norm(a - b)))
+    return spans
+
+
+def test_a_second_patch_of_one_element_is_that_element_and_not_a_group():
+    project = _stacked()
+    before = len(project['G'].elem_id)
+    run(project, 'project.tie_elements', geometry='G', elements='5', second='2', keep=True)
+    through_the_form = project['G'].elem_conn[before:]
+    direct = _stacked()
+    direct.tie_elements('G', [5], [2])
+    assert [c.tolist() for c in through_the_form] == [
+        c.tolist() for c in direct['G'].elem_conn[before:]]
+    grouped = _stacked()
+    run(grouped, 'project.tie_elements', geometry='G', elements='5', to='2', keep=True)
+    assert max(_link_spans(project, before)) < max(_link_spans(grouped, before)), (
+        'element 2 sits beside it; element group 2 is the other block')
+
+
+def test_clicks_on_the_second_patch_keep_what_was_picked():
+    project = _stacked()
+    _reading, view = run(project, 'project.tie_elements', geometry='G', side='second', add='1')
+    assert view['pick']['kept'] == [1]
+    held = view['pick']['params']
+    assert held['second'] == '1' and held['to'] == ''
+    _reading, view = run(project, 'project.tie_elements', geometry='G', side='second',
+                         second=held['second'], add='2')
+    assert view['pick']['kept'] == [1, 2], 'an id that is also a group id starts nothing over'
+    _reading, view = run(project, 'project.tie_elements', geometry='G', side='second',
+                         second='1, 2', drop='1')
+    assert view['pick']['kept'] == [2]
+
+
+def test_tie_to_is_a_group_and_says_so():
+    project = _stacked()
+    with pytest.raises(ProtocolError, match='no element group .* its own field'):
+        run(project, 'project.tie_elements', geometry='G', elements='9', to='5, 6', keep=True)
+    with pytest.raises(ProtocolError, match='not both'):
+        run(project, 'project.tie_elements', geometry='G', elements='9', to='low', second='5',
+            keep=True)
+    (reading,) = run(project, 'project.tie_elements', geometry='G', elements='9', to='low',
+                     keep=True)
+    assert {row['label']: row['value'] for row in reading['rows']}['Links added'] == 8
+
+
+def test_tie_finds_every_elements_faces_without_a_call_per_element(monkeypatch):
+    from hertzforge.drawing.viz import geometry as viz
+    from hertzforge.service import ops_model
+
+    project = _stacked()
+    geometry = project['G']
+    expected = {}
+    for row, element in enumerate(geometry.elem_id):
+        faces, _lines, _points = viz.element_cells(geometry, [row])
+        expected[int(element)] = sorted(tuple(sorted(f)) for group in faces.values() for f in group)
+    calls = []
+    original = viz.element_cells
+    monkeypatch.setattr(viz, 'element_cells',
+                        lambda *a, **k: calls.append(1) or original(*a, **k))
+    used, triangles, owners = ops_model._element_faces(geometry)
+    assert len(calls) <= 1, 'each call reads the whole mesh, so one per element is quadratic'
+    assert len(owners) == 16 * 12
+    for element, want in expected.items():
+        mine = used[triangles[owners == element]]
+        assert len(mine) == 2 * len(want)
+        assert {n for tri in mine for n in tri.tolist()} == {n for f in want for n in f}
+
+
+def test_a_large_mesh_answers_a_click_in_time():
+    import time
+
+    import hertzforge
+    from hertzforge import mesh
+    from hertzforge.service import ops_model
+
+    geometry = mesh.block((0, 0, 0), (2, 0, 0), (0, 1, 0), (0, 0, 1), 1 / 16, 'bar')
+    assert len(geometry.elem_id) >= 8192
+    project = hertzforge.Project('p')
+    project.add('G', geometry)
+    start = time.perf_counter()
+    ops_model._element_faces(geometry)
+    assert time.perf_counter() - start < 3.0
+
+
+def test_align_on_an_undefined_geometry_takes_its_reach_in_the_files_numbers():
+    import hertzforge
+    from hertzforge import mesh
+
+    fine = mesh.block((0, 0, -3), (6, 0, 0), (0, 6, 0), (0, 0, 3), 1.5, 'frame', unit=None)
+    coarse = mesh.block((0.3, 0.2, 3.5), (6, 0, 0), (0, 6, 0), (0, 0, 2), 2.0, 'wing', unit=None)
+    project = hertzforge.Project('p')
+    project.add('Raw', mesh.assemble(fine, coarse, apart=True))
+    assert not project['Raw'].units_defined
+    assert project['Raw'].align_moves(5.0)
+    (reading, _view) = run(project, 'project.align_meshes', geometry='Raw', reach=5.0)
+    found = {row['label']: row for row in reading['rows']}
+    assert found['Moves']['value'] > 0, 'a reach of 5, not of 0.005'
+    (reading,) = run(project, 'project.align_meshes', geometry='Raw', reach=5.0, keep=True)
+    found = {row['label']: row for row in reading['rows']}
+    assert found['Farthest move']['unit'] is None
+    assert 0.5 < found['Farthest move']['value'] < 5.0

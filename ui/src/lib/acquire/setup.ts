@@ -325,11 +325,6 @@ export function under(map: FieldErrors, key: FieldKey): string[] {
 	return out;
 }
 
-/** Whether a finding is about the channel table rather than the Random setup. */
-export function isTableItem(item: ReportItem): boolean {
-	return itemKey(item) === null && item.row === undefined;
-}
-
 // ---------------------------------------------------------------------------------------------
 // What the editor can say before anything is sent
 

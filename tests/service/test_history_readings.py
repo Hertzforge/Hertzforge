@@ -74,9 +74,13 @@ def test_a_sine_reads_its_amplitude(validate):
     assert found['Tallest line']['unit'] == 'm/s²'
 
 
-def test_an_amplitude_spectrum_draws_every_channel(project):
+def test_an_amplitude_spectrum_draws_the_channels_of_the_quantity_chosen(project):
     view, reading = run(project, 'project.amplitude_spectrum', record=2)
-    assert len(view['series']) == project['Time History'].num_records
+    history = project['Time History']
+    quantity = history.ordinate_dim[1]
+    drawn = [i for i in range(history.num_records) if history.ordinate_dim[i] == quantity]
+    assert len(view['series']) == len(drawn) < history.num_records
+    assert view['y']['unit'] == 'm/s²' and 'of another quantity left out' in view['title']
     assert rows(reading)['Channel']['value'] == view['series'][1]['name']
     with pytest.raises(ProtocolError, match='there is no channel 99'):
         run(project, 'project.amplitude_spectrum', record=99)

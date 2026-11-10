@@ -105,7 +105,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 # Written from the published definitions above. No code was read from
-# sdynpy, rattlesnake or forcefinder (hard rule 1 in AGENTS.md), which
+# sdynpy, rattlesnake or forcefinder, which are GPL, and that
 # matters here because a structural dynamics library is exactly where a
 # wavelet transform would be found. Nor from scipy's, which no longer
 # has one to read: `signal.cwt`, `morlet`, `morlet2` and `ricker` were
@@ -173,16 +173,6 @@ def fourier_factor(omega0: float = OMEGA0) -> float:
 def scale_for(frequency: ArrayLike, omega0: float = OMEGA0) -> np.ndarray:
     """The wavelet scale, in seconds, tuned to each frequency in Hz."""
     return 1.0 / (np.asarray(frequency, dtype=float) * fourier_factor(omega0))
-
-
-def frequency_for(scale: ArrayLike, omega0: float = OMEGA0) -> np.ndarray:
-    """The frequency, in Hz, that a wavelet of each scale is tuned to.
-
-    This is the inverse of `scale_for`. The scale axis and the frequency
-    axis are one axis under a change of variable, which is why the view
-    can label its axis in Hz.
-    """
-    return 1.0 / (np.asarray(scale, dtype=float) * fourier_factor(omega0))
 
 
 def log_frequencies(low: float, high: float,

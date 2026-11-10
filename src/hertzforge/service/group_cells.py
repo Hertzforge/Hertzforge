@@ -1,8 +1,7 @@
 """An element group's properties as cells of the Element Groups table.
 
 The properties a finite element model needs (`fem.GroupProperties`), one
-column each, as Visual Dynamics' Element Groups table has them
-(`gui.object_tables`): a material, picked from the library or typed
+column each: a material, picked from the library or typed
 number by number; a thickness for plates; a section and an orientation
 for beams, by a shape and its dimensions or by its four numbers; a mass
 for points; a stiffness for points and lines, which makes them springs;
@@ -16,6 +15,8 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from typing import Any
+
+from .parsing import parse_numbers
 
 #: every column: key, title, what holds the value ('' for the property set
 #: itself), the field there, and the SI unit its heading names
@@ -322,7 +323,7 @@ def set_cell(geometry: Any, group: int, key: str, text: str) -> None:
         raise ValueError(f'computed from the {section.shape}\'s dimensions: choose '
                          f'{CUSTOM} in Shape to type it')
     if key == 'orientation':
-        parts = tuple(float(v) for v in text.replace(',', ' ').split())
+        parts = tuple(parse_numbers(text, 'an orientation'))
         if text and len(parts) != 3:
             raise ValueError('an orientation is three numbers')
         _hold(geometry, group, replace(props, orientation=parts or None))

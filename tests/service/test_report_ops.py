@@ -102,6 +102,30 @@ def test_a_requirement_reads_each_criterion(project, validate):
                for r in reading['rows']) == len(expected.rows)
 
 
+def test_a_requirement_binds_to_a_drive_point_by_the_specifications_quantity(project):
+    """101Z+ carries a force and an acceleration; the specification is in
+    acceleration, so naming the DOF names the acceleration record."""
+    from hertzforge.report.requirement import read
+
+    held = project['Time History PSDs']
+    at = [i for i in range(held.num_records)
+          if held.is_autospectrum(i) and held.response_dof[i] == '101Z+']
+    assert sorted(held.known_dim(i).split('**')[0] for i in at) == ['acceleration', 'force']
+    features(project, 'test_requirement')
+    (reading,) = run(project, 'project.report_requirement', report='Report',
+                     document='Test plan 7', dofs='101Z+', grms_percent=10.0)
+    block = next(b for b in project['Report'].blocks if 'requirement' in b)
+    assert rows(reading)['Result']['value'] == read(block, project, project.object_groups,
+                                                    roles=False).state
+    named = next(label for label in rows(reading) if '101Z+' in label)
+    assert 'not judged' not in rows(reading)[named]['value']
+
+
+def test_the_requirement_form_asks_for_the_one_channel_it_binds(project):
+    field = next(p for p in OPS['project.report_requirement'].params if p.name == 'dofs')
+    assert field.label == 'Control channel'
+
+
 def test_a_single_point_requirement_needs_its_channel(project):
     with pytest.raises(ProtocolError, match='name the one meant'):
         run(project, 'project.report_requirement', report='Report', document='Plan')
@@ -413,7 +437,7 @@ def test_a_report_saved_as_a_template_generates_again(project, tmp_path, validat
     (reading,) = run(project, 'project.export_report_template', report='Report',
                      path=str(tmp_path / 'random'))
     wire_views([reading], validate)
-    written = tmp_path / 'random.vdreport'
+    written = tmp_path / 'random.hftemplate'
     assert rows(reading)['Saved']['value'] == str(written) and written.is_file()
     (reading,) = run(project, 'project.generate_from_template', template=str(written),
                      name='Again')
@@ -424,7 +448,7 @@ def test_a_report_saved_as_a_template_generates_again(project, tmp_path, validat
         run(project, 'project.export_report_template', report='Report',
             path=str(tmp_path / 'missing' / 'random'))
     with pytest.raises(ProtocolError, match='unknown template'):
-        run(project, 'project.generate_from_template', template=str(tmp_path / 'none.vdreport'))
+        run(project, 'project.generate_from_template', template=str(tmp_path / 'none.hftemplate'))
 
 
 # ---- reports from runs -----------------------------------------------------------------

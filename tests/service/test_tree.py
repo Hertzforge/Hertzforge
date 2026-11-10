@@ -1,5 +1,5 @@
-"""What the project tree opens an object into (`project.children`), as
-Visual Dynamics' tree opens it: a geometry's parts, families and element
+"""What the project tree opens an object into (`project.children`): a geometry's parts,
+families and element
 groups; a data object's grid of records with their quantity icons; a
 shape set's modes; a channel table's channels."""
 
@@ -165,7 +165,7 @@ def test_children_needs_an_open_project():
 
 def test_sine_objects_open_into_their_control_dofs(validate):
     """The rows under a sine specification or a level set are its control
-    DOFs, as VD lays them (the tones are the bar's drop-down)."""
+    DOFs."""
     from hertzforge.core.sine import SineSweepSpecification, SineTone
 
     project = Project()

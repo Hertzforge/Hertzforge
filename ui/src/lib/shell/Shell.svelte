@@ -48,7 +48,7 @@
 		void app.project.connected();
 	});
 
-	// `--run-log [file]`: the log alone, for the keeper's own computer, as Visual Dynamics launches it
+	// `--run-log [file]`: the log alone, for the keeper's own computer
 	let logAsked = false;
 	$effect(() => {
 		if (!app.config.runLog || logAsked) return;

@@ -292,7 +292,7 @@
 				}))
 			],
 			hooks: {
-				draw: [placePlayLine, placeMarker, placeRegions, placeHandles],
+				draw: [placePlayLine, placeMarker, placeGuides, placeRegions, placeHandles],
 				setScale: [
 					(u, key) => {
 						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
@@ -406,15 +406,23 @@
 			onMarkerDrag?.(plot.posToVal(left, 'x'), fraction, moved, done);
 		};
 		const move = (ev: PointerEvent) => report(ev, false);
-		const up = (ev: PointerEvent) => {
+		const stop = () => {
 			grip.removeEventListener('pointermove', move);
 			grip.removeEventListener('pointerup', up);
-			grip.removeEventListener('pointercancel', up);
+			grip.removeEventListener('pointercancel', cancel);
+		};
+		const up = (ev: PointerEvent) => {
+			stop();
 			report(ev, true);
+		};
+		const cancel = () => {
+			stop();
+			placeMarker();
+			onMarkerDrag?.(marker ?? 0, 0, { x: false, y: false }, true);
 		};
 		grip.addEventListener('pointermove', move);
 		grip.addEventListener('pointerup', up);
-		grip.addEventListener('pointercancel', up);
+		grip.addEventListener('pointercancel', cancel);
 	}
 
 	let guideEls: HTMLDivElement[] = [];
@@ -498,16 +506,23 @@
 		const move = (ev: PointerEvent) => {
 			el.title = `${h.label}: ${decibels(ev).toFixed(2)} dB`;
 		};
-		const up = (ev: PointerEvent) => {
+		const stop = () => {
 			el.removeEventListener('pointermove', move);
 			el.removeEventListener('pointerup', up);
-			el.removeEventListener('pointercancel', up);
+			el.removeEventListener('pointercancel', cancel);
+		};
+		const up = (ev: PointerEvent) => {
+			stop();
 			if (Math.abs(ev.clientY - e.clientY) > 3) onhandle?.(h, decibels(ev));
 			else placeHandles();
 		};
+		const cancel = () => {
+			stop();
+			placeHandles();
+		};
 		el.addEventListener('pointermove', move);
 		el.addEventListener('pointerup', up);
-		el.addEventListener('pointercancel', up);
+		el.addEventListener('pointercancel', cancel);
 	}
 
 	/** Put the marker line at `marker`, or hide it when there is none or it is off the plot. */

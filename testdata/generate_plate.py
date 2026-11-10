@@ -1,15 +1,11 @@
 """Every small fixture, generated from the demonstration plate by the
 package itself.
 
-This replaces what `generate_airplane.py`, `generate_data.py`,
-`generate_geometry.py`, `generate_test_geometry.py` and
-`generate_shock.py` made from sdynpy's demo models — and unlike them
-it runs in the project's own venv, because everything it writes goes
-out through hertzforge's own exporters: the sdynpy-format files
-included. The formats stay foreign; the model and the physics are
-this package's own.
+Everything it writes goes out through hertzforge's own exporters, the
+sdynpy-format files included. The formats stay foreign; the model and
+the physics are this package's own.
 
-    ./.venv/bin/python testdata/generate_plate.py
+    python testdata/generate_plate.py
 
 Products (testdata/plate/, SI; only the UNV declares units):
 
@@ -19,16 +15,15 @@ Products (testdata/plate/, SI; only the UNV declares units):
 - frfs.npz / frfs.unv          25 Z responses x 4 references, accelerance
 - time.npz                     the impulse response from the corner drive
 - psd.npz / spectrum.npz       autospectra / linear spectra of those
-- channel_table.vdyn           the survey's channels: 25 accels, 4 forces
+- channel_table.hforge         the survey's channels: 25 accels, 4 forces
 - shock.nc4                    a Rattlesnake-format shock recording:
                                synthesized half-sine + ringdown at the
                                plate's own frequencies (see the note at
                                `write_shock` — format exercise, not a run)
 
-The controller runs (modal/random .nc4) come from
-`generate_plate_runs.py` (hertzforge-generators), which drives
-real Rattlesnake the way the
-drone's generator does.
+The controller runs (modal/random .nc4) are fetched, not made here: the
+script that drove the controller imports Rattlesnake, which is GPL
+(testdata/README.md).
 """
 
 from __future__ import annotations
@@ -73,8 +68,7 @@ def survey(model):
     Z only, not X and Y as well: the plate lies in the XY plane and its
     modes move normal to it — measured in-plane response down here is
     numerical noise, and carrying it would triple the files to say
-    nothing. (The drone, being properly three-dimensional, keeps all
-    three.)
+    nothing.
     """
     return [f'{node}Z+' for node in plate.instrumented(model)['grid']]
 
@@ -316,7 +310,7 @@ def main():
                         ordinate_dim=['acceleration'] * len(responses))
     io.export_file(spectrum, str(OUT / 'spectrum.npz'), format='sdynpy_data')
 
-    make_channel_table(responses).save(str(OUT / 'channel_table.vdyn'))
+    make_channel_table(responses).save(str(OUT / 'channel_table.hforge'))
     write_shock(str(OUT / 'shock.nc4'))
 
     recompress(*[str(OUT / name) for name in

@@ -112,31 +112,17 @@ def _quantity(dimension: str) -> str:
 
 
 def _level_at(spectrum: Psd, record: int, lines: np.ndarray) -> np.ndarray:
-    """A record of `spectrum` at `lines`, zero outside its written band."""
-    from .author import read_at_lines
+    """A record of `spectrum` as a density on `lines`, read as every other
+    reader reads it (`compliance.record_on_lines`), and zero where it is
+    not written."""
+    # This had a reader of its own that dropped every point at zero, so a
+    # generated signal bridged a gap in an autospectrum and a zero written
+    # in a cross term, which the area, the comparison and the drive
+    # prediction read as a gap and as a value.
+    from .compliance import record_on_lines
 
-    f = np.asarray(spectrum.abscissa, dtype=float)
-    values = np.asarray(spectrum.ordinate[record])
-    magnitude = np.abs(values)
-    written = np.isfinite(magnitude) & (magnitude > 0.0)
-    out = np.zeros(len(lines), dtype=values.dtype)
-    if not written.any():
-        return out
-    f, values = f[written], values[written]
-    if getattr(spectrum, 'interpolation', 'bin') == 'log_log':
-        inside = (lines >= f[0]) & (lines <= f[-1])
-        if inside.any():
-            out[inside] = read_at_lines(f, values, lines[inside])
-        return out
-    # per bin: each written line holds the density over its own width,
-    # half way to its neighbors (and as far again past the end lines)
-    step = np.diff(f)
-    edges = np.concatenate([[f[0] - (step[0] if step.size else 0.5) / 2],
-                            (f[:-1] + f[1:]) / 2,
-                            [f[-1] + (step[-1] if step.size else 0.5) / 2]])
-    k = np.searchsorted(edges, lines, side='right') - 1
-    inside = (k >= 0) & (k < len(f))
-    out[inside] = values[k[inside]]
+    out = record_on_lines(spectrum, record, lines)
+    out[np.isnan(out)] = 0.0
     return out
 
 
@@ -643,7 +629,9 @@ def sine_history(specification: SineSweepSpecification, *,
     if tone is not None and tone not in names:
         raise ValueError(f'no tone {tone!r}; the tones are {", ".join(names)}')
     chosen = specification.tones[0 if tone is None else names.index(tone)]
-    if specification.ordinate_dim == UNKNOWN:
+    # a sine specification keeps its quantity named while its units are
+    # undeclared, so it is the unit that says (`SineSweepSpecification`)
+    if specification.ordinate_unit is None or specification.ordinate_dim == UNKNOWN:
         raise ValueError('the specification does not say what its tones '
                          'are; declare its units first')
     if not sample_rate > 0.0:

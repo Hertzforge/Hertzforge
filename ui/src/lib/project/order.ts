@@ -1,5 +1,5 @@
 /**
- * The tree's order, as Visual Dynamics' `_object_order` gives it: the linked objects first, group
+ * The tree's order: the linked objects first, group
  * by group (the Basis above the others, then the groups as the project lists them), each group's
  * members by kind, then every object in no group, by kind. A group's members sit together, so a
  * link bracket runs down consecutive rows and two brackets never nest (Brandon, 2026-11-04).
@@ -51,8 +51,9 @@ export function landsBefore(listed: Listed[], links: ProjectSummary['links'] | u
 	return order.slice(first).find((name) => !moving.includes(name)) ?? null;
 }
 
-/** `ids` with `moving` taken out and put before `before`, or last for null. */
+/** `ids` with `moving` taken out and put before `before`, or last for null; before itself, it stays. */
 export function reordered(ids: number[], moving: number, before: number | null): number[] {
+	if (before === moving) return ids;
 	const rest = ids.filter((id) => id !== moving);
 	const at = before === null ? rest.length : rest.indexOf(before);
 	return [...rest.slice(0, at < 0 ? rest.length : at), moving, ...rest.slice(at < 0 ? rest.length : at)];

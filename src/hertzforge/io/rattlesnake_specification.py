@@ -47,12 +47,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..core.data import Specification, direction_code, dof_string, parse_dof
+from .plain_numpy import PlainNpz
 from .sniffing import npz_has
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
 
-# Brandon, 2026-09-05: a specification edited in Visual Dynamics should come
+# Brandon, 2026-09-05: a specification edited here should come
 # out as something Rattlesnake can read; and most random tests are run on
 # autospectra alone, which is why `held` exists.
 
@@ -66,7 +67,7 @@ _COORDINATE = np.dtype([('node', '<u8'), ('direction', 'i1')])
 def sniff(path: str | os.PathLike) -> bool:
     """True for an `.npz` holding `f` and `cpsd`, opened with pickles
     refused, since the file is plain arrays."""
-    return npz_has(path, {'f', 'cpsd'}, allow_pickle=False)
+    return npz_has(path, {'f', 'cpsd'})
 
 
 def handles(obj: Any) -> bool:
@@ -168,7 +169,7 @@ def load(path: str | os.PathLike,
     controller itself writes, is matched to its channel table by order
     alone, so its channels are named in that order, '1', '2' and so on,
     as the sine specification reader names them and as a run through a
-    response transformation records them. A file with `held` was written by Hertzforge or Visual Dynamics, and
+    response transformation records them. A file with `held` was written by this writer, and
     the mask says which cross terms were held: those come back, zeros
     included, and the rest are left out. In a file without `held`, the
     cross terms are kept only when at least one off-diagonal value is
@@ -180,7 +181,7 @@ def load(path: str | os.PathLike,
     Raises ValueError when `cpsd` is not `(lines, n, n)` over the
     frequency lines, or the channel names do not match its size.
     """
-    with np.load(path, allow_pickle=False) as d:
+    with PlainNpz(path) as d:
         frequencies = np.asarray(d['f'], dtype=np.float64).reshape(-1)
         cpsd = np.conj(np.asarray(d['cpsd']))    # to conj(X)·Y, as `save`
         if cpsd.ndim != 3 or cpsd.shape[1] != cpsd.shape[2] \

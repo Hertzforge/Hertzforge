@@ -28,7 +28,7 @@
 		/** Every picked cell of such a matrix. */
 		picks?: { row: number; column: number }[];
 		onselect?: (cell: { row: number; column: number }, extend?: boolean) => void;
-		/** A matrix drawn as 3-D bars, VD's default for a MAC, instead of the flat grid. */
+		/** A matrix drawn as 3-D bars, the default for a MAC, instead of the flat grid. */
 		bars?: boolean;
 		/** Index into a shape3d view's overlays, drawn over its mode. */
 		overlay?: number | null;

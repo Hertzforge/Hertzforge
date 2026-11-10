@@ -1,5 +1,5 @@
-"""What a selection in the tree shows (`project.show`), by Visual
-Dynamics' table of readings: one object by its kind, and the pairs that
+"""What a selection in the tree shows (`project.show`), by the table of readings: one
+object by its kind, and the pairs that
 mean something together."""
 
 from __future__ import annotations
@@ -379,7 +379,7 @@ def test_two_shape_sets_show_their_mac_and_the_pair_it_selects(plate, validate):
         project.remove('Set A')
 
 
-def test_a_lone_shape_set_has_three_views_one_always_up(plate, validate):
+def test_a_lone_shape_set_has_four_views_one_at_a_time(plate, validate):
     project = plate.project
     geometry = project[named(plate, 'geometry')]
     dofs = [f'{int(n)}Z+' for n in geometry.node_id[:6]]
@@ -453,7 +453,14 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert offered['offers']['sensors'] is True
         with_sensors = shown(plate, geometry, history, prefs={'sensors': True, 'arrows': False},
                              validate=validate)
-        assert '1 sensors' in with_sensors['note'] and 'marks' in with_sensors['views'][0]
+        assert '1 sensors' in with_sensors['note'] and 'marks' not in with_sensors['views'][0]
+        stage = with_sensors['views'][0]
+        bodies = stage['bodies']
+        assert bodies['triangles'].dtype == np.uint32 and len(bodies['triangles']) > 0
+        # each point follows the drawn node its sensor sits on
+        sensor = project.sensors(table_name)[0][0]
+        follow = set(bodies['follow'].tolist())
+        assert len(follow) == 1 and int(stage['node_ids'][follow.pop()]) == sensor.node
     finally:
         table.set_cell('model', 0, was)
 
@@ -590,7 +597,7 @@ def swept():
 
 
 def test_a_sine_specification_and_its_levels_read_by_tone(swept, validate):
-    """VD's sine readings: the stage by default (frequency across, time
+    """The sine readings: the stage by default (frequency across, time
     receding, amplitude up, every point at its own time), the flat plot on
     the bar's Flat: a specification alone draws the tone's requirement with
     its limits, the levels alone the extracted level, and both together the
@@ -646,7 +653,7 @@ def _played_modes():
 
 
 def test_modal_responses_play_on_a_geometry_with_or_without_their_set(validate):
-    """As VD plays them: the geometry and the responses are enough, since the responses name
+    """The geometry and the responses are enough, since the responses name
     the set they came from, and the set can be selected with them."""
     state, shapes = _played_modes()
     project = state.project

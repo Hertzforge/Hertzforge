@@ -1,6 +1,6 @@
 /**
- * The project tree's selection: which objects, and within a data object which records, as
- * Visual Dynamics' tree keeps it. A plain click selects only what was clicked, Cmd (Ctrl
+ * The project tree's selection: which objects, and within a data object which
+ * records. A plain click selects only what was clicked, Cmd (Ctrl
  * elsewhere) adds or removes, Shift extends from the anchor through the rows between. Records
  * picked in an object's grid stand for that object: the object is selected with them, and
  * selecting the object's own row releases its picks, so a cell chosen minutes ago never turns a

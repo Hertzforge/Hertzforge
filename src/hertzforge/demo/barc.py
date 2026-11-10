@@ -37,7 +37,7 @@ channel, each over the element it passes through.
 The same structure is also built from solid eight-node bricks, the
 higher-fidelity model, along with the removable component on its own:
 the two channels and the beam, the part the BARC is named for
-(`solid_geometry`, `solid_project`). Its parts are solids, each made of
+(`solid_geometry`). Its parts are solids, each made of
 as few blocks as it can be (the box a block less its inside and its
 slot, a channel a block less the inside of its C, the beam a block;
 `BOX_SOLIDS`, `CHANNEL_SOLIDS`, `BEAM_SOLID`), and meshed by Mesh
@@ -504,37 +504,6 @@ def solid_build(part: str = 'BARC', size: float = SIZE) -> fem.Model:
 
 #: what each model is called in a project
 PART_NAMES = {'BARC': 'BARC', 'removable component': 'Removable Component'}
-
-
-def solid_project(size: float = SIZE, solved: bool = False) -> Any:
-    """A project to open in the app: the BARC and its removable
-    component, both of bricks, so Solve Modes on either gives its modes.
-
-        barc.solid_project().save('barc-bricks.hforge')
-
-    With `solved`, the BARC's modes are already solved to `SOLVE_TO`
-    (2000 Hz) and the removable component's to `PART_SOLVE_TO`
-    (2600 Hz). That is the example project the downloads page offers.
-
-    Parameters
-    ----------
-    size : float
-        The element size aimed at, in inches.
-    solved : bool, default False
-        Solve the modes as well.
-
-    Returns
-    -------
-    Project
-    """
-    from hertzforge.project import Project
-
-    out = Project('BARC in Bricks')
-    for part, top in zip(PARTS, (SOLVE_TO, PART_SOLVE_TO)):
-        out.add(PART_NAMES[part], solid_geometry(part, size))
-        if solved:
-            out.solve_modes(PART_NAMES[part], maximum_frequency=top)
-    return out
 
 
 def describe(size: float = SIZE, modes: int = 10) -> None:

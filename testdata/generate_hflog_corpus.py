@@ -8,9 +8,8 @@ lose. The log is small on purpose: one entry of most kinds, two tests
 and the entries between them, a correction, a clock check and a file,
 written on a fixed clock and under a fixed login and machine name.
 
-This script began as Visual Dynamics' `generate_vdlog_corpus.py`, which
-wrote `vdlog_corpus/v1.vdlog`. That file stays as Visual Dynamics wrote
-it, and the tests read it too.
+`vdlog_corpus/v1.vdlog` is the older log this format began as. It is kept as
+it was written, and the tests read it too.
 """
 
 import os

@@ -13,9 +13,8 @@ taken from the frozen run log in `vdlog_corpus/` and stored as if the
 log sat beside the project file, so the file holds a relative path and
 the log is not found beside it, a case a reader must keep too.
 
-This script began as Visual Dynamics' `generate_vdyn_corpus.py`, which
-wrote the three files in `vdyn_corpus/`. Those stay as Visual Dynamics
-wrote them, since Hertzforge reads `.vdyn` and no longer writes it.
+The three files in `vdyn_corpus/` are kept as they were written, since
+Hertzforge reads `.vdyn` and no longer writes it.
 """
 
 import os

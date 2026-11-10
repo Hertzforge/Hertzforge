@@ -1,29 +1,27 @@
 # Test data
 
-One folder per source model, files named by content. Every model here
-is built by the package itself — `visualdynamics.fem` and the two
-demonstration articles in `visualdynamics.demo` — because a
-demonstration of the toolset should be made by the toolset. The sdynpy
-demo models (`beam_plate`, `beam_airplane`) that seeded the original
-fixtures are gone, generators and all.
+The small fixtures are committed here. The plate's runs and models (55 MB) are too large for the
+repository's history, so `scripts/fetch_testdata.sh` fetches them into `plate/`, which is ignored by
+git. A test that needs the plate is skipped with that command named when `plate/` is absent, and CI
+fetches it before running the tests.
 
-`plate/` carries every object type visualdynamics handles, so it is a
-complete test on its own. It comes from `visualdynamics.demo.plate`:
-the 12 in x 12 in x 0.5 in 6061-T6 free plate, the article whose
-frequencies check against the classical tables. The drone is the
-second model and different in kind: large, and living outside the
-repository — see below.
+Every model here is built by the package itself, from `hertzforge.core.fem` and
+`hertzforge.demo.plate`. The sdynpy demonstration models that seeded the first fixtures are gone,
+generators included.
 
-The plate set is laid out like a **modal test**: four fixed reference
-DOFs where the article would be struck or shaken, responses measured
-over the survey grid. The FRFs are every response against each of the
-four drive points, and the time data is one hammer hit — the impulse
-response at every measured DOF, obtained by inverse-transforming those
-FRFs, so the time data, the FRFs and the mode shapes all describe the
-same structure.
+## The plate
+
+`plate/` holds every object type the package handles. It comes from `hertzforge.demo.plate`: the
+12 in x 12 in x 0.5 in 6061-T6 free plate, whose frequencies check against the classical tables.
+
+The set is laid out like a modal test: four fixed reference DOFs where the article would be struck
+or shaken, and responses measured over the survey grid. The FRFs are every response against each of
+the four drive points. The time data is one hammer hit, the impulse response at every measured DOF
+obtained by inverse-transforming those FRFs, so the time data, the FRFs and the mode shapes all
+describe the same structure.
 
 ```
-plate/            visualdynamics.demo.plate — 12x12x0.5 in 6061, free
+plate/
   geometry.npz        sdynpy-format geometry (no units in the file)
   geometry.unv        the same geometry as a universal file (no 164)
   geometry.exo        the same geometry as exodus, 144 SHELL4 quads
@@ -39,229 +37,83 @@ plate/            visualdynamics.demo.plate — 12x12x0.5 in 6061, free
   channel_table.vdyn  29 channels: 25 accelerometers and 4 load cells
   shock.nc4           four shocks in one recording, synthesized in
                       Rattlesnake's format (see generate_plate.py)
-  modal.nc4           a real Rattlesnake modal survey: 11 channels
-                      against 2 shakers, burst random, 20 averages
+  modal.nc4           a Rattlesnake modal survey: 11 channels against
+                      2 shakers, burst random, 20 averages
   modal_spectra.nc4   that run's FRFs and multiple coherence
-  random.nc4          a real Rattlesnake MIMO random test: 8 control
-                      channels, 4 shakers, controlled to a shaped
-                      specification
+  random.nc4          a Rattlesnake MIMO random test: 8 control channels,
+                      4 shakers, controlled to a shaped specification
   random_spectra.nc4  that run's spectra, saved while at level: FRFs,
                       coherence, the 8x8 response and 4x4 drive
                       cross-spectral matrices, and the specification
 ```
 
-References 101Z+, 110Z+, 1304Z+, 1310Z+ — one corner and three edge
-stations at the quarter points, which are the *generic* positions on a
-square plate. Not the grid's interior: every interior survey station
-lies on a center line or a diagonal — the plate's own symmetry — and a
-reference there is blind to whichever mode family nulls that line. The
-first reference set had three of four references unable to see the
-647 Hz mode at all, and its fitted shape could not resynthesize the
-measurement. Responses are Z only: the plate lies in the XY plane and
-its measured in-plane response is numerical noise, not data — except
-one deliberate in-plane channel in the modal run, because a real
-survey always has a sensor pointed somewhere nothing moves.
+The references are 101Z+, 110Z+, 1304Z+ and 1310Z+: one corner and three edge stations at the
+quarter points, which are the generic positions on a square plate. Every interior survey station
+lies on a center line or a diagonal, and a reference there cannot see the mode family that has a
+node along that line. The first reference set had three of its four references unable to see the
+647 Hz mode, and its fitted shape could not resynthesize the measurement.
 
-The channel layout is `plate_layout.py`, imported by both generators,
-so the survey the display geometry describes and the survey the
-controller runs cannot drift apart — `tests/test_correlate.py` holds
-the identity.
+Responses are Z only, because the plate lies in the XY plane and its in-plane response is numerical
+noise. The modal run has one in-plane channel on purpose, because a real survey usually has a sensor
+pointed where nothing moves.
 
-## The drone set lives outside the repository
+The channel layout is `plate_layout.py`, so the survey the display geometry describes and the survey
+the controller ran are the same survey. `tests/test_correlate.py` holds that.
 
-`generate_drone.py` — in the `visualdynamics-generators` repository,
-because it drives the real controller — builds the demonstration
-quadcopter and everything that comes from it, and writes the lot to
-`stressdata/drone/`, which is gitignored in its entirety. Nothing of it
-is committed. `generate_drone_projects.py` here assembles that data
-into four ready-to-open projects.
+Everything is written in SI. Only `frfs.unv` declares its units, through UFF dataset 164. Every other
+file not written by the controller carries none, which exercises the unit-less import path and the
+step of declaring units. The `.npz` files are compressed, which makes them about half the size.
 
-That is a size decision, not a quality one. The runs are at 8192 Hz
-over 28 channels, which is what makes them representative of real
-controller output, and a stream at that rate costs about 1.8 MB a
-second — the set comes to 600 MB. Git keeps blobs for ever, so the
-rate stays and the data does not.
+## The Rattlesnake runs
 
-The plate's committed runs live with the same tension resolved the
-other way: its physics needs 4096 Hz (modes at 439-1142 Hz in band),
-sixteen times the old airplane's rate, so its four run files weigh
-about 45 MB — kept, because the suite needs real controller files, and
-timed tightly because of what they weigh.
+The modal and random `.nc4` files came from the Rattlesnake controller running on virtual hardware
+that convolves the plate's FRFs in real time, with a control law closing the loop frame by frame. The
+script that drove them imports Rattlesnake and sdynpy, which are GPL, so it is not in this repository
+and only its output is used here.
 
-```
-stressdata/drone/
-  fem_geometry.vdyn     the whole shell, 1422 nodes, quads and triangles
-  fem_shapes.vdyn       942 modes to 10 kHz at 2% damping — the truth set
-  test_geometry.vdyn    the 14 nodes a survey instruments, threaded with
-                        tracelines: four arms, the body, the payload, two legs
-  plant.vdyn            24 responses x 4 drives, accelerance, DC to 4096 Hz
-  specification.vdyn    the random test's control target
-  transient_target.vdyn the waveform the transient test replicates
-  modal.nc4             burst random modal survey, 20 averages
-  modal_spectra.nc4     that run's FRFs and multiple coherence
-  random.nc4            MIMO random vibration, 4 shakers, 16 control channels
-  transient.nc4         the same control set replicating a waveform
-```
+These are the only files that carry their own units. A Rattlesnake channel table names the
+engineering unit of every channel, so they import fully defined. Each holds accelerations and forces
+side by side, which is the case per-record units exist for.
 
-**Two geometries, on purpose.** The FEM half is the complete model and
-every mode it has; the test half is the handful of nodes a real survey
-would instrument. Correlating one against the other is the point of
-having both.
+A run saves twice, and the two files share nothing. Streaming writes the time histories. A separate
+save writes what the environment computed from them: FRFs and coherence, and for random the cross
+spectra too. Both are kept.
 
-**The inputs are all ours.** The plants, the specifications' PSDs and
-the transient waveform are written by visualdynamics and exported to
-sdynpy's format through the ordinary exporter — which is what the
-import/export symmetry rule buys. Nothing here hand-rolls an sdynpy
-object; sdynpy is only the container the controller happens to read,
-and `rattlesnake` is imported to run the controller and nothing else.
+Two of the random run's drives are also control channels, so a drive point's force record and its
+acceleration record share a DOF name. The run drives four shakers against its eight control channels.
+Two shakers were tried first and could not hold the plate.
 
-## The Rattlesnake files are different in kind
+The modal test is burst random. The excitation drives for half of each frame and holds zero for the
+rest, so the response rings down inside the frame it started in. The FRF window is therefore
+`rectangle`, because a Hann window would discard the start of the burst, and the overlap is 0 %,
+because one frame is one burst cycle.
 
-Everything else here is synthesized by visualdynamics itself. The
-modal and random `.nc4` files came out of the Rattlesnake controller
-actually running — virtual hardware convolving the plate's FRFs in
-real time, a control law closing the loop frame by frame, spectra
-averaging. They took minutes to make rather than seconds, on purpose.
+The importer handles two things in a modal save. The saved FRF matrix has each drive against the
+drives as well, since a modal environment counts every enabled channel as a response; those rows are
+identity and cross-talk by construction, and they are dropped. The save also carries time data that
+is one frame per accepted average laid end to end, which is split into one record per capture.
 
-They are the only files here that **carry their own units**. A
-Rattlesnake channel table names the engineering unit of every channel,
-so they import fully defined and the Define Units step never appears —
-and each holds two quantities at once, accelerations and forces side
-by side, which is the case per-record units exist for. Everything else
-imports unit-less by design. They are also the only check that the
-`.nc4` reader copes with a real file rather than an idea of one.
+## Other committed files
 
-**A run saves twice, and the two files share nothing.** Streaming
-writes the time histories; a separate save writes what the environment
-computed from them — FRFs and coherence, and for random the cross
-spectra too. Neither file contains the other's contents, so both are
-kept.
+`sdynpy_oracle/` holds sdynpy's own answers as data, for the oracle tests. Its `README.md` says how.
 
-**Two of the random run's drives are control channels.** So a drive
-point's force record and its acceleration record share a DOF name —
-the case that flushed out two DOF-name-collision bugs the airplane's
-layout (drives outside the control set) could never reach. The run
-drives four shakers against its eight control channels: two were
-tried first and genuinely could not hold the plate, which is worth
-remembering as the thing the compliance report looks like when a
-test is under-actuated.
+`vdyn_corpus/` holds one `.vdyn` for each older schema (1 to 3). Hertzforge reads `.vdyn` and never
+writes it, so these are never regenerated. `hforge_corpus/` holds one `.hforge` for each Hertzforge
+schema, written by `generate_hforge_corpus.py` when the schema changes and never refreshed after.
+`tests/test_vdyn_corpus.py` and `tests/test_hforge_corpus.py` open every file in both.
 
-**The modal test is burst random, which is three settings and not
-one.** The excitation drives for half of each frame and holds zero for
-the rest, so the response rings down inside the frame it started in.
-That is what makes the signal self-windowing, so the FRF window is
-`rectangle` — a Hann window would discard the start of the burst and
-taper a decay already at zero — and the overlap is 0%, because one
-frame is one burst cycle.
-
-The controller-driving machinery lives in `rattlesnake_profiles.py`,
-in the `visualdynamics-generators` repository (`run_profile`,
-`run_transient_profile`, the completeness gates), and it carries the
-scars of everything the controller's spectral side did during
-development:
-
-- **`SAVE_CONTROL_DATA` does not save the control data.** Read it: it
-  writes `sysid_data` — the system identification measured once before
-  the profile starts, at its own fixed excitation. It is the same
-  bytes however long the test runs and whatever the test level is.
-  Pointed at a two-level run it produced two identical files sitting
-  82 dB under the specification, while the streamed time data from the
-  same run showed the loop converged and the level change plainly. The
-  committed fixture had this in it for a while and nothing caught it,
-  because every test asked about shapes and units and none asked
-  whether the numbers were the measurement.
-- So **neither** environment's spectra come from a save command. Both
-  push what they have computed at the interface they would otherwise
-  draw it on — modal a `SPECTRAL_UPDATE`, random a `CONTROL_UPDATE`
-  carrying the live `last_response_cpsd` and `last_drive_cpsd` — and
-  the driver takes the latest off that queue and writes the file
-  itself, in the layout the save command would have used. Draining
-  that queue is not optional anyway: left alone it grows for the whole
-  run.
-- A modal environment counts every enabled channel as a **response**
-  and never excludes its references, so the saved FRF matrix carries
-  each drive against the drives. Those rows are identity and
-  cross-talk by construction — 1 against itself, zero against the
-  other — and the importer drops them.
-- A modal spectral save also carries **time data**, and it is not a
-  recording: `modal_ui.py` appends one frame per *accepted* average,
-  so the samples are separate captures laid end to end. With
-  `Accept All` and no overlap that is `num_averages *
-  samples_per_frame` exactly. visualdynamics splits it into one record
-  per capture rather than drawing twenty restarting bursts as one
-  signal.
-- **Nothing stops a headless modal environment when its averages are
-  done.** `num_averages` appears nowhere in `modal_environment.py`
-  except its own metadata; the *interface* is what counts accepted
-  frames and calls `stop_environment`. Left to itself the generator
-  bursts on until the profile pulls the hardware. The driver does what
-  the interface does.
-- **A starved run is short, not empty, and `_has_data` cannot see
-  that.** On a loaded machine the driver's loop stalls and a run
-  captures 1 average of 20 — a file that is structurally perfect,
-  non-empty, and worthless. It overwrote a good set once.
-  `_run_is_complete` is the gate: a modal save must hold every average
-  it was asked for, and a streamed file must cover at least half its
-  window.
-- **Draining that queue is expensive in proportion to channel count.**
-  An unbounded drain takes longer than the interval between drains and
-  the driver's clock stops — 929 seconds in one iteration. The drain
-  is bounded by wall clock as well as by count.
-- Random's save command also opens its target in netCDF append mode
-  and leaves nothing in it but its own environment group. Never point
-  it — or anything — at the streamed file: the streaming process still
-  holds it open until shutdown, and a second writer destroys the time
-  data outright.
-
-A channel table has no foreign format to come from — only a
-rattlesnake run carries one — so the plate's is written with
-visualdynamics itself, in the native `.vdyn` format.
-
-Everything is written in SI. Only `plate/frfs.unv` declares its units
-(via UFF dataset 164); every other non-controller file carries none,
-which is deliberate — it exercises the unit-less import path and the
-Define Units step.
-
-The `.npz` files are saved compressed — the arrays are smooth enough
-to shrink by nearly half, and they live in the repository.
-
-## Frozen files
-
-`vdyn_corpus/` holds one `.vdyn` for each Visual Dynamics schema (1 to
-3), as Visual Dynamics wrote them. Hertzforge reads `.vdyn` and never
-writes it, so these are never regenerated. `hforge_corpus/` holds one
-`.hforge` for each Hertzforge schema, written by
-`generate_hforge_corpus.py` when the schema changes and never refreshed
-after. `tests/test_vdyn_corpus.py` and `tests/test_hforge_corpus.py`
-open every file in both.
-
-The run logs follow the same rule. `vdlog_corpus/v1.vdlog` is the run log
-Visual Dynamics froze, and `hflog_corpus/` holds one `.hflog` for each
-run log format version, written by `generate_hflog_corpus.py`.
+The run logs follow the same rule. `vdlog_corpus/v1.vdlog` is the frozen older log, and `hflog_corpus/`
+holds one `.hflog` for each run log format version, written by `generate_hflog_corpus.py`.
 `tests/test_run_log.py` opens and verifies every file in both.
 
 ## Regenerating
 
-Everything but the controller runs regenerates in the project's own
-venv, because every file goes out through visualdynamics's exporters:
+Everything but the controller runs regenerates from this checkout through the package's own exporters:
 
 ```
-./.venv/bin/python testdata/generate_plate.py     # the plate set
+python testdata/generate_plate.py            # the plate set, into testdata/plate
+python testdata/generate_plate_projects.py   # three projects, into testdata/plate_projects
 ```
 
-The controller runs live in the `visualdynamics-generators`
-repository — they import rattlesnake, which must not happen in this
-tree — and need a python that has rattlesnake and sdynpy. Run them
-from this checkout, which is where they find `visualdynamics` and
-`plate_layout`:
-
-```
-python3 ~/visualdynamics-generators/generate_plate_runs.py   # plate modal + random
-python3 ~/visualdynamics-generators/generate_drone.py        # the drone set
-```
-
-Both pace to real time and take minutes; scratch goes to
-`testdata/_rattlesnake_plate/` and `_rattlesnake_drone/`, neither
-kept. Redirect their output to a file rather than piping it: the
-controller's multiprocessing helpers outlive the main process holding
-the pipe open, and a reader never sees EOF.
+`generate_plate.py` writes the channel table as `channel_table.hforge`. The `.vdyn` in the fetched set
+is older, and the tests that read it stay on it because it exercises the reader.

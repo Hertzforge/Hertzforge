@@ -62,17 +62,3 @@ def test_a_ratio_is_the_signal_over_the_noise_in_decibels_on_the_stage():
     assert heights == pytest.approx([SZ, SZ / 2, 0.0])
     assert [run['station'] for run in arrays['runs']] == [0.0, SY / 2, SY]
     assert np.allclose(arrays['runs'][0]['levels'], 30.0)
-
-
-class _Kept:
-    def __init__(self):
-        self.meshes, self.labels, self.bounds = {}, None, None
-
-    def add_mesh(self, mesh, name=None, **_style):
-        self.meshes[name] = mesh
-
-    def add_point_labels(self, points, names, **_style):
-        self.labels = (np.asarray(points), list(names))
-
-    def show_bounds(self, **style):
-        self.bounds = style['axes_ranges']
