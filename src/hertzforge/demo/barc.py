@@ -260,7 +260,7 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
         barc.project().save('barc.hforge')
 
     With `solved`, the modes are already solved to `SOLVE_TO` (2000 Hz).
-    That is the example project the downloads page offers.
+    The downloads page offers the BARC of bricks instead (`solid_project`).
 
     Parameters
     ----------
@@ -504,6 +504,36 @@ def solid_build(part: str = 'BARC', size: float = SIZE) -> fem.Model:
 
 #: what each model is called in a project
 PART_NAMES = {'BARC': 'BARC', 'removable component': 'Removable Component'}
+
+
+def solid_project(size: float = SIZE, solved: bool = False) -> Any:
+    """A project to open in the app: the BARC of bricks (`solid_geometry`), its
+    element groups given their properties, so Solve Modes on it gives its modes.
+
+        barc.solid_project(solved=True).save('barc.hforge')
+
+    With `solved`, the modes are already solved to `SOLVE_TO` (2000 Hz). That is
+    the example project the downloads page offers, in bricks as the RC plate's is
+    (Brandon, 2026-11-10).
+
+    Parameters
+    ----------
+    size : float
+        The element size aimed at, in inches.
+    solved : bool, default False
+        Solve the modes as well.
+
+    Returns
+    -------
+    Project
+    """
+    from hertzforge.project import Project
+
+    out = Project('BARC')
+    out.add('BARC', solid_geometry('BARC', size))
+    if solved:
+        out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
+    return out
 
 
 def describe(size: float = SIZE, modes: int = 10) -> None:

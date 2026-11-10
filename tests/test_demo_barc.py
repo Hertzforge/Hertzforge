@@ -251,3 +251,12 @@ def test_a_coarser_mesh_of_bricks_still_holds_together():
     elastic = [f for f in shapes.frequency if f > 1.0][:8]
     assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.06), \
         np.round(elastic, 1)
+
+
+def test_the_example_project_is_the_barc_of_bricks():
+    """The downloads page's BARC is the brick model, as the RC plate's is."""
+    built = barc.solid_project()
+    assert [name for name, _obj in built.items()] == ['BARC']
+    assert 'box' in list(built['BARC'].group_name) and 'foot bolts' in list(built['BARC'].group_name)
+    # a mated set for each side's foot bolts and top bolts
+    assert len(built['BARC'].mates) == 4
