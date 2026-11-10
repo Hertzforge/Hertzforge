@@ -1,21 +1,30 @@
 /**
- * One window's classical shock run views: the layout's pages, the page this window shows, and the
- * subscription that keeps the window's plots equal to what that page draws (PROTOCOL.md, "Classical
- * Shock Display"). The pulse-by-pulse views both shock types share (`../pulse/pulseViews`) do the
- * work; this names classical shock's pages and topics.
+ * One window's classical shock run screen: its pages of plots and cards, the page this window
+ * shows, and the data the control service sends for it through `shock.subscribe` (PROTOCOL.md,
+ * "Classical Shock Display"), once per pulse and at once on subscribe. The Pulse and SRS plots
+ * carry the pulses picked in the pulse table laid over the latest one; before this window's first
+ * frame, the last pulse event's views stand in. Layouts the page layer kept are taken over the
+ * first time each is read.
  */
 
 import type { ServiceClient } from '$lib/protocol/client.svelte';
-import { SHOCK_TOPICS, type ShockData, type ShockQuantity, type ShockSubscribeResult } from '$lib/protocol/shock';
-import { PulseViewsState, type PulseViewsOptions } from '../pulse/pulseViews.svelte';
-import { SHOCK_PAGES, type ShockPageKind } from './shockLayout';
+import { SHOCK_TOPICS, type ShockData, type ShockSubscribeResult } from '$lib/protocol/shock';
+import { overlaidViews } from '../pulse/pulseLayout';
+import { pulseHooks } from '../pulse/pulseScreen';
+import { PulseScreenState } from '../pulse/pulseScreenState.svelte';
+import type { ScreenHooks, ScreenOptions } from '../screen/screen.svelte';
+import { SHOCK_SCREEN } from './shockLayout';
+import type { ShockStore } from './shockStore.svelte';
 
 export const SHOCK_TEST_TYPE = 'shock';
 
-export type ShockViewsOptions = PulseViewsOptions;
+export type ShockViewsOptions = ScreenOptions;
 
-export class ShockViewsState extends PulseViewsState<ShockPageKind, ShockQuantity, ShockData, ShockSubscribeResult> {
-	constructor(control: ServiceClient, opts: ShockViewsOptions) {
-		super(control, { pages: SHOCK_PAGES, dataTopic: SHOCK_TOPICS.data, subscribe: 'shock.subscribe', pageKey: 'hertzforge.display.shock.page' }, opts);
+export const SHOCK_HOOKS: ScreenHooks = pulseHooks(SHOCK_SCREEN, { method: 'shock.subscribe', topic: SHOCK_TOPICS.data });
+
+export class ShockViewsState extends PulseScreenState<ShockData, ShockSubscribeResult> {
+	/** `shock`, when given, lays the pulses picked in its pulse table over the Pulse and SRS plots. */
+	constructor(control: ServiceClient, opts: ShockViewsOptions, shock: Pick<ShockStore, 'lastViews' | 'overlaid'> | null = null) {
+		super(control, SHOCK_HOOKS, opts, shock ? (q, views) => (q === 'pulse' || q === 'srs' ? overlaidViews(views, shock.lastViews, shock.overlaid, q) : views) : null);
 	}
 }

@@ -49,9 +49,9 @@
 	const display = $derived(app.display);
 	const testName = $derived(mimoRun ? 'MIMO Random' : shockRun ? 'Classical Shock' : srsRun ? 'SRS' : sineRun ? 'Sine' : twrRun ? 'TWR' : explorerRun ? 'Explorer' : recorderRun ? 'Recorder' : 'Random');
 	/** The test types on the test screen's frame: one header line, and their run's own dock. */
-	const framed = $derived(sineRun);
-	const framedHost = $derived(sine);
-	const framedScreen = $derived(app.sineViews);
+	const framed = $derived(sineRun || shockRun);
+	const framedHost = $derived(shockRun ? shock : sine);
+	const framedScreen = $derived(shockRun ? app.shockViews : app.sineViews);
 	const pageName = $derived(mimoRun ? views.page.name : shockRun ? app.shockViews.page.name : srsRun ? app.srsViews.page.name : sineRun ? app.sineViews.page.name : twrRun ? app.twrViews.page.name : explorerRun ? app.explorerViews.page.name : recorderRun ? app.recorderViews.page.name : display.page.name);
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 	const abortKeys = isMac ? 'Cmd .' : 'Ctrl .';
@@ -143,7 +143,9 @@
 		{#if mimoRun}
 			<MimoRunView {views} compact onpopout={(id) => app.openDisplayWindow(id, 'mimo_random')} geometry={runGeometryOf(mimo.setup, mimo.status)} bands={runBandsOf(mimo.status)} diagnostics={mimo.law?.diagnostics ?? []} />
 		{:else if shockRun}
-			<ShockRunView {shock} views={app.shockViews} compact onpopout={(id) => app.openDisplayWindow(id, 'shock')} />
+			<ShockRunView {shock} views={app.shockViews} compact {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'shock')}>
+				{#snippet station()}<StationPanel {acq} />{/snippet}
+			</ShockRunView>
 		{:else if srsRun}
 			<SrsRunView {srs} views={app.srsViews} compact onpopout={(id) => app.openDisplayWindow(id, 'srs')} />
 		{:else if sineRun}

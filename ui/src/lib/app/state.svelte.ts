@@ -1762,11 +1762,15 @@ export class AppState {
 			windowIndex: mimoPopout ? 1 : 0
 		});
 		const shockPopout = config.popout && config.popoutTest === 'shock';
-		this.shockViews = new ShockViewsState(this.control, {
-			setupTitle: () => this.shock.status?.title ?? (config.popout ? null : this.shock.setup.title),
-			showing: () => shockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'shock' && this.shock.step === 'run'),
-			page: shockPopout ? config.page : null
-		});
+		this.shockViews = new ShockViewsState(
+			this.control,
+			{
+				setupTitle: () => this.shock.status?.title ?? (config.popout ? null : this.shock.setup.title),
+				showing: () => shockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'shock' && this.shock.step === 'run'),
+				page: shockPopout ? config.page : null
+			},
+			this.shock
+		);
 		const srsPopout = config.popout && config.popoutTest === 'srs';
 		this.srsViews = new SrsViewsState(this.control, {
 			setupTitle: () => this.srs.status?.title ?? (config.popout ? null : this.srs.setup.title),

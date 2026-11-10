@@ -1,8 +1,8 @@
 /**
- * The classical shock run's pages and what each asks the service for (PROTOCOL.md, "Classical
- * Shock Display"), on the pulse-by-pulse pages both shock types share (`../pulse/pulseLayout`):
- * the plain-data form a layout is saved in, and the pulses an operator picks in the pulse table to
- * lay over the Pulse and SRS pages.
+ * The classical shock run's screen (PROTOCOL.md, "Classical Shock Display"): every quantity the
+ * service draws offered as a plot type, the page kinds a screen opens with, and the pulses an
+ * operator picks in the pulse table to lay over the Pulse and SRS plots, on the frame the pulse
+ * page layer shares (`../pulse/pulseScreen`).
  *
  * The pages until the operator changes them: Pulse (the reference at the level fired with its
  * tolerance band, the measured pulse and the drive played), SRS, Kinematics (velocity and
@@ -11,18 +11,9 @@
  */
 
 import type { ShockQuantity } from '$lib/protocol/shock';
-import {
-	defaultPulseLayout,
-	pulseLayoutFromSaved,
-	pulseLayoutToSaved,
-	pulsePagePlots,
-	pulsePlotId,
-	pulseSubscribeParams,
-	type PulseLayout,
-	type PulsePageSet,
-	type PulsePageSpec,
-	type PulsePlotSpec
-} from '../pulse/pulseLayout';
+import type { PlotType } from '../plots/types';
+import type { PulsePageSet } from '../pulse/pulseLayout';
+import { pulsePlotTypes, type PulseScreenSpec } from '../pulse/pulseScreen';
 
 export { MAX_OVERLAY, pulseViewOf, toggleOverlay, withOverlay } from '../pulse/pulseLayout';
 
@@ -47,11 +38,6 @@ export const SHOCK_PAGE_HELP: Record<ShockPageKind, string> = {
 	pulses: 'Every pulse fired, with its verdicts, and the run in numbers.',
 	law: "The control law's reported values on its last call, and the run in numbers."
 };
-
-export type ShockPageSpec = PulsePageSpec<ShockPageKind>;
-export type ShockLayout = PulseLayout<ShockPageKind>;
-/** One plot a page subscribes to. */
-export type ShockPlotSpec = PulsePlotSpec<ShockQuantity>;
 
 export const SHOCK_RATES = [1, 2, 5];
 export const SHOCK_DEFAULT_RATE = 2;
@@ -84,31 +70,21 @@ export const SHOCK_PAGES: PulsePageSet<ShockPageKind, ShockQuantity> = {
 	maxPages: MAX_SHOCK_PAGES
 };
 
-export function defaultShockLayout(): ShockLayout {
-	return defaultPulseLayout(SHOCK_PAGES);
-}
+/** Classical shock's screen: its plot types, cards and first pages; the pulse table on the Pulses page. */
+export const SHOCK_SCREEN: PulseScreenSpec<ShockPageKind, ShockQuantity> = {
+	pages: SHOCK_PAGES,
+	plots: [
+		['pulse', { words: 'Pulse', help: 'The reference at the level fired with its tolerance band, the measured pulse, and the drive played.', group: 'time', families: ['measured', 'reference', 'tolerance', 'drive'] }],
+		['velocity', { words: 'Velocity', help: "The measured pulse's velocity and the reference's.", group: 'time', families: ['measured', 'reference'] }],
+		['displacement', { words: 'Displacement', help: "The measured pulse's displacement and the reference's.", group: 'time', families: ['measured', 'reference'] }],
+		['srs', { words: 'SRS', help: "The measured pulse's shock response spectrum against the reference's, with the informational band.", group: 'frequency', families: ['measured', 'reference', 'tolerance'] }],
+		['spectrum', { words: 'Spectra', help: "The reference's and the measured pulse's spectra in the correction band.", group: 'frequency', families: ['measured', 'reference'] }],
+		['identification', { words: 'Identification', help: "The identified system's magnitude and phase, and the coherence with the trusted lines marked.", group: 'frequency', families: ['measured', 'reference', 'tolerance'] }],
+		['law', { words: 'Law Values', help: "The control law's reported values on its last call.", group: 'numbers' }],
+		['readings', { words: 'Readings', help: 'The run in numbers.', group: 'numbers' }]
+	],
+	cards: ['run', 'level', 'pulses', 'station'],
+	pageCards: { pulses: ['pulses'] }
+};
 
-/** The plot id a page uses for one of its parts. */
-export const shockPlotId = (page: ShockPageSpec, part: string) => pulsePlotId(page, part);
-
-/** Everything a page subscribes to, at its drawn width (CSS pixels). */
-export function shockPagePlots(page: ShockPageSpec, width = 900, pixelRatio = 1): ShockPlotSpec[] {
-	return pulsePagePlots(SHOCK_PAGES, page, width, pixelRatio);
-}
-
-/** What a window sends: its plots, or the default subscription when it shows none. A point count
- * goes with the time histories only; the service refuses it on any other plot. */
-export function shockSubscribeParams(plots: ShockPlotSpec[], rate: number): Record<string, unknown> {
-	return pulseSubscribeParams(SHOCK_PAGES, plots, rate);
-}
-
-// ---------------------------------------------------------------------------------------------
-// Saved form
-
-export function shockLayoutFromSaved(text: string | null): ShockLayout | null {
-	return pulseLayoutFromSaved(SHOCK_PAGES, text);
-}
-
-export function shockLayoutToSaved(layout: ShockLayout): string {
-	return pulseLayoutToSaved(layout);
-}
+export const SHOCK_PLOT_TYPES: PlotType[] = pulsePlotTypes(SHOCK_SCREEN);
