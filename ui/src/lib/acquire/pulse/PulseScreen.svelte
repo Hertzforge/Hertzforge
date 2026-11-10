@@ -135,7 +135,7 @@
 <div class="acquire" data-testid={testid}>
 	<ScreenHeader acq={host} {name} {step} onsetup={() => (host.step = 'setup')} onrun={proceed} runWhy={proceedWhy} {onleave} {reason} ends={endsInHeader} {abortKeys} {nums} bind:heading />
 	<!-- Notices float over the top of the page, so one never pushes the plots down. -->
-	<div class="notices"><div class="stack"><Notices acq={host} /></div></div>
+	<div class="notices"><div class="floating"><Notices acq={host} /></div></div>
 
 	{#if step === 'setup'}
 		<div class="tabs" role="tablist" aria-label="{name} setup sections" bind:this={tablist} tabindex="-1" onkeydown={onTabKey}>
@@ -209,7 +209,7 @@
 		z-index: 40;
 	}
 
-	.stack {
+	.floating {
 		position: absolute;
 		top: var(--sp-2);
 		left: 50%;
@@ -221,17 +221,17 @@
 		pointer-events: none;
 	}
 
-	.stack > :global(*) {
+	.floating > :global(*) {
 		pointer-events: auto;
 		box-shadow: var(--shadow-pop);
 	}
 
 	/* The tinted notices are translucent: lay them on the page colour so a plot never shows through. */
-	.stack > :global(.aq-notice.warn) {
+	.floating > :global(.aq-notice.warn) {
 		background: linear-gradient(var(--amber-weak), var(--amber-weak)), var(--bg-2);
 	}
 
-	.stack > :global(.aq-notice.pass) {
+	.floating > :global(.aq-notice.pass) {
 		background: linear-gradient(var(--blue-weak), var(--blue-weak)), var(--bg-2);
 	}
 
