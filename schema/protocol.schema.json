@@ -556,6 +556,7 @@
       "properties": {
         "kinds": {"type": "array", "items": {"type": "string"}},
         "current": {"const": true},
+        "parts": {"type": "array", "items": {"type": "string"}},
         "rows": {"type": "array", "items": {"$ref": "#/$defs/actionRow"}}
       }
     },

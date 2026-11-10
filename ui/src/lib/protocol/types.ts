@@ -555,6 +555,8 @@ export interface ActionRow {
 export interface ActionColumn {
 	kinds: string[];
 	current?: true;
+	/** A geometry's part picked in the tree, once per part picked (or to pick, in a column of parts together). */
+	parts?: string[];
 	rows: ActionRow[];
 }
 

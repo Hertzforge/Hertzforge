@@ -123,3 +123,18 @@ describe('element groups picked together', () => {
 		expect(none.objects).toEqual(['Plate']);
 	});
 });
+
+describe('solids picked together', () => {
+	const one = clickPart(EMPTY, 'Frame', 'solid', 1);
+
+	it('Cmd adds a solid of the same geometry, as the service reads it', () => {
+		const two = clickPart(one, 'Frame', 'solid', 3, { toggle: true }, [1, 2, 3]);
+		expect(partForService(two)).toEqual({ kind: 'solid', id: 1, ids: [1, 3] });
+		expect(partIsPicked(two, 'Frame', 'solid', 3)).toBe(true);
+	});
+
+	it('Shift picks the run, and a solid with a group is a new pick', () => {
+		expect(clickPart(one, 'Frame', 'solid', 3, { extend: true }, [1, 2, 3]).part?.ids).toEqual([1, 2, 3]);
+		expect(clickPart(one, 'Frame', 'group', 2, { toggle: true }).part).toEqual({ name: 'Frame', kind: 'group', id: 2 });
+	});
+});

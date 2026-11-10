@@ -92,6 +92,9 @@ export function rectangle(grid: number[][], from: number, to: number): number[] 
  * the modifiers as objects do, within one geometry: Cmd (Ctrl) adds or takes one away, Shift picks
  * the run from the last one picked plainly. `order` is the geometry's groups as the tree lists them.
  */
+/** The parts of a geometry picked together with Cmd (Ctrl) or Shift: element groups, and solids. */
+const TOGETHER = new Set(['group', 'solid']);
+
 export function clickPart(
 	selection: Selection,
 	name: string,
@@ -101,7 +104,7 @@ export function clickPart(
 	order: (string | number)[] = []
 ): Selection {
 	const was = selection.part;
-	if (kind === 'group' && was?.kind === 'group' && was.name === name && (mods.toggle || mods.extend)) {
+	if (TOGETHER.has(kind) && was?.kind === kind && was.name === name && (mods.toggle || mods.extend)) {
 		const held = was.ids ?? [was.id];
 		let ids: (string | number)[];
 		if (mods.extend) {
@@ -116,13 +119,13 @@ export function clickPart(
 	return { objects: [name], records: {}, part: { name, kind, id }, anchor: name };
 }
 
-/** Whether a part is picked: the one part, or one of the element groups picked together. */
+/** Whether a part is picked: the one part, or one of the element groups or solids picked together. */
 export function partIsPicked(selection: Selection, name: string, kind: string, id: string | number): boolean {
 	const part = selection.part;
 	return !!part && part.name === name && part.kind === kind && (part.ids ? part.ids.includes(id) : part.id === id);
 }
 
-/** The picked part as the service reads it: `{kind, id}`, and `ids` for groups picked together. */
+/** The picked part as the service reads it: `{kind, id}`, and `ids` for groups or solids picked together. */
 export function partForService(selection: Selection): { kind: string; id: string | number; ids?: (string | number)[] } | null {
 	const part = selection.part;
 	if (!part) return null;

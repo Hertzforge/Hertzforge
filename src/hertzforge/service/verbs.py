@@ -168,7 +168,7 @@ PARTS = {f'project.{name}': part for name, part in {
     'delete_solids': 'solid',
     'pattern_solids': 'solid',
     'reorder_solids': 'solids',
-    'combine_solids': 'solids',
+    'combine_solids': 'solid',
     'merge_element_groups': 'group',
     'delete_element_groups': 'group',
     'edit_mated_surfaces': 'mate',
@@ -184,6 +184,14 @@ UNOFFERED = frozenset({'project.add_solid_hole', 'project.place'})
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',
                         'project.mate_surfaces'})
+
+#: the operations on two or more parts picked together: a boolean of solids
+TWO_SOLIDS = frozenset({'project.combine_solids'})
+
+#: a part kind picked in the tree, and what two or more of it picked together
+#: offer: the selection's column without them, a column of its own with them
+#: (Brandon, 2026-11-10)
+TOGETHER = {'group': TWO_GROUPS, 'solid': TWO_SOLIDS}
 
 
 def modules_of(op: Any) -> tuple[str, ...]:
@@ -202,8 +210,8 @@ def part_key(part: Any) -> str:
 
 
 def picked_ids(part: Any) -> list[Any]:
-    """Every id of the part picked: the element groups picked together
-    (`ids`), else the one (`id`)."""
+    """Every id of the part picked: the element groups or solids picked
+    together (`ids`), else the one (`id`)."""
     if not part:
         return []
     ids = part.get('ids')

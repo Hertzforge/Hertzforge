@@ -306,7 +306,7 @@ def _own_rows(project: Any, objects: list[str]) -> list[dict[str, Any]]:
     rows.append(_row('self.basis', 'Basis', 'self',
                      'Its group is the Basis' if basis else not_grouped))
     rows.append(_row('self.name_group', 'Name Group', 'self', not_grouped))
-    rows.append(_row('self.copy', 'Copy', 'self'))
+    rows.append(_row('self.copy', 'Duplicate', 'self'))
     rows.append(_row('self.rename', 'Rename', 'self', '' if one else 'Select one object'))
     # no Remove: Delete in the tree removes the selection (Brandon, 2026-11-10)
     return rows
@@ -388,19 +388,19 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
         if where in ('mate', 'solid', 'group') and part:
-            # the one picked in the tree is the one the row acts on
-            for held in (where, f'{where}s'):
-                if any(p.name == held for p in op.params):
-                    fill[held] = str(part['id'])
+            # what is picked in the tree is what the row acts on
+            picked = verbs.picked_ids(part)
+            if op.id in verbs.TOGETHER.get(where, ()) and len(picked) < 2:
+                continue  # in the column of two picked together
+            if any(p.name == where for p in op.params):
+                if len(picked) > 1:
+                    rows.append(_op_row(op, f'Pick one {where} in the tree', fill=fill, part=True))
+                    continue
+                fill[where] = str(part['id'])
+            if any(p.name == f'{where}s' for p in op.params):
+                fill[f'{where}s'] = ', '.join(str(i) for i in picked)
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
-        if where == 'group' and any(p.name == 'groups' for p in op.params):
-            groups = verbs.picked_ids(part)
-            fill['groups'] = ', '.join(str(g) for g in groups)
-            if op.id in verbs.TWO_GROUPS and len(groups) < 2:
-                rows.append(_op_row(op, 'Pick two element groups or more in the tree',
-                                    fill=fill, part=True))
-                continue
         more: dict[str, Any] = {'part': True} if home else {}
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
@@ -408,7 +408,10 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     # a part picked is acted on by its own rows; the geometry's are its row's
     if chosen and not where:
         rows += _own_rows(project, names)
-    return {'kinds': kinds, 'current': True, 'rows': rows}
+    column: dict[str, Any] = {'kinds': kinds, 'current': True, 'rows': rows}
+    if where:
+        column['parts'] = [where] * len(verbs.picked_ids(part))
+    return column
 
 
 def _why_not(op: Operation, kinds: list[str]) -> str:
@@ -473,6 +476,41 @@ def _needs(row: dict[str, Any], kind: str, candidates: list[str]) -> dict[str, A
     return row
 
 
+def _part_ids(project: Any, geometry: str, where: str) -> list[int]:
+    """The ids a part kind can be picked by in the tree: the solids that stand as
+    parts, or the element groups."""
+    from hertzforge.core import solids
+
+    held = project[geometry]
+    if where == 'solid':
+        return [int(s.id) for s in solids.top_level(held)]
+    return [int(g) for g in held.group_id]
+
+
+def _together_column(project: Any, geometry: str, part: dict[str, Any], where: str,
+                     taken: set[str]) -> dict[str, Any] | None:
+    """A part with one more of its kind: what two or more picked together offer, each
+    row naming the parts that would complete it."""
+    from .server import OPERATIONS
+
+    picked = {str(i) for i in verbs.picked_ids(part)}
+    others = [str(i) for i in _part_ids(project, geometry, where) if str(i) not in picked]
+    rows = []
+    for op in _rows_of(OPERATIONS):
+        if op.id not in verbs.TOGETHER[where] or op.id in taken or op.id in verbs.UNOFFERED:
+            continue
+        row = _op_row(op, part=True)
+        row['candidates'] = others
+        row['ready'] = bool(others)
+        if not others:
+            row['reason'] = f'The geometry has no other {where} for this'
+        rows.append(row)
+    if not rows:
+        return None
+    return {'kinds': [projects.kind_of(project[geometry])],
+            'parts': [where] * (len(picked) + 1), 'rows': rows}
+
+
 def action_table(project: Any, objects: list[str], records: dict[str, list[int]],
                  part: dict[str, Any] | None = None) -> dict[str, Any]:
     """`{'columns': [...]}`: the selection's column first, then one for each
@@ -486,6 +524,13 @@ def action_table(project: Any, objects: list[str], records: dict[str, list[int]]
         by_kind.setdefault(item[1], []).append(item)
     current = _current(project, chosen, records, part)
     columns = [current]
+    where = verbs.part_key(part)
+    if chosen and where:
+        # a part picked pairs with another of its kind, not with other objects
+        taken = {row['id'] for row in current['rows'] if row.get('ready')}
+        together = (_together_column(project, objects[0], part, where, taken)
+                    if where in verbs.TOGETHER and len(objects) == 1 else None)
+        return {'columns': [current, *([together] if together else [])]}
     if chosen:
         taken = {row['id'] for row in current['rows']}
         columns += _partner_columns(project, chosen, taken, by_kind)

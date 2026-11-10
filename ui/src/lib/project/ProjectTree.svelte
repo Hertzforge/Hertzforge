@@ -11,6 +11,7 @@
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
+	import type { Modifiers } from './selection';
 	import { tick } from 'svelte';
 	import { spans } from './brackets';
 	import { landsBefore, reordered, treeOrder } from './order';
@@ -46,6 +47,19 @@
 		if (!picking) return false;
 		if (picking.row.candidates?.includes(o.name)) app.analyze.join(o.name, picking.row);
 		return true;
+	}
+
+	/** A part clicked: the one a combination of parts is waiting on, while one is; else a pick. */
+	function clickSub(name: string, kind: string, id: string | number, m: Modifiers = {}, ids: (string | number)[] = []) {
+		if (picking) {
+			if (subCandidate(kind, id)) app.analyze.joinPart(name, kind, id, picking.row);
+			return;
+		}
+		p.clickPart(name, kind, id, m, ids);
+	}
+
+	function subCandidate(kind: string, id: string | number): boolean {
+		return !!picking?.part && picking.part === kind && !!picking.row.candidates?.includes(String(id));
 	}
 
 	function rowClick(e: MouseEvent, o: ProjectObject) {
@@ -279,6 +293,7 @@
 		<div
 			class="sub"
 			class:picked={partPicked(name, 'solid', solid.id)}
+			class:candidate={subCandidate('solid', solid.id)}
 			class:place-solid={solidPlace?.within === within && solidPlace.name === name && solidPlace.before === solid.id}
 			class:place-solid-end={solidPlace?.within === within && solidPlace.name === name && solidPlace.before === null && solid === solids[solids.length - 1]}
 			style="--depth: {depth}"
@@ -292,8 +307,8 @@
 			onpointermove={solidMove}
 			onpointerup={solidUp}
 			onpointercancel={() => { solidDrag = null; solidPlace = null; }}
-			onclick={(e) => { if (solidDragged) { e.stopPropagation(); return; } p.clickPart(name, 'solid', solid.id); }}
-			onkeydown={(e) => e.key === 'Enter' && p.clickPart(name, 'solid', solid.id)}
+			onclick={(e) => { if (solidDragged) { e.stopPropagation(); return; } clickSub(name, 'solid', solid.id, mods(e), solids.map((x) => x.id)); }}
+			onkeydown={(e) => e.key === 'Enter' && clickSub(name, 'solid', solid.id)}
 		>
 			<Glyph name={solidIcon(solid.kind)} of="child" parent="geometry" size={14} />
 			<span class="label">{solid.label}</span>
@@ -367,35 +382,35 @@
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}
 					{#each kids.parts as part (part.id)}
-						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => p.clickPart(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'part', part.id)}>
+						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
 							<Glyph name={part.id} of="child" parent="geometry" empty={!part.count} size={14} />
 							<span class="label">{part.label} ({part.count})</span>
 						</div>
 					{/each}
 					{#each kids.families as family (family.id)}
-						<div class="sub" class:picked={partPicked(o.name, 'family', family.id)} role="treeitem" aria-selected={partPicked(o.name, 'family', family.id)} tabindex="-1" data-testid="family-{o.name}-{family.id}" onclick={() => p.clickPart(o.name, 'family', family.id)} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'family', family.id)}>
+						<div class="sub" class:picked={partPicked(o.name, 'family', family.id)} role="treeitem" aria-selected={partPicked(o.name, 'family', family.id)} tabindex="-1" data-testid="family-{o.name}-{family.id}" onclick={() => clickSub(o.name, 'family', family.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'family', family.id)}>
 							<Glyph name={family.id} of="child" parent="geometry" empty={!family.count} size={14} />
 							<span class="label" class:dim={!family.count}>{family.label} ({family.count})</span>
 						</div>
 						{#each family.groups as group (group.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => p.clickPart(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'group', group.id)}>
+							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'group', group.id)}>
 								<Glyph name="groups" of="child" parent="geometry" size={14} />
 								<span class="label">{group.label} ({group.count})</span>
 							</div>
 						{/each}
 					{/each}
-					<div class="sub" class:picked={partPicked(o.name, 'solids', 0)} role="treeitem" aria-selected={partPicked(o.name, 'solids', 0)} tabindex="-1" data-testid="solids-{o.name}" title="Shapes to build parts from, before they are meshed" onclick={() => p.clickPart(o.name, 'solids', 0)} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'solids', 0)}>
+					<div class="sub" class:picked={partPicked(o.name, 'solids', 0)} role="treeitem" aria-selected={partPicked(o.name, 'solids', 0)} tabindex="-1" data-testid="solids-{o.name}" title="Shapes to build parts from, before they are meshed" onclick={() => clickSub(o.name, 'solids', 0)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'solids', 0)}>
 						<Glyph name="solid_block" of="child" parent="geometry" size={14} />
 						<span class="label" class:dim={!kids.solids.length}>Solids ({kids.solids.length})</span>
 					</div>
 					{@render solidRows(o.name, kids.solids, 1)}
 					{#if kids.mates.length}
-						<div class="sub" class:picked={partPicked(o.name, 'mates', 0)} role="treeitem" aria-selected={partPicked(o.name, 'mates', 0)} tabindex="-1" data-testid="mates-{o.name}" onclick={() => p.clickPart(o.name, 'mates', 0)} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'mates', 0)}>
+						<div class="sub" class:picked={partPicked(o.name, 'mates', 0)} role="treeitem" aria-selected={partPicked(o.name, 'mates', 0)} tabindex="-1" data-testid="mates-{o.name}" onclick={() => clickSub(o.name, 'mates', 0)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'mates', 0)}>
 							<Glyph name="mates" of="child" parent="geometry" size={14} />
 							<span class="label">Mated Surfaces ({kids.mates.length})</span>
 						</div>
 						{#each kids.mates as mate (mate.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'mate', mate.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'mate', mate.id)} tabindex="-1" data-testid="mate-{o.name}-{mate.id}" onclick={() => p.clickPart(o.name, 'mate', mate.id)} onkeydown={(e) => e.key === 'Enter' && p.clickPart(o.name, 'mate', mate.id)}>
+							<div class="sub" class:picked={partPicked(o.name, 'mate', mate.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'mate', mate.id)} tabindex="-1" data-testid="mate-{o.name}-{mate.id}" onclick={() => clickSub(o.name, 'mate', mate.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'mate', mate.id)}>
 								<Glyph name="mates" of="child" parent="geometry" size={14} />
 								<span class="label">{mate.label}</span>
 							</div>
@@ -517,6 +532,13 @@
 	.tree.picking .row:not(.candidate) {
 		opacity: 0.35;
 		cursor: not-allowed;
+	}
+	.tree.picking .sub:not(.candidate) {
+		opacity: 0.35;
+		cursor: not-allowed;
+	}
+	.tree.picking .sub.candidate {
+		box-shadow: inset 2px 0 0 var(--accent);
 	}
 	.tree.picking .row.candidate {
 		box-shadow: inset 2px 0 0 var(--accent);
