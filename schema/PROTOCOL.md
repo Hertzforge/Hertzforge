@@ -421,6 +421,10 @@ beside the field is pressed; the `value` it answers with fills the field (Mesh's
 parts and hexes otherwise, and with the size they are likely to hold at; its row's `omit` leaves
 out the ids, a size per piece and detecting each piece's size.
 
+A param with `"shown_with":[name, value]` is shown only while the param `name` holds `value`: of two
+ways to say a thing, the panel shows the field of the one chosen (Solve Modes: `by` is `count`, with
+`num_modes`, or `frequency`, with `maximum_frequency`).
+
 A param with `"in_view":true` is not shown in the panel: the result's view sets it. The shell runs
 the operation again with the panel's values and the view's choice, and shows the new result in
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
@@ -588,7 +592,9 @@ one longer): what two or more picked together offer (merging, aligning and matin
 combining solids), its `candidates` the ids of the geometry's other groups or standing solids. Picked
 together, those rows move to the first column. A row that acts on one part (Edit Solid) is not ready
 with several picked. A shape's Add on the Solids row has `"instant": true`: the shell runs it at once
-with its defaults and picks the new solid. One solid picked offers its shape's Add as `Edit`, with
+with its defaults and picks the new solid. New Geometry on the project row is instant too: it adds a
+geometry named Geometry (then Geometry (2) and on) in the display system's length unit, unless its
+`unit` names another, and the shell picks it; so is New Channel Table, named Channel Table. One solid picked offers its shape's Add as `Edit`, with
 `"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
 it, and a live form is run each time a changed field is left, with no Run button. Edit Solid stays for

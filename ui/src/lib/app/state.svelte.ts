@@ -157,7 +157,9 @@ class AnalyzeState {
 
 	get formParams(): ParamDescriptor[] {
 		const row = this.formRow;
+		const values = this.currentValues;
 		return this.params
+			.filter((p) => !p.shown_with || values[p.shown_with[0]] === p.shown_with[1])
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
 			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
@@ -307,8 +309,14 @@ class AnalyzeState {
 	/** A row of the action table, clicked. */
 	async perform(row: ActionRow, column: ActionColumn): Promise<void> {
 		if (!row.ready) return;
-		if (row.instant) {
+		if (row.instant && row.part) {
 			await this.addThenEdit(row);
+			return;
+		}
+		if (row.instant) {
+			// made at once with its defaults; what it adds is picked in the tree
+			this.openRow(row);
+			await this.run();
 			return;
 		}
 		if (!column.current && column.parts) {

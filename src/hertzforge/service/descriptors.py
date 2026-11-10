@@ -79,6 +79,10 @@ class Param:
     #: button beside it is pressed (Mesh's element size, detected for the parts and the
     #: element type chosen): `{'value'}` comes back, in the display units
     suggest: str | None = None
+    #: shown only while another param holds a value, as (its name, the value): one of
+    #: two ways to say a thing, the other's field out of sight (Solve Modes asks for a
+    #: number of modes or a highest frequency, not both)
+    shown_with: tuple[str, Any] | None = None
 
     def __post_init__(self) -> None:
         source = self.options_from
@@ -133,6 +137,8 @@ class Param:
             out['length'] = True
         if self.suggest is not None:
             out['suggest'] = self.suggest
+        if self.shown_with is not None:
+            out['shown_with'] = list(self.shown_with)
         return out
 
     def check(self, value: Any, choices: Sequence[Any] | None) -> Any:

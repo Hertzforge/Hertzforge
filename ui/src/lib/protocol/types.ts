@@ -486,6 +486,8 @@ export interface ParamDescriptor {
 	setting?: string;
 	/** A request for this field's value, asked with the form's values by a button beside it; `{value}` comes back in the display units. */
 	suggest?: string;
+	/** Shown only while another param holds a value: [its name, the value]. */
+	shown_with?: [string, unknown];
 }
 
 /** One object of the open project (schema/PROTOCOL.md, Projects). */

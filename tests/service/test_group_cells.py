@@ -231,7 +231,7 @@ def test_solve_modes_takes_a_highest_frequency_and_a_damping(rod):
     type_cell(rod, 1, 'dimensions', '0.01')
     points(rod, 2)
     type_cell(rod, 2, 'ground', 'all')
-    shapes = solved(rod, maximum_frequency=2000.0, damping=3.0)
+    shapes = solved(rod, by='frequency', maximum_frequency=2000.0, damping=3.0)
     assert 2 <= shapes.num_shapes < 30 and shapes.frequency.max() <= 2000.0
     assert shapes.damping == pytest.approx(0.03)
 
