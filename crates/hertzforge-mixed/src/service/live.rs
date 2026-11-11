@@ -1157,7 +1157,7 @@ impl MixedService {
             lines_out: rt.lines_out,
             alarm_lines: rt.alarm_lines,
             abort_lines: rt.abort_lines,
-            dof: rt.floor_dof,
+            dof: rt.floor_dof_typical,
             lines_in_band: rt.band.1 - rt.band.0,
         };
         let control_rms = (!rt.last_composite.is_empty())

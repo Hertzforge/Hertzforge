@@ -213,7 +213,10 @@ pub struct FloorSummary {
     pub alarm_lines: usize,
     /// Clean lines outside the abort band.
     pub abort_lines: usize,
-    /// Degrees of freedom of the floor estimate.
+    /// Degrees of freedom of the floor estimate: the typical (median) clean
+    /// line's in the last loop. (A line a moving part has just left holds a
+    /// frame or two; the least over the lines is not what the estimate
+    /// holds.)
     pub dof: f64,
     /// Lines of the grid inside the floor's band.
     #[serde(default)]

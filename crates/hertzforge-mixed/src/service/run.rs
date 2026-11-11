@@ -148,6 +148,9 @@ pub(crate) struct Runtime {
     pub(crate) abort_lines: usize,
     pub(crate) lines_out: usize,
     pub(crate) floor_dof: f64,
+    /// The typical (median) degrees of freedom over the floor's clean lines,
+    /// as the floor's status reports them.
+    pub(crate) floor_dof_typical: f64,
     pub(crate) loops: u64,
     pub(crate) relax_db: f64,
     /// Raw control samples since the run thread last took them, interleaved.
@@ -397,6 +400,7 @@ impl Runtime {
             abort_lines: 0,
             lines_out: 0,
             floor_dof: 0.0,
+            floor_dof_typical: 0.0,
             loops: 0,
             relax_db: 0.0,
             tap: Vec::new(),
@@ -1014,6 +1018,7 @@ impl Runtime {
         let mut measured = vec![0.0; self.lines];
         let clean = self.est.estimate(&self.target, self.band, &mut measured);
         self.floor_dof = self.est.min_dof(self.band);
+        self.floor_dof_typical = self.est.typical_dof(self.band);
         self.lines_out = (self.band.1 - self.band.0).saturating_sub(clean);
         let guards = cfg.law_guards.clone().unwrap_or_default().floor;
         let loop_s = cfg.blocks_per_window as f64 * self.hop as f64 / self.fs;

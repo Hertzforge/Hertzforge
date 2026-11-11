@@ -208,3 +208,30 @@ fn the_dof_per_frame_is_welchs_for_half_overlapped_hann() {
     assert!((dof_per_frame() - 2.0 / (1.0 + 2.0 / 36.0)).abs() < 1e-12);
     let _ = Gauss::new(1);
 }
+
+/// The typical degrees of freedom are the median clean line's, so one line a
+/// moving part has just left (one frame, 2 DOF) does not stand for the
+/// estimate; the least still reads that line.
+#[test]
+fn the_typical_dof_is_the_median_clean_lines_and_a_just_freed_line_does_not_set_it() {
+    let lines = 100;
+    let mut est = FloorEstimator::new(lines, 30);
+    let psd = vec![1.0; lines];
+    let mut excl = vec![false; lines];
+    for _ in 0..40 {
+        est.add_frame(&psd, &excl);
+    }
+    // A tone sat on lines 10..14 and has just moved on: they are freed one
+    // frame before the loop.
+    for x in excl.iter_mut().take(14).skip(10) {
+        *x = true;
+    }
+    est.add_frame(&psd, &excl);
+    excl.fill(false);
+    est.add_frame(&psd, &excl);
+    let full = est.dof(50);
+    assert!((est.min_dof((0, lines)) - 2.0).abs() < 1e-12);
+    assert!((est.typical_dof((0, lines)) - full).abs() < 1e-12);
+    assert!(full > 50.0, "{full}");
+    assert_eq!(FloorEstimator::new(4, 3).typical_dof((0, 4)), 0.0);
+}

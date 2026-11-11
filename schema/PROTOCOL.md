@@ -3577,8 +3577,9 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
   - `settled`: a tone's tracker has settled and its reading is used; a narrowband's estimate
     holds at least 16 degrees of freedom; the floor has equalized. `limiting` is true while a
     cap, a limit channel or the drive ceiling holds the part down.
-  - `dof` the degrees of freedom of the floor's control estimate or the narrowband's level
-    estimate (null for a tone); `lines` (the floor only) the band's lines, the clean ones read
+  - `dof` the degrees of freedom of the floor's control estimate (the typical clean line's, the
+    median over the lines read in the last loop) or the narrowband's level estimate (null for a
+    tone); `lines` (the floor only) the band's lines, the clean ones read
     in the last loop, and how many of those lie outside the alarm and the abort bands.
   - `law` the part's law instance's unusable calls in a row now and the ticks (a tone) or loops
     (the floor) a cap has bound; null for a narrowband.

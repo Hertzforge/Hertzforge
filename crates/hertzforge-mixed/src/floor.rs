@@ -228,6 +228,23 @@ impl FloorEstimator {
         clean
     }
 
+    /// The typical degrees of freedom over the clean lines of `band`: the
+    /// median line's (the upper middle of an even count); 0 with none. A line
+    /// a swept tone or band has just left holds a frame or two, so the least
+    /// ([`Self::min_dof`]) reads 2 while nearly every line holds the full
+    /// depth; this is what the floor's estimate holds.
+    pub fn typical_dof(&self, band: (usize, usize)) -> f64 {
+        let mut d: Vec<f64> = (band.0..band.1.min(self.sum.len()))
+            .filter(|&k| self.count[k] > 0.0)
+            .map(|k| self.dof(k))
+            .collect();
+        if d.is_empty() {
+            return 0.0;
+        }
+        let mid = d.len() / 2;
+        *d.select_nth_unstable_by(mid, f64::total_cmp).1
+    }
+
     /// The least degrees of freedom over the clean lines of `band`; 0 with
     /// none.
     pub fn min_dof(&self, band: (usize, usize)) -> f64 {
