@@ -1264,8 +1264,12 @@ name = "hertzforge-mixed-laws"
 version = "0.1.2"
 dependencies = [
  "hertzforge-breakpoints",
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
  "hertzforge-law-host",
  "hertzforge-mixed",
+ "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-random-laws",
  "hertzforge-sine",
