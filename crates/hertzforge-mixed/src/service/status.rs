@@ -446,6 +446,11 @@ pub struct MixedStatus {
     /// not steer by; an overload on a control or limit channel aborts).
     #[serde(default)]
     pub overloads: Vec<u32>,
+    /// Every enabled input's rms over its last half second of samples, tones
+    /// in, in the input's own unit, as `(channel index, rms)` in table order.
+    /// Empty until the first half second has been read.
+    #[serde(default)]
+    pub input_rms: Vec<(u32, f64)>,
     /// Whether a capture runs.
     pub capturing: bool,
     /// The laws and their counters; `None` until the loop engages.
@@ -548,6 +553,7 @@ impl MixedStatus {
             band_coherence: 0.0,
             trusted_frac: 0.0,
             overloads: Vec::new(),
+            input_rms: Vec::new(),
             capturing: false,
             law: None,
         }

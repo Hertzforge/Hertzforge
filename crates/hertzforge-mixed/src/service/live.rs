@@ -1054,6 +1054,7 @@ impl MixedService {
         };
         s.band_coherence = rt.ident.band_coherence;
         s.overloads = rt.step.overloads.clone();
+        s.input_rms = rt.step.input_rms.clone();
         s.capturing = rt.capture.is_some();
         s.trusted_frac = rt.ident.trusted_frac;
         if rt.floor_law.is_none() {

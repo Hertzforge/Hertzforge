@@ -3540,8 +3540,10 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
     in the last loop, and how many of those lie outside the alarm and the abort bands.
   - `law` the part's law instance's unusable calls in a row now and the ticks (a tone) or loops
     (the floor) a cap has bound; null for a narrowband.
-- `total` is the composite: its rms over the band (tones in), the reference's, and the summed
-  drive's peak (volts) and rms (volts) over the last loop. The composite is shown, not judged.
+- `total` is the composite: its rms over the band (tones in), the reference's at the level in
+  force (the service scales the full-level reference by the level, as the Control view's
+  reference is drawn; the full level's before anything drives), and the summed drive's peak
+  (volts) and rms (volts) over the last loop. The composite is shown, not judged.
 - `identification` is Sine's identification facts for Random's identification: its level, the
   band coherence against the gate (`gate_coherence` is `control.coherence_floor`), the lag it
   measured, and the fraction of its grid inside the band it trusts; null until the gate has run.
@@ -3621,8 +3623,9 @@ Event topics:
   ramping); `at_level_s`, `remaining_at_level_s` and `level_s` Random's; `loop` the floor loops
   and `tick` the control ticks since the floor engaged.
 - `parts` are the state's rows, one per part in the parts' order, for this frame.
-- `channels` lists every enabled input in table order as Random's: its rms over the band (tones
-  in) and Random's input-range `overload` latch.
+- `channels` lists every enabled input in table order as Random's: its rms over its last half
+  second of samples (tones in, in its own unit; null until the first half second) and Random's
+  input-range `overload` latch.
 - `alarms` lists what holds now: `{"kind":"envelope","part","lines","worst_db"}` (the floor's
   clean lines outside its alarm band; `worst_db` null until the core reports its worst line), `{"kind":"band","part","side","error_db"}` (a tone or a
   narrowband outside its alarm band) and `{"kind":"overload","channel"}`. An alarm warns; it

@@ -355,3 +355,27 @@ fn an_exclusion_narrower_than_two_lines_is_refused_at_arm() {
     .unwrap();
     s.arm().unwrap();
 }
+
+/// Every enabled input reports its rms with the tones in, in its own unit: a
+/// tone of 1 g peak alone on the control input reads at least its own rms.
+#[test]
+fn every_enabled_input_reports_its_rms_with_the_tones_in() {
+    let c = quick(config(vec![floor(1e-5), tone("t1", fixed(250.0), 1.0)]));
+    let mut s = build(c, table());
+    assert!(run_for(&mut s, 15.0), "{:?}", s.trip());
+    let st = s.live_status();
+    assert!(
+        st.parts.iter().all(|p| p.on),
+        "every part in: {:?}",
+        st.phase
+    );
+    let rms = st.input_rms;
+    assert_eq!(rms.len(), 1, "{rms:?}");
+    assert_eq!(rms[0].0, 0, "{rms:?}");
+    let tone_rms = 1.0 / 2f64.sqrt();
+    assert!(
+        rms[0].1 > 0.8 * tone_rms && rms[0].1 < 1.5,
+        "the control input's rms {} against the tone's {tone_rms}",
+        rms[0].1
+    );
+}

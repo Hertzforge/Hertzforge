@@ -459,3 +459,55 @@ async fn the_combined_test_runs_to_completed() {
     let end = wait_state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "completed", "{end}");
 }
+
+/// At a level below full, the composite's reference is the reference at that
+/// level (the level the Control view's reference is drawn at), and every
+/// enabled input, a monitor too, has an rms in the live frame.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_total_reference_is_at_the_level_and_every_input_has_its_rms() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Shell"})).await;
+    c.ok("station.select", json!({"kind": "sim"})).await;
+    let rev = c.ok("channels.get", json!({})).await["revision"].clone();
+    c.ok(
+        "channels.set",
+        json!({"revision": rev, "channels": [row(1, "control", "Control"),
+                                             row(2, "drive", "Shaker"),
+                                             row(3, "monitor", "Fixture")]}),
+    )
+    .await;
+    let r = c
+        .ok(
+            "mixed.configure",
+            json!({"config": config(vec![floor(), tone("t1", 160.0, 0.5)], manual())}),
+        )
+        .await;
+    let full = r["state"]["total"]["reference_rms_g"]
+        .as_f64()
+        .expect("full-level reference");
+    c.ok("mixed.start", json!({})).await;
+    wait_state(&mut c, "review").await;
+    c.ok("mixed.proceed", json!({})).await;
+    wait_phase(&mut c, "engaged").await;
+    c.pump(Duration::from_secs(3)).await;
+    let lives = c.of_topic("mixed.live");
+    let last = lives
+        .iter()
+        .rev()
+        .map(|e| e.data())
+        .find(|d| d["phase"] == "engaged" && d["level_db"] == -6)
+        .expect("a live frame at -6 dB");
+    let at = last["total"]["reference_rms_g"].as_f64().unwrap();
+    let want = full * 10f64.powf(-6.0 / 20.0);
+    assert!(
+        (at / want - 1.0).abs() < 2e-3,
+        "reference {at} at -6 dB, want {want} (full {full})"
+    );
+    let chans = last["channels"].as_array().unwrap();
+    assert_eq!(chans.len(), 2, "{chans:?}");
+    for ch in chans {
+        assert!(ch["rms"].as_f64().is_some_and(|x| x > 0.0), "no rms: {ch}");
+    }
+    c.ok("mixed.abort", json!({})).await;
+}

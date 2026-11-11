@@ -274,11 +274,18 @@ fn parts_json(v: &MixedView) -> Value {
     )
 }
 
+/// The composite's reference rms at the level in force: the configuration's
+/// full-level rms scaled by the level, the level the Control view's reference
+/// is drawn at. Before anything drives, the full level's.
+pub fn reference_rms_at_level(v: &MixedView) -> f64 {
+    v.reference_rms_g * 10f64.powf(v.achieved_db.unwrap_or(0.0) / 20.0)
+}
+
 fn total_json(v: &MixedView) -> Value {
     let t = v.status.as_ref().map(|s| s.totals);
     json!({
         "rms_g": opt_num(t.and_then(|t| t.control_rms_g).map(|x| sig(x, 4))),
-        "reference_rms_g": num(sig(v.reference_rms_g, 4)),
+        "reference_rms_g": num(sig(reference_rms_at_level(v), 4)),
         "drive_vpk": opt_num(t.map(|t| sig(t.drive_vpk, 4))),
         "drive_vrms": opt_num(t.map(|t| sig(t.drive_vrms, 4))),
     })
@@ -785,7 +792,7 @@ pub fn run_reading(v: &MixedView) -> Value {
     }
     rs.push(Row::number(
         "Reference rms",
-        sig(v.reference_rms_g, 4),
+        sig(reference_rms_at_level(v), 4),
         Some("g"),
         Status::Info,
     ));

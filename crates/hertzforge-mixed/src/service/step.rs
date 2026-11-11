@@ -225,6 +225,11 @@ pub(crate) struct MixedProcessStep {
     pub(crate) overloads: Vec<u32>,
     /// Limit channels' places in the input frame.
     pub(crate) lim_slots: Vec<usize>,
+    /// Per input slot (as `overload`): the sum of squares and the frames read
+    /// since the last rms, and the last rms over a half second.
+    in_sq: Vec<f64>,
+    in_frames: usize,
+    pub(crate) input_rms: Vec<(u32, f64)>,
     res_scratch: Vec<f64>,
     amp_scratch: Vec<f64>,
     phase_scratch: Vec<f64>,
@@ -295,6 +300,9 @@ impl MixedProcessStep {
             overload: Vec::new(),
             overloads: Vec::with_capacity(64),
             lim_slots: Vec::new(),
+            in_sq: Vec::new(),
+            in_frames: 0,
+            input_rms: Vec::new(),
             res_scratch: vec![0.0; n_ctrl],
             amp_scratch: vec![0.0; n_ctrl],
             phase_scratch: vec![0.0; n_ctrl],
@@ -628,7 +636,35 @@ fn tick_inputs<'a>(
 impl MixedProcessStep {
     /// The raw-sample guards on one input block: the kinematic monitor and
     /// each input's overload. Either one aborts.
+    /// Each input's rms over the last half second of samples, tones in.
+    fn read_input_rms(&mut self, input: &[f32], n_frames: usize) {
+        let slots = self.overload.len();
+        if slots == 0 || self.in_stride == 0 {
+            return;
+        }
+        self.in_sq.resize(slots, 0.0);
+        let frames = n_frames.min(input.len() / self.in_stride);
+        for fr in 0..frames {
+            for (slot, sq) in self.in_sq.iter_mut().enumerate() {
+                let v = f64::from(input[fr * self.in_stride + slot]);
+                *sq += v * v;
+            }
+        }
+        self.in_frames += frames;
+        if self.in_frames as f64 >= 0.5 * self.fs {
+            let n = self.in_frames as f64;
+            self.input_rms.clear();
+            for (slot, sq) in self.in_sq.iter_mut().enumerate() {
+                self.input_rms
+                    .push((self.overload[slot].0, (*sq / n).sqrt()));
+                *sq = 0.0;
+            }
+            self.in_frames = 0;
+        }
+    }
+
     fn watch(&mut self, input: &[f32], n_frames: usize) {
+        self.read_input_rms(input, n_frames);
         let n = (n_frames * self.in_stride).min(input.len());
         if let Some(kin) = self.kin.as_mut() {
             self.kin_scratch.clear();

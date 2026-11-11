@@ -839,6 +839,9 @@ impl Actor {
         }
         for c in &mut self.view.channels {
             c.overload = st.overloads.contains(&c.index);
+            if let Some((_, rms)) = st.input_rms.iter().find(|(i, _)| *i == c.index) {
+                c.rms = rms.is_finite().then_some(rms.max(0.0));
+            }
         }
         self.view.status = Some(st);
     }
