@@ -1830,7 +1830,8 @@ impl WireMixed {
             exclusion_hz: self.exclusion_hz,
             tracking_hz: self.tracking_hz,
             schedule: t.schedule.clone(),
-            full_level_duration_s: Some(t.full_level_duration_s),
+            full_level_duration_s: (t.full_level_duration_s > 0.0)
+                .then_some(t.full_level_duration_s),
             level_ramp_s: t.level_ramp_s,
             shutdown_ramp_s: t.shutdown_ramp_s,
             part_ramp_s: self.part_ramp_s,

@@ -6,18 +6,21 @@ use super::{Conn, Feed, Out, Service, DATA_SLACK, DISPLAY_PERIOD, LIVE_TICK};
 use crate::codec::{self, Arrays};
 use crate::laws;
 use crate::mixed::config::{self, CheckContext, Derived, LawFacts, WireBody, WireMixed};
+use crate::mixed::run::{self as mrun, ArmContext, Cmd, RunPlan, RunShared};
 use crate::mixed::subscribe::{self, Subscription};
 use crate::mixed::view::{self, LawState, RoleState, State, StationRef};
 use crate::mixed::{refuse, wrong_state, MixedRun};
-use crate::protocol::{self, MethodError};
+use crate::protocol::{self, num, MethodError};
+use crate::random::run::LevelTarget;
 use crate::station::{self, Selection, StationPlan};
 use crate::table;
 use crate::views::{self, Axis, Role, Scale, Series};
 use hertzforge_mixed::{MixedConfig, PartBody, ToneAmplitude};
+use hertzforge_random::RunMode;
 use hertzforge_random_laws::LawWorld;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// One connection's Mixed Mode subscription and when it was last sent a frame.
 pub struct MixedDisplay {
@@ -165,7 +168,7 @@ impl Service {
         let (Some(derived), Some(facts), Some(core)) = (derived, facts, core) else {
             return Err(config::config_invalid(&report));
         };
-        let run = self.new_mixed_run(&mut inner, w, &derived, facts, core);
+        let run = self.new_mixed_run(&mut inner, w, &derived, facts, core)?;
         let v = run.view();
         Ok((
             json!({
@@ -185,7 +188,7 @@ impl Service {
         derived: &Derived,
         facts: LawFacts,
         core: MixedConfig,
-    ) -> Arc<MixedRun> {
+    ) -> Result<Arc<MixedRun>, MethodError> {
         inner.mixed_runs += 1;
         let run_id = format!("mixed-{:04}", inner.mixed_runs);
         let station = Self::mixed_station_ref(inner);
@@ -235,15 +238,30 @@ impl Service {
         );
         let raw = w.raw.clone();
         let title = w.title.clone();
+        let shared = Arc::new(RunShared::new(initial.clone(), self.mixed_notify.clone()));
+        let wire = Arc::new(w);
+        let core = Arc::new(core);
+        let plan = RunPlan {
+            run_id: run_id.clone(),
+            wire: wire.clone(),
+            core: core.clone(),
+            law: facts.clone(),
+            sim_speed: self.opts.sim_speed,
+            capture_root: self.opts.capture_root.clone(),
+            timeout_s: self.opts.timeout.as_secs_f64(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        mrun::spawn(plan, initial.clone(), shared.clone(), rx)
+            .map_err(|e| MethodError::internal(format!("could not start the run thread: {e}")))?;
         let run = Arc::new(MixedRun::new(
             run_id.clone(),
             raw,
             derived.to_json(),
-            Arc::new(w),
-            Arc::new(core),
+            wire,
+            core,
             facts,
-            initial.clone(),
-            self.mixed_notify.clone(),
+            shared,
+            tx,
         ));
         inner.mixed = Some(run.clone());
         run.add_log(
@@ -251,7 +269,7 @@ impl Service {
             format!("configured \"{title}\" on {}", initial.station.class),
         );
         let _ = self.mixed_notify.send((run_id, Arc::new(initial)));
-        run
+        Ok(run)
     }
 
     pub(super) async fn mixed_config(&self) -> (Value, Arrays) {
@@ -369,60 +387,39 @@ impl Service {
         let channels = run.core.control.channels.len();
         let laws = self
             .with_catalog(move |cat| {
-                hertzforge_mixed_laws::resolve_mixed(cat, &choice, channels).map_err(|e| {
-                    refuse(
-                        "arm_refused",
-                        format!("The control law could not be built: {e}."),
-                    )
-                    .with_detail(json!({"role": match e.role {
-                        hertzforge_mixed::LawRole::Floor => "floor",
-                        hertzforge_mixed::LawRole::Tones => "tones",
-                    }}))
-                })
+                Ok(
+                    hertzforge_mixed_laws::resolve_mixed(cat, &choice, channels).map_err(|e| {
+                        refuse(
+                            "arm_refused",
+                            format!("The control law could not be built: {e}."),
+                        )
+                        .with_detail(json!({"role": match e.role {
+                            hertzforge_mixed::LawRole::Floor => "floor",
+                            hertzforge_mixed::LawRole::Tones => "tones",
+                        }}))
+                    }),
+                )
             })
             .await?;
-        let scanner = self.opts.scanner.clone();
-        let data_root = self.opts.data_root.clone();
-        let bind = self.opts.bind.clone();
-        let core = (*run.core).clone();
-        let damping = run.wire.random.control.damping;
-        tokio::task::spawn_blocking(move || -> Result<(), MethodError> {
-            let station = station::build(&plan, &*scanner)?;
-            // The hardware is held for as long as the controller holds the station.
-            let _lock = if station.station.is_hardware() {
-                Some(
-                    hertzforge_station::lock::acquire(
-                        &data_root,
-                        &bind,
-                        &station.provenance.station_label,
-                    )
-                    .map_err(|e| match e {
-                        hertzforge_station::lock::LockError::Held(h) => refuse(
-                            "hardware_busy",
-                            format!("Another program holds the NI hardware: {}", h.advice()),
-                        )
-                        .with_detail(json!({"holder": h.advice()})),
-                        hertzforge_station::lock::LockError::Io(m) => {
-                            refuse("arm_refused", format!("The station refused to arm: {m}"))
-                        }
-                    })?,
-                )
-            } else {
-                None
-            };
-            let class = station.station;
-            let backend = station.backend;
-            let mut laws = laws;
-            laws.floor_hinv.damping = damping;
-            let mut svc =
-                hertzforge_mixed::MixedService::new(core, tbl, backend, class, 0x5EED_0003, None)
-                    .map_err(|e| refuse("arm_refused", format!("The run cannot arm: {e}.")))?
-                    .with_laws(laws);
-            svc.arm()
-                .map_err(|e| refuse("arm_refused", format!("The run cannot arm: {e}.")))
-        })
-        .await
-        .map_err(|e| MethodError::internal(format!("the arm task failed: {e}")))??;
+        let ctx = ArmContext {
+            table: tbl,
+            station: plan,
+            scanner: self.opts.scanner.clone(),
+            data_root: self.opts.data_root.clone(),
+            bind: self.opts.bind.clone(),
+            laws,
+        };
+        if start {
+            run.ask(|reply| Cmd::Start { ctx, reply }, ARM_WAIT).await?;
+        } else {
+            let ack = params
+                .get("override_ack")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            run.ask(|reply| Cmd::Arm { ack, ctx, reply }, ARM_WAIT)
+                .await?;
+        }
+        self.spawn_mixed_live(run.clone());
         Ok(view::state_json(Some(&run.view())))
     }
 
@@ -510,23 +507,142 @@ impl Service {
                 _ => {}
             }
         }
-        let verb = match method {
-            "mixed.proceed" => "Proceeding",
-            "mixed.level" => "A level change",
-            "mixed.mode" => "A change of mode",
-            "mixed.hold" => "Holding",
-            "mixed.resume" => "Resuming",
-            "mixed.part" => "Switching a part",
-            _ => "An adjustment",
+        let w = wait_for(&run);
+        let state = || view::state_json(Some(&run.view()));
+        match method {
+            "mixed.proceed" => {
+                if v.state != State::Review {
+                    return Err(wrong_state(&v, "Proceeding"));
+                }
+                run.ask(|reply| Cmd::Proceed { reply }, w).await?;
+                Ok(state())
+            }
+            "mixed.level" => {
+                let target = match (
+                    protocol::named_f64(params, "delta_db")?,
+                    protocol::named_f64(params, "to_db")?,
+                ) {
+                    (Some(d), _) => LevelTarget::Delta(d),
+                    (_, Some(t)) => LevelTarget::To(t),
+                    _ => unreachable!("checked above"),
+                };
+                let level = run.ask(|reply| Cmd::Level { target, reply }, w).await?;
+                Ok(json!({"level_db": num(config::round(level, 2))}))
+            }
+            "mixed.mode" => {
+                let mode = match protocol::named_str(params, "mode")? {
+                    Some("manual") => RunMode::Manual,
+                    _ => RunMode::Auto,
+                };
+                run.ask(|reply| Cmd::Mode { mode, reply }, w).await?;
+                Ok(json!({"mode": crate::random::view::mode_name(mode)}))
+            }
+            "mixed.hold" | "mixed.resume" => {
+                let on = method == "mixed.hold";
+                run.ask(|reply| Cmd::Hold { on, reply }, w).await?;
+                Ok(state())
+            }
+            "mixed.part" => {
+                let id = params
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let on = params.get("on") == Some(&Value::Bool(true));
+                let by = {
+                    let inner = self.inner.lock().await;
+                    inner.session.client_name(conn.id, &conn.peer)
+                };
+                let i = id.clone();
+                let got = run
+                    .ask(
+                        |reply| Cmd::Part {
+                            id: i,
+                            on,
+                            by,
+                            reply,
+                        },
+                        w,
+                    )
+                    .await?;
+                Ok(json!({"id": id, "on": got}))
+            }
+            _ => {
+                let key = params
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let value = protocol::named_f64(params, "value")?.unwrap_or(0.0);
+                Self::mixed_adjust_check(&run.law.tones, &key, value)?;
+                let k = key.clone();
+                let got = run
+                    .ask(
+                        |reply| Cmd::Adjust {
+                            key: k,
+                            value,
+                            reply,
+                        },
+                        w,
+                    )
+                    .await?;
+                Ok(json!({"key": key, "value": num(got)}))
+            }
+        }
+    }
+
+    /// The refusals of an adjustment the tone law's declaration settles.
+    fn mixed_adjust_check(
+        facts: &config::RoleLaw,
+        key: &str,
+        value: f64,
+    ) -> Result<(), MethodError> {
+        let refused = |why: &'static str, words: String| {
+            refuse("adjust_refused", words).with_detail(json!({"key": key, "why": why}))
         };
-        Err(wrong_state(&v, verb))
+        let Some(spec) = facts.params.iter().find(|p| p.key == key) else {
+            return Err(refused(
+                "unknown_key",
+                format!("{} declares no parameter \"{key}\".", facts.name),
+            ));
+        };
+        if !facts.live.iter().any(|k| k == key) {
+            return Err(refused(
+                "not_live",
+                format!(
+                    "{}'s {} is fixed for the run; only its live parameters change while it runs.",
+                    facts.name, spec.label
+                ),
+            ));
+        }
+        if let Some(why) = crate::shock::config::param_problem(spec, &Value::from(value)) {
+            return Err(refused(
+                "out_of_range",
+                format!("{}'s {} {why}", facts.name, spec.label),
+            ));
+        }
+        Ok(())
     }
 
     /// `mixed.stop` and `mixed.abort`: open to every connection.
-    pub(super) async fn mixed_end(&self) -> Value {
-        let inner = self.inner.lock().await;
-        let v = inner.mixed.as_ref().map(|r| r.view());
-        view::state_json(v.as_deref())
+    pub(super) async fn mixed_end(&self, conn: &Conn, abort: bool) -> Value {
+        let (run, by) = {
+            let inner = self.inner.lock().await;
+            let Some(run) = inner.mixed.clone() else {
+                return view::state_json(None);
+            };
+            (run, inner.session.client_name(conn.id, &conn.peer))
+        };
+        if run.view().state.is_live() {
+            stop_mixed(
+                &run,
+                if abort { None } else { Some("operator_stop") },
+                by,
+                true,
+            )
+            .await;
+        }
+        view::state_json(Some(&run.view()))
     }
 
     pub(super) async fn mixed_reset(&self, conn: &Conn) -> Result<Value, MethodError> {
@@ -546,7 +662,7 @@ impl Service {
         let (Some(derived), Some(facts), Some(core)) = (derived, facts, core) else {
             return Err(config::config_invalid(&report));
         };
-        let run = self.new_mixed_run(&mut inner, w, &derived, facts, core);
+        let run = self.new_mixed_run(&mut inner, w, &derived, facts, core)?;
         let v = run.view();
         Ok(view::state_json(Some(&v)))
     }
@@ -701,8 +817,14 @@ impl Service {
     /// Publish `run`'s `mixed.live` five times a second while it streams, and each
     /// subscription's `mixed.data` at its own rate, until it has finished; then once
     /// more with the final state. One task per run.
-    #[allow(dead_code)]
     pub(super) fn spawn_mixed_live(self: &Arc<Self>, run: Arc<MixedRun>) {
+        if run
+            .shared
+            .live_started
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
         let svc = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(LIVE_TICK);
@@ -747,6 +869,59 @@ impl Service {
             }
         });
     }
+}
+
+/// How long to wait for the run thread to answer: its identification, a margin.
+fn wait_for(run: &MixedRun) -> Duration {
+    Duration::from_secs_f64(10.0 + 2.0 * run.wire.identification_s())
+}
+
+const ARM_WAIT: Duration = Duration::from_secs(120);
+
+/// End `run`: the controlled stop with `outcome` (`None`: the abort), raised on the
+/// run's signals first so identification ends at its next block, then queued.
+pub(super) async fn stop_mixed(
+    run: &MixedRun,
+    outcome: Option<&'static str>,
+    by: String,
+    wait: bool,
+) {
+    if !run.view().state.is_live() {
+        return;
+    }
+    run.shared.signal_end(outcome.is_none(), &by);
+    let w = wait_for(run);
+    match outcome {
+        None => {
+            let _ = run.ask(|reply| Cmd::Abort { by, reply }, w).await;
+        }
+        Some(outcome) if wait => {
+            let _ = run
+                .ask(
+                    |reply| Cmd::Stop {
+                        outcome,
+                        by,
+                        reply: Some(reply),
+                    },
+                    w,
+                )
+                .await;
+        }
+        Some(outcome) => {
+            let _ = run.send(Cmd::Stop {
+                outcome,
+                by,
+                reply: None,
+            });
+        }
+    }
+}
+
+/// How long the shutdown waits for a Mixed Mode run's controlled stop before it
+/// aborts: at least ten seconds and twice its stop ramp.
+pub(super) fn shutdown_patience(run: &MixedRun) -> Duration {
+    let ramp = run.core.shutdown_ramp_s.max(run.core.part_ramp_s);
+    Duration::from_secs_f64(10f64.max(2.0 * ramp + 2.0))
 }
 
 /// A tone's `(alarm, abort)` bands, dB, by part id.

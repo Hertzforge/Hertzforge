@@ -4,19 +4,24 @@
 //! the floor's role and the tones'.
 
 pub mod config;
+pub mod run;
 pub mod subscribe;
 pub mod view;
 
 use crate::protocol::{ErrorCode, MethodError};
 use crate::random::run::LogEntry;
+use run::{Cmd, RunShared};
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::oneshot;
 use view::MixedView;
 
-/// A publish, as the service hears it: the run id and the view published.
-pub type Notice = (String, Arc<MixedView>);
+pub use run::Notice;
 
-/// The service's handle on one configured run.
+/// The service's handle on one configured run. Dropping it ends the run thread,
+/// which releases anything the run holds; the service drops a run only when it is
+/// not live.
 pub struct MixedRun {
     pub id: String,
     /// The configuration as accepted, for `mixed.reset` and `mixed.config`.
@@ -29,16 +34,8 @@ pub struct MixedRun {
     pub core: Arc<hertzforge_mixed::MixedConfig>,
     /// Both roles' laws as the checks saw them.
     pub law: config::LawFacts,
-    view: Mutex<Arc<MixedView>>,
-    log: Mutex<Vec<LogEntry>>,
-    notify: tokio::sync::mpsc::UnboundedSender<Notice>,
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    match m.lock() {
-        Ok(g) => g,
-        Err(p) => p.into_inner(),
-    }
+    pub shared: Arc<RunShared>,
+    tx: Mutex<mpsc::Sender<Cmd>>,
 }
 
 impl MixedRun {
@@ -50,8 +47,8 @@ impl MixedRun {
         wire: Arc<config::WireMixed>,
         core: Arc<hertzforge_mixed::MixedConfig>,
         law: config::LawFacts,
-        initial: MixedView,
-        notify: tokio::sync::mpsc::UnboundedSender<Notice>,
+        shared: Arc<RunShared>,
+        tx: mpsc::Sender<Cmd>,
     ) -> MixedRun {
         MixedRun {
             id,
@@ -60,42 +57,55 @@ impl MixedRun {
             wire,
             core,
             law,
-            view: Mutex::new(Arc::new(initial)),
-            log: Mutex::new(Vec::new()),
-            notify,
+            shared,
+            tx: Mutex::new(tx),
         }
     }
 
     pub fn view(&self) -> Arc<MixedView> {
-        lock(&self.view).clone()
-    }
-
-    /// Publish a new view and tell the service.
-    pub fn publish(&self, v: MixedView) {
-        let v = Arc::new(v);
-        *lock(&self.view) = v.clone();
-        let _ = self.notify.send((self.id.clone(), v));
+        self.shared.view()
     }
 
     pub fn log_since(&self, since: u64) -> (Vec<LogEntry>, u64) {
-        let log = lock(&self.log);
-        let next = log.len() as u64;
-        let from = (since as usize).min(log.len());
-        (log[from..].to_vec(), next)
+        self.shared.log_since(since)
     }
 
     pub fn add_log(&self, kind: &'static str, text: impl Into<String>) {
-        let mut log = lock(&self.log);
-        let seq = log.len() as u64;
-        log.push(LogEntry {
-            seq,
-            at_unix: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(0.0),
-            kind,
-            text: text.into(),
-        });
+        self.shared.add_log(kind, text)
+    }
+
+    /// Queue a request and wait for its answer, at most `wait`.
+    pub async fn ask<T: Send + 'static>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, MethodError>>) -> Cmd,
+        wait: Duration,
+    ) -> Result<T, MethodError> {
+        let (tx, rx) = oneshot::channel();
+        self.send(make(tx))?;
+        match tokio::time::timeout(wait, rx).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(_)) => Err(MethodError::internal(format!(
+                "run {} ended before it answered",
+                self.id
+            ))),
+            Err(_) => Err(MethodError::new(
+                ErrorCode::Internal,
+                format!(
+                    "run {} did not answer within {:.0} s; the request stands",
+                    self.id,
+                    wait.as_secs_f64()
+                ),
+            )),
+        }
+    }
+
+    pub fn send(&self, cmd: Cmd) -> Result<(), MethodError> {
+        let tx = match self.tx.lock() {
+            Ok(t) => t,
+            Err(p) => p.into_inner(),
+        };
+        tx.send(cmd)
+            .map_err(|_| MethodError::internal(format!("run {} is no longer running", self.id)))
     }
 }
 

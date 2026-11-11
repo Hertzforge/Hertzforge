@@ -1096,6 +1096,7 @@ impl Service {
             let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
             let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
+            let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
@@ -1118,6 +1119,15 @@ impl Service {
             }
             if let Some(s) = twr {
                 twr_methods::stop_twr(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(s) = mixed {
+                mixed_methods::stop_mixed(
                     &s,
                     Some("safe_stop"),
                     "the service (nobody held control)".into(),
@@ -1177,6 +1187,28 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
+        let mixed = self.inner.lock().await.mixed.clone();
+        let mixed_said = match mixed.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                mixed_methods::stop_mixed(&s, Some("safe_stop"), rrun::SHUTDOWN_BY.into(), true)
+                    .await;
+                let asked = Instant::now();
+                let patience = mixed_methods::shutdown_patience(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        mixed_methods::stop_mixed(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
         let (random, sim, shock, srs, sine, twr, explorer, recorder) = {
             let inner = self.inner.lock().await;
             (
@@ -1353,6 +1385,7 @@ impl Service {
             return shock_said
                 .or(srs_said)
                 .or(sine_said)
+                .or(mixed_said)
                 .or(twr_said)
                 .or(explorer_said)
                 .or(recorder_said);
@@ -1658,7 +1691,8 @@ impl Service {
             "mixed.start" => self.mixed_arm(conn, params, true).await,
             "mixed.proceed" | "mixed.level" | "mixed.mode" | "mixed.hold" | "mixed.resume"
             | "mixed.part" | "mixed.adjust" => self.mixed_running_verb(conn, method, params).await,
-            "mixed.stop" | "mixed.abort" => Ok(self.mixed_end().await),
+            "mixed.stop" => Ok(self.mixed_end(conn, false).await),
+            "mixed.abort" => Ok(self.mixed_end(conn, true).await),
             "mixed.reset" => self.mixed_reset(conn).await,
             "mixed.clear" => self.mixed_clear(conn).await,
             "mixed.state" => Ok(self.mixed_state_now().await),
