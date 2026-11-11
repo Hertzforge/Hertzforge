@@ -376,3 +376,75 @@ def editing(op: str, params: dict[str, Any], columns: Sequence[str | None],
     if kinds:
         out['kinds'] = dict(kinds)
     return out
+
+
+def bars(title: str, label: str, unit: str | None, labels: Sequence[str],
+         values: Sequence[float | None], *, under: float | None = None,
+         over: float | None = None, at_limit: Literal['in', 'out'] = 'in',
+         missing: Literal['none', 'under'] = 'none',
+         notes: Sequence[str | None] | None = None, baseline: float = 0.0,
+         floor: float | None = None) -> dict[str, Any]:
+    """A `bars` view: a bar a row, judged here against its thresholds.
+
+    A value under `under` is 'under' and one over `over` is 'over'; at a
+    threshold exactly it is in, or out with `at_limit` 'out' (a waveform
+    error at its ceiling has failed it). A row with no number (None or not
+    finite) draws no bar and is not judged, or is 'under' with `missing`
+    'under': a signal-to-noise with no signal above its noise is the worst
+    reading there is. `notes` are said along their rows; `baseline` is
+    where the bars grow from (a kurtosis from its Gaussian 3); `floor`
+    keeps the axis above it (a share cannot be negative).
+    """
+    labels = [str(text) for text in labels]
+    shown: list[float | None] = []
+    for value in values:
+        value = None if value is None else float(value)
+        shown.append(value if value is not None and np.isfinite(value) else None)
+    if len(shown) != len(labels):
+        raise ValueError(f'bars {title!r}: {len(shown)} values for {len(labels)} labels')
+    states: list[str | None] = []
+    for value in shown:
+        if value is None:
+            states.append('under' if missing == 'under' else None)
+        elif over is not None and (value > over or (at_limit == 'out' and value == over)):
+            states.append('over')
+        elif under is not None and (value < under or (at_limit == 'out' and value == under)):
+            states.append('under')
+        else:
+            states.append(None)
+    out: dict[str, Any] = {'view': 'bars', 'title': title,
+                           'value': {'label': label, 'unit': unit},
+                           'labels': labels, 'values': shown, 'states': states,
+                           'under': None if under is None else float(under),
+                           'over': None if over is None else float(over),
+                           'baseline': float(baseline)}
+    if floor is not None:
+        out['floor'] = float(floor)
+    if notes is not None:
+        notes = [None if note is None else str(note) for note in notes]
+        if len(notes) != len(labels):
+            raise ValueError(f'bars {title!r}: {len(notes)} notes for {len(labels)} labels')
+        if any(notes):
+            out['notes'] = notes
+    return out
+
+
+def grouped(view: dict[str, Any], groups: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """A `spectrum` whose series are shown a set at a time, chosen from a
+    list: each group a `{'label', 'series', 'readouts'?}`, `series` the
+    indices into the view's series, `readouts` the
+    `{'label', 'text', 'status'}` readings that go with it. The axes span
+    every group, so choosing another does not move them."""
+    count = len(view['series'])
+    out = []
+    for group in groups:
+        indices = [int(i) for i in group['series']]
+        if not indices or any(i < 0 or i >= count for i in indices):
+            raise ValueError(f"group {group['label']!r}: series {indices} outside "
+                             f'the view\'s {count}')
+        entry = {'label': str(group['label']), 'series': indices}
+        if group.get('readouts'):
+            entry['readouts'] = [{'label': str(r['label']), 'text': str(r['text']),
+                                  'status': r['status']} for r in group['readouts']]
+        out.append(entry)
+    return {**view, 'groups': out}
