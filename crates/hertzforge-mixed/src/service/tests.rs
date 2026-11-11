@@ -197,3 +197,104 @@ fn a_trip_names_its_part() {
     };
     assert_eq!(f.words(), "Tone t1 law fault: over_budget");
 }
+
+/// D6: a line a swept tone crosses pauses and resumes. One loop after the
+/// tone has left it, the line holds close to the degrees of freedom it held
+/// before the tone arrived, and its average is the floor's, not the tone's.
+#[test]
+fn a_line_a_swept_tone_crosses_pauses_and_resumes_with_its_earlier_frames() {
+    // The closed-loop tests' plant and grid: 4096 Hz, one mode at 300 Hz,
+    // Q 8, 40 frames of delay; 4 Hz lines, 8 frames a loop, 60 DOF.
+    let mut flr = floor("floor");
+    if let crate::parts::PartBody::Floor(f) = &mut flr.body {
+        f.breakpoints = hertzforge_breakpoints::BreakpointTable::new("floor");
+        f.breakpoints
+            .push(hertzforge_breakpoints::BreakpointRow::psd(40.0, 0.01));
+        f.breakpoints
+            .push(hertzforge_breakpoints::BreakpointRow::psd(1000.0, 0.01));
+    }
+    let mut c = config(vec![
+        flr,
+        tone(
+            "t",
+            sweep(150.0, 450.0, 150.0, PartSweepTarget::Sweeps { n: 1 }),
+        ),
+    ]);
+    c.df_hz = 4.0;
+    c.lines = 256;
+    c.nfft = Some(1024);
+    c.blocks_per_window = 8;
+    c.control_dof = 60.0;
+    c.exclusion_hz = 8.0;
+    c.part_ramp_s = 1.0;
+    c.level_ramp_s = 1.0;
+    c.shutdown_ramp_s = 1.0;
+    c.soft_start_db = 0.0;
+    c.floor_settle_s = 3.0;
+    c.schedule.start_db = 0.0;
+    c.schedule.table_db = vec![0.0];
+    c.identification.sysid_level_db = -12.0;
+    c.limits.drive_vpk_ceiling = 20.0;
+    if let crate::parts::PartBody::Tone(t) = &mut c.parts[1].body {
+        t.amplitude = crate::parts::ToneAmplitude::Constant { g_pk: 1.0 };
+    }
+    let sim = SimConfig::new()
+        .sample_rate_hz(4096.0)
+        .resonance(300.0, 8.0)
+        .feedthrough(1.0)
+        .noise_level(1e-4)
+        .transport_delay_samples(40)
+        .shared_clock(true)
+        .seed(0x4D49_5845)
+        .build();
+    let mut s = MixedService::new(
+        c,
+        table(),
+        Box::new(sim),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        1,
+        None,
+    )
+    .unwrap()
+    .with_block_frames(64);
+    s.arm().unwrap();
+    s.run_sysid(0).unwrap();
+    assert!(s.coherence_gate().unwrap());
+    s.proceed_after_review().unwrap();
+    let k = 50usize; // 200 Hz on 4 Hz lines
+                     // One loop: 8 frames of 512-frame hops at 4096 Hz, a second, 4 chunks.
+    let loop_chunks = 4;
+    // (dof, average) a chunk before the tone covers the line; then its state
+    // one loop after the tone has left it.
+    let mut before: Option<(f64, f64)> = None;
+    let mut since_resume: Option<usize> = None;
+    let mut after: Option<(f64, f64)> = None;
+    let mut prev = (0.0, f64::NAN);
+    for _ in 0..400 {
+        assert!(s.run_chunk().unwrap(), "{:?}", s.end_reason());
+        let est = &s.rt.as_ref().unwrap().est;
+        let paused = est.paused(k);
+        if paused && before.is_none() {
+            before = Some(prev);
+        }
+        prev = (est.dof(k), est.sum_line(k));
+        if before.is_some() && !paused {
+            let n = since_resume.map_or(0, |n| n + 1);
+            since_resume = Some(n);
+            if n == loop_chunks {
+                after = Some((est.dof(k), est.line(k).unwrap()));
+                break;
+            }
+        } else {
+            since_resume = None;
+        }
+    }
+    let (dof0, m0) = before.expect("the tone reached the line");
+    let (dof1, m1) = after.expect("the tone left the line");
+    let shift_db = 10.0 * (m1 / m0).log10();
+    eprintln!(
+        "line {k} (200 Hz): {dof0:.1} dof before the tone, {dof1:.1} one loop after it left; average moved {shift_db:+.2} dB"
+    );
+    assert!(dof1 >= 0.9 * dof0, "{dof0} -> {dof1}");
+    assert!(shift_db.abs() < 1.0, "{shift_db}");
+}

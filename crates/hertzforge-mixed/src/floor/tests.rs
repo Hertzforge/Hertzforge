@@ -123,10 +123,14 @@ fn the_estimate_averages_clean_frames_only_with_its_own_dof_per_line() {
         e.add_frame(&[1.0; 8], &ex);
     }
     assert_eq!(e.count(0), 10.0);
-    // Line 3 is forgotten each time it is out: it holds only the last clean.
-    assert_eq!(e.count(3), 1.0);
+    // Line 3 pauses each time it is out (D6): it keeps its five clean frames.
+    assert_eq!(e.count(3), 5.0);
     assert!((e.dof(0) - 10.0 * dof_per_frame()).abs() < 1e-12);
-    assert_eq!(e.dof(3), 2.0);
+    assert!((e.dof(3) - 5.0 * dof_per_frame()).abs() < 1e-12);
+    // While out it is not read; back in, it reads its average.
+    ex[3] = true;
+    e.add_frame(&[1.0; 8], &ex);
+    assert!(e.paused(3) && e.line(3).is_none() && e.count(3) == 5.0);
     // The depth caps a line's frames.
     let mut d = FloorEstimator::new(1, 4);
     for _ in 0..100 {
@@ -209,24 +213,21 @@ fn the_dof_per_frame_is_welchs_for_half_overlapped_hann() {
     let _ = Gauss::new(1);
 }
 
-/// The typical degrees of freedom are the median clean line's, so one line a
-/// moving part has just left (one frame, 2 DOF) does not stand for the
-/// estimate; the least still reads that line.
+/// The typical degrees of freedom are the median clean line's, so one line
+/// that has held a single clean frame (a part sat on it from the start) does
+/// not stand for the estimate; the least still reads that line.
 #[test]
 fn the_typical_dof_is_the_median_clean_lines_and_a_just_freed_line_does_not_set_it() {
     let lines = 100;
     let mut est = FloorEstimator::new(lines, 30);
     let psd = vec![1.0; lines];
     let mut excl = vec![false; lines];
-    for _ in 0..40 {
-        est.add_frame(&psd, &excl);
-    }
-    // A tone sat on lines 10..14 and has just moved on: they are freed one
-    // frame before the loop.
     for x in excl.iter_mut().take(14).skip(10) {
         *x = true;
     }
-    est.add_frame(&psd, &excl);
+    for _ in 0..40 {
+        est.add_frame(&psd, &excl);
+    }
     excl.fill(false);
     est.add_frame(&psd, &excl);
     let full = est.dof(50);

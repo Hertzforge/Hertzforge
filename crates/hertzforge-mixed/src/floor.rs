@@ -108,10 +108,18 @@ pub fn mark_span(df: f64, lo: f64, hi: f64, mask: &mut [bool]) {
 }
 
 /// The floor's per-line average over clean frames.
+///
+/// A line a part covers pauses (design D6): its average keeps the clean
+/// frames it held before the part arrived (the floor is stationary, so they
+/// are still true of it) and takes none while it is covered; it is not read
+/// while paused, and resumes adding frames once the part has left. The
+/// window ages a line by the frames it has averaged, not by the time it was
+/// paused.
 #[derive(Debug, Clone)]
 pub struct FloorEstimator {
     sum: Vec<f64>,
     count: Vec<f64>,
+    paused: Vec<bool>,
     depth: f64,
 }
 
@@ -121,6 +129,7 @@ impl FloorEstimator {
         FloorEstimator {
             sum: vec![0.0; lines],
             count: vec![0.0; lines],
+            paused: vec![false; lines],
             depth: depth.max(1) as f64,
         }
     }
@@ -134,6 +143,7 @@ impl FloorEstimator {
     pub fn reset(&mut self) {
         self.sum.fill(0.0);
         self.count.fill(0.0);
+        self.paused.fill(false);
     }
 
     /// Forget line `k` (a band passed over it).
@@ -142,16 +152,17 @@ impl FloorEstimator {
         self.count[k] = 0.0;
     }
 
-    /// Add one frame's composite periodogram `psd`, skipping (and forgetting)
-    /// the lines `excluded` marks.
+    /// Add one frame's composite periodogram `psd`, pausing the lines
+    /// `excluded` marks (they keep their average and take nothing).
     pub fn add_frame(&mut self, psd: &[f64], excluded: &[bool]) {
         let keep = (self.depth - 1.0) / self.depth;
         #[allow(clippy::needless_range_loop)]
         for k in 0..self.sum.len() {
             if excluded.get(k).copied().unwrap_or(false) {
-                self.forget(k);
+                self.paused[k] = true;
                 continue;
             }
+            self.paused[k] = false;
             if self.count[k] >= self.depth {
                 self.sum[k] *= keep;
                 self.count[k] *= keep;
@@ -159,6 +170,20 @@ impl FloorEstimator {
             self.sum[k] += psd[k];
             self.count[k] += 1.0;
         }
+    }
+
+    /// Line `k`'s average whether or not it is paused; `None` with no frame.
+    pub fn sum_line(&self, k: usize) -> f64 {
+        if self.count[k] > 0.0 {
+            self.sum[k] / self.count[k]
+        } else {
+            f64::NAN
+        }
+    }
+
+    /// Whether line `k` is paused (a part covered it in the last frame).
+    pub fn paused(&self, k: usize) -> bool {
+        self.paused[k]
     }
 
     /// Frames in line `k`'s average (fractional once it forgets).
@@ -176,9 +201,9 @@ impl FloorEstimator {
         }
     }
 
-    /// Line `k`'s average; `None` with no clean frame.
+    /// Line `k`'s average; `None` with no clean frame or while it is paused.
     pub fn line(&self, k: usize) -> Option<f64> {
-        (self.count[k] > 0.0).then(|| self.sum[k] / self.count[k])
+        (self.count[k] > 0.0 && !self.paused[k]).then(|| self.sum[k] / self.count[k])
     }
 
     /// The estimate the floor law is given over `band` (`[lo, hi)` lines):
@@ -235,7 +260,7 @@ impl FloorEstimator {
     /// depth; this is what the floor's estimate holds.
     pub fn typical_dof(&self, band: (usize, usize)) -> f64 {
         let mut d: Vec<f64> = (band.0..band.1.min(self.sum.len()))
-            .filter(|&k| self.count[k] > 0.0)
+            .filter(|&k| self.line(k).is_some())
             .map(|k| self.dof(k))
             .collect();
         if d.is_empty() {
@@ -250,7 +275,7 @@ impl FloorEstimator {
     pub fn min_dof(&self, band: (usize, usize)) -> f64 {
         let mut m = f64::INFINITY;
         for k in band.0..band.1.min(self.sum.len()) {
-            if self.count[k] > 0.0 {
+            if self.line(k).is_some() {
                 m = m.min(self.dof(k));
             }
         }
