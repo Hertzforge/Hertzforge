@@ -188,7 +188,6 @@ function partEnd(row: MixedPartRow, ctx: PartContext): { why: 'window' | 'schedu
 	const w = p?.window;
 	const t = ctx.parts_s;
 	if (typeof t === 'number' && typeof w?.off_s === 'number' && t >= w.off_s) return { why: 'window', at_s: w.off_s };
-	if (row.done) return { why: 'schedule' };
 	if (row.sweeps && row.sweeps.of !== null && row.sweeps.done >= row.sweeps.of) return { why: 'schedule' };
 	if (typeof t === 'number' && typeof w?.on_s === 'number' && t < w.on_s) return 'waiting';
 	if (typeof t === 'number' && p) return { why: 'schedule' };
@@ -233,8 +232,14 @@ export function partStateWord(row: MixedPartRow, ctx: PartContext = {}): 'Off' |
 function dofWords(dof: number | null, floor: boolean): string {
 	if (dof === null || !Number.isFinite(dof)) return '';
 	if (dof <= 0) return floor ? 'no clean frame averaged yet' : 'no frame averaged yet';
-	// The floor's figure is the fewest of any clean line (lines differ by how many clean frames each has).
-	return floor ? `at least ${num(dof, 3)} degrees of freedom on every clean line` : `${num(dof, 3)} degrees of freedom`;
+	// The floor's figure is its typical (median) clean line's.
+	return floor ? `about ${num(dof, 3)} degrees of freedom on a typical line` : `${num(dof, 3)} degrees of freedom`;
+}
+
+/** The floor's rms abort: armed once three quarters of the in-band lines qualify. */
+function rmsJudgedWords(l: NonNullable<MixedPartRow['lines']>): string {
+	if (typeof l.rms_judged !== 'number') return '';
+	return l.rms_judged >= 0.75 * l.in_band ? `rms abort judged on ${l.rms_judged} lines` : `rms abort not armed yet, ${l.rms_judged} lines qualify`;
 }
 
 /** The line under a part's motion: the floor's lines and degrees of freedom, a narrowband's width, estimate and gain, a law's misses. */
@@ -243,7 +248,7 @@ export function partDetail(row: MixedPartRow, ctx: PartContext = {}): string {
 	if (row.kind === 'tone') return law;
 	if (row.kind === 'floor') {
 		const l = row.lines;
-		const lines = l ? [`${l.clean} of ${l.in_band} lines clean, ${l.alarm} in alarm, ${l.abort} over abort`, dofWords(row.dof, true)].filter(Boolean).join('; ') : '';
+		const lines = l ? [`${l.clean} of ${l.in_band} lines clean, ${l.alarm} in alarm, ${l.abort} over abort`, dofWords(row.dof, true), rmsJudgedWords(l)].filter(Boolean).join('; ') : '';
 		return [lines, law].filter(Boolean).join('; ');
 	}
 	const p = configPart(ctx, row.id);
@@ -251,60 +256,83 @@ export function partDetail(row: MixedPartRow, ctx: PartContext = {}): string {
 	return [row.width_hz !== null ? `${num(row.width_hz, 3)} Hz wide${share}` : '', dofWords(row.dof, false), row.gain_db !== null ? `gain ${errDb(row.gain_db)}` : ''].filter(Boolean).join(', ');
 }
 
-/**
- * A part's drive: a tone's V peak, the floor's or a narrowband's V rms. A narrowband that plays with
- * a drive of exactly 0 has had no share of the random part reported yet, so it shows none.
- */
+/** A part's drive: a tone's V peak, the floor's V rms; a narrowband has none of its own. */
 export function partDrive(row: MixedPartRow): string {
 	if (row.drive_vpk !== null) return `${num(row.drive_vpk, 3)} V pk`;
-	if (row.drive_vrms === null) return '-';
-	if (row.kind === 'narrowband' && row.on && row.drive_vrms === 0) return '-';
-	return `${num(row.drive_vrms, 3)} V rms`;
+	return row.drive_vrms === null ? '-' : `${num(row.drive_vrms, 3)} V rms`;
 }
 
-/** The trip's facts as labeled values, the part named by its name. */
+/** The trip's facts as labeled values, the part named by its name. A fact the service left null is not printed. */
 export function mixedTripFacts(trip: MixedTrip, partName: (id: string) => string): { label: string; value: string }[] {
-	const at: { label: string; value: string }[] = [];
-	if (trip.part) at.push({ label: 'Part', value: partName(trip.part) });
-	if (trip.at_hz !== null) at.push({ label: 'At', value: hz(trip.at_hz) });
-	at.push({ label: 'Level', value: db(trip.at_level_db) });
+	const out: { label: string; value: string }[] = [];
+	const put = (label: string, v: number | null | undefined, unit = '', sig = 4) => {
+		if (typeof v === 'number' && Number.isFinite(v)) out.push({ label, value: `${num(v, sig)}${unit ? ` ${unit}` : ''}` });
+	};
+	if (trip.part) out.push({ label: 'Part', value: partName(trip.part) });
+	if (typeof trip.at_hz === 'number') out.push({ label: 'At', value: hz(trip.at_hz) });
+	if (typeof trip.at_level_db === 'number') out.push({ label: 'Level', value: db(trip.at_level_db) });
 	switch (trip.kind) {
 		case 'envelope':
-			return [...at, { label: 'Lines out', value: String(trip.abort_lines) }, { label: 'Worst', value: `${num(trip.worst_db, 3)} dB` }];
+			put('Lines out', trip.abort_lines, '', 6);
+			put('Worst', trip.worst_db, 'dB', 3);
+			return out;
 		case 'abort_band':
 		case 'band_abort': {
-			// Only what the service reported: a fact it left null is not printed.
 			const unit = trip.kind === 'abort_band' ? 'g' : 'g²/Hz';
 			const measured = trip.kind === 'abort_band' ? trip.measured_g : trip.measured_g2_hz;
 			const limit = trip.kind === 'abort_band' ? trip.limit_g : trip.limit_g2_hz;
-			const out = [...at, { label: 'Side', value: trip.side === 'high' ? 'Over its target' : 'Under its target' }];
+			out.push({ label: 'Side', value: trip.side === 'high' ? 'Over its target' : 'Under its target' });
 			if (typeof trip.error_db === 'number') out.push({ label: 'Error', value: errDb(trip.error_db) });
-			if (typeof measured === 'number') out.push({ label: 'Measured', value: `${num(measured)} ${unit}` });
-			if (typeof limit === 'number') out.push({ label: trip.side === 'high' ? 'Upper abort' : 'Lower abort', value: `${num(limit)} ${unit}` });
-			if (trip.kind === 'band_abort' && typeof trip.dof === 'number') out.push({ label: 'Degrees of freedom', value: String(trip.dof) });
+			if (typeof measured === 'number' && typeof limit === 'number') out.push({ label: 'Measured against limit', value: `${num(measured)} ${unit} against ${num(limit)} ${unit}` });
+			else {
+				put('Measured', measured, unit);
+				put(trip.side === 'high' ? 'Upper abort' : 'Lower abort', limit, unit);
+			}
+			if (trip.kind === 'band_abort') put('Degrees of freedom', trip.dof, '', 4);
 			return out;
 		}
 		case 'servo_fault':
-			return [...at, { label: 'Ticks in a row', value: String(trip.consecutive_ticks) }];
+			put('Ticks in a row', trip.consecutive_ticks, '', 6);
+			return out;
 		case 'divergence':
-			return trip.capped_s !== undefined ? [...at, { label: 'Capped for', value: `${num(trip.capped_s, 3)} s` }] : [...at, { label: 'Loops in a row', value: String(trip.consecutive_loops ?? '-') }, { label: 'Lines diverging', value: String(trip.divergent_bins ?? '-') }];
+			if (trip.capped_s !== undefined) put('Capped for', trip.capped_s, 's', 3);
+			else {
+				put('Loops in a row', trip.consecutive_loops, '', 6);
+				put('Lines diverging', trip.divergent_bins, '', 6);
+			}
+			return out;
 		case 'law_fault': {
 			const words = trip.role === 'floor' ? (LAW_FAULT_WORDS as Record<string, string>)[trip.reason] : (SINE_LAW_FAULT_WORDS as Record<string, string>)[trip.reason];
-			return [...at, { label: 'Law', value: trip.role === 'floor' ? 'The floor law' : 'The tone law' }, { label: 'Why', value: words ?? (trip.reason as MixedLawFaultReason) }, { label: 'In a row', value: String(trip.consecutive) }];
+			out.push({ label: 'Law', value: trip.role === 'floor' ? 'The floor law' : 'The tone law' }, { label: 'Why', value: words ?? (trip.reason as MixedLawFaultReason) });
+			put('In a row', trip.consecutive, '', 6);
+			return out;
 		}
 		case 'oscillator_range':
-			return [...at, { label: 'Asked for', value: hz(trip.requested_hz) }, { label: 'Rate', value: `${num(trip.fs_hz, 6)} Hz` }];
+			if (typeof trip.requested_hz === 'number') out.push({ label: 'Asked for', value: hz(trip.requested_hz) });
+			put('Rate', trip.fs_hz, 'Hz', 6);
+			return out;
 		case 'kinematic': {
 			const unit = trip.axis === 'velocity' ? 'in/s' : trip.axis === 'displacement' ? 'in pk-pk' : 'g';
-			return [...at, { label: 'Channel', value: String(trip.channel) }, { label: trip.axis === 'accel' ? 'Acceleration' : trip.axis === 'velocity' ? 'Velocity' : 'Displacement', value: `${num(trip.value, 3)} ${unit}` }, { label: 'Limit', value: `${num(trip.limit, 3)} ${unit}` }];
+			put('Channel', trip.channel, '', 4);
+			put(trip.axis === 'accel' ? 'Acceleration' : trip.axis === 'velocity' ? 'Velocity' : 'Displacement', trip.value, unit, 3);
+			put('Limit', trip.limit, unit, 3);
+			return out;
 		}
 		case 'drive_vpk':
-			return [...at, { label: 'Drive', value: `${num(trip.vpk)} V pk` }, { label: 'Drive abort', value: `${num(trip.abort_vpk)} V pk` }];
+			put('Drive', trip.vpk, 'V pk');
+			put('Drive abort', trip.abort_vpk, 'V pk');
+			return out;
 		case 'drive_vrms':
-			return [...at, { label: 'Random drive', value: `${num(trip.realized_vrms)} V rms` }, { label: 'Drive abort', value: `${num(trip.limit_vrms)} V rms` }];
+			put('Random drive', trip.realized_vrms, 'V rms');
+			put('Drive abort', trip.limit_vrms, 'V rms');
+			return out;
 		case 'watchdog':
-			return [...at, { label: 'Channel', value: String(trip.channel) }, { label: 'Read', value: `${num(trip.value)} ${trip.axis}`.trim() }, { label: 'Limit', value: `${num(trip.limit)} ${trip.axis}`.trim() }];
+			put('Channel', trip.channel, '', 4);
+			put('Read', trip.value, trip.axis ?? '');
+			put('Limit', trip.limit, trip.axis ?? '');
+			return out;
 	}
+	return out;
 }
 
 /** The level card's status line for a Mixed Mode run. */
@@ -362,4 +390,13 @@ export function motionWords(range: [number, number] | null): string {
 /** The predicted peak of the sum, in a line. */
 export function kinematicsWords(k: MixedDerived['kinematics']): string {
 	return `${num(k.peak_accel_g, 4)} g, ${num(k.peak_velocity_ips, 4)} in/s, ${num(k.peak_disp_pp_in, 4)} in pk-pk`;
+}
+
+/** What is being held down now, for the run's header: the parts that are limiting by name, or the
+ * drive ceiling's clamp when the run limits and no part says so; null when nothing limits. */
+export function limitingWords(s: Pick<MixedState, 'limiting' | 'parts'> | null): string | null {
+	if (!s) return null;
+	const held = s.parts.filter((p) => p.limiting).map((p) => p.name);
+	if (held.length) return held.join(', ');
+	return s.limiting ? 'At the drive ceiling' : null;
 }

@@ -1,26 +1,25 @@
 /**
- * The parts table's words against rows shaped as the control service sends them on a combined run:
- * a follower whose row carries no direction and its leader's rate under the wrong unit, a
- * narrowband sized as a share of its center whose rate field is 0, the floor early in a run, and
- * parts that are off or have ended.
+ * The parts table's words against rows shaped as the control service sends them on a combined run
+ * (a follower with its leader, ratio, direction and rate; a narrowband sized by a share of its
+ * center; the floor early in a run; parts off or ended), and against rows that leave a fact out
+ * (no `follows`, a zero rate), which the words fill from the setup rather than print wrongly.
  */
 
 import { describe, expect, it } from 'vitest';
 import type { MixedConfig, MixedPartRow } from '$lib/protocol/mixed';
-import { partDetail, partDrive, partFreq, partMotion, partStateWord } from './mixedWords';
+import { limitingWords, mixedTripFacts, partDetail, partDrive, partFreq, partMotion, partStateWord } from './mixedWords';
+import type { MixedTrip } from '$lib/protocol/mixed';
 
-const base: MixedPartRow = { id: 'x', kind: 'tone', name: 'x', enabled: true, on: true, scale: 1, freq_hz: null, direction: null, sweeps: null, rate_oct_per_min: null, rate_hz_per_s: null, width_hz: null, unit: 'g', target: 0.0846, measured: 0.083, error_db: null, alarm: false, drive_vpk: 0.0679, drive_vrms: null, gain_db: null, settled: false, limiting: false, dof: null, lines: null, law: { misses: 0, capped: 0 } };
+const base: MixedPartRow = { id: 'x', kind: 'tone', name: 'x', enabled: true, on: true, scale: 1, freq_hz: null, direction: null, sweeps: null, rate_oct_per_min: null, rate_hz_per_s: null, width_hz: null, unit: 'g', target: 0.0846, measured: 0.083, error_db: null, alarm: false, drive_vpk: 0.0679, drive_vrms: null, gain_db: null, settled: false, limiting: false, dof: null, lines: null, law: { misses: 0, capped: 0 }, follows: null };
 const row = (over: Partial<MixedPartRow>): MixedPartRow => ({ ...base, ...over });
 
-// The rows of the real combined run at parts time 6.7 s (view.rs: a follower's direction is null and
-// its rate is written under its root's unit; a narrowband's rate stays 0; the floor's dof is the
-// fewest of any clean line).
-const floor = row({ id: 'floor', kind: 'floor', name: 'Floor', freq_hz: null, unit: 'g', target: 0.125, measured: 0.125, error_db: 0.01, drive_vpk: null, drive_vrms: 0.163, dof: 2, settled: true, lines: { in_band: 3961, clean: 3928, alarm: 0, abort: 0 } });
+// The rows of the combined run at parts time 6.7 s as the service sends them.
+const floor = row({ id: 'floor', kind: 'floor', name: 'Floor', freq_hz: null, unit: 'g', target: 0.125, measured: 0.125, error_db: 0.01, drive_vpk: null, drive_vrms: 0.163, dof: 2, settled: true, lines: { in_band: 3961, clean: 3928, alarm: 0, abort: 0, rms_judged: 2100 } });
 const rotor = row({ id: 't2', name: 'Rotor', freq_hz: 409.5, direction: 'up', sweeps: { done: 0, of: null }, rate_oct_per_min: 0.3, drive_vpk: 0.062 });
-const second = row({ id: 't3', name: 'Rotor 2nd', freq_hz: 818.9, rate_oct_per_min: 2.84, drive_vpk: 0.0193, target: 0.0282 });
-const third = row({ id: 't4', name: 'Rotor 3rd', freq_hz: 1228.4, rate_oct_per_min: 4.26, drive_vpk: 0.0356, target: 0.0282 });
-const gear = row({ id: 'b1', kind: 'narrowband', name: 'Gear mesh', freq_hz: 250, unit: 'g²/Hz', target: 0.0000397, measured: null, drive_vpk: null, drive_vrms: 0, width_hz: 20, dof: 0, gain_db: 0, law: null });
-const band = row({ id: 'b2', kind: 'narrowband', name: 'Rotor band', freq_hz: 1317.5, direction: 'up', sweeps: { done: 0, of: 2 }, rate_hz_per_s: 0, unit: 'g²/Hz', target: 0.0000397, measured: null, drive_vpk: null, drive_vrms: 0, width_hz: 65.9, dof: 0, gain_db: 0, law: null });
+const second = row({ id: 't3', name: 'Rotor 2nd', freq_hz: 818.9, direction: 'up', follows: { of: 't2', ratio: 2 }, rate_oct_per_min: 0.3, drive_vpk: 0.0193, target: 0.0282 });
+const third = row({ id: 't4', name: 'Rotor 3rd', freq_hz: 1228.4, direction: 'up', follows: { of: 't3', ratio: 1.5 }, rate_oct_per_min: 0.3, drive_vpk: 0.0356, target: 0.0282 });
+const gear = row({ id: 'b1', kind: 'narrowband', name: 'Gear mesh', freq_hz: 250, unit: 'g²/Hz', target: 0.0000397, measured: null, drive_vpk: null, drive_vrms: null, width_hz: 20, dof: 0, gain_db: 0, law: null });
+const band = row({ id: 'b2', kind: 'narrowband', name: 'Rotor band', freq_hz: 1317.5, direction: 'up', sweeps: { done: 0, of: 2 }, rate_hz_per_s: 5, unit: 'g²/Hz', target: 0.0000397, measured: null, drive_vpk: null, drive_vrms: null, width_hz: 65.9, dof: 0, gain_db: 0, law: null });
 const rows = [floor, rotor, second, third, gear, band];
 
 const config = {
@@ -40,8 +39,12 @@ const config = {
 const ctx = { rows, config, parts_s: 6.7 };
 
 describe('a follower', () => {
-	it('says what it follows and at what ratio, from the setup when the row says nothing', () => {
+	it('says what it follows and at what ratio', () => {
 		expect(partMotion(second, false, ctx)).toBe('Follows Rotor at 2×, sweeping up at 0.3 oct/min');
+	});
+
+	it('reads its leader and ratio from the setup when the row leaves them out', () => {
+		expect(partMotion({ ...second, follows: null, direction: null, rate_oct_per_min: null }, false, ctx)).toBe('Follows Rotor at 2×, sweeping up at 0.3 oct/min');
 	});
 
 	it('takes a chain of followers to the sweep at its root, the rate in the root sweep\'s unit', () => {
@@ -72,8 +75,9 @@ describe('a follower', () => {
 
 describe('a narrowband sized by a share of its center', () => {
 	it("never reads a zero rate from the field the service left empty: the schedule's own rate and unit", () => {
-		expect(partMotion(band, false, ctx)).toBe('Sweeping up at 5 Hz/s, sweep 1 of 2');
-		expect(partMotion(band, false, ctx)).not.toContain('0 Hz/s');
+		const empty = { ...band, rate_hz_per_s: 0 };
+		expect(partMotion(empty, false, ctx)).toBe('Sweeping up at 5 Hz/s, sweep 1 of 2');
+		expect(partMotion(empty, false, ctx)).not.toContain('0 Hz/s');
 	});
 
 	it("uses the row's rate when it carries one in the schedule's unit", () => {
@@ -86,7 +90,7 @@ describe('a narrowband sized by a share of its center', () => {
 	});
 
 	it('without the setup and with a zero rate, names no rate at all', () => {
-		expect(partMotion(band, false)).toBe('Sweeping up, sweep 1 of 2');
+		expect(partMotion({ ...band, rate_hz_per_s: 0 }, false)).toBe('Sweeping up, sweep 1 of 2');
 	});
 
 	it('says its width as the share of its center as well as in Hz', () => {
@@ -95,27 +99,27 @@ describe('a narrowband sized by a share of its center', () => {
 });
 
 describe('the floor early in a run', () => {
-	it('says what the degrees of freedom are, once', () => {
-		expect(partDetail(floor, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort; at least 2 degrees of freedom on every clean line');
+	it('says what the degrees of freedom are and whether the rms abort is armed yet', () => {
+		expect(partDetail(floor, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort; about 2 degrees of freedom on a typical line; rms abort not armed yet, 2100 lines qualify');
 		expect(partDetail(floor, ctx)).not.toMatch(/\b2 dof\b/);
+		expect(partDetail({ ...floor, dof: 120, lines: { ...floor.lines!, rms_judged: 3928 } }, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort; about 120 degrees of freedom on a typical line; rms abort judged on 3928 lines');
 	});
 
 	it('shows no figure the row does not carry', () => {
-		expect(partDetail({ ...floor, dof: null }, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort');
+		expect(partDetail({ ...floor, dof: null }, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort; rms abort not armed yet, 2100 lines qualify');
 		expect(partDetail({ ...floor, dof: null, lines: null }, ctx)).toBe('');
 	});
 
 	it('before a clean frame is averaged, says so instead of 0 degrees of freedom', () => {
-		expect(partDetail({ ...floor, dof: 0 }, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort; no clean frame averaged yet');
+		expect(partDetail({ ...floor, dof: 0 }, ctx)).toBe('3928 of 3961 lines clean, 0 in alarm, 0 over abort; no clean frame averaged yet; rms abort not armed yet, 2100 lines qualify');
 	});
 });
 
 describe('a narrowband before its first average', () => {
-	it('says no average yet rather than 0 dof, and shows no drive figure it does not have', () => {
+	it('says no average yet rather than 0 dof, and shows no drive of its own', () => {
 		expect(partDetail(gear, ctx)).toBe('20 Hz wide, no frame averaged yet, gain +0.00 dB');
 		expect(partDrive(gear)).toBe('-');
 		expect(partDrive({ ...gear, drive_vrms: 0.012 })).toBe('0.012 V rms');
-		expect(partDrive({ ...gear, on: false, scale: 0, drive_vrms: 0 })).toBe('0 V rms');
 	});
 });
 
@@ -138,13 +142,32 @@ describe('a part that is off or has ended', () => {
 		expect(partStateWord(done, ctx)).toBe('Ended');
 	});
 
-	it("uses the row's own done flag when the service sends it", () => {
-		const done = { ...rotor, on: false, scale: 0, done: true } as MixedPartRow;
-		expect(partMotion(done, false, ctx)).toBe('Its schedule ended');
-	});
-
 	it('switched off reads Off', () => {
 		expect(partMotion({ ...second, on: false, enabled: false, scale: 0 }, false, ctx)).toBe('Off');
 		expect(partStateWord({ ...second, on: false, enabled: false, scale: 0 }, ctx)).toBe('Off');
+	});
+});
+
+describe('limiting, for the run header', () => {
+	it('names the parts the ceiling holds, or the clamp when no part says so, and nothing otherwise', () => {
+		expect(limitingWords({ limiting: true, parts: [floor, { ...rotor, limiting: true }, { ...second, limiting: true }] })).toBe('Rotor, Rotor 2nd');
+		expect(limitingWords({ limiting: true, parts: rows })).toBe('At the drive ceiling');
+		expect(limitingWords({ limiting: false, parts: rows })).toBeNull();
+	});
+});
+
+describe('trip facts', () => {
+	const at = { part: 't2', at_hz: 433.2, at_level_db: -6, at_s: 40, at_loop: 8, at_tick: 4000 };
+	it('shows a tone abort measured against its limit once the service fills them', () => {
+		const f = mixedTripFacts({ ...at, kind: 'abort_band', side: 'high', error_db: 3.1, measured_g: 0.1205, limit_g: 0.1195 } as MixedTrip, (id) => (id === 't2' ? 'Rotor' : id));
+		expect(f).toContainEqual({ label: 'Measured against limit', value: '0.1205 g against 0.1195 g' });
+		expect(f).toContainEqual({ label: 'Part', value: 'Rotor' });
+	});
+	it('never prints a null', () => {
+		const f = mixedTripFacts({ ...at, part: null, at_hz: null, kind: 'envelope', abort_lines: 14, worst_db: null } as MixedTrip, (id) => id);
+		expect(f.map((x) => x.label)).toEqual(['Level', 'Lines out']);
+		const b = mixedTripFacts({ ...at, kind: 'band_abort', side: 'low', error_db: null, measured_g2_hz: null, limit_g2_hz: 0.0002, dof: null } as MixedTrip, (id) => id);
+		expect(b.map((x) => x.label)).toEqual(['Part', 'At', 'Level', 'Side', 'Lower abort']);
+		for (const x of [...f, ...b]) expect(x.value).not.toMatch(/null|undefined|NaN/);
 	});
 });
