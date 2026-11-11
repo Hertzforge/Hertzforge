@@ -1,19 +1,27 @@
 """Write the example projects hertzforge.com offers for download.
 
-Four `.hforge` files, each built by this package alone: the free plate
+Six `.hforge` files, each built by this package alone: the free plate
 of `hertzforge.demo` with its 30 lowest normal modes (six of them
 rigid), the Frame-Wing as `frame_wing.project`
 builds it (the frame, each wing alone and the frame with each wing,
-every one solved to 1500 Hz, a 170 MB file), and the plate's random and
-modal controller runs read from `testdata/plate`
+every one solved to 1500 Hz, a 170 MB file), the BARC of bricks as
+`barc.solid_project` builds it (the band-average study's BARC: solved to
+10 kHz, with its drives, accelerometers, force CPSD and the modes at
+them), the BARC's removable
+component on a fixture plate as `rc_plate.project` builds it (bricks,
+solved to 10 kHz, with its test geometry, channels and modes at the test
+DOFs, the system the band-average control study drives), and the plate's
+random and modal controller runs read from `testdata/plate`
 (`scripts/fetch_testdata.sh`). They were the analysis service's built-in
 datasets until 2026-11-05; now a person downloads the ones they want and
-opens them like any other project.
+opens them like any other project. The BARC and the RC plate were added on
+2026-11-10.
 
     python scripts/make_examples.py OUT_DIR [--only NAME ...]
 
 The frame-wing project takes a minute or two to build and solve and
-needs the CAD kernel (OCP); the others take seconds.
+needs the CAD kernel (OCP); the RC plate takes a few minutes and about
+6 GB; the others take seconds.
 """
 
 from __future__ import annotations
@@ -49,6 +57,16 @@ def frame_wing() -> Any:
     return frame_wing.project(solved=True)
 
 
+def barc() -> Any:
+    from hertzforge.demo import barc
+    return barc.solid_project(solved=True)
+
+
+def rc_plate() -> Any:
+    from hertzforge.demo import rc_plate
+    return rc_plate.project(solved=True)
+
+
 def plate_random_run() -> Any:
     import hertzforge as hz
 
@@ -71,6 +89,8 @@ def plate_modal_run() -> Any:
 EXAMPLES: dict[str, Callable[[], Any]] = {
     'free-plate': free_plate,
     'frame-wing': frame_wing,
+    'barc': barc,
+    'rc-plate': rc_plate,
     'plate-random-run': plate_random_run,
     'plate-modal-run': plate_modal_run,
 }
