@@ -35,6 +35,10 @@ use std::sync::Arc;
 /// (an instant step into an armature is a broadband impulse), short enough
 /// that the abort's latency is the output queue's plus this.
 pub const ABORT_RAMP_S: f64 = 0.02;
+/// The fastest the error a tone's law is shown may move, dB per second (at a
+/// 10 ms tick, 0.05 dB a tick: a proportional gain up to 4 then never meets
+/// the built-in's 20 dB/s clamp from a step in its reading).
+pub const READ_SLEW_DB_PER_S: f64 = 5.0;
 /// A tone's error must stay past its abort this long before the run aborts.
 pub const TONE_ABORT_DEBOUNCE_S: f64 = 0.5;
 
@@ -94,6 +98,8 @@ pub(crate) struct ToneCtl {
     pub(crate) usable: bool,
     /// Whether the tone's law has had a usable reading since it came in.
     pub(crate) read_once: bool,
+    /// The error the law was last shown, dB (slewed toward the reading).
+    pub(crate) shown_db: f64,
     pub(crate) alarm: bool,
     pub(crate) abort_s: f64,
     pub(crate) alarm_db: (f64, f64),
@@ -461,15 +467,30 @@ impl MixedProcessStep {
             let in_force = self.bank.voice(j).amplitude_cmd();
             let mut call: Option<(f64, u8)>;
             let proposed = {
-                let m = if usable {
-                    measured.unwrap_or(0.0)
-                } else {
-                    target_full
+                // The error the law is shown moves at most READ_SLEW_DB_PER_S
+                // toward the reading (from 0 dB, on target, while there is no
+                // usable reading). A velocity-form servo (the built-in's)
+                // turns a step in its reading into a proportional kick, and
+                // when that kick is rate-clamped its anti-windup repeats the
+                // clamped step every tick until the reading moves, which a
+                // narrow tracker takes seconds to do: found as a 6 dB fall in
+                // half a second and a tone abort after a level step.
+                let true_db = match (usable, measured) {
+                    (true, Some(m)) if m > 0.0 && target_full > 0.0 => {
+                        20.0 * (m / target_full).log10()
+                    }
+                    _ => 0.0,
                 };
+                let step = READ_SLEW_DB_PER_S * dt;
+                let shown = self.tones[j].shown_db;
+                let shown = shown + (true_db - shown).clamp(-step, step);
+                self.tones[j].shown_db = shown;
+                let k = 10f64.powf((shown - true_db) / 20.0);
+                let m = target_full * 10f64.powf(shown / 20.0);
                 for c in 0..self.weights.len() {
                     let trk = self.bank.tracker(j, c);
                     self.amp_scratch[c] = if usable {
-                        trk.amplitude() / norm.max(1e-300)
+                        k * trk.amplitude() / norm.max(1e-300)
                     } else {
                         target_full
                     };

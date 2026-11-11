@@ -686,6 +686,7 @@ impl Runtime {
                 error_db: None,
                 usable: false,
                 read_once: false,
+                shown_db: 0.0,
                 alarm: false,
                 abort_s: 0.0,
                 alarm_db: t.alarm_db,

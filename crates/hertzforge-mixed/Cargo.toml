@@ -83,3 +83,7 @@ required-features = ["service"]
 [[test]]
 name = "high_ratio"
 required-features = ["service"]
+
+[[test]]
+name = "combined_level_step"
+required-features = ["service"]
