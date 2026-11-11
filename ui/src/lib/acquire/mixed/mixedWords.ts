@@ -114,9 +114,18 @@ export function mixedTripFacts(trip: MixedTrip, partName: (id: string) => string
 		case 'envelope':
 			return [...at, { label: 'Lines out', value: String(trip.abort_lines) }, { label: 'Worst', value: `${num(trip.worst_db, 3)} dB` }];
 		case 'abort_band':
-			return [...at, { label: 'Measured', value: `${num(trip.measured_g)} g` }, { label: trip.side === 'high' ? 'Upper abort' : 'Lower abort', value: `${num(trip.limit_g)} g` }];
-		case 'band_abort':
-			return [...at, { label: 'Measured', value: `${num(trip.measured_g2_hz)} g²/Hz` }, { label: trip.side === 'high' ? 'Upper abort' : 'Lower abort', value: `${num(trip.limit_g2_hz)} g²/Hz` }, { label: 'Degrees of freedom', value: String(trip.dof) }];
+		case 'band_abort': {
+			// Only what the service reported: a fact it left null is not printed.
+			const unit = trip.kind === 'abort_band' ? 'g' : 'g²/Hz';
+			const measured = trip.kind === 'abort_band' ? trip.measured_g : trip.measured_g2_hz;
+			const limit = trip.kind === 'abort_band' ? trip.limit_g : trip.limit_g2_hz;
+			const out = [...at, { label: 'Side', value: trip.side === 'high' ? 'Over its target' : 'Under its target' }];
+			if (typeof trip.error_db === 'number') out.push({ label: 'Error', value: errDb(trip.error_db) });
+			if (typeof measured === 'number') out.push({ label: 'Measured', value: `${num(measured)} ${unit}` });
+			if (typeof limit === 'number') out.push({ label: trip.side === 'high' ? 'Upper abort' : 'Lower abort', value: `${num(limit)} ${unit}` });
+			if (trip.kind === 'band_abort' && typeof trip.dof === 'number') out.push({ label: 'Degrees of freedom', value: String(trip.dof) });
+			return out;
+		}
 		case 'servo_fault':
 			return [...at, { label: 'Ticks in a row', value: String(trip.consecutive_ticks) }];
 		case 'divergence':

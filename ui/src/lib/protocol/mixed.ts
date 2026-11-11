@@ -510,8 +510,9 @@ export interface MixedTripWhere {
 export type MixedTrip = MixedTripWhere &
 	(
 		| { kind: 'envelope'; abort_lines: number; worst_db: number }
-		| { kind: 'abort_band'; side: 'high' | 'low'; measured_g: number; limit_g: number }
-		| { kind: 'band_abort'; side: 'high' | 'low'; measured_g2_hz: number; limit_g2_hz: number; dof: number }
+		/** `error_db` the part's error then; `measured_g` and `limit_g` null until the core reports them. */
+		| { kind: 'abort_band'; side: 'high' | 'low'; error_db?: number | null; measured_g: number | null; limit_g: number | null }
+		| { kind: 'band_abort'; side: 'high' | 'low'; error_db?: number | null; measured_g2_hz: number | null; limit_g2_hz: number | null; dof: number | null }
 		| { kind: 'servo_fault'; consecutive_ticks: number }
 		/** The floor: `consecutive_loops` and `divergent_bins`; a tone: `capped_s`. */
 		| { kind: 'divergence'; consecutive_loops?: number; divergent_bins?: number; capped_s?: number }
@@ -708,7 +709,7 @@ export interface MixedSubscribeResult {
 }
 
 export type MixedAlarm =
-	| { kind: 'envelope'; part: string; lines: number; worst_db: number }
+	| { kind: 'envelope'; part: string; lines: number; worst_db: number | null }
 	| { kind: 'band'; part: string; side: 'high' | 'low'; error_db: number }
 	| { kind: 'overload'; channel: number };
 

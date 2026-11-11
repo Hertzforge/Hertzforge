@@ -991,7 +991,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			const t = r.parts.find((p) => p.part.kind === 'tone');
 			if (t && t.settledT > 2.5) {
 				const limit = (t.target ?? 0) * 10 ** ((t.part.abort_db?.[1] ?? 3) / 20);
-				const trip: MixedTrip = { kind: 'abort_band', part: t.part.id, side: 'high', measured_g: round(limit * 1.05, 4), limit_g: round(limit, 4), at_level_db: round(r.level, 2), at_s: round(r.t, 2), at_loop: r.loop, at_tick: r.tick, at_hz: round(t.freq, 1) };
+				const trip: MixedTrip = { kind: 'abort_band', part: t.part.id, side: 'high', error_db: round((t.part.abort_db?.[1] ?? 3) + 0.4, 2), measured_g: round(limit * 1.05, 4), limit_g: round(limit, 4), at_level_db: round(r.level, 2), at_s: round(r.t, 2), at_loop: r.loop, at_tick: r.tick, at_hz: round(t.freq, 1) };
 				addLog('trip', endMessage(r, trip));
 				finish(r, 'aborted', endMessage(r, trip), trip);
 				return;
@@ -1002,7 +1002,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 
 	function endMessage(r: Run, trip: MixedTrip): string {
 		const name = trip.part ? (r.names.get(trip.part) ?? trip.part) : 'The drive';
-		if (trip.kind === 'abort_band') return `${name} abort: ${round(20 * Math.log10(trip.measured_g / (trip.limit_g / 10 ** 0.15)), 1)} dB over its target at ${trip.at_hz?.toFixed(1)} Hz, at ${trip.at_level_db.toFixed(1)} dB.`;
+		if (trip.kind === 'abort_band') return `${name} abort: ${(trip.error_db ?? 0).toFixed(1)} dB over its target at ${trip.at_hz?.toFixed(1)} Hz, at ${trip.at_level_db.toFixed(1)} dB.`;
 		return `${name}: ${trip.kind.replaceAll('_', ' ')}.`;
 	}
 
@@ -1340,7 +1340,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 		}
 		if (isLive()) refuse('refused', 'run_active', `Run ${run!.id} is ${run!.state}; stop it before configuring.`, { run_id: run!.id });
 		notWhileOther('configuring Mixed Mode');
-		if (errors.length) refuse('refused', 'config_invalid', `The configuration has ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}.`, { errors, warnings });
+		if (errors.length) refuse('bad_request', 'config_invalid', `The configuration has ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}.`, { errors, warnings });
 		const derived = derive(config, host.rows(), host.toneLaws(), false);
 		const views = configureViews(config);
 		if (run?.timer) clearInterval(run.timer);

@@ -13,6 +13,11 @@ import type { Dtype, Request, ResponseOk } from './types';
 import type { MixedConfigureParams, MixedConfigureResult, MixedData, MixedLive, MixedState, MixedSubscribeParams } from './mixed';
 import { fromMixedConfig, mixedByKey, toMixedConfig } from '$lib/acquire/mixed/mixedSetup';
 import { MIXED_PLOT_TYPES, MIXED_QUANTITIES } from '$lib/acquire/mixed/mixedLayout';
+import { mixedTripFacts, PART_REFUSED_WORDS } from '$lib/acquire/mixed/mixedWords';
+import { ServiceClient } from './client.svelte';
+import { createControlServer } from './mock/control';
+import { mockSocketFactory } from './mock/socket';
+import { AcquireState } from '$lib/acquire/store.svelte';
 
 const DIR = fileURLToPath(new URL('../../../../schema/golden/', import.meta.url));
 const golden = (name: string) => `${DIR}${name}`;
@@ -102,5 +107,58 @@ describe('Mixed Mode goldens through the shell', () => {
 	it.runIf(has('request_mixed_subscribe.json'))('a subscription the service took is one the screen sends', () => {
 		const p = (readJson('request_mixed_subscribe.json') as Request<MixedSubscribeParams>).params;
 		if ('plots' in p) for (const plot of p.plots) expect(MIXED_QUANTITIES).toContain(plot.quantity);
+	});
+});
+
+describe('the requests the store sends, as the service took them', () => {
+	it.runIf(has('request_mixed_part.json'))('mixed.part is {id, on}', () => {
+		expect(Object.keys((readJson('request_mixed_part.json') as Request<Record<string, unknown>>).params).sort()).toEqual(['id', 'on']);
+	});
+	it.runIf(has('request_mixed_level.json'))('mixed.level is {delta_db} or {to_db}', () => {
+		expect(Object.keys((readJson('request_mixed_level.json') as Request<Record<string, unknown>>).params)).toEqual(['delta_db']);
+	});
+	it.runIf(has('request_mixed_adjust.json'))('mixed.adjust is {key, value}', () => {
+		expect(Object.keys((readJson('request_mixed_adjust.json') as Request<Record<string, unknown>>).params).sort()).toEqual(['key', 'value']);
+	});
+	it.runIf(has('response_error_mixed_part_refused.json'))("a part refusal's reason has words, said on the part's row", () => {
+		const e = readJson('response_error_mixed_part_refused.json') as { error: { reason: string; detail: { id: string; why: string } } };
+		expect(e.error.reason).toBe('part_refused');
+		expect(PART_REFUSED_WORDS[e.error.detail.why]).toBeTruthy();
+	});
+	it.runIf(has('response_error_mixed_config_invalid.json') && has('request_mixed_configure.json'))('a refused configuration lands on the row of the part it names', () => {
+		const c = (readJson('request_mixed_configure.json') as Request<MixedConfigureParams>).params.config;
+		const e = readJson('response_error_mixed_config_invalid.json') as { error: { detail: { errors: { reason: string; message: string; field?: string }[] } } };
+		const keys = Object.keys(mixedByKey(fromMixedConfig(c), e.error.detail.errors));
+		expect(keys.every((k) => /^(tones|bands)\.\d+\./.test(k) || k.startsWith('profile.breakpoints.'))).toBe(true);
+	});
+	it("a floor row error at parts[i].breakpoints[r] lands on row r of the floor's table", () => {
+		expect(Object.keys(mixedByKey({ tones: [], bands: [] }, [{ reason: 'psd_negative', field: 'parts[0].breakpoints[2]', message: 'm' }]))).toEqual(['profile.breakpoints.2.value']);
+	});
+	it('a tone or band trip with only its error prints no empty fact', () => {
+		const f = mixedTripFacts({ kind: 'abort_band', part: 't2', side: 'high', error_db: 3.4, measured_g: null, limit_g: null, at_level_db: 0, at_s: 1, at_loop: 1, at_tick: 1, at_hz: 400 }, () => 'Rotor');
+		expect(f.map((x) => x.label)).toEqual(['Part', 'At', 'Level', 'Side', 'Error']);
+		expect(f.some((x) => /null|NaN|undefined/.test(x.value))).toBe(false);
+	});
+});
+
+describe("the mock's frames, in the service's form", () => {
+	it.runIf(has('event_mixed_live.expected.json') && has('event_mixed_state.json') && has('request_mixed_configure.json'))('the mock sends the state and the live frame with the keys the service sends', async () => {
+		const server = createControlServer({ speed: 20 });
+		const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
+		const acq = new AcquireState(client, { session: null, local: null, checkDelayMs: 0 });
+		client.connect();
+		await client.whenOpen();
+		await acq.sync();
+		await acq.claim();
+		// the golden's limit channel is a row the mock's channel table does not have
+		const config = (readJson('request_mixed_configure.json') as Request<MixedConfigureParams>).params.config;
+		await client.request('mixed.configure', { config: { ...config, limits: { ...config.limits, channels: [] } } });
+		const state = await client.request<MixedState>('mixed.state');
+		const want = Object.keys((readJson('event_mixed_state.json') as { data: MixedState }).data).sort();
+		expect(Object.keys(state).sort()).toEqual(want);
+		const live = (readJson('event_mixed_live.expected.json') as { data: MixedLive }).data;
+		const part = live.parts[0];
+		for (const row of state.parts) expect(Object.keys(row).sort()).toEqual(Object.keys(part).sort());
+		expect(state.parts.map((p) => p.id)).toEqual(live.parts.map((p) => p.id));
 	});
 });
