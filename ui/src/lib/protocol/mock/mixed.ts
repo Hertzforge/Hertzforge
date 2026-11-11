@@ -160,6 +160,36 @@ function rangeOf(parts: MixedPart[], p: Moving, seen = new Set<string>()): [numb
 	return null;
 }
 
+/** The part a follower's chain starts from, and the product of the ratios along it. */
+function rootOf(parts: MixedPart[], p: Moving): { id: string; factor: number } {
+	let at: Moving = p;
+	let factor = 1;
+	for (let n = 0; n < 32 && at.schedule.kind === 'follow'; n++) {
+		const s = at.schedule;
+		const lead = parts.find((x): x is Moving => x.id === s.of && x.kind !== 'floor');
+		if (!lead) break;
+		factor *= s.ratio;
+		at = lead;
+	}
+	return { id: at.id, factor };
+}
+
+/**
+ * The closest two tones come over their whole motion. Two parts moved by the same leader are
+ * compared at the same moment (their ratios apart, at the leader's lowest frequency); any others by
+ * the gap between their ranges.
+ */
+function spacing(parts: MixedPart[], a: Moving, b: Moving, ra: [number, number], rb: [number, number]): number {
+	const x = rootOf(parts, a);
+	const y = rootOf(parts, b);
+	if (x.id === y.id) {
+		const root = parts.find((q): q is Moving => q.id === x.id && q.kind !== 'floor');
+		const lo = root ? (rangeOf(parts, root)?.[0] ?? 0) : 0;
+		return Math.abs(x.factor - y.factor) * lo;
+	}
+	return Math.max(0, Math.max(ra[0], rb[0]) - Math.min(ra[1], rb[1]));
+}
+
 function widthRange(p: Extract<MixedPart, { kind: 'narrowband' }>, r: [number, number]): [number, number] {
 	return p.width_share !== undefined ? [p.width_share * r[0], p.width_share * r[1]] : [p.width_hz ?? 0, p.width_hz ?? 0];
 }
@@ -217,11 +247,10 @@ function checkConfig(c: MixedConfig, rows: ChannelRow[], toneLaws: LawEntry[]): 
 		for (let b = a + 1; b < toneParts.length; b++) {
 			const A = toneParts[a].p;
 			const B = toneParts[b].p;
-			if ((A.schedule.kind === 'follow' && A.schedule.of === B.id) || (B.schedule.kind === 'follow' && B.schedule.of === A.id)) continue;
 			const ra = rangeOf(c.parts, A);
 			const rb = rangeOf(c.parts, B);
 			if (!ra || !rb) continue;
-			const gap = Math.max(0, Math.max(ra[0], rb[0]) - Math.min(ra[1], rb[1]));
+			const gap = spacing(c.parts, A, B, ra, rb);
 			if (gap < 2 * track) errors.push(item('parts_too_close', `${B.name ?? B.id} comes within ${round(gap, 2)} Hz of ${A.name ?? A.id}; tones stay at least ${round(2 * track, 2)} Hz apart.`, `parts[${toneParts[b].i}]`));
 		}
 	const df = c.acquisition.fs_hz / c.acquisition.n_pts;
@@ -357,7 +386,7 @@ function derive(c: MixedConfig, rows: ChannelRow[], toneLaws: LawEntry[], actual
 			const ra = rangeOf(c.parts, tones[a]);
 			const rb = rangeOf(c.parts, tones[b]);
 			if (!ra || !rb) continue;
-			const gap = Math.max(0, Math.max(ra[0], rb[0]) - Math.min(ra[1], rb[1]));
+			const gap = spacing(c.parts, tones[a], tones[b], ra, rb);
 			if (!closest || gap < closest.spacing_hz) closest = { parts: [tones[a].id, tones[b].id], spacing_hz: round(gap, 3), min_hz: round(2 * tracking, 3) };
 		}
 	const levels = c.schedule.levels;
@@ -945,7 +974,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 					h.target.shift();
 					h.freq.shift();
 				}
-				if (p.part.kind === 'narrowband' && p.scale > 0 && (!h.level.t.length || r.t - h.level.t[h.level.t.length - 1] >= loopS)) {
+				if (p.part.kind === 'narrowband' && p.scale >= 0.999 && (!h.level.t.length || r.t - h.level.t[h.level.t.length - 1] >= Math.min(loopS, 0.5))) {
 					h.level.t.push(round(r.t, 3));
 					h.level.measured.push(p.measured ?? 0);
 					h.level.target.push(p.target);

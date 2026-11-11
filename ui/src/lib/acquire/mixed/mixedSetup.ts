@@ -209,7 +209,7 @@ export function defaultMixedSetup(): MixedDraft {
 		tones: [newTone('t1', 1, 120)],
 		bands: [],
 		exclusion_hz: 2,
-		acquisition: { fs_hz: 8192, n_pts: 8192, n_avg: 4, tick_ms: 10 },
+		acquisition: { fs_hz: 8192, n_pts: 16384, n_avg: 4, tick_ms: 10 },
 		schedule: {
 			mode: 'auto',
 			levels: [

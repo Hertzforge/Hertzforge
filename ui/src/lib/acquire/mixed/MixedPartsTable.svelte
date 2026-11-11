@@ -152,11 +152,11 @@
 								<NumberField compact id="{table}-{i}-hi" label="To, row {i + 1}" unit="Hz" value={s.band_hz[1]} min={0} onchange={(v) => set(i, 'schedule.band_hz', (x) => (x.schedule.band_hz = [x.schedule.band_hz[0], num(v)]))} disabled={locked} testid="mixed-{table}-{i}-hi" />
 								<NumberField compact id="{table}-{i}-rate" label="Rate, row {i + 1}" unit={s.law === 'log' ? 'oct/min' : 'Hz/s'} value={s.law === 'log' ? s.oct_per_min : s.hz_per_s} min={0} onchange={(v) => set(i, s.law === 'log' ? 'schedule.oct_per_min' : 'schedule.hz_per_s', (x) => (s.law === 'log' ? (x.schedule.oct_per_min = num(v)) : (x.schedule.hz_per_s = num(v))))} disabled={locked} testid="mixed-{table}-{i}-rate" />
 								<select class="field sm law" value={s.law} disabled={locked} aria-label="Sweep law, row {i + 1}" onchange={(e) => set(i, 'schedule.law', (x) => (x.schedule.law = e.currentTarget.value as 'log' | 'linear'))} data-testid="mixed-{table}-{i}-law">
-									<option value="log">oct/min</option>
-									<option value="linear">Hz/s</option>
+									<option value="log">Log</option>
+									<option value="linear">Linear</option>
 								</select>
 							{:else}
-								<select class="field sm" value={s.of} disabled={locked} aria-label="Follows, row {i + 1}" aria-invalid={bad(i, 'schedule')} onchange={(e) => set(i, 'schedule.of', (x) => (x.schedule.of = e.currentTarget.value))} data-testid="mixed-{table}-{i}-of">
+								<select class="field sm of" value={s.of} disabled={locked} aria-label="Follows, row {i + 1}" aria-invalid={bad(i, 'schedule')} onchange={(e) => set(i, 'schedule.of', (x) => (x.schedule.of = e.currentTarget.value))} data-testid="mixed-{table}-{i}-of">
 									{#if !followChoices(mixed.setup, r.id).some((c) => c.id === s.of)}<option value={s.of}>{s.of || 'Choose'}</option>{/if}
 									{#each followChoices(mixed.setup, r.id) as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
 								</select>
@@ -294,6 +294,28 @@
 	.amp,
 	.width {
 		white-space: nowrap;
+	}
+
+	.pt :global(.nf.compact) {
+		width: 7.5em;
+	}
+
+	.pt :global(.nf.compact .field) {
+		min-width: 0;
+		width: 100%;
+	}
+
+	.pt select.field {
+		min-width: 7.5em;
+	}
+
+	.pt select.of {
+		width: 8em;
+		min-width: 0;
+	}
+
+	.pt select.law {
+		min-width: 5.5em;
 	}
 
 	.freq :global(> *),

@@ -9,6 +9,8 @@
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
+	import { MARKER_ORDER } from '$lib/viz/roles';
 	import ChannelTable from '../ChannelTable.svelte';
 	import OverrideDialog from '../OverrideDialog.svelte';
 	import ProfileEditor from '../ProfileEditor.svelte';
@@ -90,7 +92,7 @@
 			{#if toneView}
 				<section class="aq-panel" aria-labelledby="mx-tones" data-testid="mixed-tones-preview">
 					<div class="aq-head"><h2 id="mx-tones">Tone Amplitudes</h2><span class="aq-sub">Each tone's amplitude across its motion, at full level, as the service computed it.</span></div>
-					<ViewRenderer view={toneView} showTitle={false} minHeight={200} />
+					<SpectrumPane view={toneView} showTitle={false} minHeight={200} styles={toneView.series.map((_, i) => ({ marker: MARKER_ORDER[i % MARKER_ORDER.length] }))} />
 				</section>
 			{/if}
 		</div>

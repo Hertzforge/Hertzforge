@@ -170,6 +170,16 @@
 			<div class="aq-group">
 				<h3>The Floor's Loop</h3>
 				<div class="aq-fields">
+					<NumberField id="mc-fs" label="Rate asked of the station" unit="Hz" step={1024} min={1} value={d.acquisition.fs_hz} onchange={(v) => (d.acquisition.fs_hz = v ?? NaN)} errors={errs('acquisition.fs_hz')} disabled={locked} testid="mixed-fs" />
+					<div class="sel">
+						<label for="mc-npts" class="lbl">Lines from an FFT of</label>
+						<select id="mc-npts" class="field" value={d.acquisition.n_pts} disabled={locked} onchange={(e) => (d.acquisition.n_pts = Number(e.currentTarget.value))} aria-invalid={errs('acquisition.n_pts').length > 0} data-testid="mixed-npts">
+							{#each [1024, 2048, 4096, 8192, 16384, 32768, 65536] as n (n)}<option value={n}>{n} points</option>{/each}
+						</select>
+						<Findings items={errs('acquisition.n_pts').map((message) => ({ level: 'error' as const, message }))} />
+						<p class="aq-small aq-muted">The lines are the rate over this apart, and no wider than the tracking width.</p>
+					</div>
+					<NumberField id="mc-navg" label="Frames a loop" integer step={1} min={1} value={d.acquisition.n_avg} onchange={(v) => (d.acquisition.n_avg = v ?? NaN)} errors={errs('acquisition.n_avg')} disabled={locked} testid="mixed-navg" help="Hann frames, half overlapped, averaged into each loop's estimate." />
 					{#each FLOOR as s (s.key)}{@render field(s)}{/each}
 				</div>
 			</div>

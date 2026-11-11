@@ -59,18 +59,18 @@
 		{#if status?.mode}<span class="mode">{status.mode === 'auto' ? 'Automatic' : 'Manual'}</span>{/if}
 	</div>
 
-	<div class="big num" data-testid="mixed-level-db">{db(level ?? commanded)}{#if level !== null && commanded !== null && Math.abs(level - commanded) > 0.05}<span class="sub"> to {db(commanded)}</span>{/if}{#if status?.held}<span class="tag">Held</span>{/if}</div>
+	<div class="big num" data-testid="mixed-level-db">{db(level ?? commanded)}{#if level !== null && commanded !== null && Math.abs(level - commanded) > 0.05}<span class="sub">{` to ${db(commanded)}`}</span>{/if}{#if status?.held}<span class="tag">Held</span>{/if}</div>
 
 	<dl class="nums">
 		<div><dt>Parts time</dt><dd class="num" data-testid="mixed-parts-s">{status?.parts_s === null || status?.parts_s === undefined ? 'Not yet' : clock(status.parts_s)}</dd></div>
 		<div><dt>At this level</dt><dd class="num">{clock(status?.at_level_s)}{#if status?.remaining_at_level_s !== null && status?.remaining_at_level_s !== undefined}<span class="sub">, {clock(status.remaining_at_level_s)} left</span>{/if}</dd></div>
-		<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">{num(total?.rms_g, 'g rms')}<span class="sub"> against {num(total?.reference_rms_g, 'g rms')}</span></dd></div>
-		<div><dt>Summed drive</dt><dd class="num" data-testid="mixed-drive">{num(total?.drive_vpk, 'V pk')}<span class="sub">, {num(total?.drive_vrms, 'V rms')}</span></dd></div>
+		<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">{num(total?.rms_g, 'g rms')}<span class="sub">{` against ${num(total?.reference_rms_g, 'g rms')}`}</span></dd></div>
+		<div><dt>Summed drive</dt><dd class="num" data-testid="mixed-drive">{num(total?.drive_vpk, 'V pk')}<span class="sub">{`, ${num(total?.drive_vrms, 'V rms')}`}</span></dd></div>
 	</dl>
 	{#if status?.limiting}<p class="line warn" data-testid="mixed-limiting">A cap, a limit channel or the drive ceiling holds a part down.</p>{/if}
 
 	{#if law && !compact}
-		<p class="aq-small law" data-testid="mixed-law-counts">Floor law {law.floor.name}: {law.floor.misses === 0 ? 'every call answered' : `${law.floor.misses} unusable in a row`}, a cap bound on {law.floor.capped} {law.floor.capped === 1 ? 'loop' : 'loops'}. Tone law {law.tones.name}: {law.tones.misses === 0 ? 'every call answered' : `${law.tones.misses} unusable in a row`}, a cap bound on {law.tones.capped} {law.tones.capped === 1 ? 'tick' : 'ticks'}.</p>
+		<p class="aq-small law" data-testid="mixed-law-counts">Floor law {law.floor.name}: {law.floor.misses === 0 ? 'every call answered' : `${law.floor.misses} unusable in a row`}, a cap bound on {law.floor.capped} {law.floor.capped === 1 ? 'loop' : 'loops'}. {#if status?.parts.some((p) => p.kind === 'tone')}Tone law {law.tones.name}: {law.tones.misses === 0 ? 'every call answered' : `${law.tones.misses} unusable in a row`}, a cap bound on {law.tones.capped} {law.tones.capped === 1 ? 'tick' : 'ticks'}.{/if}</p>
 	{/if}
 	{#if idWords && !compact}<p class="aq-small aq-muted" data-testid="mixed-identification-facts">{idWords}</p>{/if}
 
