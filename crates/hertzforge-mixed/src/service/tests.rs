@@ -115,10 +115,7 @@ fn every_step_out_of_order_is_refused_by_state() {
     ] {
         assert_eq!(e.name(), "bad_state", "{e}");
     }
-    assert_eq!(
-        s.start_capture("x").unwrap_err(),
-        MixedError::NotBuilt("capture")
-    );
+    assert_eq!(s.start_capture("x").unwrap_err().name(), "bad_state");
     assert_eq!(
         s.adjust(LawRole::Tones, "blend_w", 0.5).unwrap_err().why(),
         "not_engaged"

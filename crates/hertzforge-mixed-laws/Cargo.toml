@@ -22,7 +22,15 @@ hertzforge-law-host.workspace = true
 hertzforge-random.workspace = true
 hertzforge-breakpoints.workspace = true
 serde_json.workspace = true
+# The check's runs: the station it is handed, the channel table and the run's
+# station class.
+hertzforge-hal.workspace = true
+hertzforge-channel-table.workspace = true
+hertzforge-module-abi.workspace = true
 
 [dev-dependencies]
 # The tone law's parameter values, read back in the resolver's tests.
 hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+# TEST FIXTURE ONLY: the check's stations, built from the cases' own facts. On
+# deny.toml's hertzforge-hal-sim wrapper list for that reason.
+hertzforge-hal-sim.workspace = true

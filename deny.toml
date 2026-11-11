@@ -84,6 +84,7 @@ deny = [
     "hertzforge-shock-laws",
     "hertzforge-mimo-random",
     "hertzforge-mixed",
+    "hertzforge-mixed-laws",
     "hertzforge-recorder",
     "hertzforge-shock-host",
     "hertzforge-sine",

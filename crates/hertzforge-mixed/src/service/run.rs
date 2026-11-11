@@ -155,6 +155,13 @@ pub(crate) struct Runtime {
     /// Lines of the random part the limit channels held down on the last
     /// synthesis.
     pub(crate) notched: Vec<bool>,
+    /// Each floor law call since the service last drained them.
+    pub(crate) floor_log: Vec<super::law_records::MixedLawRecord>,
+    /// The capture, while one runs.
+    pub(crate) capture: Option<hertzforge_capture::CaptureSink>,
+    floor_drive_in_last: f64,
+    floor_took_last: f64,
+    floor_missed_last: bool,
 }
 
 /// One limit channel.
@@ -380,6 +387,11 @@ impl Runtime {
             tap: Vec::new(),
             limits,
             notched: vec![false; lines],
+            floor_log: Vec::new(),
+            capture: None,
+            floor_drive_in_last: 0.0,
+            floor_took_last: 0.0,
+            floor_missed_last: false,
         })
     }
 
@@ -721,6 +733,7 @@ impl Runtime {
         self.ring_end = self.step.frames;
         self.resp_at = self.step.frames;
         self.step.mode = StepMode::Run;
+        self.step.engaged_frame = self.step.frames;
         self.step.level = Ramp::at(level);
         self.step.random = Ramp::at(0.0);
         self.step.random.go(1.0, cfg.part_ramp_s * self.fs);
@@ -1017,9 +1030,18 @@ impl Runtime {
                 seconds: guards.budget_fraction * loop_s,
             };
             self.floor_tally.calls += 1;
-            match guarded_call(law.as_mut(), budget, self.lines, self.band, |l| {
+            let rms = |d: &[f64]| (d.iter().sum::<f64>() * self.df).sqrt();
+            let drive_in = rms(&self.floor_drive);
+            let t0 = self.floor_clock.now_s();
+            let result = guarded_call(law.as_mut(), budget, self.lines, self.band, |l| {
                 l.iterate(&inputs)
-            }) {
+            });
+            let took = (self.floor_clock.now_s() - t0).max(0.0);
+            self.floor_tally.worst_call_us = self.floor_tally.worst_call_us.max(took * 1e6);
+            self.floor_drive_in_last = drive_in;
+            self.floor_took_last = took * 1e6;
+            self.floor_missed_last = result.is_err();
+            match result {
                 Ok(mut out) => {
                     self.floor_misses = 0;
                     let rep = cap_change(
@@ -1056,6 +1078,19 @@ impl Runtime {
                     }
                 }
             }
+        }
+        if self.floor_log.len() < 4096 {
+            let rms = (self.floor_drive.iter().sum::<f64>() * self.df).sqrt();
+            self.floor_log.push(super::law_records::MixedLawRecord {
+                t_s: self.step.frames.saturating_sub(self.step.engaged_frame) as f64 / self.fs,
+                drive_in: self.floor_drive_in_last,
+                drive_out: rms,
+                took_us: self.floor_took_last as f32,
+                role: super::law_records::RecordRole::Floor,
+                tone: 0,
+                miss: u8::from(self.floor_missed_last),
+                flags: 0,
+            });
         }
         // The floor's judgement on clean lines.
         let floor = cfg.floor().expect("validated");
@@ -1183,10 +1218,14 @@ impl Runtime {
     pub(crate) fn tap_records(&mut self) {
         let r = &self.step.records;
         let n = r.control.first().map_or(0, Vec::len);
+        let from = self.tap.len();
         for k in 0..n {
             for c in &r.control {
                 self.tap.push(c[k] as f32);
             }
+        }
+        if let Some(cap) = self.capture.as_ref() {
+            cap.push(&self.tap[from..], n);
         }
         let cap = (10.0 * self.fs) as usize * self.tap_stride();
         if self.tap.len() > cap {
