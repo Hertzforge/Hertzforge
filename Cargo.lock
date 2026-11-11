@@ -1790,6 +1790,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "law-fixture-shock-mimo-minimal"
+version = "0.1.4"
+dependencies = [
+ "wit-bindgen",
+]
+
+[[package]]
 name = "law-fixture-shock-misbehave"
 version = "0.1.4"
 dependencies = [
