@@ -461,6 +461,13 @@ pub fn trip_json(t: &MixedTrip, level_db: f64, at_hz: Option<f64>) -> Value {
         MixedTripKind::Overload { channel_index } => {
             ("overload", json!({"channel": channel_index}))
         }
+        MixedTripKind::RandomVrms {
+            realized_vrms,
+            limit_vrms,
+        } => (
+            "random_vrms",
+            json!({"realized_vrms": num(sig(*realized_vrms, 4)), "limit_vrms": num(sig(*limit_vrms, 4))}),
+        ),
         MixedTripKind::Divergence => ("divergence", json!({})),
         MixedTripKind::LawFault { role, reason } => (
             "law_fault",

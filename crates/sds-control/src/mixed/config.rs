@@ -1553,7 +1553,9 @@ impl WireMixed {
                     Item::field("out_of_range", at_part(part, field), message)
                 }
             }
-            ConfigError::BadConfig { field, .. } => Item::field("out_of_range", *field, message),
+            ConfigError::BadConfig { field, .. } => {
+                Item::field("out_of_range", wire_field(field), message)
+            }
         }
     }
 
@@ -2018,6 +2020,34 @@ pub fn feasibility_of(
                 over.join(", ")
             ),
         )
+    }
+}
+
+/// Where a field the core names sits in the wire configuration.
+fn wire_field(core: &str) -> &str {
+    match core {
+        "drive_vpk_ceiling" => "limits.drive_vpk_ceiling",
+        "drive_vpk_abort" => "limits.drive_vpk_abort",
+        "drive_ceiling_vrms" => "control.drive_ceiling_vrms",
+        "drive_abort_vrms" => "control.drive_abort_vrms",
+        "drive_clip_sigma" => "control.max_sigma",
+        "coherence_floor" => "control.coherence_floor",
+        "sysid_level_db" => "control.pretest.level_db",
+        "control_dof" => "control.control_dof",
+        "control" => "control.weights",
+        "limit_profiles" => "limits.channels",
+        "level_ramp_s" => "control.level_ramp_s",
+        "shutdown_ramp_s" => "control.shutdown_ramp_s",
+        "part_ramp_s" => "control.part_ramp_s",
+        "floor_settle_s" => "control.floor_settle_s",
+        "full_level_duration_s" => "schedule.full_level_s",
+        "schedule" => "schedule.levels",
+        "control_tick_s" => "acquisition.tick_ms",
+        "law_guards" => "control.law_guards",
+        "law" => "control.law",
+        "tracking_hz" => "control.tracking.hz",
+        "df_hz" | "lines" | "nfft" | "blocks_per_window" => "acquisition",
+        other => other,
     }
 }
 

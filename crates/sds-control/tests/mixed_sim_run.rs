@@ -188,7 +188,6 @@ async fn sine_on_random_runs_floor_first_to_completed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "waits on the core: in auto the ladder stays at its first level (seen 2026-11-10 at 3179304a)"]
 async fn the_auto_ladder_reaches_full_level() {
     let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
     let mut c = Client::connect(addr).await;
@@ -337,6 +336,30 @@ async fn a_band_switched_off_live_ramps_out_and_back() {
     c.ok("mixed.stop", json!({})).await;
     let end = wait_state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_random_parts_rms_abort_trips_and_names_no_part() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let mut cfg = config(vec![floor(), tone("t1", 160.0, 0.5)], auto(20.0));
+    cfg["control"]["drive_ceiling_vrms"] = json!(0.02);
+    cfg["control"]["drive_abort_vrms"] = json!(0.02);
+    run_to_engaged_or_end(&mut c, cfg).await;
+    let end = wait_state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "aborted", "{end}");
+    assert_eq!(end["end"]["trip"]["kind"], "random_vrms", "{end}");
+    assert!(end["end"]["trip"]["part"].is_null(), "{end}");
+}
+
+/// As [`run_to_engaged`], but the run may end before it engages.
+async fn run_to_engaged_or_end(c: &mut Client, cfg: Value) {
+    let r = c.ok("mixed.configure", json!({"config": cfg})).await;
+    assert_eq!(r["state"]["state"], "configured", "{r}");
+    c.ok("mixed.start", json!({})).await;
+    wait_state(c, "review").await;
+    c.ok("mixed.proceed", json!({})).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

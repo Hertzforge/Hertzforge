@@ -831,6 +831,9 @@ impl Actor {
                 l.floor.capped = f.capped;
             }
         }
+        for c in &mut self.view.channels {
+            c.overload = st.overloads.contains(&c.index);
+        }
         self.view.status = Some(st);
     }
 

@@ -3283,7 +3283,7 @@ and meaning are theirs, and the field applies as stated here:
 | `control.law_guards.tones` | Sine's | Sine's `law_budget`, `law_misses`, `max_step_db`, `max_rise_db_per_s`, `divergence_s` and `fault_debounce_ticks`, with Sine's defaults and ranges, for each tone |
 | `limits.drive_vpk_ceiling` | (required) | Sine's: volts peak, above 0, at most 10. The summed drive (random part plus tones) is held at or under it, judged on every frame; how the cut is shared between the parts is the service's, and `limiting` says when it binds |
 | `limits.drive_vpk_abort` | (required) | Sine's: volts peak, at least the ceiling (`abort_below_ceiling`) and at most 10. A summed drive sample at or over it aborts the run (`drive_vpk`) |
-| `limits.kinematic_monitor` | true | Sine's: with `feasibility`, abort when the response's velocity or displacement, read on raw samples (tones in), passes the shaker's rating (`kinematic`) |
+| `limits.kinematic_monitor` | true | Sine's: with `feasibility`, abort when the response's velocity or displacement, read on raw samples (tones in), passes the shaker's rating (`kinematic`). Off, the station's own raw-sample watchdog still trips on each channel's own velocity limit: the switch does not turn raw-sample protection off |
 | `limits.channels` | none | Random's limit rows, `{"channel","kind","rows":[{"freq_hz","ceiling"}]}`, ceilings in the channel's unit squared per Hz. The service lowers the random part where a channel would pass its ceiling; a limit never aborts, and it does not lower a tone |
 | `feasibility` | null | Random's shaker record, moving mass and `crest_factor` (default 3). Checked at configure and arm against the predicted peaks (below) |
 | `capture` | off | Sine's, with `run_name` default `mixed` |
@@ -3572,9 +3572,9 @@ floor and for a trip of no part), and its kind's facts. `end.message` names the 
 | `oscillator_range` | a tone | Sine's: `requested_hz`, `fs_hz` |
 | `kinematic` | none | Random's: `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit` |
 | `drive_vpk` | none | Sine's: `vpk`, `abort_vpk` (the summed drive) |
-| `drive_vrms` | none | Random's: `realized_vrms`, `limit_vrms` (the random part) |
+| `random_vrms` | none | `realized_vrms`, `limit_vrms`: the random part's rms (floor and narrowbands) over the last quarter second reached `control.drive_abort_vrms` |
 | `watchdog` | none | Sine's: `channel`, `axis`, `value`, `limit`, `measured`, `drive_vpk` (a limit channel's own abort) |
-| `overload` | none | `channel`: an input's overload latch |
+| `overload` | none | `channel`: an overload on a control or limit channel (the measurement the loop steers by); on any other channel the overload latches the channel's `overload` indicator and the run goes on |
 | `station` | none | `message`: the station's own words |
 
 A `law_fault` trip's `reason` is Random's for the floor (`error`, `panicked`, `over_budget`,
