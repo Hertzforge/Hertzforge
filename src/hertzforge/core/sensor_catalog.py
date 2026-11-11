@@ -107,10 +107,11 @@ CATALOG: tuple[SensorModel, ...] = (
     _uniaxial('352A73', 'rounded', (6.75, 3.96, 2.8), 0.3, 'integral cable',
               plug=NOTHING, cable=(0.9, 10.0)),
     # spec sheet 24786 (revision D): 3.6 mm high, 10.4 long and 6.4 wide,
-    # 0.64 g, solder pins with an attached 32 AWG twisted pair out of the
-    # side. No outline drawing was to hand, so it is a box of those
-    # extents (Brandon, 2026-11-11: two of them at one node in a test)
-    _uniaxial('352A71', 'box', (10.4, 6.4, 3.6), 0.64, 'integral cable',
+    # 0.64 g, solder pins with an attached 32 AWG twisted pair. PCB's
+    # photograph shows the 352A73's form at a larger size: a round nose,
+    # the pair out of the flat end (Brandon, 2026-11-11: two of them at
+    # one node in a test)
+    _uniaxial('352A71', 'rounded', (10.4, 6.4, 3.6), 0.64, 'integral cable',
               plug=NOTHING, cable=(0.9, 10.0)),
     _force('208C01', '10 lb'),
     _force('208C02', '100 lb'),
