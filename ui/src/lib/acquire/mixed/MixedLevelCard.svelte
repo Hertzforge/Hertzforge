@@ -2,7 +2,7 @@
 	/**
 	 * The Mixed Mode run at a glance: what it is doing in plain words, the level the drive is at
 	 * against the level commanded, parts time and the time at this level, the composite against its
-	 * reference (shown, not judged), the summed drive, each law's unusable calls and capped loops or
+	 * reference at the level in force, as the service sends it (shown, not judged), the summed drive, each law's unusable calls and capped loops or
 	 * ticks, the identification, and, once the run ends, how and on which part. Every number is the
 	 * service's; shape and word carry each state, color only follows.
 	 */
@@ -64,7 +64,7 @@
 	<dl class="nums">
 		<div><dt>Parts time</dt><dd class="num" data-testid="mixed-parts-s">{status?.parts_s === null || status?.parts_s === undefined ? 'Not yet' : clock(status.parts_s)}</dd></div>
 		<div><dt>At this level</dt><dd class="num">{clock(status?.at_level_s)}{#if status?.remaining_at_level_s !== null && status?.remaining_at_level_s !== undefined}<span class="sub">, {clock(status.remaining_at_level_s)} left</span>{/if}</dd></div>
-		<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">{num(total?.rms_g, 'g rms')}<span class="sub">{` against ${num(total?.reference_rms_g, 'g rms')}`}</span></dd></div>
+		<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">{num(total?.rms_g, 'g rms')}<span class="sub">{` against ${num(total?.reference_rms_g, 'g rms')} at this level`}</span></dd></div>
 		<div><dt>Summed drive</dt><dd class="num" data-testid="mixed-drive">{num(total?.drive_vpk, 'V pk')}<span class="sub">{`, ${num(total?.drive_vrms, 'V rms')}`}</span></dd></div>
 	</dl>
 	{#if status?.limiting}<p class="line warn" data-testid="mixed-limiting">A cap, a limit channel or the drive ceiling holds a part down.</p>{/if}

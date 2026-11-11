@@ -10,6 +10,7 @@ import type { ServiceClient } from '$lib/protocol/client.svelte';
 import { MIXED_TOPICS, type MixedData, type MixedSubscribeResult } from '$lib/protocol/mixed';
 import { PulseScreenState } from '../pulse/pulseScreenState.svelte';
 import type { FramePlot, ScreenOptions } from '../screen/screen.svelte';
+import { toBand } from './mixedBand';
 import { mixedHooks } from './mixedLayout';
 
 export const MIXED_TEST_TYPE = 'mixed';
@@ -19,14 +20,18 @@ export const MIXED_HOOKS = mixedHooks({ method: 'mixed.subscribe', topic: MIXED_
 export interface MixedViewsOptions extends ScreenOptions {
 	/** The run on screen: a frame of any other run is not drawn. */
 	runId?: () => string | null;
+	/** The test's band (the floor's): every spectrum is cut to its lines. */
+	band?: () => [number, number] | null;
 }
 
 export class MixedViewsState extends PulseScreenState<MixedData, MixedSubscribeResult> {
 	private readonly runId: (() => string | null) | null;
+	private readonly band: (() => [number, number] | null) | null;
 
 	constructor(control: ServiceClient, opts: MixedViewsOptions) {
 		super(control, MIXED_HOOKS, opts);
 		this.runId = opts.runId ?? null;
+		this.band = opts.band ?? null;
 	}
 
 	/** The last frame, when it is the run's on screen. */
@@ -38,6 +43,8 @@ export class MixedViewsState extends PulseScreenState<MixedData, MixedSubscribeR
 	}
 
 	override frame(id: string): FramePlot | null {
-		return this.frameOfRun ? super.frame(id) : null;
+		const f = this.frameOfRun ? super.frame(id) : null;
+		const band = this.band?.() ?? null;
+		return f && band ? { ...f, views: toBand(f.views, band) } : f;
 	}
 }

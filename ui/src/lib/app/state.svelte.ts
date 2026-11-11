@@ -19,6 +19,7 @@ import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
 import { SineViewsState } from '$lib/acquire/sine/sineViews.svelte';
 import { MixedStore } from '$lib/acquire/mixed/mixedStore.svelte';
 import { MixedViewsState } from '$lib/acquire/mixed/mixedViews.svelte';
+import { floorBand } from '$lib/acquire/mixed/mixedBand';
 import { TwrStore } from '$lib/acquire/twr/twrStore.svelte';
 import { TwrViewsState } from '$lib/acquire/twr/twrViews.svelte';
 import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
@@ -1986,7 +1987,8 @@ export class AppState {
 			setupTitle: () => this.mixed.status?.title ?? (config.popout ? null : this.mixed.setup.title),
 			showing: () => mixedPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mixed' && this.mixed.step === 'run'),
 			page: mixedPopout ? config.page : null,
-			runId: () => this.mixed.status?.run_id ?? null
+			runId: () => this.mixed.status?.run_id ?? null,
+			band: () => floorBand(this.mixed.runConfig)
 		});
 		const twrPopout = config.popout && config.popoutTest === 'twr';
 		this.twrViews = new TwrViewsState(this.control, {
