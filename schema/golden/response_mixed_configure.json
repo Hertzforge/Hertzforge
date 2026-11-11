@@ -1,0 +1,460 @@
+{
+ "type": "response",
+ "id": 91,
+ "result": {
+  "state": {
+   "run_id": "mixed-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Rotor on random, 20 to 2000 Hz",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 8192,
+    "n_pts": 16384,
+    "df_hz": 0.5,
+    "lines": 3961,
+    "loop_s": 8,
+    "tick_frames": 82,
+    "tick_s": 0.0100098,
+    "actual": false
+   },
+   "clock": null,
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -6,
+    0
+   ],
+   "level_db": null,
+   "full_level_s": 300,
+   "t_s": null,
+   "elapsed_s": null,
+   "parts_s": null,
+   "at_level_s": null,
+   "remaining_at_level_s": null,
+   "held": false,
+   "alarm": false,
+   "limiting": false,
+   "parts": [
+    {
+     "id": "floor",
+     "kind": "floor",
+     "name": "Floor",
+     "enabled": true,
+     "on": false,
+     "scale": 0,
+     "freq_hz": null,
+     "direction": null,
+     "sweeps": null,
+     "rate_oct_per_min": null,
+     "rate_hz_per_s": null,
+     "width_hz": null,
+     "unit": "g",
+     "target": null,
+     "measured": null,
+     "error_db": null,
+     "alarm": false,
+     "drive_vpk": null,
+     "drive_vrms": null,
+     "gain_db": null,
+     "settled": false,
+     "limiting": false,
+     "dof": null,
+     "lines": null,
+     "law": {
+      "misses": 0,
+      "capped": 0
+     }
+    },
+    {
+     "id": "t1",
+     "kind": "tone",
+     "name": "Blade pass",
+     "enabled": true,
+     "on": false,
+     "scale": 0,
+     "freq_hz": null,
+     "direction": null,
+     "sweeps": null,
+     "rate_oct_per_min": null,
+     "rate_hz_per_s": null,
+     "width_hz": null,
+     "unit": "g",
+     "target": null,
+     "measured": null,
+     "error_db": null,
+     "alarm": false,
+     "drive_vpk": null,
+     "drive_vrms": null,
+     "gain_db": null,
+     "settled": false,
+     "limiting": false,
+     "dof": null,
+     "lines": null,
+     "law": {
+      "misses": 0,
+      "capped": 0
+     }
+    },
+    {
+     "id": "t2",
+     "kind": "tone",
+     "name": "Rotor",
+     "enabled": true,
+     "on": false,
+     "scale": 0,
+     "freq_hz": null,
+     "direction": null,
+     "sweeps": {
+      "done": 0,
+      "of": 4
+     },
+     "rate_oct_per_min": null,
+     "rate_hz_per_s": null,
+     "width_hz": null,
+     "unit": "g",
+     "target": null,
+     "measured": null,
+     "error_db": null,
+     "alarm": false,
+     "drive_vpk": null,
+     "drive_vrms": null,
+     "gain_db": null,
+     "settled": false,
+     "limiting": false,
+     "dof": null,
+     "lines": null,
+     "law": {
+      "misses": 0,
+      "capped": 0
+     }
+    },
+    {
+     "id": "t3",
+     "kind": "tone",
+     "name": "Rotor 2nd",
+     "enabled": true,
+     "on": false,
+     "scale": 0,
+     "freq_hz": null,
+     "direction": null,
+     "sweeps": null,
+     "rate_oct_per_min": null,
+     "rate_hz_per_s": null,
+     "width_hz": null,
+     "unit": "g",
+     "target": null,
+     "measured": null,
+     "error_db": null,
+     "alarm": false,
+     "drive_vpk": null,
+     "drive_vrms": null,
+     "gain_db": null,
+     "settled": false,
+     "limiting": false,
+     "dof": null,
+     "lines": null,
+     "law": {
+      "misses": 0,
+      "capped": 0
+     }
+    },
+    {
+     "id": "b1",
+     "kind": "narrowband",
+     "name": "Gear mesh",
+     "enabled": true,
+     "on": false,
+     "scale": 0,
+     "freq_hz": null,
+     "direction": null,
+     "sweeps": null,
+     "rate_oct_per_min": null,
+     "rate_hz_per_s": null,
+     "width_hz": null,
+     "unit": "g²/Hz",
+     "target": null,
+     "measured": null,
+     "error_db": null,
+     "alarm": false,
+     "drive_vpk": null,
+     "drive_vrms": null,
+     "gain_db": null,
+     "settled": false,
+     "limiting": false,
+     "dof": null,
+     "lines": null,
+     "law": null
+    },
+    {
+     "id": "b2",
+     "kind": "narrowband",
+     "name": "Rotor band",
+     "enabled": true,
+     "on": false,
+     "scale": 0,
+     "freq_hz": null,
+     "direction": null,
+     "sweeps": {
+      "done": 0,
+      "of": null
+     },
+     "rate_oct_per_min": null,
+     "rate_hz_per_s": null,
+     "width_hz": null,
+     "unit": "g²/Hz",
+     "target": null,
+     "measured": null,
+     "error_db": null,
+     "alarm": false,
+     "drive_vpk": null,
+     "drive_vrms": null,
+     "gain_db": null,
+     "settled": false,
+     "limiting": false,
+     "dof": null,
+     "lines": null,
+     "law": null
+    }
+   ],
+   "total": {
+    "rms_g": null,
+    "reference_rms_g": 7.28,
+    "drive_vpk": null,
+    "drive_vrms": null
+   },
+   "identification": null,
+   "law": {
+    "floor": {
+     "id": "hinv",
+     "name": "H-inverse",
+     "version": "0.1.2",
+     "sha256": null,
+     "misses": 0,
+     "capped": 0,
+     "live": {}
+    },
+    "tones": {
+     "id": "servo_blend",
+     "name": "Servo blend",
+     "version": "0.1.0",
+     "sha256": null,
+     "misses": 0,
+     "capped": 0,
+     "live": {
+      "blend_w": 0.5
+     }
+    }
+   },
+   "feasibility": {
+    "verdict": "pass",
+    "message": "The test is within the shaker's ratings."
+   },
+   "end": null
+  },
+  "derived": {
+   "band_hz": [
+    20,
+    2000
+   ],
+   "grid": {
+    "fs_hz": 8192,
+    "n_pts": 16384,
+    "df_hz": 0.5,
+    "lines": 3961,
+    "loop_s": 8,
+    "tick_frames": 82,
+    "tick_s": 0.0100098,
+    "actual": false
+   },
+   "control_channels": [
+    1
+   ],
+   "parts": [
+    {
+     "id": "floor",
+     "kind": "floor",
+     "name": "Floor",
+     "freq_hz": null,
+     "width_hz": null,
+     "ms_g2": 36.75,
+     "peak_g": null
+    },
+    {
+     "id": "t1",
+     "kind": "tone",
+     "name": "Blade pass",
+     "freq_hz": [
+      120,
+      120
+     ],
+     "width_hz": null,
+     "ms_g2": 2,
+     "peak_g": 2
+    },
+    {
+     "id": "t2",
+     "kind": "tone",
+     "name": "Rotor",
+     "freq_hz": [
+      300,
+      600
+     ],
+     "width_hz": null,
+     "ms_g2": 1.125,
+     "peak_g": 1.5
+    },
+    {
+     "id": "t3",
+     "kind": "tone",
+     "name": "Rotor 2nd",
+     "freq_hz": [
+      600,
+      1200
+     ],
+     "width_hz": null,
+     "ms_g2": 0.125,
+     "peak_g": 0.5
+    },
+    {
+     "id": "b1",
+     "kind": "narrowband",
+     "name": "Gear mesh",
+     "freq_hz": [
+      250,
+      250
+     ],
+     "width_hz": [
+      20,
+      20
+     ],
+     "ms_g2": 4,
+     "peak_g": null
+    },
+    {
+     "id": "b2",
+     "kind": "narrowband",
+     "name": "Rotor band",
+     "freq_hz": [
+      1300,
+      1800
+     ],
+     "width_hz": [
+      65,
+      90
+     ],
+     "ms_g2": 9,
+     "peak_g": null
+    }
+   ],
+   "reference": {
+    "floor_ms_g2": 36.75,
+    "tones_ms_g2": 3.25,
+    "bands_ms_g2": 13,
+    "total_ms_g2": 53,
+    "total_rms_g": 7.28,
+    "random_rms_g": 7.053
+   },
+   "kinematics": {
+    "peak_accel_g": 25.16,
+    "peak_velocity_ips": 7.664,
+    "peak_disp_pp_in": 0.04887,
+    "verdict": "pass",
+    "message": "The test is within the shaker's ratings."
+   },
+   "exclusion": [
+    {
+     "part": "t1",
+     "lo_hz": 118,
+     "hi_hz": 122,
+     "lines": 9
+    },
+    {
+     "part": "b1",
+     "lo_hz": 239,
+     "hi_hz": 261,
+     "lines": 45
+    }
+   ],
+   "closest_tones": {
+    "parts": [
+     "t1",
+     "t2"
+    ],
+    "spacing_hz": 180,
+    "min_hz": 1
+   },
+   "tracking": [
+    {
+     "part": "t1",
+     "verdict": "ok",
+     "ratio": 0,
+     "at_hz": null,
+     "message": null
+    },
+    {
+     "part": "t2",
+     "verdict": "advisory",
+     "ratio": 0.217,
+     "at_hz": 600,
+     "message": "sweep rate 1 oct/min against tracking bandwidth FixedHz(0.5 Hz): at 600.0 Hz the 128-frame (15.6 ms at 8192.0 Hz) drive-to-response lag puts the response 0.11 Hz off the demodulation reference, against an effective tracking corner of 0.50 Hz. Ratio 0.22 (advisory above 0.2, refused above 0.5); the amplitude readout under-reads by -0.4 dB there, so the servo would overdrive the true response by that much and only the raw-ring watchdog could see it. Fix: slow the sweep by 1.1x, widen the corner to 0.5 Hz, or switch to a proportional corner (which scales with frequency and removes the anchor entirely)."
+    },
+    {
+     "part": "t3",
+     "verdict": "advisory",
+     "ratio": 0.433,
+     "at_hz": 1200,
+     "message": "sweep rate 1 oct/min against tracking bandwidth FixedHz(0.5 Hz): at 1200.0 Hz the 128-frame (15.6 ms at 8192.0 Hz) drive-to-response lag puts the response 0.22 Hz off the demodulation reference, against an effective tracking corner of 0.50 Hz. Ratio 0.43 (advisory above 0.2, refused above 0.5); the amplitude readout under-reads by -1.5 dB there, so the servo would overdrive the true response by that much and only the raw-ring watchdog could see it. Fix: slow the sweep by 2.2x, widen the corner to 1.1 Hz, or switch to a proportional corner (which scales with frequency and removes the anchor entirely)."
+    }
+   ],
+   "test_s": 360,
+   "floor_equalize_s": 70,
+   "identification_s": 32,
+   "call_budget_s": {
+    "floor": 2,
+    "tones": 0.0025024
+   },
+   "law": {
+    "floor": {
+     "id": "hinv",
+     "name": "H-inverse",
+     "version": "0.1.2",
+     "sha256": null,
+     "live": [],
+     "hardware": true
+    },
+    "tones": {
+     "id": "servo_blend",
+     "name": "Servo blend",
+     "version": "0.1.0",
+     "sha256": null,
+     "live": [
+      "blend_w"
+     ],
+     "hardware": true
+    }
+   },
+   "feasibility": {
+    "verdict": "pass",
+    "message": "The test is within the shaker's ratings."
+   }
+  },
+  "warnings": [
+   {
+    "reason": "tracking_lag",
+    "field": "parts[2].schedule",
+    "message": "sweep rate 1 oct/min against tracking bandwidth FixedHz(0.5 Hz): at 600.0 Hz the 128-frame (15.6 ms at 8192.0 Hz) drive-to-response lag puts the response 0.11 Hz off the demodulation reference, against an effective tracking corner of 0.50 Hz. Ratio 0.22 (advisory above 0.2, refused above 0.5); the amplitude readout under-reads by -0.4 dB there, so the servo would overdrive the true response by that much and only the raw-ring watchdog could see it. Fix: slow the sweep by 1.1x, widen the corner to 0.5 Hz, or switch to a proportional corner (which scales with frequency and removes the anchor entirely)."
+   },
+   {
+    "reason": "tracking_lag",
+    "field": "parts[3].schedule",
+    "message": "sweep rate 1 oct/min against tracking bandwidth FixedHz(0.5 Hz): at 1200.0 Hz the 128-frame (15.6 ms at 8192.0 Hz) drive-to-response lag puts the response 0.22 Hz off the demodulation reference, against an effective tracking corner of 0.50 Hz. Ratio 0.43 (advisory above 0.2, refused above 0.5); the amplitude readout under-reads by -1.5 dB there, so the servo would overdrive the true response by that much and only the raw-ring watchdog could see it. Fix: slow the sweep by 2.2x, widen the corner to 1.1 Hz, or switch to a proportional corner (which scales with frequency and removes the anchor entirely)."
+   }
+  ]
+ }
+}

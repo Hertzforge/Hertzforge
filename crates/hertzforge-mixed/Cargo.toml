@@ -21,6 +21,8 @@ publish = false
 [dependencies]
 hertzforge-dsp.workspace = true
 hertzforge-breakpoints.workspace = true
+# The shaker record and moving mass the prediction reads (pure data).
+hertzforge-shaker-db.workspace = true
 # Random's control core and its configuration types (`ControlSet`,
 # `LevelSchedule`, `CaptureRules`, `LimitProfile`, `LawGuards`) live behind its
 # `service` feature, so the default features are taken.
@@ -52,3 +54,32 @@ service = [
 # TEST FIXTURE ONLY: a station for the service's construction tests. On
 # deny.toml's hertzforge-hal-sim wrapper list for that reason.
 hertzforge-hal-sim.workspace = true
+
+# The closed-loop runs drive the service on the simulator.
+[[test]]
+name = "sor_closed_loop"
+required-features = ["service"]
+
+[[test]]
+name = "ror_closed_loop"
+required-features = ["service"]
+
+[[test]]
+name = "guards"
+required-features = ["service"]
+
+[[test]]
+name = "guards_more"
+required-features = ["service"]
+
+[[test]]
+name = "ladder"
+required-features = ["service"]
+
+[[test]]
+name = "records"
+required-features = ["service"]
+
+[[test]]
+name = "high_ratio"
+required-features = ["service"]

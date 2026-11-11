@@ -12,5 +12,9 @@
 mod check;
 mod choice;
 
-pub use check::{run_mixed_check_case, MixedCheckCase, MixedCheckError};
+pub use check::{
+    mixed_check_config, mixed_check_run_s, mixed_check_station, mixed_check_table,
+    run_mixed_check_case, MixedCheckCase, MixedCheckError, MixedCheckStation,
+    MIXED_CHECK_DELAY_FRAMES, MIXED_CHECK_FS_HZ, MIXED_CHECK_MODE,
+};
 pub use choice::{law_choice, resolve_mixed, MixedLawError};

@@ -470,3 +470,72 @@ pub fn twr_lookup(
     }
     (id == TWR_BUILTIN_ID).then(builtin_twr_facts)
 }
+
+/// The test type a law of `world` is for, in words.
+fn world_words(world: LawWorld) -> &'static str {
+    match world {
+        LawWorld::Single => "single-output Random",
+        LawWorld::Mimo => "multiple-output Random",
+        LawWorld::ShockClassical => "classical shock",
+        LawWorld::ShockSrs => "SRS shock",
+        LawWorld::Sine => "Sine",
+        LawWorld::Twr => "TWR",
+    }
+}
+
+/// Whether a law may drive hardware in a Mixed Mode role (design D15): a
+/// built-in may; an imported law needs a passed check in its own world (a
+/// `single` law has none to need) AND a passed mixed check in this role.
+/// `mixed_passed` is that role's mixed-check record for the exact file.
+pub fn mixed_may_arm_on_hardware(e: &CatalogEntry, mixed_passed: bool) -> bool {
+    if e.builtin {
+        return true;
+    }
+    let own_world = match e.world {
+        LawWorld::Single => true,
+        _ => may_arm_on_hardware(e).is_ok(),
+    };
+    own_world && mixed_passed
+}
+
+/// A catalog entry as a Mixed Mode role sees it: a law of another world than
+/// the role's is refused by the test type it is for.
+pub fn mixed_role_facts(
+    e: &CatalogEntry,
+    want: LawWorld,
+    mixed_passed: bool,
+) -> crate::mixed::config::RoleLaw {
+    crate::mixed::config::RoleLaw {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: if e.world == want {
+            Ok(())
+        } else {
+            Err(world_words(e.world))
+        },
+        params: e.manifest.params.clone(),
+        live: if want == LawWorld::Sine {
+            e.live.clone()
+        } else {
+            Vec::new()
+        },
+        hardware: mixed_may_arm_on_hardware(e, mixed_passed),
+    }
+}
+
+/// Look a Mixed Mode role's law up by id. No mixed-check record is kept yet, so
+/// an imported law is never cleared for hardware in a Mixed Mode role.
+pub fn mixed_lookup(
+    catalog: Option<&LawCatalog>,
+    id: &str,
+    want: LawWorld,
+) -> Option<crate::mixed::config::RoleLaw> {
+    if let Some(e) = catalog.and_then(|c| c.entry(id)) {
+        return Some(mixed_role_facts(&e, want, false));
+    }
+    (want == LawWorld::Sine && id == SINE_BUILTIN_ID)
+        .then(|| mixed_role_facts(&builtin_sine_entry(), want, false))
+}

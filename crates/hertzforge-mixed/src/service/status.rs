@@ -149,6 +149,53 @@ pub struct PartRow {
     pub sweeps_done: u32,
     /// A sweep's direction now; `None` otherwise.
     pub direction: Option<Direction>,
+    /// The part's ramp scale now, 0 (out) to 1 (in at its level): every change
+    /// of a part's level is a ramp, and this is where the ramp is.
+    #[serde(default)]
+    pub scale: f64,
+    /// Whether the part is switched on, as last switched (its configured
+    /// `enabled`, then the operator's live switch).
+    #[serde(default)]
+    pub enabled: bool,
+    /// The rate the part's frequency moves now, signed, in its schedule's
+    /// unit (Hz per second or octaves per minute; a follower's is its root's
+    /// times the ratio, in the root's unit); 0 at a dwell or while held.
+    /// `None` for the floor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    /// A band's width now, Hz (a share band widens as it rises); `None`
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width_hz: Option<f64>,
+    /// A band's servo gain now, dB on its feed-forward density; `None`
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_db: Option<f64>,
+    /// A tone's (or the floor's) law calls not used, in a row now.
+    #[serde(default)]
+    pub misses: u32,
+    /// A tone's (or the floor's) law calls a core cap bound, in all.
+    #[serde(default)]
+    pub capped: u64,
+}
+
+/// One part's line in the run's report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartSummary {
+    /// The part's id.
+    pub id: String,
+    /// Its kind.
+    pub kind: PartKind,
+    /// The target at the end, as the status row states it.
+    pub target: f64,
+    /// The last usable measurement.
+    pub measured: Option<f64>,
+    /// The last error, dB.
+    pub error_db: Option<f64>,
+    /// The largest error seen, dB (signed, the larger magnitude).
+    pub worst_error_db: Option<f64>,
+    /// Seconds its alarm was set (sampled a chunk at a time).
+    pub alarm_s: f64,
 }
 
 /// The floor's summary.
@@ -168,6 +215,9 @@ pub struct FloorSummary {
     pub abort_lines: usize,
     /// Degrees of freedom of the floor estimate.
     pub dof: f64,
+    /// Lines of the grid inside the floor's band.
+    #[serde(default)]
+    pub lines_in_band: usize,
 }
 
 /// The run's totals: shown, not judged (the drive peak is the one judged).
@@ -212,6 +262,13 @@ pub enum MixedTripKind {
         realized_vpk: f64,
         /// Volts peak.
         limit_vpk: f64,
+    },
+    /// The random part's (floor and bands) rms reached its abort.
+    RandomVrms {
+        /// Volts rms over the last quarter second.
+        realized_vrms: f64,
+        /// Volts rms.
+        limit_vrms: f64,
     },
     /// A kinematic limit on a raw input sample.
     Kinematic {
@@ -289,6 +346,12 @@ impl MixedTrip {
                 realized_vpk,
                 limit_vpk,
             } => format!("Drive peak {realized_vpk:.3} V at the {limit_vpk:.3} V abort"),
+            MixedTripKind::RandomVrms {
+                realized_vrms,
+                limit_vrms,
+            } => {
+                format!("Random drive {realized_vrms:.3} V rms at the {limit_vrms:.3} V rms abort")
+            }
             MixedTripKind::Kinematic {
                 channel_index,
                 axis,
@@ -375,6 +438,14 @@ pub struct MixedStatus {
     pub totals: MixedTotals,
     /// The identification's band coherence; 0 before it runs.
     pub band_coherence: f64,
+    /// The share of the floor's band's lines whose identification is trusted
+    /// (coherence and gain over their floors); 0 before it runs.
+    #[serde(default)]
+    pub trusted_frac: f64,
+    /// Channels whose overload indicator has latched (channels the loop does
+    /// not steer by; an overload on a control or limit channel aborts).
+    #[serde(default)]
+    pub overloads: Vec<u32>,
     /// Whether a capture runs.
     pub capturing: bool,
     /// The laws and their counters; `None` until the loop engages.
@@ -436,6 +507,19 @@ impl MixedStatus {
                     dof: (kind == PartKind::Narrowband).then_some(0.0),
                     sweeps_done: 0,
                     direction: None,
+                    scale: 0.0,
+                    enabled: p.enabled,
+                    rate: p.schedule().map(|_| 0.0),
+                    width_hz: match &p.body {
+                        PartBody::Narrowband(b) => freq_hz.map(|f| {
+                            let (lo, hi) = b.width.edges_at(f);
+                            hi - lo
+                        }),
+                        _ => None,
+                    },
+                    gain_db: (kind == PartKind::Narrowband).then_some(0.0),
+                    misses: 0,
+                    capped: 0,
                 }
             })
             .collect();
@@ -462,6 +546,8 @@ impl MixedStatus {
             },
             totals: MixedTotals::default(),
             band_coherence: 0.0,
+            trusted_frac: 0.0,
+            overloads: Vec::new(),
             capturing: false,
             law: None,
         }

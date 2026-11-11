@@ -82,6 +82,13 @@ pub struct MixedFrf {
     pub lag_frames: usize,
     /// The band coherence the gate judged.
     pub band_coherence: f64,
+    /// Per line, whether the identification is trusted there (coherence and
+    /// gain over their floors).
+    #[serde(default)]
+    pub trusted: Vec<bool>,
+    /// The share of the floor's band's lines that are trusted.
+    #[serde(default)]
+    pub trusted_frac: f64,
 }
 
 /// Everything a Mixed Mode display packer needs, on one line grid.
@@ -95,7 +102,9 @@ pub struct MixedDisplay {
     /// The control composite with the tones in, g^2/Hz.
     pub control: Vec<f32>,
     /// The composite of the residual (each tracked tone subtracted), g^2/Hz:
-    /// what the floor and bands are judged on.
+    /// what the floor and bands are judged on. Once the floor has had a loop
+    /// this is its averaged estimate (each line over its clean frames, the
+    /// neighbours' error carried on lines with none), at the level in force.
     pub residual: Vec<f32>,
     /// Per control channel.
     pub channels: Vec<MixedDisplayChannel>,

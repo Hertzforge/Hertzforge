@@ -19,18 +19,18 @@
 
 pub mod display;
 pub mod law_records;
+mod live;
+pub(crate) mod run;
 pub mod status;
+pub(crate) mod step;
+pub use step::{ABORT_RAMP_S, TONE_ABORT_DEBOUNCE_S};
 
 use crate::parts::{ConfigError, MixedConfig, MixedLawGuards};
 use crate::schedule::PartClock;
-use display::MixedDisplay;
-use hertzforge_capture::Mark;
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_hal::Backend;
 use hertzforge_random::{HinvConfig, RunMode};
-use status::{
-    MixedLawStatus, MixedLog, MixedOutcome, MixedState, MixedStatus, MixedTrip, RoleTally,
-};
+use status::{MixedLog, MixedOutcome, MixedState, MixedStatus, MixedTrip};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -119,9 +119,31 @@ impl MixedLawFactories {
             floor: Arc::new(hertzforge_random::HinvLawFactory),
             floor_hinv: HinvConfig::default(),
             tones: Arc::new(hertzforge_sine::law::servo_blend::ServoBlendFactory {
-                params: hertzforge_sine::law::servo_blend::ServoBlendParams::default(),
+                params: mixed_tone_params(),
             }),
         }
+    }
+}
+
+/// The tone law's integral gain in a Mixed Mode run, per second (`servo_blend`
+/// custom compression). Chosen on the lagged resonant plant: a tone read
+/// through a 0.5 Hz tracker held 0.41 dB rms at 0.5 (0.38 at 0.25, 0.46 at 1,
+/// the reading's own scatter being about 0.3 dB) and rang at 1.23 dB rms at 2,
+/// Sine's "slow"; the tracker's delay is the reading delay of the tone loop's
+/// stability bound (the brief's 4.2).
+pub const MIXED_TONE_KI: f64 = 0.5;
+/// The tone law's rate limit in a Mixed Mode run, dB per second.
+pub const MIXED_TONE_MAX_RATE_DB_PER_S: f64 = 20.0;
+
+/// The built-in tone law's parameters in a Mixed Mode run: Sine's defaults with
+/// the compression a narrow tracker allows ([`MIXED_TONE_KI`]).
+pub fn mixed_tone_params() -> hertzforge_sine::law::servo_blend::ServoBlendParams {
+    hertzforge_sine::law::servo_blend::ServoBlendParams {
+        compression: hertzforge_sine::control::CompressionPreset::Custom {
+            ki: MIXED_TONE_KI,
+            max_rate_db_per_s: MIXED_TONE_MAX_RATE_DB_PER_S,
+        },
+        ..hertzforge_sine::law::servo_blend::ServoBlendParams::default()
     }
 }
 
@@ -203,6 +225,9 @@ pub struct MixedReport {
     pub status: MixedStatus,
     /// The event log.
     pub events: Vec<status::MixedEvent>,
+    /// One line per part, in parts-list order.
+    #[serde(default)]
+    pub parts: Vec<status::PartSummary>,
 }
 
 /// The Mixed Mode run service. One per run; the run thread owns it and drops it
@@ -215,6 +240,7 @@ pub struct MixedService {
     backend: Option<Box<dyn Backend>>,
     station: hertzforge_module_abi::StationClass,
     sample_rate_hz: f64,
+    requested_rate_hz: f64,
     sysid_seed: u64,
     data_root: Option<PathBuf>,
     state: MixedState,
@@ -227,6 +253,33 @@ pub struct MixedService {
     sysid_cancel: Arc<AtomicBool>,
     clock: PartClock,
     trip: Option<MixedTrip>,
+    /// The run once armed.
+    rt: Option<Box<run::Runtime>>,
+    phase: status::MixedPhase,
+    outcome: Option<MixedOutcome>,
+    /// How the run ends once the drive is down (a stop on its way).
+    ending: Option<MixedOutcome>,
+    /// Verbs posted between chunks, applied at the next batch.
+    pending: std::sync::Mutex<Vec<live::Verb>>,
+    /// Station frame at engage.
+    engaged_at: u64,
+    /// Station frame the phase last changed at.
+    phase_at: u64,
+    /// Station frame the drive reached zero on the way to the end.
+    zero_at: Option<u64>,
+    histories: live::Histories,
+    chunk_peak: f64,
+    chunk_rms: f64,
+    /// The random part's sum of squares and frames toward its rms abort.
+    rand_acc: (f64, u64),
+    /// The level ladder: the rung the level is at or climbing to, whether it
+    /// is on that rung, seconds at the present level and at full level (holds
+    /// excluded).
+    ladder: live::Ladder,
+    /// The capture's folder and its law records not yet written.
+    capture_dir: Option<PathBuf>,
+    law_bytes: Vec<u8>,
+    summaries: Vec<status::PartSummary>,
 }
 
 impl std::fmt::Debug for MixedService {
@@ -286,6 +339,7 @@ impl MixedService {
             backend: Some(backend),
             station,
             sample_rate_hz,
+            requested_rate_hz: sample_rate_hz,
             sysid_seed,
             data_root,
             state: MixedState::Idle,
@@ -297,6 +351,22 @@ impl MixedService {
             sysid_cancel: Arc::new(AtomicBool::new(false)),
             clock,
             trip: None,
+            rt: None,
+            phase: status::MixedPhase::Idle,
+            outcome: None,
+            ending: None,
+            pending: std::sync::Mutex::new(Vec::new()),
+            engaged_at: 0,
+            phase_at: 0,
+            zero_at: None,
+            histories: live::Histories::default(),
+            chunk_peak: 0.0,
+            chunk_rms: 0.0,
+            rand_acc: (0.0, 0),
+            ladder: live::Ladder::default(),
+            capture_dir: None,
+            law_bytes: Vec::new(),
+            summaries: Vec::new(),
         })
     }
 
@@ -370,22 +440,22 @@ impl MixedService {
 
     /// Whether arming moved the rate from the one asked for.
     pub fn rate_was_coerced(&self) -> bool {
-        false
+        self.rt.is_some() && self.requested_rate_hz != self.sample_rate_hz
     }
 
     /// The station's configured facts after arm; `None` before.
     pub fn configured(&self) -> Option<hertzforge_hal::ConfiguredActual> {
-        None
+        self.rt.as_ref().map(|r| r.actual)
     }
 
     /// The engine's health counters; `None` before the loop engages.
     pub fn engine_health(&self) -> Option<hertzforge_engine::EngineHealth> {
-        None
+        self.rt.as_ref().and_then(|r| r.engine_health())
     }
 
-    /// Input blocks the station dropped.
+    /// Frames the engine's raw ring overran (frames the watchdog never saw).
     pub fn blocks_dropped(&self) -> u64 {
-        0
+        self.engine_health().map_or(0, |h| h.ring_overruns as u64)
     }
 
     /// The identification's seed.
@@ -421,12 +491,15 @@ impl MixedService {
 
     /// Whether test progress is held.
     pub fn is_held(&self) -> bool {
-        self.clock.held()
+        match &self.rt {
+            Some(r) => r.step.clock.held(),
+            None => self.clock.held(),
+        }
     }
 
     /// Whether the drive is at zero (before engage, after a stop or abort).
     pub fn drive_is_zero(&self) -> bool {
-        !self.state.is_running()
+        self.rt.as_ref().is_none_or(|r| r.step.drive_is_zero())
     }
 
     /// How the level schedule advances.
@@ -436,254 +509,18 @@ impl MixedService {
 
     /// The identification's band coherence; 0 before it runs.
     pub fn band_coherence(&self) -> f64 {
-        0.0
+        self.rt.as_ref().map_or(0.0, |r| r.ident.band_coherence)
     }
 
     /// The identification's measured pipeline lag, frames; 0 before it runs.
     pub fn sysid_lag_frames(&self) -> usize {
-        0
+        self.rt.as_ref().map_or(0, |r| r.ident.lag)
     }
 
     /// The flag that cancels a running identification (the run thread bridges
     /// its own stop to it).
     pub fn sysid_cancel_flag(&self) -> Arc<AtomicBool> {
         self.sysid_cancel.clone()
-    }
-
-    /// Test progress, 0 to 1, when the run's end is known (every part's
-    /// schedule bounded, or a full-level time); `None` otherwise.
-    pub fn progress(&self) -> Option<f64> {
-        None
-    }
-
-    // ---- arm, identification, gate, review -----------------------------
-
-    /// Arm: adopt the station's rate (re-validating every part under its
-    /// half), open the station through the shared arm gate, build the line
-    /// grid, the floor target and envelopes, the band references and the tone
-    /// targets. State stays [`MixedState::Idle`] until identification.
-    pub fn arm(&mut self) -> Result<(), MixedError> {
-        Err(MixedError::NotBuilt("arm"))
-    }
-
-    /// Run Random's broadband pretest at the identification level: `|H|^2`,
-    /// coherence and the pipeline lag on the line grid. `pretest_frames` 0
-    /// takes the length the grid and the target degrees of freedom need. State
-    /// [`MixedState::SysId`] while it runs; cancelled by
-    /// [`Self::sysid_cancel_flag`].
-    pub fn run_sysid(&mut self, pretest_frames: usize) -> Result<(), MixedError> {
-        let _ = pretest_frames;
-        Err(MixedError::NotBuilt("identify the plant"))
-    }
-
-    /// Judge the identification's band coherence against
-    /// `identification.coherence_floor`. `Ok(true)`: passed; the run holds at
-    /// [`MixedState::AwaitingReview`] when `review_hold` is on, else is ready
-    /// to proceed. `Ok(false)`: parked at [`MixedState::CoherenceHold`].
-    pub fn coherence_gate(&mut self) -> Result<bool, MixedError> {
-        Err(MixedError::NotBuilt("judge the identification"))
-    }
-
-    /// Leave the review hold and engage: build the floor law and one tone law
-    /// per tone, seed them, start the station's persistent run, and play the
-    /// floor alone at the schedule's start level ([`status::MixedPhase::FloorOnly`]).
-    pub fn proceed_after_review(&mut self) -> Result<(), MixedError> {
-        Err(MixedError::NotBuilt("engage"))
-    }
-
-    // ---- running ---------------------------------------------------------
-
-    /// Run about a quarter second of station time: per frame, every part's
-    /// clock, oscillator and tracker, and the summed drive's peak check; per
-    /// control tick, each settled tone's law; between chunks, the floor's
-    /// estimate and law, the bands' servo and the next synthesis segment.
-    /// Returns `true` while the run goes on, `false` once it has ended
-    /// (stopped, completed or aborted).
-    pub fn run_chunk(&mut self) -> Result<bool, MixedError> {
-        Err(MixedError::NotBuilt("run"))
-    }
-
-    /// Run `batches` station blocks (a test's finer step than a chunk). Same
-    /// return as [`Self::run_chunk`].
-    pub fn run_batches(&mut self, batches: u32) -> Result<bool, MixedError> {
-        let _ = batches;
-        Err(MixedError::NotBuilt("run"))
-    }
-
-    /// Hand the last chunk's raw input blocks to `on_block` (`block`, `stride`
-    /// = input channels per frame) and release them: the run thread's tap for
-    /// time plots.
-    pub fn service_analysis_tapped<F>(&mut self, on_block: F)
-    where
-        F: FnMut(&[f32], usize),
-    {
-        let _ = on_block;
-    }
-
-    // ---- verbs (posted to the step; take effect at its next tick) ----------
-
-    /// Step the level by `delta_db` (every part moves by the same dB, as a
-    /// ramp).
-    pub fn step_level(&self, delta_db: f64) -> Result<(), MixedError> {
-        let _ = delta_db;
-        Err(MixedError::NotBuilt("change the level"))
-    }
-
-    /// Jump to rung `i` of the level table.
-    pub fn jump_to_level(&self, i: usize) -> Result<(), MixedError> {
-        let _ = i;
-        Err(MixedError::NotBuilt("change the level"))
-    }
-
-    /// Go to `db` against full (clamped to the table's range); returns the
-    /// level taken.
-    pub fn set_level_db(&self, db: f64) -> Result<f64, MixedError> {
-        let _ = db;
-        Err(MixedError::NotBuilt("change the level"))
-    }
-
-    /// Set how the schedule advances (automatic or manual). Allowed before
-    /// and during the run.
-    pub fn set_run_mode(&mut self, mode: RunMode) -> Result<(), MixedError> {
-        if self.state.is_terminal() {
-            return Err(MixedError::BadState("the run has ended".into()));
-        }
-        self.run_mode = mode;
-        Ok(())
-    }
-
-    /// Hold test progress: every part's clock stops (sweeps, dwell timers,
-    /// windows); every part keeps playing at its frequency and level, under
-    /// control.
-    pub fn hold(&self) -> Result<(), MixedError> {
-        Err(MixedError::NotBuilt("hold"))
-    }
-
-    /// Resume test progress; every clock restarts together.
-    pub fn resume(&self) -> Result<(), MixedError> {
-        Err(MixedError::NotBuilt("resume"))
-    }
-
-    /// Switch the part `part` on or off during the run, as a ramp at the stop
-    /// ramp's rate. The floor cannot be switched off.
-    pub fn set_part_enabled(&self, part: &str, on: bool) -> Result<(), MixedError> {
-        let _ = (part, on);
-        Err(MixedError::NotBuilt("switch a part"))
-    }
-
-    /// Change a live parameter `key` of one law to `value`; returns the value
-    /// taken. For [`LawRole::Tones`] it changes every tone's instance.
-    pub fn adjust(
-        &mut self,
-        role: LawRole,
-        key: &str,
-        value: f64,
-    ) -> Result<f64, MixedAdjustRefusal> {
-        let _ = (role, key, value);
-        Err(MixedAdjustRefusal::NotEngaged)
-    }
-
-    /// Ask for the controlled stop: every part ramps out over
-    /// `shutdown_ramp_s`, then the run ends [`MixedOutcome::Stopped`]. The run
-    /// thread keeps calling [`Self::run_chunk`] until it returns `false`.
-    pub fn request_stop(&self) -> Result<(), MixedError> {
-        Err(MixedError::NotBuilt("stop"))
-    }
-
-    /// Stop now, ramping every part out within this call, and end the run.
-    pub fn stop(&mut self) -> Result<(), MixedError> {
-        if matches!(self.state, MixedState::Idle) || self.state.is_terminal() {
-            return Ok(());
-        }
-        Err(MixedError::NotBuilt("stop"))
-    }
-
-    /// Abort: the drive goes to zero at the next block, the run ends
-    /// [`MixedOutcome::Aborted`] with `reason` logged. Always succeeds before
-    /// engage (there is nothing to take down) and after the end.
-    pub fn abort(&mut self, reason: &str) -> Result<(), MixedError> {
-        if matches!(self.state, MixedState::Idle) || self.state.is_terminal() {
-            self.log.push(
-                0.0,
-                status::MixedEventKind::Note {
-                    text: format!("abort: {reason}"),
-                },
-            );
-            return Ok(());
-        }
-        Err(MixedError::NotBuilt("abort"))
-    }
-
-    // ---- capture -------------------------------------------------------------
-
-    /// Start a capture named `run_name` under the capture root; returns its
-    /// folder. The law records are written beside it while it runs.
-    pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, MixedError> {
-        let _ = run_name;
-        Err(MixedError::NotBuilt("capture"))
-    }
-
-    /// Stop the capture.
-    pub fn stop_capture(&mut self) -> Result<(), MixedError> {
-        Ok(())
-    }
-
-    /// Save a snapshot of the spectra and status with `marks`; returns its
-    /// path.
-    pub fn save_snapshot(&mut self, marks: Vec<Mark>) -> Result<PathBuf, MixedError> {
-        let _ = marks;
-        Err(MixedError::NotBuilt("save a snapshot"))
-    }
-
-    // ---- reading -------------------------------------------------------------
-
-    /// The full status (every part's row, the floor, the totals, the laws).
-    pub fn status(&self) -> MixedStatus {
-        self.live_status()
-    }
-
-    /// The status as of the last chunk, cheap to call each chunk.
-    pub fn live_status(&self) -> MixedStatus {
-        let mut s = MixedStatus::idle(&self.cfg);
-        s.state = self.state;
-        s.trip = self.trip.clone();
-        s.run_mode = self.run_mode;
-        s.held = self.clock.held();
-        s
-    }
-
-    /// The display: spectra on the line grid and each tone's and band's
-    /// history. Empty before the loop engages.
-    pub fn display(&self) -> MixedDisplay {
-        MixedDisplay::default()
-    }
-
-    /// The identification on the line grid; `None` before it has run.
-    pub fn frf(&self) -> Option<display::MixedFrf> {
-        None
-    }
-
-    /// The laws' counters; `None` before the laws are built.
-    pub fn law_status(&self) -> Option<MixedLawStatus> {
-        None
-    }
-
-    /// The floor law's counters (zero before engage).
-    pub fn floor_law_tally(&self) -> RoleTally {
-        RoleTally::default()
-    }
-
-    /// The run's record.
-    pub fn report_data(&self) -> MixedReport {
-        MixedReport {
-            config: self.cfg.clone(),
-            sample_rate_hz: self.sample_rate_hz,
-            state: self.state,
-            outcome: None,
-            trip: self.trip.clone(),
-            status: self.status(),
-            events: self.log.events().to_vec(),
-        }
     }
 }
 

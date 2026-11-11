@@ -101,26 +101,29 @@ fn new_refuses_a_configuration_by_name_at_the_station_rate() {
 }
 
 #[test]
-fn what_is_not_built_is_refused_by_a_typed_error() {
+fn every_step_out_of_order_is_refused_by_state() {
     let mut s = service(combined()).unwrap();
-    for (e, what) in [
-        (s.arm().unwrap_err(), "arm"),
-        (s.run_sysid(0).unwrap_err(), "identify the plant"),
-        (s.coherence_gate().unwrap_err(), "judge the identification"),
-        (s.proceed_after_review().unwrap_err(), "engage"),
-        (s.run_chunk().unwrap_err(), "run"),
-        (s.hold().unwrap_err(), "hold"),
-        (
-            s.set_part_enabled("t1", false).unwrap_err(),
-            "switch a part",
-        ),
+    for e in [
+        s.run_sysid(0).unwrap_err(),
+        s.coherence_gate().unwrap_err(),
+        s.proceed_after_review().unwrap_err(),
+        s.run_chunk().unwrap_err(),
+        s.hold().unwrap_err(),
+        s.set_part_enabled("t1", false).unwrap_err(),
+        s.set_level_db(-3.0).unwrap_err(),
+        s.request_stop().unwrap_err(),
     ] {
-        assert_eq!(e, MixedError::NotBuilt(what));
-        assert_eq!(e.name(), "not_built");
+        assert_eq!(e.name(), "bad_state", "{e}");
     }
+    assert_eq!(s.start_capture("x").unwrap_err().name(), "bad_state");
     assert_eq!(
         s.adjust(LawRole::Tones, "blend_w", 0.5).unwrap_err().why(),
         "not_engaged"
+    );
+    // The floor cannot be switched off.
+    assert_eq!(
+        s.set_part_enabled("floor", false).unwrap_err().name(),
+        "bad_state"
     );
     // Before engage there is nothing to take down: stop and abort succeed.
     s.stop().unwrap();

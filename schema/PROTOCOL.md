@@ -3084,8 +3084,10 @@ gate has run, the others until the loop has engaged.
 
 ## Mixed Mode
 
-**Status.** This section is the contract the Mixed Mode service and screen are built against.
-Until the service is built, every `mixed.*` method is answered `unknown_method`.
+**Status.** This section is the contract the Mixed Mode service and screen are built against;
+the service serves every method below. Where a figure the core does not report yet is named
+(a trip's measured and limit values, an envelope alarm's worst line), the field is present and
+null.
 
 A Mixed Mode test plays a list of **parts** together on one drive and controls them together:
 exactly one **floor** (broadband random to a breakpoint profile), up to 12 **tones** (sines of a
@@ -3172,7 +3174,7 @@ from a file or pasted rows with `sine.profile.import`, which only computes.
                 "start_hz":1300,"direction":"up","end":null},
     "level_g2_hz":0.1,"width_share":0.05,"alarm_db":[3,3],"abort_db":[6,6]}],
  "exclusion_hz":2,
- "acquisition":{"fs_hz":8192,"n_pts":8192,"n_avg":4,"tick_ms":10},
+ "acquisition":{"fs_hz":8192,"n_pts":16384,"n_avg":4,"tick_ms":10},
  "schedule":{"mode":"auto","levels":[{"db":-12,"dwell_s":30},{"db":-6,"dwell_s":30},{"db":0}],
              "full_level_s":300},
  "control":{"composite":"weighted_avg","weights":[{"channel":1,"weight":1}],
@@ -3261,7 +3263,7 @@ and meaning are theirs, and the field applies as stated here:
 |---|---|---|
 | `title` | empty | The run's name |
 | `exclusion_hz` | 2 | The width, Hz each side, around a tone that stands still (a `fixed` tone, or one that follows a `fixed` part) whose lines are left out of the floor's average; above 0, at most 50. A narrowband's lines, its edges plus two lines each side, are left out wherever the band is. A tone that sweeps leaves no line out. Lines left out are given the floor law's error interpolated in dB from the nearest clean lines either side |
-| `acquisition.fs_hz`, `n_pts`, `n_avg` | (required) | Random's grid: the rate requested of the station, the FFT length (a power of two) and the frames per control loop (Hann, half overlap). The lines are `fs_hz / n_pts` apart and must be no wider than the tracking width (`out_of_range` at `acquisition.n_pts`) |
+| `acquisition.fs_hz`, `n_pts`, `n_avg` | (required) | Random's grid: the rate requested of the station, the FFT length (a power of two) and the frames per control loop (Hann, half overlap). The lines are `fs_hz / n_pts` apart; with tones they must be no wider than half of `exclusion_hz`, so a tone's exclusion covers at least two lines (`out_of_range` at `exclusion_hz`) |
 | `acquisition.tick_ms` | 10 | Sine's control tick, ms, converted to whole frames at the rate the station adopts: 2 to 1000 for a built-in tone law, 8 to 1000 for a law file (`tick_out_of_range`) |
 | `schedule` | (required) | Random's ladder, `{"mode","levels":[{"db","dwell_s"}],"full_level_s"}`, moving every part by the same dB. In `auto` the run engages at the first level, holds each for its `dwell_s` of parts time and full level for `full_level_s`, then ends `completed`; in `manual` it moves only on `mixed.level` |
 | `control.composite`, `weights` | `weighted_avg`, 1 each | Random's, for the floor, the narrowbands and each tone's composite tracked amplitude |
@@ -3272,7 +3274,7 @@ and meaning are theirs, and the field applies as stated here:
 | `control.soft_start_db`, `soft_start_relax_db` | 9, 6 | Random's, for the floor alone |
 | `control.level_ramp_s`, `shutdown_ramp_s` | 3, 3 | Random's: a level change ramps every part together over `level_ramp_s`; the controlled stop ramps every part together 40 dB down over `shutdown_ramp_s`, then to zero |
 | `control.part_ramp_s` | 3 | The ramp of one part coming in or going out (its window, its `end`, `mixed.part`), above 0, at most 60 s. Tones come in from their feed-forward amplitude |
-| `control.floor_settle_s` | 30 | The most station time the floor alone is given at the start level to equalize (above 0, at most 600). It has equalized once its estimate holds `control_dof` degrees of freedom with its rms within 1 dB of its reference; at `floor_settle_s` the parts come in anyway and the log says so |
+| `control.floor_settle_s` | 30 | The most station time the floor alone is given at the start level to equalize (above 0, at most 600). It has equalized once its estimate holds `control_dof` degrees of freedom with its rms within 1 dB of its reference; if the grid needs longer than `floor_settle_s` to reach `control_dof` (`derived.floor_equalize_s`), the parts wait for that; the log states both |
 | `control.trust_coherence`, `trust_h_floor_frac` | 0.5, 0.05 | Sine's: where the identification is trusted for a tone's feed-forward and its law (a tone at a frequency it does not trust has no prediction there) |
 | `control.tracking` | `{"kind":"fixed","hz":0.5}` | Sine's form; Mixed Mode tracks every tone at one fixed width, Hz, above 0, at most 10 (`{"kind":"proportional"}` is `out_of_range`). A tone's reading is used once its tracker has settled (1.3 over the width, s) |
 | `control.law.floor` | `{"id":"hinv"}` | The floor's law, by catalog `id` in world `single` (see "Control Laws"), with `params` by key; defaults fill the rest |
@@ -3281,7 +3283,7 @@ and meaning are theirs, and the field applies as stated here:
 | `control.law_guards.tones` | Sine's | Sine's `law_budget`, `law_misses`, `max_step_db`, `max_rise_db_per_s`, `divergence_s` and `fault_debounce_ticks`, with Sine's defaults and ranges, for each tone |
 | `limits.drive_vpk_ceiling` | (required) | Sine's: volts peak, above 0, at most 10. The summed drive (random part plus tones) is held at or under it, judged on every frame; how the cut is shared between the parts is the service's, and `limiting` says when it binds |
 | `limits.drive_vpk_abort` | (required) | Sine's: volts peak, at least the ceiling (`abort_below_ceiling`) and at most 10. A summed drive sample at or over it aborts the run (`drive_vpk`) |
-| `limits.kinematic_monitor` | true | Sine's: with `feasibility`, abort when the response's velocity or displacement, read on raw samples (tones in), passes the shaker's rating (`kinematic`) |
+| `limits.kinematic_monitor` | true | Sine's: with `feasibility`, abort when the response's velocity or displacement, read on raw samples (tones in), passes the shaker's rating (`kinematic`). Off, the station's own raw-sample watchdog still trips on each channel's own velocity limit: the switch does not turn raw-sample protection off |
 | `limits.channels` | none | Random's limit rows, `{"channel","kind","rows":[{"freq_hz","ceiling"}]}`, ceilings in the channel's unit squared per Hz. The service lowers the random part where a channel would pass its ceiling; a limit never aborts, and it does not lower a tone |
 | `feasibility` | null | Random's shaker record, moving mass and `crest_factor` (default 3). Checked at configure and arm against the predicted peaks (below) |
 | `capture` | off | Sine's, with `run_name` default `mixed` |
@@ -3290,9 +3292,10 @@ and meaning are theirs, and the field applies as stated here:
 The control channels are the table's enabled `control` rows; the drive is its first enabled
 `drive` row. A configuration whose shape is wrong is refused `bad_params` naming the field in
 `detail.param` as the request's own path (`config.parts[2].amplitude_g`); its content errors are
-refused `config_invalid` with the items, located by `field`, the path inside the configuration
-(`parts[3].schedule.of`, `control.law_guards.tones.max_step_db`), or by `field` and `row` for a
-floor breakpoint row (`parts[0].breakpoints`) or a tone profile row (`parts[2].profile.rows`).
+refused `config_invalid` (code `bad_request`, as Random's and Sine's) with the items, located by
+`field`, the path inside the configuration (`parts[3].schedule.of`,
+`control.law_guards.tones.max_step_db`), a floor breakpoint row or a tone profile row by its
+index in that path (`parts[0].breakpoints[2]`, `parts[2].profile.rows[1]`).
 `dry_run: true` checks without replacing anything and needs no control.
 
 **Result.** `state` is the `mixed.state` object (`configured`). `derived` is what the service
@@ -3300,11 +3303,11 @@ computes at configure, at full level (0 dB):
 
 ```
 {"band_hz":[20,2000],
- "grid":{"fs_hz":8192,"n_pts":8192,"df_hz":1,"lines":1981,"loop_s":4,
+ "grid":{"fs_hz":8192,"n_pts":16384,"df_hz":0.5,"lines":3961,"loop_s":8,
          "tick_frames":82,"tick_s":0.0100098,"actual":false},
  "control_channels":[1],
  "parts":[{"id":"floor","kind":"floor","name":"Floor","freq_hz":null,"width_hz":null,
-           "ms_g2":36.7,"peak_g":null},
+           "ms_g2":36.75,"peak_g":null},
           {"id":"t1","kind":"tone","name":"Blade pass","freq_hz":[120,120],"width_hz":null,
            "ms_g2":2,"peak_g":2},
           {"id":"t2","kind":"tone","name":"Rotor","freq_hz":[300,600],"width_hz":null,
@@ -3315,18 +3318,18 @@ computes at configure, at full level (0 dB):
            "width_hz":[20,20],"ms_g2":4,"peak_g":null},
           {"id":"b2","kind":"narrowband","name":"Rotor band","freq_hz":[1300,1800],
            "width_hz":[65,90],"ms_g2":9,"peak_g":null}],
- "reference":{"floor_ms_g2":36.7,"tones_ms_g2":3.25,"bands_ms_g2":13,"total_ms_g2":52.95,
-              "total_rms_g":7.277,"random_rms_g":7.05},
- "kinematics":{"peak_accel_g":25.15,"peak_velocity_ips":7.672,"peak_disp_pp_in":0.0489,
+ "reference":{"floor_ms_g2":36.75,"tones_ms_g2":3.25,"bands_ms_g2":13,"total_ms_g2":53,
+              "total_rms_g":7.28,"random_rms_g":7.053},
+ "kinematics":{"peak_accel_g":25.16,"peak_velocity_ips":7.664,"peak_disp_pp_in":0.04887,
                "verdict":"pass","message":"..."},
- "exclusion":[{"part":"t1","lo_hz":118,"hi_hz":122,"lines":5},
-              {"part":"b1","lo_hz":238,"hi_hz":262,"lines":25}],
+ "exclusion":[{"part":"t1","lo_hz":118,"hi_hz":122,"lines":9},
+              {"part":"b1","lo_hz":239,"hi_hz":261,"lines":45}],
  "closest_tones":{"parts":["t1","t2"],"spacing_hz":180,"min_hz":1},
  "tracking":[{"part":"t1","verdict":"ok","ratio":0,"at_hz":null,"message":null},
              {"part":"t2","verdict":"ok","ratio":0.002,"at_hz":null,"message":null},
              {"part":"t3","verdict":"ok","ratio":0.004,"at_hz":null,"message":null}],
- "test_s":360,"identification_s":16,
- "call_budget_s":{"floor":1,"tones":0.0025025},
+ "test_s":360,"floor_equalize_s":...,"identification_s":32,
+ "call_budget_s":{"floor":2,"tones":0.0025024},
  "law":{"floor":{"id":"hinv","name":"...","version":"...","sha256":null,"live":[],
                  "hardware":true},
         "tones":{"id":"servo_blend","name":"Servo blend","version":"0.1.0","sha256":null,
@@ -3346,7 +3349,8 @@ computes at configure, at full level (0 dB):
 - `reference` sums them: `total_ms_g2` is floor plus tones plus narrowbands (the composite's
   reference, which is shown and not judged), `total_rms_g` its root, `random_rms_g` the random
   part's (floor plus narrowbands).
-- `kinematics` is the predicted peak of the sum, each to 4 significant digits: acceleration as the
+- `kinematics` is the core's prediction of the peak of the sum (null when it cannot predict),
+  each to 4 significant digits: acceleration as the
   tones' amplitudes summed plus `crest_factor` times the random part's rms; velocity and
   displacement as each tone's at the frequency of its motion where it is largest plus
   `crest_factor` times the random part's (the narrowbands at their lowest centers); displacement
@@ -3360,7 +3364,9 @@ computes at configure, at full level (0 dB):
 - `tracking` is Sine's verdict for each tone, in the parts' order, on the fixed tracking width:
   `ok`, `advisory` (a warning `tracking_lag`) or `refused` (an error `tracking_lag`).
 - `test_s` is the ladder's length in parts time (the dwells and `full_level_s`; null in
-  `manual`); `identification_s` the identification's measuring time (`pretest.averages`
+  `manual`); `floor_equalize_s` the core's prediction of the station time the floor needs to
+  reach `control_dof` degrees of freedom on this grid: the parts come in after the larger of it
+  and `floor_settle_s`; `identification_s` the identification's measuring time (`pretest.averages`
   loops); `call_budget_s` one floor law call's budget (a fraction of the loop's acquisition
   time) and one tone law call's (a fraction of the tick), 7 decimals.
 - `law` is each role's law, its live parameter keys (a `single` law has none), and `hardware`:
@@ -3560,16 +3566,18 @@ floor and for a trip of no part), and its kind's facts. `end.message` names the 
 | `kind` | Part | Facts |
 |---|---|---|
 | `envelope` | the floor | Random's: `abort_lines`, `worst_db` |
-| `abort_band` | a tone | Sine's: `side` (`high` or `low`), `measured_g`, `limit_g` |
-| `band_abort` | a narrowband | `side`, `measured_g2_hz`, `limit_g2_hz`, `dof` |
+| `abort_band` | a tone | Sine's: `side` (`high` or `low`), `measured_g`, `limit_g`, and `error_db` (the tone's error then); `measured_g` and `limit_g` are null until the core reports them |
+| `band_abort` | a narrowband | `side`, `measured_g2_hz`, `limit_g2_hz`, `dof`, and `error_db`; the first three are null until the core reports them |
 | `servo_fault` | a tone | Sine's: `consecutive_ticks` |
 | `divergence` | the floor or a tone | the floor: Random's `consecutive_loops`, `divergent_bins`; a tone: Sine's `capped_s` |
 | `law_fault` | the floor, or the tone whose instance failed | `role` (`floor` or `tones`), `reason`, `consecutive` |
 | `oscillator_range` | a tone | Sine's: `requested_hz`, `fs_hz` |
 | `kinematic` | none | Random's: `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit` |
 | `drive_vpk` | none | Sine's: `vpk`, `abort_vpk` (the summed drive) |
-| `drive_vrms` | none | Random's: `realized_vrms`, `limit_vrms` (the random part) |
-| `watchdog` | none | Sine's: `channel`, `axis`, `value`, `limit`, `measured`, `drive_vpk` |
+| `random_vrms` | none | `realized_vrms`, `limit_vrms`: the random part's rms (floor and narrowbands) over the last quarter second reached `control.drive_abort_vrms` |
+| `watchdog` | none | Sine's: `channel`, `axis`, `value`, `limit`, `measured`, `drive_vpk` (a limit channel's own abort) |
+| `overload` | none | `channel`: an overload on a control or limit channel (the measurement the loop steers by); on any other channel the overload latches the channel's `overload` indicator and the run goes on |
+| `station` | none | `message`: the station's own words |
 
 A `law_fault` trip's `reason` is Random's for the floor (`error`, `panicked`, `over_budget`,
 `wrong_length`, `non_finite`, `negative`, `non_finite_level`, `over_memory`, `bad_diagnostics`)
@@ -3613,7 +3621,7 @@ Event topics:
 - `channels` lists every enabled input in table order as Random's: its rms over the band (tones
   in) and Random's input-range `overload` latch.
 - `alarms` lists what holds now: `{"kind":"envelope","part","lines","worst_db"}` (the floor's
-  clean lines outside its alarm band), `{"kind":"band","part","side","error_db"}` (a tone or a
+  clean lines outside its alarm band; `worst_db` null until the core reports its worst line), `{"kind":"band","part","side","error_db"}` (a tone or a
   narrowband outside its alarm band) and `{"kind":"overload","channel"}`. An alarm warns; it
   does not stop the run.
 - `law` is the floor law's values on its last call by declared key, and each tone's instance's,
@@ -3695,16 +3703,15 @@ case's pass band in words, as the core sets it. A case's result:
 
 ```
 {"name":"fixed tone on floor","case":"fixed_tone_on_floor","role":"tones",
- "plant":"one mode, 250 Hz, Q 10","requirement":"...","passed":true,"detail":"...",
- "end":"completed","trip":null,"floor_worst_db":0.8,"tone_worst_db":0.4,"band_worst_db":null,
- "calls":18000,"misses":0,"refused":0,"capped":0,"worst_call_ms":0.01,"budget_ms":2.5,
- "max_drive_vpk":2.1}
+ "plant":"...","requirement":"...","passed":true,"detail":"..."}
 ```
 
-`floor_worst_db`, `tone_worst_db` and `band_worst_db` are the worst judged error of each kind of
-part at full level (null where the case has none); `calls`, `misses`, `refused`, `capped`,
-`worst_call_ms` and `budget_ms` are the law under check's. A law file's mixed result is recorded
-against its SHA-256 and its role (`recorded` true); the catalog entry is unchanged, and
+The result is `{"law","report":{"passed","recorded","role","cases"}}`: `law` the role's facts as
+`derived.law.<role>` states them, `cases` one result per case in the order above. `detail`
+states the case's measured figures in words, or the trip that failed it.
+
+A law file's mixed result is not yet recorded
+(`recorded` false): until it is, no imported law is cleared for hardware in a Mixed Mode role; the catalog entry is unchanged, and
 `mixed.configure` reports in `derived.law.<role>.hardware` whether the law may drive hardware in
 that role. `mixed.arm` on a hardware station refuses a law without both records
 `law_not_checked`, naming the role in `detail.role`. Refusals of `laws.check` with `mixed` are

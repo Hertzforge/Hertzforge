@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 97,
+ "method": "mixed.adjust",
+ "params": {
+  "key": "blend_w",
+  "value": 0.6
+ }
+}
