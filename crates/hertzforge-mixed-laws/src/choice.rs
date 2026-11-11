@@ -88,6 +88,25 @@ fn param_value(spec: &ParamSpec, v: &Value) -> Option<ParamValue> {
     })
 }
 
+/// Whether the tone law `id` takes the Mixed role's compression start values:
+/// the built-in, or a law whose manifest declares a `compression` choice with
+/// a `custom` option and numbers `ki` and `max_rate_db_per_s`.
+fn takes_mixed_compression(catalog: &LawCatalog, id: &str) -> bool {
+    if id == hertzforge_mixed::DEFAULT_TONE_LAW_ID {
+        return true;
+    }
+    let Some(entry) = catalog.entry(id) else {
+        return false;
+    };
+    let spec = |k: &str| entry.manifest.params.iter().find(|s| s.key == k);
+    let custom = matches!(
+        spec("compression").map(|s| &s.kind),
+        Some(ParamKind::Choice(c)) if c.options.iter().any(|o| o == "custom")
+    );
+    let number = |k: &str| matches!(spec(k).map(|s| &s.kind), Some(ParamKind::Number(_)));
+    custom && number("ki") && number("max_rate_db_per_s")
+}
+
 /// Resolve the run's two laws against `catalog`: the floor's through Random's
 /// resolver (a `single`-world law), the tones' through Sine's (a `sine`-world
 /// law). `control_channels` is the run's control channel count, against which
@@ -125,9 +144,11 @@ pub fn resolve_mixed(
         .resolve(&floor_choice, &mut scratch)
         .map_err(floor_err)?;
     // The built-in tone law reads through a narrow tracker in a mixed run, so
-    // its compression defaults to the one that holds there, not Sine's.
+    // its compression defaults to the one that holds there, not Sine's. A law
+    // file that declares the same parameters (the built-in's own law file
+    // does) starts from the same values: they are the role's, not the file's.
     let mut tones_pick = choice.tones.clone();
-    if tones_pick.id == hertzforge_mixed::DEFAULT_TONE_LAW_ID
+    if takes_mixed_compression(catalog, &tones_pick.id)
         && !tones_pick.params.contains_key("compression")
     {
         let p = &mut tones_pick.params;

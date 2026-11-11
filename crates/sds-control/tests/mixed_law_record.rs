@@ -318,12 +318,10 @@ async fn an_imported_floor_law_arms_on_hardware_only_through_its_mixed_record() 
     let _ = std::fs::remove_dir_all(&data_root);
 }
 
-/// The tone role. Ignored until the core hands a tone law file a grid without
-/// its 0 Hz line: today every case of the mixed check ends "the identification's
-/// grid is not positive and ascending" at the law host, so no imported tone law
-/// can pass it (the built-in law does not read the grid's first line).
+/// The tone role: an imported tone law is refused on a hardware-class station
+/// until it has passed the mixed check in the tones role, which it does from the
+/// role's start values (it declares the built-in's parameters), and then arms.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "the core hands a tone law file a grid that starts at 0 Hz"]
 async fn an_imported_tone_law_needs_its_own_check_and_the_tones_record() {
     let _turn = ONE_CHECK.lock().await;
     let o = options(
@@ -390,11 +388,7 @@ async fn an_imported_tone_law_needs_its_own_check_and_the_tones_record() {
 
     // The mixed check in the tones role clears it.
     let r = c
-        .ok(
-            "laws.check",
-            json!({"id": tone, "mixed": "tones",
-                   "params": {"compression": "custom", "ki": 0.5, "max_rate_db_per_s": 20}}),
-        )
+        .ok("laws.check", json!({"id": tone, "mixed": "tones"}))
         .await;
     schema.assert_valid(&r, Some("mixedLawsCheckResult"));
     assert_eq!(r["report"]["passed"], true, "{r}");
