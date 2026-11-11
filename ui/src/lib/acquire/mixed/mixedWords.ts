@@ -6,7 +6,7 @@
  * by side.
  */
 
-import type { MixedDerived, MixedLawFaultReason, MixedLiveHead, MixedOutcome, MixedPartKind, MixedPartRow, MixedPhase, MixedState, MixedTrip } from '$lib/protocol/mixed';
+import type { MixedConfig, MixedDerived, MixedLawFaultReason, MixedLiveHead, MixedOutcome, MixedPart, MixedPartKind, MixedPartRow, MixedPhase, MixedSchedule, MixedState, MixedTrip } from '$lib/protocol/mixed';
 import type { Status } from '$lib/protocol/types';
 import { formatNumber } from '$lib/viz/format';
 import { db, LAW_FAULT_WORDS, type LevelStatus } from '../words';
@@ -84,24 +84,182 @@ export function errDb(v: number | null | undefined): string {
 	return v === null || v === undefined || !Number.isFinite(v) ? '-' : `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(2)} dB`;
 }
 
-/** The rate now, in words, from the row's signed rate: "1 oct/min", "2 Hz/s". */
-export function partRate(row: Pick<MixedPartRow, 'rate_oct_per_min' | 'rate_hz_per_s'>): string | null {
-	if (typeof row.rate_oct_per_min === 'number') return `${num(Math.abs(row.rate_oct_per_min), 3)} oct/min`;
-	if (typeof row.rate_hz_per_s === 'number') return `${num(Math.abs(row.rate_hz_per_s), 3)} Hz/s`;
-	return null;
+/**
+ * What the parts table reads beside each row: every part's row now, the configuration the run holds
+ * and parts time. The row's own fields win where it carries them; the setup fills in what a row
+ * leaves out (a follower's leader and ratio, a sweep's stated rate, a part's window).
+ */
+export interface PartContext {
+	rows?: readonly MixedPartRow[];
+	config?: MixedConfig | null;
+	parts_s?: number | null;
 }
 
-/** What a part is doing now, in words: "Sweeping up at 1 oct/min, sweep 2 of 4", "Standing", "Off". */
-export function partMotion(row: MixedPartRow, held: boolean): string {
+const usable = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v) && v !== 0;
+
+function configPart(ctx: PartContext, id: string): MixedPart | undefined {
+	return ctx.config?.parts.find((p) => p.id === id);
+}
+
+function scheduleOf(ctx: PartContext, id: string): MixedSchedule | null {
+	const p = configPart(ctx, id);
+	return p && p.kind !== 'floor' ? p.schedule : null;
+}
+
+/** A follower's leader and ratio: the row's own when the service sends them, the setup's otherwise. */
+export function partFollows(row: MixedPartRow, ctx: PartContext = {}): { of: string; ratio: number } | null {
+	if (row.follows) return row.follows;
+	const s = scheduleOf(ctx, row.id);
+	return s?.kind === 'follow' ? { of: s.of, ratio: s.ratio } : null;
+}
+
+/** The part at the root of a follower's chain and the product of the ratios along it. */
+function followRoot(row: MixedPartRow, ctx: PartContext): { id: string; ratio: number } {
+	let id = row.id;
+	let ratio = 1;
+	let at: MixedPartRow | undefined = row;
+	for (let n = 0; n < 32; n++) {
+		const f: { of: string; ratio: number } | null = at ? partFollows(at, ctx) : (() => {
+			const s = scheduleOf(ctx, id);
+			return s?.kind === 'follow' ? { of: s.of, ratio: s.ratio } : null;
+		})();
+		if (!f) break;
+		ratio *= f.ratio;
+		id = f.of;
+		at = ctx.rows?.find((r) => r.id === id);
+	}
+	return { id, ratio };
+}
+
+function nameOf(ctx: PartContext, id: string): string {
+	return ctx.rows?.find((r) => r.id === id)?.name ?? configPart(ctx, id)?.name ?? id;
+}
+
+/**
+ * A sweeping part's rate in the unit its schedule states: the row's field in that unit when it holds
+ * a rate, the other field converted at the frequency now when only that one does, and the schedule's
+ * stated rate otherwise. Never a zero read from a field the service left empty. Without a schedule,
+ * whichever field holds a rate; null when neither does.
+ */
+export function partRate(row: MixedPartRow, schedule: MixedSchedule | null = null): string | null {
+	const f = row.freq_hz;
+	const oct = (v: number) => `${num(Math.abs(v), 3)} oct/min`;
+	const lin = (v: number) => `${num(Math.abs(v), 3)} Hz/s`;
+	const law = schedule?.kind === 'sweep' ? schedule.rate.law : null;
+	if (law === 'log' || (law === null && usable(row.rate_oct_per_min))) {
+		if (usable(row.rate_oct_per_min)) return oct(row.rate_oct_per_min);
+		if (usable(row.rate_hz_per_s) && usable(f)) return oct((row.rate_hz_per_s / (f * Math.LN2)) * 60);
+		return schedule?.kind === 'sweep' && schedule.rate.law === 'log' ? oct(schedule.rate.oct_per_min) : null;
+	}
+	if (usable(row.rate_hz_per_s)) return lin(row.rate_hz_per_s);
+	if (law === 'linear' && usable(row.rate_oct_per_min) && usable(f)) return lin((row.rate_oct_per_min * f * Math.LN2) / 60);
+	return schedule?.kind === 'sweep' && schedule.rate.law === 'linear' ? lin(schedule.rate.hz_per_s) : null;
+}
+
+/** A follower's motion from its root: "sweeping up at 0.3 oct/min" (a log rate is the same at every ratio; a linear one scales). */
+function rootMotion(row: MixedPartRow, ctx: PartContext): string | null {
+	const root = followRoot(row, ctx);
+	const r = ctx.rows?.find((x) => x.id === root.id);
+	if (!r?.direction) return null;
+	const s = scheduleOf(ctx, root.id);
+	if (s?.kind === 'sweep' && s.rate.law === 'linear') {
+		const own = usable(r.rate_hz_per_s) ? r.rate_hz_per_s : s.rate.hz_per_s;
+		return `sweeping ${r.direction} at ${num(Math.abs(own * root.ratio), 3)} Hz/s`;
+	}
+	const rate = partRate(r, s);
+	return `sweeping ${r.direction}${rate ? ` at ${rate}` : ''}`;
+}
+
+/** A part's frequency now: the row's, or for a follower whose row has none, its leader's times its ratio. */
+export function partFreq(row: MixedPartRow, ctx: PartContext = {}): number | null {
+	if (row.kind === 'floor') return null;
+	if (row.freq_hz !== null) return row.freq_hz;
+	const f = partFollows(row, ctx);
+	if (!f) return null;
+	const lead = ctx.rows?.find((r) => r.id === f.of);
+	const lf = lead ? partFreq(lead, ctx) : null;
+	return lf === null ? null : lf * f.ratio;
+}
+
+/** Whether a part that is not playing has ended, and how: its window closed, or its schedule ran out. */
+function partEnd(row: MixedPartRow, ctx: PartContext): { why: 'window' | 'schedule'; at_s?: number } | 'waiting' | null {
+	if (row.on || !row.enabled) return null;
+	const p = configPart(ctx, row.id);
+	const w = p?.window;
+	const t = ctx.parts_s;
+	if (typeof t === 'number' && typeof w?.off_s === 'number' && t >= w.off_s) return { why: 'window', at_s: w.off_s };
+	if (row.done) return { why: 'schedule' };
+	if (row.sweeps && row.sweeps.of !== null && row.sweeps.done >= row.sweeps.of) return { why: 'schedule' };
+	if (typeof t === 'number' && typeof w?.on_s === 'number' && t < w.on_s) return 'waiting';
+	if (typeof t === 'number' && p) return { why: 'schedule' };
+	return 'waiting';
+}
+
+/** What a part is doing now, in words: "Sweeping up at 1 oct/min, sweep 2 of 4", "Follows Rotor at 2×", "Standing", "Off". */
+export function partMotion(row: MixedPartRow, held: boolean, ctx: PartContext = {}): string {
 	if (row.kind === 'floor') return row.settled ? 'Equalized' : 'Equalizing';
-	if (!row.on) return row.enabled ? 'Waiting for its window' : 'Off';
+	if (!row.on) {
+		if (!row.enabled) return 'Off';
+		const end = partEnd(row, ctx);
+		if (end === 'waiting' || end === null) {
+			const on = configPart(ctx, row.id)?.window?.on_s;
+			return typeof on === 'number' && on > 0 ? `Waiting for its window, from ${num(on, 4)} s` : 'Waiting for its window';
+		}
+		return end.why === 'window' ? `Its window closed at ${num(end.at_s ?? 0, 4)} s` : 'Its schedule ended';
+	}
 	if (row.scale < 0.999) return row.enabled ? 'Ramping in' : 'Ramping out';
 	if (held) return 'Held';
-	const rate = partRate(row);
+	const follows = partFollows(row, ctx);
+	if (follows) {
+		const moving = rootMotion(row, ctx);
+		return `Follows ${nameOf(ctx, follows.of)} at ${num(follows.ratio, 4)}×${moving ? `, ${moving}` : ''}`;
+	}
+	const rate = partRate(row, scheduleOf(ctx, row.id));
 	const sw = row.sweeps;
 	const count = sw ? `, sweep ${sw.done + 1}${sw.of !== null ? ` of ${sw.of}` : ''}` : '';
 	if (row.direction) return `Sweeping ${row.direction}${rate ? ` at ${rate}` : ''}${count}`;
 	return 'Standing';
+}
+
+/** The state column's word for a part that is not playing: "Off", "Waiting" or "Ended"; null while it plays. */
+export function partStateWord(row: MixedPartRow, ctx: PartContext = {}): 'Off' | 'Waiting' | 'Ended' | null {
+	if (row.kind === 'floor' || row.on) return null;
+	if (!row.enabled) return 'Off';
+	const end = partEnd(row, ctx);
+	return end === null || end === 'waiting' ? 'Waiting' : 'Ended';
+}
+
+/** Degrees of freedom in words, only as the row carries them. */
+function dofWords(dof: number | null, floor: boolean): string {
+	if (dof === null || !Number.isFinite(dof)) return '';
+	if (dof <= 0) return floor ? 'no clean frame averaged yet' : 'no frame averaged yet';
+	// The floor's figure is the fewest of any clean line (lines differ by how many clean frames each has).
+	return floor ? `at least ${num(dof, 3)} degrees of freedom on every clean line` : `${num(dof, 3)} degrees of freedom`;
+}
+
+/** The line under a part's motion: the floor's lines and degrees of freedom, a narrowband's width, estimate and gain, a law's misses. */
+export function partDetail(row: MixedPartRow, ctx: PartContext = {}): string {
+	const law = row.law && (row.law.misses || row.law.capped) ? `${row.law.misses} unusable in a row, a cap bound ${row.law.capped} times` : '';
+	if (row.kind === 'tone') return law;
+	if (row.kind === 'floor') {
+		const l = row.lines;
+		const lines = l ? [`${l.clean} of ${l.in_band} lines clean, ${l.alarm} in alarm, ${l.abort} over abort`, dofWords(row.dof, true)].filter(Boolean).join('; ') : '';
+		return [lines, law].filter(Boolean).join('; ');
+	}
+	const p = configPart(ctx, row.id);
+	const share = p?.kind === 'narrowband' && typeof p.width_share === 'number' ? `, ${num(p.width_share * 100, 3)}% of its center` : '';
+	return [row.width_hz !== null ? `${num(row.width_hz, 3)} Hz wide${share}` : '', dofWords(row.dof, false), row.gain_db !== null ? `gain ${errDb(row.gain_db)}` : ''].filter(Boolean).join(', ');
+}
+
+/**
+ * A part's drive: a tone's V peak, the floor's or a narrowband's V rms. A narrowband that plays with
+ * a drive of exactly 0 has had no share of the random part reported yet, so it shows none.
+ */
+export function partDrive(row: MixedPartRow): string {
+	if (row.drive_vpk !== null) return `${num(row.drive_vpk, 3)} V pk`;
+	if (row.drive_vrms === null) return '-';
+	if (row.kind === 'narrowband' && row.on && row.drive_vrms === 0) return '-';
+	return `${num(row.drive_vrms, 3)} V rms`;
 }
 
 /** The trip's facts as labeled values, the part named by its name. */

@@ -598,6 +598,10 @@ export interface MixedPartRow {
 	lines: MixedFloorLines | null;
 	/** The part's law instance; null for a narrowband. `capped` counts ticks (a tone) or loops (the floor). */
 	law: { misses: number; capped: number } | null;
+	/** A follower's leader and ratio, when the service sends them; the shell reads the setup otherwise. */
+	follows?: { of: string; ratio: number } | null;
+	/** Its schedule or window has ended, when the service sends it. */
+	done?: boolean;
 }
 
 /** The composite: shown, not judged. */

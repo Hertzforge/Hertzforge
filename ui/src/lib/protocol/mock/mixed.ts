@@ -631,7 +631,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 		const lead = s.kind === 'follow' ? r.parts.find((x) => x.part.id === s.of) : null;
 		const sweep = s.kind === 'sweep' ? s : lead?.part.schedule.kind === 'sweep' ? lead.part.schedule : null;
 		const moving = !!sweep && !r.held && p.scale > 0;
-		const signed = (v: number) => (p.dir === 'down' ? -v : v) * (s.kind === 'follow' ? 1 : 1);
+		const signed = (v: number) => (p.dir === 'down' ? -v : v);
 		const rate = sweep?.rate;
 		const tone = part.kind === 'tone';
 		const err = p.measured !== null && p.target !== null && p.target > 0 ? round((tone ? 20 : 10) * Math.log10(p.measured / p.target), 2) : null;
@@ -645,7 +645,8 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			on: p.scale > 0,
 			scale: round(p.scale, 3),
 			freq_hz: round(p.freq, 2),
-			direction: sweep ? p.dir : null,
+			// As the service sends it: a follower's row carries no direction of its own.
+			direction: s.kind === 'sweep' ? p.dir : null,
 			sweeps: s.kind === 'sweep' ? { done: p.sweeps, of: s.end?.sweeps ?? null } : null,
 			rate_oct_per_min: rate?.law === 'log' ? (moving ? signed(rate.oct_per_min) : 0) : null,
 			rate_hz_per_s: rate?.law === 'linear' ? (moving ? signed(rate.hz_per_s * (s.kind === 'follow' ? s.ratio : 1)) : 0) : null,

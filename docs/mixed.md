@@ -172,16 +172,21 @@ The Run card carries the verbs that apply now: **Arm**, **Start**, **Proceed** a
 - The **parts table** switches a tone or a narrowband on or off during the run, once the parts have
   come in, as a ramp over the part ramp. A part switched off holds its own clock. The floor cannot
   be switched off, and a part whose window has closed or whose schedule has ended cannot be switched
-  back on; a refusal is said in one line under the part's row.
+  back on (its switch says so); a refusal is said in one line under the part's row.
 
 The level card says what the run is doing in plain words ("Floor alone at -12.0 dB, equalizing",
 "Every part at -6.0 dB", "Held: every part at its frequency and level"), the level the drive is at
 against the level commanded, parts time and the time at this level, the composite rms against its
 reference (shown, not judged), the summed drive, each law's unusable calls and capped loops or ticks,
 and the identification. The parts table shows, for every part, what it is doing ("Sweeping up at
-1 oct/min, sweep 2 of 4"), its frequency or center, its target against its measured value with the
-error in dB, its drive, and its state: in band, settling, limiting, alarm or off, each with its own
-mark and word.
+1 oct/min, sweep 2 of 4", "Follows Rotor at 2×, sweeping up at 1 oct/min", "Waiting for its window,
+from 40 s", "Its schedule ended"), its frequency or center, its target against its measured value
+with the error in dB, its drive, and its state: in band, settling, limiting, alarm, off, waiting or
+ended, each with its own mark and word. A sweep's rate is in the unit its schedule states: oct/min
+for a log sweep, Hz/s for a linear one. Under the floor's row are its lines (clean, in alarm, over
+abort) and the fewest degrees of freedom any clean line holds; under a narrowband's, its width (and
+its share of its center when it is sized that way), the degrees of freedom of its level and its
+servo gain.
 
 The pages, each drawn from the control service's views:
 

@@ -62,7 +62,7 @@ import {
 	type MixedSection
 } from './mixedSetup';
 import { mixedBarActions, mixedIsLive, mixedLiveParams, mixedModuleVerbs, mixedPrimary, partToggle, type MixedVerbContext, type MixedVerbId } from './mixedVerbs';
-import { MIXED_OUTCOME_WORDS, MIXED_PHASE_WORDS, PART_REFUSED_WORDS } from './mixedWords';
+import { MIXED_OUTCOME_WORDS, MIXED_PHASE_WORDS, PART_REFUSED_WORDS, partStateWord } from './mixedWords';
 import { MIXED_MAX_BANDS, MIXED_MAX_TONES } from '$lib/protocol/mixed';
 
 const SETUP_KEY = 'hertzforge.acquire.mixed.setup.v1';
@@ -379,6 +379,9 @@ export class MixedStore {
 	toggleOf(row: MixedPartRow): ActionState & { to: boolean } {
 		const t = partToggle(this.verbContext, row);
 		if (t.enabled && this.partBusy) return { ...t, enabled: false, reason: 'Waiting for the last switch.' };
+		// A part whose window has closed or whose schedule has run out cannot come back; say so on the
+		// switch rather than offer it and show the service's refusal.
+		if (t.enabled && partStateWord(row, { rows: this.parts, config: this.runConfig, parts_s: this.now?.parts_s ?? null }) === 'Ended') return { ...t, enabled: false, reason: 'The part has ended.' };
 		return t;
 	}
 
