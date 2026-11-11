@@ -385,6 +385,33 @@ fn a_bad_value_of_a_part_or_around_it_is_refused_naming_the_field() {
     let mut c = config(vec![floor("floor")]);
     c.limits.drive_vpk_abort = Some(1.0);
     assert_eq!(refusal(&c), "bad_config");
+    // The loop grid, the soft start, the crest factor and the trust floors.
+    type Poke = fn(&mut MixedConfig);
+    let pokes: [(&str, Poke); 8] = [
+        ("nfft", |c| c.nfft = Some(1000)),
+        ("nfft", |c| c.nfft = Some(8)),
+        ("blocks_per_window", |c| c.blocks_per_window = 0),
+        ("soft_start_db", |c| c.soft_start_db = -1.0),
+        ("soft_start_relax_db", |c| c.soft_start_relax_db = f64::NAN),
+        ("crest_factor", |c| c.crest_factor = 0.5),
+        ("trust_coherence", |c| {
+            c.identification.trust_coherence = 1.5
+        }),
+        ("trust_h_floor_frac", |c| {
+            c.identification.trust_h_floor_frac = 1.0
+        }),
+    ];
+    for (field, poke) in pokes {
+        let mut c = config(vec![floor("floor")]);
+        poke(&mut c);
+        match c.validate(None) {
+            Err(ConfigError::BadConfig { field: f, .. }) => assert_eq!(f, field),
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+    let mut c = config(vec![floor("floor")]);
+    c.nfft = Some(4096);
+    assert_eq!(c.validate(None), Ok(()));
     // A profile that does not reach the whole sweep.
     let mut t = tone("t", sweep(100.0, 400.0, 100.0, TWO_SWEEPS));
     if let PartBody::Tone(tp) = &mut t.body {
@@ -437,6 +464,17 @@ fn the_parts_list_reads_from_its_tagged_form_with_defaults_and_round_trips() {
     assert_eq!(c.law, MixedLawChoice::default());
     assert_eq!(c.law.floor.id, "hinv");
     assert_eq!(c.law.tones.id, "servo_blend");
+    assert_eq!(c.nfft, None);
+    assert_eq!(c.blocks_per_window, DEFAULT_BLOCKS_PER_WINDOW);
+    assert_eq!(c.soft_start_db, DEFAULT_SOFT_START_DB);
+    assert_eq!(c.soft_start_relax_db, DEFAULT_SOFT_START_RELAX_DB);
+    assert_eq!(c.shaker, None);
+    assert_eq!(c.crest_factor, hertzforge_shaker_db::DEFAULT_CREST_FACTOR);
+    assert_eq!(c.identification.trust_coherence, DEFAULT_TRUST_COHERENCE);
+    assert_eq!(
+        c.identification.trust_h_floor_frac,
+        DEFAULT_TRUST_H_FLOOR_FRAC
+    );
     assert!(c.parts[0].enabled && !c.parts[4].enabled);
     match &c.parts[1].body {
         PartBody::Tone(t) => {

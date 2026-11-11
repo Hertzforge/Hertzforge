@@ -21,6 +21,7 @@ use hertzforge_random::service::config::{
     CaptureRules, ControlSet, LevelSchedule, LimitProfile, MetaField, DEFAULT_COHERENCE_FLOOR,
     DEFAULT_OVERLOAD_FRACTION, DEFAULT_SYSID_LEVEL_DB,
 };
+use hertzforge_shaker_db::{MovingMass, ShakerRecord};
 use hertzforge_sine::profile::{ProfileRow, SineProfile};
 use hertzforge_sine::scheduler::{BidirSweepConfig, SweepDirection, SweepTarget};
 use serde::{Deserialize, Serialize};
@@ -623,7 +624,20 @@ pub struct MixedIdentification {
     /// Hold for the operator's review after a passed gate (Sine's
     /// `review_hold`, default on).
     pub review_hold: bool,
+    /// A line whose identification coherence is under this has no trusted
+    /// plant there: a tone at it has no feed-forward prediction (Sine's
+    /// `trust_coherence`).
+    pub trust_coherence: f64,
+    /// A line whose `|H|` is under this share of the in-band peak `|H|` has no
+    /// trusted plant there (Sine's `trust_h_floor_frac`).
+    pub trust_h_floor_frac: f64,
 }
+
+/// Default coherence under which the identification is not trusted (Sine's).
+pub const DEFAULT_TRUST_COHERENCE: f64 = 0.5;
+/// Default share of the in-band peak gain under which the identification is
+/// not trusted (Sine's).
+pub const DEFAULT_TRUST_H_FLOOR_FRAC: f64 = 0.05;
 
 impl Default for MixedIdentification {
     fn default() -> Self {
@@ -636,6 +650,8 @@ impl Default for MixedIdentification {
             pretest_reference_db: None,
             pretest_start_vrms: None,
             review_hold: true,
+            trust_coherence: DEFAULT_TRUST_COHERENCE,
+            trust_h_floor_frac: DEFAULT_TRUST_H_FLOOR_FRAC,
         }
     }
 }
@@ -764,6 +780,16 @@ pub struct MixedConfig {
     pub df_hz: f64,
     /// Requested number of control lines (Random's `lines`).
     pub lines: usize,
+    /// The analysis frame length, samples (Random's `nfft`, the wire's
+    /// `acquisition.n_pts`): a power of two. `None` takes the smallest power
+    /// of two whose line spacing at the adopted rate is no wider than
+    /// `df_hz`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nfft: Option<usize>,
+    /// Frames averaged per floor loop (Random's `blocks_per_window`, the
+    /// wire's `acquisition.n_avg`).
+    #[serde(default = "default_blocks_per_window")]
+    pub blocks_per_window: usize,
     /// Statistical degrees of freedom the floor estimate targets (Random's
     /// `control_dof`).
     #[serde(default = "default_dof")]
@@ -802,6 +828,26 @@ pub struct MixedConfig {
     /// regardless, logged.
     #[serde(default = "default_floor_settle")]
     pub floor_settle_s: f64,
+    /// Soft-start depth, dB below the schedule's start level: the floor
+    /// engages this far down and ramps up to the start level before tones and
+    /// bands come in (Random's `soft_start_db`). 0 disables it.
+    #[serde(default = "default_soft_start")]
+    pub soft_start_db: f64,
+    /// dB added to the floor's alarm and abort bands while it is below the
+    /// start level (Random's `soft_start_relax_db`).
+    #[serde(default = "default_soft_start_relax")]
+    pub soft_start_relax_db: f64,
+    /// The shaker, for the kinematic and force prediction; `None` skips the
+    /// rating checks (the prediction is still made).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shaker: Option<ShakerRecord>,
+    /// The moving mass, for the force prediction.
+    #[serde(default)]
+    pub moving_mass: MovingMass,
+    /// The random part's crest factor in the peak prediction: the floor and
+    /// bands peak at this times their rms (Random's `crest_factor`).
+    #[serde(default = "default_crest_factor")]
+    pub crest_factor: f64,
     /// The identification.
     #[serde(default)]
     pub identification: MixedIdentification,
@@ -829,12 +875,30 @@ pub struct MixedConfig {
 pub const DEFAULT_PART_RAMP_S: f64 = 3.0;
 /// Default longest floor-alone time, seconds.
 pub const DEFAULT_FLOOR_SETTLE_S: f64 = 30.0;
+/// Default frames averaged per floor loop (Random's demo grid).
+pub const DEFAULT_BLOCKS_PER_WINDOW: usize = 12;
+/// Default soft-start depth, dB (Random's).
+pub const DEFAULT_SOFT_START_DB: f64 = 9.0;
+/// Default band relaxation below the start level, dB (Random's).
+pub const DEFAULT_SOFT_START_RELAX_DB: f64 = 6.0;
 
 fn default_part_ramp() -> f64 {
     DEFAULT_PART_RAMP_S
 }
 fn default_floor_settle() -> f64 {
     DEFAULT_FLOOR_SETTLE_S
+}
+fn default_blocks_per_window() -> usize {
+    DEFAULT_BLOCKS_PER_WINDOW
+}
+fn default_soft_start() -> f64 {
+    DEFAULT_SOFT_START_DB
+}
+fn default_soft_start_relax() -> f64 {
+    DEFAULT_SOFT_START_RELAX_DB
+}
+fn default_crest_factor() -> f64 {
+    hertzforge_shaker_db::DEFAULT_CREST_FACTOR
 }
 fn default_dof() -> f64 {
     120.0
@@ -1322,6 +1386,28 @@ impl MixedConfig {
         if !finite_pos(self.tracking_hz) {
             return Err(bad("tracking_hz", "greater than zero"));
         }
+        if self.nfft.is_some_and(|n| n < 16 || !n.is_power_of_two()) {
+            return Err(bad("nfft", "a power of two of at least 16"));
+        }
+        if self.blocks_per_window == 0 {
+            return Err(bad("blocks_per_window", "at least one frame per loop"));
+        }
+        if !(self.soft_start_db.is_finite() && self.soft_start_db >= 0.0) {
+            return Err(bad("soft_start_db", "zero or more"));
+        }
+        if !(self.soft_start_relax_db.is_finite() && self.soft_start_relax_db >= 0.0) {
+            return Err(bad("soft_start_relax_db", "zero or more"));
+        }
+        if !(self.crest_factor.is_finite() && self.crest_factor >= 1.0) {
+            return Err(bad("crest_factor", "at least 1"));
+        }
+        let id = &self.identification;
+        if !(0.0..=1.0).contains(&id.trust_coherence) {
+            return Err(bad("trust_coherence", "0 to 1"));
+        }
+        if !(0.0..1.0).contains(&id.trust_h_floor_frac) {
+            return Err(bad("trust_h_floor_frac", "0 or more and under 1"));
+        }
         let s = &self.schedule;
         if s.table_db.is_empty() || s.table_db.iter().any(|d| !d.is_finite()) {
             return Err(bad("schedule", "a level table of finite dB"));
@@ -1561,15 +1647,32 @@ impl MixedConfig {
     /// far apart. Tones whose windows never overlap are not compared.
     fn validate_spacing(&self, motions: &[Option<Motion>]) -> Result<(), ConfigError> {
         let required = MIN_TONE_SPACING_WIDTHS * self.tracking_hz;
-        let tones: Vec<(usize, &Part, Motion)> = self
+        for (a, b, closest) in self.tone_pairs(motions) {
+            if closest < required {
+                return Err(ConfigError::PartsTooClose {
+                    a,
+                    b,
+                    closest_hz: closest,
+                    required_hz: required,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Every pair of tones that play at the same time, with the closest they
+    /// come over the whole run, Hz, in parts-list order.
+    fn tone_pairs(&self, motions: &[Option<Motion>]) -> Vec<(String, String, f64)> {
+        let tones: Vec<(&Part, Motion)> = self
             .parts
             .iter()
             .enumerate()
             .filter(|(_, p)| matches!(p.body, PartBody::Tone(_)))
-            .filter_map(|(i, p)| motions[i].map(|m| (i, p, m)))
+            .filter_map(|(i, p)| motions[i].map(|m| (p, m)))
             .collect();
-        for (x, (_, pa, ma)) in tones.iter().enumerate() {
-            for (_, pb, mb) in &tones[x + 1..] {
+        let mut out = Vec::new();
+        for (x, (pa, ma)) in tones.iter().enumerate() {
+            for (pb, mb) in &tones[x + 1..] {
                 if !pa.window.overlaps(&pb.window) {
                     continue;
                 }
@@ -1579,17 +1682,20 @@ impl MixedConfig {
                 } else {
                     (ma.lo_hz - mb.hi_hz).max(mb.lo_hz - ma.hi_hz).max(0.0)
                 };
-                if closest < required {
-                    return Err(ConfigError::PartsTooClose {
-                        a: pa.id.clone(),
-                        b: pb.id.clone(),
-                        closest_hz: closest,
-                        required_hz: required,
-                    });
-                }
+                out.push((pa.id.clone(), pb.id.clone(), closest));
             }
         }
-        Ok(())
+        out
+    }
+
+    /// The closest two tones that play together come over the whole run:
+    /// `(a, b, Hz)`; `None` with fewer than two such tones.
+    pub fn closest_tones(&self) -> Result<Option<(String, String, f64)>, ConfigError> {
+        let motions = self.motions()?;
+        Ok(self
+            .tone_pairs(&motions)
+            .into_iter()
+            .min_by(|x, y| x.2.total_cmp(&y.2)))
     }
 }
 

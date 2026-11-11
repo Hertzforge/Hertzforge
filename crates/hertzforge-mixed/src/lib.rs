@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod parts;
+pub mod predict;
 pub mod schedule;
 #[cfg(feature = "service")]
 pub mod service;
@@ -26,6 +27,7 @@ pub use parts::{
     DEFAULT_TONE_LAW_ID, DEFAULT_TRACKING_HZ, MAX_BANDS, MAX_TONES, MIN_TONE_SPACING_WIDTHS,
     RESERVED_PART_KINDS,
 };
+pub use predict::{predict, MixedPrediction, PartMeanSquare, RatingCheck};
 pub use schedule::{PartClock, PartNow};
 #[cfg(feature = "service")]
 pub use service::display::{

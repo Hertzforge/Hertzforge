@@ -1253,6 +1253,7 @@ dependencies = [
  "hertzforge-hal-sim",
  "hertzforge-module-abi",
  "hertzforge-random",
+ "hertzforge-shaker-db",
  "hertzforge-sine",
  "serde",
  "serde_json",

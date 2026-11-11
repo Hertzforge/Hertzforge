@@ -21,6 +21,8 @@ publish = false
 [dependencies]
 hertzforge-dsp.workspace = true
 hertzforge-breakpoints.workspace = true
+# The shaker record and moving mass the prediction reads (pure data).
+hertzforge-shaker-db.workspace = true
 # Random's control core and its configuration types (`ControlSet`,
 # `LevelSchedule`, `CaptureRules`, `LimitProfile`, `LawGuards`) live behind its
 # `service` feature, so the default features are taken.

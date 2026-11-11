@@ -82,6 +82,13 @@ pub struct MixedFrf {
     pub lag_frames: usize,
     /// The band coherence the gate judged.
     pub band_coherence: f64,
+    /// Per line, whether the identification is trusted there (coherence and
+    /// gain over their floors).
+    #[serde(default)]
+    pub trusted: Vec<bool>,
+    /// The share of the floor's band's lines that are trusted.
+    #[serde(default)]
+    pub trusted_frac: f64,
 }
 
 /// Everything a Mixed Mode display packer needs, on one line grid.
