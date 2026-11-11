@@ -46,6 +46,8 @@ const MOCK = args.includes('--mock');
 const PREFIX = flag('--prefix') ?? 'mixed';
 /** Run seconds per real second: the mock runs at 4, the service in real time. */
 const SPEED = MOCK ? 4 : 1;
+/** The floor's density, g²/Hz, flat across the band; the tones and bands are sized against it. */
+const FLOOR_PSD = '1e-4';
 fs.mkdirSync(SHOTS, { recursive: true });
 
 // ---- processes --------------------------------------------------------------------------------
@@ -112,6 +114,8 @@ const text = async (page, id) => ((await tid(page, id).textContent()) ?? '').rep
 const attr = (page, id, name) => tid(page, id).getAttribute(name);
 const until = (page, what, fn, ms) => waitFor(what, () => fn(page), ms);
 const shots = [];
+/** What a failed end adds to its words (set once the page exists). */
+let failNote = () => '';
 
 async function shot(page, name) {
 	const file = path.join(SHOTS, `${PREFIX}_${name}.png`);
@@ -192,8 +196,23 @@ async function runFromSetup(page) {
 	await until(page, 'the floor alone', async (p) => ['floor_only', 'engaged', 'full_level'].includes(await runPhase(p)), 60_000);
 	await until(page, 'the parts in', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await num(p, 'data-parts-s')), 120_000);
 }
+/** Wait for the run to end, on any outcome; an end other than `outcome` fails at once with the end's words. */
+/** Wait for the setup to check clean; when it does not, fail with what the screen says is left. */
+async function checkedClean(page) {
+	try {
+		await until(page, 'the setup checked clean', async (p) => (await attr(p, 'mixed-ready', 'data-ready')) === 'true', 30_000);
+	} catch {
+		const errs = await page.locator('.aq-err, .err, [role="alert"], [data-testid$="-error"]').allInnerTexts();
+		check('the setup checks clean', false, `${await text(page, 'mixed-ready')} ${errs.map((e) => e.trim()).filter(Boolean).join(' | ')}`);
+	}
+}
 async function toEnd(page, outcome, ms = 300_000) {
-	await until(page, `the run to end ${outcome}`, async (p) => (await attr(p, 'run-state', 'data-outcome')) === outcome, ms);
+	await until(page, `the run to end (expecting ${outcome})`, async (p) => !!(await attr(p, 'run-state', 'data-outcome')), ms);
+	const got = await attr(page, 'run-state', 'data-outcome');
+	if (got !== outcome) {
+		const words = [await text(page, 'run-end').catch(() => ''), await text(page, 'mixed-end').catch(() => '')].filter(Boolean).join(' | ');
+		check(`the run ends ${outcome}`, false, `ended ${got}: ${words}${failNote()}`);
+	}
 }
 
 // ---- the run ----------------------------------------------------------------------------------
@@ -225,6 +244,20 @@ let failed = null;
 
 try {
 	const a = await ctx.newPage();
+	// The last configuration the screen applied, written beside the screenshots when a run ends
+	// otherwise than expected, so the run can be repeated against the service alone.
+	let lastConfigure = null;
+	a.on('websocket', (ws) =>
+		ws.on('framesent', (f) => {
+			if (typeof f.payload === 'string' && f.payload.includes('"mixed.configure"') && !f.payload.includes('"dry_run":true')) lastConfigure = f.payload;
+		})
+	);
+	failNote = () => {
+		if (!lastConfigure) return '';
+		const file = path.join(SHOTS, `${PREFIX}_last_configure.json`);
+		fs.writeFileSync(file, lastConfigure);
+		return `; its configuration in ${file}`;
+	};
 	await a.goto(URL_('light'));
 	await until(a, 'the chooser', async (p) => (await attr(p, 'conn-control', 'data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
 	const offered = await a.locator('[data-testid="test-type-chooser"] [data-type]').evaluateAll((els) => els.filter((e) => e.getAttribute('aria-disabled') === 'false').map((e) => e.dataset.type));
@@ -236,29 +269,47 @@ try {
 	check('Mixed Mode opens on Setup', (await attr(a, 'flow-setup', 'aria-current')) === 'step');
 	await neverLive(a, 'setup');
 
+	// ---- The floor: flat 1e-4 g²/Hz from 20 to 2000 Hz (0.44 g rms), which the simulated plant
+	// plays at about half a volt rms; with the tones and bands below, the summed drive at full level
+	// stays near 3 V peak, inside the limits with room. ---------------------------------------------
+	await section(a, 'floor');
+	while ((await a.locator('[data-testid^="bp-row-"]').count()) > 2) {
+		const n = await a.locator('[data-testid^="bp-row-"]').count();
+		await a.getByRole('button', { name: `Remove row ${n}`, exact: true }).click();
+	}
+	await a.locator('#bp-0-f').fill('20');
+	await a.locator('#bp-0-f').blur();
+	await a.locator('#bp-0-v').fill(FLOOR_PSD);
+	await a.locator('#bp-0-v').blur();
+	if (await tid(a, 'bp-1-psd').count()) await tid(a, 'bp-1-psd').click();
+	await a.locator('#bp-1-f').fill('2000');
+	await a.locator('#bp-1-f').blur();
+	await a.locator('#bp-1-v').fill(FLOOR_PSD);
+	await a.locator('#bp-1-v').blur();
+
 	// ---- Limits ------------------------------------------------------------------------------------
 	await section(a, 'limits');
-	await fill(a, 'mixed-vpk-ceiling', 9);
-	await fill(a, 'mixed-vpk-abort', 10);
+	await fill(a, 'mixed-vpk-ceiling', 5);
+	await fill(a, 'mixed-vpk-abort', 6);
 	check('a limit lowers the random part only, said where limits are set', /random part only, never a tone/.test(await text(a, 'mixed-limit-note')));
 	// ---- A short automatic ladder, every run ------------------------------------------------------
 	await section(a, 'schedule');
 	await tid(a, 'schedule-auto').click();
-	for (const [sel, v] of [['#lv-0-dw', 10], ['#lv-1-dw', 10]]) {
+	for (const [sel, v] of [['#lv-0-dw', 5], ['#lv-1-dw', 5]]) {
 		if (await a.locator(sel).count()) {
 			await a.locator(sel).fill(String(v));
 			await a.locator(sel).blur();
 		}
 	}
-	await fill(a, 'full-level-s', 20);
+	await fill(a, 'full-level-s', 15);
 
 	// ---- 3. Sine-on-random ---------------------------------------------------------------------------
 	await section(a, 'parts');
 	await clearTable(a, 'tones');
 	await clearTable(a, 'bands');
-	await addPart(a, 'tones', 0, { name: 'Blade pass', freq: 120, amp: 1 });
-	await addPart(a, 'tones', 1, { name: 'Rotor', kind: 'sweep', lo: 300, hi: 600, rate: 2, amp: 1 });
-	await until(a, 'the setup checked clean', async (p) => (await attr(p, 'mixed-ready', 'data-ready')) === 'true', 30_000);
+	await addPart(a, 'tones', 0, { name: 'Blade pass', freq: 120, amp: 0.3 });
+	await addPart(a, 'tones', 1, { name: 'Rotor', kind: 'sweep', lo: 400, hi: 600, rate: 1, amp: 0.3 });
+	await checkedClean(a);
 	check('the summary says sine-on-random', /Sine on random/.test(await text(a, 'mixed-summary-kind')));
 	check("the service's derived values: each part's mean square and motion", (await a.locator('[data-testid="mixed-summary-parts"] tr[data-part]').count()) === 3, await text(a, 'mixed-summary-parts'));
 	await shot(a, 'setup_sine_on_random');
@@ -273,9 +324,9 @@ try {
 	// ---- 4. Random-on-random -------------------------------------------------------------------------
 	await section(a, 'parts');
 	await clearTable(a, 'tones');
-	await addPart(a, 'bands', 0, { name: 'Gear mesh', freq: 250, level: 0.05, width: 20 });
-	await addPart(a, 'bands', 1, { name: 'Rotor band', kind: 'sweep', law: 'linear', lo: 1300, hi: 1600, rate: 5, level: 0.05, widthby: 'share', width: 0.05 });
-	await until(a, 'the setup checked clean', async (p) => (await attr(p, 'mixed-ready', 'data-ready')) === 'true', 30_000);
+	await addPart(a, 'bands', 0, { name: 'Gear mesh', freq: 250, level: 5e-4, width: 20 });
+	await addPart(a, 'bands', 1, { name: 'Rotor band', kind: 'sweep', law: 'linear', lo: 1300, hi: 1600, rate: 5, level: 5e-4, widthby: 'share', width: 0.05 });
+	await checkedClean(a);
 	check('the summary says random-on-random', /Random on random/.test(await text(a, 'mixed-summary-kind')));
 	await runFromSetup(a);
 	await showPage(a, 'Narrowbands');
@@ -285,14 +336,16 @@ try {
 
 	// ---- 5. The combined test ---------------------------------------------------------------------
 	await section(a, 'parts');
-	await addPart(a, 'tones', 0, { name: 'Blade pass', freq: 120, amp: 1 });
-	await addPart(a, 'tones', 1, { name: 'Rotor', kind: 'sweep', lo: 300, hi: 600, rate: 2, amp: 1 });
+	await addPart(a, 'tones', 0, { name: 'Blade pass', freq: 120, amp: 0.3 });
+	// slower than before: its third harmonic moves three times as fast, and a reading that lags
+	// half the tracking width is refused (tracking_lag)
+	await addPart(a, 'tones', 1, { name: 'Rotor', kind: 'sweep', lo: 400, hi: 600, rate: 0.3, amp: 0.3 });
 	const rotor = await field(a, 'mixed-tones-1-id').inputValue();
-	await addPart(a, 'tones', 2, { name: 'Rotor 2nd', kind: 'follow', of: rotor, ratio: 2, amp: 0.3 });
-	await addPart(a, 'tones', 3, { name: 'Rotor 3rd', kind: 'follow', of: rotor, ratio: 3, amp: 0.3 });
+	await addPart(a, 'tones', 2, { name: 'Rotor 2nd', kind: 'follow', of: rotor, ratio: 2, amp: 0.1 });
+	await addPart(a, 'tones', 3, { name: 'Rotor 3rd', kind: 'follow', of: rotor, ratio: 3, amp: 0.1 });
 	await section(a, 'schedule');
 	await tid(a, 'schedule-manual').click();
-	await until(a, 'the setup checked clean', async (p) => (await attr(p, 'mixed-ready', 'data-ready')) === 'true', 30_000);
+	await checkedClean(a);
 	check('the summary says both', /Sine and random on random/.test(await text(a, 'mixed-summary-kind')));
 	await section(a, 'parts');
 	await shot(a, 'setup_combined');
@@ -325,8 +378,19 @@ try {
 	await tid(a, levelBefore.startsWith('0.0') ? 'level-down' : 'level-up').click();
 	await until(a, 'the level to move', async (p) => (await text(p, 'run-level')) !== levelBefore, 20_000);
 	check('a level step moves every part', true, `${levelBefore} to ${await text(a, 'run-level')}`);
+	// the composite against its reference at the level in force, and every input's rms
+	const total = await text(a, 'mixed-total');
+	const m = total.match(/^([\d.]+) g rms against ([\d.]+) g rms at this level$/);
+	check('the composite is shown against the reference at this level', !!m && Number(m[1]) / Number(m[2]) > 0.7 && Number(m[1]) / Number(m[2]) < 1.4, total);
+	const rmsCells = await a.locator('[data-testid="mixed-inputs"] tbody tr td:nth-child(3)').allInnerTexts();
+	check('the Inputs card shows every input with its rms', rmsCells.length > 0 && rmsCells.every((t) => /^[\d.]+(e-?\d+)? \S+$/.test(t.trim())), rmsCells.join(' | '));
+	// every run page, as the real frames draw it
+	for (const name of ['Control', 'Parts', 'Tones', 'Narrowbands', 'Drive', 'Identification', 'Law']) {
+		await showPage(a, name);
+		await a.waitForTimeout(1500);
+		await shot(a, `combined_page_${name.toLowerCase()}`);
+	}
 	await showPage(a, 'Control');
-	await shot(a, 'run_combined_control');
 	await tid(a, 'act-stop').click();
 	await toEnd(a, 'operator_stop', 60_000);
 	check('Stop ramps every part down', /ramped down in [\d.]+ s/.test(await text(a, 'mixed-end')), await text(a, 'mixed-end'));

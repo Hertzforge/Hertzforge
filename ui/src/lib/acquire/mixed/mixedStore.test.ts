@@ -55,7 +55,7 @@ function combined(mixed: MixedStore) {
 	d.tones = [newTone('t1', 1, 120), newTone('t2', 2, 300), newTone('t3', 3), newTone('t4', 4)];
 	d.tones[1].schedule.kind = 'sweep';
 	d.tones[1].schedule.band_hz = [300, 600];
-	d.tones[1].schedule.oct_per_min = 6;
+	d.tones[1].schedule.oct_per_min = 0.3;
 	for (const [i, r] of [[2, 2], [3, 3]] as const) {
 		d.tones[i].schedule.kind = 'follow';
 		d.tones[i].schedule.of = 't2';
@@ -96,6 +96,16 @@ describe('the setup against the service', () => {
 		mixed.setup.lawTones.params = { ...mixed.setup.lawTones.params, compression: 'slow' };
 		mixed.chooseLaw('tones', 'servo_blend');
 		expect(mixed.setup.lawTones.params.compression).toBe('slow');
+	});
+
+	it('refuses a tone whose sweep outruns its tracking, as the service does', async () => {
+		const { mixed } = await screen();
+		combined(mixed);
+		const t2 = mixed.setup.tones.find((t) => t.id === 't2')!;
+		t2.schedule.law = 'log';
+		t2.schedule.oct_per_min = 4;
+		await mixed.checkSetup();
+		expect(mixed.check?.errors.map((e) => e.reason)).toContain('tracking_lag');
 	});
 
 	it("the dry run gives the service's derived values for the draft", async () => {

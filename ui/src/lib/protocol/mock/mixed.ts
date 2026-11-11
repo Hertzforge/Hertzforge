@@ -160,6 +160,9 @@ function rangeOf(parts: MixedPart[], p: Moving, seen = new Set<string>()): [numb
 	return null;
 }
 
+/** The pipeline's lag the service assumes for the simulator before the station arms, frames. */
+const MOCK_LAG_FRAMES = 128;
+
 /** The part a follower's chain starts from, and the product of the ratios along it. */
 function rootOf(parts: MixedPart[], p: Moving): { id: string; factor: number } {
 	let at: Moving = p;
@@ -243,6 +246,21 @@ function checkConfig(c: MixedConfig, rows: ChannelRow[], toneLaws: LawEntry[]): 
 	if (c.control?.tracking && (c.control.tracking as { kind: string }).kind !== 'fixed') errors.push(item('out_of_range', 'Mixed Mode tracks every tone at one fixed width.', 'control.tracking'));
 	if (!(track > 0 && track <= 10)) errors.push(item('out_of_range', 'The tracking width is above 0 and at most 10 Hz.', 'control.tracking.hz'));
 	const toneParts = c.parts.map((p, i) => ({ p, i })).filter((x): x is { p: Extract<MixedPart, { kind: 'tone' }>; i: number } => x.p.kind === 'tone');
+	// A moving tone's reading lags its reference by its rate times the pipeline's lag (the
+	// simulator's, before the station arms): over half the tracking width it is refused, over a
+	// fifth it is warned, at the top of its motion, as the service does.
+	for (const { p, i } of toneParts) {
+		const root = rootOf(c.parts, p);
+		const lead = c.parts.find((x) => x.id === root.id);
+		const r = rangeOf(c.parts, p);
+		if (!lead || lead.kind === 'floor' || lead.schedule.kind !== 'sweep' || !r) continue;
+		const rate = lead.schedule.rate as { law: string; oct_per_min?: number; hz_per_s?: number };
+		const hzPerS = rate.law === 'log' ? (r[1] * Math.LN2 * (rate.oct_per_min ?? 0)) / 60 : root.factor * (rate.hz_per_s ?? 0);
+		const ratio = (hzPerS * MOCK_LAG_FRAMES) / c.acquisition.fs_hz / track;
+		const words = `${p.name ?? p.id} moves ${round(hzPerS, 2)} Hz/s at ${round(r[1], 1)} Hz: its reading lags by ${round(ratio, 2)} of the tracking width.`;
+		if (ratio > 0.5) errors.push(item('tracking_lag' as Item['reason'], `${words} Slow the sweep or widen the tracking.`, `parts[${i}].schedule`));
+		else if (ratio > 0.2) warnings.push(item('tracking_lag' as Item['reason'], words, `parts[${i}].schedule`));
+	}
 	for (let a = 0; a < toneParts.length; a++)
 		for (let b = a + 1; b < toneParts.length; b++) {
 			const A = toneParts[a].p;
