@@ -1,0 +1,3 @@
+# the report viewer is a build output checked byte for byte against the UI's build (ci.yml): never
+# converted to CRLF on checkout
+src/hertzforge/report/viewer.html -text

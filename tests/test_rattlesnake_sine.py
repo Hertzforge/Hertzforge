@@ -14,6 +14,7 @@ import pytest
 import hertzforge
 from hertzforge.core.sine import SineSweepSpecification
 from hertzforge.io import rattlesnake
+from hertzforge.report.viewer import page_text
 
 
 def _write_run(path, sine=True, random=False, band=True,
@@ -298,7 +299,7 @@ def test_the_one_call_writes_the_sine_report_into_a_folder(tmp_path):
     written = [hertzforge.sine_report(run, str(out) + '/') for run in runs]
     assert sorted(os.path.basename(p) for p in written) == ['sweep0.html', 'sweep1.html']
     with open(written[0], encoding='utf-8') as f:
-        html = f.read()
+        html = page_text(f.read())
     assert 'extracted level against the requirement' in html
 
 
@@ -316,7 +317,7 @@ def test_the_one_call_reports_take_a_marking(tmp_path):
     written = hertzforge.sine_report(run, str(tmp_path / 'marked.html'),
                                          marking='TEST SERIES 4')
     with open(written, encoding='utf-8') as f:
-        html = f.read()
+        html = page_text(f.read())
     assert 'TEST SERIES 4' in html and 'UNCLASSIFIED' not in html
     project = hertzforge.sine_run(run)
     name = project.generate_report('sine', marking='CUI', marking_color='red')
@@ -355,7 +356,7 @@ def test_run_report_writes_each_runs_own_kind_into_a_folder(tmp_path):
     pages = {}
     for p in written:
         with open(p, encoding='utf-8') as f:
-            pages[os.path.basename(p)] = f.read()
+            pages[os.path.basename(p)] = page_text(f.read())
     assert 'extracted level against the requirement' in pages['sweep.html']
     assert 'Control against specification' in pages['random.html']
     assert all('BATCH' in page and 'UNCLASSIFIED' not in page for page in pages.values())
