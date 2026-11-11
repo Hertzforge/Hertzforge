@@ -91,7 +91,11 @@ Each part is a row of its table: up to 12 tones and up to 12 narrowbands. A row 
   climbs). The band's reference is the floor's reference plus its level, line by line.
 - **Alarm and abort,** in dB either side. A tone's are its own (usual 1.5 and 3 dB). A narrowband
   takes the floor's profile bands unless it is given its own; either way they are widened to the
-  band's own scatter at the degrees of freedom it holds.
+  band's own scatter at the degrees of freedom it holds. A tone's alarm and abort judge its reading
+  averaged long enough that the reading's own scatter is a third of the alarm band: a tone well above
+  the floor is judged at once, a small one over up to 8 seconds, and the setup's prediction and the
+  tone's row state how long. A tone too close to the floor for even 8 seconds to settle its reading is
+  judged against tolerances widened to that scatter, and its row says so.
 - **On at and off at,** in parts time: when the part ramps in and out. Parts time is 0 when the floor
   has equalized, counts on the station's clock, and stops on a hold.
 
@@ -183,7 +187,8 @@ reference (shown, not judged), the summed drive, each law's unusable calls and c
 and the identification. The parts table shows, for every part, what it is doing ("Sweeping up at
 1 oct/min, sweep 2 of 4", "Follows Rotor at 2×, sweeping up at 1 oct/min", "Waiting for its window,
 from 40 s", "Its schedule ended"), its frequency or center, its target against its measured value
-with the error in dB, its drive, and its state: in band, settling, limiting, alarm, off, waiting or
+with the error in dB (for a tone, the judged error its alarm and abort use, with the single reading beside it,
+smaller), its drive, and its state: in band, settling, limiting, alarm, off, waiting or
 ended, each with its own mark and word. A sweep's rate is in the unit its schedule states: oct/min
 for a log sweep, Hz/s for a linear one. Under the floor's row are its lines (clean, in alarm, over
 abort) and the fewest degrees of freedom any clean line holds; under a narrowband's, its width (and
@@ -197,7 +202,8 @@ The pages, each drawn from the control service's views:
   alarm and abort lines, drawn as computed, flat across each line's bin. The lines left out of the
   floor's average are shaded and named for their part.
 - **Parts:** the parts table, and each part's frequency over the last minute.
-- **Tones:** each tone's tracked amplitude against its target and its alarm and abort lines.
+- **Tones:** each tone's tracked amplitude against its target and the alarm and abort lines it is
+  judged on (widened, for a tone judged against widened tolerances).
 - **Narrowbands:** each narrowband's level in its own moving frame against its reference and its
   widened alarm and abort lines.
 - **Drive:** the random part of the drive as made for the next segment.

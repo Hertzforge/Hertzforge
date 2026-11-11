@@ -3,7 +3,7 @@
 	 * The Mixed Mode setup in a few lines, beside every section: the parts, the schedule, the two
 	 * laws and the drive; then what the control service derived from the draft (each part's mean
 	 * square and motion, the totals, the predicted peak of the sum, the lines left out of the floor's
-	 * average, the closest tones, the grid and the tick, the test and identification times, whether
+	 * average, the closest tones, how long each tone is judged over (and any widened tolerance), the grid and the tick, the test and identification times, whether
 	 * each law may drive hardware, feasibility); and what is left to fix, each a click from its
 	 * section. Every derived number is the service's, from its dry run of the draft as it stands.
 	 */
@@ -12,7 +12,7 @@
 	import { runChannels } from '../sine/sineSetup';
 	import { MIXED_SECTIONS, type MixedSection } from './mixedSetup';
 	import type { MixedStore } from './mixedStore.svelte';
-	import { kinematicsWords, motionWords, PART_KIND_WORDS } from './mixedWords';
+	import { judgingSummary, kinematicsWords, motionWords, PART_KIND_WORDS } from './mixedWords';
 
 	interface Props {
 		mixed: MixedStore;
@@ -61,6 +61,7 @@
 			<div><dt>Predicted peak of the sum</dt><dd class="num">{kinematicsWords(dry.kinematics)}</dd></div>
 			<div><dt>Left out of the floor's average</dt><dd>{dry.exclusion.length ? dry.exclusion.map((e) => `${name(e.part)}: ${formatNumber(e.lo_hz, 4)} to ${formatNumber(e.hi_hz, 4)} Hz, ${e.lines} lines`).join('; ') : 'No line for the whole run'}</dd></div>
 			<div><dt>Closest tones</dt><dd>{dry.closest_tones ? `${name(dry.closest_tones.parts[0])} and ${name(dry.closest_tones.parts[1])}, ${num(dry.closest_tones.spacing_hz, 'Hz')} apart (at least ${num(dry.closest_tones.min_hz, 'Hz')})` : 'Fewer than two tones'}</dd></div>
+			{#if dry.tone_judging?.length}<div><dt>Judging</dt><dd data-testid="mixed-summary-judging">{judgingSummary(dry.tone_judging, name)}</dd></div>{/if}
 			<div><dt>Tracking</dt><dd>{dry.tracking.every((t) => t.verdict === 'ok') ? 'Every tone is tracked' : dry.tracking.filter((t) => t.verdict !== 'ok').map((t) => `${name(t.part)}: ${t.message ?? t.verdict}`).join('; ')}</dd></div>
 			<div><dt>Lines and tick</dt><dd class="num">{formatNumber(dry.grid.lines, 6)} lines {formatNumber(dry.grid.df_hz, 4)} Hz apart, a loop {num(dry.grid.loop_s, 's')}; a tick {formatNumber(dry.grid.tick_s * 1000, 4)} ms{dry.grid.actual ? '' : ', until the station arms'}</dd></div>
 			<div><dt>Floor equalizes in</dt><dd class="num" data-testid="mixed-floor-equalize">{num(dry.floor_equalize_s, 's')} on this grid, before the other parts come in</dd></div>

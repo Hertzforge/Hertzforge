@@ -32,6 +32,7 @@ import type {
 	MixedDerivedPart,
 	MixedEnd,
 	MixedFloorLines,
+	MixedToneJudging,
 	MixedLiveHead,
 	MixedLiveQuantity,
 	MixedLogKind,
@@ -352,6 +353,22 @@ function toneAmp(p: Extract<MixedPart, { kind: 'tone' }>, f: number): number {
 	return p.profile ? profileAt(p.profile, f) : (p.amplitude_g ?? 1);
 }
 
+/** The judging time a tone's single reading needs, as the service predicts it, modelled: the floor in
+ * the tracking width against the tone gives a reading's scatter; it is averaged until the scatter is a
+ * third of the alarm band, up to 8 s, past which the tolerances are widened to the scatter at 8 s. */
+function toneJudging(c: MixedConfig, pts: [number, number][], t: Extract<MixedPart, { kind: 'tone' }>, trackHz: number): MixedToneJudging {
+	const r = rangeOf(c.parts, t) ?? [0, 0];
+	const worst = Math.max(...[r[0], r[1]].map((f) => Math.sqrt(floorAt(pts, f) * trackHz) / (toneAmp(t, f) / Math.SQRT2)));
+	const sigma = 8.686 * worst;
+	const alarm = (t.alarm_db ?? [1.5, 1.5]) as [number, number];
+	const abort = (t.abort_db ?? [3, 3]) as [number, number];
+	const need = 0.5 * ((3 * sigma) / Math.min(...alarm)) ** 2;
+	const widened = need > 8;
+	const at8 = 3 * sigma * Math.sqrt(0.5 / 8);
+	const alarmJ: [number, number] = widened ? [round(Math.max(alarm[0], at8), 2), round(Math.max(alarm[1], at8), 2)] : alarm;
+	return { part: t.id, judge_s: round(Math.min(8, Math.max(0.5, need)), 2), sigma_db: round(sigma, 2), alarm_db: alarmJ, abort_db: abort, widened };
+}
+
 function derive(c: MixedConfig, rows: ChannelRow[], toneLaws: LawEntry[], actual: boolean, fsActual?: number): MixedDerived {
 	const pts = floorPoints(c);
 	const band: [number, number] = [pts[0]?.[0] ?? 20, pts[pts.length - 1]?.[0] ?? 2000];
@@ -424,6 +441,7 @@ function derive(c: MixedConfig, rows: ChannelRow[], toneLaws: LawEntry[], actual
 		exclusion,
 		closest_tones: tones.length >= 2 ? closest : null,
 		tracking: tones.map((t) => ({ part: t.id, verdict: 'ok' as const, ratio: t.schedule.kind === 'fixed' ? 0 : 0.002, at_hz: null, message: null })),
+		tone_judging: tones.map((t) => toneJudging(c, pts, t, track(c))),
 		test_s: c.schedule.mode === 'auto' ? round(levels.slice(0, -1).reduce((n, l) => n + (l.dwell_s ?? 0), 0) + c.schedule.full_level_s, 3) : null,
 		floor_equalize_s: round(((c.control?.control_dof ?? 120) / 2 + 1) * (loopS / Math.max(1, c.acquisition?.n_avg ?? 4)) + loopS, 3),
 		identification_s: round((c.control?.pretest?.averages ?? 4) * loopS, 3),
@@ -609,6 +627,11 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 				freq_hz: null,
 				direction: null,
 				follows: null,
+				judge_s: null,
+				judged_error_db: null,
+				judged_alarm_db: null,
+				judged_abort_db: null,
+				tolerance_widened: null,
 				sweeps: null,
 				rate_oct_per_min: null,
 				rate_hz_per_s: null,
@@ -651,6 +674,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			freq_hz: round(p.freq, 2),
 			direction: dir,
 			follows: s.kind === 'follow' ? { of: s.of, ratio: s.ratio } : null,
+			...judged(r, part.id, tone, err, p.settledT),
 			sweeps: s.kind === 'sweep' ? { done: p.sweeps, of: s.end?.sweeps ?? null } : null,
 			rate_oct_per_min: rate?.law === 'log' ? (moving ? signed(rate.oct_per_min) : 0) : null,
 			rate_hz_per_s: rate?.law === 'linear' ? (moving ? signed(rate.hz_per_s * (s.kind === 'follow' ? s.ratio : 1)) : 0) : null,
@@ -669,6 +693,21 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			dof: tone ? null : p.scale > 0 ? Math.min(400, Math.round(16 + p.settledT * 12)) : null,
 			lines: null,
 			law: tone ? (r.phase === 'floor_only' || p.scale > 0 || p.settledT > 0 ? { misses: 0, capped: 0 } : null) : null
+		};
+	}
+
+	/** A tone's judged reading: the derived judging once it has settled for its judging time; null on the floor and narrowbands. */
+	function judged(r: Run, id: string, tone: boolean, err: number | null, settledT: number) {
+		if (!tone) return { judge_s: null, judged_error_db: null, judged_alarm_db: null, judged_abort_db: null, tolerance_widened: null };
+		const j = r.derived.tone_judging.find((x) => x.part === id);
+		const ready = !!j && err !== null && settledT >= j.judge_s;
+		return {
+			judge_s: j && settledT > 0 ? j.judge_s : null,
+			// the averaged reading scatters less than the single one
+			judged_error_db: ready ? round(err! * 0.4, 2) : null,
+			judged_alarm_db: j && settledT > 0 ? j.alarm_db : null,
+			judged_abort_db: j && settledT > 0 ? ([Math.max(j.abort_db[0], j.alarm_db[0]), Math.max(j.abort_db[1], j.alarm_db[1])] as [number, number]) : null,
+			tolerance_widened: j?.widened ?? false
 		};
 	}
 

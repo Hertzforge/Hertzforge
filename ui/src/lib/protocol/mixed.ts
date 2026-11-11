@@ -385,6 +385,8 @@ export interface MixedDerived {
 	closest_tones: MixedClosestTones | null;
 	/** One per tone, in the parts' order. */
 	tracking: MixedTrackingVerdict[];
+	/** How each tone will be judged, in the parts' order. */
+	tone_judging: MixedToneJudging[];
 	/** Parts time of the ladder; null in manual. */
 	test_s: number | null;
 	/** Station time the floor needs on this grid to reach its control degrees of freedom; the parts wait for the larger of this and `control.floor_settle_s`. */
@@ -558,6 +560,19 @@ export interface MixedFloorLines {
 	rms_judged: number;
 }
 
+/** The prediction of how a tone's alarm and abort judge it. */
+export interface MixedToneJudging {
+	part: string;
+	/** The averaging time, s (at most 8). */
+	judge_s: number;
+	/** The single reading's predicted scatter, dB. */
+	sigma_db: number;
+	alarm_db: BandDb;
+	abort_db: BandDb;
+	/** Judged against tolerances widened to that scatter. */
+	widened: boolean;
+}
+
 /** One part's row in the state and in every frame: every part, in the parts' order. */
 export interface MixedPartRow {
 	id: string;
@@ -604,6 +619,15 @@ export interface MixedPartRow {
 	law: { misses: number; capped: number } | null;
 	/** A follower's leader and ratio; null for a part that does not follow. */
 	follows: { of: string; ratio: number } | null;
+	/** A tone's judging time, s: how long its reading is averaged before its alarm and abort judge it; null until set, and on the floor and narrowbands. */
+	judge_s: number | null;
+	/** A tone's judged error, dB (the averaged reading the alarm and abort use); `error_db` stays the single reading. */
+	judged_error_db: number | null;
+	/** A tone's alarm and abort bands as judged, `[below, above]` positive dB. */
+	judged_alarm_db: BandDb | null;
+	judged_abort_db: BandDb | null;
+	/** A tone judged against tolerances widened to its reading's scatter; null on the floor and narrowbands. */
+	tolerance_widened: boolean | null;
 }
 
 /** The composite: shown, not judged. */
