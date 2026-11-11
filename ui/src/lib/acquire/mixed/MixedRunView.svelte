@@ -12,6 +12,8 @@
 	import type { CardKind } from '../screen/types';
 	import SineLiveParams from '../sine/SineLiveParams.svelte';
 	import MixedLevelCard from './MixedLevelCard.svelte';
+	import MixedLogCard from './MixedLogCard.svelte';
+	import MixedInputsCard from './MixedInputsCard.svelte';
 	import MixedPartsCard from './MixedPartsCard.svelte';
 	import MixedRunVerbs from './MixedRunVerbs.svelte';
 	import type { MixedStore } from './mixedStore.svelte';
@@ -81,6 +83,10 @@
 		<MixedPartsCard {mixed} {compact} />
 	{:else if kind === 'law'}
 		<SineLiveParams sine={mixed} />
+	{:else if kind === 'inputs'}
+		<MixedInputsCard {live} />
+	{:else if kind === 'log'}
+		<MixedLogCard log={mixed.log} />
 	{:else if kind === 'station' && station}
 		{@render station()}
 	{/if}

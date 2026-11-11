@@ -98,7 +98,7 @@ export const MIXED_SCREEN: PulseScreenSpec<MixedPageKind, MixedLiveQuantity> = {
 		['law', { words: 'Law Values', help: "The floor law's and each tone law's values on their last calls.", group: 'numbers' }],
 		['readings', { words: 'Readings', help: 'The run in numbers, a row for each part that is on.', group: 'numbers' }]
 	],
-	cards: ['run', 'level', 'parts', 'law', 'station'],
+	cards: ['run', 'level', 'parts', 'inputs', 'law', 'log', 'station'],
 	pageCards: { parts: ['parts'] },
 	selectors: ['all', 'control', 'limited']
 };

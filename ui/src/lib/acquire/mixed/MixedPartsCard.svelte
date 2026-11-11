@@ -20,8 +20,11 @@
 	const parts = $derived(mixed.parts);
 	const held = $derived(!!mixed.now?.held);
 	const drive = (p: MixedPartRow) => (p.drive_vpk !== null ? `${formatNumber(p.drive_vpk, 3)} V pk` : p.drive_vrms !== null ? `${formatNumber(p.drive_vrms, 3)} V rms` : '-');
+	const lawWords = (p: MixedPartRow) => (p.law && (p.law.misses || p.law.capped) ? `${p.law.misses} unusable in a row, a cap bound ${p.law.capped} times` : '');
 	const extra = (p: MixedPartRow) =>
-		p.kind === 'floor' ? (p.lines ? `${p.lines.clean} of ${p.lines.in_band} lines clean, ${p.lines.alarm} in alarm; ${p.dof ?? '-'} dof` : '') : p.kind === 'narrowband' ? [p.width_hz !== null ? `${formatNumber(p.width_hz, 3)} Hz wide` : '', p.dof !== null ? `${p.dof} dof` : '', p.gain_db !== null ? `gain ${errDb(p.gain_db)}` : ''].filter(Boolean).join(', ') : '';
+		p.kind === 'tone'
+			? lawWords(p)
+			: p.kind === 'floor' ? ([p.lines ? `${p.lines.clean} of ${p.lines.in_band} lines clean, ${p.lines.alarm} in alarm, ${p.lines.abort} over abort; ${p.dof ?? '-'} dof` : '', lawWords(p)].filter(Boolean).join('; ')) : p.kind === 'narrowband' ? [p.width_hz !== null ? `${formatNumber(p.width_hz, 3)} Hz wide` : '', p.dof !== null ? `${p.dof} dof` : '', p.gain_db !== null ? `gain ${errDb(p.gain_db)}` : ''].filter(Boolean).join(', ') : '';
 </script>
 
 <section class="partscard" aria-label="Parts" data-testid="mixed-parts-card">
