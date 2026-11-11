@@ -363,7 +363,10 @@ export function floorOf(f: MixedFloorDraft): MixedFloorPart {
 
 export function toneOf(t: MixedToneDraft): MixedTonePart {
 	const base = { id: t.id.trim(), name: t.name.trim(), kind: 'tone' as const, enabled: t.enabled, window: windowOf(t.window), schedule: scheduleOf(t.schedule), alarm_db: pair(t.alarm_db), abort_db: pair(t.abort_db) };
-	return t.amplitude.by === 'profile' ? { ...base, profile: profileOf(t.amplitude.profile) } : { ...base, amplitude_g: t.amplitude.g };
+	if (t.amplitude.by === 'constant') return { ...base, amplitude_g: t.amplitude.g };
+	// The tone's bands are its row's: the profile carries only its rows (and any row's own bands).
+	const { alarm_db: _a, abort_db: _b, ...profile } = profileOf(t.amplitude.profile);
+	return { ...base, profile };
 }
 
 export function bandOf(b: MixedBandDraft): MixedBandPart {
@@ -504,8 +507,9 @@ export function fromMixedConfig(c: MixedConfig): MixedDraft {
 				window: win(t.window),
 				schedule: scheduleDraftOf(t.schedule, freq),
 				amplitude: t.profile ? { by: 'profile', g: b.amplitude.g, profile: profileDraftOf(t.profile, b.amplitude.profile) } : { by: 'constant', g: t.amplitude_g ?? 1, profile: b.amplitude.profile },
-				alarm_db: t.alarm_db ? pair(t.alarm_db) : b.alarm_db,
-				abort_db: t.abort_db ? pair(t.abort_db) : b.abort_db
+				// a profile's own bands take the tone's place, as the service reads them
+				alarm_db: t.profile?.alarm_db ? pair(t.profile.alarm_db) : t.alarm_db ? pair(t.alarm_db) : b.alarm_db,
+				abort_db: t.profile?.abort_db ? pair(t.profile.abort_db) : t.abort_db ? pair(t.abort_db) : b.abort_db
 			};
 		}),
 		bands: bands.map((p, i) => {
