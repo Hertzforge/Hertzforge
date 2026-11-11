@@ -162,7 +162,9 @@ words kept with the run.
 
 The Run card carries the verbs that apply now: **Arm**, **Start**, **Proceed** at the review hold,
 **New Run** once a run has ended, and **Stop** and **Abort**, which any connected screen may use.
-**Stop** ramps every part down together; **Abort** takes the drive down at once. Beside them:
+**Stop** ramps every part down together, each linearly in amplitude from the level in force to zero
+over the shutdown ramp (about 6 dB down halfway through); **Abort** takes the drive down at once.
+Beside them:
 
 - **Hold** freezes the test's progress: parts time, every part's schedule and window, and the level
   clock stop, and every part stays at its frequency and level, still under control. **Resume**

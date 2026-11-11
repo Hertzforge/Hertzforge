@@ -61,6 +61,12 @@ describe('Mixed spectra held to the band', () => {
 		expect(v.regions).toEqual([{ x0: 20, x1: 30, kind: 'cut', label: 'Left out' }]);
 	});
 
+	it('leaves a frame the service has already cut as it came: the same series, nothing copied', () => {
+		const [once] = toBand([controlView()], [20, 2000]) as SpectrumView[];
+		const [twice] = toBand([once], [20, 2000]) as SpectrumView[];
+		twice.series.forEach((s, i) => expect(s).toBe(once.series[i]));
+	});
+
 	it("is what the run's views hand a plot, frame by frame", () => {
 		const control = { send: () => Promise.resolve(), on: () => () => {} } as never;
 		const views = new MixedViewsState(control, { setupTitle: () => null, showing: () => false, storage: null, session: null, events: null, runId: () => 'r1', band: () => floorBand(config) });

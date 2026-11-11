@@ -1,9 +1,9 @@
 /**
- * The run's spectra held to the test's band. The control service's Mixed Mode frames carry every
- * line of the grid the run uses, and the lines outside the floor's band hold the plant's own
- * response (orders of magnitude under the band), so a plot ranged on them squashes the band into
- * a corner. Random's frames carry the band's lines only; this cuts Mixed Mode's to the same, still
- * stepped on the frame's own bin edges, so every spectrum ranges on the band and the reference.
+ * The run's spectra held to the test's band. The control service now sends Mixed Mode's spectra cut
+ * to the floor's band, and a cut frame passes through here untouched (the same series, nothing
+ * copied). A frame that carries lines outside the band (the plant's own response, orders of
+ * magnitude under it, which would squash the band into a corner of the plot) is cut to the band,
+ * still stepped on the frame's own bin edges.
  * The operator's axis options act on what is left, as on Random's.
  */
 
