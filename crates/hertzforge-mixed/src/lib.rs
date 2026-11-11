@@ -4,6 +4,8 @@
 //!
 //! - [`parts`]: the parts list, its schedules and the checks on a configuration.
 //! - [`schedule`]: the clock that moves every part, held and resumed together.
+//! - [`service`] (feature `service`, on by default): [`MixedService`], the run
+//!   lifecycle a control service drives, and its status, display and report.
 //!
 //! The control method composes published building blocks (tone estimation in
 //! noise, Welch estimation, inverse-plant equalization) and reuses the Random
@@ -13,6 +15,8 @@
 
 pub mod parts;
 pub mod schedule;
+#[cfg(feature = "service")]
+pub mod service;
 
 pub use parts::{
     sweep_span, BandWidth, ConfigError, Direction, FloorPart, LawPick, MixedConfig,
@@ -22,3 +26,16 @@ pub use parts::{
     MAX_BANDS, MAX_TONES, MIN_TONE_SPACING_WIDTHS, RESERVED_PART_KINDS,
 };
 pub use schedule::{PartClock, PartNow};
+#[cfg(feature = "service")]
+pub use service::display::{
+    BandHistory, LineGrid, MixedDisplay, MixedDisplayChannel, MixedFrf, ToneHistory,
+};
+#[cfg(feature = "service")]
+pub use service::status::{
+    FloorSummary, MixedEvent, MixedEventKind, MixedLawStatus, MixedLog, MixedOutcome, MixedPhase,
+    MixedState, MixedStatus, MixedTotals, MixedTrip, MixedTripKind, PartKind, PartRow, RoleTally,
+};
+#[cfg(feature = "service")]
+pub use service::{
+    LawRole, MixedAdjustRefusal, MixedError, MixedLawFactories, MixedReport, MixedService,
+};
