@@ -3,8 +3,14 @@
 //! The math is `hertzforge-law-band-average-math`, a port of his Python law, on
 //! this crate's stacks and factorizations. This file carries the law's inputs
 //! across the boundary, declares its parameters and reports its diagnostics. It is
-//! not one of the [`crate::BuiltinMimo`] laws: the controller runs it through its
-//! law file, `laws/mimo-band-average`.
+//! one of the [`crate::BuiltinMimo`] laws, and `laws/mimo-band-average` builds the
+//! same code as a law file.
+//!
+//! It controls each control's fractional-octave band averages, not its lines: on
+//! a plant with resonances inside a band, a control's line-by-line error stays
+//! above what a per-line inverse reaches (1.5 dB rms on the law check's 4 x 4
+//! modal plant, where the per-line laws come within 1 dB), and the drive does
+//! not chase identification noise line by line.
 //!
 //! What the core does is left to the core:
 //!
@@ -132,7 +138,7 @@ impl BandAverageLaw {
         let (lines, c) = (self.lines, self.controls);
         let mut threshold = vec![0.0; lines];
         let mut gain_db = vec![0.0; lines * c];
-        let gain = self.law.band_gain();
+        let gain = self.law.band_log_gain();
         let channels = self.law.control_channels();
         for (b, sel) in self.law.band_lines().iter().enumerate() {
             let kappa = self.law.band_threshold(b).unwrap_or(0.0);
@@ -143,10 +149,8 @@ impl BandAverageLaw {
                 threshold[k] = kappa;
                 if let Some(g) = gain {
                     for (p, &channel) in channels.iter().enumerate() {
-                        let x = g[b * channels.len() + p];
-                        if x > 0.0 {
-                            gain_db[k * c + channel] = 10.0 * x.log10();
-                        }
+                        gain_db[k * c + channel] =
+                            g[b * channels.len() + p] * (10.0 / std::f64::consts::LN_10);
                     }
                 }
             }
@@ -518,7 +522,7 @@ impl BuiltinMimoLaw for BandAverageLaw {
     fn spec() -> LawSpec {
         LawSpec {
             name: "band average",
-            version: "2026.11.04",
+            version: "2026.11.10",
             author: "Brandon Zwink",
             summary: "Solves the inverse in fractional-octave bands: one flat correlated drive \
                       per band whose band-averaged response matches the band-averaged reference, \

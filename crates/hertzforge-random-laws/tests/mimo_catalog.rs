@@ -97,7 +97,8 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             "pinv_open",
             "shape_svd",
             "buzz_match",
-            "min_drive"
+            "min_drive",
+            "band_average"
         ]
     );
     assert_eq!(DEFAULT_MIMO_LAW_ID, "pinv_closed");
@@ -137,6 +138,7 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             ("shape-constrained (SVD)".to_string(), true),
             ("buzz-test matched".to_string(), true),
             ("minimum drive".to_string(), true),
+            ("band average".to_string(), true),
             ("misbehaving multiple-output fixture".to_string(), false),
             ("zero drive".to_string(), false),
         ]

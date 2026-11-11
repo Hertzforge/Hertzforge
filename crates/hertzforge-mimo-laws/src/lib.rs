@@ -10,8 +10,8 @@
 //! inputs once, as a [`LawSpec`]; the law file's manifest and the controller's
 //! catalog entry are both built from it.
 //!
-//! The five built-in laws ([`BuiltinMimo`]), each from the published
-//! literature and cited in its module by author, title and venue:
+//! The six built-in laws ([`BuiltinMimo`]). The first five are from the
+//! published literature, each cited in its module by author, title and venue:
 //!
 //! - [`PseudoInverseLaw`], the default: the regularized pseudo-inverse drive,
 //!   then Smallwood's closed-loop correction of a factor of the reference.
@@ -24,6 +24,12 @@
 //! - [`MinimumDriveLaw`]: the reference's autospectra, as far as a trade-off
 //!   against drive power allows, with the cross terms of the drive that needs
 //!   the least power to produce them, then the default closed loop.
+//!
+//! The sixth is Brandon Zwink's:
+//!
+//! - [`BandAverageLaw`]: one flat correlated drive per fractional-octave band
+//!   whose band-averaged response matches the band-averaged reference, then a
+//!   gain correction band by band. It controls band averages, not lines.
 //!
 //! And [`ZeroLaw`]: always the zero drive. It proves the path a law takes; it
 //! controls nothing.
@@ -74,16 +80,19 @@ pub enum BuiltinMimo {
     BuzzMatched,
     /// The minimum-drive target.
     MinimumDrive,
+    /// Band-average control.
+    BandAverage,
 }
 
 impl BuiltinMimo {
     /// Every built-in law, the default first.
-    pub const ALL: [BuiltinMimo; 5] = [
+    pub const ALL: [BuiltinMimo; 6] = [
         BuiltinMimo::PseudoInverse,
         BuiltinMimo::OpenLoop,
         BuiltinMimo::ShapeConstrained,
         BuiltinMimo::BuzzMatched,
         BuiltinMimo::MinimumDrive,
+        BuiltinMimo::BandAverage,
     ];
 
     /// The stable id a choice of law names it by.
@@ -94,6 +103,7 @@ impl BuiltinMimo {
             BuiltinMimo::ShapeConstrained => "shape_svd",
             BuiltinMimo::BuzzMatched => "buzz_match",
             BuiltinMimo::MinimumDrive => "min_drive",
+            BuiltinMimo::BandAverage => "band_average",
         }
     }
 
@@ -110,6 +120,7 @@ impl BuiltinMimo {
             BuiltinMimo::ShapeConstrained => ShapeConstrainedLaw::spec(),
             BuiltinMimo::BuzzMatched => BuzzMatchedLaw::spec(),
             BuiltinMimo::MinimumDrive => MinimumDriveLaw::spec(),
+            BuiltinMimo::BandAverage => BandAverageLaw::spec(),
         }
     }
 
@@ -125,6 +136,7 @@ impl BuiltinMimo {
             BuiltinMimo::ShapeConstrained => Box::new(ShapeConstrainedLaw::build(setup, params)?),
             BuiltinMimo::BuzzMatched => Box::new(BuzzMatchedLaw::build(setup, params)?),
             BuiltinMimo::MinimumDrive => Box::new(MinimumDriveLaw::build(setup, params)?),
+            BuiltinMimo::BandAverage => Box::new(BandAverageLaw::build(setup, params)?),
         })
     }
 }

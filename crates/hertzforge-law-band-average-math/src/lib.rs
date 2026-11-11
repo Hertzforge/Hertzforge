@@ -159,6 +159,9 @@ pub struct BandAverage {
 
     // Feedback.
     gain: Option<Vec<f64>>,
+    /// The natural log of `gain`, carried from call to call so a small correction
+    /// keeps its digits (the Python takes the log of the gain again each call).
+    log_gain: Vec<f64>,
     gain_solved: Vec<f64>,
     excluded: Option<Vec<bool>>,
     limit_trim: Option<Vec<f64>>,
@@ -204,6 +207,7 @@ impl BandAverage {
             front_i: 0,
             kappa_rms: None,
             gain: None,
+            log_gain: Vec::new(),
             gain_solved: Vec::new(),
             excluded: None,
             limit_trim: None,
@@ -325,6 +329,11 @@ impl BandAverage {
     /// channels (limit channels left out), once it has run.
     pub fn band_gain(&self) -> Option<&[f64]> {
         self.gain.as_deref()
+    }
+
+    /// The natural log of [`Self::band_gain`], in the same layout.
+    pub fn band_log_gain(&self) -> Option<&[f64]> {
+        self.gain.as_ref().map(|_| self.log_gain.as_slice())
     }
 
     /// The channels the law controls, in the order of `band_gain`'s columns.
@@ -1289,13 +1298,13 @@ impl BandAverage {
     fn update_gain(&mut self, measured: &[f64], predicted: &[f64]) -> bool {
         let n_ctrl = self.n_ctrl;
         let n = self.n_bands() * n_ctrl;
-        let gain = self.gain.take().unwrap_or_else(|| {
+        if self.gain.is_none() {
             self.gain_solved = vec![1.0; n];
-            vec![1.0; n]
-        });
+            self.log_gain = vec![0.0; n];
+        }
         let cap = (10f64.powf(0.6)).ln();
         let rate = self.params.gain_correction_rate;
-        let mut lg: Vec<f64> = gain.iter().map(|g| g.ln()).collect();
+        let mut lg = std::mem::take(&mut self.log_gain);
         for b in 0..self.n_bands() {
             if self.factored[b].is_none() {
                 continue;
@@ -1314,7 +1323,11 @@ impl BandAverage {
                 }
             }
         }
-        let gain: Vec<f64> = lg.iter().map(|x| x.clamp(-cap, cap).exp()).collect();
+        for x in &mut lg {
+            *x = x.clamp(-cap, cap);
+        }
+        let gain: Vec<f64> = lg.iter().map(|x| x.exp()).collect();
+        self.log_gain = lg;
         let moved = gain
             .iter()
             .zip(&self.gain_solved)

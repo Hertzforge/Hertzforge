@@ -40,9 +40,10 @@ BA = {}
 R70 = BA | {'drive_reduction': 0.70}
 CROSS = BA | {'cross_terms': 'reference'}
 TFU = {'use_tf_update': True}
-#: law name: (kind, parameters, update the FRF during control)
+#: law name: (the built-in law's id, parameters, update the FRF during control)
 LAWS = {
-    'pinv': ('pseudoinverse', {}, False),
+    # The plain pseudoinverse, open loop, as Rattlesnake's is.
+    'pinv': ('pinv_open', {'regularization': 'none'}, False),
     'ba_knee': ('band_average', BA, False),
     'ba_knee_tfu': ('band_average', BA | TFU, True),
     'ba_r65': ('band_average', BA | {'drive_reduction': 0.65}, False),
@@ -53,6 +54,12 @@ LAWS = {
     'ba_r70_tfu_hold': ('band_average', R70 | TFU | {'hold_capped_bands': True}, True),
     'ba_cross': ('band_average', CROSS, False),
     'ba_cross_tfu': ('band_average', CROSS | TFU, True),
+    # The other built-in laws at their defaults, for comparison.
+    'pinv_closed': ('pinv_closed', {}, False),
+    'pinv_open': ('pinv_open', {}, False),
+    'shape_svd': ('shape_svd', {}, False),
+    'buzz_match': ('buzz_match', {}, False),
+    'min_drive': ('min_drive', {}, False),
 }
 # The service runs a law call per segment. Two blocks of 16384 samples, 2 s, hold
 # three 50 % overlapped frames, and Rattlesnake's test runs called the law about
@@ -108,7 +115,7 @@ def write_setup(out: Path, run: str) -> Path:
     """The study driver's setup file for one run."""
     plant, _, drives, controls = load_models()
     prefix, law = run.split('_', 1)
-    kind, parameters, update = LAWS[law]
+    law_id, parameters, update = LAWS[law]
     softening = json.loads((HERE / 'softening.json').read_text())
     soft = None
     if prefix == 'nl8n':
@@ -120,8 +127,8 @@ def write_setup(out: Path, run: str) -> Path:
         levels, full = list(LEVELS), HOLD_S
     else:
         levels, full = [0], 90.0
-    law_entry = {'kind': kind, 'params': parameters}
-    if LAW_FILE and kind == 'band_average':
+    law_entry = {'kind': 'builtin', 'id': law_id, 'params': parameters}
+    if LAW_FILE and law_id == 'band_average':
         law_entry = {'kind': 'file', 'path': str(Path(LAW_FILE).resolve()), 'params': parameters}
     setup = {
         'sample_rate': SAMPLE_RATE, 'nfft': FRAME, 'band_lo_hz': 20.0, 'band_hi_hz': 4000.0,

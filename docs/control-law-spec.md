@@ -249,7 +249,7 @@ there is the caller's, never the law's.
 - **Tolerances.** Alarm and abort judge each control channel's PSD, the diagonal of the measured
   response SDM. Coherence and phase errors are shown and recorded.
 
-**Built-in laws**, each from the published literature, each run natively and also built as a law
+**Built-in laws**, the first five from the published literature, each run natively and also built as a law
 file from the same source and held to the native law in the tests:
 
 | Id | Law | Method |
@@ -259,6 +259,7 @@ file from the same source and held to the native law in the tests:
 | `shape_svd` | Shape-constrained (SVD) | The drive held to the `m` leading right singular directions of the plant on each line, `m` fixed or set by a singular-value ratio (R. Schultz and P. Avitabile, "Shape-Constrained Input Estimation for Efficient Multi-shaker Vibration Testing", Experimental Techniques 44, 2020); closed loop by the default law's correction inside the constraint |
 | `buzz_match` | Buzz-test matched | The reference's autospectra with each pair's coherence and phase taken from the identification response, pairs below a coherence floor left independent (after P. M. Daborn, C. Roberts, D. J. Ewins and P. R. Ind, "Next-Generation Random Vibration Tests", IMAC XXXII, 2014, as described by Schultz); then the default law's closed loop |
 | `min_drive` | Minimum drive | The reference's autospectra, as far as a trade-off against drive power allows, with the cross terms of the drive that needs the least power to produce them: per line the drive minimizing the autospectrum residuals plus the trade-off times the drive power over the positive semi-definite cone, and the plant's predicted response to it as the target (K. Coletti, R. B. Davis and R. Schultz, "Pareto-optimal target definition for multi-axis random vibration testing", 2026; D. O. Smallwood, "Minimum Input Trace for Multiple Input Multiple Output Linear Systems", Journal of the IEST 56, 2013, at the exact-control end); then the default law's closed loop |
+| `band_average` | Band average | Brandon Zwink's law, not from the literature. Per fractional-octave band, one drive SDM, flat within the band, whose band-averaged response matches the band-averaged reference through the band cross-power sensitivity `<H_pi conj(H_pj)>`; the threshold of each band's regularized solve chosen by a sweep at the seed and held; a fit over the positive semi-definite drives where clipping would move a response; then each loop a gain correction per band and control from the measured response over the predicted, and optionally a new solve from the updated FRF with the drive conditioned so the estimate sees every drive. It matches band averages: a control's line-by-line error is not driven to zero |
 
 Each declares the condition number and the singular values kept per line and the largest drive
 change of the loop as diagnostics; the closed-loop laws also count the clamped factor diagonals.

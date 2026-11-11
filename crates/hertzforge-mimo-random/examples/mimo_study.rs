@@ -16,7 +16,7 @@ use hertzforge_hal_sim::{
     Discretization, ModalPlant, ModalSoftening, Mode, ModeResponse, SimConfig,
 };
 use hertzforge_law_host::{HostConfig, LawHost, LawIdentity, Param, ParamValue};
-use hertzforge_mimo_laws::{BandAverageLaw, BuiltinMimoLaw, ParamKindDecl, ParamVal};
+use hertzforge_mimo_laws::{BandAverageLaw, BuiltinMimo, BuiltinMimoLaw, LawSpec, ParamKindDecl};
 use hertzforge_mimo_random::config::{Caps, FrfMode, Gates, Protections, Records};
 use hertzforge_mimo_random::{
     DriveSpec, Estimation, Identification, MimoConfig, MimoRandomService, ReferenceSpec,
@@ -45,55 +45,6 @@ struct StoppedClock;
 impl LawClock for StoppedClock {
     fn now_s(&self) -> f64 {
         0.0
-    }
-}
-
-/// The band-average law, native.
-struct NativeBandAverage {
-    params: Vec<Param>,
-}
-
-fn to_val(p: &Param) -> ParamVal {
-    match &p.value {
-        ParamValue::Number(v) => ParamVal::Number(*v),
-        ParamValue::Integer(v) => ParamVal::Integer(*v),
-        ParamValue::Toggle(v) => ParamVal::Toggle(*v),
-        ParamValue::Choice(v) => ParamVal::Choice(v.clone()),
-        _ => panic!("the band-average law declares no parameter of this kind"),
-    }
-}
-
-impl MimoLawFactory for NativeBandAverage {
-    fn identity(&self) -> LawIdentity {
-        let spec = BandAverageLaw::spec();
-        LawIdentity {
-            name: spec.name.into(),
-            version: spec.version.into(),
-            author: spec.author.into(),
-            sha256: String::new(),
-        }
-    }
-
-    fn params(&self) -> &[Param] {
-        &self.params
-    }
-
-    fn build(
-        &self,
-        setup: &MimoSetup,
-        _budget: Duration,
-    ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
-        let given: Vec<(&str, ParamVal)> = self
-            .params
-            .iter()
-            .map(|p| (p.key.as_str(), to_val(p)))
-            .collect();
-        let resolved = BandAverageLaw::spec()
-            .resolve(&given)
-            .map_err(|e| ChoiceError::BadConfig(e.0))?;
-        let law =
-            BandAverageLaw::build(setup, &resolved).map_err(|e| ChoiceError::BadConfig(e.0))?;
-        Ok(Box::new(law))
     }
 }
 
@@ -295,9 +246,8 @@ fn reference(
     }
 }
 
-/// The study's values as the band-average law's declared kinds.
-fn band_average_params(values: &Value) -> Vec<Param> {
-    let spec = BandAverageLaw::spec();
+/// The study's values as the kinds a law declares.
+fn declared_params(spec: &LawSpec, values: &Value) -> Vec<Param> {
     values
         .as_object()
         .into_iter()
@@ -307,7 +257,7 @@ fn band_average_params(values: &Value) -> Vec<Param> {
                 .params
                 .iter()
                 .find(|p| p.key == key)
-                .unwrap_or_else(|| panic!("the band-average law has no parameter `{key}`"));
+                .unwrap_or_else(|| panic!("the law `{}` has no parameter `{key}`", spec.name));
             let value = match decl.kind {
                 ParamKindDecl::Number { .. } => ParamValue::Number(v.as_f64().expect("a number")),
                 ParamKindDecl::Integer { .. } => {
@@ -325,20 +275,15 @@ fn band_average_params(values: &Value) -> Vec<Param> {
 
 fn factory(law: &Value, dir: &Path, n_c: usize) -> (LawChoice, Option<Arc<dyn MimoLawFactory>>) {
     match law["kind"].as_str().expect("law.kind") {
-        // The built-in open-loop law with no regularization: pinv(H) S pinv(H)^H.
-        "pseudoinverse" => {
-            let params = vec![Param::new(
-                "regularization",
-                ParamValue::Choice("none".into()),
-            )];
-            (LawChoice::new("pinv_open", params), None)
-        }
-        "band_average" => {
-            let params = band_average_params(&law["params"]);
-            let f = NativeBandAverage {
-                params: params.clone(),
-            };
-            (LawChoice::new("band_average", params), Some(Arc::new(f)))
+        "builtin" => {
+            let id = law["id"].as_str().expect("law.id");
+            let spec = BuiltinMimo::from_id(id)
+                .unwrap_or_else(|| panic!("there is no built-in law `{id}`"))
+                .spec();
+            (
+                LawChoice::new(id, declared_params(&spec, &law["params"])),
+                None,
+            )
         }
         "file" => {
             let host = LawHost::new(HostConfig {
@@ -354,7 +299,7 @@ fn factory(law: &Value, dir: &Path, n_c: usize) -> (LawChoice, Option<Arc<dyn Mi
             let entry = catalog
                 .import(&path)
                 .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            let params = band_average_params(&law["params"]);
+            let params = declared_params(&BandAverageLaw::spec(), &law["params"]);
             let choice = LawChoice::new(entry.id.clone(), params);
             let resolved = catalog
                 .resolve_mimo(&choice, n_c)
