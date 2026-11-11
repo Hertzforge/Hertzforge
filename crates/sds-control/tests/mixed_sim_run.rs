@@ -512,26 +512,39 @@ async fn mixed_total_reference_is_at_the_level_and_every_input_has_its_rms() {
     c.ok("mixed.abort", json!({})).await;
 }
 
-/// A tone sweeping on the floor through the ladder to completed, with the
-/// shell's acquisition defaults and the tone law's settings the shell starts
-/// from in Mixed Mode (Sine's slow compression here falls behind the sweep
-/// and trips the tone's abort).
+/// The flow's sine-on-random test, a standing tone and a tone sweeping up
+/// from where the plant's gain climbs, with the shell's acquisition, ramps and
+/// tone law settings, through the ladder to completed. Before the tone held
+/// its feed-forward until its reading was usable, the sweep carried the drive
+/// 0.7 dB off it by the handoff and the servo ramped through that at its rate
+/// cap into the tone's abort.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_swept_tone_on_the_floor_runs_to_completed() {
     let addr = serve(service(Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c).await;
+    let tones = json!({"alarm_db": [1.5, 1.5], "abort_db": [3, 3]});
+    let mut fixed = tone("t1", 120.0, 0.3);
+    let mut swept = json!({"id": "t2", "kind": "tone", "amplitude_g": 0.3,
+           "schedule": {"kind": "sweep", "band_hz": [400, 600],
+                        "rate": {"law": "log", "oct_per_min": 1}, "end": null}});
+    for t in [&mut fixed, &mut swept] {
+        t["alarm_db"] = tones["alarm_db"].clone();
+        t["abort_db"] = tones["abort_db"].clone();
+    }
     let mut cfg = config(
         vec![
-            floor(),
-            tone("t1", 120.0, 0.3),
-            json!({"id": "t2", "kind": "tone", "amplitude_g": 0.3,
-                   "schedule": {"kind": "sweep", "band_hz": [400, 600],
-                                "rate": {"law": "log", "oct_per_min": 1}, "end": null}}),
+            json!({"id": "floor", "kind": "floor",
+                   "breakpoints": [{"freq_hz": 20, "psd_g2_hz": 1e-4}, {"freq_hz": 2000, "psd_g2_hz": 1e-4}]}),
+            fixed,
+            swept,
         ],
-        auto(20.0),
+        json!({"mode": "auto", "levels": [{"db": -12, "dwell_s": 5}, {"db": -6, "dwell_s": 5}, {"db": 0}],
+               "full_level_s": 15}),
     );
     cfg["acquisition"] = json!({"fs_hz": 8192, "n_pts": 16384, "n_avg": 4, "tick_ms": 10});
+    cfg["control"]["part_ramp_s"] = json!(3);
+    cfg["control"]["floor_settle_s"] = json!(30);
     cfg["control"]["law"] = json!({"tones": {"id": "servo_blend", "params": {
         "blend_w": 0.5, "compression": "custom", "ki": 0.5, "max_rate_db_per_s": 20, "kp": 0.3}}});
     run_to_engaged(&mut c, cfg).await;

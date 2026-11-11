@@ -532,6 +532,17 @@ impl MixedProcessStep {
                     }
                 }
             };
+            // Until the reading is usable the tone plays its feed-forward
+            // itself: the law, told it is on target, follows only its blend's
+            // share of the prediction's change, so along a sweep the drive
+            // drifts off the feed-forward and the first real reading starts
+            // the servo on an error it ramps through at its rate cap while
+            // the narrow tracker catches up (found: 0.7 dB at the handoff
+            // became a 4 dB undershoot and the tone's abort).
+            let proposed = match (usable, proposed, prediction) {
+                (false, Some(_), Some(db)) => Some(10f64.powf(db / 20.0)),
+                (_, p, _) => p,
+            };
             let mut bound_now = false;
             if let Some(p) = proposed {
                 let (capped, bound) = cap_drive(in_force, p, &self.guards, dt);
