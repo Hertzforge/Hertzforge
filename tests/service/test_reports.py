@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hertzforge.service import projects, reports
+from hertzforge.service import frames, projects, reports
 from hertzforge.service.protocol import ProtocolError
 
 from .test_projects import _exchange
@@ -95,16 +95,21 @@ def test_a_report_over_the_socket(validate, tmp_path):
         ('project.import', {'path': str(PLATE / 'frfs.unv')}),
         ('report.generate', {'template': 'modal', 'name': 'Plate Report'}),
         ('report.render', {'name': 'Plate Report'}),
+        ('report.views', {'name': 'Plate Report'}),
         ('report.export', {'name': 'Plate Report', 'path': str(tmp_path / 'out.html')}),
         ('report.print', {'name': 'Plate Report', 'anyway': True}),
         ('report.render', {}),
     ]))
-    empty, _, made, shown, written, printed, unnamed = (got[-1] for got in responses)
+    empty, _, made, shown, drawn, written, printed, unnamed = (got[-1] for got in responses)
     # the connection's empty project takes a report like any other
     assert empty['result']['name'] == 'Report'
     validate(made['result'], 'reportGenerateResult')
     assert made['result']['name'] == 'Plate Report' and made['result']['project']['modified']
     validate(shown['result'], 'reportRenderResult')
+    wire, _arrays = frames.to_wire(drawn['result'])
+    validate(wire, 'reportViewsResult')
+    figures = [b for b in drawn['result']['blocks'] if b['kind'] == 'figure']
+    assert figures and all(b['views'] for b in figures), 'the plate survey draws figures'
     validate(written['result'], 'reportExportResult')
     validate(printed['result'], 'reportPrintResult')
     assert (tmp_path / 'out.html').exists()

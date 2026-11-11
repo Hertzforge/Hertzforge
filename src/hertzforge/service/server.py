@@ -406,6 +406,7 @@ class Connection:
     async def report_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `report.*` request on this connection's project."""
         keys = {'report.generate': ('template', 'name'), 'report.render': ('name', 'theme'),
+                'report.views': ('name',),
                 'report.export': ('name', 'path', 'anyway'),
                 'report.editor': ('name', 'selected', 'theme', 'page'),
                 'report.operate': ('name', 'op', 'selected', 'theme', 'at', 'from', 'to',
@@ -422,6 +423,8 @@ class Connection:
             if method == 'report.render':
                 html = await call(reports.render, project, params, 'report.render', self.system)
                 return {'name': params['name'], 'html': html}
+            if method == 'report.views':
+                return await call(reports.page_views, project, params, self.system)
             if method == 'report.print':
                 return await call(reports.print_page, project, params, self.system)
             if method == 'report.issue':
@@ -562,8 +565,13 @@ class Connection:
                                                 'result': result})
             elif method in reports.REPORT_METHODS:
                 result = await self.report_request(method, params)
-                frame = frames.encode_text({'type': 'response', 'id': ident,
-                                            'result': result})
+                if method == 'report.views':
+                    # its figures' views carry arrays, as an operation's do
+                    frame = await self.service.in_worker(
+                        frames.pack, {'type': 'response', 'id': ident, 'result': result})
+                else:
+                    frame = frames.encode_text({'type': 'response', 'id': ident,
+                                                'result': result})
             elif method == 'units.system':
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': self.units_request(params)})

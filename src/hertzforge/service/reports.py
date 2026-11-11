@@ -16,8 +16,8 @@ from typing import Any
 
 from .protocol import bad_request, not_found, refused
 
-REPORT_METHODS = ('report.generate', 'report.render', 'report.export', 'report.editor',
-                  'report.operate', 'report.print', 'report.issue')
+REPORT_METHODS = ('report.generate', 'report.render', 'report.views', 'report.export',
+                  'report.editor', 'report.operate', 'report.print', 'report.issue')
 
 #: the steps of an issue: the page that says issued is printed by the shell
 #: between `begin` and `record`
@@ -80,6 +80,20 @@ def render(project: Any, params: Mapping[str, Any], method: str = 'report.render
         raise bad_request(f'{method} "theme" is light or dark')
     return render_html(project[name], project, units, object_groups=project.object_groups,
                        theme=theme)
+
+
+def page_views(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
+    """The report `name` as the shell's own page draws it
+    (`report.views.page_blocks`): its title and marking, and each drawn
+    block as text, an unbound slot, or a figure's protocol views, in the
+    unit system `units`."""
+    from hertzforge.report.views import page_blocks
+
+    name = _report(project, params, 'report.views')
+    report = project[name]
+    return {'name': name, 'title': report.title, 'marking': report.marking,
+            'blocks': page_blocks(report, project, units,
+                                  object_groups=project.object_groups)}
 
 
 def _anyway(params: Mapping[str, Any], method: str) -> bool:

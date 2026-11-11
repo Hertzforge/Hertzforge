@@ -891,6 +891,7 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 |---|---|---|
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
+| `report.views` | `{"name"}` | `{"name","title","marking","blocks"}` |
 | `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index","note"?}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
@@ -902,7 +903,12 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 `transient`, `sine`, `sysid`, `mimo` or `empty`, and `name` defaults to "Report". `report.render`
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
-shell shows it in a sandboxed frame. `report.export` writes the page that is printed and issued,
+shell shows it in a sandboxed frame. `report.views` gives the same report for the shell's own
+page to draw with its viz kit: each drawn block is `{"kind":"text","html"}`,
+`{"kind":"figure","views"}` (the protocol's views, arrays as binary frames) or
+`{"kind":"unbound","was"}`, with `block` (the index of the report block it came from, shared by a
+block's several figures), `label` (its figure or table number), `caption` and an optional `note`.
+`report.export` writes the page that is printed and issued,
 light, to `path` (`.html` added when it has another suffix), beside the target first and renamed
 over it. First it makes the checks asked before a report leaves the project: with skeleton sections
 on, the sections (a flash report's parts) the report still owes; with the data index on, every
