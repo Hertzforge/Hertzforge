@@ -651,7 +651,7 @@ pub const REFERENCE_PULSE_S: f64 = 0.011;
 
 /// The modal velocity at the reference amplitude of the 4 x 4 structure and of the
 /// 6 x 3, from the calibration in the module docs (the tests recompute both).
-pub const SHOCK_4X4_REFERENCE_VELOCITY: f64 = 1.2886e-2;
+pub const SHOCK_4X4_REFERENCE_VELOCITY: f64 = 1.2888e-2;
 pub const SHOCK_6X3_REFERENCE_VELOCITY: f64 = 1.2400e-2;
 
 impl ShockPlant {
