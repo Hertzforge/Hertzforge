@@ -13,11 +13,18 @@
 
 #![forbid(unsafe_code)]
 
+pub mod band;
+pub mod floor;
 pub mod parts;
 pub mod predict;
 pub mod schedule;
 #[cfg(feature = "service")]
 pub mod service;
+#[cfg(test)]
+mod testkit;
+pub mod tone;
+#[cfg(test)]
+mod verify;
 
 pub use parts::{
     sweep_span, BandWidth, ConfigError, Direction, FloorPart, LawPick, MixedConfig,
@@ -27,7 +34,7 @@ pub use parts::{
     DEFAULT_TONE_LAW_ID, DEFAULT_TRACKING_HZ, MAX_BANDS, MAX_TONES, MIN_TONE_SPACING_WIDTHS,
     RESERVED_PART_KINDS,
 };
-pub use predict::{predict, MixedPrediction, PartMeanSquare, RatingCheck};
+pub use predict::{predict, sine_gauss_exceedance, MixedPrediction, PartMeanSquare, RatingCheck};
 pub use schedule::{PartClock, PartNow};
 #[cfg(feature = "service")]
 pub use service::display::{

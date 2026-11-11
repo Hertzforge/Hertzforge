@@ -102,7 +102,9 @@ pub struct MixedDisplay {
     /// The control composite with the tones in, g^2/Hz.
     pub control: Vec<f32>,
     /// The composite of the residual (each tracked tone subtracted), g^2/Hz:
-    /// what the floor and bands are judged on.
+    /// what the floor and bands are judged on. Once the floor has had a loop
+    /// this is its averaged estimate (each line over its clean frames, the
+    /// neighbours' error carried on lines with none), at the level in force.
     pub residual: Vec<f32>,
     /// Per control channel.
     pub channels: Vec<MixedDisplayChannel>,

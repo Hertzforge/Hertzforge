@@ -124,7 +124,21 @@ pub fn resolve_mixed(
     let floor = catalog
         .resolve(&floor_choice, &mut scratch)
         .map_err(floor_err)?;
-    let tone_choice = law_choice(catalog, &choice.tones).map_err(tones_err)?;
+    // The built-in tone law reads through a narrow tracker in a mixed run, so
+    // its compression defaults to the one that holds there, not Sine's.
+    let mut tones_pick = choice.tones.clone();
+    if tones_pick.id == hertzforge_mixed::DEFAULT_TONE_LAW_ID
+        && !tones_pick.params.contains_key("compression")
+    {
+        let p = &mut tones_pick.params;
+        p.insert("compression".into(), Value::from("custom"));
+        p.entry("ki")
+            .or_insert(Value::from(hertzforge_mixed::service::MIXED_TONE_KI));
+        p.entry("max_rate_db_per_s").or_insert(Value::from(
+            hertzforge_mixed::service::MIXED_TONE_MAX_RATE_DB_PER_S,
+        ));
+    }
+    let tone_choice = law_choice(catalog, &tones_pick).map_err(tones_err)?;
     let tones = hertzforge_sine_laws::resolve_sine(catalog, &tone_choice).map_err(tones_err)?;
     Ok(MixedLawFactories {
         floor,
@@ -154,6 +168,38 @@ mod tests {
         let (cat, root) = catalog("builtin");
         let l = resolve_mixed(&cat, &MixedLawChoice::default(), 1).unwrap();
         assert_eq!(l.tones.describe().id, "servo_blend");
+        // The tones take the mixed compression unless one is chosen.
+        let params = l.tones.describe().params;
+        let get = |k: &str| {
+            params
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.clone())
+        };
+        use hertzforge_sine::law::ParamSetting;
+        assert_eq!(
+            get("compression"),
+            Some(ParamSetting::Choice("custom".into()))
+        );
+        assert_eq!(
+            get("ki"),
+            Some(ParamSetting::Number(
+                hertzforge_mixed::service::MIXED_TONE_KI
+            ))
+        );
+        let mut slow = MixedLawChoice::default();
+        slow.tones
+            .params
+            .insert("compression".into(), serde_json::json!("slow"));
+        let l = resolve_mixed(&cat, &slow, 1).unwrap();
+        let params = l.tones.describe().params;
+        assert_eq!(
+            params
+                .iter()
+                .find(|(k, _)| k == "compression")
+                .map(|(_, v)| v.clone()),
+            Some(ParamSetting::Choice("slow".into()))
+        );
         assert_eq!(l.floor_hinv, hertzforge_random::HinvConfig::default());
         // A setting given for the floor's built-in reaches its settings.
         let mut choice = MixedLawChoice::default();

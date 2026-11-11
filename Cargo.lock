@@ -1268,6 +1268,7 @@ dependencies = [
  "hertzforge-mixed",
  "hertzforge-random",
  "hertzforge-random-laws",
+ "hertzforge-sine",
  "hertzforge-sine-laws",
  "serde_json",
 ]

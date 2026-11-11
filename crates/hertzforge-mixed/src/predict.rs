@@ -222,6 +222,45 @@ pub fn predict(cfg: &MixedConfig) -> Result<MixedPrediction, ConfigError> {
     })
 }
 
+/// The chance a sample of a sine of peak `a` (uniform phase) plus Gaussian
+/// noise of rms `sigma` exceeds `c` in magnitude (the brief's 6.2):
+/// `(1/pi) int_0^pi [Q((c - a sin th)/sigma) + Q((c + a sin th)/sigma)] dth`.
+pub fn sine_gauss_exceedance(c: f64, a: f64, sigma: f64) -> f64 {
+    let q = |z: f64| 0.5 * erfc(z / std::f64::consts::SQRT_2);
+    let n = 2000;
+    let h = std::f64::consts::PI / n as f64;
+    // Simpson's rule over [0, pi].
+    let f = |th: f64| q((c - a * th.sin()) / sigma) + q((c + a * th.sin()) / sigma);
+    let mut s = f(0.0) + f(std::f64::consts::PI);
+    for i in 1..n {
+        s += f(i as f64 * h) * if i % 2 == 1 { 4.0 } else { 2.0 };
+    }
+    s * h / 3.0 / std::f64::consts::PI
+}
+
+/// The complementary error function (Numerical Recipes' Chebyshev fit,
+/// relative error under 1.2e-7).
+pub fn erfc(x: f64) -> f64 {
+    let z = x.abs();
+    let t = 1.0 / (1.0 + 0.5 * z);
+    let r = t
+        * (-z * z - 1.265_512_23
+            + t * (1.000_023_68
+                + t * (0.374_091_96
+                    + t * (0.096_784_18
+                        + t * (-0.186_288_06
+                            + t * (0.278_868_07
+                                + t * (-1.135_203_98
+                                    + t * (1.488_515_87
+                                        + t * (-0.822_152_23 + t * 0.170_872_77)))))))))
+            .exp();
+    if x >= 0.0 {
+        r
+    } else {
+        2.0 - r
+    }
+}
+
 /// `MOTION_SAMPLES` log-spaced points from `lo` to `hi` (one point at a dwell).
 fn motion_points(lo: f64, hi: f64) -> impl Iterator<Item = f64> {
     let n = if hi > lo { MOTION_SAMPLES } else { 1 };
