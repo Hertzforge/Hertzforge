@@ -17,7 +17,7 @@ import { defaultMixedScreen, MIXED_PLOT_TYPES, mixedSubscription } from './mixed
 import { newBand, newTone } from './mixedSetup';
 import { MixedStore } from './mixedStore.svelte';
 import { MixedViewsState } from './mixedViews.svelte';
-import { partMotion } from './mixedWords';
+import { partMotion, partStateWord } from './mixedWords';
 import type { PlotPanel } from '../screen/screen.svelte';
 
 vi.setConfig({ testTimeout: 30000 });
@@ -133,14 +133,35 @@ describe('the setup against the service', () => {
 });
 
 describe('a run of each kind', () => {
+	it('a part whose window has closed reads as ended and offers no switch', async () => {
+		const { mixed } = await screen();
+		combined(mixed);
+		mixed.setup.bands[0].window = { on_s: 0, off_s: 1 };
+		expect(await mixed.apply()).toBe(true);
+		expect(await mixed.start()).toBe(true);
+		await until(() => mixed.status?.state === 'review');
+		expect(await mixed.proceed()).toBe(true);
+		await until(() => (mixed.now?.parts_s ?? 0) > 1.5 && !mixed.parts.find((p) => p.id === 'b1')!.on);
+		const b1 = mixed.parts.find((p) => p.id === 'b1')!;
+		const ctx = { rows: mixed.parts, config: mixed.runConfig, parts_s: mixed.now?.parts_s ?? null };
+		expect(partMotion(b1, false, ctx)).toBe('Its window closed at 1 s');
+		expect(partStateWord(b1, ctx)).toBe('Ended');
+		expect(mixed.toggleOf(b1)).toMatchObject({ enabled: false, reason: 'The part has ended.' });
+		await mixed.abort();
+	});
+
 	it('the combined test: floor alone first, then every part; a part off and on; hold; manual level; adjust; stop', async () => {
 		const { client, mixed } = await screen();
 		combined(mixed);
 		await toParts(mixed);
 		const t3 = () => mixed.parts.find((p) => p.id === 't3')!;
 		const t2 = () => mixed.parts.find((p) => p.id === 't2')!;
-		// a follower stays at its ratio of its leader
+		// a follower stays at its ratio of its leader, and says so
 		expect(t3().freq_hz! / t2().freq_hz!).toBeCloseTo(2, 1);
+		const ctx = () => ({ rows: mixed.parts, config: mixed.runConfig, parts_s: mixed.now?.parts_s ?? null });
+		expect(partMotion(t3(), false, ctx())).toBe(`Follows ${t2().name} at 2×, sweeping up at 0.3 oct/min`);
+		// the swept band sized by a share of its center reads its schedule's rate in Hz/s
+		expect(partMotion(mixed.parts.find((p) => p.id === 'b2')!, false, ctx())).toMatch(/^Sweeping (up|down) at 20 Hz\/s/);
 		// switch a part off and back on: a ramp each way
 		expect(await mixed.part('b1', false)).toEqual({ id: 'b1', on: false });
 		await until(() => !mixed.parts.find((p) => p.id === 'b1')!.on);
