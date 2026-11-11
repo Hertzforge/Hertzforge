@@ -12,7 +12,9 @@
 	import { theme } from '$lib/theme/theme.svelte';
 	import ReportPage from '$lib/report/ReportPage.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import { untrack } from 'svelte';
 	import ActionTable from './ActionTable.svelte';
+	import { defaultTemplate, TEMPLATES } from '$lib/report/templates';
 
 	interface Props {
 		app: AppState;
@@ -36,17 +38,9 @@
 		if (a.reading && r.name) void r.show(r.name);
 	});
 
-	const TEMPLATES = [
-		['modal', 'Modal test'],
-		['random', 'Random vibration'],
-		['shock', 'Shock'],
-		['transient', 'Transient'],
-		['sine', 'Sine sweep'],
-		['sysid', 'System identification'],
-		['mimo', 'MIMO random'],
-		['empty', 'Empty']
-	] as const;
-	let template = $state('modal');
+	// the template of the module the person came from, unless they choose another
+	// read once, as the module opens: choosing another module later does not change the choice here
+	let template = $state<string>(untrack(() => defaultTemplate(app.lastModule, app.tests.screen)));
 	let inserting = $state('markdown');
 	const ed = $derived(r.editor);
 	const block = $derived(ed?.block ?? null);

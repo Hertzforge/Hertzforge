@@ -900,7 +900,9 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
-`transient`, `sine`, `sysid`, `mimo` or `empty`, and `name` defaults to "Report". `report.render`
+`transient`, `sine`, `sysid`, `mimo`, `model`, `specify`, `signals` or `empty`, and `name`
+defaults to "Report". The Report module starts from the template of the module the person came
+from: Model's is `model`, Specify's `specify`, Signals' `signals`, and each test module's its own. `report.render`
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.views` gives the same report for the shell's own

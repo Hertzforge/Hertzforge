@@ -3447,7 +3447,129 @@ def mimo_template(objects: Mapping[str, Any],
 
 #: every built-in report template by the key `Project.generate_report`
 #: takes — the one list the project, the menus and the tests read
+def _ref(name: str, field: str) -> str:
+    """A live reference, `{{name.field}}`, filled in when the page is drawn."""
+    return '{{' + f'{name}.{field}' + '}}'
+
+
+def model_template(objects: Mapping[str, Any],
+                   object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
+    """A finite element model report, the Model module's default: the model
+    as it was built, then its normal modes. The geometry and the shape set
+    bind to the first of each in the project ('@any'), since a model need
+    not be in the Basis group a test's objects are in.
+    """
+    geometry, shapes = '@any:Geometry', '@any:ShapeSet'
+    return Report('Model Report', [
+        {'kind': 'text', 'text':
+            '## Model Summary\n\n'
+            f'The finite element model has {_ref(geometry, "num_nodes")} nodes and '
+            f'{_ref(geometry, "num_elements")} elements. Its normal modes were solved '
+            f'from {_ref(shapes, "min_frequency")} to {_ref(shapes, "max_frequency")}, '
+            f'{_ref(shapes, "num_modes")} modes in all. This report records the model as '
+            'it was built and the modes it gives, which is what a test is planned from '
+            'and correlated against.'},
+        {'kind': 'text', 'text':
+            '## The Model\n\n'
+            'The model ({{figure:The model}}) is drawn with every element group it is '
+            'built from, each in its own color. Turn it to see the parts and the joints '
+            'between them.'},
+        {'kind': 'scene', 'geometry': geometry, 'shapes': '',
+         'caption': 'The model'},
+        {'kind': 'text', 'text':
+            '## Normal Modes\n\n'
+            'The modes are listed in {{table:Normal modes}}, each with its frequency '
+            'and damping. The auto-MAC ({{figure:Auto-MAC of the normal modes}}) checks '
+            'that the shapes are independent: a mass-normalized model gives an identity '
+            'matrix, and large off-diagonal terms mean two shapes are not distinct at '
+            'the degrees of freedom kept. The animated shapes follow '
+            '({{figure:Mode shapes}}), colored by displacement.'},
+        {'kind': 'table', 'source': shapes, 'caption': 'Normal modes'},
+        {'kind': 'plot', 'source': shapes, 'mode': 'mac',
+         'caption': 'Auto-MAC of the normal modes'},
+        {'kind': 'scene', 'geometry': geometry, 'shapes': shapes,
+         'caption': 'Mode shapes (pick a mode to animate it, colored by displacement)'},
+    ])
+
+
+def specify_template(objects: Mapping[str, Any],
+                     object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
+    """A specification report, the Specify module's default: each kind of
+    specification the project holds drawn with its limits. A kind the
+    project does not hold stays an unbound slot and is not drawn.
+    """
+    random, banded = '@any:Specification', '@any:OctaveSpecification'
+    shock, sine = '@any:ShockSpecification', '@any:SineSweepSpecification'
+    transient = '@any:TransientSpecification'
+    return Report('Specification Report', [
+        {'kind': 'text', 'text':
+            '## Specification Summary\n\n'
+            'This report records the test specifications in the project: what each '
+            'control channel is required to see, and the limits a test is held to. '
+            f'The random specification covers {_ref(random, "num_records")} control '
+            f'channels from {_ref(random, "min_frequency")} to '
+            f'{_ref(random, "max_frequency")}.'},
+        {'kind': 'text', 'text':
+            '## Random\n\n'
+            'The random specification ({{figure:Random specification}}) is drawn one '
+            'control channel at a time, with its warning and abort limits; the list '
+            'over the plot reaches the other channels. Its octave-band form follows '
+            'where the project holds one.'},
+        {'kind': 'plot', 'source': random, 'mode': 'curves',
+         'caption': 'Random specification'},
+        {'kind': 'plot', 'source': banded, 'mode': 'curves',
+         'caption': 'Random specification, octave bands'},
+        {'kind': 'text', 'text':
+            '## Shock, Sine and Transient\n\n'
+            'A shock response spectrum, a sine sweep and a transient waveform are each '
+            'drawn with their tolerances where the project holds them.'},
+        {'kind': 'plot', 'source': shock, 'mode': 'curves',
+         'caption': 'Shock response spectrum specification'},
+        {'kind': 'plot', 'source': sine, 'mode': 'curves',
+         'caption': 'Sine sweep specification'},
+        {'kind': 'plot', 'source': transient, 'mode': 'curves',
+         'caption': 'Transient waveform specification'},
+    ])
+
+
+def signals_template(objects: Mapping[str, Any],
+                     object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
+    """A signals report, the Signals module's default: the time histories
+    and the spectra the project holds, one figure per quantity, after the
+    front matter every report opens with.
+    """
+    time, density = '@basis:TimeHistory', '@basis:Psd'
+    dofs_source = ('@basis:TimeHistory'
+                   if any(type(obj).__name__ == 'TimeHistory' for obj in objects.values())
+                   else '@basis:Psd')
+    return Report('Signals Report', [
+        {'kind': 'text', 'text':
+            '## Summary\n\n'
+            f'The recording has {_ref(time, "num_channels")} channels at '
+            f'{_ref(time, "num_samples")} samples each. The spectra are averaged over '
+            f'{_ref(density, "num_averages")} frames from '
+            f'{_ref(density, "min_frequency")} to {_ref(density, "max_frequency")}. '
+            'This report records the signals as they were measured, before any analysis '
+            'reads them.'},
+        *front_matter(objects, object_groups, dofs_source),
+        {'kind': 'text', 'text':
+            '## Time Histories\n\n'
+            'Each quantity is drawn on its own axis, with the frames the spectra are '
+            'averaged over marked on it.'},
+        *time_data_blocks(time, objects, object_groups, 'Time histories',
+                          '{quantity} time histories'),
+        {'kind': 'text', 'text':
+            '## Spectra\n\n'
+            'The power spectral densities follow, one figure per quantity, each drawn '
+            'flat across its own frequency bin so the area under it is its mean square.'},
+        *time_data_blocks(density, objects, object_groups, 'Power spectral densities',
+                          '{quantity} power spectral densities', averaging=False),
+    ])
+
+
 TEMPLATE_BUILDERS = {'modal': modal_template, 'random': random_template,
                      'shock': shock_template, 'transient': transient_template,
                      'sine': sine_template,
-                     'sysid': sysid_template, 'mimo': mimo_template}
+                     'sysid': sysid_template, 'mimo': mimo_template,
+                     'model': model_template, 'specify': specify_template,
+                     'signals': signals_template}
