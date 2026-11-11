@@ -15,6 +15,9 @@
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
 	import SineProfileTable from '../sine/SineProfileTable.svelte';
+	import TableFileBar from '../TableFileBar.svelte';
+	import type { LoadedTable } from '$lib/tables/tableFiles';
+	import { PART_TABLE_KIND, partsRows, partsTable } from './partsFile';
 	import { NO_SELECTION, isSelected, pick, pickHow, reach, within, type RowSelection } from '$lib/tables/selection';
 	import { copyField, followChoices, type MixedBandDraft, type MixedToneDraft, type ScheduleDraft } from './mixedSetup';
 	import type { MixedStore } from './mixedStore.svelte';
@@ -84,6 +87,17 @@
 	}
 
 	const pickedCount = $derived(sel.rows.length);
+
+	/** A file's parts take the table's place; more than the table holds is refused. */
+	function openFile(loaded: LoadedTable) {
+		const { rows: read, notes } = partsRows(table, loaded);
+		if (read.length > max) throw new Error(`The file has ${read.length} parts; a table holds at most ${max}.`);
+		if (tones) mixed.setup.tones = read as MixedToneDraft[];
+		else mixed.setup.bands = read as MixedBandDraft[];
+		sel = NO_SELECTION;
+		open = {};
+		return notes;
+	}
 </script>
 
 <section class="aq-panel parts" aria-labelledby="{table}-title" data-testid="mixed-{table}">
@@ -251,9 +265,11 @@
 	{#if !rows.length}<p class="aq-small aq-muted" data-testid="mixed-{table}-empty">No {word}s.</p>{/if}
 
 	<div class="actions">
-		<button class="btn sm" disabled={locked || rows.length >= max} onclick={add} data-testid="mixed-{table}-add">Add {tones ? 'Tone' : 'Narrowband'}</button>
-		<button class="btn ghost sm" disabled={locked || !pickedCount} onclick={removePicked} data-testid="mixed-{table}-remove">Remove Picked</button>
-		<span class="aq-small aq-muted">{rows.length} of at most {max}</span>
+		<TableFileBar client={mixed.tableFiles ?? null} tableKind={PART_TABLE_KIND[table]} name={tones ? 'Tones' : 'Narrowbands'} table={() => partsTable(table, rows)} onopen={openFile} {locked} testid="mixed-{table}-file">
+			<button class="btn sm" disabled={locked || rows.length >= max} onclick={add} data-testid="mixed-{table}-add">Add {tones ? 'Tone' : 'Narrowband'}</button>
+			<button class="btn ghost sm" disabled={locked || !pickedCount} onclick={removePicked} data-testid="mixed-{table}-remove">Remove Picked</button>
+			<span class="aq-small aq-muted">{rows.length} of at most {max}</span>
+		</TableFileBar>
 	</div>
 </section>
 
