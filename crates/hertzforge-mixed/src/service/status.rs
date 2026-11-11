@@ -213,11 +213,19 @@ pub struct FloorSummary {
     pub alarm_lines: usize,
     /// Clean lines outside the abort band.
     pub abort_lines: usize,
-    /// Degrees of freedom of the floor estimate.
+    /// Degrees of freedom of the floor estimate: the typical (median) clean
+    /// line's in the last loop. (A line a moving part has just left holds a
+    /// frame or two; the least over the lines is not what the estimate
+    /// holds.)
     pub dof: f64,
     /// Lines of the grid inside the floor's band.
     #[serde(default)]
     pub lines_in_band: usize,
+    /// The clean lines the floor's rms abort was judged on in the last loop,
+    /// each holding 16 degrees of freedom; 0 while it is not armed (fewer
+    /// than three quarters of `lines_in_band` qualify).
+    #[serde(default)]
+    pub rms_judged_lines: usize,
 }
 
 /// The run's totals: shown, not judged (the drive peak is the one judged).
@@ -230,6 +238,10 @@ pub struct MixedTotals {
     pub drive_vpk: f64,
     /// The summed drive's rms over the last chunk, volts.
     pub drive_vrms: f64,
+    /// Whether the hard clamp at the drive ceiling cut the summed drive in
+    /// the last chunk (the last backstop under the parts' own holds).
+    #[serde(default)]
+    pub clamped: bool,
 }
 
 /// Why a run tripped.
@@ -250,6 +262,10 @@ pub enum MixedTripKind {
     ToneAbort {
         /// dB off the target.
         error_db: f64,
+        /// The drive ceiling, volts peak, when it held the tone down as it
+        /// tripped; `None` otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        held_at_vpk: Option<f64>,
     },
     /// A band's level left its abort band (widened to its own scatter).
     BandAbort {
@@ -336,8 +352,17 @@ impl MixedTrip {
             MixedTripKind::FloorRmsAbort { error_db } => {
                 format!("Floor rms abort: {error_db:+.1} dB")
             }
-            MixedTripKind::ToneAbort { error_db } => {
+            MixedTripKind::ToneAbort {
+                error_db,
+                held_at_vpk: None,
+            } => {
                 format!("Tone {part} abort: {error_db:+.1} dB")
+            }
+            MixedTripKind::ToneAbort {
+                error_db,
+                held_at_vpk: Some(v),
+            } => {
+                format!("Tone {part} abort: {error_db:+.1} dB; the {v:.3} V drive ceiling held it")
             }
             MixedTripKind::BandAbort { error_db } => {
                 format!("Narrowband {part} abort: {error_db:+.1} dB")

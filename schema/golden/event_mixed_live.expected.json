@@ -32,6 +32,7 @@
     "scale": 1,
     "freq_hz": null,
     "direction": null,
+    "follows": null,
     "sweeps": null,
     "rate_oct_per_min": null,
     "rate_hz_per_s": null,
@@ -51,7 +52,8 @@
      "in_band": 3961,
      "clean": 3909,
      "alarm": 2,
-     "abort": 0
+     "abort": 0,
+     "rms_judged": 3909
     },
     "law": {
      "misses": 0,
@@ -67,6 +69,7 @@
     "scale": 1,
     "freq_hz": 120,
     "direction": null,
+    "follows": null,
     "sweeps": null,
     "rate_oct_per_min": null,
     "rate_hz_per_s": null,
@@ -97,6 +100,7 @@
     "scale": 1,
     "freq_hz": 412.63,
     "direction": "up",
+    "follows": null,
     "sweeps": {
      "done": 1,
      "of": 4
@@ -130,6 +134,10 @@
     "scale": 1,
     "freq_hz": 825.25,
     "direction": "up",
+    "follows": {
+     "of": "t2",
+     "ratio": 2
+    },
     "sweeps": null,
     "rate_oct_per_min": 1,
     "rate_hz_per_s": null,
@@ -160,6 +168,7 @@
     "scale": 1,
     "freq_hz": 250,
     "direction": null,
+    "follows": null,
     "sweeps": null,
     "rate_oct_per_min": null,
     "rate_hz_per_s": null,
@@ -170,7 +179,7 @@
     "error_db": -0.09,
     "alarm": false,
     "drive_vpk": null,
-    "drive_vrms": 0.125,
+    "drive_vrms": null,
     "gain_db": 0.25,
     "settled": true,
     "limiting": false,
@@ -187,6 +196,7 @@
     "scale": 1,
     "freq_hz": 1472.5,
     "direction": "up",
+    "follows": null,
     "sweeps": {
      "done": 0,
      "of": null
@@ -200,7 +210,7 @@
     "error_db": -0.23,
     "alarm": true,
     "drive_vpk": null,
-    "drive_vrms": 0.11,
+    "drive_vrms": null,
     "gain_db": 0.4,
     "settled": true,
     "limiting": false,
@@ -238,7 +248,7 @@
     "kind": "envelope",
     "part": "floor",
     "lines": 2,
-    "worst_db": null
+    "worst_db": 0
    },
    {
     "kind": "band",

@@ -556,3 +556,189 @@ async fn a_swept_tone_on_the_floor_runs_to_completed() {
     let end = wait_state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "completed", "{end}");
 }
+
+/// Every spectrum of a live frame carries the floor's band's lines only, as
+/// Random's frames do: the floor here is 20 to 1000 Hz on 0.5 Hz lines, so the
+/// views' lines run from 20 Hz to 1000 Hz, not over the whole 2048 Hz grid.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_live_spectra_carry_the_floor_bands_lines_only() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    run_to_engaged(
+        &mut c,
+        config(vec![floor(), tone("t1", 160.0, 0.5)], manual()),
+    )
+    .await;
+    c.pump(Duration::from_secs(2)).await;
+    let live = c
+        .of_topic("mixed.live")
+        .into_iter()
+        .rev()
+        .find(|e| e.data()["phase"] == "engaged")
+        .expect("a live frame engaged");
+    let decoded = live.decoded.as_ref().expect("a binary frame");
+    let mut spectra = 0;
+    for view in live.data()["views"].as_array().unwrap() {
+        if view["view"] != "spectrum" {
+            continue;
+        }
+        for s in view["series"].as_array().unwrap() {
+            let x = decoded.array(&s["x"]).unwrap().to_f64();
+            let edges = decoded.array(&s["edges"]).unwrap().to_f64();
+            assert_eq!(edges.len(), x.len() + 1);
+            assert!(
+                (x[0] - 20.0).abs() < 1e-9 && (x[x.len() - 1] - 1000.0).abs() < 1e-9,
+                "{} {}: {} to {} Hz over {} lines",
+                view["title"],
+                s["name"],
+                x[0],
+                x[x.len() - 1],
+                x.len()
+            );
+            spectra += 1;
+        }
+    }
+    assert!(spectra >= 3, "{spectra} series");
+    c.ok("mixed.abort", json!({})).await;
+}
+
+/// What a moving part's row says while the run is engaged: a follower names the
+/// part it follows and its ratio, moves in its leader's direction, and states its
+/// own rate in its leader's law (a linear leader's Hz/s times the ratio; a log
+/// leader's octaves per minute unchanged), the other rate null; a band sweeping
+/// with its width a share of its center states its rate in its own law's field;
+/// a band's drive is null (the core reports none for it), not 0.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_moving_rows_name_their_leader_and_their_own_rate() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let mut lin = json!({"id": "t1", "kind": "tone", "amplitude_g": 0.3,
+        "schedule": {"kind": "sweep", "band_hz": [100, 140],
+                     "rate": {"law": "linear", "hz_per_s": 2}, "end": null}});
+    lin["name"] = json!("Lead");
+    let follow = |id: &str, of: &str, ratio: f64| {
+        json!({"id": id, "kind": "tone", "amplitude_g": 0.1,
+               "schedule": {"kind": "follow", "of": of, "ratio": ratio}})
+    };
+    let share = json!({"id": "b1", "kind": "narrowband", "level_g2_hz": 0.002, "width_share": 0.05,
+        "schedule": {"kind": "sweep", "band_hz": [500, 800],
+                     "rate": {"law": "log", "oct_per_min": 1}, "end": null}});
+    run_to_engaged(
+        &mut c,
+        config(
+            vec![
+                floor(),
+                lin,
+                follow("t2", "t1", 2.0),
+                share,
+                follow("t3", "b1", 1.2),
+            ],
+            manual(),
+        ),
+    )
+    .await;
+    c.pump(Duration::from_millis(600)).await;
+    let frame = c
+        .of_topic("mixed.live")
+        .into_iter()
+        .rev()
+        .map(|e| e.data().clone())
+        .find(|d| d["phase"] == "engaged")
+        .expect("an engaged live frame");
+    let row = |id: &str| {
+        frame["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let (t1, t2, b1, t3) = (row("t1"), row("t2"), row("b1"), row("t3"));
+    assert_eq!(t1["follows"], Value::Null);
+    assert_eq!(t1["direction"], "up", "{t1}");
+    assert_eq!(t1["rate_hz_per_s"], 2.0, "{t1}");
+    assert_eq!(t1["rate_oct_per_min"], Value::Null);
+    assert_eq!(t2["follows"], json!({"of": "t1", "ratio": 2}), "{t2}");
+    assert_eq!(t2["direction"], "up", "{t2}");
+    assert_eq!(t2["rate_hz_per_s"], 4.0, "{t2}");
+    assert_eq!(t2["rate_oct_per_min"], Value::Null, "{t2}");
+    assert_eq!(b1["direction"], "up", "{b1}");
+    assert_eq!(b1["rate_oct_per_min"], 1.0, "{b1}");
+    assert_eq!(b1["rate_hz_per_s"], Value::Null, "{b1}");
+    assert_eq!(b1["drive_vrms"], Value::Null, "{b1}");
+    assert_eq!(t3["follows"], json!({"of": "b1", "ratio": 1.2}), "{t3}");
+    assert_eq!(t3["direction"], "up", "{t3}");
+    assert_eq!(t3["rate_oct_per_min"], 1.0, "{t3}");
+    assert_eq!(t3["rate_hz_per_s"], Value::Null, "{t3}");
+    c.ok("mixed.abort", json!({})).await;
+}
+
+/// A tone's abort states what the tone measured and the limit it crossed, not
+/// only its error: a swept tone with an abort band far tighter than the servo
+/// holds trips, and the end's trip carries `measured_g` and `limit_g` that agree
+/// with its `error_db` and the band.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_tone_trip_states_its_measured_value_and_its_limit() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let tight = json!({"id": "t1", "kind": "tone", "amplitude_g": 0.3,
+        "alarm_db": [0.05, 0.05], "abort_db": [0.1, 0.1],
+        "schedule": {"kind": "sweep", "band_hz": [100, 400],
+                     "rate": {"law": "log", "oct_per_min": 2}, "end": null}});
+    run_to_engaged(&mut c, config(vec![floor(), tight], manual())).await;
+    let end = wait_state(&mut c, "finished").await;
+    let trip = &end["end"]["trip"];
+    assert_eq!(trip["kind"], "abort_band", "{end}");
+    let e = trip["error_db"].as_f64().unwrap();
+    let m = trip["measured_g"].as_f64().expect("measured_g");
+    let l = trip["limit_g"].as_f64().expect("limit_g");
+    // measured / limit is the error beyond the 0.1 dB band, in g.
+    let beyond = 20.0 * (m / l).log10();
+    assert!(
+        (beyond - (e - 0.1f64.copysign(e))).abs() < 0.01,
+        "{trip}: {beyond} dB beyond the limit"
+    );
+    assert!(if e >= 0.0 { m > l } else { m < l }, "{trip}");
+}
+
+/// A limit profile on the control channel is accepted, as Random accepts it
+/// (Mixed Mode's limit rows are Random's), and the run with it engages; a
+/// subscription made before the run starts is accepted and its data flows once
+/// the run streams.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_takes_a_limit_on_the_control_channel_and_an_early_subscription() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let sub = c
+        .ok(
+            "mixed.subscribe",
+            json!({"rate_hz": 2, "plots": [{"id": "ctl", "quantity": "control"}]}),
+        )
+        .await;
+    assert_eq!(sub["default"], false, "{sub}");
+    let mut cfg = config(vec![floor(), tone("t1", 160.0, 0.5)], manual());
+    cfg["limits"]["channels"] = json!([{"channel": 1, "kind": "response",
+        "rows": [{"freq_hz": 20, "ceiling": 1.0}, {"freq_hz": 1000, "ceiling": 1.0}]}]);
+    let r = c.ok("mixed.configure", json!({"config": cfg})).await;
+    assert_eq!(r["state"]["state"], "configured", "{r}");
+    assert!(
+        !r["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["reason"] == "limit_on_control_channel"),
+        "{r}"
+    );
+    c.ok("mixed.start", json!({})).await;
+    wait_state(&mut c, "review").await;
+    c.ok("mixed.proceed", json!({})).await;
+    wait_phase(&mut c, "engaged").await;
+    c.wait_for("mixed.data", LONG, |e| e.topic() == "mixed.data")
+        .await;
+    c.ok("mixed.abort", json!({})).await;
+}

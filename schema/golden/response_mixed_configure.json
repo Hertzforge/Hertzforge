@@ -50,6 +50,7 @@
      "scale": 0,
      "freq_hz": null,
      "direction": null,
+     "follows": null,
      "sweeps": null,
      "rate_oct_per_min": null,
      "rate_hz_per_s": null,
@@ -80,6 +81,7 @@
      "scale": 0,
      "freq_hz": null,
      "direction": null,
+     "follows": null,
      "sweeps": null,
      "rate_oct_per_min": null,
      "rate_hz_per_s": null,
@@ -110,6 +112,7 @@
      "scale": 0,
      "freq_hz": null,
      "direction": null,
+     "follows": null,
      "sweeps": {
       "done": 0,
       "of": 4
@@ -143,6 +146,10 @@
      "scale": 0,
      "freq_hz": null,
      "direction": null,
+     "follows": {
+      "of": "t2",
+      "ratio": 2
+     },
      "sweeps": null,
      "rate_oct_per_min": null,
      "rate_hz_per_s": null,
@@ -173,6 +180,7 @@
      "scale": 0,
      "freq_hz": null,
      "direction": null,
+     "follows": null,
      "sweeps": null,
      "rate_oct_per_min": null,
      "rate_hz_per_s": null,
@@ -200,6 +208,7 @@
      "scale": 0,
      "freq_hz": null,
      "direction": null,
+     "follows": null,
      "sweeps": {
       "done": 0,
       "of": null
@@ -233,7 +242,7 @@
     "floor": {
      "id": "hinv",
      "name": "H-inverse",
-     "version": "0.1.2",
+     "version": "0.1.3",
      "sha256": null,
      "misses": 0,
      "capped": 0,
@@ -423,7 +432,7 @@
     "floor": {
      "id": "hinv",
      "name": "H-inverse",
-     "version": "0.1.2",
+     "version": "0.1.3",
      "sha256": null,
      "live": [],
      "hardware": true

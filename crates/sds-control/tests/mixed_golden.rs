@@ -177,6 +177,7 @@ fn running() -> MixedView {
     s.floor.alarm_lines = 2;
     s.floor.abort_lines = 0;
     s.floor.dof = 120.0;
+    s.floor.rms_judged_lines = 3909;
     s.totals.control_rms_g = Some(7.21);
     s.totals.drive_vpk = 2.91;
     s.totals.drive_vrms = 0.66;

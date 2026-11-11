@@ -78,35 +78,52 @@ pub struct PartFacts {
     pub own_sweep: bool,
     /// The sweeps a count asks for.
     pub sweeps_of: Option<u32>,
+    /// The part it follows and the ratio it follows at, as configured.
+    pub follows: Option<(String, f64)>,
+    /// The part whose own sweep moves this one (itself, or the end of its
+    /// chain of leaders); `None` when nothing in the chain sweeps.
+    pub root: Option<String>,
+    /// The rate this part moves at while its root sweeps, unsigned, in its
+    /// law's unit: the root's own rate, times the chain's ratio for a linear
+    /// sweep (a ratio keeps octaves per minute).
+    pub rate_abs: Option<f64>,
 }
 
 /// The parts' facts, in the parts' order.
 pub fn part_facts(w: &WireMixed) -> Vec<PartFacts> {
     let names = part_names(&w.parts);
-    let law_of = |mut i: usize| -> (Option<bool>, Option<u32>) {
+    // Walk to the sweep that moves part `i`: its id, its rate and law, the
+    // chain's ratio and the sweeps a count asks for.
+    let root_of = |mut i: usize| -> Option<(String, SweepRate, f64, Option<u32>)> {
+        let mut ratio = 1.0;
         for _ in 0..=w.parts.len() {
             match w.parts[i].schedule() {
                 Some(WireSchedule::Sweep { rate, sweeps, .. }) => {
-                    return (Some(matches!(rate, SweepRate::LogOctPerMin(_))), *sweeps)
+                    return Some((w.parts[i].id.clone(), *rate, ratio, *sweeps))
                 }
-                Some(WireSchedule::Follow { of, .. }) => {
-                    match w.parts.iter().position(|p| &p.id == of) {
-                        Some(j) => i = j,
-                        None => return (None, None),
-                    }
+                Some(WireSchedule::Follow { of, ratio: r }) => {
+                    ratio *= r;
+                    i = w.parts.iter().position(|p| &p.id == of)?;
                 }
-                _ => return (None, None),
+                _ => return None,
             }
         }
-        (None, None)
+        None
     };
     w.parts
         .iter()
         .enumerate()
         .zip(names)
         .map(|((i, p), name)| {
-            let (log_rate, sweeps_of) = law_of(i);
+            let root = root_of(i);
             let own_sweep = matches!(p.schedule(), Some(WireSchedule::Sweep { .. }));
+            let log_rate = root
+                .as_ref()
+                .map(|(_, r, _, _)| matches!(r, SweepRate::LogOctPerMin(_)));
+            let rate_abs = root.as_ref().map(|(_, r, ratio, _)| match r {
+                SweepRate::LogOctPerMin(x) => x.abs(),
+                SweepRate::LinearHzPerSec(x) => (x * ratio).abs(),
+            });
             PartFacts {
                 id: p.id.clone(),
                 kind: match p.body {
@@ -117,7 +134,17 @@ pub fn part_facts(w: &WireMixed) -> Vec<PartFacts> {
                 name,
                 log_rate,
                 own_sweep,
-                sweeps_of: if own_sweep { sweeps_of } else { None },
+                sweeps_of: if own_sweep {
+                    root.as_ref().and_then(|r| r.3)
+                } else {
+                    None
+                },
+                follows: match p.schedule() {
+                    Some(WireSchedule::Follow { of, ratio }) => Some((of.clone(), *ratio)),
+                    _ => None,
+                },
+                root: root.map(|r| r.0),
+                rate_abs,
             }
         })
         .collect()
@@ -190,8 +217,36 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
     let is_tone = f.kind == "tone";
     let is_band = f.kind == "narrowband";
     let r = row;
-    let moving = r.and_then(|r| r.direction).is_some() && f.log_rate.is_some();
-    let rate = r.and_then(|r| r.rate).filter(|_| f.log_rate.is_some());
+    // A part moves with the sweep at the root of its chain (itself, or the part
+    // it follows, or that one's leader): the root's direction now, and this
+    // part's own rate, signed, 0 while the parts' clock does not run (before the
+    // parts come in, at a hold, on a stop) or the sweep has ended.
+    let root = f
+        .root
+        .as_deref()
+        .and_then(|id| s.and_then(|s| s.parts.iter().find(|p| p.id == id)));
+    let direction = root
+        .and_then(|p| p.direction)
+        .filter(|_| f.log_rate.is_some());
+    let rate = f.rate_abs.zip(direction).map(|(x, d)| {
+        let clock_runs = s.is_some_and(|s| {
+            use hertzforge_mixed::{MixedPhase as P, MixedState as S};
+            !s.held
+                && matches!(s.state, S::Engaged | S::FullLevel)
+                && matches!(s.phase, P::PartsRampingIn | P::Running)
+        });
+        let sweeping = root.is_some_and(|p| p.on && !p.done)
+            // A tone's own reading of its motion: 0 when the core holds its
+            // sweep (the bands' rows carry none).
+            && root.is_none_or(|p| p.kind != hertzforge_mixed::PartKind::Tone || p.rate != Some(0.0));
+        if !(clock_runs && sweeping) {
+            0.0
+        } else if d == Direction::Down {
+            -x
+        } else {
+            x
+        }
+    });
     let unit = if is_band { "g²/Hz" } else { "g" };
     let (lines, dof) = if is_floor {
         let fl = s.map(|s| s.floor);
@@ -202,6 +257,7 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
                     "clean": fl.lines_in_band.saturating_sub(fl.lines_out),
                     "alarm": fl.alarm_lines,
                     "abort": fl.abort_lines,
+                    "rms_judged": fl.rms_judged_lines,
                 })
             }),
             fl.map_or(Value::Null, |fl| num(round(fl.dof, 1))),
@@ -239,7 +295,8 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
         "on": r.is_some_and(|r| r.on),
         "scale": num(round(r.map_or(0.0, |r| r.scale), 4)),
         "freq_hz": if is_floor { Value::Null } else { opt_num(r.and_then(|r| r.freq_hz).map(|x| round(x, 2))) },
-        "direction": if moving { r.and_then(|r| r.direction).map(dir_name).map_or(Value::Null, Value::from) } else { Value::Null },
+        "direction": direction.map(dir_name).map_or(Value::Null, Value::from),
+        "follows": f.follows.as_ref().map_or(Value::Null, |(of, ratio)| json!({"of": of, "ratio": num(sig(*ratio, 6))})),
         "sweeps": if f.own_sweep {
             json!({"done": r.map_or(0, |r| r.sweeps_done), "of": f.sweeps_of})
         } else {
@@ -254,7 +311,9 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
         "error_db": opt_num(error_db.map(|x| round(x, 2))),
         "alarm": r.is_some_and(|r| r.alarm),
         "drive_vpk": if is_tone { opt_num(r.map(|r| sig(r.drive, 4))) } else { Value::Null },
-        "drive_vrms": if is_tone { Value::Null } else { opt_num(r.map(|r| sig(r.drive, 4))) },
+        // The core keeps no drive of its own for a narrowband (its share of the
+        // random part is not reported), so a band's is null, never a 0.
+        "drive_vrms": if is_floor { opt_num(r.map(|r| sig(r.drive, 4))) } else { Value::Null },
         "gain_db": if is_band { opt_num(r.and_then(|r| r.gain_db).map(|x| round(x, 2))) } else { Value::Null },
         "settled": r.is_some_and(|r| r.settled),
         "limiting": r.is_some_and(|r| r.limiting),
@@ -388,7 +447,7 @@ pub fn alarm(v: &MixedView) -> bool {
 pub fn limiting(v: &MixedView) -> bool {
     v.status
         .as_ref()
-        .is_some_and(|s| s.parts.iter().any(|r| r.limiting))
+        .is_some_and(|s| s.parts.iter().any(|r| r.limiting) || s.totals.clamped)
 }
 
 /// What `mixed.state` events are sent on a change of.
@@ -433,7 +492,7 @@ pub fn trip_json(t: &MixedTrip, level_db: f64, at_hz: Option<f64>) -> Value {
             "envelope",
             json!({"abort_lines": 0, "worst_db": num(round(*error_db, 2))}),
         ),
-        MixedTripKind::ToneAbort { error_db } => (
+        MixedTripKind::ToneAbort { error_db, .. } => (
             "abort_band",
             json!({"side": if *error_db >= 0.0 { "high" } else { "low" }, "measured_g": null, "limit_g": null, "error_db": num(round(*error_db, 2))}),
         ),
@@ -608,6 +667,71 @@ fn law_frame_json(v: &MixedView, l: &LawState) -> Value {
     })
 }
 
+/// The floor's worst clean line against its reference, dB (`10 log10` of the
+/// residual estimate over the reference, both at the level in force), the line
+/// furthest from 0 dB; `None` without a residual and a reference.
+pub fn envelope_worst_db(d: &MixedDisplay) -> Option<f64> {
+    let n = d.residual.len();
+    if n == 0 || d.reference.len() != n {
+        return None;
+    }
+    (0..n)
+        .filter(|&k| !d.excluded.get(k).copied().unwrap_or(false))
+        .filter_map(|k| {
+            let (m, r) = (f64::from(d.residual[k]), f64::from(d.reference[k]));
+            (m > 0.0 && r > 0.0 && m.is_finite() && r.is_finite()).then(|| 10.0 * (m / r).log10())
+        })
+        .max_by(|a, b| a.abs().total_cmp(&b.abs()))
+}
+
+/// The facts a trip's own record leaves out, filled from what the core reports
+/// beside it: a tone's or a narrowband's measured value and the abort limit it
+/// crossed (from its row's target at the level in force, the trip's error and the
+/// part's abort band), a band's degrees of freedom, and an envelope abort's worst
+/// line (from the last display). A fact with nothing to fill it from stays null.
+pub fn fill_trip_facts(
+    v: &mut Value,
+    t: &MixedTrip,
+    row: Option<&PartRow>,
+    core: &hertzforge_mixed::MixedConfig,
+    display: Option<&MixedDisplay>,
+) {
+    let abort_band = |id: &str| -> Option<(f64, f64)> {
+        core.parts
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| match &p.body {
+                hertzforge_mixed::parts::PartBody::Tone(x) => Some(x.abort_db),
+                hertzforge_mixed::parts::PartBody::Narrowband(x) => Some(x.abort_db),
+                _ => None,
+            })
+    };
+    let target = row.map(|r| r.target).filter(|x| x.is_finite() && *x > 0.0);
+    let band = t.part.as_deref().and_then(abort_band);
+    let limit = |e: f64, per_db: f64| {
+        band.zip(target).map(|((lo, hi), tg)| {
+            let db = if e >= 0.0 { hi } else { -lo };
+            tg * 10f64.powf(db / per_db)
+        })
+    };
+    match &t.kind {
+        MixedTripKind::ToneAbort { error_db, .. } => {
+            v["measured_g"] = opt_num(target.map(|tg| sig(tg * 10f64.powf(error_db / 20.0), 4)));
+            v["limit_g"] = opt_num(limit(*error_db, 20.0).map(|x| sig(x, 4)));
+        }
+        MixedTripKind::BandAbort { error_db } => {
+            v["measured_g2_hz"] =
+                opt_num(target.map(|tg| sig(tg * 10f64.powf(error_db / 10.0), 4)));
+            v["limit_g2_hz"] = opt_num(limit(*error_db, 10.0).map(|x| sig(x, 4)));
+            v["dof"] = opt_num(row.and_then(|r| r.dof).map(|x| round(x, 1)));
+        }
+        MixedTripKind::FloorAbort { .. } => {
+            v["worst_db"] = opt_num(display.and_then(envelope_worst_db).map(|x| round(x, 2)));
+        }
+        _ => {}
+    }
+}
+
 /// What holds now: the floor's envelope, each part's band, overloads.
 pub fn alarms_json(v: &MixedView) -> Value {
     let mut out = Vec::new();
@@ -618,7 +742,7 @@ pub fn alarms_json(v: &MixedView) -> Value {
                 "kind": "envelope",
                 "part": floor.map(|f| f.id.as_str()),
                 "lines": s.floor.alarm_lines,
-                "worst_db": null,
+                "worst_db": opt_num(v.display.as_deref().and_then(envelope_worst_db).map(|x| round(x, 2))),
             }));
         }
         for (f, r) in v.parts.iter().zip(rows(v)) {
@@ -638,6 +762,69 @@ pub fn alarms_json(v: &MixedView) -> Value {
         out.push(json!({"kind": "overload", "channel": c.index}));
     }
     Value::Array(out)
+}
+
+/// The lines of `grid` a band `(lo, hi)` Hz covers, as Random's frames take them:
+/// every line whose center rounds into `[lo, hi]`, never the 0 Hz line, at least
+/// one. The whole grid without a band.
+pub fn band_lines(
+    grid: &hertzforge_mixed::LineGrid,
+    band: Option<(f64, f64)>,
+) -> std::ops::Range<usize> {
+    let n = grid.lines;
+    let Some((lo, hi)) = band.filter(|(lo, hi)| lo.is_finite() && hi.is_finite() && hi > lo) else {
+        return 0..n;
+    };
+    if n == 0 || grid.df_hz.is_nan() || grid.df_hz <= 0.0 {
+        return 0..n;
+    }
+    let at = |f: f64| ((f - grid.f0_hz) / grid.df_hz).round();
+    let dc = usize::from(grid.f0_hz <= 0.0);
+    let i0 = (at(lo).max(0.0) as usize).max(dc).min(n - 1);
+    let i1 = ((at(hi).max(0.0) as usize) + 1).min(n).max(i0 + 1);
+    i0..i1
+}
+
+/// `d` held to the floor's band: every per-line spectrum, the lines left out
+/// and the identification cut to [`band_lines`], and the grid moved to match,
+/// so every view and plot drawn from it carries the band's lines only, as
+/// Random's frames do. The histories are not per line and are kept whole.
+pub fn on_band(mut d: MixedDisplay, band: Option<(f64, f64)>) -> MixedDisplay {
+    let n = d.grid.lines;
+    let r = band_lines(&d.grid, band);
+    if r == (0..n) {
+        return d;
+    }
+    fn cut<T: Copy>(v: &mut Vec<T>, n: usize, r: &std::ops::Range<usize>) {
+        if v.len() == n {
+            *v = v[r.clone()].to_vec();
+        }
+    }
+    for v in [
+        &mut d.control,
+        &mut d.residual,
+        &mut d.reference,
+        &mut d.alarm_lo,
+        &mut d.alarm_hi,
+        &mut d.abort_lo,
+        &mut d.abort_hi,
+        &mut d.drive,
+    ] {
+        cut(v, n, &r);
+    }
+    for c in &mut d.channels {
+        cut(&mut c.control, n, &r);
+        cut(&mut c.residual, n, &r);
+    }
+    cut(&mut d.excluded, n, &r);
+    if let Some(id) = &mut d.identification {
+        cut(&mut id.h_mag2, n, &r);
+        cut(&mut id.coherence, n, &r);
+        cut(&mut id.trusted, n, &r);
+    }
+    d.grid.f0_hz += r.start as f64 * d.grid.df_hz;
+    d.grid.lines = r.len();
+    d
 }
 
 /// The line centers of the display's grid.

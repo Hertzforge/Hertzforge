@@ -191,6 +191,16 @@ impl Ramp {
         self.target
     }
 
+    /// The value it will have `frames` samples from now.
+    pub fn ahead(&self, frames: f64) -> f64 {
+        let d = self.target - self.now;
+        if d.abs() <= self.step * frames.max(0.0) {
+            self.target
+        } else {
+            self.now + (self.step * frames.max(0.0)).copysign(d)
+        }
+    }
+
     /// Whether it has arrived.
     pub fn settled(&self) -> bool {
         self.now == self.target
@@ -235,6 +245,11 @@ impl ToneVoice {
     /// The part ramp now, 0 to 1.
     pub fn scale(&self) -> f64 {
         self.part.value()
+    }
+
+    /// The part ramp `frames` samples from now.
+    pub fn scale_ahead(&self, frames: f64) -> f64 {
+        self.part.ahead(frames)
     }
 
     /// Whether the part ramp is at its target.

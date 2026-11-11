@@ -478,24 +478,31 @@ async fn arming_on_the_simulator_opens_the_station_and_a_stop_from_armed_ends_at
 #[test]
 fn a_role_law_drives_hardware_only_with_its_own_check_and_its_mixed_check() {
     let builtin = laws::builtin_sine_entry();
-    assert!(laws::mixed_may_arm_on_hardware(&builtin, false));
+    assert_eq!(
+        laws::mixed_clearance(None, &builtin, LawWorld::Sine),
+        Ok(())
+    );
     let mut imported = builtin.clone();
     imported.builtin = false;
     imported.check = CheckStatus::Unchecked;
     imported.identity.sha256 = "ab".repeat(32);
-    // A tone law: its own world's check is needed as well as the mixed check.
-    assert!(!laws::mixed_may_arm_on_hardware(&imported, false));
-    assert!(!laws::mixed_may_arm_on_hardware(&imported, true));
-    // A floor law has no own-world check to need; the mixed check alone decides.
+    // With no record to read, an imported law is not cleared in either role.
+    assert!(laws::mixed_clearance(None, &imported, LawWorld::Sine).is_err());
     let mut floor = imported.clone();
     floor.world = LawWorld::Single;
-    assert!(!laws::mixed_may_arm_on_hardware(&floor, false));
-    assert!(laws::mixed_may_arm_on_hardware(&floor, true));
-    // The role facts say so in `hardware`, and the simulator is not gated.
-    let facts = laws::mixed_role_facts(&floor, LawWorld::Single, false);
+    assert!(laws::mixed_clearance(None, &floor, LawWorld::Single).is_err());
+    // A law of the other role's world is never cleared in this one.
+    assert!(laws::mixed_clearance(None, &floor, LawWorld::Sine).is_err());
+    // The role facts say so in `hardware`, and why.
+    let facts = laws::mixed_role_facts(
+        &floor,
+        LawWorld::Single,
+        laws::mixed_clearance(None, &floor, LawWorld::Single),
+    );
     assert!(!facts.hardware);
+    assert!(facts.not_cleared.is_some());
     assert_eq!(facts.world, Ok(()));
-    assert!(laws::mixed_role_facts(&floor, LawWorld::Sine, false)
+    assert!(laws::mixed_role_facts(&floor, LawWorld::Sine, Ok(()))
         .world
         .is_err());
 }
@@ -591,4 +598,102 @@ async fn a_subscription_is_answered_with_its_defaults_filled() {
         c.ok("mixed.subscribe", json!({"default": true})).await["default"],
         true
     );
+}
+
+#[test]
+fn the_mixed_display_is_cut_to_the_floor_bands_lines_as_randoms() {
+    use hertzforge_mixed::{LineGrid, MixedDisplay, MixedDisplayChannel, MixedFrf};
+    use sds_control::mixed::view::{band_lines, on_band};
+    // A whole grid from 0 Hz, 0.5 Hz lines to 50 Hz: 101 lines.
+    let grid = LineGrid {
+        f0_hz: 0.0,
+        df_hz: 0.5,
+        lines: 101,
+    };
+    // Random's rule: every line whose center rounds into the band, never 0 Hz.
+    assert_eq!(band_lines(&grid, Some((20.0, 30.0))), 40..61);
+    assert_eq!(band_lines(&grid, Some((20.1, 29.9))), 40..61);
+    assert_eq!(band_lines(&grid, Some((0.0, 10.0))), 1..21);
+    assert_eq!(band_lines(&grid, Some((0.0, 900.0))), 1..101);
+    assert_eq!(band_lines(&grid, None), 0..101);
+    let line = |k: usize| k as f32;
+    let all: Vec<f32> = (0..101).map(line).collect();
+    let d = MixedDisplay {
+        grid,
+        control: all.clone(),
+        residual: all.clone(),
+        channels: vec![MixedDisplayChannel {
+            channel_index: 1,
+            control: all.clone(),
+            residual: all.clone(),
+        }],
+        reference: all.clone(),
+        alarm_lo: all.clone(),
+        alarm_hi: all.clone(),
+        abort_lo: all.clone(),
+        abort_hi: all.clone(),
+        drive: all.clone(),
+        excluded: (0..101).map(|k| k == 50).collect(),
+        tones: Vec::new(),
+        bands: Vec::new(),
+        identification: Some(MixedFrf {
+            h_mag2: all.clone(),
+            coherence: all.clone(),
+            lag_frames: 0,
+            band_coherence: 1.0,
+            trusted: vec![true; 101],
+            trusted_frac: 1.0,
+        }),
+    };
+    let b = on_band(d, Some((20.0, 30.0)));
+    assert_eq!(b.grid.f0_hz, 20.0);
+    assert_eq!(b.grid.lines, 21);
+    let want: Vec<f32> = (40..61).map(line).collect();
+    for v in [
+        &b.control,
+        &b.residual,
+        &b.reference,
+        &b.alarm_lo,
+        &b.alarm_hi,
+        &b.abort_lo,
+        &b.abort_hi,
+        &b.drive,
+        &b.channels[0].control,
+        &b.channels[0].residual,
+    ] {
+        assert_eq!(v, &want);
+    }
+    let id = b.identification.as_ref().unwrap();
+    assert_eq!(id.h_mag2, want);
+    assert_eq!(id.trusted.len(), 21);
+    assert_eq!(
+        b.excluded.iter().position(|x| *x),
+        Some(10),
+        "25 Hz kept in place"
+    );
+    // The edges are the cut lines' own.
+    let e = b.grid.edges_hz();
+    assert_eq!((e[0], e[21]), (19.75, 30.25));
+}
+
+#[test]
+fn the_envelope_alarms_worst_line_is_read_from_the_clean_lines() {
+    use hertzforge_mixed::{LineGrid, MixedDisplay};
+    use sds_control::mixed::view::envelope_worst_db;
+    let d = MixedDisplay {
+        grid: LineGrid {
+            f0_hz: 20.0,
+            df_hz: 1.0,
+            lines: 4,
+        },
+        // Line 1 is 10 dB over but left out; line 2 is the worst clean line,
+        // 4 dB under its reference.
+        residual: vec![0.01, 0.1, 0.01 * 10f32.powf(-0.4), 0.012],
+        reference: vec![0.01; 4],
+        excluded: vec![false, true, false, false],
+        ..MixedDisplay::default()
+    };
+    let w = envelope_worst_db(&d).unwrap();
+    assert!((w + 4.0).abs() < 1e-4, "{w}");
+    assert_eq!(envelope_worst_db(&MixedDisplay::default()), None);
 }
