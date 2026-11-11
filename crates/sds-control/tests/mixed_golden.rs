@@ -204,6 +204,11 @@ fn running() -> MixedView {
                 r.measured = Some(1.21);
                 r.error_db = Some(0.15);
                 r.drive = 0.31;
+                // Far over the floor: judged on each reading, at its own bands.
+                r.judge_s = Some(0.5);
+                r.judged_error_db = Some(0.125);
+                r.judged_alarm_db = Some((1.5, 1.5));
+                r.judged_abort_db = Some((3.0, 3.0));
             }
             "t3" => {
                 r.freq_hz = Some(825.25);
@@ -213,6 +218,12 @@ fn running() -> MixedView {
                 r.error_db = Some(-0.35);
                 r.drive = 0.0625;
                 r.misses = 1;
+                // Close to the floor: averaged over the cap, its bands widened.
+                r.judge_s = Some(8.0);
+                r.judged_error_db = Some(-0.25);
+                r.judged_alarm_db = Some((1.75, 1.75));
+                r.judged_abort_db = Some((3.5, 3.5));
+                r.tolerance_widened = true;
             }
             "b1" => {
                 r.target = 0.2425;

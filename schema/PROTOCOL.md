@@ -3372,7 +3372,10 @@ computes at configure, at full level (0 dB):
  "tracking":[{"part":"t1","verdict":"ok","ratio":0,"at_hz":null,"message":null},
              {"part":"t2","verdict":"ok","ratio":0.002,"at_hz":null,"message":null},
              {"part":"t3","verdict":"ok","ratio":0.004,"at_hz":null,"message":null}],
- "test_s":360,"floor_equalize_s":70,"identification_s":32,
+ "test_s":360,"floor_equalize_s":70,
+ "tone_judging":[{"part":"t1","judge_s":0.5,"sigma_db":0.12,"alarm_db":[1.5,1.5],"abort_db":[3,3],
+                  "widened":false}, ...],
+ "identification_s":32,
  "call_budget_s":{"floor":2,"tones":0.0025024},
  "law":{"floor":{"id":"hinv","name":"...","version":"...","sha256":null,"live":[],
                  "hardware":true},
@@ -3413,6 +3416,11 @@ computes at configure, at full level (0 dB):
   and `floor_settle_s`; `identification_s` the identification's measuring time (`pretest.averages`
   loops); `call_budget_s` one floor law call's budget (a fraction of the loop's acquisition
   time) and one tone law call's (a fraction of the tick), 7 decimals.
+- `tone_judging` is the core's prediction of how each tone will be judged, one
+  `{"part","judge_s","sigma_db","alarm_db","abort_db","widened"}` per tone in the parts' order,
+  at the point of its motion that needs the longest averaging: the averaging, seconds; the judged
+  figure's scatter, dB at one sigma; the bands judged against, `[below, above]` dB; whether they
+  are widened. Empty when the prediction cannot be made.
 - `law` is each role's law, its live parameter keys (a `single` law has none), and `hardware`:
   whether it may drive hardware in this role (a built-in may; an imported law needs a passed
   check in its own world and a passed mixed check in this role, see "Control Laws").
@@ -3510,20 +3518,24 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
  "parts":[{"id":"floor","kind":"floor","name":"Floor","enabled":true,"on":true,"scale":1,
            "freq_hz":null,"direction":null,"follows":null,"sweeps":null,"rate_oct_per_min":null,
            "rate_hz_per_s":null,"width_hz":null,
-           "unit":"g","target":6.06,"measured":6.02,"error_db":-0.06,"alarm":false,
+           "unit":"g","target":6.06,"measured":6.02,"error_db":-0.06,"judge_s":null,"judged_error_db":null,
+           "judged_alarm_db":null,"judged_abort_db":null,"tolerance_widened":null,"alarm":false,
            "drive_vpk":null,"drive_vrms":0.58,"gain_db":null,"settled":true,"limiting":false,
            "dof":120,"lines":{"in_band":1981,"clean":1929,"alarm":2,"abort":0,"rms_judged":1929},
            "law":{"misses":0,"capped":0}},
           {"id":"t2","kind":"tone","name":"Rotor","enabled":true,"on":true,"scale":1,
            "freq_hz":412.6,"direction":"up","follows":null,"sweeps":{"done":1,"of":4},
            "rate_oct_per_min":1,"rate_hz_per_s":null,"width_hz":null,
-           "unit":"g","target":1.19,"measured":1.21,"error_db":0.15,"alarm":false,
+           "unit":"g","target":1.19,"measured":1.21,"error_db":0.15,"judge_s":0.5,
+           "judged_error_db":0.13,"judged_alarm_db":[1.5,1.5],"judged_abort_db":[3,3],
+           "tolerance_widened":false,"alarm":false,
            "drive_vpk":0.31,"drive_vrms":null,"gain_db":null,"settled":true,"limiting":false,
            "dof":null,"lines":null,"law":{"misses":0,"capped":0}},
           {"id":"b2","kind":"narrowband","name":"Rotor band","enabled":true,"on":true,
            "scale":1,"freq_hz":1472.4,"direction":"up","follows":null,"sweeps":{"done":0,"of":null},
            "rate_oct_per_min":null,"rate_hz_per_s":2,"width_hz":73.6,
-           "unit":"g²/Hz","target":0.1046,"measured":0.0991,"error_db":-0.23,"alarm":false,
+           "unit":"g²/Hz","target":0.1046,"measured":0.0991,"error_db":-0.23,"judge_s":null,"judged_error_db":null,
+           "judged_alarm_db":null,"judged_abort_db":null,"tolerance_widened":null,"alarm":false,
            "drive_vpk":null,"drive_vrms":null,"gain_db":0.4,"settled":true,"limiting":false,
            "dof":184,"lines":null,"law":null},
           ...],
@@ -3575,6 +3587,14 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
     narrowband in `g²/Hz`, the mean density over the inner half of its width in its own moving
     frame against its reference over the same lines. `alarm` is true while the part is outside
     its alarm band.
+  - A tone's alarm and abort judge its reading averaged to its own scatter: a tone well over the
+    floor is judged on each reading, a small one on its reading averaged over up to 8 s, and one
+    too close to the floor for that against tolerances widened to its scatter at three sigma.
+    `judge_s` that averaging, seconds; `judged_error_db` the error judged, dB (`error_db` stays
+    the single reading; null until there is one); `judged_alarm_db` and `judged_abort_db` the
+    bands judged against, `[below, above]` in positive dB; `tolerance_widened` true when they are
+    widened. `judge_s` and the bands are null until the tone's judging is set; all five are null
+    for the floor and a narrowband (a band is judged on its own estimate).
   - `drive_vpk` a tone's commanded amplitude in the drive, volts peak, and `drive_vrms` the
     floor's share of the random part, volts rms (the other null); `gain_db` a
     narrowband's servo gain (null otherwise). A narrowband's `drive_vrms` is null: the core does
@@ -3622,7 +3642,7 @@ floor and for a trip of no part), and its kind's facts. `end.message` names the 
 | `kind` | Part | Facts |
 |---|---|---|
 | `envelope` | the floor | Random's: `abort_lines`, `worst_db` |
-| `abort_band` | a tone | Sine's: `side` (`high` or `low`), `measured_g`, `limit_g`, and `error_db` (the tone's error then); `measured_g` is the tone's target then times its error, `limit_g` the target times its abort band on that side |
+| `abort_band` | a tone | Sine's: `side` (`high` or `low`), `measured_g`, `limit_g`, and `error_db` (the tone's error then); `error_db` is the judged error; `measured_g` the tone's target then times it, `limit_g` the target times its judged abort band on that side (widened when its tolerances are) |
 | `band_abort` | a narrowband | `side`, `measured_g2_hz`, `limit_g2_hz`, `dof`, and `error_db`; `measured_g2_hz` and `limit_g2_hz` from the band's reference then, its error and its abort band, as a tone's; `dof` its estimate's degrees of freedom then |
 | `servo_fault` | a tone | Sine's: `consecutive_ticks` |
 | `divergence` | the floor or a tone | the floor: Random's `consecutive_loops`, `divergent_bins`; a tone: Sine's `capped_s` |
