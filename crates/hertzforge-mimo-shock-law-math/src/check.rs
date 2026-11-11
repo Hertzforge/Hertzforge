@@ -277,6 +277,103 @@ pub fn reachable_fraction(
         .collect())
 }
 
+/// The local convergence of `shape` on one line (`Derivations.md` D6).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShapeJacobian {
+    /// Masked lines whose Jacobian is not diagonally dominant by rows
+    /// (some `J_cc <= sum_{j != c} abs(J_cj)`).
+    pub lines_without_dominance: usize,
+    /// Masked lines with an eigenvalue of nonpositive real part: no weight
+    /// makes the magnitude loop contract there.
+    pub lines_unstable: usize,
+    /// Masked lines examined.
+    pub lines: usize,
+    /// The smallest safe weight over the masked lines,
+    /// `min 2 Re(lambda) / abs(lambda)^2` (zero where a line is unstable).
+    pub least_safe_weight: f64,
+}
+
+/// The real Jacobian of `log abs(Y_c)` against `log C_j` per masked line, for
+/// the response `Y = H G (C o R)` of the shaped targets `C o R` (given here as
+/// `targets`): `J_cj = Re(M_cj X_j / Y_c)` with `M = H G` and `X` the shaped
+/// targets. Its rows sum to one. `shape` contracts on a line when every
+/// eigenvalue `lambda` of `J` satisfies `abs(1 - w lambda) < 1`. Lines where a
+/// control's response is below `1e-9` of the largest are skipped.
+pub fn shape_jacobian(
+    inverse: &MatrixStack,
+    plant: &MatrixStack,
+    mask: &[bool],
+    targets: &[Vec<C64>],
+) -> Result<ShapeJacobian, String> {
+    let (lines, n_d, n_c) = inverse.dims();
+    if plant.dims() != (lines, n_c, n_d)
+        || mask.len() != lines
+        || targets.len() != n_c
+        || targets.iter().any(|t| t.len() != lines)
+    {
+        return Err("the inverse, plant, mask and targets do not share lines and sizes".into());
+    }
+    let mut m = vec![C64::new(0.0, 0.0); n_c * n_c];
+    let mut y = vec![C64::new(0.0, 0.0); n_c];
+    let mut j = vec![C64::new(0.0, 0.0); n_c * n_c];
+    let mut out = ShapeJacobian {
+        lines_without_dominance: 0,
+        lines_unstable: 0,
+        lines: 0,
+        least_safe_weight: f64::INFINITY,
+    };
+    let mut peak = 0.0f64;
+    for f in 0..lines {
+        for t in targets {
+            peak = peak.max(t[f].norm());
+        }
+    }
+    for (f, _) in mask.iter().enumerate().filter(|(_, &on)| on) {
+        let g = inverse.line(f);
+        let h = plant.line(f);
+        for r in 0..n_c {
+            for c in 0..n_c {
+                m[r * n_c + c] = (0..n_d).map(|i| h[r * n_d + i] * g[i * n_c + c]).sum();
+            }
+            y[r] = (0..n_c).map(|c| m[r * n_c + c] * targets[c][f]).sum();
+        }
+        if y.iter().any(|v| v.norm() <= 1e-9 * peak) {
+            continue;
+        }
+        out.lines += 1;
+        let mut dominant = true;
+        for r in 0..n_c {
+            let mut off = 0.0;
+            for c in 0..n_c {
+                let v = (m[r * n_c + c] * targets[c][f] / y[r]).re;
+                j[r * n_c + c] = C64::new(v, 0.0);
+                if c != r {
+                    off += v.abs();
+                }
+            }
+            if j[r * n_c + r].re <= off {
+                dominant = false;
+            }
+        }
+        if !dominant {
+            out.lines_without_dominance += 1;
+        }
+        let mut safe = f64::INFINITY;
+        for l in eigenvalues(&j, n_c)? {
+            safe = if l.re <= 0.0 {
+                0.0
+            } else {
+                safe.min(2.0 * l.re / l.norm_sqr())
+            };
+        }
+        if safe == 0.0 {
+            out.lines_unstable += 1;
+        }
+        out.least_safe_weight = out.least_safe_weight.min(safe);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,6 +443,36 @@ mod tests {
         assert!((d.radius[0] - 1.0).abs() < 1e-12);
         let d = drive_side(&g, &h, &[true], 0.5).unwrap();
         assert!(d.radius[0] < 1.0);
+    }
+
+    #[test]
+    fn mimo_shock_shape_jacobian_is_identity_for_one_control_and_flags_a_flip() {
+        // One control: J = 1 whatever the phase of M.
+        let mut g = MatrixStack::zeros(1, 1, 1);
+        g.set(0, 0, 0, c(1.0, 0.0));
+        let mut h = MatrixStack::zeros(1, 1, 1);
+        h.set(0, 0, 0, C64::from_polar(2.0, 2.5));
+        let j = shape_jacobian(&g, &h, &[true], &[vec![c(1.0, 0.0)]]).unwrap();
+        assert_eq!(
+            (j.lines, j.lines_unstable, j.lines_without_dominance),
+            (1, 0, 0)
+        );
+        assert!((j.least_safe_weight - 2.0).abs() < 1e-12);
+        // Two controls, G = I, H with strong cross terms in opposite phase:
+        // M = [[1, 2], [2, 1]], targets (1, 1): Y = (3, 3), J = [[1/3, 2/3],
+        // [2/3, 1/3]], eigenvalues 1 and -1/3: unstable, not dominant.
+        let mut g = MatrixStack::zeros(1, 2, 2);
+        g.set(0, 0, 0, c(1.0, 0.0));
+        g.set(0, 1, 1, c(1.0, 0.0));
+        let mut h = MatrixStack::zeros(1, 2, 2);
+        h.set(0, 0, 0, c(1.0, 0.0));
+        h.set(0, 0, 1, c(2.0, 0.0));
+        h.set(0, 1, 0, c(2.0, 0.0));
+        h.set(0, 1, 1, c(1.0, 0.0));
+        let t = vec![vec![c(1.0, 0.0)], vec![c(1.0, 0.0)]];
+        let j = shape_jacobian(&g, &h, &[true], &t).unwrap();
+        assert_eq!((j.lines_unstable, j.lines_without_dominance), (1, 1));
+        assert_eq!(j.least_safe_weight, 0.0);
     }
 
     #[test]

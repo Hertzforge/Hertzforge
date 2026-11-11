@@ -14,7 +14,7 @@
 //! drive growth (full-level drive rms over the first pulse's) at the last
 //! pulse and at their worst; the delays the law built the last pulse for.
 
-use hertzforge_mimo_shock_law_math::check::{drive_side, reachable_fraction};
+use hertzforge_mimo_shock_law_math::check::{drive_side, reachable_fraction, shape_jacobian};
 use hertzforge_mimo_shock_law_math::delay::LeastEffort;
 use hertzforge_mimo_shock_law_math::inverse::{InverseLaw, InverseParams};
 use hertzforge_mimo_shock_law_math::model::regularized_inverse;
@@ -211,6 +211,17 @@ fn check_line(plant: &ModalPlant, setup: &Setup) {
             .map(|v| format!("{v:.3}"))
             .collect::<Vec<_>>()
             .join(" ")
+    );
+    // The shape Jacobian at the seed (gains one, zero delays), on the lines of
+    // the SRS band.
+    let band: Vec<bool> = (0..id.lines())
+        .map(|k| (100.0..=2000.0).contains(&(k as f64 * df)))
+        .collect();
+    let j = shape_jacobian(&g, &full, &band, &r).expect("jacobian");
+    println!(
+        "  shape Jacobian at the seed, 100 to 2000 Hz: {} lines; {} not diagonally dominant; \
+         {} with an eigenvalue of nonpositive real part; least safe weight {:.2}",
+        j.lines, j.lines_without_dominance, j.lines_unstable, j.least_safe_weight
     );
 }
 
