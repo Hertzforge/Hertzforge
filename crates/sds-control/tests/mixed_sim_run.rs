@@ -303,6 +303,43 @@ async fn the_level_hold_and_a_part_switched_live_reach_the_core() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_band_switched_off_live_ramps_out_and_back() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    run_to_engaged(
+        &mut c,
+        config(
+            vec![
+                floor(),
+                band("b1", json!({"kind": "fixed", "freq_hz": 300})),
+            ],
+            manual(),
+        ),
+    )
+    .await;
+    let band_on = |want: bool| {
+        move |e: &support::Event| {
+            e.topic() == "mixed.state"
+                && e.data()["parts"]
+                    .as_array()
+                    .and_then(|ps| ps.iter().find(|p| p["id"] == "b1"))
+                    .is_some_and(|p| p["on"] == want)
+        }
+    };
+    let r = c.ok("mixed.part", json!({"id": "b1", "on": false})).await;
+    assert_eq!(r["on"], false);
+    // A band's samples are synthesized ahead, so its switch lands about a quarter
+    // second of station time late: the wait allows for it.
+    c.wait_for("b1 off", LONG, band_on(false)).await;
+    c.ok("mixed.part", json!({"id": "b1", "on": true})).await;
+    c.wait_for("b1 on again", LONG, band_on(true)).await;
+    c.ok("mixed.stop", json!({})).await;
+    let end = wait_state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "operator_stop", "{end}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_controller_ends_in_the_safe_stop() {
     let addr = serve(service(Duration::from_secs(2))).await;
     let mut obs = Client::connect(addr).await;
@@ -324,7 +361,6 @@ async fn a_dropped_controller_ends_in_the_safe_stop() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "waits on the core's narrowbands closed loop (package B, M3)"]
 async fn random_on_random_runs_to_completed() {
     let addr = serve(service(Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
@@ -345,7 +381,6 @@ async fn random_on_random_runs_to_completed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "waits on the core's narrowbands closed loop (package B, M3)"]
 async fn the_combined_test_runs_to_completed() {
     let addr = serve(service(Duration::from_secs(30))).await;
     let mut c = Client::connect(addr).await;
