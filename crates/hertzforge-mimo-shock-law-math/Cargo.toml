@@ -1,0 +1,32 @@
+[package]
+name = "hertzforge-mimo-shock-law-math"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+description = "The mathematics of the multiple-drive shock control laws"
+
+# The arithmetic of the MIMO Shock built-in laws (`inverse`, `shape`, `paired`), the
+# model refresh, the delay tools and the convergence checks, with nothing around it:
+# plain records and spectra in, plain records and numbers out. It depends only on
+# `hertzforge-dsp` and `hertzforge-sdm`, both of which build for `wasm32-wasip2`, and
+# must keep building there:
+# `cargo build -p hertzforge-mimo-shock-law-math --target wasm32-wasip2`.
+
+[features]
+# The exact quasi-linear reference plant, the reference waveform and a seeded
+# pseudo-random generator for tests and the study example. Not part of any law: a
+# law file builds without it.
+reference-plant = []
+
+[dependencies]
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+
+[dev-dependencies]
+# Tests and the study example use the reference plant.
+hertzforge-mimo-shock-law-math = { path = ".", features = ["reference-plant"] }
+
+[[example]]
+name = "mimo_shock_study"
+required-features = ["reference-plant"]
