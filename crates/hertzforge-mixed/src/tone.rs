@@ -289,6 +289,7 @@ impl ToneVoice {
 /// construction; the work is linear in tones times channels.
 #[derive(Debug, Clone)]
 pub struct ToneBank {
+    bn_hz: f64,
     voices: Vec<ToneVoice>,
     channels: usize,
     trackers: Vec<ToneTracker>,
@@ -306,6 +307,7 @@ impl ToneBank {
     pub fn new(fs_hz: f64, f0_hz: &[f64], channels: usize, bn_hz: f64, lag: usize) -> Self {
         let n = f0_hz.len();
         ToneBank {
+            bn_hz,
             voices: f0_hz.iter().map(|&f| ToneVoice::new(fs_hz, f)).collect(),
             channels,
             trackers: vec![ToneTracker::new(fs_hz, bn_hz); n * channels],
@@ -324,6 +326,16 @@ impl ToneBank {
     /// Whether there are no tones.
     pub fn is_empty(&self) -> bool {
         self.voices.is_empty()
+    }
+
+    /// The trackers' noise bandwidth, Hz.
+    pub fn bn_hz(&self) -> f64 {
+        self.bn_hz
+    }
+
+    /// Seconds a tracker needs to settle.
+    pub fn tracker_settle_s(&self) -> f64 {
+        SETTLE_WIDTHS / self.bn_hz
     }
 
     /// The pipeline lag the trackers read behind the drive, frames.

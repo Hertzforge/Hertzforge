@@ -22,3 +22,7 @@ hertzforge-law-host.workspace = true
 hertzforge-random.workspace = true
 hertzforge-breakpoints.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+# The tone law's parameter values, read back in the resolver's tests.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }

@@ -54,3 +54,8 @@ service = [
 # TEST FIXTURE ONLY: a station for the service's construction tests. On
 # deny.toml's hertzforge-hal-sim wrapper list for that reason.
 hertzforge-hal-sim.workspace = true
+
+# The closed-loop runs drive the service on the simulator.
+[[test]]
+name = "sor_closed_loop"
+required-features = ["service"]
