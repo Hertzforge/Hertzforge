@@ -1,7 +1,7 @@
 [package]
 name = "hertzforge-desktop"
 description = "The Hertzforge desktop app: the shell in a window of its own, with the control and analysis services started beside it."
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "MIT"
 publish = false
