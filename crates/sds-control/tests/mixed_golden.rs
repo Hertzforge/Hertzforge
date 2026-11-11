@@ -424,7 +424,16 @@ fn event_mixed_live() -> (Value, Arrays) {
 
 fn event_mixed_data() -> (Value, Arrays) {
     let mut arrays = Arrays::new();
-    let data = subscribe::data_json(&running(), &subscription(), &tone_bands, &[3], &mut arrays);
+    // Channel 3 is limited flat at 0.5 g^2/Hz from 20 to 2000 Hz, as the golden
+    // configuration's limit row says.
+    let limits = [(3, vec![(20.0, 0.5), (2000.0, 0.5)])];
+    let data = subscribe::data_json(
+        &running(),
+        &subscription(),
+        &tone_bands,
+        &limits,
+        &mut arrays,
+    );
     (protocol::event("mixed.data", 192, data), arrays)
 }
 

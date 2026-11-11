@@ -3744,7 +3744,7 @@ that order, one per channel or part.
 | `control` | one `spectrum` | The live frame's **Control** view |
 | `residual` | one `spectrum` | The live frame's **Residual** view |
 | `drive` | one `spectrum` | The live frame's **Drive** view |
-| `response` | one `spectrum` per resolved channel | Random's: that channel's PSD (tones in), stepped, and a limited channel's `Limit` |
+| `response` | one `spectrum` per resolved channel | Random's: that channel's PSD (tones in), stepped, and a limited channel's `Limit` (`limit`; a control channel too), its ceiling stepped on the band's lines its rows cover |
 | `time` | one `spectrum` per resolved channel | Random's: the last loop's acquired samples, tones in |
 | `coherence` | one `spectrum` | Random's: the identification's coherence on the band's lines |
 | `identification` | **Identification Gain** (`spectrum`, x `Frequency` Hz log, y `Gain` log) | `Gain` (`measured`, stepped on the band's lines), `abs(H)` from the drive to the composite control point, control unit per volt, and `Trusted` (`reference`, stepped) on the lines the tones may trust, the rest absent |
