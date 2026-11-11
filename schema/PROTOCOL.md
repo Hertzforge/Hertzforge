@@ -3084,8 +3084,10 @@ gate has run, the others until the loop has engaged.
 
 ## Mixed Mode
 
-**Status.** This section is the contract the Mixed Mode service and screen are built against.
-Until the service is built, every `mixed.*` method is answered `unknown_method`.
+**Status.** This section is the contract the Mixed Mode service and screen are built against;
+the service serves every method below. Where a figure the core does not report yet is named
+(a trip's measured and limit values, an envelope alarm's worst line), the field is present and
+null.
 
 A Mixed Mode test plays a list of **parts** together on one drive and controls them together:
 exactly one **floor** (broadband random to a breakpoint profile), up to 12 **tones** (sines of a
@@ -3172,7 +3174,7 @@ from a file or pasted rows with `sine.profile.import`, which only computes.
                 "start_hz":1300,"direction":"up","end":null},
     "level_g2_hz":0.1,"width_share":0.05,"alarm_db":[3,3],"abort_db":[6,6]}],
  "exclusion_hz":2,
- "acquisition":{"fs_hz":8192,"n_pts":8192,"n_avg":4,"tick_ms":10},
+ "acquisition":{"fs_hz":8192,"n_pts":16384,"n_avg":4,"tick_ms":10},
  "schedule":{"mode":"auto","levels":[{"db":-12,"dwell_s":30},{"db":-6,"dwell_s":30},{"db":0}],
              "full_level_s":300},
  "control":{"composite":"weighted_avg","weights":[{"channel":1,"weight":1}],
@@ -3290,9 +3292,10 @@ and meaning are theirs, and the field applies as stated here:
 The control channels are the table's enabled `control` rows; the drive is its first enabled
 `drive` row. A configuration whose shape is wrong is refused `bad_params` naming the field in
 `detail.param` as the request's own path (`config.parts[2].amplitude_g`); its content errors are
-refused `config_invalid` with the items, located by `field`, the path inside the configuration
-(`parts[3].schedule.of`, `control.law_guards.tones.max_step_db`), or by `field` and `row` for a
-floor breakpoint row (`parts[0].breakpoints`) or a tone profile row (`parts[2].profile.rows`).
+refused `config_invalid` (code `bad_request`, as Random's and Sine's) with the items, located by
+`field`, the path inside the configuration (`parts[3].schedule.of`,
+`control.law_guards.tones.max_step_db`), a floor breakpoint row or a tone profile row by its
+index in that path (`parts[0].breakpoints[2]`, `parts[2].profile.rows[1]`).
 `dry_run: true` checks without replacing anything and needs no control.
 
 **Result.** `state` is the `mixed.state` object (`configured`). `derived` is what the service
@@ -3300,11 +3303,11 @@ computes at configure, at full level (0 dB):
 
 ```
 {"band_hz":[20,2000],
- "grid":{"fs_hz":8192,"n_pts":8192,"df_hz":1,"lines":1981,"loop_s":4,
+ "grid":{"fs_hz":8192,"n_pts":16384,"df_hz":0.5,"lines":3961,"loop_s":8,
          "tick_frames":82,"tick_s":0.0100098,"actual":false},
  "control_channels":[1],
  "parts":[{"id":"floor","kind":"floor","name":"Floor","freq_hz":null,"width_hz":null,
-           "ms_g2":36.7,"peak_g":null},
+           "ms_g2":36.75,"peak_g":null},
           {"id":"t1","kind":"tone","name":"Blade pass","freq_hz":[120,120],"width_hz":null,
            "ms_g2":2,"peak_g":2},
           {"id":"t2","kind":"tone","name":"Rotor","freq_hz":[300,600],"width_hz":null,
@@ -3315,18 +3318,18 @@ computes at configure, at full level (0 dB):
            "width_hz":[20,20],"ms_g2":4,"peak_g":null},
           {"id":"b2","kind":"narrowband","name":"Rotor band","freq_hz":[1300,1800],
            "width_hz":[65,90],"ms_g2":9,"peak_g":null}],
- "reference":{"floor_ms_g2":36.7,"tones_ms_g2":3.25,"bands_ms_g2":13,"total_ms_g2":52.95,
-              "total_rms_g":7.277,"random_rms_g":7.05},
- "kinematics":{"peak_accel_g":25.15,"peak_velocity_ips":7.672,"peak_disp_pp_in":0.0489,
+ "reference":{"floor_ms_g2":36.75,"tones_ms_g2":3.25,"bands_ms_g2":13,"total_ms_g2":53,
+              "total_rms_g":7.28,"random_rms_g":7.053},
+ "kinematics":{"peak_accel_g":25.16,"peak_velocity_ips":7.664,"peak_disp_pp_in":0.04887,
                "verdict":"pass","message":"..."},
- "exclusion":[{"part":"t1","lo_hz":118,"hi_hz":122,"lines":5},
-              {"part":"b1","lo_hz":238,"hi_hz":262,"lines":25}],
+ "exclusion":[{"part":"t1","lo_hz":118,"hi_hz":122,"lines":9},
+              {"part":"b1","lo_hz":239,"hi_hz":261,"lines":45}],
  "closest_tones":{"parts":["t1","t2"],"spacing_hz":180,"min_hz":1},
  "tracking":[{"part":"t1","verdict":"ok","ratio":0,"at_hz":null,"message":null},
              {"part":"t2","verdict":"ok","ratio":0.002,"at_hz":null,"message":null},
              {"part":"t3","verdict":"ok","ratio":0.004,"at_hz":null,"message":null}],
- "test_s":360,"identification_s":16,
- "call_budget_s":{"floor":1,"tones":0.0025025},
+ "test_s":360,"identification_s":32,
+ "call_budget_s":{"floor":2,"tones":0.0025024},
  "law":{"floor":{"id":"hinv","name":"...","version":"...","sha256":null,"live":[],
                  "hardware":true},
         "tones":{"id":"servo_blend","name":"Servo blend","version":"0.1.0","sha256":null,
@@ -3346,7 +3349,8 @@ computes at configure, at full level (0 dB):
 - `reference` sums them: `total_ms_g2` is floor plus tones plus narrowbands (the composite's
   reference, which is shown and not judged), `total_rms_g` its root, `random_rms_g` the random
   part's (floor plus narrowbands).
-- `kinematics` is the predicted peak of the sum, each to 4 significant digits: acceleration as the
+- `kinematics` is the core's prediction of the peak of the sum (null when it cannot predict),
+  each to 4 significant digits: acceleration as the
   tones' amplitudes summed plus `crest_factor` times the random part's rms; velocity and
   displacement as each tone's at the frequency of its motion where it is largest plus
   `crest_factor` times the random part's (the narrowbands at their lowest centers); displacement
@@ -3560,8 +3564,8 @@ floor and for a trip of no part), and its kind's facts. `end.message` names the 
 | `kind` | Part | Facts |
 |---|---|---|
 | `envelope` | the floor | Random's: `abort_lines`, `worst_db` |
-| `abort_band` | a tone | Sine's: `side` (`high` or `low`), `measured_g`, `limit_g` |
-| `band_abort` | a narrowband | `side`, `measured_g2_hz`, `limit_g2_hz`, `dof` |
+| `abort_band` | a tone | Sine's: `side` (`high` or `low`), `measured_g`, `limit_g`, and `error_db` (the tone's error then); `measured_g` and `limit_g` are null until the core reports them |
+| `band_abort` | a narrowband | `side`, `measured_g2_hz`, `limit_g2_hz`, `dof`, and `error_db`; the first three are null until the core reports them |
 | `servo_fault` | a tone | Sine's: `consecutive_ticks` |
 | `divergence` | the floor or a tone | the floor: Random's `consecutive_loops`, `divergent_bins`; a tone: Sine's `capped_s` |
 | `law_fault` | the floor, or the tone whose instance failed | `role` (`floor` or `tones`), `reason`, `consecutive` |
@@ -3569,7 +3573,9 @@ floor and for a trip of no part), and its kind's facts. `end.message` names the 
 | `kinematic` | none | Random's: `channel`, `axis` (`accel`, `velocity` or `displacement`), `value`, `limit` |
 | `drive_vpk` | none | Sine's: `vpk`, `abort_vpk` (the summed drive) |
 | `drive_vrms` | none | Random's: `realized_vrms`, `limit_vrms` (the random part) |
-| `watchdog` | none | Sine's: `channel`, `axis`, `value`, `limit`, `measured`, `drive_vpk` |
+| `watchdog` | none | Sine's: `channel`, `axis`, `value`, `limit`, `measured`, `drive_vpk` (a limit channel's own abort) |
+| `overload` | none | `channel`: an input's overload latch |
+| `station` | none | `message`: the station's own words |
 
 A `law_fault` trip's `reason` is Random's for the floor (`error`, `panicked`, `over_budget`,
 `wrong_length`, `non_finite`, `negative`, `non_finite_level`, `over_memory`, `bad_diagnostics`)
@@ -3613,7 +3619,7 @@ Event topics:
 - `channels` lists every enabled input in table order as Random's: its rms over the band (tones
   in) and Random's input-range `overload` latch.
 - `alarms` lists what holds now: `{"kind":"envelope","part","lines","worst_db"}` (the floor's
-  clean lines outside its alarm band), `{"kind":"band","part","side","error_db"}` (a tone or a
+  clean lines outside its alarm band; `worst_db` null until the core reports its worst line), `{"kind":"band","part","side","error_db"}` (a tone or a
   narrowband outside its alarm band) and `{"kind":"overload","channel"}`. An alarm warns; it
   does not stop the run.
 - `law` is the floor law's values on its last call by declared key, and each tone's instance's,
