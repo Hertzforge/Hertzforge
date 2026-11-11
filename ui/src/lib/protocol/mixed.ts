@@ -511,7 +511,7 @@ export interface MixedTripWhere {
 
 export type MixedTrip = MixedTripWhere &
 	(
-		| { kind: 'envelope'; abort_lines: number; worst_db: number }
+		| { kind: 'envelope'; abort_lines: number; worst_db: number | null }
 		/** `error_db` the part's error then; `measured_g` and `limit_g` null until the core reports them. */
 		| { kind: 'abort_band'; side: 'high' | 'low'; error_db?: number | null; measured_g: number | null; limit_g: number | null }
 		| { kind: 'band_abort'; side: 'high' | 'low'; error_db?: number | null; measured_g2_hz: number | null; limit_g2_hz: number | null; dof: number | null }
@@ -554,6 +554,8 @@ export interface MixedFloorLines {
 	clean: number;
 	alarm: number;
 	abort: number;
+	/** The lines the floor's rms abort is judged on; it arms once three quarters of the in-band lines qualify. */
+	rms_judged: number;
 }
 
 /** One part's row in the state and in every frame: every part, in the parts' order. */
@@ -569,11 +571,13 @@ export interface MixedPartRow {
 	scale: number;
 	/** A tone's frequency or a narrowband's center now; null for the floor. */
 	freq_hz: number | null;
-	/** Null when it stands still. */
+	/** Null when it stands still; a follower carries its leader's. */
 	direction: SineDirection | null;
 	/** Null unless the part sweeps. */
 	sweeps: { done: number; of: number | null } | null;
-	/** Signed; at most one of the two is a number, both null when the part stands still. */
+	/** Signed, from the part's own schedule (a log follower its leader's oct/min, a linear one its
+	 * leader's Hz/s times the ratio); one is a number, the other null; both null when it stands still;
+	 * 0 while the parts' clock is stopped. */
 	rate_oct_per_min: number | null;
 	rate_hz_per_s: number | null;
 	/** A narrowband's width now; null otherwise. */
@@ -586,22 +590,20 @@ export interface MixedPartRow {
 	alarm: boolean;
 	/** A tone's amplitude in the drive, V peak; null otherwise. */
 	drive_vpk: number | null;
-	/** The floor's or a narrowband's share of the random part, V rms; null for a tone. */
+	/** The floor's share of the random part, V rms; null for a tone and a narrowband. */
 	drive_vrms: number | null;
 	/** A narrowband's servo gain; null otherwise. */
 	gain_db: number | null;
 	settled: boolean;
 	limiting: boolean;
-	/** The floor's or a narrowband's estimate; null for a tone. */
+	/** The floor's typical (median) clean line, or a narrowband's level estimate; null for a tone. */
 	dof: number | null;
 	/** The floor only. */
 	lines: MixedFloorLines | null;
 	/** The part's law instance; null for a narrowband. `capped` counts ticks (a tone) or loops (the floor). */
 	law: { misses: number; capped: number } | null;
-	/** A follower's leader and ratio, when the service sends them; the shell reads the setup otherwise. */
-	follows?: { of: string; ratio: number } | null;
-	/** Its schedule or window has ended, when the service sends it. */
-	done?: boolean;
+	/** A follower's leader and ratio; null for a part that does not follow. */
+	follows: { of: string; ratio: number } | null;
 }
 
 /** The composite: shown, not judged. */

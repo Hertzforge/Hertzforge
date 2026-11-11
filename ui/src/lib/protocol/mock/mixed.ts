@@ -31,6 +31,7 @@ import type {
 	MixedDerived,
 	MixedDerivedPart,
 	MixedEnd,
+	MixedFloorLines,
 	MixedLiveHead,
 	MixedLiveQuantity,
 	MixedLogKind,
@@ -607,6 +608,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 				scale: driving ? 1 : 0,
 				freq_hz: null,
 				direction: null,
+				follows: null,
 				sweeps: null,
 				rate_oct_per_min: null,
 				rate_hz_per_s: null,
@@ -622,7 +624,7 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 				settled: driving && r.phaseT > 1.5,
 				limiting: false,
 				dof: driving ? Math.min(120, 8 * r.loop + 8) : null,
-				lines: driving ? { in_band: r.derived.grid.lines, clean: r.derived.grid.lines - r.derived.exclusion.reduce((n, e) => n + e.lines, 0), alarm: 0, abort: 0 } : null,
+				lines: driving ? floorLines(r) : null,
 				law: r.phase === 'sysid' || r.phase === 'coherence_gate' || r.state === 'review' ? null : { misses: 0, capped: 0 }
 			};
 		}
@@ -631,7 +633,9 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 		const lead = s.kind === 'follow' ? r.parts.find((x) => x.part.id === s.of) : null;
 		const sweep = s.kind === 'sweep' ? s : lead?.part.schedule.kind === 'sweep' ? lead.part.schedule : null;
 		const moving = !!sweep && !r.held && p.scale > 0;
-		const signed = (v: number) => (p.dir === 'down' ? -v : v);
+		// As the service sends it: a follower carries its leader's direction.
+		const dir = s.kind === 'sweep' ? p.dir : sweep && lead ? lead.dir : null;
+		const signed = (v: number) => (dir === 'down' ? -v : v);
 		const rate = sweep?.rate;
 		const tone = part.kind === 'tone';
 		const err = p.measured !== null && p.target !== null && p.target > 0 ? round((tone ? 20 : 10) * Math.log10(p.measured / p.target), 2) : null;
@@ -645,8 +649,8 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			on: p.scale > 0,
 			scale: round(p.scale, 3),
 			freq_hz: round(p.freq, 2),
-			// As the service sends it: a follower's row carries no direction of its own.
-			direction: s.kind === 'sweep' ? p.dir : null,
+			direction: dir,
+			follows: s.kind === 'follow' ? { of: s.of, ratio: s.ratio } : null,
 			sweeps: s.kind === 'sweep' ? { done: p.sweeps, of: s.end?.sweeps ?? null } : null,
 			rate_oct_per_min: rate?.law === 'log' ? (moving ? signed(rate.oct_per_min) : 0) : null,
 			rate_hz_per_s: rate?.law === 'linear' ? (moving ? signed(rate.hz_per_s * (s.kind === 'follow' ? s.ratio : 1)) : 0) : null,
@@ -657,7 +661,8 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			error_db: err,
 			alarm: err !== null && p.settledT > 1 && (err > al[1] || err < -al[0]),
 			drive_vpk: tone && p.target !== null ? round((p.target * p.scale) / plantGain(p.freq), 4) : null,
-			drive_vrms: !tone && p.target !== null ? round(Math.sqrt(p.target * (width ?? 1)) * p.scale * 0.08, 4) : null,
+			// The core reports no drive for a narrowband.
+			drive_vrms: null,
 			gain_db: tone ? null : p.scale > 0 ? round(0.4 * Math.sin(r.t / 7), 2) : null,
 			settled: p.settledT > 1,
 			limiting: false,
@@ -665,6 +670,12 @@ export function createMixedMock(host: MixedMockHost): MixedMock {
 			lines: null,
 			law: tone ? (r.phase === 'floor_only' || p.scale > 0 || p.settledT > 0 ? { misses: 0, capped: 0 } : null) : null
 		};
+	}
+
+	/** The floor's lines: the rms abort is judged on the lines that qualify, all of them after a few loops. */
+	function floorLines(r: Run): MixedFloorLines {
+		const clean = r.derived.grid.lines - r.derived.exclusion.reduce((n, e) => n + e.lines, 0);
+		return { in_band: r.derived.grid.lines, clean, alarm: 0, abort: 0, rms_judged: r.loop >= 3 ? clean : Math.round((clean * r.loop) / 3) };
 	}
 
 	function rows(r: Run): MixedPartRow[] {
