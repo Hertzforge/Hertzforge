@@ -27,7 +27,14 @@ from hertzforge.core.transform import (
     to_physical,
 )
 from hertzforge.core.validate import modal_coordinate
-from hertzforge.units import SYSTEMS, dimension_of, plain_unit, pretty_unit
+from hertzforge.units import (
+    SYSTEMS,
+    UnitError,
+    dimension_of,
+    plain_unit,
+    pretty_unit,
+    si_factor,
+)
 
 T = np.arange(1024) / 1024.0
 
@@ -207,7 +214,13 @@ def test_the_units_module_knows_the_new_quantities():
     assert coherent.label_ascii('modal_acceleration') == 'in/s^2*slinch^0.5'
     assert coherent.factor('modal_acceleration') == pytest.approx(
         coherent.factor('acceleration') * math.sqrt(coherent.factor('mass')))
-    assert SYSTEMS['m-kg-N-s'].unit('modal_force') == 'N*kg**0.5'
+    assert SYSTEMS['m-kg-N-s'].unit('modal_force') == 'N/kg**0.5'
+    assert coherent.unit('modal_force') == 'lbf/slinch**0.5'
+    assert dimension_of('lbf/slinch**0.5') == 'modal_force', 'told apart by the force'
+    assert si_factor('lbf/slinch**0.5', 'modal_force') == pytest.approx(
+        4.4482216152605 / math.sqrt(4.4482216152605 / 0.0254))
+    with pytest.raises(UnitError):
+        si_factor('lbf*slinch**0.5', 'modal_force')
     assert SYSTEMS['in-slinch-lbf-s (g)'].unit('acceleration') == 'g'
     assert SYSTEMS['in-slinch-lbf-s (g)'].unit('modal_acceleration') == \
         'in/s**2*slinch**0.5', 'the modal unit stays coherent'
