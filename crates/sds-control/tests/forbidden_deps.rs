@@ -140,6 +140,15 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // The laws crate is on LAW_CRATES, as the Sine and TWR law crates are.
     "hertzforge-mixed",
     "hertzforge-mixed-laws",
+    // MIMO Shock, reviewed 2026-11-11 with its contracts, before the wire reaches it:
+    // the run contracts and engine (`hertzforge-mimo-shock`, MIT, written here), whose
+    // `[dependencies]` are `hertzforge-shock-common`, `hertzforge-sdm`, `hertzforge-hal`,
+    // `hertzforge-channel-table`, `serde` and `serde_json`, all on this list; it names no
+    // backend and is handed its station at arm. The choice of its laws
+    // (`hertzforge-mimo-shock-laws`) depends on it and `hertzforge-shock-common` only.
+    // The laws crate is on LAW_CRATES.
+    "hertzforge-mimo-shock",
+    "hertzforge-mimo-shock-laws",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -160,6 +169,11 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// `hertzforge-mixed` was written here as well (2026-11-10): the Single Output Mixed
 /// Mode parts list, part clock and run service, composed from the Random and Sine
 /// cores. It names no backend and builds the Sim only as a test fixture.
+///
+/// `hertzforge-mimo-shock` was written here as well (2026-11-11): the MIMO Shock
+/// contracts (the law setup, the per-pulse inputs and outputs, the law traits and
+/// their validation) and the run engine's surface. It names no backend; the run
+/// service hands it a finished station, and the Sim is at most a dev-dependency.
 ///
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
@@ -184,6 +198,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-insight",
     "hertzforge-ipc",
     "hertzforge-mimo-random",
+    "hertzforge-mimo-shock",
     "hertzforge-mixed",
     "hertzforge-module-abi",
     "hertzforge-protocol",
@@ -234,7 +249,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// So was the band-average MIMO law (2026-11-10):
 /// its math (`hertzforge-law-band-average-math`, on `hertzforge-sdm`'s stacks and
 /// factorizations and nothing else), the law in `hertzforge-mimo-laws` and the
-/// `mimo-band-average` law file.
+/// `mimo-band-average` law file. So was the MIMO Shock set (2026-11-11), written
+/// with its contracts: the choice of a law (`hertzforge-mimo-shock-laws`) and the
+/// `shock-mimo-minimal` host fixture, the smallest law file of the `shock-mimo`
+/// world, written against the world's own bindings.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -254,6 +272,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-sine-servo",
     "hertzforge-law-twr-correct",
     "hertzforge-mimo-laws",
+    "hertzforge-mimo-shock-laws",
     "hertzforge-mixed-laws",
     "hertzforge-random-laws",
     "hertzforge-shock-law-math",
@@ -263,6 +282,7 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-bad-manifest",
     "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
+    "law-fixture-shock-mimo-minimal",
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
     "law-fixture-sine-misbehave",

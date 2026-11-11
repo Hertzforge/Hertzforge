@@ -8,6 +8,7 @@ use crate::mimo::LoadedMimoLaw;
 use crate::mimo_bindings::RandomMimoPre;
 use crate::sandbox::{self, HostState, Sandbox};
 use crate::shock_classical::{LoadedClassicalLaw, ShockClassicalPre};
+use crate::shock_mimo::{ShockMimoPre, SHOCK_MIMO_NOT_RUN};
 use crate::shock_srs::{LoadedSrsLaw, ShockSrsPre};
 use crate::sine::{LoadedSineLaw, SineSinglePre};
 use crate::ticker::Ticker;
@@ -290,12 +291,18 @@ impl LawHost {
             Ok(c) => return LoadedSineLaw::read(self, sha256, c).map(AnyLaw::Sine),
             Err(e) => chain(&e),
         };
-        match TwrSinglePre::new(pre) {
-            Ok(c) => LoadedTwrLaw::read(self, sha256, c).map(AnyLaw::Twr),
+        let twr_err = match TwrSinglePre::new(pre.clone()) {
+            Ok(c) => return LoadedTwrLaw::read(self, sha256, c).map(AnyLaw::Twr),
+            Err(e) => chain(&e),
+        };
+        // Recognized by name, not yet run (`crate::shock_mimo`).
+        match ShockMimoPre::new(pre) {
+            Ok(_) => Err(LawError::NotALaw(SHOCK_MIMO_NOT_RUN.into())),
             Err(e) => Err(LawError::NotALaw(format!(
                 "not a single-output law ({single_err}), not a multiple-output law ({mimo_err}), \
                  not a classical shock law ({classical_err}), not an SRS shock law ({srs_err}), \
-                 not a Sine law ({sine_err}) and not a time waveform replication law ({})",
+                 not a Sine law ({sine_err}), not a time waveform replication law \
+                 ({twr_err}) and not a MIMO Shock law ({})",
                 chain(&e)
             ))),
         }

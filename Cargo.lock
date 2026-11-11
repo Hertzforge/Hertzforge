@@ -1257,12 +1257,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mimo-shock"
+version = "0.1.4"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-sdm",
+ "hertzforge-shock-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-mimo-shock-law-math"
 version = "0.1.4"
 dependencies = [
  "hertzforge-dsp",
  "hertzforge-mimo-shock-law-math",
  "hertzforge-sdm",
+]
+
+[[package]]
+name = "hertzforge-mimo-shock-laws"
+version = "0.1.4"
+dependencies = [
+ "hertzforge-mimo-shock",
+ "hertzforge-shock-common",
 ]
 
 [[package]]
@@ -1796,6 +1816,13 @@ name = "law-fixture-misbehave"
 version = "0.1.4"
 dependencies = [
  "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-shock-mimo-minimal"
+version = "0.1.4"
+dependencies = [
+ "wit-bindgen",
 ]
 
 [[package]]

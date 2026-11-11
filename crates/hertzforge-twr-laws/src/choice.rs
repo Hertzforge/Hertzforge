@@ -79,7 +79,8 @@ pub fn resolve_twr(
             | LawWorld::Mimo
             | LawWorld::ShockClassical
             | LawWorld::ShockSrs
-            | LawWorld::Sine => Err(ChoiceError::WrongTestType {
+            | LawWorld::Sine
+            | LawWorld::ShockMimo => Err(ChoiceError::WrongTestType {
                 id: choice.id.clone(),
                 law_is_for: entry.world.test_type(),
             }),

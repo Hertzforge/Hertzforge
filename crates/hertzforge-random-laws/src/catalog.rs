@@ -65,11 +65,15 @@ pub enum LawWorld {
     /// Time waveform replication (`twr-single`). Listed with no entries until
     /// its built-in law and its law files are served.
     Twr,
+    /// MIMO Shock (`shock-mimo`): classical pulses and SRS at several controls
+    /// with several drives. Listed with no entries: a law file of this world is
+    /// refused when it is loaded, and the built-in laws are not served yet.
+    ShockMimo,
 }
 
 impl LawWorld {
     /// The stable wire name: `single`, `mimo`, `shock_classical`,
-    /// `shock_srs`, `sine` or `twr`.
+    /// `shock_srs`, `sine`, `twr` or `shock_mimo`.
     pub fn as_str(self) -> &'static str {
         match self {
             LawWorld::Single => "single",
@@ -78,12 +82,13 @@ impl LawWorld {
             LawWorld::ShockSrs => "shock_srs",
             LawWorld::Sine => "sine",
             LawWorld::Twr => "twr",
+            LawWorld::ShockMimo => "shock_mimo",
         }
     }
 
     /// The test type, in words, for a refusal: "single-output Random",
-    /// "multiple-output Random", "classical shock", "SRS shock", "Sine" or
-    /// "TWR".
+    /// "multiple-output Random", "classical shock", "SRS shock", "Sine", "TWR"
+    /// or "MIMO Shock".
     pub fn test_type(self) -> &'static str {
         match self {
             LawWorld::Single => "single-output Random",
@@ -92,6 +97,7 @@ impl LawWorld {
             LawWorld::ShockSrs => "SRS shock",
             LawWorld::Sine => "Sine",
             LawWorld::Twr => "TWR",
+            LawWorld::ShockMimo => "MIMO Shock",
         }
     }
 }
@@ -588,6 +594,7 @@ impl LawCatalog {
             LawWorld::ShockSrs => self.shock_srs_entries(),
             LawWorld::Sine => self.sine_entries(),
             LawWorld::Twr => self.twr_entries(),
+            LawWorld::ShockMimo => Vec::new(),
         }
     }
 

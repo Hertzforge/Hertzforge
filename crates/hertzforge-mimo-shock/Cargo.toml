@@ -1,0 +1,25 @@
+[package]
+name = "hertzforge-mimo-shock"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# MIMO Shock: classical pulses and Shock Response Spectra at several control
+# channels with several drives, one pulse at a time, closed between pulses.
+# This crate holds the contracts the run service and the laws are written
+# against: the law setup, the per-pulse inputs and outputs, the law traits,
+# their validation and size limits, and the run engine's public surface. It
+# names no backend; the run service hands it a finished station.
+[dependencies]
+# The shared pulse-run infrastructure: the law guard's fault, value and
+# descriptor types every shock law reports through.
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# The abstract station the engine is handed at arm, and its channel table. No
+# concrete backend: the run service builds the station.
+hertzforge-hal = { path = "../hertzforge-hal" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# The complex matrix stack the plant is carried in.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

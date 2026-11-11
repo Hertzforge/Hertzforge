@@ -13,7 +13,8 @@ use crate::protocol::{ErrorCode, MethodError};
 use hertzforge_hal::DiscoveredDevice;
 use hertzforge_module_abi::StationClass;
 use hertzforge_station::{
-    BackendKind, NiSelection, SimPlantSpec, StationBackend, StationBuildError, StationSpec,
+    BackendKind, NiSelection, SimPlant, SimPlantSpec, StationBackend, StationBuildError,
+    StationSpec,
 };
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -411,8 +412,17 @@ pub fn hardware_holder(data_root: &Path) -> Option<String> {
 /// What a run arms on.
 #[derive(Debug, Clone)]
 pub enum StationPlan {
+    /// The simulator. With `plant` and `outputs` both `None` it is the station every
+    /// single-output run arms on: the [`SIM_RESONANCES`] bank, [`SIM_INPUTS`] inputs and
+    /// [`SIM_OUTPUTS`] output. A sized `plant` (modal or FRF) sets the station's size to
+    /// its own and refuses a table of any other size at `configure`; `outputs` raises
+    /// the output count offered by the resonator bank (which plays the first drive row).
     Sim {
         fs_hz: f64,
+        /// The plant, when not the resonator bank.
+        plant: Option<SimPlant>,
+        /// Outputs offered, when not [`SIM_OUTPUTS`].
+        outputs: Option<u32>,
     },
     Ni {
         devices: Vec<String>,
@@ -422,11 +432,26 @@ pub enum StationPlan {
     },
 }
 
+impl StationPlan {
+    /// The simulator every single-output run arms on: the resonator bank, one output.
+    pub fn sim(fs_hz: f64) -> StationPlan {
+        StationPlan::Sim {
+            fs_hz,
+            plant: None,
+            outputs: None,
+        }
+    }
+}
+
 /// Build the station a run arms on. The simulator through the factory; NI from a
 /// fresh scan through the factory's own classification. Never a simulator for NI.
 pub fn build(plan: &StationPlan, scanner: &dyn NiScanner) -> Result<StationBackend, MethodError> {
     match plan {
-        StationPlan::Sim { fs_hz } => {
+        StationPlan::Sim {
+            fs_hz,
+            plant,
+            outputs,
+        } => {
             let spec = StationSpec {
                 sim: SimPlantSpec {
                     sample_rate_hz: *fs_hz,
@@ -438,7 +463,8 @@ pub fn build(plan: &StationPlan, scanner: &dyn NiScanner) -> Result<StationBacke
                     shared_clock: true,
                     seed: 0x5A5A_1234,
                     max_input_channels: SIM_INPUTS,
-                    max_output_channels: SIM_OUTPUTS,
+                    max_output_channels: outputs.unwrap_or(SIM_OUTPUTS),
+                    plant: plant.clone().unwrap_or_default(),
                     ..SimPlantSpec::default()
                 },
                 ..StationSpec::default()
@@ -710,10 +736,91 @@ mod tests {
 
     #[test]
     fn the_sim_run_is_built_on_the_shared_clock_plant() {
-        let st = build(&StationPlan::Sim { fs_hz: 8192.0 }, &DriverScanner).unwrap();
+        let st = build(&StationPlan::sim(8192.0), &DriverScanner).unwrap();
         assert_eq!(st.station, StationClass::HertzforgeSim);
         let caps = st.backend.caps();
         assert_eq!(caps.clock, hertzforge_hal::ClockDomain::Shared);
         assert_eq!(caps.max_input_channels, SIM_INPUTS);
+    }
+
+    /// `n_in` Control rows then `n_drive` Drive rows.
+    fn mimo_shock_table(n_in: u32, n_drive: u32) -> hertzforge_channel_table::ChannelTable {
+        use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable, Units};
+        let mut t = ChannelTable::new();
+        for i in 0..n_in {
+            let mut c = Channel::new(i);
+            c.role = ChannelRole::Control;
+            t.channels.push(c);
+        }
+        for d in 0..n_drive {
+            let mut c = Channel::new(n_in + d);
+            c.role = ChannelRole::Drive;
+            c.units = Units::VoltageV;
+            t.channels.push(c);
+        }
+        t
+    }
+
+    fn mimo_shock_arm(
+        st: &mut StationBackend,
+        t: &hertzforge_channel_table::ChannelTable,
+    ) -> Result<(), hertzforge_hal::HalError> {
+        st.backend.open()?;
+        let acq = hertzforge_hal::AcquisitionConfig::new(st.backend.caps().sample_rate_hz, 256);
+        st.backend.configure(t, &acq)?;
+        st.backend.arm()?;
+        st.backend.stop()
+    }
+
+    #[test]
+    fn mimo_shock_the_default_sim_plan_is_the_single_output_station() {
+        let plan = StationPlan::sim(8192.0);
+        assert!(matches!(
+            plan,
+            StationPlan::Sim {
+                plant: None,
+                outputs: None,
+                ..
+            }
+        ));
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        let caps = st.backend.caps();
+        assert_eq!(caps.max_input_channels, SIM_INPUTS);
+        assert_eq!(caps.max_output_channels, SIM_OUTPUTS);
+        assert_eq!(caps.sample_rate_hz, 8192.0);
+        // One drive arms; a second drive row is refused by the station itself.
+        mimo_shock_arm(&mut st, &mimo_shock_table(1, 1)).unwrap();
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        let e = mimo_shock_arm(&mut st, &mimo_shock_table(1, 2)).unwrap_err();
+        assert!(e.to_string().contains("exceeds max 1"), "{e}");
+    }
+
+    #[test]
+    fn mimo_shock_a_modal_four_by_four_plant_arms_with_four_drive_rows() {
+        let plant = hertzforge_station::SimStandardPlant::from_name("modal-4x4").unwrap();
+        let plan = StationPlan::Sim {
+            fs_hz: 8192.0,
+            plant: Some(SimPlant::Modal(plant)),
+            outputs: Some(4),
+        };
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        assert_eq!(st.station, StationClass::HertzforgeSim);
+        assert_eq!(st.backend.caps().max_output_channels, 4);
+        mimo_shock_arm(&mut st, &mimo_shock_table(4, 4)).unwrap();
+        // The sized plant refuses a table of another size.
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        assert!(mimo_shock_arm(&mut st, &mimo_shock_table(4, 3)).is_err());
+    }
+
+    #[test]
+    fn mimo_shock_an_output_count_alone_widens_the_resonator_station() {
+        let plan = StationPlan::Sim {
+            fs_hz: 8192.0,
+            plant: None,
+            outputs: Some(2),
+        };
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        assert_eq!(st.backend.caps().max_output_channels, 2);
+        mimo_shock_arm(&mut st, &mimo_shock_table(1, 2)).unwrap();
     }
 }

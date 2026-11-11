@@ -76,6 +76,7 @@ mod host;
 pub mod mimo;
 mod sandbox;
 pub mod shock_classical;
+pub mod shock_mimo;
 pub mod shock_srs;
 pub mod sine;
 mod ticker;
@@ -122,6 +123,8 @@ pub const MIMO_WORLD: &str = "random-mimo";
 pub const CLASSICAL_WORLD: &str = "shock-classical";
 /// The world an SRS shock law file implements.
 pub const SRS_WORLD: &str = "shock-srs";
+/// The world a MIMO Shock law file implements.
+pub const SHOCK_MIMO_WORLD: &str = "shock-mimo";
 /// The world a single-output Sine law file implements.
 pub const SINE_WORLD: &str = "sine-single";
 /// The world a time waveform replication law file implements.

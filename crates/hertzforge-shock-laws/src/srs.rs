@@ -136,7 +136,8 @@ pub fn resolve_srs(
             | LawWorld::Mimo
             | LawWorld::ShockClassical
             | LawWorld::Sine
-            | LawWorld::Twr => Err(ChoiceError::WrongTestType {
+            | LawWorld::Twr
+            | LawWorld::ShockMimo => Err(ChoiceError::WrongTestType {
                 id: choice.id.clone(),
                 law_is_for: entry.world.test_type(),
             }),

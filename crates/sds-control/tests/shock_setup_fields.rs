@@ -917,3 +917,37 @@ fn each_shape_error_is_bad_params_naming_the_field() {
     let e = config::parse(&c).map(|_| ()).unwrap_err();
     assert_eq!(e.reason, Some("shaker_record_invalid"));
 }
+
+#[test]
+fn mimo_shock_classical_refuses_a_second_drive_row() {
+    // Single-output shock plays one drive record. With two enabled drive rows a station opens
+    // both as outputs and the one record would be split across them as interleaved frames.
+    let w = config::parse(&golden_config()).unwrap();
+    let mut t = table();
+    let mut second = table::new_row(5);
+    second.role = ChannelRole::Drive;
+    second.units = Units::VoltageV;
+    t.channels.push(second);
+    let (r, _) = w.check(&CheckContext {
+        table: &t,
+        law: &law,
+        timeout_s: 30.0,
+    });
+    assert!(
+        r.errors.iter().any(|i| i.reason == "extra_drive_channels"),
+        "{:?}",
+        r.errors
+    );
+    // A disabled second drive row is not refused.
+    t.channels.last_mut().unwrap().enabled = false;
+    let (r, _) = w.check(&CheckContext {
+        table: &t,
+        law: &law,
+        timeout_s: 30.0,
+    });
+    assert!(
+        !r.errors.iter().any(|i| i.reason == "extra_drive_channels"),
+        "{:?}",
+        r.errors
+    );
+}
