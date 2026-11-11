@@ -387,6 +387,8 @@ export interface MixedDerived {
 	tracking: MixedTrackingVerdict[];
 	/** Parts time of the ladder; null in manual. */
 	test_s: number | null;
+	/** Station time the floor needs on this grid to reach its control degrees of freedom; the parts wait for the larger of this and `control.floor_settle_s`. */
+	floor_equalize_s: number;
 	identification_s: number;
 	call_budget_s: { floor: number; tones: number };
 	law: { floor: MixedLawFacts; tones: MixedLawFacts };

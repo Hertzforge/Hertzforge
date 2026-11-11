@@ -63,6 +63,7 @@
 			<div><dt>Closest tones</dt><dd>{dry.closest_tones ? `${name(dry.closest_tones.parts[0])} and ${name(dry.closest_tones.parts[1])}, ${num(dry.closest_tones.spacing_hz, 'Hz')} apart (at least ${num(dry.closest_tones.min_hz, 'Hz')})` : 'Fewer than two tones'}</dd></div>
 			<div><dt>Tracking</dt><dd>{dry.tracking.every((t) => t.verdict === 'ok') ? 'Every tone is tracked' : dry.tracking.filter((t) => t.verdict !== 'ok').map((t) => `${name(t.part)}: ${t.message ?? t.verdict}`).join('; ')}</dd></div>
 			<div><dt>Lines and tick</dt><dd class="num">{formatNumber(dry.grid.lines, 6)} lines {formatNumber(dry.grid.df_hz, 4)} Hz apart, a loop {num(dry.grid.loop_s, 's')}; a tick {formatNumber(dry.grid.tick_s * 1000, 4)} ms{dry.grid.actual ? '' : ', until the station arms'}</dd></div>
+			<div><dt>Floor equalizes in</dt><dd class="num" data-testid="mixed-floor-equalize">{num(dry.floor_equalize_s, 's')} on this grid, before the other parts come in</dd></div>
 			<div><dt>Test time</dt><dd class="num">{dry.test_s === null ? 'Not set in advance' : num(dry.test_s, 's')} after the floor equalizes; identification {num(dry.identification_s, 's')}</dd></div>
 			<div><dt>Law call budget</dt><dd class="num">Floor {num(dry.call_budget_s.floor * 1000, 'ms')}, each tone {num(dry.call_budget_s.tones * 1000, 'ms')}</dd></div>
 			<div><dt>On hardware</dt><dd>Floor law {dry.law.floor.hardware ? 'may drive hardware' : 'runs on the simulator only'}; tone law {dry.law.tones.hardware ? 'may drive hardware' : 'runs on the simulator only'}</dd></div>

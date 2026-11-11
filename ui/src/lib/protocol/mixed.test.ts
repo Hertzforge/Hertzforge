@@ -83,6 +83,7 @@ const DERIVED_KEYS = keysOf<MixedDerived>({
 	closest_tones: true,
 	tracking: true,
 	test_s: true,
+	floor_equalize_s: true,
 	identification_s: true,
 	call_budget_s: true,
 	law: true,

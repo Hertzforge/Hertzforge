@@ -39,18 +39,18 @@ describe('the test types', () => {
 		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
 	});
 
-	it('gives each of the thirteen test types one plain line, and only Random, Sine, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder can be chosen', () => {
+	it('gives each of the thirteen test types one plain line, and only Random, Sine, Mixed Mode, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder can be chosen', () => {
 		expect(TEST_TYPES).toHaveLength(13);
-		// Mixed Mode is listed in Single Output, after Sine, and is coming.
-		expect(TEST_TYPES.find((t) => t.id === 'mixed')).toMatchObject({ group: 'single', title: 'Mixed Mode', ready: false });
-		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'sine', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
+		// Mixed Mode is listed in Single Output, after Sine, and can be chosen.
+		expect(TEST_TYPES.find((t) => t.id === 'mixed')).toMatchObject({ group: 'single', title: 'Mixed Mode', ready: true });
+		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'sine', 'mixed', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);
 			// What the test is, never a note to developers.
 			expect(t.summary).not.toMatch(/\b[QM]\d+\b|#\d+|todo|tbd|port|issue|milestone/i);
 		}
 		const { view } = viewOf(null);
-		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'sine', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
+		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'sine', 'mixed', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
 		expect(TEST_TYPES.filter((t) => !t.ready).every((t) => view.whyNot(t.id) === 'Coming')).toBe(true);
 	});
 });

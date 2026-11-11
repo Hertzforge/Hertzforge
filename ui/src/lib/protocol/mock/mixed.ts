@@ -406,6 +406,7 @@ function derive(c: MixedConfig, rows: ChannelRow[], toneLaws: LawEntry[], actual
 		closest_tones: tones.length >= 2 ? closest : null,
 		tracking: tones.map((t) => ({ part: t.id, verdict: 'ok' as const, ratio: t.schedule.kind === 'fixed' ? 0 : 0.002, at_hz: null, message: null })),
 		test_s: c.schedule.mode === 'auto' ? round(levels.slice(0, -1).reduce((n, l) => n + (l.dwell_s ?? 0), 0) + c.schedule.full_level_s, 3) : null,
+		floor_equalize_s: round(((c.control?.control_dof ?? 120) / 2 + 1) * (loopS / Math.max(1, c.acquisition?.n_avg ?? 4)) + loopS, 3),
 		identification_s: round((c.control?.pretest?.averages ?? 4) * loopS, 3),
 		call_budget_s: { floor: round((c.control?.law_guards?.floor?.law_budget ?? 0.25) * loopS, 7), tones: round((c.control?.law_guards?.tones?.law_budget ?? 0.25) * tickS, 7) },
 		law: {

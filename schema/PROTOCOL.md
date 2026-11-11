@@ -3331,7 +3331,7 @@ computes at configure, at full level (0 dB):
  "tracking":[{"part":"t1","verdict":"ok","ratio":0,"at_hz":null,"message":null},
              {"part":"t2","verdict":"ok","ratio":0.002,"at_hz":null,"message":null},
              {"part":"t3","verdict":"ok","ratio":0.004,"at_hz":null,"message":null}],
- "test_s":360,"floor_equalize_s":...,"identification_s":32,
+ "test_s":360,"floor_equalize_s":70,"identification_s":32,
  "call_budget_s":{"floor":2,"tones":0.0025024},
  "law":{"floor":{"id":"hinv","name":"...","version":"...","sha256":null,"live":[],
                  "hardware":true},
