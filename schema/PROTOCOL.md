@@ -115,6 +115,18 @@ computed the data decides it. Spectral content is plotted the way it is calculat
   polyline is within a pixel of it. Drawn as a line.
 - `line`: anything that is a sample at a point (an FRF, a coherence, a time history).
 
+`groups` (optional) shows the series a set at a time, chosen from a list over the plot: a
+channel each, say, with its target and its measurement. Each group names its series by index into
+`series` and may carry `readouts`, `{"label","text","status"}` readings shown beside the list while
+it is chosen. The axes span every group's series, so choosing another does not move them, and the
+legend lists the chosen group's alone.
+
+```
+ "groups":[{"label":"101X+","series":[0,1],
+            "readouts":[{"label":"RMS error","text":"0.4 dB","status":"pass"}]},
+           {"label":"102X+","series":[2,3]}]
+```
+
 `y_min` (optional) makes a series an envelope: the service decimated it to the plot's width,
 and each point stands for an interval of the original lines, `y` the largest value in it and
 `y_min` the smallest. The shell draws the band between them (and with `steps`, each interval
@@ -335,6 +347,26 @@ Every cell is text, written the way the value is usually quoted (the service for
 shell draws the table with its headings held at the top as it scrolls, puts a cell that reads as
 a number at the right of its column, and copies the whole table as tab-separated text, the
 headings first, so it pastes into a spreadsheet.
+
+**`bars`** (a bar a row, such as each channel's RMS error against its tolerance)
+
+```
+{"view":"bars","title":"RMS Error",
+ "value":{"label":"RMS error","unit":"dB"},     unit null for a pure number
+ "labels":["101X+","102X+",...],                one a row, top to bottom
+ "values":[-4.0,0.5,null,...],                  null: no number, so no bar
+ "states":["under",null,null,...],              each bar judged: "over", "under" or null (in)
+ "notes":[null,null,"not scored: ...",...],     optional: said along the row
+ "under":-3.0,"over":3.0,                       optional thresholds, null or absent for none
+ "baseline":0,                                  optional: where the bars grow from
+ "floor":0}                                     optional: the axis reaches no lower
+```
+
+The service judges every bar and the shell draws what it is told: a bar whose state is set is in
+the fail color with its state written beside the row, and the ground past each threshold is
+shaded. A row with no number keeps its name and its note. Bars grow from `baseline` (0 unless
+given), which is a kurtosis's Gaussian 3 rather than a zero no record sits at. Rows are named down
+the side and the chart is as tall as its rows, so sixty channels stay legible.
 
 **`image`** (a photo of the test)
 

@@ -116,7 +116,41 @@
             "op": {"type": "string"},
             "params": {"type": "object"}
           }
+        }},
+        "groups": {"type": "array", "items": {
+          "type": "object", "required": ["label", "series"], "additionalProperties": false,
+          "properties": {
+            "label": {"type": "string"},
+            "series": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+            "readouts": {"type": "array", "items": {
+              "type": "object", "required": ["label", "text", "status"], "additionalProperties": false,
+              "properties": {
+                "label": {"type": "string"}, "text": {"type": "string"},
+                "status": {"enum": ["pass", "warn", "fail", "info"]}
+              }
+            }}
+          }
         }}
+      }
+    },
+    "barsView": {
+      "type": "object", "required": ["view", "title", "value", "labels", "values", "states"],
+      "additionalProperties": false,
+      "properties": {
+        "view": {"const": "bars"},
+        "title": {"type": "string"},
+        "value": {
+          "type": "object", "required": ["label", "unit"], "additionalProperties": false,
+          "properties": {"label": {"type": "string"}, "unit": {"type": ["string", "null"]}}
+        },
+        "labels": {"type": "array", "items": {"type": "string"}},
+        "values": {"type": "array", "items": {"type": ["number", "null"]}},
+        "states": {"type": "array", "items": {"enum": ["over", "under", null]}},
+        "notes": {"type": "array", "items": {"type": ["string", "null"]}},
+        "under": {"type": ["number", "null"]},
+        "over": {"type": ["number", "null"]},
+        "baseline": {"type": "number"},
+        "floor": {"type": ["number", "null"]}
       }
     },
     "region": {
@@ -355,7 +389,7 @@
         }
       }
     },
-    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}, {"$ref": "#/$defs/heatmapView"}, {"$ref": "#/$defs/sdmView"}, {"$ref": "#/$defs/tableView"}, {"$ref": "#/$defs/imageView"}]},
+    "view": {"oneOf": [{"$ref": "#/$defs/spectrumView"}, {"$ref": "#/$defs/readingView"}, {"$ref": "#/$defs/shape3dView"}, {"$ref": "#/$defs/waterfallView"}, {"$ref": "#/$defs/matrixView"}, {"$ref": "#/$defs/heatmapView"}, {"$ref": "#/$defs/sdmView"}, {"$ref": "#/$defs/tableView"}, {"$ref": "#/$defs/imageView"}, {"$ref": "#/$defs/barsView"}]},
     "heatmapView": {
       "type": "object",
       "required": ["view", "title", "rows", "x", "x_values", "values", "value", "row_bands"],
