@@ -221,6 +221,11 @@ pub struct FloorSummary {
     /// Lines of the grid inside the floor's band.
     #[serde(default)]
     pub lines_in_band: usize,
+    /// The clean lines the floor's rms abort was judged on in the last loop,
+    /// each holding 16 degrees of freedom; 0 while it is not armed (fewer
+    /// than three quarters of `lines_in_band` qualify).
+    #[serde(default)]
+    pub rms_judged_lines: usize,
 }
 
 /// The run's totals: shown, not judged (the drive peak is the one judged).

@@ -1159,6 +1159,7 @@ impl MixedService {
             abort_lines: rt.abort_lines,
             dof: rt.floor_dof_typical,
             lines_in_band: rt.band.1 - rt.band.0,
+            rms_judged_lines: rt.rms_judged_lines,
         };
         let control_rms = (!rt.last_composite.is_empty())
             .then(|| (rt.last_composite.iter().sum::<f64>() * rt.df).sqrt());

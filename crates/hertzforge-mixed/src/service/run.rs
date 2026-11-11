@@ -41,6 +41,12 @@ const SYSID_FRAMES: usize = 48;
 const MAX_LAG_S: f64 = 0.25;
 /// A floor line is judged against its envelope at this many degrees of freedom.
 pub(crate) const MIN_ENVELOPE_DOF: f64 = 16.0;
+/// The share of the floor's in-band lines that must each hold
+/// [`MIN_ENVELOPE_DOF`] before the floor's rms abort is armed. Three
+/// quarters: an rms over most of the band is the band's rms (tones' and
+/// bands' exclusions cover a few percent of it), and one starved line (a line
+/// a part has just freed) cannot disarm the guard.
+pub(crate) const RMS_ABORT_SHARE: f64 = 0.75;
 /// The floor is equalized (tones and bands may come in) when its rms is
 /// within this of the target, dB.
 pub(crate) const FLOOR_EQUALIZED_DB: f64 = 1.0;
@@ -151,6 +157,9 @@ pub(crate) struct Runtime {
     /// The typical (median) degrees of freedom over the floor's clean lines,
     /// as the floor's status reports them.
     pub(crate) floor_dof_typical: f64,
+    /// The lines the floor's rms abort was judged on in the last loop (each
+    /// holding [`MIN_ENVELOPE_DOF`]); 0 while it is not armed.
+    pub(crate) rms_judged_lines: usize,
     pub(crate) loops: u64,
     pub(crate) relax_db: f64,
     /// Raw control samples since the run thread last took them, interleaved.
@@ -401,6 +410,7 @@ impl Runtime {
             lines_out: 0,
             floor_dof: 0.0,
             floor_dof_typical: 0.0,
+            rms_judged_lines: 0,
             loops: 0,
             relax_db: 0.0,
             tap: Vec::new(),
@@ -1109,6 +1119,8 @@ impl Runtime {
         // The floor's judgement on clean lines.
         let floor = cfg.floor().expect("validated");
         let (mut ms_m, mut ms_t, mut alarm, mut abort) = (0.0, 0.0, 0usize, 0usize);
+        // The rms abort's own sums: lines that each hold the gate's DOF.
+        let (mut qm, mut qt, mut qn) = (0.0, 0.0, 0usize);
         for k in self.band.0..self.band.1 {
             let Some(m) = self.est.line(k) else { continue };
             ms_m += m;
@@ -1116,6 +1128,9 @@ impl Runtime {
             if self.est.dof(k) < MIN_ENVELOPE_DOF || self.target[k] <= 0.0 || m <= 0.0 {
                 continue;
             }
+            qm += m;
+            qt += self.target[k];
+            qn += 1;
             let e = 10.0 * (m / self.target[k]).log10();
             let r = self.relax_db;
             if e < -(floor.alarm_db.0 + r) || e > floor.alarm_db.1 + r {
@@ -1132,17 +1147,20 @@ impl Runtime {
             self.floor_rms_err_db = Some(10.0 * (ms_m / ms_t).log10());
             self.floor_rms_g = Some((ms_m * self.df).sqrt());
         }
-        // The floor's rms against the tighter side of its abort band.
+        // The floor's rms against the tighter side of its abort band, judged
+        // on the lines that each hold the gate's DOF, once most of the band
+        // does (one starved line cannot disarm it).
+        let in_band = self.band.1.saturating_sub(self.band.0);
+        let armed = in_band > 0 && qn as f64 >= RMS_ABORT_SHARE * in_band as f64;
+        self.rms_judged_lines = if armed { qn } else { 0 };
+        let judged_db = (armed && qm > 0.0 && qt > 0.0).then(|| 10.0 * (qm / qt).log10());
         if trip.is_none()
             && self.relax_db == 0.0
-            && self.floor_dof >= MIN_ENVELOPE_DOF
-            && self
-                .floor_rms_err_db
-                .is_some_and(|e| e.abs() > floor.abort_db.0.min(floor.abort_db.1))
+            && judged_db.is_some_and(|e| e.abs() > floor.abort_db.0.min(floor.abort_db.1))
         {
             trip = Some((
                 MixedTripKind::FloorRmsAbort {
-                    error_db: self.floor_rms_err_db.unwrap_or(0.0),
+                    error_db: judged_db.unwrap_or(0.0),
                 },
                 None,
                 true,
