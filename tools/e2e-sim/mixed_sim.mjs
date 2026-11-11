@@ -206,6 +206,13 @@ async function checkedClean(page) {
 		check('the setup checks clean', false, `${await text(page, 'mixed-ready')} ${errs.map((e) => e.trim()).filter(Boolean).join(' | ')}`);
 	}
 }
+/** Fail at once, with the end's words, when the run has ended while the flow still works on it. */
+async function stillRunning(page, where) {
+	const got = await attr(page, 'run-state', 'data-outcome');
+	if (!got) return;
+	const words = [await text(page, 'run-end').catch(() => ''), await text(page, 'mixed-end').catch(() => '')].filter(Boolean).join(' | ');
+	check(`the run is still running (${where})`, false, `ended ${got}: ${words}${failNote()}`);
+}
 async function toEnd(page, outcome, ms = 300_000) {
 	await until(page, `the run to end (expecting ${outcome})`, async (p) => !!(await attr(p, 'run-state', 'data-outcome')), ms);
 	const got = await attr(page, 'run-state', 'data-outcome');
@@ -391,6 +398,7 @@ try {
 		await shot(a, `combined_page_${name.toLowerCase()}`);
 	}
 	await showPage(a, 'Control');
+	await stillRunning(a, 'before Stop');
 	await tid(a, 'act-stop').click();
 	await toEnd(a, 'operator_stop', 60_000);
 	check('Stop ramps every part down', /ramped down in [\d.]+ s/.test(await text(a, 'mixed-end')), await text(a, 'mixed-end'));
