@@ -251,3 +251,45 @@ def test_a_coarser_mesh_of_bricks_still_holds_together():
     elastic = [f for f in shapes.frequency if f > 1.0][:8]
     assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.06), \
         np.round(elastic, 1)
+
+
+def test_the_example_project_is_the_band_average_studys_barc():
+    """The downloads page's BARC is the one the band-average study drives
+    (Brandon, 2026-11-10): the bricks, twelve drives at the box's bottom
+    corners pointing in, the RC plate's sixteen accelerometers, and the force
+    CPSD, linked as the Basis."""
+    built = barc.solid_project()
+    assert [name for name, _obj in built.items()] == [
+        'BARC', 'BARC Test Geometry', 'BARC Channels', 'BARC Force CPSD']
+    assert len(built['BARC'].mates) == 4
+    table = built['BARC Channels']
+    roles = list(table['role'])
+    assert roles.count('reference') == 12 and roles.count('response') == 48
+    assert list(table['direction'][:3]) == ['X+', 'Y+', 'Z+']     # the -X -Z corner
+    cpsd = built['BARC Force CPSD']
+    assert len(cpsd.response_dof) == 144
+    level = barc.FORCE_LEVEL * barc.LBF ** 2
+    assert np.real(cpsd.ordinate[0][cpsd.abscissa == 100.0]) == pytest.approx(level)
+    assert np.all(cpsd.ordinate[1] == 0), 'uncorrelated'
+    assert built.object_groups[-1] == {
+        'members': ['BARC Test Geometry', 'BARC Channels', 'BARC Force CPSD'], 'role': 'Basis'}
+
+
+@pytest.mark.slow
+def test_the_solved_example_is_the_studys_barc():
+    """About 15 s: the study's 59 modes to 10 kHz at 1 % damping and their
+    projections; the study's response specification follows from them in
+    the app (Compute Modal Responses, Expand, Convert to Specification)."""
+    solved = barc.solid_project(solved=True)
+    shapes = solved['BARC Modes']
+    assert shapes.num_shapes == 59 and int(np.sum(shapes.frequency < 1.0)) == 6
+    assert np.allclose(shapes.damping, barc.DAMPING)
+    elastic = [f for f in shapes.frequency if f > 1.0][:10]
+    assert np.allclose(elastic, SOLID_CHECKED, rtol=0.005), np.round(elastic, 1)
+    for name, count in (('BARC Modes @ Force DOFs', 4), ('BARC Modes @ Response DOFs', 16)):
+        report = solved[name].projection_report
+        assert report['matched'] == report['total'] == count
+    modal = solved.compute_modal_responses('BARC Force CPSD', 'BARC Modes @ Force DOFs')
+    response = solved.expand(modal, 'BARC Modes @ Response DOFs', name='BARC Response CPSD')
+    solved.convert_to_specification(response)
+    assert solved[response].ordinate.shape == (48 * 48, 4097)
