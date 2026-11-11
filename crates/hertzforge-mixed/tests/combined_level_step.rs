@@ -358,3 +358,42 @@ fn the_servo_repeats_its_clamped_step_while_the_reading_holds() {
         "{steps:?}"
     );
 }
+
+/// The mechanism of the fall after a level step, in the built-in tone law's
+/// servo alone (shared with Sine; not changed here). Once a step is
+/// rate-clamped, the back-calculation leaves the next step at exactly the
+/// clamp plus `(kp + ki dt)` times the error's change since, so while the
+/// reading keeps moving the same way, by however little, every step is the
+/// clamp. Replayed from the combined test without the read slew: the reading
+/// handed over at +0.83 dB and a narrow tracker kept it drifting up 0.004 dB
+/// a tick for 30 ticks, so the servo took 30 clamped 0.2 dB steps (6 dB in
+/// 0.3 s, its full 20 dB/s), and stopped the tick after the reading turned.
+#[test]
+fn the_servo_takes_its_clamped_step_every_tick_while_its_reading_drifts_the_same_way() {
+    let mut s = hertzforge_dsp::sine::AmplitudeServo::new(1.0, 20.0).with_gains(0.3, 0.5);
+    let mut last = s.drive_scale();
+    let mut steps = Vec::new();
+    // On target, then the reading handed over at +0.83 dB, drifting up
+    // 0.004 dB a tick for 30 ticks, then easing back down.
+    let mut read_db: Vec<f64> = vec![0.0; 5];
+    read_db.extend((0..30).map(|i| 0.83 + 0.004 * i as f64));
+    read_db.extend((1..=10).map(|i| 0.946 - 0.004 * i as f64));
+    for db in &read_db {
+        let now = s.update(10f64.powf(db / 20.0), 0.01);
+        steps.push(20.0 * (now / last).log10());
+        last = now;
+    }
+    let clamped = steps.iter().filter(|d| (**d + 0.2).abs() < 1e-9).count();
+    let fall: f64 = steps[5..35].iter().sum();
+    eprintln!(
+        "clamped steps {clamped}, fall over the drift {fall:.2} dB, step after it turns {:.4} dB",
+        steps[35]
+    );
+    assert!(steps[..5].iter().all(|d| d.abs() < 1e-9));
+    assert!(
+        steps[5..35].iter().all(|d| (d + 0.2).abs() < 1e-9),
+        "{steps:?}"
+    );
+    assert_eq!(clamped, 30);
+    assert!(steps[35] > -0.2 + 1e-3, "{steps:?}");
+}

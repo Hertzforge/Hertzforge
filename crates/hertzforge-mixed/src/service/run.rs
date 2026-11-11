@@ -41,6 +41,12 @@ const SYSID_FRAMES: usize = 48;
 const MAX_LAG_S: f64 = 0.25;
 /// A floor line is judged against its envelope at this many degrees of freedom.
 pub(crate) const MIN_ENVELOPE_DOF: f64 = 16.0;
+/// The share of the floor's in-band lines that must each hold
+/// [`MIN_ENVELOPE_DOF`] before the floor's rms abort is armed. Three
+/// quarters: an rms over most of the band is the band's rms (tones' and
+/// bands' exclusions cover a few percent of it), and one starved line (a line
+/// a part has just freed) cannot disarm the guard.
+pub(crate) const RMS_ABORT_SHARE: f64 = 0.75;
 /// The floor is equalized (tones and bands may come in) when its rms is
 /// within this of the target, dB.
 pub(crate) const FLOOR_EQUALIZED_DB: f64 = 1.0;
@@ -67,6 +73,9 @@ pub(crate) struct BandCtl {
     pub(crate) error_db: Option<f64>,
     pub(crate) center_now: f64,
     pub(crate) capped: u64,
+    /// Whether the random part's rms ceiling or a limit channel held the band
+    /// down in its last loop (its servo did not raise its gain).
+    pub(crate) limiting: bool,
 }
 
 /// What one synthesized stretch of the ring carries.
@@ -145,6 +154,12 @@ pub(crate) struct Runtime {
     pub(crate) abort_lines: usize,
     pub(crate) lines_out: usize,
     pub(crate) floor_dof: f64,
+    /// The typical (median) degrees of freedom over the floor's clean lines,
+    /// as the floor's status reports them.
+    pub(crate) floor_dof_typical: f64,
+    /// The lines the floor's rms abort was judged on in the last loop (each
+    /// holding [`MIN_ENVELOPE_DOF`]); 0 while it is not armed.
+    pub(crate) rms_judged_lines: usize,
     pub(crate) loops: u64,
     pub(crate) relax_db: f64,
     /// Raw control samples since the run thread last took them, interleaved.
@@ -154,6 +169,8 @@ pub(crate) struct Runtime {
     /// Lines of the random part the limit channels held down on the last
     /// synthesis.
     pub(crate) notched: Vec<bool>,
+    /// Whether the random part's rms ceiling scaled the last hop synthesized.
+    pub(crate) rms_held: bool,
     /// Each floor law call since the service last drained them.
     pub(crate) floor_log: Vec<super::law_records::MixedLawRecord>,
     /// The capture, while one runs.
@@ -392,11 +409,14 @@ impl Runtime {
             abort_lines: 0,
             lines_out: 0,
             floor_dof: 0.0,
+            floor_dof_typical: 0.0,
+            rms_judged_lines: 0,
             loops: 0,
             relax_db: 0.0,
             tap: Vec::new(),
             limits,
             notched: vec![false; lines],
+            rms_held: false,
             floor_log: Vec::new(),
             capture: None,
             floor_drive_in_last: 0.0,
@@ -687,6 +707,7 @@ impl Runtime {
                 usable: false,
                 read_once: false,
                 shown_db: 0.0,
+                limiting: false,
                 alarm: false,
                 abort_s: 0.0,
                 alarm_db: t.alarm_db,
@@ -730,6 +751,7 @@ impl Runtime {
                     error_db: None,
                     center_now: now[i].freq_hz.unwrap_or(0.0),
                     capped: 0,
+                    limiting: false,
                 }),
                 _ => None,
             })
@@ -815,9 +837,11 @@ impl Runtime {
                 }
             }
             // The random part's rms ceiling.
+            self.rms_held = false;
             if let Some(vmax) = cfg.limits.drive_ceiling_vrms {
                 let rms = (psd.iter().sum::<f64>() * self.df).sqrt() * lev;
                 if rms > vmax && rms > 0.0 {
+                    self.rms_held = true;
                     let k = (vmax / rms).powi(2);
                     psd.iter_mut().for_each(|p| *p *= k);
                 }
@@ -1004,6 +1028,7 @@ impl Runtime {
         let mut measured = vec![0.0; self.lines];
         let clean = self.est.estimate(&self.target, self.band, &mut measured);
         self.floor_dof = self.est.min_dof(self.band);
+        self.floor_dof_typical = self.est.typical_dof(self.band);
         self.lines_out = (self.band.1 - self.band.0).saturating_sub(clean);
         let guards = cfg.law_guards.clone().unwrap_or_default().floor;
         let loop_s = cfg.blocks_per_window as f64 * self.hop as f64 / self.fs;
@@ -1048,7 +1073,11 @@ impl Runtime {
                     if !rep.bound.is_empty() {
                         self.floor_tally.capped += 1;
                     }
-                    if out.diagnostics.divergent_bins.is_empty() {
+                    // While the random part's rms ceiling holds the drive,
+                    // the floor reads low and the law's asks against the
+                    // hold are not a diverging loop (the floor row says it
+                    // is limiting; its rms alarm and abort judge it).
+                    if out.diagnostics.divergent_bins.is_empty() || self.rms_held {
                         self.divergent_loops = 0;
                     } else {
                         self.divergent_loops += 1;
@@ -1090,6 +1119,8 @@ impl Runtime {
         // The floor's judgement on clean lines.
         let floor = cfg.floor().expect("validated");
         let (mut ms_m, mut ms_t, mut alarm, mut abort) = (0.0, 0.0, 0usize, 0usize);
+        // The rms abort's own sums: lines that each hold the gate's DOF.
+        let (mut qm, mut qt, mut qn) = (0.0, 0.0, 0usize);
         for k in self.band.0..self.band.1 {
             let Some(m) = self.est.line(k) else { continue };
             ms_m += m;
@@ -1097,6 +1128,9 @@ impl Runtime {
             if self.est.dof(k) < MIN_ENVELOPE_DOF || self.target[k] <= 0.0 || m <= 0.0 {
                 continue;
             }
+            qm += m;
+            qt += self.target[k];
+            qn += 1;
             let e = 10.0 * (m / self.target[k]).log10();
             let r = self.relax_db;
             if e < -(floor.alarm_db.0 + r) || e > floor.alarm_db.1 + r {
@@ -1113,17 +1147,20 @@ impl Runtime {
             self.floor_rms_err_db = Some(10.0 * (ms_m / ms_t).log10());
             self.floor_rms_g = Some((ms_m * self.df).sqrt());
         }
-        // The floor's rms against the tighter side of its abort band.
+        // The floor's rms against the tighter side of its abort band, judged
+        // on the lines that each hold the gate's DOF, once most of the band
+        // does (one starved line cannot disarm it).
+        let in_band = self.band.1.saturating_sub(self.band.0);
+        let armed = in_band > 0 && qn as f64 >= RMS_ABORT_SHARE * in_band as f64;
+        self.rms_judged_lines = if armed { qn } else { 0 };
+        let judged_db = (armed && qm > 0.0 && qt > 0.0).then(|| 10.0 * (qm / qt).log10());
         if trip.is_none()
             && self.relax_db == 0.0
-            && self.floor_dof >= MIN_ENVELOPE_DOF
-            && self
-                .floor_rms_err_db
-                .is_some_and(|e| e.abs() > floor.abort_db.0.min(floor.abort_db.1))
+            && judged_db.is_some_and(|e| e.abs() > floor.abort_db.0.min(floor.abort_db.1))
         {
             trip = Some((
                 MixedTripKind::FloorRmsAbort {
-                    error_db: self.floor_rms_err_db.unwrap_or(0.0),
+                    error_db: judged_db.unwrap_or(0.0),
                 },
                 None,
                 true,
@@ -1164,10 +1201,24 @@ impl Runtime {
         }
         // Bands.
         for bc in self.bands.iter_mut() {
+            // A band the random part's rms ceiling or a limit channel holds
+            // reads low; its servo may lower its gain but does not raise it
+            // against the hold (it would wind up and step the band past its
+            // level when the hold lets go).
+            let (lo, hi) = bc.width.edges_at(bc.center_now);
+            let (k0, k1) = (
+                ((lo / self.df).floor().max(0.0) as usize).min(self.lines),
+                ((hi / self.df).ceil().max(0.0) as usize + 1).min(self.lines),
+            );
+            bc.limiting = self.rms_held || self.notched[k0..k1].iter().any(|n| *n);
             if let Some(m) = bc.loop_level.measured() {
                 let floor_ref = bc.loop_level.reference().unwrap_or(0.0) - bc.level_g2;
-                if bc.servo.update(m - floor_ref, bc.level_g2) {
+                let before = bc.servo.gain_db;
+                if bc.servo.update(m - floor_ref, bc.level_g2) && !bc.limiting {
                     bc.capped += 1;
+                }
+                if bc.limiting && bc.servo.gain_db > before {
+                    bc.servo.gain_db = before;
                 }
             }
             bc.loop_level.reset();

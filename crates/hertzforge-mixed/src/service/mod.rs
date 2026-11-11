@@ -270,6 +270,7 @@ pub struct MixedService {
     histories: live::Histories,
     chunk_peak: f64,
     chunk_rms: f64,
+    chunk_clamped: bool,
     /// The random part's sum of squares and frames toward its rms abort.
     rand_acc: (f64, u64),
     /// The level ladder: the rung the level is at or climbing to, whether it
@@ -362,6 +363,7 @@ impl MixedService {
             histories: live::Histories::default(),
             chunk_peak: 0.0,
             chunk_rms: 0.0,
+            chunk_clamped: false,
             rand_acc: (0.0, 0),
             ladder: live::Ladder::default(),
             capture_dir: None,

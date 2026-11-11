@@ -3553,7 +3553,8 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
   excluded; `parts_s` parts time (null before the parts come in).
 - `held` is true while `mixed.hold` holds the progress. `alarm` is true while any part is
   outside its alarm band. `limiting` is true while the drive ceiling, a limit channel or a cap
-  holds any part down.
+  holds any part down, or the drive ceiling's last-resort clamp cut the summed drive in the last
+  chunk.
 - `parts` has one row per part, every part of the configuration in its order, whether on or not
   (a screen finds a part by `id`, never by position alone). Each row:
   - `id`, `kind`, `name`, `enabled` (as configured, or as `mixed.part` last set it), `on` (the
@@ -3581,8 +3582,9 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
   - `settled`: a tone's tracker has settled and its reading is used; a narrowband's estimate
     holds at least 16 degrees of freedom; the floor has equalized. `limiting` is true while a
     cap, a limit channel or the drive ceiling holds the part down.
-  - `dof` the degrees of freedom of the floor's control estimate or the narrowband's level
-    estimate (null for a tone); `lines` (the floor only) the band's lines, the clean ones read
+  - `dof` the degrees of freedom of the floor's control estimate (the typical clean line's, the
+    median over the lines read in the last loop) or the narrowband's level estimate (null for a
+    tone); `lines` (the floor only) the band's lines, the clean ones read
     in the last loop, and how many of those lie outside the alarm and the abort bands.
   - `law` the part's law instance's unusable calls in a row now and the ticks (a tone) or loops
     (the floor) a cap has bound; null for a narrowband.

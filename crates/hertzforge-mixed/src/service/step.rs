@@ -39,6 +39,9 @@ pub const ABORT_RAMP_S: f64 = 0.02;
 /// 10 ms tick, 0.05 dB a tick: a proportional gain up to 4 then never meets
 /// the built-in's 20 dB/s clamp from a step in its reading).
 pub const READ_SLEW_DB_PER_S: f64 = 5.0;
+/// How fast the random part's held peak (the headroom the tones leave it under
+/// the drive ceiling) lets go of a past peak, seconds per factor of e.
+pub const RANDOM_PEAK_RELEASE_S: f64 = 1.0;
 /// A tone's error must stay past its abort this long before the run aborts.
 pub const TONE_ABORT_DEBOUNCE_S: f64 = 0.5;
 
@@ -100,6 +103,8 @@ pub(crate) struct ToneCtl {
     pub(crate) read_once: bool,
     /// The error the law was last shown, dB (slewed toward the reading).
     pub(crate) shown_db: f64,
+    /// Whether the drive ceiling held the tone's amplitude on the last tick.
+    pub(crate) limiting: bool,
     pub(crate) alarm: bool,
     pub(crate) abort_s: f64,
     pub(crate) alarm_db: (f64, f64),
@@ -174,6 +179,8 @@ pub(crate) struct Records {
     /// The random part's sum of squares and count, as played.
     pub(crate) rand_sumsq: f64,
     pub(crate) rand_n: u64,
+    /// Frames the hard clamp at the drive ceiling cut, over the chunk.
+    pub(crate) clamped: u64,
     /// The summed drive's peak and sum of squares over the chunk.
     pub(crate) peak: f64,
     pub(crate) sumsq: f64,
@@ -212,6 +219,9 @@ pub(crate) struct MixedProcessStep {
     pub(crate) plant: PlantGrid,
     pub(crate) ceiling_vpk: f64,
     pub(crate) abort_vpk: f64,
+    /// The random part's peak at full level and full ramp, held with a slow
+    /// release: what the tones leave room for under the ceiling.
+    rand_peak_hold: f64,
     pub(crate) records: Records,
     /// Each tone law call, until the service drains them (bounded: a call
     /// past the capacity is not recorded rather than allocated for).
@@ -292,6 +302,7 @@ impl MixedProcessStep {
             plant: PlantGrid::default(),
             ceiling_vpk: ceiling,
             abort_vpk: cfg.limits.drive_vpk_abort.unwrap_or(ceiling),
+            rand_peak_hold: 0.0,
             records: Records {
                 control: vec![Vec::with_capacity(capacity); n_ctrl],
                 residual: vec![Vec::with_capacity(capacity); n_ctrl],
@@ -360,8 +371,59 @@ impl MixedProcessStep {
         }
     }
 
+    /// The most tone `j`'s full-level amplitude may be so that the drive as
+    /// played stays under the ceiling: the ceiling less the random part's
+    /// held peak and every other tone's amplitude as played, over the gain
+    /// tone `j` plays at. Level and part ramps are judged where they will be
+    /// two ticks from now (or now, if higher), so a ramp up cannot carry a
+    /// tone past the ceiling between two judgements. Infinite while the tone
+    /// plays at no gain.
+    fn tone_ceiling(&self, j: usize, rand_vpk: f64) -> f64 {
+        let ahead = 2.0 * self.tick_frames as f64;
+        let lev = self.level.value().max(self.level.ahead(ahead));
+        let gain = |i: usize| {
+            let v = self.bank.voice(i);
+            lev * v.scale().max(v.scale_ahead(ahead))
+        };
+        let others: f64 = (0..self.tones.len())
+            .filter(|&i| i != j)
+            .map(|i| {
+                self.bank
+                    .voice(i)
+                    .amplitude_cmd()
+                    .max(self.bank.voice(i).amplitude_now())
+                    * gain(i)
+            })
+            .sum();
+        let room = (self.ceiling_vpk - rand_vpk - others).max(0.0);
+        let g = gain(j);
+        if g > 0.0 {
+            room / g
+        } else {
+            f64::INFINITY
+        }
+    }
+
     fn control_tick(&mut self) {
         let dt = self.tick_frames as f64 / self.fs;
+        // The random part's peak as it will play: the next two ticks of the
+        // ring, held with a slow release, at the level and ramp in force.
+        {
+            let ahead = 2 * self.tick_frames;
+            let pk = self
+                .ring
+                .iter()
+                .take(ahead)
+                .fold(0.0f64, |m, v| m.max(v.abs()));
+            let keep = (-dt / RANDOM_PEAK_RELEASE_S).exp();
+            self.rand_peak_hold = pk.max(self.rand_peak_hold * keep);
+        }
+        let rand_vpk = {
+            let a = 2.0 * self.tick_frames as f64;
+            self.rand_peak_hold
+                * self.level.value().max(self.level.ahead(a))
+                * self.random.value().max(self.random.ahead(a))
+        };
         if self.clock_running {
             self.clock.tick(dt);
         }
@@ -416,8 +478,9 @@ impl MixedProcessStep {
                     };
                     t.engaged = true;
                     t.tally.calls += 1;
-                    let a = a.min(self.ceiling_vpk);
-                    self.bank.voice_mut(j).set_amplitude(a);
+                    let lim = self.tone_ceiling(j, rand_vpk);
+                    self.tones[j].limiting = a > lim;
+                    self.bank.voice_mut(j).set_amplitude(a.min(lim));
                 }
                 let frames = self.part_ramp_frames;
                 self.bank.voice_mut(j).ramp_to(1.0, frames);
@@ -469,12 +532,18 @@ impl MixedProcessStep {
             let proposed = {
                 // The error the law is shown moves at most READ_SLEW_DB_PER_S
                 // toward the reading (from 0 dB, on target, while there is no
-                // usable reading). A velocity-form servo (the built-in's)
-                // turns a step in its reading into a proportional kick, and
-                // when that kick is rate-clamped its anti-windup repeats the
-                // clamped step every tick until the reading moves, which a
-                // narrow tracker takes seconds to do: found as a 6 dB fall in
-                // half a second and a tone abort after a level step.
+                // usable reading). Handing a tone back to its law after a
+                // span with no usable reading (engage, a level step, a hold)
+                // is otherwise a step in its error, because a narrow
+                // tracker's reading wanders in that time. A velocity-form
+                // servo (the built-in's) turns that step into a proportional
+                // kick; once the kick is rate-clamped, its back-calculation
+                // leaves every next step at the clamp plus kp times the
+                // error's change, so while the reading keeps drifting the
+                // same way, by however little, the servo ramps at its full
+                // rate: found as a 6 dB fall in 0.3 s and a tone abort after
+                // a level step. Measured on that replay, the slew binds only
+                // for the few ticks after such a handoff.
                 let true_db = match (usable, measured) {
                     (true, Some(m)) if m > 0.0 && target_full > 0.0 => {
                         20.0 * (m / target_full).log10()
@@ -574,10 +643,19 @@ impl MixedProcessStep {
             let mut bound_now = false;
             if let Some(p) = proposed {
                 let (capped, bound) = cap_drive(in_force, p, &self.guards, dt);
-                bound_now = bound;
-                let capped = capped.min(self.ceiling_vpk);
+                // The drive ceiling, judged on the drive as played. When it
+                // holds the tone (the law asks for more than the ceiling
+                // leaves it), the tone is limiting: the law is shown the held
+                // drive as the drive in force, and its asks against the hold
+                // are neither a bound cap nor a diverging loop. The tone then
+                // reads low, and its own alarm and abort judge that.
+                let lim = self.tone_ceiling(j, rand_vpk);
+                let held = p > lim;
+                bound_now = bound && !held;
+                let capped = capped.min(lim);
                 let t = &mut self.tones[j];
-                if bound {
+                t.limiting = held;
+                if bound_now {
                     t.tally.capped += 1;
                     t.cap_bound_s += dt;
                 } else {
@@ -614,7 +692,15 @@ impl MixedProcessStep {
                 }
                 if t.abort_s >= TONE_ABORT_DEBOUNCE_S {
                     let part = t.part;
-                    self.latch(MixedTripKind::ToneAbort { error_db: e }, Some(part), true);
+                    let held_at_vpk = t.limiting.then_some(self.ceiling_vpk);
+                    self.latch(
+                        MixedTripKind::ToneAbort {
+                            error_db: e,
+                            held_at_vpk,
+                        },
+                        Some(part),
+                        true,
+                    );
                 }
             }
         }
@@ -786,6 +872,9 @@ impl ProcessStep for MixedProcessStep {
                         None,
                         true,
                     );
+                }
+                if x.abs() > self.ceiling_vpk {
+                    self.records.clamped += 1;
                 }
                 x.clamp(-self.ceiling_vpk, self.ceiling_vpk)
             };
