@@ -1116,6 +1116,17 @@ impl Actor {
                 .as_deref()
                 .and_then(|id| st.parts.iter().find(|r| r.id == id).and_then(|r| r.freq_hz));
             let mut v = view::trip_json(t, level, at_hz);
+            let row = t
+                .part
+                .as_deref()
+                .and_then(|id| st.parts.iter().find(|r| r.id == id));
+            view::fill_trip_facts(
+                &mut v,
+                t,
+                row,
+                &self.plan.core,
+                self.view.display.as_deref(),
+            );
             // The floor's own trips name the floor.
             if v["kind"] == "envelope" && v["part"].is_null() {
                 if let Some(f) = self.plan.core.parts.iter().find(|p| p.kind() == "floor") {

@@ -122,12 +122,19 @@ def test_the_state_carries_one_row_per_part_in_the_parts_order():
     floor = state['parts'][0]
     assert floor['kind'] == 'floor' and floor['lines'] is not None and floor['freq_hz'] is None
     for row in state['parts']:
-        # one drive per part: volts peak for a tone, volts rms otherwise
-        assert (row['drive_vpk'] is None) != (row['drive_vrms'] is None), row['id']
+        # a tone's drive in volts peak, the floor's in volts rms; a narrowband
+        # has none of its own (the core reports no share of the random part for it)
+        want = {'tone': (True, False), 'floor': (False, True), 'narrowband': (False, False)}
+        has = (row['drive_vpk'] is not None, row['drive_vrms'] is not None)
+        assert has == want[row['kind']], row['id']
         # one rate at most, in its schedule's law
         assert row['rate_oct_per_min'] is None or row['rate_hz_per_s'] is None, row['id']
     follower = next(r for r in state['parts'] if r['id'] == 't3')
     assert follower['sweeps'] is None and follower['rate_oct_per_min'] is not None
+    # a follower names its leader and ratio, and moves in its leader's direction
+    assert follower['follows'] == {'of': 't2', 'ratio': 2}
+    assert follower['direction'] == 'up'
+    assert all(r['follows'] is None for r in state['parts'] if r['id'] != 't3')
 
 
 def test_the_derived_values_sum_the_parts():

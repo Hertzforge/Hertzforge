@@ -675,3 +675,25 @@ fn the_mixed_display_is_cut_to_the_floor_bands_lines_as_randoms() {
     let e = b.grid.edges_hz();
     assert_eq!((e[0], e[21]), (19.75, 30.25));
 }
+
+#[test]
+fn the_envelope_alarms_worst_line_is_read_from_the_clean_lines() {
+    use hertzforge_mixed::{LineGrid, MixedDisplay};
+    use sds_control::mixed::view::envelope_worst_db;
+    let d = MixedDisplay {
+        grid: LineGrid {
+            f0_hz: 20.0,
+            df_hz: 1.0,
+            lines: 4,
+        },
+        // Line 1 is 10 dB over but left out; line 2 is the worst clean line,
+        // 4 dB under its reference.
+        residual: vec![0.01, 0.1, 0.01 * 10f32.powf(-0.4), 0.012],
+        reference: vec![0.01; 4],
+        excluded: vec![false, true, false, false],
+        ..MixedDisplay::default()
+    };
+    let w = envelope_worst_db(&d).unwrap();
+    assert!((w + 4.0).abs() < 1e-4, "{w}");
+    assert_eq!(envelope_worst_db(&MixedDisplay::default()), None);
+}
