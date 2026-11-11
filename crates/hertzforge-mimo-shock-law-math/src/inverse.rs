@@ -73,7 +73,7 @@ impl Default for InverseParams {
             watchdog_restore: 1.2,
             refresh: false,
             refresh_mu: 0.5,
-            refresh_floor_rel: 2.5e-3,
+            refresh_floor_rel: 1.0e-6,
             align: false,
             align_max_s: 2.0e-3,
         }

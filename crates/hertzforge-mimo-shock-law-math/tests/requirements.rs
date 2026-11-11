@@ -325,3 +325,32 @@ fn mimo_shock_check_flags_the_shifted_band() {
         }
     }
 }
+
+/// The refresh's default floor lets a single drive's refresh at `mu = 1`
+/// re-identify the plant exactly once a pulse has been played at full level:
+/// on the 1 x 1 plant with an 8% drop, every pulse from 6 to 14 is within 0.05
+/// dB. With a floor of 2.5e-3 of the largest line, the lines near the shifted
+/// mode (where the plant is large, so the drive is small) were never refreshed
+/// and the run peaked at 13.1 dB at pulse 8.
+#[test]
+fn mimo_shock_refresh_is_exact_after_one_full_level_pulse() {
+    let plant = ModalPlant::siso(0.08, 0.0);
+    let setup = srs_setup(&plant, ID_SCALE);
+    let params = InverseParams {
+        watchdog: false,
+        refresh: true,
+        refresh_mu: 1.0,
+        ..Default::default()
+    };
+    let mut law = InverseLaw::new(setup.clone(), params).unwrap();
+    let rows = run_ladder(&mut law, &setup, &plant, &LADDER_DB, 0.0, 1).unwrap();
+    print(&rows);
+    for (k, r) in rows.iter().enumerate().skip(5) {
+        assert!(
+            r.worst_srs_db <= 0.05,
+            "pulse {} at {} dB",
+            k + 1,
+            r.worst_srs_db
+        );
+    }
+}

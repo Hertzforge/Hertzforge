@@ -102,7 +102,7 @@ impl Default for ShapeParams {
             anchor: Anchor::Target,
             refresh: false,
             refresh_mu: 1.0,
-            refresh_floor_rel: 2.5e-3,
+            refresh_floor_rel: 1.0e-6,
             seed_timing: SeedTiming::Zero,
         }
     }
