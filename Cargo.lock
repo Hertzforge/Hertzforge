@@ -1241,6 +1241,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mixed"
+version = "0.1.2"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-sine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-module-abi"
 version = "0.1.2"
 dependencies = [
