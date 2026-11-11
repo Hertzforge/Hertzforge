@@ -23,6 +23,7 @@ from hertzforge.core.report import (
     project_expectations,
     sine_template,
 )
+from hertzforge.report.viewer import page_text
 
 
 def _labels(project_type):
@@ -144,7 +145,7 @@ def test_the_one_call_writes_two_reports_the_sine_from_the_whole_run(
     pages = {}
     for p in written:
         with open(p, encoding='utf-8') as handle:
-            pages[os.path.basename(p)] = handle.read()
+            pages[os.path.basename(p)] = page_text(handle.read())
     assert 'Random Vibration Test Report' in pages['both_random.html']
     assert 'Sine Sweep Test Report' in pages['both_sine.html']
 

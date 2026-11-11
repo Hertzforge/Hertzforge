@@ -157,6 +157,17 @@ jobs:
         run: npm --prefix ui test
       - name: Build
         run: npm --prefix ui run build
+      - name: The report viewer the package ships is the one this UI builds
+        # Windows checks the UI's sources out with CRLF, which the build carries into the page;
+        # the check needs one platform, and the others build from LF as the committed file was
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          npm --prefix ui run build:report
+          git diff --exit-code -- src/hertzforge/report/viewer.html || {
+            echo "::error::src/hertzforge/report/viewer.html is stale: run npm --prefix ui run build:report and commit it"
+            exit 1
+          }
 
   # The control service and the controller crates, one Cargo workspace:
   # formatting, lint and tests, on every platform a desktop build targets.

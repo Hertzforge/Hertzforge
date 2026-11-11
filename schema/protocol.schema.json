@@ -757,6 +757,7 @@
       "type": "object", "required": ["name", "title", "marking", "blocks"], "additionalProperties": false,
       "properties": {
         "name": {"type": "string"}, "title": {"type": "string"}, "marking": {"type": "string"},
+        "css": {"type": "string"},
         "blocks": {"type": "array", "items": {
           "type": "object", "required": ["kind", "block", "label", "caption"],
           "properties": {

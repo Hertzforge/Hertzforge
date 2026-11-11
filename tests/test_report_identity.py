@@ -293,8 +293,10 @@ def test_a_draft_exports_as_often_as_wanted(tmp_path):
     project.export_report(name, tmp_path / 'a.html')
     project[name].title = 'Retitled'
     project.export_report(name, tmp_path / 'b.html')
-    assert 'Report R-0037, Revision 0, Draft' in (
-        tmp_path / 'b.html').read_text(encoding='utf-8')
+    from hertzforge.report.viewer import read_viewer
+
+    page = read_viewer((tmp_path / 'b.html').read_text(encoding='utf-8'))
+    assert 'Report R-0037, Revision 0, Draft' in page['css'], 'the printed running head'
 
 
 CHANGE = {'where': 'Page 3, Table 1', 'was': 'Sensitivity 10.2 mV/g',

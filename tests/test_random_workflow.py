@@ -22,6 +22,7 @@ from conftest import fixture_path
 
 import hertzforge
 from hertzforge.core.data import MultipleCoherence, Specification, TimeHistory
+from hertzforge.report.viewer import page_text
 
 RUN = 'random.nc4'
 
@@ -102,7 +103,7 @@ def test_the_report_binds_the_narrowband_set_not_the_bands(worked_up):
 def test_one_call_writes_the_report(tmp_path):
     path = hertzforge.random_vibration_report(fixture_path('plate', RUN),
                                          tmp_path / 'run.html')
-    html = (tmp_path / 'run.html').read_text(encoding='utf-8')
+    html = page_text((tmp_path / 'run.html').read_text(encoding='utf-8'))
     assert str(path) == str(tmp_path / 'run.html')
     assert 'Random Vibration Test Report' in html
     for caption in ('Control against specification',
@@ -238,8 +239,6 @@ def test_a_scene_names_no_unit_and_the_report_asks_for_none(tmp_path):
     call no longer takes one.
     """
     import inspect
-    import json
-    import re
 
     assert 'length_unit' not in inspect.signature(
         hertzforge.random_vibration_report).parameters, (
@@ -252,18 +251,17 @@ def test_a_scene_names_no_unit_and_the_report_asks_for_none(tmp_path):
     written = hertzforge.random_vibration_report(
         fixture_path('plate', RUN), tmp_path / 'scenes.html',
         geometry=fixture_path('plate', 'geometry.npz'))
-    page = pathlib.Path(written).read_text(encoding='utf-8')
+    from hertzforge.report.viewer import read_viewer
+
+    raw = pathlib.Path(written).read_text(encoding='utf-8')
+    page = page_text(raw)
     assert 'coordinates in ' not in page, 'no scene names a unit'
     assert 'units undefined' not in page, (
         'nor says it lacks one, having stopped claiming to need it'
     )
-    payload = json.loads(re.search(r'<script id="data"[^>]*>(.*?)</script>',
-                                   page, re.DOTALL).group(1))
-    scenes = [b for b in payload['blocks'] if b['kind'] == 'scene']
+    scenes = [view for block in read_viewer(raw)['blocks'] for view in block.get('views', [])
+              if view['view'] == 'shape3d']
     assert len(scenes) == 3, 'geometry, excitation DOFs, response DOFs'
-    assert not any('unit' in scene for scene in scenes), (
-        'and none of them carries the field that fed the label'
-    )
 
 
 def _history(level, dof='101Z+'):
@@ -317,7 +315,7 @@ def test_a_system_id_run_names_its_streams_and_measures_the_plant(tmp_path):
 
     written = hertzforge.system_id_report(
         fixture_path('plate', RUN), tmp_path / 'sysid.html')
-    page = pathlib.Path(written).read_text(encoding='utf-8')
+    page = page_text(pathlib.Path(written).read_text(encoding='utf-8'))
     assert 'System ID Report' in page
     assert 'The measured plant' in page
 

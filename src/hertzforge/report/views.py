@@ -369,3 +369,25 @@ def page_blocks(report: Any, objects: Mapping[str, Any], unit_system: Any = None
                 entry['was'] = str(kind)
         out.append(entry)
     return out
+
+
+def page_style(report: Any, objects: Mapping[str, Any]) -> str:
+    """The stylesheet a report's page adds, as its own page adds it: with
+    the report identity on, the printed page's margins (the laboratory, the
+    report's number and revision, its title and page n of N); with the flash
+    report on and a run log held, the log's tight setting. Empty otherwise."""
+    from .features import enabled
+
+    active = enabled(report)
+    css = ''
+    if 'report_identity' in active:
+        from .identity import page_css
+
+        css = page_css(report)
+    if 'flash_report' in active:
+        from ..core.run_log_extract import held
+        from .flash import LOG_CSS
+
+        if held(objects or {}):
+            css += LOG_CSS
+    return css
