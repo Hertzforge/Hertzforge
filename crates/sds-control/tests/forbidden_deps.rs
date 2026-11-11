@@ -149,6 +149,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // The laws crate is on LAW_CRATES.
     "hertzforge-mimo-shock",
     "hertzforge-mimo-shock-laws",
+    // The MIMO Shock laws' math (`hertzforge-mimo-shock-law-math`, on `hertzforge-dsp`
+    // and `hertzforge-sdm` alone, built for WebAssembly as the classical shock math is),
+    // reviewed 2026-11-11 with the laws it serves. Written here, so on LAW_CRATES.
+    "hertzforge-mimo-shock-law-math",
 ];
 
 /// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
@@ -272,6 +276,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-sine-servo",
     "hertzforge-law-twr-correct",
     "hertzforge-mimo-laws",
+    "hertzforge-mimo-shock-law-math",
     "hertzforge-mimo-shock-laws",
     "hertzforge-mixed-laws",
     "hertzforge-random-laws",
