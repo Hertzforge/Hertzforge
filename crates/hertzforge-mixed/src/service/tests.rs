@@ -51,6 +51,42 @@ fn service(cfg: MixedConfig) -> Result<MixedService, MixedError> {
 }
 
 #[test]
+fn a_run_asks_the_station_for_the_rate_the_setup_states_not_the_stations_highest() {
+    // A station that states 8192 Hz in its caps; the setup was written for 4096.
+    let s = service(combined()).unwrap();
+    assert_eq!(
+        s.sample_rate_hz(),
+        8192.0,
+        "without a request, the caps' rate"
+    );
+    let s = s.with_requested_rate(4096.0).unwrap();
+    assert_eq!(s.sample_rate_hz(), 4096.0, "the rate the run will ask for");
+    // The configuration is checked at the requested rate: a band at 3000 Hz
+    // fits under 8192 Hz and not under 4096 Hz.
+    let high = config(vec![
+        floor("floor"),
+        band(
+            "b1",
+            fixed(1200.0),
+            crate::parts::BandWidth::Hz { hz: 20.0 },
+        ),
+    ]);
+    assert!(service(high.clone())
+        .unwrap()
+        .with_requested_rate(4096.0)
+        .is_ok());
+    assert!(service(high).unwrap().with_requested_rate(1024.0).is_err());
+    assert!(service(combined())
+        .unwrap()
+        .with_requested_rate(0.0)
+        .is_err());
+    assert!(service(combined())
+        .unwrap()
+        .with_requested_rate(f64::NAN)
+        .is_err());
+}
+
+#[test]
 fn a_good_configuration_builds_idle_with_a_row_per_part() {
     let s = service(combined()).unwrap();
     assert_eq!(s.state(), MixedState::Idle);

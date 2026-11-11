@@ -515,6 +515,11 @@ impl Actor {
             self.plan.capture_root.clone(),
         )
         .map_err(arm_refused)?;
+        // The station is asked for the setup's rate: a device's caps state its
+        // highest rate, which is not the one the lines and the tick were set for.
+        let svc = svc
+            .with_requested_rate(self.plan.wire.fs_hz())
+            .map_err(arm_refused)?;
         let svc = if hardware {
             svc
         } else {

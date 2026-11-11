@@ -391,6 +391,25 @@ impl MixedService {
         self
     }
 
+    /// The rate the run asks the station for, Hz. Without it the run asks for
+    /// the rate the station states in its caps, which on a device that runs at
+    /// several rates is its highest, not the one the setup was written for. The
+    /// configuration is checked again at this rate, and the station's answer
+    /// at arm is still what the run adopts.
+    pub fn with_requested_rate(mut self, fs_hz: f64) -> Result<Self, MixedError> {
+        if !fs_hz.is_finite() || fs_hz <= 0.0 {
+            return Err(crate::parts::ConfigError::BadConfig {
+                field: "fs_hz",
+                why: format!("{fs_hz} Hz is not a rate a run can be asked at"),
+            }
+            .into());
+        }
+        self.cfg.validate(Some(fs_hz))?;
+        self.requested_rate_hz = fs_hz;
+        self.sample_rate_hz = fs_hz;
+        Ok(self)
+    }
+
     /// The block the station is pumped in, frames (the simulator takes the
     /// block a hardware station would at the rate).
     pub fn with_block_frames(mut self, frames: usize) -> Self {
