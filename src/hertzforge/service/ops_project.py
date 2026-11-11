@@ -310,6 +310,10 @@ TOP_FREQUENCY = Param('maximum_frequency', 'Highest frequency', 'number', defaul
 MODAL_DAMPING = Param('damping', 'Damping', 'number', default=2.0, unit='%', min=0.0,
                       max=100.0, step=0.5)
 ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
+PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
+                         options_from='objects:shape_set|channel_table')
+EXPAND_MATCH = Param('tolerance', 'Node match tolerance, on another geometry', 'number',
+                     default=2.0, unit='%', min=0.01, max=100.0, step=0.5)
 MATCH = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
               min=0.01, max=100.0, step=0.5)
 
@@ -392,6 +396,51 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
         params['source'], damping=params['damping'] / 100.0, **limit))
 
 
+def expand(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.expand`: modal responses back to physical ones through a
+    shape set, or modal FRFs to the FRFs between a channel table's channels
+    (`Project.expand`). With a table, the reading the pane gives: the modes,
+    references, responses and FRFs, how the shapes were taken, and what was
+    dropped or skipped. The tolerance applies only when the table and the set
+    are on different geometries."""
+    from hertzforge.core.channel_table import ChannelTable
+
+    source, partner = params['source'], params['shapes']
+    tolerance = float(params.get('tolerance', 2.0)) / 100.0
+    at_table = isinstance(project.get(partner), ChannelTable)
+    if not at_table:
+        return _derived(project, lambda: project.expand(source, partner))
+    try:
+        added = project.expand(source, partner, tolerance=tolerance)
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    made = project[added]
+    view = waterfall_view(added, made)
+    view.pop('quantities', None)
+    view.pop('quantity', None)
+    report = made.transform_report
+    references = list(dict.fromkeys(str(d) for d in made.reference_dof))
+    responses = list(dict.fromkeys(str(d) for d in made.response_dof))
+    modes = next(iter(report.shared.values()), [])
+    rows = [v.row('Modes', float(len(modes)), '', 'info'),
+            v.row('References', float(len(references)), '', 'info'),
+            v.row('Responses', float(len(responses)), '', 'info'),
+            v.row('FRFs', float(made.num_records), '', 'info'),
+            v.row('Through', str(report.basis), None, 'info')]
+    projection = report.projection
+    if projection:
+        rows.append(v.row('Shapes', f'projected: {projection.get("matched")} of '
+                          f'{projection.get("total")} channels matched a node', None, 'info'))
+    else:
+        rows.append(v.row('Shapes', 'read at the set\'s own DOFs', None, 'info'))
+    if report.dropped:
+        rows.append(v.row('Dropped', ', '.join(map(str, report.dropped)), None, 'warn'))
+    if report.skipped:
+        rows.append(v.row('Skipped', ', '.join(f'{count} {kind}' for kind, count
+                                               in report.skipped.items()), None, 'info'))
+    return [view, v.reading(f'{source} at {partner}', rows)]
+
+
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
     DOFs, or at a channel table's (`Project.project_onto_basis`), a node
@@ -469,9 +518,13 @@ MODAL_VERB_OPERATIONS = (
              'A record\'s channels through a shape set to modal coordinates, one '
              'record per mode; with a geometry\'s rigid-body shapes this is the '
              'virtual point transformation.', (PARTNER,), workspace='modal'),
-    _derives('expand', 'Expand to Physical Responses',
-             'Modal responses back through the shape set they were transformed '
-             'through, at every DOF it covers.', (PARTNER,), workspace='modal'),
+    Operation(
+        id='project.expand', title='Expand to Physical Responses', workspace='modal',
+        summary='Modal responses back through the shape set they were transformed through, '
+                'at every DOF it covers; modal FRFs with a channel table, the FRFs between '
+                'its channels, each response and monitor against each reference.',
+        params=(_source('expand'), PARTNER_OR_TABLE, EXPAND_MATCH),
+        outputs=('waterfall', 'reading'), run=expand),
     Operation(
         id='project.generate_rigid_body_modes', title='Generate Rigid Body Modes',
         workspace='modal',

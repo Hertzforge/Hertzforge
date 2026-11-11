@@ -157,6 +157,7 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.compute_cpsds': 'psd',
 	'project.compute_frfs': 'frf',
 	'project.compute_modal_responses': 'modal_response',
+	'project.synthesize_modal_frfs': 'frf',
 	'project.compute_multiple_coherence': 'multiple_coherence',
 	'project.compute_octave': 'octave_psd',
 	'project.compute_psds': 'psd',
