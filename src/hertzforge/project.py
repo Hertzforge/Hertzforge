@@ -5929,7 +5929,10 @@ class Project(dict):
         template : str, default 'modal'
             Which starter to build: 'modal', 'random', 'shock',
             'transient', 'sine', 'sysid', 'mimo' (a multiple-input
-            random run, judged on its control matrix) or 'empty'. (In
+            random run, judged on its control matrix), 'model' (a finite
+            element model and its modes), 'specify' (the specifications
+            with their limits), 'signals' (the time histories and spectra)
+            or 'empty'. (In
             the app, a
             Random and Sine project makes 'random' and 'sine', one
             report each.) It can also be a saved template, by the name

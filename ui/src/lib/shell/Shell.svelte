@@ -20,6 +20,10 @@
 	import TopBar from './TopBar.svelte';
 
 	const app = getApp();
+	// the module the person was in before Report, for the template it makes by default
+	$effect(() => {
+		if (app.workspace !== 'report') app.lastModule = app.workspace;
+	});
 
 	onMount(() => {
 		if (app.config.popout) return;

@@ -1871,6 +1871,8 @@ export class AppState {
 	readonly control: ServiceClient;
 
 	workspace = $state<Workspace>('signals');
+	/** The last workspace shown other than Report: the template Generate Report starts from. */
+	lastModule = $state<Workspace | null>(null);
 	paletteOpen = $state(false);
 	catalog = $state.raw<Catalog | null>(null);
 	catalogError = $state<string | null>(null);

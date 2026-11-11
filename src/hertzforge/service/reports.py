@@ -38,7 +38,8 @@ _PRINTS = ("<script>history.replaceState(null, '', '#print');</script>",
 PRINT_FLAG = '<meta name="hertzforge-print" content="1" />'
 
 #: the starter templates; 'empty' starts blank
-TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'empty')
+TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'model',
+             'specify', 'signals', 'empty')
 
 THEMES = ('light', 'dark')
 
