@@ -31,7 +31,7 @@ def _lock_versions(path: Path) -> dict[str, str]:
 def test_every_manifest_states_one_version():
     version = _version()
     package = (ROOT / 'src' / 'hertzforge' / '__init__.py').read_text(encoding='utf-8')
-    assert re.search(r'^__version__ = "([^"]+)"', package, re.M)[1] == version
+    assert re.search(r'^__version__ = "([^"]+)"', package, re.MULTILINE)[1] == version
     workspace = tomllib.loads((ROOT / 'Cargo.toml').read_text(encoding='utf-8'))
     assert workspace['workspace']['package']['version'] == version
     desktop = tomllib.loads((ROOT / 'desktop' / 'Cargo.toml').read_text(encoding='utf-8'))
