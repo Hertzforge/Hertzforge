@@ -203,6 +203,17 @@ fn rows(v: &MixedView) -> Vec<Option<&PartRow>> {
         .collect()
 }
 
+/// Whether a part is playing now, ramps included: the floor while the core
+/// says it plays; a tone or a narrowband while it has drive (its ramp scale above
+/// 0), so it reads off while it waits for the floor or its window and once it has
+/// ramped out.
+pub fn playing(r: &PartRow) -> bool {
+    match r.kind {
+        hertzforge_mixed::PartKind::Floor => r.on,
+        _ => r.scale > 0.0,
+    }
+}
+
 fn dir_name(d: Direction) -> &'static str {
     match d {
         Direction::Up => "up",
@@ -292,7 +303,7 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
         "kind": f.kind,
         "name": f.name,
         "enabled": r.is_none_or(|r| r.enabled),
-        "on": r.is_some_and(|r| r.on),
+        "on": r.is_some_and(playing),
         "scale": num(round(r.map_or(0.0, |r| r.scale), 4)),
         "freq_hz": if is_floor { Value::Null } else { opt_num(r.and_then(|r| r.freq_hz).map(|x| round(x, 2))) },
         "direction": direction.map(dir_name).map_or(Value::Null, Value::from),
@@ -470,7 +481,7 @@ pub fn state_key(v: Option<&MixedView>) -> String {
             let parts: String = rows(v)
                 .iter()
                 .map(|r| match r {
-                    Some(r) => format!("{}{}{}", r.on as u8, r.alarm as u8, r.settled as u8),
+                    Some(r) => format!("{}{}{}", playing(r) as u8, r.alarm as u8, r.settled as u8),
                     None => "---".into(),
                 })
                 .collect();
@@ -1008,7 +1019,7 @@ pub fn run_reading(v: &MixedView) -> Value {
         ));
     }
     for (f, r) in v.parts.iter().zip(rows(v)) {
-        let Some(r) = r.filter(|r| r.on) else {
+        let Some(r) = r.filter(|r| playing(r)) else {
             continue;
         };
         let unit = if f.kind == "narrowband" {

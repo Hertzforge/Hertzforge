@@ -3570,7 +3570,8 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
 - `parts` has one row per part, every part of the configuration in its order, whether on or not
   (a screen finds a part by `id`, never by position alone). Each row:
   - `id`, `kind`, `name`, `enabled` (as configured, or as `mixed.part` last set it), `on` (the
-    part is playing now, ramps included) and `scale` (its ramp now, 0 to 1).
+    part is playing now, ramps included: false while it waits for the floor or its window and
+    once it has ramped out) and `scale` (its ramp now, 0 to 1).
   - `freq_hz` the tone's frequency or the narrowband's center now (null for the floor);
     `direction` `up` or `down` while it moves, a follower's its leader's (null when it stands
     still); `follows` `{"of","ratio"}`, the part it follows and the ratio, for a part whose

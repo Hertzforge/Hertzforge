@@ -757,3 +757,49 @@ async fn mixed_takes_a_limit_on_the_control_channel_and_an_early_subscription() 
         .await;
     c.ok("mixed.abort", json!({})).await;
 }
+
+/// While the floor plays alone a tone is not playing: its row reads `on` false
+/// with its ramp scale 0, and in the Run reading it has no row; once the parts
+/// come in it reads `on` true.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_a_part_waiting_for_the_floor_reads_off() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let r = c
+        .ok(
+            "mixed.configure",
+            json!({"config": config(vec![floor(), tone("t1", 160.0, 0.5)], manual())}),
+        )
+        .await;
+    assert_eq!(r["state"]["state"], "configured", "{r}");
+    c.ok("mixed.start", json!({})).await;
+    wait_state(&mut c, "review").await;
+    c.ok("mixed.proceed", json!({})).await;
+    let alone = wait_phase(&mut c, "floor_only").await;
+    let row = |d: &Value, id: &str| {
+        d["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let t1 = row(&alone, "t1");
+    assert_eq!(t1["scale"], 0, "{t1}");
+    assert_eq!(t1["on"], false, "{t1}");
+    assert_eq!(row(&alone, "floor")["on"], true, "{alone}");
+    let engaged = wait_phase(&mut c, "engaged").await;
+    c.pump(Duration::from_secs(2)).await;
+    let live = c
+        .of_topic("mixed.live")
+        .into_iter()
+        .rev()
+        .map(|e| e.data().clone())
+        .find(|d| d["phase"] == "engaged")
+        .unwrap_or(engaged);
+    let t1 = row(&live, "t1");
+    assert_eq!(t1["on"], true, "{t1}");
+    c.ok("mixed.abort", json!({})).await;
+}
