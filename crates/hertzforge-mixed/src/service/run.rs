@@ -18,7 +18,7 @@ use crate::band::{
     add_band_drive, band_weights, inner_lines, widened_db, BandLevel, BandServo, BAND_GUARD_LINES,
 };
 use crate::floor::{dof_per_frame, exclusion_mask, hann, periodogram, FloorEstimator};
-use crate::parts::{BandWidth, MixedConfig, PartBody, PartSchedule};
+use crate::parts::{BandWidth, MixedConfig, PartBody};
 use crate::tone::{Ramp, ToneBank};
 use hertzforge_dsp::cola::ColaSynth;
 use hertzforge_engine::{Engine, EngineConfig, StopReason, VecCaptureSink};
@@ -132,7 +132,6 @@ pub(crate) struct Runtime {
     /// Drive frames the ring's tail will play at.
     pub(crate) ring_end: u64,
     pub(crate) ident: Ident,
-    pub(crate) dwelling: Vec<bool>,
     // Display.
     pub(crate) last_control: Vec<Vec<f64>>,
     pub(crate) last_residual: Vec<Vec<f64>>,
@@ -223,6 +222,19 @@ impl Runtime {
 
         let nfft = frame_len(cfg, fs);
         let df = fs / nfft as f64;
+        // The exclusion must cover at least two lines either side of a tone
+        // (the tracker reads in time and needs no line rule of its own).
+        if cfg.tones().next().is_some() && df > cfg.exclusion_hz / 2.0 {
+            backend.emergency_stop().ok();
+            return Err(MixedError::Config(crate::parts::ConfigError::BadConfig {
+                field: "exclusion_hz",
+                why: format!(
+                    "the exclusion covers at least two lines: lines of {df:.3} Hz need \
+                     exclusion_hz of at least {:.3} Hz",
+                    2.0 * df
+                ),
+            }));
+        }
         let lines = nfft / 2 + 1;
         let floor = cfg
             .floor()
@@ -327,7 +339,6 @@ impl Runtime {
         }
         let n_ctrl = cfg.control.channels.len();
         let depth = (cfg.control_dof / dof_per_frame()).ceil() as usize;
-        let dwelling = dwelling_parts(cfg);
         let mut ecfg = EngineConfig::with_block(n_in.max(1), 1, &actual);
         if !station.is_hardware() {
             ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
@@ -369,7 +380,6 @@ impl Runtime {
             segs: VecDeque::new(),
             ring_end: 0,
             ident: Ident::default(),
-            dwelling,
             last_control: vec![Vec::new(); n_ctrl],
             last_residual: vec![Vec::new(); n_ctrl],
             last_composite: Vec::new(),
@@ -915,23 +925,10 @@ impl Runtime {
             let steady = gmax > 0.0 && (gmax - gmin) <= GAIN_STEADY * gmax;
             if steady {
                 let norm: Vec<f64> = comp_res.iter().map(|p| p / g2).collect();
-                // The mask: dwelling tones on, bands with their guard.
-                let tones: Vec<f64> = self
-                    .step
-                    .tones
-                    .iter()
-                    .enumerate()
-                    .filter(|(j, t)| {
-                        // A tone switched off stays left out until its
-                        // tracker has let it go: the passed waveform decays
-                        // over the tracker's settle time.
-                        let (a, _) = self.step.bank.composite(*j, weights);
-                        self.dwelling[t.part]
-                            && (self.step.bank.voice(*j).scale() > 0.0
-                                || a > 0.01 * t.amp.at(t.last_freq))
-                    })
-                    .map(|(_, t)| t.last_freq)
-                    .collect();
+                // The mask: every tone that has any drive (or whose tracker
+                // has not let it go), over the span it can have covered while
+                // this frame played, and bands with their guard.
+                let tones = self.tone_spans(cfg, weights);
                 let bands_now = self.bands_at(mid.saturating_sub(lag)).map(|b| b.to_vec());
                 let edges: Vec<(f64, f64)> = match &bands_now {
                     Some(b) => self
@@ -943,14 +940,10 @@ impl Runtime {
                         .collect(),
                     None => Vec::new(),
                 };
-                exclusion_mask(
-                    self.df,
-                    &tones,
-                    cfg.exclusion_hz,
-                    &edges,
-                    BAND_GUARD_LINES,
-                    &mut mask,
-                );
+                exclusion_mask(self.df, &[], 0.0, &edges, BAND_GUARD_LINES, &mut mask);
+                for &(lo, hi) in &tones {
+                    crate::floor::mark_span(self.df, lo, hi, &mut mask);
+                }
                 for (k, m) in mask.iter_mut().enumerate() {
                     if k < self.band.0 || k >= self.band.1 {
                         *m = true;
@@ -1203,6 +1196,53 @@ impl Runtime {
         self.step.trip.take()
     }
 
+    /// The frequency spans the floor leaves out this frame for the tones,
+    /// `(lo, hi)` Hz.
+    ///
+    /// Every tone that is on, dwelling or sweeping, settled or not, and every
+    /// tone switched off whose tracker still reads it (its passed waveform
+    /// decays over the settle time). The span is where the tone can have been
+    /// while the frame played: its frequency now less its rate times the
+    /// frame, the lag and a batch either side. Its half-width is the larger of
+    /// `exclusion_hz` and the lines the whole tone's Hann leakage needs to
+    /// fall under a tenth of the floor (the brief's 3.2 inequality,
+    /// `x (x^2 - 1) >= sqrt(A^2 / (3 eps G df)) / pi`), at the tone's
+    /// full-level target over the floor's full-level target (the ratio does
+    /// not move with the level). At the usual ratios (A^2 / G of 100 Hz at
+    /// 1 Hz lines) that is `exclusion_hz` itself.
+    fn tone_spans(&self, cfg: &MixedConfig, weights: &[f64]) -> Vec<(f64, f64)> {
+        let behind = (2.0 * self.nfft as f64 + self.step.lag() as f64 + self.batch_frames() as f64)
+            / self.fs;
+        let mut out = Vec::new();
+        for (j, t) in self.step.tones.iter().enumerate() {
+            let target = t.amp.at(t.last_freq);
+            let (a, _) = self.step.bank.composite(j, weights);
+            let voice = self.step.bank.voice(j);
+            if voice.scale() <= 0.0 && a <= 0.01 * target {
+                continue;
+            }
+            // Never narrower than the whole tone's Hann leakage needs: the
+            // subtraction is not credited (measured at A^2 / G = 3e4 Hz, a
+            // settled dwelling tone still read +3 to +5 dB three and four lines
+            // out with only `exclusion_hz` = 2 lines left out).
+            let g = self.step.plant.floor_at(t.last_freq).max(1e-300);
+            let half = cfg
+                .exclusion_hz
+                .max(leak_lines(target, g, self.df) * self.df);
+            let reach = t.rate.abs() * behind;
+            out.push((t.last_freq - reach - half, t.last_freq + reach + half));
+        }
+        out
+    }
+
+    /// The longest the floor can need to reach its degrees of freedom on
+    /// this grid, seconds: the frames `control_dof` needs, a frame, and a loop.
+    pub(crate) fn equalize_s(&self, cfg: &MixedConfig) -> f64 {
+        let frames = (cfg.control_dof / dof_per_frame()).ceil();
+        let hop = self.hop as f64 / self.fs;
+        frames * hop + self.nfft as f64 / self.fs + cfg.blocks_per_window as f64 * hop
+    }
+
     /// The engine's health counters.
     pub(crate) fn engine_health(&self) -> Option<hertzforge_engine::EngineHealth> {
         self.engine.as_ref().map(Engine::health)
@@ -1242,6 +1282,17 @@ impl Runtime {
     }
 }
 
+/// The Hann leakage of a tone of peak `a` stays under a tenth of a floor of
+/// density `g` beyond this many lines of `df` (the brief's 3.2 inequality).
+pub(crate) fn leak_lines(a: f64, g: f64, df: f64) -> f64 {
+    let rhs = (a * a / (3.0 * 0.1 * g * df)).sqrt() / std::f64::consts::PI;
+    let mut x: f64 = 2.0;
+    while x * (x * x - 1.0) < rhs && x < 1000.0 {
+        x += 0.25;
+    }
+    x
+}
+
 /// Weighted average of per-channel spectra.
 fn composite(per: &[Vec<f64>], weights: &[f64]) -> Vec<f64> {
     let n = per.first().map_or(0, Vec::len);
@@ -1267,23 +1318,6 @@ fn clear(r: &mut super::step::Records) {
     r.peak = 0.0;
     r.sumsq = 0.0;
     r.n = 0;
-}
-
-/// Which parts dwell (a fixed schedule, or a follower of one): the floor
-/// estimate leaves out lines beside a dwelling tone.
-fn dwelling_parts(cfg: &MixedConfig) -> Vec<bool> {
-    let motions = cfg.motions().unwrap_or_default();
-    cfg.parts
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            matches!(p.schedule(), Some(PartSchedule::Fixed { .. }))
-                || motions
-                    .get(i)
-                    .and_then(|m| *m)
-                    .is_some_and(|m| m.hi_hz <= m.lo_hz)
-        })
-        .collect()
 }
 
 /// The plant from the identification: the lag by cross-correlation, then

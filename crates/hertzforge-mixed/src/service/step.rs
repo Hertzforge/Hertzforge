@@ -439,16 +439,30 @@ impl MixedProcessStep {
                     _ => None,
                 };
             }
-            if !(self.tones[j].engaged && full_in) || self.trip.is_some() {
+            // From engage on, the law is called every tick. Until the tone's
+            // reading is usable (ramping, its tracker settling, under the
+            // floor, the level moving) it is told the tone is on target, so
+            // it follows its feed-forward along the sweep and never catches
+            // up on a frozen drive at once (found: a swept tone held right
+            // after it came in stepped 5 dB in half a second and aborted).
+            if !self.tones[j].engaged || self.trip.is_some() {
                 continue;
             }
             let in_force = self.bank.voice(j).amplitude_cmd();
-            let mut call: Option<(f64, u8)> = None;
-            let proposed = if usable {
-                let m = measured.unwrap_or(0.0);
+            let mut call: Option<(f64, u8)>;
+            let proposed = {
+                let m = if usable {
+                    measured.unwrap_or(0.0)
+                } else {
+                    target_full
+                };
                 for c in 0..self.weights.len() {
                     let trk = self.bank.tracker(j, c);
-                    self.amp_scratch[c] = trk.amplitude() / norm.max(1e-300);
+                    self.amp_scratch[c] = if usable {
+                        trk.amplitude() / norm.max(1e-300)
+                    } else {
+                        target_full
+                    };
                     self.phase_scratch[c] = trk.phase().to_degrees();
                 }
                 let (amp, ph) = (
@@ -508,14 +522,6 @@ impl MixedProcessStep {
                         }
                         None
                     }
-                }
-            } else {
-                // Readable or not, a tone not read yet holds; one under the
-                // floor follows the feed-forward.
-                if !readable {
-                    prediction.map(|db| 10f64.powf(db / 20.0))
-                } else {
-                    None
                 }
             };
             let mut bound_now = false;

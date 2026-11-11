@@ -39,9 +39,13 @@ fn a_hold_stops_every_clock_and_resume_goes_on_from_there() {
         quick(config(vec![floor(0.01), tone("s", swept(), 1.0)])),
         DELAY,
     );
-    run_for(&mut s, 8.0);
-    assert_eq!(s.live_status().phase, MixedPhase::Running);
+    // Hold just as the swept tone has come in, before its reading is usable:
+    // it must hold its feed-forward and settle, not catch up at once.
+    while s.live_status().phase != MixedPhase::Running {
+        assert!(run_for(&mut s, 0.25), "{:?}", s.end_reason());
+    }
     s.hold().unwrap();
+    run_for(&mut s, 4.0);
     run_for(&mut s, 0.25);
     let a = s.live_status();
     run_for(&mut s, 3.0);
@@ -52,6 +56,7 @@ fn a_hold_stops_every_clock_and_resume_goes_on_from_there() {
     assert_eq!(f(&a), f(&b));
     // Held, the tone still plays under control at its frequency.
     assert!(b.parts[1].drive > 0.0);
+    assert!(s.state().is_running(), "{:?}", s.end_reason());
     s.resume().unwrap();
     run_for(&mut s, 1.0);
     let c = s.live_status();

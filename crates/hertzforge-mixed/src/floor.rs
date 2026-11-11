@@ -96,6 +96,17 @@ pub fn exclusion_mask(
     }
 }
 
+/// Mark the lines of a grid (`df` spacing, line `k` at `k df`) from `lo` to
+/// `hi` Hz, inclusive.
+pub fn mark_span(df: f64, lo: f64, hi: f64, mask: &mut [bool]) {
+    let n = mask.len();
+    let a = (lo / df).ceil().max(0.0) as usize;
+    let b = ((hi / df).floor().max(-1.0) + 1.0) as usize;
+    for m in mask.iter_mut().take(b.min(n)).skip(a) {
+        *m = true;
+    }
+}
+
 /// The floor's per-line average over clean frames.
 #[derive(Debug, Clone)]
 pub struct FloorEstimator {

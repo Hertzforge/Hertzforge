@@ -321,3 +321,37 @@ fn the_station_is_parked_through_the_gate_and_review_and_restarts_at_engage() {
     assert!(run_for(&mut s, 12.0));
     assert_eq!(s.live_status().phase, MixedPhase::Running);
 }
+
+/// The line rule: with tones, the exclusion must cover at least two lines
+/// (lines no wider than half of `exclusion_hz`); a grid of 4 Hz lines with a
+/// 2 Hz exclusion is refused at arm, naming the field.
+#[test]
+fn an_exclusion_narrower_than_two_lines_is_refused_at_arm() {
+    let mut c = config(vec![floor(0.01), tone("t1", fixed(250.0), 2.0)]);
+    c.exclusion_hz = 2.0;
+    let mut s = MixedService::new(
+        c,
+        table(),
+        station(DELAY),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        1,
+        None,
+    )
+    .unwrap();
+    let e = s.arm().unwrap_err();
+    assert_eq!(e.name(), "bad_config", "{e}");
+    assert!(e.to_string().contains("exclusion_hz"), "{e}");
+    // The same grid with an 8 Hz exclusion arms.
+    let mut c = config(vec![floor(0.01), tone("t1", fixed(250.0), 2.0)]);
+    c.exclusion_hz = 8.0;
+    let mut s = MixedService::new(
+        c,
+        table(),
+        station(DELAY),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        1,
+        None,
+    )
+    .unwrap();
+    s.arm().unwrap();
+}

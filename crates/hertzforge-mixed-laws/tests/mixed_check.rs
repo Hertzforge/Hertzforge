@@ -1,4 +1,4 @@
-//! The mixed check: the built-in pair passes all eight cases, each on the
+//! The mixed check: the built-in pair passes all nine cases, each on the
 //! station its own facts describe (the transport-delay case at the chassis's
 //! 553 frames of lag), and a tone law past its stability bound fails.
 
@@ -25,7 +25,7 @@ fn station(case: MixedCheckCase) -> Box<dyn hertzforge_hal::Backend> {
 }
 
 #[test]
-fn the_built_in_pair_passes_all_eight_cases() {
+fn the_built_in_pair_passes_all_nine_cases() {
     let laws = MixedLawFactories::builtin();
     let mut failed = Vec::new();
     for case in MixedCheckCase::ALL {
