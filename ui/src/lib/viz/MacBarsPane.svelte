@@ -236,7 +236,8 @@
 
 	function init() {
 		try {
-			renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+			// the drawing is kept after each frame so a printed report can capture the canvas
+			renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 		} catch {
 			failure = 'The bars need WebGL, which is not available in this browser.';
 			return;

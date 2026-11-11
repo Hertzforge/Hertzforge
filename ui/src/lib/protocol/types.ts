@@ -127,6 +127,15 @@ export interface SpectrumView {
 	regions?: Region[];
 	/** Places on a series to drag up and down, which run `op` with `decibels` on release. */
 	handles?: SpectrumHandle[];
+	/** Sets of series shown one at a time, chosen from a list: a channel each, say. */
+	groups?: SeriesGroup[];
+}
+
+/** One set of a spectrum's series, by index, with readings that go with it. */
+export interface SeriesGroup {
+	label: string;
+	series: number[];
+	readouts?: { label: string; text: string; status: Status }[];
 }
 
 /** A span of x shaded behind a spectrum's curves. */
@@ -448,7 +457,31 @@ export interface ImageView {
 	bytes: Uint8Array;
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView | TableView | ImageView;
+/**
+ * A bar a row, such as each channel's RMS error against its tolerance. The service judges
+ * each bar (`states`); the thresholds are sent to shade the ground past them.
+ */
+export interface BarsView {
+	view: 'bars';
+	title: string;
+	value: { label: string; unit: string | null };
+	labels: string[];
+	/** null: no number, so no bar; the row is still named. */
+	values: (number | null)[];
+	states: ('over' | 'under' | null)[];
+	/** Said along a row, such as why it was not scored. */
+	notes?: (string | null)[];
+	/** A value under it is out. */
+	under?: number | null;
+	/** A value over it is out. */
+	over?: number | null;
+	/** Where the bars grow from; 0 when absent. */
+	baseline?: number;
+	/** The axis never reaches below it. */
+	floor?: number | null;
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView | TableView | ImageView | BarsView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------
@@ -1407,6 +1440,34 @@ export interface ReportField {
 }
 
 /** `report.editor`: the edit page and the pane for the selection. */
+/** One block of a report as the shell's own page draws it (`report.views`). */
+export interface ReportPageBlock {
+	kind: 'text' | 'figure' | 'unbound';
+	/** The index of the report block it came from; a block's several figures share it. */
+	block: number | null;
+	/** Its figure or table number, such as "Figure 3". */
+	label: string;
+	caption: string;
+	note?: string;
+	/** Text: its HTML, written by the core from the block's escaped markdown. */
+	html?: string;
+	/** A figure: the views it is drawn as. */
+	views?: View[];
+	/** An unbound slot: what the block was. */
+	was?: string;
+	empty?: boolean;
+}
+
+/** A report as the shell's own page draws it (`report.views`). */
+export interface ReportPageData {
+	name: string;
+	title: string;
+	marking: string;
+	/** The stylesheet the report adds, such as the printed page's margins; empty for none. */
+	css?: string;
+	blocks: ReportPageBlock[];
+}
+
 export interface ReportEditor {
 	/** The edit page; left out when only the pane was asked for. */
 	html?: string;

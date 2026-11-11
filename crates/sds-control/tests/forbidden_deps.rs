@@ -55,6 +55,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-law-sdk",
     "hertzforge-mimo-laws",
     "hertzforge-random-laws",
+    // The band-average law's math, which `hertzforge-mimo-laws` brings, reviewed
+    // 2026-11-10: pure computation on `hertzforge-sdm`'s stacks, MIT, with no other
+    // dependency. Written here, so on LAW_CRATES.
+    "hertzforge-law-band-average-math",
     // The MIMO Random run service and the reference reader behind the wire's MIMO
     // driver (src/mimo/adapter.rs), reviewed 2026-11-03: `hertzforge-mimo-random`
     // reaches hardware only through the station backend the control service hands it
@@ -227,9 +231,15 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// `twr-template` host fixtures. So was the Mixed Mode set (2026-11-10): the choice
 /// of its two laws through the Random and Sine resolvers and its check cases
 /// (`hertzforge-mixed-laws`); it adds no world, so no law file or fixture.
+/// So was the band-average MIMO law (2026-11-10):
+/// its math (`hertzforge-law-band-average-math`, on `hertzforge-sdm`'s stacks and
+/// factorizations and nothing else), the law in `hertzforge-mimo-laws` and the
+/// `mimo-band-average` law file.
 const LAW_CRATES: &[&str] = &[
+    "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
     "hertzforge-law-host",
+    "hertzforge-law-mimo-band-average",
     "hertzforge-law-mimo-buzz",
     "hertzforge-law-mimo-min-drive",
     "hertzforge-law-mimo-open-loop",

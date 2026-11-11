@@ -16,6 +16,7 @@ law-file = ["dep:hertzforge-law-sdk"]
 
 [dependencies]
 hertzforge-sdm = { path = "../hertzforge-sdm" }
+hertzforge-law-band-average-math = { path = "../hertzforge-law-band-average-math" }
 hertzforge-law-sdk = { path = "../hertzforge-law-sdk", optional = true }
 
 [dev-dependencies]

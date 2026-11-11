@@ -16,8 +16,8 @@ from typing import Any
 
 from .protocol import bad_request, not_found, refused
 
-REPORT_METHODS = ('report.generate', 'report.render', 'report.export', 'report.editor',
-                  'report.operate', 'report.print', 'report.issue')
+REPORT_METHODS = ('report.generate', 'report.render', 'report.views', 'report.export',
+                  'report.editor', 'report.operate', 'report.print', 'report.issue')
 
 #: the steps of an issue: the page that says issued is printed by the shell
 #: between `begin` and `record`
@@ -33,9 +33,13 @@ _PENDING: dict[int, tuple[str, str]] = {}
 #: they are drawn
 _PRINTS = ("<script>history.replaceState(null, '', '#print');</script>",
            "<script>addEventListener('load', () => setTimeout(() => print(), 600));</script>")
+#: what makes the shell's viewer page a page to print: it asks for the print
+#: dialog once its figures are drawn (`ReportViewer`)
+PRINT_FLAG = '<meta name="hertzforge-print" content="1" />'
 
 #: the starter templates; 'empty' starts blank
-TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'empty')
+TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'model',
+             'specify', 'signals', 'empty')
 
 THEMES = ('light', 'dark')
 
@@ -80,6 +84,21 @@ def render(project: Any, params: Mapping[str, Any], method: str = 'report.render
         raise bad_request(f'{method} "theme" is light or dark')
     return render_html(project[name], project, units, object_groups=project.object_groups,
                        theme=theme)
+
+
+def page_views(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
+    """The report `name` as the shell's own page draws it
+    (`report.views.page_blocks`): its title and marking, and each drawn
+    block as text, an unbound slot, or a figure's protocol views, in the
+    unit system `units`."""
+    from hertzforge.report.views import page_blocks, page_style
+
+    name = _report(project, params, 'report.views')
+    report = project[name]
+    return {'name': name, 'title': report.title, 'marking': report.marking,
+            'css': page_style(report, project),
+            'blocks': page_blocks(report, project, units,
+                                  object_groups=project.object_groups)}
 
 
 def _anyway(params: Mapping[str, Any], method: str) -> bool:
@@ -153,7 +172,7 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[s
     if (checks['owed'] or checks['index']) and not _anyway(params, 'report.export'):
         return {'path': None, **checks}
     try:
-        html = project._export_page(name, units)
+        html = project._viewer_export(name, units)
     except ValueError as error:
         raise refused(str(error)) from None
     partial = f'{path}.partial'
@@ -205,6 +224,9 @@ def operate(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[
 
 
 def _printable(page: str) -> str:
+    """`page` asking for the print dialog once its figures are drawn."""
+    if '<script id="report-data"' in page:
+        return page.replace('<head>', '<head>\n\t\t' + PRINT_FLAG, 1)
     head, body = _PRINTS
     page = page.replace('<head>', '<head>' + head, 1)
     return page.replace('</body>', body + '</body>', 1)
@@ -224,7 +246,7 @@ def print_page(project: Any, params: Mapping[str, Any], units: Any = None) -> di
     if (checks['owed'] or checks['index']) and not _anyway(params, 'report.print'):
         return {'html': None, **checks}
     try:
-        return {'html': _printable(project._export_page(name, units)), 'owed': [], 'index': []}
+        return {'html': _printable(project._viewer_export(name, units)), 'owed': [], 'index': []}
     except ValueError as error:
         raise refused(str(error)) from None
 
@@ -255,9 +277,12 @@ def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[st
         checks = export_checks(project, name)
         if checks['index'] and not _anyway(params, 'report.issue'):
             return {'index': checks['index']}
+        from hertzforge.report.viewer import viewer_html
+
         before = mark_issued(report, status)
         try:
-            page = project._report_page(name, units)
+            page = viewer_html(report, project, units, object_groups=project.object_groups,
+                               theme='light')
         finally:
             unmark(report, before)
         _PENDING[id(report)] = (status, page)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hertzforge"
-version = "0.1.2"
+version = "0.1.3"
 description = "Data acquisition and structural dynamics in one toolset."
 readme = "README.md"
 license = "MIT"
@@ -63,7 +63,8 @@ Source = "https://github.com/hertzforge/hertzforge"
 hertzforge = "hertzforge.__main__:main"
 
 [tool.setuptools.package-data]
-hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE"]
+hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE",
+              "report/viewer.html"]
 
 [tool.ruff]
 # Ruff's own rule set, 100 columns.

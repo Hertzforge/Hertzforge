@@ -26,6 +26,7 @@ use crate::law::{guarded_call, Miss};
 use crate::pool;
 use crate::report::*;
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
+use hertzforge_dsp::{fft, window};
 use hertzforge_hal::Backend;
 use hertzforge_module_abi::StationClass;
 use hertzforge_random::service::config::RunMode;
@@ -54,6 +55,8 @@ pub const MIN_ENVELOPE_DOF: f64 = 16.0;
 
 /// The most frames the lag search looks back.
 const MAX_LAG_FRAMES: usize = 4096;
+/// The lag search's window, log2 frames: 16 384, four times `MAX_LAG_FRAMES`.
+const LAG_WINDOW_LOG2: u32 = 14;
 
 /// Why a service call could not do what was asked.
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +226,10 @@ pub struct MimoRandomService {
     frf_law: Option<MatrixStack>,
     frf_law_ident: Option<MatrixStack>,
     coherence: Vec<f64>,
+    /// The multiple coherence the law sees while the FRF is updated: that of the
+    /// loop's own estimate, the one the updated FRF's H1 comes from. `None` holds
+    /// the identification's.
+    coherence_law: Option<Vec<f64>>,
     condition: Vec<f64>,
     gate: Option<GateReport>,
     prediction: Option<Prediction>,
@@ -437,6 +444,7 @@ impl MimoRandomService {
             frf_law: None,
             frf_law_ident: None,
             coherence: Vec::new(),
+            coherence_law: None,
             condition: Vec::new(),
             gate: None,
             prediction: None,
@@ -1288,17 +1296,21 @@ impl MimoRandomService {
         })
     }
 
-    /// The lag between the drive as synthesized and the response, frames: the
-    /// peak of the cross-correlation of drive 0 with the first controls over a
-    /// window of the record. A lag common to every drive is a pure delay the FRF
-    /// absorbs; aligning by it keeps the coherence (an unaligned lag near the
-    /// frame length destroys it).
+    /// The lag between the drive as synthesized and the response, frames: the peak
+    /// of the whitened cross-correlation of drive 0 with the first controls over the
+    /// end of the record, on the band. A lag common to every drive is a pure delay
+    /// the FRF absorbs; aligning by it keeps the coherence (an unaligned lag near
+    /// the frame length destroys it).
+    ///
+    /// Whitening weighs every line alike, so the peak falls at the response's onset.
+    /// The raw correlation of a lightly damped structure peaks wherever its ringing
+    /// lines up with the drive: on the 48 x 12 RC plate it returned 1597 frames
+    /// against a true 276.
     ///
     /// It runs at the seam after the identification's first segment, while the
-    /// station's output buffer drains with nothing feeding it, so it is computed
-    /// through the FFT ([`crate::estimate::lag_scores`]): the direct sum it replaced
-    /// held that seam for about 150 ms at four controls, longer than a DAQ card's
-    /// buffer lasts, and the output stopped.
+    /// station's output buffer drains with nothing feeding it, so it is held to the
+    /// cost of [`crate::estimate::lag_scores`]: at most four controls and a
+    /// 16 384-point window, nine transforms.
     fn measure_lag(&self, seg: &SegmentResult, stream0: &[f64]) -> usize {
         let resp = self.responses(seg);
         let len = resp.first().map(|r| r.len()).unwrap_or(0);
@@ -1307,14 +1319,36 @@ impl MimoRandomService {
         }
         let offset = stream0.len() - len;
         let max_lag = MAX_LAG_FRAMES.min(offset).min(len / 2);
-        let w = (len / 2).min(8192);
-        let start = len - w;
-        let controls: Vec<&[f64]> = resp
-            .iter()
-            .take(self.n_c.min(4))
-            .map(|r| &r[start..start + w])
-            .collect();
-        crate::estimate::best_lag(&controls, &stream0[offset + start - max_lag..], max_lag)
+        let n = 1usize << len.ilog2().min(LAG_WINDOW_LOG2);
+        let hann = window::hann(n);
+        let spectrum = |x: &[f64]| {
+            let mut z: Vec<(f64, f64)> = x.iter().zip(&hann).map(|(v, w)| (v * w, 0.0)).collect();
+            fft::fft_in_place(&mut z);
+            z
+        };
+        let drive = spectrum(&stream0[stream0.len() - n..]);
+        let lo = self.band.0 * n / self.loop_cfg.nfft;
+        let hi = (self.band.1 * n / self.loop_cfg.nfft).min(n / 2);
+        let mut power = vec![0.0f64; n];
+        for r in resp.iter().take(self.n_c.min(4)) {
+            let y = spectrum(&r[len - n..]);
+            let mut c = vec![(0.0f64, 0.0f64); n];
+            for k in lo..hi {
+                let v = C64::new(y[k].0, y[k].1) * C64::new(drive[k].0, -drive[k].1);
+                let m = v.norm();
+                if m > 0.0 {
+                    c[k] = (v.re / m, v.im / m);
+                }
+            }
+            fft::fft_in_place(&mut c);
+            for (p, v) in power.iter_mut().zip(&c) {
+                *p += v.0 * v.0 + v.1 * v.1;
+            }
+        }
+        // `y(t) = x(t - d)` peaks at index `n - d`, whichever sign the transform has.
+        (0..=max_lag)
+            .max_by(|&a, &b| power[(n - a) % n].total_cmp(&power[(n - b) % n]))
+            .unwrap_or(0)
     }
 
     /// System identification (Q34): uncorrelated random on every drive, stepped
@@ -1461,6 +1495,7 @@ impl MimoRandomService {
             self.achievable = Some(Arc::new(ach));
         }
         self.coherence = set.coherence.clone();
+        self.coherence_law = None;
         self.condition = set.condition.clone();
         self.frf_c = Some(h_c);
         self.frf_l = Some(h_l);
@@ -2226,7 +2261,10 @@ impl MimoRandomService {
         };
         let tolerances = self.cfg.reference.tolerances.clone();
         let reference = self.reference.clone();
-        let coherence = self.coherence.clone();
+        let coherence = self
+            .coherence_law
+            .clone()
+            .unwrap_or_else(|| self.coherence.clone());
         let inputs = MimoLoopInputs {
             reference: &reference,
             tolerances: &tolerances,
@@ -2641,6 +2679,20 @@ impl MimoRandomService {
                         *a = *a * (1.0 - blend) + *b * blend;
                     }
                     self.frf_law = Some(m);
+                }
+            }
+            // The coherence of the same estimate, so a law that weighs the updated
+            // FRF by it reads the two from one measurement. Every term is at full
+            // level, and the drive SDM is inverted as the H1 above inverts it.
+            if let Ok(g_vd) = self.csd_to_control(&g_cd_full) {
+                if let Ok(c) = pool::multiple_coherence(
+                    &resp,
+                    &g_vd,
+                    &g_dd,
+                    Regularization::Truncated { rcond: 1e-3 },
+                    self.band,
+                ) {
+                    self.coherence_law = Some(c);
                 }
             }
         }

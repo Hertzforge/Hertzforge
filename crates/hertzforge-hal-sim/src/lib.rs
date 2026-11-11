@@ -62,13 +62,14 @@
 #![allow(dead_code)]
 
 pub mod bench_network;
+mod fitted;
 pub mod plant;
 pub mod plants;
 
 pub use hertzforge_sdm::{MatrixStack, C64};
 pub use plant::{
-    FrfPlant, FrfTaps, ModalPlant, Mode, ModeResponse, PlantModel, ResonatorBank,
-    DEFAULT_FEEDTHROUGH, DEFAULT_FRF_BLOCK_FRAMES, DEFAULT_FRF_MAX_TAPS,
+    Discretization, FrfPlant, FrfTaps, ModalPlant, ModalSoftening, Mode, ModeResponse, PlantModel,
+    ResonatorBank, DEFAULT_FEEDTHROUGH, DEFAULT_FRF_BLOCK_FRAMES, DEFAULT_FRF_MAX_TAPS,
 };
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable};

@@ -5929,7 +5929,10 @@ class Project(dict):
         template : str, default 'modal'
             Which starter to build: 'modal', 'random', 'shock',
             'transient', 'sine', 'sysid', 'mimo' (a multiple-input
-            random run, judged on its control matrix) or 'empty'. (In
+            random run, judged on its control matrix), 'model' (a finite
+            element model and its modes), 'specify' (the specifications
+            with their limits), 'signals' (the time histories and spectra)
+            or 'empty'. (In
             the app, a
             Random and Sine project makes 'random' and 'sine', one
             report each.) It can also be a saved template, by the name
@@ -7496,6 +7499,25 @@ class Project(dict):
         guard(self._report(name), page)
         return page
 
+    def _viewer_export(self, name: str, unit_system: Any = None) -> str:
+        """The report as it is exported, printed and issued: the shell's
+        own page (`report.viewer.viewer_html`), light as paper is, for the
+        reader to switch. Refused when the report was issued and has changed
+        since (`report.identity.guard`)."""
+        from .report.identity import guard
+        from .report.viewer import viewer_html
+
+        report = self._report(name)
+        page = viewer_html(report, self, unit_system, object_groups=self.object_groups,
+                           theme='light')
+        try:
+            guard(report, page)
+        except ValueError:
+            # an issue recorded from the core's own page, before reports were
+            # the shell's page, is checked against that page
+            guard(report, self._report_page(name, unit_system))
+        return page
+
     def run_identity(self, name: str) -> Any:
         """Which run of the test a time history is, as a report reads it.
 
@@ -8018,7 +8040,7 @@ class Project(dict):
         """
         name = self.name_of(name)
         self._verify_index_for(name)
-        html = self._export_page(name, unit_system)
+        html = self._viewer_export(name, unit_system)
         path = os.path.expanduser(str(path))
         with open(path, 'w', encoding='utf-8') as out:
             out.write(html)

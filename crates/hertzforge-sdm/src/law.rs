@@ -176,7 +176,9 @@ pub struct MimoLoopInputs<'a> {
     /// response units per volt.
     pub frf: &'a MatrixStack,
     /// Multiple coherence of each control on all drives, line-major
-    /// (`lines * controls` values).
+    /// (`lines * controls` values), of the estimate `frf` comes from: the
+    /// identification's while the plant estimate is held, the loop's own while it
+    /// is updated.
     pub multiple_coherence: &'a [f64],
     /// Line spacing, Hz.
     pub df_hz: f64,

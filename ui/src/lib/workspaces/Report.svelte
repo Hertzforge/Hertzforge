@@ -1,16 +1,20 @@
 <script lang="ts">
 	/**
 	 * Report: the report on the project, generated from a starter template bound to its
-	 * objects and edited. The page is the core's edit page in a
-	 * sandboxed frame; a click on a block selects it, and every act (insert, move, delete, a source,
-	 * the caption, the text, the title and marking) is on the bar and the pane here. In
-	 * the desktop app Save opens the dialog; in a browser it asks for a path.
+	 * objects and edited. The page is drawn by the shell's own viewers (`ReportPage`, from
+	 * `report.views`), so a figure reads as it does in its module; a click on a block selects it,
+	 * and every act (insert, move, delete, a source, the caption, the text, the title and marking)
+	 * is on the bar and the pane here. In the desktop app Save opens the dialog; in a browser it
+	 * asks for a path.
 	 */
 	import type { AppState } from '$lib/app/state.svelte';
 	import { choosePdf, chooseReportPath, hasNativeFiles } from '$lib/project/files';
 	import { theme } from '$lib/theme/theme.svelte';
+	import ReportPage from '$lib/report/ReportPage.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import { untrack } from 'svelte';
 	import ActionTable from './ActionTable.svelte';
+	import { defaultTemplate, TEMPLATES } from '$lib/report/templates';
 
 	interface Props {
 		app: AppState;
@@ -34,38 +38,12 @@
 		if (a.reading && r.name) void r.show(r.name);
 	});
 
-	const TEMPLATES = [
-		['modal', 'Modal test'],
-		['random', 'Random vibration'],
-		['shock', 'Shock'],
-		['transient', 'Transient'],
-		['sine', 'Sine sweep'],
-		['sysid', 'System identification'],
-		['mimo', 'MIMO random'],
-		['empty', 'Empty']
-	] as const;
-	let template = $state('modal');
+	// the template of the module the person came from, unless they choose another
+	// read once, as the module opens: choosing another module later does not change the choice here
+	let template = $state<string>(untrack(() => defaultTemplate(app.lastModule, app.tests.screen)));
 	let inserting = $state('markdown');
-	let frame = $state<HTMLIFrameElement | null>(null);
 	const ed = $derived(r.editor);
 	const block = $derived(ed?.block ?? null);
-
-	// the page says which block was clicked, and how far it is scrolled
-	$effect(() => {
-		const heard = (e: MessageEvent) => {
-			if (!frame || e.source !== frame.contentWindow) return;
-			const said = e.data as { hforgeReport?: { op: string; at: number | null }; hforgeScroll?: number };
-			if (typeof said?.hforgeScroll === 'number') r.scroll = said.hforgeScroll;
-			if (said?.hforgeReport?.op === 'select') void r.select(said.hforgeReport.at ?? null);
-		};
-		window.addEventListener('message', heard);
-		return () => window.removeEventListener('message', heard);
-	});
-
-	// the page re-rendered by an edit opens where it was scrolled
-	const page = $derived(
-		r.html ? r.html.replace(/<\/body>/i, `<script>addEventListener('load', () => scrollTo(0, ${Math.round(r.scroll)}));<\/script></body>`) : null
-	);
 
 	// typing rests before the page re-renders
 	let text = $state('');
@@ -117,6 +95,7 @@
 		if (r.name && !reports.includes(r.name)) {
 			r.name = null;
 			r.html = null;
+			r.page = null;
 		}
 	});
 
@@ -293,17 +272,18 @@
 				<button class="btn ghost sm danger" data-testid="report-delete" onclick={() => block && r.operate('remove', { at: block.index })} disabled={!block || r.busy !== null}>Delete</button>
 			</div>
 		{/if}
-		{#if page}
-			<!-- the core's own page: its scripts run, isolated from the shell -->
-			<iframe bind:this={frame} title={r.name ?? 'Report'} sandbox="allow-scripts" srcdoc={page} data-testid="report-frame"></iframe>
+		{#if r.page}
+			<div class="paper" data-testid="report-paper">
+				<ReportPage page={r.page} editing selected={ed?.selected ?? null} onselect={(at) => r.select(at)} />
+			</div>
+		{:else if !r.printing}
+			<div class="placeholder">Generate a report, or pick one in the project.</div>
 		{/if}
 		{#if r.printing}
 			<!-- the page as printed, out of sight: it asks for the print dialog once its figures are drawn -->
 			{#key r.printing}
 				<iframe class="printing" title="Printing" sandbox="allow-scripts allow-modals" srcdoc={r.printing} data-testid="report-print-frame"></iframe>
 			{/key}
-		{:else}
-			<div class="placeholder">Generate a report, or pick one in the project.</div>
 		{/if}
 	</main>
 </div>
@@ -463,6 +443,13 @@
 		width: 100%;
 		min-height: 0;
 		border: 0;
+		background: var(--bg-0);
+	}
+
+	.paper {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
 		background: var(--bg-0);
 	}
 

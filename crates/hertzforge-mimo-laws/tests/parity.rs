@@ -111,6 +111,7 @@ fn file_of(law: BuiltinMimo) -> &'static str {
         BuiltinMimo::ShapeConstrained => "hertzforge_law_mimo_shape",
         BuiltinMimo::BuzzMatched => "hertzforge_law_mimo_buzz",
         BuiltinMimo::MinimumDrive => "hertzforge_law_mimo_min_drive",
+        BuiltinMimo::BandAverage => "hertzforge_law_mimo_band_average",
     }
 }
 
@@ -165,6 +166,16 @@ fn non_default(law: BuiltinMimo) -> (Given, OnePercent) {
                 ("convergence", num(0.7)),
             ],
             ("convergence", 0.5, 0.505),
+        ),
+        BuiltinMimo::BandAverage => (
+            vec![
+                ("oct_order", ParamVal::Integer(3)),
+                ("kappa_rule", choice("knee")),
+                ("drive_reduction", num(0.3)),
+                ("use_tf_update", ParamVal::Toggle(true)),
+                ("cross_terms", choice("reference")),
+            ],
+            ("gain_correction_rate", 0.25, 0.2525),
         ),
     }
 }

@@ -27,6 +27,7 @@
 //!   Reference row is not a sensor on the structure: it reads the commanded first
 //!   drive (see [`crate::SimBackend`]) and takes no plant output.
 
+use crate::fitted::{FittedMode, Recorder, SofteningRun};
 use crate::{DelayLine, Resonator, Xorshift64};
 use hertzforge_dsp::fft::{self, Cplx};
 use hertzforge_sdm::{MatrixStack, C64};
@@ -164,6 +165,17 @@ pub struct ModalPlant {
     pub residual: Vec<f64>,
     /// Transport delay in whole samples, common to every path.
     pub transport_delay_samples: usize,
+    /// How each mode is made a filter at the sample rate.
+    pub discretization: Discretization,
+    /// Modes whose natural frequency falls with their level, when given. Needs
+    /// [`Discretization::Fitted`].
+    pub softening: Option<ModalSoftening>,
+    /// How many of the first inputs carry the noise: all of them when `None`. Inputs
+    /// past these (a drive's readback through the residual, say) read clean.
+    pub noisy_inputs: Option<usize>,
+    /// A file every input of every sample is written to as played, noise included,
+    /// little-endian `f32`, sample-major, when given. It is emptied at `configure`.
+    pub record: Option<std::path::PathBuf>,
 }
 
 impl ModalPlant {
@@ -176,8 +188,77 @@ impl ModalPlant {
             feedthrough: DEFAULT_FEEDTHROUGH,
             residual: Vec::new(),
             transport_delay_samples: 0,
+            discretization: Discretization::Biquad,
+            softening: None,
+            noisy_inputs: None,
+            record: None,
         }
     }
+
+    /// The delay the discretization adds to every path, samples: the fitted modes'
+    /// `delay`, which the residual and the feedthrough share.
+    pub fn discretization_delay_samples(&self) -> usize {
+        match self.discretization {
+            Discretization::Biquad => 0,
+            Discretization::Fitted { delay, .. } => delay,
+        }
+    }
+}
+
+/// How a [`ModalPlant`]'s modes are made filters at the sample rate.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Discretization {
+    /// [`Resonator::with_response`]'s biquad, prewarped so the peak sits at `f_n`.
+    /// Cheapest, and its [`PlantModel::analytic_frf`] is exact, but the bilinear map
+    /// bends the frequency axis toward Nyquist: a mode well above the band adds far
+    /// less below its resonance than the continuous mode does. On the 48 x 12 RC
+    /// plate at 16 384 Hz the plant reads 3.3 dB low in the 4 kHz sixth-octave band.
+    #[default]
+    Biquad,
+    /// The continuous mode's exact poles with a numerator of `taps` coefficients
+    /// fitted to its response, delayed `delay` samples, on lines from 0 to `band_hz`
+    /// (`crate::fitted`). Every path, residual and feedthrough included, is delayed
+    /// `delay` samples. `taps + 2` multiply-adds a mode a sample against the biquad's
+    /// five; nothing is held above `band_hz`.
+    Fitted {
+        taps: usize,
+        delay: usize,
+        band_hz: f64,
+    },
+}
+
+impl Discretization {
+    /// Nine taps behind four samples, fitted to `band_hz`: within 0.0001 dB of the
+    /// continuous RC plate in every sixth-octave band to 4 kHz, fitted to 4400 Hz at
+    /// 16 384 Hz.
+    pub fn fitted(band_hz: f64) -> Self {
+        Discretization::Fitted {
+            taps: 9,
+            delay: 4,
+            band_hz,
+        }
+    }
+}
+
+/// Level-dependent softening of some of a [`ModalPlant`]'s modes. After each read of
+/// `read_samples`, a softening mode's natural frequency is `f0 (1 - fraction r^2 / (1
+/// + r^2))`, with `r` its running RMS modal displacement over `reference_rms`,
+/// smoothed from read to read. The modal displacement is the mode's input through
+/// `1 / (s^2 + s w / Q + w^2)`; its Q and shapes hold.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModalSoftening {
+    /// Indices into the plant's modes.
+    pub modes: Vec<usize>,
+    /// Each softening mode's modal displacement RMS at the reference level.
+    pub reference_rms: Vec<f64>,
+    /// The largest fractional frequency drop.
+    pub fraction: f64,
+    /// The weight of the newest read in the running mean square.
+    pub smoothing: f64,
+    /// Samples between frequency updates.
+    pub read_samples: usize,
+    /// Each read's time, s, and frequencies, Hz, are appended here as CSV, when given.
+    pub log: Option<std::path::PathBuf>,
 }
 
 /// A plant that plays an FRF matrix.
@@ -450,6 +531,58 @@ impl PlantModel {
                         return Err(format!("mode {k} has a non-finite shape value"));
                     }
                 }
+                if let Discretization::Fitted {
+                    taps,
+                    delay,
+                    band_hz,
+                } = m.discretization
+                {
+                    if taps < 3 || delay >= taps {
+                        return Err(format!(
+                            "a fitted mode needs at least 3 taps and a delay under them, got \
+                             {taps} taps and {delay} samples"
+                        ));
+                    }
+                    if !(band_hz.is_finite() && band_hz > 0.0 && band_hz < 0.5 * fs_hz) {
+                        return Err(format!(
+                            "a fitted mode's band, {band_hz} Hz, is not between 0 and the \
+                             Nyquist frequency of {fs_hz} Hz"
+                        ));
+                    }
+                }
+                if m.noisy_inputs.is_some_and(|n| n > m.n_inputs) {
+                    return Err(format!(
+                        "noise on {} inputs of a plant with {}",
+                        m.noisy_inputs.unwrap_or(0),
+                        m.n_inputs
+                    ));
+                }
+                if let Some(soft) = &m.softening {
+                    if !matches!(m.discretization, Discretization::Fitted { .. }) {
+                        return Err("softening needs the fitted discretization".into());
+                    }
+                    if soft.reference_rms.len() != soft.modes.len()
+                        || soft.modes.iter().any(|&k| k >= m.modes.len())
+                    {
+                        return Err(
+                            "softening: one reference RMS per softening mode, each a mode of \
+                             the plant"
+                                .into(),
+                        );
+                    }
+                    if soft.read_samples == 0
+                        || soft
+                            .reference_rms
+                            .iter()
+                            .any(|r| !(r.is_finite() && *r > 0.0))
+                    {
+                        return Err(
+                            "softening: a read is at least one sample and each reference RMS \
+                             is positive"
+                                .into(),
+                        );
+                    }
+                }
                 Ok(())
             }
             PlantModel::Frf(f) => f.validate(fs_hz),
@@ -500,19 +633,16 @@ impl PlantModel {
                 out
             }
             PlantModel::Modal(m) => {
-                let rs: Vec<Resonator> = m
-                    .modes
-                    .iter()
-                    .map(|mode| Resonator::with_response(mode.f_hz, mode.q, fs_hz, mode.response))
-                    .collect();
+                let filters = ModeFilters::new(m, fs_hz);
                 let (n_in, n_d) = (m.n_inputs, m.n_drives);
                 let mut out = MatrixStack::zeros(freqs_hz.len(), n_in, n_d);
-                let mut rm = vec![C64::new(0.0, 0.0); rs.len()];
+                let mut rm = vec![C64::new(0.0, 0.0); m.modes.len()];
                 for (k, &f) in freqs_hz.iter().enumerate() {
-                    for (r, v) in rs.iter().zip(rm.iter_mut()) {
-                        *v = r.response(f, fs_hz);
-                    }
+                    filters.responses(f, fs_hz, &mut rm);
+                    // The fitted modes carry their delay; the residual and the
+                    // feedthrough are delayed with them.
                     let dl = delay(f, m.transport_delay_samples);
+                    let shared = delay(f, m.discretization_delay_samples());
                     let line = out.line_mut(k);
                     for i in 0..n_in {
                         for j in 0..n_d {
@@ -520,6 +650,7 @@ impl PlantModel {
                             if !m.residual.is_empty() {
                                 h.re += m.residual[i * n_d + j];
                             }
+                            h *= shared;
                             for (mode, r) in m.modes.iter().zip(&rm) {
                                 h += r * (mode.output_shape[i] * mode.input_shape[j]);
                             }
@@ -637,7 +768,7 @@ fn frf_on_fft_grid(p: &FrfPlant, lines: usize, df_hz: f64, fs_hz: f64) -> Option
 #[derive(Debug, Clone)]
 pub(crate) enum Plant {
     Bank(BankPlant),
-    Modal(ModalRun),
+    Modal(Box<ModalRun>),
     Frf(Box<FrfRun>),
 }
 
@@ -651,7 +782,9 @@ impl Plant {
         model.validate(fs_hz)?;
         Ok(match model {
             PlantModel::Resonators(b) => Plant::Bank(BankPlant::new(b, fs_hz, noise_level, seed)),
-            PlantModel::Modal(m) => Plant::Modal(ModalRun::new(m, fs_hz, noise_level, seed)),
+            PlantModel::Modal(m) => {
+                Plant::Modal(Box::new(ModalRun::new(m, fs_hz, noise_level, seed)))
+            }
             PlantModel::Frf(f) => Plant::Frf(Box::new(FrfRun::new(f, fs_hz, noise_level, seed)?)),
         })
     }
@@ -755,6 +888,111 @@ fn add_noise(rng: &mut Xorshift64, sigma: f64, out: &mut [f64]) {
     }
 }
 
+/// A modal plant's modes as filters at the sample rate, one per mode.
+#[derive(Debug, Clone)]
+pub(crate) enum ModeFilters {
+    Biquad(Vec<Resonator>),
+    Fitted {
+        modes: Vec<FittedMode>,
+        delay: usize,
+        band_hz: f64,
+    },
+}
+
+impl ModeFilters {
+    pub(crate) fn new(m: &ModalPlant, fs_hz: f64) -> Self {
+        match m.discretization {
+            Discretization::Biquad => ModeFilters::Biquad(
+                m.modes
+                    .iter()
+                    .map(|mode| Resonator::with_response(mode.f_hz, mode.q, fs_hz, mode.response))
+                    .collect(),
+            ),
+            Discretization::Fitted {
+                taps,
+                delay,
+                band_hz,
+            } => {
+                let softening = m
+                    .softening
+                    .as_ref()
+                    .map(|s| s.modes.as_slice())
+                    .unwrap_or(&[]);
+                let modes = m
+                    .modes
+                    .iter()
+                    .enumerate()
+                    .map(|(k, mode)| {
+                        let mut f = FittedMode::new(
+                            mode.f_hz,
+                            mode.q,
+                            mode.response,
+                            softening.contains(&k),
+                            taps,
+                        );
+                        f.tune(mode.f_hz, fs_hz, delay, band_hz);
+                        f
+                    })
+                    .collect();
+                ModeFilters::Fitted {
+                    modes,
+                    delay,
+                    band_hz,
+                }
+            }
+        }
+    }
+
+    /// Each mode's response at `f_hz`, into `out`.
+    fn responses(&self, f_hz: f64, fs_hz: f64, out: &mut [C64]) {
+        match self {
+            ModeFilters::Biquad(rs) => {
+                for (r, v) in rs.iter().zip(out) {
+                    *v = r.response(f_hz, fs_hz);
+                }
+            }
+            ModeFilters::Fitted { modes, .. } => {
+                for (r, v) in modes.iter().zip(out) {
+                    *v = r.response(f_hz, fs_hz);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, k: usize, u: f64) -> f64 {
+        match self {
+            ModeFilters::Biquad(rs) => rs[k].process(u),
+            ModeFilters::Fitted { modes, .. } => modes[k].process(u),
+        }
+    }
+
+    fn displacement(&self, k: usize) -> f64 {
+        match self {
+            ModeFilters::Biquad(_) => 0.0,
+            ModeFilters::Fitted { modes, .. } => modes[k].displacement(),
+        }
+    }
+
+    fn retune(&mut self, k: usize, f_n: f64, fs_hz: f64) {
+        if let ModeFilters::Fitted {
+            modes,
+            delay,
+            band_hz,
+        } = self
+        {
+            modes[k].tune(f_n, fs_hz, *delay, *band_hz);
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            ModeFilters::Biquad(rs) => rs.iter_mut().for_each(Resonator::reset),
+            ModeFilters::Fitted { modes, .. } => modes.iter_mut().for_each(FittedMode::reset),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ModalRun {
     n_out: usize,
@@ -763,30 +1001,31 @@ pub(crate) struct ModalRun {
     phi: Vec<f64>,
     /// `n_modes x n_out`, row-major (each mode's output shape, contiguous).
     psi: Vec<f64>,
-    resonators: Vec<Resonator>,
+    filters: ModeFilters,
     /// Non-zero residual entries `(input, drive, value)`.
     residual: Vec<(usize, usize, f64)>,
     feedthrough: f64,
     delays: Vec<DelayLine>,
     delayed: Vec<f64>,
+    /// The discretization's delay on the residual and the feedthrough, per drive.
+    shared: Vec<DelayLine>,
+    shared_out: Vec<f64>,
     rng: Xorshift64,
     noise_level: f64,
+    noisy: usize,
+    fs_hz: f64,
+    softening: Option<SofteningRun>,
+    soft_modes: Vec<usize>,
+    recorder: Option<Recorder>,
 }
 
 impl ModalRun {
     fn new(m: &ModalPlant, fs_hz: f64, noise_level: f64, seed: u64) -> Self {
         let mut phi = Vec::with_capacity(m.modes.len() * m.n_drives);
         let mut psi = Vec::with_capacity(m.modes.len() * m.n_inputs);
-        let mut resonators = Vec::with_capacity(m.modes.len());
         for mode in &m.modes {
             phi.extend_from_slice(&mode.input_shape);
             psi.extend_from_slice(&mode.output_shape);
-            resonators.push(Resonator::with_response(
-                mode.f_hz,
-                mode.q,
-                fs_hz,
-                mode.response,
-            ));
         }
         let residual = if m.residual.is_empty() {
             Vec::new()
@@ -799,20 +1038,37 @@ impl ModalRun {
                 })
                 .collect()
         };
+        let softening = m
+            .softening
+            .as_ref()
+            .map(|s| SofteningRun::new(s, s.modes.iter().map(|&k| m.modes[k].f_hz).collect()));
         ModalRun {
             n_out: m.n_inputs,
             n_drive: m.n_drives,
             phi,
             psi,
-            resonators,
+            filters: ModeFilters::new(m, fs_hz),
             residual,
             feedthrough: m.feedthrough,
             delays: (0..m.n_drives)
                 .map(|_| DelayLine::new(m.transport_delay_samples))
                 .collect(),
             delayed: vec![0.0; m.n_drives],
+            shared: (0..m.n_drives)
+                .map(|_| DelayLine::new(m.discretization_delay_samples()))
+                .collect(),
+            shared_out: vec![0.0; m.n_drives],
             rng: Xorshift64::new(seed),
             noise_level,
+            noisy: m.noisy_inputs.unwrap_or(m.n_inputs).min(m.n_inputs),
+            fs_hz,
+            soft_modes: m
+                .softening
+                .as_ref()
+                .map(|s| s.modes.clone())
+                .unwrap_or_default(),
+            softening,
+            recorder: m.record.clone().map(Recorder::new),
         }
     }
 
@@ -820,34 +1076,66 @@ impl ModalRun {
     fn step(&mut self, drive: &[f64], out: &mut [f64]) {
         let out = &mut out[..self.n_out];
         let mut sum = 0.0;
-        for ((d, line), &x) in self.delayed.iter_mut().zip(&mut self.delays).zip(drive) {
+        for (((d, line), (s, shared)), &x) in self
+            .delayed
+            .iter_mut()
+            .zip(&mut self.delays)
+            .zip(self.shared_out.iter_mut().zip(&mut self.shared))
+            .zip(drive)
+        {
             *d = line.process(x);
-            sum += *d;
+            *s = shared.process(*d);
+            sum += *s;
         }
         out.fill(self.feedthrough * sum);
         for &(i, j, v) in &self.residual {
-            out[i] += v * self.delayed[j];
+            out[i] += v * self.shared_out[j];
         }
         let nd = self.n_drive;
         let no = self.n_out;
-        for (m, r) in self.resonators.iter_mut().enumerate() {
+        for m in 0..self.phi.len() / nd {
             let u: f64 = self.phi[m * nd..(m + 1) * nd]
                 .iter()
                 .zip(&self.delayed)
                 .map(|(a, b)| a * b)
                 .sum();
-            let x = r.process(u);
+            let x = self.filters.process(m, u);
             for (o, &s) in out.iter_mut().zip(&self.psi[m * no..(m + 1) * no]) {
                 *o += s * x;
             }
         }
-        add_noise(&mut self.rng, self.noise_level, out);
+        add_noise(&mut self.rng, self.noise_level, &mut out[..self.noisy]);
+        if let Some(soft) = &mut self.softening {
+            let filters = &self.filters;
+            let read = soft.sample(
+                self.soft_modes.iter().map(|&k| filters.displacement(k)),
+                self.fs_hz,
+            );
+            if let Some(f) = read {
+                for (&k, f) in self.soft_modes.iter().zip(f) {
+                    self.filters.retune(k, f, self.fs_hz);
+                }
+            }
+        }
+        if let Some(r) = &mut self.recorder {
+            r.record(out);
+        }
     }
 
     fn reset(&mut self) {
-        self.resonators.iter_mut().for_each(Resonator::reset);
+        self.filters.reset();
         self.delays.iter_mut().for_each(DelayLine::reset);
+        self.shared.iter_mut().for_each(DelayLine::reset);
         self.delayed.iter_mut().for_each(|v| *v = 0.0);
+        self.shared_out.iter_mut().for_each(|v| *v = 0.0);
+        if let Some(soft) = &mut self.softening {
+            for (&k, f) in self.soft_modes.iter().zip(soft.reset()) {
+                self.filters.retune(k, f, self.fs_hz);
+            }
+        }
+        if let Some(r) = &mut self.recorder {
+            r.flush();
+        }
     }
 }
 

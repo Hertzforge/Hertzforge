@@ -243,7 +243,7 @@ caught before the test.
 ### The Control Law
 
 The **Control Law** panel lists the laws that can run this test, each with its name, version, and
-whether it is built in. Four are built in, each written from the published literature:
+whether it is built in. Six are built in, the first five written from the published literature:
 
 | Law | What it does | When to choose it |
 |---|---|---|
@@ -252,6 +252,7 @@ whether it is built in. Four are built in, each written from the published liter
 | Shape-constrained (SVD) | Holds the drive on each line to the directions the plant responds to most (its leading right singular vectors), and runs the default law's correction inside that constraint | When the unconstrained drive is too high: much lower drive for some loss of fidelity in the cross terms between modes |
 | Buzz-test matched | Keeps the reference's autospectra and takes each pair's coherence and phase from the identification response, the structure's own response to uncorrelated drive; pairs below a coherence floor are left independent. Then runs the default law on that reference | When the reference's cross terms are unknown or should be what the structure does naturally |
 | Minimum drive | Keeps the reference's autospectra as far as a trade-off against drive power allows, and takes its cross terms from the drive that needs the least power to produce them (the Pareto-optimal target of Coletti, Davis and Schultz; Smallwood's minimum input trace at the exact-control end). The trade-off is picked at the knee of drive against residual, or set. Then runs the default law on that target | When the cross terms are free to choose and drive is the cost: the target that needs the least shaker power for the autospectra, at a trade-off you can see |
+| Band average | Solves for one flat, correlated drive per fractional-octave band so that each control's band-averaged response matches the reference's band average, then corrects each band's gain from the measured response. Averaging the FRF over a band before inverting it keeps identification noise out of the drive | When a per-line inverse asks for too much drive or follows the noise in the FRF: lower drive and a smoother drive spectrum, for a line-by-line error that stays a decibel or two inside a band with resonances in it. It can also follow a plant that changes with level, with its FRF update on and the test's FRF mode at update |
 
 The details card under the list describes the chosen law, its author, its file hash and whether
 it is cleared for hardware. Its parameters appear below as a form built from the law's own
@@ -270,7 +271,8 @@ MIMO laws are listed apart, and a single-output law is refused here.
   measured, and blended with identification's (the blend sets the weight of each loop's estimate,
   0.5 by default). An updated FRF is sound only in the directions the drive actually excites, so
   it follows a plant that changes with level but can wander where the drive is weak. The Drive
-  and Plant page shows the live estimate.
+  and Plant page shows the live estimate. A law that reads the multiple coherence is given the
+  loop's own alongside, in place of identification's.
 
 ### Estimation
 

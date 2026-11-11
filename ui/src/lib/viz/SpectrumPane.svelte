@@ -170,6 +170,11 @@
 	let cursorX = $state<number | null>(null);
 	let cursorIsLocal = $state(false);
 
+	/** With `groups`, the one shown; the others' series stay out of sight but in the ranges. */
+	let group = $state(0);
+	const shownGroup = $derived(view.groups?.length ? view.groups[Math.min(group, view.groups.length - 1)] : null);
+	const inGroup = (i: number) => !shownGroup || shownGroup.series.includes(i);
+
 	const logX = $derived(view.x.scale === 'log');
 	const logY = $derived(view.y.scale === 'log');
 
@@ -185,7 +190,8 @@
 			const style = o ? { ...look.style, width: o.width ?? look.style.width, dash: o.dash ? [...o.dash] : look.style.dash, styleName: o.dashName ?? look.style.styleName } : look.style;
 			const markerShape: MarkerShape | null = o?.marker ?? null;
 			const styleWords = markerShape ? `${style.styleName}, ${MARKER_WORDS[markerShape]}` : style.styleName;
-			return { series: s, index: i, ...look, style, color: o?.color ?? look.color, markerShape, styleWords, shown: o?.visible !== false };
+			const kept = o?.visible !== false;
+			return { series: s, index: i, ...look, style, color: o?.color ?? look.color, markerShape, styleWords, kept, grouped: inGroup(i), shown: kept && inGroup(i) };
 		});
 	});
 
@@ -201,16 +207,19 @@
 	}
 
 	/** What, beyond the view, changes how the plot is built: a change rebuilds it. */
-	const optionsKey = $derived(JSON.stringify([styles, grid, xTicks, yTicks, xLabel, yLabel, envelope, zoomY, ownZoom]));
+	const optionsKey = $derived(JSON.stringify([styles, grid, xTicks, yTicks, xLabel, yLabel, envelope, zoomY, ownZoom, shownGroup?.label ?? null]));
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
 		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey]);
 	}
 
-	/** The columns of the series drawn, which the y range is taken from. */
+	/**
+	 * The columns of the series drawn, which the y range is taken from: every group's, so
+	 * choosing another group keeps the axes where they were.
+	 */
 	function shownCols(cols: ArrayLike<number | null>[]): ArrayLike<number | null>[] {
-		return cols.filter((_, i) => styled[i]?.shown !== false);
+		return cols.filter((_, i) => styled[i]?.kept !== false);
 	}
 
 	function finiteExtent(values: ArrayLike<number | null>[], positive: boolean): [number, number] | null {
@@ -1106,12 +1115,12 @@
 	}
 
 	/** The series the legend lists: every one but a follower, which reads with its measurement. */
-	const legendEntries = $derived(styled.filter((e) => !e.follows));
+	const legendEntries = $derived(styled.filter((e) => !e.follows && e.grouped));
 
 	/** The marks' readout sits in a top corner the legend does not take. */
 	const marksCorner = $derived<Corner>(legend === 'inside' && legendCorner === 'top-left' ? 'top-right' : 'top-left');
 
-	const showHead = $derived(showTitle || copyButton || (legend === 'outside' && readout));
+	const showHead = $derived(showTitle || copyButton || (legend === 'outside' && readout) || !!view.groups?.length);
 
 	/** A note being dragged: where it is, as fractions of the plot area. */
 	let dragNote = $state<{ id: string; fx: number; fy: number } | null>(null);
@@ -1184,6 +1193,20 @@
 			<span class="xunit">{view.x.unit ?? ''}</span>
 		</div>
 		{/if}
+		{#if view.groups?.length}
+		<select class="group" data-testid="spectrum-group" aria-label="Shown" bind:value={group}>
+			{#each view.groups as g, k (k)}
+				<option value={k}>{g.label}</option>
+			{/each}
+		</select>
+		{/if}
+		{#if shownGroup?.readouts?.length}
+		<span class="group-readouts">
+			{#each shownGroup.readouts as r, k (k)}
+				<span class="group-readout" data-status={r.status}>{r.label}: <b>{r.text}</b> <span class="word">{r.status}</span></span>
+			{/each}
+		</span>
+		{/if}
 		{#if copyButton}
 		<button class="btn ghost sm copyimg" data-testid="spectrum-copy-image" onclick={copyImage} title="Copy the plot as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
 		{/if}
@@ -1239,6 +1262,33 @@
 	.copyimg {
 		flex: none;
 		font-size: var(--text-2xs, 11px);
+	}
+
+	.group {
+		flex: none;
+		max-width: 18em;
+		font-size: var(--text-2xs, 11px);
+	}
+
+	.group-readouts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+		font-size: var(--text-2xs, 11px);
+		color: var(--text-2);
+	}
+
+	.group-readout[data-status='fail'] b,
+	.group-readout[data-status='fail'] .word {
+		color: var(--status-fail);
+	}
+
+	.group-readout[data-status='warn'] .word {
+		color: var(--status-warn);
+	}
+
+	.group-readout .word {
+		color: var(--status-info);
 	}
 
 	.spectrum {

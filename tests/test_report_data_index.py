@@ -786,9 +786,12 @@ def test_export_report_checks_the_index_first(tmp_path):
     project.index_file(_file(tmp_path, 'log.txt'), 'log')
     _file(tmp_path, 'log.txt', b'edited')
     out = project.export_report(name, str(tmp_path / 'out.html'))
+    from hertzforge.report.viewer import read_viewer
+
     with open(out, encoding='utf-8') as handle:
-        data = _payload(handle.read())
-    table = next(block for block in data['blocks'] if block['kind'] == 'table')
+        data = read_viewer(handle.read())
+    table = next(view for block in data['blocks'] for view in block.get('views', [])
+                 if view['view'] == 'table')
     assert [row[-1] for row in table['rows']] == ['matches', 'CHANGED']
     assert project.journal[-1].startswith('project.export_report('), \
         'the check inside is not a line of its own'

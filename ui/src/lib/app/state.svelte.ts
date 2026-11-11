@@ -43,6 +43,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	UnitsTables,
 	ProjectSummary,
 	ReportEditor,
+	ReportPageData,
 	RunState,
 	SimProfile,
 	SimStateResult,
@@ -1069,6 +1070,8 @@ export class ReportState {
 	held = $state<{ act: 'export' | 'print' | 'issue'; path?: string; owed: string[]; index: { name: string; status: string }[] } | null>(null);
 	/** The editor's pane for the selection, from the last `report.editor`. */
 	editor = $state.raw<ReportEditor | null>(null);
+	/** The report drawn by the shell's own viewers, from the last `report.views`. */
+	page = $state.raw<ReportPageData | null>(null);
 	/** How far the page was scrolled, kept across the re-render an edit makes. */
 	scroll = 0;
 
@@ -1185,6 +1188,7 @@ export class ReportState {
 			const res = await this.request('report.operate', { name, op, selected: this.editor?.selected ?? null, ...params });
 			if (res.project) this.app.project.apply(res.project);
 			this.take(res);
+			if (res.html !== undefined) await this.draw(name);
 			ok = true;
 		});
 		return ok;
@@ -1206,7 +1210,13 @@ export class ReportState {
 		const res = await this.request('report.editor', { name, selected: keep });
 		this.name = name;
 		this.take(res);
+		await this.draw(name);
 		this.exported = null;
+	}
+
+	/** The report `name` as the shell's own page draws it, in this connection's units. */
+	private async draw(name: string): Promise<void> {
+		this.page = await this.app.analysis.request<ReportPageData>('report.views', { name }, { timeoutMs: RUN_TIMEOUT_MS });
 	}
 
 	private async act(doing: string, work: () => Promise<void>): Promise<void> {
@@ -1864,6 +1874,8 @@ export class AppState {
 	readonly control: ServiceClient;
 
 	workspace = $state<Workspace>('signals');
+	/** The last workspace shown other than Report: the template Generate Report starts from. */
+	lastModule = $state<Workspace | null>(null);
 	paletteOpen = $state(false);
 	catalog = $state.raw<Catalog | null>(null);
 	catalogError = $state<string | null>(null);
