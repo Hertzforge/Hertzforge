@@ -27,6 +27,7 @@ import { RECORDER_LIVE_STATES } from './recorder/recorderVerbs';
 export type TestTypeId =
 	| 'random'
 	| 'sine'
+	| 'mixed'
 	| 'shock'
 	| 'srs'
 	| 'twr'
@@ -66,6 +67,7 @@ export interface TestType {
 export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'random', group: 'single', title: 'Random', summary: 'Broadband random vibration shaped to a target spectrum and held for a set time.', ready: true },
 	{ id: 'sine', group: 'single', title: 'Sine', summary: 'One frequency at a time, swept across a range or held, at a controlled amplitude.', ready: true },
+	{ id: 'mixed', group: 'single', title: 'Mixed Mode', summary: 'Sine tones and narrow bands of random on a random floor, each dwelling or sweeping.', ready: true },
 	{ id: 'shock', group: 'single', title: 'Classical Shock', summary: 'Short pulses of a standard shape, such as a half-sine, at a set peak and duration.', ready: true },
 	{ id: 'srs', group: 'single', title: 'SRS', summary: 'Shock response spectrum: a short transient built to meet a target response spectrum.', ready: true },
 	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: true },
@@ -103,19 +105,21 @@ export function liveTestOf(
 	sine?: { status: { state: RandomRunState } | null; syncError: string | null },
 	twr?: { status: { state: TwrRunState } | null; syncError: string | null },
 	explorer?: { status: { state: ExplorerRunState } | null; syncError: string | null },
-	recorder?: { status: { state: RecorderRunState } | null; syncError: string | null }
+	recorder?: { status: { state: RecorderRunState } | null; syncError: string | null },
+	mixed?: { status: { state: RandomRunState } | null; syncError: string | null }
 ): LiveTest {
 	if (acq.run !== null && isLive(acq.run)) return 'random';
 	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
 	if (shock?.status && LIVE_STATES.includes(shock.status.state)) return 'shock';
 	if (srs?.status && LIVE_STATES.includes(srs.status.state)) return 'srs';
 	if (sine?.status && LIVE_STATES.includes(sine.status.state)) return 'sine';
+	if (mixed?.status && LIVE_STATES.includes(mixed.status.state)) return 'mixed';
 	if (twr?.status && TWR_LIVE_STATES.includes(twr.status.state)) return 'twr';
 	if (explorer?.status && EXPLORER_LIVE_STATES.includes(explorer.status.state)) return 'explorer';
 	if (recorder?.status && RECORDER_LIVE_STATES.includes(recorder.status.state)) return 'recorder';
 	// Every run read has answered (or one could not be read): nothing is live.
 	const answered = (s?: { status: unknown; syncError: string | null }) => !s || s.status !== null || s.syncError !== null;
-	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder)) return null;
+	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

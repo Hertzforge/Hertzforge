@@ -178,7 +178,7 @@
 
 {#if optionsOpen && panel.kind === 'plot'}
 	<Popover anchor={optBtn} label="Options for {title}" align="end" testid="plot-options-pop" onclose={() => screen.openOptions(null)}>
-		<PlotOptions spec={panel.plot} types={screen.hooks.types} {channels} traces={body?.traces() ?? []} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
+		<PlotOptions spec={panel.plot} types={screen.hooks.types} {channels} parts={screen.partChoices} traces={body?.traces() ?? []} onchange={(spec) => screen.updatePlot(panel.id, spec)} {onexport} onclose={() => screen.openOptions(null)} />
 	</Popover>
 {/if}
 

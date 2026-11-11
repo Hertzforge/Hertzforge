@@ -15,20 +15,22 @@
 	import { MARKER_WORDS, TRACE_COLORS } from '$lib/viz/roles';
 	import { withType } from './display';
 	import { stepIndex } from './keys';
-	import type { AxisDisplay, CursorMode, Dash, HoldMode, LineFamily, Marker, PlotDisplay, PlotPanelSpec, PlotType, TraceStyle } from './types';
+	import type { AxisDisplay, CursorMode, Dash, HoldMode, LineFamily, Marker, PartChoice, PlotDisplay, PlotPanelSpec, PlotType, TraceStyle } from './types';
 
 	interface Props {
 		spec: PlotPanelSpec;
 		types: PlotType[];
 		/** The test's channels, for the channel choice. */
 		channels: { index: number; name: string }[];
+		/** The test's parts, for a per-part plot's part choice. */
+		parts?: PartChoice[];
 		onchange: (spec: PlotPanelSpec) => void;
 		onexport?: (what: 'copy' | 'image' | 'csv') => void;
 		onclose: () => void;
 		/** The lines the plot draws now (the plot body's `traces()`), for the trace list. */
 		traces?: { name: string; role: string }[];
 	}
-	let { spec, types, channels, onchange, onexport, onclose, traces = [] }: Props = $props();
+	let { spec, types, channels, parts = [], onchange, onexport, onclose, traces = [] }: Props = $props();
 
 	const d = $derived(spec.display);
 	const type = $derived(types.find((t) => t.id === spec.quantity) ?? null);
@@ -91,6 +93,22 @@
 	}
 	function toggleChannel(index: number, on: boolean) {
 		set({ channels: on ? [...new Set([...picked, index])].sort((a, b) => a - b) : picked.filter((i) => i !== index) });
+	}
+
+	/** The part choices the plot's type takes: its own kind of part, or both. */
+	const partModes = $derived<[string, string][]>(
+		type?.parts === 'tones' ? [['tones', 'Every Tone'], ['pick', 'Chosen']] : type?.parts === 'bands' ? [['bands', 'Every Narrowband'], ['pick', 'Chosen']] : [['all', 'Every Part'], ['tones', 'Tones'], ['bands', 'Narrowbands'], ['pick', 'Chosen']]
+	);
+	const partOffer = $derived(parts.filter((p) => type?.parts === 'both' || (type?.parts === 'tones' ? p.kind === 'tone' : p.kind === 'narrowband')));
+	const partMode = $derived(Array.isArray(spec.parts) ? 'pick' : (spec.parts ?? 'all'));
+	const pickedParts = $derived(Array.isArray(spec.parts) ? spec.parts : []);
+	function setPartMode(m: string) {
+		if (m === 'pick') set({ parts: pickedParts.length ? pickedParts : partOffer.slice(0, 1).map((p) => p.id) });
+		else set({ parts: m as 'all' | 'tones' | 'bands' });
+	}
+	function togglePart(id: string, on: boolean) {
+		const order = partOffer.map((p) => p.id);
+		set({ parts: on ? order.filter((x) => x === id || pickedParts.includes(x)) : pickedParts.filter((x) => x !== id) });
 	}
 
 	function setTitle(text: string) {
@@ -311,6 +329,20 @@
 					{#if type?.help}<p class="help">{type.help}</p>{/if}
 				</div>
 			</div>
+			{#if type?.parts}
+				{@render seg('Parts', partModes, partMode, setPartMode, 'plot-options-parts')}
+				{#if partMode === 'pick'}
+					<ul class="picks" aria-label="Chosen parts">
+						{#each partOffer as p (p.id)}
+							<li>
+								<label><input type="checkbox" checked={pickedParts.includes(p.id)} onchange={(e) => togglePart(p.id, e.currentTarget.checked)} data-testid="plot-options-part-{p.id}" /> {p.name}</label>
+							</li>
+						{:else}
+							<li class="help">The setup has no parts of this kind to choose.</li>
+						{/each}
+					</ul>
+				{/if}
+			{/if}
 			{#if type?.channels}
 				{@render seg(
 					'Channels',

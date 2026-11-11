@@ -367,6 +367,53 @@ def compute_modal_responses(project: Any, params: dict[str, Any]) -> list[dict]:
     return [view, v.reading(f'{name} through {set_name}: modal {params["response"]}', rows)]
 
 
+# ---- Synthesize Modal FRFs ------------------------------------------------------------
+
+MODAL_SET = Param('source', 'Shape set', 'enum', options_from='verb:synthesize_modal_frfs')
+MODAL_RATE = Param('sample_rate', 'Sample rate', 'number', default=8192.0, unit='Hz', min=1.0,
+                   step=1024.0)
+MODAL_FRAME = Param('frame_length', 'Frame', 'integer', default=8192, unit='samples', min=2,
+                    step=1024)
+
+
+def synthesize_modal_frfs(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.synthesize_modal_frfs`: each mode's own FRF, its modal
+    coordinate per unit modal force, on the lines of a test frame, added
+    beside the set (`Project.synthesize_modal_frfs`, `core.modal_frf`).
+    Drawn as a waterfall, with what the pane gives: the modes, the line
+    spacing, the lines, the Nyquist frequency, the highest mode and how many
+    modes are above the Nyquist frequency, which are kept."""
+    from hertzforge.core.modal_frf import above_nyquist, frequency_lines
+
+    name = params['source']
+    shapes = project[name]
+    modes = parse_optional_picks(params['modes'], shapes.num_shapes, 'mode')
+    rate, frame = float(params['sample_rate']), int(params['frame_length'])
+    extra: dict[str, Any] = {'sample_rate': rate, 'frame_length': frame,
+                             'quantity': params['response']}
+    if modes is not None:
+        extra['modes'] = modes
+    added = _core(lambda: project.synthesize_modal_frfs(name, **extra))
+    view = waterfall_view(added, project[added])
+    view.pop('quantities', None)
+    view.pop('quantity', None)
+    used = list(range(shapes.num_shapes)) if modes is None else modes
+    lines = frequency_lines(rate, frame)
+    above = above_nyquist(shapes, modes, rate)
+    rows = [v.row('Added', added, None, 'info'),
+            v.row('Modes', f'{len(used)} of {shapes.num_shapes}', None, 'info'),
+            v.row('Line spacing', rate / frame, 'Hz', 'info'),
+            v.row('Lines', float(lines.size), '', 'info'),
+            v.row('Nyquist', rate / 2.0, 'Hz', 'info'),
+            v.row('Highest mode', float(np.max(np.asarray(shapes.frequency)[used])), 'Hz',
+                  'info')]
+    if above:
+        rows.append(v.row('Note', f'{above} mode{"s" * (above != 1)} above the Nyquist '
+                          'frequency, kept: each still adds its stiffness below it', None,
+                          'info'))
+    return [view, v.reading(f'{name}: modal {params["response"]} FRFs', rows)]
+
+
 # ---- Sweep Rate ---------------------------------------------------------------------
 
 SWEEP = Param('specification', 'Sine specification', 'enum',
@@ -982,6 +1029,14 @@ OPERATIONS = (
                 'force CPSD, added as an object of its own, one record per mode.',
         params=(FORCES, SHAPES, QUANTITY, MODES, FORCE_RECORDS),
         outputs=('waterfall', 'reading'), run=compute_modal_responses),
+    Operation(
+        id='project.synthesize_modal_frfs', title='Synthesize Modal FRFs', workspace='modal',
+        summary='Each mode\'s own FRF from a shape set, its modal coordinate per unit modal '
+                'force, on the lines of a test frame, added beside the set, one record per '
+                'mode. Expand to Physical Responses with a channel table gives the FRFs '
+                'between its channels.',
+        params=(MODAL_SET, MODAL_RATE, MODAL_FRAME, QUANTITY, MODES),
+        outputs=('waterfall', 'reading'), run=synthesize_modal_frfs),
     Operation(
         id='project.sweep_rate', title='Sweep Rate', workspace='sine',
         summary='One tone of a sine specification against typed modes, each a frequency and '

@@ -470,3 +470,93 @@ pub fn twr_lookup(
     }
     (id == TWR_BUILTIN_ID).then(builtin_twr_facts)
 }
+
+/// The test type a law of `world` is for, in words.
+fn world_words(world: LawWorld) -> &'static str {
+    match world {
+        LawWorld::Single => "single-output Random",
+        LawWorld::Mimo => "multiple-output Random",
+        LawWorld::ShockClassical => "classical shock",
+        LawWorld::ShockSrs => "SRS shock",
+        LawWorld::Sine => "Sine",
+        LawWorld::Twr => "TWR",
+    }
+}
+
+/// The Mixed Mode role a law of `world` fills: `single` the floor, `sine` the
+/// tones (any other world is refused before a role is asked of it).
+fn mixed_role(world: LawWorld) -> hertzforge_mixed::LawRole {
+    match world {
+        LawWorld::Sine => hertzforge_mixed::LawRole::Tones,
+        _ => hertzforge_mixed::LawRole::Floor,
+    }
+}
+
+/// Whether a law may drive hardware in the Mixed Mode role of `want` (design
+/// D15): a built-in may; an imported law needs a passed check in its own world
+/// at the check in force (a `single` law has none to need) AND a passed mixed
+/// check in this role, recorded for its exact file at the mixed check in force
+/// (`hertzforge_mixed_laws::may_arm_in_role`). With no catalog there is no
+/// record, so an imported law is refused.
+pub fn mixed_clearance(
+    catalog: Option<&LawCatalog>,
+    e: &CatalogEntry,
+    want: LawWorld,
+) -> Result<(), String> {
+    if e.builtin {
+        return Ok(());
+    }
+    if e.world != want {
+        return Err(format!("it is a {} law", world_words(e.world)));
+    }
+    match catalog {
+        Some(cat) => hertzforge_mixed_laws::may_arm_in_role(cat, e, mixed_role(want))
+            .map_err(|why| why.to_string()),
+        None => Err("no check record can be read".to_owned()),
+    }
+}
+
+/// A catalog entry as a Mixed Mode role sees it: a law of another world than
+/// the role's is refused by the test type it is for. `clearance` is
+/// [`mixed_clearance`]'s answer for it.
+pub fn mixed_role_facts(
+    e: &CatalogEntry,
+    want: LawWorld,
+    clearance: Result<(), String>,
+) -> crate::mixed::config::RoleLaw {
+    crate::mixed::config::RoleLaw {
+        id: e.id.clone(),
+        name: e.identity.name.clone(),
+        version: e.identity.version.clone(),
+        sha256: e.identity.sha256.clone(),
+        builtin: e.builtin,
+        world: if e.world == want {
+            Ok(())
+        } else {
+            Err(world_words(e.world))
+        },
+        params: e.manifest.params.clone(),
+        live: if want == LawWorld::Sine {
+            e.live.clone()
+        } else {
+            Vec::new()
+        },
+        hardware: clearance.is_ok(),
+        not_cleared: clearance.err(),
+    }
+}
+
+/// Look a Mixed Mode role's law up by id: its facts, and whether its records
+/// clear it for hardware in that role.
+pub fn mixed_lookup(
+    catalog: Option<&LawCatalog>,
+    id: &str,
+    want: LawWorld,
+) -> Option<crate::mixed::config::RoleLaw> {
+    if let Some(e) = catalog.and_then(|c| c.entry(id)) {
+        let clearance = mixed_clearance(catalog, &e, want);
+        return Some(mixed_role_facts(&e, want, clearance));
+    }
+    (want == LawWorld::Sine && id == SINE_BUILTIN_ID)
+        .then(|| mixed_role_facts(&builtin_sine_entry(), want, Ok(())))
+}

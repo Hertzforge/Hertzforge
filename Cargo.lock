@@ -1257,6 +1257,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mixed"
+version = "0.1.4"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-capture",
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-shaker-db",
+ "hertzforge-sine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-mixed-laws"
+version = "0.1.4"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
+ "hertzforge-mixed",
+ "hertzforge-module-abi",
+ "hertzforge-random",
+ "hertzforge-random-laws",
+ "hertzforge-sine",
+ "hertzforge-sine-laws",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-module-abi"
 version = "0.1.4"
 dependencies = [
@@ -2409,6 +2446,8 @@ dependencies = [
  "hertzforge-hal-sim",
  "hertzforge-law-host",
  "hertzforge-mimo-random",
+ "hertzforge-mixed",
+ "hertzforge-mixed-laws",
  "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-random-laws",

@@ -81,6 +81,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'solve_modes': (('geometry',), 'Its element groups have no properties yet'),
     'plan_instrumentation': (('shape_set',), 'It needs a mode above 0 Hz on a geometry with elements'),
     'project_onto_basis': (('shape_set',), 'It needs a second shape set'),
+    'synthesize_modal_frfs': (('shape_set',), 'It needs real modes'),
     'overload_check': (_HISTORY, 'No linked channel table gives its ranges'),
 }
 

@@ -1,0 +1,19 @@
+{
+ "type": "response",
+ "id": 92,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 1 error.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "parts_too_close",
+     "field": "parts[2]",
+     "message": "tones t2 and t3 come within 0.300 Hz; they must stay 1.000 Hz apart"
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

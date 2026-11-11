@@ -47,6 +47,8 @@ mod shock_methods;
 #[path = "server_srs.rs"]
 mod srs_methods;
 
+#[path = "server_mixed.rs"]
+mod mixed_methods;
 #[path = "server_sine.rs"]
 mod sine_methods;
 
@@ -78,7 +80,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 44] = [
+const DRIVE_METHODS: [&str; 52] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -111,6 +113,14 @@ const DRIVE_METHODS: [&str; 44] = [
     "sine.jog",
     "sine.goto",
     "sine.adjust",
+    "mixed.arm",
+    "mixed.start",
+    "mixed.proceed",
+    "mixed.level",
+    "mixed.mode",
+    "mixed.resume",
+    "mixed.part",
+    "mixed.adjust",
     "twr.arm",
     "twr.start",
     "twr.proceed",
@@ -144,7 +154,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
     sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
     sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
-    sine.state, sine.log, sine.subscribe, twr.configure, twr.config, twr.reference.import, \
+    sine.state, sine.log, sine.subscribe, mixed.configure, mixed.config, mixed.arm, \
+    mixed.start, mixed.proceed, mixed.level, mixed.mode, mixed.hold, mixed.resume, mixed.part, \
+    mixed.adjust, mixed.stop, mixed.abort, mixed.reset, mixed.clear, mixed.state, mixed.log, \
+    mixed.subscribe, twr.configure, twr.config, twr.reference.import, \
     twr.reference.preview, twr.arm, twr.start, twr.proceed, twr.iterate, twr.play, twr.level, \
     twr.freeze, twr.stop, twr.abort, twr.reset, twr.clear, twr.state, twr.log, twr.subscribe, \
     twr.plays, twr.record, explorer.configure, explorer.config, explorer.start, explorer.steer, \
@@ -267,6 +280,7 @@ pub enum Feed {
     Shock,
     Srs,
     Sine,
+    Mixed,
     Twr,
     Explorer,
     Recorder,
@@ -377,6 +391,11 @@ struct Inner {
     sine_runs: u64,
     sine_state_key: String,
     sine_log_sent: (String, u64),
+    /// The Mixed Mode configuration and its run, and what of it has been sent.
+    mixed: Option<Arc<crate::mixed::MixedRun>>,
+    mixed_runs: u64,
+    mixed_state_key: String,
+    mixed_log_sent: (String, u64),
     /// The TWR configuration and its run, beside the others, and what of it has
     /// been sent.
     twr: Option<Arc<crate::twr::TwrRun>>,
@@ -428,6 +447,12 @@ impl Inner {
         self.sine.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
+    fn mixed_live(&self) -> bool {
+        self.mixed
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     fn twr_live(&self) -> bool {
         self.twr.as_ref().is_some_and(|s| s.view().state.is_live())
     }
@@ -452,6 +477,7 @@ impl Inner {
             || self.shock_live()
             || self.srs_live()
             || self.sine_live()
+            || self.mixed_live()
             || self.twr_live()
             || self.explorer_live()
             || self.recorder_live()
@@ -528,6 +554,21 @@ impl Inner {
                     ErrorCode::Refused,
                     "run_active",
                     format!("Sine run {} is {}; stop it first.", s.id, v.state.name()),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
+        if let Some(s) = &self.mixed {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "Mixed Mode run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
                 )
                 .with_detail(json!({"run_id": s.id})));
             }
@@ -621,6 +662,11 @@ pub struct Service {
     /// Sine runs' publishes, in order.
     sine_notify: mpsc::UnboundedSender<crate::sine::run::Notice>,
     sine_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::sine::run::Notice>>>,
+    /// The connections with a Mixed Mode display subscription.
+    mixed_displays: std::sync::Mutex<HashMap<ConnId, mixed_methods::MixedDisplay>>,
+    /// Mixed Mode runs' publishes, in order.
+    mixed_notify: mpsc::UnboundedSender<crate::mixed::Notice>,
+    mixed_notices: std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::mixed::Notice>>>,
     /// The connections with a TWR display subscription.
     twr_displays: std::sync::Mutex<HashMap<ConnId, twr_methods::TwrDisplay>>,
     /// TWR runs' publishes, in order.
@@ -688,6 +734,7 @@ impl Service {
         let (shock_notify, shock_notices) = mpsc::unbounded_channel();
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
+        let (mixed_notify, mixed_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
@@ -716,6 +763,10 @@ impl Service {
                 sine_runs: 0,
                 sine_state_key: String::new(),
                 sine_log_sent: (String::new(), 0),
+                mixed: None,
+                mixed_runs: 0,
+                mixed_state_key: String::new(),
+                mixed_log_sent: (String::new(), 0),
                 twr: None,
                 twr_runs: 0,
                 twr_state_key: String::new(),
@@ -752,6 +803,9 @@ impl Service {
             sine_displays: std::sync::Mutex::new(HashMap::new()),
             sine_notify,
             sine_notices: std::sync::Mutex::new(Some(sine_notices)),
+            mixed_displays: std::sync::Mutex::new(HashMap::new()),
+            mixed_notify,
+            mixed_notices: std::sync::Mutex::new(Some(mixed_notices)),
             twr_displays: std::sync::Mutex::new(HashMap::new()),
             twr_notify,
             twr_notices: std::sync::Mutex::new(Some(twr_notices)),
@@ -824,6 +878,7 @@ impl Service {
             Feed::Shock => self.shock_displays().contains_key(&conn),
             Feed::Srs => self.srs_displays().contains_key(&conn),
             Feed::Sine => self.sine_displays().contains_key(&conn),
+            Feed::Mixed => self.mixed_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
             Feed::Explorer => self.explorer_displays().contains_key(&conn),
             Feed::Recorder => self.recorder_displays().contains_key(&conn),
@@ -939,6 +994,15 @@ impl Service {
                 }
             });
         }
+        let mixed_notices = self.mixed_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = mixed_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, _view)) = notices.recv().await {
+                    svc.mixed_changed(&run_id).await;
+                }
+            });
+        }
         let twr_notices = self.twr_notices.lock().ok().and_then(|mut n| n.take());
         if let Some(mut notices) = twr_notices {
             let svc = self.clone();
@@ -1032,6 +1096,7 @@ impl Service {
             let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
             let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
+            let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
@@ -1054,6 +1119,15 @@ impl Service {
             }
             if let Some(s) = twr {
                 twr_methods::stop_twr(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(s) = mixed {
+                mixed_methods::stop_mixed(
                     &s,
                     Some("safe_stop"),
                     "the service (nobody held control)".into(),
@@ -1113,6 +1187,28 @@ impl Service {
     pub async fn shutdown(&self) -> Option<String> {
         self.closing.store(true, Ordering::SeqCst);
         drop(self.drive_gate.write().await);
+        let mixed = self.inner.lock().await.mixed.clone();
+        let mixed_said = match mixed.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                mixed_methods::stop_mixed(&s, Some("safe_stop"), rrun::SHUTDOWN_BY.into(), true)
+                    .await;
+                let asked = Instant::now();
+                let patience = mixed_methods::shutdown_patience(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        mixed_methods::stop_mixed(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
         let (random, sim, shock, srs, sine, twr, explorer, recorder) = {
             let inner = self.inner.lock().await;
             (
@@ -1289,6 +1385,7 @@ impl Service {
             return shock_said
                 .or(srs_said)
                 .or(sine_said)
+                .or(mixed_said)
                 .or(twr_said)
                 .or(explorer_said)
                 .or(recorder_said);
@@ -1342,6 +1439,7 @@ impl Service {
         self.shock_displays().remove(&conn.id);
         self.srs_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
+        self.mixed_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
         self.explorer_displays().remove(&conn.id);
         self.recorder_displays().remove(&conn.id);
@@ -1438,6 +1536,8 @@ impl Service {
             "sine.configure" => self.sine_configure(conn, params).await,
             "sine.config" => Ok(self.sine_config().await),
             "sine.profile.validate" => self.sine_profile_validate(params).await,
+            "mixed.configure" => self.mixed_configure(conn, params).await,
+            "mixed.config" => Ok(self.mixed_config().await),
             "twr.configure" => self.twr_configure(conn, params).await,
             "twr.config" => Ok(self.twr_config().await),
             "twr.reference.import" => self.twr_reference_import(params).await,
@@ -1587,6 +1687,17 @@ impl Service {
             "sine.state" => Ok(self.sine_state_now().await),
             "sine.log" => self.sine_log(params).await,
             "sine.subscribe" => self.sine_subscribe(conn, params).await,
+            "mixed.arm" => self.mixed_arm(conn, params, false).await,
+            "mixed.start" => self.mixed_arm(conn, params, true).await,
+            "mixed.proceed" | "mixed.level" | "mixed.mode" | "mixed.hold" | "mixed.resume"
+            | "mixed.part" | "mixed.adjust" => self.mixed_running_verb(conn, method, params).await,
+            "mixed.stop" => Ok(self.mixed_end(conn, false).await),
+            "mixed.abort" => Ok(self.mixed_end(conn, true).await),
+            "mixed.reset" => self.mixed_reset(conn).await,
+            "mixed.clear" => self.mixed_clear(conn).await,
+            "mixed.state" => Ok(self.mixed_state_now().await),
+            "mixed.log" => self.mixed_log(params).await,
+            "mixed.subscribe" => self.mixed_subscribe(conn, params).await,
             "twr.arm" => self.twr_arm(conn, params, false).await,
             "twr.start" => self.twr_arm(conn, params, true).await,
             "twr.proceed" => self.twr_proceed(conn).await,
@@ -1635,6 +1746,9 @@ impl Service {
             "twr.plays" => self.twr_plays(params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
+            "laws.check" if params.get("mixed").is_some_and(|m| !m.is_null()) => {
+                self.mixed_laws_check(conn, params).await
+            }
             "laws.check" => match self.classical_law_id(conn, params).await {
                 Some(id) => {
                     let mut p = params.clone();
@@ -2126,6 +2240,7 @@ impl Service {
                 || inner.shock_live()
                 || inner.srs_live()
                 || inner.sine_live()
+                || inner.mixed_live()
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
@@ -2406,6 +2521,7 @@ impl Service {
             || inner.shock_live()
             || inner.srs_live()
             || inner.sine_live()
+            || inner.mixed_live()
             || inner.twr_live()
             || inner.explorer_live()
             || inner.recorder_live()
