@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 95,
+ "method": "mixed.part",
+ "params": {
+  "id": "b2",
+  "on": false
+ }
+}

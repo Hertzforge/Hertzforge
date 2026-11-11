@@ -1,0 +1,56 @@
+[package]
+name = "hertzforge-mixed"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# Single Output Mixed Mode: sine tones and narrow bands of random on a random
+# floor, each part dwelling, sweeping or following another at a ratio, played
+# together on one drive and controlled together.
+#
+# The parts list, its schedules and their validation (`parts`), and the clock
+# that moves every part (`schedule`), are pure and build without the service.
+# They reuse Random's grid, control set, level schedule and capture rules, and
+# Sine's sweep and dwell schedulers, profile rows and law seam.
+#
+# The RUN SERVICE (`service`, the default feature) is `MixedService`: the run
+# lifecycle a control service drives (arm, identification, gate, review, run in
+# chunks, level verbs, hold, part switching, stop, abort) and its status,
+# display and report surfaces.
+[dependencies]
+hertzforge-dsp.workspace = true
+hertzforge-breakpoints.workspace = true
+# The shaker record and moving mass the prediction reads (pure data).
+hertzforge-shaker-db.workspace = true
+# Random's control core and its configuration types (`ControlSet`,
+# `LevelSchedule`, `CaptureRules`, `LimitProfile`, `LawGuards`) live behind its
+# `service` feature, so the default features are taken.
+hertzforge-random.workspace = true
+# Sine's schedulers, profile rows and law seam are outside its `service` feature.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+# Service deps, behind the default `service` feature: the backend a run is handed,
+# the station class its arm gate is given, the channel table, capture marks and
+# the engine's health readout.
+hertzforge-engine = { path = "../hertzforge-engine", optional = true }
+hertzforge-hal = { workspace = true, optional = true }
+hertzforge-channel-table = { workspace = true, optional = true }
+hertzforge-capture = { workspace = true, optional = true }
+hertzforge-module-abi = { workspace = true, optional = true }
+
+[features]
+default = ["service"]
+service = [
+    "dep:hertzforge-engine",
+    "dep:hertzforge-hal",
+    "dep:hertzforge-channel-table",
+    "dep:hertzforge-capture",
+    "dep:hertzforge-module-abi",
+]
+
+[dev-dependencies]
+# TEST FIXTURE ONLY: a station for the service's construction tests. On
+# deny.toml's hertzforge-hal-sim wrapper list for that reason.
+hertzforge-hal-sim.workspace = true

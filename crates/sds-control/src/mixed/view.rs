@@ -1,0 +1,947 @@
+//! What a Mixed Mode run shows: the `mixed.state` object, the numbers every live
+//! frame carries, and the views drawn from the controller's display
+//! (schema/PROTOCOL.md, "Mixed Mode Run State" and "Mixed Mode Display"). The
+//! per-part rows, the floor's lines, the totals and the trip are encoded from the
+//! controller's [`MixedStatus`]; the spectra from its [`MixedDisplay`]. Keys are
+//! written in the contract's order.
+
+use super::config::{part_names, round, sig, Grid, RoleLaw, WireBody, WireMixed, WireSchedule};
+use crate::codec::Arrays;
+use crate::protocol::{num, opt_num};
+use crate::views::{self, Axis, Role, Row, Scale, Series, Status};
+use hertzforge_dsp::sweep::SweepRate;
+use hertzforge_mixed::{
+    Direction, LawRole, MixedDisplay, MixedStatus, MixedTrip, MixedTripKind, PartRow,
+};
+use hertzforge_random::RunMode;
+use serde_json::{json, Map, Value};
+use std::sync::Arc;
+
+pub use crate::random::view::State;
+pub use crate::sine::view::{IdentFacts, StationRef};
+
+/// One role's law and its counters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoleState {
+    pub law: RoleLaw,
+    pub misses: u32,
+    pub capped: u64,
+    /// The live parameters' values in force, by key.
+    pub live: Vec<(String, f64)>,
+}
+
+/// Both roles' laws and the values each reported on its last call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LawState {
+    pub floor: RoleState,
+    pub tones: RoleState,
+    /// The floor law's values on its last call, by key.
+    pub floor_values: Vec<(String, f64)>,
+    /// Each tone instance's values on its last call: part id, values.
+    pub tone_values: Vec<(String, Vec<(String, f64)>)>,
+    /// Whether the laws have been built (the live frame's `law` is null until then).
+    pub built: bool,
+}
+
+/// How a run ended.
+#[derive(Debug, Clone, PartialEq)]
+pub struct End {
+    pub outcome: &'static str,
+    pub message: String,
+    pub at_s: Option<f64>,
+    pub level_db: Option<f64>,
+    pub ramp_s: Option<f64>,
+    pub trip: Option<Value>,
+}
+
+/// One enabled input in the live frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveChannel {
+    pub index: u32,
+    pub description: String,
+    pub role: &'static str,
+    pub rms: Option<f64>,
+    pub unit: String,
+    pub overload: bool,
+}
+
+/// What the configuration says about each part that the rows need.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartFacts {
+    pub id: String,
+    pub kind: &'static str,
+    pub name: String,
+    /// The sweep's law, its own or its leader's (`true` log); `None` when it
+    /// stands still.
+    pub log_rate: Option<bool>,
+    /// Whether the part sweeps on its own schedule (a follower does not).
+    pub own_sweep: bool,
+    /// The sweeps a count asks for.
+    pub sweeps_of: Option<u32>,
+}
+
+/// The parts' facts, in the parts' order.
+pub fn part_facts(w: &WireMixed) -> Vec<PartFacts> {
+    let names = part_names(&w.parts);
+    let law_of = |mut i: usize| -> (Option<bool>, Option<u32>) {
+        for _ in 0..=w.parts.len() {
+            match w.parts[i].schedule() {
+                Some(WireSchedule::Sweep { rate, sweeps, .. }) => {
+                    return (Some(matches!(rate, SweepRate::LogOctPerMin(_))), *sweeps)
+                }
+                Some(WireSchedule::Follow { of, .. }) => {
+                    match w.parts.iter().position(|p| &p.id == of) {
+                        Some(j) => i = j,
+                        None => return (None, None),
+                    }
+                }
+                _ => return (None, None),
+            }
+        }
+        (None, None)
+    };
+    w.parts
+        .iter()
+        .enumerate()
+        .zip(names)
+        .map(|((i, p), name)| {
+            let (log_rate, sweeps_of) = law_of(i);
+            let own_sweep = matches!(p.schedule(), Some(WireSchedule::Sweep { .. }));
+            PartFacts {
+                id: p.id.clone(),
+                kind: match p.body {
+                    WireBody::Floor => "floor",
+                    WireBody::Tone { .. } => "tone",
+                    _ => "narrowband",
+                },
+                name,
+                log_rate,
+                own_sweep,
+                sweeps_of: if own_sweep { sweeps_of } else { None },
+            }
+        })
+        .collect()
+}
+
+/// Everything the state and the live frame say, as the run last published it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MixedView {
+    pub run_id: String,
+    pub title: String,
+    pub state: State,
+    pub phase: &'static str,
+    pub station: StationRef,
+    pub grid: Grid,
+    pub clock: Option<&'static str>,
+    pub mode: RunMode,
+    pub levels_db: Vec<f64>,
+    /// The commanded level.
+    pub level_db: Option<f64>,
+    /// The level the drive is at now.
+    pub achieved_db: Option<f64>,
+    pub full_level_s: f64,
+    pub t_s: Option<f64>,
+    pub elapsed_s: Option<f64>,
+    pub parts_s: Option<f64>,
+    pub at_level_s: Option<f64>,
+    pub remaining_at_level_s: Option<f64>,
+    pub level_s: Option<f64>,
+    pub loop_n: u64,
+    pub tick_n: u64,
+    pub held: bool,
+    pub parts: Vec<PartFacts>,
+    /// The controller's status as of the last chunk; `None` before it exists.
+    pub status: Option<MixedStatus>,
+    /// The composite's reference rms, g (the configuration's, at the level).
+    pub reference_rms_g: f64,
+    pub identification: Option<IdentFacts>,
+    pub law: Option<LawState>,
+    pub feasibility: Option<(&'static str, String)>,
+    pub end: Option<End>,
+    pub channels: Vec<LiveChannel>,
+    /// Whether the run has started streaming (`mixed.live` from identification on).
+    pub streaming: bool,
+    /// The spectra the views are drawn from, as of the last publish.
+    pub display: Option<Arc<MixedDisplay>>,
+}
+
+fn rows(v: &MixedView) -> Vec<Option<&PartRow>> {
+    v.parts
+        .iter()
+        .map(|f| {
+            v.status
+                .as_ref()
+                .and_then(|s| s.parts.iter().find(|r| r.id == f.id))
+        })
+        .collect()
+}
+
+fn dir_name(d: Direction) -> &'static str {
+    match d {
+        Direction::Up => "up",
+        Direction::Down => "down",
+    }
+}
+
+/// One part's row, from the controller's row (or the configuration's facts
+/// before there is one).
+pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatus>) -> Value {
+    let is_floor = f.kind == "floor";
+    let is_tone = f.kind == "tone";
+    let is_band = f.kind == "narrowband";
+    let r = row;
+    let moving = r.and_then(|r| r.direction).is_some() && f.log_rate.is_some();
+    let rate = r.and_then(|r| r.rate).filter(|_| f.log_rate.is_some());
+    let unit = if is_band { "g²/Hz" } else { "g" };
+    let (lines, dof) = if is_floor {
+        let fl = s.map(|s| s.floor);
+        (
+            fl.map_or(Value::Null, |fl| {
+                json!({
+                    "in_band": fl.lines_in_band,
+                    "clean": fl.lines_in_band.saturating_sub(fl.lines_out),
+                    "alarm": fl.alarm_lines,
+                    "abort": fl.abort_lines,
+                })
+            }),
+            fl.map_or(Value::Null, |fl| num(round(fl.dof, 1))),
+        )
+    } else {
+        (
+            Value::Null,
+            if is_band {
+                r.and_then(|r| r.dof)
+                    .map_or(Value::Null, |d| num(round(d, 1)))
+            } else {
+                Value::Null
+            },
+        )
+    };
+    let (target, measured, error_db) = if is_floor {
+        let fl = s.map(|s| s.floor);
+        (
+            fl.map(|f| f.rms_target_g),
+            fl.and_then(|f| f.rms_g),
+            fl.and_then(|f| f.error_db_rms),
+        )
+    } else {
+        (
+            r.map(|r| r.target),
+            r.and_then(|r| r.measured),
+            r.and_then(|r| r.error_db),
+        )
+    };
+    json!({
+        "id": f.id,
+        "kind": f.kind,
+        "name": f.name,
+        "enabled": r.is_none_or(|r| r.enabled),
+        "on": r.is_some_and(|r| r.on),
+        "scale": num(round(r.map_or(0.0, |r| r.scale), 4)),
+        "freq_hz": if is_floor { Value::Null } else { opt_num(r.and_then(|r| r.freq_hz).map(|x| round(x, 2))) },
+        "direction": if moving { r.and_then(|r| r.direction).map(dir_name).map_or(Value::Null, Value::from) } else { Value::Null },
+        "sweeps": if f.own_sweep {
+            json!({"done": r.map_or(0, |r| r.sweeps_done), "of": f.sweeps_of})
+        } else {
+            Value::Null
+        },
+        "rate_oct_per_min": if f.log_rate == Some(true) { opt_num(rate.map(|x| sig(x, 4))) } else { Value::Null },
+        "rate_hz_per_s": if f.log_rate == Some(false) { opt_num(rate.map(|x| sig(x, 4))) } else { Value::Null },
+        "width_hz": if is_band { opt_num(r.and_then(|r| r.width_hz).map(|x| round(x, 3))) } else { Value::Null },
+        "unit": unit,
+        "target": opt_num(target.map(|x| sig(x, 4))),
+        "measured": opt_num(measured.map(|x| sig(x, 4))),
+        "error_db": opt_num(error_db.map(|x| round(x, 2))),
+        "alarm": r.is_some_and(|r| r.alarm),
+        "drive_vpk": if is_tone { opt_num(r.map(|r| sig(r.drive, 4))) } else { Value::Null },
+        "drive_vrms": if is_tone { Value::Null } else { opt_num(r.map(|r| sig(r.drive, 4))) },
+        "gain_db": if is_band { opt_num(r.and_then(|r| r.gain_db).map(|x| round(x, 2))) } else { Value::Null },
+        "settled": r.is_some_and(|r| r.settled),
+        "limiting": r.is_some_and(|r| r.limiting),
+        "dof": dof,
+        "lines": lines,
+        "law": if is_band { Value::Null } else { json!({"misses": r.map_or(0, |r| r.misses), "capped": r.map_or(0, |r| r.capped)}) },
+    })
+}
+
+fn parts_json(v: &MixedView) -> Value {
+    Value::Array(
+        v.parts
+            .iter()
+            .zip(rows(v))
+            .map(|(f, r)| part_row_json(f, r, v.status.as_ref()))
+            .collect(),
+    )
+}
+
+fn total_json(v: &MixedView) -> Value {
+    let t = v.status.as_ref().map(|s| s.totals);
+    json!({
+        "rms_g": opt_num(t.and_then(|t| t.control_rms_g).map(|x| sig(x, 4))),
+        "reference_rms_g": num(sig(v.reference_rms_g, 4)),
+        "drive_vpk": opt_num(t.map(|t| sig(t.drive_vpk, 4))),
+        "drive_vrms": opt_num(t.map(|t| sig(t.drive_vrms, 4))),
+    })
+}
+
+fn role_json(r: &RoleState) -> Value {
+    let mut live = Map::new();
+    for (k, x) in &r.live {
+        live.insert(k.clone(), num(*x));
+    }
+    json!({
+        "id": r.law.id,
+        "name": r.law.name,
+        "version": r.law.version,
+        "sha256": if r.law.sha256.is_empty() { Value::Null } else { Value::from(r.law.sha256.as_str()) },
+        "misses": r.misses,
+        "capped": r.capped,
+        "live": live,
+    })
+}
+
+fn end_json(e: &End) -> Value {
+    json!({
+        "outcome": e.outcome,
+        "message": e.message,
+        "at_s": opt_num(e.at_s.map(|x| round(x, 3))),
+        "level_db": opt_num(e.level_db.map(|x| round(x, 2))),
+        "ramp_s": opt_num(e.ramp_s.map(|x| round(x, 3))),
+        "trip": e.trip.clone().unwrap_or(Value::Null),
+    })
+}
+
+fn ident_json(i: &IdentFacts) -> Value {
+    json!({
+        "level_db": num(i.level_db),
+        "band_coherence": num(round(i.band_coherence, 4)),
+        "gate_coherence": num(i.gate_coherence),
+        "lag_frames": i.lag_frames,
+        "trusted_frac": num(round(i.trusted_frac, 4)),
+        "passed": i.passed,
+    })
+}
+
+/// The `mixed.state` object; `None` is the unconfigured service.
+pub fn state_json(v: Option<&MixedView>) -> Value {
+    let Some(v) = v else {
+        return json!({
+            "run_id": null, "state": "unconfigured", "phase": "idle", "title": null,
+            "source": null, "station": null, "grid": null, "clock": null, "mode": null,
+            "levels_db": null, "level_db": null, "full_level_s": null, "t_s": null,
+            "elapsed_s": null, "parts_s": null, "at_level_s": null,
+            "remaining_at_level_s": null, "held": false, "alarm": false, "limiting": false,
+            "parts": [], "total": null, "identification": null, "law": null,
+            "feasibility": null, "end": null,
+        });
+    };
+    json!({
+        "run_id": v.run_id,
+        "state": v.state.name(),
+        "phase": v.phase,
+        "title": v.title,
+        "source": v.station.source(),
+        "station": v.station.to_json(),
+        "grid": v.grid.to_json(),
+        "clock": v.clock,
+        "mode": crate::random::view::mode_name(v.mode),
+        "levels_db": v.levels_db.iter().map(|l| num(*l)).collect::<Vec<_>>(),
+        "level_db": opt_num(v.level_db.map(|x| round(x, 2))),
+        "full_level_s": num(v.full_level_s),
+        "t_s": opt_num(v.t_s.map(|x| round(x, 3))),
+        "elapsed_s": opt_num(v.elapsed_s.map(|x| round(x, 3))),
+        "parts_s": opt_num(v.parts_s.map(|x| round(x, 3))),
+        "at_level_s": opt_num(v.at_level_s.map(|x| round(x, 3))),
+        "remaining_at_level_s": opt_num(v.remaining_at_level_s.map(|x| round(x, 3))),
+        "held": v.held,
+        "alarm": alarm(v),
+        "limiting": limiting(v),
+        "parts": parts_json(v),
+        "total": total_json(v),
+        "identification": v.identification.as_ref().map_or(Value::Null, ident_json),
+        "law": v.law.as_ref().map_or(Value::Null, |l| json!({
+            "floor": role_json(&l.floor),
+            "tones": role_json(&l.tones),
+        })),
+        "feasibility": v.feasibility.as_ref().map_or(Value::Null, |(verdict, message)| {
+            json!({"verdict": verdict, "message": message})
+        }),
+        "end": v.end.as_ref().map_or(Value::Null, end_json),
+    })
+}
+
+/// Any part outside its alarm band.
+pub fn alarm(v: &MixedView) -> bool {
+    v.status
+        .as_ref()
+        .is_some_and(|s| s.parts.iter().any(|r| r.alarm) || s.floor.alarm_lines > 0)
+}
+
+/// Any part held down by the ceiling, a limit channel or a cap.
+pub fn limiting(v: &MixedView) -> bool {
+    v.status
+        .as_ref()
+        .is_some_and(|s| s.parts.iter().any(|r| r.limiting))
+}
+
+/// What `mixed.state` events are sent on a change of.
+pub fn state_key(v: Option<&MixedView>) -> String {
+    match v {
+        None => "unconfigured".into(),
+        Some(v) => {
+            let parts: String = rows(v)
+                .iter()
+                .map(|r| match r {
+                    Some(r) => format!("{}{}{}", r.on as u8, r.alarm as u8, r.settled as u8),
+                    None => "---".into(),
+                })
+                .collect();
+            format!(
+                "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{}",
+                v.run_id,
+                v.state.name(),
+                v.phase,
+                crate::random::view::mode_name(v.mode),
+                v.level_db.map(|x| round(x, 2)),
+                v.held,
+                alarm(v),
+                limiting(v),
+                v.end.is_some(),
+                parts,
+            )
+        }
+    }
+}
+
+/// The trip object of a controller trip, naming its part (schema/PROTOCOL.md,
+/// the trip table). `at_hz` is the part's frequency then.
+pub fn trip_json(t: &MixedTrip, level_db: f64, at_hz: Option<f64>) -> Value {
+    let mut m = Map::new();
+    let (kind, facts): (&str, Value) = match &t.kind {
+        MixedTripKind::FloorAbort { lines_out } => (
+            "envelope",
+            json!({"abort_lines": lines_out, "worst_db": null}),
+        ),
+        MixedTripKind::FloorRmsAbort { error_db } => (
+            "envelope",
+            json!({"abort_lines": 0, "worst_db": num(round(*error_db, 2))}),
+        ),
+        MixedTripKind::ToneAbort { error_db } => (
+            "abort_band",
+            json!({"side": if *error_db >= 0.0 { "high" } else { "low" }, "measured_g": null, "limit_g": null, "error_db": num(round(*error_db, 2))}),
+        ),
+        MixedTripKind::BandAbort { error_db } => (
+            "band_abort",
+            json!({"side": if *error_db >= 0.0 { "high" } else { "low" }, "measured_g2_hz": null, "limit_g2_hz": null, "dof": null, "error_db": num(round(*error_db, 2))}),
+        ),
+        MixedTripKind::DriveVpk {
+            realized_vpk,
+            limit_vpk,
+        } => (
+            "drive_vpk",
+            json!({"vpk": num(sig(*realized_vpk, 4)), "abort_vpk": num(*limit_vpk)}),
+        ),
+        MixedTripKind::Kinematic {
+            channel_index,
+            axis,
+            value,
+            limit,
+        } => (
+            "kinematic",
+            json!({"channel": channel_index, "axis": axis, "value": num(sig(*value, 4)), "limit": num(sig(*limit, 4))}),
+        ),
+        MixedTripKind::LimitChannel {
+            channel_index,
+            measured,
+            limit,
+        } => (
+            "watchdog",
+            json!({"channel": channel_index, "axis": "accel", "value": num(sig(*measured, 4)), "limit": num(sig(*limit, 4)), "measured": num(sig(*measured, 4)), "drive_vpk": null}),
+        ),
+        MixedTripKind::Overload { channel_index } => {
+            ("overload", json!({"channel": channel_index}))
+        }
+        MixedTripKind::Divergence => ("divergence", json!({})),
+        MixedTripKind::LawFault { role, reason } => (
+            "law_fault",
+            json!({"role": match role { LawRole::Floor => "floor", LawRole::Tones => "tones" }, "reason": reason, "consecutive": null}),
+        ),
+        MixedTripKind::Station { message } => ("station", json!({"message": message})),
+    };
+    m.insert("kind".into(), Value::from(kind));
+    m.insert(
+        "part".into(),
+        t.part.as_deref().map_or(Value::Null, Value::from),
+    );
+    m.insert("at_level_db".into(), num(round(level_db, 2)));
+    m.insert("at_s".into(), num(round(t.t_s, 3)));
+    m.insert("at_loop".into(), Value::Null);
+    m.insert("at_tick".into(), Value::Null);
+    m.insert("at_hz".into(), opt_num(at_hz.map(|x| round(x, 2))));
+    if let Value::Object(f) = facts {
+        m.extend(f);
+    }
+    Value::Object(m)
+}
+
+/// The numbers every live frame carries, `mixed.live` and `mixed.data` alike.
+pub fn live_head(v: &MixedView) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("run_id".into(), Value::from(v.run_id.as_str()));
+    m.insert("source".into(), Value::from(v.station.source()));
+    m.insert("class".into(), Value::from(v.station.class));
+    m.insert("state".into(), Value::from(v.state.name()));
+    m.insert("phase".into(), Value::from(v.phase));
+    m.insert(
+        "mode".into(),
+        Value::from(crate::random::view::mode_name(v.mode)),
+    );
+    m.insert("t_s".into(), opt_num(v.t_s.map(|x| round(x, 3))));
+    m.insert(
+        "elapsed_s".into(),
+        opt_num(v.elapsed_s.map(|x| round(x, 3))),
+    );
+    m.insert("parts_s".into(), opt_num(v.parts_s.map(|x| round(x, 3))));
+    m.insert(
+        "level_db".into(),
+        opt_num(v.achieved_db.map(|x| round(x, 2))),
+    );
+    m.insert(
+        "commanded_db".into(),
+        opt_num(v.level_db.map(|x| round(x, 2))),
+    );
+    m.insert(
+        "at_level_s".into(),
+        opt_num(v.at_level_s.map(|x| round(x, 3))),
+    );
+    m.insert(
+        "remaining_at_level_s".into(),
+        opt_num(v.remaining_at_level_s.map(|x| round(x, 3))),
+    );
+    m.insert("level_s".into(), opt_num(v.level_s.map(|x| round(x, 3))));
+    m.insert("loop".into(), Value::from(v.loop_n));
+    m.insert("tick".into(), Value::from(v.tick_n));
+    m.insert("held".into(), Value::from(v.held));
+    m.insert("alarm".into(), Value::from(alarm(v)));
+    m.insert("limiting".into(), Value::from(limiting(v)));
+    m.insert("parts".into(), parts_json(v));
+    m.insert("total".into(), total_json(v));
+    m.insert(
+        "channels".into(),
+        Value::Array(
+            v.channels
+                .iter()
+                .map(|c| {
+                    json!({
+                        "index": c.index,
+                        "description": c.description,
+                        "role": c.role,
+                        "rms": opt_num(c.rms.map(|x| sig(x, 4))),
+                        "unit": c.unit,
+                        "overload": c.overload,
+                    })
+                })
+                .collect(),
+        ),
+    );
+    m.insert("alarms".into(), alarms_json(v));
+    m.insert(
+        "law".into(),
+        match &v.law {
+            Some(l) if l.built => law_frame_json(v, l),
+            _ => Value::Null,
+        },
+    );
+    m
+}
+
+fn values_json(vals: &[(String, f64)]) -> Value {
+    let mut m = Map::new();
+    for (k, x) in vals {
+        m.insert(k.clone(), num(*x));
+    }
+    Value::Object(m)
+}
+
+fn law_frame_json(v: &MixedView, l: &LawState) -> Value {
+    let tones: Vec<Value> = v
+        .parts
+        .iter()
+        .zip(rows(v))
+        .filter(|(f, _)| f.kind == "tone")
+        .map(|(f, r)| {
+            let vals = l
+                .tone_values
+                .iter()
+                .find(|(id, _)| id == &f.id)
+                .map(|(_, v)| v.as_slice())
+                .unwrap_or(&[]);
+            json!({
+                "part": f.id,
+                "values": values_json(vals),
+                "misses": r.map_or(0, |r| r.misses),
+                "capped": r.map_or(0, |r| r.capped),
+            })
+        })
+        .collect();
+    json!({
+        "floor": {
+            "values": values_json(&l.floor_values),
+            "misses": l.floor.misses,
+            "capped": l.floor.capped,
+        },
+        "tones": tones,
+    })
+}
+
+/// What holds now: the floor's envelope, each part's band, overloads.
+pub fn alarms_json(v: &MixedView) -> Value {
+    let mut out = Vec::new();
+    if let Some(s) = &v.status {
+        let floor = v.parts.iter().find(|f| f.kind == "floor");
+        if s.floor.alarm_lines > 0 {
+            out.push(json!({
+                "kind": "envelope",
+                "part": floor.map(|f| f.id.as_str()),
+                "lines": s.floor.alarm_lines,
+                "worst_db": null,
+            }));
+        }
+        for (f, r) in v.parts.iter().zip(rows(v)) {
+            let Some(r) = r else { continue };
+            if f.kind != "floor" && r.alarm {
+                let e = r.error_db.unwrap_or(0.0);
+                out.push(json!({
+                    "kind": "band",
+                    "part": f.id,
+                    "side": if e >= 0.0 { "high" } else { "low" },
+                    "error_db": num(round(e, 2)),
+                }));
+            }
+        }
+    }
+    for c in v.channels.iter().filter(|c| c.overload) {
+        out.push(json!({"kind": "overload", "channel": c.index}));
+    }
+    Value::Array(out)
+}
+
+/// The line centers of the display's grid.
+fn centers(d: &MixedDisplay) -> Vec<f64> {
+    (0..d.grid.lines)
+        .map(|k| d.grid.f0_hz + k as f64 * d.grid.df_hz)
+        .collect()
+}
+
+fn stepped(name: &str, role: Role, d: &MixedDisplay, y: &[f32]) -> Series {
+    let mut s = Series::new(
+        name,
+        role,
+        centers(d),
+        y.iter().map(|x| f64::from(*x)).collect(),
+    );
+    s.edges = Some(d.grid.edges_hz());
+    s
+}
+
+/// The lines left out of the floor's average as `cut` regions, each naming the
+/// part whose frequency lies in it.
+fn cut_regions(v: &MixedView, d: &MixedDisplay) -> Value {
+    let edges = d.grid.edges_hz();
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < d.excluded.len() {
+        if !d.excluded[k] {
+            k += 1;
+            continue;
+        }
+        let start = k;
+        while k < d.excluded.len() && d.excluded[k] {
+            k += 1;
+        }
+        let (x0, x1) = (edges[start], edges[k.min(edges.len() - 1)]);
+        let name = v
+            .parts
+            .iter()
+            .zip(rows(v))
+            .find(|(_, r)| {
+                r.and_then(|r| r.freq_hz)
+                    .is_some_and(|f| f >= x0 && f <= x1)
+            })
+            .map(|(f, _)| f.name.clone());
+        out.push(json!({
+            "x0": num(round(x0, 6)),
+            "x1": num(round(x1, 6)),
+            "kind": "cut",
+            "label": match name { Some(n) => format!("Left out: {n}"), None => "Left out".into() },
+        }));
+    }
+    Value::Array(out)
+}
+
+fn psd_axes() -> (Axis, Axis) {
+    (
+        Axis::new("Frequency", Some("Hz"), Scale::Log),
+        Axis::new("PSD", Some("g²/Hz"), Scale::Log),
+    )
+}
+
+fn reference_series(d: &MixedDisplay) -> Vec<Series> {
+    let mut s = Vec::new();
+    if !d.reference.is_empty() {
+        s.push(stepped("Reference", Role::Reference, d, &d.reference));
+    }
+    for (name, role, y) in [
+        ("Alarm high", Role::Tolerance, &d.alarm_hi),
+        ("Alarm low", Role::Tolerance, &d.alarm_lo),
+        ("Abort high", Role::Abort, &d.abort_hi),
+        ("Abort low", Role::Abort, &d.abort_lo),
+    ] {
+        if !y.is_empty() {
+            s.push(stepped(name, role, d, y));
+        }
+    }
+    s
+}
+
+fn spectrum_with_regions(
+    v: &MixedView,
+    d: &MixedDisplay,
+    title: &str,
+    first: (&str, Role, &[f32]),
+    arrays: &mut Arrays,
+) -> Value {
+    let (x, y) = psd_axes();
+    let mut series = Vec::new();
+    if !first.2.is_empty() {
+        series.push(stepped(first.0, first.1, d, first.2));
+    }
+    series.extend(reference_series(d));
+    let mut view = views::spectrum(arrays, title, &x, &y, series, Some("frequency"));
+    view["regions"] = cut_regions(v, d);
+    view
+}
+
+/// The **Control** view.
+pub fn control_view(v: &MixedView, d: &MixedDisplay, arrays: &mut Arrays) -> Value {
+    spectrum_with_regions(
+        v,
+        d,
+        "Control",
+        ("Control", Role::Measured, &d.control),
+        arrays,
+    )
+}
+
+/// The **Residual** view.
+pub fn residual_view(v: &MixedView, d: &MixedDisplay, arrays: &mut Arrays) -> Value {
+    spectrum_with_regions(
+        v,
+        d,
+        "Residual",
+        ("Residual", Role::Measured, &d.residual),
+        arrays,
+    )
+}
+
+/// The **Drive** view: the random part's drive spectrum.
+pub fn drive_view(d: &MixedDisplay, arrays: &mut Arrays) -> Value {
+    let x = Axis::new("Frequency", Some("Hz"), Scale::Log);
+    let y = Axis::new("PSD", Some("V²/Hz"), Scale::Log);
+    let series = if d.drive.is_empty() {
+        Vec::new()
+    } else {
+        vec![stepped("Drive", Role::Drive, d, &d.drive)]
+    };
+    views::spectrum(arrays, "Drive", &x, &y, series, Some("frequency"))
+}
+
+/// The **Run** reading.
+pub fn run_reading(v: &MixedView) -> Value {
+    let mut rs = Vec::new();
+    if let Some(l) = v.achieved_db {
+        rs.push(Row::number("Level", round(l, 2), Some("dB"), Status::Info));
+    }
+    if let Some(e) = v.elapsed_s {
+        rs.push(Row::number("Elapsed", round(e, 1), Some("s"), Status::Info));
+    }
+    if let Some(r) = v.remaining_at_level_s {
+        rs.push(Row::number(
+            "Remaining",
+            round(r, 1),
+            Some("s"),
+            Status::Info,
+        ));
+    }
+    if let Some(t) = v.status.as_ref().and_then(|s| s.totals.control_rms_g) {
+        rs.push(Row::number("Total rms", sig(t, 4), Some("g"), Status::Info));
+    }
+    rs.push(Row::number(
+        "Reference rms",
+        sig(v.reference_rms_g, 4),
+        Some("g"),
+        Status::Info,
+    ));
+    if let Some(s) = &v.status {
+        rs.push(Row::number(
+            "Drive peak",
+            sig(s.totals.drive_vpk, 4),
+            Some("V"),
+            Status::Info,
+        ));
+    }
+    for (f, r) in v.parts.iter().zip(rows(v)) {
+        let Some(r) = r.filter(|r| r.on) else {
+            continue;
+        };
+        let unit = if f.kind == "narrowband" {
+            "g²/Hz"
+        } else {
+            "g"
+        };
+        let status = if r.alarm { Status::Warn } else { Status::Pass };
+        if let Some(fr) = r.freq_hz {
+            rs.push(Row::number(
+                &format!("{}: Frequency", f.name),
+                round(fr, 2),
+                Some("Hz"),
+                Status::Info,
+            ));
+        }
+        let (target, measured, error) = if f.kind == "floor" {
+            let fl = v.status.as_ref().map(|s| s.floor);
+            (
+                fl.map(|x| x.rms_target_g),
+                fl.and_then(|x| x.rms_g),
+                fl.and_then(|x| x.error_db_rms),
+            )
+        } else {
+            (Some(r.target), r.measured, r.error_db)
+        };
+        if let Some(m) = measured {
+            rs.push(Row::number(
+                &format!("{}: Measured", f.name),
+                sig(m, 4),
+                Some(unit),
+                status,
+            ));
+        }
+        if let Some(t) = target {
+            rs.push(Row::number(
+                &format!("{}: Target", f.name),
+                sig(t, 4),
+                Some(unit),
+                Status::Info,
+            ));
+        }
+        if let Some(e) = error {
+            rs.push(Row::number(
+                &format!("{}: Error", f.name),
+                round(e, 2),
+                Some("dB"),
+                status,
+            ));
+        }
+    }
+    views::reading("Run", rs)
+}
+
+/// The views of a live frame, in the contract's order.
+pub fn live_views(v: &MixedView, arrays: &mut Arrays) -> Vec<Value> {
+    let mut out = Vec::new();
+    if let Some(d) = &v.display {
+        out.push(control_view(v, d, arrays));
+        out.push(residual_view(v, d, arrays));
+        out.push(drive_view(d, arrays));
+    }
+    out.push(run_reading(v));
+    out
+}
+
+/// `mixed.live`.
+pub fn live_json(v: &MixedView, arrays: &mut Arrays) -> Value {
+    let mut m = live_head(v);
+    m.insert("views".into(), Value::Array(live_views(v, arrays)));
+    Value::Object(m)
+}
+
+/// A run's view as configured: nothing open, every part's row from the
+/// configuration.
+pub fn configured_view(
+    run_id: &str,
+    w: &WireMixed,
+    grid: Grid,
+    reference_rms_g: f64,
+    station: StationRef,
+    law: Option<LawState>,
+    feasibility: Option<(&'static str, String)>,
+) -> MixedView {
+    MixedView {
+        run_id: run_id.to_owned(),
+        title: w.title.clone(),
+        state: State::Configured,
+        phase: "idle",
+        station,
+        grid,
+        clock: None,
+        mode: w.random.mode,
+        levels_db: w.random.levels.iter().map(|l| l.0).collect(),
+        level_db: None,
+        achieved_db: None,
+        full_level_s: w.random.full_level_s,
+        t_s: None,
+        elapsed_s: None,
+        parts_s: None,
+        at_level_s: None,
+        remaining_at_level_s: None,
+        level_s: None,
+        loop_n: 0,
+        tick_n: 0,
+        held: false,
+        parts: part_facts(w),
+        status: None,
+        reference_rms_g,
+        identification: None,
+        law,
+        feasibility,
+        end: None,
+        channels: Vec::new(),
+        streaming: false,
+        display: None,
+    }
+}
+
+/// The wire phase of the controller's lifecycle state and start-up phase.
+pub fn wire_state(s: &MixedStatus) -> (State, &'static str) {
+    use hertzforge_mixed::{MixedPhase as P, MixedState as S};
+    match (s.state, s.phase) {
+        (S::Idle, _) => (State::Armed, "armed"),
+        (S::SysId, _) => (State::Running, "sysid"),
+        (S::CoherenceGate, _) => (State::Running, "coherence_gate"),
+        (S::CoherenceHold, _) => (State::Finished, "coherence_hold"),
+        (S::AwaitingReview, _) => (State::Review, "awaiting_review"),
+        (_, P::RampingDown) if !s.state.is_terminal() => (State::Stopping, "ramping_down"),
+        (S::Engaged, P::FloorOnly) => (State::Running, "floor_only"),
+        (S::Engaged, _) => (State::Running, "engaged"),
+        (S::FullLevel, _) => (State::Running, "full_level"),
+        (S::Stopped, _) => (State::Finished, "stopped"),
+        (S::Aborted, _) => (State::Finished, "aborted"),
+    }
+}
+
+/// Take the controller's status into the view: the state and phase, the rows,
+/// the level and the clocks.
+pub fn apply_status(v: &mut MixedView, s: &MixedStatus) {
+    let (state, phase) = wire_state(s);
+    v.state = state;
+    v.phase = phase;
+    v.level_db = Some(s.level_db);
+    v.achieved_db = Some(s.level_db);
+    v.mode = s.run_mode;
+    v.held = s.held;
+    v.t_s = Some(s.t_s);
+    v.parts_s = (s.phase != hertzforge_mixed::MixedPhase::FloorOnly
+        && s.phase != hertzforge_mixed::MixedPhase::Idle)
+        .then_some(s.test_s);
+    v.status = Some(s.clone());
+}

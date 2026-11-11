@@ -1,0 +1,1077 @@
+{
+ "type": "event",
+ "topic": "mixed.live",
+ "seq": 191,
+ "data": {
+  "run_id": "mixed-0002",
+  "source": "SIM",
+  "class": "sim",
+  "state": "running",
+  "phase": "full_level",
+  "mode": "auto",
+  "t_s": 131.5,
+  "elapsed_s": 131.5,
+  "parts_s": 96.25,
+  "level_db": 0,
+  "commanded_db": 0,
+  "at_level_s": 36.25,
+  "remaining_at_level_s": 263.75,
+  "level_s": 36.25,
+  "loop": 63,
+  "tick": 13136,
+  "held": false,
+  "alarm": true,
+  "limiting": false,
+  "parts": [
+   {
+    "id": "floor",
+    "kind": "floor",
+    "name": "Floor",
+    "enabled": true,
+    "on": true,
+    "scale": 1,
+    "freq_hz": null,
+    "direction": null,
+    "sweeps": null,
+    "rate_oct_per_min": null,
+    "rate_hz_per_s": null,
+    "width_hz": null,
+    "unit": "g",
+    "target": 6.062,
+    "measured": 6.02,
+    "error_db": -0.06,
+    "alarm": false,
+    "drive_vpk": null,
+    "drive_vrms": 0.58,
+    "gain_db": null,
+    "settled": true,
+    "limiting": false,
+    "dof": 120,
+    "lines": {
+     "in_band": 3961,
+     "clean": 3909,
+     "alarm": 2,
+     "abort": 0
+    },
+    "law": {
+     "misses": 0,
+     "capped": 0
+    }
+   },
+   {
+    "id": "t1",
+    "kind": "tone",
+    "name": "Blade pass",
+    "enabled": true,
+    "on": true,
+    "scale": 1,
+    "freq_hz": 120,
+    "direction": null,
+    "sweeps": null,
+    "rate_oct_per_min": null,
+    "rate_hz_per_s": null,
+    "width_hz": null,
+    "unit": "g",
+    "target": 2,
+    "measured": 2.03,
+    "error_db": 0.13,
+    "alarm": false,
+    "drive_vpk": 0.25,
+    "drive_vrms": null,
+    "gain_db": null,
+    "settled": true,
+    "limiting": false,
+    "dof": null,
+    "lines": null,
+    "law": {
+     "misses": 0,
+     "capped": 0
+    }
+   },
+   {
+    "id": "t2",
+    "kind": "tone",
+    "name": "Rotor",
+    "enabled": true,
+    "on": true,
+    "scale": 1,
+    "freq_hz": 412.63,
+    "direction": "up",
+    "sweeps": {
+     "done": 1,
+     "of": 4
+    },
+    "rate_oct_per_min": 1,
+    "rate_hz_per_s": null,
+    "width_hz": null,
+    "unit": "g",
+    "target": 1.19,
+    "measured": 1.21,
+    "error_db": 0.15,
+    "alarm": false,
+    "drive_vpk": 0.31,
+    "drive_vrms": null,
+    "gain_db": null,
+    "settled": true,
+    "limiting": false,
+    "dof": null,
+    "lines": null,
+    "law": {
+     "misses": 0,
+     "capped": 0
+    }
+   },
+   {
+    "id": "t3",
+    "kind": "tone",
+    "name": "Rotor 2nd",
+    "enabled": true,
+    "on": true,
+    "scale": 1,
+    "freq_hz": 825.25,
+    "direction": "up",
+    "sweeps": null,
+    "rate_oct_per_min": 1,
+    "rate_hz_per_s": null,
+    "width_hz": null,
+    "unit": "g",
+    "target": 0.5,
+    "measured": 0.48,
+    "error_db": -0.35,
+    "alarm": false,
+    "drive_vpk": 0.0625,
+    "drive_vrms": null,
+    "gain_db": null,
+    "settled": true,
+    "limiting": false,
+    "dof": null,
+    "lines": null,
+    "law": {
+     "misses": 1,
+     "capped": 0
+    }
+   },
+   {
+    "id": "b1",
+    "kind": "narrowband",
+    "name": "Gear mesh",
+    "enabled": true,
+    "on": true,
+    "scale": 1,
+    "freq_hz": 250,
+    "direction": null,
+    "sweeps": null,
+    "rate_oct_per_min": null,
+    "rate_hz_per_s": null,
+    "width_hz": 20,
+    "unit": "g²/Hz",
+    "target": 0.2425,
+    "measured": 0.2375,
+    "error_db": -0.09,
+    "alarm": false,
+    "drive_vpk": null,
+    "drive_vrms": 0.125,
+    "gain_db": 0.25,
+    "settled": true,
+    "limiting": false,
+    "dof": 184,
+    "lines": null,
+    "law": null
+   },
+   {
+    "id": "b2",
+    "kind": "narrowband",
+    "name": "Rotor band",
+    "enabled": true,
+    "on": true,
+    "scale": 1,
+    "freq_hz": 1472.5,
+    "direction": "up",
+    "sweeps": {
+     "done": 0,
+     "of": null
+    },
+    "rate_oct_per_min": null,
+    "rate_hz_per_s": 2,
+    "width_hz": 73.625,
+    "unit": "g²/Hz",
+    "target": 0.1046,
+    "measured": 0.0991,
+    "error_db": -0.23,
+    "alarm": true,
+    "drive_vpk": null,
+    "drive_vrms": 0.11,
+    "gain_db": 0.4,
+    "settled": true,
+    "limiting": false,
+    "dof": 184,
+    "lines": null,
+    "law": null
+   }
+  ],
+  "total": {
+   "rms_g": 7.21,
+   "reference_rms_g": 7.28,
+   "drive_vpk": 2.91,
+   "drive_vrms": 0.66
+  },
+  "channels": [
+   {
+    "index": 1,
+    "description": "Control",
+    "role": "control",
+    "rms": 7.18,
+    "unit": "g",
+    "overload": false
+   },
+   {
+    "index": 3,
+    "description": "Fixture",
+    "role": "monitor",
+    "rms": 9.5,
+    "unit": "g",
+    "overload": false
+   }
+  ],
+  "alarms": [
+   {
+    "kind": "envelope",
+    "part": "floor",
+    "lines": 2,
+    "worst_db": null
+   },
+   {
+    "kind": "band",
+    "part": "b2",
+    "side": "low",
+    "error_db": -0.23
+   }
+  ],
+  "law": {
+   "floor": {
+    "values": {
+     "damping": 4
+    },
+    "misses": 0,
+    "capped": 0
+   },
+   "tones": [
+    {
+     "part": "t1",
+     "values": {},
+     "misses": 0,
+     "capped": 0
+    },
+    {
+     "part": "t2",
+     "values": {
+      "servo_step_db": 0.03125
+     },
+     "misses": 0,
+     "capped": 0
+    },
+    {
+     "part": "t3",
+     "values": {},
+     "misses": 1,
+     "capped": 0
+    }
+   ]
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Control",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "PSD",
+     "unit": "g²/Hz",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Control",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0390625,
+        0.5,
+        0.046875,
+        0.0390625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0390625,
+        0.0390625,
+        0.0390625,
+        0.0390625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.078125,
+        0.078125,
+        0.078125,
+        0.078125
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.01953125,
+        0.01953125,
+        0.01953125,
+        0.01953125
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.15625,
+        0.15625,
+        0.15625,
+        0.15625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.009765625,
+        0.009765625,
+        0.009765625,
+        0.009765625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     }
+    ],
+    "link": "frequency",
+    "regions": [
+     {
+      "x0": 103.125,
+      "x1": 115.625,
+      "kind": "cut",
+      "label": "Left out"
+     }
+    ]
+   },
+   {
+    "view": "spectrum",
+    "title": "Residual",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "PSD",
+     "unit": "g²/Hz",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Residual",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0390625,
+        0.0625,
+        0.046875,
+        0.0390625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0390625,
+        0.0390625,
+        0.0390625,
+        0.0390625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.078125,
+        0.078125,
+        0.078125,
+        0.078125
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.01953125,
+        0.01953125,
+        0.01953125,
+        0.01953125
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.15625,
+        0.15625,
+        0.15625,
+        0.15625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.009765625,
+        0.009765625,
+        0.009765625,
+        0.009765625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     }
+    ],
+    "link": "frequency",
+    "regions": [
+     {
+      "x0": 103.125,
+      "x1": 115.625,
+      "kind": "cut",
+      "label": "Left out"
+     }
+    ]
+   },
+   {
+    "view": "spectrum",
+    "title": "Drive",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "PSD",
+     "unit": "V²/Hz",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Drive",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        100.0,
+        106.25,
+        112.5,
+        118.75
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.000244140625,
+        0.00048828125,
+        0.000244140625,
+        0.000244140625
+       ]
+      },
+      "shape": "steps",
+      "edges": {
+       "dtype": "f64",
+       "shape": [
+        5
+       ],
+       "values": [
+        96.875,
+        103.125,
+        109.375,
+        115.625,
+        121.875
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "reading",
+    "title": "Run",
+    "rows": [
+     {
+      "label": "Level",
+      "value": 0.0,
+      "unit": "dB",
+      "status": "info"
+     },
+     {
+      "label": "Elapsed",
+      "value": 131.5,
+      "unit": "s",
+      "status": "info"
+     },
+     {
+      "label": "Remaining",
+      "value": 263.8,
+      "unit": "s",
+      "status": "info"
+     },
+     {
+      "label": "Total rms",
+      "value": 7.21,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Reference rms",
+      "value": 7.28,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Drive peak",
+      "value": 2.91,
+      "unit": "V",
+      "status": "info"
+     },
+     {
+      "label": "Floor: Measured",
+      "value": 6.02,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Floor: Target",
+      "value": 6.062,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Floor: Error",
+      "value": -0.06,
+      "unit": "dB",
+      "status": "pass"
+     },
+     {
+      "label": "Blade pass: Frequency",
+      "value": 120.0,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Blade pass: Measured",
+      "value": 2.03,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Blade pass: Target",
+      "value": 2.0,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Blade pass: Error",
+      "value": 0.13,
+      "unit": "dB",
+      "status": "pass"
+     },
+     {
+      "label": "Rotor: Frequency",
+      "value": 412.63,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Rotor: Measured",
+      "value": 1.21,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Rotor: Target",
+      "value": 1.19,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Rotor: Error",
+      "value": 0.15,
+      "unit": "dB",
+      "status": "pass"
+     },
+     {
+      "label": "Rotor 2nd: Frequency",
+      "value": 825.25,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Rotor 2nd: Measured",
+      "value": 0.48,
+      "unit": "g",
+      "status": "pass"
+     },
+     {
+      "label": "Rotor 2nd: Target",
+      "value": 0.5,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Rotor 2nd: Error",
+      "value": -0.35,
+      "unit": "dB",
+      "status": "pass"
+     },
+     {
+      "label": "Gear mesh: Frequency",
+      "value": 250.0,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Gear mesh: Measured",
+      "value": 0.2375,
+      "unit": "g²/Hz",
+      "status": "pass"
+     },
+     {
+      "label": "Gear mesh: Target",
+      "value": 0.2425,
+      "unit": "g²/Hz",
+      "status": "info"
+     },
+     {
+      "label": "Gear mesh: Error",
+      "value": -0.09,
+      "unit": "dB",
+      "status": "pass"
+     },
+     {
+      "label": "Rotor band: Frequency",
+      "value": 1472.5,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Rotor band: Measured",
+      "value": 0.0991,
+      "unit": "g²/Hz",
+      "status": "warn"
+     },
+     {
+      "label": "Rotor band: Target",
+      "value": 0.1046,
+      "unit": "g²/Hz",
+      "status": "info"
+     },
+     {
+      "label": "Rotor band: Error",
+      "value": -0.23,
+      "unit": "dB",
+      "status": "warn"
+     }
+    ]
+   }
+  ]
+ }
+}
