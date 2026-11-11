@@ -460,8 +460,45 @@ fn stepped(name: &str, role: Role, d: &MixedDisplay, y: &[f32]) -> Series {
     s
 }
 
-/// One channel's response spectrum (tones in).
-fn response_view(v: &MixedView, d: &MixedDisplay, ch: u32, arrays: &mut Arrays) -> Value {
+/// A limit channel's rows, `(frequency Hz, ceiling)`, as configured.
+pub type LimitRows = (u32, Vec<(f64, f64)>);
+
+/// A limited channel's ceiling on the display's lines its rows cover (Random's
+/// construction, log-log between rows), stepped on those lines' own edges, as
+/// Random's response view draws it; `None` when no line is covered.
+fn limit_series(d: &MixedDisplay, rows: &[(f64, f64)]) -> Option<Series> {
+    let g = &d.grid;
+    if g.lines == 0 || g.df_hz <= 0.0 {
+        return None;
+    }
+    let k0 = (g.f0_hz / g.df_hz).round() as usize;
+    let ceiling = crate::random::config::ceiling_on_grid(rows, k0 + g.lines, g.df_hz);
+    let keep: Vec<usize> = (0..g.lines)
+        .filter(|i| ceiling.get(k0 + i).is_some_and(|c| c.is_finite()))
+        .collect();
+    let (first, last) = (*keep.first()?, *keep.last()?);
+    let x: Vec<f64> = (first..=last)
+        .map(|i| g.f0_hz + i as f64 * g.df_hz)
+        .collect();
+    let y: Vec<f64> = (first..=last)
+        .map(|i| ceiling[k0 + i])
+        .map(|c| if c.is_finite() { c } else { f64::NAN })
+        .collect();
+    let edges = g.edges_hz()[first..=last + 1].to_vec();
+    let mut s = Series::new("Limit", Role::Limit, x, y);
+    s.edges = Some(edges);
+    Some(s)
+}
+
+/// One channel's response spectrum (tones in), and its limit when it is a
+/// limit channel (a control channel too).
+fn response_view(
+    v: &MixedView,
+    d: &MixedDisplay,
+    ch: u32,
+    limits: &[LimitRows],
+    arrays: &mut Arrays,
+) -> Value {
     let c = v.channels.iter().find(|c| c.index == ch);
     let title = c.map_or(format!("Channel {ch}"), |c| {
         if c.description.is_empty() {
@@ -478,6 +515,13 @@ fn response_view(v: &MixedView, d: &MixedDisplay, ch: u32, arrays: &mut Arrays) 
         .filter(|x| !x.control.is_empty())
         .map(|x| vec![stepped("Response", Role::Measured, d, &x.control)])
         .unwrap_or_default();
+    let mut series = series;
+    series.extend(
+        limits
+            .iter()
+            .filter(|(c, _)| *c == ch)
+            .filter_map(|(_, rows)| limit_series(d, rows)),
+    );
     views::spectrum(
         arrays,
         &title,
@@ -682,9 +726,10 @@ pub fn data_json(
     v: &MixedView,
     sub: &Subscription,
     tone_bands: &ToneBands<'_>,
-    limited: &[u32],
+    limits: &[LimitRows],
     arrays: &mut Arrays,
 ) -> Value {
+    let limited: Vec<u32> = limits.iter().map(|(c, _)| *c).collect();
     let mut m = view::live_head(v);
     let engaged = v.status.is_some();
     let d = v.display.as_deref();
@@ -709,12 +754,12 @@ pub fn data_json(
                         .channels
                         .as_ref()
                         .unwrap_or(&Channels::All)
-                        .resolve(v, limited);
+                        .resolve(v, &limited);
                     channels = Value::Array(pos.iter().map(|i| Value::from(v.channels[*i].index)).collect());
                     match (p.quantity, d) {
                         (Quantity::Response, Some(d)) if engaged => pos
                             .iter()
-                            .map(|i| response_view(v, d, v.channels[*i].index, arrays))
+                            .map(|i| response_view(v, d, v.channels[*i].index, limits, arrays))
                             .collect(),
                         // The acquired samples reach the frame from the run thread's
                         // tap; until a run has them there is nothing to draw.

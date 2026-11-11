@@ -721,7 +721,8 @@ async fn mixed_tone_trip_states_its_measured_value_and_its_limit() {
 }
 
 /// A limit profile on the control channel is accepted, as Random accepts it
-/// (Mixed Mode's limit rows are Random's), and the run with it engages; a
+/// (Mixed Mode's limit rows are Random's), the run with it engages and the
+/// channel's response view draws its Limit; a
 /// subscription made before the run starts is accepted and its data flows once
 /// the run streams.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -732,7 +733,8 @@ async fn mixed_takes_a_limit_on_the_control_channel_and_an_early_subscription() 
     let sub = c
         .ok(
             "mixed.subscribe",
-            json!({"rate_hz": 2, "plots": [{"id": "ctl", "quantity": "control"}]}),
+            json!({"rate_hz": 2, "plots": [{"id": "ctl", "quantity": "control"},
+                                            {"id": "lim", "quantity": "response", "channels": "limited"}]}),
         )
         .await;
     assert_eq!(sub["default"], false, "{sub}");
@@ -753,7 +755,82 @@ async fn mixed_takes_a_limit_on_the_control_channel_and_an_early_subscription() 
     wait_state(&mut c, "review").await;
     c.ok("mixed.proceed", json!({})).await;
     wait_phase(&mut c, "engaged").await;
-    c.wait_for("mixed.data", LONG, |e| e.topic() == "mixed.data")
+    // The limited control channel's response view carries its Limit, the
+    // ceiling stepped on the band's lines its rows cover.
+    let i = c
+        .wait_for("mixed.data with a response", LONG, |e| {
+            e.topic() == "mixed.data"
+                && e.data()["plots"][1]["views"][0]["series"]
+                    .as_array()
+                    .is_some_and(|v| !v.is_empty())
+        })
         .await;
+    let e = &c.events[i];
+    let plot = &e.data()["plots"][1];
+    assert_eq!(plot["channels"], json!([1]), "{plot}");
+    let view = &plot["views"][0];
+    let limit = view["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "Limit")
+        .unwrap_or_else(|| panic!("no Limit series: {view}"));
+    assert_eq!(limit["role"], "limit");
+    let d = e.decoded.as_ref().unwrap();
+    let x = d.array(&limit["x"]).unwrap().to_f64();
+    let y = d.array(&limit["y"]).unwrap().to_f64();
+    let edges = d.array(&limit["edges"]).unwrap().to_f64();
+    assert_eq!(edges.len(), x.len() + 1);
+    assert!((x[0] - 20.0).abs() < 1e-9 && (x[x.len() - 1] - 1000.0).abs() < 1e-9);
+    assert!(
+        y.iter().all(|c| (c - 1.0).abs() < 1e-9),
+        "a flat 1.0 ceiling"
+    );
+    c.ok("mixed.abort", json!({})).await;
+}
+
+/// While the floor plays alone a tone is not playing: its row reads `on` false
+/// with its ramp scale 0, and in the Run reading it has no row; once the parts
+/// come in it reads `on` true.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_a_part_waiting_for_the_floor_reads_off() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let r = c
+        .ok(
+            "mixed.configure",
+            json!({"config": config(vec![floor(), tone("t1", 160.0, 0.5)], manual())}),
+        )
+        .await;
+    assert_eq!(r["state"]["state"], "configured", "{r}");
+    c.ok("mixed.start", json!({})).await;
+    wait_state(&mut c, "review").await;
+    c.ok("mixed.proceed", json!({})).await;
+    let alone = wait_phase(&mut c, "floor_only").await;
+    let row = |d: &Value, id: &str| {
+        d["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let t1 = row(&alone, "t1");
+    assert_eq!(t1["scale"], 0, "{t1}");
+    assert_eq!(t1["on"], false, "{t1}");
+    assert_eq!(row(&alone, "floor")["on"], true, "{alone}");
+    let engaged = wait_phase(&mut c, "engaged").await;
+    c.pump(Duration::from_secs(2)).await;
+    let live = c
+        .of_topic("mixed.live")
+        .into_iter()
+        .rev()
+        .map(|e| e.data().clone())
+        .find(|d| d["phase"] == "engaged")
+        .unwrap_or(engaged);
+    let t1 = row(&live, "t1");
+    assert_eq!(t1["on"], true, "{t1}");
     c.ok("mixed.abort", json!({})).await;
 }

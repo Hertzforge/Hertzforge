@@ -748,8 +748,14 @@ impl Service {
         let v = run.view();
         let mut arrays = Arrays::new();
         let bands = |id: &str| tone_bands(&run.core, id);
-        let limited: Vec<u32> = run.wire.random.limits.iter().map(|l| l.channel).collect();
-        let data = subscribe::data_json(&v, sub, &bands, &limited, &mut arrays);
+        let limits: Vec<subscribe::LimitRows> = run
+            .wire
+            .random
+            .limits
+            .iter()
+            .map(|l| (l.channel, l.rows.clone()))
+            .collect();
+        let data = subscribe::data_json(&v, sub, &bands, &limits, &mut arrays);
         let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match codec::encode(&protocol::event("mixed.data", seq, data), &arrays) {
             Ok(frame) => {

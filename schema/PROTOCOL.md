@@ -3570,7 +3570,8 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
 - `parts` has one row per part, every part of the configuration in its order, whether on or not
   (a screen finds a part by `id`, never by position alone). Each row:
   - `id`, `kind`, `name`, `enabled` (as configured, or as `mixed.part` last set it), `on` (the
-    part is playing now, ramps included) and `scale` (its ramp now, 0 to 1).
+    part is playing now, ramps included: false while it waits for the floor or its window and
+    once it has ramped out) and `scale` (its ramp now, 0 to 1).
   - `freq_hz` the tone's frequency or the narrowband's center now (null for the floor);
     `direction` `up` or `down` while it moves, a follower's its leader's (null when it stands
     still); `follows` `{"of","ratio"}`, the part it follows and the ratio, for a part whose
@@ -3743,7 +3744,7 @@ that order, one per channel or part.
 | `control` | one `spectrum` | The live frame's **Control** view |
 | `residual` | one `spectrum` | The live frame's **Residual** view |
 | `drive` | one `spectrum` | The live frame's **Drive** view |
-| `response` | one `spectrum` per resolved channel | Random's: that channel's PSD (tones in), stepped, and a limited channel's `Limit` |
+| `response` | one `spectrum` per resolved channel | Random's: that channel's PSD (tones in), stepped, and a limited channel's `Limit` (`limit`; a control channel too), its ceiling stepped on the band's lines its rows cover |
 | `time` | one `spectrum` per resolved channel | Random's: the last loop's acquired samples, tones in |
 | `coherence` | one `spectrum` | Random's: the identification's coherence on the band's lines |
 | `identification` | **Identification Gain** (`spectrum`, x `Frequency` Hz log, y `Gain` log) | `Gain` (`measured`, stepped on the band's lines), `abs(H)` from the drive to the composite control point, control unit per volt, and `Trusted` (`reference`, stepped) on the lines the tones may trust, the rest absent |
