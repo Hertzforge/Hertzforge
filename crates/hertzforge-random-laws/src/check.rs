@@ -71,6 +71,15 @@ impl CheckRecord {
         laws_dir.join(format!("{law_sha256}.check.json"))
     }
 
+    /// Where the record of the further check `check` (for example
+    /// `mixed-floor`, a law's check in one role of another test type) for
+    /// `law_sha256` lives in `laws_dir`: `<sha256>.<check>.check.json`, beside
+    /// the law file and its own record. `None` when `check` is not a name of
+    /// lower-case letters, digits and hyphens.
+    pub fn named_path(laws_dir: &Path, law_sha256: &str, check: &str) -> Option<PathBuf> {
+        is_check_name(check).then(|| laws_dir.join(format!("{law_sha256}.{check}.check.json")))
+    }
+
     /// Whether the record is well formed: the known format, a SHA-256 for a
     /// hash, and a verdict that agrees with its cases.
     pub fn validate(&self) -> Result<(), String> {
@@ -101,8 +110,23 @@ impl CheckRecord {
     /// is none, an error when there is one that cannot be read, is malformed,
     /// or is for another file.
     pub fn read(laws_dir: &Path, law_sha256: &str) -> Result<Option<CheckRecord>, String> {
-        let path = Self::path(laws_dir, law_sha256);
-        let text = match std::fs::read_to_string(&path) {
+        Self::read_at(&Self::path(laws_dir, law_sha256), law_sha256)
+    }
+
+    /// Read the record of the further check `check` for `law_sha256` from
+    /// `laws_dir`, as [`Self::read`] does.
+    pub fn read_named(
+        laws_dir: &Path,
+        law_sha256: &str,
+        check: &str,
+    ) -> Result<Option<CheckRecord>, String> {
+        let path = Self::named_path(laws_dir, law_sha256, check)
+            .ok_or_else(|| format!("`{check}` is not the name of a check"))?;
+        Self::read_at(&path, law_sha256)
+    }
+
+    fn read_at(path: &Path, law_sha256: &str) -> Result<Option<CheckRecord>, String> {
+        let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(format!("{}: {e}", path.display())),
@@ -125,8 +149,19 @@ impl CheckRecord {
     /// Write this record into `laws_dir` (created if missing), replacing any
     /// earlier record for the same file. Written whole or not at all.
     pub fn write(&self, laws_dir: &Path) -> Result<PathBuf, String> {
+        self.write_at(laws_dir, Self::path(laws_dir, &self.law_sha256))
+    }
+
+    /// Write this record as the record of the further check `check` into
+    /// `laws_dir`, as [`Self::write`] does.
+    pub fn write_named(&self, laws_dir: &Path, check: &str) -> Result<PathBuf, String> {
+        let path = Self::named_path(laws_dir, &self.law_sha256, check)
+            .ok_or_else(|| format!("`{check}` is not the name of a check"))?;
+        self.write_at(laws_dir, path)
+    }
+
+    fn write_at(&self, laws_dir: &Path, path: PathBuf) -> Result<PathBuf, String> {
         self.validate()?;
-        let path = Self::path(laws_dir, &self.law_sha256);
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         crate::catalog::write_whole(laws_dir, &path, text.as_bytes())?;
         Ok(path)
@@ -139,6 +174,15 @@ fn verdict(passed: bool) -> &'static str {
     } else {
         "not passed"
     }
+}
+
+/// Whether `s` names a further check: lower-case letters, digits and hyphens,
+/// starting with a letter, at most 32 characters.
+fn is_check_name(s: &str) -> bool {
+    s.len() <= 32
+        && s.starts_with(|c: char| c.is_ascii_lowercase())
+        && s.bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-'))
 }
 
 /// Whether `s` is 64 lower-case hex digits.
