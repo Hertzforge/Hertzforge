@@ -11,7 +11,7 @@
 	 * back where it was when it closes. It draws no frame of its own: it sits in the popover that
 	 * opens it, which scrolls it when it is taller than the window.
 	 */
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
 	import { MARKER_WORDS, TRACE_COLORS } from '$lib/viz/roles';
 	import { withType } from './display';
 	import { stepIndex } from './keys';
@@ -27,13 +27,17 @@
 		onclose: () => void;
 		/** The lines the plot draws now (the plot body's `traces()`), for the trace list. */
 		traces?: { name: string; role: string }[];
+		/** A test type's own choices, under what the plot shows. */
+		data?: Snippet<[PlotPanelSpec, (spec: PlotPanelSpec) => void]>;
 	}
-	let { spec, types, channels, onchange, onexport, onclose, traces = [] }: Props = $props();
+	let { spec, types, channels, onchange, onexport, onclose, traces = [], data }: Props = $props();
 
 	const d = $derived(spec.display);
 	const type = $derived(types.find((t) => t.id === spec.quantity) ?? null);
 	const time = $derived(type?.time ?? false);
 	const numbers = $derived(type?.group === 'numbers');
+	/** Drawn by the test type's own body: what it shows and its title, nothing about lines. */
+	const own = $derived(type?.own === true);
 	const uid = `po-${Math.random().toString(36).slice(2, 8)}`;
 
 	type Section = 'data' | 'axes' | 'display' | 'cursors' | 'hold' | 'export';
@@ -41,11 +45,11 @@
 		(
 			[
 				['data', 'Data', true],
-				['axes', 'Axes', !numbers],
-				['display', 'Display', !numbers],
-				['cursors', 'Cursors', !numbers],
-				['hold', 'Hold', !numbers && !time],
-				['export', 'Export', true]
+				['axes', 'Axes', !numbers && !own],
+				['display', 'Display', !numbers && !own],
+				['cursors', 'Cursors', !numbers && !own],
+				['hold', 'Hold', !numbers && !time && !own],
+				['export', 'Export', !own]
 			] as [Section, string, boolean][]
 		).filter(([, , on]) => on)
 	);
@@ -311,6 +315,7 @@
 					{#if type?.help}<p class="help">{type.help}</p>{/if}
 				</div>
 			</div>
+			{#if data}{@render data(spec, onchange)}{/if}
 			{#if type?.channels}
 				{@render seg(
 					'Channels',

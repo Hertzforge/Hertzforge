@@ -16,9 +16,11 @@
 		/** The test's name. */
 		name: string;
 		/** The step on show; null in a window with no steps (another monitor's). */
-		step?: 'setup' | 'run' | null;
+		step?: 'setup' | 'predict' | 'run' | null;
 		onsetup?: () => void;
 		onrun?: () => void;
+		/** A step between Setup and Run (MIMO's prediction), and whether it waits for the operator. */
+		predict?: { onopen: () => void; waiting: boolean } | null;
 		/** Why the Run step waits, or null. */
 		runWhy?: string | null;
 		/** Back to the test types; absent while the screen cannot be left. */
@@ -35,7 +37,7 @@
 		/** The test's name, for the keyboard to land on. */
 		heading?: HTMLElement | null;
 	}
-	let { acq, name, step = null, onsetup, onrun, runWhy = null, onleave = null, reason = null, ends = false, abortKeys, compact = false, nums, heading = $bindable(null) }: Props = $props();
+	let { acq, name, step = null, onsetup, onrun, predict = null, runWhy = null, onleave = null, reason = null, ends = false, abortKeys, compact = false, nums, heading = $bindable(null) }: Props = $props();
 
 	const run = $derived(acq.run);
 	const frame = $derived(acq.frame);
@@ -83,9 +85,19 @@
 				<li aria-hidden="true" class="arrow">
 					<svg viewBox="0 0 12 12" width="10" height="10"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</li>
+				{#if predict}
+					<li>
+						<button class="step" class:on={step === 'predict'} aria-current={step === 'predict' ? 'step' : undefined} data-testid="flow-predict" onclick={() => predict.onopen()}>
+							<span class="n">2</span>Predict{#if predict.waiting}<span class="dot wait" aria-label="waiting for you"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><rect x="1.5" y="1" width="2.4" height="8" rx="0.6" fill="currentColor" /><rect x="6.1" y="1" width="2.4" height="8" rx="0.6" fill="currentColor" /></svg></span>{/if}
+						</button>
+					</li>
+					<li aria-hidden="true" class="arrow">
+						<svg viewBox="0 0 12 12" width="10" height="10"><path d="M4.5 2.5L8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+					</li>
+				{/if}
 				<li>
 					<button class="step" class:on={step === 'run'} aria-current={step === 'run' ? 'step' : undefined} data-testid="flow-run" aria-disabled={step !== 'run' && !!runWhy} title={step !== 'run' && runWhy ? runWhy : undefined} onclick={() => (step === 'run' ? null : onrun?.())}>
-						<span class="n">2</span>Run{#if liveDot}<span class="dot" aria-label="running"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg></span>{/if}
+						<span class="n">{predict ? 3 : 2}</span>Run{#if liveDot}<span class="dot" aria-label="running"><svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg></span>{/if}
 					</button>
 				</li>
 			</ol>
@@ -281,6 +293,10 @@
 		display: inline-flex;
 		color: var(--blue-2);
 		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	.dot.wait {
+		animation: none;
 	}
 
 	.chip {

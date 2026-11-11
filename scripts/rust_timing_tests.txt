@@ -339,3 +339,9 @@ sds-control  test:recorder_sim_run  recorder_sim_runs_exclude_each_other_and_shu
 sds-control  test:recorder_protocol  recorder_verbs_are_refused_by_name_in_every_state_and_mode
 sds-control  test:recorder_protocol  recorder_log_reaches_every_connection_and_names_the_folder
 sds-control  test:recorder_records  recorder_run_folder_holds_its_records
+
+# Signals: the run's block reads against the clock while readers copy windows, and a
+# Random run on the simulator paced to the wall clock, its frames waited on against
+# wall-clock deadlines and counted against the rate asked
+sds-control  lib  signals::tests::signals_reads_never_wait_on_readers_under_contention
+sds-control  test:signals_sim_run  signals_of_a_random_run_on_the_simulator_reach_a_subscribed_window

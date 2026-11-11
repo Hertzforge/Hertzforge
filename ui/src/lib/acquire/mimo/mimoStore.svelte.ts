@@ -35,6 +35,7 @@ import { LIVE_STATES, type ActionId, type ActionState, type SetupStatus } from '
 import { errorCount, mergeErrors, type FieldErrors } from '../setup';
 import type { AcquireState } from '../store.svelte';
 import { toRefusal, type Refusal } from '../words';
+import { MIMO_PHASE_WORDS } from './views/words';
 import {
 	breakpointParams,
 	byKey,
@@ -452,6 +453,9 @@ export class MimoState {
 
 	/** MIMO Random sends no live head; the bar reads the status. */
 	readonly frame = null;
+
+	/** The run's phases in MIMO's own words, for the state chip. */
+	readonly phaseWords: Record<string, string> = MIMO_PHASE_WORDS;
 
 	get elapsed(): number | null {
 		return this.status?.elapsed_s ?? null;

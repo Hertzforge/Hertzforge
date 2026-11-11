@@ -4405,6 +4405,92 @@ sample, and null for the rest.
 A plot is empty (`views` empty) until there is something to draw: `time` until the first batch,
 `spectrum` and `frf` until the first average, `frf` without a pair always.
 
+## Signals
+
+The time history of every channel a run reads or drives, for every test type: Random, MIMO
+Random, classical shock, SRS shock, Sine, TWR, Explorer and the Recorder alike. Every run builds
+its station the same way, and the service keeps the last several seconds of each channel as the
+station delivers it: each block read, and each block of drive the station accepts. A window asks
+for the channels its Signals plots show and is sent them as time views while a run acquires. The
+feed only reads: it never makes the run wait, and a module's own display methods are unchanged
+by it.
+
+- **Channels** are the run's channel-table rows, by `index`: every enabled row, the drive rows
+  `kind` `drive` and every other row (control, monitor, reference) `kind` `input`. A table with no
+  enabled drive row has no drive channel, even where the simulator drives a plant input no row
+  names.
+- **Units.** An input is in its row's unit: the station has already converted volts with the row's
+  sensitivity, and nothing is scaled again. A drive is in volts, as written to the station.
+- **Time** is station time in seconds, counted from the run's start at the rate the station
+  programmed (`fs_hz`): an input frame by the frames read before it, a drive frame by the frames
+  written before it. After the station stops and starts again within a run (between two shock
+  pulses, or a run that suspends), the next drive starts at the input's place, since the station
+  dropped what it still held.
+- **How much is kept.** Ten seconds of every channel, or less when the run's channels and rate
+  would need more than 4 Mi samples in all (`max_window_s` says how much). A window longer than
+  that shows what is kept.
+- **A run** is acquiring from its configure until it ends; the next run's channels replace it.
+
+| Method | Params | Result |
+|---|---|---|
+| `signals.subscribe` | `{"rate_hz","plots":[plot...]}` | `{"available","fs_hz","max_window_s","rate_hz","channels","plots"}` |
+| `signals.unsubscribe` | `{}` | `{}` |
+
+```
+{"rate_hz":10,"plots":[{"id":"raw","channels":[3],"window_s":0.0625,"points":64,"arrange":"split"},
+                       {"id":"env","window_s":0.25,"points":64}]}
+```
+
+- Each call replaces the connection's subscription as a whole; a client sends its full list
+  whenever a Signals plot is added, removed or changed. The subscription belongs to the
+  connection, lasts until it closes or `signals.unsubscribe`, and carries over from run to run. It
+  only reads, so it is open to every connection, controller or observer, at any time.
+- `rate_hz` is 0.5 to 10, default 10: the most frames per second the connection is sent.
+- `plots` holds up to 64 entries and may be empty. Each is `{"id","channels","window_s","points",
+  "arrange"}`, every field but `id` optional. `id` is the client's own name for the plot, 1 to 64
+  characters and unique in the list. `channels` is a list of row indexes (inputs and drives alike),
+  or `"all"` (the default), `"inputs"`, `"drives"` or `"control"` (the control rows); it is
+  resolved against the run's channels on every frame, in table order, and an index the run does
+  not have is left out, never refused. `window_s` is the seconds shown, above 0 and at most 10,
+  default 2. `points` is the most points sent per channel, 64 to 8192, default 1024. `arrange` is
+  `"overlay"` (the default: one view for each unit, its channels drawn together, so a drive in
+  volts is never drawn on an acceleration's axis) or `"split"` (one view for each channel).
+- Refusals: `bad_params` with `param` naming the field (for example `plots[1].window_s`): a key
+  the method or a plot does not take, a duplicate `id`, a value out of range or of the wrong kind.
+- The result says whether a run is acquiring (`available`), and for that run its rate
+  (`fs_hz`), the longest window it keeps (`max_window_s`) and its channels in table order, each
+  `{"index","name","unit","kind"}` (`name` the row's description, or its role when it has none);
+  with no run, `fs_hz` and `max_window_s` are null and `channels` is empty. Then `rate_hz` and
+  `plots` with every default filled in. When a run is acquiring and has read a frame, the service
+  also sends the connection a `signals.data` frame at once.
+
+Event topic `signals.data`, a binary frame to one subscribed connection: at most `rate_hz` times a
+second while a run acquires and has read more since the connection's last frame, and once more
+when that run ends, with `available` false. With no run acquiring nothing is sent, and a
+connection that subscribes after a run has ended is sent nothing of it.
+
+```
+{"available":true,"fs_hz":1024,"t_s":2,"frames":2048,"max_window_s":10,"lost_frames":0,
+ "channels":[{"index":1,"name":"Table","unit":"g","kind":"input"}, ...],
+ "plots":[{"id":"raw","channels":[3],"window_s":0.0625,"first_frame":1984,"views":[spectrum]}]}
+```
+
+- `frames` is the station frames read so far and `t_s` their time; every window ends there.
+- `lost_frames` counts the frames a window could not show because the run had already written
+  over them while the window was copied (zero unless the service was starved for a long time).
+- Each plot gives its `channels` as resolved, `window_s` as drawn (the window asked, or
+  `max_window_s` when that is shorter), `first_frame`, the station frame the window starts at,
+  and its `views`, in channel order: with `split` one `spectrum` per channel, with `overlay` one
+  per unit in the order the units first appear. A plot whose channels resolve to none has
+  `channels: []` and no views.
+- Each view is titled `Channel <index>: <name>` for one channel and `Channels <i>, <j>` for
+  several, x `Time` s linear (station time), y `Amplitude` in the unit, linear, and has a series
+  `Channel <index>` per channel, `measured` for an input and `drive` for a drive, shape `line`. A
+  window with no more samples than `points` sends every sample; a longer one is decimated to
+  `points` as an envelope, each point at the time of the first sample of its interval with `y`
+  the largest and `y_min` the smallest sample in it, as the Recorder's time plot is. A channel
+  the run has not yet read or written has no series.
+
 ## Control Laws
 
 The control laws an operator can choose, for single-output and MIMO Random, for classical and

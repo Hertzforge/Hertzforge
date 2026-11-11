@@ -32,6 +32,8 @@
 //! - [`recorder`]: the Recorder, the inputs recorded with no drive: its
 //!   configuration.
 //! - [`laws`]: the control-law catalog on the wire.
+//! - [`signals`]: the time history of every channel any run reads or drives, tapped
+//!   from the station's backend, and its subscriptions.
 //! - [`server`]: the WebSocket service, loopback only.
 //!
 //! Hardware is reached only through `hertzforge-station`, the controller's one
@@ -51,6 +53,7 @@ pub mod recorder;
 pub mod server;
 pub mod session;
 pub mod shock;
+pub mod signals;
 pub mod sim;
 pub mod sine;
 pub mod srs;

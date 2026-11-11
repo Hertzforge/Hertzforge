@@ -126,6 +126,32 @@ pub fn bin_edges(centers: &[f64]) -> Vec<f64> {
     edges
 }
 
+/// How many samples each point of a time plot stands for when `samples` are drawn at
+/// most `points` wide: one when they fit.
+pub fn envelope_span(samples: usize, points: usize) -> usize {
+    samples.div_ceil(points.max(1)).max(1)
+}
+
+/// The largest and the smallest sample of each `span` long interval of `samples`, in
+/// time order (the last interval may be shorter): a time history decimated so no peak
+/// is lost, as a series' `y` and `y_min`.
+pub fn envelope(samples: &[f32], span: usize) -> (Vec<f64>, Vec<f64>) {
+    let span = span.max(1);
+    let n = samples.len().div_ceil(span);
+    let mut hi = Vec::with_capacity(n);
+    let mut lo = Vec::with_capacity(n);
+    for chunk in samples.chunks(span) {
+        let (mut a, mut b) = (f64::INFINITY, f64::NEG_INFINITY);
+        for v in chunk {
+            a = a.min(f64::from(*v));
+            b = b.max(f64::from(*v));
+        }
+        hi.push(b);
+        lo.push(a);
+    }
+    (hi, lo)
+}
+
 /// A `spectrum` view. Each series' `x` then `y` is attached to `arrays` in series
 /// order (every array is referenced exactly once, so each series carries its own x).
 pub fn spectrum(
