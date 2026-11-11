@@ -7,10 +7,12 @@
 
 import { describe, expect, it } from 'vitest';
 import type { MixedConfig, MixedPartRow } from '$lib/protocol/mixed';
-import { limitingWords, mixedTripFacts, partDetail, partDrive, partFreq, partMotion, partStateWord } from './mixedWords';
+import { judgedTolerance } from './mixedJudged';
+import type { SpectrumView } from '$lib/protocol/types';
+import { limitingWords, mixedTripFacts, partErrorCell, toneJudgingWords, judgingSummary, partDetail, partDrive, partFreq, partMotion, partStateWord } from './mixedWords';
 import type { MixedTrip } from '$lib/protocol/mixed';
 
-const base: MixedPartRow = { id: 'x', kind: 'tone', name: 'x', enabled: true, on: true, scale: 1, freq_hz: null, direction: null, sweeps: null, rate_oct_per_min: null, rate_hz_per_s: null, width_hz: null, unit: 'g', target: 0.0846, measured: 0.083, error_db: null, alarm: false, drive_vpk: 0.0679, drive_vrms: null, gain_db: null, settled: false, limiting: false, dof: null, lines: null, law: { misses: 0, capped: 0 }, follows: null };
+const base: MixedPartRow = { id: 'x', kind: 'tone', name: 'x', enabled: true, on: true, scale: 1, freq_hz: null, direction: null, sweeps: null, rate_oct_per_min: null, rate_hz_per_s: null, width_hz: null, unit: 'g', target: 0.0846, measured: 0.083, error_db: null, alarm: false, drive_vpk: 0.0679, drive_vrms: null, gain_db: null, settled: false, limiting: false, dof: null, lines: null, law: { misses: 0, capped: 0 }, follows: null, judge_s: null, judged_error_db: null, judged_alarm_db: null, judged_abort_db: null, tolerance_widened: null };
 const row = (over: Partial<MixedPartRow>): MixedPartRow => ({ ...base, ...over });
 
 // The rows of the combined run at parts time 6.7 s as the service sends them.
@@ -169,5 +171,49 @@ describe('trip facts', () => {
 		const b = mixedTripFacts({ ...at, kind: 'band_abort', side: 'low', error_db: null, measured_g2_hz: null, limit_g2_hz: 0.0002, dof: null } as MixedTrip, (id) => id);
 		expect(b.map((x) => x.label)).toEqual(['Part', 'At', 'Level', 'Side', 'Lower abort']);
 		for (const x of [...f, ...b]) expect(x.value).not.toMatch(/null|undefined|NaN/);
+	});
+});
+
+describe('how a tone is judged', () => {
+	const small = row({ ...second, judge_s: 8, error_db: -0.35, judged_error_db: -0.25, judged_alarm_db: [1.75, 1.75], judged_abort_db: [3.5, 3.5], tolerance_widened: true });
+	const quick = row({ ...rotor, judge_s: 0.5, error_db: 0.15, judged_error_db: 0.13, judged_alarm_db: [1.5, 1.5], judged_abort_db: [3, 3], tolerance_widened: false });
+
+	it('puts the judged error first and the single reading beside it, never the single reading alone as the error', () => {
+		expect(partErrorCell(small)).toEqual({ main: '-0.25 dB', single: '-0.35 dB' });
+		expect(partErrorCell({ ...small, judged_error_db: null })).toEqual({ main: '-', single: '-0.35 dB' });
+		expect(partErrorCell(floor)).toEqual({ main: '+0.01 dB', single: null });
+	});
+
+	it('says how long a tone is judged over, and the widened tolerances when they are', () => {
+		expect(toneJudgingWords(quick)).toBe('judged over 0.5 s');
+		expect(toneJudgingWords(small)).toBe('judged over 8 s, tolerances widened to alarm ±1.75 dB, abort ±3.5 dB');
+		expect(toneJudgingWords({ ...small, judge_s: null })).toBe('');
+		expect(partDetail(small, ctx)).toBe('judged over 8 s, tolerances widened to alarm ±1.75 dB, abort ±3.5 dB');
+	});
+
+	it("redraws a tone's amplitude bands at the judged tolerance, from its Target line", () => {
+		const line = (name: string, role: string, y: number[]) => ({ name, role, x: Float64Array.from([1, 2]), y: Float64Array.from(y), shape: 'line' });
+		const v = { view: 'spectrum', title: 'Rotor 2nd', x: { label: 'Time', unit: 's', scale: 'linear' }, y: { label: 'Amplitude', unit: 'g', scale: 'log' }, series: [line('Measured', 'measured', [0.1, 0.1]), line('Target', 'reference', [0.1, 0.1]), line('Alarm high', 'tolerance', [0.119, 0.119]), line('Alarm low', 'tolerance', [0.084, 0.084]), line('Abort high', 'abort', [0.141, 0.141]), line('Abort low', 'abort', [0.071, 0.071])] } as unknown as SpectrumView;
+		const [out] = judgedTolerance([v], ['t3'], [small]) as SpectrumView[];
+		const y = (n: string) => out.series.find((s) => s.name === n)!.y[0];
+		expect(y('Alarm high')).toBeCloseTo(0.1 * 10 ** (1.75 / 20), 9);
+		expect(y('Alarm low')).toBeCloseTo(0.1 * 10 ** (-1.75 / 20), 9);
+		expect(y('Abort high')).toBeCloseTo(0.1 * 10 ** (3.5 / 20), 9);
+		expect(y('Measured')).toBe(0.1);
+		// a part without judged bands (a narrowband) keeps the view as it came
+		expect(judgedTolerance([v], ['b1'], [gear])[0]).toBe(v);
+	});
+});
+
+describe('the setup summary\'s judging line', () => {
+	it('lists the tones judged slowly or against widened tolerances, before the run', () => {
+		const j = [
+			{ part: 't1', judge_s: 0.5, sigma_db: 0.12, alarm_db: [1.5, 1.5] as [number, number], abort_db: [3, 3] as [number, number], widened: false },
+			{ part: 't2', judge_s: 3.01, sigma_db: 0.5, alarm_db: [1.5, 1.5] as [number, number], abort_db: [3, 3] as [number, number], widened: false },
+			{ part: 't3', judge_s: 8, sigma_db: 0.94, alarm_db: [2.82, 2.82] as [number, number], abort_db: [3, 3] as [number, number], widened: true }
+		];
+		const name = (id: string) => ({ t1: 'Blade pass', t2: 'Rotor', t3: 'Rotor 2nd' })[id] ?? id;
+		expect(judgingSummary(j, name)).toBe('Rotor: over 3.01 s; Rotor 2nd: over 8 s, alarm widened to ±2.82 dB, abort ±3 dB');
+		expect(judgingSummary(j.slice(0, 1), name)).toBe('Every tone is judged at once');
 	});
 });

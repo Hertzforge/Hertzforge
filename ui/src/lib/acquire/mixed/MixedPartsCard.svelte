@@ -9,7 +9,7 @@
 	 * its row.
 	 */
 	import type { MixedStore } from './mixedStore.svelte';
-	import { errDb, hz, partDetail, partDrive, partFreq, partMotion, partStateWord, partValue, PART_KIND_WORDS } from './mixedWords';
+	import { hz, partErrorCell, partDetail, partDrive, partFreq, partMotion, partStateWord, partValue, PART_KIND_WORDS } from './mixedWords';
 
 	interface Props {
 		mixed: MixedStore;
@@ -46,6 +46,7 @@
 						{@const t = mixed.toggleOf(p)}
 						{@const detail = partDetail(p, ctx)}
 						{@const idle = partStateWord(p, ctx)}
+						{@const ec = partErrorCell(p)}
 						<tr data-testid="mixed-part-{p.id}" data-on={p.on} data-enabled={p.enabled} data-alarm={p.alarm} data-settled={p.settled}>
 							<td>
 								{#if p.kind === 'floor'}
@@ -63,7 +64,7 @@
 							<td class="num">{hz(partFreq(p, ctx))}</td>
 							<td class="num">{partValue(p.target, p.unit)}</td>
 							<td class="num">{partValue(p.measured, p.unit)}</td>
-							<td class="num" class:warn={p.alarm}>{errDb(p.error_db)}</td>
+							<td class="num" class:warn={p.alarm} title={p.kind === 'tone' ? 'The judged error, which the alarm and abort use; beside it, smaller, the single reading' : undefined}>{ec.main}{#if ec.single}<br /><span class="single" data-testid="mixed-part-{p.id}-single">reading {ec.single}</span>{/if}</td>
 							{#if !compact}<td class="num">{partDrive(p)}</td>{/if}
 							<td class="state">
 								{#if p.alarm}
@@ -101,6 +102,16 @@
 
 	.sub {
 		color: var(--text-3);
+	}
+
+	.single {
+		color: var(--text-3);
+		font-size: var(--text-xs);
+		white-space: nowrap;
+	}
+
+	td.num {
+		white-space: nowrap;
 	}
 
 	.state {

@@ -81,7 +81,7 @@ const DERIVED_KEYS = keysOf<MixedDerived>({
 	kinematics: true,
 	exclusion: true,
 	closest_tones: true,
-	tracking: true,
+	tracking: true, tone_judging: true,
 	test_s: true,
 	floor_equalize_s: true,
 	identification_s: true,
@@ -120,6 +120,11 @@ const STATE_KEYS = keysOf<MixedState>({
 });
 const ROW_KEYS = keysOf<MixedPartRow>({
 	follows: true,
+	judge_s: true,
+	judged_error_db: true,
+	judged_alarm_db: true,
+	judged_abort_db: true,
+	tolerance_widened: true,
 	id: true,
 	kind: true,
 	name: true,

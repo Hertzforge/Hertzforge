@@ -11,6 +11,7 @@ import { MIXED_TOPICS, type MixedData, type MixedSubscribeResult } from '$lib/pr
 import { PulseScreenState } from '../pulse/pulseScreenState.svelte';
 import type { FramePlot, ScreenOptions } from '../screen/screen.svelte';
 import { toBand } from './mixedBand';
+import { judgedTolerance } from './mixedJudged';
 import { mixedHooks } from './mixedLayout';
 
 export const MIXED_TEST_TYPE = 'mixed';
@@ -45,6 +46,9 @@ export class MixedViewsState extends PulseScreenState<MixedData, MixedSubscribeR
 	override frame(id: string): FramePlot | null {
 		const f = this.frameOfRun ? super.frame(id) : null;
 		const band = this.band?.() ?? null;
-		return f && band ? { ...f, views: toBand(f.views, band) } : f;
+		const g = f && band ? { ...f, views: toBand(f.views, band) } : f;
+		// A tone's amplitude history against the bands its alarm and abort judge it on.
+		const rows = this.frameOfRun?.parts ?? [];
+		return g && g.parts?.length && rows.some((r) => r.judged_alarm_db || r.judged_abort_db) ? { ...g, views: judgedTolerance(g.views, g.parts, rows) } : g;
 	}
 }

@@ -6,7 +6,7 @@
  * by side.
  */
 
-import type { MixedConfig, MixedDerived, MixedLawFaultReason, MixedLiveHead, MixedOutcome, MixedPart, MixedPartKind, MixedPartRow, MixedPhase, MixedSchedule, MixedState, MixedTrip } from '$lib/protocol/mixed';
+import type { MixedConfig, MixedDerived, MixedToneJudging, MixedLawFaultReason, MixedLiveHead, MixedOutcome, MixedPart, MixedPartKind, MixedPartRow, MixedPhase, MixedSchedule, MixedState, MixedTrip } from '$lib/protocol/mixed';
 import type { Status } from '$lib/protocol/types';
 import { formatNumber } from '$lib/viz/format';
 import { db, LAW_FAULT_WORDS, type LevelStatus } from '../words';
@@ -245,7 +245,7 @@ function rmsJudgedWords(l: NonNullable<MixedPartRow['lines']>): string {
 /** The line under a part's motion: the floor's lines and degrees of freedom, a narrowband's width, estimate and gain, a law's misses. */
 export function partDetail(row: MixedPartRow, ctx: PartContext = {}): string {
 	const law = row.law && (row.law.misses || row.law.capped) ? `${row.law.misses} unusable in a row, a cap bound ${row.law.capped} times` : '';
-	if (row.kind === 'tone') return law;
+	if (row.kind === 'tone') return [toneJudgingWords(row), law].filter(Boolean).join('; ');
 	if (row.kind === 'floor') {
 		const l = row.lines;
 		const lines = l ? [`${l.clean} of ${l.in_band} lines clean, ${l.alarm} in alarm, ${l.abort} over abort`, dofWords(row.dof, true), rmsJudgedWords(l)].filter(Boolean).join('; ') : '';
@@ -399,4 +399,41 @@ export function limitingWords(s: Pick<MixedState, 'limiting' | 'parts'> | null):
 	const held = s.parts.filter((p) => p.limiting).map((p) => p.name);
 	if (held.length) return held.join(', ');
 	return s.limiting ? 'At the drive ceiling' : null;
+}
+
+/** A band in dB as `[below, above]`: "±1.5 dB", or "-1 / +2 dB". */
+export function bandDbWords(b: readonly [number, number]): string {
+	return b[0] === b[1] ? `±${num(b[0], 3)} dB` : `-${num(b[0], 3)} / +${num(b[1], 3)} dB`;
+}
+
+/** How a tone's alarm and abort judge it: "judged over 8 s, tolerances widened to alarm ±1.75 dB, abort ±3.5 dB". */
+export function toneJudgingWords(row: Pick<MixedPartRow, 'kind' | 'judge_s' | 'tolerance_widened' | 'judged_alarm_db' | 'judged_abort_db'>): string {
+	if (row.kind !== 'tone' || typeof row.judge_s !== 'number') return '';
+	const over = `judged over ${num(row.judge_s, 3)} s`;
+	if (!row.tolerance_widened) return over;
+	const parts = [row.judged_alarm_db ? `alarm ${bandDbWords(row.judged_alarm_db)}` : '', row.judged_abort_db ? `abort ${bandDbWords(row.judged_abort_db)}` : ''].filter(Boolean);
+	return `${over}, tolerances widened${parts.length ? ` to ${parts.join(', ')}` : ''}`;
+}
+
+/**
+ * The Error cell: for a tone the judged error (the one its alarm and abort use) with the single
+ * reading beside it, smaller; for the floor and a narrowband their error. `single` is null when
+ * there is nothing to set beside the main figure.
+ */
+export function partErrorCell(row: Pick<MixedPartRow, 'kind' | 'error_db' | 'judged_error_db'>): { main: string; single: string | null } {
+	if (row.kind !== 'tone') return { main: errDb(row.error_db), single: null };
+	if (typeof row.judged_error_db === 'number') return { main: errDb(row.judged_error_db), single: typeof row.error_db === 'number' ? errDb(row.error_db) : null };
+	// No judged reading yet: the single reading is not the one the abort uses, so it is only the small figure.
+	return { main: '-', single: typeof row.error_db === 'number' ? errDb(row.error_db) : null };
+}
+
+/**
+ * The setup summary's judging line: each tone the prediction says is judged slowly (over more than
+ * half a second) or against widened tolerances, how long and how wide; else that every tone is
+ * judged at once.
+ */
+export function judgingSummary(j: readonly MixedToneJudging[], name: (id: string) => string): string {
+	const slow = j.filter((t) => t.judge_s > 0.5 || t.widened);
+	if (!slow.length) return 'Every tone is judged at once';
+	return slow.map((t) => `${name(t.part)}: over ${num(t.judge_s, 3)} s${t.widened ? `, alarm widened to ${bandDbWords(t.alarm_db)}${t.abort_db ? `, abort ${bandDbWords(t.abort_db)}` : ''}` : ''}`).join('; ');
 }
