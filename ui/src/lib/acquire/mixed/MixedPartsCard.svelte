@@ -4,12 +4,12 @@
 	 * or a narrowband once the parts have come in), what it is doing, its frequency or center, its
 	 * target against its measured value with the error in dB, its drive, and its state. A part in its
 	 * alarm band is marked with a triangle and the word "Alarm"; a part not yet settled with a ring
-	 * and "Settling": never by color alone. A refused switch is said in one line under its row.
+	 * and "Settling": never by color alone. A follower says what it follows; a part not playing says
+	 * whether it is off, waiting for its window or ended. A refused switch is said in one line under
+	 * its row.
 	 */
-	import type { MixedPartRow } from '$lib/protocol/mixed';
-	import { formatNumber } from '$lib/viz/format';
 	import type { MixedStore } from './mixedStore.svelte';
-	import { errDb, hz, partMotion, partValue, PART_KIND_WORDS } from './mixedWords';
+	import { errDb, hz, partDetail, partDrive, partFreq, partMotion, partStateWord, partValue, PART_KIND_WORDS } from './mixedWords';
 
 	interface Props {
 		mixed: MixedStore;
@@ -19,12 +19,7 @@
 
 	const parts = $derived(mixed.parts);
 	const held = $derived(!!mixed.now?.held);
-	const drive = (p: MixedPartRow) => (p.drive_vpk !== null ? `${formatNumber(p.drive_vpk, 3)} V pk` : p.drive_vrms !== null ? `${formatNumber(p.drive_vrms, 3)} V rms` : '-');
-	const lawWords = (p: MixedPartRow) => (p.law && (p.law.misses || p.law.capped) ? `${p.law.misses} unusable in a row, a cap bound ${p.law.capped} times` : '');
-	const extra = (p: MixedPartRow) =>
-		p.kind === 'tone'
-			? lawWords(p)
-			: p.kind === 'floor' ? ([p.lines ? `${p.lines.clean} of ${p.lines.in_band} lines clean, ${p.lines.alarm} in alarm, ${p.lines.abort} over abort; ${p.dof ?? '-'} dof` : '', lawWords(p)].filter(Boolean).join('; ')) : p.kind === 'narrowband' ? [p.width_hz !== null ? `${formatNumber(p.width_hz, 3)} Hz wide` : '', p.dof !== null ? `${p.dof} dof` : '', p.gain_db !== null ? `gain ${errDb(p.gain_db)}` : ''].filter(Boolean).join(', ') : '';
+	const ctx = $derived({ rows: parts, config: mixed.runConfig, parts_s: mixed.now?.parts_s ?? null });
 </script>
 
 <section class="partscard" aria-label="Parts" data-testid="mixed-parts-card">
@@ -49,6 +44,8 @@
 				<tbody>
 					{#each parts as p (p.id)}
 						{@const t = mixed.toggleOf(p)}
+						{@const detail = partDetail(p, ctx)}
+						{@const idle = partStateWord(p, ctx)}
 						<tr data-testid="mixed-part-{p.id}" data-on={p.on} data-enabled={p.enabled} data-alarm={p.alarm} data-settled={p.settled}>
 							<td>
 								{#if p.kind === 'floor'}
@@ -62,12 +59,12 @@
 								{/if}
 							</td>
 							<td><span class="kind">{PART_KIND_WORDS[p.kind]}</span> {p.name}</td>
-							<td class="aq-small">{partMotion(p, held)}{#if extra(p)}<span class="sub"><br />{extra(p)}</span>{/if}</td>
-							<td class="num">{p.freq_hz === null ? '-' : hz(p.freq_hz)}</td>
+							<td class="aq-small">{partMotion(p, held, ctx)}{#if detail}<span class="sub"><br />{detail}</span>{/if}</td>
+							<td class="num">{hz(partFreq(p, ctx))}</td>
 							<td class="num">{partValue(p.target, p.unit)}</td>
 							<td class="num">{partValue(p.measured, p.unit)}</td>
 							<td class="num" class:warn={p.alarm}>{errDb(p.error_db)}</td>
-							{#if !compact}<td class="num">{drive(p)}</td>{/if}
+							{#if !compact}<td class="num">{partDrive(p)}</td>{/if}
 							<td class="state">
 								{#if p.alarm}
 									<span class="mark warn" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><path d="M6 1l5 9.5H1z" fill="currentColor" /></svg></span>Alarm
@@ -78,7 +75,7 @@
 								{:else if p.on}
 									<span class="mark ok" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="currentColor" /></svg></span>In band
 								{:else}
-									<span class="mark" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.2" /></svg></span>Off
+									<span class="mark" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.2" /></svg></span>{idle ?? 'Off'}
 								{/if}
 							</td>
 						</tr>

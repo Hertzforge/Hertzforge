@@ -118,7 +118,8 @@ const STATE_KEYS = keysOf<MixedState>({
 	feasibility: true,
 	end: true
 });
-const ROW_KEYS = keysOf<MixedPartRow>({
+// `follows` and `done` are optional: the shell reads the setup when a row leaves them out.
+const ROW_KEYS = keysOf<Omit<MixedPartRow, 'follows' | 'done'>>({
 	id: true,
 	kind: true,
 	name: true,
