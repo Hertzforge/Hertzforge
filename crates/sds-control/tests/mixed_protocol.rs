@@ -74,7 +74,7 @@ fn service() -> std::sync::Arc<Service> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn configure_its_dry_run_the_configuration_reset_and_clear() {
+async fn mixed_configure_its_dry_run_the_configuration_reset_and_clear() {
     let schema = Schema::load();
     let addr = serve(service()).await;
     let mut c = Client::connect(addr).await;
@@ -538,7 +538,7 @@ async fn every_mixed_method_is_served_and_listed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn shutdown_refuses_the_drive_verbs_and_leaves_hold_stop_and_abort() {
+async fn mixed_shutdown_refuses_the_drive_verbs_and_leaves_hold_stop_and_abort() {
     let svc = service();
     let addr = serve(svc.clone()).await;
     let mut c = Client::connect(addr).await;
