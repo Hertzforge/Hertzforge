@@ -225,6 +225,8 @@ struct Actor {
     /// Station time of the first engaged chunk; `elapsed_s` counts holds out.
     held_s: f64,
     last_t: Option<f64>,
+    /// The level in force before any ramp down, for the end's `level_db`.
+    driving_level: Option<f64>,
 }
 
 fn arm_refused(words: impl std::fmt::Display) -> MethodError {
@@ -254,6 +256,7 @@ pub fn spawn(
             pace_origin: None,
             held_s: 0.0,
             last_t: None,
+            driving_level: None,
         };
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.run(rx)));
         if r.is_err() {
@@ -807,6 +810,9 @@ impl Actor {
                 ),
             );
         }
+        if !stopping && st.phase != hertzforge_mixed::MixedPhase::RampingDown {
+            self.driving_level = Some(st.level_db);
+        }
         if let (Some(last), true) = (self.last_t, st.held) {
             self.held_s += (st.t_s - last).max(0.0);
         }
@@ -1189,7 +1195,7 @@ impl Actor {
             .as_ref()
             .map(|(_, b)| b.clone())
             .unwrap_or_else(|| self.ender());
-        let level = self.view.level_db;
+        let level = self.driving_level.or(self.view.level_db);
         let at = match level {
             Some(l) => format!(
                 "{} dB after {} s",

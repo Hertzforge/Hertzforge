@@ -141,6 +141,8 @@ async fn sine_on_random_runs_floor_first_to_completed() {
     let end = wait_state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "completed", "{end}");
     assert!(end["end"]["ramp_s"].as_f64().is_some(), "{end}");
+    // The end says the level the test ran at, not where the ramp down left it.
+    assert_eq!(end["end"]["level_db"], 0, "{end}");
     let seen = phases_seen(&c);
     let at = |p: &str| seen.iter().position(|s| s == p);
     assert!(
