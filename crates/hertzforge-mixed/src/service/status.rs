@@ -179,6 +179,25 @@ pub struct PartRow {
     pub capped: u64,
 }
 
+/// One part's line in the run's report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartSummary {
+    /// The part's id.
+    pub id: String,
+    /// Its kind.
+    pub kind: PartKind,
+    /// The target at the end, as the status row states it.
+    pub target: f64,
+    /// The last usable measurement.
+    pub measured: Option<f64>,
+    /// The last error, dB.
+    pub error_db: Option<f64>,
+    /// The largest error seen, dB (signed, the larger magnitude).
+    pub worst_error_db: Option<f64>,
+    /// Seconds its alarm was set (sampled a chunk at a time).
+    pub alarm_s: f64,
+}
+
 /// The floor's summary.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct FloorSummary {

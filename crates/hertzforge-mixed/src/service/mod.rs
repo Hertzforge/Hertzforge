@@ -225,6 +225,9 @@ pub struct MixedReport {
     pub status: MixedStatus,
     /// The event log.
     pub events: Vec<status::MixedEvent>,
+    /// One line per part, in parts-list order.
+    #[serde(default)]
+    pub parts: Vec<status::PartSummary>,
 }
 
 /// The Mixed Mode run service. One per run; the run thread owns it and drops it
@@ -273,6 +276,10 @@ pub struct MixedService {
     /// is on that rung, seconds at the present level and at full level (holds
     /// excluded).
     ladder: live::Ladder,
+    /// The capture's folder and its law records not yet written.
+    capture_dir: Option<PathBuf>,
+    law_bytes: Vec<u8>,
+    summaries: Vec<status::PartSummary>,
 }
 
 impl std::fmt::Debug for MixedService {
@@ -357,6 +364,9 @@ impl MixedService {
             chunk_rms: 0.0,
             rand_acc: (0.0, 0),
             ladder: live::Ladder::default(),
+            capture_dir: None,
+            law_bytes: Vec::new(),
+            summaries: Vec::new(),
         })
     }
 

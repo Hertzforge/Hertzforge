@@ -390,6 +390,7 @@ impl MixedService {
                 );
             }
             self.advance_phase();
+            self.flush_law_records();
             if self.ending.is_some() && self.drive_is_zero() {
                 let now = self.frames();
                 let lag = self.rt.as_ref().map_or(0, |r| r.step.lag() as u64);
@@ -444,6 +445,7 @@ impl MixedService {
     }
 
     fn finish(&mut self, outcome: MixedOutcome) {
+        self.flush_law_records();
         if let Some(rt) = self.rt.as_mut() {
             rt.stop_station();
             rt.step.mode = super::step::StepMode::Silent;
@@ -634,6 +636,36 @@ impl MixedService {
     fn sample_histories(&mut self) {
         let t = self.t_s();
         let st = self.live_status();
+        if self.summaries.len() != st.parts.len() {
+            self.summaries = st
+                .parts
+                .iter()
+                .map(|r| super::status::PartSummary {
+                    id: r.id.clone(),
+                    kind: r.kind,
+                    target: r.target,
+                    measured: None,
+                    error_db: None,
+                    worst_error_db: None,
+                    alarm_s: 0.0,
+                })
+                .collect();
+        }
+        for (sm, r) in self.summaries.iter_mut().zip(&st.parts) {
+            sm.target = r.target;
+            if r.measured.is_some() {
+                sm.measured = r.measured;
+            }
+            if let Some(e) = r.error_db {
+                sm.error_db = Some(e);
+                if sm.worst_error_db.is_none_or(|w| e.abs() > w.abs()) {
+                    sm.worst_error_db = Some(e);
+                }
+            }
+            if r.alarm {
+                sm.alarm_s += super::run::CHUNK_S;
+            }
+        }
         let (mut ti, mut bi) = (0, 0);
         for row in &st.parts {
             match row.kind {
@@ -878,22 +910,120 @@ impl MixedService {
     // ---- capture -------------------------------------------------------------
 
     /// Start a capture named `run_name` under the capture root; returns its
-    /// folder. The law records are written beside it while it runs.
+    /// folder. The control channels are captured at the run's rate, and the
+    /// law records (`law_ticks.bin`, described by `law.json`) are written
+    /// beside them while it runs.
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, MixedError> {
-        let _ = run_name;
-        Err(MixedError::NotBuilt("capture"))
+        let root = self
+            .data_root
+            .clone()
+            .unwrap_or_else(hertzforge_capture::default_data_root);
+        let cfg_json =
+            serde_json::to_string(&self.cfg).map_err(|e| MixedError::Io(e.to_string()))?;
+        let n = self.cfg.control.channels.len();
+        let table = self.table.clone();
+        let tones: Vec<String> = self.cfg.tones().map(|(p, _)| p.id.clone()).collect();
+        let law = serde_json::json!({
+            "format": super::law_records::LAW_TICKS_FORMAT,
+            "record_bytes": super::law_records::MixedLawRecord::BYTES,
+            "fields": super::law_records::LAW_TICK_FIELDS
+                .iter()
+                .map(|(n, t)| serde_json::json!({"name": n, "type": t}))
+                .collect::<Vec<_>>(),
+            "roles": ["floor", "tone"],
+            "tones": tones,
+            "tone_misses": super::step::TONE_MISS_NAMES,
+            "floor_miss": "1: the call was not used (its reason is in the run's log)",
+            "floor_law": self.cfg.law.floor.id,
+            "tone_law": self.laws.tones.describe().id,
+        });
+        let rt = self
+            .rt
+            .as_mut()
+            .ok_or_else(|| MixedError::BadState("capture after arm".into()))?;
+        let sink = hertzforge_capture::CaptureSink::start(
+            &root,
+            run_name,
+            hertzforge_capture::CaptureConfig::at_rate(n, rt.fs),
+            table,
+            cfg_json,
+        )
+        .map_err(|e| MixedError::Io(e.to_string()))?;
+        let dir = sink.run_dir().to_path_buf();
+        std::fs::write(
+            dir.join(super::law_records::LAW_JSON_FILE),
+            serde_json::to_vec_pretty(&law).map_err(|e| MixedError::Io(e.to_string()))?,
+        )
+        .map_err(|e| MixedError::Io(e.to_string()))?;
+        std::fs::write(dir.join(super::law_records::LAW_TICKS_FILE), [])
+            .map_err(|e| MixedError::Io(e.to_string()))?;
+        rt.capture = Some(sink);
+        self.capture_dir = Some(dir.clone());
+        Ok(dir)
     }
 
-    /// Stop the capture.
+    /// Stop the capture (its law records are flushed).
     pub fn stop_capture(&mut self) -> Result<(), MixedError> {
+        self.flush_law_records();
+        if let Some(rt) = self.rt.as_mut() {
+            rt.capture = None;
+        }
+        self.capture_dir = None;
         Ok(())
     }
 
+    /// Take the laws' records from the step and the floor loop; append them
+    /// to the capture's `law_ticks.bin` while a capture runs.
+    fn flush_law_records(&mut self) {
+        let Some(rt) = self.rt.as_mut() else { return };
+        for r in rt.step.law_log.drain(..).chain(rt.floor_log.drain(..)) {
+            if self.capture_dir.is_some() {
+                r.write_to(&mut self.law_bytes);
+            }
+        }
+        if let Some(dir) = &self.capture_dir {
+            if !self.law_bytes.is_empty() {
+                use std::io::Write;
+                let path = dir.join(super::law_records::LAW_TICKS_FILE);
+                if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(path) {
+                    if f.write_all(&self.law_bytes).is_ok() {
+                        self.law_bytes.clear();
+                    }
+                }
+            }
+        }
+    }
+
     /// Save a snapshot of the spectra and status with `marks`; returns its
-    /// path.
+    /// path (`snapshots/` under the capture root).
     pub fn save_snapshot(&mut self, marks: Vec<Mark>) -> Result<PathBuf, MixedError> {
-        let _ = marks;
-        Err(MixedError::NotBuilt("save a snapshot"))
+        let root = self
+            .data_root
+            .clone()
+            .unwrap_or_else(hertzforge_capture::default_data_root)
+            .join("snapshots");
+        std::fs::create_dir_all(&root).map_err(|e| MixedError::Io(e.to_string()))?;
+        let marks: Vec<serde_json::Value> = marks
+            .iter()
+            .map(|m| {
+                serde_json::json!({"ch": m.ch, "freq_hz": m.freq_hz, "value": m.value,
+                    "label": m.label})
+            })
+            .collect();
+        let snap = serde_json::json!({
+            "kind": "mixed_snapshot",
+            "t_s": self.t_s(),
+            "status": self.status(),
+            "display": self.display(),
+            "marks": marks,
+        });
+        let path = root.join(format!("mixed_{}_{:.3}.json", self.sysid_seed, self.t_s()));
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&snap).map_err(|e| MixedError::Io(e.to_string()))?,
+        )
+        .map_err(|e| MixedError::Io(e.to_string()))?;
+        Ok(path)
     }
 
     // ---- reading -------------------------------------------------------------
@@ -917,6 +1047,7 @@ impl MixedService {
         };
         s.band_coherence = rt.ident.band_coherence;
         s.overloads = rt.step.overloads.clone();
+        s.capturing = rt.capture.is_some();
         s.trusted_frac = rt.ident.trusted_frac;
         if rt.floor_law.is_none() {
             return s;
@@ -1146,6 +1277,7 @@ impl MixedService {
             trip: self.trip.clone(),
             status: self.status(),
             events: self.log.events().to_vec(),
+            parts: self.summaries.clone(),
         }
     }
 }

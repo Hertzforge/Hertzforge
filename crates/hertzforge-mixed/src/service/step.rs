@@ -205,6 +205,11 @@ pub(crate) struct MixedProcessStep {
     pub(crate) ceiling_vpk: f64,
     pub(crate) abort_vpk: f64,
     pub(crate) records: Records,
+    /// Each tone law call, until the service drains them (bounded: a call
+    /// past the capacity is not recorded rather than allocated for).
+    pub(crate) law_log: Vec<super::law_records::MixedLawRecord>,
+    /// The frame the loop engaged at.
+    pub(crate) engaged_frame: u64,
     pub(crate) trip: Option<StepTrip>,
     in_scratch: Vec<f64>,
     /// The whole input block as f64, for the kinematic monitor.
@@ -282,6 +287,8 @@ impl MixedProcessStep {
                 ..Records::default()
             },
             trip: None,
+            law_log: Vec::with_capacity(64 * 128),
+            engaged_frame: 0,
             in_scratch: vec![0.0; n_ctrl],
             kin_scratch: Vec::with_capacity(capacity.min(1 << 16) * in_stride.max(1)),
             kin: None,
@@ -436,6 +443,7 @@ impl MixedProcessStep {
                 continue;
             }
             let in_force = self.bank.voice(j).amplitude_cmd();
+            let mut call: Option<(f64, u8)> = None;
             let proposed = if usable {
                 let m = measured.unwrap_or(0.0);
                 for c in 0..self.weights.len() {
@@ -474,12 +482,14 @@ impl MixedProcessStep {
                 t.tally.calls += 1;
                 t.ticks += 1;
                 t.tally.worst_call_us = t.tally.worst_call_us.max(took * 1e6);
+                call = Some((took, 0u8));
                 match r {
                     Ok(out) => {
                         t.misses_in_row = 0;
                         Some(out.drive)
                     }
                     Err(fault) => {
+                        call = Some((took, miss_code(fault.reason())));
                         t.tally.misses += 1;
                         t.misses_in_row += 1;
                         if matches!(fault, hertzforge_sine::law::LawFault::BadOutput(_)) {
@@ -508,8 +518,10 @@ impl MixedProcessStep {
                     None
                 }
             };
+            let mut bound_now = false;
             if let Some(p) = proposed {
                 let (capped, bound) = cap_drive(in_force, p, &self.guards, dt);
+                bound_now = bound;
                 let capped = capped.min(self.ceiling_vpk);
                 let t = &mut self.tones[j];
                 if bound {
@@ -522,6 +534,20 @@ impl MixedProcessStep {
                 self.bank.voice_mut(j).slew_to(capped, tick);
                 if self.tones[j].cap_bound_s > self.guards.divergence_s {
                     self.latch(MixedTripKind::Divergence, Some(self.tones[j].part), false);
+                }
+            }
+            if let Some((took, miss)) = call {
+                if self.law_log.len() < self.law_log.capacity() {
+                    self.law_log.push(super::law_records::MixedLawRecord {
+                        t_s: self.frames.saturating_sub(self.engaged_frame) as f64 / self.fs,
+                        drive_in: in_force,
+                        drive_out: self.bank.voice(j).amplitude_cmd(),
+                        took_us: (took * 1e6) as f32,
+                        role: super::law_records::RecordRole::Tone,
+                        tone: j as u8,
+                        miss,
+                        flags: u8::from(bound_now),
+                    });
                 }
             }
             // Judge.
@@ -541,6 +567,27 @@ impl MixedProcessStep {
         }
     }
 }
+
+/// The miss code a law record carries: the index of the reason among
+/// [`TONE_MISS_NAMES`], plus one.
+pub(crate) fn miss_code(reason: &str) -> u8 {
+    TONE_MISS_NAMES
+        .iter()
+        .position(|n| *n == reason)
+        .map_or(u8::MAX, |i| i as u8 + 1)
+}
+
+/// The tone laws' miss reasons, in record code order (Sine's names).
+pub const TONE_MISS_NAMES: [&str; 8] = [
+    "error",
+    "panicked",
+    "over_budget",
+    "over_memory",
+    "non_finite",
+    "negative",
+    "undeclared_value",
+    "too_many_values",
+];
 
 #[allow(clippy::too_many_arguments)]
 fn tick_inputs<'a>(

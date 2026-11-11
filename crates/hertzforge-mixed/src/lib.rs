@@ -43,7 +43,8 @@ pub use service::display::{
 #[cfg(feature = "service")]
 pub use service::status::{
     FloorSummary, MixedEvent, MixedEventKind, MixedLawStatus, MixedLog, MixedOutcome, MixedPhase,
-    MixedState, MixedStatus, MixedTotals, MixedTrip, MixedTripKind, PartKind, PartRow, RoleTally,
+    MixedState, MixedStatus, MixedTotals, MixedTrip, MixedTripKind, PartKind, PartRow, PartSummary,
+    RoleTally,
 };
 #[cfg(feature = "service")]
 pub use service::{
