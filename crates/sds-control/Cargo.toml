@@ -64,6 +64,12 @@ hertzforge-srs.workspace = true
 # and holds the Sim only as a dev-dependency (tests/forbidden_deps.rs).
 hertzforge-sine.workspace = true
 hertzforge-sine-laws.workspace = true
+# Mixed Mode (no `mixed.*` method yet): the parts list, part clock and run service,
+# and the choice of its two laws. Reviewed 2026-11-10: the run service reaches
+# hardware only through the station backend it is handed, and holds the Sim only as
+# a dev-dependency (tests/forbidden_deps.rs).
+hertzforge-mixed.workspace = true
+hertzforge-mixed-laws.workspace = true
 # TWR (src/twr/): the door every TWR law goes through (the choice of law
 # and the law check). The TWR service itself is `hertzforge-twr` above. Reviewed
 # 2026-11-08: it runs a check case on the backend it is handed and names none.

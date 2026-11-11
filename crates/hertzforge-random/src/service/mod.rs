@@ -66,17 +66,17 @@
 
 pub mod config;
 pub mod engine;
-mod guard;
+pub mod guard;
 pub mod law;
 pub mod ramp;
 pub mod report;
 
 use crate::control::{
-    composite_psd, ControlLaw, LawFault, LevelCommand, LoopInputs, LoopOutputs, NotchReport,
-    NotchSet, OutputFault,
+    composite_psd, ControlLaw, LevelCommand, LoopInputs, LoopOutputs, NotchReport, NotchSet,
 };
 use config::{CaptureTrigger, ConfigError, RandomTestConfig, RunMode};
 use engine::{DriveSynth, KinematicMonitor, KinematicTrip, LoopConfig, PlantLoop};
+use guard::{guarded_call, Budget, Miss};
 use hertzforge_breakpoints::{Envelope, LineSpectrum};
 use hertzforge_capture::{
     default_data_root, save_snapshot, CaptureConfig, CaptureSink, Mark, Snapshot,
@@ -3603,106 +3603,6 @@ impl RandomService {
             .max(0.0)
             .sqrt()
     }
-}
-
-/// Why one law call's output was not used, with the law's own words when it gave
-/// any.
-#[derive(Debug, Clone)]
-struct Miss {
-    reason: LawFaultReason,
-    detail: Option<String>,
-}
-
-impl Miss {
-    fn words(&self) -> String {
-        match &self.detail {
-            Some(d) => format!("{} ({d})", self.reason.words()),
-            None => self.reason.words().to_string(),
-        }
-    }
-}
-
-/// The reason a law's own fault is recorded under. A contained law's host can
-/// stop it (a trap, its time budget, its memory cap) or refuse its output before
-/// the core sees it; each lands on the reason the core would give the same
-/// failure in a native law, so a run record reads the same either way.
-fn fault_reason(fault: &LawFault) -> LawFaultReason {
-    match fault {
-        LawFault::BadInputs(_) | LawFault::Failed(_) => LawFaultReason::Error,
-        LawFault::Crashed(_) => LawFaultReason::Panicked,
-        LawFault::OverBudget(_) => LawFaultReason::OverBudget,
-        LawFault::OverMemory(_) => LawFaultReason::OverMemory,
-        LawFault::BadOutput(rule, _) => match rule {
-            OutputFault::WrongLength => LawFaultReason::WrongLength,
-            OutputFault::NonFinite => LawFaultReason::NonFinite,
-            OutputFault::Negative => LawFaultReason::Negative,
-            OutputFault::NonFiniteLevel => LawFaultReason::NonFiniteLevel,
-            OutputFault::Diagnostics => LawFaultReason::BadDiagnostics,
-        },
-    }
-}
-
-/// The time one law call may take, seconds: what the law is allowed of one loop.
-#[derive(Clone, Copy)]
-struct Budget<'a> {
-    clock: &'a dyn LawClock,
-    seconds: f64,
-}
-
-/// One call into the control law, guarded: the output comes back only if the
-/// call returned within its time budget and the output passes the core's checks
-/// ([`guard::check_output`]); otherwise the reason it was not usable.
-fn guarded_call<F>(
-    law: &mut (dyn ControlLaw + Send),
-    budget: Budget<'_>,
-    nbins: usize,
-    band: (usize, usize),
-    call: F,
-) -> Result<LoopOutputs, Miss>
-where
-    F: FnOnce(&mut (dyn ControlLaw + Send)) -> Result<LoopOutputs, LawFault>,
-{
-    let started = budget.clock.now_s();
-    // A panic inside the law is the law's fault, never the run's: it is caught
-    // here and becomes a miss like any other. `AssertUnwindSafe` is sound because
-    // nothing the core relies on is borrowed into the call except the law itself,
-    // and a law that panicked is only ever asked again for a fresh output, which
-    // is checked like this one. (The workspace keeps `panic = "unwind"` for
-    // exactly this kind of containment; see the workspace Cargo.toml.)
-    let out = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(law))) {
-        Ok(Ok(out)) => out,
-        Ok(Err(e)) => {
-            return Err(Miss {
-                reason: fault_reason(&e),
-                detail: Some(e.to_string()),
-            })
-        }
-        Err(_) => {
-            return Err(Miss {
-                reason: LawFaultReason::Panicked,
-                detail: None,
-            })
-        }
-    };
-    // A late answer is not used even when it is a good one: the loop cannot wait
-    // for a law, and a law that is late once is not to be trusted to be on time
-    // next loop. (A call that never returns is the plug-in host's to interrupt;
-    // a native law runs on the loop thread and is trusted not to hang.)
-    let took = budget.clock.now_s() - started;
-    if took.is_nan() || took > budget.seconds {
-        return Err(Miss {
-            reason: LawFaultReason::OverBudget,
-            detail: Some(format!(
-                "{:.0} ms against {:.0} ms",
-                took * 1e3,
-                budget.seconds * 1e3
-            )),
-        });
-    }
-    guard::check_output(out, nbins, band).map_err(|reason| Miss {
-        reason,
-        detail: None,
-    })
 }
 
 /// Human unit label for the report.

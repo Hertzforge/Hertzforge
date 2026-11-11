@@ -26,7 +26,7 @@ export interface ShellConfig {
 	runLogFile: string | null;
 	page: string | null;
 	/** `&test=mimo_random`, `&test=shock`, `&test=srs`, `&test=sine`, `&test=twr`, `&test=explorer` or `&test=recorder`: the pop-out shows that run's page; otherwise Random's. */
-	popoutTest: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr' | 'explorer' | 'recorder';
+	popoutTest: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder';
 	/**
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
@@ -64,7 +64,7 @@ export function readConfig(search: string): ShellConfig {
 		runLog: q.get('runlog') === '1',
 		runLogFile: q.get('runlog_file'),
 		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
-		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : q.get('test') === 'shock' ? 'shock' : q.get('test') === 'srs' ? 'srs' : q.get('test') === 'sine' ? 'sine' : q.get('test') === 'twr' ? 'twr' : q.get('test') === 'explorer' ? 'explorer' : q.get('test') === 'recorder' ? 'recorder' : 'random',
+		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : q.get('test') === 'shock' ? 'shock' : q.get('test') === 'srs' ? 'srs' : q.get('test') === 'sine' ? 'sine' : q.get('test') === 'mixed' ? 'mixed' : q.get('test') === 'twr' ? 'twr' : q.get('test') === 'explorer' ? 'explorer' : q.get('test') === 'recorder' ? 'recorder' : 'random',
 		mockControl: {
 			speed: num(q.get('mock_speed')),
 			niReal: q.get('mock_ni') === 'real' ? true : undefined,

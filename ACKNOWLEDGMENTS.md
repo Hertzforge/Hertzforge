@@ -64,6 +64,16 @@ Random were written from these papers, and their code comments cite them the sam
 - **P. D. Welch**, "The Use of Fast Fourier Transform for the Estimation of Power Spectra", IEEE
   Transactions on Audio and Electroacoustics, 1967: the averaged spectral estimates every loop is
   built on.
+- **IEC 60068-2-80**, *Environmental testing, Part 2-80: Tests, Test Fi: Vibration, Mixed mode*:
+  the test type Mixed Mode controls, a random floor with sine tones or narrow bands of random laid
+  over it. The control method is Hertzforge's own composition of published building blocks, each
+  held to a closed-form case in its tests.
+- **S. O. Rice**, "Mathematical Analysis of Random Noise", Bell System Technical Journal, 1944 and
+  1945: the statistics of a sine wave in random noise, behind how far a tone must stand over the
+  floor to be read and the predicted peak of the two together.
+- **F. J. Harris**, "On the Use of Windows for Harmonic Analysis with the Discrete Fourier
+  Transform", Proceedings of the IEEE, 1978: how far a tone leaks into the lines beside it, which
+  sets the width Mixed Mode leaves out of the floor's average around each tone.
 - **D. O. Smallwood**, the multiple-shaker random control papers: "Multiple Shaker Random Vibration
   Control: An Update", Proceedings of the IEST, 1999, the source of the default law's closed-loop
   correction of a factor of the reference and its per-loop limits; "Random Vibration Testing of

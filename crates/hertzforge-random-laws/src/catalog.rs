@@ -673,6 +673,32 @@ impl LawCatalog {
         Ok(entry)
     }
 
+    /// Where an imported law stands on the further check `check` (for example
+    /// `mixed-floor`): read from its record now, so a record written or
+    /// removed since the last scan is seen. A record for another file, or a
+    /// malformed one, is [`CheckStatus::Unreadable`]. The law's own check
+    /// ([`CatalogEntry::check`]) is not changed by a further check.
+    pub fn named_check(&self, law_sha256: &str, check: &str) -> CheckStatus {
+        match CheckRecord::read_named(&self.laws_dir, law_sha256, check) {
+            Ok(Some(r)) => CheckStatus::Checked(r),
+            Ok(None) => CheckStatus::Unchecked,
+            Err(why) => CheckStatus::Unreadable(why),
+        }
+    }
+
+    /// Write `record` as the record of the further check `check` beside its
+    /// law file. The law's entry, and its own check record, are unchanged.
+    pub fn record_named_check(
+        &mut self,
+        check: &str,
+        record: &CheckRecord,
+    ) -> Result<(), CatalogError> {
+        record
+            .write_named(&self.laws_dir, check)
+            .map_err(CatalogError::Check)?;
+        Ok(())
+    }
+
     /// Write `record` beside its law file and update that law's entry.
     pub fn record_check(&mut self, record: &CheckRecord) -> Result<(), CatalogError> {
         record.write(&self.laws_dir).map_err(CatalogError::Check)?;

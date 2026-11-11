@@ -647,3 +647,64 @@ fn a_twr_record_clears_a_file_only_at_the_check_in_force() {
     cat.record_check(&rec).unwrap();
     assert_eq!(may_arm_on_hardware(&cat.entry(&sine.id).unwrap()), Ok(()));
 }
+
+#[test]
+fn a_further_check_record_lives_beside_the_law_and_leaves_its_own_check_alone() {
+    let scratch = Scratch::new("catalog-named-check");
+    let mut cat = open(scratch.path());
+    let law = cat.import(&law_file(RATIO)).unwrap();
+    assert_eq!(
+        cat.named_check(&law.id, "mixed-floor"),
+        CheckStatus::Unchecked
+    );
+    let record = CheckRecord::new(
+        law.id.clone(),
+        "role-check 1",
+        "2026-11-11T10:00:00Z",
+        vec![CheckCase {
+            name: "floor only".into(),
+            passed: true,
+            detail: "within 0.4 dB".into(),
+        }],
+    );
+    cat.record_named_check("mixed-floor", &record).unwrap();
+    let path = scratch
+        .path()
+        .join(LAWS_DIR)
+        .join(format!("{}.mixed-floor.check.json", law.id));
+    assert!(path.is_file(), "the record is beside the law file");
+    assert_eq!(
+        cat.named_check(&law.id, "mixed-floor"),
+        CheckStatus::Checked(record.clone())
+    );
+    // Each further check is its own record; the law's own check is untouched,
+    // and a rescan neither lists the record as a problem nor as a law.
+    assert_eq!(
+        cat.named_check(&law.id, "mixed-tones"),
+        CheckStatus::Unchecked
+    );
+    assert_eq!(cat.entry(&law.id).unwrap().check, CheckStatus::Unchecked);
+    cat.rescan().unwrap();
+    assert!(cat.problems().is_empty(), "{:?}", cat.problems());
+    assert_eq!(cat.entry(&law.id).unwrap().check, CheckStatus::Unchecked);
+    // A record carried to another file's name does not vouch for that file.
+    let other = "1".repeat(64);
+    std::fs::copy(
+        &path,
+        scratch
+            .path()
+            .join(LAWS_DIR)
+            .join(format!("{other}.mixed-floor.check.json")),
+    )
+    .unwrap();
+    assert!(matches!(
+        cat.named_check(&other, "mixed-floor"),
+        CheckStatus::Unreadable(_)
+    ));
+    // A name that is not a check's is refused, never turned into a path.
+    assert!(cat.record_named_check("../x", &record).is_err());
+    assert!(matches!(
+        cat.named_check(&law.id, "Mixed Floor"),
+        CheckStatus::Unreadable(_)
+    ));
+}

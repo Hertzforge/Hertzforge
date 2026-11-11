@@ -11,6 +11,7 @@
 	import ShockScreen from '$lib/acquire/shock/ShockScreen.svelte';
 	import SrsScreen from '$lib/acquire/srs/SrsScreen.svelte';
 	import SineScreen from '$lib/acquire/sine/SineScreen.svelte';
+	import MixedScreen from '$lib/acquire/mixed/MixedScreen.svelte';
 	import TwrScreen from '$lib/acquire/twr/TwrScreen.svelte';
 	import { TWR_STATE_WORDS } from '$lib/acquire/twr/twrWords';
 	import ExplorerScreen from '$lib/acquire/explorer/ExplorerScreen.svelte';
@@ -37,6 +38,8 @@
 						? STATE_WORDS[app.srs.status.state]
 						: app.sine.isLive && app.sine.status
 							? STATE_WORDS[app.sine.status.state]
+							: app.mixed.isLive && app.mixed.status
+							? STATE_WORDS[app.mixed.status.state]
 							: app.twr.isLive && app.twr.status
 								? TWR_STATE_WORDS[app.twr.status.state]
 								: app.explorer.isLive && app.explorer.status
@@ -59,6 +62,8 @@
 	<SrsScreen {app} />
 {:else if tests.screen === 'sine'}
 	<SineScreen {app} />
+{:else if tests.screen === 'mixed'}
+	<MixedScreen {app} />
 {:else if tests.screen === 'twr'}
 	<TwrScreen {app} />
 {:else if tests.screen === 'explorer'}

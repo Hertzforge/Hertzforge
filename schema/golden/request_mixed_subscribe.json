@@ -1,0 +1,51 @@
+{
+ "type": "request",
+ "id": 93,
+ "method": "mixed.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control"
+   },
+   {
+    "id": "res",
+    "quantity": "residual"
+   },
+   {
+    "id": "rsp",
+    "quantity": "response",
+    "channels": "control"
+   },
+   {
+    "id": "gain",
+    "quantity": "identification"
+   },
+   {
+    "id": "amp",
+    "quantity": "amplitude",
+    "parts": [
+     "t2"
+    ]
+   },
+   {
+    "id": "frq",
+    "quantity": "frequency",
+    "parts": "bands"
+   },
+   {
+    "id": "lvl",
+    "quantity": "level"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   }
+  ]
+ }
+}

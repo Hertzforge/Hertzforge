@@ -248,6 +248,7 @@ export function withType(spec: PlotPanelSpec, type: PlotType): PlotPanelSpec {
 		...spec,
 		quantity: type.id,
 		channels: type.channels ? spec.channels : 'all',
+		parts: type.parts ? (spec.parts ?? (type.parts === 'both' ? 'all' : type.parts)) : undefined,
 		arrange: type.time ? 'overlay' : 'split',
 		display: { ...d, x: defaultAxis(), y: defaultAxis(), hidden: [], traces: {}, cursorAt: [null, null], window_s: null, lanes: 'overlay', hold: type.time ? 'none' : d.hold }
 	};
