@@ -1440,6 +1440,32 @@ export interface ReportField {
 }
 
 /** `report.editor`: the edit page and the pane for the selection. */
+/** One block of a report as the shell's own page draws it (`report.views`). */
+export interface ReportPageBlock {
+	kind: 'text' | 'figure' | 'unbound';
+	/** The index of the report block it came from; a block's several figures share it. */
+	block: number | null;
+	/** Its figure or table number, such as "Figure 3". */
+	label: string;
+	caption: string;
+	note?: string;
+	/** Text: its HTML, written by the core from the block's escaped markdown. */
+	html?: string;
+	/** A figure: the views it is drawn as. */
+	views?: View[];
+	/** An unbound slot: what the block was. */
+	was?: string;
+	empty?: boolean;
+}
+
+/** A report as the shell's own page draws it (`report.views`). */
+export interface ReportPageData {
+	name: string;
+	title: string;
+	marking: string;
+	blocks: ReportPageBlock[];
+}
+
 export interface ReportEditor {
 	/** The edit page; left out when only the pane was asked for. */
 	html?: string;
