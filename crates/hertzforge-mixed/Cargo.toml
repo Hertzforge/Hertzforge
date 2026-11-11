@@ -59,3 +59,11 @@ hertzforge-hal-sim.workspace = true
 [[test]]
 name = "sor_closed_loop"
 required-features = ["service"]
+
+[[test]]
+name = "ror_closed_loop"
+required-features = ["service"]
+
+[[test]]
+name = "guards"
+required-features = ["service"]
