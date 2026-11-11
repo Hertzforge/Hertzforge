@@ -82,7 +82,8 @@ class TableContentError(ValueError):
 class Column:
     """One column of a kind of breakpoint table.
 
-    `type` is `number` or `choice`. `choices` maps each word a file may
+    `type` is `number`, `choice` or `text` (a Mixed Mode part's id, name,
+    the part it follows, or its amplitude profile's rows). `choices` maps each word a file may
     hold, in normalized form, to the value it stands for; `values` are the
     values themselves, which a write must use.
     """
@@ -220,6 +221,67 @@ BREAKPOINT_KINDS: dict[str, BreakpointKind] = {
         x='freq_hz', x_unit='Hz', y_unit='g/V', needs=('gain',),
         positional=('freq_hz', 'gain')),
 }
+
+
+def _num(name: str, label: str, *aliases: str) -> Column:
+    return Column(name, label, 'number', None, nullable=True, aliases=aliases)
+
+
+def _choice(name: str, label: str, default: str | None, *words: str,
+            aliases: tuple[str, ...] = ()) -> Column:
+    values = tuple(w.partition(':')[0] for w in words)
+    return Column(name, label, 'choice', default, nullable=default is None, aliases=aliases,
+                  values=values, choices=_words(*words))
+
+
+def _txt(name: str, label: str, *aliases: str) -> Column:
+    return Column(name, label, 'text', None, nullable=True, aliases=aliases)
+
+
+#: the columns a Mixed Mode tone and a narrowband share: who the part is, when
+#: it plays, how it moves (each kind of schedule's fields, empty where the
+#: part's kind does not use them) and its bands
+_PART_COLUMNS = (
+    _txt('id', 'Id', 'partid', 'part'),
+    _txt('name', 'Name', 'label'),
+    _choice('enabled', 'On', 'on', 'on: yes true 1 enabled', 'off: no false 0 disabled',
+            aliases=('enabled', 'starts on')),
+    _choice('schedule', 'Moves', None, 'fixed: standsstill dwell dwells', 'sweep: sweeps swept',
+            'follow: follows follower', aliases=('schedule', 'kind', 'motion')),
+    _num('freq_hz', 'Frequency', 'freq', 'frequency', 'hz'),
+    _num('dwell_s', 'Stands for', 'dwells', 'dwell seconds'),
+    _num('dwell_cycles', 'Stands for cycles', 'cycles'),
+    _num('lo_hz', 'From', 'low', 'lo', 'from hz'),
+    _num('hi_hz', 'To', 'high', 'hi', 'to hz'),
+    _choice('rate_law', 'Sweep law', None, 'log: logarithmic octaves', 'linear: lin hz',
+            aliases=('law', 'sweep law')),
+    _num('rate', 'Rate', 'sweep rate'),
+    _num('start_hz', 'Starts at', 'start'),
+    _choice('direction', 'First goes', None, 'up: rising', 'down: falling',
+            aliases=('direction', 'first leg')),
+    _num('end_sweeps', 'Sweeps', 'sweeps', 'count'),
+    _num('end_s', 'Sweeps for', 'duration', 'duration s'),
+    _txt('follows', 'Follows', 'of', 'leader'),
+    _num('ratio', 'Ratio', 'times'),
+    *_bands(),
+    _num('on_s', 'On at', 'window on', 'on s'),
+    _num('off_s', 'Off at', 'window off', 'off s'),
+)
+
+BREAKPOINT_KINDS['mixed_tones'] = BreakpointKind(
+    'Tones table',
+    (*_PART_COLUMNS,
+     _num('amplitude_g', 'Amplitude', 'amplitude', 'amp', 'g', 'gpk'),
+     _txt('profile', 'Amplitude profile', 'amplitude profile', 'profile rows')),
+    x='id', x_unit='', y_unit='', needs=('schedule',))
+
+BREAKPOINT_KINDS['mixed_bands'] = BreakpointKind(
+    'Narrowbands table',
+    (*_PART_COLUMNS,
+     _num('level_g2_hz', 'Level', 'level', 'psd', 'g2hz'),
+     _num('width_hz', 'Width', 'width'),
+     _num('width_share', 'Width share', 'share', 'width share of center')),
+    x='id', x_unit='', y_unit='', needs=('schedule',))
 
 
 def _breakpoint_kind(table_kind: str | None) -> BreakpointKind:
@@ -620,7 +682,10 @@ def _strict(column: Column, value: Any, at: int) -> Any:
         return float(value)
     if column.type == 'choice' and value in column.values:
         return value
+    if column.type == 'text' and isinstance(value, str):
+        return value
     wanted = ('a finite number' if column.type == 'number'
+              else 'text' if column.type == 'text'
               else 'one of ' + ', '.join(column.values))
     raise TableContentError(f'{where}: {value!r} is not {wanted}')
 
@@ -680,7 +745,8 @@ def _write_hforge(path: str, table: Table, form: str) -> None:
                 group.create_dataset(name, data=np.asarray(
                     [math.nan if v is None else v for v in values], dtype=np.float64))
             else:
-                group.create_dataset(name, data=values, dtype=h5py.string_dtype('utf-8'))
+                group.create_dataset(name, data=['' if v is None else v for v in values],
+                                     dtype=h5py.string_dtype('utf-8'))
 
 
 # ---- reading ------------------------------------------------------------------------------
@@ -1024,6 +1090,8 @@ def _lenient(column: Column, cell: Any, line: int) -> Any:
         return None
     if empty:
         return column.default
+    if column.type == 'text':
+        return _text(cell) if not isinstance(cell, str) else cell
     if column.type == 'number':
         value = _number(cell)
         if value is None or not math.isfinite(value):

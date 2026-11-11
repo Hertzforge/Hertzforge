@@ -1,0 +1,368 @@
+{
+ "type": "request",
+ "id": 91,
+ "method": "mixed.configure",
+ "params": {
+  "config": {
+   "title": "Rotor on random, 20 to 2000 Hz",
+   "parts": [
+    {
+     "id": "floor",
+     "name": "Floor",
+     "kind": "floor",
+     "enabled": true,
+     "window": {
+      "on_s": 0,
+      "off_s": null
+     },
+     "breakpoints": [
+      {
+       "freq_hz": 20,
+       "psd_g2_hz": 0.01
+      },
+      {
+       "freq_hz": 80,
+       "slope_db_oct": 3
+      },
+      {
+       "freq_hz": 350,
+       "psd_g2_hz": 0.04,
+       "alarm_db": [
+        2,
+        2
+       ]
+      },
+      {
+       "freq_hz": 2000,
+       "slope_db_oct": -3
+      }
+     ],
+     "alarm_db": [
+      3,
+      3
+     ],
+     "abort_db": [
+      6,
+      6
+     ]
+    },
+    {
+     "id": "t1",
+     "name": "Blade pass",
+     "kind": "tone",
+     "enabled": true,
+     "window": {
+      "on_s": 0,
+      "off_s": null
+     },
+     "schedule": {
+      "kind": "fixed",
+      "freq_hz": 120,
+      "end": null
+     },
+     "amplitude_g": 2,
+     "alarm_db": [
+      1.5,
+      1.5
+     ],
+     "abort_db": [
+      3,
+      3
+     ]
+    },
+    {
+     "id": "t2",
+     "name": "Rotor",
+     "kind": "tone",
+     "enabled": true,
+     "window": {
+      "on_s": 0,
+      "off_s": null
+     },
+     "schedule": {
+      "kind": "sweep",
+      "band_hz": [
+       300,
+       600
+      ],
+      "rate": {
+       "law": "log",
+       "oct_per_min": 1
+      },
+      "start_hz": 300,
+      "direction": "up",
+      "end": {
+       "sweeps": 4,
+       "duration_s": null
+      }
+     },
+     "profile": {
+      "label": "Rotor",
+      "rows": [
+       {
+        "freq_hz": 300,
+        "quantity": "accel_g",
+        "value": 1
+       },
+       {
+        "freq_hz": 600,
+        "quantity": "accel_g",
+        "value": 1.5
+       }
+      ]
+     },
+     "alarm_db": [
+      1.5,
+      1.5
+     ],
+     "abort_db": [
+      3,
+      3
+     ]
+    },
+    {
+     "id": "t3",
+     "name": "Rotor 2nd",
+     "kind": "tone",
+     "enabled": true,
+     "window": {
+      "on_s": 0,
+      "off_s": null
+     },
+     "schedule": {
+      "kind": "follow",
+      "of": "t2",
+      "ratio": 2
+     },
+     "amplitude_g": 0.5,
+     "alarm_db": [
+      1.5,
+      1.5
+     ],
+     "abort_db": [
+      3,
+      3
+     ]
+    },
+    {
+     "id": "b1",
+     "name": "Gear mesh",
+     "kind": "narrowband",
+     "enabled": true,
+     "window": {
+      "on_s": 0,
+      "off_s": null
+     },
+     "schedule": {
+      "kind": "fixed",
+      "freq_hz": 250,
+      "end": null
+     },
+     "level_g2_hz": 0.2,
+     "width_hz": 20,
+     "alarm_db": null,
+     "abort_db": null
+    },
+    {
+     "id": "b2",
+     "name": "Rotor band",
+     "kind": "narrowband",
+     "enabled": true,
+     "window": {
+      "on_s": 10,
+      "off_s": 250
+     },
+     "schedule": {
+      "kind": "sweep",
+      "band_hz": [
+       1300,
+       1800
+      ],
+      "rate": {
+       "law": "linear",
+       "hz_per_s": 2
+      },
+      "start_hz": 1300,
+      "direction": "up",
+      "end": null
+     },
+     "level_g2_hz": 0.1,
+     "width_share": 0.05,
+     "alarm_db": [
+      3,
+      3
+     ],
+     "abort_db": [
+      6,
+      6
+     ]
+    }
+   ],
+   "exclusion_hz": 2,
+   "acquisition": {
+    "fs_hz": 8192,
+    "n_pts": 16384,
+    "n_avg": 4,
+    "tick_ms": 10
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels": [
+     {
+      "db": -12,
+      "dwell_s": 30
+     },
+     {
+      "db": -6,
+      "dwell_s": 30
+     },
+     {
+      "db": 0
+     }
+    ],
+    "full_level_s": 300
+   },
+   "control": {
+    "composite": "weighted_avg",
+    "weights": [
+     {
+      "channel": 1,
+      "weight": 1
+     }
+    ],
+    "control_dof": 120,
+    "damping": 4,
+    "max_lines_out": 10,
+    "max_loops_out": 5,
+    "max_sigma": 5,
+    "drive_ceiling_vrms": 1,
+    "drive_abort_vrms": null,
+    "coherence_floor": 0.5,
+    "review_after_sysid": true,
+    "pretest": {
+     "averages": 4,
+     "level_db": -20,
+     "max_vrms": 1,
+     "start_vrms": 0.01,
+     "shaped": false
+    },
+    "soft_start_db": 9,
+    "soft_start_relax_db": 6,
+    "level_ramp_s": 3,
+    "shutdown_ramp_s": 3,
+    "part_ramp_s": 3,
+    "floor_settle_s": 30,
+    "trust_coherence": 0.5,
+    "trust_h_floor_frac": 0.05,
+    "tracking": {
+     "kind": "fixed",
+     "hz": 0.5
+    },
+    "law": {
+     "floor": {
+      "id": "hinv",
+      "params": {}
+     },
+     "tones": {
+      "id": "servo_blend",
+      "params": {
+       "blend_w": 0.5,
+       "compression": "slow",
+       "kp": 0.3
+      }
+     }
+    },
+    "law_guards": {
+     "floor": {
+      "law_budget": 0.25,
+      "law_misses": 3,
+      "max_change_db": 6
+     },
+     "tones": {
+      "law_budget": 0.25,
+      "law_misses": 3,
+      "max_step_db": 1,
+      "max_rise_db_per_s": 240,
+      "divergence_s": 1,
+      "fault_debounce_ticks": 50
+     }
+    }
+   },
+   "limits": {
+    "drive_vpk_ceiling": 4,
+    "drive_vpk_abort": 6,
+    "kinematic_monitor": true,
+    "channels": [
+     {
+      "channel": 3,
+      "kind": "response",
+      "rows": [
+       {
+        "freq_hz": 20,
+        "ceiling": 0.5
+       },
+       {
+        "freq_hz": 2000,
+        "ceiling": 0.5
+       }
+      ]
+     }
+    ]
+   },
+   "feasibility": {
+    "shaker": {
+     "name": "Bench shaker",
+     "manufacturer": "",
+     "model": "",
+     "notes": "",
+     "force_random": null,
+     "force_sine": {
+      "value": 2000,
+      "basis": "Peak"
+     },
+     "force_shock": {
+      "value": 4000,
+      "basis": "Peak"
+     },
+     "max_velocity_ips": {
+      "value": 70,
+      "basis": "Peak"
+     },
+     "max_displacement_in_pp": {
+      "value": 1,
+      "basis": "Peak"
+     },
+     "max_accel_bare_g": {
+      "value": 100,
+      "basis": "Peak"
+     },
+     "armature_mass_lb": 45,
+     "overturning_moment_limit_lbf_in": null,
+     "custom": []
+    },
+    "moving_mass_lb": {
+     "armature": 45,
+     "slip_table": 0,
+     "drive_adapter": 3,
+     "fixturing": 10,
+     "test_article": 12
+    },
+    "crest_factor": 3
+   },
+   "capture": {
+    "rule": "off",
+    "first_s": null,
+    "level_settle_s": 1,
+    "periodic_save_s": null,
+    "run_name": "mixed"
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "7"
+    }
+   ]
+  }
+ }
+}

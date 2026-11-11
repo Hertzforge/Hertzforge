@@ -666,6 +666,46 @@ play optionally `initial_backoff_db` under the prediction; after a clipped play 
 the drive that played. It runs natively, and is also the law file `laws/twr-correct`; the two give
 the same run, sample for sample.
 
+## Mixed Mode
+
+A Mixed Mode test (tones and narrow bands of random on a random floor) has no
+law world of its own. It takes two laws you already know:
+
+- **The floor law** is a single-output Random law (the `single` world;
+  default `hinv`). It is told the floor's target alone, at full level, and the
+  floor's estimate made on the response with every tracked tone subtracted.
+  On a line it could not read cleanly (beside a dwelling tone, or under a band
+  and three lines either side of it), it is given the error of the nearest
+  clean lines either side, so it neither chases a part nor loses its mean.
+- **The tone law** is a Sine law (the `sine` world; default `servo_blend`),
+  built once per tone from one choice. Each instance sees its own tone: its
+  tracked amplitude at full level as `measured`, its own commanded amplitude as
+  `drive`, and the prediction from the identified plant at its frequency.
+
+Narrow bands are not a law: the controller shapes each band over the
+identified plant at the center it will have when the drive plays, and moves a
+capped gain on it from the band's level read in the band's own moving frame.
+
+### What the controller does around the laws
+
+Every guard of each world applies to its law as it does in that world: the
+floor law's output checks, change cap, time budget and controlled stop on
+repeated misses; each tone law's per-tick cap, rise limit, budget and
+divergence time. On top of them the controller judges the sum: the drive's
+peak per sample against the ceiling and abort, the floor on clean lines, each
+tone and each band against its own tolerance, and a run that trips names the
+part ("Tone t3 abort").
+
+The level schedule moves every part by the same dB as one ramp. A law sees its
+part at full level throughout: its target, its measurement and its drive are
+all stated at 0 dB, so a level step never reads to a law as an error.
+
+A tone is read through a narrow tracker (0.5 Hz by default), whose delay is
+the tone loop's reading delay. A tone law that corrects faster than that delay
+allows will ring. The built-in tone law therefore takes a gentler compression
+in a Mixed Mode run (custom, integral gain 0.5, 20 dB/s) unless you choose
+one.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and

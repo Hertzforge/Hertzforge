@@ -17,7 +17,7 @@
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
 import type { ChannelSelector, View } from '$lib/protocol/types';
-import { newPlotSpec, type PlotPanelSpec, type PlotType } from '../plots/types';
+import { newPlotSpec, type PartChoice, type PlotPanelSpec, type PlotType } from '../plots/types';
 import { toRefusal } from '../words';
 import * as grid from './grid';
 import {
@@ -46,6 +46,8 @@ export type CardPanel = Extract<Panel, { kind: 'card' }>;
 export interface FramePlot {
 	id: string;
 	channels?: number[] | null;
+	/** The parts it resolved to, for a per-part plot (Mixed Mode). */
+	parts?: string[] | null;
 	views: View[];
 }
 
@@ -146,6 +148,8 @@ export class ScreenState<D extends ScreenFrame = ScreenFrame, A = unknown> {
 	error = $state<string | null>(null);
 	/** Where the layout on screen is kept. */
 	key = $state('');
+	/** The parts a per-part plot may choose from (Mixed Mode's tones and narrowbands); none elsewhere. */
+	partChoices = $state.raw<PartChoice[]>([]);
 
 	/**
 	 * The layout as this window last found it in storage or wrote it there, under `key` (its saved

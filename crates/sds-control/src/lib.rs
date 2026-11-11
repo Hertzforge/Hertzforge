@@ -43,6 +43,7 @@ pub mod codec;
 pub mod explorer;
 pub mod laws;
 pub mod mimo;
+pub mod mixed;
 pub mod profiles;
 pub mod protocol;
 pub mod pulse;

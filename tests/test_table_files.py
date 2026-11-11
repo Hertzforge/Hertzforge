@@ -327,7 +327,8 @@ def test_every_kind_of_breakpoint_table_has_its_label():
     assert t.table_kinds() == {
         'random_profile': 'Random profile', 'sine_profile': 'Sine profile',
         'sine_limit': 'Sine limit', 'srs_target': 'SRS target', 'limit': 'Limit',
-        'drive_gain': 'Drive gain'}
+        'drive_gain': 'Drive gain', 'mixed_tones': 'Tones table',
+        'mixed_bands': 'Narrowbands table'}
 
 
 @pytest.mark.parametrize('suffix', FORMS)
