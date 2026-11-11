@@ -1,0 +1,24 @@
+[package]
+name = "hertzforge-mixed-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The laws of a Mixed Mode run: the floor's single-output Random law and the
+# tones' Sine law, each chosen from the catalog and resolved through its own
+# world's resolver (no world of its own), and the check cases the composed
+# core is held to.
+[dependencies]
+# The run's law seam (`MixedLawChoice`, `MixedLawFactories`).
+hertzforge-mixed.workspace = true
+# The catalog, the choice of law and the floor's resolver.
+hertzforge-random-laws.workspace = true
+# The tones' resolver.
+hertzforge-sine-laws.workspace = true
+# Parameter declarations and values.
+hertzforge-law-host.workspace = true
+# The floor law's settings and a scratch configuration its resolver writes them to.
+hertzforge-random.workspace = true
+hertzforge-breakpoints.workspace = true
+serde_json.workspace = true

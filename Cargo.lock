@@ -1259,6 +1259,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mixed-laws"
+version = "0.1.2"
+dependencies = [
+ "hertzforge-breakpoints",
+ "hertzforge-law-host",
+ "hertzforge-mixed",
+ "hertzforge-random",
+ "hertzforge-random-laws",
+ "hertzforge-sine-laws",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-module-abi"
 version = "0.1.2"
 dependencies = [
