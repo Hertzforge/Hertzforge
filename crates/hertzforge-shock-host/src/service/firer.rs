@@ -601,7 +601,7 @@ impl<B: Backend> BackendPulseFirer<B> {
                 self.n_drives
             )));
         }
-        if drive.is_empty() || drive.len() % n_drive != 0 {
+        if drive.is_empty() || !drive.len().is_multiple_of(n_drive) {
             return Err(ServiceError::Fire(format!(
                 "the drive record holds {} samples, not a whole number of {n_drive}-drive \
                  frames",

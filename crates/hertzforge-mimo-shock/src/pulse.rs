@@ -279,7 +279,7 @@ impl PulseOutputs {
         }
         for (i, v) in self.values.iter().enumerate() {
             let twice = self.values[..i].iter().any(|w| w.key == v.key);
-            if twice || !declared.iter().any(|k| *k == v.key) {
+            if twice || !declared.contains(&v.key) {
                 return err(
                     OutputRule::UndeclaredValue,
                     format!("the value `{}` is undeclared or given twice", v.key),
