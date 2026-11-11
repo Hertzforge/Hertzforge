@@ -48,7 +48,43 @@
 //! [`ModeResponse::Acceleration`], so above the suspension the plate sits on its mass
 //! line, and a six-degree-of-freedom transformation built from the geometry alone
 //! controls it.
+//!
+//! # The shock plants
+//!
+//! A second set, [`ShockPlant`], for multiple-drive shock control: a fixture plate driven
+//! at several points, read by accelerometers near them, with flexible modes between
+//! 60 Hz and 1.8 kHz on a mass line, every mode of the acceleration shape, and a delay
+//! per control point from 0 to 0.5 ms (the time a shock takes to reach each point).
+//! Every drive reaches every control. They are [`PlantModel::Jointed`] plants: the
+//! jointed ones lose frequency and gain damping with amplitude, as a bolted structure
+//! does, so the phase of the plant at full level is not its phase at a low level.
+//!
+//! | Name | Controls x drives | Joint |
+//! |---|---|---|
+//! | `shock-linear-4x4` | 4 x 4 | none (linear) |
+//! | `shock-jointed-4x4-moderate` | 4 x 4 | 3 % drop, damping doubled at the reference amplitude |
+//! | `shock-jointed-4x4-severe` | 4 x 4 | 8 % drop, damping unchanged |
+//! | `shock-jointed-6x3` | 6 x 3 | moderate |
+//!
+//! The three 4 x 4 plants are one structure. The standard shock plants' frequency drop
+//! grows linearly with amplitude (`freq_exponent` 1) and their damping as its square
+//! root (`damping_exponent` 0.5), so 20 dB below full level a resonance sits within
+//! 1 % of its small-signal frequency while its damping has already begun to rise.
+//!
+//! ## Calibration
+//!
+//! Each mode's reference amplitude is a modal velocity divided by its frequency,
+//! `reference_amplitude = V_ref / (2 pi f)`: one modal velocity for every mode, the
+//! quantity a shock's severity tracks across frequency. `V_ref` is set so the
+//! reference pulse ([`reference_pulse`]: a 20 g, 11 ms half-sine with its pre- and
+//! post-pulses) played at the first control by the drives of least energy that make
+//! the linear plant play it ([`JointedPlant::least_drive_for`], at 12 800 Hz over
+//! 16 384 samples) brings the mode nearest its reference (the dominant mode) exactly
+//! to it. Other modes stay below theirs under that pulse. The tests recompute the
+//! calibration and measure the shift and the damping at full level from the plant's
+//! own response.
 
+use crate::jointed::{JointLaw, JointedMode, JointedPlant};
 use crate::plant::{ModalPlant, Mode, ModeResponse, PlantModel, DEFAULT_FEEDTHROUGH};
 use crate::Xorshift64;
 
@@ -583,5 +619,265 @@ pub fn rigid_plate_12x6() -> NamedPlant {
             max: 100.0,
         },
         rigid_body: Some(body),
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The shock plants.
+// ---------------------------------------------------------------------------------------
+
+/// The standard shock plants, by name (see the module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShockPlant {
+    /// `shock-linear-4x4`.
+    Linear4x4,
+    /// `shock-jointed-4x4-moderate`.
+    Jointed4x4Moderate,
+    /// `shock-jointed-4x4-severe`.
+    Jointed4x4Severe,
+    /// `shock-jointed-6x3`.
+    Jointed6x3,
+}
+
+/// The rate the shock plants are calibrated at, Hz.
+pub const SHOCK_CALIBRATION_RATE_HZ: f64 = 12_800.0;
+
+/// The record length the shock plants are calibrated over, samples.
+pub const SHOCK_CALIBRATION_SAMPLES: usize = 16_384;
+
+/// The reference pulse's peak, g, and duration, s.
+pub const REFERENCE_PULSE_G: f64 = 20.0;
+pub const REFERENCE_PULSE_S: f64 = 0.011;
+
+/// The modal velocity at the reference amplitude of the 4 x 4 structure and of the
+/// 6 x 3, from the calibration in the module docs (the tests recompute both).
+pub const SHOCK_4X4_REFERENCE_VELOCITY: f64 = 1.2886e-2;
+pub const SHOCK_6X3_REFERENCE_VELOCITY: f64 = 1.2400e-2;
+
+impl ShockPlant {
+    /// Every shock plant.
+    pub const ALL: [ShockPlant; 4] = [
+        ShockPlant::Linear4x4,
+        ShockPlant::Jointed4x4Moderate,
+        ShockPlant::Jointed4x4Severe,
+        ShockPlant::Jointed6x3,
+    ];
+
+    /// The plant's name (`shock-linear-4x4`, ...).
+    pub fn name(self) -> &'static str {
+        match self {
+            ShockPlant::Linear4x4 => "shock-linear-4x4",
+            ShockPlant::Jointed4x4Moderate => "shock-jointed-4x4-moderate",
+            ShockPlant::Jointed4x4Severe => "shock-jointed-4x4-severe",
+            ShockPlant::Jointed6x3 => "shock-jointed-6x3",
+        }
+    }
+
+    /// The plant with this name, if it is one of the set.
+    pub fn from_name(name: &str) -> Option<ShockPlant> {
+        ShockPlant::ALL.into_iter().find(|p| p.name() == name)
+    }
+
+    /// `(n_controls, n_drives)`.
+    pub fn dims(self) -> (usize, usize) {
+        match self {
+            ShockPlant::Jointed6x3 => (6, 3),
+            _ => (4, 4),
+        }
+    }
+
+    /// The joint law, `None` for the linear plant.
+    pub fn joint(self) -> Option<JointLaw> {
+        let law = |delta, damping_gain| JointLaw {
+            freq_exponent: 1.0,
+            damping_exponent: 0.5,
+            ..JointLaw::new(delta, damping_gain)
+        };
+        match self {
+            ShockPlant::Linear4x4 => None,
+            ShockPlant::Jointed4x4Moderate | ShockPlant::Jointed6x3 => Some(law(0.03, 1.0)),
+            ShockPlant::Jointed4x4Severe => Some(law(0.08, 0.0)),
+        }
+    }
+
+    /// The jointed plant itself.
+    pub fn plant(self) -> JointedPlant {
+        let mut p = match self {
+            ShockPlant::Jointed6x3 => shock_structure(&SHOCK_6X3, SHOCK_6X3_REFERENCE_VELOCITY),
+            _ => shock_structure(&SHOCK_4X4, SHOCK_4X4_REFERENCE_VELOCITY),
+        };
+        p.joint = self.joint();
+        p
+    }
+
+    /// Build the plant with its name and geometry.
+    pub fn build(self) -> NamedPlant {
+        let layout = match self {
+            ShockPlant::Jointed6x3 => &SHOCK_6X3,
+            _ => &SHOCK_4X4,
+        };
+        let z = [0.0, 0.0, 1.0];
+        let at = |p: &[f64; 2]| Placement {
+            position_m: [p[0] * layout.half_width_m, p[1] * layout.half_width_m, 0.0],
+            direction: z,
+        };
+        NamedPlant {
+            name: self.name().to_string(),
+            model: PlantModel::Jointed(self.plant()),
+            geometry: Geometry {
+                inputs: layout.controls.iter().map(at).collect(),
+                drives: layout.drives.iter().map(at).collect(),
+                reference_point_m: [0.0; 3],
+            },
+            conditioning: Conditioning::Well {
+                band_hz: (20.0, 2000.0),
+                max: 100.0,
+            },
+            rigid_body: None,
+        }
+    }
+}
+
+/// The reference pulse at `fs_hz` over `n` samples, scaled by `10^(level_db / 20)`: a
+/// half-sine of [`REFERENCE_PULSE_G`] and [`REFERENCE_PULSE_S`] centred at a quarter of
+/// the record, with a negative half-sine of a tenth of its height and five times its
+/// duration on each side, so the pulse's velocity and displacement both return to zero
+/// (the compensation a shaker needs to play it).
+pub fn reference_pulse(fs_hz: f64, n: usize, level_db: f64) -> Vec<f64> {
+    let s = 10f64.powf(level_db / 20.0);
+    let t_main = REFERENCE_PULSE_S;
+    let t_comp = 5.0 * t_main;
+    let centre = 0.25 * n as f64 / fs_hz;
+    let half_sine = |t: f64, start: f64, dur: f64, peak: f64| -> f64 {
+        let x = (t - start) / dur;
+        if (0.0..=1.0).contains(&x) {
+            peak * (std::f64::consts::PI * x).sin()
+        } else {
+            0.0
+        }
+    };
+    (0..n)
+        .map(|k| {
+            let t = k as f64 / fs_hz;
+            let start = centre - 0.5 * t_main;
+            s * (half_sine(t, start, t_main, REFERENCE_PULSE_G)
+                + half_sine(t, start - t_comp, t_comp, -0.1 * REFERENCE_PULSE_G)
+                + half_sine(t, start + t_main, t_comp, -0.1 * REFERENCE_PULSE_G))
+        })
+        .collect()
+}
+
+/// A shock structure's layout on a square plate, positions in half-widths.
+struct ShockLayout {
+    half_width_m: f64,
+    drives: &'static [[f64; 2]],
+    controls: &'static [[f64; 2]],
+    /// `(f_hz, zeta)` per flexible mode, with the mode's shape index.
+    modes: &'static [(f64, f64, usize)],
+    /// Each control's delay, s.
+    delays_s: &'static [f64],
+    /// The mass line at a drive's own point, g per volt.
+    mass_line: f64,
+    /// Generalized force per volt over modal mass, relative to the mass line.
+    participation: f64,
+}
+
+const SHOCK_4X4: ShockLayout = ShockLayout {
+    half_width_m: 0.3,
+    drives: &[[0.8, 0.8], [-0.8, 0.8], [-0.8, -0.8], [0.8, -0.8]],
+    controls: &[[0.6, 0.75], [-0.75, 0.55], [-0.55, -0.7], [0.7, -0.6]],
+    modes: &[
+        (72.0, 0.02, 0),
+        (135.0, 0.025, 1),
+        (210.0, 0.02, 2),
+        (330.0, 0.03, 3),
+        (520.0, 0.025, 4),
+        (780.0, 0.03, 5),
+        (1150.0, 0.035, 6),
+        (1650.0, 0.04, 7),
+    ],
+    delays_s: &[0.0, 0.12e-3, 0.31e-3, 0.5e-3],
+    mass_line: 6.0,
+    participation: 0.3,
+};
+
+const SHOCK_6X3: ShockLayout = ShockLayout {
+    half_width_m: 0.3,
+    drives: &[[0.8, 0.8], [-0.8, 0.4], [0.2, -0.8]],
+    controls: &[
+        [0.6, 0.7],
+        [-0.7, 0.3],
+        [0.1, -0.6],
+        [0.0, 0.0],
+        [-0.5, -0.6],
+        [0.7, -0.2],
+    ],
+    modes: &[
+        (64.0, 0.02, 0),
+        (118.0, 0.025, 2),
+        (190.0, 0.02, 1),
+        (300.0, 0.03, 3),
+        (470.0, 0.025, 5),
+        (720.0, 0.03, 4),
+        (1080.0, 0.035, 7),
+        (1550.0, 0.04, 6),
+    ],
+    delays_s: &[0.0, 0.1e-3, 0.2e-3, 0.3e-3, 0.4e-3, 0.5e-3],
+    mass_line: 6.0,
+    participation: 0.3,
+};
+
+/// The plate's flexible shapes, `x` and `y` in half-widths.
+fn plate_shape(k: usize, x: f64, y: f64) -> f64 {
+    use std::f64::consts::PI;
+    match k {
+        0 => x * y,
+        1 => x,
+        2 => y,
+        3 => x * x + y * y - 0.8,
+        4 => (PI * x).cos() * y,
+        5 => (PI * y).cos() * x,
+        6 => (PI * x).cos() * (PI * y).cos(),
+        _ => (0.5 * PI * x).sin() * (PI * y).cos(),
+    }
+}
+
+/// A shock structure as a linear jointed plant (the caller sets the law).
+fn shock_structure(l: &ShockLayout, reference_velocity: f64) -> JointedPlant {
+    let (n_c, n_d) = (l.controls.len(), l.drives.len());
+    let modes = l
+        .modes
+        .iter()
+        .map(|&(f_hz, zeta, k)| JointedMode {
+            f_hz,
+            zeta,
+            input_shape: l
+                .drives
+                .iter()
+                .map(|p| l.participation * l.mass_line * plate_shape(k, p[0], p[1]))
+                .collect(),
+            output_shape: l
+                .controls
+                .iter()
+                .map(|p| plate_shape(k, p[0], p[1]))
+                .collect(),
+            reference_amplitude: reference_velocity / (std::f64::consts::TAU * f_hz),
+        })
+        .collect();
+    // The mass line: each control moves most with the drive nearest it.
+    let residual = l
+        .controls
+        .iter()
+        .flat_map(|c| {
+            l.drives.iter().map(move |d| {
+                let d2 = (c[0] - d[0]).powi(2) + (c[1] - d[1]).powi(2);
+                l.mass_line * (-d2).exp()
+            })
+        })
+        .collect();
+    JointedPlant {
+        residual,
+        output_delays_s: l.delays_s.to_vec(),
+        ..JointedPlant::new(n_c, n_d, modes)
     }
 }

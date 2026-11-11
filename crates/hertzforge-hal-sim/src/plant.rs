@@ -10,6 +10,7 @@
 //! | [`PlantModel::Resonators`] | The single-path bank: a sum of resonators, feedthrough and transport delay, driven by the FIRST drive row and read identically by every measurement input (noise included). The default, unchanged from the original plant | any x any |
 //! | [`PlantModel::Modal`] | A cross-coupled modal plant: each mode is one second-order resonator driven by the inner product of its input shape with the drive frame, seen by input `i` through its output shape. Independent noise per input | fixed by the model |
 //! | [`PlantModel::Frf`] | Plays any FRF matrix by partitioned overlap-save block convolution. Independent noise per input | fixed by the stack |
+//! | [`PlantModel::Jointed`] | A cross-coupled modal plant whose modes fall in frequency and rise in damping with their own amplitude, with a delay per output ([`crate::jointed`]). Independent noise per input | fixed by the model |
 //!
 //! Every model gives its exact frequency response ([`PlantModel::analytic_frf`]): the
 //! complex FRF of the discretized plant the backend actually steps, transport delay and
@@ -28,6 +29,7 @@
 //!   drive (see [`crate::SimBackend`]) and takes no plant output.
 
 use crate::fitted::{FittedMode, Recorder, SofteningRun};
+use crate::jointed::{JointedPlant, JointedRun};
 use crate::{DelayLine, Resonator, Xorshift64};
 use hertzforge_dsp::fft::{self, Cplx};
 use hertzforge_sdm::{MatrixStack, C64};
@@ -56,6 +58,8 @@ pub enum PlantModel {
     Modal(ModalPlant),
     /// A plant that plays a given FRF matrix.
     Frf(FrfPlant),
+    /// A modal plant whose modes change with their amplitude ([`crate::jointed`]).
+    Jointed(JointedPlant),
 }
 
 impl Default for PlantModel {
@@ -436,12 +440,13 @@ impl FrfTaps {
 }
 
 impl PlantModel {
-    /// A short name for messages: `resonators`, `modal` or `frf`.
+    /// A short name for messages: `resonators`, `modal`, `frf` or `jointed`.
     pub fn kind(&self) -> &'static str {
         match self {
             PlantModel::Resonators(_) => "resonators",
             PlantModel::Modal(_) => "modal",
             PlantModel::Frf(_) => "frf",
+            PlantModel::Jointed(_) => "jointed",
         }
     }
 
@@ -455,6 +460,7 @@ impl PlantModel {
                 let (_, r, c) = f.stack.dims();
                 Some((r, c))
             }
+            PlantModel::Jointed(j) => Some((j.n_inputs, j.n_drives)),
         }
     }
 
@@ -464,6 +470,7 @@ impl PlantModel {
             PlantModel::Resonators(b) => b.transport_delay_samples,
             PlantModel::Modal(m) => m.transport_delay_samples,
             PlantModel::Frf(f) => f.transport_delay_samples,
+            PlantModel::Jointed(j) => j.transport_delay_samples,
         }
     }
 
@@ -473,6 +480,7 @@ impl PlantModel {
             PlantModel::Resonators(b) => b.transport_delay_samples = n,
             PlantModel::Modal(m) => m.transport_delay_samples = n,
             PlantModel::Frf(f) => f.transport_delay_samples = n,
+            PlantModel::Jointed(j) => j.transport_delay_samples = n,
         }
     }
 
@@ -586,12 +594,17 @@ impl PlantModel {
                 Ok(())
             }
             PlantModel::Frf(f) => f.validate(fs_hz),
+            PlantModel::Jointed(j) => j.validate(fs_hz),
         }
     }
 
     /// The exact complex FRF of the plant discretized at `fs_hz`, on lines
     /// `0, df, 2 df, ...`: `lines x n_inputs x n_drives` (`lines x 1 x 1` for the
     /// resonator bank, the one path from the first drive that every input reads).
+    ///
+    /// For a [`PlantModel::Jointed`] plant this is the SMALL-SIGNAL FRF: every mode at
+    /// its small-signal frequency and damping, as at a vanishing level. The FRF at a
+    /// stated amplitude is [`JointedPlant::frf_at_envelope`].
     ///
     /// Panics when the model does not validate at `fs_hz`.
     pub fn analytic_frf(&self, lines: usize, df_hz: f64, fs_hz: f64) -> MatrixStack {
@@ -683,6 +696,7 @@ impl PlantModel {
                 }
                 out
             }
+            PlantModel::Jointed(j) => j.frf_at_envelope(freqs_hz, fs_hz, &vec![0.0; j.modes.len()]),
         }
     }
 }
@@ -693,7 +707,7 @@ impl PlantModel {
 /// every transform here whose meaning depends on the sign asks rather than assumes.
 /// (The block convolution does not depend on it: a matched forward and inverse pair
 /// convolves either way.)
-fn fft_exponent_sign() -> f64 {
+pub(crate) fn fft_exponent_sign() -> f64 {
     let x = fft::fft(&[(0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0)]);
     if x[1].1 > 0.0 {
         1.0
@@ -704,7 +718,7 @@ fn fft_exponent_sign() -> f64 {
 
 /// The textbook inverse DFT, `x[n] = (1/N) sum_k X[k] exp(+j 2 pi k n / N)`, whichever
 /// sign the workspace FFT uses.
-fn inverse_dft(spec: &[Cplx]) -> Vec<Cplx> {
+pub(crate) fn inverse_dft(spec: &[Cplx]) -> Vec<Cplx> {
     if fft_exponent_sign() < 0.0 {
         fft::ifft(spec)
     } else {
@@ -770,6 +784,7 @@ pub(crate) enum Plant {
     Bank(BankPlant),
     Modal(Box<ModalRun>),
     Frf(Box<FrfRun>),
+    Jointed(Box<JointedRun>),
 }
 
 impl Plant {
@@ -786,6 +801,9 @@ impl Plant {
                 Plant::Modal(Box::new(ModalRun::new(m, fs_hz, noise_level, seed)))
             }
             PlantModel::Frf(f) => Plant::Frf(Box::new(FrfRun::new(f, fs_hz, noise_level, seed)?)),
+            PlantModel::Jointed(j) => {
+                Plant::Jointed(Box::new(JointedRun::new(j, fs_hz, noise_level, seed)))
+            }
         })
     }
 
@@ -796,6 +814,7 @@ impl Plant {
             Plant::Bank(_) => 1,
             Plant::Modal(m) => m.n_out,
             Plant::Frf(f) => f.n_out,
+            Plant::Jointed(j) => j.n_out,
         }
     }
 
@@ -807,6 +826,7 @@ impl Plant {
             Plant::Bank(b) => out[0] = b.step(drive.first().copied().unwrap_or(0.0)),
             Plant::Modal(m) => m.step(drive, out),
             Plant::Frf(f) => f.step(drive, out),
+            Plant::Jointed(j) => j.step(drive, out),
         }
     }
 
@@ -815,6 +835,7 @@ impl Plant {
             Plant::Bank(b) => b.reset(),
             Plant::Modal(m) => m.reset(),
             Plant::Frf(f) => f.reset(),
+            Plant::Jointed(j) => j.reset(),
         }
     }
 }
@@ -873,7 +894,7 @@ impl BankPlant {
 /// Independent Gaussian noise for `out.len()` inputs from one seeded stream, two
 /// values per Box-Muller draw.
 #[inline]
-fn add_noise(rng: &mut Xorshift64, sigma: f64, out: &mut [f64]) {
+pub(crate) fn add_noise(rng: &mut Xorshift64, sigma: f64, out: &mut [f64]) {
     if sigma == 0.0 {
         return;
     }
