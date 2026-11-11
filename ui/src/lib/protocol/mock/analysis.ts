@@ -40,7 +40,9 @@ const TABLE_KIND_WORDS: Record<string, string> = {
 	sine_limit: 'a sine limit',
 	srs_target: 'an SRS target',
 	limit: 'a limit',
-	drive_gain: 'a drive gain'
+	drive_gain: 'a drive gain',
+	mixed_tones: 'a tones table',
+	mixed_bands: 'a narrowbands table'
 };
 const tableKindWords = (k: string) => TABLE_KIND_WORDS[k] ?? `a ${k.replace(/_/g, ' ')}`;
 

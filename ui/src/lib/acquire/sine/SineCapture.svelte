@@ -5,11 +5,17 @@
 	 */
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
-	import { CAPTURE_RULES } from './sineSetup';
-	import type { SineStore } from './sineStore.svelte';
+	import { CAPTURE_RULES, type SineDraft } from './sineSetup';
+
+	/** What the card reads and edits: Sine's store, or another test type's with the same capture. */
+	interface CaptureHost {
+		setup: Pick<SineDraft, 'capture' | 'metadata'>;
+		locked: boolean;
+		fieldErrors: Record<string, string[]>;
+	}
 
 	interface Props {
-		sine: SineStore;
+		sine: CaptureHost;
 	}
 	let { sine }: Props = $props();
 

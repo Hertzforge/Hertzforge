@@ -697,7 +697,9 @@ path, as projects are; neither request touches the connection's project. `kind` 
 channel table: one table that holds what the analysis reads and, converted for a test, the
 settings the control service runs each channel at) or `breakpoints` (a profile, target or limit table, which
 `table_kind` names: `random_profile`, `sine_profile`, `sine_limit`, `srs_target`, `limit` or
-`drive_gain`). `columns` names the
+`drive_gain`; or Mixed Mode's parts tables, `mixed_tones` and `mixed_bands`, one row per part,
+whose `id`, `name`, `follows` and a tone's `profile` (its rows as `freq quantity value`, separated
+by `;`) are text). `columns` names the
 table's columns and each row holds one value per column.
 
 A channel table's columns are the channel table object's own (`channel`, `node`, `direction`,

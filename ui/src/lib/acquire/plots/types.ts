@@ -27,6 +27,18 @@ export interface PlotType {
 	units?: { id: string; words: string }[];
 	/** The families of lines it draws, which the Display section switches on and off. */
 	families?: LineFamily[];
+	/** Takes a part selector (Mixed Mode's per-part histories): which parts it draws, one pane each. */
+	parts?: 'tones' | 'bands' | 'both';
+}
+
+/** Which parts a per-part plot shows: part ids, or a set the service resolves. */
+export type PartSelector = string[] | 'all' | 'tones' | 'bands';
+
+/** A part a plot's part choice offers. */
+export interface PartChoice {
+	id: string;
+	name: string;
+	kind: 'tone' | 'narrowband';
 }
 
 /** The line families a plot may draw, by the role the service gives each series. */
@@ -120,6 +132,8 @@ export interface PlotPanelSpec {
 	/** Null for the plot type's own title. */
 	title: string | null;
 	display: PlotDisplay;
+	/** The parts it shows, for a plot type that takes parts; absent otherwise. */
+	parts?: PartSelector;
 }
 
 export function defaultAxis(): AxisDisplay {
@@ -149,5 +163,7 @@ export function defaultDisplay(): PlotDisplay {
 
 /** A new plot of `type`, with the type's own defaults. */
 export function newPlotSpec(type: PlotType, channels: ChannelSelector = 'all'): PlotPanelSpec {
-	return { quantity: type.id, channels: type.channels ? channels : 'all', arrange: type.time ? 'overlay' : 'split', points: 1024, title: null, display: defaultDisplay() };
+	const spec: PlotPanelSpec = { quantity: type.id, channels: type.channels ? channels : 'all', arrange: type.time ? 'overlay' : 'split', points: 1024, title: null, display: defaultDisplay() };
+	if (type.parts) spec.parts = type.parts === 'tones' ? 'tones' : type.parts === 'bands' ? 'bands' : 'all';
+	return spec;
 }
