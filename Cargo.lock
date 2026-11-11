@@ -2424,6 +2424,8 @@ dependencies = [
  "hertzforge-hal-sim",
  "hertzforge-law-host",
  "hertzforge-mimo-random",
+ "hertzforge-mixed",
+ "hertzforge-mixed-laws",
  "hertzforge-module-abi",
  "hertzforge-random",
  "hertzforge-random-laws",
