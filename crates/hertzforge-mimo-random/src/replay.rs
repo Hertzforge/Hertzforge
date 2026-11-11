@@ -167,7 +167,7 @@ impl LawSource {
                             .map(|d| d.as_nanos())
                             .unwrap_or(0),
                         // the clock alone repeats: macOS reads it to the microsecond, and two
-                        // replays running at once could share a folder and delete it under each other
+                        // replays at once could share a folder and delete it under each other
                         {
                             use std::sync::atomic::{AtomicUsize, Ordering};
                             static NEXT: AtomicUsize = AtomicUsize::new(0);
