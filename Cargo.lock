@@ -1257,6 +1257,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mimo-shock"
+version = "0.1.4"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-hal",
+ "hertzforge-sdm",
+ "hertzforge-shock-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-mimo-shock-laws"
+version = "0.1.4"
+dependencies = [
+ "hertzforge-mimo-shock",
+ "hertzforge-shock-common",
+]
+
+[[package]]
 name = "hertzforge-mixed"
 version = "0.1.4"
 dependencies = [

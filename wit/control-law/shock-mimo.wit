@@ -83,7 +83,8 @@ interface mimo-shock-types {
     record srs-component {
         /// Frequency, Hz.
         hz: f64,
-        /// Peak amplitude at full level, EU.
+        /// Peak amplitude at full level, EU; negative for an inverted
+        /// component.
         amplitude: f64,
         /// Start of the component after the record's start, s.
         delay-s: f64,

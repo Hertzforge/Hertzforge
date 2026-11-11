@@ -1,0 +1,13 @@
+[package]
+name = "hertzforge-mimo-shock-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The choice of a MIMO Shock law: the built-in laws' factories, resolution of a
+# law by catalog id, and the law check's cases. It runs a check case on the
+# backend it is handed and names none.
+[dependencies]
+hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
