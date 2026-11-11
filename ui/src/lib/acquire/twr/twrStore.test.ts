@@ -484,7 +484,9 @@ describe("the TWR mock's subscriptions, as the service takes them", () => {
 		const { client } = await screen();
 		const layout = TWR_HOOKS.defaultLayout(1.4);
 		const plots = layout.pages.map((pg) => pg.panels.filter((x): x is PlotPanel => x.kind === 'plot'));
-		const one = TWR_HOOKS.types.map((t, i): PlotPanel => ({ ...plots[0][0], id: `pl-${i}`, plot: { ...plots[0][0].plot, quantity: t.id } }));
+		// The plot types on the test's own feed (Signals has a feed of its own).
+		const own = TWR_HOOKS.types.filter((t) => !(TWR_HOOKS.others ?? []).some((f) => f.quantities?.includes(t.id)));
+		const one = own.map((t, i): PlotPanel => ({ ...plots[0][0], id: `pl-${i}`, plot: { ...plots[0][0].plot, quantity: t.id } }));
 		for (const list of [...plots, ...one.map((p) => [p])]) {
 			const params = TWR_HOOKS.feed!.params(list, 5);
 			await expect(client.request('twr.subscribe', params)).resolves.toMatchObject({ default: false });

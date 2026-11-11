@@ -74,6 +74,7 @@ import { createSineMock } from './sine';
 import { createTwrMock } from './twr';
 import { createExplorerMock } from './explorer';
 import { createRecorderMock } from './recorder';
+import { createSignalsMock } from './signals';
 import { binEdges } from './bins';
 import {
 	breakpointArrays,
@@ -152,6 +153,8 @@ const HEARTBEAT_S = 5;
 const TIMEOUT_S = 30;
 const SIM_INPUTS = 8;
 const SIM_OUTPUTS = 1;
+/** The rate the mock's other test types' signals run at, Hz. */
+const SIGNALS_FS = 12800;
 /** The simulator's plant: two resonances, as the real service's. */
 const PLANT: [number, number][] = [
 	[200, 8],
@@ -950,6 +953,16 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		freeBytes: options.recorderFreeBytes
 	});
 
+	// ---- signals: the time history of whatever run acquires ----------------------------------
+	const signals = createSignalsMock({
+		rows: () => rows,
+		acquiring: () => {
+			if (random && isLive() && random.state !== 'armed') return { id: random.id, fsHz: random.grid.fs_hz };
+			const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId();
+			return id ? { id, fsHz: SIGNALS_FS } : null;
+		}
+	});
+
 	// ---- stations and the channel table -------------------------------------------------------
 	let selection: Selection = { kind: 'sim', devices: [] };
 	const scan = niInstalled ? scanDevices(niReal) : [];
@@ -1742,6 +1755,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			twr.detach(c);
 			explorer.detach(c);
 			recorder.detach(c);
+			signals.detach(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1758,6 +1772,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			...twr.methods,
 			...explorer.methods,
 			...recorder.methods,
+			...signals.methods,
 			// The law catalog holds both shock worlds, Sine's and TWR's: each lists its own, and a law
 			// file goes to the world it implements (the mock tells an SRS, a Sine or a TWR law file by
 			// its name).

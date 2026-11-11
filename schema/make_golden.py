@@ -3408,6 +3408,103 @@ def write_recorder_run() -> None:
     (root / 'end.json').write_text(json.dumps(end, indent=2) + '\n', encoding='utf-8')
 
 
+# --- Signals (PROTOCOL.md, "Signals") ---
+#
+# A run at 1024 Hz with rows 1 (Table, control, g), 2 (Drive) and 3 (Fixture, monitor,
+# g), 2048 frames read and 2048 driven. Every sample is a multiple of a power of two, so
+# each language writes the same numbers.
+
+SIGNALS_FS = 1024
+SIGNALS_FRAMES = 2048
+SIGNALS_CHANNELS = [
+    {'index': 1, 'name': 'Table', 'unit': 'g', 'kind': 'input'},
+    {'index': 2, 'name': 'Drive', 'unit': 'V', 'kind': 'drive'},
+    {'index': 3, 'name': 'Fixture', 'unit': 'g', 'kind': 'input'},
+]
+
+
+def signals_sample(index: int, frame: int) -> float:
+    """Row `index`'s sample at station frame `frame`."""
+    if index == 1:
+        return ((frame % 16) - 8) / 8
+    if index == 3:
+        return ((frame % 8) - 4) / 16
+    return ((frame % 32) - 16) / 64
+
+
+SIGNALS_SUBSCRIBE_PLOTS = [
+    {'id': 'raw', 'channels': [3], 'window_s': 0.0625, 'points': 64, 'arrange': 'split'},
+    {'id': 'env', 'window_s': 0.25, 'points': 64},
+]
+SIGNALS_SUBSCRIBED = [
+    {'id': 'raw', 'channels': [3], 'window_s': 0.0625, 'points': 64, 'arrange': 'split'},
+    {'id': 'env', 'channels': 'all', 'window_s': 0.25, 'points': 64, 'arrange': 'overlay'},
+]
+
+
+def _signals_raw_series(a: _Arr, index: int, role: str, first: int, n: int) -> dict:
+    frames = range(first, first + n)
+    return a.series(f'Channel {index}', role, [f / SIGNALS_FS for f in frames],
+                    [signals_sample(index, f) for f in frames])
+
+
+def _signals_envelope_series(a: _Arr, index: int, role: str, first: int, n: int,
+                             points: int) -> dict:
+    span = -(-n // points)
+    starts = range(first, first + n, span)
+    chunks = [[signals_sample(index, f) for f in range(s, min(s + span, first + n))]
+              for s in starts]
+    s = a.series(f'Channel {index}', role, [f / SIGNALS_FS for f in starts],
+                 [max(c) for c in chunks])
+    s['y_min'] = a.push([min(c) for c in chunks])
+    return s
+
+
+def _signals_view(title: str, unit: str, series: list) -> dict:
+    return {'view': 'spectrum', 'title': title, 'x': _TIME,
+            'y': _axis('Amplitude', unit, 'linear'), 'series': series}
+
+
+def _signals_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    raw_first = SIGNALS_FRAMES - 64
+    raw = {'id': 'raw', 'channels': [3], 'window_s': 0.0625, 'first_frame': raw_first,
+           'views': [_signals_view('Channel 3: Fixture', 'g',
+                                   [_signals_raw_series(a, 3, 'measured', raw_first, 64)])]}
+    env_first = SIGNALS_FRAMES - 256
+    env = {'id': 'env', 'channels': [1, 2, 3], 'window_s': 0.25, 'first_frame': env_first,
+           'views': [
+               _signals_view('Channels 1, 3', 'g', [
+                   _signals_envelope_series(a, 1, 'measured', env_first, 256, 64),
+                   _signals_envelope_series(a, 3, 'measured', env_first, 256, 64)]),
+               _signals_view('Channel 2: Drive', 'V', [
+                   _signals_envelope_series(a, 2, 'drive', env_first, 256, 64)]),
+           ]}
+    data = {'available': True, 'fs_hz': SIGNALS_FS, 't_s': SIGNALS_FRAMES // SIGNALS_FS,
+            'frames': SIGNALS_FRAMES, 'max_window_s': 10, 'lost_frames': 0,
+            'channels': SIGNALS_CHANNELS, 'plots': [raw, env]}
+    return {'type': 'event', 'topic': 'signals.data', 'seq': 220, 'data': data}, a.arrays
+
+
+SIGNALS_TEXT_GOLDENS = {
+    'request_signals_subscribe': {
+        'type': 'request', 'id': 121, 'method': 'signals.subscribe',
+        'params': {'rate_hz': 10, 'plots': SIGNALS_SUBSCRIBE_PLOTS},
+    },
+    'response_signals_subscribe': {
+        'type': 'response', 'id': 121,
+        'result': {'available': True, 'fs_hz': SIGNALS_FS, 'max_window_s': 10, 'rate_hz': 10,
+                   'channels': SIGNALS_CHANNELS, 'plots': SIGNALS_SUBSCRIBED},
+    },
+    'request_signals_unsubscribe': {
+        'type': 'request', 'id': 122, 'method': 'signals.unsubscribe', 'params': {},
+    },
+    'response_signals_unsubscribe': {
+        'type': 'response', 'id': 122, 'result': {},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -3557,10 +3654,13 @@ def main() -> None:
     write('event_recorder_data', *_recorder_data_build())
     write_recorder_run()
 
+    # Signals: one window's data
+    write('event_signals_data', *_signals_data_build())
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS,
                           **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
-                          **RECORDER_TEXT_GOLDENS}.items():
+                          **RECORDER_TEXT_GOLDENS, **SIGNALS_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

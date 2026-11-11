@@ -1730,6 +1730,7 @@ impl Actor {
                 ..StationSpec::default()
             };
             hertzforge_station::try_build_station_backend(BackendKind::Sim, &spec)
+                .map(station::tapped)
                 .map_err(station::build_refusal)?
         } else {
             let (ins, outs) = hertzforge_station::physical_from_table(&table);

@@ -16,6 +16,7 @@ import { newPlotSpec, type LineFamily, type PlotType } from '../plots/types';
 import { tiling } from '../screen/grid';
 import { cleanName, DEFAULT_ASPECT, DEFAULT_RATE, defaultDock, RATES } from '../screen/layout';
 import type { PlotPanel, ScreenHooks } from '../screen/screen.svelte';
+import { signalsHooks } from '../signals/signals';
 import { GRID_COLS, GRID_ROWS, type CardKind, type Panel, type ScreenLayout, type ScreenPage } from '../screen/types';
 import { pulseLayoutFromSaved, type PulsePageSet } from './pulseLayout';
 
@@ -146,7 +147,8 @@ export function pulseSubscription(types: PlotType[], plots: PlotPanel[], rate: n
 export function pulseHooks<K extends string, Q extends string>(spec: PulseScreenSpec<K, Q>, feed: { method: string; topic: string }): ScreenHooks {
 	const types = pulsePlotTypes(spec);
 	const testType = spec.pages.testType;
-	return {
+	// Every test type also offers Signals: any channel against time, on its own feed.
+	return signalsHooks({
 		testType,
 		types,
 		cards: spec.cards,
@@ -157,5 +159,5 @@ export function pulseHooks<K extends string, Q extends string>(spec: PulseScreen
 			read: (text) => pulseFromSaved(spec, types, text)
 		},
 		feed: { method: feed.method, topic: feed.topic, params: (plots, rate) => pulseSubscription(types, plots, rate) }
-	};
+	});
 }

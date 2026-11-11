@@ -14,6 +14,8 @@
 	import PageGrid from './screen/PageGrid.svelte';
 	import PageTabs from './screen/PageTabs.svelte';
 	import type { PlotPanel } from './screen/screen.svelte';
+	import { isSignals, SIGNALS_FEED, signalsChoices, signalsEmpty } from './signals/signals';
+	import type { SignalsData } from '$lib/protocol/signals';
 	import type { CardKind } from './screen/types';
 	import RunVerbs from './RunVerbs.svelte';
 	import type { AcquireState } from './store.svelte';
@@ -53,11 +55,16 @@
 	const inputs = $derived(
 		(acq.server?.channels ?? []).filter((c) => c.enabled && c.role !== 'drive').map((c) => ({ index: c.index, name: c.description || c.role }))
 	);
+	/** The last Signals frame for this window, or null. */
+	const signals = $derived((display.others.find((l) => l.feed === SIGNALS_FEED)?.data ?? null) as SignalsData | null);
+	/** The channels a Signals plot chooses from: the run's, else the table's enabled rows, drives too. */
+	const signalChannels = $derived(signalsChoices(signals?.channels, acq.server?.channels ?? []));
 	/** Verbs the Run card draws as its hold and end lines, so not twice. */
 	const omit = $derived<ActionId[]>(['apply', ...(review ? (['proceed'] as const) : []), ...(end ? (['reset'] as const) : [])]);
 	const reset = $derived(acq.actions.reset);
 
 	function empty(p: PlotPanel): string {
+		if (isSignals(p.plot.quantity)) return signalsEmpty(display.frame(p.id));
 		const data = display.plotData(p.id);
 		if (!streaming) return 'Appears when a run starts.';
 		if (!data) return 'Waiting for the control service.';
@@ -180,7 +187,7 @@
 
 <div class="live" class:compact class:bottom={display.dock.side === 'bottom'} data-testid="live-view">
 	<div class="area">
-		<PageGrid screen={display} {card} channels={inputs} {empty} live={streaming} />
+		<PageGrid screen={display} {card} channels={inputs} {signalChannels} {empty} live={streaming} />
 		<PageTabs screen={display} {onpopout} />
 	</div>
 	<Dock screen={display} {card} />

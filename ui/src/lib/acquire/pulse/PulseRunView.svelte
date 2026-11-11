@@ -16,6 +16,8 @@
 	import type { PlotPanel, ScreenState } from '../screen/screen.svelte';
 	import type { CardKind } from '../screen/types';
 	import { clock, db, OUTCOME_WORDS, outcomeTone } from '../words';
+	import type { SignalsData } from '$lib/protocol/signals';
+	import { isSignals, SIGNALS_FEED, signalsChoices, signalsEmpty } from '../signals/signals';
 
 	interface Props {
 		host: RunBarHost;
@@ -65,6 +67,15 @@
 		return `at ${clock(end.at_s)}${level}`;
 	});
 	const page = $derived(screen.page);
+	/** The last Signals frame for this window, or null. */
+	const signals = $derived((screen.others.find((l) => l.feed === SIGNALS_FEED)?.data ?? null) as SignalsData | null);
+	/** The table's rows, where the host holds the service's table. */
+	const rows = $derived((host as { server?: { channels?: { index: number; enabled: boolean; description: string; role: string }[] } | null }).server?.channels ?? []);
+	/** The channels a Signals plot chooses from: the run's, else the table's enabled rows, drives too. */
+	const signalChannels = $derived(signalsChoices(signals?.channels, rows));
+	function plotEmpty(p: PlotPanel): string {
+		return isSignals(p.plot.quantity) ? signalsEmpty(screen.frame(p.id)) : empty(p);
+	}
 </script>
 
 {#snippet card(kind: CardKind)}
@@ -118,7 +129,7 @@
 <div class="live" class:compact class:bottom={screen.dock.side === 'bottom'} data-testid="{prefix}-run-view" {...attrs}>
 	<div class="area">
 		<div class="pageview" data-testid="{prefix}-page-view" data-page={page.id}>
-			<PageGrid {screen} {card} {channels} {empty} {live} {bodies} />
+			<PageGrid {screen} {card} {channels} {signalChannels} empty={plotEmpty} {live} {bodies} />
 		</div>
 		<PageTabs {screen} {onpopout} />
 	</div>

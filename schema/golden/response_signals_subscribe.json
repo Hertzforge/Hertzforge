@@ -1,0 +1,48 @@
+{
+ "type": "response",
+ "id": 121,
+ "result": {
+  "available": true,
+  "fs_hz": 1024,
+  "max_window_s": 10,
+  "rate_hz": 10,
+  "channels": [
+   {
+    "index": 1,
+    "name": "Table",
+    "unit": "g",
+    "kind": "input"
+   },
+   {
+    "index": 2,
+    "name": "Drive",
+    "unit": "V",
+    "kind": "drive"
+   },
+   {
+    "index": 3,
+    "name": "Fixture",
+    "unit": "g",
+    "kind": "input"
+   }
+  ],
+  "plots": [
+   {
+    "id": "raw",
+    "channels": [
+     3
+    ],
+    "window_s": 0.0625,
+    "points": 64,
+    "arrange": "split"
+   },
+   {
+    "id": "env",
+    "channels": "all",
+    "window_s": 0.25,
+    "points": 64,
+    "arrange": "overlay"
+   }
+  ]
+ }
+}

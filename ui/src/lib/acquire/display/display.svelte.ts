@@ -14,6 +14,7 @@ import type { DataPlot, LiveQuantity, RandomData, RandomSubscribeResult, Subscri
 import { CONTROL_TOPICS as T } from '$lib/protocol/types';
 import { defaultRandomScreen, RANDOM_CARDS, RANDOM_LEGACY, RANDOM_TYPES } from '../screen/layout';
 import { ScreenState, type PlotPanel, type ScreenHooks, type ScreenOptions } from '../screen/screen.svelte';
+import { signalsHooks } from '../signals/signals';
 
 export type DisplayOptions = ScreenOptions;
 
@@ -28,14 +29,15 @@ export function subscriptionFor(plots: PlotPanel[]): SubscribePlot[] {
 	});
 }
 
-export const RANDOM_SCREEN: ScreenHooks = {
+/** Random's screen: its own plot types and Signals, any input or drive against time. */
+export const RANDOM_SCREEN: ScreenHooks = signalsHooks({
 	testType: 'random',
 	types: RANDOM_TYPES,
 	cards: RANDOM_CARDS,
 	defaultLayout: defaultRandomScreen,
 	legacy: RANDOM_LEGACY,
 	feed: { method: 'random.subscribe', topic: T.data, params: (plots, rate) => ({ rate_hz: rate, plots: subscriptionFor(plots) }) }
-};
+});
 
 export class DisplayState extends ScreenState<RandomData, RandomSubscribeResult> {
 	constructor(control: ServiceClient, opts: DisplayOptions) {
