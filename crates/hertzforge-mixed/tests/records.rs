@@ -35,7 +35,17 @@ fn a_capture_writes_the_response_and_every_law_call_with_its_tone() {
     assert!(s.live_status().capturing);
     run_for(&mut s, 14.0);
     let snap = s.save_snapshot(Vec::new()).unwrap();
+    let complete = |dir: &std::path::Path| -> bool {
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("capture.json")).unwrap()).unwrap();
+        v["complete"].as_bool().unwrap()
+    };
+    assert!(!complete(&dir), "a recording still running is not complete");
     s.stop_capture().unwrap();
+    assert!(
+        complete(&dir),
+        "a stopped recording is finished and says so"
+    );
     s.stop().unwrap();
     assert!(snap.exists());
     let law: serde_json::Value =

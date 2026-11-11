@@ -973,13 +973,16 @@ impl MixedService {
         Ok(dir)
     }
 
-    /// Stop the capture (its law records are flushed).
+    /// Stop the capture: its law records are flushed and the recording is
+    /// finished, which is what marks it complete. A recording that is only
+    /// dropped reads as one cut short.
     pub fn stop_capture(&mut self) -> Result<(), MixedError> {
         self.flush_law_records();
-        if let Some(rt) = self.rt.as_mut() {
-            rt.capture = None;
-        }
+        let sink = self.rt.as_mut().and_then(|rt| rt.capture.take());
         self.capture_dir = None;
+        if let Some(sink) = sink {
+            sink.finish().map_err(|e| MixedError::Io(e.to_string()))?;
+        }
         Ok(())
     }
 
