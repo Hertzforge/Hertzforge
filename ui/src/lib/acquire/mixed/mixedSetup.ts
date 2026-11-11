@@ -142,6 +142,19 @@ export interface MixedDraft {
 export const DEFAULT_FLOOR_LAW = 'hinv';
 export const DEFAULT_TONE_LAW = 'servo_blend';
 
+/**
+ * The built-in tone law's settings in Mixed Mode. It reads each tone through a narrow tracker, so
+ * its compression is the one that holds there (the core's own default for the role), not Sine's
+ * catalog default: Sine's slow compression lets a sweeping tone fall behind its target.
+ */
+export const MIXED_TONE_LAW_DEFAULTS: Record<string, string | number> = { compression: 'custom', ki: 0.5, max_rate_db_per_s: 20 };
+
+/** The values a tone law's form starts from: the operator's, over Mixed Mode's for the built-in. */
+export function toneLawStart<T>(id: string, previous: Record<string, T> | undefined): Record<string, T | string | number> | undefined {
+	if (id !== DEFAULT_TONE_LAW || (previous && 'compression' in previous)) return previous;
+	return { ...MIXED_TONE_LAW_DEFAULTS, ...(previous ?? {}) };
+}
+
 export function newSchedule(kind: ScheduleDraft['kind'] = 'fixed', freq = 100): ScheduleDraft {
 	return {
 		kind,

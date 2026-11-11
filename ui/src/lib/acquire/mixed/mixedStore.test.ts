@@ -88,6 +88,16 @@ describe('the setup against the service', () => {
 		expect(mixed.toneLaw?.id).toBe('servo_blend');
 	});
 
+	it("starts the built-in tone law from Mixed Mode's settings, not Sine's catalog defaults", async () => {
+		const { mixed } = await screen();
+		// Sine's slow compression lets a sweeping tone fall behind its target and trip its abort
+		expect(mixed.setup.lawTones.params).toMatchObject({ compression: 'custom', ki: 0.5, max_rate_db_per_s: 20 });
+		// what the operator chose is kept
+		mixed.setup.lawTones.params = { ...mixed.setup.lawTones.params, compression: 'slow' };
+		mixed.chooseLaw('tones', 'servo_blend');
+		expect(mixed.setup.lawTones.params.compression).toBe('slow');
+	});
+
 	it("the dry run gives the service's derived values for the draft", async () => {
 		const { mixed } = await screen();
 		combined(mixed);

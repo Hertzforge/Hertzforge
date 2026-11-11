@@ -511,3 +511,30 @@ async fn mixed_total_reference_is_at_the_level_and_every_input_has_its_rms() {
     }
     c.ok("mixed.abort", json!({})).await;
 }
+
+/// A tone sweeping on the floor through the ladder to completed, with the
+/// shell's acquisition defaults and the tone law's settings the shell starts
+/// from in Mixed Mode (Sine's slow compression here falls behind the sweep
+/// and trips the tone's abort).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_swept_tone_on_the_floor_runs_to_completed() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let mut cfg = config(
+        vec![
+            floor(),
+            tone("t1", 120.0, 0.3),
+            json!({"id": "t2", "kind": "tone", "amplitude_g": 0.3,
+                   "schedule": {"kind": "sweep", "band_hz": [400, 600],
+                                "rate": {"law": "log", "oct_per_min": 1}, "end": null}}),
+        ],
+        auto(20.0),
+    );
+    cfg["acquisition"] = json!({"fs_hz": 8192, "n_pts": 16384, "n_avg": 4, "tick_ms": 10});
+    cfg["control"]["law"] = json!({"tones": {"id": "servo_blend", "params": {
+        "blend_w": 0.5, "compression": "custom", "ki": 0.5, "max_rate_db_per_s": 20, "kp": 0.3}}});
+    run_to_engaged(&mut c, cfg).await;
+    let end = wait_state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+}

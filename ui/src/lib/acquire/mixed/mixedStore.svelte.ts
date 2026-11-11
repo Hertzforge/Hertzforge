@@ -51,6 +51,7 @@ import {
 	fromMixedConfig,
 	localErrors,
 	MIXED_SECTIONS,
+	toneLawStart,
 	mergeMixedSetup,
 	mixedByKey,
 	mixedSectionOf,
@@ -603,7 +604,7 @@ export class MixedStore {
 		const f = this.floorLaw;
 		if (f) this.setup.lawFloor.params = lawValues(f, this.setup.lawFloor.params, 1);
 		const t = this.toneLaw;
-		if (t) this.setup.lawTones.params = lawValues(t, this.setup.lawTones.params, 1);
+		if (t) this.setup.lawTones.params = lawValues(t, toneLawStart(t.id, this.setup.lawTones.params) as never, 1);
 	}
 
 	/** Choose a role's law: its parameters start from the operator's last valid values, else its defaults. */
@@ -611,7 +612,8 @@ export class MixedStore {
 		const law = (role === 'floor' ? this.floorLaws : this.toneLaws).find((l) => l.id === id);
 		if (!law || this.locked) return;
 		const draft = role === 'floor' ? this.setup.lawFloor : this.setup.lawTones;
-		const next = { id, params: lawValues(law, id === draft.id ? draft.params : undefined, 1) };
+		const previous = id === draft.id ? draft.params : undefined;
+		const next = { id, params: lawValues(law, (role === 'tones' ? toneLawStart(id, previous) : previous) as never, 1) };
 		if (role === 'floor') this.setup.lawFloor = next;
 		else this.setup.lawTones = next;
 	}
