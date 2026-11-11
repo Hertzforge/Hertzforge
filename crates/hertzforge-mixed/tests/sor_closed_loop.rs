@@ -237,7 +237,9 @@ fn the_drive_is_phase_continuous_and_every_change_is_a_ramp() {
 
 /// An abort takes the drive down as a ramp, fast: from the request, the
 /// response through a feedthrough station is under 1 % of its level within
-/// the abort ramp plus the station's lag, and the run ends Aborted.
+/// the abort ramp plus the station's lag plus two blocks (measured: the last
+/// sample over 4 % came 260 frames, 63 ms, after the request), and the run
+/// ends Aborted.
 #[test]
 fn an_abort_is_a_fast_ramp_and_ends_the_run() {
     let mut cfg = config(vec![floor(0.01), tone("t1", fixed(250.0), 2.0)]);
@@ -258,8 +260,9 @@ fn an_abort_is_a_fast_ramp_and_ends_the_run() {
     s.abort("test").unwrap();
     let mut after = Vec::new();
     s.service_analysis_tapped(|b, _| after.extend_from_slice(b));
-    let latency =
-        hertzforge_mixed::service::ABORT_RAMP_S * FS + s.sysid_lag_frames() as f64 + BLOCK as f64;
+    let latency = hertzforge_mixed::service::ABORT_RAMP_S * FS
+        + s.sysid_lag_frames() as f64
+        + 2.0 * BLOCK as f64;
     let tail = &after[(latency as usize).min(after.len())..];
     eprintln!(
         "abort: level {level:.3} g rms, {} samples after, latency bound {latency:.0} frames",

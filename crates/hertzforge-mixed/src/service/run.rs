@@ -95,6 +95,10 @@ pub(crate) struct Ident {
 pub(crate) struct Runtime {
     pub(crate) backend: Box<dyn Backend>,
     engine: Option<Engine>,
+    /// The table the engine is built against (kept to rebuild it at engage).
+    table: hertzforge_channel_table::ChannelTable,
+    sim: bool,
+    n_in: usize,
     pub(crate) actual: ConfiguredActual,
     pub(crate) step: MixedProcessStep,
     pub(crate) fs: f64,
@@ -146,6 +150,21 @@ pub(crate) struct Runtime {
     pub(crate) relax_db: f64,
     /// Raw control samples since the run thread last took them, interleaved.
     pub(crate) tap: Vec<f32>,
+    /// Limit channels: index, response ceiling on the grid, `|H|^2` to it.
+    pub(crate) limits: Vec<LimitCtl>,
+    /// Lines of the random part the limit channels held down on the last
+    /// synthesis.
+    pub(crate) notched: Vec<bool>,
+}
+
+/// One limit channel.
+pub(crate) struct LimitCtl {
+    pub(crate) channel_index: u32,
+    pub(crate) ceiling: Vec<f64>,
+    pub(crate) h_mag2: Vec<f64>,
+    buf: VecDeque<f64>,
+    sum: Vec<f64>,
+    frames: usize,
 }
 
 /// The line grid's frame length for `cfg` at `fs`.
@@ -238,7 +257,7 @@ impl Runtime {
             })?);
         }
         let chunk_frames = (CHUNK_S * fs) as usize;
-        let step = MixedProcessStep::new(
+        let mut step = MixedProcessStep::new(
             cfg,
             fs,
             n_in.max(1),
@@ -248,6 +267,57 @@ impl Runtime {
             tone_clock,
             chunk_frames * 2 + 4096,
         );
+        // The raw-sample guards.
+        if cfg.limits.kinematic_monitor {
+            let kin = hertzforge_random::KinematicMonitor::new(table, fs, 5.0, 1, 5.0);
+            step.kin = kin.is_active().then_some(kin);
+        }
+        for ch in &table.channels {
+            if !ch.enabled || ch.role == hertzforge_channel_table::ChannelRole::Drive {
+                continue;
+            }
+            let at = if ch.range_max > 0.0 {
+                cfg.limits.overload_fraction * ch.range_max
+            } else {
+                f64::INFINITY
+            };
+            let steers = cfg
+                .control
+                .channels
+                .iter()
+                .any(|c| c.channel_index == ch.index)
+                || cfg
+                    .limits
+                    .limit_profiles
+                    .iter()
+                    .any(|l| l.channel_index == ch.index);
+            step.overload.push((ch.index, at, steers));
+        }
+        let mut limits = Vec::new();
+        for lp in &cfg.limits.limit_profiles {
+            let slot = *slot_of.get(&lp.channel_index).ok_or_else(|| {
+                MixedError::BadState(format!(
+                    "limit channel {} is not an input",
+                    lp.channel_index
+                ))
+            })?;
+            step.lim_slots.push(slot);
+            step.records
+                .limits
+                .push(Vec::with_capacity(chunk_frames * 2 + 4096));
+            let mut ceiling = vec![f64::INFINITY; lines];
+            for (c, v) in ceiling.iter_mut().zip(&lp.resp_ceiling) {
+                *c = *v;
+            }
+            limits.push(LimitCtl {
+                channel_index: lp.channel_index,
+                ceiling,
+                h_mag2: vec![0.0; lines],
+                buf: VecDeque::new(),
+                sum: vec![0.0; lines],
+                frames: 0,
+            });
+        }
         let n_ctrl = cfg.control.channels.len();
         let depth = (cfg.control_dof / dof_per_frame()).ceil() as usize;
         let dwelling = dwelling_parts(cfg);
@@ -260,6 +330,9 @@ impl Runtime {
         Ok(Runtime {
             backend,
             engine: Some(engine),
+            table: table.clone(),
+            sim: !station.is_hardware(),
+            n_in: n_in.max(1),
             actual,
             step,
             fs,
@@ -305,6 +378,8 @@ impl Runtime {
             loops: 0,
             relax_db: 0.0,
             tap: Vec::new(),
+            limits,
+            notched: vec![false; lines],
         })
     }
 
@@ -353,6 +428,34 @@ impl Runtime {
         })
     }
 
+    /// Park the station after the identification: the drive has ramped to
+    /// zero; the controlled stop takes the device off drive, so the gate and
+    /// the review hold wait with nothing playing and nothing unwatched (Sine's
+    /// park). [`Self::restart`] brings it back at engage.
+    pub(crate) fn park(&mut self) -> Result<(), MixedError> {
+        self.engine = None;
+        self.backend
+            .stop()
+            .map_err(|e| MixedError::Plant(format!("parking the station: {e}")))
+    }
+
+    /// Re-arm and restart a parked station with a fresh engine.
+    pub(crate) fn restart(&mut self) -> Result<(), MixedError> {
+        if self.engine.is_some() {
+            return Ok(());
+        }
+        let plant = |e: hertzforge_hal::HalError| MixedError::Plant(e.to_string());
+        self.backend.arm().map_err(plant)?;
+        self.backend.start().map_err(plant)?;
+        let mut ecfg = EngineConfig::with_block(self.n_in, 1, &self.actual);
+        if self.sim {
+            ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
+            ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
+        }
+        self.engine = Some(Engine::new(ecfg, &self.table, self.backend.as_ref()));
+        Ok(())
+    }
+
     /// Stop the station's tasks (the drive has been ramped to zero).
     pub(crate) fn stop_station(&mut self) {
         let _ = self.backend.stop();
@@ -392,6 +495,7 @@ impl Runtime {
         let lead = (ramp as usize) + self.batch_frames();
         let mut drive = Vec::with_capacity(need + lead);
         let mut resp: Vec<Vec<f64>> = vec![Vec::with_capacity(need + lead); weights.len()];
+        let mut lresp: Vec<Vec<f64>> = vec![Vec::new(); self.limits.len()];
         let mut recorded = 0usize;
         let skip = ramp as usize + self.batch_frames();
         let mut stopping = false;
@@ -412,6 +516,9 @@ impl Runtime {
                         for (rc, ctl) in resp.iter_mut().zip(&r.control) {
                             rc.push(ctl[k]);
                         }
+                        for (lc, lim) in lresp.iter_mut().zip(&r.limits) {
+                            lc.push(lim[k]);
+                        }
                     }
                 }
                 recorded += r.drive.len();
@@ -431,6 +538,7 @@ impl Runtime {
         }
         self.step.ring.clear();
         self.step.mode = StepMode::Silent;
+        self.park()?;
         if cancel.load(std::sync::atomic::Ordering::Acquire) && drive.len() < need {
             return Err(MixedError::BadState(
                 "the identification was cancelled".into(),
@@ -439,6 +547,19 @@ impl Runtime {
         self.ident = estimate_plant(
             &drive, &resp, weights, self.fs, self.nfft, self.band, max_lag, trust,
         );
+        for (l, y) in self.limits.iter_mut().zip(lresp) {
+            l.h_mag2 = estimate_plant(
+                &drive,
+                &[y],
+                &[1.0],
+                self.fs,
+                self.nfft,
+                self.band,
+                max_lag,
+                trust,
+            )
+            .h_mag2;
+        }
         Ok(())
     }
 
@@ -452,6 +573,7 @@ impl Runtime {
         laws: &MixedLawFactories,
         level: f64,
     ) -> Result<(), MixedError> {
+        self.restart()?;
         let guards = cfg.law_guards.clone().unwrap_or_default();
         let loop_s = cfg.blocks_per_window as f64 * self.hop as f64 / self.fs;
         let budget_s = guards.floor.budget_fraction * loop_s;
@@ -647,6 +769,34 @@ impl Runtime {
                 }
                 meta.push((c, s));
             }
+            // Limit channels lower the random part only (a tone is held by
+            // the channel's abort, the kinematic monitor and the drive
+            // ceiling): the tightest predicted drive ceiling per line, at the
+            // level the hop will play at.
+            let lev = self.step.level.value().max(self.step.level.target());
+            if !self.limits.is_empty() && lev > 0.0 {
+                #[allow(clippy::needless_range_loop)]
+                for k in 0..self.lines {
+                    let mut ceil = f64::INFINITY;
+                    for l in &self.limits {
+                        if l.h_mag2[k] > 1e-12 && l.ceiling[k].is_finite() {
+                            ceil = ceil.min(l.ceiling[k] / l.h_mag2[k] / (lev * lev));
+                        }
+                    }
+                    self.notched[k] = psd[k] > ceil;
+                    if self.notched[k] {
+                        psd[k] = ceil;
+                    }
+                }
+            }
+            // The random part's rms ceiling.
+            if let Some(vmax) = cfg.limits.drive_ceiling_vrms {
+                let rms = (psd.iter().sum::<f64>() * self.df).sqrt() * lev;
+                if rms > vmax && rms > 0.0 {
+                    let k = (vmax / rms).powi(2);
+                    psd.iter_mut().for_each(|p| *p *= k);
+                }
+            }
             if let Some(clip) = cfg.limits.drive_clip_sigma {
                 let ms: f64 = psd.iter().sum::<f64>() * self.df;
                 let lim = clip * ms.sqrt();
@@ -686,6 +836,24 @@ impl Runtime {
             self.ctl_buf[c].extend(r.control[c].drain(..));
         }
         self.gain_buf.extend(r.gain.drain(..));
+        for (l, rec) in self.limits.iter_mut().zip(r.limits.iter_mut()) {
+            l.buf.extend(rec.drain(..));
+        }
+        let mut lp = vec![0.0; self.lines];
+        let mut lframe = vec![0.0; self.nfft];
+        for l in self.limits.iter_mut() {
+            while l.buf.len() >= self.nfft {
+                for (k, v) in l.buf.iter().take(self.nfft).enumerate() {
+                    lframe[k] = *v;
+                }
+                periodogram(&lframe, &self.win, self.fs, &mut self.scratch, &mut lp);
+                for (s, p) in l.sum.iter_mut().zip(&lp) {
+                    *s += p;
+                }
+                l.frames += 1;
+                l.buf.drain(..self.hop);
+            }
+        }
         let lag = self.step.lag() as u64;
         let mut trip = None;
         let n_ctrl = self.res_buf.len();
@@ -838,7 +1006,7 @@ impl Runtime {
             coherence: &self.ident.coherence,
             current_level_db: 0.0,
             df_hz: self.df,
-            notched_bins: &[],
+            notched_bins: &self.notched,
             band: self.band,
             dof: self.floor_dof,
         };
@@ -915,6 +1083,52 @@ impl Runtime {
             self.floor_rms_err_db = Some(10.0 * (ms_m / ms_t).log10());
             self.floor_rms_g = Some((ms_m * self.df).sqrt());
         }
+        // The floor's rms against the tighter side of its abort band.
+        if trip.is_none()
+            && self.relax_db == 0.0
+            && self.floor_dof >= MIN_ENVELOPE_DOF
+            && self
+                .floor_rms_err_db
+                .is_some_and(|e| e.abs() > floor.abort_db.0.min(floor.abort_db.1))
+        {
+            trip = Some((
+                MixedTripKind::FloorRmsAbort {
+                    error_db: self.floor_rms_err_db.unwrap_or(0.0),
+                },
+                None,
+                true,
+            ));
+        }
+        // Each limit channel against its ceiling plus the floor's abort margin.
+        let margin = 10f64.powf(floor.abort_db.1 / 10.0);
+        for l in self.limits.iter_mut() {
+            if l.frames == 0 {
+                continue;
+            }
+            let (mut over, mut worst) = (0usize, (0.0, 0.0, 0.0f64));
+            for k in 0..self.lines {
+                let m = l.sum[k] / l.frames as f64;
+                if l.ceiling[k].is_finite() && m > l.ceiling[k] * margin {
+                    over += 1;
+                    if m / l.ceiling[k] > worst.2 {
+                        worst = (m, l.ceiling[k], m / l.ceiling[k]);
+                    }
+                }
+            }
+            l.sum.iter_mut().for_each(|s| *s = 0.0);
+            l.frames = 0;
+            if over > cfg.limits.max_lines_out && trip.is_none() {
+                trip = Some((
+                    MixedTripKind::LimitChannel {
+                        channel_index: l.channel_index,
+                        measured: worst.0,
+                        limit: worst.1,
+                    },
+                    None,
+                    true,
+                ));
+            }
+        }
         if abort > cfg.limits.max_lines_out && trip.is_none() {
             trip = Some((MixedTripKind::FloorAbort { lines_out: abort }, None, true));
         }
@@ -952,6 +1166,11 @@ impl Runtime {
     /// The step's trip, taken.
     pub(crate) fn take_step_trip(&mut self) -> Option<StepTrip> {
         self.step.trip.take()
+    }
+
+    /// The engine's health counters.
+    pub(crate) fn engine_health(&self) -> Option<hertzforge_engine::EngineHealth> {
+        self.engine.as_ref().map(Engine::health)
     }
 
     /// Control channels per tapped frame.
@@ -994,7 +1213,14 @@ fn composite(per: &[Vec<f64>], weights: &[f64]) -> Vec<f64> {
 }
 
 fn clear(r: &mut super::step::Records) {
-    for v in r.control.iter_mut().chain(r.residual.iter_mut()) {
+    r.rand_sumsq = 0.0;
+    r.rand_n = 0;
+    for v in r
+        .control
+        .iter_mut()
+        .chain(r.residual.iter_mut())
+        .chain(r.limits.iter_mut())
+    {
         v.clear();
     }
     r.gain.clear();

@@ -244,6 +244,13 @@ pub enum MixedTripKind {
         /// Volts peak.
         limit_vpk: f64,
     },
+    /// The random part's (floor and bands) rms reached its abort.
+    RandomVrms {
+        /// Volts rms over the last quarter second.
+        realized_vrms: f64,
+        /// Volts rms.
+        limit_vrms: f64,
+    },
     /// A kinematic limit on a raw input sample.
     Kinematic {
         /// The channel.
@@ -320,6 +327,12 @@ impl MixedTrip {
                 realized_vpk,
                 limit_vpk,
             } => format!("Drive peak {realized_vpk:.3} V at the {limit_vpk:.3} V abort"),
+            MixedTripKind::RandomVrms {
+                realized_vrms,
+                limit_vrms,
+            } => {
+                format!("Random drive {realized_vrms:.3} V rms at the {limit_vrms:.3} V rms abort")
+            }
             MixedTripKind::Kinematic {
                 channel_index,
                 axis,
@@ -410,6 +423,10 @@ pub struct MixedStatus {
     /// (coherence and gain over their floors); 0 before it runs.
     #[serde(default)]
     pub trusted_frac: f64,
+    /// Channels whose overload indicator has latched (channels the loop does
+    /// not steer by; an overload on a control or limit channel aborts).
+    #[serde(default)]
+    pub overloads: Vec<u32>,
     /// Whether a capture runs.
     pub capturing: bool,
     /// The laws and their counters; `None` until the loop engages.
@@ -511,6 +528,7 @@ impl MixedStatus {
             totals: MixedTotals::default(),
             band_coherence: 0.0,
             trusted_frac: 0.0,
+            overloads: Vec::new(),
             capturing: false,
             law: None,
         }

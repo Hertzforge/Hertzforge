@@ -267,6 +267,12 @@ pub struct MixedService {
     histories: live::Histories,
     chunk_peak: f64,
     chunk_rms: f64,
+    /// The random part's sum of squares and frames toward its rms abort.
+    rand_acc: (f64, u64),
+    /// The level ladder: the rung the level is at or climbing to, whether it
+    /// is on that rung, seconds at the present level and at full level (holds
+    /// excluded).
+    ladder: live::Ladder,
 }
 
 impl std::fmt::Debug for MixedService {
@@ -349,6 +355,8 @@ impl MixedService {
             histories: live::Histories::default(),
             chunk_peak: 0.0,
             chunk_rms: 0.0,
+            rand_acc: (0.0, 0),
+            ladder: live::Ladder::default(),
         })
     }
 
@@ -432,12 +440,12 @@ impl MixedService {
 
     /// The engine's health counters; `None` before the loop engages.
     pub fn engine_health(&self) -> Option<hertzforge_engine::EngineHealth> {
-        None
+        self.rt.as_ref().and_then(|r| r.engine_health())
     }
 
-    /// Input blocks the station dropped.
+    /// Frames the engine's raw ring overran (frames the watchdog never saw).
     pub fn blocks_dropped(&self) -> u64 {
-        0
+        self.engine_health().map_or(0, |h| h.ring_overruns as u64)
     }
 
     /// The identification's seed.
