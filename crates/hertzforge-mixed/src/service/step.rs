@@ -532,12 +532,18 @@ impl MixedProcessStep {
             let proposed = {
                 // The error the law is shown moves at most READ_SLEW_DB_PER_S
                 // toward the reading (from 0 dB, on target, while there is no
-                // usable reading). A velocity-form servo (the built-in's)
-                // turns a step in its reading into a proportional kick, and
-                // when that kick is rate-clamped its anti-windup repeats the
-                // clamped step every tick until the reading moves, which a
-                // narrow tracker takes seconds to do: found as a 6 dB fall in
-                // half a second and a tone abort after a level step.
+                // usable reading). Handing a tone back to its law after a
+                // span with no usable reading (engage, a level step, a hold)
+                // is otherwise a step in its error, because a narrow
+                // tracker's reading wanders in that time. A velocity-form
+                // servo (the built-in's) turns that step into a proportional
+                // kick; once the kick is rate-clamped, its back-calculation
+                // leaves every next step at the clamp plus kp times the
+                // error's change, so while the reading keeps drifting the
+                // same way, by however little, the servo ramps at its full
+                // rate: found as a 6 dB fall in 0.3 s and a tone abort after
+                // a level step. Measured on that replay, the slew binds only
+                // for the few ticks after such a handoff.
                 let true_db = match (usable, measured) {
                     (true, Some(m)) if m > 0.0 && target_full > 0.0 => {
                         20.0 * (m / target_full).log10()
