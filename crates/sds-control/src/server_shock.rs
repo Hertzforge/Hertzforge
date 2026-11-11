@@ -459,6 +459,7 @@ impl Service {
                 || inner.mimo_live()
                 || inner.srs_live()
                 || inner.sine_live()
+                || inner.mixed_live()
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
