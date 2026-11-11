@@ -92,6 +92,8 @@ pub(crate) struct ToneCtl {
     pub(crate) measured: Option<f64>,
     pub(crate) error_db: Option<f64>,
     pub(crate) usable: bool,
+    /// Whether the tone's law has had a usable reading since it came in.
+    pub(crate) read_once: bool,
     pub(crate) alarm: bool,
     pub(crate) abort_s: f64,
     pub(crate) alarm_db: (f64, f64),
@@ -532,14 +534,19 @@ impl MixedProcessStep {
                     }
                 }
             };
-            // Until the reading is usable the tone plays its feed-forward
+            // Until its first usable reading the tone plays its feed-forward
             // itself: the law, told it is on target, follows only its blend's
             // share of the prediction's change, so along a sweep the drive
             // drifts off the feed-forward and the first real reading starts
             // the servo on an error it ramps through at its rate cap while
             // the narrow tracker catches up (found: 0.7 dB at the handoff
             // became a 4 dB undershoot and the tone's abort).
-            let proposed = match (usable, proposed, prediction) {
+            // Once it has been read, a tone the core cannot read for a while
+            // (a level step, a hold) keeps the drive its law found.
+            if usable {
+                self.tones[j].read_once = true;
+            }
+            let proposed = match (usable || self.tones[j].read_once, proposed, prediction) {
                 (false, Some(_), Some(db)) => Some(10f64.powf(db / 20.0)),
                 (_, p, _) => p,
             };

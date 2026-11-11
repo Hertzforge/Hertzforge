@@ -794,6 +794,11 @@ impl Actor {
             self.view.status = Some(st);
             return;
         }
+        // A ramp down the core starts itself (the schedule finished) is timed
+        // from the first chunk that shows it, as one the operator asks for is.
+        if st.phase == hertzforge_mixed::MixedPhase::RampingDown && self.stop_at_t.is_none() {
+            self.stop_at_t = Some(self.view.t_s.unwrap_or(st.t_s));
+        }
         let was = self.view.phase;
         view::apply_status(&mut self.view, &st);
         if stopping {
