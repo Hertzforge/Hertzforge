@@ -137,6 +137,16 @@ def test_the_state_carries_one_row_per_part_in_the_parts_order():
     assert follower['follows'] == {'of': 't2', 'ratio': 2}
     assert follower['direction'] == 'up'
     assert all(r['follows'] is None for r in state['parts'] if r['id'] != 't3')
+    # a tone states how its alarm and abort are judged; the floor and a band do not
+    judged = ('judge_s', 'judged_error_db', 'judged_alarm_db', 'judged_abort_db')
+    for row in state['parts']:
+        if row['kind'] == 'tone':
+            assert isinstance(row['tolerance_widened'], bool), row['id']
+        else:
+            assert row['tolerance_widened'] is None and all(row[k] is None for k in judged)
+    assert follower['tolerance_widened'] is True and follower['judge_s'] == 8
+    lo, hi = follower['judged_abort_db']
+    assert follower['judged_alarm_db'][0] < lo and follower['judged_alarm_db'][1] < hi
 
 
 def test_the_derived_values_sum_the_parts():
@@ -152,6 +162,12 @@ def test_the_derived_values_sum_the_parts():
         ref['floor_ms_g2'] + ref['tones_ms_g2'] + ref['bands_ms_g2'], rel=1e-3)
     assert set(derived['law']) == {'floor', 'tones'}
     assert derived['law']['floor']['live'] == []
+    # one judging prediction per tone, in the parts' order
+    tones = [p['id'] for p in derived['parts'] if p['kind'] == 'tone']
+    assert [j['part'] for j in derived['tone_judging']] == tones
+    for j in derived['tone_judging']:
+        assert j['judge_s'] > 0 and j['sigma_db'] >= 0
+        assert j['abort_db'][0] >= j['alarm_db'][0] and j['abort_db'][1] >= j['alarm_db'][1]
 
 
 def test_the_live_frame_has_its_four_views_in_order():

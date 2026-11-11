@@ -309,6 +309,11 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
         "target": opt_num(target.map(|x| sig(x, 4))),
         "measured": opt_num(measured.map(|x| sig(x, 4))),
         "error_db": opt_num(error_db.map(|x| round(x, 2))),
+        "judge_s": if is_tone { opt_num(r.and_then(|r| r.judge_s).map(|x| round(x, 3))) } else { Value::Null },
+        "judged_error_db": if is_tone { opt_num(r.and_then(|r| r.judged_error_db).map(|x| round(x, 2))) } else { Value::Null },
+        "judged_alarm_db": if is_tone { db_pair(r.and_then(|r| r.judged_alarm_db)) } else { Value::Null },
+        "judged_abort_db": if is_tone { db_pair(r.and_then(|r| r.judged_abort_db)) } else { Value::Null },
+        "tolerance_widened": if is_tone { Value::from(r.is_some_and(|r| r.tolerance_widened)) } else { Value::Null },
         "alarm": r.is_some_and(|r| r.alarm),
         "drive_vpk": if is_tone { opt_num(r.map(|r| sig(r.drive, 4))) } else { Value::Null },
         // The core keeps no drive of its own for a narrowband (its share of the
@@ -320,6 +325,13 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
         "dof": dof,
         "lines": lines,
         "law": if is_band { Value::Null } else { json!({"misses": r.map_or(0, |r| r.misses), "capped": r.map_or(0, |r| r.capped)}) },
+    })
+}
+
+/// A band `[below, above]` in dB, or null.
+fn db_pair(b: Option<(f64, f64)>) -> Value {
+    b.map_or(Value::Null, |(lo, hi)| {
+        json!([num(round(lo, 2)), num(round(hi, 2))])
     })
 }
 
@@ -707,7 +719,11 @@ pub fn fill_trip_facts(
             })
     };
     let target = row.map(|r| r.target).filter(|x| x.is_finite() && *x > 0.0);
-    let band = t.part.as_deref().and_then(abort_band);
+    // A tone is judged against its judged abort band (its own, or widened to its
+    // reading's scatter); a band against its configured one.
+    let band = row
+        .and_then(|r| r.judged_abort_db)
+        .or_else(|| t.part.as_deref().and_then(abort_band));
     let limit = |e: f64, per_db: f64| {
         band.zip(target).map(|((lo, hi), tg)| {
             let db = if e >= 0.0 { hi } else { -lo };

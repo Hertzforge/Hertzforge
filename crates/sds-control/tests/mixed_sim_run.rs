@@ -679,7 +679,7 @@ async fn mixed_moving_rows_name_their_leader_and_their_own_rate() {
 /// A tone's abort states what the tone measured and the limit it crossed, not
 /// only its error: a swept tone with an abort band far tighter than the servo
 /// holds trips, and the end's trip carries `measured_g` and `limit_g` that agree
-/// with its `error_db` and the band.
+/// with its judged `error_db` and its judged (widened) abort band.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mixed_tone_trip_states_its_measured_value_and_its_limit() {
     let addr = serve(service(Duration::from_secs(30))).await;
@@ -696,13 +696,28 @@ async fn mixed_tone_trip_states_its_measured_value_and_its_limit() {
     let e = trip["error_db"].as_f64().unwrap();
     let m = trip["measured_g"].as_f64().expect("measured_g");
     let l = trip["limit_g"].as_f64().expect("limit_g");
-    // measured / limit is the error beyond the 0.1 dB band, in g.
+    // The limit is the tone's judged abort band on that side (its own 0.1 dB,
+    // or widened to its reading's scatter), as the row states it; measured over
+    // limit is the judged error beyond it.
+    let row = end["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "t1")
+        .unwrap()
+        .clone();
+    let band = row["judged_abort_db"].as_array().expect("judged band");
+    let side = if e >= 0.0 {
+        band[1].as_f64().unwrap()
+    } else {
+        band[0].as_f64().unwrap()
+    };
+    assert!(side >= 0.1, "{row}");
     let beyond = 20.0 * (m / l).log10();
     assert!(
-        (beyond - (e - 0.1f64.copysign(e))).abs() < 0.01,
-        "{trip}: {beyond} dB beyond the limit"
+        (beyond - (e - side.copysign(e))).abs() < 0.02,
+        "{trip}: {beyond} dB beyond the limit, band {side}"
     );
-    assert!(if e >= 0.0 { m > l } else { m < l }, "{trip}");
 }
 
 /// A limit profile on the control channel is accepted, as Random accepts it

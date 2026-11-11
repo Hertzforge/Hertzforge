@@ -177,6 +177,25 @@ pub struct PartRow {
     /// A tone's (or the floor's) law calls a core cap bound, in all.
     #[serde(default)]
     pub capped: u64,
+    /// A tone's alarm and abort judge its reading averaged over this long,
+    /// seconds (a single tracker reading for a tone far over the floor);
+    /// `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_s: Option<f64>,
+    /// The error a tone's alarm and abort judged, dB (its reading averaged
+    /// over `judge_s`); `None` until there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judged_error_db: Option<f64>,
+    /// A tone's alarm band as judged, dB below and above: its own, or widened
+    /// to the judged figure's scatter at three sigma.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judged_alarm_db: Option<(f64, f64)>,
+    /// A tone's abort band as judged, dB below and above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judged_abort_db: Option<(f64, f64)>,
+    /// Whether a tone's tolerances were widened to its reading's scatter.
+    #[serde(default)]
+    pub tolerance_widened: bool,
 }
 
 /// One part's line in the run's report.
@@ -550,6 +569,11 @@ impl MixedStatus {
                     gain_db: (kind == PartKind::Narrowband).then_some(0.0),
                     misses: 0,
                     capped: 0,
+                    judge_s: None,
+                    judged_error_db: None,
+                    judged_alarm_db: None,
+                    judged_abort_db: None,
+                    tolerance_widened: false,
                 }
             })
             .collect();

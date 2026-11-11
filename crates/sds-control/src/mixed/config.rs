@@ -805,6 +805,9 @@ pub struct Derived {
     /// The core's prediction of the time the floor needs to reach the control
     /// degrees of freedom on the grid, s; `None` when it cannot predict.
     pub floor_equalize_s: Option<f64>,
+    /// How each tone's alarm and abort will be judged (the core's prediction,
+    /// at the point of its motion that needs the longest averaging).
+    pub tone_judging: Vec<hertzforge_mixed::predict::ToneJudgingPrediction>,
 }
 
 impl Derived {
@@ -877,6 +880,14 @@ impl Derived {
             }).collect::<Vec<_>>(),
             "test_s": self.test_s.map_or(Value::Null, |s| num(round(s, 1))),
             "floor_equalize_s": self.floor_equalize_s.map_or(Value::Null, |s| num(round(s, 1))),
+            "tone_judging": self.tone_judging.iter().map(|j| json!({
+                "part": j.part,
+                "judge_s": num(round(j.judge_s, 2)),
+                "sigma_db": num(round(j.sigma_db, 2)),
+                "alarm_db": [num(round(j.alarm_db.0, 2)), num(round(j.alarm_db.1, 2))],
+                "abort_db": [num(round(j.abort_db.0, 2)), num(round(j.abort_db.1, 2))],
+                "widened": j.widened,
+            })).collect::<Vec<_>>(),
             "identification_s": num(round(self.identification_s, 1)),
             "call_budget_s": {
                 "floor": num(round(self.call_budget_floor_s, 7)),
@@ -1724,9 +1735,11 @@ impl WireMixed {
         // The predicted figures are the core's (`predict`): the parts' mean
         // squares, the peaks of the sum and the shaker's ratings.
         let mut floor_equalize_s = None;
+        let mut tone_judging = Vec::new();
         let (kinematics, feasibility) = match hertzforge_mixed::predict(core) {
             Ok(pr) => {
                 floor_equalize_s = Some(pr.floor_equalize_s);
+                tone_judging = pr.tone_judging.clone();
                 for dp in &mut parts {
                     if let Some(m) = pr.parts.iter().find(|m| m.part == dp.id) {
                         dp.ms_g2 = m.ms_g2;
@@ -1758,6 +1771,7 @@ impl WireMixed {
             kinematics,
             feasibility,
             floor_equalize_s,
+            tone_judging,
         }
     }
 

@@ -79,19 +79,56 @@ fn the_summed_drive_peak_ends_the_run_naming_no_part() {
 
 #[test]
 fn a_tone_abort_names_the_tone() {
-    let mut c = quick(config(vec![floor(0.01), tone("t1", fixed(250.0), 0.5)]));
-    if let hertzforge_mixed::PartBody::Tone(t) = &mut c.parts[1].body {
-        // A 0.5 g tone reads with 1.2 dB of scatter: a 0.2 dB abort trips.
-        t.abort_db = (0.2, 0.2);
-        t.alarm_db = (0.1, 0.1);
-    }
-    let mut s = engaged(c, DELAY);
+    // A real, persistent error: the tone law plays the prediction 4 dB low
+    // (a reading's scatter is judged at its own averaging time and no longer
+    // trips an abort narrower than it).
+    let mut laws = MixedLawFactories::builtin();
+    laws.tones = Arc::new(LowFactory);
+    let c = quick(config(vec![floor(0.01), tone("t1", fixed(250.0), 0.5)]));
+    let mut s = engaged_with(c, DELAY, laws);
     run_for(&mut s, 40.0);
     let t = s.trip().expect("tripped");
     assert!(matches!(t.kind, MixedTripKind::ToneAbort { .. }), "{t:?}");
     assert_eq!(t.part.as_deref(), Some("t1"));
     assert!(s.end_reason().unwrap().starts_with("Tone t1 abort"));
     assert_eq!(s.state(), MixedState::Aborted);
+}
+
+/// A tone law that plays the identification's prediction 4 dB low.
+struct Low;
+impl SineControlLaw for Low {
+    fn name(&self) -> &str {
+        "low"
+    }
+    fn engage(&mut self, i: &TickInputs<'_>, _: &mut LawValues) -> Result<TickOutputs, LawFault> {
+        Ok(TickOutputs {
+            drive: 10f64.powf((i.prediction_db.unwrap_or(-40.0) - 4.0) / 20.0),
+            faulted: false,
+        })
+    }
+    fn tick(&mut self, i: &TickInputs<'_>, v: &mut LawValues) -> Result<TickOutputs, LawFault> {
+        self.engage(i, v)
+    }
+    fn adjust(&mut self, _: &str, _: f64) -> Result<(), LawFault> {
+        Ok(())
+    }
+}
+struct LowFactory;
+impl SineLawFactory for LowFactory {
+    fn build(&self, _: &SineLawSetup<'_>) -> Result<Box<dyn SineControlLaw + Send>, LawFault> {
+        Ok(Box::new(Low))
+    }
+    fn describe(&self) -> LawDescriptor {
+        LawDescriptor {
+            id: "low".into(),
+            name: "low".into(),
+            version: "0".into(),
+            sha256: None,
+            params: Vec::new(),
+            diagnostics: Vec::new(),
+            live: Vec::new(),
+        }
+    }
 }
 
 /// A tone law that answers NaN.

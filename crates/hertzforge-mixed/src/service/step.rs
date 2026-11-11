@@ -21,7 +21,7 @@ use super::status::{MixedTripKind, RoleTally};
 use super::LawRole;
 use crate::parts::{MixedConfig, ToneAmplitude};
 use crate::schedule::PartClock;
-use crate::tone::{tone_readable, Ramp, ToneBank};
+use crate::tone::{tone_judging, tone_readable, Ramp, ToneBank, ToneJudging};
 use hertzforge_engine::ProcessStep;
 use hertzforge_sine::law::{
     guard::{call_law, cap_drive},
@@ -105,6 +105,14 @@ pub(crate) struct ToneCtl {
     pub(crate) shown_db: f64,
     /// Whether the drive ceiling held the tone's amplitude on the last tick.
     pub(crate) limiting: bool,
+    /// How the tone's alarm and abort are judged at its frequency now.
+    pub(crate) judging: Option<ToneJudging>,
+    /// The tone's reading squared, averaged for its judgement (full level).
+    pub(crate) avg_ms: f64,
+    /// Seconds of readings in that average since it last restarted.
+    pub(crate) avg_s: f64,
+    /// The error its alarm and abort judged on the last tick, dB.
+    pub(crate) judged_db: Option<f64>,
     pub(crate) alarm: bool,
     pub(crate) abort_s: f64,
     pub(crate) alarm_db: (f64, f64),
@@ -681,11 +689,46 @@ impl MixedProcessStep {
                     });
                 }
             }
-            // Judge.
-            if let Some(e) = self.tones[j].error_db {
+            // Judge: on the reading averaged long enough for its scatter
+            // (a tone far over the floor: the single reading, as always), in
+            // mean square less the floor's expected power in the tracker's
+            // band, against tolerances widened to the scatter where the cap
+            // leaves it too wide. The law above is not affected.
+            let bn = self.bank.bn_hz();
+            let g = self.plant.floor_at(f);
+            let jd = {
+                let t = &self.tones[j];
+                tone_judging(target_full, g, t.alarm_db, t.abort_db, bn)
+            };
+            let judged = {
                 let t = &mut self.tones[j];
-                t.alarm = e < -t.alarm_db.0 || e > t.alarm_db.1;
-                if e < -t.abort_db.0 || e > t.abort_db.1 {
+                t.judging = Some(jd);
+                match (t.error_db, t.measured) {
+                    (Some(e), _) if !jd.averages => Some(e),
+                    (Some(_), Some(m)) => {
+                        let tau = jd.tau_s(bn).max(dt);
+                        if t.avg_s == 0.0 {
+                            t.avg_ms = m * m;
+                        } else {
+                            t.avg_ms += (m * m - t.avg_ms) * (dt / tau).min(1.0);
+                        }
+                        t.avg_s += dt;
+                        let ms = (t.avg_ms - 2.0 * g * bn).max(1e-30);
+                        (t.avg_s >= tau && target_full > 0.0)
+                            .then(|| 10.0 * (ms / (target_full * target_full)).log10())
+                    }
+                    _ => {
+                        t.avg_s = 0.0;
+                        None
+                    }
+                }
+            };
+            self.tones[j].judged_db = judged;
+            if let Some(e) = judged {
+                let t = &mut self.tones[j];
+                let (alarm_db, abort_db) = (jd.alarm_db, jd.abort_db);
+                t.alarm = e < -alarm_db.0 || e > alarm_db.1;
+                if e < -abort_db.0 || e > abort_db.1 {
                     t.abort_s += dt;
                 } else {
                     t.abort_s = 0.0;

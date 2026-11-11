@@ -59,6 +59,11 @@
      "target": null,
      "measured": null,
      "error_db": null,
+     "judge_s": null,
+     "judged_error_db": null,
+     "judged_alarm_db": null,
+     "judged_abort_db": null,
+     "tolerance_widened": null,
      "alarm": false,
      "drive_vpk": null,
      "drive_vrms": null,
@@ -90,6 +95,11 @@
      "target": null,
      "measured": null,
      "error_db": null,
+     "judge_s": null,
+     "judged_error_db": null,
+     "judged_alarm_db": null,
+     "judged_abort_db": null,
+     "tolerance_widened": false,
      "alarm": false,
      "drive_vpk": null,
      "drive_vrms": null,
@@ -124,6 +134,11 @@
      "target": null,
      "measured": null,
      "error_db": null,
+     "judge_s": null,
+     "judged_error_db": null,
+     "judged_alarm_db": null,
+     "judged_abort_db": null,
+     "tolerance_widened": false,
      "alarm": false,
      "drive_vpk": null,
      "drive_vrms": null,
@@ -158,6 +173,11 @@
      "target": null,
      "measured": null,
      "error_db": null,
+     "judge_s": null,
+     "judged_error_db": null,
+     "judged_alarm_db": null,
+     "judged_abort_db": null,
+     "tolerance_widened": false,
      "alarm": false,
      "drive_vpk": null,
      "drive_vrms": null,
@@ -189,6 +209,11 @@
      "target": null,
      "measured": null,
      "error_db": null,
+     "judge_s": null,
+     "judged_error_db": null,
+     "judged_alarm_db": null,
+     "judged_abort_db": null,
+     "tolerance_widened": null,
      "alarm": false,
      "drive_vpk": null,
      "drive_vrms": null,
@@ -220,6 +245,11 @@
      "target": null,
      "measured": null,
      "error_db": null,
+     "judge_s": null,
+     "judged_error_db": null,
+     "judged_alarm_db": null,
+     "judged_abort_db": null,
+     "tolerance_widened": null,
      "alarm": false,
      "drive_vpk": null,
      "drive_vrms": null,
@@ -423,6 +453,50 @@
    ],
    "test_s": 360,
    "floor_equalize_s": 70,
+   "tone_judging": [
+    {
+     "part": "t1",
+     "judge_s": 3.01,
+     "sigma_db": 0.5,
+     "alarm_db": [
+      1.5,
+      1.5
+     ],
+     "abort_db": [
+      3,
+      3
+     ],
+     "widened": false
+    },
+    {
+     "part": "t2",
+     "judge_s": 8,
+     "sigma_db": 0.61,
+     "alarm_db": [
+      1.84,
+      1.84
+     ],
+     "abort_db": [
+      3,
+      3
+     ],
+     "widened": true
+    },
+    {
+     "part": "t3",
+     "judge_s": 8,
+     "sigma_db": 0.94,
+     "alarm_db": [
+      2.82,
+      2.82
+     ],
+     "abort_db": [
+      3,
+      3
+     ],
+     "widened": true
+    }
+   ],
    "identification_s": 32,
    "call_budget_s": {
     "floor": 2,
