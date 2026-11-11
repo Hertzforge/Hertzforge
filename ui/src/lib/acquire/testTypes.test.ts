@@ -29,7 +29,7 @@ function viewOf(initial: LiveTest = undefined, types?: readonly TestType[]) {
 describe('the test types', () => {
 	it('lists Single Output, MIMO and Data Acquisition, in that order, with their test types in order', () => {
 		expect(TEST_GROUPS.map((g) => g.title)).toEqual(['Single Output', 'MIMO', 'Data Acquisition']);
-		expect(typesIn('single').map((t) => t.title)).toEqual(['Random', 'Sine', 'Classical Shock', 'SRS', 'TWR', 'Explorer']);
+		expect(typesIn('single').map((t) => t.title)).toEqual(['Random', 'Sine', 'Mixed Mode', 'Classical Shock', 'SRS', 'TWR', 'Explorer']);
 		expect(typesIn('mimo').map((t) => t.title)).toEqual(['MIMO Random', 'MIMO Shock', 'MIMO Sine', 'MIMO Mixed Mode', 'MIMO TWR']);
 		expect(typesIn('acquisition').map((t) => t.title)).toEqual(['Recorder']);
 		// Every test type is in exactly one section, and the keyboard order is the sections' order.
@@ -39,8 +39,10 @@ describe('the test types', () => {
 		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
 	});
 
-	it('gives each of the twelve test types one plain line, and only Random, Sine, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder can be chosen', () => {
-		expect(TEST_TYPES).toHaveLength(12);
+	it('gives each of the thirteen test types one plain line, and only Random, Sine, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder can be chosen', () => {
+		expect(TEST_TYPES).toHaveLength(13);
+		// Mixed Mode is listed in Single Output, after Sine, and is coming.
+		expect(TEST_TYPES.find((t) => t.id === 'mixed')).toMatchObject({ group: 'single', title: 'Mixed Mode', ready: false });
 		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'sine', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);

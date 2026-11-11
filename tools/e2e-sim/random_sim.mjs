@@ -311,7 +311,7 @@ try {
 	check(
 		'Acquire opens on the test-type chooser: Single Output, MIMO and Data Acquisition sections, Random, Sine, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder offered, the rest "Coming"',
 		sections.map((t) => t.toLowerCase()).join('|') === 'single output|mimo|data acquisition' &&
-			inGroup('single') === 'random,sine,shock,srs,twr,explorer' &&
+			inGroup('single') === 'random,sine,mixed,shock,srs,twr,explorer' &&
 			inGroup('mimo') === 'mimo_random,mimo_shock,mimo_sine,mimo_mixed,mimo_twr' &&
 			inGroup('acquisition') === 'recorder' &&
 			cards.filter((c) => c.offered).map((c) => c.id).join() === 'random,sine,shock,srs,twr,explorer,mimo_random,recorder' &&
