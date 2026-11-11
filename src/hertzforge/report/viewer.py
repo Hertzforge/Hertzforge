@@ -71,3 +71,21 @@ def read_viewer(page: str) -> dict[str, Any]:
     data = base64.b64decode(encoded)
     message = frames.decode(data.decode('utf-8') if data[:1] == b'{' else data)
     return message['result']
+
+
+def page_text(page: str) -> str:
+    """The words a page from `viewer_html` shows, one line each: its title,
+    marking and stylesheet, and each block's text, number, caption and note,
+    its tables' cells and its readings' rows. What a reader can search for,
+    and what a test looks for."""
+    held = read_viewer(page)
+    lines = [str(held.get('title', '')), str(held.get('marking', '')), str(held.get('css', ''))]
+    for block in held['blocks']:
+        lines += [str(block.get(key, '')) for key in ('html', 'label', 'caption', 'note')]
+        for view in block.get('views', []):
+            lines.append(str(view.get('title', '')))
+            if view['view'] == 'table':
+                lines += ['\t'.join(view['columns'])] + ['\t'.join(row) for row in view['rows']]
+            elif view['view'] == 'reading':
+                lines += [f"{row['label']}\t{row['value']}" for row in view['rows']]
+    return '\n'.join(line for line in lines if line)

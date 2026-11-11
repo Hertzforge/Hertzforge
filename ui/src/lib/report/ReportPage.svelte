@@ -168,6 +168,22 @@
 		font-style: italic;
 	}
 
+	@media print {
+		.page {
+			max-width: none;
+			padding: 0;
+		}
+
+		.block {
+			break-inside: avoid;
+			outline: none;
+		}
+
+		.title {
+			break-after: avoid;
+		}
+	}
+
 	.unbound {
 		padding: var(--sp-3);
 		border: 1px dashed var(--line-2);

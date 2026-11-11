@@ -359,6 +359,10 @@ def page_blocks(report: Any, objects: Mapping[str, Any], unit_system: Any = None
             entry['note'] = str(built['note'])
         if kind == 'text':
             entry.update(kind='text', html=str(built.get('html', '')))
+            if built.get('stamp'):
+                # when it was checked rather than what the report holds
+                # (`report.identity.STAMP`): out of the issued content's hash
+                entry['stamp'] = True
         elif kind == 'unbound':
             entry.update(kind='unbound', was=str(built.get('was', 'block')),
                          empty=bool(built.get('empty')))

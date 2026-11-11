@@ -16,10 +16,17 @@
 
 	let { page, error = null }: Props = $props();
 
+	/** How long the figures are given to draw before the print dialog: spectra and 3-D views draw a frame or two after mounting. */
+	const SETTLE_MS = 1200;
+
 	onMount(() => {
 		const written = document.documentElement.getAttribute('data-theme');
 		theme.init(written === 'light' || written === 'dark' ? written : null);
 		if (page) document.title = page.title;
+		// a page written to be printed (`report.print`, an issue) asks for the dialog itself
+		if (page && document.querySelector('meta[name="hertzforge-print"]')) {
+			void document.fonts.ready.then(() => setTimeout(() => window.print(), SETTLE_MS));
+		}
 	});
 
 	function flip() {

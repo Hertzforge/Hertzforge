@@ -33,6 +33,9 @@ _PENDING: dict[int, tuple[str, str]] = {}
 #: they are drawn
 _PRINTS = ("<script>history.replaceState(null, '', '#print');</script>",
            "<script>addEventListener('load', () => setTimeout(() => print(), 600));</script>")
+#: what makes the shell's viewer page a page to print: it asks for the print
+#: dialog once its figures are drawn (`ReportViewer`)
+PRINT_FLAG = '<meta name="hertzforge-print" content="1" />'
 
 #: the starter templates; 'empty' starts blank
 TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'empty')
@@ -220,6 +223,9 @@ def operate(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[
 
 
 def _printable(page: str) -> str:
+    """`page` asking for the print dialog once its figures are drawn."""
+    if '<script id="report-data"' in page:
+        return page.replace('<head>', '<head>\n\t\t' + PRINT_FLAG, 1)
     head, body = _PRINTS
     page = page.replace('<head>', '<head>' + head, 1)
     return page.replace('</body>', body + '</body>', 1)
@@ -239,7 +245,7 @@ def print_page(project: Any, params: Mapping[str, Any], units: Any = None) -> di
     if (checks['owed'] or checks['index']) and not _anyway(params, 'report.print'):
         return {'html': None, **checks}
     try:
-        return {'html': _printable(project._export_page(name, units)), 'owed': [], 'index': []}
+        return {'html': _printable(project._viewer_export(name, units)), 'owed': [], 'index': []}
     except ValueError as error:
         raise refused(str(error)) from None
 
@@ -270,9 +276,12 @@ def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[st
         checks = export_checks(project, name)
         if checks['index'] and not _anyway(params, 'report.issue'):
             return {'index': checks['index']}
+        from hertzforge.report.viewer import viewer_html
+
         before = mark_issued(report, status)
         try:
-            page = project._report_page(name, units)
+            page = viewer_html(report, project, units, object_groups=project.object_groups,
+                               theme='light')
         finally:
             unmark(report, before)
         _PENDING[id(report)] = (status, page)
