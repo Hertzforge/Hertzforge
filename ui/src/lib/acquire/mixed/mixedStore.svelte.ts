@@ -749,7 +749,7 @@ export class MixedStore {
 		this.served = { run_id: res.state.run_id, config, derived: res.derived, views: [] };
 		void this.loadLog(res.state.run_id);
 		void this.readServed();
-		this.acq.note = { tone: 'pass', text: 'The service holds this setup.' };
+		// The setup's footer says the service holds it; no notice is laid over the screen.
 		return true;
 	}
 

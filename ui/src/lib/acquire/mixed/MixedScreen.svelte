@@ -41,7 +41,12 @@
 	const channels = $derived(runChannels(mixed.rows));
 	const preview = $derived(mixed.check && mixed.checkedKey === mixed.key ? mixed.check.views : (mixed.served?.views ?? []));
 	const reference = $derived(preview.find((v) => v.title === 'Reference') ?? null);
-	const toneView = $derived(preview.find((v) => v.title === 'Tones' && v.series.length) ?? null);
+	/** The service's tone view; a tone that stands still is one point, repeated so its marker is drawn. */
+	const toneView = $derived.by(() => {
+		const v = preview.find((x) => x.title === 'Tones' && x.series.length);
+		if (!v) return null;
+		return { ...v, series: v.series.map((s) => (s.x.length === 1 ? { ...s, x: Float64Array.of(s.x[0], s.x[0]), y: Float64Array.of(s.y[0], s.y[0]) } : s)) };
+	});
 	const on = $derived(now?.parts.filter((p) => p.on && p.kind !== 'floor').length ?? 0);
 
 	let reviewed: string | null = null;
@@ -63,6 +68,14 @@
 	<div>
 		<dt>Parts time</dt>
 		<dd class="num" data-testid="run-parts-s">{now?.parts_s === null || now?.parts_s === undefined ? '-' : clock(now.parts_s)}</dd>
+	</div>
+	<div>
+		<dt>At Level</dt>
+		<dd class="num" data-testid="run-at-level">{now?.at_level_s === null || now?.at_level_s === undefined ? '-' : clock(now.at_level_s)}{#if now?.remaining_at_level_s !== null && now?.remaining_at_level_s !== undefined}{` of ${clock(now.at_level_s! + now.remaining_at_level_s)}`}{/if}</dd>
+	</div>
+	<div>
+		<dt>Full Level</dt>
+		<dd class="num" data-testid="run-full-level">{now?.full_level_s === null || now?.full_level_s === undefined ? '-' : clock(now.full_level_s)}</dd>
 	</div>
 	<div>
 		<dt>Parts on</dt>

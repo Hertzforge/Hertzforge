@@ -119,10 +119,7 @@
 						<th class="num">Level</th>
 						<th>Width</th>
 					{/if}
-					<th class="num">Alarm</th>
-					<th class="num">Abort</th>
-					<th class="num">On at</th>
-					<th class="num">Off at</th>
+					<th>Bands, window</th>
 					<th></th>
 				</tr>
 			</thead>
@@ -185,33 +182,18 @@
 								</select>
 							</td>
 						{/if}
-						<td class="num band">
-							{#if !tones && !(r as MixedBandDraft).own_bands}
-								<span class="aq-small aq-muted">Floor's</span>
-							{:else}
-								<NumberField compact id="{table}-{i}-al" label="Alarm, dB either side, row {i + 1}" unit="±dB" value={r.alarm_db[1]} min={0} onchange={(v) => set(i, 'alarm_db', (x) => (x.alarm_db = [num(v), num(v)]))} disabled={locked} testid="mixed-{table}-{i}-alarm" />
-							{/if}
-						</td>
-						<td class="num band">
-							{#if !tones && !(r as MixedBandDraft).own_bands}
-								<span class="aq-small aq-muted">Floor's</span>
-							{:else}
-								<NumberField compact id="{table}-{i}-ab" label="Abort, dB either side, row {i + 1}" unit="±dB" value={r.abort_db[1]} min={0} onchange={(v) => set(i, 'abort_db', (x) => (x.abort_db = [num(v), num(v)]))} disabled={locked} testid="mixed-{table}-{i}-abort" />
-							{/if}
-						</td>
-						<td class="num"><NumberField compact id="{table}-{i}-on" label="Comes in at, parts time, row {i + 1}" unit="s" value={r.window.on_s} min={0} onchange={(v) => set(i, 'window.on_s', (x) => (x.window.on_s = num(v)))} disabled={locked} testid="mixed-{table}-{i}-on" /></td>
-						<td class="num"><NumberField compact id="{table}-{i}-off" label="Goes out at, parts time, row {i + 1}" unit="s" nullable="End" fallback={300} value={r.window.off_s} min={0} onchange={(v) => set(i, 'window.off_s', (x) => (x.window.off_s = v))} disabled={locked} testid="mixed-{table}-{i}-off" /></td>
+						<td class="aq-small summary" data-testid="mixed-{table}-{i}-folded">{!tones && !(r as MixedBandDraft).own_bands ? "Floor's bands" : `±${r.alarm_db[1]} / ±${r.abort_db[1]} dB`}; {r.window.on_s} s to {r.window.off_s === null ? 'the end' : `${r.window.off_s} s`}</td>
 						<td>
 							<button class="btn ghost sm" aria-expanded={!!open[r.id]} onclick={() => (open[r.id] = !open[r.id])} data-testid="mixed-{table}-{i}-more">{open[r.id] ? 'Less' : 'More'}</button>
 						</td>
 					</tr>
 					{#if f.length}
-						<tr class="findings"><td></td><td colspan="13"><Findings items={f} /></td></tr>
+						<tr class="findings"><td></td><td colspan="10"><Findings items={f} /></td></tr>
 					{/if}
 					{#if open[r.id]}
 						<tr class="details" data-testid="mixed-{table}-{i}-details">
 							<td></td>
-							<td colspan="13">
+							<td colspan="10">
 								<div class="aq-fields">
 									{#if s.kind === 'fixed'}
 										<div class="sel">
@@ -246,6 +228,8 @@
 									{:else}
 										<p class="aq-small aq-muted">It reads its leader's frequency at the same moment, through the leader's turns and holds; it plays while its own window is open.</p>
 									{/if}
+									<NumberField id="{table}-{i}-on" label="Comes in at, parts time" unit="s" min={0} value={r.window.on_s} onchange={(v) => set(i, 'window.on_s', (x) => (x.window.on_s = num(v)))} disabled={locked} testid="mixed-{table}-{i}-on" />
+									<NumberField id="{table}-{i}-off" label="Goes out at, parts time" unit="s" nullable="The end" fallback={300} min={0} value={r.window.off_s} onchange={(v) => set(i, 'window.off_s', (x) => (x.window.off_s = v))} disabled={locked} testid="mixed-{table}-{i}-off" />
 									<NumberField id="{table}-{i}-alb" label="Alarm below" unit="dB" min={0} value={r.alarm_db[0]} onchange={(v) => set(i, 'alarm_db', (x) => (x.alarm_db = [num(v), x.alarm_db[1]]))} disabled={locked || (!tones && !(r as MixedBandDraft).own_bands)} />
 									<NumberField id="{table}-{i}-ala" label="Alarm above" unit="dB" min={0} value={r.alarm_db[1]} onchange={(v) => set(i, 'alarm_db', (x) => (x.alarm_db = [x.alarm_db[0], num(v)]))} disabled={locked || (!tones && !(r as MixedBandDraft).own_bands)} />
 									<NumberField id="{table}-{i}-abb" label="Abort below" unit="dB" min={0} value={r.abort_db[0]} onchange={(v) => set(i, 'abort_db', (x) => (x.abort_db = [num(v), x.abort_db[1]]))} disabled={locked || (!tones && !(r as MixedBandDraft).own_bands)} />
@@ -306,7 +290,12 @@
 	}
 
 	.pt select.field {
-		min-width: 7.5em;
+		min-width: 8.5em;
+	}
+
+	.summary {
+		color: var(--text-3);
+		white-space: nowrap;
 	}
 
 	.pt select.of {

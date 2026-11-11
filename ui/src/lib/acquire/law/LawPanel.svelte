@@ -44,8 +44,10 @@
 		notice?: Snippet<[LawEntry]>;
 		/** The keys of the chosen law's parameters that may change during a run; absent, none is marked. */
 		live?: string[];
+		/** The panel's heading; a test type with two laws names each by its role. */
+		heading?: string;
 	}
-	let { laws, law, chosenId, values, subtitle, locked, connected, busy, problems, errors, channelLabels = [], onchoose, onimport, facts, notice, live }: Props = $props();
+	let { laws, law, chosenId, values, subtitle, locked, connected, busy, problems, errors, channelLabels = [], onchoose, onimport, facts, notice, live, heading = 'Control Law' }: Props = $props();
 
 	let importPath = $state('');
 	let importOpen = $state(false);
@@ -76,7 +78,7 @@
 
 <section class="aq-panel" aria-labelledby="law-title" data-testid="law-panel">
 	<div class="aq-head">
-		<h2 id="law-title">Control Law</h2>
+		<h2 id="law-title">{heading}</h2>
 		<span class="aq-sub">{subtitle}</span>
 		<span class="aq-spacer"></span>
 		<button class="btn sm" disabled={locked} aria-expanded={importOpen} onclick={() => (importOpen = !importOpen)} data-testid="law-import-open">Import Law</button>

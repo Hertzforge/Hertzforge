@@ -96,6 +96,7 @@
 <div class="cols">
 	<div class="stack">
 		<LawPanel
+			heading="Floor Law"
 			laws={mixed.floorLaws}
 			law={mixed.floorLaw}
 			chosenId={d.lawFloor.id}
@@ -114,6 +115,7 @@
 			{/snippet}
 		</LawPanel>
 		<LawPanel
+			heading="Tone Law"
 			laws={mixed.toneLaws}
 			law={mixed.toneLaw}
 			chosenId={d.lawTones.id}

@@ -7,7 +7,7 @@
 // It builds and starts `sds-control` (release, loopback, a free port) and the shell's dev server
 // (a free port), runs three Mixed Mode tests on the simulated station, and stops both. With
 // `--mock` it starts only the shell, against its own mock control service, to try the flow without
-// a build. Run it with `HERTZFORGE_DATA_ROOT` set to a fresh scratch folder. The runs take a few
+// a build. The service's data root is `HERTZFORGE_DATA_ROOT` when set, else a fresh scratch folder. The runs take a few
 // minutes. Not part of `npm test`.
 //
 // 1. The chooser offers Mixed Mode; its screen opens on Setup, and the screen takes control. The
@@ -199,13 +199,16 @@ async function toEnd(page, outcome, ms = 300_000) {
 // ---- the run ----------------------------------------------------------------------------------
 let servicePort = null;
 if (!MOCK) {
-	if (!process.env.HERTZFORGE_DATA_ROOT) console.log('note: HERTZFORGE_DATA_ROOT is not set; set it to a fresh scratch folder');
+	// The service reads and writes laws, captures and run records under its data root: a fresh
+	// scratch folder, so nothing an earlier session imported or recorded changes the run.
+	const DATA_ROOT = process.env.HERTZFORGE_DATA_ROOT ?? fs.mkdtempSync(path.join(os.tmpdir(), 'hertzforge-e2e-mixed-data-'));
+	console.log(`data root ${DATA_ROOT}`);
 	console.log('building the control service (release)');
 	execFileSync('cargo', ['build', '--release', '-q', '-p', 'sds-control', '--locked'], { cwd: ROOT, stdio: 'inherit' });
 	const TARGET = process.env.CARGO_TARGET_DIR ? path.resolve(process.env.CARGO_TARGET_DIR) : path.join(ROOT, 'target');
 	servicePort = await freePort();
 	const exe = path.join(TARGET, 'release', process.platform === 'win32' ? 'sds-control.exe' : 'sds-control');
-	const service = start('sds-control', exe, ['--port', String(servicePort)]);
+	const service = start('sds-control', exe, ['--port', String(servicePort)], { env: { ...process.env, HERTZFORGE_DATA_ROOT: DATA_ROOT } });
 	await waitFor('the control service', () => service.log.join('').includes('listening on ws://127.0.0.1:'), 30_000);
 }
 const shellPort = await freePort();
@@ -235,8 +238,8 @@ try {
 
 	// ---- Limits ------------------------------------------------------------------------------------
 	await section(a, 'limits');
-	await fill(a, 'mixed-vpk-ceiling', 4);
-	await fill(a, 'mixed-vpk-abort', 6);
+	await fill(a, 'mixed-vpk-ceiling', 9);
+	await fill(a, 'mixed-vpk-abort', 10);
 	check('a limit lowers the random part only, said where limits are set', /random part only, never a tone/.test(await text(a, 'mixed-limit-note')));
 	// ---- A short automatic ladder, every run ------------------------------------------------------
 	await section(a, 'schedule');
