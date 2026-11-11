@@ -2433,8 +2433,7 @@ _TWR_ACC = _axis('Acceleration', 'g', 'linear')
 
 # --- Mixed Mode (PROTOCOL.md, "Mixed Mode") ---------------------------------------
 #
-# The configuration is the section's example on a grid whose lines are no wider
-# than the tracking width, with the classical shock section's shaker record. The
+# The configuration is the section's example (0.5 Hz lines), with the classical shock section's shaker record. The
 # derived values, the state and the frames are the service's own builders' output
 # for it (crates/sds-control/tests/mixed_golden.rs builds each one and holds it to
 # these files).
@@ -2879,6 +2878,7 @@ MIXED_BUILT_TEXT = {
                                                      'frequency and removes the anchor '
                                                      'entirely).'}],
                             'test_s': 360,
+                            'floor_equalize_s': 70,
                             'identification_s': 32,
                             'call_budget_s': {'floor': 2, 'tones': 0.0025024},
                             'law': {'floor': {'id': 'hinv',

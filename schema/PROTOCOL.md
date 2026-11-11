@@ -3263,7 +3263,7 @@ and meaning are theirs, and the field applies as stated here:
 |---|---|---|
 | `title` | empty | The run's name |
 | `exclusion_hz` | 2 | The width, Hz each side, around a tone that stands still (a `fixed` tone, or one that follows a `fixed` part) whose lines are left out of the floor's average; above 0, at most 50. A narrowband's lines, its edges plus two lines each side, are left out wherever the band is. A tone that sweeps leaves no line out. Lines left out are given the floor law's error interpolated in dB from the nearest clean lines either side |
-| `acquisition.fs_hz`, `n_pts`, `n_avg` | (required) | Random's grid: the rate requested of the station, the FFT length (a power of two) and the frames per control loop (Hann, half overlap). The lines are `fs_hz / n_pts` apart and must be no wider than the tracking width (`out_of_range` at `acquisition.n_pts`) |
+| `acquisition.fs_hz`, `n_pts`, `n_avg` | (required) | Random's grid: the rate requested of the station, the FFT length (a power of two) and the frames per control loop (Hann, half overlap). The lines are `fs_hz / n_pts` apart; with tones they must be no wider than half of `exclusion_hz`, so a tone's exclusion covers at least two lines (`out_of_range` at `exclusion_hz`) |
 | `acquisition.tick_ms` | 10 | Sine's control tick, ms, converted to whole frames at the rate the station adopts: 2 to 1000 for a built-in tone law, 8 to 1000 for a law file (`tick_out_of_range`) |
 | `schedule` | (required) | Random's ladder, `{"mode","levels":[{"db","dwell_s"}],"full_level_s"}`, moving every part by the same dB. In `auto` the run engages at the first level, holds each for its `dwell_s` of parts time and full level for `full_level_s`, then ends `completed`; in `manual` it moves only on `mixed.level` |
 | `control.composite`, `weights` | `weighted_avg`, 1 each | Random's, for the floor, the narrowbands and each tone's composite tracked amplitude |
@@ -3274,7 +3274,7 @@ and meaning are theirs, and the field applies as stated here:
 | `control.soft_start_db`, `soft_start_relax_db` | 9, 6 | Random's, for the floor alone |
 | `control.level_ramp_s`, `shutdown_ramp_s` | 3, 3 | Random's: a level change ramps every part together over `level_ramp_s`; the controlled stop ramps every part together 40 dB down over `shutdown_ramp_s`, then to zero |
 | `control.part_ramp_s` | 3 | The ramp of one part coming in or going out (its window, its `end`, `mixed.part`), above 0, at most 60 s. Tones come in from their feed-forward amplitude |
-| `control.floor_settle_s` | 30 | The most station time the floor alone is given at the start level to equalize (above 0, at most 600). It has equalized once its estimate holds `control_dof` degrees of freedom with its rms within 1 dB of its reference; at `floor_settle_s` the parts come in anyway and the log says so |
+| `control.floor_settle_s` | 30 | The most station time the floor alone is given at the start level to equalize (above 0, at most 600). It has equalized once its estimate holds `control_dof` degrees of freedom with its rms within 1 dB of its reference; if the grid needs longer than `floor_settle_s` to reach `control_dof` (`derived.floor_equalize_s`), the parts wait for that; the log states both |
 | `control.trust_coherence`, `trust_h_floor_frac` | 0.5, 0.05 | Sine's: where the identification is trusted for a tone's feed-forward and its law (a tone at a frequency it does not trust has no prediction there) |
 | `control.tracking` | `{"kind":"fixed","hz":0.5}` | Sine's form; Mixed Mode tracks every tone at one fixed width, Hz, above 0, at most 10 (`{"kind":"proportional"}` is `out_of_range`). A tone's reading is used once its tracker has settled (1.3 over the width, s) |
 | `control.law.floor` | `{"id":"hinv"}` | The floor's law, by catalog `id` in world `single` (see "Control Laws"), with `params` by key; defaults fill the rest |
@@ -3328,7 +3328,7 @@ computes at configure, at full level (0 dB):
  "tracking":[{"part":"t1","verdict":"ok","ratio":0,"at_hz":null,"message":null},
              {"part":"t2","verdict":"ok","ratio":0.002,"at_hz":null,"message":null},
              {"part":"t3","verdict":"ok","ratio":0.004,"at_hz":null,"message":null}],
- "test_s":360,"identification_s":32,
+ "test_s":360,"floor_equalize_s":...,"identification_s":32,
  "call_budget_s":{"floor":2,"tones":0.0025024},
  "law":{"floor":{"id":"hinv","name":"...","version":"...","sha256":null,"live":[],
                  "hardware":true},
@@ -3364,7 +3364,9 @@ computes at configure, at full level (0 dB):
 - `tracking` is Sine's verdict for each tone, in the parts' order, on the fixed tracking width:
   `ok`, `advisory` (a warning `tracking_lag`) or `refused` (an error `tracking_lag`).
 - `test_s` is the ladder's length in parts time (the dwells and `full_level_s`; null in
-  `manual`); `identification_s` the identification's measuring time (`pretest.averages`
+  `manual`); `floor_equalize_s` the core's prediction of the station time the floor needs to
+  reach `control_dof` degrees of freedom on this grid: the parts come in after the larger of it
+  and `floor_settle_s`; `identification_s` the identification's measuring time (`pretest.averages`
   loops); `call_budget_s` one floor law call's budget (a fraction of the loop's acquisition
   time) and one tone law call's (a fraction of the tick), 7 decimals.
 - `law` is each role's law, its live parameter keys (a `single` law has none), and `hardware`:

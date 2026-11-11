@@ -354,8 +354,11 @@ fn every_configuration_refusal_is_named_and_located() {
         ),
         (
             "out_of_range",
-            "acquisition.n_pts",
-            with(|c| c["acquisition"]["n_pts"] = json!(8192)),
+            "exclusion_hz",
+            with(|c| {
+                c["acquisition"]["n_pts"] = json!(8192);
+                c["exclusion_hz"] = json!(1.5);
+            }),
         ),
         (
             "out_of_range",

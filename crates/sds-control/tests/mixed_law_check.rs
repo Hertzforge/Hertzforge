@@ -36,7 +36,7 @@ async fn the_built_in_tone_law_passes_the_mixed_check_in_its_role() {
         .ok("laws.check", json!({"id": "servo_blend", "mixed": "tones"}))
         .await;
     let cases = r["report"]["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 8, "{r}");
+    assert_eq!(cases.len(), 9, "{r}");
     for k in cases {
         assert_eq!(k["role"], "tones");
         assert_eq!(k["passed"], true, "{k}");

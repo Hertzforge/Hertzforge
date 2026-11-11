@@ -800,6 +800,9 @@ pub struct Derived {
     /// `None` until the core offers it.
     pub kinematics: Option<Value>,
     pub feasibility: (&'static str, String),
+    /// The core's prediction of the time the floor needs to reach the control
+    /// degrees of freedom on the grid, s; `None` when it cannot predict.
+    pub floor_equalize_s: Option<f64>,
 }
 
 impl Derived {
@@ -871,6 +874,7 @@ impl Derived {
                 Value::Object(m)
             }).collect::<Vec<_>>(),
             "test_s": self.test_s.map_or(Value::Null, |s| num(round(s, 1))),
+            "floor_equalize_s": self.floor_equalize_s.map_or(Value::Null, |s| num(round(s, 1))),
             "identification_s": num(round(self.identification_s, 1)),
             "call_budget_s": {
                 "floor": num(round(self.call_budget_floor_s, 7)),
@@ -1455,15 +1459,22 @@ impl WireMixed {
             (ctx.tone_law)(&self.law_tones.id),
         );
         self.check_around(&mut r, tone_law.as_ref().is_none_or(|l| l.builtin));
+        // With tones, the lines must be no wider than half the exclusion width,
+        // so a tone's exclusion covers at least two lines (the core's own rule).
+        let has_tones = self
+            .parts
+            .iter()
+            .any(|p| matches!(p.body, WireBody::Tone { .. }));
         if let Some(d) = &rderived {
-            if d.grid.df_hz > self.tracking_hz + 1e-12 && self.tracking_kind == "fixed" {
+            if has_tones && d.grid.df_hz > self.exclusion_hz / 2.0 + 1e-12 {
                 r.errors.push(Item::field(
                     "out_of_range",
-                    "acquisition.n_pts",
+                    "exclusion_hz",
                     format!(
-                        "the lines are {} Hz apart, wider than the tracking width of {} Hz",
+                        "the lines are {} Hz apart; with tones they are at most half the \
+                         exclusion width of {} Hz",
                         num(round(d.grid.df_hz, 4)),
-                        num(self.tracking_hz)
+                        num(self.exclusion_hz)
                     ),
                 ));
             }
@@ -1710,8 +1721,10 @@ impl WireMixed {
         };
         // The predicted figures are the core's (`predict`): the parts' mean
         // squares, the peaks of the sum and the shaker's ratings.
+        let mut floor_equalize_s = None;
         let (kinematics, feasibility) = match hertzforge_mixed::predict(core) {
             Ok(pr) => {
+                floor_equalize_s = Some(pr.floor_equalize_s);
                 for dp in &mut parts {
                     if let Some(m) = pr.parts.iter().find(|m| m.part == dp.id) {
                         dp.ms_g2 = m.ms_g2;
@@ -1742,6 +1755,7 @@ impl WireMixed {
             law,
             kinematics,
             feasibility,
+            floor_equalize_s,
         }
     }
 

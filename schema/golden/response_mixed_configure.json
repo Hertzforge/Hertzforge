@@ -413,6 +413,7 @@
     }
    ],
    "test_s": 360,
+   "floor_equalize_s": 70,
    "identification_s": 32,
    "call_budget_s": {
     "floor": 2,
