@@ -247,7 +247,7 @@
     "kind": "envelope",
     "part": "floor",
     "lines": 2,
-    "worst_db": null
+    "worst_db": 0
    },
    {
     "kind": "band",
