@@ -599,3 +599,79 @@ async fn a_subscription_is_answered_with_its_defaults_filled() {
         true
     );
 }
+
+#[test]
+fn the_mixed_display_is_cut_to_the_floor_bands_lines_as_randoms() {
+    use hertzforge_mixed::{LineGrid, MixedDisplay, MixedDisplayChannel, MixedFrf};
+    use sds_control::mixed::view::{band_lines, on_band};
+    // A whole grid from 0 Hz, 0.5 Hz lines to 50 Hz: 101 lines.
+    let grid = LineGrid {
+        f0_hz: 0.0,
+        df_hz: 0.5,
+        lines: 101,
+    };
+    // Random's rule: every line whose center rounds into the band, never 0 Hz.
+    assert_eq!(band_lines(&grid, Some((20.0, 30.0))), 40..61);
+    assert_eq!(band_lines(&grid, Some((20.1, 29.9))), 40..61);
+    assert_eq!(band_lines(&grid, Some((0.0, 10.0))), 1..21);
+    assert_eq!(band_lines(&grid, Some((0.0, 900.0))), 1..101);
+    assert_eq!(band_lines(&grid, None), 0..101);
+    let line = |k: usize| k as f32;
+    let all: Vec<f32> = (0..101).map(line).collect();
+    let d = MixedDisplay {
+        grid,
+        control: all.clone(),
+        residual: all.clone(),
+        channels: vec![MixedDisplayChannel {
+            channel_index: 1,
+            control: all.clone(),
+            residual: all.clone(),
+        }],
+        reference: all.clone(),
+        alarm_lo: all.clone(),
+        alarm_hi: all.clone(),
+        abort_lo: all.clone(),
+        abort_hi: all.clone(),
+        drive: all.clone(),
+        excluded: (0..101).map(|k| k == 50).collect(),
+        tones: Vec::new(),
+        bands: Vec::new(),
+        identification: Some(MixedFrf {
+            h_mag2: all.clone(),
+            coherence: all.clone(),
+            lag_frames: 0,
+            band_coherence: 1.0,
+            trusted: vec![true; 101],
+            trusted_frac: 1.0,
+        }),
+    };
+    let b = on_band(d, Some((20.0, 30.0)));
+    assert_eq!(b.grid.f0_hz, 20.0);
+    assert_eq!(b.grid.lines, 21);
+    let want: Vec<f32> = (40..61).map(line).collect();
+    for v in [
+        &b.control,
+        &b.residual,
+        &b.reference,
+        &b.alarm_lo,
+        &b.alarm_hi,
+        &b.abort_lo,
+        &b.abort_hi,
+        &b.drive,
+        &b.channels[0].control,
+        &b.channels[0].residual,
+    ] {
+        assert_eq!(v, &want);
+    }
+    let id = b.identification.as_ref().unwrap();
+    assert_eq!(id.h_mag2, want);
+    assert_eq!(id.trusted.len(), 21);
+    assert_eq!(
+        b.excluded.iter().position(|x| *x),
+        Some(10),
+        "25 Hz kept in place"
+    );
+    // The edges are the cut lines' own.
+    let e = b.grid.edges_hz();
+    assert_eq!((e[0], e[21]), (19.75, 30.25));
+}

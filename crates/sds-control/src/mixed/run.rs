@@ -858,7 +858,8 @@ impl Actor {
 
     fn refresh_display(&mut self) {
         if let Some(svc) = self.svc.as_ref() {
-            self.view.display = Some(Arc::new(svc.display()));
+            let band = self.plan.core.floor().and_then(|f| f.band());
+            self.view.display = Some(Arc::new(super::view::on_band(svc.display(), band)));
         }
     }
 

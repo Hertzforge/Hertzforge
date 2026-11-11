@@ -556,3 +556,49 @@ async fn a_swept_tone_on_the_floor_runs_to_completed() {
     let end = wait_state(&mut c, "finished").await;
     assert_eq!(end["end"]["outcome"], "completed", "{end}");
 }
+
+/// Every spectrum of a live frame carries the floor's band's lines only, as
+/// Random's frames do: the floor here is 20 to 1000 Hz on 0.5 Hz lines, so the
+/// views' lines run from 20 Hz to 1000 Hz, not over the whole 2048 Hz grid.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_live_spectra_carry_the_floor_bands_lines_only() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    run_to_engaged(
+        &mut c,
+        config(vec![floor(), tone("t1", 160.0, 0.5)], manual()),
+    )
+    .await;
+    c.pump(Duration::from_secs(2)).await;
+    let live = c
+        .of_topic("mixed.live")
+        .into_iter()
+        .rev()
+        .find(|e| e.data()["phase"] == "engaged")
+        .expect("a live frame engaged");
+    let decoded = live.decoded.as_ref().expect("a binary frame");
+    let mut spectra = 0;
+    for view in live.data()["views"].as_array().unwrap() {
+        if view["view"] != "spectrum" {
+            continue;
+        }
+        for s in view["series"].as_array().unwrap() {
+            let x = decoded.array(&s["x"]).unwrap().to_f64();
+            let edges = decoded.array(&s["edges"]).unwrap().to_f64();
+            assert_eq!(edges.len(), x.len() + 1);
+            assert!(
+                (x[0] - 20.0).abs() < 1e-9 && (x[x.len() - 1] - 1000.0).abs() < 1e-9,
+                "{} {}: {} to {} Hz over {} lines",
+                view["title"],
+                s["name"],
+                x[0],
+                x[x.len() - 1],
+                x.len()
+            );
+            spectra += 1;
+        }
+    }
+    assert!(spectra >= 3, "{spectra} series");
+    c.ok("mixed.abort", json!({})).await;
+}

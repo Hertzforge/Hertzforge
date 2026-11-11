@@ -640,6 +640,69 @@ pub fn alarms_json(v: &MixedView) -> Value {
     Value::Array(out)
 }
 
+/// The lines of `grid` a band `(lo, hi)` Hz covers, as Random's frames take them:
+/// every line whose center rounds into `[lo, hi]`, never the 0 Hz line, at least
+/// one. The whole grid without a band.
+pub fn band_lines(
+    grid: &hertzforge_mixed::LineGrid,
+    band: Option<(f64, f64)>,
+) -> std::ops::Range<usize> {
+    let n = grid.lines;
+    let Some((lo, hi)) = band.filter(|(lo, hi)| lo.is_finite() && hi.is_finite() && hi > lo) else {
+        return 0..n;
+    };
+    if n == 0 || !(grid.df_hz > 0.0) {
+        return 0..n;
+    }
+    let at = |f: f64| ((f - grid.f0_hz) / grid.df_hz).round();
+    let dc = usize::from(grid.f0_hz <= 0.0);
+    let i0 = (at(lo).max(0.0) as usize).max(dc).min(n - 1);
+    let i1 = ((at(hi).max(0.0) as usize) + 1).min(n).max(i0 + 1);
+    i0..i1
+}
+
+/// `d` held to the floor's band: every per-line spectrum, the lines left out
+/// and the identification cut to [`band_lines`], and the grid moved to match,
+/// so every view and plot drawn from it carries the band's lines only, as
+/// Random's frames do. The histories are not per line and are kept whole.
+pub fn on_band(mut d: MixedDisplay, band: Option<(f64, f64)>) -> MixedDisplay {
+    let n = d.grid.lines;
+    let r = band_lines(&d.grid, band);
+    if r == (0..n) {
+        return d;
+    }
+    fn cut<T: Copy>(v: &mut Vec<T>, n: usize, r: &std::ops::Range<usize>) {
+        if v.len() == n {
+            *v = v[r.clone()].to_vec();
+        }
+    }
+    for v in [
+        &mut d.control,
+        &mut d.residual,
+        &mut d.reference,
+        &mut d.alarm_lo,
+        &mut d.alarm_hi,
+        &mut d.abort_lo,
+        &mut d.abort_hi,
+        &mut d.drive,
+    ] {
+        cut(v, n, &r);
+    }
+    for c in &mut d.channels {
+        cut(&mut c.control, n, &r);
+        cut(&mut c.residual, n, &r);
+    }
+    cut(&mut d.excluded, n, &r);
+    if let Some(id) = &mut d.identification {
+        cut(&mut id.h_mag2, n, &r);
+        cut(&mut id.coherence, n, &r);
+        cut(&mut id.trusted, n, &r);
+    }
+    d.grid.f0_hz += r.start as f64 * d.grid.df_hz;
+    d.grid.lines = r.len();
+    d
+}
+
 /// The line centers of the display's grid.
 fn centers(d: &MixedDisplay) -> Vec<f64> {
     (0..d.grid.lines)
