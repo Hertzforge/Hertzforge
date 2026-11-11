@@ -213,7 +213,7 @@ def identified(project):
 def test_the_printed_page_draws_finely_and_asks_to_print(edited):
     project, name = edited
     page = reports.print_page(project, {'name': name})['html']
-    assert "replaceState(null, '', '#print')" in page and 'print()' in page
+    assert page.count(reports.PRINT_FLAG) == 1, 'the viewer asks for the print dialog itself'
 
 
 def test_an_issue_is_begun_printed_and_recorded_with_its_hashes(identified, tmp_path):
@@ -221,7 +221,7 @@ def test_an_issue_is_begun_printed_and_recorded_with_its_hashes(identified, tmp_
 
     project, name = identified
     begun = reports.issue(project, {'name': name, 'step': 'begin'})
-    assert begun['status'] == 'issued' and 'print()' in begun['html']
+    assert begun['status'] == 'issued' and reports.PRINT_FLAG in begun['html']
     pdf = tmp_path / 'issued.pdf'
     pdf.write_bytes(b'%PDF-1.4\n% a page\n%%EOF\n')
     done = reports.issue(project, {'name': name, 'step': 'record', 'path': str(pdf)})

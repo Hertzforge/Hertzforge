@@ -85,6 +85,14 @@ def _page(project, name):
                        object_groups=project.object_groups)
 
 
+def _issued_page(project, name):
+    """The page an issue records: the shell's viewer page, light."""
+    from hertzforge.report.viewer import viewer_html
+
+    return viewer_html(project[name], project, object_groups=project.object_groups,
+                       theme='light')
+
+
 def test_fields_are_entered_and_a_blank_clears():
     report = _report(**COMPLETE)
     assert ri.value(report, 'number') == 'R-0037'
@@ -268,13 +276,15 @@ def test_issue_records_the_revision_and_says_issued():
     report = project[name]
     assert ri.value(report, 'status') == 'issued'
     [entry] = ri.record(report)
-    page_now = _page(project, name)
+    page_now = _issued_page(project, name)
     assert entry == {'number': 'R-0037', 'revision': '0', 'status': 'issued',
                      'issued': '2026-10-05',
                      'sha256': hashlib.sha256(PDF).hexdigest(),
                      'content': ri.content_hash(page_now),
                      'file': 'R-0037.pdf'}
-    assert '<td>Issued</td>' in _payload(page_now)['blocks'][0]['html']
+    from hertzforge.report.viewer import page_text
+
+    assert '<td>Issued</td>' in page_text(page_now)
     assert 'Revision 0";' in ri.page_css(report), 'no Draft beside it'
 
 

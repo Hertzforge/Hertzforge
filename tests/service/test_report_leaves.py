@@ -17,6 +17,7 @@ from hertzforge.core.report import Report
 from hertzforge.report import identity as ri
 from hertzforge.report import render_html
 from hertzforge.report.data_index import UNKNOWN
+from hertzforge.report.viewer import page_text
 from hertzforge.service import projects, reports
 from hertzforge.service.protocol import ProtocolError
 
@@ -27,7 +28,7 @@ FIELDS = {'number': 'HF-001', 'revision': 'A', 'laboratory': 'Bay 2', 'address':
           'received': '2026-11-01', 'tested': '2026-11-02', 'issued': '2026-11-03',
           'authorized': ['B. Signer']}
 
-PRINT_ONLY = reports._PRINTS
+PRINT_ONLY = (*reports._PRINTS, '\n\t\t' + reports.PRINT_FLAG)
 
 
 @pytest.fixture
@@ -72,15 +73,10 @@ def test_the_exported_page_is_the_printed_page(project, tmp_path):
     name = _identified(project, 'data_index')
     _indexed(project, tmp_path)
     written = reports.export(project, {'name': name, 'path': str(tmp_path / 'out.html')})['path']
-    # the export is the shell's own page (step 4 of the reports plan); the printed page is the
-    # core's until step 5, so the two carry the same report rather than the same bytes
-    from hertzforge.report.viewer import read_viewer
-
-    held = read_viewer(Path(written).read_text(encoding='utf-8'))
-    exported = repr(held['blocks'])
-    assert 'settings.csv' in exported and UNKNOWN not in exported
-    printed = reports.print_page(project, {'name': name})['html']
-    assert 'settings.csv' in printed and held['title'] == project[name].title
+    exported = Path(written).read_text(encoding='utf-8')
+    words = page_text(exported)
+    assert 'settings.csv' in words and UNKNOWN not in words
+    assert exported == _reader(reports.print_page(project, {'name': name})['html'])
 
 
 def test_the_page_shown_and_edited_read_the_project(project, tmp_path):
@@ -96,10 +92,7 @@ def test_an_issued_report_that_changed_is_not_exported(project, tmp_path):
     name = _identified(project)
     issued = _issued(project, name, tmp_path)
     unchanged = reports.export(project, {'name': name, 'path': str(tmp_path / 'same.html')})
-    from hertzforge.report.viewer import read_viewer
-
-    assert issued and read_viewer(Path(unchanged['path']).read_text(encoding='utf-8'))[
-        'title'] == project[name].title, 'an issued report unchanged since is exported'
+    assert Path(unchanged['path']).read_text(encoding='utf-8') == _reader(issued)
     project[name].title = 'Changed'
     with pytest.raises(ProtocolError, match='has changed since') as refused:
         reports.export(project, {'name': name, 'path': str(tmp_path / 'changed.html')})
@@ -112,7 +105,7 @@ def test_a_later_check_of_the_same_files_is_not_a_change(project, tmp_path, monk
     _indexed(project, tmp_path)
     _issued(project, name, tmp_path)
     _later(monkeypatch)
-    assert '2031-01-02' in reports.print_page(project, {'name': name})['html']
+    assert '2031-01-02' in page_text(reports.print_page(project, {'name': name})['html'])
     assert reports.export(project, {'name': name, 'path': str(tmp_path / 'late.html')})['path']
 
 
@@ -176,7 +169,7 @@ def test_a_save_between_begin_and_record_writes_a_draft(project, tmp_path):
 def test_the_issue_begun_says_issued_and_is_recorded_as_issued(project, tmp_path):
     name = _identified(project)
     begun = reports.issue(project, {'name': name, 'step': 'begin'})
-    assert '<td>Issued</td>' in begun['html'].replace('<\\/', '</')
+    assert '<td>Issued</td>' in page_text(begun['html'])
     pdf = tmp_path / 'issued.pdf'
     pdf.write_bytes(b'%PDF-1.4\n')
     entry = reports.issue(project, {'name': name, 'step': 'record', 'path': str(pdf)})['entry']
@@ -203,21 +196,21 @@ def test_an_issued_report_in_a_file_stays_issued(tmp_path):
 
 
 def test_a_page_that_fails_to_draw_leaves_the_report_a_draft(project, monkeypatch):
-    import hertzforge.report as report_package
+    import hertzforge.report.viewer as report_package
 
     name = _identified(project)
-    drawn = report_package.render_html
+    drawn = report_package.viewer_html
 
     def fail(*_args, **_kwargs):
         raise RuntimeError('the page could not be drawn')
 
-    monkeypatch.setattr(report_package, 'render_html', fail)
+    monkeypatch.setattr(report_package, 'viewer_html', fail)
     with pytest.raises(RuntimeError, match='could not be drawn'):
         reports.issue(project, {'name': name, 'step': 'begin'})
     assert ri.value(project[name], 'status') == 'draft' and ri.record(project[name]) == []
     with pytest.raises(ProtocolError, match='not waiting to be issued'):
         reports.issue(project, {'name': name, 'step': 'cancel'})
-    monkeypatch.setattr(report_package, 'render_html', drawn)
+    monkeypatch.setattr(report_package, 'viewer_html', drawn)
     assert reports.issue(project, {'name': name, 'step': 'begin'})['status'] == 'issued'
 
 
@@ -235,7 +228,7 @@ def test_printing_asks_what_an_export_asks(project, tmp_path):
     asked = reports.print_page(project, {'name': name})
     assert asked['html'] is None and asked['owed'] == list(project.report_check(name))
     forced = reports.print_page(project, {'name': name, 'anyway': True})
-    assert 'print()' in forced['html'] and forced['owed'] == [] and forced['index'] == []
+    assert reports.PRINT_FLAG in forced['html'] and forced['owed'] == [] and forced['index'] == []
 
     attached = _indexed(project, tmp_path)
     project.report_features(name, enable=('data_index',), disable=('skeleton_sections',))

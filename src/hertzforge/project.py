@@ -7497,17 +7497,23 @@ class Project(dict):
         return page
 
     def _viewer_export(self, name: str, unit_system: Any = None) -> str:
-        """The report as it is exported: the shell's own page
-        (`report.viewer.viewer_html`), light as paper is, for the reader to
-        switch. Refused, as `_export_page` is, when the report was issued
-        and has changed since; the issue still records the page the core
-        prints, so that page is what the check compares."""
+        """The report as it is exported, printed and issued: the shell's
+        own page (`report.viewer.viewer_html`), light as paper is, for the
+        reader to switch. Refused when the report was issued and has changed
+        since (`report.identity.guard`)."""
         from .report.identity import guard
         from .report.viewer import viewer_html
 
-        guard(self._report(name), self._report_page(name, unit_system))
-        return viewer_html(self._report(name), self, unit_system,
-                           object_groups=self.object_groups, theme='light')
+        report = self._report(name)
+        page = viewer_html(report, self, unit_system, object_groups=self.object_groups,
+                           theme='light')
+        try:
+            guard(report, page)
+        except ValueError:
+            # an issue recorded from the core's own page, before reports were
+            # the shell's page, is checked against that page
+            guard(report, self._report_page(name, unit_system))
+        return page
 
     def run_identity(self, name: str) -> Any:
         """Which run of the test a time history is, as a report reads it.

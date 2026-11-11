@@ -267,10 +267,35 @@ _STAMPED = re.compile(r'\{"kind": "text", "html": "[^"\\]*(?:\\.[^"\\]*)*", '
 def content_hash(page: str) -> str:
     """The SHA-256 (hex) of a rendered page without its stamped blocks and
     whatever fixed its theme: what is compared to tell the issued content
-    from a changed one."""
+    from a changed one. A page the shell's viewer draws
+    (`report.viewer.viewer_html`) is hashed by the report it holds rather
+    than its text, so a new build of the viewer does not read as a change
+    (`viewer_content_hash`)."""
+    if '<script id="report-data"' in page:
+        return viewer_content_hash(page)
     held = _STAMPED.sub('', page).replace('"theme": "light", "curve_width"',
                                           '"theme": null, "curve_width"', 1)
     return hashlib.sha256(held.encode('utf-8')).hexdigest()
+
+
+def viewer_content_hash(page: str) -> str:
+    """The SHA-256 (hex) of the report a viewer page holds: its title,
+    marking, stylesheet and blocks, without the stamped blocks (a check's
+    time), each array by its type, shape and bytes."""
+    import json
+
+    from ..service import frames
+    from .viewer import read_viewer
+
+    held = read_viewer(page)
+    held['blocks'] = [block for block in held['blocks'] if not block.get(STAMP)]
+    wire, arrays = frames.to_wire(held)
+    digest = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False,
+                                       separators=(',', ':')).encode('utf-8'))
+    for ident, array in arrays.items():
+        digest.update(f'{ident}:{array.dtype.str}:{array.shape}'.encode('ascii'))
+        digest.update(array.tobytes())
+    return digest.hexdigest()
 
 
 def _issued_entry(held: Mapping[str, Any]) -> dict[str, Any] | None:
