@@ -200,3 +200,55 @@ fn print_convergence_trajectory() {
         }
     }
 }
+
+/// The mean, over the in-band lines and controls, of the target's
+/// autospectrum over the specified one, each counted at most at 1.
+fn mean_kept(run: &Run, nc: usize) -> f64 {
+    let ratio = per_control_line(run, 0, "target_ratio");
+    let (mut sum, mut n) = (0.0, 0.0);
+    for line in BAND.0..BAND.1 {
+        for c in 0..nc {
+            sum += ratio[line * nc + c].min(1.0);
+            n += 1.0;
+        }
+    }
+    sum / n
+}
+
+#[test]
+fn with_no_alarm_lines_the_automatic_trade_off_keeps_the_autospectra() {
+    // 24 controls on 6 drives with singular values spread over 300 to 1, a
+    // reference the plant cannot reach, and no alarm lines: the reduced form of
+    // a 48 x 12 lightly damped plate, where the knee alone kept 15 % of the
+    // specification. With the default largest shortfall of 3 dB the target
+    // keeps at least half of each autospectrum on average.
+    let (nc, nd) = (24, 6);
+    let plant = plant_with_singular_values(41, nc, nd, LINES, &[1.0, 0.3, 0.1, 0.03, 0.01, 3e-3]);
+    let mut rng = Rng::new(41);
+    let mut reference = hertzforge_sdm::HermitianStack::zeros(LINES, nc);
+    for line in BAND.0..BAND.1 {
+        let g = random_psd(&mut rng, nc, 1e-2);
+        for r in 0..nc {
+            for c in r..nc {
+                reference.set(line, r, c, g[r * nc + c]);
+            }
+        }
+    }
+    let s = run_on(41, plant.clone(), plant, reference, BAND, 0.01);
+    let mut law = MinimumDriveLaw::with_params(&s.setup, &[]).expect("law");
+    let run = closed_loop(&mut law, &s, 0);
+    let kept = mean_kept(&run, nc);
+    let tradeoff = run.scalar(0, "tradeoff");
+    println!("automatic trade-off {tradeoff:e}: the target keeps {kept:.3} of the autospectra");
+    assert!(kept >= 0.5, "trade-off {tradeoff:e} keeps {kept:.3}");
+    // The bound is the parameter's: at 20 dB it lets the knee give up more.
+    let mut loose =
+        MinimumDriveLaw::with_params(&s.setup, &[("shortfall_db", ParamVal::Number(20.0))])
+            .expect("law");
+    let loose = closed_loop(&mut loose, &s, 0);
+    println!(
+        "at 20 dB: trade-off {:e}, keeps {:.3}",
+        loose.scalar(0, "tradeoff"),
+        mean_kept(&loose, nc)
+    );
+}

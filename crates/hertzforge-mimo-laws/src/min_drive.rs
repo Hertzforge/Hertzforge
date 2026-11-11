@@ -21,7 +21,10 @@
 //! target's autospectra sit below the specification where the plant pays most
 //! for them, by a ratio the `target_ratio` diagnostic reports per control per
 //! line, and the core judges the run against the specification's alarm and
-//! abort lines as it does for every law.
+//! abort lines as it does for every law. The automatic trade-off gives up no
+//! more than `shortfall_db` on average (3 dB by default) and stays inside the
+//! alarm lines, so with none it is still "the least drive that keeps the
+//! autospectra".
 
 use crate::factor::{FactorLoop, LoopSettings};
 use crate::pareto::{self, ResidualWeight, Target, Tradeoff};
@@ -44,6 +47,9 @@ pub struct MinimumDriveConfig {
     pub tradeoff: String,
     /// The relative trade-off when `fixed`.
     pub tradeoff_value: f64,
+    /// With `auto`: the most the target's autospectra may sit below the
+    /// specification on average, dB.
+    pub shortfall_db: f64,
     /// `relative` or `absolute`.
     pub residual: String,
     /// The convergence factor `e`.
@@ -55,6 +61,7 @@ impl Default for MinimumDriveConfig {
         MinimumDriveConfig {
             tradeoff: "auto".into(),
             tradeoff_value: 1.0,
+            shortfall_db: 3.0,
             residual: "relative".into(),
             convergence: 0.5,
         }
@@ -67,6 +74,7 @@ impl MinimumDriveConfig {
         match key {
             "tradeoff" => self.tradeoff = v.choice(key)?.to_string(),
             "tradeoff_value" => self.tradeoff_value = v.number(key)?,
+            "shortfall_db" => self.shortfall_db = v.number(key)?,
             "residual" => self.residual = v.choice(key)?.to_string(),
             "convergence" => self.convergence = v.number(key)?,
             other => return Err(LawError(format!("parameter `{other}` is not declared"))),
@@ -76,7 +84,17 @@ impl MinimumDriveConfig {
 
     fn tradeoff(&self) -> Result<Tradeoff, LawError> {
         match self.tradeoff.as_str() {
-            "auto" => Ok(Tradeoff::Auto),
+            "auto" => {
+                if self.shortfall_db < 0.0 || !self.shortfall_db.is_finite() {
+                    return Err(LawError(format!(
+                        "parameter `shortfall_db` must be zero or positive, got {}",
+                        self.shortfall_db
+                    )));
+                }
+                Ok(Tradeoff::Auto {
+                    retained: 10f64.powf(-self.shortfall_db / 10.0),
+                })
+            }
             "fixed" => {
                 if self.tradeoff_value <= 0.0 || !self.tradeoff_value.is_finite() {
                     return Err(LawError(format!(
@@ -196,7 +214,7 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
     fn spec() -> LawSpec {
         LawSpec {
             name: "minimum drive",
-            version: "1.0.0",
+            version: "1.1.0",
             author: "Hertzforge",
             summary: "Takes the cross terms of the reference from the drive that needs the least \
                       power to produce its autospectra: on each line the drive minimizing the \
@@ -205,7 +223,8 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
                       and Schultz; Smallwood's minimum input trace at the exact-control end), \
                       and the plant's predicted response to it as the target. The trade-off is \
                       picked at the knee of drive against residual among the trade-offs whose \
-                      target stays inside the alarm lines, or set. Then the default law's \
+                      target stays inside the alarm lines and gives up no more than the \
+                      shortfall on average, or set. Then the default law's \
                       closed loop on that target.",
             params: vec![
                 ParamDecl {
@@ -213,8 +232,8 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
                     label: "Trade-off",
                     help: "Auto picks the trade-off between drive power and autospectrum \
                            residual at the knee of the curve over the band, among the \
-                           trade-offs whose target stays inside the alarm lines; fixed uses \
-                           the value below.",
+                           trade-offs whose target stays inside the alarm lines and within \
+                           the largest shortfall below; fixed uses the value below.",
                     kind: ParamKindDecl::Choice {
                         options: TRADEOFFS,
                         default: "auto",
@@ -234,6 +253,22 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
                         max: 1e6,
                         step: 0.1,
                         default: 1.0,
+                    },
+                },
+                ParamDecl {
+                    key: "shortfall_db",
+                    label: "Largest shortfall",
+                    help: "With an automatic trade-off: the most the target's autospectra may \
+                           sit below the specification, on average over the band's controls \
+                           and lines, each counted at most at its specification. It bounds \
+                           what the trade-off gives up where the alarm lines do not; 0 \
+                           accepts only a target that reproduces every autospectrum.",
+                    kind: ParamKindDecl::Number {
+                        unit: "dB",
+                        min: 0.0,
+                        max: 20.0,
+                        step: 0.5,
+                        default: 3.0,
                     },
                 },
                 ParamDecl {
