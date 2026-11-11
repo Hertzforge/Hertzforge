@@ -365,8 +365,9 @@ impl BandWidth {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PartSchedule {
-    /// A dwell at `hz`, for `for_s` seconds of test time when given (the part
-    /// then ends), else for as long as the part plays.
+    /// A dwell at `hz`, for `for_s` seconds of test time or `for_cycles`
+    /// cycles when one is given (the part then ends), else for as long as the
+    /// part plays. At most one of the two.
     Fixed {
         /// Hz.
         hz: f64,
@@ -374,6 +375,9 @@ pub enum PartSchedule {
         /// or the test ends.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         for_s: Option<f64>,
+        /// Cycles of the tone (Sine's dwell by cycles).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        for_cycles: Option<u64>,
     },
     /// A sweep between `lo_hz` and `hi_hz`, bouncing at the limits, from
     /// `start_hz` in `direction` at `rate` under `law`, until `target`.
@@ -651,6 +655,17 @@ pub struct MixedLimits {
     /// ceiling.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drive_vpk_abort: Option<f64>,
+    /// The random part's rms ceiling (floor and bands), volts: its synthesis
+    /// is clamped to it (Random's `drive_ceiling_vrms`). `None`: no clamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drive_ceiling_vrms: Option<f64>,
+    /// The random part's rms at which the run ends (Random's
+    /// `drive_abort_vrms`). `None`: none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drive_abort_vrms: Option<f64>,
+    /// Judge raw input samples against each channel's velocity and
+    /// displacement limits (Random's kinematic monitor). Default on.
+    pub kinematic_monitor: bool,
     /// Sigma clip on the random part of the drive (floor and bands); `None` is
     /// no clip.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -670,6 +685,9 @@ impl Default for MixedLimits {
         MixedLimits {
             drive_vpk_ceiling: DEFAULT_DRIVE_VPK_CEILING,
             drive_vpk_abort: None,
+            drive_ceiling_vrms: None,
+            drive_abort_vrms: None,
+            kinematic_monitor: true,
             drive_clip_sigma: None,
             limit_profiles: Vec::new(),
             max_lines_out: 10,
@@ -774,6 +792,16 @@ pub struct MixedConfig {
     /// Controlled-stop ramp, seconds (Random's `shutdown_ramp_s`).
     #[serde(default)]
     pub shutdown_ramp_s: f64,
+    /// How long a tone or band takes to ramp in or out (at start-up, switched
+    /// live, at its window's edges and its schedule's end), seconds.
+    #[serde(default = "default_part_ramp")]
+    pub part_ramp_s: f64,
+    /// The longest the floor plays alone before tones and bands ramp in,
+    /// seconds: they come in once the floor has equalized (its estimate at
+    /// `control_dof` and its rms within 1 dB of the target), or at this time
+    /// regardless, logged.
+    #[serde(default = "default_floor_settle")]
+    pub floor_settle_s: f64,
     /// The identification.
     #[serde(default)]
     pub identification: MixedIdentification,
@@ -797,6 +825,17 @@ pub struct MixedConfig {
     pub metadata: Vec<MetaField>,
 }
 
+/// Default part ramp, seconds.
+pub const DEFAULT_PART_RAMP_S: f64 = 3.0;
+/// Default longest floor-alone time, seconds.
+pub const DEFAULT_FLOOR_SETTLE_S: f64 = 30.0;
+
+fn default_part_ramp() -> f64 {
+    DEFAULT_PART_RAMP_S
+}
+fn default_floor_settle() -> f64 {
+    DEFAULT_FLOOR_SETTLE_S
+}
 fn default_dof() -> f64 {
     120.0
 }
@@ -1301,6 +1340,8 @@ impl MixedConfig {
         for (field, v) in [
             ("level_ramp_s", self.level_ramp_s),
             ("shutdown_ramp_s", self.shutdown_ramp_s),
+            ("part_ramp_s", self.part_ramp_s),
+            ("floor_settle_s", self.floor_settle_s),
         ] {
             if !(v.is_finite() && v >= 0.0) {
                 return Err(bad(field, "zero or more"));
@@ -1313,6 +1354,16 @@ impl MixedConfig {
         if let Some(a) = l.drive_vpk_abort {
             if !finite_pos(a) || a < l.drive_vpk_ceiling {
                 return Err(bad("drive_vpk_abort", "at or above the ceiling"));
+            }
+        }
+        if let Some(v) = l.drive_ceiling_vrms {
+            if !finite_pos(v) {
+                return Err(bad("drive_ceiling_vrms", "greater than zero"));
+            }
+        }
+        if let Some(a) = l.drive_abort_vrms {
+            if !finite_pos(a) || l.drive_ceiling_vrms.is_some_and(|c| a < c) {
+                return Err(bad("drive_abort_vrms", "at or above the rms ceiling"));
             }
         }
         if let Some(c) = l.drive_clip_sigma {
@@ -1423,7 +1474,11 @@ impl MixedConfig {
 
     fn validate_schedule(&self, p: &Part, s: &PartSchedule) -> Result<(), ConfigError> {
         match s {
-            PartSchedule::Fixed { hz, for_s } => {
+            PartSchedule::Fixed {
+                hz,
+                for_s,
+                for_cycles,
+            } => {
                 if !finite_pos(*hz) {
                     return Err(bad_part(p, "schedule", "hz greater than zero"));
                 }
@@ -1431,6 +1486,16 @@ impl MixedConfig {
                     if !finite_pos(*t) {
                         return Err(bad_part(p, "schedule", "for_s greater than zero"));
                     }
+                }
+                if *for_cycles == Some(0) {
+                    return Err(bad_part(p, "schedule", "for_cycles at least 1"));
+                }
+                if for_s.is_some() && for_cycles.is_some() {
+                    return Err(bad_part(
+                        p,
+                        "schedule",
+                        "a dwell is for seconds or for cycles, not both",
+                    ));
                 }
             }
             PartSchedule::Sweep { .. } => {

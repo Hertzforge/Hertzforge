@@ -363,6 +363,22 @@ fn a_bad_value_of_a_part_or_around_it_is_refused_naming_the_field() {
     let mut c = config(vec![floor("floor")]);
     c.parts[0].enabled = false;
     assert_eq!(refusal(&c), "bad_part");
+    let c = config(vec![
+        floor("floor"),
+        tone(
+            "t",
+            PartSchedule::Fixed {
+                hz: 100.0,
+                for_s: Some(1.0),
+                for_cycles: Some(10),
+            },
+        ),
+    ]);
+    assert_eq!(refusal(&c), "bad_part");
+    let mut c = config(vec![floor("floor")]);
+    c.limits.drive_ceiling_vrms = Some(2.0);
+    c.limits.drive_abort_vrms = Some(1.0);
+    assert_eq!(refusal(&c), "bad_config");
     let mut c = config(vec![floor("floor")]);
     c.tracking_hz = 0.0;
     assert_eq!(refusal(&c), "bad_config");

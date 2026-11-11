@@ -145,4 +145,13 @@ fn a_trip_names_its_part() {
     let v = serde_json::to_value(&t).unwrap();
     assert_eq!(v["kind"]["kind"], "tone_abort");
     assert_eq!(v["part"], "t3");
+    let f = status::MixedTrip {
+        kind: status::MixedTripKind::LawFault {
+            role: LawRole::Tones,
+            reason: "over_budget".into(),
+        },
+        part: Some("t1".into()),
+        t_s: 1.0,
+    };
+    assert_eq!(f.words(), "Tone t1 law fault: over_budget");
 }

@@ -53,7 +53,11 @@ pub(crate) fn band(id: &str, schedule: PartSchedule, width: BandWidth) -> Part {
 }
 
 pub(crate) fn fixed(hz: f64) -> PartSchedule {
-    PartSchedule::Fixed { hz, for_s: None }
+    PartSchedule::Fixed {
+        hz,
+        for_s: None,
+        for_cycles: None,
+    }
 }
 
 pub(crate) fn sweep(lo: f64, hi: f64, start: f64, target: PartSweepTarget) -> PartSchedule {
@@ -88,6 +92,8 @@ pub(crate) fn config(parts: Vec<Part>) -> MixedConfig {
         full_level_duration_s: Some(60.0),
         level_ramp_s: 0.0,
         shutdown_ramp_s: 0.0,
+        part_ramp_s: DEFAULT_PART_RAMP_S,
+        floor_settle_s: DEFAULT_FLOOR_SETTLE_S,
         identification: MixedIdentification::default(),
         limits: MixedLimits::default(),
         capture: Default::default(),

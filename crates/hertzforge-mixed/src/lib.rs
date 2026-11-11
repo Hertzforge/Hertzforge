@@ -22,8 +22,9 @@ pub use parts::{
     sweep_span, BandWidth, ConfigError, Direction, FloorPart, LawPick, MixedConfig,
     MixedIdentification, MixedLawChoice, MixedLawGuards, MixedLimits, Motion, NarrowbandPart, Part,
     PartBody, PartSchedule, PartSweepTarget, PartWindow, SweepLaw, ToneAmplitude, TonePart,
-    DEFAULT_EXCLUSION_HZ, DEFAULT_FLOOR_LAW_ID, DEFAULT_TONE_LAW_ID, DEFAULT_TRACKING_HZ,
-    MAX_BANDS, MAX_TONES, MIN_TONE_SPACING_WIDTHS, RESERVED_PART_KINDS,
+    DEFAULT_EXCLUSION_HZ, DEFAULT_FLOOR_LAW_ID, DEFAULT_FLOOR_SETTLE_S, DEFAULT_PART_RAMP_S,
+    DEFAULT_TONE_LAW_ID, DEFAULT_TRACKING_HZ, MAX_BANDS, MAX_TONES, MIN_TONE_SPACING_WIDTHS,
+    RESERVED_PART_KINDS,
 };
 pub use schedule::{PartClock, PartNow};
 #[cfg(feature = "service")]

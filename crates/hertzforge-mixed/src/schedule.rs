@@ -232,18 +232,19 @@ fn engine_for(cfg: &MixedConfig, p: &Part) -> Result<Engine, ConfigError> {
     };
     Ok(match p.schedule() {
         None => Engine::None,
-        Some(PartSchedule::Fixed { hz, for_s }) => Engine::Fixed {
+        Some(PartSchedule::Fixed {
+            hz,
+            for_s,
+            for_cycles,
+        }) => Engine::Fixed {
             hz: *hz,
-            run: match for_s {
-                Some(s) => Some(
-                    DwellRun::new(DwellPlan {
-                        freq_hz: *hz,
-                        for_: DwellFor::Seconds(*s),
-                    })
-                    .map_err(bad)?,
-                ),
-                None => None,
-            },
+            run: match (for_s, for_cycles) {
+                (Some(s), _) => Some(DwellFor::Seconds(*s)),
+                (None, Some(n)) => Some(DwellFor::Cycles(*n)),
+                (None, None) => None,
+            }
+            .map(|for_| DwellRun::new(DwellPlan { freq_hz: *hz, for_ }).map_err(bad))
+            .transpose()?,
         },
         Some(s @ PartSchedule::Sweep { .. }) => {
             Engine::Sweep(BidirSweep::new(s.sweep_config().expect("a sweep")).map_err(bad)?)
@@ -388,12 +389,32 @@ mod tests {
                 PartSchedule::Fixed {
                     hz: 100.0,
                     for_s: Some(3.0),
+                    for_cycles: None,
                 },
             ),
         ]);
         let mut k = PartClock::new(&c).unwrap();
         assert!(!run_to(&mut k, 2.9, 0.1, 1).done);
         assert!(run_to(&mut k, 3.1, 0.1, 1).done);
+    }
+
+    #[test]
+    fn a_dwell_by_cycles_ends_on_its_count() {
+        // 300 cycles at 100 Hz is 3 s.
+        let c = config(vec![
+            floor("floor"),
+            tone(
+                "d",
+                PartSchedule::Fixed {
+                    hz: 100.0,
+                    for_s: None,
+                    for_cycles: Some(300),
+                },
+            ),
+        ]);
+        let mut k = PartClock::new(&c).unwrap();
+        assert!(!run_to(&mut k, 2.95, 0.05, 1).done);
+        assert!(run_to(&mut k, 3.05, 0.05, 1).done);
     }
 
     #[test]
@@ -436,6 +457,7 @@ mod tests {
             PartSchedule::Fixed {
                 hz: 50.0,
                 for_s: Some(5.0),
+                for_cycles: None,
             },
         ));
         // A part whose window opens at 4 s.
@@ -444,6 +466,7 @@ mod tests {
             PartSchedule::Fixed {
                 hz: 600.0,
                 for_s: None,
+                for_cycles: None,
             },
         );
         late.window = PartWindow {

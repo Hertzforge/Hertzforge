@@ -68,7 +68,7 @@ pub enum MixedPhase {
     /// Not driving.
     Idle,
     /// The floor alone at the schedule's start level, equalizing.
-    FloorSettling,
+    FloorOnly,
     /// Tones and bands ramping in from their feed-forward.
     PartsRampingIn,
     /// Every part under control; part clocks running.
@@ -138,6 +138,10 @@ pub struct PartRow {
     pub alarm: bool,
     /// Whether a limit channel holds it down.
     pub limiting: bool,
+    /// Whether its reading is usable: a tone's tracker has settled (and the
+    /// tone stands above the floor in its band), a band has its first frame,
+    /// the floor its first loop.
+    pub settled: bool,
     /// A band's degrees of freedom in its moving-frame average; `None`
     /// otherwise.
     pub dof: Option<f64>,
@@ -239,6 +243,8 @@ pub enum MixedTripKind {
     Divergence,
     /// A law's outputs were unusable `max_misses` times in a row.
     LawFault {
+        /// Which law.
+        role: super::LawRole,
         /// The reason's wire name (Random's or Sine's).
         reason: String,
     },
@@ -299,10 +305,10 @@ impl MixedTrip {
             }
             MixedTripKind::Divergence if part.is_empty() => "Divergence".to_owned(),
             MixedTripKind::Divergence => format!("Divergence on {part}"),
-            MixedTripKind::LawFault { reason } if part.is_empty() => {
-                format!("Control law fault: {reason}")
-            }
-            MixedTripKind::LawFault { reason } => format!("Control law fault on {part}: {reason}"),
+            MixedTripKind::LawFault { role, reason } => match role {
+                super::LawRole::Floor => format!("Floor law fault: {reason}"),
+                super::LawRole::Tones => format!("Tone {part} law fault: {reason}"),
+            },
             MixedTripKind::Station { message } => format!("Station fault: {message}"),
         }
     }
@@ -426,6 +432,7 @@ impl MixedStatus {
                     held: false,
                     alarm: false,
                     limiting: false,
+                    settled: false,
                     dof: (kind == PartKind::Narrowband).then_some(0.0),
                     sweeps_done: 0,
                     direction: None,

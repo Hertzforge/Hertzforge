@@ -486,7 +486,7 @@ impl MixedService {
 
     /// Leave the review hold and engage: build the floor law and one tone law
     /// per tone, seed them, start the station's persistent run, and play the
-    /// floor alone at the schedule's start level ([`status::MixedPhase::FloorSettling`]).
+    /// floor alone at the schedule's start level ([`status::MixedPhase::FloorOnly`]).
     pub fn proceed_after_review(&mut self) -> Result<(), MixedError> {
         Err(MixedError::NotBuilt("engage"))
     }
