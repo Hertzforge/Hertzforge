@@ -269,6 +269,10 @@ pub struct MixedService {
     chunk_rms: f64,
     /// The random part's sum of squares and frames toward its rms abort.
     rand_acc: (f64, u64),
+    /// The level ladder: the rung the level is at or climbing to, whether it
+    /// is on that rung, seconds at the present level and at full level (holds
+    /// excluded).
+    ladder: live::Ladder,
 }
 
 impl std::fmt::Debug for MixedService {
@@ -352,6 +356,7 @@ impl MixedService {
             chunk_peak: 0.0,
             chunk_rms: 0.0,
             rand_acc: (0.0, 0),
+            ladder: live::Ladder::default(),
         })
     }
 

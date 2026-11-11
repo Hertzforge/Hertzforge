@@ -281,7 +281,17 @@ impl Runtime {
             } else {
                 f64::INFINITY
             };
-            step.overload.push((ch.index, at));
+            let steers = cfg
+                .control
+                .channels
+                .iter()
+                .any(|c| c.channel_index == ch.index)
+                || cfg
+                    .limits
+                    .limit_profiles
+                    .iter()
+                    .any(|l| l.channel_index == ch.index);
+            step.overload.push((ch.index, at, steers));
         }
         let mut limits = Vec::new();
         for lp in &cfg.limits.limit_profiles {

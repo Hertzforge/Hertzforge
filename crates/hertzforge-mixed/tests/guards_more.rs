@@ -69,13 +69,52 @@ fn a_velocity_limit_on_the_raw_samples_ends_the_run() {
 }
 
 #[test]
-fn an_input_overload_ends_the_run_naming_the_channel() {
+fn a_control_channel_overload_ends_the_run_naming_the_channel() {
     let mut t = table();
     t.channels[0].range_max = 5.0;
     let c = quick(config(vec![floor(0.01), tone("t1", fixed(250.0), 6.0)]));
     let mut s = build(c, t);
     run_for(&mut s, 15.0);
     assert_eq!(kind(&s), Some(MixedTripKind::Overload { channel_index: 0 }));
+}
+
+/// An overload on a channel the loop does not steer by (a monitor) latches its
+/// indicator and the run goes on.
+#[test]
+fn a_monitor_channel_overload_latches_and_the_run_goes_on() {
+    let mut t = table();
+    let mut m = hertzforge_channel_table::Channel::new(2);
+    m.role = hertzforge_channel_table::ChannelRole::Monitor;
+    m.units = hertzforge_channel_table::Units::AccelG;
+    m.range_max = 0.5;
+    t.channels.push(m);
+    let c = quick(config(vec![floor(0.01), tone("t1", fixed(250.0), 2.0)]));
+    let sim = hertzforge_hal_sim::SimConfig::new()
+        .sample_rate_hz(FS)
+        .resonance(FN, Q)
+        .feedthrough(1.0)
+        .noise_level(1e-4)
+        .transport_delay_samples(DELAY)
+        .shared_clock(true)
+        .max_input_channels(2)
+        .seed(5)
+        .build();
+    let mut s = MixedService::new(
+        c,
+        t,
+        Box::new(sim),
+        hertzforge_module_abi::StationClass::HertzforgeSim,
+        1,
+        None,
+    )
+    .unwrap()
+    .with_block_frames(BLOCK);
+    s.arm().unwrap();
+    s.run_sysid(0).unwrap();
+    assert!(s.coherence_gate().unwrap());
+    s.proceed_after_review().unwrap();
+    assert!(run_for(&mut s, 10.0), "{:?}", s.trip());
+    assert_eq!(s.live_status().overloads, vec![2]);
 }
 
 #[test]

@@ -17,6 +17,8 @@ use hertzforge_random::RunMode;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+const TICKS_PER_BATCH_F: f64 = super::run::TICKS_PER_BATCH as f64;
+
 /// The most points a history keeps.
 const HISTORY_POINTS: usize = 2400;
 
@@ -27,6 +29,37 @@ pub(crate) enum Verb {
     Hold(bool),
     Part(usize, bool),
     Stop,
+}
+
+/// The level ladder's place.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Ladder {
+    /// The rung the level is on, or the next rung above when it is between.
+    pub(crate) rung: usize,
+    /// Whether the level is on that rung.
+    pub(crate) on_rung: bool,
+    /// Seconds at the present level, holds excluded.
+    pub(crate) level_s: f64,
+    /// Seconds at full level, holds excluded.
+    pub(crate) full_s: f64,
+    /// Whether the ladder has started (every part is in).
+    pub(crate) started: bool,
+}
+
+impl Ladder {
+    /// The ladder's place for a level of `db` on `table`: the first rung at or
+    /// above it (the last when it is above them all).
+    pub(crate) fn at(table: &[f64], db: f64) -> Self {
+        let i = table
+            .iter()
+            .position(|r| *r >= db - 1e-6)
+            .unwrap_or(table.len().saturating_sub(1));
+        Ladder {
+            rung: i,
+            on_rung: (table[i] - db).abs() < 1e-6,
+            ..Ladder::default()
+        }
+    }
 }
 
 /// Each tone's and band's history, a point per chunk.
@@ -315,6 +348,13 @@ impl MixedService {
                 self.finish(MixedOutcome::Aborted);
                 return Ok(false);
             }
+            let dt = (TICKS_PER_BATCH_F * rt.actual.block_frames.max(1) as f64) / rt.fs;
+            if self.ladder.started && !rt.step.clock.held() && rt.step.level.settled() {
+                self.ladder.level_s += dt;
+                if self.at_full() {
+                    self.ladder.full_s += dt;
+                }
+            }
             if let Some(kind) = vrms_trip {
                 self.latch_trip(kind, None);
                 self.begin_end(MixedOutcome::Aborted, true);
@@ -428,6 +468,9 @@ impl MixedService {
                 Verb::Level(db_) => {
                     let frames = (self.cfg.level_ramp_s.max(self.cfg.part_ramp_s) * rt.fs).max(1.0);
                     rt.step.level.go(10f64.powf(db_ / 20.0), frames);
+                    let started = self.ladder.started;
+                    self.ladder = Ladder::at(&self.cfg.schedule.table_db, db_);
+                    self.ladder.started = started;
                     self.log.push(t, MixedEventKind::Level { level_db: db_ });
                 }
                 Verb::Hold(h) => {
@@ -518,11 +561,18 @@ impl MixedService {
                 }
             }
             MixedPhase::Running => {
+                if !self.ladder.started {
+                    self.ladder =
+                        Ladder::at(&self.cfg.schedule.table_db, self.cfg.schedule.start_db);
+                    self.ladder.started = true;
+                }
+                self.climb();
+                let rt = self.rt.as_mut().expect("running");
                 let done = has_parts && rt.step.clock.all_parts_done() && rt.parts_settled();
                 let timed = self
                     .cfg
                     .full_level_duration_s
-                    .is_some_and(|d| in_phase_s >= d);
+                    .is_some_and(|d| self.ladder.full_s >= d);
                 if done || timed {
                     self.begin_end(MixedOutcome::Completed, false);
                 }
@@ -538,6 +588,47 @@ impl MixedService {
         {
             self.set_state(MixedState::FullLevel);
         }
+    }
+
+    /// Whether the level in force is the schedule's last rung.
+    fn at_full(&self) -> bool {
+        let t = &self.cfg.schedule.table_db;
+        self.ladder.on_rung && self.ladder.rung + 1 == t.len()
+    }
+
+    /// The automatic ladder: after the dwell at the present level, the next
+    /// rung (from a level between rungs, the rung above it, dwelling the rung
+    /// below's time), every part together, as one ramp.
+    fn climb(&mut self) {
+        if self.run_mode != RunMode::Auto || self.at_full() {
+            return;
+        }
+        let sch = &self.cfg.schedule;
+        let l = self.ladder;
+        let dwell = sch.dwell_for(if l.on_rung {
+            l.rung
+        } else {
+            l.rung.saturating_sub(1)
+        });
+        if l.level_s < dwell {
+            return;
+        }
+        let next = if l.on_rung { l.rung + 1 } else { l.rung };
+        let Some(&db_) = sch.table_db.get(next) else {
+            return;
+        };
+        let t = self.t_s();
+        let rt = self.rt.as_mut().expect("running");
+        let frames = (self.cfg.level_ramp_s.max(self.cfg.part_ramp_s) * rt.fs).max(1.0);
+        rt.step.level.go(10f64.powf(db_ / 20.0), frames);
+        self.ladder = Ladder {
+            rung: next,
+            on_rung: true,
+            level_s: 0.0,
+            full_s: 0.0,
+            started: true,
+        };
+        self.log.push(t, MixedEventKind::Level { level_db: db_ });
     }
 
     fn sample_histories(&mut self) {
@@ -825,6 +916,7 @@ impl MixedService {
             return s;
         };
         s.band_coherence = rt.ident.band_coherence;
+        s.overloads = rt.step.overloads.clone();
         s.trusted_frac = rt.ident.trusted_frac;
         if rt.floor_law.is_none() {
             return s;
@@ -833,7 +925,8 @@ impl MixedService {
         s.t_s = self.t_s();
         s.test_s = rt.step.clock.t_s();
         s.level_db = db(lev);
-        s.at_last_level = (lev - 1.0).abs() < 1e-3;
+        s.rung_index = self.ladder.rung;
+        s.at_last_level = self.at_full();
         let now = rt.step.clock.now();
         for (i, row) in s.parts.iter_mut().enumerate() {
             let n = now[i];

@@ -423,6 +423,10 @@ pub struct MixedStatus {
     /// (coherence and gain over their floors); 0 before it runs.
     #[serde(default)]
     pub trusted_frac: f64,
+    /// Channels whose overload indicator has latched (channels the loop does
+    /// not steer by; an overload on a control or limit channel aborts).
+    #[serde(default)]
+    pub overloads: Vec<u32>,
     /// Whether a capture runs.
     pub capturing: bool,
     /// The laws and their counters; `None` until the loop engages.
@@ -524,6 +528,7 @@ impl MixedStatus {
             totals: MixedTotals::default(),
             band_coherence: 0.0,
             trusted_frac: 0.0,
+            overloads: Vec::new(),
             capturing: false,
             law: None,
         }

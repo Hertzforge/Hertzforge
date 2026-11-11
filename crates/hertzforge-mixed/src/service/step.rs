@@ -212,8 +212,12 @@ pub(crate) struct MixedProcessStep {
     /// Random's raw-sample kinematic monitor (velocity and displacement from
     /// acceleration), when the run asks for it and a channel has a limit.
     pub(crate) kin: Option<hertzforge_random::KinematicMonitor>,
-    /// Per input slot: `(channel index, |x| at which it overloads)`.
-    pub(crate) overload: Vec<(u32, f64)>,
+    /// Per input slot: `(channel index, |x| at which it overloads, whether
+    /// an overload aborts)`. A control or limit channel's overload aborts (the
+    /// loop steers by it); any other channel's latches an indicator.
+    pub(crate) overload: Vec<(u32, f64, bool)>,
+    /// Channels whose overload indicator has latched (non-aborting channels).
+    pub(crate) overloads: Vec<u32>,
     /// Limit channels' places in the input frame.
     pub(crate) lim_slots: Vec<usize>,
     res_scratch: Vec<f64>,
@@ -282,6 +286,7 @@ impl MixedProcessStep {
             kin_scratch: Vec::with_capacity(capacity.min(1 << 16) * in_stride.max(1)),
             kin: None,
             overload: Vec::new(),
+            overloads: Vec::with_capacity(64),
             lim_slots: Vec::new(),
             res_scratch: vec![0.0; n_ctrl],
             amp_scratch: vec![0.0; n_ctrl],
@@ -591,14 +596,21 @@ impl MixedProcessStep {
         }
         if self.trip.is_none() && !self.overload.is_empty() {
             for fr in 0..n_frames {
-                for (slot, &(ch, at)) in self.overload.iter().enumerate() {
+                for slot in 0..self.overload.len() {
+                    let (ch, at, aborts) = self.overload[slot];
                     let v = input
                         .get(fr * self.in_stride + slot)
                         .copied()
                         .unwrap_or(0.0);
-                    if (v as f64).abs() >= at {
+                    if (v as f64).abs() < at {
+                        continue;
+                    }
+                    if aborts {
                         self.latch(MixedTripKind::Overload { channel_index: ch }, None, true);
                         return;
+                    }
+                    if !self.overloads.contains(&ch) {
+                        self.overloads.push(ch);
                     }
                 }
             }
