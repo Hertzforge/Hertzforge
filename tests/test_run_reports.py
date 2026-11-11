@@ -12,6 +12,7 @@ from conftest import fixture_path
 from test_rattlesnake_sine import _write_run
 
 import hertzforge
+from hertzforge.report.viewer import page_text
 
 
 def _campaign(tmp_path):
@@ -67,7 +68,7 @@ def test_run_report_takes_each_runs_report_and_last(tmp_path):
     assert [os.path.basename(p) for p in written] == ['both.html'], \
         'one random report, not the two its type would get'
     with open(written[0], encoding='utf-8') as handle:
-        html = handle.read()
+        html = page_text(handle.read())
     assert 'Random Vibration Test Report' in html
     assert float(re.search(r'over ([0-9.]+) ?s', html).group(1)) == \
         pytest.approx(5.0, abs=0.01)
