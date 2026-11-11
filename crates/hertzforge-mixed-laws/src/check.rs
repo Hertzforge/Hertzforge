@@ -36,11 +36,14 @@ pub enum MixedCheckCase {
     LevelLadder,
     /// A flat wire behind a hardware station's lag.
     TransportDelay,
+    /// A tone far over a low floor (a low-level loopback's ratio, A^2 / G
+    /// about 3e4 Hz), swept from 100 Hz at 2 oct/min.
+    ToneFarOverFloor,
 }
 
 impl MixedCheckCase {
     /// Every case, in the order the check runs them.
-    pub const ALL: [MixedCheckCase; 8] = [
+    pub const ALL: [MixedCheckCase; 9] = [
         MixedCheckCase::FloorOnly,
         MixedCheckCase::FixedToneOnFloor,
         MixedCheckCase::SweptToneThroughMode,
@@ -49,6 +52,7 @@ impl MixedCheckCase {
         MixedCheckCase::NarrowbandSwept,
         MixedCheckCase::LevelLadder,
         MixedCheckCase::TransportDelay,
+        MixedCheckCase::ToneFarOverFloor,
     ];
 
     /// The stable record and wire name.
@@ -62,6 +66,7 @@ impl MixedCheckCase {
             MixedCheckCase::NarrowbandSwept => "narrowband_swept",
             MixedCheckCase::LevelLadder => "level_ladder",
             MixedCheckCase::TransportDelay => "transport_delay",
+            MixedCheckCase::ToneFarOverFloor => "tone_far_over_floor",
         }
     }
 
@@ -84,6 +89,9 @@ impl MixedCheckCase {
             MixedCheckCase::LevelLadder => "one mode; a tone and a band through the level ladder",
             MixedCheckCase::TransportDelay => {
                 "a flat wire behind a hardware station's lag; a tone and a band"
+            }
+            MixedCheckCase::ToneFarOverFloor => {
+                "one mode; a 0.2 g tone swept over a floor of 1.3e-6 g^2/Hz"
             }
         }
     }
@@ -114,6 +122,9 @@ impl MixedCheckCase {
             }
             MixedCheckCase::TransportDelay => {
                 "the run completes and every part settles within its alarm band"
+            }
+            MixedCheckCase::ToneFarOverFloor => {
+                "the floor's rms within 1 dB with no abort while the tone sweeps; the tone within its alarm band"
             }
         }
     }
@@ -259,6 +270,7 @@ pub fn mixed_check_run_s(case: MixedCheckCase) -> f64 {
     match case {
         MixedCheckCase::SweptToneThroughMode => 140.0,
         MixedCheckCase::NarrowbandSwept => 140.0,
+        MixedCheckCase::ToneFarOverFloor => 60.0,
         MixedCheckCase::LevelLadder => 30.0,
         _ => 25.0,
     }
@@ -267,9 +279,14 @@ pub fn mixed_check_run_s(case: MixedCheckCase) -> f64 {
 /// The configuration `case` runs: 4 Hz lines, 60 degrees of freedom, a flat
 /// 0.01 g^2/Hz floor from 40 to 1000 Hz, and the case's parts.
 pub fn mixed_check_config(case: MixedCheckCase) -> MixedConfig {
+    let level = if case == MixedCheckCase::ToneFarOverFloor {
+        1.3e-6
+    } else {
+        0.01
+    };
     let mut t = BreakpointTable::new("floor");
-    t.push(BreakpointRow::psd(40.0, 0.01));
-    t.push(BreakpointRow::psd(1000.0, 0.01));
+    t.push(BreakpointRow::psd(40.0, level));
+    t.push(BreakpointRow::psd(1000.0, level));
     let floor = part(
         "floor",
         PartBody::Floor(FloorPart {
@@ -296,6 +313,19 @@ pub fn mixed_check_config(case: MixedCheckCase) -> MixedConfig {
         }
         MixedCheckCase::NarrowbandFixed => parts.push(band("b1", fixed(600.0))),
         MixedCheckCase::NarrowbandSwept => parts.push(band("b1", sweep(150.0, 450.0, 4.0))),
+        MixedCheckCase::ToneFarOverFloor => parts.push(tone(
+            "t1",
+            PartSchedule::Sweep {
+                lo_hz: 100.0,
+                hi_hz: 400.0,
+                start_hz: 100.0,
+                direction: Direction::Up,
+                law: SweepLaw::LogOctPerMin,
+                rate: 2.0,
+                target: PartSweepTarget::Sweeps { n: 2 },
+            },
+            0.2,
+        )),
         MixedCheckCase::LevelLadder | MixedCheckCase::TransportDelay => {
             parts.push(tone("t1", fixed(250.0), 2.0));
             parts.push(band("b1", fixed(600.0)));
@@ -482,16 +512,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn eight_cases_with_unique_names_that_read_back() {
+    fn nine_cases_with_unique_names_that_read_back() {
         let mut names: Vec<_> = MixedCheckCase::ALL.iter().map(|c| c.name()).collect();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 9);
         for c in MixedCheckCase::ALL {
             assert_eq!(MixedCheckCase::from_name(c.name()), Some(c));
             assert!(!c.plant().is_empty() && !c.requirement().is_empty());
         }
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 9);
         assert_eq!(MixedCheckCase::from_name("nope"), None);
     }
 

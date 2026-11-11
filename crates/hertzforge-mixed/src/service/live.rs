@@ -531,16 +531,23 @@ impl MixedService {
                     && rt
                         .floor_rms_err_db
                         .is_some_and(|e| e.abs() <= FLOOR_EQUALIZED_DB);
-                let timeout = in_phase_s >= self.cfg.floor_settle_s;
+                // The parts wait for the larger of the settle time and the
+                // time this grid needs to reach the control degrees of freedom.
+                let wait_s = self.cfg.floor_settle_s.max(rt.equalize_s(&self.cfg));
+                let timeout = in_phase_s >= wait_s;
                 if equalized || timeout {
                     if timeout && !equalized {
                         let t = self.t_s();
                         self.log.push(
                             t,
                             MixedEventKind::Note {
-                                text: "the floor did not equalize in its settle time; \
-                                       the parts come in now"
-                                    .into(),
+                                text: format!(
+                                    "the floor did not equalize in {wait_s:.1} s (the larger \
+                                     of its settle time and the {:.1} s this grid needs for \
+                                     {} degrees of freedom); the parts come in now",
+                                    self.rt.as_ref().map_or(0.0, |r| r.equalize_s(&self.cfg)),
+                                    self.cfg.control_dof
+                                ),
                             },
                         );
                     }

@@ -79,6 +79,12 @@ pub struct MixedPrediction {
     pub excluded_lines: usize,
     /// The shaker's ratings against the prediction; empty without a shaker.
     pub ratings: Vec<RatingCheck>,
+    /// The longest the floor plays alone before the parts come in, seconds:
+    /// the larger of `floor_settle_s` and the time the requested grid
+    /// (`df_hz`, half-overlapped frames, `blocks_per_window` a loop) needs to
+    /// reach `control_dof`.
+    #[serde(default)]
+    pub floor_equalize_s: f64,
 }
 
 impl MixedPrediction {
@@ -219,6 +225,12 @@ pub fn predict(cfg: &MixedConfig) -> Result<MixedPrediction, ConfigError> {
         excluded_hz,
         excluded_lines,
         ratings,
+        floor_equalize_s: {
+            let frame = 1.0 / cfg.df_hz;
+            let frames = (cfg.control_dof / crate::floor::dof_per_frame()).ceil();
+            let grid = frames * frame / 2.0 + frame + cfg.blocks_per_window as f64 * frame / 2.0;
+            cfg.floor_settle_s.max(grid)
+        },
     })
 }
 
@@ -329,6 +341,13 @@ mod tests {
         // Two dwelling tones, each excluding 100 +/- 2 Hz: 5 lines at 1 Hz each.
         assert_eq!(p.excluded_hz, vec![(98.0, 102.0), (298.0, 302.0)]);
         assert_eq!(p.excluded_lines, 10);
+        // 120 DOF at 1 Hz lines: 64 half-overlapped 1 s frames, one more
+        // frame and a 12-frame loop, 39 s, over the 30 s settle time.
+        assert!(
+            (p.floor_equalize_s - 39.0).abs() < 1e-9,
+            "{}",
+            p.floor_equalize_s
+        );
     }
 
     fn p_crest(c: &MixedConfig) -> f64 {
