@@ -23,7 +23,8 @@ import {
 	type MixedSweepSchedule
 } from './mixed';
 
-const PROTOCOL = readFileSync(fileURLToPath(new URL('../../../../schema/PROTOCOL.md', import.meta.url)), 'utf8');
+// A Windows checkout may hold the file with CRLF line ends; the examples are found by their LF fences.
+const PROTOCOL = readFileSync(fileURLToPath(new URL('../../../../schema/PROTOCOL.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
 
 /** The first example block after `heading`, with the text's `...` placeholders taken out. */
 function example(heading: string, after = 0): unknown {

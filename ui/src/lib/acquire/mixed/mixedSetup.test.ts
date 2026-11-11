@@ -27,7 +27,7 @@ import {
 } from './mixedSetup';
 
 // This suite's environment has no module URL to resolve from: the protocol is found from the folder the tests run in.
-const PROTOCOL = readFileSync([resolve(process.cwd(), '../schema/PROTOCOL.md'), resolve(process.cwd(), 'schema/PROTOCOL.md')].find((p) => existsSync(p))!, 'utf8');
+const PROTOCOL = readFileSync([resolve(process.cwd(), '../schema/PROTOCOL.md'), resolve(process.cwd(), 'schema/PROTOCOL.md')].find((p) => existsSync(p))!, 'utf8').replace(/\r\n/g, '\n');
 
 /** PROTOCOL's combined configuration, its placeholders taken out. */
 function protocolConfig(): MixedConfig {
