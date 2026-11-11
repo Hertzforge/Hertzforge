@@ -871,6 +871,107 @@ impl Service {
     }
 }
 
+impl Service {
+    /// `laws.check` with `mixed`: the mixed check set with the law in its role and
+    /// the built-in in the other. No mixed-check record is kept yet, so the result
+    /// is reported and not recorded.
+    pub(super) async fn mixed_laws_check(
+        self: &Arc<Self>,
+        conn: &Conn,
+        params: &Map<String, Value>,
+    ) -> Result<Value, MethodError> {
+        use crate::mimo::law_check::{bad_choice, CheckSlot};
+        let role = match params.get("mixed").and_then(Value::as_str) {
+            Some("floor") => hertzforge_mixed::LawRole::Floor,
+            Some("tones") => hertzforge_mixed::LawRole::Tones,
+            _ => {
+                return Err(MethodError::bad_params(
+                    "mixed",
+                    "\"mixed\" is the law's role, \"floor\" or \"tones\".",
+                ))
+            }
+        };
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let id = protocol::named_str(params, "id")?.map(str::to_owned);
+        let given = match params.get("params") {
+            None | Some(Value::Null) => Map::new(),
+            Some(Value::Object(m)) => m.clone(),
+            Some(_) => {
+                return Err(MethodError::bad_params(
+                    "params",
+                    "\"params\" is an object of parameter values by key.",
+                ))
+            }
+        };
+        {
+            let inner = self.inner.lock().await;
+            inner.session.require_controller(conn.id)?;
+            inner.run_active()?;
+        }
+        let (facts, laws) = self
+            .with_catalog(move |cat| {
+                let id =
+                    match (id, path) {
+                        (Some(id), None) => id,
+                        (None, Some(p)) => laws::import(cat, &p)?["law"]["id"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned(),
+                        _ => return Err(MethodError::bad_params(
+                            "id",
+                            "Checking a law needs its catalog \"id\" or the \"path\" of its file.",
+                        )),
+                    };
+                let world = match role {
+                    hertzforge_mixed::LawRole::Floor => LawWorld::Single,
+                    hertzforge_mixed::LawRole::Tones => LawWorld::Sine,
+                };
+                let facts = laws::mixed_lookup(Some(cat), &id, world)
+                    .ok_or_else(|| crate::mimo::law_check::unknown_law(&id))?;
+                if facts.world.is_err() {
+                    return Err(bad_choice(&id, "a law of another world for this role"));
+                }
+                let pick = hertzforge_mixed::LawPick {
+                    id: id.clone(),
+                    params: given,
+                };
+                let mut choice = hertzforge_mixed::MixedLawChoice::default();
+                match role {
+                    hertzforge_mixed::LawRole::Floor => choice.floor = pick,
+                    hertzforge_mixed::LawRole::Tones => choice.tones = pick,
+                }
+                let laws = hertzforge_mixed_laws::resolve_mixed(cat, &choice, 1)
+                    .map_err(|e| bad_choice(&id, &e.to_string()))?;
+                Ok((facts, laws))
+            })
+            .await?;
+        let _slot = CheckSlot::take()?;
+        let svc = self.clone();
+        let law_id = facts.id.clone();
+        let results = tokio::task::spawn_blocking(move || {
+            crate::mixed::law_check::run_check(&law_id, role, &laws, &mut |event| {
+                svc.emit("laws.check", event);
+            })
+        })
+        .await
+        .map_err(|e| MethodError::internal(format!("the law check failed: {e}")))??;
+        let passed = !results.is_empty() && results.iter().all(|(_, v)| v.passed);
+        let cases: Vec<Value> = results.iter().map(|(j, _)| j.clone()).collect();
+        Ok(json!({
+            "law": facts.to_json(),
+            "report": {
+                "passed": passed,
+                "recorded": false,
+                "role": crate::mixed::law_check::role_name(role),
+                "cases": cases,
+            },
+        }))
+    }
+}
+
 /// How long to wait for the run thread to answer: its identification, a margin.
 fn wait_for(run: &MixedRun) -> Duration {
     Duration::from_secs_f64(10.0 + 2.0 * run.wire.identification_s())

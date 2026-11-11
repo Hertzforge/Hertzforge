@@ -1746,6 +1746,9 @@ impl Service {
             "twr.plays" => self.twr_plays(params).await,
             "laws.list" => self.laws_list(params).await,
             "laws.import" => self.laws_import(conn, params).await,
+            "laws.check" if params.get("mixed").is_some_and(|m| !m.is_null()) => {
+                self.mixed_laws_check(conn, params).await
+            }
             "laws.check" => match self.classical_law_id(conn, params).await {
                 Some(id) => {
                     let mut p = params.clone();

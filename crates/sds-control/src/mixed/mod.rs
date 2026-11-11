@@ -4,6 +4,7 @@
 //! the floor's role and the tones'.
 
 pub mod config;
+pub mod law_check;
 pub mod run;
 pub mod subscribe;
 pub mod view;

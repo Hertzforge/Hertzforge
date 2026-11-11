@@ -1095,7 +1095,14 @@ impl Actor {
                 .part
                 .as_deref()
                 .and_then(|id| st.parts.iter().find(|r| r.id == id).and_then(|r| r.freq_hz));
-            view::trip_json(t, level, at_hz)
+            let mut v = view::trip_json(t, level, at_hz);
+            // The floor's own trips name the floor.
+            if v["kind"] == "envelope" && v["part"].is_null() {
+                if let Some(f) = self.plan.core.parts.iter().find(|p| p.kind() == "floor") {
+                    v["part"] = Value::from(f.id.as_str());
+                }
+            }
+            v
         });
         let trip_words = trip.as_ref().map(|t| {
             let w = t.words();

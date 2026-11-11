@@ -363,6 +363,36 @@ async fn run_to_engaged_or_end(c: &mut Client, cfg: Value) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recording_runs_with_the_test_and_says_where_it_is() {
+    let addr = serve(service(Duration::from_secs(30))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let mut cfg = config(vec![floor(), tone("t1", 160.0, 0.5)], auto(4.0));
+    cfg["capture"] = json!({"rule": "entire_test", "run_name": "mixed_sim_capture"});
+    run_to_engaged(&mut c, cfg).await;
+    let end = wait_state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+    let log = c.ok("mixed.log", json!({})).await;
+    let rec: Vec<&str> = log["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["text"].as_str())
+        .filter(|t| t.starts_with("recording to"))
+        .collect();
+    assert_eq!(rec.len(), 1, "{log}");
+    let dir = std::path::PathBuf::from(rec[0].trim_start_matches("recording to "));
+    assert!(
+        dir.ends_with("mixed_sim_capture") || dir.to_string_lossy().contains("mixed_sim_capture"),
+        "{dir:?}"
+    );
+    assert!(
+        dir.join("law.json").exists() || dir.parent().is_some_and(|p| p.join("law.json").exists()),
+        "{dir:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_controller_ends_in_the_safe_stop() {
     let addr = serve(service(Duration::from_secs(2))).await;
     let mut obs = Client::connect(addr).await;

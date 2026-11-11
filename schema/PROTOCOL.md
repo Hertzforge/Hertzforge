@@ -3701,16 +3701,15 @@ case's pass band in words, as the core sets it. A case's result:
 
 ```
 {"name":"fixed tone on floor","case":"fixed_tone_on_floor","role":"tones",
- "plant":"one mode, 250 Hz, Q 10","requirement":"...","passed":true,"detail":"...",
- "end":"completed","trip":null,"floor_worst_db":0.8,"tone_worst_db":0.4,"band_worst_db":null,
- "calls":18000,"misses":0,"refused":0,"capped":0,"worst_call_ms":0.01,"budget_ms":2.5,
- "max_drive_vpk":2.1}
+ "plant":"...","requirement":"...","passed":true,"detail":"..."}
 ```
 
-`floor_worst_db`, `tone_worst_db` and `band_worst_db` are the worst judged error of each kind of
-part at full level (null where the case has none); `calls`, `misses`, `refused`, `capped`,
-`worst_call_ms` and `budget_ms` are the law under check's. A law file's mixed result is recorded
-against its SHA-256 and its role (`recorded` true); the catalog entry is unchanged, and
+The result is `{"law","report":{"passed","recorded","role","cases"}}`: `law` the role's facts as
+`derived.law.<role>` states them, `cases` one result per case in the order above. `detail`
+states the case's measured figures in words, or the trip that failed it.
+
+A law file's mixed result is not yet recorded
+(`recorded` false): until it is, no imported law is cleared for hardware in a Mixed Mode role; the catalog entry is unchanged, and
 `mixed.configure` reports in `derived.law.<role>.hardware` whether the law may drive hardware in
 that role. `mixed.arm` on a hardware station refuses a law without both records
 `law_not_checked`, naming the role in `detail.role`. Refusals of `laws.check` with `mixed` are
