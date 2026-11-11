@@ -313,6 +313,7 @@ impl MixedService {
             return Ok(false);
         }
         let (mut peak, mut sumsq, mut n) = (0.0f64, 0.0, 0u64);
+        let mut clamped = 0u64;
         for _ in 0..batches {
             self.apply_verbs();
             let rt = self.rt.as_mut().expect("running");
@@ -320,6 +321,8 @@ impl MixedService {
             rt.top_up(&self.cfg, lead);
             let station_trip = rt.run_batch()?;
             peak = peak.max(rt.step.records.peak);
+            clamped += rt.step.records.clamped;
+            rt.step.records.clamped = 0;
             sumsq += rt.step.records.sumsq;
             n += rt.step.records.n;
             rt.step.records.peak = 0.0;
@@ -406,6 +409,7 @@ impl MixedService {
             }
         }
         self.chunk_peak = peak;
+        self.chunk_clamped = clamped > 0;
         self.chunk_rms = if n > 0 {
             (sumsq / n as f64).sqrt()
         } else {
@@ -1097,7 +1101,7 @@ impl MixedService {
             row.drive = (rt.floor_drive.iter().sum::<f64>() * rt.df).sqrt() * rgain;
             row.misses = rt.floor_misses;
             row.capped = rt.floor_tally.capped;
-            row.limiting = rt.notched.iter().any(|n| *n);
+            row.limiting = rt.notched.iter().any(|n| *n) || rt.rms_held;
         }
         // Tones.
         for (j, tc) in rt.step.tones.iter().enumerate() {
@@ -1123,6 +1127,8 @@ impl MixedService {
             });
             row.misses = tc.misses_in_row;
             row.capped = tc.tally.capped;
+            row.limiting = tc.limiting;
+            row.held = tc.limiting;
         }
         // Bands.
         for bc in &rt.bands {
@@ -1142,6 +1148,7 @@ impl MixedService {
             row.settled = bc.level.frames() > 0.0;
             row.alarm = bc.alarm;
             row.capped = bc.capped;
+            row.limiting = bc.limiting;
         }
         s.floor = FloorSummary {
             rms_target_g: s.floor.rms_target_g * lev,
@@ -1159,6 +1166,7 @@ impl MixedService {
             control_rms_g: control_rms,
             drive_vpk: self.chunk_peak,
             drive_vrms: self.chunk_rms,
+            clamped: self.chunk_clamped,
         };
         s.law = self.law_status();
         s

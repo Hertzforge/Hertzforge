@@ -176,7 +176,10 @@ fn every_step_out_of_order_is_refused_by_state() {
 #[test]
 fn a_trip_names_its_part() {
     let t = status::MixedTrip {
-        kind: status::MixedTripKind::ToneAbort { error_db: 3.4 },
+        kind: status::MixedTripKind::ToneAbort {
+            error_db: 3.4,
+            held_at_vpk: None,
+        },
         part: Some("t3".into()),
         t_s: 12.0,
     };

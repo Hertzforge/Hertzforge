@@ -67,6 +67,9 @@ pub(crate) struct BandCtl {
     pub(crate) error_db: Option<f64>,
     pub(crate) center_now: f64,
     pub(crate) capped: u64,
+    /// Whether the random part's rms ceiling or a limit channel held the band
+    /// down in its last loop (its servo did not raise its gain).
+    pub(crate) limiting: bool,
 }
 
 /// What one synthesized stretch of the ring carries.
@@ -154,6 +157,8 @@ pub(crate) struct Runtime {
     /// Lines of the random part the limit channels held down on the last
     /// synthesis.
     pub(crate) notched: Vec<bool>,
+    /// Whether the random part's rms ceiling scaled the last hop synthesized.
+    pub(crate) rms_held: bool,
     /// Each floor law call since the service last drained them.
     pub(crate) floor_log: Vec<super::law_records::MixedLawRecord>,
     /// The capture, while one runs.
@@ -397,6 +402,7 @@ impl Runtime {
             tap: Vec::new(),
             limits,
             notched: vec![false; lines],
+            rms_held: false,
             floor_log: Vec::new(),
             capture: None,
             floor_drive_in_last: 0.0,
@@ -687,6 +693,7 @@ impl Runtime {
                 usable: false,
                 read_once: false,
                 shown_db: 0.0,
+                limiting: false,
                 alarm: false,
                 abort_s: 0.0,
                 alarm_db: t.alarm_db,
@@ -730,6 +737,7 @@ impl Runtime {
                     error_db: None,
                     center_now: now[i].freq_hz.unwrap_or(0.0),
                     capped: 0,
+                    limiting: false,
                 }),
                 _ => None,
             })
@@ -815,9 +823,11 @@ impl Runtime {
                 }
             }
             // The random part's rms ceiling.
+            self.rms_held = false;
             if let Some(vmax) = cfg.limits.drive_ceiling_vrms {
                 let rms = (psd.iter().sum::<f64>() * self.df).sqrt() * lev;
                 if rms > vmax && rms > 0.0 {
+                    self.rms_held = true;
                     let k = (vmax / rms).powi(2);
                     psd.iter_mut().for_each(|p| *p *= k);
                 }
@@ -1048,7 +1058,11 @@ impl Runtime {
                     if !rep.bound.is_empty() {
                         self.floor_tally.capped += 1;
                     }
-                    if out.diagnostics.divergent_bins.is_empty() {
+                    // While the random part's rms ceiling holds the drive,
+                    // the floor reads low and the law's asks against the
+                    // hold are not a diverging loop (the floor row says it
+                    // is limiting; its rms alarm and abort judge it).
+                    if out.diagnostics.divergent_bins.is_empty() || self.rms_held {
                         self.divergent_loops = 0;
                     } else {
                         self.divergent_loops += 1;
@@ -1164,10 +1178,24 @@ impl Runtime {
         }
         // Bands.
         for bc in self.bands.iter_mut() {
+            // A band the random part's rms ceiling or a limit channel holds
+            // reads low; its servo may lower its gain but does not raise it
+            // against the hold (it would wind up and step the band past its
+            // level when the hold lets go).
+            let (lo, hi) = bc.width.edges_at(bc.center_now);
+            let (k0, k1) = (
+                ((lo / self.df).floor().max(0.0) as usize).min(self.lines),
+                ((hi / self.df).ceil().max(0.0) as usize + 1).min(self.lines),
+            );
+            bc.limiting = self.rms_held || self.notched[k0..k1].iter().any(|n| *n);
             if let Some(m) = bc.loop_level.measured() {
                 let floor_ref = bc.loop_level.reference().unwrap_or(0.0) - bc.level_g2;
-                if bc.servo.update(m - floor_ref, bc.level_g2) {
+                let before = bc.servo.gain_db;
+                if bc.servo.update(m - floor_ref, bc.level_g2) && !bc.limiting {
                     bc.capped += 1;
+                }
+                if bc.limiting && bc.servo.gain_db > before {
+                    bc.servo.gain_db = before;
                 }
             }
             bc.loop_level.reset();

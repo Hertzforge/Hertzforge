@@ -388,7 +388,7 @@ pub fn alarm(v: &MixedView) -> bool {
 pub fn limiting(v: &MixedView) -> bool {
     v.status
         .as_ref()
-        .is_some_and(|s| s.parts.iter().any(|r| r.limiting))
+        .is_some_and(|s| s.parts.iter().any(|r| r.limiting) || s.totals.clamped)
 }
 
 /// What `mixed.state` events are sent on a change of.
@@ -433,7 +433,7 @@ pub fn trip_json(t: &MixedTrip, level_db: f64, at_hz: Option<f64>) -> Value {
             "envelope",
             json!({"abort_lines": 0, "worst_db": num(round(*error_db, 2))}),
         ),
-        MixedTripKind::ToneAbort { error_db } => (
+        MixedTripKind::ToneAbort { error_db, .. } => (
             "abort_band",
             json!({"side": if *error_db >= 0.0 { "high" } else { "low" }, "measured_g": null, "limit_g": null, "error_db": num(round(*error_db, 2))}),
         ),

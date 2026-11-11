@@ -3553,7 +3553,8 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
   excluded; `parts_s` parts time (null before the parts come in).
 - `held` is true while `mixed.hold` holds the progress. `alarm` is true while any part is
   outside its alarm band. `limiting` is true while the drive ceiling, a limit channel or a cap
-  holds any part down.
+  holds any part down, or the drive ceiling's last-resort clamp cut the summed drive in the last
+  chunk.
 - `parts` has one row per part, every part of the configuration in its order, whether on or not
   (a screen finds a part by `id`, never by position alone). Each row:
   - `id`, `kind`, `name`, `enabled` (as configured, or as `mixed.part` last set it), `on` (the
