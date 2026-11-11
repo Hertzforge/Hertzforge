@@ -50,6 +50,25 @@ pub struct RatingCheck {
     pub within: bool,
 }
 
+/// How one tone's alarm and abort will be judged (see
+/// [`crate::tone::tone_judging`]), at the point of its motion that needs the
+/// longest averaging.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToneJudgingPrediction {
+    /// The part's id.
+    pub part: String,
+    /// The averaging its alarm and abort judge, seconds.
+    pub judge_s: f64,
+    /// The judged figure's scatter, dB, one sigma.
+    pub sigma_db: f64,
+    /// The alarm band it is judged against, dB below and above.
+    pub alarm_db: (f64, f64),
+    /// The abort band, dB below and above.
+    pub abort_db: (f64, f64),
+    /// Whether the tolerances are widened to the scatter.
+    pub widened: bool,
+}
+
 /// The prediction for a configuration at full level.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MixedPrediction {
@@ -85,6 +104,9 @@ pub struct MixedPrediction {
     /// reach `control_dof`.
     #[serde(default)]
     pub floor_equalize_s: f64,
+    /// Each tone's judging, in parts-list order.
+    #[serde(default)]
+    pub tone_judging: Vec<ToneJudgingPrediction>,
 }
 
 impl MixedPrediction {
@@ -114,16 +136,44 @@ pub fn predict(cfg: &MixedConfig) -> Result<MixedPrediction, ConfigError> {
     let (mut rand_ms, mut rand_v2, mut rand_d2) = (floor_ms, floor_v * floor_v, floor_d * floor_d);
     let (mut tone_a, mut tone_v, mut tone_d) = (0.0, 0.0, 0.0);
     let mut excluded_hz = Vec::new();
+    let mut tone_judging = Vec::new();
+    // The floor's density at a frequency, on a fine grid of the table.
+    let fine_df = (cfg.df_hz / 4.0).max(0.01);
+    let f_top = cfg
+        .parts
+        .iter()
+        .zip(&motions)
+        .filter_map(|(_, m)| m.as_ref().map(|m| m.hi_hz))
+        .fold(0.0f64, f64::max)
+        .max(floor.band().map_or(0.0, |b| b.1));
+    let fine = ft.interpolate(fine_df, f_top + 2.0 * fine_df).ok();
+    let floor_at = |f: f64| -> f64 {
+        fine.as_ref().map_or(0.0, |l| {
+            let k = ((f - l.f0_hz) / l.df_hz).round().max(0.0) as usize;
+            l.psd.get(k).copied().unwrap_or(0.0)
+        })
+    };
     for (p, m) in cfg.parts.iter().zip(&motions) {
         let ms = match (&p.body, m) {
             (PartBody::Floor(_), _) => floor_ms,
             (PartBody::Tone(t), Some(m)) => {
                 let (mut a_max, mut v_max, mut d_max) = (0.0f64, 0.0f64, 0.0f64);
+                let mut slowest: Option<crate::tone::ToneJudging> = None;
                 for f in motion_points(m.lo_hz, m.hi_hz) {
                     let a = match &t.amplitude {
                         ToneAmplitude::Constant { g_pk } => *g_pk,
                         amp => amp.g_pk_at(f).unwrap_or(0.0),
                     };
+                    let jd = crate::tone::tone_judging(
+                        a,
+                        floor_at(f),
+                        t.alarm_db,
+                        t.abort_db,
+                        cfg.tracking_hz,
+                    );
+                    if slowest.is_none_or(|s| jd.judge_s > s.judge_s || jd.sigma_db > s.sigma_db) {
+                        slowest = Some(jd);
+                    }
                     let w = TAU * f;
                     a_max = a_max.max(a);
                     v_max = v_max.max(a * STANDARD_G / w);
@@ -132,6 +182,16 @@ pub fn predict(cfg: &MixedConfig) -> Result<MixedPrediction, ConfigError> {
                 tone_a += a_max;
                 tone_v += v_max;
                 tone_d += d_max;
+                if let Some(jd) = slowest {
+                    tone_judging.push(ToneJudgingPrediction {
+                        part: p.id.clone(),
+                        judge_s: jd.judge_s,
+                        sigma_db: jd.sigma_db,
+                        alarm_db: jd.alarm_db,
+                        abort_db: jd.abort_db,
+                        widened: jd.widened,
+                    });
+                }
                 if m.hi_hz <= m.lo_hz {
                     excluded_hz.push((m.lo_hz - cfg.exclusion_hz, m.lo_hz + cfg.exclusion_hz));
                 }
@@ -225,6 +285,7 @@ pub fn predict(cfg: &MixedConfig) -> Result<MixedPrediction, ConfigError> {
         excluded_hz,
         excluded_lines,
         ratings,
+        tone_judging,
         floor_equalize_s: {
             let frame = 1.0 / cfg.df_hz;
             let frames = (cfg.control_dof / crate::floor::dof_per_frame()).ceil();

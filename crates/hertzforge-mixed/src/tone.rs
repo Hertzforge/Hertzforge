@@ -436,6 +436,94 @@ impl ToneBank {
     }
 }
 
+/// The judged figure's scatter, one sigma, as a share of the tighter side of
+/// the tone's alarm band: a third, so an alarm is three sigma from a tone on
+/// target (a false alarm about once in 370 independent judgements) while the
+/// scatter stays a small part of what the operator set.
+pub const TONE_JUDGE_SHARE: f64 = 1.0 / 3.0;
+/// The longest a tone's reading is averaged before it is judged, seconds. A
+/// tone that would need longer is judged on this and its tolerance widened to
+/// its scatter: past this an abort stops being an abort.
+pub const TONE_JUDGE_CAP_S: f64 = 8.0;
+/// Sigmas of the judged figure's scatter a widened tolerance spans.
+pub const TONE_JUDGE_SIGMAS: f64 = 3.0;
+/// dB per unit of relative amplitude, small: `20 / ln 10`.
+const DB_PER_REL: f64 = 8.685_889_638_065_037;
+
+/// How a tone's alarm and abort are judged: on its reading averaged over
+/// `judge_s` (a single reading of a tracker of noise bandwidth `B_n` already
+/// averages `1 / B_n`), against tolerances widened to the judged figure's
+/// scatter when even [`TONE_JUDGE_CAP_S`] leaves it wider than
+/// [`TONE_JUDGE_SHARE`] of the alarm.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ToneJudging {
+    /// The averaging time the judged figure carries, seconds.
+    pub judge_s: f64,
+    /// The judged figure's predicted scatter, dB, one sigma.
+    pub sigma_db: f64,
+    /// The alarm band it is judged against, dB below and above.
+    pub alarm_db: (f64, f64),
+    /// The abort band, dB below and above.
+    pub abort_db: (f64, f64),
+    /// Whether the tolerances were widened to the scatter.
+    pub widened: bool,
+    /// Whether the reading is averaged past a single tracker reading.
+    pub averages: bool,
+}
+
+impl ToneJudging {
+    /// The time constant of the exponential average that, after a single
+    /// reading's own `1 / B_n`, brings the judged figure's averaging to
+    /// `judge_s` (an exponential of time constant tau averages like a boxcar
+    /// of `2 tau`).
+    pub fn tau_s(&self, bn_hz: f64) -> f64 {
+        ((self.judge_s - 1.0 / bn_hz) / 2.0).max(0.0)
+    }
+}
+
+/// How a tone of peak `a` over a floor of one-sided density `g` (both at full
+/// level, so their ratio holds at every level) is judged, read through a
+/// tracker of noise bandwidth `bn_hz`. Averaged over `T`, an amplitude's
+/// standard deviation is about `sqrt(g / T)` (the brief's 2.2), so the judged
+/// figure scatters `8.69 sqrt(g / T) / a` dB; `T` is the least that brings
+/// that to [`TONE_JUDGE_SHARE`] of the tighter alarm side, no shorter than a
+/// single reading (`1 / bn_hz`: such a tone is judged exactly as before) and no
+/// longer than [`TONE_JUDGE_CAP_S`].
+pub fn tone_judging(
+    a: f64,
+    g: f64,
+    alarm_db: (f64, f64),
+    abort_db: (f64, f64),
+    bn_hz: f64,
+) -> ToneJudging {
+    let single = 1.0 / bn_hz.max(1e-9);
+    let alarm = alarm_db.0.min(alarm_db.1).max(1e-9);
+    let need = if a > 0.0 && g > 0.0 {
+        g * (DB_PER_REL / (TONE_JUDGE_SHARE * alarm * a)).powi(2)
+    } else {
+        0.0
+    };
+    let judge_s = need.clamp(single, TONE_JUDGE_CAP_S.max(single));
+    let sigma_db = if a > 0.0 && g > 0.0 {
+        DB_PER_REL * (g / judge_s).sqrt() / a
+    } else {
+        0.0
+    };
+    let span = TONE_JUDGE_SIGMAS * sigma_db;
+    let widened = span > alarm + 1e-12;
+    let wide = |b: (f64, f64)| (b.0.max(span), b.1.max(span));
+    let alarm_w = wide(alarm_db);
+    let abort_w = wide(abort_db);
+    ToneJudging {
+        judge_s,
+        sigma_db,
+        alarm_db: alarm_w,
+        abort_db: (abort_w.0.max(alarm_w.0), abort_w.1.max(alarm_w.1)),
+        widened,
+        averages: judge_s > single + 1e-9,
+    }
+}
+
 /// Whether a tone of peak `a` stands far enough above a floor of one-sided
 /// density `g` in a tracker band of `bn_hz` to be read ([`MIN_TONE_SNR`]).
 pub fn tone_readable(a: f64, g: f64, bn_hz: f64) -> bool {

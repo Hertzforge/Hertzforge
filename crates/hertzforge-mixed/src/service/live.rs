@@ -1129,6 +1129,13 @@ impl MixedService {
             row.capped = tc.tally.capped;
             row.limiting = tc.limiting;
             row.held = tc.limiting;
+            if let Some(jd) = tc.judging {
+                row.judge_s = Some(jd.judge_s);
+                row.judged_alarm_db = Some(jd.alarm_db);
+                row.judged_abort_db = Some(jd.abort_db);
+                row.tolerance_widened = jd.widened;
+            }
+            row.judged_error_db = tc.judged_db;
         }
         // Bands.
         for bc in &rt.bands {

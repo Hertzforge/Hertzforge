@@ -313,3 +313,27 @@ fn a_tone_under_the_floor_in_its_band_is_not_readable() {
     // 0.2 g: 0.02 / 0.005 = 4, not.
     assert!(!tone_readable(0.2, 0.01, 0.5));
 }
+
+/// The judging time and tolerances: a tone far over the floor is judged on a
+/// single reading as before; a small one is averaged up to the cap and, past
+/// it, judged against tolerances widened to three sigma of its scatter.
+#[test]
+fn a_tone_is_judged_over_the_time_its_scatter_needs_up_to_the_cap() {
+    let big = tone_judging(2.0, 0.01, (1.5, 1.5), (3.0, 3.0), 0.5);
+    assert!(!big.averages && !big.widened && big.judge_s == 2.0);
+    assert_eq!((big.alarm_db, big.abort_db), ((1.5, 1.5), (3.0, 3.0)));
+    // 0.1 g on 1e-4 g^2/Hz needs about 3 s for a 0.5 dB sigma.
+    let mid = tone_judging(0.1, 1e-4, (1.5, 1.5), (3.0, 3.0), 0.5);
+    assert!(mid.averages && !mid.widened, "{mid:?}");
+    assert!((mid.judge_s - 3.02).abs() < 0.01 && (mid.sigma_db - 0.5).abs() < 1e-9);
+    // 0.1 g on 5e-4 g^2/Hz would need 15 s: judged on 8 s, alarm widened.
+    let small = tone_judging(0.1, 5e-4, (1.5, 1.5), (3.0, 3.0), 0.5);
+    assert_eq!(small.judge_s, TONE_JUDGE_CAP_S);
+    assert!(
+        small.widened && (small.sigma_db - 0.687).abs() < 0.001,
+        "{small:?}"
+    );
+    assert!((small.alarm_db.0 - 3.0 * small.sigma_db).abs() < 1e-12);
+    assert_eq!(small.abort_db, (3.0, 3.0));
+    assert!((small.tau_s(0.5) - 3.0).abs() < 1e-12);
+}
