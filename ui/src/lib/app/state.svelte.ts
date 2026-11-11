@@ -17,6 +17,8 @@ import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
 import { SineViewsState } from '$lib/acquire/sine/sineViews.svelte';
+import { MixedStore } from '$lib/acquire/mixed/mixedStore.svelte';
+import { MixedViewsState } from '$lib/acquire/mixed/mixedViews.svelte';
 import { TwrStore } from '$lib/acquire/twr/twrStore.svelte';
 import { TwrViewsState } from '$lib/acquire/twr/twrViews.svelte';
 import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
@@ -1896,6 +1898,10 @@ export class AppState {
 	readonly sine: SineStore;
 	/** The Sine run's pages and this window's subscription. */
 	readonly sineViews: SineViewsState;
+	/** Mixed Mode's setup and run; the station and table are the Acquire store's. */
+	readonly mixed: MixedStore;
+	/** The Mixed Mode run's pages and this window's subscription. */
+	readonly mixedViews: MixedViewsState;
 	/** Time waveform replication's setup and run; the station and table are the Acquire store's. */
 	readonly twr: TwrStore;
 	/** The TWR run's pages and this window's subscription. */
@@ -1931,6 +1937,7 @@ export class AppState {
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.mixed = new MixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.twr = new TwrStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -1973,6 +1980,13 @@ export class AppState {
 			setupTitle: () => this.sine.status?.title ?? (config.popout ? null : this.sine.setup.title),
 			showing: () => sinePopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'sine' && this.sine.step === 'run'),
 			page: sinePopout ? config.page : null
+		});
+		const mixedPopout = config.popout && config.popoutTest === 'mixed';
+		this.mixedViews = new MixedViewsState(this.control, {
+			setupTitle: () => this.mixed.status?.title ?? (config.popout ? null : this.mixed.setup.title),
+			showing: () => mixedPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mixed' && this.mixed.step === 'run'),
+			page: mixedPopout ? config.page : null,
+			runId: () => this.mixed.status?.run_id ?? null
 		});
 		const twrPopout = config.popout && config.popoutTest === 'twr';
 		this.twrViews = new TwrViewsState(this.control, {
@@ -2017,7 +2031,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'twr' | 'explorer' | 'recorder' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -2035,6 +2049,7 @@ export class AppState {
 		const shock = this.config.popoutTest === 'shock';
 		const srs = this.config.popoutTest === 'srs';
 		const sine = this.config.popoutTest === 'sine';
+		const mixed = this.config.popoutTest === 'mixed';
 		const twr = this.config.popoutTest === 'twr';
 		const explorer = this.config.popoutTest === 'explorer';
 		const recorder = this.config.popoutTest === 'recorder';
@@ -2062,6 +2077,11 @@ export class AppState {
 					if (this.control.status === 'open') void this.sine.sync();
 				});
 			}
+			if (mixed) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mixed.sync();
+				});
+			}
 			if (twr) {
 				$effect(() => {
 					if (this.control.status === 'open') void this.twr.sync();
@@ -2082,6 +2102,7 @@ export class AppState {
 		else if (shock) this.shockViews.watch();
 		else if (srs) this.srsViews.watch();
 		else if (sine) this.sineViews.watch();
+		else if (mixed) this.mixedViews.watch();
 		else if (twr) this.twrViews.watch();
 		else if (explorer) this.explorerViews.watch();
 		else if (recorder) this.recorderViews.watch();
@@ -2091,7 +2112,7 @@ export class AppState {
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2120,6 +2141,8 @@ export class AppState {
 		if (onSrs || this.srs.isLive) return this.srs.source;
 		const onSine = this.workspace === 'acquire' && this.tests.screen === 'sine';
 		if (onSine || this.sine.isLive) return this.sine.source;
+		const onMixed = this.workspace === 'acquire' && this.tests.screen === 'mixed';
+		if (onMixed || this.mixed.isLive) return this.mixed.source;
 		const onTwr = this.workspace === 'acquire' && this.tests.screen === 'twr';
 		if (onTwr || this.twr.isLive) return this.twr.source;
 		const onExplorer = this.workspace === 'acquire' && this.tests.screen === 'explorer';
@@ -2167,6 +2190,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.sine.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mixed.sync();
+			});
+			$effect(() => {
 				if (this.control.status === 'open') void this.twr.sync();
 			});
 			$effect(() => {
@@ -2186,6 +2212,7 @@ export class AppState {
 		this.shock.watch();
 		this.srs.watch();
 		this.sine.watch();
+		this.mixed.watch();
 		this.twr.watch();
 		this.explorer.watch();
 		this.recorder.watch();
@@ -2195,6 +2222,7 @@ export class AppState {
 		this.shockViews.watch();
 		this.srsViews.watch();
 		this.sineViews.watch();
+		this.mixedViews.watch();
 		this.twrViews.watch();
 		this.explorerViews.watch();
 		this.recorderViews.watch();

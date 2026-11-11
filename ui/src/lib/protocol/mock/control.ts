@@ -71,6 +71,7 @@ import { MockConnection, MockError, type MockServer } from './socket';
 import { createShockMock } from './shock';
 import { createSrsMock } from './srs';
 import { createSineMock } from './sine';
+import { createMixedMock } from './mixed';
 import { createTwrMock } from './twr';
 import { createExplorerMock } from './explorer';
 import { createRecorderMock } from './recorder';
@@ -788,7 +789,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const isLive = () => random !== null && LIVE_STATES.includes(random.state);
 	/** A run of any test type is live (the seat's countdown runs for every one). */
-	const anyLive = () => isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive();
+	const anyLive = () => isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive();
 	const orphanS = () => (seatDeadline !== null && anyLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
@@ -820,6 +821,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			shock.seatExpired();
 			srs.seatExpired();
 			sine.seatExpired();
+			mixed.seatExpired();
 			twr.seatExpired();
 			explorer.seatExpired();
 			recorder.seatExpired();
@@ -849,7 +851,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -866,7 +868,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -883,7 +885,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -900,7 +902,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? explorer.liveId() ?? recorder.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -918,7 +920,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? recorder.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? recorder.liveId() ?? mixed.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -936,7 +938,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? mixed.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		connections: () => connections,
 		rows: () => rows,
@@ -948,6 +950,24 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		clientName,
 		feasibilityExceeds: options.feasibilityExceeds ?? false,
 		freeBytes: options.recorderFreeBytes
+	});
+	const mixed = createMixedMock({
+		speed,
+		timeoutS,
+		own,
+		hasController: () => !!seat?.conn,
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId())),
+		broadcast: (topic, data) => broadcast(topic, data),
+		connections: () => connections,
+		rows: () => rows,
+		station: () => {
+			const sel = selected();
+			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
+			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
+		},
+		clientName,
+		feasibilityExceeds: options.feasibilityExceeds ?? false,
+		toneLaws: () => sine.laws()
 	});
 
 	// ---- stations and the channel table -------------------------------------------------------
@@ -1711,7 +1731,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function notWhileShock(what: string) {
-		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId();
+		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId();
 		if (id) refuse('refused', 'run_active', `Run ${id} is live; stop it before ${what}.`, { run_id: id });
 	}
 
@@ -1739,6 +1759,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			shock.detach(c);
 			srs.detach(c);
 			sine.detach(c);
+			mixed.detach(c);
 			twr.detach(c);
 			explorer.detach(c);
 			recorder.detach(c);
@@ -1755,6 +1776,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			...shock.methods,
 			...srs.methods,
 			...sine.methods,
+			...mixed.methods,
 			...twr.methods,
 			...explorer.methods,
 			...recorder.methods,
@@ -1766,7 +1788,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const classical = (shock.methods['laws.list'](params, conn) as { laws: unknown[] }).laws;
 				const all = world === undefined || world === null;
 				return {
-					laws: [...classical, ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : [])],
+					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : [])],
 					problems: []
 				};
 			},

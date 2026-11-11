@@ -29,6 +29,7 @@ import {
 	newPlotSpec,
 	type AxisDisplay,
 	type LineFamily,
+	type PartSelector,
 	type PlotDisplay,
 	type PlotNote,
 	type PlotPanelSpec,
@@ -67,7 +68,8 @@ export const CARD_WORDS: Record<string, string> = {
 	plays: 'Plays',
 	recording: 'Recording',
 	recordings: 'Recordings',
-	recmarks: 'Marks'
+	recmarks: 'Marks',
+	parts: 'Parts'
 };
 
 export function cardWords(kind: CardKind): string {
@@ -158,7 +160,16 @@ export function freePageName(layout: ScreenLayout): string {
 export function plotTitle(spec: PlotPanelSpec, type: PlotType | null): string {
 	if (spec.title) return spec.title;
 	const words = type?.words ?? spec.quantity;
+	if (type?.parts && spec.parts !== undefined) return `${words}: ${partWords(spec.parts)}`;
 	return type?.channels ? `${words}: ${channelWords(spec.channels)}` : words;
+}
+
+export function partWords(p: PartSelector): string {
+	if (p === 'all') return 'every part';
+	if (p === 'tones') return 'tones';
+	if (p === 'bands') return 'narrowbands';
+	if (p.length === 0) return 'no parts';
+	return p.join(', ');
 }
 
 export function channelWords(c: ChannelSelector): string {
@@ -276,7 +287,7 @@ export function readSpec(v: unknown, types: PlotType[]): PlotPanelSpec | null {
 	const type = types.find((t) => t.id === v.quantity);
 	if (!type) return null;
 	const base = newPlotSpec(type);
-	return {
+	const out: PlotPanelSpec = {
 		quantity: type.id,
 		channels: type.channels ? readSelector(v.channels) : 'all',
 		arrange: oneOf(v.arrange, ['split', 'overlay'], base.arrange),
@@ -284,6 +295,15 @@ export function readSpec(v: unknown, types: PlotType[]): PlotPanelSpec | null {
 		title: textOrNull(v.title, 80),
 		display: readDisplay(v.display)
 	};
+	if (type.parts) out.parts = readParts(v.parts, base.parts ?? 'all');
+	return out;
+}
+
+/** A part selector, read back: ids, or one of the named sets. */
+export function readParts(v: unknown, fallback: PartSelector): PartSelector {
+	if (v === 'all' || v === 'tones' || v === 'bands') return v;
+	if (Array.isArray(v)) return [...new Set(v.filter((x): x is string => typeof x === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(x)))].slice(0, 24);
+	return fallback;
 }
 
 function readCell(v: unknown): Cell | null {
@@ -404,7 +424,9 @@ function savedDisplay(d: PlotDisplay) {
 }
 
 function savedSpec(s: PlotPanelSpec) {
-	return { quantity: s.quantity, channels: Array.isArray(s.channels) ? [...s.channels] : s.channels, arrange: s.arrange, points: s.points, title: s.title, display: savedDisplay(s.display) };
+	const out: Record<string, unknown> = { quantity: s.quantity, channels: Array.isArray(s.channels) ? [...s.channels] : s.channels, arrange: s.arrange, points: s.points, title: s.title, display: savedDisplay(s.display) };
+	if (s.parts !== undefined) out.parts = Array.isArray(s.parts) ? [...s.parts] : s.parts;
+	return out;
 }
 
 function savedPanel(p: Panel) {

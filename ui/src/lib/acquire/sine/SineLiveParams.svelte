@@ -6,11 +6,19 @@
 	 */
 	import { formatNumber } from '$lib/viz/format';
 	import NumberField from '../NumberField.svelte';
-	import type { SineStore } from './sineStore.svelte';
-	import { liveValueError } from './sineVerbs';
+	import type { LawEntry } from '$lib/protocol/mimo';
+	import { liveValueError, type LiveParamState } from './sineVerbs';
+
+	/** What the card reads and sends: Sine's store, or Mixed Mode's for its tone law. */
+	interface LiveParamsHost {
+		liveParams: LiveParamState[];
+		runLaw: LawEntry | null;
+		busy: string | null;
+		adjust(key: string, value: number): Promise<unknown>;
+	}
 
 	interface Props {
-		sine: SineStore;
+		sine: LiveParamsHost;
 	}
 	let { sine }: Props = $props();
 
