@@ -226,6 +226,10 @@ pub struct MimoRandomService {
     frf_law: Option<MatrixStack>,
     frf_law_ident: Option<MatrixStack>,
     coherence: Vec<f64>,
+    /// The multiple coherence the law sees while the FRF is updated: that of the
+    /// loop's own estimate, the one the updated FRF's H1 comes from. `None` holds
+    /// the identification's.
+    coherence_law: Option<Vec<f64>>,
     condition: Vec<f64>,
     gate: Option<GateReport>,
     prediction: Option<Prediction>,
@@ -440,6 +444,7 @@ impl MimoRandomService {
             frf_law: None,
             frf_law_ident: None,
             coherence: Vec::new(),
+            coherence_law: None,
             condition: Vec::new(),
             gate: None,
             prediction: None,
@@ -1490,6 +1495,7 @@ impl MimoRandomService {
             self.achievable = Some(Arc::new(ach));
         }
         self.coherence = set.coherence.clone();
+        self.coherence_law = None;
         self.condition = set.condition.clone();
         self.frf_c = Some(h_c);
         self.frf_l = Some(h_l);
@@ -2255,7 +2261,10 @@ impl MimoRandomService {
         };
         let tolerances = self.cfg.reference.tolerances.clone();
         let reference = self.reference.clone();
-        let coherence = self.coherence.clone();
+        let coherence = self
+            .coherence_law
+            .clone()
+            .unwrap_or_else(|| self.coherence.clone());
         let inputs = MimoLoopInputs {
             reference: &reference,
             tolerances: &tolerances,
@@ -2670,6 +2679,20 @@ impl MimoRandomService {
                         *a = *a * (1.0 - blend) + *b * blend;
                     }
                     self.frf_law = Some(m);
+                }
+            }
+            // The coherence of the same estimate, so a law that weighs the updated
+            // FRF by it reads the two from one measurement. Every term is at full
+            // level, and the drive SDM is inverted as the H1 above inverts it.
+            if let Ok(g_vd) = self.csd_to_control(&g_cd_full) {
+                if let Ok(c) = pool::multiple_coherence(
+                    &resp,
+                    &g_vd,
+                    &g_dd,
+                    Regularization::Truncated { rcond: 1e-3 },
+                    self.band,
+                ) {
+                    self.coherence_law = Some(c);
                 }
             }
         }
