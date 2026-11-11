@@ -685,6 +685,8 @@ pub struct RoleLaw {
     pub live: Vec<String>,
     /// May it drive hardware in this role (design D15).
     pub hardware: bool,
+    /// Why it may not, in words (lower case, no stop), when it may not.
+    pub not_cleared: Option<String>,
 }
 
 impl RoleLaw {
@@ -2419,13 +2421,14 @@ pub fn config_invalid(report: &Report) -> MethodError {
     crate::shock::config::config_invalid(report)
 }
 
-/// `law_not_checked` for a role on a hardware station.
-pub fn law_not_checked(role: &str, name: &str) -> MethodError {
+/// `law_not_checked` for a role on a hardware station, with why when known.
+pub fn law_not_checked(role: &str, name: &str, why: Option<&str>) -> MethodError {
+    let why = why.map_or_else(String::new, |w| format!(" ({w})"));
     MethodError::named(
         ErrorCode::Refused,
         "law_not_checked",
         format!(
-            "The {} law \"{name}\" is not cleared for hardware in Mixed Mode; it needs a \
+            "The {} law \"{name}\" is not cleared for hardware in Mixed Mode{why}; it needs a \
              passed check in its own world and a passed mixed check in this role.",
             if role == "floor" { "floor" } else { "tone" }
         ),

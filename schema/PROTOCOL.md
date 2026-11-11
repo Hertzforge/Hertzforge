@@ -3736,7 +3736,8 @@ law of the wrong world for its role is refused `law_wrong_world` at `control.law
 `control.law.tones`.
 
 An imported law drives hardware in a Mixed Mode run once it has a passed check for its exact
-file in its own world (the `sine` world's check for a tone law; a `single` law has none) **and**
+file in its own world (the `sine` world's check for a tone law, at the Sine check in force; a
+`single` law has none) **and**
 a passed **mixed check** in its role. `laws.check` with `{"mixed":"floor"}` or
 `{"mixed":"tones"}` (beside `id` or `path`, and `params`) runs the mixed check set with the law
 in that role and the built-in in the other; without `mixed`, `laws.check` is as before (a
@@ -3753,16 +3754,23 @@ case's pass band in words, as the core sets it. A case's result:
  "plant":"...","requirement":"...","passed":true,"detail":"..."}
 ```
 
-The result is `{"law","report":{"passed","recorded","role","cases"}}`: `law` the role's facts as
-`derived.law.<role>` states them, `cases` one result per case in the order above. `detail`
-states the case's measured figures in words, or the trip that failed it.
+The result is `{"law","report":{"passed","recorded","role","tool_version","cases"}}`: `law` the
+role's facts as `derived.law.<role>` states them, read again after the record is written;
+`tool_version` the mixed check's version (`mixed-check 1`); `cases` one result per case in the
+order above. `detail` states the case's measured figures in words, or the trip that failed it.
 
-A law file's mixed result is not yet recorded
-(`recorded` false): until it is, no imported law is cleared for hardware in a Mixed Mode role; the catalog entry is unchanged, and
+A law file's result is recorded against its SHA-256 for that role (`recorded` true), passed or
+not, beside the file as `laws/<sha256>.mixed-floor.check.json` or
+`laws/<sha256>.mixed-tones.check.json`; a built-in law is checked and not recorded (it is cleared
+already). The law's own entry in `laws.list`, and its own world's check, are unchanged by a mixed
+check. A record clears its file in its role only: a passed record with the check's present
+version and its present cases, by name and in order; a record of the other role, of an earlier
+version or case list, or for other bytes clears nothing, and the law is checked again.
 `mixed.configure` reports in `derived.law.<role>.hardware` whether the law may drive hardware in
 that role. `mixed.arm` on a hardware station refuses a law without both records
-`law_not_checked`, naming the role in `detail.role`. Refusals of `laws.check` with `mixed` are
-its own, and `bad_params` for a role other than `floor` or `tones`.
+`law_not_checked`, naming the role in `detail.role` and, in the message, which check stands in
+the way. Refusals of `laws.check` with `mixed` are its own, and `bad_params` for a role other
+than `floor` or `tones`; a record that cannot be written is `law_check_not_recorded`.
 
 ## Time Waveform Replication
 

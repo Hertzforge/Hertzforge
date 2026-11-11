@@ -308,7 +308,11 @@ impl Service {
         }
         for (role, r) in [("floor", &facts.floor), ("tones", &facts.tones)] {
             if !r.hardware {
-                return Err(config::law_not_checked(role, &r.name));
+                return Err(config::law_not_checked(
+                    role,
+                    &r.name,
+                    r.not_cleared.as_deref(),
+                ));
             }
         }
         Ok(())
@@ -873,8 +877,8 @@ impl Service {
 
 impl Service {
     /// `laws.check` with `mixed`: the mixed check set with the law in its role and
-    /// the built-in in the other. No mixed-check record is kept yet, so the result
-    /// is reported and not recorded.
+    /// the built-in in the other. A law file's result is recorded for its role
+    /// (design D15); a built-in's is reported only.
     pub(super) async fn mixed_laws_check(
         self: &Arc<Self>,
         conn: &Conn,
@@ -960,12 +964,37 @@ impl Service {
         .map_err(|e| MethodError::internal(format!("the law check failed: {e}")))??;
         let passed = !results.is_empty() && results.iter().all(|(_, v)| v.passed);
         let cases: Vec<Value> = results.iter().map(|(j, _)| j.clone()).collect();
+        // A law file's result is recorded against its SHA-256 for this role; a
+        // built-in is cleared already and its result is reported only. The role's
+        // facts are read again so `hardware` states the record just written.
+        let (facts, recorded) = if facts.builtin {
+            (facts, false)
+        } else {
+            let id = facts.id.clone();
+            let sha = facts.sha256.clone();
+            let verdicts: Vec<_> = results.into_iter().map(|(_, v)| v).collect();
+            let facts = self
+                .with_catalog(move |cat| {
+                    let record = hertzforge_mixed_laws::mixed_check_record(
+                        &sha,
+                        &crate::mimo::law_check::now_rfc3339(),
+                        verdicts,
+                    );
+                    hertzforge_mixed_laws::record_mixed_check(cat, role, &record)
+                        .map_err(|e| crate::mimo::law_check::not_recorded(&e))?;
+                    laws::mixed_lookup(Some(cat), &id, hertzforge_mixed_laws::role_world(role))
+                        .ok_or_else(|| MethodError::internal("the checked law left the catalog"))
+                })
+                .await?;
+            (facts, true)
+        };
         Ok(json!({
             "law": facts.to_json(),
             "report": {
                 "passed": passed,
-                "recorded": false,
+                "recorded": recorded,
                 "role": crate::mixed::law_check::role_name(role),
+                "tool_version": hertzforge_mixed_laws::MIXED_CHECK_VERSION,
                 "cases": cases,
             },
         }))

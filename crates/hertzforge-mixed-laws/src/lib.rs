@@ -4,13 +4,15 @@
 //! floor (default `hinv`) and a Sine law for the tones (default
 //! `servo_blend`, one instance per tone). [`resolve_mixed`] resolves each
 //! through its own world's resolver and refuses a law of the wrong world by
-//! name. [`MixedCheckCase`] lists the cases the composed core is held to.
+//! name. [`MixedCheckCase`] lists the cases the composed core is held to, and
+//! [`may_arm_in_role`] is the hardware rule its records feed.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod check;
 mod choice;
+mod record;
 
 pub use check::{
     mixed_check_config, mixed_check_run_s, mixed_check_station, mixed_check_table,
@@ -18,3 +20,7 @@ pub use check::{
     MIXED_CHECK_DELAY_FRAMES, MIXED_CHECK_FS_HZ, MIXED_CHECK_MODE,
 };
 pub use choice::{law_choice, resolve_mixed, MixedLawError};
+pub use record::{
+    may_arm_in_role, mixed_check_name, mixed_check_record, mixed_check_status, record_mixed_check,
+    role_record_clears, role_world, RoleRefusal, MIXED_CHECK_VERSION,
+};

@@ -478,24 +478,31 @@ async fn arming_on_the_simulator_opens_the_station_and_a_stop_from_armed_ends_at
 #[test]
 fn a_role_law_drives_hardware_only_with_its_own_check_and_its_mixed_check() {
     let builtin = laws::builtin_sine_entry();
-    assert!(laws::mixed_may_arm_on_hardware(&builtin, false));
+    assert_eq!(
+        laws::mixed_clearance(None, &builtin, LawWorld::Sine),
+        Ok(())
+    );
     let mut imported = builtin.clone();
     imported.builtin = false;
     imported.check = CheckStatus::Unchecked;
     imported.identity.sha256 = "ab".repeat(32);
-    // A tone law: its own world's check is needed as well as the mixed check.
-    assert!(!laws::mixed_may_arm_on_hardware(&imported, false));
-    assert!(!laws::mixed_may_arm_on_hardware(&imported, true));
-    // A floor law has no own-world check to need; the mixed check alone decides.
+    // With no record to read, an imported law is not cleared in either role.
+    assert!(laws::mixed_clearance(None, &imported, LawWorld::Sine).is_err());
     let mut floor = imported.clone();
     floor.world = LawWorld::Single;
-    assert!(!laws::mixed_may_arm_on_hardware(&floor, false));
-    assert!(laws::mixed_may_arm_on_hardware(&floor, true));
-    // The role facts say so in `hardware`, and the simulator is not gated.
-    let facts = laws::mixed_role_facts(&floor, LawWorld::Single, false);
+    assert!(laws::mixed_clearance(None, &floor, LawWorld::Single).is_err());
+    // A law of the other role's world is never cleared in this one.
+    assert!(laws::mixed_clearance(None, &floor, LawWorld::Sine).is_err());
+    // The role facts say so in `hardware`, and why.
+    let facts = laws::mixed_role_facts(
+        &floor,
+        LawWorld::Single,
+        laws::mixed_clearance(None, &floor, LawWorld::Single),
+    );
     assert!(!facts.hardware);
+    assert!(facts.not_cleared.is_some());
     assert_eq!(facts.world, Ok(()));
-    assert!(laws::mixed_role_facts(&floor, LawWorld::Sine, false)
+    assert!(laws::mixed_role_facts(&floor, LawWorld::Sine, Ok(()))
         .world
         .is_err());
 }
