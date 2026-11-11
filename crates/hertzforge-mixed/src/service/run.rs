@@ -656,7 +656,11 @@ impl Runtime {
         self.floor_law = Some(law);
 
         // Tones.
-        let freqs: Vec<f64> = (0..self.lines).map(|k| k as f64 * self.df).collect();
+        // The grid a tone law is given starts at the first line above 0 Hz, as
+        // the Sine core gives its own (a law host refuses a grid that is not
+        // positive and ascending, so a 0 Hz line refused every law file).
+        let first = 1.min(self.lines);
+        let freqs: Vec<f64> = (first..self.lines).map(|k| k as f64 * self.df).collect();
         let mut f0 = Vec::new();
         let mut tones = Vec::new();
         let now = self.step.clock.now().to_vec();
@@ -668,9 +672,9 @@ impl Runtime {
             let tgt: Vec<f64> = freqs.iter().map(|&f| amp.at(f)).collect();
             let id = Identification {
                 frequency_hz: &freqs,
-                gain: &self.ident.gain,
-                coherence: &self.ident.coherence,
-                trusted: &self.ident.trusted,
+                gain: &self.ident.gain[first.min(self.ident.gain.len())..],
+                coherence: &self.ident.coherence[first.min(self.ident.coherence.len())..],
+                trusted: &self.ident.trusted[first.min(self.ident.trusted.len())..],
                 target: &tgt,
             };
             let tick_s = cfg
