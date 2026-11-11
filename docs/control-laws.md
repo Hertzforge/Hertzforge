@@ -255,7 +255,10 @@ with a drive the checks accept, and that no protection trips. Then:
 
 Each case reports the loops it took to converge, the trip if one ended the run, the calls not used
 and the drives refused, the drive-lines the controller repaired or held back, and the slowest call
-against its budget. The five built-in laws pass; the zero-drive law fails every case (the envelope
+against its budget. The five built-in laws from the literature pass. The band-average law passes
+four cases and settles on the two that ask a 4 x 4 plant to converge: it controls band averages,
+so each control's line-by-line rms error holds steady at 1.5 dB there, with every call answered in
+time and no trip. The zero-drive law fails every case (the envelope
 ends each run), and a law whose drive is refused fails with that reason.
 
 In the application, import the file and choose "Check before hardware" (`laws.check` on the
@@ -270,10 +273,11 @@ whether the file is cleared for hardware.
 
 ### The built-in MIMO laws
 
-Five multiple-output laws are built in, each from the published literature, each running natively
-and also built as a law file from the same source (`laws/mimo-pinv`, `laws/mimo-open-loop`,
-`laws/mimo-shape`, `laws/mimo-buzz`, `laws/mimo-min-drive`, all on the crate
-`crates/hertzforge-mimo-laws`), with tests
+Six multiple-output laws are built in, each running natively and also built as a law file from
+the same source (`laws/mimo-pinv`, `laws/mimo-open-loop`, `laws/mimo-shape`, `laws/mimo-buzz`,
+`laws/mimo-min-drive`, `laws/mimo-band-average`, all on the crate
+`crates/hertzforge-mimo-laws`). The first five are from the published literature; the sixth is
+Brandon Zwink's. There are tests
 that hold every law file to its native law within `1e-12`, relative:
 
 | Id | Law | What it does |
@@ -283,6 +287,17 @@ that hold every law file to its native law within `1e-12`, relative:
 | `shape_svd` | Shape-constrained (SVD) | Holds the drive on each line to the `m` directions the plant responds to most, for much lower drive; `m` fixed, or set by a singular-value ratio; closed loop inside the constraint |
 | `buzz_match` | Buzz-test matched | Keeps the reference's autospectra and takes each pair's coherence and phase from the identification response, the structure's own response to uncorrelated drive; pairs below a coherence floor are left independent; then the default law's closed loop |
 | `min_drive` | Minimum drive | Takes the reference's cross terms from the drive that needs the least power to produce its autospectra: on each line the drive minimizing the autospectrum residuals plus a trade-off times the drive power, over the positive semi-definite cone, and the plant's predicted response to it as the target (K. Coletti, R. B. Davis and R. Schultz, "Pareto-optimal target definition for multi-axis random vibration testing", 2026; Smallwood's minimum input trace at the exact-control end). The trade-off is picked at the knee of drive against residual, or set; closed loop by the default law's correction on that target |
+| `band_average` | Band average | Solves the inverse in fractional-octave bands: one flat correlated drive per band whose band-averaged response matches the band-averaged reference, with a threshold per band chosen by a sweep at the first solve; then a gain correction band by band from the measured response, and optionally a new solve from the updated FRF. It controls band averages, not lines |
+
+The band-average law's arithmetic is `crates/hertzforge-law-band-average-math`, a port of
+Brandon Zwink's Python law that the crate's `parity` example holds to it call for call. It leaves
+to the core what the core does: limit channels, the drive ceilings (its own RMS limit is off unless
+set) and the plant estimate (with its FRF update on, it solves again from the FRF and multiple
+coherence the core hands it, so the test's FRF mode must be update). Its buzz cross terms are the
+buzz-test law's reference. It reports each band's threshold and gain correction, and counts of the
+channels its check has left out, the FRF updates it has accepted and the bands it has held. Its
+first solve runs the sweep: 0.5 to 3 s on a test of 48 controls, 12 drives and 8193 lines, which
+is over the law budget of a 2 s loop, and milliseconds on the law check's plants.
 
 The `zero drive` law (`laws/mimo-zero`) returns the zero drive and one diagnostic of each layout.
 It is not for running a test; it is the smallest complete MIMO law, and the tests use it to prove

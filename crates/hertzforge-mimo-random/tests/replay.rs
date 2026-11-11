@@ -57,6 +57,30 @@ fn a_recorded_run_replays_through_its_law_within_1e_12() {
         .filter(|w| w[0].inputs.frf != w[1].inputs.frf)
         .count();
     assert!(distinct >= 2, "the FRF changed {distinct} times");
+    // So did the multiple coherence the law was given: with the FRF updated it is
+    // the loop's own, where the seed and the iterated prediction hold
+    // identification's.
+    assert_eq!(
+        calls[0].inputs.multiple_coherence,
+        calls[1].inputs.multiple_coherence
+    );
+    let moved = calls
+        .windows(2)
+        .filter(|w| w[0].inputs.multiple_coherence != w[1].inputs.multiple_coherence)
+        .count();
+    assert!(moved >= 2, "the coherence changed {moved} times");
+    let band = calls[0].inputs.band;
+    let n = calls[0].inputs.reference.n();
+    for call in &calls {
+        let c = &call.inputs.multiple_coherence[band.0 * n..band.1 * n];
+        assert!(c.iter().all(|v| (0.0..=1.0).contains(v)));
+        let mean = c.iter().sum::<f64>() / c.len() as f64;
+        assert!(
+            mean > 0.9,
+            "loop {}: mean coherence {mean}",
+            call.loop_index
+        );
+    }
     // The reference record agrees with what the law was given.
     let (sdm, _, band, _) = read_reference(&dir).unwrap();
     assert_eq!(sdm, calls[0].inputs.reference);

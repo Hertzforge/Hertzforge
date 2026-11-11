@@ -184,7 +184,9 @@ interface mimo-types {
         /// identification or updated each loop, by the operator's choice),
         /// controls by drives.
         frf: matrix-stack,
-        /// Multiple coherence of each control channel on all drives, 0 to 1:
+        /// Multiple coherence of each control channel on all drives, 0 to 1,
+        /// of the estimate `frf` comes from: system identification's while the
+        /// plant estimate is held, the loop's own while it is updated.
         /// `lines * controls` values, line after line.
         multiple-coherence: list<f64>,
         /// Line spacing, Hz.

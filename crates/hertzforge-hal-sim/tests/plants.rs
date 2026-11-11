@@ -9,7 +9,8 @@ use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
 use hertzforge_hal::{AcquisitionConfig, Backend, HalError};
 use hertzforge_hal_sim::plants::{Conditioning, Placement, StandardPlant, RIGID_DOFS};
 use hertzforge_hal_sim::{
-    ModalPlant, Mode, ModeResponse, PlantModel, Resonator, SimBackend, SimConfig, C64,
+    Discretization, ModalPlant, Mode, ModeResponse, PlantModel, Resonator, SimBackend, SimConfig,
+    C64,
 };
 use std::f64::consts::TAU;
 
@@ -100,6 +101,42 @@ fn the_modal_plant_in_the_time_domain_matches_its_analytic_frf() {
     let mut b = running(model.clone(), fs, 0.0, &table(2, 0, 3));
     let truth = b.analytic_frf(n / 2 + 1, fs / n as f64);
     for (j, k) in [(0usize, 45usize), (1, 130), (2, 300)] {
+        let col = sine_column(&mut b, 2, 3, j, k, n, 4 * n);
+        for (i, h) in col.iter().enumerate() {
+            let t = truth.get(k, i, j);
+            let r = cdiv(*h, t);
+            assert!(
+                (mag(r) - 1.0).abs() < 1e-5 && arg(r).abs() < 1e-5,
+                "drive {j} input {i} at bin {k}: measured {h} vs analytic {t}"
+            );
+        }
+    }
+}
+
+/// The same with the modes fitted to their continuous responses: the backend plays
+/// the fitted filters' `analytic_frf`, the discretization's delay on the residual and
+/// the feedthrough included. A softening mode at the reference level drifts no
+/// further than its smoothing allows, so it is left out here.
+#[test]
+fn the_fitted_modal_plant_in_the_time_domain_matches_its_analytic_frf() {
+    let fs = 4096.0;
+    let n = 1024;
+    let modes = vec![
+        Mode::new(180.0, 8.0, vec![1.0, 0.4, -0.3], vec![0.9, -0.5]),
+        Mode {
+            response: ModeResponse::Acceleration,
+            ..Mode::new(1900.0, 12.0, vec![-0.2, 1.0, 0.6], vec![0.3, 1.1])
+        },
+    ];
+    let model = PlantModel::Modal(ModalPlant {
+        transport_delay_samples: 3,
+        residual: vec![0.2, 0.0, 0.05, 0.0, 0.3, 0.0],
+        discretization: Discretization::fitted(1100.0),
+        ..ModalPlant::new(2, 3, modes)
+    });
+    let mut b = running(model.clone(), fs, 0.0, &table(2, 0, 3));
+    let truth = b.analytic_frf(n / 2 + 1, fs / n as f64);
+    for (j, k) in [(0usize, 45usize), (1, 130), (2, 250)] {
         let col = sine_column(&mut b, 2, 3, j, k, n, 4 * n);
         for (i, h) in col.iter().enumerate() {
             let t = truth.get(k, i, j);

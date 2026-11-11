@@ -1086,6 +1086,13 @@ name = "hertzforge-ipc"
 version = "0.1.2"
 
 [[package]]
+name = "hertzforge-law-band-average-math"
+version = "0.1.2"
+dependencies = [
+ "hertzforge-sdm",
+]
+
+[[package]]
 name = "hertzforge-law-hinv"
 version = "0.1.2"
 dependencies = [
@@ -1105,6 +1112,14 @@ dependencies = [
  "tokio",
  "wasmtime",
  "wasmtime-wasi",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-band-average"
+version = "0.1.2"
+dependencies = [
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-laws",
 ]
 
 [[package]]
@@ -1213,6 +1228,7 @@ dependencies = [
 name = "hertzforge-mimo-laws"
 version = "0.1.2"
 dependencies = [
+ "hertzforge-law-band-average-math",
  "hertzforge-law-host",
  "hertzforge-law-sdk",
  "hertzforge-sdm",

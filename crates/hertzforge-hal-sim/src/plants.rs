@@ -405,6 +405,7 @@ pub fn random_modal(spec: &RandomModalSpec) -> NamedPlant {
             feedthrough,
             residual,
             transport_delay_samples: 0,
+            ..ModalPlant::new(0, 0, Vec::new())
         }),
         geometry: Geometry {
             inputs: input_pos
@@ -570,6 +571,7 @@ pub fn rigid_plate_12x6() -> NamedPlant {
             feedthrough: DEFAULT_FEEDTHROUGH,
             residual: Vec::new(),
             transport_delay_samples: 0,
+            ..ModalPlant::new(0, 0, Vec::new())
         }),
         geometry: Geometry {
             inputs,
