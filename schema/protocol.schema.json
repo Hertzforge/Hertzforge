@@ -753,6 +753,26 @@
       "type": "object", "required": ["name", "html"],
       "properties": {"name": {"type": "string"}, "html": {"type": "string"}}
     },
+    "reportViewsResult": {
+      "type": "object", "required": ["name", "title", "marking", "blocks"], "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"}, "title": {"type": "string"}, "marking": {"type": "string"},
+        "blocks": {"type": "array", "items": {
+          "type": "object", "required": ["kind", "block", "label", "caption"],
+          "properties": {
+            "kind": {"enum": ["text", "figure", "unbound"]},
+            "block": {"type": ["integer", "null"]},
+            "label": {"type": "string"},
+            "caption": {"type": "string"},
+            "note": {"type": "string"},
+            "html": {"type": "string"},
+            "views": {"$ref": "#/$defs/views"},
+            "was": {"type": "string"},
+            "empty": {"type": "boolean"}
+          }
+        }}
+      }
+    },
     "reportHeld": {
       "type": "object", "required": ["owed", "index"],
       "properties": {
