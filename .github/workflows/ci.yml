@@ -158,6 +158,9 @@ jobs:
       - name: Build
         run: npm --prefix ui run build
       - name: The report viewer the package ships is the one this UI builds
+        # Windows checks the UI's sources out with CRLF, which the build carries into the page;
+        # the check needs one platform, and the others build from LF as the committed file was
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           npm --prefix ui run build:report
