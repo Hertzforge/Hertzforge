@@ -189,7 +189,7 @@
 							{@const b = r as MixedBandDraft}
 							<td><NumberField compact id="{table}-{i}-lv" label="Level, row {i + 1}" unit="g²/Hz" value={b.level_g2_hz} min={0} errors={E[key(i, 'level')] ?? []} onchange={(v) => set(i, 'level_g2_hz', (x) => ((x as MixedBandDraft).level_g2_hz = num(v)))} disabled={locked} testid="mixed-{table}-{i}-level" /></td>
 							<td class="width">
-								<NumberField compact id="{table}-{i}-w" label="Width, row {i + 1}" unit={b.width.by === 'hz' ? 'Hz' : 'of center'} value={b.width.by === 'hz' ? b.width.hz : b.width.share} min={0} errors={E[key(i, 'width')] ?? []} onchange={(v) => set(i, b.width.by === 'hz' ? 'width.hz' : 'width.share', (x) => ((x as MixedBandDraft).width[b.width.by === 'hz' ? 'hz' : 'share'] = num(v)))} disabled={locked} testid="mixed-{table}-{i}-width" />
+								<NumberField compact id="{table}-{i}-w" label="Width, row {i + 1}" unit={b.width.by === 'hz' ? 'Hz' : undefined} value={b.width.by === 'hz' ? b.width.hz : b.width.share} min={0} errors={E[key(i, 'width')] ?? []} onchange={(v) => set(i, b.width.by === 'hz' ? 'width.hz' : 'width.share', (x) => ((x as MixedBandDraft).width[b.width.by === 'hz' ? 'hz' : 'share'] = num(v)))} disabled={locked} testid="mixed-{table}-{i}-width" />
 								<select class="field sm" value={b.width.by} disabled={locked} aria-label="Width in, row {i + 1}" onchange={(e) => set(i, 'width.by', (x) => ((x as MixedBandDraft).width.by = e.currentTarget.value as 'hz' | 'share'))} data-testid="mixed-{table}-{i}-widthby">
 									<option value="hz">Hz</option>
 									<option value="share">Share of center</option>
