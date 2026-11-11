@@ -58,6 +58,7 @@
 //! ([`crate::SineService::with_law_clock`]). Without guards the law runs with
 //! none but its own: the shipped law's 1 dB clamp, the original arithmetic.
 
+pub mod guard;
 pub mod servo_blend;
 
 use serde::{Deserialize, Serialize};
