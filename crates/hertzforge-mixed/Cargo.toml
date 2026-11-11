@@ -67,3 +67,7 @@ required-features = ["service"]
 [[test]]
 name = "guards"
 required-features = ["service"]
+
+[[test]]
+name = "guards_more"
+required-features = ["service"]

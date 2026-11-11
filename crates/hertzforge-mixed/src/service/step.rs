@@ -161,6 +161,11 @@ pub(crate) struct Records {
     pub(crate) gain: Vec<f64>,
     /// The random part as played, identification only.
     pub(crate) drive: Vec<f64>,
+    /// Raw samples per limit channel.
+    pub(crate) limits: Vec<Vec<f64>>,
+    /// The random part's sum of squares and count, as played.
+    pub(crate) rand_sumsq: f64,
+    pub(crate) rand_n: u64,
     /// The summed drive's peak and sum of squares over the chunk.
     pub(crate) peak: f64,
     pub(crate) sumsq: f64,
@@ -202,6 +207,15 @@ pub(crate) struct MixedProcessStep {
     pub(crate) records: Records,
     pub(crate) trip: Option<StepTrip>,
     in_scratch: Vec<f64>,
+    /// The whole input block as f64, for the kinematic monitor.
+    kin_scratch: Vec<f64>,
+    /// Random's raw-sample kinematic monitor (velocity and displacement from
+    /// acceleration), when the run asks for it and a channel has a limit.
+    pub(crate) kin: Option<hertzforge_random::KinematicMonitor>,
+    /// Per input slot: `(channel index, |x| at which it overloads)`.
+    pub(crate) overload: Vec<(u32, f64)>,
+    /// Limit channels' places in the input frame.
+    pub(crate) lim_slots: Vec<usize>,
     res_scratch: Vec<f64>,
     amp_scratch: Vec<f64>,
     phase_scratch: Vec<f64>,
@@ -265,6 +279,10 @@ impl MixedProcessStep {
             },
             trip: None,
             in_scratch: vec![0.0; n_ctrl],
+            kin_scratch: Vec::with_capacity(capacity.min(1 << 16) * in_stride.max(1)),
+            kin: None,
+            overload: Vec::new(),
+            lim_slots: Vec::new(),
             res_scratch: vec![0.0; n_ctrl],
             amp_scratch: vec![0.0; n_ctrl],
             phase_scratch: vec![0.0; n_ctrl],
@@ -549,9 +567,51 @@ fn tick_inputs<'a>(
     }
 }
 
+impl MixedProcessStep {
+    /// The raw-sample guards on one input block: the kinematic monitor and
+    /// each input's overload. Either one aborts.
+    fn watch(&mut self, input: &[f32], n_frames: usize) {
+        let n = (n_frames * self.in_stride).min(input.len());
+        if let Some(kin) = self.kin.as_mut() {
+            self.kin_scratch.clear();
+            self.kin_scratch
+                .extend(input[..n].iter().map(|v| *v as f64));
+            if let Some(t) = kin.feed(&self.kin_scratch) {
+                self.latch(
+                    MixedTripKind::Kinematic {
+                        channel_index: t.channel_index,
+                        axis: format!("{:?}", t.axis).to_lowercase(),
+                        value: t.value,
+                        limit: t.limit,
+                    },
+                    None,
+                    true,
+                );
+            }
+        }
+        if self.trip.is_none() && !self.overload.is_empty() {
+            for fr in 0..n_frames {
+                for (slot, &(ch, at)) in self.overload.iter().enumerate() {
+                    let v = input
+                        .get(fr * self.in_stride + slot)
+                        .copied()
+                        .unwrap_or(0.0);
+                    if (v as f64).abs() >= at {
+                        self.latch(MixedTripKind::Overload { channel_index: ch }, None, true);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl ProcessStep for MixedProcessStep {
     fn process(&mut self, input: &[f32], n_frames: usize, drive_out: &mut Vec<f32>) {
         drive_out.clear();
+        if self.mode != StepMode::Silent {
+            self.watch(input, n_frames);
+        }
         let w = self.gain_ring.len();
         for fr in 0..n_frames {
             let x = if self.mode == StepMode::Silent {
@@ -567,6 +627,8 @@ impl ProcessStep for MixedProcessStep {
                     }
                 };
                 let rand_part = r * rg * lev;
+                self.records.rand_sumsq += rand_part * rand_part;
+                self.records.rand_n += 1;
                 let tones = self.bank.drive_frame(lev);
                 self.gain_ring[self.gain_head] = rg * lev;
                 self.gain_head = (self.gain_head + 1) % w;
@@ -600,6 +662,10 @@ impl ProcessStep for MixedProcessStep {
                 self.in_scratch[c] = input.get(base + slot).copied().unwrap_or(0.0) as f64;
             }
             if self.mode != StepMode::Silent {
+                for (l, &slot) in self.lim_slots.iter().enumerate() {
+                    let v = input.get(base + slot).copied().unwrap_or(0.0) as f64;
+                    self.records.limits[l].push(v);
+                }
                 self.bank
                     .track_frame(&self.in_scratch, &mut self.res_scratch);
                 for c in 0..self.ctrl_slots.len() {

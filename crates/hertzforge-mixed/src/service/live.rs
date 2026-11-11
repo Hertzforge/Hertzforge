@@ -292,12 +292,34 @@ impl MixedService {
             rt.step.records.peak = 0.0;
             rt.step.records.sumsq = 0.0;
             rt.step.records.n = 0;
+            self.rand_acc.0 += rt.step.records.rand_sumsq;
+            self.rand_acc.1 += rt.step.records.rand_n;
+            rt.step.records.rand_sumsq = 0.0;
+            rt.step.records.rand_n = 0;
+            let mut vrms_trip = None;
+            if self.rand_acc.1 as f64 >= 0.25 * rt.fs {
+                let rms = (self.rand_acc.0 / self.rand_acc.1 as f64).sqrt();
+                if let Some(lim) = self.cfg.limits.drive_abort_vrms {
+                    if rms >= lim {
+                        vrms_trip = Some(MixedTripKind::RandomVrms {
+                            realized_vrms: rms,
+                            limit_vrms: lim,
+                        });
+                    }
+                }
+                self.rand_acc = (0.0, 0);
+            }
             if let Some(kind) = station_trip {
                 rt.emergency();
                 self.latch_trip(kind, None);
                 self.finish(MixedOutcome::Aborted);
                 return Ok(false);
             }
+            if let Some(kind) = vrms_trip {
+                self.latch_trip(kind, None);
+                self.begin_end(MixedOutcome::Aborted, true);
+            }
+            let rt = self.rt.as_mut().expect("running");
             if let Some(t) = rt.take_step_trip() {
                 let part = t.part.map(|i| self.cfg.parts[i].id.clone());
                 let law_fault = matches!(t.kind, MixedTripKind::LawFault { .. });
@@ -843,6 +865,7 @@ impl MixedService {
             row.drive = (rt.floor_drive.iter().sum::<f64>() * rt.df).sqrt() * rgain;
             row.misses = rt.floor_misses;
             row.capped = rt.floor_tally.capped;
+            row.limiting = rt.notched.iter().any(|n| *n);
         }
         // Tones.
         for (j, tc) in rt.step.tones.iter().enumerate() {
