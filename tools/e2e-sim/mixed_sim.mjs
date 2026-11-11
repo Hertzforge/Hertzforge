@@ -18,7 +18,8 @@
 //    table; the service's derived values in the summary; a short automatic ladder run to its end.
 // 4. Random-on-random: the tones removed, two narrowbands (one standing, one sweeping by a share
 //    of its center); run to its end.
-// 5. The combined test: a standing tone, a swept tone with two tones following it at 2 and 3, a
+// 5. The combined test: a standing tone, a swept tone with two small tones following it at 2 and 3
+//    (one judged over several seconds, one against widened tolerances), a
 //    standing band and a swept band; the floor alone first, then the parts; the parts table; a part
 //    switched off and on; Hold stops parts time and Resume starts it; a level step on the manual
 //    ladder; Stop ramps every part down.
@@ -348,12 +349,15 @@ try {
 	// half the tracking width is refused (tracking_lag)
 	await addPart(a, 'tones', 1, { name: 'Rotor', kind: 'sweep', lo: 400, hi: 600, rate: 0.3, amp: 0.3 });
 	const rotor = await field(a, 'mixed-tones-1-id').inputValue();
-	await addPart(a, 'tones', 2, { name: 'Rotor 2nd', kind: 'follow', of: rotor, ratio: 2, amp: 0.1 });
-	await addPart(a, 'tones', 3, { name: 'Rotor 3rd', kind: 'follow', of: rotor, ratio: 3, amp: 0.1 });
+	await addPart(a, 'tones', 2, { name: 'Rotor 2nd', kind: 'follow', of: rotor, ratio: 2, amp: 0.06 });
+	await addPart(a, 'tones', 3, { name: 'Rotor 3rd', kind: 'follow', of: rotor, ratio: 3, amp: 0.03 });
 	await section(a, 'schedule');
 	await tid(a, 'schedule-manual').click();
 	await checkedClean(a);
 	check('the summary says both', /Sine and random on random/.test(await text(a, 'mixed-summary-kind')));
+	// The small followers: Rotor 2nd judged over several seconds, Rotor 3rd against widened tolerances.
+	const judging = await text(a, 'mixed-summary-judging');
+	check('the summary says how long the small tones are judged and which tolerance is widened', /Rotor 2nd: over/.test(judging) && /Rotor 3rd: over 8 s, alarm widened/.test(judging), judging);
 	await section(a, 'parts');
 	await shot(a, 'setup_combined');
 	await runFromSetup(a);
