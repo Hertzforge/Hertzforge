@@ -1089,8 +1089,8 @@ path such as `control.damping`) locates the problem. Item reasons:
 | MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected` | `transform_ill_conditioned`, `alarm_wider_than_abort` |
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
-| Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
-| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
+| Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `extra_drive_channels`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
+| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `extra_drive_channels`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
 | Sine | `out_of_range`, `profile_too_short`, `frequency_not_positive`, `frequency_not_ascending`, `value_not_positive`, `quantity_ambiguous`, `profile_not_covering`, `band_above_grid`, `levels_empty`, `levels_not_ascending`, `start_not_a_level`, `end_before_full_level`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `limit_on_control_channel`, `cola_needs_two_outputs`, `safe_stop_budget`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `profile_file` from the import | `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag`; `units_column_ignored` from the import |
 | Mixed Mode | Random's profile, acquisition, schedule and control reasons for the floor and the ladder, `out_of_range`, `no_floor`, `too_many_floors`, `unknown_part_kind`, `duplicate_part_id`, `part_out_of_band`, `parts_too_close`, `too_many_tones`, `too_many_bands`, `follow_unknown_part`, `follow_self`, `follow_loop`, `schedule_unsupported`, `profile_too_short`, `value_not_positive`, `profile_not_covering`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `alarm_wider_than_abort`, `join_discontinuity`, `tracking_lag` |
 | TWR | `out_of_range`, `reference_unknown`, `reference_changed`, `units_mismatch`, `rate_mismatch`, `section_outside_reference`, `record_too_long`, `band_above_grid`, `band_outside_identification`, `highpass_above_band`, `identification_too_short`, `levels_empty`, `levels_not_ascending`, `alarm_wider_than_abort`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `reference_resampled` |
@@ -2191,8 +2191,9 @@ Item reasons (Classical Shock): errors `out_of_range`, `levels_empty`, `levels_n
 `pulses_length_mismatch`, `band_above_grid`, `record_too_long` (one pulse's record is as long as
 the controller timeout), `spacing_below_floor` (a train or gunfire spacing below the time between
 pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled input),
-`no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`,
-`law_param_invalid`; warnings `quiet_window_exceeded`.
+`no_control_channel`, `no_drive_channel`, `extra_drive_channels` (more than one enabled drive row:
+the station would open every one as an output and split the one pulse across them), `law_unknown`,
+`law_wrong_world`, `law_param_unknown`, `law_param_invalid`; warnings `quiet_window_exceeded`.
 
 ### Running a Classical Shock Test
 
@@ -2536,7 +2537,8 @@ do not cover the band grid), `target_not_ascending`, `alarm_wider_than_abort`,
 `per_band_length_mismatch` (a per-band envelope or bound list that is not one per band),
 `components_engine_mismatch`, `component_invalid` (at `synthesis.components.rows[i]`),
 `record_too_long`, `limit_unknown_channel`, `limit_no_frf` (a limit channel with no `frf` and no
-input to measure one from), `no_control_channel`, `no_drive_channel`, `law_unknown`,
+input to measure one from), `no_control_channel`, `no_drive_channel`, `extra_drive_channels` (more
+than one enabled drive row, as in Classical Shock), `law_unknown`,
 `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; warnings `synthesis_not_converged`
 (the offline fit did not reach `tol_db`; the run's law refines from there).
 
