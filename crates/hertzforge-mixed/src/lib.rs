@@ -3,6 +3,7 @@
 //! together on one drive and controlled together.
 //!
 //! - [`parts`]: the parts list, its schedules and the checks on a configuration.
+//! - [`schedule`]: the clock that moves every part, held and resumed together.
 //!
 //! The control method composes published building blocks (tone estimation in
 //! noise, Welch estimation, inverse-plant equalization) and reuses the Random
@@ -11,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 pub mod parts;
+pub mod schedule;
 
 pub use parts::{
     sweep_span, BandWidth, ConfigError, Direction, FloorPart, LawPick, MixedConfig,
@@ -19,3 +21,4 @@ pub use parts::{
     DEFAULT_EXCLUSION_HZ, DEFAULT_FLOOR_LAW_ID, DEFAULT_TONE_LAW_ID, DEFAULT_TRACKING_HZ,
     MAX_BANDS, MAX_TONES, MIN_TONE_SPACING_WIDTHS, RESERVED_PART_KINDS,
 };
+pub use schedule::{PartClock, PartNow};
