@@ -6,6 +6,7 @@
 	 * control dock. The header carries parts time beside the run's state and level. The review hold
 	 * after identification brings the page with the identified gain forward, once per hold.
 	 */
+	import { limitingWords } from './mixedWords';
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
@@ -48,6 +49,7 @@
 		return { ...v, series: v.series.map((s) => (s.x.length === 1 ? { ...s, x: Float64Array.of(s.x[0], s.x[0]), y: Float64Array.of(s.y[0], s.y[0]) } : s)) };
 	});
 	const on = $derived(now?.parts.filter((p) => p.on && p.kind !== 'floor').length ?? 0);
+	const limitingNow = $derived(now?.state === 'running' ? limitingWords(now) : null);
 
 	let reviewed: string | null = null;
 	$effect(() => {
@@ -81,6 +83,12 @@
 		<dt>Parts on</dt>
 		<dd class="num" data-testid="run-parts-on">{on}</dd>
 	</div>
+	{#if limitingNow}
+		<div>
+			<dt>Limiting</dt>
+			<dd class="limiting" data-testid="run-limiting"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.5" y="5" width="9" height="2" fill="currentColor" /></svg> {limitingNow}</dd>
+		</div>
+	{/if}
 {/snippet}
 
 {#snippet setup(section: string)}
@@ -162,6 +170,11 @@
 />
 
 <style>
+	.limiting {
+		color: var(--amber-1);
+		white-space: nowrap;
+	}
+
 	.stack {
 		display: flex;
 		flex-direction: column;

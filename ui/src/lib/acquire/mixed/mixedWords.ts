@@ -391,3 +391,12 @@ export function motionWords(range: [number, number] | null): string {
 export function kinematicsWords(k: MixedDerived['kinematics']): string {
 	return `${num(k.peak_accel_g, 4)} g, ${num(k.peak_velocity_ips, 4)} in/s, ${num(k.peak_disp_pp_in, 4)} in pk-pk`;
 }
+
+/** What is being held down now, for the run's header: the parts that are limiting by name, or the
+ * drive ceiling's clamp when the run limits and no part says so; null when nothing limits. */
+export function limitingWords(s: Pick<MixedState, 'limiting' | 'parts'> | null): string | null {
+	if (!s) return null;
+	const held = s.parts.filter((p) => p.limiting).map((p) => p.name);
+	if (held.length) return held.join(', ');
+	return s.limiting ? 'At the drive ceiling' : null;
+}

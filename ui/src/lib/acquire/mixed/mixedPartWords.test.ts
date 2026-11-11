@@ -7,7 +7,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { MixedConfig, MixedPartRow } from '$lib/protocol/mixed';
-import { partDetail, partDrive, partFreq, partMotion, partStateWord } from './mixedWords';
+import { limitingWords, mixedTripFacts, partDetail, partDrive, partFreq, partMotion, partStateWord } from './mixedWords';
+import type { MixedTrip } from '$lib/protocol/mixed';
 
 const base: MixedPartRow = { id: 'x', kind: 'tone', name: 'x', enabled: true, on: true, scale: 1, freq_hz: null, direction: null, sweeps: null, rate_oct_per_min: null, rate_hz_per_s: null, width_hz: null, unit: 'g', target: 0.0846, measured: 0.083, error_db: null, alarm: false, drive_vpk: 0.0679, drive_vrms: null, gain_db: null, settled: false, limiting: false, dof: null, lines: null, law: { misses: 0, capped: 0 }, follows: null };
 const row = (over: Partial<MixedPartRow>): MixedPartRow => ({ ...base, ...over });
@@ -144,5 +145,29 @@ describe('a part that is off or has ended', () => {
 	it('switched off reads Off', () => {
 		expect(partMotion({ ...second, on: false, enabled: false, scale: 0 }, false, ctx)).toBe('Off');
 		expect(partStateWord({ ...second, on: false, enabled: false, scale: 0 }, ctx)).toBe('Off');
+	});
+});
+
+describe('limiting, for the run header', () => {
+	it('names the parts the ceiling holds, or the clamp when no part says so, and nothing otherwise', () => {
+		expect(limitingWords({ limiting: true, parts: [floor, { ...rotor, limiting: true }, { ...second, limiting: true }] })).toBe('Rotor, Rotor 2nd');
+		expect(limitingWords({ limiting: true, parts: rows })).toBe('At the drive ceiling');
+		expect(limitingWords({ limiting: false, parts: rows })).toBeNull();
+	});
+});
+
+describe('trip facts', () => {
+	const at = { part: 't2', at_hz: 433.2, at_level_db: -6, at_s: 40, at_loop: 8, at_tick: 4000 };
+	it('shows a tone abort measured against its limit once the service fills them', () => {
+		const f = mixedTripFacts({ ...at, kind: 'abort_band', side: 'high', error_db: 3.1, measured_g: 0.1205, limit_g: 0.1195 } as MixedTrip, (id) => (id === 't2' ? 'Rotor' : id));
+		expect(f).toContainEqual({ label: 'Measured against limit', value: '0.1205 g against 0.1195 g' });
+		expect(f).toContainEqual({ label: 'Part', value: 'Rotor' });
+	});
+	it('never prints a null', () => {
+		const f = mixedTripFacts({ ...at, part: null, at_hz: null, kind: 'envelope', abort_lines: 14, worst_db: null } as MixedTrip, (id) => id);
+		expect(f.map((x) => x.label)).toEqual(['Level', 'Lines out']);
+		const b = mixedTripFacts({ ...at, kind: 'band_abort', side: 'low', error_db: null, measured_g2_hz: null, limit_g2_hz: 0.0002, dof: null } as MixedTrip, (id) => id);
+		expect(b.map((x) => x.label)).toEqual(['Part', 'At', 'Level', 'Side', 'Lower abort']);
+		for (const x of [...f, ...b]) expect(x.value).not.toMatch(/null|undefined|NaN/);
 	});
 });
