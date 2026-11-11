@@ -121,6 +121,8 @@ def test_the_state_carries_one_row_per_part_in_the_parts_order():
     assert [p['id'] for p in state['parts']] == [p['id'] for p in config['parts']]
     floor = state['parts'][0]
     assert floor['kind'] == 'floor' and floor['lines'] is not None and floor['freq_hz'] is None
+    # the lines the floor's rms abort is judged on are clean lines
+    assert 0 <= floor['lines']['rms_judged'] <= floor['lines']['clean']
     for row in state['parts']:
         # a tone's drive in volts peak, the floor's in volts rms; a narrowband
         # has none of its own (the core reports no share of the random part for it)

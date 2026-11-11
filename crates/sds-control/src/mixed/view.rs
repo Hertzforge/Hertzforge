@@ -257,6 +257,7 @@ pub fn part_row_json(f: &PartFacts, row: Option<&PartRow>, s: Option<&MixedStatu
                     "clean": fl.lines_in_band.saturating_sub(fl.lines_out),
                     "alarm": fl.alarm_lines,
                     "abort": fl.abort_lines,
+                    "rms_judged": fl.rms_judged_lines,
                 })
             }),
             fl.map_or(Value::Null, |fl| num(round(fl.dof, 1))),
@@ -714,7 +715,7 @@ pub fn fill_trip_facts(
         })
     };
     match &t.kind {
-        MixedTripKind::ToneAbort { error_db } => {
+        MixedTripKind::ToneAbort { error_db, .. } => {
             v["measured_g"] = opt_num(target.map(|tg| sig(tg * 10f64.powf(error_db / 20.0), 4)));
             v["limit_g"] = opt_num(limit(*error_db, 20.0).map(|x| sig(x, 4)));
         }

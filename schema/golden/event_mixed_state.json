@@ -70,7 +70,8 @@
      "in_band": 3961,
      "clean": 3909,
      "alarm": 2,
-     "abort": 0
+     "abort": 0,
+     "rms_judged": 3909
     },
     "law": {
      "misses": 0,

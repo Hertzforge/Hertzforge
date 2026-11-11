@@ -3512,7 +3512,7 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
            "rate_hz_per_s":null,"width_hz":null,
            "unit":"g","target":6.06,"measured":6.02,"error_db":-0.06,"alarm":false,
            "drive_vpk":null,"drive_vrms":0.58,"gain_db":null,"settled":true,"limiting":false,
-           "dof":120,"lines":{"in_band":1981,"clean":1929,"alarm":2,"abort":0},
+           "dof":120,"lines":{"in_band":1981,"clean":1929,"alarm":2,"abort":0,"rms_judged":1929},
            "law":{"misses":0,"capped":0}},
           {"id":"t2","kind":"tone","name":"Rotor","enabled":true,"on":true,"scale":1,
            "freq_hz":412.6,"direction":"up","follows":null,"sweeps":{"done":1,"of":4},
@@ -3584,8 +3584,11 @@ adopted; only the safe stop's countdown (`orphan_s`) is the service's clock.
     cap, a limit channel or the drive ceiling holds the part down.
   - `dof` the degrees of freedom of the floor's control estimate (the typical clean line's, the
     median over the lines read in the last loop) or the narrowband's level estimate (null for a
-    tone); `lines` (the floor only) the band's lines, the clean ones read
-    in the last loop, and how many of those lie outside the alarm and the abort bands.
+    tone); `lines` (the floor only) `{"in_band","clean","alarm","abort","rms_judged"}`: the
+    band's lines, the clean ones read in the last loop, how many of those lie outside the alarm
+    and the abort bands, and `rms_judged` the clean lines the floor's rms abort was judged on in
+    the last loop, each holding 16 degrees of freedom (0 while that abort is not armed: it arms
+    once three quarters of the band's lines qualify).
   - `law` the part's law instance's unusable calls in a row now and the ticks (a tone) or loops
     (the floor) a cap has bound; null for a narrowband.
 - `total` is the composite: its rms over the band (tones in), the reference's at the level in
