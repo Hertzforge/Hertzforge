@@ -891,7 +891,7 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 |---|---|---|
 | `report.generate` | `{"template"?,"name"?}` | `{"name","project"}` |
 | `report.render` | `{"name","theme"?}` | `{"name","html"}` |
-| `report.views` | `{"name"}` | `{"name","title","marking","blocks"}` |
+| `report.views` | `{"name"}` | `{"name","title","marking","css","blocks"}` |
 | `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index","note"?}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
@@ -904,7 +904,8 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.views` gives the same report for the shell's own
-page to draw with its viz kit: each drawn block is `{"kind":"text","html"}`,
+page to draw with its viz kit, with `css`, the stylesheet the report adds (the printed page's
+margins when the report identity is on; empty otherwise): each drawn block is `{"kind":"text","html"}`,
 `{"kind":"figure","views"}` (the protocol's views, arrays as binary frames) or
 `{"kind":"unbound","was"}`, with `block` (the index of the report block it came from, shared by a
 block's several figures), `label` (its figure or table number), `caption` and an optional `note`.

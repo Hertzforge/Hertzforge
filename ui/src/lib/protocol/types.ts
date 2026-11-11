@@ -1463,6 +1463,8 @@ export interface ReportPageData {
 	name: string;
 	title: string;
 	marking: string;
+	/** The stylesheet the report adds, such as the printed page's margins; empty for none. */
+	css?: string;
 	blocks: ReportPageBlock[];
 }
 

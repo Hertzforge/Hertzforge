@@ -196,3 +196,41 @@ def test_a_map_a_mac_a_verdict_and_a_photo_are_their_views():
 def test_text_and_slots_draw_no_views():
     assert block_views({'kind': 'text', 'html': '<p>x</p>'}) == []
     assert block_views({'kind': 'unbound', 'was': 'plot'}) == []
+
+
+def test_no_figure_is_lost_between_the_two_pages():
+    """The parity check of step 4: every block the core's page draws as a
+    figure is a figure on the shell's page, numbered the same."""
+    from hertzforge.report import _report_payload
+
+    project = hertzforge.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
+    report = project[project.generate_report('random')]
+    old = _report_payload(report, project, None, edit=True,
+                          object_groups=project.object_groups)['blocks']
+    new = page_blocks(report, project, object_groups=project.object_groups)
+    drawn = [b.get('label') or '' for b in old if b['kind'] not in ('text', 'unbound')]
+    figures = [b['label'] for b in new if b['kind'] == 'figure']
+    assert figures == drawn
+
+
+def test_an_exported_report_is_the_viewer_with_the_report_inside(tmp_path):
+    from hertzforge.report.viewer import DATA, read_viewer, viewer_page
+
+    page = viewer_page()
+    assert DATA in page and '<script type="module">' in page
+    import re
+
+    tags = re.sub(r'<script[^>]*>.*?</script>|<style>.*?</style>', '', page, flags=re.DOTALL)
+    assert not re.search(r'<(script|link|img)\b[^>]*(src|href)=', tags), 'nothing from a network'
+    project = hertzforge.Project('m')
+    project.import_file(fixture_path('plate', 'frfs.unv'))
+    name = project.generate_report('modal')
+    written = project.export_report(name, tmp_path / 'r.html')
+    text = (tmp_path / 'r.html').read_text(encoding='utf-8')
+    assert text.startswith('<!DOCTYPE html>') and DATA not in text
+    held = read_viewer(text)
+    assert held['title'] == project[name].title
+    assert any(b['kind'] == 'figure' for b in held['blocks'])
+    assert written == str(tmp_path / 'r.html')

@@ -87,11 +87,12 @@ def page_views(project: Any, params: Mapping[str, Any], units: Any = None) -> di
     (`report.views.page_blocks`): its title and marking, and each drawn
     block as text, an unbound slot, or a figure's protocol views, in the
     unit system `units`."""
-    from hertzforge.report.views import page_blocks
+    from hertzforge.report.views import page_blocks, page_style
 
     name = _report(project, params, 'report.views')
     report = project[name]
     return {'name': name, 'title': report.title, 'marking': report.marking,
+            'css': page_style(report, project),
             'blocks': page_blocks(report, project, units,
                                   object_groups=project.object_groups)}
 
@@ -167,7 +168,7 @@ def export(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[s
     if (checks['owed'] or checks['index']) and not _anyway(params, 'report.export'):
         return {'path': None, **checks}
     try:
-        html = project._export_page(name, units)
+        html = project._viewer_export(name, units)
     except ValueError as error:
         raise refused(str(error)) from None
     partial = f'{path}.partial'
