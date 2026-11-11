@@ -195,10 +195,12 @@ def entity_rows(geometry: Any, kind: str, indices: Any) -> list[list[str]]:
 
     indices = [int(k) for k in indices]
     if kind == 'nodes':
-        xyz = np.asarray(geometry.node_xyz).reshape(-1, 3)
-        return [[str(int(geometry.node_id[k])), *(_number(c) for c in xyz[k]),
+        # in each node's placement system, as the column beside them says, an angle in
+        # degrees (Brandon, 2026-11-11)
+        xyz = np.zeros((0, 3)) if not len(indices) else geometry.node_local_xyz(indices)
+        return [[str(int(geometry.node_id[k])), *(_number(c) for c in xyz[n]),
                  str(int(geometry.node_def_cs[k])), str(int(geometry.node_disp_cs[k]))]
-                for k in indices]
+                for n, k in enumerate(indices)]
     if kind == 'coordinate_systems':
         matrices = np.asarray(geometry.cs_matrix).reshape(-1, 4, 3)
         return [[str(int(geometry.cs_id[k])), geometry.cs_name[k],
@@ -567,13 +569,18 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
         if field == 'id':
             geometry.renumber_node(row, _whole(text, 1))
         elif field in ('x', 'y', 'z'):
-            geometry.node_xyz[row, 'xyz'.index(field)] = _finite(text)
+            # in the node's placement system (Brandon, 2026-11-11)
+            local = geometry.node_local_xyz([row])[0]
+            local['xyz'.index(field)] = _finite(text)
+            geometry.set_node_local_xyz(row, local)
+        elif field == 'placement_cs':
+            # the same numbers in the other system, so the node moves to them
+            geometry.set_node_placement(row, _whole(text))
         else:
             cs = _whole(text)
             if cs not in {int(c) for c in geometry.cs_id}:
                 raise ValueError(f'no coordinate system {cs}')
-            array = 'node_def_cs' if field == 'placement_cs' else 'node_disp_cs'
-            getattr(geometry, array)[row] = cs
+            geometry.node_disp_cs[row] = cs
     elif kind == 'coordinate_systems':
         if field == 'id':
             geometry.renumber_coordinate_system(row, _whole(text, 1))
@@ -584,9 +591,13 @@ def _set_field(geometry: Any, kind: str, row: int, field: str, text: str) -> Non
             codes = [c for c, word in CS_TYPES.items() if word == wanted]
             if not codes:
                 raise ValueError(f'expected one of {sorted(CS_TYPES.values())}')
-            geometry.cs_type[row] = codes[0]
+            # the nodes placed in it keep their numbers, so they move
+            geometry.set_coordinate_system_type(int(geometry.cs_id[row]), codes[0])
         elif field.startswith('origin'):
-            geometry.cs_matrix[row, 3, 'xyz'.index(field[-1])] = _finite(text)
+            # through `place_coordinate_system`, so its nodes move with it
+            origin = np.array(geometry.cs_matrix[row, 3], dtype=float)
+            origin['xyz'.index(field[-1])] = _finite(text)
+            geometry.place_coordinate_system(int(geometry.cs_id[row]), origin=origin)
         else:
             angles = list(angles_of(geometry.cs_matrix[row]))
             angles['xyz'.index(field[-1])] = _finite(text)
