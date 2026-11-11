@@ -444,14 +444,38 @@ const TEXT: [&str; 4] = [
     "response_error_mixed_part_refused",
 ];
 
+/// The release the golden frames were written at. A built-in law with no file
+/// states the release's own version, which moves with every release; a golden
+/// frame states this one, so a release does not rewrite the frames.
+const GOLDEN_RELEASE: &str = "0.1.3";
+
+/// Put the golden release where a built-in law states the present one.
+fn at_the_golden_release(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            let built_in = m.get("sha256").is_some_and(Value::is_null);
+            let present =
+                m.get("version").and_then(Value::as_str) == Some(env!("CARGO_PKG_VERSION"));
+            if built_in && present {
+                m.insert("version".into(), GOLDEN_RELEASE.into());
+            }
+            m.values_mut().for_each(at_the_golden_release);
+        }
+        Value::Array(a) => a.iter_mut().for_each(at_the_golden_release),
+        _ => {}
+    }
+}
+
 fn build_text(name: &str) -> Value {
-    match name {
+    let mut v = match name {
         "response_mixed_configure" => response_mixed_configure(),
         "event_mixed_state" => event_mixed_state(),
         "response_error_mixed_config_invalid" => response_error_mixed_config_invalid(),
         "response_error_mixed_part_refused" => response_error_mixed_part_refused(),
         other => panic!("no builder for {other}"),
-    }
+    };
+    at_the_golden_release(&mut v);
+    v
 }
 
 const BINARY: [&str; 2] = ["event_mixed_live", "event_mixed_data"];
@@ -494,7 +518,7 @@ fn the_golden_configuration_checks_to_the_golden_derived_values() {
     assert!(r.errors.is_empty(), "{:?}", r.errors);
     assert!(d.is_some());
     same(
-        &response_mixed_configure(),
+        &build_text("response_mixed_configure"),
         &read_json("response_mixed_configure.json"),
         "response_mixed_configure",
     );
