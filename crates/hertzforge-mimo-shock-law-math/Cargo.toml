@@ -30,3 +30,7 @@ hertzforge-mimo-shock-law-math = { path = ".", features = ["reference-plant"] }
 [[example]]
 name = "mimo_shock_study"
 required-features = ["reference-plant"]
+
+[[example]]
+name = "mimo_shock_law_research"
+required-features = ["reference-plant"]

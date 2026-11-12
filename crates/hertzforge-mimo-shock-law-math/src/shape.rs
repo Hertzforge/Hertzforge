@@ -30,7 +30,9 @@
 
 use crate::delay::{apply_delay, estimate_delay, least_effort_delays, EffortCost, LeastEffort};
 use crate::model::regularized_inverse;
+use crate::provider::{ModelProvider, ModelSource, Observation};
 use crate::refresh::refresh_along_drive;
+use crate::robust::weighted_inverse;
 use crate::spectrum::{apply, omegas, rms_all, rows_irfft, rows_rfft};
 use crate::srs::{srs_rows, to_lines_log, weight_at, worst_error_db};
 use crate::{
@@ -108,6 +110,86 @@ impl Default for ShapeParams {
     }
 }
 
+/// How the accumulated gains are carried through a change of model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CarryGain {
+    /// The gains are kept whatever the model.
+    Keep,
+    /// The gains restart at one when the new model was learned at the level
+    /// about to be played (it should need no shaping there).
+    ResetOnOwn,
+}
+
+/// The safety options of `shape` built with [`ShapeLaw::with_options`]
+/// (`Derivations.md` D15).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShapeSafety {
+    /// Each accumulated gain stays within `+/-` this many dB; `None`: no clamp.
+    pub gain_clamp_db: Option<f64>,
+    /// A point is stalled when its gain is at the clamp, or when its error is
+    /// above this many dB and has not fallen in two pulses at one level.
+    pub stall_tol_db: f64,
+    /// When the played drive delivered less than `1 - clip_tol` of what the
+    /// law asked for (in phase, energy-weighted over a point's band), that
+    /// point's gain is not updated. `None`: always updated.
+    pub clip_tol: Option<f64>,
+    /// How the gains pass through a model change.
+    pub carry: CarryGain,
+}
+
+impl ShapeSafety {
+    /// No safety change: the law as built with [`ShapeLaw::new`].
+    pub fn off() -> Self {
+        ShapeSafety {
+            gain_clamp_db: None,
+            stall_tol_db: 1.5,
+            clip_tol: None,
+            carry: CarryGain::Keep,
+        }
+    }
+
+    /// The values the research record supports: a 12 dB clamp, the stall
+    /// flag at 1.5 dB, no learning where a drive delivered under 90%.
+    pub fn recommended() -> Self {
+        ShapeSafety {
+            gain_clamp_db: Some(12.0),
+            stall_tol_db: 1.5,
+            clip_tol: Some(0.1),
+            carry: CarryGain::Keep,
+        }
+    }
+}
+
+/// What [`ShapeLaw::with_options`] adds to the law.
+pub struct ShapeExtras {
+    /// The model provider; `None` keeps the model as `params` says.
+    pub provider: Option<Box<dyn ModelProvider>>,
+    /// The safety options.
+    pub safety: ShapeSafety,
+    /// When set, the first pulse of each new level uses the
+    /// uncertainty-weighted inverse with these mode-frequency drops
+    /// (fractions) around the provider's model (it needs a provider with a
+    /// modal model).
+    pub robust_first: Option<Vec<f64>>,
+}
+
+impl Default for ShapeExtras {
+    fn default() -> Self {
+        ShapeExtras {
+            provider: None,
+            safety: ShapeSafety::off(),
+            robust_first: None,
+        }
+    }
+}
+
+struct ShapeState {
+    extras: ShapeExtras,
+    stalled: Vec<Vec<bool>>,
+    history: Vec<(f64, Vec<Vec<f64>>)>,
+    last_drive: Option<Vec<Vec<C64>>>,
+}
+
 /// The `shape` law's state.
 pub struct ShapeLaw {
     setup: Setup,
@@ -119,6 +201,7 @@ pub struct ShapeLaw {
     reference: Vec<Vec<C64>>,
     gains: Vec<Vec<f64>>,
     delays: Vec<f64>,
+    state: Option<ShapeState>,
 }
 
 impl ShapeLaw {
@@ -155,7 +238,72 @@ impl ShapeLaw {
             model,
             inverse,
             reference,
+            state: None,
         })
+    }
+
+    /// The law with a model provider and the safety options. With
+    /// `ShapeExtras::default()` it is the law of [`ShapeLaw::new`] with more
+    /// diagnostics.
+    pub fn with_options(
+        setup: Setup,
+        params: ShapeParams,
+        extras: ShapeExtras,
+    ) -> Result<Self, String> {
+        if extras.provider.is_some() && params.refresh {
+            return Err("a model provider replaces the refresh; turn the refresh off".into());
+        }
+        if extras.robust_first.is_some() && extras.provider.is_none() {
+            return Err("the weighted first pulse needs a model provider".into());
+        }
+        if let Some(c) = extras.safety.gain_clamp_db {
+            if c.is_nan() || c <= 0.0 {
+                return Err("the gain clamp must be positive".into());
+            }
+        }
+        let mut law = ShapeLaw::new(setup, params)?;
+        if let Some(p) = &extras.provider {
+            if p.current().dims() != law.model.dims() {
+                return Err("the provider's model does not match the setup".into());
+            }
+            law.model = p.current().clone();
+            law.inverse = regularized_inverse(&law.model, &law.mask, law.params.lambda_rel)?;
+        }
+        let n_pts = law
+            .setup
+            .srs
+            .as_ref()
+            .map(|t| t.natural_hz.len())
+            .unwrap_or(0);
+        law.state = Some(ShapeState {
+            extras,
+            stalled: vec![vec![false; n_pts]; law.setup.n_controls],
+            history: Vec::new(),
+            last_drive: None,
+        });
+        Ok(law)
+    }
+
+    /// Per control and SRS point, whether the stall diagnostic is raised (empty
+    /// for a law built with [`ShapeLaw::new`]).
+    pub fn stalled(&self) -> Vec<Vec<bool>> {
+        self.state
+            .as_ref()
+            .map(|s| s.stalled.clone())
+            .unwrap_or_default()
+    }
+
+    /// The largest `abs(20 log10 C)` over every control and driven line, dB.
+    pub fn gain_extent_db(&self) -> f64 {
+        let mut m = 0.0f64;
+        for g in &self.gains {
+            for (v, &on) in g.iter().zip(&self.mask) {
+                if on && *v > 0.0 {
+                    m = m.max((20.0 * v.log10()).abs());
+                }
+            }
+        }
+        m
     }
 
     /// The shaped targets at the current gains and delays, full level.
@@ -201,6 +349,9 @@ impl LawSteps for ShapeLaw {
         let s = level_scale(level_db);
         let drives = rows_irfft(&d, self.setup.record_len, s)?;
         values.push(("drive_rms_full_level", rms_all(&drives) / s));
+        if let Some(st) = self.state.as_mut() {
+            st.last_drive = Some(d);
+        }
         Ok(PulseOutputs {
             drives,
             delays_s: Some(self.delays.clone()),
@@ -238,13 +389,12 @@ impl LawSteps for ShapeLaw {
         };
         let w = weight_at(&self.params.weights, inputs.level_db);
         let lim = self.params.max_step_db;
-        // This pulse's ratio per control, on the lines.
-        let ratios: Vec<Vec<f64>> = measured
+        // This pulse's ratio per control, at the SRS points, in dB.
+        let mut db_points: Vec<Vec<f64>> = measured
             .iter()
             .zip(&target.points)
             .map(|(m, t)| {
-                let db: Vec<f64> = m
-                    .iter()
+                m.iter()
                     .zip(t)
                     .map(|(&mv, &tv)| {
                         let e = if mv > 0.0 && tv > 0.0 {
@@ -254,14 +404,79 @@ impl LawSteps for ShapeLaw {
                         };
                         (w * e).clamp(-lim, lim)
                     })
-                    .collect();
-                let at = to_lines_log(&target.natural_hz, &db, lines, df);
-                at.iter().map(|v| 10f64.powf(v / 20.0)).collect()
+                    .collect()
             })
             .collect();
 
         let d = rows_rfft(&inputs.drives, s)?;
         let y = rows_rfft(&inputs.responses, s)?;
+        let mut extra_values: Vec<(&'static str, f64)> = Vec::new();
+        if let Some(st) = self.state.as_mut() {
+            // Points whose band the played drive could not deliver learn
+            // nothing from this pulse.
+            if let (Some(tol), Some(req)) = (st.extras.safety.clip_tol, &st.last_drive) {
+                let frozen = clipped_points(&d, req, &target.natural_hz, df, tol);
+                for row in db_points.iter_mut() {
+                    for (v, &fz) in row.iter_mut().zip(&frozen) {
+                        if fz {
+                            *v = 0.0;
+                        }
+                    }
+                }
+                extra_values.push((
+                    "points_frozen_by_clip",
+                    frozen.iter().filter(|&&f| f).count() as f64,
+                ));
+            }
+        }
+        // ... carried to the lines.
+        let ratios: Vec<Vec<f64>> = db_points
+            .iter()
+            .map(|db| {
+                let at = to_lines_log(&target.natural_hz, db, lines, df);
+                at.iter().map(|v| 10f64.powf(v / 20.0)).collect()
+            })
+            .collect();
+
+        let mut first_of_level_inverse: Option<MatrixStack> = None;
+        if let Some(st) = self.state.as_mut() {
+            if let Some(p) = st.extras.provider.as_mut() {
+                p.observe(&Observation {
+                    level_db: inputs.level_db,
+                    drives: &d,
+                    responses: &y,
+                })?;
+                let source = p.model_for(inputs.next_level_db)?;
+                self.model = p.current().clone();
+                self.inverse =
+                    regularized_inverse(&self.model, &self.mask, self.params.lambda_rel)?;
+                if st.extras.safety.carry == CarryGain::ResetOnOwn
+                    && source == ModelSource::LevelOwn
+                {
+                    for g in self.gains.iter_mut() {
+                        g.iter_mut().for_each(|v| *v = 1.0);
+                    }
+                }
+                if let Some(drops) = &st.extras.robust_first {
+                    if inputs.next_level_db != inputs.level_db {
+                        if let Some(rad) = p.radius(inputs.next_level_db, drops) {
+                            first_of_level_inverse = Some(weighted_inverse(
+                                &self.model,
+                                &self.mask,
+                                self.params.lambda_rel,
+                                &rad,
+                            )?);
+                        }
+                    }
+                }
+                let rep = p.report();
+                extra_values.push(("model_prediction_residual", rep.prediction_residual));
+                extra_values.push(("model_fit_residual", rep.fit_residual));
+                extra_values.push(("model_fallback_residual", rep.fallback_residual));
+                extra_values.push(("model_gate_fired", f64::from(u8::from(rep.gate_fired))));
+                extra_values.push(("model_source", rep.source.code()));
+            }
+        }
         let mut refreshed = 0usize;
         if self.params.refresh {
             refreshed = refresh_along_drive(
@@ -279,6 +494,16 @@ impl LawSteps for ShapeLaw {
                 for (g, r) in self.gains.iter_mut().zip(&ratios) {
                     for (gv, rv) in g.iter_mut().zip(r) {
                         *gv *= rv;
+                    }
+                }
+                if let Some(c) = self
+                    .state
+                    .as_ref()
+                    .and_then(|st| st.extras.safety.gain_clamp_db)
+                {
+                    let (lo, hi) = (10f64.powf(-c / 20.0), 10f64.powf(c / 20.0));
+                    for g in self.gains.iter_mut() {
+                        g.iter_mut().for_each(|v| *v = v.clamp(lo, hi));
                     }
                 }
                 if self.params.delay_relax > 0.0 {
@@ -300,7 +525,10 @@ impl LawSteps for ShapeLaw {
                         *tau = (*tau - d0).clamp(-b, b);
                     }
                 }
-                apply(&self.inverse, &self.shaped())
+                apply(
+                    first_of_level_inverse.as_ref().unwrap_or(&self.inverse),
+                    &self.shaped(),
+                )
             }
             Anchor::Measured => {
                 let change: Vec<Vec<C64>> = y
@@ -316,18 +544,100 @@ impl LawSteps for ShapeLaw {
             }
         };
         let drives = rows_irfft(&next, n, s_next)?;
+        let mut values = vec![
+            (
+                "worst_srs_error_db",
+                worst_error_db(&measured, &target.points),
+            ),
+            ("weight", w),
+            ("drive_rms_full_level", rms_all(&drives) / s_next),
+            ("lines_refreshed", refreshed as f64),
+        ];
+        if self.state.is_some() {
+            let extent = self.gain_extent_db();
+            let clamp_db = self
+                .state
+                .as_ref()
+                .and_then(|st| st.extras.safety.gain_clamp_db);
+            let at_clamp: Vec<Vec<bool>> = self
+                .gains
+                .iter()
+                .map(|g| {
+                    target
+                        .natural_hz
+                        .iter()
+                        .map(|&fhz| {
+                            let k = ((fhz / df).round() as usize).min(g.len() - 1);
+                            clamp_db
+                                .map(|c| (20.0 * g[k].log10()).abs() >= c - 1e-9)
+                                .unwrap_or(false)
+                        })
+                        .collect()
+                })
+                .collect();
+            let errors: Vec<Vec<f64>> = measured
+                .iter()
+                .zip(&target.points)
+                .map(|(m, t)| crate::srs::error_db(m, t))
+                .collect();
+            let Some(st) = self.state.as_mut() else {
+                unreachable!("the state was checked above")
+            };
+            st.history.push((inputs.level_db, errors.clone()));
+            let tol = st.extras.safety.stall_tol_db;
+            let hl = st.history.len();
+            for c in 0..errors.len() {
+                for p in 0..errors[c].len() {
+                    let mut stalled = at_clamp[c][p];
+                    if hl >= 3 && st.history[hl - 3].0 == inputs.level_db {
+                        let now = errors[c][p].abs();
+                        let then = st.history[hl - 3].1[c][p].abs();
+                        if now > tol && now >= then - 0.25 {
+                            stalled = true;
+                        }
+                    }
+                    st.stalled[c][p] = stalled;
+                }
+            }
+            let n_stalled = st.stalled.iter().flatten().filter(|&&b| b).count();
+            st.last_drive = Some(next);
+            values.push(("gain_extent_db", extent));
+            values.push(("stalled_points", n_stalled as f64));
+            values.extend(extra_values);
+        }
         Ok(PulseOutputs {
-            values: vec![
-                (
-                    "worst_srs_error_db",
-                    worst_error_db(&measured, &target.points),
-                ),
-                ("weight", w),
-                ("drive_rms_full_level", rms_all(&drives) / s_next),
-                ("lines_refreshed", refreshed as f64),
-            ],
+            values,
             drives,
             delays_s: Some(self.delays.clone()),
         })
     }
+}
+
+/// Per SRS point, whether the played drive delivered less than `1 - tol` of
+/// the requested drive's energy in phase over the point's band (one
+/// twenty-fourth of an octave either side), every drive together.
+fn clipped_points(
+    played: &[Vec<C64>],
+    requested: &[Vec<C64>],
+    natural_hz: &[f64],
+    df: f64,
+    tol: f64,
+) -> Vec<bool> {
+    let lines = played.first().map(|v| v.len()).unwrap_or(0);
+    let h = 2f64.powf(1.0 / 24.0);
+    natural_hz
+        .iter()
+        .map(|&fc| {
+            let lo = ((fc / h / df).ceil() as usize).min(lines);
+            let hi = ((fc * h / df).floor() as usize + 1).min(lines);
+            let (mut num, mut den) = (0.0, 0.0);
+            for (p, r) in played.iter().zip(requested) {
+                for k in lo..hi {
+                    num += (p[k] * r[k].conj()).re;
+                    den += r[k].norm_sqr();
+                }
+            }
+            den > 0.0 && num / den < 1.0 - tol
+        })
+        .collect()
 }
