@@ -119,6 +119,28 @@ pub struct IdentificationPlan {
     pub review: bool,
 }
 
+/// The joint verdict the ladder is fed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerdictMode {
+    /// Every control inside its own tolerance.
+    #[default]
+    All,
+    /// An SRS target only: the energy-weighted global SRS error inside the
+    /// tolerance (the smaller of its two sides), and no control over its abort
+    /// line.
+    Global,
+}
+
+impl VerdictMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VerdictMode::All => "all",
+            VerdictMode::Global => "global",
+        }
+    }
+}
+
 /// The core's guards on every pulse, whatever the law.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GuardPlan {
@@ -159,6 +181,9 @@ pub struct GuardPlan {
     /// this ends the run.
     #[serde(default)]
     pub max_displacement_in: Option<f64>,
+    /// The joint verdict the ladder is fed.
+    #[serde(default)]
+    pub verdict: VerdictMode,
 }
 
 fn default_max_band_growth_db() -> f64 {
@@ -189,6 +214,7 @@ impl Default for GuardPlan {
             first_drive_ratio: default_first_drive_ratio(),
             max_velocity_ips: None,
             max_displacement_in: None,
+            verdict: VerdictMode::All,
         }
     }
 }
@@ -402,6 +428,10 @@ pub struct ControlReport {
     /// The control's delay was inside its timing window; a control whose
     /// delay was not is judged failing for it.
     pub timing_ok: bool,
+    /// The response was inside the control's tolerance (its standard, the
+    /// envelope or the SRS band); a control that was not fails for it.
+    #[serde(default)]
+    pub shape_ok: bool,
     /// The worst signed error, dB, positive an over-test (the SRS deviation
     /// above the target, or the peak over the target's peak).
     pub over_test_db: f64,
@@ -486,6 +516,13 @@ pub enum EngineError {
     NotBuilt(&'static str),
     /// The station could not be armed or a shot failed; the run ended.
     Station(String),
+    /// A control cannot reach its target (its best reachable response fails
+    /// its own judge): the run holds before the first pulse until the hold is
+    /// acknowledged. The controls by table index and their floors, dB.
+    Unreachable {
+        controls: Vec<u32>,
+        floors_db: Vec<f64>,
+    },
 }
 
 impl fmt::Display for EngineError {
@@ -497,6 +534,10 @@ impl fmt::Display for EngineError {
                 write!(f, "MIMO Shock cannot run its {step} step in this version")
             }
             EngineError::Station(m) => write!(f, "the station failed: {m}"),
+            EngineError::Unreachable { controls, .. } => write!(
+                f,
+                "controls {controls:?} cannot reach their targets; acknowledge the hold to go on"
+            ),
         }
     }
 }
@@ -671,6 +712,10 @@ pub struct SeedReport {
     /// The seed's predicted peak at each control over its target's peak at
     /// the first level.
     pub predicted_peak_ratio: Vec<f64>,
+    /// Each control's best reachable response passes its own judge at full
+    /// level.
+    #[serde(default)]
+    pub reachable_ok: Vec<bool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -744,6 +789,8 @@ pub struct MimoShockEngine {
     last_start: Option<Instant>,
     records: RunRecord,
     end: Option<RunEnd>,
+    /// The operator's words acknowledging an unreachable target.
+    unreachable_ack: Option<String>,
 }
 
 impl MimoShockEngine {
@@ -791,6 +838,7 @@ impl MimoShockEngine {
             last_start: None,
             records: RunRecord::default(),
             end: None,
+            unreachable_ack: None,
         })
     }
 
@@ -881,6 +929,36 @@ impl MimoShockEngine {
         &self.records
     }
 
+    /// The controls (by position) whose targets are held as unreachable before
+    /// the first pulse, while the hold stands; `None` when nothing holds.
+    pub fn unreachable(&self) -> Option<Vec<usize>> {
+        if self.state != RunState::AwaitingReview
+            || self.config.guards.verdict == VerdictMode::Global
+            || self.unreachable_ack.is_some()
+        {
+            return None;
+        }
+        let r = self.seed_report.as_ref()?;
+        let held: Vec<usize> = r
+            .reachable_ok
+            .iter()
+            .enumerate()
+            .filter(|(_, ok)| !**ok)
+            .map(|(c, _)| c)
+            .collect();
+        (!held.is_empty()).then_some(held)
+    }
+
+    /// Acknowledge the unreachable hold with the operator's words.
+    pub fn acknowledge_unreachable(&mut self, words: &str) {
+        self.unreachable_ack = Some(words.to_owned());
+    }
+
+    /// The operator's words acknowledging the unreachable hold, once given.
+    pub fn unreachable_acknowledged(&self) -> Option<&str> {
+        self.unreachable_ack.as_deref()
+    }
+
     /// Open the station `backend` with `table` at the configured rate, adopt
     /// the rate it programmed, re-derive the grid and the targets at it and
     /// pass the arm gate for `station`. Nothing is driven.
@@ -934,6 +1012,15 @@ impl MimoShockEngine {
                 return Err(EngineError::Config(e));
             }
         };
+        if self.config.guards.verdict == VerdictMode::Global
+            && !matches!(built.target, Target::Srs(_))
+        {
+            let _ = shot.stop();
+            return Err(EngineError::Config(SetupError::new(
+                SetupRule::TargetShape,
+                "the global verdict judges an SRS target; this target is a waveform",
+            )));
+        }
         if built.target.waveforms().len() != self.config.controls.len() * n {
             let _ = shot.stop();
             return Err(EngineError::Config(SetupError::new(
@@ -1241,6 +1328,8 @@ impl MimoShockEngine {
             );
             return Ok(());
         }
+        let setup = self.setup.clone().expect("identified");
+        self.seed_report = Some(self.floors(&setup));
         self.state = RunState::AwaitingReview;
         Ok(())
     }
@@ -1497,12 +1586,21 @@ impl MimoShockEngine {
             self.finish(EndOutcome::Fault, "fault", e.to_string());
             return Err(EngineError::Config(e));
         }
+        if let Some(held) = self.unreachable() {
+            let floors = &self.seed_report.as_ref().expect("held").floor_db;
+            return Err(EngineError::Unreachable {
+                controls: held.iter().map(|&c| self.config.controls[c]).collect(),
+                floors_db: held.iter().map(|&c| floors[c]).collect(),
+            });
+        }
         let manifest = self.law.manifest();
         if let Err(e) = check_law_accepts(&manifest, &setup) {
             self.finish(EndOutcome::LawFault, "target_not_accepted", e.to_string());
             return Err(EngineError::Config(e));
         }
-        self.seed_report = Some(self.floors(&setup));
+        if self.seed_report.is_none() {
+            self.seed_report = Some(self.floors(&setup));
+        }
         self.records.setup = Some(setup.clone());
         self.records.law = Some(self.law.describe());
         let built = catch_unwind(AssertUnwindSafe(|| self.law.build(&setup)));
@@ -1632,10 +1730,34 @@ impl MimoShockEngine {
                 }
             })
             .collect();
+        // Whether each control's best reachable response passes its own judge
+        // at full level. Its arrival is not judged: a set delay is one the
+        // drives can always add, so a held timing is judged as free.
+        let free = match &self.config.timing {
+            Timing::Free { window_s } => Timing::Free {
+                window_s: *window_s,
+            },
+            Timing::Hold(h) => Timing::Free {
+                window_s: h.window_s,
+            },
+        };
+        let reachable_ok: Vec<bool> = match self.built.as_ref() {
+            Some(b) if best.len() == nc => best
+                .iter()
+                .enumerate()
+                .map(|(c, y)| {
+                    judge_control(c, y, 0.0, setup.fs_hz, &b.target, &b.judging, &free)
+                        .verdict
+                        .passed
+                })
+                .collect(),
+            _ => vec![false; nc],
+        };
         SeedReport {
             reachable_fraction: fraction,
             floor_db,
             predicted_peak_ratio: Vec::new(),
+            reachable_ok,
         }
     }
 
@@ -1793,6 +1915,7 @@ impl MimoShockEngine {
                 velocity_ips: j.velocity_ips,
                 displacement_pk_pk_in: j.displacement_pk_pk_in,
                 timing_ok: j.timing_ok,
+                shape_ok: j.shape_ok,
                 over_test_db: j.over_test_db,
                 polarity_ok: j.polarity_ok,
                 duration_ratio: j.duration_ratio,
@@ -1831,42 +1954,53 @@ impl MimoShockEngine {
             report.global_srs_error_db = global_srs_error_db(&built.target, &srs_errors);
         }
         self.last_played = Some((drives.clone(), level));
-        // The measured response against the abort lines.
+        // The measured response against the abort lines. The lines are
+        // absolute: the full-level target's peak plus the abort margin, at
+        // every level. A pulse over its own level's target and under the line
+        // is a judged failure the law may correct at that level.
         let line = self.control_abort_ratio();
-        let measured_breach = if let Some((c, j)) = judgements
-            .iter()
-            .enumerate()
-            .find(|(_, j)| j.verdict.peak_ratio > line)
-        {
-            Some((
-                EndOutcome::Aborted,
-                "control_abort",
-                format!(
-                    "control {} measured {:.2} dB over its target's peak; its abort line is {:.2} dB",
+        let s_level = Self::scale(level);
+        let over_line = |j: &ControlJudgement| j.verdict.peak_ratio * s_level > line;
+        if self.config.guards.verdict == VerdictMode::Global {
+            let tol = match &built.target {
+                Target::Srs(t) => (-t.tol_lo_db).min(t.tol_hi_db),
+                Target::Waveform(_) => f64::NEG_INFINITY,
+            };
+            report.passed = report.global_srs_error_db.is_some_and(|g| g <= tol)
+                && !judgements.iter().any(over_line);
+        }
+        let measured_breach =
+            if let Some((c, j)) = judgements.iter().enumerate().find(|(_, j)| over_line(j)) {
+                Some((
+                    EndOutcome::Aborted,
+                    "control_abort",
+                    format!(
+                    "control {} measured {:.2} dB over its full-level target's peak; its abort \
+                     line is {:.2} dB",
                     self.config.controls[c],
-                    20.0 * j.verdict.peak_ratio.log10(),
+                    20.0 * (j.verdict.peak_ratio * s_level).log10(),
                     20.0 * line.log10()
                 ),
-            ))
-        } else if let Some((lim, pk)) = self
-            .config
-            .limits
-            .iter()
-            .zip(limits.iter().map(|r| peak(r)))
-            .find(|(l, pk)| *pk > l.abort_peak)
-        {
-            Some((
-                EndOutcome::Aborted,
-                "limit_abort",
-                format!(
-                    "limit {} measured {pk:.3}, over its abort of {}",
-                    lim.channel, lim.abort_peak
-                ),
-            ))
-        } else {
-            self.kinematics_breach(&responses)
-                .map(|m| (EndOutcome::Aborted, "kinematics", m))
-        };
+                ))
+            } else if let Some((lim, pk)) = self
+                .config
+                .limits
+                .iter()
+                .zip(limits.iter().map(|r| peak(r)))
+                .find(|(l, pk)| *pk > l.abort_peak)
+            {
+                Some((
+                    EndOutcome::Aborted,
+                    "limit_abort",
+                    format!(
+                        "limit {} measured {pk:.3}, over its abort of {}",
+                        lim.channel, lim.abort_peak
+                    ),
+                ))
+            } else {
+                self.kinematics_breach(&responses)
+                    .map(|m| (EndOutcome::Aborted, "kinematics", m))
+            };
         let verdicts: Vec<ControlVerdict> = judgements.iter().map(|j| j.verdict).collect();
         self.pulses.push(report.clone());
         if let Some((o, r, m)) = measured_breach {
