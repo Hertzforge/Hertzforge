@@ -1,13 +1,36 @@
-//! The choice of a MIMO Shock law: the built-in laws by name, resolution of a law
-//! by its catalog id, and the law check's cases.
+//! The choice of a MIMO Shock law: the built-in laws by name, law files by
+//! catalog id or by path, the facts the law picker shows, the law check's cases
+//! and their requirements, and a side-by-side run that shows two laws give the
+//! same drives.
 //!
-//! The built-in laws (`inverse`, `shape`, `paired`) are named here so the catalog
-//! and the wire can list them; none is built in this version, so resolving one
-//! answers [`ResolveError::NotBuilt`].
+//! - [`resolve`]: a catalog id to the factory a run builds its law with. A
+//!   built-in id goes to [`resolve_builtin`]; any other is a `shock-mimo` law
+//!   file in the catalog, run through the law host ([`wasm`]).
+//! - [`load_law_file`]: a law file by path, as a contributor tries one.
+//! - [`facts`]: the catalog entries and the picker's facts, built-ins first.
+//! - [`check`]: the cases, their requirements and the judge.
+//! - [`parity`]: two laws over one scripted run.
 
+pub mod check;
+pub mod facts;
+pub mod parity;
+pub mod wasm;
+
+pub use check::{
+    check_record, judge, run_check, CaseRun, CaseSpec, CaseVerdict, MimoShockCheckCase,
+    Perturbation, MIMO_SHOCK_CHECK_VERSION,
+};
+pub use facts::{all_facts, builtin_facts, entries, file_facts, KnownFailure, LawFacts};
+pub use parity::{compare_laws, MathLaw, ParityReport};
+pub use wasm::{shock_mimo_law_fault, WasmMimoShockLaw, WasmMimoShockLawFactory};
+
+use hertzforge_law_host::{LawHost, LoadedShockMimoLaw, Param};
 use hertzforge_mimo_shock::{MimoShockLawFactory, TargetKind};
+use hertzforge_random_laws::{LawCatalog, LawWorld};
 use std::fmt;
+use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// A built-in MIMO Shock law.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,6 +90,15 @@ pub enum ResolveError {
     Unknown(String),
     /// The law is named but this version does not run it.
     NotBuilt(&'static str),
+    /// The id is a law file of another test type.
+    WrongWorld {
+        /// The id asked for.
+        id: String,
+        /// The test type the law file is for.
+        law_is_for: &'static str,
+    },
+    /// The law file could not be read or loaded.
+    File(String),
 }
 
 impl fmt::Display for ResolveError {
@@ -76,6 +108,11 @@ impl fmt::Display for ResolveError {
             ResolveError::NotBuilt(id) => {
                 write!(f, "the MIMO Shock law `{id}` cannot run in this version")
             }
+            ResolveError::WrongWorld { id, law_is_for } => write!(
+                f,
+                "the law `{id}` is a {law_is_for} law, not a MIMO Shock law"
+            ),
+            ResolveError::File(why) => write!(f, "the MIMO Shock law file: {why}"),
         }
     }
 }
@@ -88,6 +125,44 @@ pub fn resolve_builtin(id: &str) -> Result<Arc<dyn MimoShockLawFactory>, Resolve
         Some(b) => Err(ResolveError::NotBuilt(b.id())),
         None => Err(ResolveError::Unknown(id.into())),
     }
+}
+
+/// The factory a run builds its law with, for the law with catalog id `id`:
+/// a built-in by name ([`resolve_builtin`]), or a `shock-mimo` law file in
+/// `catalog` by its SHA-256, built with `params` and with `budget` as every
+/// call's deadline.
+pub fn resolve(
+    catalog: &LawCatalog,
+    id: &str,
+    params: Vec<Param>,
+    budget: Duration,
+) -> Result<Arc<dyn MimoShockLawFactory>, ResolveError> {
+    if BuiltinMimoShock::from_id(id).is_some() {
+        return resolve_builtin(id);
+    }
+    if let Some(law) = catalog.shock_mimo_law(id) {
+        return Ok(Arc::new(WasmMimoShockLawFactory::new(
+            law.clone(),
+            params,
+            budget,
+        )));
+    }
+    match catalog.entry(id) {
+        Some(e) if e.world != LawWorld::ShockMimo => Err(ResolveError::WrongWorld {
+            id: id.into(),
+            law_is_for: e.world.test_type(),
+        }),
+        _ => Err(ResolveError::Unknown(id.into())),
+    }
+}
+
+/// Load the MIMO Shock law file at `path` with `host`: how a contributor runs
+/// a law straight from the build, before importing it into a catalog.
+pub fn load_law_file(host: &LawHost, path: &Path) -> Result<LoadedShockMimoLaw, ResolveError> {
+    let bytes =
+        std::fs::read(path).map_err(|e| ResolveError::File(format!("{}: {e}", path.display())))?;
+    host.load_shock_mimo(&bytes)
+        .map_err(|e| ResolveError::File(format!("{}: {e}", path.display())))
 }
 
 #[cfg(test)]

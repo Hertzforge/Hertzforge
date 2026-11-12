@@ -5,9 +5,25 @@ edition.workspace = true
 license = "MIT"
 publish = false
 
-# The choice of a MIMO Shock law: the built-in laws' factories, resolution of a
-# law by catalog id, and the law check's cases. It runs a check case on the
-# backend it is handed and names none.
+# The choice of a MIMO Shock law: the built-in laws by name, law files by catalog
+# id or path through the law host, the facts the law picker shows, the law check's
+# cases and their requirements, and a side-by-side runner that shows two laws give
+# the same drives. It names no backend: a check case is run by a closure the caller
+# supplies.
 [dependencies]
 hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }
 hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# MIMO Shock law files: the `shock-mimo` world and its contained instance.
+hertzforge-law-host = { path = "../hertzforge-law-host" }
+# The built-in laws' declarations (`shock_mimo::builtin`) and, through it, the laws'
+# mathematics, for the catalog entries and the native reference of the parity runs.
+hertzforge-law-sdk = { path = "../hertzforge-law-sdk" }
+# The catalog, check records and the arming rule, shared with every other world.
+hertzforge-random-laws = { path = "../hertzforge-random-laws" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The reference plant the parity tests run on.
+hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math", features = ["reference-plant"] }
+hertzforge-sdm = { path = "../hertzforge-sdm" }
