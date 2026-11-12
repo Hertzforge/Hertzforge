@@ -523,6 +523,11 @@ in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied 
 Nothing reaches the project or its journal. A reading's `Added` row says `Would add`. `preview` on an
 operation without `previews` is a `bad_request`, and nothing runs.
 
+**Commits.** An operation with `commits` names a boolean param that says go ahead. Run with it
+false, the operation answers with what it would do and changes nothing; run with it true, it does
+it. The shell's form does not ask that param: its Preview button sends it false and Apply sends it
+true.
+
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
 the first line making the project. The shell shows it read-only along the bottom of the window, to be copied into a script; nothing is typed into it.
@@ -631,7 +636,7 @@ geometry named Geometry (then Geometry (2) and on) in the display system's lengt
 `unit` names another, and the shell picks it; so is New Channel Table, named Channel Table. One solid picked offers its shape's Add as `Edit`, with
 `"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
-it, and a live form is run each time a changed field is left, with no Run button. Edit Solid stays for
+it, and a live form is run each time a changed field is left, with no Apply button. Edit Solid stays for
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
 color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a

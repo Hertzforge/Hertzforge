@@ -240,6 +240,10 @@ class Operation:
     #: the form can show this while it is typed: `op.run` with `preview` runs it on a
     #: copy of its geometry, so nothing in the project changes
     previews: bool = False
+    #: the boolean param that says go ahead, for an operation that shows what it would do
+    #: until told to (Mesh Solids, Merge Coincident Nodes): the form does not ask it, and sets
+    #: it false for its Preview button and true for Apply (Brandon, 2026-11-11)
+    commits: str | None = None
     #: its readings and refusals say lengths in words, '0.2 m', which go to the display system
     says_lengths: bool = False
 
@@ -253,6 +257,8 @@ class Operation:
         out['modules'] = list(modules_of(self))
         if self.previews:
             out['previews'] = True
+        if self.commits:
+            out['commits'] = self.commits
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,

@@ -34,6 +34,23 @@ def test_catalog_names_every_operation(catalog):
     assert all(op['id'].startswith('project.') for op in catalog['operations'])
 
 
+def test_an_operation_that_waits_to_be_told_says_which_param_tells_it(catalog):
+    """Brandon, 2026-11-11: a tickbox that turned a preview into the real thing (Mesh, Keep,
+    Tie) meant Run did not do what it said. Each such operation names the param, and the
+    shell sends it false for Preview and true for Apply; it is a boolean of the operation's."""
+    committing = {op['id']: op['commits'] for op in catalog['operations'] if 'commits' in op}
+    assert committing == dict.fromkeys(
+        ('project.mesh_solids', 'project.mate_surfaces', 'project.merge_coincident_nodes',
+         'project.tie_elements', 'project.align_meshes', 'project.plan_instrumentation',
+         'project.generate_rigid_body_modes'), 'keep')
+    for op in catalog['operations']:
+        named = {param['name']: param for param in op['params']}
+        if 'commits' in op:
+            assert named[op['commits']]['type'] == 'boolean', op['id']
+        else:
+            assert 'keep' not in named, f'{op["id"]} has a keep tickbox and no Preview'
+
+
 def test_an_object_param_lists_no_options_of_its_own(catalog):
     for op in catalog['operations']:
         for param in op['params']:

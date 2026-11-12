@@ -46,12 +46,19 @@ pub fn options(
     heartbeat: Duration,
 ) -> ServiceOptions {
     let dir = std::env::temp_dir().join(format!(
-        "sds-control-test-{}-{}",
+        "sds-control-test-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        // the clock alone repeats: macOS reads it to the microsecond, and two
+        // tests running at once could share a folder and delete it under each other
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        }
     ));
     ServiceOptions {
         heartbeat,

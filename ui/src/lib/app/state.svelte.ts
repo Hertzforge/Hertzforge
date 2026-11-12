@@ -166,6 +166,7 @@ class AnalyzeState {
 		const values = this.currentValues;
 		return this.params
 			.filter((p) => !p.shown_with || values[p.shown_with[0]] === p.shown_with[1])
+			.filter((p) => p.name !== this.op?.commits)
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
 			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
@@ -670,12 +671,18 @@ class AnalyzeState {
 		this.triedRun = false;
 	}
 
-	async run(): Promise<void> {
+	/**
+	 * Apply the form. An operation that `commits` is sent its go-ahead param: false for Preview,
+	 * which only shows what it would do, true for Apply, which does it.
+	 */
+	async run(preview = false): Promise<void> {
 		const op = this.op;
 		if (!op || !this.onProject || this.running) return;
+		if (preview && !op.commits) return;
 		this.triedRun = true;
 		if (Object.keys(this.errors).length) return;
 		const params = { ...this.currentValues };
+		if (op.commits) params[op.commits] = !preview;
 		this.running = true;
 		this.runError = null;
 		// what is typed now is run, so its preview must not land on top of the answer
@@ -692,7 +699,7 @@ class AnalyzeState {
 				this.app.project.clickObject(added[0], order);
 				this.closeForm();
 			} else if (res.views.length) {
-				this.reading = { title: this.formTitle, views: res.views };
+				this.reading = { title: preview ? `${this.formTitle}, preview` : this.formTitle, views: res.views };
 				this.readingId = op.id;
 			} else {
 				this.closeForm();

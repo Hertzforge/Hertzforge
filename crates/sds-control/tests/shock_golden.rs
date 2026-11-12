@@ -37,12 +37,19 @@ fn read_json(name: &str) -> Value {
 /// an empty data folder.
 fn builtin_classical_entry() -> Value {
     let dir = std::env::temp_dir().join(format!(
-        "sds-control-golden-{}-{}",
+        "sds-control-golden-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        // the clock alone repeats: macOS reads it to the microsecond, and two
+        // tests running at once could share a folder and delete it under each other
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        }
     ));
     let cat = hertzforge_random_laws::LawCatalog::open(&dir).unwrap();
     let entry = sds_control::laws::entry_json(&cat.entry("fd_correct").unwrap());
