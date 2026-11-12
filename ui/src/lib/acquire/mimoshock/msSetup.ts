@@ -158,7 +158,7 @@ export function defaultSrsControl(): MsSrsControlDraft {
 		points: [
 			{ freq_hz: 50, accel_g: 4 },
 			{ freq_hz: 300, accel_g: 24 },
-			{ freq_hz: 2000, accel_g: 24 }
+			{ freq_hz: 2500, accel_g: 24 }
 		],
 		engine: 'wavsyn',
 		max_iters: 50,

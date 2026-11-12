@@ -147,7 +147,7 @@ describe('the wire', () => {
 		d.kind = 'srs';
 		const t = toMsConfig(d, null).target;
 		expect(t.kind === 'srs' && t.controls.length).toBe(3);
-		expect(t.kind === 'srs' && t.controls[0].target).toEqual({ kind: 'breakpoints', points: [[50, 4], [300, 24], [2000, 24]] });
+		expect(t.kind === 'srs' && t.controls[0].target).toEqual({ kind: 'breakpoints', points: [[50, 4], [300, 24], [2500, 24]] });
 	});
 
 	it("puts the service's findings on the setup's own fields and sections", () => {

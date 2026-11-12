@@ -425,6 +425,17 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 		} else {
 			if (t.controls.length !== nc) errors.push(item('targets_length_mismatch', `${t.controls.length} targets for ${nc} controls; give one target per control.`, 'config.target.controls'));
 			if (!(t.bands.f_hi_hz > t.bands.f_lo_hz)) errors.push(item('bands_empty', 'The band grid holds no bands.', 'config.target.bands'));
+			else {
+				// as the service: a breakpoint target covers the band grid, from its lowest edge to its top centre
+				const n = t.bands.bands_per_octave ?? 3;
+				let top = t.bands.f_lo_hz;
+				for (let k = 0; k < 400 && top < t.bands.f_hi_hz - 1e-9; k++) top = t.bands.f_lo_hz * 2 ** ((k + 1) / n);
+				t.controls.forEach((ctl, i) => {
+					const pts = ctl.target.kind === 'breakpoints' ? ctl.target.points : [];
+					if (pts.length && (pts[0][0] > t.bands.f_lo_hz || pts[pts.length - 1][0] < top))
+						errors.push(item('target_not_covering', `The breakpoints run from ${pts[0][0]} to ${pts[pts.length - 1][0]} Hz; they cover the band grid, from ${t.bands.f_lo_hz} Hz to its top centre at ${round(top, 2)} Hz.`, `config.target.controls[${i}].target.points`));
+				});
+			}
 		}
 		const timing = c.timing ?? { mode: 'free' };
 		if (timing.mode === 'hold' && (timing.delays_s?.length ?? 0) !== nc) errors.push(item('delays_length_mismatch', 'Give one delay for every control.', 'config.timing.delays_s'));

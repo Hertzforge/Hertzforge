@@ -106,6 +106,14 @@ describe('the MIMO Shock store', () => {
 		expect(ms.actions.apply.enabled).toBe(true);
 	});
 
+	it("a new SRS setup's targets cover the default band grid, so it checks clean as it opens", async () => {
+		const { ms } = await screen();
+		ms.setKind('srs');
+		await ms.checkSetup();
+		expect(ms.check?.errors).toEqual([]);
+		expect(ms.counts.target.errors).toBe(0);
+	});
+
 	it("puts the service's dry-run findings on the setup's fields", async () => {
 		const { ms } = await screen();
 		ms.setup.srs.bands.f_hi_hz = 10;
