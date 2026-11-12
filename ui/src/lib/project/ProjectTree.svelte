@@ -18,6 +18,7 @@
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 	import { partIsPicked } from './selection';
+	import { canDragOut } from './files';
 
 	interface Props {
 		app: AppState;
@@ -161,12 +162,30 @@
 		if (e.button !== 0 || p.renaming === o.name) return;
 		dragFrom = { name: o.name, x: e.clientX, y: e.clientY, id: e.pointerId };
 	}
+	/** Objects dragged out of the window, while the button stays down: their files are being written. */
+	let outHeld = false;
+	/** Whether the pointer has reached the window's edge, where a drag in the tree becomes a drag out of it. */
+	function atEdge(e: PointerEvent): boolean {
+		return e.clientX <= 1 || e.clientY <= 1 || e.clientX >= innerWidth - 2 || e.clientY >= innerHeight - 2;
+	}
 	function dragMove(e: PointerEvent) {
 		if (!dragFrom) return;
 		if (!dragging) {
 			if (Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < 6) return;
 			dragging = p.isSelected(dragFrom.name) ? [...p.selection.objects] : [dragFrom.name];
 			(e.currentTarget as HTMLElement).setPointerCapture?.(dragFrom.id);
+		}
+		if (atEdge(e) && canDragOut()) {
+			// out of the window: each object saved where it is let go (Brandon, 2026-11-11)
+			const names = dragging;
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(dragFrom.id);
+			dragging = null;
+			dropOn = null;
+			dropOut = false;
+			dragFrom = null;
+			outHeld = true;
+			void p.dragOut({ names }, () => outHeld).finally(() => (outHeld = false));
+			return;
 		}
 		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-testid^="object-"]');
 		const name = row?.dataset.testid?.slice('object-'.length) ?? null;
@@ -179,6 +198,7 @@
 		return (treeBox.closest('aside') ?? treeBox).contains(document.elementFromPoint(e.clientX, e.clientY));
 	}
 	function dragUp(e: PointerEvent) {
+		outHeld = false;
 		const moving = dragging;
 		const target = dropOn;
 		const inside = overBlank(e);

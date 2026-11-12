@@ -331,6 +331,7 @@ fn main() {
         // tauri.conf.json, installs it, and the process plugin relaunches.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_drag::init())
         .manage(AppLog::new())
         .manage(Quit::default())
         .setup(|app| {

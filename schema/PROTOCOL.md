@@ -493,6 +493,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+| `project.drag_out` | `{"project":true}` or `{"names"}` | `{"paths"}` |
 | `op.cancel` | `{}` | `{"op"}` |
 | `report.*` | see Reports below | |
 | `project.rename` | `{"name","to","index"?}` | `{"project"}` |
@@ -666,7 +667,7 @@ them, and refuses any other file with a pointer to import it. A client asks befo
 project whose `modified` is true. `project.import` adds a file's
 objects to the project. `units` declares what the file does not state, as the core's `import_file` options
 (`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
-project came from; a `.vdyn` is opened but never written. `project.new` replaces the project with an
+project came from; a `.vdyn` is opened but never written. `project.drag_out` writes the whole project (`"project": true`) or the objects `names` to files in a new temporary folder, for the desktop shell to drag out of the window, and answers their paths: the project as one `.hforge` named for its title, each object as a `.hforge` object named for itself. It is a copy: the project's `file` and `modified` are unchanged. `project.new` replaces the project with an
 empty one; it takes an optional `title` and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.
 With `index`, `project.rename` renames one photo of a Photos object instead (the photo at that

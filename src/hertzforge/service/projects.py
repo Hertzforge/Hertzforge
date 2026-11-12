@@ -8,8 +8,11 @@ with the core's own words when the core refuses a file.
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
+import shutil
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -266,6 +269,73 @@ def save(state: OpenProject | None, params: Mapping[str, Any]) -> str:
     except (ValueError, OSError) as error:
         raise _refusal(error) from None
     state.modified = False
+    return written
+
+
+#: where files dragged out of the window are written, made on first use and removed at exit:
+#: the application they are dropped on copies them after the drop, so they outlive the drag
+_DRAG_FOLDER: str | None = None
+
+
+def _drag_folder() -> str:
+    global _DRAG_FOLDER
+    if _DRAG_FOLDER is None:
+        _DRAG_FOLDER = tempfile.mkdtemp(prefix='hertzforge-drag-')
+        atexit.register(shutil.rmtree, _DRAG_FOLDER, ignore_errors=True)
+    return _DRAG_FOLDER
+
+
+def _file_name(text: str, fallback: str) -> str:
+    """A name a file can carry on every platform: the characters a path or a file manager
+    reads specially made dashes."""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '-', text).strip(' .')
+    return name or fallback
+
+
+def drag_out(state: OpenProject | None, params: Mapping[str, Any]) -> list[str]:
+    """`project.drag_out`: the project, or some of its objects, written to files for the shell
+    to drag out of the window (Brandon, 2026-11-11: dragging the project out saves it, as the
+    earlier toolset did). The project is one `.hforge` file named for its title; each object a
+    `.hforge` object named for itself. They go to a folder of their own, so a name is never
+    taken. A copy: the project stays bound to its own file and keeps its unsaved changes."""
+    from hertzforge.io import save as save_object
+
+    state = _open(state, 'project.drag_out')
+    whole, names = params.get('project', False), params.get('names')
+    if not isinstance(whole, bool):
+        raise bad_request('project.drag_out "project" is true or false')
+    if whole == (names is not None):
+        raise bad_request('project.drag_out takes "project": true or "names", one of them')
+    project = state.project
+    if not whole:
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise bad_request('project.drag_out "names" is a list of object names')
+        missing = [n for n in names if n not in project]
+        if missing:
+            raise not_found(f'the project has no object named {missing[0]!r}')
+    folder = tempfile.mkdtemp(dir=_drag_folder())
+    try:
+        if whole:
+            path = os.path.join(folder, _file_name(project.name or '', 'Project') + '.hforge')
+            # `save` binds the project to what it wrote, and a drag out is a copy
+            file, references = project.file, dict(project.references)
+            prints = dict(project._reference_prints)
+            try:
+                written = [project.save(path)]
+            finally:
+                project.file = file
+                project.references.clear()
+                project.references.update(references)
+                project._reference_prints.clear()
+                project._reference_prints.update(prints)
+        else:
+            written = []
+            for name in names:
+                path = os.path.join(folder, _file_name(name, 'Object') + '.hforge')
+                save_object(project[name], path)
+                written.append(path)
+    except (ValueError, TypeError, OSError) as error:
+        raise _refusal(error) from None
     return written
 
 

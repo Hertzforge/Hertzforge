@@ -6,7 +6,7 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles } from '$lib/project/files';
+import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
@@ -1664,6 +1664,24 @@ export class ProjectState {
 			return false;
 		}
 		return this.duplicate(ours);
+	}
+
+	/**
+	 * The project, or objects, dragged out of the window (Brandon, 2026-11-11: dragging the project
+	 * out saves it): the service writes a copy, and the system's drag of it starts if the button
+	 * is still held once it is written, so a drag let go meanwhile drops nothing. The project
+	 * keeps its own file and its unsaved changes. False when nothing was dragged.
+	 */
+	async dragOut(what: { project: true } | { names: string[] }, stillHeld: () => boolean): Promise<boolean> {
+		const label = 'project' in what ? `${this.summary?.title ?? 'Project'}.hforge` : what.names.length === 1 ? `${what.names[0]}.hforge` : `${what.names.length} objects`;
+		try {
+			const res = await this.app.analysis.request<{ paths: string[] }>('project.drag_out', what, { timeoutMs: RUN_TIMEOUT_MS });
+			if (!stillHeld()) return false;
+			return await startDragOut(res.paths, label);
+		} catch (err) {
+			this.error = `Dragging out ${label}: ${message(err)}`;
+			return false;
+		}
 	}
 
 	/**

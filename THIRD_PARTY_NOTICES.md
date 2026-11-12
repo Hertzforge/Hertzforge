@@ -74,6 +74,7 @@ Python runtime with the packages above installed as their published wheels.
 | tauri, tauri-build, tao, wry, muda and the rest of the Tauri family | Apache-2.0 OR MIT | the window, the menu, serving the shell |
 | tauri-plugin-dialog, rfd | Apache-2.0 OR MIT, MIT | the quit question and error messages |
 | tungstenite | MIT OR Apache-2.0 | asking the control service whether a run is live |
+| tauri-plugin-drag, drag | Apache-2.0 OR MIT | dragging the project or an object out of the window |
 
 `cargo deny --manifest-path desktop/Cargo.toml --config desktop/deny.toml check` checks every
 crate in the app's own lockfile against the same license policy as the controller's. On Linux the

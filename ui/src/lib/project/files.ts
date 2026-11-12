@@ -55,6 +55,8 @@ interface DragDropEvent {
 interface TauriGlobals {
 	core?: {
 		invoke<T>(command: string, args: Record<string, unknown>): Promise<T>;
+		/** What a command reports back through while it runs, as the drag reports where it ended. */
+		Channel?: new () => { onmessage: (message: unknown) => void };
 	};
 	event?: {
 		listen: (name: string, handler: (event: { payload: string }) => void) => Promise<() => void>;
@@ -194,7 +196,9 @@ export function listenForDrops(onPaths: (paths: string[] | null) => void): () =>
 		void webview
 			.getCurrentWebview()
 			.onDragDropEvent((event) => {
-				if (event.payload.type === 'drop' && event.payload.paths?.length) onPaths(event.payload.paths);
+				// a drag out let go over the window itself brings back the files it wrote: not an import
+				const paths = (event.payload.paths ?? []).filter((path) => !draggedOut.has(path));
+				if (event.payload.type === 'drop' && paths.length) onPaths(paths);
 			})
 			.then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
 		return () => {
@@ -264,4 +268,55 @@ export function listenForFileMenu(onAct: (act: string) => void): () => void {
 		stopped = true;
 		stop?.();
 	};
+}
+
+/** The files dragged out of the window this session, which a drop back on it leaves alone. */
+const draggedOut = new Set<string>();
+
+/** Whether the shell can drag files out of the window: the desktop app, whose drag plugin hands them to the system. */
+export function canDragOut(): boolean {
+	const core = tauri()?.core;
+	return Boolean(core?.invoke && core.Channel && tauri()?.dialog);
+}
+
+/** A picture of what is dragged: its name on a card, as a PNG data URL the drag plugin takes. */
+export function dragPicture(label: string): string {
+	// a clear pixel where there is no page to draw on, as the drag needs a picture of some kind
+	const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+	if (typeof document === 'undefined') return pixel;
+	const canvas = document.createElement('canvas');
+	const scale = Math.max(1, Math.round(globalThis.devicePixelRatio || 1));
+	const width = Math.min(260, 24 + 7.5 * label.length);
+	canvas.width = width * scale;
+	canvas.height = 28 * scale;
+	const g = canvas.getContext('2d');
+	if (g) {
+		g.scale(scale, scale);
+		g.fillStyle = 'rgba(40, 44, 52, 0.92)';
+		g.beginPath();
+		g.roundRect(0.5, 0.5, width - 1, 27, 6);
+		g.fill();
+		g.fillStyle = '#ffffff';
+		g.font = '13px -apple-system, "Segoe UI", sans-serif';
+		g.textBaseline = 'middle';
+		g.fillText(label, 12, 14, width - 24);
+	} else {
+		return pixel;
+	}
+	return canvas.toDataURL('image/png');
+}
+
+/**
+ * Start the system's drag of files already written, from the desktop app: dropped in a file
+ * manager or another application, they are copied there. Resolves when the drag starts; false
+ * when there is no desktop app to drag from.
+ */
+export async function startDragOut(paths: string[], label: string): Promise<boolean> {
+	const core = tauri()?.core;
+	if (!core?.Channel || !paths.length) return false;
+	for (const path of paths) draggedOut.add(path);
+	const onEvent = new core.Channel();
+	onEvent.onmessage = () => {};
+	await core.invoke('plugin:drag|start_drag', { item: paths, image: dragPicture(label), options: { mode: 'copy' }, onEvent });
+	return true;
 }
