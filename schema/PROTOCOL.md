@@ -2822,8 +2822,11 @@ table drive row the run does not name, or the drives out of the table's order),
 `limit_unknown_channel`, `targets_length_mismatch` (not one target per control),
 `delays_length_mismatch` (a `hold` without one delay per control), `target_invalid` (a target the
 service cannot build at the rate: a pulse that is not usable, a target that does not fit the
-record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target), `plant_unknown`,
-`law_unknown`, `law_wrong_world`, `law_wrong_target`, `law_param_unknown`, `law_param_invalid`.
+record), `bands_empty`, `target_not_covering` and `target_not_ascending` (an SRS control's
+breakpoints, as SRS Shock's), `components_engine_mismatch` and `component_invalid` (an SRS
+control's synthesis table, as SRS Shock's), `verdict_needs_srs` (`global` with a `waveform`
+target), `plant_unknown`, `law_unknown`, `law_wrong_world`, `law_wrong_target`,
+`law_param_unknown`, `law_param_invalid`.
 
 ### Running a MIMO Shock Test
 
