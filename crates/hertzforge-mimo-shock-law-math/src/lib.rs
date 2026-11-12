@@ -24,6 +24,10 @@
 //!   last pulse.
 //! - [`delay`]: delay estimation by cross-correlation, a delay applied as a
 //!   linear phase, and the least-effort choice of per-control delays.
+//! - [`warp`]: a model follower with no modal fit: the identification seen
+//!   at a complex frequency, fitted from each pulse and extrapolated in level.
+//! - [`choice`]: the choice between two model followers, per frequency
+//!   region, by which one predicted the latest pulse better.
 //! - [`check`]: the convergence checks a law check evaluates before a pulse:
 //!   the safe gain and drive-side spectral radius per line, and the fraction
 //!   of each control's target the drives can reach at all.
@@ -49,6 +53,7 @@
 #![warn(missing_docs)]
 
 pub mod check;
+pub mod choice;
 pub mod delay;
 pub mod inverse;
 pub mod lsq;
@@ -61,6 +66,7 @@ pub mod robust;
 pub mod shape;
 pub mod spectrum;
 pub mod srs;
+pub mod warp;
 
 #[cfg(feature = "reference-plant")]
 pub mod reference_plant;

@@ -561,10 +561,21 @@ pub fn identify_h1(
     noise_rel: f64,
     seed: u64,
 ) -> Result<MatrixStack, String> {
+    identify_h1_model(&plant.modal_truth(s_id), records, noise_rel, seed)
+}
+
+/// [`identify_h1`] of any plant given as its modal model at the
+/// identification's level.
+pub fn identify_h1_model(
+    model: &ModalModel,
+    records: usize,
+    noise_rel: f64,
+    seed: u64,
+) -> Result<MatrixStack, String> {
     let len = RECORD_LEN * records.next_power_of_two();
     let mut rng = Rng::new(seed);
-    let drives = random_drives(plant.n_d, len, 1.0, &mut rng);
-    let model = plant.modal_truth(s_id);
+    let drives = random_drives(model.n_d, len, 1.0, &mut rng);
+    let plant = model;
     let x: Vec<Vec<C64>> = drives.iter().map(|d| rfft(d)).collect::<Result<_, _>>()?;
     let w = omegas(FS_HZ, len);
     let mut y = vec![vec![C64::new(0.0, 0.0); w.len()]; plant.n_c];
@@ -754,6 +765,214 @@ pub fn run_research_ladder(
         });
     }
     Ok(rows)
+}
+
+/// One mode of a [`SpreadPlant`]: its own drop and damping growth.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpreadMode {
+    /// Natural frequency at zero level, Hz.
+    pub fn0_hz: f64,
+    /// Damping ratio at zero level.
+    pub zeta0: f64,
+    /// Fractional frequency drop at full level (`fn0 (1 - drop s)`).
+    pub drop: f64,
+    /// Damping growth at full level (`zeta0 (1 + growth s)`).
+    pub growth: f64,
+    /// Shape at each control.
+    pub phi: Vec<f64>,
+    /// Shape at each drive.
+    pub psi: Vec<f64>,
+}
+
+/// A quasi-linear modal plant whose modes each move by their own amount with
+/// level (the plants of the warp research: modes moving differently, close
+/// modes, dense modes).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpreadPlant {
+    /// Number of controls.
+    pub n_c: usize,
+    /// Number of drives.
+    pub n_d: usize,
+    /// Quasi-static coupling, `n_c x n_d` row-major.
+    pub quasi_static: Vec<f64>,
+    /// The modes.
+    pub modes: Vec<SpreadMode>,
+    /// Delay at each control, seconds.
+    pub delays_s: Vec<f64>,
+}
+
+impl SpreadPlant {
+    fn from_four_by_four(rows: &[(f64, f64, f64)]) -> Self {
+        let p = ModalPlant::four_by_four(0.0, 0.0);
+        SpreadPlant {
+            n_c: 4,
+            n_d: 4,
+            quasi_static: p.quasi_static.clone(),
+            modes: p
+                .modes
+                .iter()
+                .zip(rows)
+                .map(|(m, &(f, d, k))| SpreadMode {
+                    fn0_hz: f,
+                    zeta0: p.zeta0,
+                    drop: d,
+                    growth: k,
+                    phi: m.phi.clone(),
+                    psi: m.psi.clone(),
+                })
+                .collect(),
+            delays_s: p.delays_s.clone(),
+        }
+    }
+
+    /// The 4 x 4 reference plant whose modes move differently: drops 8, 2, 6
+    /// and 4%, damping growth 1, 0, 2 and 0.5.
+    pub fn four_by_four_mixed() -> Self {
+        Self::from_four_by_four(&[
+            (400.0, 0.08, 1.0),
+            (700.0, 0.02, 0.0),
+            (1100.0, 0.06, 2.0),
+            (1600.0, 0.04, 0.5),
+        ])
+    }
+
+    /// Close modes moving differently: the 4 x 4's coupling and delays with
+    /// modes at 400 Hz (drop 8%), 1000 Hz (8%), 1060 Hz (1%) and 1600 Hz (3%),
+    /// damping 0.02, no damping growth.
+    pub fn four_by_four_close_apart() -> Self {
+        let p = ModalPlant::four_by_four(0.0, 0.0);
+        let rows: [(f64, [f64; 4], [f64; 4], f64); 4] = [
+            (400.0, [1.0, 0.6, -0.4, 0.2], [1.0, 0.5, -0.3, 0.2], 0.08),
+            (1000.0, [0.5, -0.8, 0.9, -0.3], [0.4, -0.9, 0.2, 0.6], 0.08),
+            (1060.0, [0.6, 0.5, -0.5, 0.7], [0.5, 0.4, 0.6, -0.5], 0.01),
+            (1600.0, [0.4, 0.3, -0.6, 0.9], [0.2, 0.3, -0.8, 0.7], 0.03),
+        ];
+        SpreadPlant {
+            n_c: 4,
+            n_d: 4,
+            quasi_static: p.quasi_static.clone(),
+            modes: rows
+                .iter()
+                .map(|(f, phi, psi, d)| SpreadMode {
+                    fn0_hz: *f,
+                    zeta0: 0.02,
+                    drop: *d,
+                    growth: 0.0,
+                    phi: phi.to_vec(),
+                    psi: psi.to_vec(),
+                })
+                .collect(),
+            delays_s: p.delays_s.clone(),
+        }
+    }
+
+    /// Dense modes: the 4 x 4's coupling and delays, four clear modes at 300,
+    /// 450, 600 and 750 Hz (drops 8, 5, 6, 4%, damping growth 1, 0.5, 1, 0;
+    /// random shapes of norm 1.2) and `n_dense` modes placed uniformly at
+    /// random from 850 to 2500 Hz with random shapes (standard deviation 0.45
+    /// per entry), damping 0.02, each dropping by a random 3 to 8% with a
+    /// random damping growth 0 to 1.5 (`coherent`: every dense mode 5% and 1).
+    /// Seeded.
+    pub fn dense(n_dense: usize, coherent: bool, seed: u64) -> Self {
+        let p = ModalPlant::four_by_four(0.0, 0.0);
+        let mut rng = Rng::new(seed);
+        let mut modes = Vec::new();
+        for (f, d, k) in [
+            (300.0, 0.08, 1.0),
+            (450.0, 0.05, 0.5),
+            (600.0, 0.06, 1.0),
+            (750.0, 0.04, 0.0),
+        ] {
+            let mut phi: Vec<f64> = (0..4).map(|_| rng.normal()).collect();
+            let mut psi: Vec<f64> = (0..4).map(|_| rng.normal()).collect();
+            for v in [&mut phi, &mut psi] {
+                let n = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+                v.iter_mut().for_each(|x| *x *= 1.2 / n);
+            }
+            modes.push(SpreadMode {
+                fn0_hz: f,
+                zeta0: 0.02,
+                drop: d,
+                growth: k,
+                phi,
+                psi,
+            });
+        }
+        let mut fs: Vec<f64> = (0..n_dense)
+            .map(|_| 850.0 + (2500.0 - 850.0) * rng.uniform())
+            .collect();
+        fs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        for f in fs {
+            let phi: Vec<f64> = (0..4).map(|_| 0.45 * rng.normal()).collect();
+            let psi: Vec<f64> = (0..4).map(|_| 0.45 * rng.normal()).collect();
+            let (d, k) = if coherent {
+                (0.05, 1.0)
+            } else {
+                (0.03 + 0.05 * rng.uniform(), 1.5 * rng.uniform())
+            };
+            modes.push(SpreadMode {
+                fn0_hz: f,
+                zeta0: 0.02,
+                drop: d,
+                growth: k,
+                phi,
+                psi,
+            });
+        }
+        SpreadPlant {
+            n_c: 4,
+            n_d: 4,
+            quasi_static: p.quasi_static.clone(),
+            modes,
+            delays_s: p.delays_s.clone(),
+        }
+    }
+
+    /// The plant's own modal model at amplitude scale `s`.
+    pub fn modal_truth(&self, s: f64) -> ModalModel {
+        ModalModel {
+            n_c: self.n_c,
+            n_d: self.n_d,
+            delays_s: self.delays_s.clone(),
+            b0: self
+                .quasi_static
+                .iter()
+                .map(|&v| C64::new(v, 0.0))
+                .collect(),
+            b2: vec![C64::new(0.0, 0.0); self.n_c * self.n_d],
+            f_ref_hz: 2400.0,
+            modes: self
+                .modes
+                .iter()
+                .map(|m| ModalTerm {
+                    fn_hz: m.fn0_hz * (1.0 - m.drop * s),
+                    zeta: m.zeta0 * (1.0 + m.growth * s),
+                    residue: (0..self.n_c)
+                        .flat_map(|r| (0..self.n_d).map(move |c| (r, c)))
+                        .map(|(r, c)| C64::new(m.phi[r] * m.psi[c], 0.0))
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The plant at amplitude scale `s` on a record's lines.
+    pub fn frf(&self, s: f64, fs_hz: f64, record_len: usize) -> MatrixStack {
+        self.modal_truth(s).frf(fs_hz, record_len)
+    }
+
+    /// Responses to drive records played at amplitude scale `s` (circular).
+    pub fn respond(
+        &self,
+        drives: &[Vec<f64>],
+        s: f64,
+        fs_hz: f64,
+    ) -> Result<Vec<Vec<f64>>, String> {
+        let n = drives.first().map(|d| d.len()).unwrap_or(0);
+        let h = self.frf(s, fs_hz, n);
+        let d: Vec<Vec<C64>> = drives.iter().map(|x| rfft(x)).collect::<Result<_, _>>()?;
+        rows_irfft(&crate::spectrum::apply(&h, &d), n, 1.0)
+    }
 }
 
 #[cfg(test)]
