@@ -447,9 +447,10 @@ pub struct TrackOptions {
     pub refit_ridge: f64,
     /// The sparse penalty.
     pub sparse: Sparse,
-    /// The validity gate: the fallback's model is used while the tracked
-    /// model's prediction residual on the last pulse is above `gate_ratio`
-    /// times the fallback's, until it is at or below the fallback's again.
+    /// The validity gate: the fallback's model is used from a pulse on which
+    /// the tracked model's prediction residual is above `gate_ratio` times the
+    /// fallback's, until a pulse on which it is below the fallback's divided
+    /// by `gate_ratio`.
     /// `None` turns the gate off.
     pub gate_ratio: Option<f64>,
     /// No mode's frequency may move more than this fraction from its fitted
@@ -461,6 +462,10 @@ pub struct TrackOptions {
     /// on the band is above this, the run starts on the fallback (whose model
     /// is the identification) and the gate decides from the first pulse on.
     pub seed_residual_max: f64,
+    /// The amplitude scale the modal model was identified at. When set, the
+    /// identification is the first point of the level history, so the second
+    /// level of a run is already extrapolated.
+    pub identification_scale: Option<f64>,
 }
 
 impl Default for TrackOptions {
@@ -475,6 +480,7 @@ impl Default for TrackOptions {
             max_frequency_change: 0.25,
             secant: None,
             seed_residual_max: 0.05,
+            identification_scale: None,
         }
     }
 }
@@ -532,6 +538,10 @@ impl PoleTrackModel {
             report.source = ModelSource::Fallback;
             report.gate_fired = true;
         }
+        let hist = match opts.identification_scale {
+            Some(s) if !on_fallback => vec![(s, modal.theta())],
+            _ => Vec::new(),
+        };
         Ok(PoleTrackModel {
             theta0: modal.theta(),
             modal,
@@ -541,7 +551,7 @@ impl PoleTrackModel {
             band,
             fs_hz,
             opts,
-            hist: Vec::new(),
+            hist,
             fallback,
             on_fallback,
             level: None,
@@ -907,7 +917,7 @@ impl ModelProvider for PoleTrackModel {
             if track_res.is_finite() && fb_res.is_finite() {
                 if track_res > gr * fb_res {
                     self.on_fallback = true;
-                } else if track_res <= fb_res {
+                } else if track_res * gr <= fb_res {
                     self.on_fallback = false;
                 }
             }

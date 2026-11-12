@@ -59,6 +59,7 @@ enum Prov {
         sparse: Sparse,
         refit: bool,
     },
+    TrackFromId,
 }
 
 #[derive(Clone, Copy)]
@@ -173,6 +174,21 @@ fn build(s: &Spec, setup: &Setup, modal: &ModalModel) -> Box<dyn LawSteps> {
                 ..Default::default()
             },
         ))),
+        Prov::TrackFromId => Some(Box::new(
+            PoleTrackModel::new(
+                modal.clone(),
+                h.clone(),
+                band.clone(),
+                FS_HZ,
+                TrackOptions {
+                    identification_scale: Some(S_ID),
+                    secant: Some(SecantOptions::default()),
+                    ..Default::default()
+                },
+                Box::new(MultiSecantModel::new(h, band, SecantOptions::default())),
+            )
+            .expect("track"),
+        )),
         Prov::Track {
             extrapolate,
             gate,
@@ -890,6 +906,11 @@ fn part_cost() {
 /// that only starts the tracking.
 fn part_seed() {
     let b1 = spec("shape + track extrap [B1]", Kind::Shape, track(true, false));
+    let b1id = spec(
+        "shape + track from the identification",
+        Kind::Shape,
+        Prov::TrackFromId,
+    );
     let mut plants = four_by_fours();
     plants.push((
         "4x4 close modes, 8%",
@@ -903,12 +924,50 @@ fn part_seed() {
             let plain = run(&b1, &mc, &mut resp, &LADDER_DB, 0.0);
             let starter: Vec<f64> = std::iter::once(-18.0).chain(LADDER_DB).collect();
             let st = run(&b1, &mc, &mut resp, &starter, 0.0);
+            let id = run(&b1id, &mc, &mut resp, &LADDER_DB, 0.0);
+            let idst = run(&b1id, &mc, &mut resp, &starter, 0.0);
+            println!(
+                "{pname:28} {:8}: identification as a level point (with secant): -12 {:+5.2}, -9 {:+5.2}, p5 {:+5.2}, p8 {:.2} | with the starter: starter {:+5.2}, -12 {:+5.2}, -9 {:+5.2}, first 0 dB {:+5.2}",
+                if mixed { "mixed" } else { "in phase" },
+                id[0].over_db, id[1].over_db, id[4].over_db, id[7].worst_db,
+                idst[0].over_db, idst[1].over_db, idst[2].over_db, idst[5].over_db
+            );
             println!(
                 "{pname:28} {:8}: no starter: -12 dB over {:+5.2}, -9 {:+5.2}, p5 {:+5.2}, p8 {:.2} | starter at -18: starter over {:+5.2}, -12 dB {:+5.2}, -9 {:+5.2}, first 0 dB {:+5.2}, its p8 {:.2}",
                 if mixed { "mixed" } else { "in phase" },
                 plain[0].over_db, plain[1].over_db, plain[4].over_db, plain[7].worst_db,
                 st[0].over_db, st[1].over_db, st[2].over_db, st[5].over_db, st[8].worst_db
             );
+        }
+    }
+}
+
+/// Why `inverse` with its watchdog diverges on the realistic identification.
+fn part_h1() {
+    let plant = LevelPlant::four_by_four_damped(0.08, 0.0, 0.02);
+    for (label, fitted) in [("exact identification", false), ("realistic H1", true)] {
+        let mc = model_case(&plant, false, fitted, 4);
+        let mut banded = mc.setup.clone();
+        banded.band_lo_hz = 80.0;
+        banded.band_hi_hz = 2400.0;
+        for (name, setup, watchdog) in [
+            ("inverse, watchdog, every line driven", &mc.setup, true),
+            ("inverse, no watchdog, every line driven", &mc.setup, false),
+            ("inverse, watchdog, band 80 to 2400 Hz", &banded, true),
+            ("inverse, no watchdog, band 80 to 2400 Hz", &banded, false),
+        ] {
+            let mut law = InverseLaw::new(
+                setup.clone(),
+                InverseParams {
+                    watchdog,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut resp = |d: &[Vec<f64>], sc: f64| plant.respond(d, sc, FS_HZ);
+            let rows = run_research_ladder(&mut law, setup, &mut resp, &LADDER_DB, 0.0, SEED, None)
+                .unwrap();
+            println!("{label:22} {}", line(name, &rows, 5));
         }
     }
 }
@@ -926,6 +985,7 @@ fn main() {
         "secant" => part_secant(),
         "cost" => part_cost(),
         "seed" => part_seed(),
+        "h1" => part_h1(),
         other => eprintln!("unknown part {other}"),
     }
 }

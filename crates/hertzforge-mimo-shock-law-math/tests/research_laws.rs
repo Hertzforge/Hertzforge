@@ -333,3 +333,156 @@ fn mimo_shock_track_recovers_the_level_from_one_pulse() {
         );
     }
 }
+
+fn shape_with(setup: &Setup, provider: Box<dyn ModelProvider>) -> ShapeLaw {
+    ShapeLaw::with_options(
+        setup.clone(),
+        ShapeParams::default(),
+        ShapeExtras {
+            provider: Some(provider),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+/// RL4: a modal model with residues 15% wrong, and a plant whose shapes move
+/// with level. The gate hands the run to the fallback, and from p5 on the
+/// tracked law is never more than 1 dB worse than the fallback alone. The
+/// seed guard keeps the first pulse at the identification's own over-test
+/// (without it the wrong modal model seeds a +10 to +12 dB first pulse).
+#[test]
+fn mimo_shock_rl4_gate_and_fallback_on_a_wrong_modal_model() {
+    let base = LevelPlant::four_by_four_damped(0.08, 0.0, 0.02);
+    let ladder: Vec<f64> = [-12.0, -9.0, -6.0, -3.0]
+        .into_iter()
+        .chain([0.0; 16])
+        .collect();
+    let moving = LevelPlant::four_by_four_shapes_move(0.08, 0.0, 0.10, 5);
+    for mixed in [false, true] {
+        let cases: Vec<(&str, &LevelPlant, ModalModel)> = vec![
+            (
+                "residues 15% wrong",
+                &base,
+                base.with_shape_errors(0.15, 3).modal_truth(S_ID),
+            ),
+            ("shapes move", &moving, moving.modal_truth(S_ID)),
+        ];
+        for (name, plant, modal) in cases {
+            let setup = research_setup_signed(plant.frf(S_ID, FS_HZ, RECORD_LEN), &polarity(mixed));
+            let h = setup.plant.frf.clone();
+            let mut alone = shape_with(
+                &setup,
+                Box::new(MultiSecantModel::new(
+                    h.clone(),
+                    band(),
+                    SecantOptions::default(),
+                )),
+            );
+            let ra = run(&mut alone, &setup, plant, &ladder, 0.0);
+            let mut tracked = shape_tracked(&setup, &modal, TrackOptions::default());
+            let rt = run(&mut tracked, &setup, plant, &ladder, 0.0);
+            let fired = rt
+                .iter()
+                .filter(|r| r.value("model_gate_fired") == 1.0)
+                .count();
+            let excess = (4..ladder.len())
+                .map(|k| rt[k].worst_db - ra[k].worst_db)
+                .fold(f64::NEG_INFINITY, f64::max);
+            eprintln!(
+                "RL4 {name} {mixed}: gate fired {fired}; p1 over {:+.2} (fallback {:+.2}); worst excess over the fallback from p5 {excess:+.2} dB; p5 {:.1}/{:.1} p8 {:.1}/{:.1} p20 {:.1}/{:.1}",
+                rt[0].over_db, ra[0].over_db, rt[4].worst_db, ra[4].worst_db, rt[7].worst_db, ra[7].worst_db, rt[19].worst_db, ra[19].worst_db
+            );
+            assert!(rt[0].over_db <= ra[0].over_db + 0.5, "{name}: seed");
+            if name.starts_with("residues") {
+                assert!(fired > 0, "{name}: the gate never fired");
+            }
+            assert!(
+                excess <= 1.0,
+                "RL4 {name} {mixed}: {excess} dB over the fallback"
+            );
+        }
+    }
+}
+
+/// The seed guard's falsification: with it off, the wrong modal model plays
+/// the first pulse.
+#[test]
+fn mimo_shock_seed_guard_is_needed() {
+    let base = LevelPlant::four_by_four_damped(0.08, 0.0, 0.02);
+    let setup = research_setup_signed(base.frf(S_ID, FS_HZ, RECORD_LEN), &polarity(false));
+    let modal = base.with_shape_errors(0.15, 3).modal_truth(S_ID);
+    let mut off = shape_tracked(
+        &setup,
+        &modal,
+        TrackOptions {
+            seed_residual_max: f64::INFINITY,
+            ..Default::default()
+        },
+    );
+    let mut on = shape_tracked(&setup, &modal, TrackOptions::default());
+    let r_off = run(&mut off, &setup, &base, &LADDER_DB[..2], 0.0);
+    let r_on = run(&mut on, &setup, &base, &LADDER_DB[..2], 0.0);
+    eprintln!(
+        "seed over: guard off {:+.2}, on {:+.2}",
+        r_off[0].over_db, r_on[0].over_db
+    );
+    assert!(r_off[0].over_db > r_on[0].over_db + 3.0);
+}
+
+/// RL6: the same-level multi-secant under noise 30% of record rms, second
+/// pulse of each level against the first. The requirement is asserted on the
+/// combination that meets it (tracked prior, secant on top, predicted level
+/// step); the secant alone is reported (it fails with mixed targets, MS-E009).
+#[test]
+fn mimo_shock_rl6_second_pulse_of_a_level_under_noise() {
+    let plant = LevelPlant::four_by_four_damped(0.08, 0.0, 0.02);
+    for mixed in [false, true] {
+        let (setup, modal) = case(&plant, mixed, false);
+        let h = setup.plant.frf.clone();
+        let mut b2 = InverseLaw::with_options(
+            setup.clone(),
+            InverseParams {
+                watchdog: false,
+                ..Default::default()
+            },
+            InverseExtras {
+                provider: Some(Box::new(MultiSecantModel::new(
+                    h,
+                    band(),
+                    SecantOptions::default(),
+                ))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let r2 = run(&mut b2, &setup, &plant, &LADDER_DB, 0.30);
+        let mut hy = InverseLaw::with_options(
+            setup.clone(),
+            InverseParams {
+                watchdog: false,
+                ..Default::default()
+            },
+            InverseExtras {
+                provider: Some(tracker(
+                    &setup,
+                    &modal,
+                    TrackOptions {
+                        secant: Some(SecantOptions::default()),
+                        ..Default::default()
+                    },
+                )),
+                predicted_step: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let rh = run(&mut hy, &setup, &plant, &LADDER_DB, 0.30);
+        eprintln!(
+            "RL6 {mixed}: secant alone p5 {:.2} p6 {:.2} ({:+.2}); combined p5 {:.2} p6 {:.2} ({:+.2})",
+            r2[4].worst_db, r2[5].worst_db, r2[5].worst_db - r2[4].worst_db,
+            rh[4].worst_db, rh[5].worst_db, rh[5].worst_db - rh[4].worst_db
+        );
+        assert!(rh[5].worst_db - rh[4].worst_db <= 2.0);
+    }
+}
