@@ -12,7 +12,8 @@
 //! Parts: `crosscheck` (one fit from one pulse, printed for comparison with
 //! another implementation), `compare [plant]` (the one-page comparison; plant
 //! one of `8`, `5x2`, `5`, `close`, `dense`, `narrow`, `intra`, `shapes`,
-//! `2x3`, or all), `gate`, `combos`, `cost`.
+//! `2x3`, or all), `gate`, `combos`, `cost`, `seeds` (the warp over eight
+//! noise seeds), `diag [plant]` (the choice held on each follower).
 //!
 //! Columns: `p1+` the first pulse's signed over-test; `p5+` the first
 //! full-level pulse's signed over-test with its worst error in brackets; `p8`
@@ -849,6 +850,102 @@ fn part_seeds() {
     }
 }
 
+/// Whether a follower inside the choice behaves as it does alone: the
+/// choice held on one follower (margins too large to cross) against each
+/// follower alone and the choice, on one plant (dense by default), true
+/// identification, in phase, clean, with the over-test of every pulse.
+fn part_diag(key: &str) {
+    let c = case(key);
+    let setup = with_polarity(&c.setup_true, false);
+    let warp0 = base_warp(&setup);
+    for (label, start) in [("held on the warp", 0usize), ("held on tracking", 1)] {
+        let wp: Box<dyn ModelProvider> = Box::new(warp0.clone());
+        let tp = track(&c.modal_true, &setup.plant.frf).expect("track");
+        let ch = ChoiceModel::new(
+            wp,
+            tp,
+            fit_band(),
+            FS_HZ,
+            ChoiceOptions {
+                ratio: 1e9,
+                z: 1e9,
+                start,
+                ..Default::default()
+            },
+        )
+        .expect("choice");
+        let log = ch.log();
+        let mut law = ShapeLaw::with_options(
+            setup.clone(),
+            ShapeParams::default(),
+            ShapeExtras {
+                provider: Some(Box::new(ch)),
+                safety: ShapeSafety::off(),
+                robust_first: None,
+            },
+        )
+        .expect("law");
+        let mut resp = |d: &[Vec<f64>], s: f64| (c.respond)(d, s);
+        let rows = run_research_ladder(&mut law, &setup, &mut resp, &LADDER_DB, 0.0, SEED, None)
+            .expect("run");
+        let l = log.lock().expect("log");
+        println!(
+            "{label}: over by pulse {}",
+            rows.iter()
+                .map(|x| format!("{:+.2}", x.over_db))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        println!(
+            "{label}: p5 over {:+.1}, p8 {:.1}; residuals (warp, tracking) by pulse: {}",
+            rows[4].over_db,
+            rows[7].worst_db,
+            l.iter()
+                .map(|r| format!("{:.3}/{:.3}", r.residuals[0][0], r.residuals[0][1]))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
+    for r in [
+        row("shape warp+secant", Kind::Shape, Fol::Warp),
+        row("shape track+secant", Kind::Shape, Fol::Track),
+        row("shape choice", Kind::Shape, Fol::Choice),
+    ] {
+        let (mut law, log) = build(&r, &setup, Some(&c.modal_true), &warp0).expect("law");
+        let mut resp = |d: &[Vec<f64>], s: f64| (c.respond)(d, s);
+        let rows =
+            run_research_ladder(law.as_mut(), &setup, &mut resp, &LADDER_DB, 0.0, SEED, None)
+                .expect("run");
+        let res = log
+            .map(|l| {
+                l.lock()
+                    .expect("log")
+                    .iter()
+                    .map(|r| format!("{:.3}/{:.3}", r.residuals[0][0], r.residuals[0][1]))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        println!(
+            "{}: over by pulse {}",
+            r.name,
+            rows.iter()
+                .map(|x| format!("{:+.2}", x.over_db))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        println!(
+            "{}: p5 over {:+.1}; residual of the model in force by pulse {} {res}",
+            r.name,
+            rows[4].over_db,
+            rows.iter()
+                .map(|x| format!("{:.3}", x.value("model_prediction_residual")))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let part = args.next().unwrap_or_else(|| "crosscheck".into());
@@ -860,6 +957,7 @@ fn main() {
         "combos" => part_combos(),
         "cost" => part_cost(),
         "seeds" => part_seeds(),
+        "diag" => part_diag(plant.as_deref().unwrap_or("dense")),
         other => eprintln!("unknown part {other}"),
     }
 }
