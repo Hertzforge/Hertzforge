@@ -34,3 +34,7 @@ required-features = ["reference-plant"]
 [[example]]
 name = "mimo_shock_law_research"
 required-features = ["reference-plant"]
+
+[[example]]
+name = "mimo_shock_follower_study"
+required-features = ["reference-plant"]
