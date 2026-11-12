@@ -691,6 +691,21 @@ impl<B: Backend + Send> ShotPath for FirerShot<B> {
     }
 }
 
+/// `x` to three significant figures, without trailing zeros: a budget of a
+/// microsecond reads "0.001", not "0.0".
+fn three_figures(x: f64) -> String {
+    if !x.is_finite() || x == 0.0 {
+        return format!("{x}");
+    }
+    let digits = (2 - x.abs().log10().floor() as i32).max(0) as usize;
+    let s = format!("{x:.digits$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_owned()
+    } else {
+        s
+    }
+}
+
 /// The time between pulse starts: the shot waits in its `ready` hook, so only
 /// the start lands on the floor.
 struct Pace<'a> {
@@ -1771,11 +1786,11 @@ impl MimoShockEngine {
                     EndOutcome::LawFault,
                     "law_too_slow",
                     format!(
-                        "the control law took {:.1} ms to answer a pulse on a rehearsal before \
-                         the run, over its {:.1} ms budget; raise the pulse spacing or choose a \
+                        "the control law took {} ms to answer a pulse on a rehearsal before \
+                         the run, over its {} ms budget; raise the pulse spacing or choose a \
                          faster law or option",
-                        took * 1e3,
-                        budget * 1e3
+                        three_figures(took * 1e3),
+                        three_figures(budget * 1e3)
                     ),
                 );
                 return Ok(());

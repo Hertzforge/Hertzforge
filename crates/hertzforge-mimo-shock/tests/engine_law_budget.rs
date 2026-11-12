@@ -130,3 +130,15 @@ fn mimo_shock_x_a_law_too_slow_for_a_pulse_is_named_before_the_first_pulse() {
     let e = proceeded(0.0, 0.2, |_| {});
     assert!(e.end().is_none(), "{:?}", e.end());
 }
+
+#[test]
+fn mimo_shock_a_law_too_slow_names_a_budget_under_a_tenth_of_a_millisecond_as_it_is() {
+    // The NI bench, 2026-11-11, row M9: a budget of 1 us was stated as "its
+    // 0.0 ms budget". Here the budget is a millionth of the 1 s spacing.
+    let e = proceeded(0.0, 0.3, |c| c.guards.law.budget_fraction = 1e-6);
+    let end = e.end().expect("ended before the first pulse");
+    assert_eq!(end.reason, "law_too_slow", "{end:?}");
+    assert!(!end.detail.contains("0.0 ms budget"), "{}", end.detail);
+    assert!(end.detail.contains("0.001 ms budget"), "{}", end.detail);
+    assert!(end.detail.contains("took 300 ms"), "{}", end.detail);
+}
