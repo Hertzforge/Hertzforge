@@ -302,3 +302,17 @@ def test_the_drive_points_are_the_frfs_at_their_own_reference(modal_project, val
     assert [s['name'] for s in view['series']] == ['101Z+/101Z+', '1310Z+/1310Z+']
     with pytest.raises(ProtocolError, match='no references'):
         run(modal_project, 'project.drive_points', data='Time History PSDs')
+
+
+def test_a_drive_point_measured_opposite_its_force_is_a_drive_point():
+    from hertzforge.core.data import Frf
+    f = np.arange(0.0, 100.0, 5.0)
+    one = np.ones(len(f), complex)
+    project = hertzforge.Project()
+    project.add('FRFs', Frf(f, np.array([one, 2 * one, 3 * one, 4 * one]),
+                            response_dof=['206X-', '207X+', '207Y+', '206RX+'],
+                            reference_dof=['206X+', '206X+', '207Y-', '206X+'],
+                            ordinate_dim='acceleration/force'))
+    (view,) = run(project, 'project.drive_points', data='FRFs')
+    assert [s['name'] for s in view['series']] == ['206X-/206X+', '207Y+/207Y-']
+    assert view['title'].endswith('2 of 4 records')

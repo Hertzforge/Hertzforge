@@ -387,3 +387,13 @@ def test_a_direction_that_is_not_a_direction_is_still_a_typo():
     with pytest.raises(ValueError, match='names no direction'):
         TimeHistory(np.arange(4) / 4.0, [[1.0, 2.0, 3.0, 4.0]],
                     response_dof=['101Q+'])
+
+
+@pytest.mark.parametrize('a, b, same', [
+    ('206X-', '206X+', True), ('206X+', '206X+', True), ('206X', '206X-', True),
+    ('206RX-', '206rx+', True), ('206X+', '206RX+', False), ('206X+', '207X+', False),
+    ('206X+', '206Y+', False), ('Ref', 'Ref', True), ('Ref', 'Ref+', False),
+    ('206Q+', '206Q-', False)])
+def test_two_dofs_are_one_axis_whatever_their_signs(a, b, same):
+    from hertzforge.core.data import same_axis
+    assert same_axis(a, b) is same
