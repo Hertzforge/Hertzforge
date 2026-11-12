@@ -593,8 +593,9 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			step_note: null,
 			law: { used: true, miss: null, call_ms: 2.8, delays_s: null, values: r.law.diagnostics.map((d, k) => ({ key: d.key, value: round(0.5 / (n + 1 + k), 3) })) }
 		};
-		for (const x of crossings) row.warnings.push(`Control ${x.channel} crossed its scaled abort line by ${x.over_db} dB.`);
-		if (row.arrival_spread_s > windowS) row.warnings.push(`The controls' arrivals spread over ${round(row.arrival_spread_s * 1000, 2)} ms, past the ${round(windowS * 1000, 2)} ms window.`);
+		// the engine's own words
+		if (crossings.length) row.warnings.push(`control${crossings.length === 1 ? '' : 's'} ${crossings.map((x) => x.channel).join(', ')} crossed the abort line scaled to ${row.level_db} dB`);
+		if (row.arrival_spread_s > windowS) row.warnings.push(`the controls arrive ${(row.arrival_spread_s * 1000).toFixed(2)} ms apart, over the ${(windowS * 1000).toFixed(2)} ms window`);
 		if (r.config.verdict === 'global' && row.global_srs_error_db !== null) row.passed = row.global_srs_error_db <= tol;
 		r.rows.push(row);
 		// the law improves every control that is not growing

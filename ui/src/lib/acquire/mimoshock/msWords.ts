@@ -184,6 +184,25 @@ export function marginWords(v: number | null | undefined): string {
 	return `${formatNumber(Math.abs(v), 2)} dB ${v > 0 ? 'over' : 'under'}`;
 }
 
+/** A warning of the service's as a sentence: a capital first, a stop last. */
+function sentence(w: string): string {
+	const t = w.trim();
+	if (!t) return t;
+	const c = t[0].toUpperCase() + t.slice(1);
+	return /[.!?]$/.test(c) ? c : `${c}.`;
+}
+
+/**
+ * The service's warnings on a pulse that the pulse card does not already say in its own words: the
+ * arrival spread when the card shows it, and the scaled-line crossings when the card flags them.
+ */
+export function otherWarnings(warnings: readonly string[], shown: { spread: boolean; crossing: boolean }): string[] {
+	return warnings
+		.filter((w) => !(shown.crossing && /abort line scaled to|scaled abort line/i.test(w)))
+		.filter((w) => !(shown.spread && /arrive .* apart|spread/i.test(w)))
+		.map(sentence);
+}
+
 /** The arrival spread, as a warning, when the pulse's warnings carry one, else null. */
 export function spreadWarning(row: MimoShockPulseRow, windowS: number | null): string | null {
 	if (windowS === null || !(row.arrival_spread_s > windowS)) return null;

@@ -137,7 +137,7 @@ describe('the MIMO Shock store', () => {
 		// every pulse row came, the verdicts improved and the arrival spread was warned about once
 		expect(ms.pulses.length).toBe(ms.status!.pulses.fired);
 		expect(ms.pulses.at(-1)?.passed).toBe(true);
-		expect(ms.pulses.some((p) => p.warnings.some((w) => /spread/.test(w)))).toBe(true);
+		expect(ms.pulses.some((p) => p.warnings.some((w) => /arrive .* apart/.test(w)))).toBe(true);
 		expect(ms.primary).toBe('reset');
 	}, 30000);
 
