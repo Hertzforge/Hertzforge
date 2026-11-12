@@ -288,6 +288,25 @@ export class MimoShockStore {
 		return this.runConfig?.control?.scaled_aborts ?? this.setup.control.scaled_aborts;
 	}
 
+	/** Why the scaled-abort switch cannot move now, or null: it is locked while a run is live. */
+	get scaledToggleWhy(): string | null {
+		return this.locked ? 'Locked while the run is live: the scaled abort lines cannot change once a run is armed or running.' : null;
+	}
+
+	/** Turn the scaled abort lines on or off in the setup; false while the switch is locked. */
+	setScaledAborts(on: boolean): boolean {
+		if (this.scaledToggleWhy) return false;
+		this.setup.control.scaled_aborts = on;
+		return true;
+	}
+
+	/** The standing notice while the run in hand has its scaled aborts off, or null. */
+	get unscaledNotice(): string | null {
+		const s = this.status;
+		if (!s || s.state === 'unconfigured' || this.scaledAborts) return null;
+		return s.notice ?? "Level-scaled aborts are off: a pulse over its level's abort line is flagged and judged failing, and only the full-level (absolute) lines end the run.";
+	}
+
 	/** The timing window of the run in hand, seconds. */
 	get windowS(): number | null {
 		return this.runConfig?.timing?.window_s ?? null;

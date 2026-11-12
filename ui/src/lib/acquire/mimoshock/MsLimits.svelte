@@ -42,7 +42,7 @@
 			</div>
 			<div class="line" data-testid="ms-scaled-line">
 				<label class="aq-switch">
-					<input type="checkbox" role="switch" aria-checked={c.scaled_aborts} bind:checked={c.scaled_aborts} disabled={locked} data-testid="ms-scaled-aborts" aria-label="Scaled abort lines" />
+					<input type="checkbox" role="switch" aria-checked={c.scaled_aborts} checked={c.scaled_aborts} disabled={!!ms.scaledToggleWhy} title={ms.scaledToggleWhy ?? undefined} onchange={(e) => ms.setScaledAborts(e.currentTarget.checked)} data-testid="ms-scaled-aborts" aria-label="Scaled abort lines" />
 					<span class="track" aria-hidden="true"><span class="thumb"></span></span>
 					<span class="word">{c.scaled_aborts ? 'Scaled lines: on' : 'Scaled lines: off'}</span>
 				</label>
@@ -54,7 +54,7 @@
 							Off: a pulse over its abort line scaled to the level played is flagged and judged failing, and the run goes on without climbing.
 						{/if}
 					</p>
-					{#if locked}<p class="aq-small aq-muted" data-testid="ms-scaled-locked">Locked while the run is live.</p>{/if}
+					{#if ms.scaledToggleWhy}<p class="aq-small aq-muted" data-testid="ms-scaled-locked">{ms.scaledToggleWhy}</p>{/if}
 				</div>
 			</div>
 		</div>

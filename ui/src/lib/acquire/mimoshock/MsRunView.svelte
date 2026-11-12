@@ -33,7 +33,7 @@
 	const state = $derived(ms.run?.state ?? null);
 	const streaming = $derived(state === 'running' || state === 'review' || state === 'stopping' || state === 'finished');
 	const channels = $derived(ms.runControls.map((c) => ({ index: c, name: `Control ${c}` })));
-	const unscaled = $derived(!!status && status.state !== 'unconfigured' && !ms.scaledAborts);
+	const unscaled = $derived(ms.unscaledNotice);
 	const shown = $derived(ms.shownPulse);
 	const fire = $derived(ms.fireAction);
 	const holdWords = $derived.by(() => {
@@ -100,8 +100,7 @@
 	{#if unscaled}
 		<p class="notice" role="status" data-testid="ms-unscaled-notice">
 			<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M7 1.6l5.6 10H1.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /><path d="M7 5.4v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><circle cx="7" cy="10.1" r="0.85" fill="currentColor" /></svg>
-			<strong>Scaled aborts off.</strong>
-			{status?.notice ?? "A pulse over its level's abort line is flagged and judged failing; only the full-level (absolute) lines end the run."}
+			{unscaled}
 		</p>
 	{/if}
 	<div class="fill">

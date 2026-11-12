@@ -254,7 +254,8 @@ export function rungWord(r: LadderRung, levels: readonly number[] | null): strin
 	if (r.halved) return 'Halved step';
 	const l = levels ?? [];
 	const i = l.findIndex((v) => Math.abs(v - r.db) < 1e-9);
-	if (i === l.length - 2 && i > 0 && Math.abs(l[l.length - 1] - r.db) < Math.abs(l[i] - l[i - 1]) - 1e-9) return 'Half step';
+	// the last level before full level, reached by a smaller step than the one before it
+	if (i === l.length - 2 && i >= 2 && l[i] - l[i - 1] < l[i - 1] - l[i - 2] - 1e-9) return 'Half step';
 	return '';
 }
 
