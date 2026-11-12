@@ -275,7 +275,8 @@ fn mimo_shock_r6_law_path_is_pure() {
         }
     }
     // The only mention in lib.rs is the feature-gated declaration.
-    let lib = include_str!("../src/lib.rs");
+    // A Windows checkout may carry carriage returns; the declaration is the same text.
+    let lib = include_str!("../src/lib.rs").replace("\r\n", "\n");
     assert!(lib.contains("#[cfg(feature = \"reference-plant\")]\npub mod reference_plant;"));
 }
 
