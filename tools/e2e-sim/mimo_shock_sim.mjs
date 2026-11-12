@@ -364,7 +364,8 @@ try {
 	await tid(a, 'law-import-open').click();
 	await fill(tid(a, 'law-path'), LAW);
 	await tid(a, 'law-import-go').click();
-	await until(a, 'the imported law', async (p) => (await tid(p, 'law-imported').count()) > 0 && (await attr(p, 'law-imported', 'aria-checked')) === 'true', 30_000);
+	// The catalog keeps what earlier runs imported: the law just imported is the one chosen.
+	await until(a, 'the imported law', async (p) => (await p.locator('[data-testid="law-imported"][aria-checked="true"]').count()) === 1, 30_000);
 	const params = await a.locator('[data-testid="law-params"] [data-testid^="law-param-"]').count();
 	check('an imported law is chosen and shows its parameters from its manifest', params > 0, `${params} parameters`);
 	await shot(a, 'law_imported');
