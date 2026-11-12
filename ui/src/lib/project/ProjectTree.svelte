@@ -41,6 +41,11 @@
 		return { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey };
 	}
 
+	/** A list of sub-items as a grid one column wide, so Shift picks the run between two of them as it does a grid's block. */
+	function column(indices: number[]): number[][] {
+		return indices.map((i) => [i]);
+	}
+
 	/** Picking the object a combination in the action table needs: the tree answers that, and nothing else. */
 	const picking = $derived(app.analyze.picking);
 	function pick(o: ProjectObject): boolean {
@@ -472,7 +477,7 @@
 					</div>
 				{:else if kids.kind === 'modes'}
 					{#each kids.modes as mode (mode.index)}
-						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, mode.index - 1)}>
+						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e), column(kids.modes.map((m) => m.index - 1)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, mode.index - 1)}>
 							<Glyph name="mode" of="child" parent="shape_set" size={14} />
 							<span class="label mono">M{mode.index}</span>
 							<span class="num">{mode.frequency.toPrecision(5)} Hz</span>
@@ -482,14 +487,14 @@
 					{/each}
 				{:else if kids.kind === 'channels'}
 					{#each kids.channels as channel, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="channel-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="channel-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.channels.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
 							<Glyph name={channel.quantity} of="record" parent="channel_table" size={14} />
 							<span class="label mono">{channel.dof || `channel ${i + 1}`}</span>
 						</div>
 					{/each}
 				{:else if kids.kind === 'photos'}
 					{#each kids.photos as photo, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="photo-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} ondblclick={() => startPartRename(o.name, i, photo)} onkeydown={(e) => { if (e.key === 'Enter') p.clickRecord(o.name, i); else if (e.key === 'F2') { e.stopPropagation(); startPartRename(o.name, i, photo); } }}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="photo-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.photos.map((_, k) => k)))} ondblclick={() => startPartRename(o.name, i, photo)} onkeydown={(e) => { if (e.key === 'Enter') p.clickRecord(o.name, i); else if (e.key === 'F2') { e.stopPropagation(); startPartRename(o.name, i, photo); } }}>
 							<Glyph name="photos" size={14} />
 							{#if p.renamingPart?.name === o.name && p.renamingPart.index === i}
 								<input
@@ -514,7 +519,7 @@
 					{/each}
 				{:else if kids.kind === 'matches'}
 					{#each kids.matches as match, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="match-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="match-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.matches.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
 							<Glyph name="mode" of="child" parent="matched_modes" size={14} />
 							<span class="label mono">M{match.first} to M{match.second}</span>
 							<span class="num dim">MAC {match.mac.toFixed(3)}</span>
