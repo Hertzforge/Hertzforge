@@ -625,8 +625,11 @@ test of a kind the law does not accept, before the law is built.
 **When it runs.** Never while a pulse plays. Once after system identification, for the first
 level of the ladder (`seed(level-db)`), then once after each pulse has been fired, measured and
 judged and the ladder has scheduled the next level (`iterate`). The ladder goes first so the law
-knows the level it is building for. Each call has a time budget the controller sets; a law file's
-host deadline is the same number.
+knows the level it is building for. The law is built and seeded under a seed budget (60 s by
+default), where a law may fit a model of the plant; each later call has the call budget, a
+fraction of the time between pulses. A law file's host deadlines are the same numbers. Before the
+first pulse the controller times one iteration of a second copy of the law on the identified
+plant's predicted response, and ends the run (`law_too_slow`) if it is over the call budget.
 
 **What it is built with.** Fixed for the run:
 
@@ -640,6 +643,7 @@ host deadline is the same number.
 | `plant` | `H`, controls by drives on every line (`record-len / 2 + 1` lines), from one identification shot with every drive played at once, so the path delays are in it; the multiple coherence of each control; the lines the controller trusts |
 | `drive-ceiling-v` | Each drive's ceiling, volts peak |
 | `ladder-db` | The level ladder, ascending, ending at 0 dB |
+| `identification-level-db` | The level the plant was identified at, dB against full level: the largest, over the controls, of the identification's measured peak over the target's peak; not finite when it was not measured. A plant that changes with level was measured here, so a law that follows the plant may take it as the first point of the level trend. On a structure whose joints soften within a pulse it is only a rough guide: the identification's random excitation and a pulse load the joints differently |
 
 Records of several channels travel flat, channel after channel: sample `n` of channel `c` is
 `data[c * record-len + n]`. A matrix stack travels in full, row-major within a line, line after
@@ -676,7 +680,9 @@ per control, and the call budget with its misses in a row, as in the single-outp
 
 **The built-in laws.** `inverse` (the default for a waveform target, accepts both kinds),
 `shape` (the default for an SRS target, SRS only) and `paired` (both kinds; the template for
-contributors). Each runs natively and as a law file (`laws/mimo-shock-inverse`,
+contributors). `inverse` and `shape` take a `model` parameter (`frozen`, the default; `secant`;
+`track`; `track_secant`) that says how the law's model of the plant follows a plant that changes
+with level; a further follower is a further name, with no change to this world. Each runs natively and as a law file (`laws/mimo-shock-inverse`,
 `laws/mimo-shock-shape`, `laws/mimo-shock-paired`), and the law file gives the same drives as the
 same mathematics called natively, within 1e-12 of each record's peak, over a run that holds and
 steps the level, for every option that changes the mathematics. Their parameters are in

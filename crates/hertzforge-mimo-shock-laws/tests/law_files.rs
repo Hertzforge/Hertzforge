@@ -187,7 +187,7 @@ fn mimo_shock_the_picker_lists_the_builtins_first_and_states_their_failures() {
     assert!(shape
         .known_failures
         .iter()
-        .any(|f| f.case == MimoShockCheckCase::Jointed4x4Severe));
+        .any(|f| f.case == MimoShockCheckCase::Jointed6x3));
     assert!(shape.params.iter().any(|p| p.key == "anchor"));
     let paired = builtin_facts(BuiltinMimoShock::Paired);
     assert_eq!(paired.known_failures.len(), 16);

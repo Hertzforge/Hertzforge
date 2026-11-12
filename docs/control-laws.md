@@ -854,9 +854,10 @@ not within one pulse, `track` with the identification as a level point takes the
 pulse from about 10 dB over the SRS to under 1 dB. On the simulator's jointed plants, whose joints
 soften within each pulse and recover as it decays, no option helps: no single linear model
 reproduces one of those pulses (the best modal re-fit of a pulse leaves 8 % of it unexplained at
--30 dB and 47 % at -18 dB), the tracked model is set aside for `secant`'s within a pulse or two,
-and every option ends a run where `frozen` ends it, or earlier. That is why the default is
-`frozen`. A structure's joints decide which of the two it is like, and a run on it says which:
+-30 dB and 47 % at -18 dB), and the tracked model is set aside for `secant`'s within a pulse or two.
+There, on targets that drive the joints hard, `frozen` reached full level where every other option
+stopped at a lower level, and on milder ones the options did no better than `frozen`. That is why
+the default is `frozen`. A structure's joints decide which of the two it is like, and a run on it says which:
 `model_prediction_residual` is how far the model missed the pulse it built.
 
 **`paired`** (both kinds). Each control is paired with one drive (control 1 with drive 1, and so
