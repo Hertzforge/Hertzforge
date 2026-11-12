@@ -75,6 +75,7 @@
 	import { alignedShape, followed, nodeTravel } from './shape';
 	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
+	import { splitOnFaces } from './edges';
 
 	interface Props {
 		view: Shape3DView;
@@ -204,6 +205,8 @@
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
 	const OVERLAY_COLOR = 0xe69f00;
+	/** The elements' edges over the surface: dark, so they read on a gray or colored face in either theme. */
+	const EDGE_COLOR = 0x000000;
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
@@ -355,11 +358,14 @@
 	let controls: OrbitControls;
 	let geometry: BufferGeometry;
 	let lineGeometry: BufferGeometry | null = null;
+	/** The lines that lie on a face (the elements' edges), drawn dark over the surface. */
+	let edgeGeometry: BufferGeometry | null = null;
 	let shapeAttr: BufferAttribute;
 	let shapeImagAttr: BufferAttribute;
 	let colorAttr: BufferAttribute;
 	let surface: Mesh;
 	let outline: LineSegments | null = null;
+	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
 	/** The view's `marks`: DOF arrows and sensors, drawn still. */
@@ -665,9 +671,10 @@
 		boundsBox.visible = bounds;
 		scene.add(boundsBox);
 
+		// the faces a little back, so the elements' edges drawn on them win the depth test
 		surface = new Mesh(
 			geometry,
-			displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true }))
+			displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }))
 		);
 		surface.frustumCulled = false;
 		scene.add(surface);
@@ -746,14 +753,30 @@
 		}
 
 		if (view.lines && view.lines.length) {
-			lineGeometry = new BufferGeometry();
-			lineGeometry.setAttribute('position', position);
-			lineGeometry.setAttribute('shape', shapeAttr);
-			lineGeometry.setAttribute('shapeImag', shapeImagAttr);
-			lineGeometry.setIndex(new BufferAttribute(view.lines, 1));
-			outline = new LineSegments(lineGeometry, displaced(new LineBasicMaterial({ transparent: true, opacity: 0.9 })));
-			outline.frustumCulled = false;
-			scene.add(outline);
+			// a line along a face's side is an element's edge, drawn dark on the surface as the
+			// earlier toolset drew them; a beam or a marker keeps the line color, which reads
+			// against the background (Brandon, 2026-11-11)
+			const { onFaces, apart } = splitOnFaces(view.lines, view.triangles);
+			const linked = (index: Uint32Array) => {
+				const g = new BufferGeometry();
+				g.setAttribute('position', position);
+				g.setAttribute('shape', shapeAttr);
+				g.setAttribute('shapeImag', shapeImagAttr);
+				g.setIndex(new BufferAttribute(index, 1));
+				return g;
+			};
+			lineGeometry = linked(view.lines);
+			if (apart.length) {
+				outline = new LineSegments(linked(apart), displaced(new LineBasicMaterial({ transparent: true, opacity: 0.9 })));
+				outline.frustumCulled = false;
+				scene.add(outline);
+			}
+			if (onFaces.length) {
+				edgeGeometry = linked(onFaces);
+				edges = new LineSegments(edgeGeometry, displaced(new LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.55 })));
+				edges.frustumCulled = false;
+				scene.add(edges);
+			}
 			ghostOutline = new LineSegments(
 				lineGeometry,
 				plain(new LineBasicMaterial({ transparent: true, opacity: 0.55, depthWrite: false }))
@@ -1062,6 +1085,8 @@
 		controls.dispose();
 		geometry.dispose();
 		lineGeometry?.dispose();
+		edgeGeometry?.dispose();
+		outline?.geometry.dispose();
 		mutedSurface?.geometry.dispose();
 		dots?.geometry.dispose();
 		leftOut?.geometry.dispose();
