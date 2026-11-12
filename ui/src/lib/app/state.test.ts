@@ -247,3 +247,66 @@ describe('a form with a Preview button', () => {
 		expect(runs.length).toBe(before);
 	});
 });
+
+describe('a long operation', () => {
+	// Brandon, 2026-11-11: a solve that takes a while shows how far it has got and can be stopped
+	const solve = {
+		id: 'project.solve_modes',
+		title: 'Solve Modes',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		outputs: ['reading'],
+		params: [geometry, { name: 'num_modes', label: 'Modes', type: 'integer', default: 20 }]
+	} as unknown as OperationDescriptor;
+
+	function slowly() {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const sent: string[] = [];
+		let finish: (value: unknown) => void = () => {};
+		const request = vi.fn((method: string) => {
+			sent.push(method);
+			if (method === 'op.run') return new Promise((resolve) => (finish = resolve));
+			if (method === 'op.cancel') return Promise.resolve({ op: solve.id });
+			if (method === 'project.actions') return Promise.resolve({ table: { columns: [{ kinds: ['geometry'], current: true, rows: [] }] } });
+			return Promise.resolve({});
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		const handlers = (app.analysis as unknown as { handlers: Map<string, Set<(data: unknown) => void>> }).handlers;
+		const emit = (data: unknown) => handlers.get('op.progress')?.forEach((h) => h(data));
+		app.catalog = { operations: [solve] } as never;
+		app.project.summary = summary;
+		return { a: app.analyze, sent, emit, finish: () => finish({ views: [{ view: 'reading', title: 'done', rows: [] }] }) };
+	}
+
+	it('follows its progress while it runs and forgets it after', async () => {
+		const { a, emit, finish } = slowly();
+		await a.perform(row(solve), column);
+		const running = a.run();
+		await Promise.resolve();
+		emit({ op: solve.id, done: 0, total: -1 });
+		expect(a.opProgress).toEqual({ done: 0, total: -1 });
+		emit({ op: 'project.other', done: 5, total: 10 });
+		expect(a.opProgress, 'another operation\'s progress is not ours').toEqual({ done: 0, total: -1 });
+		emit({ op: solve.id, done: 3, total: 10 });
+		expect(a.opProgress).toEqual({ done: 3, total: 10 });
+		finish();
+		await running;
+		expect(a.opProgress).toBeNull();
+	});
+
+	it('Cancel asks the service once, and only while it runs', async () => {
+		const { a, sent, finish } = slowly();
+		await a.perform(row(solve), column);
+		await a.cancel();
+		expect(sent).not.toContain('op.cancel');
+		const running = a.run();
+		await Promise.resolve();
+		await a.cancel();
+		await a.cancel();
+		expect(sent.filter((m) => m === 'op.cancel')).toHaveLength(1);
+		expect(a.cancelling).toBe(true);
+		finish();
+		await running;
+		expect(a.cancelling).toBe(false);
+	});
+});

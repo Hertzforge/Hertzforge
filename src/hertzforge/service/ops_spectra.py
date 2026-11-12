@@ -16,6 +16,7 @@ import numpy as np
 from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .op_progress import hook
 from .ops_project import COMPONENT
 from .ops_sine_shock import _record
 from .ops_specify import (
@@ -311,7 +312,7 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
     coherence = project[name]
     record = _record(coherence, params['record'], name)
     try:
-        reading = project.read_partial_coherence(name)
+        reading = project.read_partial_coherence(name, progress=hook())
     except ValueError as error:
         raise refused(str(error)) from None
     k = _coherence_channel(project, name, record, reading)
@@ -398,7 +399,7 @@ def rigid_body_residual(project: Any, params: dict[str, Any]) -> list[dict]:
 
     name = params['density']
     try:
-        reading = project.read_transformation(name)
+        reading = project.read_transformation(name, progress=hook())
     except ValueError as error:
         raise refused(str(error)) from None
     t = reading.transformation
@@ -473,7 +474,7 @@ def field_limit(project: Any, params: dict[str, Any]) -> list[dict]:
     if not records:
         raise refused(f'{name} has no records to take a limit over')
     try:
-        fit = project.field_limit(name, records, **limit_settings(params))
+        fit = project.field_limit(name, records, **limit_settings(params), progress=hook())
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     limit = fit.limit
