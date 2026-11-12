@@ -13,6 +13,8 @@ import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
 import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
 import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
+import { MimoShockStore } from '$lib/acquire/mimoshock/msStore.svelte';
+import { MsViewsState } from '$lib/acquire/mimoshock/msViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
@@ -1903,6 +1905,10 @@ export class AppState {
 	readonly shock: ShockStore;
 	/** The classical shock run's pages and this window's subscription. */
 	readonly shockViews: ShockViewsState;
+	/** MIMO Shock's setup and run; the station and table are the Acquire store's. */
+	readonly mimoShock: MimoShockStore;
+	/** The MIMO Shock run's pages and this window's subscription. */
+	readonly mimoShockViews: MsViewsState;
 	/** SRS shock's setup and run; the station and table are the Acquire store's. */
 	readonly srs: SrsStore;
 	/** The SRS shock run's pages and this window's subscription. */
@@ -1948,6 +1954,7 @@ export class AppState {
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mixed = new MixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -1977,6 +1984,16 @@ export class AppState {
 				page: shockPopout ? config.page : null
 			},
 			this.shock
+		);
+		const mimoShockPopout = config.popout && config.popoutTest === 'mimo_shock';
+		this.mimoShockViews = new MsViewsState(
+			this.control,
+			{
+				setupTitle: () => this.mimoShock.status?.title ?? (config.popout ? null : this.mimoShock.setup.title),
+				showing: () => mimoShockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_shock' && this.mimoShock.step === 'run'),
+				page: mimoShockPopout ? config.page : null
+			},
+			this.mimoShock
 		);
 		const srsPopout = config.popout && config.popoutTest === 'srs';
 		this.srsViews = new SrsViewsState(
@@ -2045,7 +2062,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -2067,6 +2084,7 @@ export class AppState {
 		const twr = this.config.popoutTest === 'twr';
 		const explorer = this.config.popoutTest === 'explorer';
 		const recorder = this.config.popoutTest === 'recorder';
+		const mimoShock = this.config.popoutTest === 'mimo_shock';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -2111,6 +2129,11 @@ export class AppState {
 					if (this.control.status === 'open') void this.recorder.sync();
 				});
 			}
+			if (mimoShock) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mimoShock.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
@@ -2120,13 +2143,14 @@ export class AppState {
 		else if (twr) this.twrViews.watch();
 		else if (explorer) this.explorerViews.watch();
 		else if (recorder) this.recorderViews.watch();
+		else if (mimoShock) this.mimoShockViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2163,6 +2187,8 @@ export class AppState {
 		if (onExplorer || this.explorer.isLive) return this.explorer.source;
 		const onRecorder = this.workspace === 'acquire' && this.tests.screen === 'recorder';
 		if (onRecorder || this.recorder.isLive) return this.recorder.source;
+		const onMimoShock = this.workspace === 'acquire' && this.tests.screen === 'mimo_shock';
+		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
 		return null;
 	}
 
@@ -2216,6 +2242,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.recorder.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mimoShock.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -2230,6 +2259,7 @@ export class AppState {
 		this.twr.watch();
 		this.explorer.watch();
 		this.recorder.watch();
+		this.mimoShock.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
@@ -2240,6 +2270,7 @@ export class AppState {
 		this.twrViews.watch();
 		this.explorerViews.watch();
 		this.recorderViews.watch();
+		this.mimoShockViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

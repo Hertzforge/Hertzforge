@@ -10,6 +10,8 @@
 	import MimoRandomScreen from '$lib/acquire/mimo/MimoRandomScreen.svelte';
 	import ShockScreen from '$lib/acquire/shock/ShockScreen.svelte';
 	import SrsScreen from '$lib/acquire/srs/SrsScreen.svelte';
+	import MimoShockScreen from '$lib/acquire/mimoshock/MimoShockScreen.svelte';
+	import { MS_STATE_WORDS } from '$lib/acquire/mimoshock/msWords';
 	import SineScreen from '$lib/acquire/sine/SineScreen.svelte';
 	import MixedScreen from '$lib/acquire/mixed/MixedScreen.svelte';
 	import TwrScreen from '$lib/acquire/twr/TwrScreen.svelte';
@@ -46,7 +48,9 @@
 									? EXPLORER_STATE_WORDS[app.explorer.status.state]
 									: app.recorder.isLive && app.recorder.status
 										? RECORDER_STATE_WORDS[app.recorder.status.state]
-										: null
+										: app.mimoShock.isLive && app.mimoShock.status
+											? MS_STATE_WORDS[app.mimoShock.status.state]
+											: null
 	);
 </script>
 
@@ -58,6 +62,8 @@
 	<MimoRandomScreen {app} />
 {:else if tests.screen === 'shock'}
 	<ShockScreen {app} />
+{:else if tests.screen === 'mimo_shock'}
+	<MimoShockScreen {app} />
 {:else if tests.screen === 'srs'}
 	<SrsScreen {app} />
 {:else if tests.screen === 'sine'}
