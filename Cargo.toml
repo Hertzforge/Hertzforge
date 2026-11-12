@@ -94,6 +94,11 @@ opt-level = 3
 [profile.dev.package.hertzforge-mimo-random]
 opt-level = 3
 
+# The MIMO Shock law math: its modal fit's cost test took 83 s unoptimized on the ten-core Mac
+# against a budget of seconds, and the warp follower's per-pulse cost test missed its budget too.
+[profile.dev.package.hertzforge-mimo-shock-law-math]
+opt-level = 3
+
 # The Sine core: its law check's seven cases took 24.2 s unoptimized on the ten-core Mac and
 # 14.6 s with this.
 [profile.dev.package.hertzforge-sine]
