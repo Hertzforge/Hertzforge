@@ -720,7 +720,8 @@ How a law for several drives should work is an open question. A correction throu
 structure can diverge when the structure's resonances move with level, and with several drives the
 SRS can look better for a few pulses while the waveform and the drives grow. The built-in laws are
 starting points, each with a known weakness (below), and the check is written for the law that
-would have none. Trying a new law is meant to be quick.
+would have none. Trying a new law is meant to be quick. Every result stated here was measured on the
+simulator's structures; no MIMO Shock law has yet run on a shaker.
 
 What differs from the single-output shock laws:
 

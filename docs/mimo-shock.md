@@ -119,9 +119,12 @@ computation, never a measurement.
   fires this many pulses (3 unless you change it) without a pass ends the run. Full level completes
   on its own count of passing pulses (also 3 unless you change it).
 - **Time between pulses.** The largest of the cooling, settling and law times.
-- **Pulse grid.** The sample rate requested of the station, the record length (the shortest that
-  holds every target unless you choose one), the band identification excites and the law corrects
-  in, and where each target starts in its record.
+- **Pulse grid.** The sample rate requested of the station (12 800 Hz unless you change it), the
+  record length (the shortest that holds every target unless you choose one, at most 16 384
+  samples), the band identification excites and the law corrects in, and where each target starts
+  in its record. An SRS target is synthesized as a waveform that rings down from its lowest band, so
+  it needs a longer record than a classical pulse: at 51 200 Hz no record holds one from 50 Hz, and
+  the setup says so.
 - **Identification.** The most each drive plays in the shot, the records averaged, the coherence
   floor under which a line is not trusted, and whether the run holds for review afterwards.
 
@@ -130,8 +133,10 @@ computation, never a measurement.
 The law panel lists every MIMO Shock law the control service's catalog holds that accepts the kind
 of target you chose, built-in laws first. Choosing a law shows its summary, who wrote it, its check
 record, whether it may drive hardware, the target kinds it accepts, and its parameters as its own
-manifest declares them, each with its range. Changing the target kind keeps your law when it accepts
-the new kind, and otherwise takes the first law that does.
+manifest declares them, each with its range. A new setup opens on the law the control service names
+the default for its kind of target: `inverse` for classical pulses, `shape` for SRS. Changing the
+target kind moves a default law to the new kind's default; a law you chose stays when it accepts the
+new kind, and otherwise gives way to the new kind's default.
 
 Under the law are the guards the controller holds every law to, whichever law it is: how far a
 drive's peak, or any third-octave band of a drive, may grow from one pulse to the next beyond the
@@ -178,6 +183,15 @@ control. It uses no model of how one drive moves the other controls. It accepts 
 target. Pick it when the drives barely affect each other's control points, or to see what a law
 without a coupling model does on your structure. On a coupled structure the pairs work against
 each other. It is also the template for a new law.
+
+**How a law's model follows the structure.** `inverse` and `shape` build every drive through a
+model of the structure, and both have a `model` option for how that model is kept current as the
+structure changes with level: `frozen` (the default) keeps the identification; `secant` reproduces
+the pulses of the level being played; `track` and `track_secant` fit the structure's modes and
+follow their frequencies and damping from pulse to pulse. The options other than `frozen` are off
+unless you choose them. On the simulator's jointed structures, whose joints soften within a pulse,
+none of them did better than `frozen`; [control-laws.md](control-laws.md) gives the numbers and
+what each costs.
 
 An imported law must pass the law check before it may drive hardware; any law runs on the
 simulator. The law picker shows each law's check record.
@@ -292,8 +306,14 @@ another monitor; every window keeps Stop and Abort.
 ## Limits of This Version
 
 - **The laws are young.** Control of several shakers firing shock is not a settled practice, and
-  few published methods for it were found. The built-in laws can leave a control point outside tolerance on
-  a structure that changes with level; the controller stops instead of climbing.
+  few published methods for it were found. The built-in laws can leave a control point outside
+  tolerance on a structure that changes with level; the controller stops instead of climbing.
+- **A structure whose resonances shift inside a pulse can stop a run low.** Where bolted joints
+  soften while the pulse is ringing and recover as it decays, no linear model reproduces the pulse,
+  and the controller may stop the run at a low level of the ladder: its guards refuse a law's
+  answer that grows a drive past its caps, or a level spends its pulses without passing. The run
+  says which, on the pulse and at its end.
+- **Nothing here has run on a shaker.** Every result in this guide was measured on the simulator.
 - **The simulator's structures are models.** The jointed structures the laws are checked on soften
   and gain damping with level in a stated way. A real joint can do more, and less, than the model.
 - **The hardware proof so far is a wire loopback.** It shows the timing, the channel sync, the drive
