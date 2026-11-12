@@ -180,9 +180,15 @@ the result's place:
         "faces":{"$array":.. i32 [T]}, faces: each triangle's surface, -1 for none
         "kept":[1,3],                  faces: the surfaces in use now
         "out":"leave_out","back":"put_back",   faces: the params a click names a surface in
-        "off":2}                       nodes: marked places, shown through the model; this many of
+        "off":2,                       nodes: marked places, shown through the model; this many of
                                        the last `ids` are left out and drawn dim
+        "others":[40,6]}               nodes: a second set of places in the rows after `ids`, drawn
+                                       in their own color and not clicked: this many held, then
+                                       this many not (a mate's other side)
 ```
+
+A `shape3d` with `opacity` (below 1) opens with its surface that see-through, so places marked on
+surfaces inside the model show; the view's own slider changes it after.
 
 A `point` click sends `x`, `y` and `z` in the view's unit: where it lands on the model's surface,
 on the model's plane when the model is flat, or else at the depth of the node nearest it. A
@@ -643,7 +649,10 @@ booleans and patterns. A solid added, edited or picked is drawn in the view's `b
 color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
 plate thickness, and no row on a part picked asks again for what the pick fills (its groups,
-solids or mates: more are picked in the tree).
+solids or mates: more are picked in the tree). Mate Surfaces is offered on two element groups
+picked together, as Mate, and on one mate picked, as `Edit`, with `fill` holding the mate's name
+and how it holds (stiffnesses in the display units); it leaves out `mate` on groups and `groups`,
+`tolerance` and `patch` on a mate.
 
 **Display units.** Every view the analysis service sends is drawn in its connection's unit
 system. A connection starts

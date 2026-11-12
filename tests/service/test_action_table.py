@@ -376,7 +376,10 @@ def test_a_mate_picked_in_the_tree_fills_the_rows_that_act_on_it(plate, validate
     found = project.mate_surfaces('Part')
     picked = {'name': 'Part', 'kind': 'mate', 'id': found[0]}
     (current, *_rest) = table(plate, 'Part', part=picked, validate=validate)
-    assert row(current, 'Edit Sides')['fill']['mate'] == str(found[0])
+    edit = row(current, 'Edit')
+    assert edit['id'] == 'project.mate_surfaces' and edit['fill']['mate'] == str(found[0])
+    assert edit['fill']['name'] == 'base on lid' and edit['fill']['normal'] == 'rigid'
+    assert {'groups', 'tolerance', 'patch'} <= set(edit['omit'])
     assert row(current, 'Delete Mates')['fill']['mates'] == str(found[0])
 
 

@@ -442,6 +442,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             more['instant'] = True
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
+        if op.id == 'project.mate_surfaces':
+            # one pane makes a mate from the groups picked and edits the mate picked
+            # (Brandon, 2026-11-11)
+            if where == 'mate':
+                fill.update(_mate_fill(project[fill['geometry']], int(fill['mate'])))
+                more['omit'] = [*more.get('omit', []), 'groups', 'tolerance', 'patch']
+                rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
+                continue
+            more['omit'] = [*more.get('omit', []), 'mate']
         rows.append(_op_row(op, fill=fill, **more))
     if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:
         edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)
@@ -485,6 +494,25 @@ def _solid_edit_row(project: Any, geometry: str, solid_id: Any,
                   live=True)
     row['verb'] = 'Edit'
     return row
+
+
+def _mate_fill(geometry: Any, mate_id: int) -> dict[str, str]:
+    """Mate Surfaces opened on a kept mate: its name and how it holds, each stiffness in
+    the display units."""
+    from hertzforge.core import mates
+
+    from . import display_units
+
+    try:
+        mated = mates.find(geometry, mate_id)
+    except ValueError:
+        return {}
+    fill = {'name': mated.name, 'normal': mated.normal_mode, 'shear': mated.shear_mode}
+    scale = display_units.words_in('force/length')[1]
+    for side in ('normal', 'shear'):
+        if getattr(mated, f'{side}_mode') == 'stiffness':
+            fill[f'{side}_stiffness'] = f'{getattr(mated, f"{side}_stiffness") * scale:.6g}'
+    return fill
 
 
 def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:

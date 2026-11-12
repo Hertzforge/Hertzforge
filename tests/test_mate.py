@@ -372,3 +372,19 @@ def test_a_node_both_groups_share_is_never_tied():
     assert len(mates.links(geometry, mated)) == 5 * 9 - 15
     model = Model.from_geometry(_steel(geometry))
     assert len(model.ties) == 30 and len(model.pieces()) == 1
+
+
+def test_each_side_offers_its_surface_by_the_other_group_and_the_ring_around_it():
+    # Brandon, 2026-11-11: the nodes a mate's side may hold are picked in the view
+    *_made, geometry = _two_blocks()
+    (found,) = mates.detect(geometry, tolerance=0.01 * 0.0254)
+    first, second = mates.offered(geometry, found['groups'])
+    assert set(found['nodes_a']) <= set(first) and set(found['nodes_b']) <= set(second)
+    xyz = {int(n): geometry.node_xyz[geometry.node_index([n])[0]] for n in (*first, *second)}
+    base = second if found['groups'][1] == _group(geometry, 'base') else first
+    ring = [n for n in base if n not in found['nodes_b'] and n not in found['nodes_a']]
+    assert ring, 'the base offers nodes just past the post, to be added by hand'
+    assert all(abs(xyz[n][2] - 0.5 * 0.0254) <= 0.5 * 0.0254 * 1.01 for n in base), (
+        'no deeper than one element below the post')
+    far = mates.offered(geometry, found['groups'], reach=1e-9)
+    assert len(far[0]) + len(far[1]) < len(first) + len(second)

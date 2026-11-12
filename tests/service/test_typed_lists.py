@@ -118,7 +118,7 @@ def test_patches_and_mates_typed_with_a_space_are_two():
     run(project, 'project.add_solid_block', z=1.0)
     run(project, 'project.add_solid_block', z=2.0)
     run(project, 'project.mesh_solids', size=0.5, parts_apart=True, keep=True)
-    run(project, 'project.mate_surfaces', patches='1 2', keep=True)
+    run(project, 'project.mate_surfaces', keep=True)
     assert len(project['Part'].mates) == 2
     run(project, 'project.delete_mated_surfaces', mates='1 2')
     assert not project['Part'].mates

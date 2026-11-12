@@ -269,4 +269,20 @@ def test_every_stiffness_of_a_solids_form_is_marked():
     marked = {op.id: {p.name for p in op.params if p.quantity == 'force/length'}
               for op in OPERATIONS}
     assert marked['project.mate_surfaces'] == {'normal_stiffness', 'shear_stiffness'}
-    assert marked['project.edit_mated_surfaces'] == {'normal_stiffness', 'shear_stiffness'}
+
+
+def test_a_mate_picked_opens_the_pane_on_its_stiffness_in_the_display_system():
+    block = {'width_x': 1.0, 'width_y': 1.0, 'width_z': 1.0}
+    (*_made, picked) = answers(
+        add_block(**block), add_block(z=1.0, **block),
+        ('op.run', {'op': 'project.mesh_solids', 'params': {
+            'geometry': 'Part', 'size': 0.5, 'parts_apart': True, 'keep': True}}),
+        ('op.run', {'op': 'project.mate_surfaces', 'params': {
+            'geometry': 'Part', 'normal': 'stiffness', 'normal_stiffness': 1000.0,
+            'keep': True}}),
+        ('project.actions', {'objects': ['Part'], 'part': {'name': 'Part', 'kind': 'mate',
+                                                            'id': 1}}))
+    rows = picked['result']['table']['columns'][0]['rows']
+    edit = next(row for row in rows if row['verb'] == 'Edit')
+    assert float(edit['fill']['normal_stiffness']) == pytest.approx(1000.0)
+    assert 'shear_stiffness' not in edit['fill'], 'a rigid shear opens on the default'

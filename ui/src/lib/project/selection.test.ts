@@ -138,3 +138,15 @@ describe('solids picked together', () => {
 		expect(clickPart(one, 'Frame', 'group', 2, { toggle: true }).part).toEqual({ name: 'Frame', kind: 'group', id: 2 });
 	});
 });
+
+describe('a list of sub-items', () => {
+	// Brandon, 2026-11-11: Shift picks a run of modes, as it does of any sub-items
+	it('takes the run from the last one clicked through the one Shift-clicked, a list being a grid one column wide', () => {
+		const column = [0, 1, 2, 3, 4, 5].map((i) => [i]);
+		let s = clickRecord(EMPTY, 'Modes', 1);
+		s = clickRecord(s, 'Modes', 4, { extend: true }, { from: 1, to: 4, grid: column });
+		expect(s.records.Modes).toEqual([1, 2, 3, 4]);
+		s = clickRecord(s, 'Modes', 0, { extend: true }, { from: 1, to: 0, grid: column });
+		expect([...s.records.Modes].sort()).toEqual([0, 1, 2, 3, 4]);
+	});
+});

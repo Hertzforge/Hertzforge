@@ -266,6 +266,13 @@
 	let wireframe = $state(false);
 	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
 	let opacity = $state(1);
+	/** The click a view's own opacity was taken for: a view that asks to be seen through (`opacity`) opens so, and the slider is the user's after. */
+	let seeThroughFor: string | null = null;
+	$effect.pre(() => {
+		const key = view.opacity === undefined ? null : (view.pick?.op ?? view.title);
+		if (key !== null && key !== seeThroughFor) opacity = view.opacity!;
+		seeThroughFor = key;
+	});
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (the colormap toggle). */
 	let colored = $state(true);
@@ -414,6 +421,9 @@
 	/** Every node as a dot, while clicks place points or pick nodes, so a node with no element still shows. */
 	let dots: Points | null = null;
 	let leftOut: Points | null = null;
+	/** A second set of places, drawn in their own color and not clicked (`pick.others`): a mate's other side, held and not. */
+	let otherOn: Points | null = null;
+	let otherOff: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
 	const materials: Material[] = [];
 	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
@@ -586,7 +596,8 @@
 		if (outline) (outline.material as LineBasicMaterial).color = lineColor;
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
-		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		// beside a second set of places, the ones a click picks wear the accent
+		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
 		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
@@ -810,7 +821,8 @@
 			g.setDrawRange(0, (view.pick.ids?.length ?? view.nodes.length / 3) - off);
 			// marked places show through the model, since a seam runs inside a solid
 			const places = view.pick.off !== undefined;
-			dots = new Points(g, plain(new PointsMaterial({ size: places ? 7 : 4, sizeAttenuation: false, depthTest: !places })));
+			// marked places are drawn with the transparent layers, so render order alone puts them over a second set
+			dots = new Points(g, plain(new PointsMaterial({ size: places ? 7 : 4, sizeAttenuation: false, depthTest: !places, transparent: places })));
 			if (places) dots.renderOrder = 4;
 			dots.frustumCulled = false;
 			scene.add(dots);
@@ -824,6 +836,22 @@
 				leftOut.frustumCulled = false;
 				scene.add(leftOut);
 			}
+			const [held, notHeld] = view.pick.others ?? [0, 0];
+			const start = view.pick.ids?.length ?? 0;
+			const layer = (from: number, count: number, size: number, alpha: number): Points | null => {
+				if (!count) return null;
+				const g2 = new BufferGeometry();
+				g2.setAttribute('position', position);
+				g2.setDrawRange(from, count);
+				const points = new Points(g2, plain(new PointsMaterial({ color: OVERLAY_COLOR, size, sizeAttenuation: false, transparent: true, opacity: alpha, depthTest: false })));
+				// under the places a click picks, which sit on them where the two sides coincide
+				points.renderOrder = 3;
+				points.frustumCulled = false;
+				scene.add(points);
+				return points;
+			};
+			otherOn = layer(start, held, 9, 0.9);
+			otherOff = layer(start + held, notHeld, 8, 0.3);
 		}
 		if (view.pick?.target === 'nodes') {
 			markGeometry = new BufferGeometry();
@@ -1090,6 +1118,8 @@
 		mutedSurface?.geometry.dispose();
 		dots?.geometry.dispose();
 		leftOut?.geometry.dispose();
+		otherOn?.geometry.dispose();
+		otherOff?.geometry.dispose();
 		markGeometry?.dispose();
 		overlayGeometry?.dispose();
 		overlayLineGeometry?.dispose();
