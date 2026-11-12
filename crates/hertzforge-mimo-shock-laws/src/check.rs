@@ -481,6 +481,8 @@ mod tests {
                     duration_ok: true,
                     energy_db: 0.0,
                     rms_duration_ratio: 1.0,
+                    scaled_margin_db: -6.0,
+                    absolute_margin_db: -6.0,
                 })
                 .collect(),
             passed,

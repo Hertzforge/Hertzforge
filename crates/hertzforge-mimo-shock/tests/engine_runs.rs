@@ -242,12 +242,10 @@ fn mimo_shock_engine_r5_severe_twist_srs_waveform_inverse_without_its_watchdog_i
 /// What the guards let through on the twist SRS target on the severe plant:
 /// the seed. Its predicted response (the identified plant) is the target's,
 /// so nothing refuses it before the fire; it measures about 7 dB over the
-/// target's peak at the first level. The growth cap and the divergence watch
-/// compare a pulse with the one before, so neither can act on the first. The
-/// abort lines are absolute (the full-level target's peak plus the margin),
-/// so this -12 dB pulse, 5 dB under the full-level peak, is a judged failure
-/// the law corrects at its level, not an abort. (Before the lines were made
-/// absolute it ended the run `control_abort` after this one pulse.)
+/// target's peak at the first level; the measured abort line (6 dB for an SRS
+/// target) ends the run after that one pulse. The growth cap and the
+/// divergence watch compare a pulse with the one before, so neither can act on
+/// the first.
 #[test]
 fn mimo_shock_engine_the_severe_twist_seed_is_let_through_to_the_measured_abort() {
     let cfg = config(4, 0, 4, LEN_SRS);
@@ -257,21 +255,27 @@ fn mimo_shock_engine_the_severe_twist_seed_is_let_through_to_the_measured_abort(
         srs_twist(),
         Arc::new(ShapeFactory::default()),
     );
-    let first = e.fire_next(None).unwrap();
-    let predicted = first
+    let end = e.run_to_end(None).unwrap();
+    let p = e.pulses();
+    assert_eq!(p.len(), 1);
+    let predicted = p[0]
         .predicted_peak_ratio
         .iter()
         .fold(0.0f64, |a, v| a.max(*v));
     let measured = worst_peak_ratio(&e);
     println!(
-        "predicted {:.2} dB, measured {:.2} dB over the target's peak; {:?}",
+        "predicted {:.2} dB, measured {:.2} dB over the target's peak; {end:?}",
         20.0 * predicted.log10(),
-        20.0 * measured.log10(),
-        first.end
+        20.0 * measured.log10()
     );
     assert!(20.0 * predicted.log10() < 1.0);
     assert!(20.0 * measured.log10() > 6.0);
-    assert!(!first.passed && first.end.is_none(), "{:?}", first.end);
+    // The line it crosses is its level's (scaled) line, not the absolute one;
+    // the scaled abort is the controlled stop.
+    assert_eq!(
+        (end.outcome, end.reason.as_str()),
+        (EndOutcome::SafeStop, "control_abort_scaled")
+    );
 }
 
 #[test]

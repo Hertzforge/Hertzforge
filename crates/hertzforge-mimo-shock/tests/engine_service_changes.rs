@@ -1,9 +1,11 @@
 //! Three changes the run service asked of the engine, each held by a test:
 //!
-//! 1. **Abort lines are absolute.** A control's measured abort is judged
-//!    against the full-level abort line (the full-level target's peak plus the
-//!    abort margin) at every level. A low-level pulse over its own level's
-//!    target is a judged failure the law may correct, not an abort.
+//! 1. **Abort lines are absolute, and scaled by choice.** A control's measured
+//!    peak over the full-level abort line (the full-level target's peak plus
+//!    the abort margin) aborts at every level (`control_abort_absolute`). The
+//!    same margin over the level's own target (the scaled line) ends the run in
+//!    the controlled stop when scaled aborts are on (`control_abort_scaled`);
+//!    off, the pulse is flagged, judged failing, and the ladder holds.
 //! 2. **The joint verdict has a mode.** `All` (every control inside its own
 //!    tolerance) and `Global` (an SRS target only: the energy-weighted global
 //!    SRS error inside the tolerance and no control over its abort line).
@@ -47,12 +49,12 @@ fn identified(
     e
 }
 
-#[test]
-fn mimo_shock_engine_a_low_level_pulse_over_its_own_target_is_judged_not_aborted() {
-    // The severe 4 x 4 twist SRS run: the -12 dB seed measures about 7 dB over
-    // its own level's target, 5 dB under the full-level target. Under absolute
-    // lines (6 dB over the full-level peak) it is a judged failure.
-    let cfg = config(4, 0, 4, LEN_SRS);
+/// The severe 4 x 4 twist SRS run: the -12 dB seed measures about 7 dB over its
+/// own level's target (over its scaled line, 6 dB) and about 5 dB under the
+/// full-level target (under its absolute line).
+fn severe_twist(scaled: bool) -> (MimoShockEngine, hertzforge_mimo_shock::PulseReport) {
+    let mut cfg = config(4, 0, 4, LEN_SRS);
+    cfg.guards.scaled_aborts = scaled;
     let (mut e, _) = ready(
         ShockPlant::Jointed4x4Severe,
         cfg,
@@ -60,60 +62,89 @@ fn mimo_shock_engine_a_low_level_pulse_over_its_own_target_is_judged_not_aborted
         Arc::new(ShapeFactory::default()),
     );
     let first = e.fire_next(None).unwrap();
-    let over = first.over_test_db;
     let worst = first
         .controls
         .iter()
-        .fold(0.0f64, |a, c| a.max(c.verdict.peak_ratio));
+        .fold(f64::NEG_INFINITY, |a, c| a.max(c.scaled_margin_db));
+    let worst_abs = first
+        .controls
+        .iter()
+        .fold(f64::NEG_INFINITY, |a, c| a.max(c.absolute_margin_db));
     println!(
-        "first pulse at {} dB: worst peak {:.2} dB over its level's target; end {:?}",
-        first.level_db,
-        20.0 * worst.log10(),
-        first.end
+        "scaled aborts {scaled}: first pulse at {} dB, {worst:+.2} dB against its scaled \
+         line, {worst_abs:+.2} dB against the absolute line; end {:?}",
+        first.level_db, first.end
     );
-    assert!(20.0 * worst.log10() > 6.0, "the case no longer over-tests");
-    assert!(over > 3.0 && !first.passed);
     assert!(
-        first.end.is_none(),
-        "a pulse under the full-level line ended the run: {:?}",
-        first.end
+        worst > 0.0 && worst_abs < 0.0,
+        "the case no longer sits between the lines"
+    );
+    (e, first)
+}
+
+#[test]
+fn mimo_shock_engine_with_scaled_aborts_a_pulse_over_its_level_line_ends_the_run_by_that_line() {
+    let (_, first) = severe_twist(true);
+    let end = first.end.expect("the run ended");
+    assert_eq!(
+        (end.outcome, end.reason.as_str()),
+        (EndOutcome::SafeStop, "control_abort_scaled")
     );
 }
 
 #[test]
-fn mimo_shock_engine_a_pulse_over_the_full_level_line_aborts_below_full_level() {
+fn mimo_shock_engine_without_scaled_aborts_the_pulse_is_flagged_and_the_ladder_holds() {
+    let (mut e, first) = severe_twist(false);
+    assert!(first.end.is_none(), "{:?}", first.end);
+    assert!(!first.passed);
+    assert!(
+        first
+            .warnings
+            .iter()
+            .any(|w| w.contains("abort line scaled")),
+        "{:?}",
+        first.warnings
+    );
+    let second = e.fire_next(None).unwrap();
+    assert_eq!(
+        second.level_db, first.level_db,
+        "the ladder climbed on a flagged pulse"
+    );
+}
+
+#[test]
+fn mimo_shock_engine_a_pulse_over_the_absolute_line_aborts_by_it_in_both_settings() {
     // The severe twist SRS seed played at -3 dB measures several dB over the
     // full-level peak while its prediction is near the target: a line 2 dB
     // over the full-level peak ends the run on that first pulse, below full
-    // level.
-    let mut cfg = config(4, 0, 4, LEN_SRS);
-    cfg.ladder = LadderPlan {
-        levels_db: vec![-3.0, 0.0],
-        ..LadderPlan::default()
-    };
-    cfg.guards.control_abort_db = Some(2.0);
-    let (mut e, _) = ready(
-        ShockPlant::Jointed4x4Severe,
-        cfg,
-        srs_twist(),
-        Arc::new(ShapeFactory::default()),
-    );
-    let p = e.fire_next(None).unwrap();
-    let worst = p
-        .controls
-        .iter()
-        .fold(0.0f64, |a, c| a.max(c.verdict.peak_ratio));
-    println!(
-        "at {} dB: {:.2} dB over the full-level peak",
-        p.level_db,
-        20.0 * worst.log10() + p.level_db
-    );
-    let end = p.end.expect("the run ended");
-    assert_eq!(p.level_db, -3.0);
-    assert_eq!(
-        (end.outcome, end.reason.as_str()),
-        (EndOutcome::Aborted, "control_abort")
-    );
+    // level, by the absolute line, whether scaled aborts are on or off.
+    for scaled in [true, false] {
+        let mut cfg = config(4, 0, 4, LEN_SRS);
+        cfg.ladder = LadderPlan {
+            levels_db: vec![-3.0, 0.0],
+            ..LadderPlan::default()
+        };
+        cfg.guards.control_abort_db = Some(2.0);
+        cfg.guards.scaled_aborts = scaled;
+        let (mut e, _) = ready(
+            ShockPlant::Jointed4x4Severe,
+            cfg,
+            srs_twist(),
+            Arc::new(ShapeFactory::default()),
+        );
+        let p = e.fire_next(None).unwrap();
+        let worst = p
+            .controls
+            .iter()
+            .fold(f64::NEG_INFINITY, |a, c| a.max(c.absolute_margin_db));
+        println!("scaled {scaled}: {worst:+.2} dB over the absolute line");
+        let end = p.end.expect("the run ended");
+        assert_eq!(p.level_db, -3.0);
+        assert_eq!(
+            (end.outcome, end.reason.as_str()),
+            (EndOutcome::Aborted, "control_abort_absolute")
+        );
+    }
 }
 
 #[test]
@@ -234,4 +265,65 @@ fn mimo_shock_engine_a_reachable_target_is_not_held() {
     let seed = e.seed_report().cloned().expect("floors");
     assert!(seed.reachable_ok.iter().all(|ok| *ok), "{seed:?}");
     assert!(e.unreachable().is_none());
+}
+
+/// A law that reports it trapped (a law file's crash) on every iteration.
+struct Trapping(InverseFactory);
+
+struct TrappingLaw(Box<dyn hertzforge_mimo_shock::MimoShockLaw + Send>);
+
+impl hertzforge_mimo_shock::MimoShockLaw for TrappingLaw {
+    fn name(&self) -> &str {
+        "trapping"
+    }
+    fn seed(
+        &mut self,
+        level_db: f64,
+    ) -> Result<hertzforge_mimo_shock::PulseOutputs, hertzforge_shock_common::law_guard::LawFault>
+    {
+        self.0.seed(level_db)
+    }
+    fn iterate(
+        &mut self,
+        _inputs: &hertzforge_mimo_shock::PulseInputs,
+    ) -> Result<hertzforge_mimo_shock::PulseOutputs, hertzforge_shock_common::law_guard::LawFault>
+    {
+        Err(hertzforge_shock_common::law_guard::LawFault::Crashed(
+            "the law trapped".into(),
+        ))
+    }
+}
+
+impl MimoShockLawFactory for Trapping {
+    fn build(
+        &self,
+        setup: &hertzforge_mimo_shock::Setup,
+    ) -> Result<
+        Box<dyn hertzforge_mimo_shock::MimoShockLaw + Send>,
+        hertzforge_shock_common::law_guard::LawFault,
+    > {
+        Ok(Box::new(TrappingLaw(self.0.build(setup)?)))
+    }
+    fn describe(&self) -> hertzforge_shock_common::law_guard::LawDescriptor {
+        self.0.describe()
+    }
+    fn manifest(&self) -> hertzforge_mimo_shock::LawManifest {
+        self.0.manifest()
+    }
+}
+
+#[test]
+fn mimo_shock_engine_a_law_file_that_traps_ends_the_run_at_once() {
+    let (mut e, _) = ready(
+        ShockPlant::Linear4x4,
+        config(4, 0, 4, LEN_CLASSICAL),
+        classical(&[20.0, 18.0, 20.0, 18.0]),
+        Arc::new(Trapping(InverseFactory::default())),
+    );
+    let end = e.run_to_end(None).unwrap();
+    assert_eq!(e.pulses().len(), 1, "{end:?}");
+    assert_eq!(
+        (end.outcome, end.reason.as_str()),
+        (EndOutcome::LawFault, "panicked")
+    );
 }

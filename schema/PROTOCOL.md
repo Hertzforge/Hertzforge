@@ -2738,7 +2738,7 @@ views travels as a binary frame.
  "control":{"law":{"id":"inverse","params":{}},"law_budget":0.25,"law_misses":3,
             "max_pulses":100,"max_growth_db":6,"max_band_growth_db":10,"divergence_pulses":3,
             "divergence_drive_ratio":1.3,"first_drive_ratio":2,"abort_db":null,
-            "max_velocity_ips":null,"max_displacement_in":null},
+            "scaled_aborts":true,"max_velocity_ips":null,"max_displacement_in":null},
  "simulator":{"plant":null},
  "capture":{"auto_start":false,"run_name":"mimo_shock"},
  "metadata":[]}
@@ -2749,7 +2749,7 @@ An SRS target replaces `target`:
 ```
  "target":{"kind":"srs","bands":{"f_lo_hz":50,"f_hi_hz":2000,"bands_per_octave":3,"q":10},
            "tolerance_db":[-3,3],
-           "controls":[{"target":{"kind":"breakpoints","points":[[50,3.33],[300,20],[2000,20]]},
+           "controls":[{"target":{"kind":"breakpoints","points":[[50,3.33],[300,20],[2500,20]]},
                         "synthesis":{"engine":"wavsyn"},"polarity":"positive"}, ...]}
 ```
 
@@ -2787,7 +2787,8 @@ An SRS target replaces `target`:
 | `control.divergence_pulses` | 3 | Pulses in a row at one level with the waveform error rising that end the run in the controlled stop (`divergence`); 1 to 100 |
 | `control.divergence_drive_ratio` | 1.3 | A drive whose rms at one level passes this many times its rms on that level's first pulse ends the run the same way (above 1, at most 10) |
 | `control.first_drive_ratio` | 2 | The seed's predicted response peak at every control is at most this times its target's at the first level (1 to 10; `first_drive`) |
-| `control.abort_db` | null: twice the standard's amplitude tolerance for `waveform` (2.28 dB under MIL-STD-810), 6 dB for `srs` | Each control's abort line, dB over its target's peak at **full level**. A measured peak over it ends the run (`control_abort`) at any level; a pulse over its own level's tolerance and under this line is a judged failure the law may correct at that level. Above 0, at most 40 |
+| `control.abort_db` | null: twice the standard's amplitude tolerance for `waveform` (2.28 dB under MIL-STD-810), 6 dB for `srs` | Each control's abort margin, dB, above 0, at most 40. The **absolute** line is this margin over the control's target peak at **full level**: a measured peak over it aborts the run at any level (`aborted`, `control_abort_absolute`), whatever `scaled_aborts` says. The **scaled** line is the same margin over the target's peak at the level played |
+| `control.scaled_aborts` | true | On: a measured peak over its scaled line ends the run in the controlled stop (`safe_stop`, `control_abort_scaled`). Off: the pulse is judged failing (the ladder does not climb on it), a warning names every control that crossed its scaled line, the run goes on, and the state carries a standing `notice`. Either way every row reports each control's margin to both lines. It cannot change while a run is live |
 | `control.max_velocity_ips`, `max_displacement_in` | null | A control's peak velocity (in/s) or peak-to-peak displacement (in), predicted or measured, over it ends the run (`kinematics`) |
 | `simulator.plant` | null: chosen by size | The simulator's plant by name: `shock-linear-4x4`, `shock-jointed-4x4-moderate`, `shock-jointed-4x4-severe` or `shock-jointed-6x3`. Null takes `shock-linear-4x4` for 4 controls and 4 drives and `shock-jointed-6x3` for 6 and 3. Ignored on NI |
 | `capture`, `metadata` | as shown | Random's. With `capture.auto_start` and a capture root, every pulse's drives and input rows, the identification, every law call and the end are written to `<capture root>/<run_name>_<run_id>/` when the run ends |
@@ -2865,12 +2866,13 @@ record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target),
 {"run_id":"ms-0002","state":"running","phase":"waiting","title":"Four-Drive Half-Sine",
  "source":"SIM","station":{"kind":"sim","class":"sim","devices":[],"plant":"shock-linear-4x4"},
  "grid":{"fs_hz":12800,"record_len":8192,"lines":4097,"actual":true},"clock":"shared",
- "target":"waveform","timing":"free","verdict":"all","mode":"auto",
+ "target":"waveform","timing":"free","verdict":"all","scaled_aborts":true,"notice":null,
+ "mode":"auto",
  "levels_db":[-12,-9,-6,-3,-1.5,0],"level_db":-6,"rung":2,
  "pulses":{"fired":5,"passed":3,"at_level":1,"of_level":3},
  "next_pulse_s":0.6,"elapsed_s":14.2,
  "identification":{...},"review":{...},"last_pulse":{row},
- "law":{"id":"inverse","name":"inverse","version":"0.1.4","sha256":null,"params":{...},
+ "law":{"id":"inverse","name":"inverse","version":"0.1.0","sha256":null,"params":{...},
         "misses":0},
  "end":null}
 ```
@@ -2884,8 +2886,9 @@ record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target),
 | `stopping` | `stopping` | The pulse in flight finishes; nothing more fires |
 | `finished` | `stopped`, `aborted`, `held` | Ended; `end` says how |
 
-- `station.plant` is the simulator's plant (null on NI). `target`, `timing` and `verdict` are the
-  configuration's.
+- `station.plant` is the simulator's plant (null on NI). `target`, `timing`, `verdict` and
+  `scaled_aborts` are the configuration's. `notice` is null while scaled aborts are on; with them
+  off it is a standing sentence saying so, which a screen shows with the run.
 - `level_db` is the level the next pulse fires at (the last pulse's once finished; null before the
   law is seeded); `rung` its place in `levels_db` (null when a halved step left the table's
   levels). `pulses.passed` counts the pulses the joint verdict passed; `at_level` the pulses fired
@@ -2928,8 +2931,8 @@ record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target),
 | `completed` | Full level passed its pulses |
 | `operator_stop` | `mimo_shock.stop` |
 | `operator_abort` | `mimo_shock.abort` |
-| `safe_stop` | The controlled stop: nobody held control (`reason` `orphan`), the service shut down (`shutdown`), the divergence watch (`divergence`), a predicted response over an abort line before a fire (`predicted_abort`), or the pulse cap (`max_pulses`) |
-| `aborted` | A protection tripped on what was driven or measured: `drive_abort`, `control_abort`, `limit_abort`, `kinematics` |
+| `safe_stop` | The controlled stop: nobody held control (`reason` `orphan`), the service shut down (`shutdown`), a control over its level-scaled line with scaled aborts on (`control_abort_scaled`), the divergence watch (`divergence`), a predicted response over a scaled line before a fire (`predicted_abort`), or the pulse cap (`max_pulses`) |
+| `aborted` | A protection tripped on what was driven or measured: `drive_abort`, `control_abort_absolute` (a control over its full-level line), `limit_abort`, `kinematics` |
 | `not_converged` | `max_pulses_per_level` pulses at one level without a joint pass (`not_converged`) |
 | `held` | Identification held the run before any pulse: `low_coherence` or `reference_out_of_band` |
 | `law_fault` | The law gave no usable drives `law_misses` times in a row, panicked, could not be built, or its seed was refused; `reason` is the last miss's: `error`, `panicked`, `over_budget`, `wrong_length`, `non_finite`, `undeclared_value`, `too_many_values`, `peak_rise`, `bin_rise`, `predicted_peak`, `first_drive`, `target_not_accepted` |
@@ -2950,6 +2953,7 @@ table index.
  "drives":[{"channel":5,"vpk":0.29,"limit_scale":1}, ...],
  "controls":[{"channel":1,"passed":false,"reasons":["tolerance"],"error_db":-21.4,
               "over_test_db":0.4,"delay_s":0.00031,"peak":10.0,"peak_ratio":1.047,
+              "scaled_margin_db":-1.88,"absolute_margin_db":-7.88,
               "timing_ok":true,"polarity_ok":true,"duration_ratio":null,"duration_ok":true,
               "energy_db":0.21,"rms_duration_ratio":1.01,"velocity_ips":12.1,
               "displacement_pk_pk_in":0.18,"predicted_peak_ratio":0.99,"srs":null}, ...],
@@ -2970,7 +2974,9 @@ table index.
   error after the control's delay is removed (`waveform`) or the largest SRS deviation (`srs`);
   `over_test_db` the worst signed error, positive an over-test (the peak over the target's peak,
   or the SRS deviation above the target); `delay_s` the control's delay; `peak` (EU) and
-  `peak_ratio` (over the target's peak at the level); `duration_ratio` the effective duration over
+  `peak_ratio` (over the target's peak at the level); `scaled_margin_db` and `absolute_margin_db`
+  the measured peak against the control's scaled and absolute abort lines, dB, positive over the
+  line; `duration_ratio` the effective duration over
   the target's (`srs`, else null); `energy_db` and `rms_duration_ratio` the response's energy and
   rms duration against the target's, reported (a stated tolerance of 1 dB and 10% gives a
   warning, never a failure); `velocity_ips` and `displacement_pk_pk_in` through the pure
@@ -2980,8 +2986,9 @@ table index.
   error over every control (MIL-STD-810H Method 527.2 Annex C; the joint verdict with `verdict`
   `global`, else shown only; null for a `waveform` target); `arrival_spread_s` the latest control
   delay less the earliest.
-- `warnings`: what is reported, not judged (an arrival spread over the window, energy or rms
-  duration outside its stated tolerance).
+- `warnings`: what is reported beside the verdict: every control that crossed its scaled abort
+  line (always, whatever `scaled_aborts` says), an arrival spread over the window, energy or rms
+  duration outside its stated tolerance.
 - `step_note`: when the ladder stepped up after this pulse by less than the table's step (the
   first pulses' trend predicted an over-test above the upper tolerance at the table's next
   level), `{"from_db","planned_db","taken_db","predicted_planned_db","predicted_taken_db",

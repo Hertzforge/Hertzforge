@@ -70,7 +70,7 @@
          24
         ],
         [
-         2000,
+         2500,
          24
         ]
        ]
@@ -97,7 +97,7 @@
          24
         ],
         [
-         2000,
+         2500,
          24
         ]
        ]
@@ -124,7 +124,7 @@
          24
         ],
         [
-         2000,
+         2500,
          24
         ]
        ]
@@ -151,7 +151,7 @@
          24
         ],
         [
-         2000,
+         2500,
          24
         ]
        ]
@@ -222,6 +222,7 @@
     "divergence_drive_ratio": 1.3,
     "first_drive_ratio": 2,
     "abort_db": null,
+    "scaled_aborts": true,
     "max_velocity_ips": null,
     "max_displacement_in": null
    },

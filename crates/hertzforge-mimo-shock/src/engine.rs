@@ -184,6 +184,17 @@ pub struct GuardPlan {
     /// The joint verdict the ladder is fed.
     #[serde(default)]
     pub verdict: VerdictMode,
+    /// Level-scaled abort lines: a control measured over its line scaled to
+    /// the level played (the level's own target peak plus the abort margin)
+    /// ends the run in the controlled stop (`control_abort_scaled`). Off, the
+    /// pulse is a judged failure, flagged, and the run goes on. The absolute
+    /// lines (full level) apply either way.
+    #[serde(default = "default_scaled_aborts")]
+    pub scaled_aborts: bool,
+}
+
+fn default_scaled_aborts() -> bool {
+    true
 }
 
 fn default_max_band_growth_db() -> f64 {
@@ -215,6 +226,7 @@ impl Default for GuardPlan {
             max_velocity_ips: None,
             max_displacement_in: None,
             verdict: VerdictMode::All,
+            scaled_aborts: true,
         }
     }
 }
@@ -445,6 +457,14 @@ pub struct ControlReport {
     /// and the rms duration over the target's.
     pub energy_db: f64,
     pub rms_duration_ratio: f64,
+    /// The measured peak against the control's abort line scaled to the level
+    /// played, dB, positive over it.
+    #[serde(default)]
+    pub scaled_margin_db: f64,
+    /// The measured peak against the control's absolute (full-level) abort
+    /// line, dB, positive over it.
+    #[serde(default)]
+    pub absolute_margin_db: f64,
 }
 
 /// One fired pulse's report.
@@ -496,7 +516,8 @@ pub struct PulseReport {
 pub struct RunEnd {
     pub outcome: EndOutcome,
     /// A stable reason: `completed`, `not_converged`, `divergence`,
-    /// `drive_abort`, `predicted_abort`, `control_abort`, `limit_abort`,
+    /// `drive_abort`, `predicted_abort`, `control_abort_absolute`,
+    /// `control_abort_scaled`, `limit_abort`,
     /// `kinematics`, `max_pulses`, `low_coherence`, `reference_out_of_band`,
     /// a law fault's reason (`panicked`, `over_budget`, `wrong_length`, ...),
     /// `operator`, `cancelled` or `fault`.
@@ -952,6 +973,12 @@ impl MimoShockEngine {
     /// Acknowledge the unreachable hold with the operator's words.
     pub fn acknowledge_unreachable(&mut self, words: &str) {
         self.unreachable_ack = Some(words.to_owned());
+    }
+
+    /// The level the next pulse fires at, dB, once the law is seeded and
+    /// until the run ends.
+    pub fn next_level_db(&self) -> Option<f64> {
+        matches!(self.state, RunState::Waiting | RunState::Firing).then_some(self.next_level)
     }
 
     /// The operator's words acknowledging the unreachable hold, once given.
@@ -1922,6 +1949,8 @@ impl MimoShockEngine {
                 duration_ok: j.duration_ok,
                 energy_db: j.energy_db,
                 rms_duration_ratio: j.rms_duration_ratio,
+                scaled_margin_db: 0.0,
+                absolute_margin_db: 0.0,
             })
             .collect();
         report.passed = judgements.iter().all(|j| j.verdict.passed);
@@ -1954,33 +1983,75 @@ impl MimoShockEngine {
             report.global_srs_error_db = global_srs_error_db(&built.target, &srs_errors);
         }
         self.last_played = Some((drives.clone(), level));
-        // The measured response against the abort lines. The lines are
-        // absolute: the full-level target's peak plus the abort margin, at
-        // every level. A pulse over its own level's target and under the line
-        // is a judged failure the law may correct at that level.
+        // The measured response against the abort lines. The absolute line is
+        // the full-level target's peak plus the abort margin, judged at every
+        // level; the scaled line is the same margin over the level's own
+        // target. Both margins are reported for every control.
         let line = self.control_abort_ratio();
+        let line_db = 20.0 * line.log10();
         let s_level = Self::scale(level);
+        for (r, j) in report.controls.iter_mut().zip(&judgements) {
+            r.scaled_margin_db = 20.0 * j.verdict.peak_ratio.max(1e-300).log10() - line_db;
+            r.absolute_margin_db = r.scaled_margin_db + level;
+        }
         let over_line = |j: &ControlJudgement| j.verdict.peak_ratio * s_level > line;
+        let over_scaled: Vec<u32> = report
+            .controls
+            .iter()
+            .filter(|r| r.scaled_margin_db > 0.0)
+            .map(|r| r.channel)
+            .collect();
+        if !over_scaled.is_empty() {
+            // Over its level's line: never a pass, whatever the verdict mode.
+            report.passed = false;
+            report.warnings.push(format!(
+                "control{} {} crossed the abort line scaled to {level} dB",
+                if over_scaled.len() == 1 { "" } else { "s" },
+                over_scaled
+                    .iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
         if self.config.guards.verdict == VerdictMode::Global {
             let tol = match &built.target {
                 Target::Srs(t) => (-t.tol_lo_db).min(t.tol_hi_db),
                 Target::Waveform(_) => f64::NEG_INFINITY,
             };
-            report.passed = report.global_srs_error_db.is_some_and(|g| g <= tol)
+            report.passed = over_scaled.is_empty()
+                && report.global_srs_error_db.is_some_and(|g| g <= tol)
                 && !judgements.iter().any(over_line);
         }
         let measured_breach =
             if let Some((c, j)) = judgements.iter().enumerate().find(|(_, j)| over_line(j)) {
                 Some((
                     EndOutcome::Aborted,
-                    "control_abort",
+                    "control_abort_absolute",
                     format!(
-                    "control {} measured {:.2} dB over its full-level target's peak; its abort \
-                     line is {:.2} dB",
-                    self.config.controls[c],
-                    20.0 * (j.verdict.peak_ratio * s_level).log10(),
-                    20.0 * line.log10()
-                ),
+                        "control {} measured {:.2} dB over its full-level target's peak; its \
+                         absolute abort line is {:.2} dB",
+                        self.config.controls[c],
+                        20.0 * (j.verdict.peak_ratio * s_level).log10(),
+                        line_db
+                    ),
+                ))
+            } else if let Some(r) = report
+                .controls
+                .iter()
+                .find(|r| r.scaled_margin_db > 0.0)
+                .filter(|_| self.config.guards.scaled_aborts)
+            {
+                Some((
+                    EndOutcome::SafeStop,
+                    "control_abort_scaled",
+                    format!(
+                        "control {} measured {:.2} dB over its target's peak at {level} dB; its \
+                         abort line scaled to the level is {:.2} dB",
+                        r.channel,
+                        r.scaled_margin_db + line_db,
+                        line_db
+                    ),
                 ))
             } else if let Some((lim, pk)) = self
                 .config
@@ -2066,7 +2137,12 @@ impl MimoShockEngine {
                 None => (None, Some(o), false),
                 Some(f) => (Some(f), Some(o), false),
             },
-            Answer::Missed(f, o) => (Some(f), o, false),
+            // A law file that trapped is in an unknown state, as a native law
+            // that panicked is: it is not called again.
+            Answer::Missed(f, o) => {
+                let crashed = matches!(f, LawFault::Crashed(_));
+                (Some(f), o, crashed)
+            }
             Answer::Panicked(m) => (Some(LawFault::Crashed(m)), None, true),
         };
         self.records.law_calls.push(LawCallEntry {

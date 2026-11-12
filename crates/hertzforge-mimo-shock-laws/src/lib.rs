@@ -22,7 +22,7 @@ pub use check::{
 };
 pub use facts::{all_facts, builtin_facts, entries, file_facts, KnownFailure, LawFacts};
 pub use parity::{compare_laws, MathLaw, ParityReport};
-pub use wasm::{shock_mimo_law_fault, WasmMimoShockLaw, WasmMimoShockLawFactory};
+pub use wasm::{shock_mimo_law_fault, HostRule, WasmMimoShockLaw, WasmMimoShockLawFactory};
 
 use hertzforge_law_host::{LawHost, LoadedShockMimoLaw, Param};
 use hertzforge_mimo_shock::{MimoShockLawFactory, TargetKind};
@@ -227,6 +227,25 @@ pub fn resolve(
         }),
         _ => Err(ResolveError::Unknown(id.into())),
     }
+}
+
+/// [`resolve`] for a run: the factory, and for a law file the cell its host
+/// fills with its own name for the last output it refused, so the run's end can
+/// name it where the core's fault folds it into `wrong_length`.
+pub fn resolve_for_run(
+    catalog: &LawCatalog,
+    id: &str,
+    params: Vec<Param>,
+    budget: Duration,
+) -> Result<(Arc<dyn MimoShockLawFactory>, Option<HostRule>), ResolveError> {
+    if BuiltinMimoShock::from_id(id).is_none() {
+        if let Some(law) = catalog.shock_mimo_law(id) {
+            let f = WasmMimoShockLawFactory::new(law.clone(), params, budget);
+            let rule = f.host_rule();
+            return Ok((Arc::new(f), Some(rule)));
+        }
+    }
+    resolve(catalog, id, params, budget).map(|f| (f, None))
 }
 
 /// Load the MIMO Shock law file at `path` with `host`: how a contributor runs

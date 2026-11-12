@@ -24,6 +24,8 @@
   "target": "srs",
   "timing": "free",
   "verdict": "all",
+  "scaled_aborts": true,
+  "notice": null,
   "mode": "auto",
   "levels_db": [
    -12,
@@ -105,10 +107,17 @@
   "law": {
    "id": "shape",
    "name": "shape",
-   "version": "0.1.4",
+   "version": "0.1.0",
    "sha256": null,
    "params": {
-    "max_step_db": 6
+    "lambda_rel": 0.001,
+    "max_step_db": 6,
+    "delay_relax": 0.5,
+    "delay_bound_ms": 2,
+    "anchor": "target",
+    "refresh": false,
+    "refresh_mu": 1,
+    "seed_timing": "zero"
    },
    "misses": 0
   },

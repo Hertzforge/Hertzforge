@@ -12,6 +12,7 @@ Each `*.bin` is one binary frame exactly as it crosses the socket. Each
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 import struct
 
@@ -5577,7 +5578,7 @@ MSHOCK_COMMON = {
 MSHOCK_CONTROL = {
     'law_budget': 0.25, 'law_misses': 3, 'max_pulses': 100, 'max_growth_db': 6,
     'max_band_growth_db': 10, 'divergence_pulses': 3, 'divergence_drive_ratio': 1.3,
-    'first_drive_ratio': 2, 'abort_db': None, 'max_velocity_ips': None,
+    'first_drive_ratio': 2, 'abort_db': None, 'scaled_aborts': True, 'max_velocity_ips': None,
     'max_displacement_in': None,
 }
 
@@ -5598,7 +5599,7 @@ MSHOCK_CONFIG = {
 
 def _mshock_spectrum_control(flat_g, polarity):
     return {'target': {'kind': 'breakpoints',
-                       'points': [[50, flat_g / 6], [300, flat_g], [2000, flat_g]]},
+                       'points': [[50, flat_g / 6], [300, flat_g], [2500, flat_g]]},
             'synthesis': {'engine': 'wavsyn', 'components': None, 'max_iters': 50,
                           'tol_db': 1.5, 'max_gain_db_per_iter': 3},
             'polarity': polarity}
@@ -5632,8 +5633,10 @@ MSHOCK_DERIVED = {
 
 MSHOCK_LEVELS = [-12, -9, -6, -3, -1.5, 0]
 MSHOCK_STATION = {'kind': 'sim', 'class': 'sim', 'devices': [], 'plant': 'shock-linear-4x4'}
-MSHOCK_LAW = {'id': 'inverse', 'name': 'inverse', 'version': '0.1.4', 'sha256': None,
-              'params': {'gain': 1, 'lambda_rel': 0.001}, 'misses': 0}
+MSHOCK_LAW = {'id': 'inverse', 'name': 'inverse', 'version': '0.1.0', 'sha256': None,
+              'params': {'lambda_rel': 0.001, 'gain': 1, 'watchdog': True, 'refresh': False,
+                         'refresh_mu': 0.5, 'align': False, 'align_max_ms': 2},
+              'misses': 0}
 
 
 def _mshock_state(**over) -> dict:
@@ -5641,7 +5644,8 @@ def _mshock_state(**over) -> dict:
         'run_id': 'ms-0001', 'state': 'configured', 'phase': 'idle',
         'title': MSHOCK_CONFIG['title'], 'source': 'SIM', 'station': MSHOCK_STATION,
         'grid': MSHOCK_DERIVED['grid'], 'clock': None, 'target': 'waveform', 'timing': 'free',
-        'verdict': 'all', 'mode': 'auto', 'levels_db': MSHOCK_LEVELS, 'level_db': None,
+        'verdict': 'all', 'scaled_aborts': True, 'notice': None, 'mode': 'auto',
+        'levels_db': MSHOCK_LEVELS, 'level_db': None,
         'rung': None, 'pulses': {'fired': 0, 'passed': 0, 'at_level': 0, 'of_level': 0},
         'next_pulse_s': None, 'elapsed_s': None, 'identification': None, 'review': None,
         'last_pulse': None, 'law': MSHOCK_LAW, 'end': None,
@@ -5682,10 +5686,18 @@ MSHOCK_REVIEW_HELD = {
 }
 
 
+#: The default classical abort line, dB (twice the MIL-STD-810 amplitude
+#: tolerance), and the level of the golden rows built with it.
+MSHOCK_LINE_DB = 2.28
+MSHOCK_ROW_LEVEL = -6
+
+
 def _mshock_control_row(channel, passed, reasons, error_db, over, delay, peak, ratio,
                         srs=None, duration=None):
     return {'channel': channel, 'passed': passed, 'reasons': reasons, 'error_db': error_db,
             'over_test_db': over, 'delay_s': delay, 'peak': peak, 'peak_ratio': ratio,
+            'scaled_margin_db': round(20 * math.log10(ratio) - MSHOCK_LINE_DB, 2),
+            'absolute_margin_db': round(20 * math.log10(ratio) - MSHOCK_LINE_DB + MSHOCK_ROW_LEVEL, 2),
             'timing_ok': 'timing' not in reasons, 'polarity_ok': 'polarity' not in reasons,
             'duration_ratio': duration, 'duration_ok': 'duration' not in reasons,
             'energy_db': 0.21, 'rms_duration_ratio': 1.01, 'velocity_ips': 12.1,
@@ -5726,8 +5738,10 @@ MSHOCK_REVIEW_STATE = _mshock_state(
                     'coverage': [0.999, 0.999, 0.998], 'trusted_lines': 3192,
                     'band_lines': 3192, 'condition_max': 7.5},
     review=MSHOCK_REVIEW_HELD,
-    law={'id': 'shape', 'name': 'shape', 'version': '0.1.4', 'sha256': None,
-         'params': {'max_step_db': 6}, 'misses': 0})
+    law={'id': 'shape', 'name': 'shape', 'version': '0.1.0', 'sha256': None,
+         'params': {'lambda_rel': 0.001, 'max_step_db': 6, 'delay_relax': 0.5,
+                    'delay_bound_ms': 2, 'anchor': 'target', 'refresh': False, 'refresh_mu': 1,
+                    'seed_timing': 'zero'}, 'misses': 0})
 
 #: The live frame between pulses.
 MSHOCK_LIVE = {
@@ -5893,6 +5907,13 @@ MSHOCK_TEXT_GOLDENS = {
     },
     'event_mimo_shock_state': {
         'type': 'event', 'topic': 'mimo_shock.state', 'seq': 210, 'data': MSHOCK_RUNNING,
+    },
+    'event_mimo_shock_state_unscaled': {
+        'type': 'event', 'topic': 'mimo_shock.state', 'seq': 230,
+        'data': {**MSHOCK_RUNNING, 'run_id': 'ms-0005', 'scaled_aborts': False,
+                 'notice': 'Level-scaled aborts are off: a pulse over its level\'s abort line '
+                           'is flagged and judged failing, and only the full-level (absolute) '
+                           'lines end the run.'},
     },
     'event_mimo_shock_state_review': {
         'type': 'event', 'topic': 'mimo_shock.state', 'seq': 220, 'data': MSHOCK_REVIEW_STATE,
