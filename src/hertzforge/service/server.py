@@ -64,6 +64,7 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
+                   'project.drag_out',
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
@@ -396,6 +397,9 @@ class Connection:
             _only(params, keys, method)
             await call(edit, self.project, params)
             return {'project': projects.summary(self.project)}
+        if method == 'project.drag_out':
+            _only(params, ('project', 'names'), method)
+            return {'paths': await call(projects.drag_out, self.project, params)}
         _only(params, ('path', 'compress'), method)
         written = await call(projects.save, self.project, params)
         return {'path': written, 'project': projects.summary(self.project)}

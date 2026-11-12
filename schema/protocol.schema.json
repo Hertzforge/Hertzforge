@@ -877,6 +877,17 @@
         "project": {"$ref": "#/$defs/project"}
       }
     },
+    "projectDragOutParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "project": {"type": "boolean"},
+        "names": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "projectDragOutResult": {
+      "type": "object", "required": ["paths"],
+      "properties": {"paths": {"type": "array", "items": {"type": "string"}}}
+    },
     "projectSaveResult": {
       "type": "object", "required": ["path", "project"],
       "properties": {"path": {"type": "string"}, "project": {"$ref": "#/$defs/project"}}
