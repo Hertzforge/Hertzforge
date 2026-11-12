@@ -48,6 +48,9 @@ pub struct ControlJudgement {
     pub srs_error_db: Option<Vec<f64>>,
     /// The delay was inside its window.
     pub timing_ok: bool,
+    /// The response is inside the control's tolerance: the classical
+    /// standard's, the envelope, or the SRS band.
+    pub shape_ok: bool,
     /// The measured peak, EU.
     pub peak: f64,
     /// Peak velocity, in/s, and peak-to-peak displacement, in, of the measured
@@ -262,6 +265,7 @@ pub fn judge_control(
         srs: None,
         srs_error_db: None,
         timing_ok,
+        shape_ok: false,
         peak: pk,
         velocity_ips: kin.peak_velocity_ips,
         displacement_pk_pk_in: kin.pk_pk_disp_in,
@@ -337,6 +341,7 @@ pub fn judge_control(
         }
         (Judging::Srs, Target::Waveform(_)) => false,
     };
+    out.shape_ok = shape_ok;
     out.verdict.passed = shape_ok && timing_ok && out.polarity_ok && out.duration_ok;
     out
 }

@@ -336,6 +336,7 @@ impl Service {
                 || inner.mixed_live()
                 || inner.twr_live()
                 || inner.recorder_live()
+                || inner.mimo_shock_live()
             {
                 inner.run_active()?;
             }

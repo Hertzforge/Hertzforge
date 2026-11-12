@@ -24,6 +24,8 @@
   "target": "waveform",
   "timing": "free",
   "verdict": "all",
+  "scaled_aborts": true,
+  "notice": null,
   "mode": "auto",
   "levels_db": [
    -12,
@@ -147,6 +149,8 @@
      "delay_s": 0.0003,
      "peak": 10.0,
      "peak_ratio": 0.998,
+     "scaled_margin_db": -2.3,
+     "absolute_margin_db": -8.3,
      "timing_ok": true,
      "polarity_ok": true,
      "duration_ratio": null,
@@ -169,6 +173,8 @@
      "delay_s": 0.0004,
      "peak": 10.3,
      "peak_ratio": 1.16,
+     "scaled_margin_db": -0.99,
+     "absolute_margin_db": -6.99,
      "timing_ok": true,
      "polarity_ok": true,
      "duration_ratio": null,
@@ -189,6 +195,8 @@
      "delay_s": 0.0002,
      "peak": 10.0,
      "peak_ratio": 0.999,
+     "scaled_margin_db": -2.29,
+     "absolute_margin_db": -8.29,
      "timing_ok": true,
      "polarity_ok": true,
      "duration_ratio": null,
@@ -209,6 +217,8 @@
      "delay_s": 0.0003,
      "peak": 9.1,
      "peak_ratio": 1.01,
+     "scaled_margin_db": -2.19,
+     "absolute_margin_db": -8.19,
      "timing_ok": true,
      "polarity_ok": true,
      "duration_ratio": null,
@@ -246,11 +256,16 @@
   "law": {
    "id": "inverse",
    "name": "inverse",
-   "version": "0.1.4",
+   "version": "0.1.0",
    "sha256": null,
    "params": {
+    "lambda_rel": 0.001,
     "gain": 1,
-    "lambda_rel": 0.001
+    "watchdog": true,
+    "refresh": false,
+    "refresh_mu": 0.5,
+    "align": false,
+    "align_max_ms": 2
    },
    "misses": 0
   },

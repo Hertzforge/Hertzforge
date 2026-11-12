@@ -24,6 +24,8 @@
    "target": "waveform",
    "timing": "free",
    "verdict": "all",
+   "scaled_aborts": true,
+   "notice": null,
    "mode": "auto",
    "levels_db": [
     -12,
@@ -49,11 +51,16 @@
    "law": {
     "id": "inverse",
     "name": "inverse",
-    "version": "0.1.4",
+    "version": "0.1.0",
     "sha256": null,
     "params": {
+     "lambda_rel": 0.001,
      "gain": 1,
-     "lambda_rel": 0.001
+     "watchdog": true,
+     "refresh": false,
+     "refresh_mu": 0.5,
+     "align": false,
+     "align_max_ms": 2
     },
     "misses": 0
    },

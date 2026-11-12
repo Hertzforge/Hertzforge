@@ -188,7 +188,13 @@ pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
         LawWorld::ShockMimo,
     ] {
         if world.is_none_or(|x| x == w) {
-            laws.extend(catalog.entries_for(w).iter().map(entry_json));
+            if w == LawWorld::ShockMimo {
+                // The built-ins first, then the imported files, each with the
+                // target kinds it accepts.
+                laws.extend(crate::mimo_shock::laws::list(catalog));
+            } else {
+                laws.extend(catalog.entries_for(w).iter().map(entry_json));
+            }
         }
     }
     json!({
