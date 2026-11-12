@@ -65,12 +65,17 @@ pub struct RunRecord {
     pub law: Option<LawDescriptor>,
     pub law_calls: Vec<LawCallEntry>,
     pub pulses: Vec<PulseEntry>,
+    /// Every step the overshoot guard halved.
+    #[serde(default)]
+    pub step_notes: Vec<crate::ladder::StepNote>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Head {
     setup: Option<Setup>,
     law: Option<LawDescriptor>,
+    #[serde(default)]
+    step_notes: Vec<crate::ladder::StepNote>,
 }
 
 fn write_lines<T: Serialize>(path: &Path, items: &[T]) -> Result<(), String> {
@@ -100,6 +105,7 @@ impl RunRecord {
         let head = Head {
             setup: self.setup.clone(),
             law: self.law.clone(),
+            step_notes: self.step_notes.clone(),
         };
         let s = serde_json::to_string(&head).map_err(|e| e.to_string())?;
         fs::write(dir.join("setup.json"), s).map_err(|e| e.to_string())?;
@@ -114,6 +120,7 @@ impl RunRecord {
         Ok(RunRecord {
             setup: head.setup,
             law: head.law,
+            step_notes: head.step_notes,
             law_calls: read_lines(&dir.join("law_calls.jsonl"))?,
             pulses: read_lines(&dir.join("pulses.jsonl"))?,
         })

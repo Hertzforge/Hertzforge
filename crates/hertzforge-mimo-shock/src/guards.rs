@@ -12,15 +12,16 @@ use hertzforge_mimo_shock_law_math::spectrum::{irfft, rfft};
 use hertzforge_sdm::{MatrixStack, C64};
 use serde::{Deserialize, Serialize};
 
-/// Which part of a drive grew too much.
+/// How much one drive grew over the drive last played, beyond the level step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Growth {
     /// The drive, in drive order.
     pub drive: usize,
-    /// `peak` or the band's centre in Hz.
-    pub what: String,
-    /// The growth beyond the level step, dB.
-    pub db: f64,
+    /// The peak's growth, dB.
+    pub peak_db: f64,
+    /// The largest band's growth, dB, and that band's lowest line.
+    pub band_db: f64,
+    pub band_line: usize,
 }
 
 /// Third-octave band edges over `[lo, hi]` Hz as line ranges (each at least
@@ -53,11 +54,11 @@ fn band_rms(spec: &[C64], bands: &[(usize, usize)]) -> Vec<f64> {
         .collect()
 }
 
-/// The largest growth of each drive in `next` over `last` (both channel-major,
+/// The growth of each drive in `next` over `last` (both channel-major,
 /// `record_len` a drive), with `step` the amplitude ratio of the next level
-/// over the last: the peak's growth and every band's, in dB beyond the step.
-/// A band below `floor_rel` of the last drive's largest band does not count.
-/// Returns the worst growth found per drive.
+/// over the last: the peak's growth and the largest band's, in dB beyond the
+/// step. A band below `floor_rel` of the last drive's largest band (scaled by
+/// the step) is measured against that floor instead.
 pub fn growth(
     next: &[f64],
     last: &[f64],
@@ -74,34 +75,36 @@ pub fn growth(
         let (x, l) = (&next[d * n..(d + 1) * n], &last[d * n..(d + 1) * n]);
         let pk_l = crate::judge::peak(l) * step;
         let pk_x = crate::judge::peak(x);
-        let mut worst = Growth {
-            drive: d,
-            what: "peak".into(),
-            db: if pk_l > 0.0 {
-                db(pk_x, pk_l)
-            } else if pk_x > 0.0 {
-                f64::INFINITY
-            } else {
-                0.0
-            },
+        let peak_db = if pk_l > 0.0 {
+            db(pk_x, pk_l)
+        } else if pk_x > 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
         };
         let (bx, bl) = (band_rms(&rfft(x)?, bands), band_rms(&rfft(l)?, bands));
         let floor = bl.iter().fold(0.0f64, |a, v| a.max(*v)) * floor_rel * step;
-        let df_centre = |i: usize| -> String { format!("band {}", i) };
-        for (i, (vx, vl)) in bx.iter().zip(&bl).enumerate() {
+        let (mut band_db, mut band_line) = (f64::NEG_INFINITY, 0);
+        for ((vx, vl), &(a, _)) in bx.iter().zip(&bl).zip(bands) {
             let base = (vl * step).max(floor);
-            if base > 0.0 && *vx > 0.0 {
-                let g = db(*vx, base);
-                if g > worst.db {
-                    worst = Growth {
-                        drive: d,
-                        what: df_centre(i),
-                        db: g,
-                    };
-                }
+            let g = if base > 0.0 {
+                db(vx.max(1e-300), base)
+            } else if *vx > 0.0 {
+                f64::INFINITY
+            } else {
+                0.0
+            };
+            if g > band_db {
+                band_db = g;
+                band_line = a;
             }
         }
-        out.push(worst);
+        out.push(Growth {
+            drive: d,
+            peak_db,
+            band_db,
+            band_line,
+        });
     }
     Ok(out)
 }
@@ -131,71 +134,88 @@ pub fn predict(
         .collect()
 }
 
-/// The divergence watch: a run whose watched errors rise on consecutive pulses
-/// at one level ends in the controlled stop.
-///
-/// Two errors are watched every pulse, each the worst over the controls: the
-/// judged error ([`crate::ControlVerdict::error_db`]: the waveform error for a
-/// waveform target, the largest SRS deviation for an SRS target) and the
-/// response's peak over its target's peak at the level (the peak ratio), so a
-/// waveform growing behind a good SRS is seen. A pulse rises when either grew
-/// more than `rise_db` over the previous pulse at the same level; `pulses`
-/// rising pulses in a row trip the watch. A level change starts it afresh.
+/// The divergence watch: at one level, (a) the waveform error rising on
+/// `rises` pulses in a row, or (b) any drive's rms over `drive_ratio` times its
+/// rms on the level's first pulse, ends the run in the controlled stop. A level
+/// change starts it afresh. For an SRS target the waveform error is the law's
+/// own (its value named `waveform_error`), and rule (a) is not applied to a law
+/// that does not report one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DivergenceWatch {
-    pulses: u32,
-    rise_db: f64,
+    rises: u32,
+    drive_ratio: f64,
     level_db: Option<f64>,
-    last: Option<(f64, f64)>,
+    last: Option<f64>,
     rising: u32,
+    first_rms: Vec<f64>,
 }
 
 /// What tripped the watch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Divergence {
-    /// Rising pulses in a row.
-    pub pulses: u32,
-    /// The judged error and the peak ratio on the last pulse, dB.
-    pub error_db: f64,
-    pub peak_ratio_db: f64,
+    /// `waveform_error_rising` or `drive_growth`.
+    pub rule: String,
+    /// The facts, in words.
+    pub detail: String,
 }
 
 impl DivergenceWatch {
-    pub fn new(pulses: u32, rise_db: f64) -> Self {
+    pub fn new(rises: u32, drive_ratio: f64) -> Self {
         DivergenceWatch {
-            pulses: pulses.max(1),
-            rise_db,
+            rises: rises.max(1),
+            drive_ratio,
             level_db: None,
             last: None,
             rising: 0,
+            first_rms: Vec::new(),
         }
     }
 
-    /// Note one judged pulse at `level_db`; `Some` when the watch trips.
+    /// Note one pulse at `level_db`: its waveform error (any unit that rises
+    /// with the error), when there is one, and each drive's rms as played;
+    /// `Some` when the watch trips.
     pub fn observe(
         &mut self,
         level_db: f64,
-        error_db: f64,
-        peak_ratio_db: f64,
+        waveform_error: Option<f64>,
+        drive_rms: &[f64],
     ) -> Option<Divergence> {
         if self.level_db != Some(level_db) {
             self.level_db = Some(level_db);
             self.last = None;
             self.rising = 0;
+            self.first_rms = drive_rms.to_vec();
         }
-        if let Some((e0, p0)) = self.last {
-            if error_db - e0 > self.rise_db || peak_ratio_db - p0 > self.rise_db {
-                self.rising += 1;
-            } else {
-                self.rising = 0;
+        for (d, (now, first)) in drive_rms.iter().zip(&self.first_rms).enumerate() {
+            if *first > 0.0 && *now > self.drive_ratio * first {
+                return Some(Divergence {
+                    rule: "drive_growth".into(),
+                    detail: format!(
+                        "drive {d} plays {:.3} times its rms on the first pulse at {level_db} dB, \
+                         over {}",
+                        now / first,
+                        self.drive_ratio
+                    ),
+                });
             }
         }
-        self.last = Some((error_db, peak_ratio_db));
-        (self.rising >= self.pulses).then_some(Divergence {
-            pulses: self.rising,
-            error_db,
-            peak_ratio_db,
-        })
+        if let Some(e) = waveform_error {
+            match self.last {
+                Some(prev) if e > prev => self.rising += 1,
+                _ => self.rising = 0,
+            }
+            self.last = Some(e);
+            if self.rising >= self.rises {
+                return Some(Divergence {
+                    rule: "waveform_error_rising".into(),
+                    detail: format!(
+                        "the waveform error rose on {} pulses in a row at {level_db} dB",
+                        self.rising
+                    ),
+                });
+            }
+        }
+        None
     }
 }
 
@@ -204,27 +224,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mimo_shock_engine_divergence_watch_trips_on_rises_at_one_level_only() {
-        let mut w = DivergenceWatch::new(2, 1.0);
-        assert!(w.observe(-12.0, -20.0, 0.0).is_none());
-        assert!(w.observe(-12.0, -18.5, 0.0).is_none()); // one rise
-        assert!(w.observe(-12.0, -17.0, 0.0).is_some()); // two in a row
-                                                         // A level change starts afresh.
-        let mut w = DivergenceWatch::new(2, 1.0);
-        w.observe(-12.0, -20.0, 0.0);
-        w.observe(-12.0, -18.0, 0.0);
-        assert!(w.observe(-9.0, -10.0, 0.0).is_none());
-        // The peak ratio alone also rises.
-        let mut w = DivergenceWatch::new(2, 1.0);
-        w.observe(0.0, 3.0, 0.0);
-        w.observe(0.0, 2.0, 1.5);
-        assert!(w.observe(0.0, 1.0, 3.0).is_some());
-        // A fall resets the count.
-        let mut w = DivergenceWatch::new(2, 1.0);
-        w.observe(0.0, -20.0, 0.0);
-        w.observe(0.0, -18.0, 0.0);
-        w.observe(0.0, -19.0, 0.0);
-        assert!(w.observe(0.0, -17.5, 0.0).is_none());
+    fn mimo_shock_engine_divergence_watch_trips_on_three_rises_or_drive_growth() {
+        let rms = [1.0, 1.0];
+        let mut w = DivergenceWatch::new(3, 1.3);
+        for e in [-20.0, -19.0, -18.0] {
+            assert!(w.observe(0.0, Some(e), &rms).is_none());
+        }
+        let d = w.observe(0.0, Some(-17.0), &rms).expect("three rises");
+        assert_eq!(d.rule, "waveform_error_rising");
+        // Two rises, a fall, two rises: never three in a row.
+        let mut w = DivergenceWatch::new(3, 1.3);
+        for e in [-20.0, -19.0, -18.0, -18.5, -18.0, -17.0] {
+            assert!(w.observe(0.0, Some(e), &rms).is_none());
+        }
+        // A level change starts afresh.
+        let mut w = DivergenceWatch::new(3, 1.3);
+        for e in [-20.0, -19.0, -18.0] {
+            w.observe(-3.0, Some(e), &rms);
+        }
+        assert!(w.observe(0.0, Some(-10.0), &[2.0, 2.0]).is_none());
+        // Drive growth at one level, with no waveform error at all.
+        let mut w = DivergenceWatch::new(3, 1.3);
+        assert!(w.observe(0.0, None, &[1.0, 2.0]).is_none());
+        assert!(w.observe(0.0, None, &[1.29, 2.0]).is_none());
+        let d = w.observe(0.0, None, &[1.0, 2.7]).expect("drive 1 grew");
+        assert_eq!(d.rule, "drive_growth");
     }
 
     #[test]
@@ -245,7 +269,10 @@ mod tests {
         // Twice the level: no growth beyond the step.
         let next: Vec<f64> = last.iter().map(|v| 2.0 * v).collect();
         let g = growth(&next, &last, n, 2.0, &b, 1e-3).unwrap();
-        assert!(g[0].db.abs() < 1e-9, "{g:?}");
+        assert!(
+            g[0].peak_db.abs() < 1e-9 && g[0].band_db.abs() < 1e-9,
+            "{g:?}"
+        );
         // The small band grows ten times while the peak barely moves.
         let next: Vec<f64> = tone(50.0, 1.0)
             .iter()
@@ -253,7 +280,7 @@ mod tests {
             .map(|(a, c)| a + c)
             .collect();
         let g = growth(&next, &last, n, 1.0, &b, 1e-3).unwrap();
-        assert!(g[0].db > 19.0 && g[0].what.starts_with("band"), "{g:?}");
+        assert!(g[0].band_db > 19.0 && g[0].peak_db < 6.0, "{g:?}");
     }
 
     #[test]

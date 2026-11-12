@@ -20,9 +20,10 @@
 //!    [`MimoShockEngine::stop`] or [`MimoShockEngine::abort`]. Every end stops
 //!    and releases the station before the engine reports it ended.
 
-use crate::guards::{bands, growth, predict, Divergence, DivergenceWatch, Growth};
+use crate::guards::{bands, growth, predict, DivergenceWatch};
 use crate::ident::{band_lines, estimate, excitation, rows_of};
 use crate::judge::{global_srs_error_db, judge_control, peak, ControlJudgement};
+use crate::ladder::{Ladder, StepNote, Tick};
 use crate::law::{check_law_accepts, LawManifest, MimoShockLaw, MimoShockLawFactory};
 use crate::limits::{MAX_CONTROLS, MAX_DRIVES, MAX_RECORD_LEN, MIN_RECORD_LEN};
 use crate::pulse::{ControlVerdict, PulseInputs, PulseOutputs};
@@ -37,9 +38,6 @@ use hertzforge_mimo_shock_law_math::spectrum::{rfft, rows_irfft, rows_rfft};
 use hertzforge_module_abi::StationClass;
 use hertzforge_sdm::linalg::{pinv, Regularization};
 use hertzforge_sdm::MatrixStack;
-use hertzforge_shock_common::ladder::{
-    LadderAdvance, LadderTick, ShockLadderState, ShockLevelSchedule, ShockRunMode,
-};
 use hertzforge_shock_common::law_guard::{
     LawCall, LawClock, LawDescriptor, LawFault, LawGuards, LawValue, MissCounter, MonotonicClock,
     OutputRule as GuardRule,
@@ -93,11 +91,11 @@ fn default_full_level_pulses() -> u32 {
 }
 
 impl Default for LadderPlan {
-    /// -12, -9, -6, -3 and 0 dB, three pulses a level, three passing pulses at
-    /// full level.
+    /// -12, -9, -6, -3, -1.5 and 0 dB (a half step before full level), three
+    /// pulses a level, three passing pulses at full level.
     fn default() -> Self {
         LadderPlan {
-            levels_db: vec![-12.0, -9.0, -6.0, -3.0, 0.0],
+            levels_db: vec![-12.0, -9.0, -6.0, -3.0, -1.5, 0.0],
             max_pulses_per_level: 3,
             full_level_pulses: default_full_level_pulses(),
         }
@@ -108,7 +106,10 @@ impl Default for LadderPlan {
 /// estimated on the pulse grid.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IdentificationPlan {
-    /// Each drive's level, volts rms, under its ceiling.
+    /// The most each drive plays, volts rms (and never over its ceiling at
+    /// its peak). The level itself is found relative to the reference: a short
+    /// probe shot at a tenth of this, then the shot scaled so the control
+    /// closest to it reaches its target's rms less [`IDENTIFICATION_BELOW_DB`].
     pub drive_vrms: f64,
     /// Records of `record_len` averaged; at least 10 times the drive count.
     pub frames: u32,
@@ -124,15 +125,20 @@ pub struct GuardPlan {
     /// The most any drive's peak may grow from one pulse to the next beyond the
     /// level step, dB.
     pub max_growth_db: f64,
-    /// Pulses in a row at one level with the error rising that end the run
-    /// (`divergence`).
+    /// The most any third-octave band of a drive may grow from one pulse to
+    /// the next beyond the level step, dB. Above the built-in laws' own
+    /// per-pulse clamp (6 dB), as the single-output bin cap is (10 dB).
+    #[serde(default = "default_max_band_growth_db")]
+    pub max_band_growth_db: f64,
+    /// Pulses in a row at one level with the waveform error rising that end
+    /// the run (`divergence`).
     pub divergence_pulses: u32,
     /// The law call budget, misses and the run's pulse cap.
     pub law: LawGuards,
-    /// A watched error that grows more than this from one pulse to the next at
-    /// one level is rising, dB.
-    #[serde(default = "default_divergence_rise_db")]
-    pub divergence_rise_db: f64,
+    /// A drive whose rms at one level grows past this many times its rms on
+    /// that level's first pulse ends the run (`divergence`).
+    #[serde(default = "default_divergence_drive_ratio")]
+    pub divergence_drive_ratio: f64,
     /// A control's abort line: its response's peak over its target's peak at
     /// the level, dB, predicted before a fire and measured after it. `None` is
     /// the default for the target kind: twice the classical standard's
@@ -155,8 +161,12 @@ pub struct GuardPlan {
     pub max_displacement_in: Option<f64>,
 }
 
-fn default_divergence_rise_db() -> f64 {
-    1.0
+fn default_max_band_growth_db() -> f64 {
+    10.0
+}
+
+fn default_divergence_drive_ratio() -> f64 {
+    1.3
 }
 
 fn default_first_drive_ratio() -> f64 {
@@ -165,15 +175,16 @@ fn default_first_drive_ratio() -> f64 {
 
 /// A drive band below this fraction of the drive's largest band does not count
 /// toward the growth cap.
-pub const GROWTH_BAND_FLOOR: f64 = 1e-3;
+pub const GROWTH_BAND_FLOOR: f64 = 1e-2;
 
 impl Default for GuardPlan {
     fn default() -> Self {
         GuardPlan {
             max_growth_db: 6.0,
-            divergence_pulses: 2,
+            max_band_growth_db: default_max_band_growth_db(),
+            divergence_pulses: 3,
             law: LawGuards::default(),
-            divergence_rise_db: default_divergence_rise_db(),
+            divergence_drive_ratio: default_divergence_drive_ratio(),
             control_abort_db: None,
             first_drive_ratio: default_first_drive_ratio(),
             max_velocity_ips: None,
@@ -388,6 +399,22 @@ pub struct ControlReport {
     /// Peak velocity, in/s, and peak-to-peak displacement, in.
     pub velocity_ips: f64,
     pub displacement_pk_pk_in: f64,
+    /// The control's delay was inside its timing window; a control whose
+    /// delay was not is judged failing for it.
+    pub timing_ok: bool,
+    /// The worst signed error, dB, positive an over-test (the SRS deviation
+    /// above the target, or the peak over the target's peak).
+    pub over_test_db: f64,
+    /// The pulse was the right way up; an upside-down pulse fails.
+    pub polarity_ok: bool,
+    /// The effective duration over the target's (SRS) and whether it is in
+    /// its window; an SRS control out of it fails.
+    pub duration_ratio: Option<f64>,
+    pub duration_ok: bool,
+    /// Reported, not judged: the energy over the target's at the level, dB,
+    /// and the rms duration over the target's.
+    pub energy_db: f64,
+    pub rms_duration_ratio: f64,
 }
 
 /// One fired pulse's report.
@@ -423,6 +450,15 @@ pub struct PulseReport {
     pub predicted_peak_ratio: Vec<f64>,
     /// How the run ended, when this pulse ended it.
     pub end: Option<RunEnd>,
+    /// The worst signed error over every control, dB, positive an over-test.
+    pub over_test_db: f64,
+    /// The spread of the controls' delays, s (latest less earliest).
+    pub arrival_spread_s: f64,
+    /// Things reported, not judged: an arrival spread over the timing window
+    /// (`free` timing), an energy or rms duration outside its stated tolerance.
+    pub warnings: Vec<String>,
+    /// When the ladder stepped up after this pulse with a halved step, why.
+    pub step_note: Option<StepNote>,
 }
 
 /// How a run ended and why.
@@ -649,6 +685,18 @@ pub const MIN_MEAN_COHERENCE: f64 = 0.8;
 /// before the run holds (the single-output classical rule).
 pub const MIN_BAND_ENERGY: f64 = 0.9;
 
+/// Identification plays each control's response this far under its target's
+/// rms over the record, dB (the single-output identification level rule).
+pub const IDENTIFICATION_BELOW_DB: f64 = 20.0;
+
+/// Realizations in the probe shot that sets the identification level.
+const PROBE_REALIZATIONS: usize = 2;
+
+/// The value a law may report with its answer: the worst over-test it
+/// predicts at any control on the pulse it built, dB over the target's peak at
+/// the next level. The core holds it to the controls' abort line.
+pub const LAW_PREDICTED_OVER_TEST: &str = "predicted_over_test_db";
+
 /// A law's answer, timed and caught.
 enum Answer {
     Used(PulseOutputs),
@@ -677,7 +725,7 @@ pub struct MimoShockEngine {
     setup: Option<Setup>,
     manifest: Option<LawManifest>,
     running: Option<Box<dyn MimoShockLaw + Send>>,
-    ladder: Option<ShockLadderState>,
+    ladder: Option<Ladder>,
     misses: MissCounter,
     watch: DivergenceWatch,
     bands: Vec<(usize, usize)>,
@@ -704,7 +752,7 @@ impl MimoShockEngine {
         let misses = MissCounter::new(config.guards.law.max_misses);
         let watch = DivergenceWatch::new(
             config.guards.divergence_pulses,
-            config.guards.divergence_rise_db,
+            config.guards.divergence_drive_ratio,
         );
         let fs_hz = config.fs_hz;
         Ok(MimoShockEngine {
@@ -1026,29 +1074,42 @@ impl MimoShockEngine {
         let plan = self.config.identification.clone();
         let band = band_lines(fs, n, self.config.band_lo_hz, self.config.band_hi_hz);
         let realizations = (plan.frames as usize).max(10 * nd);
-        let rms: Vec<f64> = vec![plan.drive_vrms; nd];
         let caps: Vec<f64> = self.config.drives.iter().map(|d| d.ceiling_v).collect();
-        let drives = match excitation(n, &band, &rms, &caps, realizations, self.seed) {
-            Ok(d) => d,
-            Err(e) => {
-                self.finish(EndOutcome::Fault, "fault", e.clone());
-                return Err(EngineError::Station(e));
-            }
+        let target_rms: Vec<f64> = {
+            let w = self.built.as_ref().expect("armed").target.waveforms();
+            (0..nc)
+                .map(|c| {
+                    let r = &w[c * n..(c + 1) * n];
+                    (r.iter().map(|v| v * v).sum::<f64>() / n as f64).sqrt()
+                })
+                .collect()
         };
-        let rows = match self.fire_shot(&drives, None) {
-            Ok(r) => r,
-            Err(e) => {
-                let detail = format!("{e:?}");
-                self.finish(EndOutcome::Fault, "fault", detail.clone());
-                return Err(EngineError::Station(detail));
-            }
+        // The level: a probe at a tenth of the most, then scaled so the control
+        // closest to its mark reaches it.
+        let probe_vrms = 0.1 * plan.drive_vrms;
+        let (probe, probe_out) = match self.id_shot(n, &band, probe_vrms, &caps, PROBE_REALIZATIONS)
+        {
+            Ok(x) => x,
+            Err(e) => return e,
         };
-        let outputs = match self.rows_of_channels(&rows, &self.input_channels()) {
-            Ok(o) => o,
-            Err(e) => {
-                self.finish(EndOutcome::Fault, "fault", e.clone());
-                return Err(EngineError::Station(e));
-            }
+        let _ = probe;
+        let used = 2 * PROBE_REALIZATIONS * n;
+        let want = 10f64.powf(-IDENTIFICATION_BELOW_DB / 20.0);
+        let scale = (0..nc)
+            .map(|c| {
+                let r = &probe_out[c][n..used.min(probe_out[c].len())];
+                let y = (r.iter().map(|v| v * v).sum::<f64>() / r.len().max(1) as f64).sqrt();
+                if y > 0.0 {
+                    want * target_rms[c] / y
+                } else {
+                    f64::INFINITY
+                }
+            })
+            .fold(f64::INFINITY, f64::min);
+        let vrms = (probe_vrms * scale).min(plan.drive_vrms);
+        let (drives, outputs) = match self.id_shot(n, &band, vrms, &caps, realizations) {
+            Ok(x) => x,
+            Err(e) => return e,
         };
         let est = match estimate(&drives, &outputs, nc, n, realizations) {
             Ok(e) => e,
@@ -1058,6 +1119,15 @@ impl MimoShockEngine {
             }
         };
         let lines = n / 2 + 1;
+        // H is the plant only where the shot excited it: elsewhere the
+        // estimate is noise over a drive spectrum of nothing. Zero there, so a
+        // prediction sees no plant outside the band (as MIMO Random's does).
+        let mut est = est;
+        for (f, on) in band.iter().enumerate() {
+            if !on {
+                est.frf.line_mut(f).fill(hertzforge_sdm::C64::new(0.0, 0.0));
+            }
+        }
         let floor = plan.coherence_floor;
         let trusted: Vec<bool> = (0..lines)
             .map(|f| band[f] && (0..nc).all(|c| est.coherence[c * lines + f] >= floor))
@@ -1171,6 +1241,59 @@ impl MimoShockEngine {
         Ok(())
     }
 
+    /// One identification shot at `vrms` on every drive: the drives and every
+    /// control and limit row. A limit over its abort ends the run.
+    #[allow(clippy::type_complexity)]
+    fn id_shot(
+        &mut self,
+        n: usize,
+        band: &[bool],
+        vrms: f64,
+        caps: &[f64],
+        realizations: usize,
+    ) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Result<(), EngineError>> {
+        let nd = caps.len();
+        let nc = self.config.controls.len();
+        let drives = match excitation(n, band, &vec![vrms; nd], caps, realizations, self.seed) {
+            Ok(d) => d,
+            Err(e) => {
+                self.finish(EndOutcome::Fault, "fault", e.clone());
+                return Err(Err(EngineError::Station(e)));
+            }
+        };
+        let rows = match self.fire_shot(&drives, None) {
+            Ok(r) => r,
+            Err(e) => {
+                let detail = format!("{e:?}");
+                self.finish(EndOutcome::Fault, "fault", detail.clone());
+                return Err(Err(EngineError::Station(detail)));
+            }
+        };
+        let outputs = match self.rows_of_channels(&rows, &self.input_channels()) {
+            Ok(o) => o,
+            Err(e) => {
+                self.finish(EndOutcome::Fault, "fault", e.clone());
+                return Err(Err(EngineError::Station(e)));
+            }
+        };
+        let breach = self
+            .config
+            .limits
+            .iter()
+            .zip(&outputs[nc..])
+            .find(|(l, r)| peak(r) > l.abort_peak)
+            .map(|(l, r)| (l.channel, peak(r), l.abort_peak));
+        if let Some((ch, pk, ab)) = breach {
+            self.finish(
+                EndOutcome::Aborted,
+                "limit_abort",
+                format!("limit {ch} measured {pk:.3} in identification, over its abort of {ab}"),
+            );
+            return Err(Ok(()));
+        }
+        Ok((drives, outputs))
+    }
+
     /// The level scale of `db`.
     fn scale(db: f64) -> f64 {
         10f64.powf(db / 20.0)
@@ -1191,6 +1314,21 @@ impl MimoShockEngine {
             }
         });
         Self::scale(db)
+    }
+
+    /// The upper tolerance the first pulse of a level is held to, dB: the SRS
+    /// tolerance above the target, or the classical amplitude tolerance on the
+    /// peak.
+    fn upper_tolerance_db(&self) -> f64 {
+        let built = self.built.as_ref().expect("armed");
+        match (&built.judging, &built.target) {
+            (Judging::Srs, Target::Srs(t)) => t.tol_hi_db,
+            (Judging::Classical { standard, .. }, _) => {
+                20.0 * (1.0 + standard.params().amp_tol_frac_of_peak).log10()
+            }
+            (Judging::Envelope { tol_frac_of_peak }, _) => 20.0 * (1.0 + tol_frac_of_peak).log10(),
+            (Judging::Srs, Target::Waveform(_)) => 0.0,
+        }
     }
 
     /// The target's peak at each control, full level.
@@ -1386,27 +1524,13 @@ impl MimoShockEngine {
         self.running = Some(law);
         self.manifest = Some(manifest);
         let lp = &self.config.ladder;
-        let mut per_level = vec![1u32; lp.levels_db.len()];
-        if let Some(last) = per_level.last_mut() {
-            *last = lp.full_level_pulses.max(1);
-        }
-        let schedule = ShockLevelSchedule {
-            mode: ShockRunMode::Auto,
-            start_db: lp.levels_db[0],
-            table_db: lp.levels_db.clone(),
-            pulses_per_level: per_level,
-            advance: LadderAdvance::OnPass,
-            max_pulses_per_level: lp.max_pulses_per_level,
-        };
-        let ladder = match ShockLadderState::new(schedule) {
-            Ok(l) => l,
-            Err(e) => {
-                let m = format!("{e:?}");
-                self.finish(EndOutcome::Fault, "fault", m.clone());
-                return Err(EngineError::Config(SetupError::new(SetupRule::Ladder, m)));
-            }
-        };
-        let level = ladder.current_level_db();
+        let ladder = Ladder::new(
+            lp.levels_db.clone(),
+            lp.full_level_pulses,
+            lp.max_pulses_per_level,
+            self.upper_tolerance_db(),
+        );
+        let level = ladder.level_db();
         self.ladder = Some(ladder);
         let (ans, us) = self.call_law(None, level);
         let (miss, outputs) = match ans {
@@ -1542,6 +1666,10 @@ impl MimoShockEngine {
             law_values: std::mem::take(&mut self.next_values),
             predicted_peak_ratio: Vec::new(),
             end: None,
+            over_test_db: f64::NEG_INFINITY,
+            arrival_spread_s: 0.0,
+            warnings: Vec::new(),
+            step_note: None,
         };
         if index >= self.config.guards.law.max_pulses {
             let end = self.finish(
@@ -1664,9 +1792,37 @@ impl MimoShockEngine {
                 waveform_error_db: j.waveform_error_db,
                 velocity_ips: j.velocity_ips,
                 displacement_pk_pk_in: j.displacement_pk_pk_in,
+                timing_ok: j.timing_ok,
+                over_test_db: j.over_test_db,
+                polarity_ok: j.polarity_ok,
+                duration_ratio: j.duration_ratio,
+                duration_ok: j.duration_ok,
+                energy_db: j.energy_db,
+                rms_duration_ratio: j.rms_duration_ratio,
             })
             .collect();
         report.passed = judgements.iter().all(|j| j.verdict.passed);
+        report.over_test_db = judgements
+            .iter()
+            .fold(f64::NEG_INFINITY, |a, j| a.max(j.over_test_db));
+        let delays: Vec<f64> = judgements.iter().map(|j| j.verdict.delay_s).collect();
+        let (spread, warning) = crate::judge::arrival_spread(&delays, &self.config.timing);
+        report.arrival_spread_s = spread;
+        report.warnings.extend(warning);
+        for (j, ch) in judgements.iter().zip(&self.config.controls) {
+            if j.energy_db.abs() > crate::judge::ENERGY_TOL_DB {
+                report.warnings.push(format!(
+                    "control {ch} has {:+.2} dB of its target's energy",
+                    j.energy_db
+                ));
+            }
+            if (j.rms_duration_ratio - 1.0).abs() > crate::judge::RMS_DURATION_TOL {
+                report.warnings.push(format!(
+                    "control {ch}'s rms duration is {:.2} times its target's",
+                    j.rms_duration_ratio
+                ));
+            }
+        }
         let srs_errors: Vec<Vec<f64>> = judgements
             .iter()
             .filter_map(|j| j.srs_error_db.clone())
@@ -1722,9 +1878,9 @@ impl MimoShockEngine {
             .ladder
             .as_mut()
             .expect("proceeded")
-            .on_pulse_judged(report.passed);
+            .on_judged(report.passed, report.over_test_db);
         match tick {
-            LadderTick::Completed => {
+            Tick::Completed => {
                 let end = self.finish(
                     EndOutcome::Completed,
                     "completed",
@@ -1732,7 +1888,7 @@ impl MimoShockEngine {
                 );
                 return Ok(self.close_report(end));
             }
-            LadderTick::NotConverged { pulses } => {
+            Tick::NotConverged { pulses } => {
                 let end = self.finish(
                     EndOutcome::NotConverged,
                     "not_converged",
@@ -1740,32 +1896,15 @@ impl MimoShockEngine {
                 );
                 return Ok(self.close_report(end));
             }
-            LadderTick::Advanced | LadderTick::Held => {}
+            Tick::Advanced { note: Some(n), .. } => {
+                self.records.step_notes.push(n.clone());
+                if let Some(r) = self.pulses.last_mut() {
+                    r.step_note = Some(n);
+                }
+            }
+            Tick::Advanced { note: None, .. } | Tick::Held => {}
         }
-        let next_level = self.ladder.as_ref().expect("proceeded").current_level_db();
-        // The divergence watch.
-        let worst_err = verdicts
-            .iter()
-            .fold(f64::NEG_INFINITY, |a, v| a.max(v.error_db));
-        let worst_pk = verdicts.iter().fold(f64::NEG_INFINITY, |a, v| {
-            a.max(20.0 * v.peak_ratio.max(1e-300).log10())
-        });
-        if let Some(Divergence {
-            pulses,
-            error_db,
-            peak_ratio_db,
-        }) = self.watch.observe(level, worst_err, worst_pk)
-        {
-            let end = self.finish(
-                EndOutcome::SafeStop,
-                "divergence",
-                format!(
-                    "the error rose on {pulses} pulses in a row at {level} dB (judged error {error_db:.2} dB, \
-                     peak {peak_ratio_db:.2} dB over the target's)"
-                ),
-            );
-            return Ok(self.close_report(end));
-        }
+        let next_level = self.ladder.as_ref().expect("proceeded").level_db();
         // The law, with the next level.
         let srs = match &built.target {
             Target::Srs(_) => Some(
@@ -1804,6 +1943,32 @@ impl MimoShockEngine {
             miss: miss.clone(),
             call_us: us,
         });
+        // The divergence watch, on the pulse just played.
+        let waveform_error = match &built.target {
+            Target::Waveform(_) => Some(
+                judgements
+                    .iter()
+                    .fold(f64::NEG_INFINITY, |a, j| a.max(j.waveform_error_db)),
+            ),
+            Target::Srs(_) => outputs.as_ref().and_then(|o| {
+                o.values
+                    .iter()
+                    .find(|v| v.key == "waveform_error")
+                    .map(|v| v.value)
+            }),
+        };
+        let drive_rms: Vec<f64> = drives
+            .chunks(n)
+            .map(|d| (d.iter().map(|v| v * v).sum::<f64>() / n as f64).sqrt())
+            .collect();
+        if let Some(d) = self.watch.observe(level, waveform_error, &drive_rms) {
+            let end = self.finish(
+                EndOutcome::SafeStop,
+                "divergence",
+                format!("{} ({})", d.detail, d.rule),
+            );
+            return Ok(self.close_report(end));
+        }
         match miss {
             None => {
                 self.misses.used();
@@ -1850,18 +2015,22 @@ impl MimoShockEngine {
         let n = self.config.record_len;
         match growth(&o.drives, played, n, step, &self.bands, GROWTH_BAND_FLOOR) {
             Ok(g) => {
-                if let Some(Growth { what, .. }) =
-                    g.iter().find(|g| g.db > self.config.guards.max_growth_db)
-                {
-                    let rule = if what == "peak" {
-                        GuardRule::PeakRise
-                    } else {
-                        GuardRule::BinRise
-                    };
-                    return Some(LawFault::BadOutput(rule));
+                let gp = &self.config.guards;
+                if g.iter().any(|g| g.peak_db > gp.max_growth_db) {
+                    return Some(LawFault::BadOutput(GuardRule::PeakRise));
+                }
+                if g.iter().any(|g| g.band_db > gp.max_band_growth_db) {
+                    return Some(LawFault::BadOutput(GuardRule::BinRise));
                 }
             }
             Err(e) => return Some(LawFault::Failed(e)),
+        }
+        // A law's own prediction of its next pulse's worst over-test, dB, when
+        // it reports one, against the controls' abort line.
+        if let Some(v) = o.values.iter().find(|v| v.key == LAW_PREDICTED_OVER_TEST) {
+            if v.value > 20.0 * self.control_abort_ratio().log10() {
+                return Some(LawFault::BadOutput(GuardRule::PredictedPeak));
+            }
         }
         match self.predicted_breach(&o.drives, next_level) {
             Ok((_, None)) => None,

@@ -49,6 +49,10 @@ pub struct SrsSpec {
     pub tables: Vec<SynthesisEngine>,
     /// The synthesis iteration's knobs (its `q` is replaced by [`Self::q`]).
     pub synthesis: SynthesisOpts,
+    /// Controls whose synthesized waveform is played upside down (an SRS does
+    /// not see the sign; the structure does). Empty: none.
+    #[serde(default)]
+    pub inverted: Vec<bool>,
 }
 
 /// What a test asks of its controls, before it is synthesized at a rate.
@@ -191,13 +195,16 @@ impl TargetSpec {
                     }
                     let r =
                         synthesize_to_target(points, &spec.natural_hz, fs_hz, table.clone(), opts);
-                    waveforms.extend(place(
-                        &r.waveform,
-                        lead,
-                        record_len,
-                        "synthesized waveform",
-                    )?);
-                    components.push(component_table(&r.components, lead_t));
+                    let sign = if spec.inverted.get(c).copied().unwrap_or(false) {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let wave: Vec<f64> = r.waveform.iter().map(|v| sign * v).collect();
+                    waveforms.extend(place(&wave, lead, record_len, "synthesized waveform")?);
+                    let mut table = component_table(&r.components, lead_t);
+                    table.iter_mut().for_each(|k| k.amplitude *= sign);
+                    components.push(table);
                 }
                 Ok(BuiltTarget {
                     target: Target::Srs(SrsTarget {

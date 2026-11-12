@@ -29,6 +29,7 @@ pub mod engine;
 pub mod guards;
 pub mod ident;
 pub mod judge;
+pub mod ladder;
 pub mod law;
 pub mod limits;
 pub mod pulse;
