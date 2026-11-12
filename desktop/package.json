@@ -1,6 +1,6 @@
 {
 	"name": "hertzforge-desktop",
-	"version": "0.1.5",
+	"version": "0.1.6",
 	"private": true,
 	"description": "Build tools for the Hertzforge desktop app: the Tauri command line, which bundles the app and makes its icons.",
 	"license": "MIT",

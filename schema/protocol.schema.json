@@ -877,9 +877,32 @@
         "project": {"$ref": "#/$defs/project"}
       }
     },
+    "projectDragOutParams": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "project": {"type": "boolean"},
+        "names": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "projectDragOutResult": {
+      "type": "object", "required": ["paths"],
+      "properties": {"paths": {"type": "array", "items": {"type": "string"}}}
+    },
     "projectSaveResult": {
       "type": "object", "required": ["path", "project"],
       "properties": {"path": {"type": "string"}, "project": {"$ref": "#/$defs/project"}}
+    },
+    "opProgress": {
+      "type": "object", "required": ["op", "done", "total"],
+      "properties": {
+        "op": {"type": "string"},
+        "done": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": -1}
+      }
+    },
+    "opCancelResult": {
+      "type": "object", "required": ["op"],
+      "properties": {"op": {"type": ["string", "null"]}}
     },
     "projectProgress": {
       "type": "object", "required": ["done", "total", "path"],

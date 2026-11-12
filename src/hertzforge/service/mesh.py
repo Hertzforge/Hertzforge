@@ -27,20 +27,44 @@ def triangulate(faces: list[list[int]]) -> np.ndarray:
             else np.zeros((0, 3), dtype=np.int64))
 
 
+def outline(faces: list[list[int]]) -> np.ndarray:
+    """The edges of polygons (as `element_cells` draws faces and solid
+    skins), each pair of corners once whichever face or way round it came:
+    the outline of every element face, without the diagonals the triangles
+    add."""
+    out = []
+    by_count: dict[int, list[list[int]]] = {}
+    for face in faces:
+        by_count.setdefault(len(face), []).append(face)
+    for count, group in by_count.items():
+        if count < 2:
+            continue
+        polygons = np.asarray(group, dtype=np.int64)
+        out.append(np.stack([polygons, np.roll(polygons, -1, axis=1)], axis=-1).reshape(-1, 2))
+    if not out:
+        return np.zeros((0, 2), dtype=np.int64)
+    return np.unique(np.sort(np.concatenate(out), axis=1), axis=0)
+
+
 def drawn_mesh(geometry: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(node rows drawn, triangles, lines), the last two indexing the drawn
     nodes. Faces and lines are the drawing of the elements
     (`viz.geometry.element_cells`: a face element by its corners, a solid by
-    its skin, a line by its two ends). Only nodes a triangle or a line uses
-    are sent, so a brick model's interior nodes do not travel; a geometry
-    with no faces or lines sends every node."""
+    its skin, a line by its two ends). The lines are the line elements and
+    the outline of every face drawn (`outline`), so each element's edges show
+    on the surface as the earlier toolset drew them (Brandon, 2026-11-11). Only
+    nodes a triangle or a line uses are sent, so a brick model's interior
+    nodes do not travel; a geometry with no faces or lines sends every
+    node."""
     from hertzforge.drawing.viz.geometry import element_cells
 
     faces, lines, _points = element_cells(geometry)
-    triangles = triangulate([face for group in faces.values()
-                             for face in group])
+    polygons = [face for group in faces.values() for face in group]
+    triangles = triangulate(polygons)
     segments = np.asarray([pair for group in lines.values() for pair in group],
                           dtype=np.int64).reshape(-1, 2)
+    if polygons:
+        segments = np.unique(np.sort(np.vstack([segments, outline(polygons)]), axis=1), axis=0)
     used = np.unique(np.concatenate([triangles.ravel(), segments.ravel()]))
     if not used.size:
         used = np.arange(geometry.num_nodes)

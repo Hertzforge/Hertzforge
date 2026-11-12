@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { baseName, chooseFiles, chooseObjectFile, discardUnsaved, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops } from './files';
+import { baseName, canDragOut, chooseFiles, chooseObjectFile, discardUnsaved, fileNameOf, formatForPath, hasNativeFiles, isProjectFile, listenForDrops, startDragOut } from './files';
 
 const g = globalThis as Record<string, unknown>;
 
@@ -145,5 +145,53 @@ describe('letting unsaved changes go', () => {
 		expect(await discardUnsaved('Plate')).toBe(true);
 		expect(confirm).toHaveBeenCalledWith('Plate has unsaved changes. Discard them?');
 		vi.unstubAllGlobals();
+	});
+});
+
+describe('dragging out of the window', () => {
+	// Brandon, 2026-11-11: the project dragged to a folder is saved there
+	class Channel {
+		onmessage: (message: unknown) => void = () => {};
+	}
+
+	it('hands the system the files the service wrote, as a copy, with a picture', async () => {
+		const invoke = vi.fn(async () => undefined);
+		g.__TAURI__ = { core: { invoke, Channel }, dialog: {} };
+		expect(canDragOut()).toBe(true);
+		expect(await startDragOut(['/tmp/hertzforge-drag-x/a/Project.hforge'], 'Project.hforge')).toBe(true);
+		const [command, args] = invoke.mock.calls[0] as unknown as [string, Record<string, unknown>];
+		expect(command).toBe('plugin:drag|start_drag');
+		expect(args.item).toEqual(['/tmp/hertzforge-drag-x/a/Project.hforge']);
+		expect(args.options).toEqual({ mode: 'copy' });
+		expect(String(args.image)).toMatch(/^data:image\/png;base64,/);
+		expect(args.onEvent).toBeInstanceOf(Channel);
+	});
+
+	it('is not offered in a browser', async () => {
+		expect(canDragOut()).toBe(false);
+		expect(await startDragOut(['/x.hforge'], 'x')).toBe(false);
+	});
+
+	it('a drag let go over the window itself imports nothing, and other files still do', async () => {
+		let handler: ((e: { payload: { type: string; paths?: string[] } }) => void) | null = null;
+		g.__TAURI__ = {
+			core: { invoke: vi.fn(async () => undefined), Channel },
+			dialog: {},
+			webview: {
+				getCurrentWebview: () => ({
+					onDragDropEvent: (h: typeof handler) => {
+						handler = h;
+						return Promise.resolve(vi.fn());
+					}
+				})
+			}
+		};
+		await startDragOut(['/tmp/hertzforge-drag-x/b/Run.hforge'], 'Run.hforge');
+		const got: (string[] | null)[] = [];
+		listenForDrops((paths) => got.push(paths));
+		await Promise.resolve();
+		handler!({ payload: { type: 'drop', paths: ['/tmp/hertzforge-drag-x/b/Run.hforge'] } });
+		handler!({ payload: { type: 'drop', paths: ['/tmp/hertzforge-drag-x/b/Run.hforge', '/a/modal.nc4'] } });
+		expect(got).toEqual([['/a/modal.nc4']]);
 	});
 });

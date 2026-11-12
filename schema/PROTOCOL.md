@@ -493,6 +493,8 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.open` | `{"path"}` | `{"project"}` |
 | `project.import` | `{"path","units"?}` | `{"added":[name...],"project"}` |
 | `project.save` | `{"path"?,"compress"?}` | `{"path","project"}` |
+| `project.drag_out` | `{"project":true}` or `{"names"}` | `{"paths"}` |
+| `op.cancel` | `{}` | `{"op"}` |
 | `report.*` | see Reports below | |
 | `project.rename` | `{"name","to","index"?}` | `{"project"}` |
 | `project.remove` | `{"names"}` | `{"project"}` |
@@ -665,7 +667,7 @@ them, and refuses any other file with a pointer to import it. A client asks befo
 project whose `modified` is true. `project.import` adds a file's
 objects to the project. `units` declares what the file does not state, as the core's `import_file` options
 (`length_unit`, `ordinate_unit` and the rest). `project.save` writes to `path`, or to the file the
-project came from; a `.vdyn` is opened but never written. `project.new` replaces the project with an
+project came from; a `.vdyn` is opened but never written. `project.drag_out` writes the whole project (`"project": true`) or the objects `names` to files in a new temporary folder, for the desktop shell to drag out of the window, and answers their paths: the project as one `.hforge` named for its title, each object as a `.hforge` object named for itself. It is a copy: the project's `file` and `modified` are unchanged. `project.new` replaces the project with an
 empty one; it takes an optional `title` and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.
 With `index`, `project.rename` renames one photo of a Photos object instead (the photo at that
@@ -724,6 +726,14 @@ reference point `x`, `y`, `z` in meters, `normalize`, and with it `mass` and the
 `features` (each report feature's key, true where it is on) and `identity` (each identification
 field as text, people authorized comma-separated). `modified` is true after an import or an operation that added,
 removed or changed an object, and false after an open or a save.
+
+An operation reports its progress while it runs, as event topic `op.progress`,
+`{"op","done","total"}`: a solve, a mesh, a signal generated, a sine extracted. `total` is -1 for a
+stage that cannot count itself, such as one long call into a library, which the shell shows as a
+moving bar. They come at most ten a second, always when the stage or its total changes, and always
+the last one. `op.cancel` (`{}`, answering `{"op"}`, the operation running or null) stops the
+operation at its next report: it is refused, saying it was cancelled, and the project is as it was.
+A stage that cannot count itself is not interrupted; the cancel takes effect when it returns.
 
 A reader that can count reports its progress while an import runs, as event topic
 `project.progress`, `{"done","total","path"}`, at most ten a second and always the last one. A

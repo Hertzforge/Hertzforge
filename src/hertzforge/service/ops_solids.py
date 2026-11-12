@@ -25,6 +25,7 @@ import numpy as np
 from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh, places_view
+from .op_progress import hook
 from .parsing import parse_id_runs, parse_numbers
 from .protocol import refused
 
@@ -960,13 +961,13 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
                 return None, [v.row(what.title(), f'about {inside:,} under the surface at '
                                     'this size; Mesh makes them', None, 'info')]
         part, made = shells.shell_mesh(geometry, ids, size,
-                                       triangles=elements == 'triangles')
+                                       triangles=elements == 'triangles', progress=hook())
     elif elements == 'tetras':
         expected = tetmesh.tet_count(geometry, ids, size)
         if expected > PREVIEW_TETS:
             return None, [v.row('Tetrahedra', f'about {expected:,} at this size; Mesh '
                                 'makes them', None, 'info')]
-        part, made = tetmesh.tet_mesh(geometry, ids, size)
+        part, made = tetmesh.tet_mesh(geometry, ids, size, progress=hook())
     else:
         plan = solids.piece_plan(geometry, ids, size, sizes)
         bricks = sum(entry['bricks'] for entry in plan)
@@ -975,7 +976,8 @@ def _preview(geometry: Any, ids: list[int], size: float, elements: str,
         if bricks > budget:
             return None, [v.row('Bricks', f'about {bricks:,} at this size; Mesh makes '
                                 'them', None, 'info')]
-        part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes)
+        part, made = solids.brick_mesh(geometry, ids, size, parts_apart, sizes=sizes,
+                                       progress=hook())
     earlier = len(solids.meshed_elements(geometry,
                                          solids.groups_meshed_again(geometry, ids, part)))
     return part, _made_rows(geometry, made, earlier)
@@ -1042,7 +1044,7 @@ def mesh_solids(project: Any, params: dict[str, Any]) -> list[dict]:
     found = _call(lambda: project.mesh_solids(
         name, ids, size, apart=params['apart'],
         parts_apart=params['parts_apart'] and elements == 'hexes', elements=elements,
-        sizes=sizes or None))
+        sizes=sizes or None, progress=hook()))
     rows = _made_rows(geometry, found, 0)
     if found['replaced']:
         rows.append(v.row('Replaced', f'the {found["replaced"]:,} elements meshed before',
