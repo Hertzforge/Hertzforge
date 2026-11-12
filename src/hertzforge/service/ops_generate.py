@@ -24,6 +24,7 @@ import numpy as np
 from . import display_units, run_logs
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .op_progress import hook
 from .ops_sine_shock import (
     EDGE_WORDS,
     STROKE_RATINGS,
@@ -159,7 +160,7 @@ def generate_signal(project: Any, params: dict[str, Any]) -> list[dict]:
     name, kind = params['source'], params['kind']
     source = project[name]
     settings = _settings(source, params)
-    added = _core(lambda: project.generate_signal(name, kind, **settings))
+    added = _core(lambda: project.generate_signal(name, kind, **settings, progress=hook()))
     made = project[added]
     chosen = SignalSettings.from_dict(project.provenance[added]['params'])
     what = KINDS[kind].lower()
@@ -279,7 +280,7 @@ def srs_synthesis(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(f'the synthesis has {len(made.channels)} channels; there is no channel '
                       f'{params["record"]}')
     k = params['record'] - 1
-    added = _core(lambda: project.generate_signal(name, 'srs', **settings))
+    added = _core(lambda: project.generate_signal(name, 'srs', **settings, progress=hook()))
     chosen = made.channels[k]
     judged = next(result for dof, _event, result in made.tolerance() if dof == chosen.dof)
     *readings, stroke_rows = stroke(project, {'history': added, 'record': k + 1,

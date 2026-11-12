@@ -71,6 +71,10 @@ class AnalyzeState {
 	values = $state<Record<string, ParamValues>>({});
 	triedRun = $state(false);
 	running = $state(false);
+	/** How far the running operation has got (`op.progress`): a total of -1 is a stage that cannot count itself. */
+	opProgress = $state<{ done: number; total: number } | null>(null);
+	/** Cancel was asked of the running operation, which stops at its next report. */
+	cancelling = $state(false);
 	runError = $state<string | null>(null);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
@@ -108,7 +112,12 @@ class AnalyzeState {
 	private showSeq = 0;
 	private actionSeq = 0;
 
-	constructor(private readonly app: AppState) {}
+	constructor(private readonly app: AppState) {
+		app.analysis.on('op.progress', (data) => {
+			const d = data as unknown as { op: string; done: number; total: number };
+			if (this.running && d.op === this.opId) this.opProgress = { done: d.done, total: d.total };
+		});
+	}
 
 	/** Tools follow the data: only the operations with an object in the project to run on. */
 	get tools(): OperationDescriptor[] {
@@ -682,6 +691,8 @@ class AnalyzeState {
 		const params = { ...this.currentValues };
 		if (op.commits) params[op.commits] = !preview;
 		this.running = true;
+		this.opProgress = null;
+		this.cancelling = false;
 		this.runError = null;
 		// what is typed now is run, so its preview must not land on top of the answer
 		this.stopPreview();
@@ -707,6 +718,20 @@ class AnalyzeState {
 			this.runError = message(err);
 		} finally {
 			this.running = false;
+			this.opProgress = null;
+			this.cancelling = false;
+		}
+	}
+
+	/** Stop the running operation at its next report of progress (`op.cancel`). */
+	async cancel(): Promise<void> {
+		if (!this.running || this.cancelling) return;
+		this.cancelling = true;
+		try {
+			await this.app.analysis.request('op.cancel', {});
+		} catch (err) {
+			this.runError = message(err);
+			this.cancelling = false;
 		}
 	}
 

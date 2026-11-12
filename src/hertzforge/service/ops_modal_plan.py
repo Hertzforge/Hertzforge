@@ -24,6 +24,7 @@ from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
+from .op_progress import hook
 from .ops_model import _family, _groups
 from .ops_project import _shape_view
 from .parsing import parse_id_runs, parse_optional_picks
@@ -264,7 +265,8 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
                 added = project.plan_instrumentation(
                     source, triaxial, uniaxial, modes=modes,
                     groups=None if every_group else groups, surfaces=kept, edge_angle=angle,
-                    axes=list(axes), name=base, edge_distance=distance, unit='m')
+                    axes=list(axes), name=base, edge_distance=distance, unit='m',
+                    progress=hook())
             except ValueError as error:
                 raise refused(str(error)) from None
         rows.append(v.row('Kept', f'{added["geometry"]}, {added["channels"]} and '

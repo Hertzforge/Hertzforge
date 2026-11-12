@@ -10,6 +10,7 @@ import numpy as np
 
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .op_progress import hook
 from .ops_project import RECORDS, chosen_records
 from .protocol import refused
 from .waterfalls import axes
@@ -71,7 +72,7 @@ def derive_specification(project: Any, params: dict[str, Any]) -> list[dict]:
     try:
         added = project.derive_specification(
             name, records, **limit_settings(params), margin_db=params['margin_db'],
-            dof=params['dof'].strip() or None)
+            dof=params['dof'].strip() or None, progress=hook())
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     measured = waterfall_arrays(data, records, unit_system=hz.SI, exponents=False)

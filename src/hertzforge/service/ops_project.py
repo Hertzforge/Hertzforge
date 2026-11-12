@@ -16,6 +16,7 @@ from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .mode_pairs import translations
+from .op_progress import hook
 from .parsing import parse_picks
 from .protocol import refused
 from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
@@ -131,10 +132,15 @@ def _verb(verb: str, **fixed: Any) -> Any:
     other params as its keywords, and draws what it added. A param named
     in `fixed` is converted first: `fixed[name](value)`."""
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
+        import inspect
+
         keywords = {name: fixed.get(name, lambda value: value)(value)
                     for name, value in params.items() if name != 'source'}
-        return _derived(project, lambda: getattr(project, verb)(
-            params['source'], **keywords))
+        call = getattr(project, verb)
+        # a verb that reports its progress reports the operation's (`op_progress`)
+        if 'progress' in inspect.signature(call).parameters:
+            keywords['progress'] = hook()
+        return _derived(project, lambda: call(params['source'], **keywords))
     return run
 
 
@@ -184,7 +190,8 @@ def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
     sine-level set added per tone. The project's one specification when
     none is picked."""
     try:
-        added = project.extract_sine(params['source'], params['specification'] or None)
+        added = project.extract_sine(params['source'], params['specification'] or None,
+                                    progress=hook())
     except ValueError as error:
         raise refused(str(error)) from None
     from .show import _sine
@@ -393,7 +400,7 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     else:
         limit = {'num_modes': params['num_modes']}
     return _added_shapes(project, lambda: project.solve_modes(
-        params['source'], damping=params['damping'] / 100.0, **limit))
+        params['source'], damping=params['damping'] / 100.0, **limit, progress=hook()))
 
 
 def expand(project: Any, params: dict[str, Any]) -> list[dict]:
