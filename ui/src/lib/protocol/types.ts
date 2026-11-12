@@ -517,6 +517,8 @@ export interface ParamDescriptor {
 	in_view?: boolean;
 	/** A length, or a text of lengths, typed in the display system (`withDisplayLengths`). */
 	length?: boolean;
+	/** A number of this dimension ('force/length') typed in the display system (`withDisplayQuantities`). */
+	quantity?: string;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
 	/** A request for this field's value, asked with the form's values by a button beside it; `{value}` comes back in the display units. */

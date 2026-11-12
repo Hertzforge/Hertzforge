@@ -1072,10 +1072,12 @@ HELD = tuple(Option(mode, label) for mode, label in (
     ('rigid', 'Rigid'), ('stiffness', 'Stiffness'), ('free', 'Free')))
 NORMAL = Param('normal', 'Normal', 'enum', default='rigid', options=HELD)
 SHEAR = Param('shear', 'Shear', 'enum', default='rigid', options=HELD)
+#: a stiffness, typed in the display system
+STIFFNESS = 'force/length'
 NORMAL_STIFFNESS = Param('normal_stiffness', 'Normal stiffness', 'number', default=1e6,
-                         unit='N/m', min=0.0)
+                         unit='N/m', min=0.0, quantity=STIFFNESS)
 SHEAR_STIFFNESS = Param('shear_stiffness', 'Shear stiffness', 'number', default=1e5,
-                        unit='N/m', min=0.0)
+                        unit='N/m', min=0.0, quantity=STIFFNESS)
 PATCHES = Param('patches', 'Patches to keep (empty for every one)', 'string', default='')
 MATE_KEEP = Param('keep', 'Keep: add the patches to the Mated Surfaces', 'boolean',
                   default=False)
@@ -1111,7 +1113,7 @@ def _mates_table(name: str, geometry: Any) -> dict:
     rows = []
     for mated in geometry.mates:
         how = mated.describe()
-        springs = [f'{what} {value:.4g} N/m' for what, mode, value in (
+        springs = [f'{what} {value!r} N/m' for what, mode, value in (
             ('normal', mated.normal_mode, mated.normal_stiffness),
             ('shear', mated.shear_mode, mated.shear_stiffness)) if mode == 'stiffness']
         first, second = (_group_name(geometry, g) for g in mated.groups)
@@ -1177,9 +1179,11 @@ KEPT_HOLD = (Option('keep', 'As it is'), *HELD)
 EDIT_NORMAL = Param('normal', 'Normal', 'enum', default='keep', options=KEPT_HOLD)
 EDIT_SHEAR = Param('shear', 'Shear', 'enum', default='keep', options=KEPT_HOLD)
 EDIT_NORMAL_STIFFNESS = Param('normal_stiffness', 'Normal stiffness (0 keeps it)', 'number',
-                              default=0.0, unit='N/m', min=0.0)
+                              default=0.0, unit='N/m', min=0.0,
+                              quantity=STIFFNESS)
 EDIT_SHEAR_STIFFNESS = Param('shear_stiffness', 'Shear stiffness (0 keeps it)', 'number',
-                             default=0.0, unit='N/m', min=0.0)
+                             default=0.0, unit='N/m', min=0.0,
+                              quantity=STIFFNESS)
 
 
 def _hold_changes(params: dict[str, Any], mated: Any) -> dict[str, Any]:

@@ -310,3 +310,64 @@ describe('a long operation', () => {
 		expect(a.cancelling).toBe(false);
 	});
 });
+
+describe('a value typed into an open form', () => {
+	// Brandon, 2026-11-11: a mesh size typed, then Preview, then Apply meshed at the detected size
+	const mesh = {
+		id: 'project.mesh_solids',
+		title: 'Mesh',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		outputs: ['reading'],
+		commits: 'keep',
+		params: [geometry, { name: 'size', label: 'Element size', type: 'number', default: 0 }, { name: 'apart', label: 'Apart', type: 'boolean', default: false }, { name: 'keep', label: 'Mesh', type: 'boolean', default: false }]
+	} as unknown as OperationDescriptor;
+
+	function meshing() {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const runs: Sent[] = [];
+		const detected = { size: '0.01' };
+		const request = vi.fn(async (method: string, params: Sent) => {
+			if (method === 'op.run') {
+				runs.push(params);
+				return { views: [{ view: 'reading', title: 'r', rows: [] }], project: summary };
+			}
+			if (method === 'project.actions') {
+				const rows = [{ id: mesh.id, verb: 'Mesh', kind: 'run', ready: true, fill: { geometry: 'G', size: detected.size } }];
+				return { table: { columns: [{ kinds: ['geometry'], current: true, rows }] } };
+			}
+			if (method === 'project.show') return { title: 'shown', views: [], note: '' };
+			return {};
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		Object.defineProperty(app.analysis, 'isOpen', { get: () => true });
+		app.catalog = { operations: [mesh] } as never;
+		app.project.summary = summary;
+		return { a: app.analyze, runs, detected };
+	}
+
+	const opened = (detected: { size: string }) =>
+		({ id: mesh.id, verb: 'Mesh', kind: 'run', ready: true, fill: { geometry: 'G', size: detected.size } }) as unknown as ActionRow;
+
+	it('stays through a Preview and the reload after it, and is what Apply sends', async () => {
+		const { a, runs, detected } = meshing();
+		await a.perform(opened(detected), column);
+		expect(a.formOpen).toBe(true);
+		expect(a.currentValues.size).toBe(0.01);
+		a.values = { ...a.values, [mesh.id]: { ...a.currentValues, size: 0.005 } };
+		await a.run(true);
+		await a.loadActions();
+		expect(a.currentValues.size, 'the detected size must not come back over the typed one').toBe(0.005);
+		await a.run();
+		expect(runs.map((r) => [r.params?.size, r.params?.keep])).toEqual([[0.005, false], [0.005, true]]);
+	});
+
+	it('follows the selection when what it would be filled with changes', async () => {
+		const { a, detected } = meshing();
+		await a.perform(opened(detected), column);
+		a.values = { ...a.values, [mesh.id]: { ...a.currentValues, size: 0.005 } };
+		detected.size = '0.02';
+		await a.loadActions();
+		expect(a.currentValues.size).toBe(0.02);
+	});
+});

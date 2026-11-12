@@ -183,6 +183,37 @@ export function withDisplayLengths(params: ParamDescriptor[], unit: string | nul
 	);
 }
 
+/** A unit system's unit for a quantity, and what takes it to SI. */
+export interface DisplayUnit {
+	unit: string;
+	to_si: number;
+}
+
+/**
+ * The params as the display system shows them: a `quantity` param in the system's unit for it,
+ * its default the same amount in that unit.
+ */
+export function withDisplayQuantities(params: ParamDescriptor[], units: Record<string, DisplayUnit>): ParamDescriptor[] {
+	return params.map((p) => {
+		const shown = p.quantity ? units[p.quantity] : undefined;
+		if (!shown) return p;
+		// a default is a round number in its new unit too
+		const held = typeof p.default === 'number' ? Number((p.default / shown.to_si).toPrecision(4)) : p.default;
+		return { ...p, unit: shown.unit, default: held };
+	});
+}
+
+/** What a form holds after the display system changed: each `quantity` param the same amount in the new unit (`ratios`: old unit in the new). */
+export function rescaledQuantities(params: ParamDescriptor[], values: ParamValues, ratios: Record<string, number>): ParamValues {
+	const out = { ...values };
+	for (const p of params) {
+		const ratio = p.quantity ? ratios[p.quantity] : undefined;
+		const held = out[p.name];
+		if (ratio !== undefined && typeof held === 'number' && Number.isFinite(held)) out[p.name] = roundedLength(held * ratio);
+	}
+	return out;
+}
+
 function roundedLength(value: number): number {
 	return Number(value.toPrecision(10));
 }
