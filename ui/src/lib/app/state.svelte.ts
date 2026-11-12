@@ -299,10 +299,11 @@ class AnalyzeState {
 				if (row?.ready && current) void this.perform(row, current);
 				return;
 			}
-			// an open form follows the selection while the selection can still take it
+			// an open form follows the selection while the selection can still take it; only
+			// what the selection now fills differently is filled again, so a value typed stays
 			if (this.formOpen) {
 				const row = current?.rows.find((r) => r.id === this.opId && r.ready);
-				if (row) this.openRow(row);
+				if (row) this.followRow(row);
 				else this.closeForm();
 			}
 			this.fitWeighing = false;
@@ -391,6 +392,14 @@ class AnalyzeState {
 		try {
 			const chosen = await chooseObjectFile(row.fill?.object ?? '', formats);
 			if (!chosen) return;
+	/** The open form's row as the actions now give it: the fields it fills differently from before are filled. */
+	private followRow(row: ActionRow): void {
+		const was = this.formRow?.id === row.id ? (this.formRow.fill ?? {}) : {};
+		const fill = Object.fromEntries(Object.entries(row.fill ?? {}).filter(([key, text]) => was[key] !== text));
+		this.pickAction({ id: row.id, fill });
+		this.formRow = row;
+	}
+
 			this.pickAction({ id: row.id, fill: { ...row.fill, format: chosen.format, path: chosen.path, units: 'display', creator: '' } });
 			await this.run();
 		} catch (err) {
