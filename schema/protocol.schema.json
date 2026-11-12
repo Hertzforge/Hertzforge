@@ -501,6 +501,7 @@
         "workspace": {"$ref": "#/$defs/workspace"},
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "previews": {"type": "boolean"},
+        "commits": {"type": "string"},
         "summary": {"type": "string"},
         "params": {"type": "array", "items": {"$ref": "#/$defs/param"}},
         "outputs": {"type": "array", "items": {"enum": ["spectrum", "reading", "shape3d", "waterfall", "matrix", "table", "image"]}}

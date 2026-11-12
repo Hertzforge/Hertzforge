@@ -203,3 +203,47 @@ describe('a drag in a reading', () => {
 		expect(a.reading!.views[0]).toEqual(before);
 	});
 });
+
+describe('a form with a Preview button', () => {
+	// Brandon, 2026-11-11: a Mesh tickbox meant "the preview until ticked"; Apply should mean do it.
+	const meshSolids = {
+		id: 'project.mesh_solids',
+		title: 'Mesh Solids',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		commits: 'keep',
+		outputs: ['reading'],
+		params: [geometry, { name: 'size', label: 'Size', type: 'number', default: 0.01 }, { name: 'keep', label: 'Mesh', type: 'boolean', default: false }]
+	} as unknown as OperationDescriptor;
+
+	function withMesh() {
+		const made = make();
+		made.app.catalog = { operations: [addBlock, editSolid, meshSolids] } as never;
+		return made;
+	}
+
+	it('does not ask the go-ahead param', async () => {
+		const { a } = withMesh();
+		await a.perform(row(meshSolids), column);
+		expect(a.formParams.map((p) => p.name)).toEqual(['size']);
+	});
+
+	it('Preview sends it false and Apply sends it true', async () => {
+		const { a, runs } = withMesh();
+		await a.perform(row(meshSolids), column);
+		await a.run(true);
+		expect(runs.at(-1)?.params?.keep).toBe(false);
+		expect(a.reading?.title).toBe('Mesh Solids, preview');
+		await a.run();
+		expect(runs.at(-1)?.params?.keep).toBe(true);
+		expect(runs.at(-1)?.preview).toBeUndefined();
+	});
+
+	it('Preview does nothing on a form without one', async () => {
+		const { a, runs } = withMesh();
+		await a.perform(row(addBlock), column);
+		const before = runs.length;
+		await a.run(true);
+		expect(runs.length).toBe(before);
+	});
+});
