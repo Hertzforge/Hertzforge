@@ -211,6 +211,10 @@ pub struct Setup {
     pub drive_ceiling_v: Vec<f64>,
     /// The level ladder, dB, ascending, ending at 0.
     pub ladder_db: Vec<f64>,
+    /// The level the plant was identified at, dB against full level (the
+    /// largest identification peak over target peak among the controls); not
+    /// finite when the controller could not measure it.
+    pub identification_level_db: f64,
 }
 
 /// The controller's judgement of one control on the last pulse.
@@ -418,6 +422,7 @@ pub fn setup_from_wit(s: wit::MimoShockSetup) -> Result<Setup, String> {
         },
         drive_ceiling_v: s.drive_ceiling_v,
         ladder_db: s.ladder_db,
+        identification_level_db: s.identification_level_db,
     })
 }
 
@@ -742,6 +747,9 @@ pub mod builtin {
     use super::{math, ManifestBuilder, ShockMimoManifest, TargetKind};
     use crate::Params;
 
+    mod laws;
+    pub use laws::*;
+
     /// Who the built-in laws are credited to in their manifests.
     pub const AUTHOR: &str = "Hertzforge contributors";
 
@@ -887,6 +895,54 @@ pub mod builtin {
                reproduce that pulse, blended by the refresh weight.",
         knob: Knob::Toggle(false),
     };
+    const MODEL: ParamDecl = ParamDecl {
+        key: "model",
+        label: "Model",
+        help: "How the plant model follows a plant that changes with level: `frozen` keeps \
+               the identification; `secant` reproduces every pulse of the level being played; \
+               `track` fits the plant's modes once and re-fits their frequencies and damping \
+               from every pulse, predicting each new level from the trend; `track_secant` is \
+               `track` with the level's pulses reproduced on top.",
+        knob: Knob::Choice {
+            options: ModelChoice::NAMES,
+            default: "frozen",
+        },
+    };
+    const MODES: ParamDecl = ParamDecl {
+        key: "modes",
+        label: "Modes",
+        help: "Modes in the tracked model; zero counts the resonance peaks of the identified \
+               plant in the band.",
+        knob: Knob::Integer {
+            unit: "",
+            min: 0,
+            max: MAX_MODES as i64,
+            default: 0,
+        },
+    };
+    const FROM_IDENTIFICATION: ParamDecl = ParamDecl {
+        key: "track_from_identification",
+        label: "Track from the identification",
+        help: "Take the identification as the first point of the level trend, at the level the \
+               controller measured it at, so the second level is already predicted from the \
+               first.",
+        knob: Knob::Toggle(false),
+    };
+    const MODEL_SOURCE: ValueDecl = ValueDecl {
+        key: "model_source",
+        label: "Model source",
+        unit: "",
+        help: "Where the next pulse's model came from: 0 the identification, 1 learned at this \
+               level, 2 predicted for a new level, 3 the secant model after the tracked one \
+               predicted worse.",
+    };
+    const MODEL_RESIDUAL: ValueDecl = ValueDecl {
+        key: "model_prediction_residual",
+        label: "Model prediction error",
+        unit: "",
+        help: "How far the model that built the last pulse missed its measured response, \
+               relative, over the band.",
+    };
     const DRIVE_RMS: ValueDecl = ValueDecl {
         key: "drive_rms_full_level",
         label: "Drive rms at full level",
@@ -946,6 +1002,17 @@ pub mod builtin {
                 help: "The largest delay the alignment removes.",
                 knob: number(0.0, 20.0, 0.1, 2.0, "ms"),
             },
+            MODEL,
+            MODES,
+            FROM_IDENTIFICATION,
+            ParamDecl {
+                key: "predicted_step",
+                label: "Predicted level step",
+                help: "At a level step, correct the error the next level is predicted to have \
+                       (the tracked model's change between the levels) instead of the one just \
+                       measured. Needs a tracked model.",
+                knob: Knob::Toggle(false),
+            },
         ],
         values: &[
             ValueDecl {
@@ -968,6 +1035,14 @@ pub mod builtin {
                 help: "Lines whose gain the watchdog cut on this pulse.",
             },
             LINES_REFRESHED,
+            MODEL_SOURCE,
+            MODEL_RESIDUAL,
+            ValueDecl {
+                key: "predicted_step",
+                label: "Predicted step",
+                unit: "",
+                help: "1 when the last correction was for the next level's predicted error.",
+            },
         ],
     };
 
@@ -1030,6 +1105,23 @@ pub mod builtin {
                     default: "zero",
                 },
             },
+            MODEL,
+            MODES,
+            FROM_IDENTIFICATION,
+            ParamDecl {
+                key: "gain_clamp_db",
+                label: "Gain clamp",
+                help: "Each control's accumulated gain stays within this many dB of one; zero \
+                       leaves it free.",
+                knob: number(0.0, 40.0, 0.5, 0.0, "dB"),
+            },
+            ParamDecl {
+                key: "stall_tol_db",
+                label: "Stall tolerance",
+                help: "A point is reported stalled when its gain is at the clamp, or its error \
+                       is above this and has not fallen in two pulses at one level.",
+                knob: number(0.25, 12.0, 0.25, 1.5, "dB"),
+            },
         ],
         values: &[
             ValueDecl {
@@ -1045,19 +1137,27 @@ pub mod builtin {
                 help: "The weight on the SRS ratio at the level just played.",
             },
             DRIVE_RMS,
-            LINES_REFRESHED,
-            ValueDecl {
-                key: "effort_cost_zero_delay",
-                label: "Effort at zero delay",
-                unit: "",
-                help: "The seed timing's cost with every delay at zero.",
-            },
             ValueDecl {
                 key: "effort_cost_seed",
                 label: "Effort at the seed delays",
                 unit: "",
                 help: "The seed timing's cost at the delays chosen.",
             },
+            ValueDecl {
+                key: "gain_extent_db",
+                label: "Gain extent",
+                unit: "dB",
+                help: "The largest accumulated gain of any control on any driven line, either \
+                       way.",
+            },
+            ValueDecl {
+                key: "stalled_points",
+                label: "Stalled points",
+                unit: "",
+                help: "SRS points whose gain is at the clamp or whose error has stopped falling.",
+            },
+            MODEL_SOURCE,
+            MODEL_RESIDUAL,
         ],
     };
 
@@ -1222,6 +1322,7 @@ mod tests {
             },
             drive_ceiling_v: vec![1.0, 2.0, 3.0],
             ladder_db: vec![-6.0, 0.0],
+            identification_level_db: -26.0,
         }
     }
 
@@ -1229,6 +1330,7 @@ mod tests {
     fn mimo_shock_sdk_unpacks_the_setup_channel_after_channel() {
         let s = setup_from_wit(wit_setup(TargetKind::Srs)).unwrap();
         assert_eq!((s.n_controls, s.n_drives, s.record_len), (2, 3, 8));
+        assert_eq!(s.identification_level_db, -26.0);
         assert_eq!(s.reference[1][0], 8.0);
         assert_eq!(s.reference[0][7], 7.0);
         // Element (r, c) of line l is data[(l * rows + r) * cols + c].
@@ -1334,6 +1436,85 @@ mod tests {
         assert_eq!(manifest_targets(&m), vec![TargetKind::Srs]);
         assert_eq!(m.law.params.len(), 5);
         assert_eq!(m.law.diagnostics[0].key, "weight");
+    }
+
+    #[test]
+    fn mimo_shock_sdk_builtin_model_options_are_read_by_name() {
+        use crate::{Param, ParamValue};
+        use builtin::*;
+        let set = |mut p: Params, k: &str, v: ParamValue| {
+            p.0.iter_mut().find(|q| q.key == k).expect(k).value = v;
+            p
+        };
+        let d = defaults(&SHAPE);
+        let c = shape_config(&d).unwrap();
+        assert_eq!(c, ShapeConfig::default());
+        assert_eq!(c.model.model, ModelChoice::Frozen);
+        for name in ModelChoice::NAMES {
+            let p = set(
+                defaults(&SHAPE),
+                "model",
+                ParamValue::Choice((*name).into()),
+            );
+            assert_eq!(shape_config(&p).unwrap().model.model.name(), *name);
+        }
+        let p = set(defaults(&SHAPE), "model", ParamValue::Choice("warp".into()));
+        assert!(shape_config(&p).unwrap_err().contains("warp"));
+        let p = set(
+            defaults(&INVERSE),
+            "predicted_step",
+            ParamValue::Toggle(true),
+        );
+        assert!(inverse_config(&p).unwrap().predicted_step);
+        let _ = Param {
+            key: String::new(),
+            value: ParamValue::Toggle(false),
+        };
+    }
+
+    #[test]
+    fn mimo_shock_sdk_the_predicted_step_needs_a_tracked_model() {
+        use builtin::*;
+        let mut c = InverseConfig {
+            predicted_step: true,
+            ..InverseConfig::default()
+        };
+        let s = super::math::Setup {
+            fs_hz: 1024.0,
+            record_len: 64,
+            n_drives: 1,
+            n_controls: 1,
+            band_lo_hz: 10.0,
+            band_hi_hz: 400.0,
+            reference: vec![vec![0.0; 64]],
+            srs: None,
+            plant: super::math::PlantModel {
+                frf: MatrixStack::from_vec(33, 1, 1, vec![C64::new(1.0, 0.0); 33]).unwrap(),
+                trusted: vec![true; 33],
+            },
+        };
+        let e = c.build(s.clone(), f64::NAN).err().unwrap();
+        assert!(e.contains("tracked model"), "{e}");
+        c.predicted_step = false;
+        assert!(c.build(s, f64::NAN).is_ok());
+    }
+
+    #[test]
+    fn mimo_shock_sdk_count_modes_finds_separated_resonances() {
+        let lines = 513;
+        let fs = 1024.0;
+        let df = fs / 1024.0;
+        let mut h = MatrixStack::zeros(lines, 1, 1);
+        for l in 0..lines {
+            let w = l as f64 * df;
+            let mut v = C64::new(0.0, 0.0);
+            for fnm in [60.0, 150.0, 320.0] {
+                v += C64::new(fnm * fnm, 0.0) / C64::new(fnm * fnm - w * w, 2.0 * 0.02 * fnm * w);
+            }
+            h.set(l, 0, 0, v);
+        }
+        let band: Vec<bool> = (0..lines).map(|l| l > 10).collect();
+        assert_eq!(builtin::count_modes(&h, &band), 3);
     }
 
     #[test]

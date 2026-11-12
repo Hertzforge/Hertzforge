@@ -479,3 +479,59 @@ async fn mimo_shock_every_pulse_is_written_to_the_capture_root() {
     assert_eq!(back.pulses.len(), n);
     assert!(back.setup.is_some());
 }
+
+/// A contributor's law file, imported under a name of its own, is listed with
+/// the target kinds it accepts, chosen by its id and run on the simulator; the
+/// built-ins say which target kind each is the default for.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_an_imported_law_file_is_listed_chosen_and_run() {
+    let dir = std::env::temp_dir().join(format!("mimo_shock_import_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("my_pairing_idea.wasm");
+    std::fs::copy(law_file("hertzforge_law_mimo_shock_paired"), &copy).unwrap();
+    let addr = serve(Service::with_options(opts(Duration::from_secs(30)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 4).await;
+    let entry = c
+        .ok("laws.import", json!({"path": copy.display().to_string()}))
+        .await["law"]
+        .clone();
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(entry["world"], "shock_mimo", "{entry}");
+    let id = entry["id"].clone();
+    let list = c.ok("laws.list", json!({"world": "shock_mimo"})).await;
+    let laws = list["laws"].as_array().unwrap();
+    let mine = laws.iter().find(|l| l["id"] == id).expect("listed");
+    assert_eq!(mine["builtin"], false);
+    assert_eq!(mine["targets"], json!(["waveform", "srs"]));
+    assert_eq!(mine["default_for"], json!([]));
+    let default_of = |kind: &str| {
+        laws.iter()
+            .filter(|l| {
+                l["default_for"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|k| k == kind)
+            })
+            .map(|l| l["id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(default_of("waveform"), vec!["inverse".to_owned()]);
+    assert_eq!(default_of("srs"), vec!["shape".to_owned()]);
+    let mut cfg = spectrum(
+        &[20.0, 16.0, 20.0, 16.0],
+        &["positive"; 4],
+        "shock-linear-4x4",
+    );
+    cfg["control"]["law"] = json!({"id": id});
+    let run = configure(&mut c, cfg).await;
+    c.ok("mimo_shock.start", json!({})).await;
+    let end = wait_end(&mut c, &run).await;
+    println!("{}", end["end"]);
+    assert_eq!(end["law"]["id"], id, "{end}");
+    assert!(
+        !rows(&mut c).await.is_empty(),
+        "the imported law fired no pulse: {end}"
+    );
+}

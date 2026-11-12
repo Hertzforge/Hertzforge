@@ -280,10 +280,16 @@ impl Service {
         let id = w.law_id.clone();
         let given = w.law_params.clone();
         let budget = Duration::from_secs_f64((w.law_budget * w.spacing_s()).max(1e-3));
+        let seed_budget = Duration::from_secs_f64(w.seed_budget_s);
         let chosen = self
             .with_catalog(move |cat| {
                 Ok(crate::mimo_shock::laws::resolve(
-                    cat, &id, &given, budget, hardware,
+                    cat,
+                    &id,
+                    &given,
+                    budget,
+                    seed_budget,
+                    hardware,
                 ))
             })
             .await?;
@@ -808,6 +814,7 @@ impl Service {
                     &law_id,
                     &given,
                     Duration::from_secs(1),
+                    Duration::from_secs_f64(hertzforge_mimo_shock::DEFAULT_SEED_BUDGET_S),
                     false,
                 )
                 .map_err(|e| bad_choice(&law_id, &e.message))?;

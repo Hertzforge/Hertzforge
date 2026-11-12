@@ -83,6 +83,7 @@ fn setup() -> Setup {
         },
         drive_ceiling_v: vec![1.0; nd],
         ladder_db: vec![-6.0, 0.0],
+        identification_level_db: None,
     }
 }
 

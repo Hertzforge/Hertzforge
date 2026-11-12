@@ -170,6 +170,13 @@ interface mimo-shock-types {
         drive-ceiling-v: list<f64>,
         /// The level ladder, dB, ascending, ending at 0.
         ladder-db: list<f64>,
+        /// The level the plant was identified at, dB against full level: the
+        /// largest, over the controls, of the identification's measured peak
+        /// over the target's peak. A plant that changes with level was
+        /// measured here, so it is the first point of the level trend a law
+        /// may follow. Normally below the ladder's first level; not finite
+        /// when the core could not measure it.
+        identification-level-db: f64,
     }
 
     /// The core's judgement of one control on the last pulse.

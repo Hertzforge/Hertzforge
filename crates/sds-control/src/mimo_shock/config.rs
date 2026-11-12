@@ -113,6 +113,8 @@ pub struct WireMs {
     pub law_id: String,
     pub law_params: Map<String, Value>,
     pub law_budget: f64,
+    /// The time the law may take to be built and seeded, s.
+    pub seed_budget_s: f64,
     pub law_misses: u64,
     pub max_pulses: u64,
     pub max_growth_db: f64,
@@ -326,10 +328,7 @@ pub fn parse(config: &Value) -> Result<WireMs, MethodError> {
         review = s.opt_bool("review")?.unwrap_or(review);
     }
     let d = LawGuards::default();
-    let default_law = match target.kind() {
-        TargetKind::Waveform => "inverse",
-        TargetKind::Srs => "shape",
-    };
+    let default_law = hertzforge_mimo_shock_laws::BuiltinMimoShock::default_for(target.kind()).id();
     let mut w = WireMs {
         raw: config.clone(),
         title,
@@ -357,6 +356,7 @@ pub fn parse(config: &Value) -> Result<WireMs, MethodError> {
         law_id: default_law.into(),
         law_params: Map::new(),
         law_budget: d.budget_fraction,
+        seed_budget_s: hertzforge_mimo_shock::DEFAULT_SEED_BUDGET_S,
         law_misses: u64::from(d.max_misses),
         max_pulses: d.max_pulses,
         max_growth_db: 6.0,
@@ -389,6 +389,7 @@ pub fn parse(config: &Value) -> Result<WireMs, MethodError> {
             }
         }
         w.law_budget = s.f64_or("law_budget", w.law_budget)?;
+        w.seed_budget_s = s.f64_or("seed_budget_s", w.seed_budget_s)?;
         w.law_misses = s.opt_count("law_misses")?.unwrap_or(w.law_misses);
         w.max_pulses = s.opt_count("max_pulses")?.unwrap_or(w.max_pulses);
         w.max_growth_db = s.f64_or("max_growth_db", w.max_growth_db)?;
@@ -630,6 +631,8 @@ impl WireMs {
                 max_displacement_in: self.max_displacement_in,
                 verdict: self.verdict,
                 scaled_aborts: self.scaled_aborts,
+                seed_budget_s: self.seed_budget_s,
+                rehearse_law: true,
             },
             min_spacing_s: self.spacing_s(),
         }
@@ -997,6 +1000,13 @@ impl WireMs {
             self.law_budget,
             self.law_budget > 0.0 && self.law_budget <= 1.0,
             "above 0 and at most 1",
+        );
+        range(
+            &mut r,
+            "control.seed_budget_s",
+            self.seed_budget_s,
+            self.seed_budget_s > 0.0 && self.seed_budget_s <= 3600.0,
+            "above 0 and at most 3600",
         );
         for (f, v) in [
             ("control.max_growth_db", self.max_growth_db),

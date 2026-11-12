@@ -174,6 +174,11 @@ pub struct Setup {
     pub drive_ceiling_v: Vec<f64>,
     /// The level ladder, dB, ascending, ending at 0.
     pub ladder_db: Vec<f64>,
+    /// The level the plant was identified at, dB against full level: the
+    /// largest, over the controls, of the identification's measured peak over
+    /// the target's peak. `None` when it was not measured.
+    #[serde(default)]
+    pub identification_level_db: Option<f64>,
 }
 
 /// The rule a [`Setup`] broke.

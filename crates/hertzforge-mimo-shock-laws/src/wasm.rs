@@ -114,6 +114,7 @@ pub fn host_setup(s: &Setup) -> MimoShockSetup {
         },
         drive_ceiling_v: s.drive_ceiling_v.clone(),
         ladder_db: s.ladder_db.clone(),
+        identification_level_db: s.identification_level_db.unwrap_or(f64::NAN),
     }
 }
 
@@ -149,6 +150,7 @@ pub fn host_inputs(i: &PulseInputs) -> MimoShockInputs {
 pub struct WasmMimoShockLaw {
     instance: ShockMimoLawInstance,
     budget: Duration,
+    seed_budget: Duration,
     first_fault: Option<LawFault>,
     name: String,
     host_rule: HostRule,
@@ -161,16 +163,24 @@ pub struct WasmMimoShockLaw {
 pub type HostRule = std::sync::Arc<std::sync::Mutex<Option<&'static str>>>;
 
 impl WasmMimoShockLaw {
-    /// The law `instance`, called with `budget` as every call's deadline.
+    /// The law `instance`, called with `budget` as every call's deadline
+    /// (the seed's too; see [`WasmMimoShockLaw::with_seed_budget`]).
     pub fn new(instance: ShockMimoLawInstance, budget: Duration) -> Self {
         let name = instance.identity().name.clone();
         WasmMimoShockLaw {
             instance,
             budget,
+            seed_budget: budget,
             first_fault: None,
             name,
             host_rule: HostRule::default(),
         }
+    }
+
+    /// The seed's deadline: the seed is where a law fits its model.
+    pub fn with_seed_budget(mut self, seed_budget: Duration) -> Self {
+        self.seed_budget = seed_budget;
+        self
     }
 
     /// The contained instance (its guest output, its parameters).
@@ -217,7 +227,7 @@ impl MimoShockLaw for WasmMimoShockLaw {
         if let Some(f) = &self.first_fault {
             return Err(f.clone());
         }
-        let r = self.instance.seed(level_db, self.budget);
+        let r = self.instance.seed(level_db, self.seed_budget);
         self.answer(r)
     }
 
@@ -237,19 +247,32 @@ pub struct WasmMimoShockLawFactory {
     law: LoadedShockMimoLaw,
     params: Vec<Param>,
     budget: Duration,
+    seed_budget: Duration,
     host_rule: HostRule,
 }
 
 impl WasmMimoShockLawFactory {
     /// The law file `law` with `params` (checked against its manifest when a
-    /// run is built) and `budget` as the deadline of every call.
+    /// run is built) and `budget` as the deadline of every pulse's call; the
+    /// constructor and the seed each have the default seed budget
+    /// ([`hertzforge_mimo_shock::DEFAULT_SEED_BUDGET_S`], or `budget` when that
+    /// is longer).
     pub fn new(law: LoadedShockMimoLaw, params: Vec<Param>, budget: Duration) -> Self {
         WasmMimoShockLawFactory {
             law,
             params,
+            seed_budget: budget.max(Duration::from_secs_f64(
+                hertzforge_mimo_shock::DEFAULT_SEED_BUDGET_S,
+            )),
             budget,
             host_rule: HostRule::default(),
         }
+    }
+
+    /// The deadline of the constructor and of the seed, each.
+    pub fn with_seed_budget(mut self, seed_budget: Duration) -> Self {
+        self.seed_budget = seed_budget;
+        self
     }
 
     /// The host's name for the last output it refused from a law this factory
@@ -294,9 +317,10 @@ impl MimoShockLawFactory for WasmMimoShockLawFactory {
     fn build(&self, setup: &Setup) -> Result<Box<dyn MimoShockLaw + Send>, LawFault> {
         let instance = self
             .law
-            .instantiate(&host_setup(setup), &self.params, self.budget)
+            .instantiate(&host_setup(setup), &self.params, self.seed_budget)
             .map_err(|e| shock_mimo_law_fault(&e))?;
-        let mut law = WasmMimoShockLaw::new(instance, self.budget);
+        let mut law =
+            WasmMimoShockLaw::new(instance, self.budget).with_seed_budget(self.seed_budget);
         law.host_rule = self.host_rule.clone();
         Ok(Box::new(law))
     }

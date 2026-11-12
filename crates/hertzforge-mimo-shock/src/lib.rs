@@ -41,7 +41,7 @@ pub use builtin::builtin_factory;
 pub use engine::{
     ControlReport, DriveChannel, EndOutcome, EngineError, GuardPlan, IdentificationPlan,
     IdentificationReport, LadderPlan, LimitChannel, MimoShockConfig, MimoShockEngine, PulseReport,
-    RunEnd, RunState, SeedReport, ShotError, ShotPath, VerdictMode,
+    RunEnd, RunState, SeedReport, ShotError, ShotPath, VerdictMode, DEFAULT_SEED_BUDGET_S,
 };
 pub use law::{check_law_accepts, LawManifest, MimoShockLaw, MimoShockLawFactory};
 pub use limits::{MAX_CONTROLS, MAX_DRIVES, MAX_LAW_VALUES, MAX_RECORD_LEN, MIN_RECORD_LEN};

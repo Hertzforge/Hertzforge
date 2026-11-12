@@ -191,9 +191,31 @@ pub struct GuardPlan {
     /// lines (full level) apply either way.
     #[serde(default = "default_scaled_aborts")]
     pub scaled_aborts: bool,
+    /// The time the law may take to be built and to answer its seed, s: the
+    /// seed is where a law fits its model, before any pulse. Over it, the run
+    /// ends `seed_over_budget` before the first pulse.
+    #[serde(default = "default_seed_budget_s")]
+    pub seed_budget_s: f64,
+    /// Before the first pulse, a second copy of the law is built, seeded and
+    /// asked for one iteration on the identified plant's predicted response,
+    /// timed against the call budget: a law that cannot answer a pulse in time
+    /// ends the run `law_too_slow` before it starts, not in the middle.
+    #[serde(default = "default_rehearse_law")]
+    pub rehearse_law: bool,
 }
 
 fn default_scaled_aborts() -> bool {
+    true
+}
+
+/// The default seed budget, s.
+pub const DEFAULT_SEED_BUDGET_S: f64 = 60.0;
+
+fn default_seed_budget_s() -> f64 {
+    DEFAULT_SEED_BUDGET_S
+}
+
+fn default_rehearse_law() -> bool {
     true
 }
 
@@ -227,6 +249,8 @@ impl Default for GuardPlan {
             max_displacement_in: None,
             verdict: VerdictMode::All,
             scaled_aborts: true,
+            seed_budget_s: DEFAULT_SEED_BUDGET_S,
+            rehearse_law: true,
         }
     }
 }
@@ -804,6 +828,8 @@ pub struct MimoShockEngine {
     next_level: f64,
     next_used: bool,
     next_miss: Option<String>,
+    /// Seconds the law took to be built.
+    build_s: f64,
     next_values: Vec<LawValue>,
     /// The drives the last pulse played and its level.
     last_played: Option<(Vec<f64>, f64)>,
@@ -854,6 +880,7 @@ impl MimoShockEngine {
             next_level: 0.0,
             next_used: false,
             next_miss: None,
+            build_s: 0.0,
             next_values: Vec::new(),
             last_played: None,
             last_start: None,
@@ -1307,6 +1334,19 @@ impl MimoShockEngine {
             coherence: est.coherence[..nc * lines].to_vec(),
             trusted,
         };
+        // The level the plant was identified at, against full level: the
+        // largest identification peak over target peak among the controls.
+        let identification_level_db = {
+            let tp = self.target_peaks();
+            let l = report
+                .response_pk
+                .iter()
+                .zip(&tp)
+                .filter(|(_, t)| **t > 0.0)
+                .map(|(r, t)| 20.0 * (r / t).log10())
+                .fold(f64::NEG_INFINITY, f64::max);
+            l.is_finite().then_some(l)
+        };
         self.plant_all = Some(est.frf);
         self.ident = Some(report);
         let setup = Setup {
@@ -1321,6 +1361,7 @@ impl MimoShockEngine {
             plant,
             drive_ceiling_v: self.config.drives.iter().map(|d| d.ceiling_v).collect(),
             ladder_db: self.config.ladder.levels_db.clone(),
+            identification_level_db,
         };
         self.setup = Some(setup);
         if let Some((c, m)) = mean_coherence
@@ -1469,11 +1510,15 @@ impl MimoShockEngine {
             .as_ref()
             .map(|m| m.values.clone())
             .unwrap_or_default();
-        let budget = self
-            .config
-            .guards
-            .law
-            .call_budget_s(self.config.min_spacing_s);
+        let budget = match inputs {
+            // The seed's budget is the build's and the seed's together.
+            None => self.config.guards.seed_budget_s - self.build_s,
+            Some(_) => self
+                .config
+                .guards
+                .law
+                .call_budget_s(self.config.min_spacing_s),
+        };
         let law = self.running.as_mut().expect("built");
         let t0 = self.clock.now_s();
         let r = catch_unwind(AssertUnwindSafe(|| match inputs {
@@ -1630,7 +1675,9 @@ impl MimoShockEngine {
         }
         self.records.setup = Some(setup.clone());
         self.records.law = Some(self.law.describe());
+        let t_build = self.clock.now_s();
         let built = catch_unwind(AssertUnwindSafe(|| self.law.build(&setup)));
+        self.build_s = (self.clock.now_s() - t_build).max(0.0);
         let law = match built {
             Ok(Ok(l)) => l,
             Ok(Err(f)) => {
@@ -1692,10 +1739,42 @@ impl MimoShockEngine {
         });
         if let Some(f) = miss {
             // A seed that is not usable fires nothing.
-            self.finish(EndOutcome::LawFault, f.reason(), f.to_string());
+            match f {
+                LawFault::OverBudget { took_s, .. } => {
+                    let budget = self.config.guards.seed_budget_s;
+                    self.finish(
+                        EndOutcome::LawFault,
+                        "seed_over_budget",
+                        format!(
+                            "the control law took {:.1} s to build and seed, over its {budget:.1} s \
+                             seed budget",
+                            took_s + self.build_s
+                        ),
+                    );
+                }
+                f => {
+                    self.finish(EndOutcome::LawFault, f.reason(), f.to_string());
+                }
+            }
             return Ok(());
         }
         let o = outputs.expect("used");
+        if self.config.guards.rehearse_law {
+            if let Some((took, budget)) = self.rehearse(&setup, level, &o.drives) {
+                self.finish(
+                    EndOutcome::LawFault,
+                    "law_too_slow",
+                    format!(
+                        "the control law took {:.1} ms to answer a pulse on a rehearsal before \
+                         the run, over its {:.1} ms budget; raise the pulse spacing or choose a \
+                         faster law or option",
+                        took * 1e3,
+                        budget * 1e3
+                    ),
+                );
+                return Ok(());
+            }
+        }
         self.next_drive = o.drives;
         self.next_values = o.values;
         self.next_level = level;
@@ -1703,6 +1782,66 @@ impl MimoShockEngine {
         self.next_miss = None;
         self.state = RunState::Waiting;
         Ok(())
+    }
+
+    /// The rehearsal: a second copy of the law built and seeded, then timed on
+    /// one iteration whose response is the identified plant's prediction for
+    /// the seed. `Some((took, budget))` when that iteration is over the call
+    /// budget. Anything else the copy does is not judged here: the run judges
+    /// the law itself.
+    fn rehearse(&self, setup: &Setup, level: f64, seed_drives: &[f64]) -> Option<(f64, f64)> {
+        let budget = self
+            .config
+            .guards
+            .law
+            .call_budget_s(self.config.min_spacing_s);
+        let n = setup.record_len;
+        let nc = setup.n_controls;
+        let h = self.plant_all.as_ref()?;
+        let y = predict(h, seed_drives, n).ok()?;
+        let responses: Vec<Vec<f64>> = y.into_iter().take(nc).collect();
+        let srs = match &setup.target {
+            Target::Srs(t) => Some(
+                hertzforge_mimo_shock_law_math::srs::srs_rows(
+                    &responses,
+                    setup.fs_hz,
+                    &t.natural_hz,
+                    t.q,
+                    1.0,
+                )
+                .concat(),
+            ),
+            Target::Waveform(_) => None,
+        };
+        let inputs = PulseInputs {
+            pulse_index: 1,
+            level_db: level,
+            next_level_db: level,
+            drives: seed_drives.to_vec(),
+            responses: responses.concat(),
+            srs,
+            verdicts: vec![
+                crate::pulse::ControlVerdict {
+                    passed: false,
+                    error_db: 0.0,
+                    delay_s: 0.0,
+                    peak_ratio: 1.0,
+                };
+                nc
+            ],
+            limited: false,
+        };
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let mut law = self.law.build(setup).ok()?;
+            law.seed(level).ok()?;
+            let t0 = self.clock.now_s();
+            let _ = law.iterate(&inputs);
+            Some((self.clock.now_s() - t0).max(0.0))
+        }));
+        match r {
+            Ok(Some(took)) if took > budget => Some((took, budget)),
+            _ => None,
+        }
     }
 
     /// The reachable fraction and the floor of each control.

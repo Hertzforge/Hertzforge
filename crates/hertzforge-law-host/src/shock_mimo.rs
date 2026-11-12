@@ -761,6 +761,7 @@ mod tests {
             },
             drive_ceiling_v: vec![1.0; 3],
             ladder_db: vec![-6.0, 0.0],
+            identification_level_db: -26.0,
         }
     }
 

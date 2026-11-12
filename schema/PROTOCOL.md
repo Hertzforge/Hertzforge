@@ -2728,15 +2728,15 @@ views travels as a binary frame.
                       "rise_frac":null,"fall_frac":null,
                       "compensation":{"shape":"rectangular","pre_frac":4,"post_frac":4,
                                       "symmetric":true}}, ...]},
- "timing":{"mode":"free","window_s":0.002},
+ "timing":{"mode":"free","window_s":0.002,"delays_s":null},
  "verdict":"all",
  "acquisition":{"fs_hz":12800,"record_len":8192,"band_hz":[5,2500],"lead_s":0.05},
  "schedule":{"mode":"auto","levels_db":[-12,-9,-6,-3,-1.5,0],"max_pulses_per_level":3,
              "full_level_pulses":3},
  "spacing":{"cooling_s":1,"settling_s":0.5,"compute_s":0.25},
  "identification":{"drive_vrms":0.05,"frames":64,"coherence_floor":0.5,"review":true},
- "control":{"law":{"id":"inverse","params":{}},"law_budget":0.25,"law_misses":3,
-            "max_pulses":100,"max_growth_db":6,"max_band_growth_db":10,"divergence_pulses":3,
+ "control":{"law":{"id":"inverse","params":{}},"law_budget":0.25,"seed_budget_s":60,
+            "law_misses":3,"max_pulses":100,"max_growth_db":6,"max_band_growth_db":10,"divergence_pulses":3,
             "divergence_drive_ratio":1.3,"first_drive_ratio":2,"abort_db":null,
             "scaled_aborts":true,"max_velocity_ips":null,"max_displacement_in":null},
  "simulator":{"plant":null},
@@ -2781,7 +2781,8 @@ An SRS target replaces `target`:
 | `identification.coherence_floor` | 0.5 | Lines where a control's multiple coherence is under it are not trusted (0 to 1) |
 | `identification.review` | true | Hold for the operator after identification (`review`) |
 | `control.law` | `inverse` for `waveform`, `shape` for `srs` | The control law by catalog `id` (world `shock_mimo`; built in: `inverse`, `shape`, `paired`) and values for the parameters its entry declares (`params` by key; defaults fill the rest). A law whose entry does not accept the target kind is refused `law_wrong_target` |
-| `control.law_budget`, `law_misses`, `max_pulses` | 0.25, 3, 100 | As Classical Shock's. A law that panics ends the run at once (`law_fault`, `panicked`) |
+| `control.law_budget`, `law_misses`, `max_pulses` | 0.25, 3, 100 | As Classical Shock's. A law that panics ends the run at once (`law_fault`, `panicked`). Before the first pulse a second copy of the law is built, seeded and timed on one iteration over the identified plant's predicted response: a law that cannot answer a pulse inside `law_budget` ends the run then (`law_fault`, `law_too_slow`), not in the middle of the ladder |
+| `control.seed_budget_s` | 60 | The time the law may take to be built and to answer its seed, seconds (above 0, at most 3600): the seed is where a law fits its model of the plant. Over it, the run ends before the first pulse (`law_fault`, `seed_over_budget`) |
 | `control.max_growth_db` | 6 | The most any drive's peak may grow from one pulse to the next beyond the level step, dB (above 0, at most 40); an answer over it is not used (`peak_rise`) |
 | `control.max_band_growth_db` | 10 | The same for any third-octave band of a drive (above 0, at most 40; `bin_rise`) |
 | `control.divergence_pulses` | 3 | Pulses in a row at one level with the waveform error rising that end the run in the controlled stop (`divergence`); 1 to 100 |
@@ -2800,11 +2801,11 @@ are refused `config_invalid` with the items, located by `field` or `channel`.
 
 ```
 {"grid":{"fs_hz":12800,"record_len":8192,"lines":4097,"actual":false},
- "controls":[{"channel":1,"peak":20,"rms":1.0841}, ...],
+ "controls":[{"channel":1,"peak":20}, ...],
  "spacing_s":1,"call_budget_s":0.25}
 ```
 
-`controls` holds each control's full-level target: its peak (EU) and its rms over the record.
+`controls` holds each control's full-level target peak (EU).
 `views` are each control's **Target** *n* view at full level (*n* its table index), and for an
 `srs` target its **Target SRS** *n* view.
 
@@ -5536,8 +5537,10 @@ folder.
 - A MIMO Shock law's entry has `world: "shock_mimo"`, its `diagnostics` scalar values (`layout`
   null), at most 8, reported once per call, and `targets`: the target kinds it accepts
   (`waveform`, `srs` or both). The built-ins `inverse`, `shape` and `paired` come first, in that
-  order. `laws.import` refuses a law file of the `shock-mimo` world with the reason that this
-  version cannot run one.
+  order. `default_for` lists the target kinds a law is the default for, the law a new setup of
+  that kind opens on (`["waveform"]` on `inverse`, `["srs"]` on `shape`, empty on every other
+  entry). `laws.import` takes a `shock-mimo` law file like any other; it runs on the simulator at
+  once and drives hardware after a passing `laws.check`.
 - `check.hardware` says whether the law may drive hardware: a built-in law always may; an
   imported law only with a passing check record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.

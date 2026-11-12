@@ -4,6 +4,7 @@
 //! the mathematics.
 
 use hertzforge_law_host::{Param, ParamValue};
+use hertzforge_law_sdk::shock_mimo::builtin::{ModelChoice, ShapeConfig};
 use hertzforge_law_sdk::shock_mimo::math::delay::LeastEffort;
 use hertzforge_law_sdk::shock_mimo::math::shape::{Anchor, SeedTiming, ShapeParams};
 use hertzforge_mimo_shock::TargetKind;
@@ -88,6 +89,72 @@ fn mimo_shock_shape_parity_sees_each_option_the_law_file_ignores() {
     let bench = Bench::four_by_four(TargetKind::Srs);
     for (what, _, native_params) in sets().into_iter().skip(1) {
         let mut native = MathLaw::shape(&bench.setup, native_params).unwrap();
+        let r = law_file_against(FILE, Vec::new(), &mut native, &bench).unwrap();
+        assert!(
+            r.worst_rel > 1e-6 || r.worst_value_rel > 1e-6,
+            "{what}: {r:?}"
+        );
+    }
+}
+
+fn model_sets() -> Vec<(&'static str, Vec<Param>, ShapeConfig)> {
+    let p = |key: &str, value| Param {
+        key: key.into(),
+        value,
+    };
+    let with = |m: ModelChoice, clamp: f64| {
+        let mut c = ShapeConfig::default();
+        c.model.model = m;
+        c.gain_clamp_db = clamp;
+        c
+    };
+    let mut v = Vec::new();
+    for m in [
+        ModelChoice::Secant,
+        ModelChoice::Track,
+        ModelChoice::TrackSecant,
+    ] {
+        v.push((
+            m.name(),
+            vec![p("model", ParamValue::Choice(m.name().into()))],
+            with(m, 0.0),
+        ));
+    }
+    v.push((
+        "gain clamp",
+        vec![p("gain_clamp_db", ParamValue::Number(1.0))],
+        with(ModelChoice::Frozen, 1.0),
+    ));
+    let mut c = with(ModelChoice::Track, 12.0);
+    c.model.modes = 4;
+    c.model.from_identification = true;
+    v.push((
+        "track, 4 modes, from the identification, clamp",
+        vec![
+            p("model", ParamValue::Choice("track".into())),
+            p("modes", ParamValue::Integer(4)),
+            p("track_from_identification", ParamValue::Toggle(true)),
+            p("gain_clamp_db", ParamValue::Number(12.0)),
+        ],
+        c,
+    ));
+    v
+}
+
+#[test]
+fn mimo_shock_shape_model_options_law_file_gives_the_native_drives() {
+    for (what, file_params, config) in model_sets() {
+        let bench = Bench::four_by_four(TargetKind::Srs);
+        let mut native = MathLaw::shape_with(&bench.setup, &config).unwrap();
+        let r = law_file_against(FILE, file_params, &mut native, &bench).unwrap();
+        println!("shape {what}: {r:?}");
+        assert_eq!(r.calls, 6);
+        assert!(r.same_keys, "{r:?}");
+        assert!(r.worst_rel <= 1e-12, "{what}: {r:?}");
+        assert!(r.worst_value_rel <= 1e-12, "{what}: {r:?}");
+        // The option changes the mathematics: the law file at its defaults
+        // does not give these drives.
+        let mut native = MathLaw::shape_with(&bench.setup, &config).unwrap();
         let r = law_file_against(FILE, Vec::new(), &mut native, &bench).unwrap();
         assert!(
             r.worst_rel > 1e-6 || r.worst_value_rel > 1e-6,

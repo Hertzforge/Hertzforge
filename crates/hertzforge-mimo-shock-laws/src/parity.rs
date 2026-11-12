@@ -5,6 +5,7 @@
 //! mathematics runs natively ([`MathLaw`]), and how a native built-in is shown
 //! to match its law file.
 
+use hertzforge_law_sdk::shock_mimo::builtin::{InverseConfig, ShapeConfig};
 use hertzforge_law_sdk::shock_mimo::math::{self, LawSteps};
 use hertzforge_mimo_shock::{
     ControlVerdict, MimoShockLaw, PulseInputs, PulseOutputs, Setup, Target,
@@ -89,15 +90,39 @@ impl MathLaw {
         }
     }
 
-    /// `inverse` with `params`.
+    /// `inverse` with `params` and the other options at their defaults.
     pub fn inverse(setup: &Setup, params: math::inverse::InverseParams) -> Result<Self, String> {
-        let law = math::inverse::InverseLaw::new(math_setup(setup), params)?;
+        Self::inverse_with(
+            setup,
+            &InverseConfig {
+                params,
+                ..InverseConfig::default()
+            },
+        )
+    }
+
+    /// `inverse` as `config` builds it (the built-in's own constructor).
+    pub fn inverse_with(setup: &Setup, config: &InverseConfig) -> Result<Self, String> {
+        let id = setup.identification_level_db.unwrap_or(f64::NAN);
+        let law = config.build(math_setup(setup), id)?;
         Ok(Self::new("inverse", setup, Box::new(law)))
     }
 
-    /// `shape` with `params`.
+    /// `shape` with `params` and the other options at their defaults.
     pub fn shape(setup: &Setup, params: math::shape::ShapeParams) -> Result<Self, String> {
-        let law = math::shape::ShapeLaw::new(math_setup(setup), params)?;
+        Self::shape_with(
+            setup,
+            &ShapeConfig {
+                params,
+                ..ShapeConfig::default()
+            },
+        )
+    }
+
+    /// `shape` as `config` builds it (the built-in's own constructor).
+    pub fn shape_with(setup: &Setup, config: &ShapeConfig) -> Result<Self, String> {
+        let id = setup.identification_level_db.unwrap_or(f64::NAN);
+        let law = config.build(math_setup(setup), id)?;
         Ok(Self::new("shape", setup, Box::new(law)))
     }
 
@@ -367,6 +392,7 @@ pub mod bench {
                 },
                 drive_ceiling_v: vec![1.0e3; nd],
                 ladder_db: vec![-12.0, -6.0, 0.0],
+                identification_level_db: Some(-12.0),
             };
             Bench { setup, plant }
         }

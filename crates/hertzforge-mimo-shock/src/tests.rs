@@ -44,6 +44,7 @@ fn waveform_setup() -> Setup {
         plant: plant(NC, ND, LEN),
         drive_ceiling_v: vec![1.0; ND],
         ladder_db: vec![-12.0, -9.0, -6.0, -3.0, 0.0],
+        identification_level_db: None,
     }
 }
 

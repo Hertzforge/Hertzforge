@@ -71,6 +71,7 @@ fn setup(kind: TargetKind) -> MimoShockSetup {
         },
         drive_ceiling_v: vec![1.0, 2.0, 3.0],
         ladder_db: vec![-6.0, 0.0],
+        identification_level_db: f64::NAN,
     }
 }
 
