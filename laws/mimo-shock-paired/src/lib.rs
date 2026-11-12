@@ -218,3 +218,6 @@ impl Paired {
 }
 
 export_shock_mimo_law!(Paired);
+
+#[cfg(test)]
+mod tests;

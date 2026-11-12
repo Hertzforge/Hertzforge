@@ -17,6 +17,6 @@ hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
 [dev-dependencies]
 # The parity test runs the law file through the law host beside the same
 # mathematics called natively, over a scripted run on the reference plant.
-hertzforge-mimo-shock-laws = { path = "../../crates/hertzforge-mimo-shock-laws" }
+hertzforge-mimo-shock-laws = { path = "../../crates/hertzforge-mimo-shock-laws", features = ["reference-plant"] }
 hertzforge-mimo-shock = { path = "../../crates/hertzforge-mimo-shock" }
-hertzforge-mimo-shock-law-math = { path = "../../crates/hertzforge-mimo-shock-law-math", features = ["reference-plant"] }
+hertzforge-law-host = { path = "../../crates/hertzforge-law-host" }

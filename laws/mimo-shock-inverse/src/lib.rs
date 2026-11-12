@@ -29,3 +29,6 @@ impl ShockMimoLaw for InverseFile {
 }
 
 export_shock_mimo_law!(InverseFile);
+
+#[cfg(test)]
+mod tests;

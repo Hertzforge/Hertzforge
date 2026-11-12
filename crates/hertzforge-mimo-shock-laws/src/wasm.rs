@@ -279,7 +279,15 @@ impl MimoShockLawFactory for WasmMimoShockLawFactory {
             name: id.name.clone(),
             version: id.version.clone(),
             sha256: Some(id.sha256.clone()),
-            params: params_json(&self.params),
+            // Every declared parameter, the defaults filled in. A per-channel
+            // parameter the operator did not set has one value here: its
+            // count is the run's control count, known only when it is built.
+            params: params_json(
+                &self
+                    .law
+                    .resolve_params(&self.params, 1)
+                    .unwrap_or_else(|_| self.params.clone()),
+            ),
         }
     }
 

@@ -29,3 +29,6 @@ impl ShockMimoLaw for ShapeFile {
 }
 
 export_shock_mimo_law!(ShapeFile);
+
+#[cfg(test)]
+mod tests;

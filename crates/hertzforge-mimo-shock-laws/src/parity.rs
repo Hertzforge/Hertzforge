@@ -279,3 +279,152 @@ impl ParityReport {
         Ok(())
     }
 }
+
+/// A scripted run on the law mathematics' exact reference plant (feature
+/// `reference-plant`): a 4 x 4 coupled structure whose modes soften and damp
+/// with level, a target at every control, and a law file run beside a native
+/// law over the same pulses.
+#[cfg(feature = "reference-plant")]
+pub mod bench {
+    use super::{compare_laws, ParityReport};
+    use crate::{load_law_file, WasmMimoShockLawFactory};
+    use hertzforge_law_host::{HostConfig, LawHost, Param};
+    use hertzforge_law_sdk::shock_mimo::math::reference_plant::{
+        reference_shock, srs_grid_hz, ModalPlant,
+    };
+    use hertzforge_law_sdk::shock_mimo::math::{level_scale, spectrum, srs};
+    use hertzforge_mimo_shock::{
+        MimoShockLaw, MimoShockLawFactory, PlantStack, Setup, SrsTarget, Target, TargetKind,
+        Timing, WaveformTarget,
+    };
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    /// Sample rate of the bench, Hz.
+    pub const FS_HZ: f64 = 8192.0;
+    /// Record length of the bench.
+    pub const RECORD_LEN: usize = 2048;
+    /// The pulses of a parity run, dB: two at each of three levels, so the
+    /// run holds a level and steps it.
+    pub const PARITY_LEVELS: [f64; 6] = [-12.0, -12.0, -6.0, -6.0, 0.0, 0.0];
+
+    /// The bench: a run's setup and the plant behind it.
+    pub struct Bench {
+        /// The setup a law is built with.
+        pub setup: Setup,
+        /// The plant the pulses are played through.
+        pub plant: ModalPlant,
+    }
+
+    impl Bench {
+        /// The 4 x 4 reference plant (frequencies down 5 % and damping up by
+        /// half at full level), identified exactly at -12 dB, with the
+        /// reference shock as every control's target, for `kind`.
+        pub fn four_by_four(kind: TargetKind) -> Bench {
+            let plant = ModalPlant::four_by_four(0.05, 2.0);
+            let r = reference_shock(FS_HZ, RECORD_LEN);
+            let (nc, nd) = (plant.n_c, plant.n_d);
+            // Each control a little different, so a law cannot pass by
+            // treating them alike.
+            let rows: Vec<Vec<f64>> = (0..nc)
+                .map(|c| r.iter().map(|v| v * (1.0 - 0.1 * c as f64)).collect())
+                .collect();
+            let waveforms: Vec<f64> = rows.iter().flatten().copied().collect();
+            let lines = RECORD_LEN / 2 + 1;
+            let target = match kind {
+                TargetKind::Waveform => Target::Waveform(WaveformTarget { records: waveforms }),
+                TargetKind::Srs => {
+                    let grid = srs_grid_hz();
+                    let points = srs::srs_rows(&rows, FS_HZ, &grid, 10.0, 1.0);
+                    Target::Srs(SrsTarget {
+                        natural_hz: grid,
+                        q: 10.0,
+                        points: points.into_iter().flatten().collect(),
+                        tol_lo_db: -1.5,
+                        tol_hi_db: 3.0,
+                        waveforms,
+                        components: vec![Vec::new(); nc],
+                    })
+                }
+            };
+            let setup = Setup {
+                fs_hz: FS_HZ,
+                record_len: RECORD_LEN,
+                n_drives: nd,
+                n_controls: nc,
+                band_lo_hz: 50.0,
+                band_hi_hz: 3000.0,
+                target,
+                timing: Timing::Free { window_s: 0.002 },
+                plant: PlantStack {
+                    frf: plant.frf(level_scale(-12.0), FS_HZ, RECORD_LEN),
+                    coherence: vec![1.0; nc * lines],
+                    trusted: vec![true; lines],
+                },
+                drive_ceiling_v: vec![1.0e3; nd],
+                ladder_db: vec![-12.0, -6.0, 0.0],
+            };
+            Bench { setup, plant }
+        }
+
+        /// The plant as [`compare_laws`] calls it: flat drives as played and
+        /// their level to flat responses.
+        pub fn respond(&self, drives: &[f64], level_db: f64) -> Result<Vec<f64>, String> {
+            let rows: Vec<Vec<f64>> = drives
+                .chunks(self.setup.record_len)
+                .map(<[f64]>::to_vec)
+                .collect();
+            let y = self.plant.respond(&rows, level_scale(level_db), FS_HZ)?;
+            Ok(y.into_iter().flatten().collect())
+        }
+
+        /// The rms of every target together, at full level.
+        pub fn target_rms(&self) -> f64 {
+            let rows: Vec<Vec<f64>> = self
+                .setup
+                .target
+                .waveforms()
+                .chunks(self.setup.record_len)
+                .map(<[f64]>::to_vec)
+                .collect();
+            spectrum::rms_all(&rows)
+        }
+    }
+
+    /// The built law file `<crate_name>.wasm` (as `scripts/build_laws.sh`
+    /// leaves it under the target directory), found from the running test.
+    pub fn law_file(crate_name: &str) -> PathBuf {
+        let file = format!("{crate_name}.wasm");
+        let exe = std::env::current_exe().expect("the test binary knows its own path");
+        for dir in exe.ancestors().skip(1).take(4) {
+            let p = dir.join("wasm32-wasip2").join("release").join(&file);
+            if p.is_file() {
+                return p;
+            }
+        }
+        panic!("the law file {file} is not built. Run `bash scripts/build_laws.sh`.");
+    }
+
+    /// Run the law file `crate_name` with `params` beside `native` over
+    /// [`PARITY_LEVELS`] on `bench`.
+    pub fn law_file_against(
+        crate_name: &str,
+        params: Vec<Param>,
+        native: &mut dyn MimoShockLaw,
+        bench: &Bench,
+    ) -> Result<ParityReport, String> {
+        let host = LawHost::new(HostConfig::default()).map_err(|e| e.to_string())?;
+        let law = load_law_file(&host, &law_file(crate_name)).map_err(|e| e.to_string())?;
+        let factory = WasmMimoShockLawFactory::new(law, params, Duration::from_secs(60));
+        let mut file = factory
+            .build(&bench.setup)
+            .map_err(|f| format!("{} ({f:?})", f.reason()))?;
+        compare_laws(
+            file.as_mut(),
+            native,
+            &bench.setup,
+            &PARITY_LEVELS,
+            &mut |d, l| bench.respond(d, l),
+        )
+    }
+}

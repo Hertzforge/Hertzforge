@@ -1166,9 +1166,9 @@ dependencies = [
 name = "hertzforge-law-mimo-shock-inverse"
 version = "0.1.4"
 dependencies = [
+ "hertzforge-law-host",
  "hertzforge-law-sdk",
  "hertzforge-mimo-shock",
- "hertzforge-mimo-shock-law-math",
  "hertzforge-mimo-shock-laws",
 ]
 
@@ -1176,9 +1176,9 @@ dependencies = [
 name = "hertzforge-law-mimo-shock-paired"
 version = "0.1.4"
 dependencies = [
+ "hertzforge-law-host",
  "hertzforge-law-sdk",
  "hertzforge-mimo-shock",
- "hertzforge-mimo-shock-law-math",
  "hertzforge-mimo-shock-laws",
 ]
 
@@ -1186,9 +1186,9 @@ dependencies = [
 name = "hertzforge-law-mimo-shock-shape"
 version = "0.1.4"
 dependencies = [
+ "hertzforge-law-host",
  "hertzforge-law-sdk",
  "hertzforge-mimo-shock",
- "hertzforge-mimo-shock-law-math",
  "hertzforge-mimo-shock-laws",
 ]
 
