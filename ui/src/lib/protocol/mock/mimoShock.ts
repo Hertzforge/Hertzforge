@@ -98,12 +98,16 @@ const LAWS: MimoShockLawEntry[] = [
 	builtIn(
 		'inverse',
 		'inverse',
-		'Builds every drive through the regularized inverse of the identified plant, correcting a share of the error between pulses.',
+		"Builds every drive through the regularized inverse of the identified plant, correcting a fraction of the waveform error after each pulse.",
 		['waveform', 'srs'],
 		[
-			{ key: 'gain', label: 'Correction gain', help: 'The share of the error each pulse corrects.', kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 1 },
-			{ key: 'lambda_rel', label: 'Regularization', help: 'How strongly the inverse is held back where the plant barely answers.', kind: 'number', unit: '', min: 0.00001, max: 0.1, step: 0.0005, default: 0.001 },
-			{ key: 'refresh', label: 'Refresh the model', help: 'Move the identified plant toward what the last pulse showed.', kind: 'toggle', default: false }
+			{ key: 'lambda_rel', label: 'Regularization', help: "Regularization of the inverse on each line, relative to that line's largest singular value.", kind: 'number', unit: '', min: 0.00001, max: 1, step: 0.0005, default: 0.001 },
+			{ key: 'gain', label: 'Correction gain', help: "The fraction of each pulse's error corrected.", kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 1 },
+			{ key: 'watchdog', label: 'Line gain cut', help: 'Halve the gain on a line whose smoothed error grew.', kind: 'toggle', default: true },
+			{ key: 'refresh', label: 'Refresh the model', help: 'After every pulse, move the model the least amount that reproduces that pulse.', kind: 'toggle', default: false },
+			{ key: 'refresh_mu', label: 'Refresh step', help: 'How far the refresh moves the model.', kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 0.5 },
+			{ key: 'align', label: 'Align', help: "Remove each control's best-fit delay before the error is formed.", kind: 'toggle', default: false },
+			{ key: 'align_max_ms', label: 'Largest delay removed', help: 'The largest delay the alignment removes.', kind: 'number', unit: 'ms', min: 0, max: 20, step: 0.5, default: 2 }
 		],
 		[
 			{ key: 'drive_rms_full_level', label: 'Drive rms at full level', unit: 'V', help: 'The drives at full level, rms.', layout: null },
@@ -113,17 +117,30 @@ const LAWS: MimoShockLawEntry[] = [
 	builtIn(
 		'shape',
 		'shape',
-		"Corrects each control's target from its SRS ratio, leaving the model's phase alone.",
+		"Shapes each control's target by its SRS ratio after every pulse; no waveform error is formed.",
 		['srs'],
-		[{ key: 'max_step_db', label: 'Largest change per pulse', help: 'The most any control\'s correction may change in one pulse.', kind: 'number', unit: 'dB', min: 1, max: 12, step: 0.5, default: 6 }],
+		[
+			{ key: 'lambda_rel', label: 'Regularization', help: "Regularization of the inverse on each line, relative to that line's largest singular value.", kind: 'number', unit: '', min: 0.00001, max: 1, step: 0.0005, default: 0.001 },
+			{ key: 'max_step_db', label: 'Largest change per pulse', help: "The largest change of a control's gain in one pulse.", kind: 'number', unit: 'dB', min: 0.5, max: 12, step: 0.5, default: 6 },
+			{ key: 'delay_relax', label: 'Delay relaxation', help: 'How far each delay moves toward the measured one per pulse; 0 holds them.', kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 0.5 },
+			{ key: 'delay_bound_ms', label: 'Delay bound', help: "Each control's delay stays this close to the first control's.", kind: 'number', unit: 'ms', min: 0, max: 20, step: 0.5, default: 2 },
+			{ key: 'anchor', label: 'Anchor', help: 'Shape the target, or the measured response with its own phase.', kind: 'choice', options: ['target', 'measured'], default: 'target' },
+			{ key: 'refresh', label: 'Refresh the model', help: 'After every pulse, move the model the least amount that reproduces that pulse.', kind: 'toggle', default: false },
+			{ key: 'refresh_mu', label: 'Refresh step', help: 'How far the refresh moves the model.', kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 1 },
+			{ key: 'seed_timing', label: 'Seed timing', help: 'Start the delays at zero, or where the least drive and unreachable energy are needed.', kind: 'choice', options: ['zero', 'least_effort'], default: 'zero' }
+		],
 		[{ key: 'weight', label: 'Weight', unit: '', help: 'The share of the SRS ratio taken this pulse.', layout: null }]
 	),
 	builtIn(
 		'paired',
 		'paired',
-		"Pairs each control with one drive and scales that drive's spectrum by the wanted over measured magnitude. No plant model.",
+		"Pairs each control with one drive and scales that drive's spectrum by the smoothed ratio of wanted to measured magnitude. No plant model.",
 		['waveform', 'srs'],
-		[{ key: 'smoothing', label: 'Smoothing', help: 'Lines the ratio is smoothed over.', kind: 'integer', unit: 'lines', min: 1, max: 64, step: 1, default: 8 }],
+		[
+			{ key: 'weight', label: 'Weight', help: 'The power on the ratio.', kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 0.8 },
+			{ key: 'smooth_lines', label: 'Smoothing', help: 'Lines the ratio is smoothed over.', kind: 'integer', unit: 'lines', min: 1, max: 101, step: 2, default: 15 },
+			{ key: 'max_step_db', label: 'Largest change per pulse', help: 'The most a line may change in one pulse.', kind: 'number', unit: 'dB', min: 0.5, max: 12, step: 0.5, default: 6 }
+		],
 		[{ key: 'ratio_db', label: 'Largest ratio', unit: 'dB', help: 'The largest correction applied.', layout: null }]
 	)
 ];
