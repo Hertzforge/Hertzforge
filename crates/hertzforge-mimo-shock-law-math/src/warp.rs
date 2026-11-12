@@ -466,6 +466,14 @@ impl WarpModel {
         self.fs_hz
     }
 
+    /// Each knot's frequency, Hz, in the order of [`WarpModel::parameters`].
+    pub fn knot_hz(&self) -> Vec<f64> {
+        let k0 = self.opts.band_lo_hz.log2();
+        (0..self.nk)
+            .map(|k| 2f64.powf(k0 + k as f64 / self.opts.knots_per_octave))
+            .collect()
+    }
+
     fn fields(&self, x: &[f64], hat: &Hat) -> (f64, f64) {
         let nk = self.nk;
         let ainv = 1.0 + hat.w[0] * x[hat.k[0]] + hat.w[1] * x[hat.k[1]];

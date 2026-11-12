@@ -65,6 +65,7 @@ pub mod provider;
 pub mod refresh;
 pub mod robust;
 pub mod shape;
+pub mod softening;
 pub mod spectrum;
 pub mod srs;
 pub mod warp;
