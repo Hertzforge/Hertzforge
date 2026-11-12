@@ -3475,7 +3475,10 @@ guards, and `no_floor`, `too_many_floors`, `unknown_part_kind`, `duplicate_part_
   stop (`law_fault`, the trip naming the role and, for a tone, the tone).
 - **`mixed.level`** and **`mixed.mode`** are `random.level` and `random.mode` for Mixed Mode,
   with the same refusals (`manual_mode_required`, `not_a_rung`): every part moves by the same dB
-  over `level_ramp_s`. A level change re-opens each tone's settle window, as Sine's does.
+  over `level_ramp_s`. A level change re-opens each tone's settle window, as Sine's does. A
+  `delta_db` steps from the level the run is going to, whether the run has taken that level up
+  yet or not, so two steps asked for in quick succession add up; the answer's `level_db` is the
+  level taken, held to the schedule's range.
 - **`mixed.hold`** freezes the test's progress: parts time, every part's schedule clock and
   window, and the level clock stop, and every part stays at its frequency and level, still under
   control (`held` true). **`mixed.resume`** starts them again. Neither is a run state, and
@@ -3485,7 +3488,9 @@ guards, and `no_floor`, `too_many_floors`, `unknown_part_kind`, `duplicate_part_
   its own schedule clock; one switched off holds it. Switching on a part whose window has closed
   or whose `end` has been reached, or switching off the floor, is refused `part_refused` with
   `detail.id` and `detail.why` (`unknown_part`, `floor`, `window_closed`, `schedule_ended`);
-  asking for the state a part is already in answers with it, unchanged.
+  asking for the state a part is already in answers with it, unchanged. The state a part is in
+  counts every switch already answered, whether the run has taken it up yet or not: `off`
+  followed at once by `on` leaves the part on, and `on` followed at once by `off` leaves it off.
 - **`mixed.adjust`** is `sine.adjust` for the tone law: it changes one live parameter of every
   tone's law instance, from the next tick, and is logged (`law`). Refused `adjust_refused` as
   Sine's. The floor law has no live parameters.
