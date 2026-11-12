@@ -46,7 +46,7 @@ export function verdictGrid(rows: readonly MimoShockPulseRow[], controls: readon
 		shown.map((r): GridCell | null => {
 			const c = r.controls.find((x) => x.channel === ch);
 			if (!c) return null;
-			const scaledOver = (r.scaled_crossings ?? []).some((x) => x.channel === ch);
+			const scaledOver = c.scaled_margin_db > 0;
 			const why = c.reasons.map((x) => FAIL_WORDS[x]?.word ?? x).join(', ');
 			return {
 				pulse: r.index,

@@ -82,7 +82,7 @@ const builtIn = (id: string, name: string, summary: string, targets: ('waveform'
 	world: 'shock_mimo' as MimoShockLawEntry['world'],
 	builtin: true,
 	name,
-	version: '0.1.4',
+	version: '0.1.0',
 	author: 'Hertzforge',
 	summary,
 	sha256: null,
@@ -297,7 +297,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 				run_id: null, state: 'unconfigured', phase: 'idle', title: null, source: null, station: null, grid: null, clock: null,
 				target: null, timing: null, verdict: null, mode: null, levels_db: null, level_db: null, rung: null,
 				pulses: { fired: 0, passed: 0, at_level: 0, of_level: 0 }, next_pulse_s: null, elapsed_s: null,
-				identification: null, review: null, last_pulse: null, law: null, end: null, scaled_aborts: true
+				identification: null, review: null, last_pulse: null, law: null, end: null, scaled_aborts: true, notice: null
 			};
 		}
 		const started = r.state !== 'configured';
@@ -325,7 +325,8 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			last_pulse: r.rows.at(-1) ?? null,
 			law: { id: r.law.id, name: r.law.name, version: r.law.version, sha256: r.law.sha256, params: r.lawParams, misses: 0 },
 			end: r.end,
-			scaled_aborts: r.config.control?.scaled_aborts ?? true
+			scaled_aborts: r.config.control?.scaled_aborts ?? true,
+			notice: (r.config.control?.scaled_aborts ?? true) ? null : "Level-scaled aborts are off: a pulse over its level's abort line is flagged and judged failing, and only the full-level (absolute) lines end the run."
 		};
 	}
 
@@ -478,10 +479,10 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 		const n = r.rows.length;
 		// the severe plant: control 2 grows once the level reaches -6 dB
 		if (severe && level >= -6 - 1e-9 && r.errors.length > 1) r.errors[1] = Math.max(r.errors[1], 1.0) + 1.4;
-		if (host.absoluteAbort && r.rung === 1) r.errors[0] = absLineOf(r) + 0.6;
+		if (host.absoluteAbort && r.rung === 1) r.errors[0] = absLineOf(r) - level + 0.6;
 		const windowS = r.config.timing?.window_s ?? 0.002;
 		const spread = r.plant === 'shock-linear-4x4' && n === 1 ? windowS * 1.4 : 0.0002;
-		const scaledLine = 2.0;
+		const scaledLine = absLineOf(r);
 		const controls: MimoShockControlVerdict[] = r.controls.map((ch, i) => {
 			const e = round(r.errors[i] ?? 0, 2);
 			const delay = round(0.0002 + (i === r.controls.length - 1 ? spread : 0.0001 * i), 5);
@@ -510,11 +511,13 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 				displacement_pk_pk_in: round(0.18 * 10 ** (level / 20), 3),
 				predicted_peak_ratio: round(10 ** ((e * 0.9) / 20), 3),
 				srs: r.config.target.kind === 'srs' ? { worst_err_db: e, worst_band_hz: 400, bands: 16, passed_bands: Math.abs(e) > tol ? 13 : 16 } : null,
-				scaled_abort_margin_db: round(scaledLine - e, 2),
-				absolute_abort_margin_db: round(fullLine - (e + level), 2)
+				scaled_margin_db: round(e - scaledLine, 2),
+				absolute_margin_db: round(e + level - fullLine, 2)
 			};
 		});
-		const crossings = controls.filter((c) => (c.scaled_abort_margin_db ?? 1) < 0).map((c) => ({ channel: c.channel, over_db: round(-(c.scaled_abort_margin_db as number), 2) }));
+		// a control over its scaled line is judged failing, whatever the toggle says
+		for (const c of controls) if (c.scaled_margin_db > 0 && c.passed) c.passed = false;
+		const crossings = controls.filter((c) => c.scaled_margin_db > 0).map((c) => ({ channel: c.channel, over_db: c.scaled_margin_db }));
 		const passed = controls.every((c) => c.passed);
 		const row: MimoShockPulseRow = {
 			index: n,
@@ -529,9 +532,9 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			arrival_spread_s: round(Math.max(...controls.map((c) => c.delay_s)) - Math.min(...controls.map((c) => c.delay_s)), 5),
 			warnings: [],
 			step_note: null,
-			scaled_crossings: crossings,
 			law: { used: true, miss: null, call_ms: 2.8, delays_s: null, values: r.law.diagnostics.map((d, k) => ({ key: d.key, value: round(0.5 / (n + 1 + k), 3) })) }
 		};
+		for (const x of crossings) row.warnings.push(`Control ${x.channel} crossed its scaled abort line by ${x.over_db} dB.`);
 		if (row.arrival_spread_s > windowS) row.warnings.push(`The controls' arrivals spread over ${round(row.arrival_spread_s * 1000, 2)} ms, past the ${round(windowS * 1000, 2)} ms window.`);
 		if (r.config.verdict === 'global' && row.global_srs_error_db !== null) row.passed = row.global_srs_error_db <= tol;
 		r.rows.push(row);
@@ -540,15 +543,15 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 		addLog('pulse', `Pulse ${n + 1} at ${level} dB: ${row.passed ? 'passed' : 'did not pass'}.`);
 
 		// the abort lines
-		const absolute = controls.find((c) => (c.absolute_abort_margin_db ?? 1) < 0);
+		const absolute = controls.find((c) => c.absolute_margin_db > 0);
 		if (absolute) {
 			finishPulse(r, row);
-			return end(r, 'aborted', 'control_abort', `Control ${absolute.channel} went over its absolute abort line.`);
+			return end(r, 'aborted', 'control_abort_absolute', `Control ${absolute.channel} went over its absolute abort line.`);
 		}
 		if (crossings.length) {
 			if (scaledOn) {
 				finishPulse(r, row);
-				return end(r, 'aborted', 'control_abort_scaled', `Control ${crossings[0].channel} went over its abort line scaled to ${level} dB.`);
+				return end(r, 'safe_stop', 'control_abort_scaled', `Control ${crossings[0].channel} went over its abort line scaled to ${level} dB.`);
 			}
 			addLog('alarm', `Over the scaled abort line: ${crossings.map((x) => `control ${x.channel} by ${x.over_db} dB`).join(', ')}.`);
 		}
@@ -789,7 +792,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			levelDb: null,
 			atLevel: 0,
 			fullPassed: 0,
-			errors: config.channels.controls.map((_, i) => (i === 1 ? 2.6 : i === 0 ? -1.8 : 1.4 - 0.3 * i)),
+			errors: config.channels.controls.map((_, i) => (i === 1 ? 1.8 : i === 0 ? -1.6 : 1.0 - 0.2 * i)),
 			risingRun: 0,
 			lastErr: null,
 			rows: [],

@@ -105,13 +105,13 @@ export interface MimoShockControl {
 	divergence_pulses?: number;
 	divergence_drive_ratio?: number;
 	first_drive_ratio?: number;
-	/** Each control's absolute abort line, dB over its full-level target's peak; null: the default. */
+	/** Each control's abort margin, dB over its target's peak (at full level: absolute; at the level played: scaled); null: the default. */
 	abort_db?: number | null;
 	max_velocity_ips?: number | null;
 	max_displacement_in?: number | null;
 	/**
-	 * The abort lines scaled to the level fired also stop the run (default true). Off, a pulse over
-	 * its scaled line is flagged and the ladder does not climb on it; the absolute lines always hold.
+	 * The abort lines scaled to the level played also stop the run (default true). Off, a pulse over
+	 * its scaled line is judged failing and flagged, and the run goes on; the absolute lines always hold.
 	 */
 	scaled_aborts?: boolean;
 }
@@ -218,7 +218,7 @@ export type MimoShockLawMiss =
 
 export interface MimoShockEnd {
 	outcome: MimoShockOutcome;
-	/** Why, by name: `divergence`, `control_abort`, `control_abort_scaled`, a law's miss, ... */
+	/** Why, by name: `divergence`, `control_abort_absolute`, `control_abort_scaled`, a law's miss, ... */
 	reason: string | null;
 	message: string;
 	at_s: number | null;
@@ -276,10 +276,10 @@ export interface MimoShockControlVerdict {
 	displacement_pk_pk_in: number;
 	predicted_peak_ratio: number | null;
 	srs: { worst_err_db: number; worst_band_hz: number; bands: number; passed_bands: number } | null;
-	/** How far under the abort line scaled to the level fired, dB; negative when over it. */
-	scaled_abort_margin_db?: number | null;
-	/** How far under the absolute (full-level) abort line, dB; negative when over it. */
-	absolute_abort_margin_db?: number | null;
+	/** The measured peak against the abort line scaled to the level played, dB: positive over it. */
+	scaled_margin_db: number;
+	/** The measured peak against the absolute (full-level) abort line, dB: positive over it. */
+	absolute_margin_db: number;
 }
 
 export interface MimoShockStepNote {
@@ -305,8 +305,6 @@ export interface MimoShockPulseRow {
 	arrival_spread_s: number;
 	warnings: string[];
 	step_note: MimoShockStepNote | null;
-	/** The controls that crossed their scaled abort line on this pulse, and by how much (dB). */
-	scaled_crossings?: { channel: number; over_db: number }[];
 	law: {
 		used: boolean;
 		miss: MimoShockLawMiss | null;
@@ -357,8 +355,10 @@ export interface MimoShockState {
 	last_pulse: MimoShockPulseRow | null;
 	law: MimoShockLawRef | null;
 	end: MimoShockEnd | null;
-	/** Whether the abort lines scaled to the level stop the run; absent means they do. */
-	scaled_aborts?: boolean;
+	/** Whether the abort lines scaled to the level stop the run (the configuration's). */
+	scaled_aborts: boolean;
+	/** Null while scaled aborts are on; with them off, a standing sentence saying so. */
+	notice: string | null;
 }
 
 export interface MimoShockProceedParams {

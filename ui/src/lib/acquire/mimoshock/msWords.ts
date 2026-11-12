@@ -95,8 +95,8 @@ const END_REASON_WORDS: Record<string, string> = {
 	orphan: 'Nobody held control, so nothing more was fired.',
 	shutdown: 'The control service shut down.',
 	drive_abort: 'A drive went over its abort voltage.',
-	control_abort: "A control's pulse went over its absolute abort line.",
-	control_abort_scaled: "A control's pulse went over its abort line scaled to the level fired.",
+	control_abort_absolute: "A control's pulse went over its absolute abort line, the line at full level, which always ends the run.",
+	control_abort_scaled: "A control's pulse went over its abort line scaled to the level played, and scaled aborts were on.",
 	limit_abort: 'A limit channel went over its abort peak.',
 	kinematics: "A control's velocity or displacement went over its limit.",
 	low_coherence: 'Identification held the run: a control was not measured with enough coherence.',
@@ -120,9 +120,9 @@ export function endWords(end: MimoShockEnd): string {
 
 /** Which abort line ended the run, when one did: `scaled`, `absolute`, or null. */
 export function abortLineOf(end: MimoShockEnd | null): 'scaled' | 'absolute' | null {
-	if (!end || end.outcome !== 'aborted') return null;
+	if (!end) return null;
 	if (end.reason === 'control_abort_scaled') return 'scaled';
-	if (end.reason === 'control_abort') return 'absolute';
+	if (end.reason === 'control_abort_absolute') return 'absolute';
 	return null;
 }
 
@@ -165,12 +165,23 @@ export function lastPulseWords(row: MimoShockPulseRow | null): { text: string; t
 	return { text: `Pulse ${n}${at} did not pass: ${passed} of ${row.controls.length} controls inside tolerance`, tone: 'warn' };
 }
 
+/** The controls over their scaled abort line on a pulse, and by how much (dB), from their margins. */
+export function scaledCrossings(row: MimoShockPulseRow): { channel: number; over_db: number }[] {
+	return row.controls.filter((c) => c.scaled_margin_db > 0).map((c) => ({ channel: c.channel, over_db: c.scaled_margin_db }));
+}
+
 /** A pulse's flag for the controls over their scaled abort line, or null when none is. */
 export function scaledCrossingWords(row: MimoShockPulseRow): string | null {
-	const list = row.scaled_crossings ?? [];
+	const list = scaledCrossings(row);
 	if (!list.length) return null;
 	const parts = list.map((x) => `control ${x.channel} by ${num(x.over_db, 2)} dB`);
 	return `Pulse ${row.index + 1} went over the scaled abort line at ${parts.join(', ')}.`;
+}
+
+/** A margin to an abort line in words: "1.3 dB over" or "2.3 dB under". */
+export function marginWords(v: number | null | undefined): string {
+	if (v === null || v === undefined || !Number.isFinite(v)) return '-';
+	return `${formatNumber(Math.abs(v), 2)} dB ${v > 0 ? 'over' : 'under'}`;
 }
 
 /** The arrival spread, as a warning, when the pulse's warnings carry one, else null. */

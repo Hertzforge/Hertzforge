@@ -284,7 +284,7 @@ export class MimoShockStore {
 	/** Whether the run in hand stops on the scaled abort lines (its own word, else the setup's). */
 	get scaledAborts(): boolean {
 		const s = this.status;
-		if (s && s.state !== 'unconfigured' && s.scaled_aborts !== undefined) return s.scaled_aborts;
+		if (s && s.state !== 'unconfigured' && typeof s.scaled_aborts === 'boolean') return s.scaled_aborts;
 		return this.runConfig?.control?.scaled_aborts ?? this.setup.control.scaled_aborts;
 	}
 
@@ -437,7 +437,7 @@ export class MimoShockStore {
 
 	private onStatus(s: MimoShockState) {
 		const was = this.status;
-		if (regresses(was as never, s as never)) return;
+		if (regresses(was, s)) return;
 		this.status = s;
 		if (this.live && this.live.run_id === s.run_id) this.live = null;
 		if (s.run_id !== this.pulsesRun) void this.loadPulses(s.run_id);
