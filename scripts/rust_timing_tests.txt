@@ -355,3 +355,4 @@ sds-control  test:mimo_shock_sim_run  mimo_shock_every_pulse_is_written_to_the_c
 sds-control  test:mimo_shock_protocol  mimo_shock_refusals_follow_the_run_through_its_states
 sds-control  test:mimo_shock_protocol  mimo_shock_auto_refuses_the_manual_fire_and_shutdown_refuses_the_drive
 sds-control  test:mimo_shock_law_check  mimo_shock_laws_check_runs_every_case_and_records_a_law_file
+hertzforge-mimo-shock-law-math  test:research_fit  mimo_shock_rf3_fit_cost
