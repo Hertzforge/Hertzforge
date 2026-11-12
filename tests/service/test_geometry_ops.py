@@ -224,8 +224,12 @@ def test_dof_arrows_mark_a_tables_references_pointing_in(project, validate):
     assert [row['DOF'] for row in cells(table)] == ['101Z+', '110Z+', '1304Z+', '1310Z+']
     assert all(row['Arrow'].startswith('in') for row in cells(table))
     geometry = project['Geometry']
-    # a shaft and two barbs each, the shaft ending on the node
-    assert len(view['nodes']) == geometry.num_nodes + 4 * 4 and len(view['lines']) == 12
+    from hertzforge.service.mesh import drawn_mesh
+
+    edges = len(drawn_mesh(geometry)[2])
+    # a shaft and two barbs each, the shaft ending on the node, after the elements' edges
+    assert len(view['nodes']) == geometry.num_nodes + 4 * 4
+    assert len(view['lines']) == edges + 12
     tip = view['nodes'][geometry.num_nodes + 1]
     assert tip == pytest.approx(geometry.node_xyz[0])
     _view, table = run(project, 'project.dof_arrows', source='Time History',

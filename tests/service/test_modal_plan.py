@@ -102,7 +102,10 @@ def test_a_plan_is_the_cores_choice_and_reads_as_the_pane_does(plate, validate):
     assert [row[1] for row in sensors['rows']] == [str(n) for n in made.geometry.node_id]
     assert np.allclose(np.asarray(matrix['values']), mac, atol=1e-6)
     assert len(shape['modes']) == len(elastic(plate[MODEL]))
-    assert shape['lines'].shape == (8, 2), 'a line per uni-axial sensor'
+    from hertzforge.service.mesh import drawn_mesh
+
+    edges = len(drawn_mesh(plate['Geometry'])[2])
+    assert shape['lines'].shape == (edges + 8, 2), 'the elements\' edges and a line per uni-axial sensor'
     assert surfaces['rows'][0][-1] == 'yes'
     assert 'Not kept' in rows and len(list(plate)) == 4
 
