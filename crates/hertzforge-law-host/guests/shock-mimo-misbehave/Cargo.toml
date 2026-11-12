@@ -1,0 +1,17 @@
+[package]
+name = "law-fixture-shock-mimo-misbehave"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# A test fixture for the law host and the MIMO Shock core, not a law to use: a
+# MIMO Shock law that misbehaves in the way its `mode` parameter names (trap,
+# spin, grow memory, the wrong drive count or record length, non-finite values,
+# a drive over its ceiling...), and otherwise returns a small steady drive.
+# Built to WebAssembly by scripts/build_laws.sh.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../../hertzforge-law-sdk" }

@@ -594,7 +594,26 @@ impl LawCatalog {
             LawWorld::ShockSrs => self.shock_srs_entries(),
             LawWorld::Sine => self.sine_entries(),
             LawWorld::Twr => self.twr_entries(),
-            LawWorld::ShockMimo => Vec::new(),
+            LawWorld::ShockMimo => self.shock_mimo_entries(),
+        }
+    }
+
+    /// The imported MIMO Shock (`shock-mimo`) law files by name, version and
+    /// hash. The built-in MIMO Shock laws are listed with these by
+    /// `hertzforge-mimo-shock-laws`, which holds their declarations.
+    pub fn shock_mimo_entries(&self) -> Vec<CatalogEntry> {
+        self.imported
+            .iter()
+            .filter(|i| matches!(i.law, AnyLaw::ShockMimo(_)))
+            .map(imported_entry)
+            .collect()
+    }
+
+    /// The imported MIMO Shock law file with `id` (its SHA-256).
+    pub fn shock_mimo_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedShockMimoLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::ShockMimo(l)) => Some(l),
+            _ => None,
         }
     }
 
@@ -765,6 +784,7 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
         AnyLaw::ShockSrs(l) => (l.manifest().clone(), LawWorld::ShockSrs, None),
         AnyLaw::Sine(l) => (l.manifest().clone(), LawWorld::Sine, None),
         AnyLaw::Twr(l) => (l.manifest().clone(), LawWorld::Twr, None),
+        AnyLaw::ShockMimo(l) => (l.manifest().law.clone(), LawWorld::ShockMimo, None),
     };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),

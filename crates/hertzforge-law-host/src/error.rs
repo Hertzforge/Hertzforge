@@ -113,6 +113,18 @@ pub enum LawError {
         /// What was wrong, in words.
         detail: String,
     },
+    /// A MIMO Shock law returned a result that breaks the output rules: not
+    /// one drive record per drive, a record of the wrong length, a value that
+    /// is not a finite number, delays that are not one per control, too many
+    /// values, or a value the manifest does not declare (or reported twice).
+    /// Each drive's ceiling, the growth cap and every other protection of the
+    /// drive belong to the controller.
+    BadShockMimoOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: ShockMimoOutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
@@ -217,6 +229,39 @@ impl SrsOutputRule {
     }
 }
 
+/// The output rules a MIMO Shock law's result is checked against, in the
+/// order they are checked ([`LawError::BadShockMimoOutput`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShockMimoOutputRule {
+    /// Whole records, but not one per drive.
+    WrongDriveCount,
+    /// Not a whole number of records of the run's record length.
+    WrongLength,
+    /// Every drive sample and every value is a finite number.
+    NonFinite,
+    /// Delays, when given, are one finite delay per control.
+    DelaysShape,
+    /// At most [`crate::shock_mimo::MAX_SHOCK_MIMO_VALUES`] values.
+    TooManyValues,
+    /// Every value is declared by the manifest and reported once.
+    UndeclaredValue,
+}
+
+impl ShockMimoOutputRule {
+    /// The stable wire and record name: `wrong_drive_count`, `wrong_length`,
+    /// `non_finite`, `delays_shape`, `too_many_values`, `undeclared_value`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShockMimoOutputRule::WrongDriveCount => "wrong_drive_count",
+            ShockMimoOutputRule::WrongLength => "wrong_length",
+            ShockMimoOutputRule::NonFinite => "non_finite",
+            ShockMimoOutputRule::DelaysShape => "delays_shape",
+            ShockMimoOutputRule::TooManyValues => "too_many_values",
+            ShockMimoOutputRule::UndeclaredValue => "undeclared_value",
+        }
+    }
+}
+
 /// The output rules a Sine law's result is checked against, in the order
 /// they are checked ([`LawError::BadSineOutput`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,7 +361,8 @@ impl fmt::Display for LawError {
             | LawError::BadClassicalOutput { detail, .. }
             | LawError::BadSrsOutput { detail, .. }
             | LawError::BadSineOutput { detail, .. }
-            | LawError::BadTwrOutput { detail, .. } => {
+            | LawError::BadTwrOutput { detail, .. }
+            | LawError::BadShockMimoOutput { detail, .. } => {
                 write!(f, "the law's output was refused: {detail}")
             }
             LawError::Poisoned(s) => write!(

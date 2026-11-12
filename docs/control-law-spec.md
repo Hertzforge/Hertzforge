@@ -568,6 +568,7 @@ Each test type gets its own world, built on the same mechanism.
 | Time waveform replication | Between plays | Built: section 11 |
 | Sine | Every control tick | Built: section 10 |
 | MIMO variants of the above | As above | After MIMO Random |
+| MIMO Shock (classical and SRS, several drives) | Between pulses | Built: section 15 |
 
 ## 13. Writing a law
 
@@ -612,3 +613,84 @@ for now. A law should pass `law check` before it is used on hardware.
     negative-exponent transform (section 7), so `S_yy = H S_vv H^H` and a law ported from
     Rattlesnake needs no conjugation. The core forms it directly and converts where a file holds
     the other form; the conversion is the core's, never a law's.
+
+## 15. MIMO Shock (`shock-mimo`)
+
+A MIMO Shock law closes the loop between pulses on several drives and several control channels at
+once, for a classical waveform or a shock response spectrum (SRS) at every control. The world is
+`wit/control-law/shock-mimo.wit`; one world serves both target kinds, and a law's manifest says
+which kinds it accepts (`targets`: `waveform`, `srs` or both, each once). The controller refuses a
+test of a kind the law does not accept, before the law is built.
+
+**When it runs.** Never while a pulse plays. Once after system identification, for the first
+level of the ladder (`seed(level-db)`), then once after each pulse has been fired, measured and
+judged and the ladder has scheduled the next level (`iterate`). The ladder goes first so the law
+knows the level it is building for. Each call has a time budget the controller sets; a law file's
+host deadline is the same number.
+
+**What it is built with.** Fixed for the run:
+
+| Field | Meaning |
+|---|---|
+| `fs-hz`, `record-len` | The pulse grid: `record-len` samples (a power of two, 64 to 16384) at `fs-hz`. Every record starts with the quiet lead-in |
+| `drives`, `controls` | 1 to 8 drives, 1 to 16 control channels |
+| `band-lo-hz`, `band-hi-hz` | The band the law corrects, inside the record's Nyquist frequency |
+| `target` | `waveform`: each control's full-level record. `srs`: each control's SRS on ascending natural frequencies at quality factor `q`, the tolerance below and above it in dB, the full-level waveform the controller synthesized for each control, and the synthesis table behind it (frequency, amplitude, start, and a decay ratio or an odd number of half-cycles per component) |
+| `timing` | `free(window-s)`: each control is judged on its own and its delay reported. `hold`: each control is held to a set delay inside a window |
+| `plant` | `H`, controls by drives on every line (`record-len / 2 + 1` lines), from one identification shot with every drive played at once, so the path delays are in it; the multiple coherence of each control; the lines the controller trusts |
+| `drive-ceiling-v` | Each drive's ceiling, volts peak |
+| `ladder-db` | The level ladder, ascending, ending at 0 dB |
+
+Records of several channels travel flat, channel after channel: sample `n` of channel `c` is
+`data[c * record-len + n]`. A matrix stack travels in full, row-major within a line, line after
+line. Spectra are not passed: a law takes its own transforms, one-sided under the negative-exponent
+convention, the one the plant is formed in. The SDK gives a Rust law plain rows and a matrix stack
+instead of the flat lists, and the transforms, the regularized inverse, the SRS and delay tools.
+
+**What it sees after a pulse.** The pulse count (1 for the first iteration), the level played and
+the level scheduled next, the drives as played after the controller's limits (volts), the measured
+responses, for an SRS target the measured SRS of every control on the target's frequencies, the
+controller's verdict per control (inside its tolerance or not, the worst deviation in dB, the
+measured delay, the measured peak over the target's), and whether the controller scaled the last
+pulse down. Drives and responses are at the level played; a law refers them to full level itself.
+
+**What it returns.** The drives of the next pulse at the next level, in volts, one record of
+`record-len` finite samples per drive: the controller does not rescale them. Optionally the delay
+the law expects at each control (shown and recorded only). Up to eight values, each under a key its
+manifest declares. The law does not set the level, the ladder, the judgement or any abort.
+
+**What the host refuses**, each by name: not one record per drive (`wrong_drive_count`), not whole
+records of `record-len` (`wrong_length`), a sample or a value that is not finite (`non_finite`),
+delays that are not one finite delay per control (`delays_shape`), more than eight values
+(`too_many_values`), a value the manifest does not declare or reported twice
+(`undeclared_value`). A trap, a call past its budget or memory past the cap leave the instance
+unusable, and every later call reports that first fault. The setup and each pulse's inputs are
+checked against the limits and lengths above before the law sees them.
+
+**What the controller enforces, for every law.** Each drive's ceiling (a drive over it is scaled
+down, one past its abort is refused; the host names a drive over its ceiling, `over_ceiling`, and
+passes it on), the growth of each drive's peak from one pulse to the next beyond the level step,
+the predicted response against the abort lines before a fire, a divergence watch (an error that
+rises on consecutive pulses at one level ends the run in the controlled stop), the kinematic checks
+per control, and the call budget with its misses in a row, as in the single-output shock worlds.
+
+**The built-in laws.** `inverse` (the default for a waveform target, accepts both kinds),
+`shape` (the default for an SRS target, SRS only) and `paired` (both kinds; the template for
+contributors). Each runs natively and as a law file (`laws/mimo-shock-inverse`,
+`laws/mimo-shock-shape`, `laws/mimo-shock-paired`), and the law file gives the same drives as the
+same mathematics called natively, within 1e-12 of each record's peak, over a run that holds and
+steps the level, for every option that changes the mathematics. Their parameters are in
+`docs/control-laws.md`.
+
+**The check.** Eight cases, each run for every target kind the law accepts, on the simulator's
+standard shock plants with the ladder -12, -9, -6, -3 and 0 dB, three pulses a level, and an SRS
+tolerance of -1.5 and +3 dB: the linear 4 x 4, the jointed 4 x 4 moderate and severe, the jointed
+6 x 3 (more controls than drives), the linear 4 x 4 with the law's model wrong by a 0.5 ms delay,
+the moderate 4 x 4 identified 20 dB under the reference with the model 2 dB high, the moderate
+4 x 4 with noise at 3 % of the target rms on every response, and the linear 4 x 4 with a limit
+channel that binds from the -3 dB level. Every case asks: every answer used and no law fault; no
+abort, safe stop or fault; a pulse at full level (the limit case excepted); the last pulse of the
+last level passing jointly; the worst control's error on that pulse no more than 1 dB above its
+best at that level; no drive's peak growing more than 6 dB over that level's pulses. The
+requirements describe a good law; the facts of a built-in law list the cases it is known to fail.
+A record clears a law file at the check in force (`mimo-shock-check 1`).
