@@ -1414,3 +1414,22 @@ def test_fit_modes_bounds_that_miss_the_lines_raise():
     frequencies = sorted(np.atleast_1d(fitted.frequency))
     assert len(frequencies) == 2
     assert frequencies[-1] < 700.0, frequencies
+
+
+def test_records_of_two_quantities_are_refused_and_of_one_are_fitted():
+    # Brandon, 2026-11-11: the fit holds one power for every record, so a set
+    # mixing accelerometers and velocity channels is refused, not fitted wrong
+    from hertzforge.core.data import Frf
+    from hertzforge.core.modal_fit import fit_refusal
+
+    accelerance = synthetic_frf(power=2)
+    mixed = Frf(accelerance.abscissa, accelerance.ordinate,
+                response_dof=accelerance.response_dof, reference_dof=accelerance.reference_dof,
+                ordinate_dim=['acceleration/force'] * (accelerance.num_records - 1)
+                + ['velocity/force'])
+    with pytest.raises(ValueError, match='acceleration and velocity: a fit takes one quantity'):
+        ModalFitSession(mixed)
+    assert fit_refusal(mixed).startswith('These records measure acceleration and velocity')
+    one = list(range(mixed.num_records - 1))
+    assert fit_refusal(mixed, one) == ''
+    assert ModalFitSession(mixed, one).power == 2
