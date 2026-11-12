@@ -39,3 +39,5 @@ serde_json = "1"
 [dev-dependencies]
 # The simulator's shock plants, driven through the same firer a station gets.
 hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+# The research plants and the H1 estimate, for the research round's studies.
+hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math", features = ["reference-plant"] }

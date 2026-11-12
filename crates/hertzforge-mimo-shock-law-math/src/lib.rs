@@ -55,6 +55,7 @@
 pub mod check;
 pub mod choice;
 pub mod delay;
+pub mod first_pulse;
 pub mod inverse;
 pub mod lsq;
 pub mod modal;
