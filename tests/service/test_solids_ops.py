@@ -245,41 +245,54 @@ def stacked(project):
     run(project, 'project.mesh_solids', size=0.025, parts_apart=True, keep=True)
 
 
-def test_mated_surfaces_are_found_kept_edited_and_deleted(project, validate):
+def _pane(project, **given):
+    """Mate Surfaces as the shell runs it: the views, and the pick a click runs again."""
+    views = run(project, 'project.mate_surfaces', **given)
+    view = next(view for view in views if view['view'] == 'shape3d')
+    return views, view['pick']
+
+
+def test_mated_surfaces_are_found_picked_kept_edited_and_deleted(project, validate):
+    # Brandon, 2026-11-11: one pane makes a mate and edits it, nodes of either side picked
     stacked(project)
-    reading, patches, view, mates = run(project, 'project.mate_surfaces')
-    wire_views([reading, patches, view, mates], validate)
+    views, pick = _pane(project, groups='1, 2')
+    wire_views(views, validate)
+    reading, patches, view, mates = views
     assert rows(reading)['Patches found']['value'] == 1.0
     assert patches['rows'][0][3] == '15 on 15' and mates['rows'] == []
-    reading, _patches, _view, mates = run(project, 'project.mate_surfaces', keep=True,
-                                          normal='stiffness', normal_stiffness=2e6)
-    assert mates['rows'][0][2] == 'base on lid'
-    held = project['Part'].mates[0]
-    assert held.normal_stiffness == 2e6 and held.shear_mode == 'rigid'
-    reading, mates = run(project, 'project.edit_mated_surfaces', mate=1, normal='rigid',
-                         shear='free', name='seat')
-    assert rows(reading)['Saved']['value'] == 'seat (normal rigid, shear free)'
-    refused(project, 'project.edit_mated_surfaces', 'holds nothing', mate=1, normal='free',
-            shear='free')
-    first = project['Part'].mates[0]
-    reading, view = run(project, 'project.edit_mate_sides', mate=1)
-    held = view['pick']
-    assert held['ids'][:len(first.nodes_a)] != [] and held['count'] == 1
-    on = len(held['ids']) - held['off']
-    assert on == len(first.nodes_a), 'the side held is what shows as in'
-    node = held['ids'][0]
-    reading, view = run(project, 'project.edit_mate_sides', mate=1, toggle=str(node))
-    assert node not in project['Part'].mates[0].nodes_a
-    assert view['pick']['off'] == held['off'] + 1
-    run(project, 'project.edit_mate_sides', mate=1, toggle=str(node))
-    assert node in project['Part'].mates[0].nodes_a, 'a second click puts it back'
-    refused(project, 'project.edit_mate_sides', 'not 9', mate=9)
+    assert view['opacity'] < 1, 'the model is drawn see-through, the sides inside it'
+    assert pick['count'] == 1 and pick['param'] == 'toggle'
+    held = len(pick['ids']) - pick['off']
+    assert held == 15 and pick['others'][0] == 15, 'each side shows what it holds'
+    # a click takes a node of the first side away, and nothing is kept until Apply
+    node = pick['ids'][0]
+    views, after = _pane(project, **{**pick['params'], 'toggle': str(node)})
+    assert after['off'] == pick['off'] + 1 and not project['Part'].mates
+    assert str(node) not in after['params']['nodes_a'].split(', ')
+    # the second side is picked once it is chosen, the first drawn beside it
+    views, second = _pane(project, **{**after['params'], 'side': 'b'})
+    assert len(second['ids']) - second['off'] == 15 and second['others'][0] == 14
+    views, _pick = _pane(project, **{**after['params'], 'normal': 'stiffness',
+                                     'normal_stiffness': 2e6, 'keep': True})
+    assert views[-1]['rows'][0][2] == 'base on lid'
+    kept = project['Part'].mates[0]
+    assert len(kept.nodes_a) == 14 and node not in kept.nodes_a
+    assert kept.normal_stiffness == 2e6 and kept.shear_mode == 'rigid'
+    # the same pane on the kept mate: what it holds, changed only as the form says
+    views, pick = _pane(project, mate=1, name='seat', normal='rigid', shear='free', keep=True)
+    assert rows(views[0])['Saved']['value'] == 'seat (normal rigid, shear free)'
+    assert project['Part'].mates[0].nodes_a == kept.nodes_a
+    views, pick = _pane(project, mate=1, toggle=str(node))
+    views, _pick = _pane(project, **{**pick['params'], 'normal': 'rigid', 'shear': 'free',
+                                     'name': 'seat', 'keep': True})
+    assert node in project['Part'].mates[0].nodes_a, 'a click puts it back'
+    refused(project, 'project.mate_surfaces', 'holds nothing', mate=1, normal='free',
+            shear='free', keep=True)
+    refused(project, 'project.mate_surfaces', 'not 9', mate=9)
     refused(project, 'project.mate_surfaces', 'not 9', groups='9')
     refused(project, 'project.delete_mated_surfaces', 'not 4', mates='4')
     reading, mates = run(project, 'project.delete_mated_surfaces', mates='1')
     assert rows(reading)['Deleted']['value'] == 1.0 and mates['rows'] == []
-
-
 def test_the_default_view_is_set_and_reset(project, validate):
     block(project)
     reading, view = run(project, 'project.set_view', eye_x=1.0, eye_y=1.0, eye_z=-1.0,
@@ -699,9 +712,16 @@ def _mated(project, **held):
     return project['Part']
 
 
+def _edit(project, **given):
+    """The pane on mate 1, filled as the action table fills it, with `given` changed."""
+    held = {'name': 'base on lid', 'normal': 'stiffness', 'normal_stiffness': 2e6,
+            'shear': 'free'}
+    return run(project, 'project.mate_surfaces', mate=1, keep=True, **{**held, **given})
+
+
 def test_renaming_a_mated_set_leaves_how_it_is_held(project):
     geometry = _mated(project, normal='stiffness', normal_stiffness=2e6, shear='free')
-    run(project, 'project.edit_mated_surfaces', mate=1, name='Renamed')
+    _edit(project, name='Renamed')
     held = geometry.mates[0]
     assert (held.name, held.normal_mode, held.normal_stiffness, held.shear_mode) == (
         'Renamed', 'stiffness', 2e6, 'free')
@@ -709,27 +729,49 @@ def test_renaming_a_mated_set_leaves_how_it_is_held(project):
 
 def test_a_mated_set_changes_only_what_the_form_changes(project):
     geometry = _mated(project, normal='stiffness', normal_stiffness=2e6, shear='free')
-    run(project, 'project.edit_mated_surfaces', mate=1, normal_stiffness=3e6)
+    nodes = geometry.mates[0].nodes_a
+    _edit(project, normal_stiffness=3e6)
     assert geometry.mates[0].normal_stiffness == 3e6 and geometry.mates[0].shear_mode == 'free'
-    run(project, 'project.edit_mated_surfaces', mate=1, normal='rigid')
+    assert geometry.mates[0].nodes_a == nodes
+    _edit(project, normal='rigid')
     assert geometry.mates[0].normal_mode == 'rigid' and geometry.mates[0].normal_stiffness == 0.0
-    run(project, 'project.edit_mated_surfaces', mate=1, shear='stiffness', shear_stiffness=1e5)
+    _edit(project, normal='rigid', shear='stiffness', shear_stiffness=1e5)
     assert geometry.mates[0].shear_stiffness == 1e5
-    refused(project, 'project.edit_mated_surfaces', 'choose what changes', mate=1)
-    refused(project, 'project.edit_mated_surfaces', 'not 9', mate=9, name='x')
 
 
 def test_a_node_clicked_on_a_mate_side_is_a_node_of_that_side(project):
     geometry = _mated(project)
-    refused(project, 'project.edit_mate_sides', 'is not an id|is not a node id', mate=1,
+    refused(project, 'project.mate_surfaces', 'is not an id|is not a node id', mate=1,
             toggle='abc')
     held = geometry.mates[0]
     other = next(int(n) for n in geometry.nodes_in([held.groups[1]])
                  if int(n) not in geometry.nodes_in([held.groups[0]]))
-    refused(project, 'project.edit_mate_sides', 'is not on', mate=1, side='a', toggle=str(other))
-    assert geometry.mates[0] == held
-    run(project, 'project.edit_mate_sides', mate=1, side='a', toggle=str(held.nodes_a[0]))
+    refused(project, 'project.mate_surfaces', 'is not on the surface', mate=1, side='a',
+            toggle=str(other))
+    side = geometry.nodes_in([held.groups[0]])
+    far = max(side, key=lambda n: abs(geometry.node_xyz[geometry.node_index([n])[0], 2] - 1.0))
+    refused(project, 'project.mate_surfaces', 'where it mates', mate=1, side='a',
+            toggle=str(far))
+    views = run(project, 'project.mate_surfaces', mate=1, side='a',
+                toggle=str(held.nodes_a[0]))
+    assert geometry.mates[0] == held, 'a click changes nothing until Apply'
+    pick = next(view for view in views if view['view'] == 'shape3d')['pick']
+    run(project, 'project.mate_surfaces', **{**pick['params'], 'keep': True})
     assert len(geometry.mates[0].nodes_a) == len(held.nodes_a) - 1
+
+
+def test_picks_made_for_one_patch_are_dropped_for_another(project):
+    _mated(project)
+    project.delete_mated_surfaces('Part', [1])
+    views = run(project, 'project.mate_surfaces')
+    pick = next(view for view in views if view['view'] == 'shape3d')['pick']
+    views = run(project, 'project.mate_surfaces',
+                **{**pick['params'], 'toggle': str(pick['ids'][0])})
+    after = next(view for view in views if view['view'] == 'shape3d')['pick']['params']
+    moved = {**after, 'groups': '2, 1'}
+    views = run(project, 'project.mate_surfaces', **moved)
+    shown = next(view for view in views if view['view'] == 'shape3d')['pick']
+    assert shown['off'] == pick['off'], 'the groups changed: the picks went with them'
 
 
 def test_whole_numbers_are_whole(project):
@@ -737,7 +779,7 @@ def test_whole_numbers_are_whole(project):
     run(project, 'project.pattern_solids', solids='1', count_x=2, spacing_x=3.0)
     pattern = project['Part'].solids[-1].id
     refused(project, 'project.edit_solid', 'not a whole count', solid=pattern, counts='2.9,1,1')
-    refused(project, 'project.mate_surfaces', 'not a patch number', patches='1.5', keep=True)
+    refused(project, 'project.mate_surfaces', 'there is no patch 2', patch=2)
 
 
 def test_two_groups_a_mate_joins_are_not_merged(project):
@@ -798,12 +840,13 @@ def test_looking_at_a_view_first_operation_leaves_the_project_unmodified(tmp_pat
         ('project.align_meshes', {'geometry': 'Part'}),
         ('project.tie_elements', {'geometry': 'Part'}),
         ('project.tie_elements', {'geometry': 'Part', 'add': '1'}),
-        ('project.edit_mate_sides', {'geometry': 'Part', 'mate': 1}),
+        ('project.mate_surfaces', {'geometry': 'Part', 'mate': 1}),
         ('project.move_solids', {'geometry': 'Part', 'solids': '1'}),
         ('project.mesh_solids', {'geometry': 'Part', 'size': 0.5})]
     acts = [
         ('project.move_solids', {'geometry': 'Part', 'solids': '1', 'offset_x': 0.5}),
-        ('project.edit_mate_sides', {'geometry': 'Part', 'mate': 1, 'toggle': '1'}),
+        ('project.mate_surfaces', {'geometry': 'Part', 'mate': 1, 'name': 'seat',
+                                   'keep': True}),
         ('project.mesh_solids', {'geometry': 'Part', 'size': 0.5, 'parts_apart': True,
                                  'keep': True}),
         ('project.merge_coincident_nodes', {'geometry': 'Part', 'keep': True})]

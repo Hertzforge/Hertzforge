@@ -264,6 +264,7 @@
             "count": {"type": "integer", "minimum": 0},
             "param": {"type": "string"},
             "off": {"type": "integer", "minimum": 0},
+            "others": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2},
             "faces": {"$ref": "#/$defs/arrayRef"},
             "kept": {"type": "array", "items": {"type": "integer"}},
             "out": {"type": "string"},

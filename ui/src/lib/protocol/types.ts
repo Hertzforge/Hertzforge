@@ -230,6 +230,8 @@ export interface Shape3DView {
 	note?: string;
 	/** What a click in the view does. */
 	pick?: Pick3D;
+	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
+	opacity?: number;
 	gizmo?: Gizmo3D;
 	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
 	frames?: { origin: number[]; axes: number[][]; length: number }[];
@@ -279,6 +281,8 @@ export interface Pick3D {
 	param?: string;
 	/** nodes: how many of the last `ids` are left out, and drawn dim. */
 	off?: number;
+	/** nodes: a second set of places after the `ids` rows, drawn in their own color and not clicked: how many held, then how many not. */
+	others?: [number, number];
 	/** faces: each triangle's surface, -1 for none. */
 	faces?: Int32Array;
 	/** faces: the surfaces in use now. */
