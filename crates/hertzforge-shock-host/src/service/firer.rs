@@ -346,6 +346,11 @@ pub struct BackendPulseFirer<B: Backend> {
     /// The block this firer REQUESTS at configure. `None` = derive it from the
     /// rate (`hertzforge_hal::default_block_frames`).
     requested_block: Option<usize>,
+    /// The rate this firer REQUESTS at configure. `None` (every single-output
+    /// path) = the station's caps rate, as before; a caller that runs at the
+    /// rate its operator asked for sets it with [`Self::with_requested_rate`].
+    /// What it actually runs at still comes from `ConfiguredActual`.
+    requested_rate_hz: Option<f64>,
     /// The rate the device ACTUALLY programmed, from `ConfiguredActual`. The
     /// adoption seam; `None` until `arm()` succeeds.
     actual_fs_hz: Option<f64>,
@@ -420,6 +425,7 @@ impl<B: Backend> BackendPulseFirer<B> {
             quiet_frames: 0,
             block_frames: 1,
             requested_block: None,
+            requested_rate_hz: None,
             actual_fs_hz: None,
             in_scratch: Vec::new(),
             drive_scratch: Vec::new(),
@@ -444,6 +450,13 @@ impl<B: Backend> BackendPulseFirer<B> {
     /// actually runs still comes from `ConfiguredActual`.
     pub fn with_block_frames(mut self, frames: usize) -> Self {
         self.requested_block = Some(frames.max(1));
+        self
+    }
+
+    /// Request `fs_hz` at configure instead of the station's caps rate. The
+    /// rate the device programs is still adopted from `ConfiguredActual`.
+    pub fn with_requested_rate(mut self, fs_hz: f64) -> Self {
+        self.requested_rate_hz = Some(fs_hz);
         self
     }
 
@@ -746,7 +759,9 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
     /// nothing after 0 frames"). Parked tasks cannot do either.
     fn arm(&mut self) -> Result<(), ServiceError> {
         self.backend.open().map_err(hal_err)?;
-        let requested = self.backend.caps().sample_rate_hz;
+        let requested = self
+            .requested_rate_hz
+            .unwrap_or_else(|| self.backend.caps().sample_rate_hz);
         let want_block = self
             .requested_block
             .unwrap_or_else(|| hertzforge_hal::default_block_frames(requested));

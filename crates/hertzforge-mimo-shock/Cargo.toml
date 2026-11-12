@@ -21,5 +21,20 @@ hertzforge-hal = { path = "../hertzforge-hal" }
 hertzforge-channel-table = { path = "../hertzforge-channel-table" }
 # The complex matrix stack the plant is carried in.
 hertzforge-sdm = { path = "../hertzforge-sdm" }
+# The station class the arm gate is given.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# The shot: the single-output host firer played N drives wide (`fire_rows`), the
+# classical pulse library and its tolerance check, judged per control.
+hertzforge-shock-host = { path = "../hertzforge-shock-host" }
+# The SRS synthesis (wavelets or decaying sinusoids) per control.
+hertzforge-srs = { path = "../hertzforge-srs" }
+# The SRS, the pulse kinematics and the octave grids.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The built-in laws' mathematics; the native laws here are adapters to it.
+hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+# The simulator's shock plants, driven through the same firer a station gets.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

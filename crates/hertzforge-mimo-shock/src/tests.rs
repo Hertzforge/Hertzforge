@@ -469,22 +469,18 @@ fn mimo_shock_the_engine_refuses_a_bad_configuration_by_name() {
 }
 
 #[test]
-fn mimo_shock_unbuilt_engine_steps_fail_loudly_and_change_nothing() {
+fn mimo_shock_engine_steps_out_of_order_fail_loudly_and_change_nothing() {
     let mut e = MimoShockEngine::new(config(), Arc::new(NoLaw)).unwrap();
     assert_eq!(e.state(), RunState::Idle);
     assert_eq!(e.law().id, "none");
-    let calls: [(&str, Result<(), EngineError>); 4] = [
-        ("identification", e.identify()),
-        ("law seed", e.proceed()),
-        ("stop", e.stop()),
-        ("abort", e.abort()),
-    ];
-    for (step, r) in calls {
-        assert_eq!(r, Err(EngineError::NotBuilt(step)));
+    let idle = EngineError::WrongState(RunState::Idle);
+    let calls: [Result<(), EngineError>; 4] = [e.identify(), e.proceed(), e.stop(), e.abort()];
+    for r in calls {
+        assert_eq!(r, Err(idle.clone()));
     }
     let fired = e.fire_next(None).unwrap_err();
-    assert_eq!(fired, EngineError::NotBuilt("pulse"));
-    assert!(fired.to_string().contains("cannot run its pulse step"));
+    assert_eq!(fired, idle);
+    assert!(fired.to_string().contains("not allowed while idle"));
     assert_eq!(e.state(), RunState::Idle);
     assert!(e.pulses().is_empty());
 }

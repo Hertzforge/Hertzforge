@@ -24,25 +24,35 @@
 //! these types field for field. Records of several channels are flat, channel
 //! after channel: sample `n` of channel `c` is `data[c * record_len + n]`.
 
+pub mod builtin;
 pub mod engine;
+pub mod guards;
+pub mod ident;
+pub mod judge;
 pub mod law;
 pub mod limits;
 pub mod pulse;
+pub mod records;
 pub mod setup;
+pub mod targets;
 
+pub use builtin::builtin_factory;
 pub use engine::{
     ControlReport, DriveChannel, EndOutcome, EngineError, GuardPlan, IdentificationPlan,
-    LadderPlan, LimitChannel, MimoShockConfig, MimoShockEngine, PulseReport, RunState,
+    IdentificationReport, LadderPlan, LimitChannel, MimoShockConfig, MimoShockEngine, PulseReport,
+    RunEnd, RunState, SeedReport, ShotError, ShotPath,
 };
 pub use law::{check_law_accepts, LawManifest, MimoShockLaw, MimoShockLawFactory};
 pub use limits::{MAX_CONTROLS, MAX_DRIVES, MAX_LAW_VALUES, MAX_RECORD_LEN, MIN_RECORD_LEN};
 pub use pulse::{
     ControlVerdict, InputsError, InputsRule, OutputError, OutputRule, PulseInputs, PulseOutputs,
 };
+pub use records::{replay, ReplayReport, RunRecord};
 pub use setup::{
     ComponentShape, HoldTiming, PlantStack, Setup, SetupError, SetupRule, SrsComponent, SrsTarget,
     Target, TargetKind, Timing, WaveformTarget,
 };
+pub use targets::{ClassicalControl, SrsSpec, TargetSpec};
 
 #[cfg(test)]
 mod tests;

@@ -1261,9 +1261,15 @@ name = "hertzforge-mimo-shock"
 version = "0.1.4"
 dependencies = [
  "hertzforge-channel-table",
+ "hertzforge-dsp",
  "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-mimo-shock-law-math",
+ "hertzforge-module-abi",
  "hertzforge-sdm",
  "hertzforge-shock-common",
+ "hertzforge-shock-host",
+ "hertzforge-srs",
  "serde",
  "serde_json",
 ]
