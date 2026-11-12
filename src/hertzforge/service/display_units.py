@@ -206,12 +206,21 @@ def length_of(name: str) -> dict[str, Any]:
 _TYPED = re.compile(r'(\d+\s*:)|([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)')
 
 
+def quantities_of(name: str, quantities: set[str]) -> dict[str, dict[str, Any]]:
+    """What the shell labels and converts a typed number of each of `quantities` (a param's
+    `quantity`, 'force/length') by in the system `name`."""
+    system = _system(name)
+    return {q: {'unit': system.label_text(q), 'to_si': float(system.transform(q)[0])}
+            for q in sorted(quantities)}
+
+
 def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any) -> dict[str, Any]:
-    """`values` with each `length` param taken from the system `name` to meters. An
-    undefined geometry's numbers are its own, and pass as they are."""
+    """`values` with each `length` param taken from the system `name` to meters, and each
+    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are."""
     if not geometry.units_defined or name == DEFAULT:
         return values
-    scale = float(_system(name).transform('length')[0])
+    system = _system(name)
+    scale = float(system.transform('length')[0])
 
     def scaled(found: re.Match) -> str:
         return found.group(1) or repr(float(found.group(2)) * scale)
@@ -221,20 +230,27 @@ def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any)
         if param.length:
             held = out[param.name]
             out[param.name] = _TYPED.sub(scaled, held) if isinstance(held, str) else held * scale
+        elif param.quantity:
+            out[param.name] = out[param.name] * float(system.transform(param.quantity)[0])
     return out
 
 
 #: a length said in words: '0.2 m', not '0.2 m²' or '1e+06 N/m'
 _SAID = re.compile(r'(?<![\w.])(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?) m\b')
+#: a stiffness said in words: '1e+06 N/m'
+_SAID_STIFFNESS = re.compile(r'(?<![\w.])(-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?) N/m\b')
 
 
 def lengths_in_words(text: str, name: str) -> str:
-    """`text` with each length said in meters said in the system `name`."""
-    if name == DEFAULT:
-        return text
-    length = length_of(name)
-    return _SAID.sub(lambda found: f'{float(found.group(1)) / length["to_si"]:.4g} {length["unit"]}',
-                     text)
+    """`text` with each length said in meters, and each stiffness in N/m, said in the system
+    `name`, to four figures; a stiffness is said at its full precision, and rounded once here."""
+    stiffness = quantities_of(name, {'force/length'})['force/length']
+    if name != DEFAULT:
+        length = length_of(name)
+        text = _SAID.sub(
+            lambda found: f'{float(found.group(1)) / length["to_si"]:.4g} {length["unit"]}', text)
+    return _SAID_STIFFNESS.sub(
+        lambda found: f'{float(found.group(1)) / stiffness["to_si"]:.4g} {stiffness["unit"]}', text)
 
 
 def say_lengths(views: list[dict], name: str) -> None:
@@ -246,7 +262,7 @@ def say_lengths(views: list[dict], name: str) -> None:
                     row['value'] = lengths_in_words(row['value'], name)
         elif view.get('view') == 'table':
             spoken = [k for k, heading in enumerate(view['columns'])
-                      if heading in ('Dimensions', 'Center')]
+                      if heading in ('Dimensions', 'Center', 'Held')]
             for row in view['rows']:
                 for k in spoken:
                     row[k] = lengths_in_words(row[k], name)

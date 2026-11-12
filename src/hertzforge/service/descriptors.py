@@ -77,6 +77,11 @@ class Param:
     #: system: the service takes it to meters before the operation runs, and the shell shows
     #: the system's length unit for `unit`, and for '[m]' in the label
     length: bool = False
+    #: a number of this dimension ('force/length' for a stiffness) typed in the connection's
+    #: display system: the service takes it to SI before the operation runs, and the shell
+    #: shows the system's unit for `unit` and its default in that unit (`units.system`'s
+    #: `quantities`)
+    quantity: str | None = None
     #: a request the panel asks for this field's value, with the form's values, when the
     #: button beside it is pressed (Mesh's element size, detected for the parts and the
     #: element type chosen): `{'value'}` comes back, in the display units
@@ -137,6 +142,8 @@ class Param:
             out['setting'] = self.setting
         if self.length:
             out['length'] = True
+        if self.quantity is not None:
+            out['quantity'] = self.quantity
         if self.suggest is not None:
             out['suggest'] = self.suggest
         if self.shown_with is not None:

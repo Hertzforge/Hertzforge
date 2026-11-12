@@ -511,7 +511,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
-| `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"}}` |
+| `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
@@ -648,7 +648,10 @@ solids or mates: more are picked in the tree).
 system. A connection starts
 in the default (`in-slinch-lbf-s (g)`: inches, pound-force, accelerations in g);
 `units.system` with `name` (one of `systems`) changes it, and without one says which it is, and
-`length` gives its length unit and what takes that unit to meters. Each
+`length` gives its length unit and what takes that unit to meters. A param with `quantity` (a
+dimension, `force/length` for a stiffness) is typed in the system too: `quantities` gives, by
+dimension, the unit it is typed in and what takes that unit to SI, and the service takes it to SI
+before the operation runs. Each
 operation computes in SI; the service converts what it sends: a `spectrum`'s axes, series, step
 edges and regions, a `reading`'s rows, a `waterfall`'s axes and values, the fit's CMIF, and the
 report's page, and a `table`'s columns headed "<name> [<SI unit>]" (each number in them). A column

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ParamDescriptor, ProjectObject } from '$lib/protocol/types';
-import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, rescaled, validate, validateAll, withDisplayLengths, withObjects } from './params';
+import { defaultFor, defaultValues, hasObjectsFor, objectKinds, objectVerb, withSettings, parseNumber, rangeHint, reconcile, rescaled, rescaledQuantities, validate, validateAll, withDisplayLengths, withDisplayQuantities, withObjects } from './params';
 
 const tol: ParamDescriptor = { name: 'tolerance_db', label: 'Tolerance', type: 'number', unit: 'dB', default: 3, min: 0.5, max: 6, step: 0.5 };
 const avg: ParamDescriptor = { name: 'averages', label: 'Averages', type: 'integer', default: 64, min: 8, max: 512 };
@@ -205,5 +205,29 @@ describe('lengths typed in the display system', () => {
 
 	it('leaves a field left empty empty', () => {
 		expect(rescaled([widths], { widths: '' }, 0.0254).widths).toBe('');
+	});
+});
+
+describe('a quantity typed in the display system', () => {
+	// Brandon, 2026-11-11: a mate's stiffness was asked for in N/m with inches on screen
+	const stiffness = { name: 'k', label: 'Normal stiffness', type: 'number', default: 1e6, unit: 'N/m', quantity: 'force/length' } as ParamDescriptor;
+	const plain = { name: 'n', label: 'Count', type: 'number', default: 3, unit: 'N/m' } as ParamDescriptor;
+	const units = { 'force/length': { unit: 'lbf/in', to_si: 175.1268352464764 } };
+
+	it('shows its unit and its default in the system', () => {
+		const [k, n] = withDisplayQuantities([stiffness, plain], units);
+		expect(k.unit).toBe('lbf/in');
+		expect(k.default).toBe(5710);
+		expect(n).toBe(plain);
+	});
+
+	it('is left in SI when the system has no unit for it', () => {
+		expect(withDisplayQuantities([stiffness], {})[0]).toBe(stiffness);
+	});
+
+	it('holds the same stiffness when the system changes', () => {
+		const out = rescaledQuantities([stiffness, plain], { k: 1000, n: 3 }, { 'force/length': 175.1268352464764 });
+		expect(out.k).toBeCloseTo(175126.8352, 3);
+		expect(out.n).toBe(3);
 	});
 });

@@ -415,7 +415,7 @@ class Connection:
                 verbs={name: projects.verbs_of(project, name) for name in project})
             if op.id == 'project.save_as' and values['units'] == 'display':
                 values['units'] = self.units
-            if any(param.length for param in op.params):
+            if any(param.length or param.quantity for param in op.params):
                 values = display_units.typed_lengths(op.params, values, self.units,
                                                      project[values['geometry']])
             if params.get('preview') and not op.previews:
@@ -516,7 +516,11 @@ class Connection:
                                   f'{", ".join(display_units.systems())}')
             self.units = name
         return {'name': self.units, 'systems': display_units.systems(),
-                'length': display_units.length_of(self.units)}
+                'length': display_units.length_of(self.units),
+                'quantities': display_units.quantities_of(
+                    self.units, {p.quantity for op in self.service.operations.values()
+                                 for p in op.params
+                                 if p.quantity})}
 
     async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `fit.*` request: a step of the mode fit on this
