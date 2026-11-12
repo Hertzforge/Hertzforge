@@ -302,6 +302,14 @@ pub enum Follow {
         /// Whether the drop is also re-set after every pulse at a level.
         within_level: bool,
     },
+    /// Re-set on every step up, only ever widened there; after every pulse
+    /// at a level, narrowed (never widened) toward that level's own fit, to
+    /// no less than `narrow` of the old drop, and reported as the level's own
+    /// model so a law that resets its learning on such a model does.
+    Narrowing {
+        /// The least fraction of the old drop a change keeps.
+        narrow: f64,
+    },
 }
 
 /// The method's settings. One setting serves every plant.
@@ -329,6 +337,11 @@ pub struct SofteningPlan {
     pub fit: FitOptions,
     /// The family inverse's regularization.
     pub lambda_rel: f64,
+    /// When set, the margin is measured instead of `margin`
+    /// (`Derivations.md` D-R4-6): `(2 + p) / 2` for the power `p` the drop
+    /// is carried with, times the largest ratio so far of a level's fitted
+    /// drop over what the previous levels predicted for it (at least one).
+    pub data_margin: bool,
 }
 
 impl Default for SofteningPlan {
@@ -344,6 +357,7 @@ impl Default for SofteningPlan {
             band_octaves: Some(1.0),
             fit: FitOptions::default(),
             lambda_rel: 1e-3,
+            data_margin: false,
         }
     }
 }
@@ -373,6 +387,10 @@ pub struct SofteningFamily {
     model: MatrixStack,
     report: ModelReport,
     log: Vec<(f64, Vec<f64>)>,
+    /// Per band, what the last step predicted: `(a2, d2, p)`.
+    pending: Option<Vec<(f64, f64, f64)>>,
+    pred_error: f64,
+    errors: Vec<(f64, f64)>,
 }
 
 impl SofteningFamily {
@@ -393,7 +411,7 @@ impl SofteningFamily {
         if plan.members.is_empty() {
             return Err("the family needs at least one member".into());
         }
-        if let Follow::Levels { narrow, .. } = plan.follow {
+        if let Follow::Levels { narrow, .. } | Follow::Narrowing { narrow } = plan.follow {
             if !(0.0..=1.0).contains(&narrow) {
                 return Err("the narrowing factor must be in [0, 1]".into());
             }
@@ -418,6 +436,9 @@ impl SofteningFamily {
             frozen: false,
             report: ModelReport::default(),
             log: Vec::new(),
+            pending: None,
+            pred_error: 1.0,
+            errors: Vec::new(),
         })
     }
 
@@ -448,31 +469,68 @@ impl SofteningFamily {
         &self.log
     }
 
+    /// The largest ratio so far of a level's fitted drop over its prediction
+    /// (at least one), and every measured ratio with its level.
+    pub fn prediction_error(&self) -> (f64, &[(f64, f64)]) {
+        (self.pred_error, &self.errors)
+    }
+
     /// The band edges' knot bands (for reports).
     pub fn bands(&self) -> &Bands {
         &self.bands
     }
 
     /// The drop per band extrapolated to `level_db` from the last two levels'
-    /// fits, times the margin, at most the ceiling.
-    fn target(&self, level_db: f64) -> Vec<f64> {
+    /// fits, times the margin, at most the ceiling; and per band the
+    /// prediction's `(a2, d2, p)` before the margin.
+    fn target_with(&self, level_db: f64) -> (Vec<f64>, Vec<(f64, f64, f64)>) {
         let nb = self.bands.len();
         let at = level_scale(level_db);
         let n = self.levels.len();
         let last = &self.levels[n - 1].fit;
         let prev = (n >= 2).then(|| &self.levels[n - 2].fit);
-        (0..nb)
+        let mut pred = Vec::with_capacity(nb);
+        let t = (0..nb)
             .map(|b| {
-                let d = extrapolate_drop(
-                    prev.map(|p| (p.amplitude[b], p.drops[b])),
-                    last.amplitude[b],
-                    last.drops[b],
-                    at,
-                    self.plan.p_max,
-                );
-                (self.plan.margin * d).clamp(0.0, self.plan.ceiling)
+                let (a2, d2) = (last.amplitude[b], last.drops[b]);
+                let earlier = prev.map(|p| (p.amplitude[b], p.drops[b]));
+                // With no earlier drop to measure a power from, the power is
+                // the joint model's small-amplitude bound, 1, under `p_max`.
+                // Under the data margin a power is measured only from drops the
+                // fit resolves to a tenth (ten fine steps).
+                let res = if self.plan.data_margin {
+                    10.0 * self.plan.fit.fine.1
+                } else {
+                    0.0
+                };
+                let p = match earlier {
+                    Some((a1, d1))
+                        if d1 > res
+                            && d2 > res
+                            && d1 > 0.0
+                            && d2 > 0.0
+                            && a1 > 0.0
+                            && (a2 / a1 - 1.0).abs() > 1e-6 =>
+                    {
+                        ((d2 / d1).ln() / (a2 / a1).ln()).clamp(0.0, self.plan.p_max)
+                    }
+                    _ => self.plan.p_max.min(1.0),
+                };
+                let d = extrapolate_drop(None, a2, d2, at, p);
+                pred.push((a2, d2, p));
+                let m = if self.plan.data_margin {
+                    (2.0 + p) / 2.0 * self.pred_error
+                } else {
+                    self.plan.margin
+                };
+                (m * d).clamp(0.0, self.plan.ceiling)
             })
-            .collect()
+            .collect();
+        (t, pred)
+    }
+
+    fn target(&self, level_db: f64) -> Vec<f64> {
+        self.target_with(level_db).0
     }
 
     fn set(&mut self, level_db: f64, target: Vec<f64>, narrow: f64) -> Result<bool, String> {
@@ -547,6 +605,20 @@ impl ModelProvider for SofteningFamily {
             .fold((0.0, 0.0), |a, (r, _)| (a.0 + r, a.1 + 1.0));
         self.report.fit_residual = if den > 0.0 { num / den } else { f64::NAN };
         if new_level {
+            // The last step's prediction against what this level measured,
+            // at the amplitude it reached.
+            if let Some(pred) = self.pending.take() {
+                for (b, &(a2, d2, p)) in pred.iter().enumerate() {
+                    let d = fit.drops[b];
+                    let want = extrapolate_drop(None, a2, d2, fit.amplitude[b], p);
+                    let res = 10.0 * self.plan.fit.fine.1;
+                    if d > res && want > res {
+                        let r = d / want;
+                        self.errors.push((obs.level_db, r));
+                        self.pred_error = self.pred_error.max(r);
+                    }
+                }
+            }
             self.levels.push(LevelFit {
                 level_db: obs.level_db,
                 fit,
@@ -597,9 +669,34 @@ impl ModelProvider for SofteningFamily {
                     self.report.source = ModelSource::Predicted;
                 } else if within_level {
                     let t = self.target(next_level_db);
-                    if self.set(next_level_db, t, narrow)? {
-                        self.report.source = ModelSource::LevelOwn;
-                    }
+                    self.report.source = if self.set(next_level_db, t, narrow)? {
+                        ModelSource::LevelOwn
+                    } else {
+                        ModelSource::Predicted
+                    };
+                }
+            }
+            Follow::Narrowing { narrow } => {
+                if step_up {
+                    let (t, pred) = self.target_with(next_level_db);
+                    self.pending = Some(pred);
+                    let n = if self.set_once { 1.0 } else { 0.0 };
+                    self.set(next_level_db, t, n)?;
+                    self.set_once = true;
+                    self.report.source = ModelSource::Predicted;
+                } else {
+                    // Narrow only: never above the drop in force.
+                    let t: Vec<f64> = self
+                        .target(next_level_db)
+                        .into_iter()
+                        .zip(&self.assumed)
+                        .map(|(t, old)| t.min(*old))
+                        .collect();
+                    self.report.source = if self.set(next_level_db, t, narrow)? {
+                        ModelSource::LevelOwn
+                    } else {
+                        ModelSource::Predicted
+                    };
                 }
             }
         }
@@ -886,5 +983,72 @@ mod tests {
         let (with, without) = (kept[0], kept[1]);
         assert!(with.0 > 0.0 && with.1 > with.0, "{with:?}");
         assert_eq!(without.0, without.1, "{without:?}");
+    }
+
+    /// A drop that grows as the square of the amplitude is under-predicted
+    /// by a power of one: the measured margin rises by the ratio, and the
+    /// next family is set with it; at one level the family narrows to the
+    /// level's own fit and says so.
+    #[test]
+    fn mimo_shock_r4_margin_is_measured_and_the_level_narrows() {
+        let id = plant(&[100.0, 900.0], &[0.0, 0.0]);
+        let warp = WarpModel::new(id.clone(), mask(), FS, opts()).unwrap();
+        // The reference is the plant's own full-level response, so a fit's
+        // amplitude is its level's scale.
+        let reference = pulses(&id, 1.0)[0].responses.clone();
+        let b100 = ((100.0f64 / 40.0).log2()).floor() as usize;
+        let mut f = SofteningFamily::new(
+            warp,
+            id.clone(),
+            mask(),
+            reference,
+            SofteningPlan {
+                probe_levels: 1,
+                follow: Follow::Narrowing { narrow: 0.0 },
+                data_margin: true,
+                p_max: f64::INFINITY,
+                ceiling: 1.0,
+                ..SofteningPlan::default()
+            },
+        )
+        .unwrap();
+        let at = |d: f64| plant(&[100.0, 900.0], &[d, 0.0]);
+        observe(&mut f, -40.0, &at(0.01));
+        f.model_for(-34.0).unwrap();
+        observe(&mut f, -34.0, &at(0.02));
+        f.model_for(-28.0).unwrap();
+        assert!(f.prediction_error().0 < 1.1, "{:?}", f.prediction_error());
+        // Four times the drop for twice the amplitude: a power of two.
+        observe(&mut f, -28.0, &at(0.08));
+        let e = f.prediction_error().0;
+        assert!(e > 1.5 && e < 2.5, "measured margin factor {e}");
+        f.model_for(-26.0).unwrap();
+        let wide = f.assumed()[b100];
+        let l = f.levels();
+        let p = (l[2].fit.drops[b100] / l[1].fit.drops[b100]).ln()
+            / (l[2].fit.amplitude[b100] / l[1].fit.amplitude[b100]).ln();
+        let want = (2.0 + p) / 2.0
+            * e
+            * extrapolate_drop(
+                None,
+                l[2].fit.amplitude[b100],
+                l[2].fit.drops[b100],
+                level_scale(-26.0),
+                p,
+            );
+        assert!(
+            want < 1.0 && (wide - want).abs() < 1e-9,
+            "{wide} {want} {:?}",
+            f.levels()
+                .iter()
+                .map(|l| (l.fit.amplitude[b100], l.fit.drops[b100]))
+                .collect::<Vec<_>>()
+        );
+        // The plant at -26 dB is much stiffer than assumed: the level narrows.
+        observe(&mut f, -26.0, &at(0.02));
+        assert_eq!(f.model_for(-26.0).unwrap(), ModelSource::LevelOwn);
+        assert!(f.assumed()[b100] < 0.5 * wide);
+        // Nothing new at the level: kept, and not reported as the level's own.
+        assert_eq!(f.model_for(-26.0).unwrap(), ModelSource::Predicted);
     }
 }

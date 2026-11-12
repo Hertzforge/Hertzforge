@@ -27,7 +27,7 @@ use math::reference_plant::FS_HZ as RFS;
 use math::research_plant::{
     h1_from_records, identify_h1_model, research_setup_signed, run_research_ladder, LevelPlant,
 };
-use math::shape::{ShapeExtras, ShapeLaw, ShapeParams, ShapeSafety};
+use math::shape::{CarryGain, ShapeExtras, ShapeLaw, ShapeParams, ShapeSafety};
 use math::softening::{fit_softening, Bands, FitOptions, Follow, SofteningFamily, SofteningPlan};
 use math::spectrum::{apply, rfft, rows_irfft, rows_rfft};
 use math::srs::{error_db, srs_rows};
@@ -75,7 +75,32 @@ fn nonsat() -> Plant {
     }
 }
 
+/// The held-out plant of the operator-free part (fixed in the experiment
+/// log before it was run): the severe plant's structure, drop 0.10 with
+/// exponent 2 (softening that sets in late), no damping rise, every reference
+/// amplitude 15 times the severe plant's.
+fn late() -> Plant {
+    let mut jp = ShockPlant::Jointed4x4Severe.plant();
+    for m in jp.modes.iter_mut() {
+        m.reference_amplitude *= 15.0;
+    }
+    jp.joint = Some(JointLaw {
+        delta: 0.10,
+        damping_gain: 0.0,
+        freq_exponent: 2.0,
+        damping_exponent: 0.5,
+        decay_cycles: 3.0,
+    });
+    Plant {
+        name: "jointed-4x4-late-softening".into(),
+        jp,
+    }
+}
+
 fn engine_plants() -> Vec<Plant> {
+    if std::env::var("R4_PLANT").as_deref() == Ok("late") {
+        return vec![late()];
+    }
     let all = vec![
         shock(ShockPlant::Linear4x4),
         shock(ShockPlant::Jointed4x4Moderate),
@@ -91,11 +116,39 @@ fn engine_plants() -> Vec<Plant> {
     }
 }
 
+/// Measurement noise relative to the full-level reference's rms, from
+/// `R4_NOISE` (none beyond the station's own 1e-4 when unset).
+fn noise_rel() -> f64 {
+    std::env::var("R4_NOISE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0)
+}
+
+/// The twist SRS reference's rms (every engine plant shares it).
+fn reference_rms() -> f64 {
+    static RMS: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *RMS.get_or_init(|| {
+        let b = jointed_bench_noise(&shock(ShockPlant::Linear4x4), 1e-4);
+        math::spectrum::rms_all(&b.ms.reference)
+    })
+}
+
 fn station_of(p: &Plant, seed: u64) -> Box<dyn hertzforge_hal::Backend + Send> {
+    let n = noise_rel();
+    let abs = if n > 0.0 {
+        (n * reference_rms()).max(1e-4)
+    } else {
+        1e-4
+    };
+    station_noise(p, seed, abs)
+}
+
+fn station_noise(p: &Plant, seed: u64, noise: f64) -> Box<dyn hertzforge_hal::Backend + Send> {
     Box::new(
         hertzforge_hal_sim::SimConfig::new()
             .sample_rate_hz(FS)
-            .noise_level(1e-4)
+            .noise_level(noise)
             .shared_clock(true)
             .seed(seed)
             .plant(PlantModel::Jointed(p.jp.clone()))
@@ -150,6 +203,10 @@ fn warp_on(ms: &math::Setup, model: &MatrixStack) -> WarpModel {
 }
 
 fn jointed_bench(p: &Plant) -> Bench {
+    jointed_bench_noise(p, 1e-4)
+}
+
+fn jointed_bench_noise(p: &Plant, noise: f64) -> Bench {
     let cfg = config(4, 0, 4, LEN_SRS);
     let mut e = hertzforge_mimo_shock::MimoShockEngine::new(
         cfg,
@@ -160,7 +217,7 @@ fn jointed_bench(p: &Plant) -> Bench {
     .with_clock(Arc::new(ManualClock::default()))
     .with_pacing(false);
     e.arm(
-        station_of(p, 11),
+        station_noise(p, 11, noise),
         table(4, 0, 4),
         hertzforge_module_abi::StationClass::HertzforgeSim,
     )
@@ -469,6 +526,7 @@ struct Method {
     /// The softening provider, and an assumed drop to start it at.
     softening: Option<(SofteningPlan, Option<f64>)>,
     params: ShapeParams,
+    carry: CarryGain,
     log: Arc<Mutex<Vec<String>>>,
 }
 
@@ -479,6 +537,7 @@ impl Method {
             family: None,
             softening: None,
             params: ShapeParams::default(),
+            carry: CarryGain::Keep,
             log: Arc::default(),
         }
     }
@@ -536,7 +595,10 @@ impl Method {
             self.params.clone(),
             ShapeExtras {
                 provider: Some(provider),
-                safety: ShapeSafety::off(),
+                safety: ShapeSafety {
+                    carry: self.carry,
+                    ..ShapeSafety::off()
+                },
                 robust_first: None,
             },
         )
@@ -786,7 +848,15 @@ fn runner_run(b: &Bench, m: &Method, ladder: &[f64], ladder_start: f64) -> Run {
     let mut law = m.law(&b.ms).expect("a law");
     let mut resp =
         |d: &[Vec<f64>], s: f64| -> Result<Vec<Vec<f64>>, String> { Ok((b.respond)(d, s)) };
-    match run_research_ladder(&mut law, &b.ms, &mut resp, ladder, 0.0, 20_261_111, None) {
+    match run_research_ladder(
+        &mut law,
+        &b.ms,
+        &mut resp,
+        ladder,
+        noise_rel(),
+        20_261_111,
+        None,
+    ) {
         Ok(rows) => {
             let r: Vec<(f64, f64, f64)> = rows
                 .iter()
@@ -1519,6 +1589,182 @@ fn mimo_shock_r4_study_classical_twist() {
             for s in log.lock().expect("log").iter() {
                 println!("    {s}");
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The operator-free part (MS-R4-10 onward).
+// ---------------------------------------------------------------------------
+
+/// The operator-free setting (written in the experiment log before the
+/// held-out plant ran): the first mapping pulse on the identification, every
+/// later pulse on the family; the margin measured; the power measured with no
+/// bound; no ceiling; widened on steps, narrowed to the level's own fit inside
+/// a level with the law's gains reset when it narrows.
+fn operator_free() -> Method {
+    Method {
+        carry: CarryGain::ResetOnOwn,
+        ..Method::soft(SofteningPlan {
+            probe_levels: 1,
+            follow: Follow::Narrowing { narrow: 0.0 },
+            data_margin: true,
+            p_max: f64::INFINITY,
+            // Not an operator number: the largest drop the fit can measure.
+            ceiling: FitOptions::default().coarse.1,
+            ladder_start_db: Some(-12.0),
+            ..SofteningPlan::default()
+        })
+    }
+}
+
+/// The operator-free setting without the narrowing inside a level: only
+/// ever widened (round 4's following) with the measured margin and power and
+/// no ceiling.
+fn operator_free_widen() -> Method {
+    let mut m = operator_free();
+    m.carry = CarryGain::Keep;
+    if let Some((plan, _)) = m.softening.as_mut() {
+        plan.follow = WIDEN;
+    }
+    m
+}
+
+/// Mapping sets of R4-I.
+fn mapping_sets() -> Vec<(&'static str, Vec<f64>)> {
+    let all = vec![
+        ("-40 -34 -28 -22", vec![-40.0, -34.0, -28.0, -22.0]),
+        ("-40 -30 -20", vec![-40.0, -30.0, -20.0]),
+        ("-34 -28 -22 -18", vec![-34.0, -28.0, -22.0, -18.0]),
+        ("-40 -34", vec![-40.0, -34.0]),
+    ];
+    match std::env::var("R4_MAP")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        Some(k) => vec![all[k].clone()],
+        None => all,
+    }
+}
+
+fn mapped(map: &[f64], l: &[f64]) -> Vec<f64> {
+    map.iter().copied().chain(l.iter().copied()).collect()
+}
+
+/// MS-R4-10 to -12: the operator-free scheme beside round 4's ceiling-based
+/// "followed" and the baselines, on the engine's plants (`R4_PLANT`, `late`
+/// for the held-out plant) and the runner plants (`R4_RUNNER`: dev, heldout,
+/// none), with `R4_NOISE` relative noise and `R4_MAP` one mapping set.
+#[test]
+#[ignore = "a study: run on demand, prints its table"]
+fn mimo_shock_r4b_study_operator_free() {
+    let def = LadderPlan::default().levels_db;
+    let base_rows = std::env::var("R4_BASELINES")
+        .map(|v| v != "0")
+        .unwrap_or(true);
+    println!("relative noise {:e}", noise_rel());
+    let run_engine = std::env::var("R4_RUNNER")
+        .map(|v| v == "none")
+        .unwrap_or(true)
+        || std::env::var("R4_PLANT").is_ok();
+    if run_engine {
+        for p in engine_plants() {
+            header(&format!(
+                "{}, twist SRS, station seed {}",
+                p.name,
+                seed_env()
+            ));
+            let mut rows: Vec<(String, Method, Vec<f64>)> = Vec::new();
+            if base_rows {
+                rows.push((
+                    "frozen, default ladder".into(),
+                    Method::frozen(),
+                    def.clone(),
+                ));
+                rows.push((
+                    "frozen, -40 by 3".into(),
+                    Method::frozen(),
+                    ladder(-40.0, 3.0),
+                ));
+                rows.push((
+                    "family 8 % (hand-set)".into(),
+                    Method::family(0.08),
+                    def.clone(),
+                ));
+                rows.push((
+                    "round 4 followed, ceiling 12 %".into(),
+                    Method::soft(plan(WIDEN)),
+                    with_probes(&def),
+                ));
+            }
+            for (name, map) in mapping_sets() {
+                rows.push((
+                    format!("operator-free, mapping {name}"),
+                    operator_free(),
+                    mapped(&map, &def),
+                ));
+                rows.push((
+                    format!("operator-free widen only, mapping {name}"),
+                    operator_free_widen(),
+                    mapped(&map, &def),
+                ));
+            }
+            for (name, m, lad) in rows {
+                let r = engine_run(&p, Arc::new(m.clone()), lad, 6, -12.0);
+                print_run(&name, 0, &r);
+                flush(&m);
+            }
+        }
+    }
+    use math::reference_plant::LADDER_DB;
+    let which = std::env::var("R4_RUNNER").unwrap_or_else(|_| "none".into());
+    if which == "none" {
+        return;
+    }
+    let spring_ladder: Vec<f64> = def.iter().copied().chain([0.0; 7]).collect();
+    let mut benches: Vec<(Bench, Vec<f64>)> = Vec::new();
+    if which == "dev" || which == "all" {
+        benches.push((research_bench(), LADDER_DB.to_vec()));
+        benches.push((spring_bench(0.16), spring_ladder.clone()));
+        benches.push((spring_bench(0.32), spring_ladder.clone()));
+    }
+    for (b, lad) in &benches {
+        header(&format!("{} (research ladder runner)", b.name));
+        let mut rows: Vec<(String, Method, Vec<f64>)> = Vec::new();
+        if base_rows {
+            rows.push(("frozen, from -12".into(), Method::frozen(), lad.clone()));
+            rows.push((
+                "frozen, -40 by 3".into(),
+                Method::frozen(),
+                ladder(-40.0, 3.0).into_iter().chain([0.0; 7]).collect(),
+            ));
+            rows.push((
+                "family 8 % (hand-set)".into(),
+                Method::family(0.08),
+                lad.clone(),
+            ));
+            rows.push((
+                "round 4 followed, ceiling 12 %".into(),
+                Method::soft(plan(WIDEN)),
+                with_probes(lad),
+            ));
+        }
+        for (name, map) in mapping_sets() {
+            rows.push((
+                format!("operator-free, mapping {name}"),
+                operator_free(),
+                mapped(&map, lad),
+            ));
+            rows.push((
+                format!("operator-free widen only, mapping {name}"),
+                operator_free_widen(),
+                mapped(&map, lad),
+            ));
+        }
+        for (name, m, l) in rows {
+            let r = runner_run(b, &m, &l, -12.0);
+            print_run(&name, 0, &r);
+            flush(&m);
         }
     }
 }
