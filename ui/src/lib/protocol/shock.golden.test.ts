@@ -35,7 +35,7 @@ const readJson = (name: string) => JSON.parse(readFileSync(golden(name), 'utf-8'
 const readBin = (name: string) => new Uint8Array(readFileSync(golden(name)));
 
 /** Every classical shock golden in the folder: its text frames and its binary frames. */
-const SHOCK = readdirSync(DIR).filter((f) => /(^|_)shock(_|\.)/.test(f));
+const SHOCK = readdirSync(DIR).filter((f) => /(^|_)shock(_|\.)/.test(f) && !/mimo_shock|shock_mimo/.test(f));
 const TEXT = SHOCK.filter((f) => f.endsWith('.json') && !f.endsWith('.expected.json')).sort();
 const BIN = SHOCK.filter((f) => f.endsWith('.bin')).sort();
 const QUANTITIES: ShockQuantity[] = ['pulse', 'velocity', 'displacement', 'srs', 'spectrum', 'identification', 'law', 'readings', 'pulses'];

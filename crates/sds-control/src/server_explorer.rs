@@ -336,6 +336,7 @@ impl Service {
                 || inner.mixed_live()
                 || inner.twr_live()
                 || inner.recorder_live()
+                || inner.mimo_shock_live()
             {
                 inner.run_active()?;
             }
@@ -365,7 +366,7 @@ impl Service {
             }
             let fs_hz = run.wire.fs();
             let plan = match inner.stations.selected() {
-                Selection::Sim => StationPlan::Sim { fs_hz },
+                Selection::Sim => StationPlan::sim(fs_hz),
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);

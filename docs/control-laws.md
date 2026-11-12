@@ -706,6 +706,221 @@ allows will ring. The built-in tone law therefore takes a gentler compression
 in a Mixed Mode run (custom, integral gain 0.5, 20 dB/s) unless you choose
 one.
 
+## MIMO Shock laws
+
+A MIMO Shock law drives several shakers at once to put a pulse at several control points: a
+classical waveform at every control, or a shock response spectrum (SRS) at every control. The
+controller identifies the structure on the pulse's own spectral lines with every drive playing at
+once, then builds the law and calls it between pulses: once for the first pulse, at the first level
+of the ladder, then after each pulse with what was played and measured and the level of the next
+pulse. The law returns every drive's whole record for that next pulse, in volts, at that level. The
+specification's section 15 states the world in full.
+
+How a law for several drives should work is an open question. A correction through a model of the
+structure can diverge when the structure's resonances move with level, and with several drives the
+SRS can look better for a few pulses while the waveform and the drives grow. The built-in laws are
+starting points, each with a known weakness (below), and the check is written for the law that
+would have none. Trying a new law is meant to be quick. Every result stated here was measured on the
+simulator's structures; no MIMO Shock law has yet run on a shaker.
+
+What differs from the single-output shock laws:
+
+- **The law builds the drive at the level it is played.** The drives and responses it is given are
+  at the level played; `level_scale` turns a level into its amplitude, and the law divides by it to
+  work at full level and multiplies by the next level's to play.
+- **The plant is a stack of matrices**, controls by drives on every line, with each path's delay in
+  it. A law takes its own transforms; `spectrum::rows_rfft` and `spectrum::rows_irfft` in the SDK
+  go between records and spectra and scale in the same step.
+- **One law can run both kinds of test.** For an SRS test the controller synthesizes a waveform
+  for each control's SRS and hands it over as the reference, so a waveform law runs an SRS test as
+  it runs a classical one; an SRS law also gets each control's target SRS and the measured SRS
+  after every pulse. The manifest says which kinds a law accepts.
+
+### Writing a MIMO Shock law in Rust
+
+Implement `ShockMimoLaw` (`describe`, `new`, `seed`, `iterate`) from
+`hertzforge_law_sdk::shock_mimo` and export it with `export_shock_mimo_law!`. Build the manifest
+with `ManifestBuilder`: name, version, summary, the target kinds, the parameters and the values.
+The SDK hands the law plain Rust: `Setup` (one row per control for the reference, the plant as a
+`MatrixStack`, the band, the ceilings, the ladder), `Inputs` (one row per drive and per control)
+and takes `Outputs` back. `shock_mimo::math` is the mathematics the built-in laws run on: the
+regularized inverse per line, the SRS, delay estimation and the built-in laws' own steps.
+
+Start from `laws/mimo-shock-paired`. It is the whole of `paired` written out in one file, with
+comments for an engineer who knows control and has not seen this code: its parameters, its state,
+the seed and the iteration, and nothing else.
+
+### What the controller does with a MIMO Shock law's drives
+
+Every one of these holds whatever the law returns:
+
+- one record of the run's length per drive, every sample finite, at most eight declared values,
+  delays (if any) one per control; anything else is refused by name and is a miss;
+- each drive's peak against its ceiling: over it the drive is scaled down, past its abort the run
+  aborts;
+- each drive's growth from one pulse to the next, beyond the level step, is capped;
+- the drives' predicted response is checked against the abort lines before a pulse is fired;
+- an error that rises on consecutive pulses at one level ends the run in the controlled stop;
+- a late, failed, crashed or refused call is a miss; three in a row end the run; a law file that
+  traps, runs past its budget or asks for too much memory stays stopped for the rest of the run.
+
+### Checking a MIMO Shock law before hardware
+
+An imported MIMO Shock law must pass the check before it may drive hardware. Each case is a whole
+run on the simulator, from -12 dB to full level in 3 dB steps with three pulses a level, for every
+target kind the law accepts, with an SRS tolerance of -1.5 and +3 dB.
+
+| Case | Plant | What it tests |
+|---|---|---|
+| linear 4 x 4 | Four drives, four controls, coupled, linear | The base case |
+| jointed 4 x 4 moderate | The same structure, joints softening and damping moderately with level | A plant that moves with level |
+| jointed 4 x 4 severe | The same, strongly | Where a model correction diverges |
+| jointed 6 x 3 | Six controls on three drives | More controls than drives |
+| delay error | Linear 4 x 4, the law's model 0.5 ms late on every path | A wrong delay in the model |
+| identification error | Moderate 4 x 4 identified 20 dB under the reference, the model 2 dB high | A wrong model |
+| measurement noise | Moderate 4 x 4, noise at 3 % of the target rms on every response | Noise |
+| limit channel | Linear 4 x 4 with a monitored output that binds from -3 dB | A run held under full level |
+
+Every case asks the same six things of the run: every answer of the law was used and it never
+faulted; the run did not abort or stop on a guard; it reached full level (the limit case excepted);
+the last pulse of the last level passed at every control; the worst control's error on that pulse
+was within 1 dB of its best at that level, so a law that found the target and drifted off fails;
+and no drive's peak grew more than 6 dB over that level's pulses. A failed case is recorded with
+the requirement it broke and the number that broke it.
+
+The requirements are what a good law should do, written before any law was run against them. Each
+built-in law is known to fail some of them, and its facts in the law picker say which.
+
+### The built-in MIMO Shock laws
+
+**`inverse`** (the default for a waveform target; accepts both kinds). The first drives are each
+control's target through the regularized inverse of the identified plant, line by line. After each
+pulse the drives are corrected by a fraction of the inverse times the waveform error, with a gain
+per line that is halved on a line whose smoothed error grew and restored slowly. Known weakness: on
+a structure whose resonances move with level, the line gains slow the divergence but do not stop
+it.
+
+| Key | What it does |
+|---|---|
+| `lambda_rel` | Regularization of the inverse on each line, relative to that line's largest singular value (default 0.001) |
+| `gain` | The fraction of each pulse's error corrected (default 1) |
+| `watchdog` | The per-line gain cut (default on) |
+| `refresh` | After every pulse, move the model the least amount that reproduces that pulse (default off) |
+| `refresh_mu` | How far the refresh moves the model (default 0.5) |
+| `align` | Remove each control's best-fit delay before the error is formed (default off) |
+| `align_max_ms` | The largest delay removed (default 2 ms) |
+| `model`, `modes`, `track_from_identification` | How the model follows the plant (below; default `frozen`) |
+| `predicted_step` | At a level step, correct the error the next level is predicted to have, from the tracked model's change between the two levels, instead of the error just measured; needs `model` `track` or `track_secant` (default off) |
+
+**`shape`** (the default for an SRS target; SRS only). A smooth real gain per control shapes that
+control's target by its SRS ratio after every pulse, with a weight that rises with level (0.5 at
+-12 dB to 0.85 from -3 dB), and the drives are the regularized inverse applied to the shaped
+targets: no waveform error is ever formed. Each control's delay is re-estimated from its response.
+It is the several-drive form of the published single-drive practice. Known weakness: bounded, but
+it stalls short of tolerance on a strongly coupled structure.
+
+| Key | What it does |
+|---|---|
+| `lambda_rel` | As for `inverse` (default 0.001) |
+| `max_step_db` | The largest change of a control's gain in one pulse (default 6 dB) |
+| `delay_relax` | How far each delay moves toward the measured one per pulse; 0 holds them (default 0.5) |
+| `delay_bound_ms` | Each control's delay stays this close to the first control's (default 2 ms) |
+| `anchor` | `target` (default) or `measured`: shape the measured response with its own phase; needs `refresh` |
+| `refresh`, `refresh_mu` | As for `inverse` (default off, 1) |
+| `seed_timing` | `zero` (default) or `least_effort`: start the delays where the least drive and unreachable energy are needed |
+| `model`, `modes`, `track_from_identification` | How the model follows the plant (below; default `frozen`) |
+| `gain_clamp_db` | Each control's accumulated gain stays within this many dB of one; 0 leaves it free (default 0) |
+| `stall_tol_db` | A point is reported stalled (the `stalled_points` value) when its gain is at the clamp, or its error is above this and has not fallen in two pulses at one level (default 1.5 dB) |
+
+**How the model follows the plant (`model`).** `inverse` and `shape` build every drive through a
+model of the structure. A jointed structure softens as it is driven harder, so the model measured
+at identification is wrong by full level. `model` chooses how the law keeps its model current:
+
+| `model` | What it does | Cost |
+|---|---|---|
+| `frozen` (default) | The identification, never changed | Nothing |
+| `secant` | After each pulse, the least change of the model that reproduces every pulse played at the current level | Small, every pulse |
+| `track` | Fits a modal model (common resonances and damping, a delay per control) to the identification before the first pulse; after each pulse re-fits the resonances and damping from that pulse, and predicts the first pulse of each new level from their trend with level. When the tracked model explains the pulses worse than `secant` would, `secant`'s model is used until it does better again | A fit before the first pulse (seconds), and a small re-fit every pulse |
+| `track_secant` | `track`, with the pulses of the level being played reproduced exactly on top of the tracked model | As `track` |
+
+`modes` sets the number of modes fitted; 0 (the default) counts the identified plant's resonance
+peaks in the band, then adds two modes at a time until the fit is within 1 % of the
+identification. A fit further than 5 % from the identification is not trusted: the run starts on
+`secant`'s model, and the `model_source` value says 3. `track_from_identification` takes the
+identification as the first point of the level trend, at the level the controller measured it at
+(the identification's peak over the target's peak, the largest among the controls).
+
+Where they help and where they do not. On a plant whose modes soften with the pulse's level but
+not within one pulse, `track` with the identification as a level point takes the first full-level
+pulse from about 10 dB over the SRS to under 1 dB. On the simulator's jointed plants, whose joints
+soften within each pulse and recover as it decays, no option helps: no single linear model
+reproduces one of those pulses (the best modal re-fit of a pulse leaves 8 % of it unexplained at
+-30 dB and 47 % at -18 dB), and the tracked model is set aside for `secant`'s within a pulse or two.
+There, on targets that drive the joints hard, `frozen` reached full level where every other option
+stopped at a lower level, and on milder ones the options did no better than `frozen`. That is why
+the default is `frozen`. A structure's joints decide which of the two it is like, and a run on it says which:
+`model_prediction_residual` is how far the model missed the pulse it built.
+
+**`paired`** (both kinds). Each control is paired with one drive (control 1 with drive 1, and so
+on); that drive's spectrum is scaled by the smoothed ratio of wanted to measured magnitude at its
+control. No cross path of the plant is used, so on a coupled structure the pairs work against each
+other; it is there to show that, and as the template. Parameters `weight` (the power on the ratio,
+default 0.8), `smooth_lines` (default 15) and `max_step_db` (default 6 dB).
+
+Each runs natively and as a law file (`laws/mimo-shock-inverse`, `laws/mimo-shock-shape`,
+`laws/mimo-shock-paired`), from the same mathematics and the same constructor; the law file's
+drives match the native law's within 1e-12 of each record's peak, for every option.
+
+**Time.** A law is built and seeded before the first pulse, under `control.seed_budget_s` (60 s by
+default): that is where `track` fits its modal model. Each pulse's call has the call budget, a
+quarter of the time between pulses by default. Before the first pulse the controller times one
+iteration of a second copy of the law on the identified plant's predicted response, so a law that
+cannot answer in time is named (`law_too_slow`) before the run, not in the middle of it.
+
+### Trying a new idea
+
+1. Copy the template and give it a name:
+
+   ```sh
+   cp -R laws/mimo-shock-paired laws/mimo-shock-myidea
+   ```
+
+   In `laws/mimo-shock-myidea/Cargo.toml` change the package name to
+   `hertzforge-law-mimo-shock-myidea`. In `src/lib.rs` change the name in `describe`, then change
+   `new`, `seed` and `iterate`. Delete `src/tests.rs` and the `mod tests;` line at the end of
+   `src/lib.rs`: they check that the template matches the built-in `paired`. Then add the new
+   crate to the lockfile:
+
+   ```sh
+   cargo update --workspace
+   ```
+
+2. Build it:
+
+   ```sh
+   bash scripts/build_laws.sh
+   ```
+
+   The law file is `<target>/wasm32-wasip2/release/hertzforge_law_mimo_shock_myidea.wasm`, where
+   `<target>` is `target` or `CARGO_TARGET_DIR`.
+
+3. Run it on the reference bench beside the built-in it should beat:
+
+   ```sh
+   cargo run --release -p hertzforge-mimo-shock-laws --features reference-plant \
+       --example try_mimo_shock_law -- \
+       target/wasm32-wasip2/release/hertzforge_law_mimo_shock_myidea.wasm srs
+   ```
+
+   `srs` or `waveform` picks the target kind; `name=value` arguments after it set parameters
+   (`weight=0.5`). The bench is a 4 x 4 coupled structure whose resonances fall 5 % and whose
+   damping triples by full level. It prints each pulse's level, waveform error, worst SRS error
+   and drive rms for your law, then for `shape` (SRS) or `inverse` (waveform) on the same pulses.
+
+4. Import the law file in the law panel, run its check on the simulator, and read the record: each
+   case passed, or the requirement it broke with its number. A new law is worth keeping when it
+   passes a case the built-ins fail, or passes the same cases with less drive.
+
 ## Importing a law
 
 A law file is imported from a path. Hertzforge loads it (which finds the world it implements and
@@ -731,8 +946,8 @@ Laws are separate files loaded at run time, so their authors can license them as
 
 ## The interface version
 
-The interface is `hertzforge:control-law@0.1.0`, with six worlds: `random-single`,
-`random-mimo`, `shock-classical`, `shock-srs`, `sine-single` and `twr-single`. While it is at 0.x it may change between releases, and a law must be built against
+The interface is `hertzforge:control-law@0.1.0`, with seven worlds: `random-single`,
+`random-mimo`, `shock-classical`, `shock-srs`, `sine-single`, `twr-single` and `shock-mimo`. While it is at 0.x it may change between releases, and a law must be built against
 the version the host loads.
 
 ## Building and testing in this repository

@@ -47,6 +47,9 @@ mod shock_methods;
 #[path = "server_srs.rs"]
 mod srs_methods;
 
+#[path = "server_mimo_shock.rs"]
+mod mimo_shock_methods;
+
 #[path = "server_mixed.rs"]
 mod mixed_methods;
 #[path = "server_sine.rs"]
@@ -80,7 +83,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 52] = [
+const DRIVE_METHODS: [&str; 56] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -133,6 +136,10 @@ const DRIVE_METHODS: [&str; 52] = [
     "recorder.start",
     "recorder.arm",
     "recorder.record",
+    "mimo_shock.arm",
+    "mimo_shock.start",
+    "mimo_shock.proceed",
+    "mimo_shock.fire",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -151,6 +158,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     shock.pulses, shock.pulse, srs.configure, srs.config, srs.preview, srs.target.import, \
     srs.table.import, srs.arm, srs.start, srs.proceed, srs.fire, srs.level, srs.stop, srs.abort, \
     srs.reset, srs.clear, srs.state, srs.log, srs.subscribe, srs.pulses, srs.pulse, \
+    mimo_shock.configure, mimo_shock.config, mimo_shock.arm, mimo_shock.start, \
+    mimo_shock.proceed, mimo_shock.fire, mimo_shock.stop, mimo_shock.abort, mimo_shock.reset, \
+    mimo_shock.clear, mimo_shock.state, mimo_shock.log, mimo_shock.subscribe, \
+    mimo_shock.pulses, mimo_shock.pulse, \
     sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
     sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
     sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
@@ -279,6 +290,7 @@ pub enum Feed {
     Mimo,
     Shock,
     Srs,
+    MimoShock,
     Sine,
     Mixed,
     Twr,
@@ -385,6 +397,14 @@ struct Inner {
     srs_log_sent: (String, u64),
     srs_rows_sent: u64,
     srs_ident_sent: bool,
+    /// The MIMO Shock configuration and its run, beside the others, and what of
+    /// it has been sent.
+    mimo_shock: Option<Arc<crate::mimo_shock::MsRun>>,
+    mimo_shock_runs: u64,
+    mimo_shock_state_key: String,
+    mimo_shock_log_sent: (String, u64),
+    mimo_shock_rows_sent: u64,
+    mimo_shock_ident_sent: bool,
     /// The Sine configuration and its run, beside the others, and what of it has
     /// been sent.
     sine: Option<Arc<crate::sine::SineRun>>,
@@ -443,6 +463,12 @@ impl Inner {
         self.srs.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
+    fn mimo_shock_live(&self) -> bool {
+        self.mimo_shock
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     fn sine_live(&self) -> bool {
         self.sine.as_ref().is_some_and(|s| s.view().state.is_live())
     }
@@ -476,6 +502,7 @@ impl Inner {
             || self.mimo_live()
             || self.shock_live()
             || self.srs_live()
+            || self.mimo_shock_live()
             || self.sine_live()
             || self.mixed_live()
             || self.twr_live()
@@ -540,6 +567,21 @@ impl Inner {
                     "run_active",
                     format!(
                         "SRS shock run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
+        if let Some(s) = &self.mimo_shock {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "MIMO Shock run {} is {}; stop it first.",
                         s.id,
                         v.state.name()
                     ),
@@ -657,6 +699,16 @@ pub struct Service {
     srs_notices: std::sync::Mutex<
         Option<mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::srs::view::SrsView>>>,
     >,
+    /// The connections with a MIMO Shock display subscription.
+    mimo_shock_displays: std::sync::Mutex<HashMap<ConnId, mimo_shock_methods::MsDisplay>>,
+    /// MIMO Shock runs' publishes, in order.
+    mimo_shock_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::mimo_shock::view::MsView>>,
+    mimo_shock_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::mimo_shock::view::MsView>>,
+        >,
+    >,
     /// The connections with a Sine display subscription.
     sine_displays: std::sync::Mutex<HashMap<ConnId, sine_methods::SineDisplay>>,
     /// Sine runs' publishes, in order.
@@ -733,6 +785,7 @@ impl Service {
         let (notify, notices) = mpsc::unbounded_channel();
         let (shock_notify, shock_notices) = mpsc::unbounded_channel();
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
+        let (mimo_shock_notify, mimo_shock_notices) = mpsc::unbounded_channel();
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
         let (mixed_notify, mixed_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
@@ -759,6 +812,12 @@ impl Service {
                 srs_log_sent: (String::new(), 0),
                 srs_rows_sent: 0,
                 srs_ident_sent: false,
+                mimo_shock: None,
+                mimo_shock_runs: 0,
+                mimo_shock_state_key: String::new(),
+                mimo_shock_log_sent: (String::new(), 0),
+                mimo_shock_rows_sent: 0,
+                mimo_shock_ident_sent: false,
                 sine: None,
                 sine_runs: 0,
                 sine_state_key: String::new(),
@@ -800,6 +859,9 @@ impl Service {
             srs_displays: std::sync::Mutex::new(HashMap::new()),
             srs_notify,
             srs_notices: std::sync::Mutex::new(Some(srs_notices)),
+            mimo_shock_displays: std::sync::Mutex::new(HashMap::new()),
+            mimo_shock_notify,
+            mimo_shock_notices: std::sync::Mutex::new(Some(mimo_shock_notices)),
             sine_displays: std::sync::Mutex::new(HashMap::new()),
             sine_notify,
             sine_notices: std::sync::Mutex::new(Some(sine_notices)),
@@ -877,6 +939,7 @@ impl Service {
             Feed::Mimo => self.mimo_displays().contains_key(&conn),
             Feed::Shock => self.shock_displays().contains_key(&conn),
             Feed::Srs => self.srs_displays().contains_key(&conn),
+            Feed::MimoShock => self.mimo_shock_displays().contains_key(&conn),
             Feed::Sine => self.sine_displays().contains_key(&conn),
             Feed::Mixed => self.mixed_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
@@ -982,6 +1045,19 @@ impl Service {
             tokio::spawn(async move {
                 while let Some((run_id, view)) = notices.recv().await {
                     svc.srs_changed(&run_id, &view).await;
+                }
+            });
+        }
+        let ms_notices = self
+            .mimo_shock_notices
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take());
+        if let Some(mut notices) = ms_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.mimo_shock_changed(&run_id, &view).await;
                 }
             });
         }
@@ -1095,6 +1171,10 @@ impl Service {
             }
             let shock = inner.shock.clone().filter(|s| s.view().state.is_live());
             let srs = inner.srs.clone().filter(|s| s.view().state.is_live());
+            let mshock = inner
+                .mimo_shock
+                .clone()
+                .filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
             let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
@@ -1155,6 +1235,15 @@ impl Service {
             }
             if let Some(s) = srs {
                 srs_methods::stop_srs(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
+            if let Some(s) = mshock {
+                mimo_shock_methods::stop_mimo_shock(
                     &s,
                     Some("safe_stop"),
                     "the service (nobody held control)".into(),
@@ -1333,6 +1422,39 @@ impl Service {
                 })
             }
         };
+        // A MIMO Shock run takes its controlled stop the same way.
+        let mshock = self.inner.lock().await.mimo_shock.clone();
+        let mshock_said = match mshock.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                mimo_shock_methods::stop_mimo_shock(
+                    &s,
+                    Some("safe_stop"),
+                    rrun::SHUTDOWN_BY.into(),
+                    true,
+                )
+                .await;
+                let asked = Instant::now();
+                while s.view().state.is_live() {
+                    if asked.elapsed() > Duration::from_secs(30) {
+                        mimo_shock_methods::stop_mimo_shock(
+                            &s,
+                            None,
+                            rrun::SHUTDOWN_BY.into(),
+                            true,
+                        )
+                        .await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
         // An SRS shock run takes its controlled stop the same way.
         let srs_said = match srs.filter(|s| s.view().state.is_live()) {
             None => None,
@@ -1384,6 +1506,7 @@ impl Service {
         let Some(run) = random.filter(|r| r.view().state.is_live()) else {
             return shock_said
                 .or(srs_said)
+                .or(mshock_said)
                 .or(sine_said)
                 .or(mixed_said)
                 .or(twr_said)
@@ -1438,6 +1561,7 @@ impl Service {
         self.mimo_displays().remove(&conn.id);
         self.shock_displays().remove(&conn.id);
         self.srs_displays().remove(&conn.id);
+        self.mimo_shock_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
         self.mixed_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
@@ -1456,6 +1580,14 @@ impl Service {
                 }
             }
             if let Some(s) = &inner.srs {
+                if s.view().state.is_live() {
+                    s.hold(true);
+                    let name = inner.session.client_name(conn.id, &conn.peer);
+                    s.shared
+                        .add_log("note", format!("{name} left control; firing is held"));
+                }
+            }
+            if let Some(s) = &inner.mimo_shock {
                 if s.view().state.is_live() {
                     s.hold(true);
                     let name = inner.session.client_name(conn.id, &conn.peer);
@@ -1533,6 +1665,9 @@ impl Service {
             "srs.config" => Ok(self.srs_config().await),
             "srs.preview" => self.srs_preview(params).await,
             "srs.pulse" => self.srs_pulse(params).await,
+            "mimo_shock.configure" => self.mimo_shock_configure(conn, params).await,
+            "mimo_shock.config" => Ok(self.mimo_shock_config().await),
+            "mimo_shock.pulse" => self.mimo_shock_pulse(params).await,
             "sine.configure" => self.sine_configure(conn, params).await,
             "sine.config" => Ok(self.sine_config().await),
             "sine.profile.validate" => self.sine_profile_validate(params).await,
@@ -1586,6 +1721,11 @@ impl Service {
                     }
                 }
                 if let Some(s) = inner.srs.as_ref().filter(|_| held) {
+                    if s.view().state.is_live() {
+                        s.hold(true);
+                    }
+                }
+                if let Some(s) = inner.mimo_shock.as_ref().filter(|_| held) {
                     if s.view().state.is_live() {
                         s.hold(true);
                     }
@@ -1668,6 +1808,18 @@ impl Service {
             "srs.log" => self.srs_log(params).await,
             "srs.subscribe" => self.srs_subscribe(conn, params).await,
             "srs.pulses" => self.srs_pulses(params).await,
+            "mimo_shock.arm" => self.mimo_shock_arm(conn, false).await,
+            "mimo_shock.start" => self.mimo_shock_arm(conn, true).await,
+            "mimo_shock.proceed" => self.mimo_shock_proceed(conn, params).await,
+            "mimo_shock.fire" => self.mimo_shock_fire(conn).await,
+            "mimo_shock.stop" => self.mimo_shock_end(conn, false).await,
+            "mimo_shock.abort" => self.mimo_shock_end(conn, true).await,
+            "mimo_shock.reset" => self.mimo_shock_reset(conn).await,
+            "mimo_shock.clear" => self.mimo_shock_clear(conn).await,
+            "mimo_shock.state" => Ok(self.mimo_shock_state_now().await),
+            "mimo_shock.log" => self.mimo_shock_log(params).await,
+            "mimo_shock.subscribe" => self.mimo_shock_subscribe(conn, params).await,
+            "mimo_shock.pulses" => self.mimo_shock_pulses(params).await,
             "sine.profile.import" => self.sine_profile_import(params).await,
             "sine.arm" => self.sine_arm(conn, params, false).await,
             "sine.start" => self.sine_arm(conn, params, true).await,
@@ -1749,6 +1901,16 @@ impl Service {
             "laws.check" if params.get("mixed").is_some_and(|m| !m.is_null()) => {
                 self.mixed_laws_check(conn, params).await
             }
+            "laws.check" if self.mimo_shock_law_id(conn, params).await.is_some() => {
+                let id = self
+                    .mimo_shock_law_id(conn, params)
+                    .await
+                    .unwrap_or_default();
+                let mut p = params.clone();
+                p.remove("path");
+                p.insert("id".into(), Value::from(id));
+                self.mimo_shock_laws_check(conn, &p).await
+            }
             "laws.check" => match self.classical_law_id(conn, params).await {
                 Some(id) => {
                     let mut p = params.clone();
@@ -1823,6 +1985,14 @@ impl Service {
             }
         }
         if let Some(s) = &inner.srs {
+            if s.shared.signals.held() {
+                s.hold(false);
+                let who = inner.session.client_name(conn.id, &conn.peer);
+                s.shared
+                    .add_log("note", format!("{who} holds control; firing resumes"));
+            }
+        }
+        if let Some(s) = &inner.mimo_shock {
             if s.shared.signals.held() {
                 s.hold(false);
                 let who = inner.session.client_name(conn.id, &conn.peer);
@@ -2180,7 +2350,7 @@ impl Service {
         }
         let fs_hz = run.view().grid.fs_hz;
         let plan = match inner.stations.selected() {
-            Selection::Sim => StationPlan::Sim { fs_hz },
+            Selection::Sim => StationPlan::sim(fs_hz),
             Selection::Ni { devices } => {
                 let (inputs, outputs) = hertzforge_station::physical_from_table(&inner.table.table);
                 StationPlan::Ni {
@@ -2244,6 +2414,7 @@ impl Service {
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
+                || inner.mimo_shock_live()
             {
                 inner.run_active()?;
             }
@@ -2525,6 +2696,7 @@ impl Service {
             || inner.twr_live()
             || inner.explorer_live()
             || inner.recorder_live()
+            || inner.mimo_shock_live()
         {
             inner.run_active()?;
         }

@@ -1,0 +1,34 @@
+{
+ "type": "response",
+ "id": 74,
+ "error": {
+  "code": "refused",
+  "reason": "unreachable_target",
+  "message": "Controls 1 and 3 cannot reach their targets: their best reachable responses are 4.2 and 12.6 dB from them, outside the tolerance. Proceed with an acknowledgement, or judge the run by the global verdict.",
+  "detail": {
+   "controls": [
+    {
+     "channel": 1,
+     "reachable": 0.97,
+     "floor_db": 4.2,
+     "reachable_ok": false,
+     "predicted_peak_ratio": null
+    },
+    {
+     "channel": 2,
+     "reachable": 0.99,
+     "floor_db": 1.8,
+     "reachable_ok": true,
+     "predicted_peak_ratio": null
+    },
+    {
+     "channel": 3,
+     "reachable": 0.91,
+     "floor_db": 12.6,
+     "reachable_ok": false,
+     "predicted_peak_ratio": null
+    }
+   ]
+  }
+ }
+}

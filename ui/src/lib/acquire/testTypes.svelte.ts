@@ -19,6 +19,8 @@ import type { ShockRunState } from '$lib/protocol/shock';
 import type { TwrRunState } from '$lib/protocol/twr';
 import type { ExplorerRunState } from '$lib/protocol/explorer';
 import type { RecorderRunState } from '$lib/protocol/recorder';
+import type { MimoShockRunState } from '$lib/protocol/mimoShock';
+import { MS_LIVE_STATES } from './mimoshock/msVerbs';
 import { isLive, LIVE_STATES } from './actions';
 import { TWR_LIVE_STATES } from './twr/twrVerbs';
 import { EXPLORER_LIVE_STATES } from './explorer/explorerVerbs';
@@ -73,7 +75,7 @@ export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: true },
 	{ id: 'explorer', group: 'single', title: 'Explorer', summary: 'A sine you steer live by hand, to find resonances and watch the response.', ready: true },
 	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: true },
-	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: false },
+	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: true },
 	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: false },
 	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine, random and shock combined in one test, on several shakers controlled together.', ready: false },
 	{ id: 'mimo_twr', group: 'mimo', title: 'MIMO TWR', summary: 'Recorded signals reproduced at several control points at once, from several shakers.', ready: false },
@@ -106,7 +108,8 @@ export function liveTestOf(
 	twr?: { status: { state: TwrRunState } | null; syncError: string | null },
 	explorer?: { status: { state: ExplorerRunState } | null; syncError: string | null },
 	recorder?: { status: { state: RecorderRunState } | null; syncError: string | null },
-	mixed?: { status: { state: RandomRunState } | null; syncError: string | null }
+	mixed?: { status: { state: RandomRunState } | null; syncError: string | null },
+	mimoShock?: { status: { state: MimoShockRunState } | null; syncError: string | null }
 ): LiveTest {
 	if (acq.run !== null && isLive(acq.run)) return 'random';
 	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
@@ -117,9 +120,10 @@ export function liveTestOf(
 	if (twr?.status && TWR_LIVE_STATES.includes(twr.status.state)) return 'twr';
 	if (explorer?.status && EXPLORER_LIVE_STATES.includes(explorer.status.state)) return 'explorer';
 	if (recorder?.status && RECORDER_LIVE_STATES.includes(recorder.status.state)) return 'recorder';
+	if (mimoShock?.status && MS_LIVE_STATES.includes(mimoShock.status.state)) return 'mimo_shock';
 	// Every run read has answered (or one could not be read): nothing is live.
 	const answered = (s?: { status: unknown; syncError: string | null }) => !s || s.status !== null || s.syncError !== null;
-	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed)) return null;
+	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed) && answered(mimoShock)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

@@ -1,0 +1,276 @@
+package hertzforge:control-law@0.1.0;
+
+// MIMO Shock: several drives, several control channels, one pulse at a time,
+// for a classical pulse or a Shock Response Spectrum (SRS) at every control.
+//
+// - The pulse grid. Every record has `record-len` samples (a power of two) at
+//   `fs-hz` and starts with the quiet lead-in. A spectrum is the one-sided
+//   transform of a record under the negative-exponent transform,
+//   X[k] = sum_n x[n] exp(-j 2 pi k n / N): `record-len / 2 + 1` lines, line
+//   `k` at `k * fs-hz / record-len`. The core forms the plant in this
+//   convention, so a law never converts. A law transforms its own records
+//   under the same convention; no spectrum is passed to it.
+// - Channel records. A set of records, one per channel, is passed flat,
+//   channel after channel: sample `n` of channel `c` is
+//   `data[c * record-len + n]`. Controls are in the order of the setup's
+//   control channels, drives in the order of its drive channels.
+// - A rectangular matrix stack is passed in full, row-major within a line,
+//   lines one after another: element (r, c) of line l is
+//   `data[(l * rows + r) * cols + c]`.
+// - Level. The target is at full level (0 dB). Drives and responses are the
+//   ones played and measured, at the level they were played at; `level-db` is
+//   that level and `next-level-db` the level the core has scheduled for the
+//   next pulse. A law returns the drive for the next level, in volts as it
+//   is to be played: the core does not rescale it. The core sets the level;
+//   a law cannot change it.
+// - Units. Target and responses in each control channel's units (EU, g for
+//   an accelerometer); drives in volts; the plant in EU per volt, controls by
+//   drives; delays in seconds; SRS values in the control's units, peak.
+// - Cadence. A law is called between pulses, never while one plays: once
+//   after system identification (`seed`), and once after each fired,
+//   measured and judged pulse (`iterate`), after the core has scheduled the
+//   next level. Each call has a time budget the core sets; a call past it is
+//   not used.
+// - Guards. Whatever a law returns, the core checks it before it is played:
+//   length, finite values, each drive's ceiling, the growth of each drive
+//   from one pulse to the next, and the predicted response against the
+//   abort lines. A law's answer is a request.
+//
+// This world is a draft until MIMO Shock is merged, and frozen then.
+
+/// Types for MIMO Shock.
+interface mimo-shock-types {
+    use types.{diagnostic-value, manifest};
+
+    record complex {
+        re: f64,
+        im: f64,
+    }
+
+    /// One complex matrix per line, stacked and passed in full: `lines`
+    /// matrices of `rows` by `cols`, row-major within a line, line after
+    /// line. `data` holds `lines * rows * cols` values.
+    record matrix-stack {
+        lines: u32,
+        rows: u32,
+        cols: u32,
+        data: list<complex>,
+    }
+
+    /// What a test asks of its control channels.
+    enum target-kind {
+        /// A time history at every control: a compensated classical pulse.
+        waveform,
+        /// A Shock Response Spectrum at every control.
+        srs,
+    }
+
+    /// A waveform target: the full-level record every control is to follow.
+    record waveform-target {
+        /// `controls * record-len` values, control after control, EU.
+        records: list<f64>,
+    }
+
+    /// The decay of one synthesis component.
+    variant component-shape {
+        /// A damped sinusoid with this damping ratio (0 to 1).
+        decay(f64),
+        /// A windowed sine of this many half-cycles (odd, 3 or more).
+        half-cycles(u32),
+    }
+
+    /// One component of an SRS synthesis.
+    record srs-component {
+        /// Frequency, Hz.
+        hz: f64,
+        /// Peak amplitude at full level, EU; negative for an inverted
+        /// component.
+        amplitude: f64,
+        /// Start of the component after the record's start, s.
+        delay-s: f64,
+        shape: component-shape,
+    }
+
+    /// An SRS target: the spectrum each control is judged against, and the
+    /// full-level waveform the core synthesized to meet it, so a waveform law
+    /// can run an SRS test and an SRS law can ignore the waveform.
+    record srs-target {
+        /// The SRS natural frequencies, Hz, ascending: `n-freq` values.
+        natural-hz: list<f64>,
+        /// The SRS quality factor (10 for 5 % damping).
+        q: f64,
+        /// The full-level target SRS, `controls * n-freq` values, control
+        /// after control, EU peak.
+        points: list<f64>,
+        /// The tolerance band below and above the target, dB (`tol-lo-db`
+        /// negative).
+        tol-lo-db: f64,
+        tol-hi-db: f64,
+        /// The synthesized full-level waveform at every control,
+        /// `controls * record-len` values, control after control, EU.
+        waveforms: list<f64>,
+        /// The synthesis table behind each control's waveform, one list per
+        /// control in control order.
+        components: list<list<srs-component>>,
+    }
+
+    /// The target of a test: one kind for every control.
+    variant target {
+        waveform(waveform-target),
+        srs(srs-target),
+    }
+
+    /// Hold timing: each control's arrival is held to a set delay.
+    record hold-timing {
+        /// The delay each control is held to, s, one per control.
+        delays-s: list<f64>,
+        /// The window a control's measured delay may move within, s.
+        window-s: f64,
+    }
+
+    /// How the arrival times of the controls are treated.
+    variant timing {
+        /// Each control is judged on its own; its delay is reported. The
+        /// value is the window the delay is searched over, s.
+        free(f64),
+        /// Each control is held to its set delay (see `hold-timing`).
+        hold(hold-timing),
+    }
+
+    /// The core's plant estimate on the pulse grid, from one identification
+    /// shot with every drive played at once. The path delays are in `frf`.
+    record plant {
+        /// H, controls by drives on every line: `record-len / 2 + 1` lines.
+        frf: matrix-stack,
+        /// Multiple coherence of each control on all drives, 0 to 1:
+        /// `controls * lines` values, control after control.
+        coherence: list<f64>,
+        /// Lines the core trusts: in the band, with coherence at or over its
+        /// floor. One per line.
+        trusted: list<bool>,
+    }
+
+    /// What a MIMO Shock law is built for: fixed for the run.
+    record mimo-shock-setup {
+        fs-hz: f64,
+        /// Samples in every record: a power of two.
+        record-len: u32,
+        /// Drives the law commands.
+        drives: u32,
+        /// Control channels the target is written for.
+        controls: u32,
+        /// The band the law corrects, Hz.
+        band-lo-hz: f64,
+        band-hi-hz: f64,
+        target: target,
+        timing: timing,
+        plant: plant,
+        /// Each drive's ceiling, volts peak, one per drive. The core scales a
+        /// drive over its ceiling down, and refuses one past its abort.
+        drive-ceiling-v: list<f64>,
+        /// The level ladder, dB, ascending, ending at 0.
+        ladder-db: list<f64>,
+        /// The level the plant was identified at, dB against full level: the
+        /// largest, over the controls, of the identification's measured peak
+        /// over the target's peak. A plant that changes with level was
+        /// measured here, so it is the first point of the level trend a law
+        /// may follow. Normally below the ladder's first level; not finite
+        /// when the core could not measure it.
+        identification-level-db: f64,
+    }
+
+    /// The core's judgement of one control on the last pulse.
+    record control-verdict {
+        /// Inside the control's tolerance at its level.
+        passed: bool,
+        /// The worst deviation from the target, dB: the waveform error for a
+        /// waveform target (after the control's delay is removed), the
+        /// largest SRS deviation for an SRS target.
+        error-db: f64,
+        /// The control's measured delay against its target, s (the best-fit
+        /// delay).
+        delay-s: f64,
+        /// Measured peak over the target's peak at the played level.
+        peak-ratio: f64,
+    }
+
+    /// Everything a MIMO Shock law sees after a pulse.
+    record mimo-shock-inputs {
+        /// Pulses fired so far, 1 for the first iteration.
+        pulse-index: u64,
+        /// The level the last pulse was played at, dB.
+        level-db: f64,
+        /// The level the core has scheduled for the next pulse, dB.
+        next-level-db: f64,
+        /// The drives as played, after the core's limits: `drives *
+        /// record-len` values, drive after drive, volts.
+        drives: list<f64>,
+        /// The measured responses: `controls * record-len` values, control
+        /// after control, EU.
+        responses: list<f64>,
+        /// The measured SRS of every control on the target's natural
+        /// frequencies, `controls * n-freq` values, control after control.
+        /// Present for an SRS target only.
+        srs: option<list<f64>>,
+        /// The core's judgement of each control, in control order.
+        verdicts: list<control-verdict>,
+        /// The core scaled the last pulse down (a drive ceiling or a limit).
+        limited: bool,
+    }
+
+    /// What a law returns for the next pulse.
+    record mimo-shock-outputs {
+        /// The next drives, at the next level, volts: `drives * record-len`
+        /// finite values, drive after drive.
+        drives: list<f64>,
+        /// The delay the law expects at each control, s, one per control,
+        /// when it has an opinion. Shown and recorded only.
+        delays-s: option<list<f64>>,
+        /// At most 8 values, each under a key the manifest declares.
+        values: list<diagnostic-value>,
+    }
+
+    /// What a MIMO Shock law says about itself. Read once, when the law file
+    /// is loaded.
+    record mimo-shock-manifest {
+        /// Name, version, author, summary, parameters and diagnostics, as for
+        /// every law. A per-channel parameter holds one value per control.
+        law: manifest,
+        /// The target kinds the law accepts. The controller refuses a test of
+        /// another kind. At least one, each at most once.
+        targets: list<target-kind>,
+    }
+}
+
+/// A MIMO Shock law: its state lives in one `law` resource, built once per
+/// run, after system identification.
+interface shock-mimo-law {
+    use types.{param};
+    use mimo-shock-types.{mimo-shock-setup, mimo-shock-inputs, mimo-shock-outputs};
+
+    resource law {
+        /// Build the law for a run. `params` holds every declared parameter,
+        /// already checked against the manifest, in manifest order; values
+        /// the operator left out carry their defaults. An error refuses the
+        /// run with the given reason.
+        constructor(setup: mimo-shock-setup, params: list<param>) -> result<law, string>;
+
+        /// The first drives, before any pulse has fired, for the first level
+        /// of the ladder, `level-db`.
+        seed: func(level-db: f64) -> result<mimo-shock-outputs, string>;
+
+        /// The next drives, after a pulse was fired, measured and judged and
+        /// the next level scheduled.
+        iterate: func(inputs: mimo-shock-inputs) -> result<mimo-shock-outputs, string>;
+    }
+}
+
+/// The world a MIMO Shock law file implements.
+world shock-mimo {
+    use mimo-shock-types.{mimo-shock-manifest};
+
+    /// The law's name, version, parameters, diagnostics and target kinds.
+    export describe: func() -> mimo-shock-manifest;
+
+    export shock-mimo-law;
+}

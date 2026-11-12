@@ -1,0 +1,278 @@
+{
+ "type": "event",
+ "topic": "mimo_shock.state",
+ "seq": 210,
+ "data": {
+  "run_id": "ms-0002",
+  "state": "running",
+  "phase": "waiting",
+  "title": "Four-Drive Half-Sine",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": [],
+   "plant": "shock-linear-4x4"
+  },
+  "grid": {
+   "fs_hz": 12800,
+   "record_len": 8192,
+   "lines": 4097,
+   "actual": true
+  },
+  "clock": "shared",
+  "target": "waveform",
+  "timing": "free",
+  "verdict": "all",
+  "scaled_aborts": true,
+  "notice": null,
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -9,
+   -6,
+   -3,
+   -1.5,
+   0
+  ],
+  "level_db": -6,
+  "rung": 2,
+  "pulses": {
+   "fired": 5,
+   "passed": 3,
+   "at_level": 2,
+   "of_level": 3
+  },
+  "next_pulse_s": 0.6,
+  "elapsed_s": 14.2,
+  "identification": {
+   "realizations": 64,
+   "drive_vrms": [
+    0.05,
+    0.05,
+    0.05,
+    0.05
+   ],
+   "drive_vpk": [
+    0.18,
+    0.18,
+    0.18,
+    0.18
+   ],
+   "coherence_mean": [
+    0.998,
+    0.997,
+    0.998,
+    0.996
+   ],
+   "coverage": [
+    0.999,
+    0.999,
+    0.998,
+    0.999
+   ],
+   "trusted_lines": 1596,
+   "band_lines": 1596,
+   "condition_max": 3.1,
+   "coherence_floor": 0.5,
+   "passed": true
+  },
+  "review": {
+   "controls": [
+    {
+     "channel": 1,
+     "reachable": 0.9998,
+     "floor_db": -31.2,
+     "reachable_ok": true,
+     "predicted_peak_ratio": 1.01
+    },
+    {
+     "channel": 2,
+     "reachable": 0.9998,
+     "floor_db": -31.2,
+     "reachable_ok": true,
+     "predicted_peak_ratio": 1.01
+    },
+    {
+     "channel": 3,
+     "reachable": 0.9998,
+     "floor_db": -31.2,
+     "reachable_ok": true,
+     "predicted_peak_ratio": 1.01
+    },
+    {
+     "channel": 4,
+     "reachable": 0.9998,
+     "floor_db": -31.2,
+     "reachable_ok": true,
+     "predicted_peak_ratio": 1.01
+    }
+   ],
+   "hold": null,
+   "acknowledged": null
+  },
+  "last_pulse": {
+   "index": 4,
+   "scheduled_db": -6,
+   "level_db": -6,
+   "passed": false,
+   "at_s": 11.25,
+   "drives": [
+    {
+     "channel": 5,
+     "vpk": 0.29,
+     "limit_scale": 1
+    },
+    {
+     "channel": 6,
+     "vpk": 0.29,
+     "limit_scale": 1
+    },
+    {
+     "channel": 7,
+     "vpk": 0.29,
+     "limit_scale": 1
+    },
+    {
+     "channel": 8,
+     "vpk": 0.29,
+     "limit_scale": 1
+    }
+   ],
+   "controls": [
+    {
+     "channel": 1,
+     "passed": true,
+     "reasons": [],
+     "error_db": -21.4,
+     "over_test_db": -0.1,
+     "delay_s": 0.0003,
+     "peak": 10.0,
+     "peak_ratio": 0.998,
+     "scaled_margin_db": -2.3,
+     "absolute_margin_db": -8.3,
+     "timing_ok": true,
+     "polarity_ok": true,
+     "duration_ratio": null,
+     "duration_ok": true,
+     "energy_db": 0.21,
+     "rms_duration_ratio": 1.01,
+     "velocity_ips": 12.1,
+     "displacement_pk_pk_in": 0.18,
+     "predicted_peak_ratio": 0.99,
+     "srs": null
+    },
+    {
+     "channel": 2,
+     "passed": false,
+     "reasons": [
+      "tolerance"
+     ],
+     "error_db": -12.5,
+     "over_test_db": 1.3,
+     "delay_s": 0.0004,
+     "peak": 10.3,
+     "peak_ratio": 1.16,
+     "scaled_margin_db": -0.99,
+     "absolute_margin_db": -6.99,
+     "timing_ok": true,
+     "polarity_ok": true,
+     "duration_ratio": null,
+     "duration_ok": true,
+     "energy_db": 0.21,
+     "rms_duration_ratio": 1.01,
+     "velocity_ips": 12.1,
+     "displacement_pk_pk_in": 0.18,
+     "predicted_peak_ratio": 0.99,
+     "srs": null
+    },
+    {
+     "channel": 3,
+     "passed": true,
+     "reasons": [],
+     "error_db": -22.0,
+     "over_test_db": -0.05,
+     "delay_s": 0.0002,
+     "peak": 10.0,
+     "peak_ratio": 0.999,
+     "scaled_margin_db": -2.29,
+     "absolute_margin_db": -8.29,
+     "timing_ok": true,
+     "polarity_ok": true,
+     "duration_ratio": null,
+     "duration_ok": true,
+     "energy_db": 0.21,
+     "rms_duration_ratio": 1.01,
+     "velocity_ips": 12.1,
+     "displacement_pk_pk_in": 0.18,
+     "predicted_peak_ratio": 0.99,
+     "srs": null
+    },
+    {
+     "channel": 4,
+     "passed": true,
+     "reasons": [],
+     "error_db": -20.9,
+     "over_test_db": 0.08,
+     "delay_s": 0.0003,
+     "peak": 9.1,
+     "peak_ratio": 1.01,
+     "scaled_margin_db": -2.19,
+     "absolute_margin_db": -8.19,
+     "timing_ok": true,
+     "polarity_ok": true,
+     "duration_ratio": null,
+     "duration_ok": true,
+     "energy_db": 0.21,
+     "rms_duration_ratio": 1.01,
+     "velocity_ips": 12.1,
+     "displacement_pk_pk_in": 0.18,
+     "predicted_peak_ratio": 0.99,
+     "srs": null
+    }
+   ],
+   "over_test_db": 1.3,
+   "global_srs_error_db": null,
+   "arrival_spread_s": 0.0002,
+   "warnings": [],
+   "step_note": null,
+   "law": {
+    "used": true,
+    "miss": null,
+    "call_ms": 3.1,
+    "delays_s": null,
+    "values": [
+     {
+      "key": "drive_rms_full_level",
+      "value": 0.5
+     },
+     {
+      "key": "waveform_error",
+      "value": 0.125
+     }
+    ]
+   }
+  },
+  "law": {
+   "id": "inverse",
+   "name": "inverse",
+   "version": "0.1.0",
+   "sha256": null,
+   "params": {
+    "lambda_rel": 0.001,
+    "gain": 1,
+    "watchdog": true,
+    "refresh": false,
+    "refresh_mu": 0.5,
+    "align": false,
+    "align_max_ms": 2,
+    "model": "frozen",
+    "modes": 0,
+    "track_from_identification": false,
+    "predicted_step": false
+   },
+   "misses": 0
+  },
+  "end": null
+ }
+}

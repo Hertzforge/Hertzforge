@@ -59,7 +59,7 @@ pub use law::{
     FdCorrectFactory, FdCorrectLaw, Polarity, PulseInputs, PulseOutputs, ToleranceAbort, Verdict,
 };
 pub use service::config::{CaptureRules, ClassicalTestConfig, ConfigError, GunfireSpec, MetaField};
-pub use service::firer::{BackendPulseFirer, PulseFirer};
+pub use service::firer::{BackendPulseFirer, PulseFirer, PulseRows};
 pub use service::report::{
     ConvergenceLimit, DrivePrediction, HeldReason, Honesty, IdentificationSummary, LawStatus,
     PulseLawCall, PulseRow, PulseView, ReportData, RunState, Status, ToleranceBand, TripKind,

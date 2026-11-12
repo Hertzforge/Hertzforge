@@ -221,3 +221,53 @@ fn capture_pulse_streams_time_history_to_the_sink() {
     assert_eq!(bin_len, sidecar.frames_written * 4);
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn mimo_shock_capture_pulse_rows_interleaves_every_row() {
+    use crate::pulse_store::{capture_pulse_rows, CaptureRowsError};
+    let a = [1.0, 2.0, 3.0];
+    let b = [-1.0, -2.0, -3.0];
+    let c = [10.0, 20.0, 30.0];
+    let tmp = std::env::temp_dir().join(format!("hertzforge-mshock-cap-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let cfg = CaptureConfig {
+        n_channels: 3,
+        sample_rate_hz: 1000.0,
+        decimation: 1,
+        ring_capacity: 8,
+    };
+    #[allow(deprecated)]
+    let sink = CaptureSink::start(
+        &tmp,
+        "pulse000",
+        cfg,
+        ChannelTable::nonuniform_default_8ch(),
+        "{}".into(),
+    )
+    .unwrap();
+    // Unequal and empty row sets are refused and push nothing.
+    assert_eq!(
+        capture_pulse_rows(&sink, &[&a, &b[..2]]),
+        Err(CaptureRowsError::UnequalRows {
+            row: 1,
+            len: 2,
+            want: 3
+        })
+    );
+    assert_eq!(
+        capture_pulse_rows(&sink, &[]),
+        Err(CaptureRowsError::NoRows)
+    );
+    assert_eq!(capture_pulse_rows(&sink, &[&a, &b, &c]), Ok(true));
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let run_dir = sink.run_dir().to_path_buf();
+    let sidecar = sink.finish().unwrap();
+    assert_eq!(sidecar.frames_written, 3);
+    let bytes = std::fs::read(run_dir.join("telemetry.f32")).unwrap();
+    let got: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|w| f32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        .collect();
+    assert_eq!(got, vec![1.0, -1.0, 10.0, 2.0, -2.0, 20.0, 3.0, -3.0, 30.0]);
+    let _ = std::fs::remove_dir_all(&tmp);
+}

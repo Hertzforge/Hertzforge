@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 76,
+ "method": "mimo_shock.fire",
+ "params": {}
+}

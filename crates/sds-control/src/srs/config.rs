@@ -1562,6 +1562,23 @@ impl WireSrs {
                  one.",
             ));
         }
+        let drives = ctx
+            .table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
+            .count();
+        if drives > 1 {
+            r.errors.push(Item::channel(
+                "extra_drive_channels",
+                None,
+                format!(
+                    "The channel table has {drives} enabled drive rows; SRS Shock plays one pulse \
+                     on one output, and a station opens every drive row as an output. Disable \
+                     all but one, or run MIMO Shock."
+                ),
+            ));
+        }
 
         // Feasibility.
         if let Some(f) = &self.feasibility {

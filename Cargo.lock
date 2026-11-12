@@ -1163,6 +1163,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-mimo-shock-inverse"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-laws",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-shock-paired"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-laws",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-shock-shape"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-laws",
+]
+
+[[package]]
 name = "hertzforge-law-mimo-zero"
 version = "0.1.7"
 dependencies = [
@@ -1186,6 +1216,7 @@ version = "0.1.7"
 name = "hertzforge-law-sdk"
 version = "0.1.7"
 dependencies = [
+ "hertzforge-mimo-shock-law-math",
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
  "hertzforge-sine",
@@ -1252,6 +1283,49 @@ dependencies = [
  "hertzforge-random-laws",
  "hertzforge-sdm",
  "hertzforge-shaker-db",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-mimo-shock"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock-law-math",
+ "hertzforge-module-abi",
+ "hertzforge-sdm",
+ "hertzforge-shock-common",
+ "hertzforge-shock-host",
+ "hertzforge-srs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-mimo-shock-law-math"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-dsp",
+ "hertzforge-mimo-shock-law-math",
+ "hertzforge-sdm",
+]
+
+[[package]]
+name = "hertzforge-mimo-shock-laws"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-law-math",
+ "hertzforge-random-laws",
+ "hertzforge-sdm",
+ "hertzforge-shock-common",
  "serde",
  "serde_json",
 ]
@@ -1784,6 +1858,20 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-misbehave"
+version = "0.1.7"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-shock-mimo-minimal"
+version = "0.1.7"
+dependencies = [
+ "wit-bindgen",
+]
+
+[[package]]
+name = "law-fixture-shock-mimo-misbehave"
 version = "0.1.7"
 dependencies = [
  "hertzforge-law-sdk",
@@ -2446,6 +2534,8 @@ dependencies = [
  "hertzforge-hal-sim",
  "hertzforge-law-host",
  "hertzforge-mimo-random",
+ "hertzforge-mimo-shock",
+ "hertzforge-mimo-shock-laws",
  "hertzforge-mixed",
  "hertzforge-mixed-laws",
  "hertzforge-module-abi",

@@ -2144,7 +2144,7 @@ mod tests {
     fn ctx() -> ArmContext {
         ArmContext {
             table: crate::table::Table::new().table,
-            station: StationPlan::Sim { fs_hz: 16384.0 },
+            station: StationPlan::sim(16384.0),
             scanner: Arc::new(DriverScanner),
             data_root: std::env::temp_dir().join("sds-sine-run-tests"),
             bind: "ws://127.0.0.1:0/".into(),

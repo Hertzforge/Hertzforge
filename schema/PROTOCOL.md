@@ -1116,8 +1116,8 @@ path such as `control.damping`) locates the problem. Item reasons:
 | MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected` | `transform_ill_conditioned`, `alarm_wider_than_abort` |
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
-| Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
-| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
+| Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `extra_drive_channels`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
+| SRS shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `bands_empty`, `target_not_covering`, `target_not_ascending`, `alarm_wider_than_abort`, `per_band_length_mismatch`, `components_engine_mismatch`, `component_invalid`, `record_too_long`, `limit_unknown_channel`, `limit_no_frf`, `no_control_channel`, `no_drive_channel`, `extra_drive_channels`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `target_file` and `table_file` from the imports | `synthesis_not_converged`; `target_file` (an ignored column) from the target import |
 | Sine | `out_of_range`, `profile_too_short`, `frequency_not_positive`, `frequency_not_ascending`, `value_not_positive`, `quantity_ambiguous`, `profile_not_covering`, `band_above_grid`, `levels_empty`, `levels_not_ascending`, `start_not_a_level`, `end_before_full_level`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `limit_on_control_channel`, `cola_needs_two_outputs`, `safe_stop_budget`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; `profile_file` from the import | `join_discontinuity`, `alarm_wider_than_abort`, `tracking_lag`; `units_column_ignored` from the import |
 | Mixed Mode | Random's profile, acquisition, schedule and control reasons for the floor and the ladder, `out_of_range`, `no_floor`, `too_many_floors`, `unknown_part_kind`, `duplicate_part_id`, `part_out_of_band`, `parts_too_close`, `too_many_tones`, `too_many_bands`, `follow_unknown_part`, `follow_self`, `follow_loop`, `schedule_unsupported`, `profile_too_short`, `value_not_positive`, `profile_not_covering`, `tick_out_of_range`, `abort_below_ceiling`, `no_control_channel`, `weight_unknown_channel`, `no_drive_channel`, `limit_unknown_channel`, `tracking_lag`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `alarm_wider_than_abort`, `join_discontinuity`, `tracking_lag` |
 | TWR | `out_of_range`, `reference_unknown`, `reference_changed`, `units_mismatch`, `rate_mismatch`, `section_outside_reference`, `record_too_long`, `band_above_grid`, `band_outside_identification`, `highpass_above_band`, `identification_too_short`, `levels_empty`, `levels_not_ascending`, `alarm_wider_than_abort`, `no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `reference_resampled` |
@@ -2218,8 +2218,9 @@ Item reasons (Classical Shock): errors `out_of_range`, `levels_empty`, `levels_n
 `pulses_length_mismatch`, `band_above_grid`, `record_too_long` (one pulse's record is as long as
 the controller timeout), `spacing_below_floor` (a train or gunfire spacing below the time between
 pulses), `limit_unknown_channel` (a monitor on a channel that is not an enabled input),
-`no_control_channel`, `no_drive_channel`, `law_unknown`, `law_wrong_world`, `law_param_unknown`,
-`law_param_invalid`; warnings `quiet_window_exceeded`.
+`no_control_channel`, `no_drive_channel`, `extra_drive_channels` (more than one enabled drive row:
+the station would open every one as an output and split the one pulse across them), `law_unknown`,
+`law_wrong_world`, `law_param_unknown`, `law_param_invalid`; warnings `quiet_window_exceeded`.
 
 ### Running a Classical Shock Test
 
@@ -2563,7 +2564,8 @@ do not cover the band grid), `target_not_ascending`, `alarm_wider_than_abort`,
 `per_band_length_mismatch` (a per-band envelope or bound list that is not one per band),
 `components_engine_mismatch`, `component_invalid` (at `synthesis.components.rows[i]`),
 `record_too_long`, `limit_unknown_channel`, `limit_no_frf` (a limit channel with no `frf` and no
-input to measure one from), `no_control_channel`, `no_drive_channel`, `law_unknown`,
+input to measure one from), `no_control_channel`, `no_drive_channel`, `extra_drive_channels` (more
+than one enabled drive row, as in Classical Shock), `law_unknown`,
 `law_wrong_world`, `law_param_unknown`, `law_param_invalid`; warnings `synthesis_not_converged`
 (the offline fit did not reach `tol_db`; the run's law refines from there).
 
@@ -2699,6 +2701,371 @@ takes classical shock's form; `points` applies to `pulse`, `velocity` and `displ
 
 A plot of the latest pulse is empty (`views` empty) until a pulse has fired, `identification` and
 `limit_frf` until identification has ended, and `limit_channels` without limit channels.
+
+## MIMO Shock
+
+A MIMO Shock test fires one pulse at a time on several drives at once and judges it at several
+control channels: a classical pulse at every control (`target.kind` `waveform`) or a Shock
+Response Spectrum at every control (`srs`). One engine runs both. The service identifies the
+plant with one shot of independent band-limited random on every drive, on the pulse's own grid;
+the control law builds every drive record from it; after each pulse is fired, measured and judged
+per control, the ladder schedules the next level and the law builds the next drives for that
+level, which the service checks before they play. Drives are in volts throughout. The run is one
+test like any other and excludes every other run (`run_active`). **Any connected screen may stop
+or abort** (`mimo_shock.stop`, `mimo_shock.abort`); `mimo_shock.configure` (other than a dry
+run), `arm`, `start`, `proceed`, `fire`, `reset` and `clear` need control; everything that only
+reads is open to every connection. While the service shuts down, `arm`, `start`, `proceed` and
+`fire` are refused `shutting_down`. Words mean what they mean in "Classical Shock" and "SRS
+Shock" unless this section says otherwise.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `mimo_shock.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
+| `mimo_shock.config` | `{}` | any | `{"run_id","config","derived","views"}` |
+| `mimo_shock.arm` | `{}` | `configured` | state |
+| `mimo_shock.start` | `{}` | `configured`, `armed` | state |
+| `mimo_shock.proceed` | `{"acknowledge"}` (optional) | `review` | state |
+| `mimo_shock.fire` | `{}` | `running`, in `manual` | state |
+| `mimo_shock.stop` | `{}` | any | state |
+| `mimo_shock.abort` | `{}` | any | state |
+| `mimo_shock.reset` | `{}` | any but live | state |
+| `mimo_shock.clear` | `{}` | any but live | state |
+| `mimo_shock.state` | `{}` | any | state |
+| `mimo_shock.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `mimo_shock.subscribe` | see "MIMO Shock Display" | any | as there |
+| `mimo_shock.pulses` | `{"since"}` (optional, default 0) | any | `{"pulses":[row...],"next"}` |
+| `mimo_shock.pulse` | `{"index","points"}` (`points` optional) | any | `{"pulse":row,"views"}` |
+
+"state" is the `mimo_shock.state` object below. There are no trains, gunfire bursts or manual
+level changes: the ladder alone sets the level, in `manual` as in `auto`. A result that carries
+views travels as a binary frame.
+
+### MIMO Shock Configuration
+
+```
+{"title":"Four-Drive Half-Sine",
+ "channels":{"controls":[{"channel":1},{"channel":2},{"channel":3},{"channel":4}],
+             "drives":[{"channel":5,"ceiling_vpk":4,"abort_vpk":6},
+                       {"channel":6,"ceiling_vpk":4,"abort_vpk":6},
+                       {"channel":7,"ceiling_vpk":4,"abort_vpk":6},
+                       {"channel":8,"ceiling_vpk":4,"abort_vpk":6}],
+             "limits":[]},
+ "target":{"kind":"waveform","standard":"mil_std_810_516",
+           "pulses":[{"shape":"half_sine","amplitude_g":20,"duration_ms":11,"polarity":"positive",
+                      "rise_frac":null,"fall_frac":null,
+                      "compensation":{"shape":"rectangular","pre_frac":4,"post_frac":4,
+                                      "symmetric":true}}, ...]},
+ "timing":{"mode":"free","window_s":0.002,"delays_s":null},
+ "verdict":"all",
+ "acquisition":{"fs_hz":12800,"record_len":8192,"band_hz":[2,2500],"lead_s":0.05},
+ "schedule":{"mode":"auto","levels_db":[-12,-9,-6,-3,-1.5,0],"max_pulses_per_level":3,
+             "full_level_pulses":3},
+ "spacing":{"cooling_s":1,"settling_s":0.5,"compute_s":0.25},
+ "identification":{"drive_vrms":0.05,"frames":64,"coherence_floor":0.5,"review":true},
+ "control":{"law":{"id":"inverse","params":{}},"law_budget":0.25,"seed_budget_s":60,
+            "law_misses":3,"max_pulses":100,"max_growth_db":6,"max_band_growth_db":10,"divergence_pulses":3,
+            "divergence_drive_ratio":1.3,"first_drive_ratio":2,"abort_db":null,
+            "scaled_aborts":true,"max_velocity_ips":null,"max_displacement_in":null},
+ "simulator":{"plant":null},
+ "capture":{"auto_start":false,"run_name":"mimo_shock"},
+ "metadata":[]}
+```
+
+An SRS target replaces `target`:
+
+```
+ "target":{"kind":"srs","bands":{"f_lo_hz":50,"f_hi_hz":2000,"bands_per_octave":3,"q":10},
+           "tolerance_db":[-3,3],
+           "controls":[{"target":{"kind":"breakpoints","points":[[50,3.33],[300,20],[2500,20]]},
+                        "synthesis":{"engine":"wavsyn"},"polarity":"positive"}, ...]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `channels.controls` | (required) | The control channels by table `index` (each an enabled `control` row), 1 to 16. Their order is the order of every per-control list |
+| `channels.drives` | (required) | The drives by table `index` (each an enabled `drive` row), 1 to 8, in the order of the table's enabled drive rows, each with its own `ceiling_vpk` (above 0, at most 10; a drive over it is scaled down to it) and `abort_vpk` (above the ceiling, at most 10; a drive over it is refused and the run aborts, `drive_abort`). On NI every enabled drive row is an output; a drive row the run does not name is refused (`drive_unknown_channel`) |
+| `channels.limits` | none | Monitored inputs (enabled `monitor` or `control` rows not named as controls) by `index`, each with its `abort_peak` in the channel's unit: a measured or predicted peak over it ends the run (`limit_abort`, `predicted_abort`) |
+| `target.kind` | (required) | `waveform` or `srs`; one kind for every control |
+| `target.standard` | `mil_std_810_516` | For `waveform`: the classical standard every control is judged by (`mil_std_810_516` or `iec_60068_2_27`, as Classical Shock's `standard.name`) |
+| `target.pulses` | (required for `waveform`) | One per control: a Classical Shock `pulse`. `polarity` `negative` plays that control's pulse upside down |
+| `target.bands` | (required for `srs`) | The SRS natural frequencies every control is judged at (SRS Shock's `bands`) |
+| `target.tolerance_db` | `[-3, 3]` | For `srs`: the band a control's SRS passes in, dB below and above its target (below 0, above 0) |
+| `target.controls` | (required for `srs`) | One per control: its target SRS (SRS Shock's `target`), its `synthesis` (SRS Shock's) and its `polarity`. The service synthesizes a full-level waveform for each control, so a waveform law can run an SRS test |
+| `timing.mode` | `free` | `free`: each control is judged after its own best-fit delay is removed, searched within `window_s` (default 0.002, above 0, at most 0.1), and the delay is reported; a spread of the controls' delays over the window is a warning. `hold`: each control's arrival must be within `window_s` of its own `delays_s` (one per control, seconds, 0 to 0.1), or it fails on `timing` |
+| `verdict` | `all` | The joint verdict the ladder is fed. `all`: every control inside its own tolerance. `global` (an `srs` target only): the energy-weighted global SRS error inside the tolerance, and no control over its abort line |
+| `acquisition.fs_hz` | 51200 | The rate requested of the station, 1000 to 204800 Hz; the run adopts the rate it runs at and derives the grid and the targets from it |
+| `acquisition.record_len` | the shortest power of two (at least 1024) whose first three quarters hold every target from `lead_s` | Every record's length, a power of two from 64 to 16384 |
+| `acquisition.band_hz` | from 5 Hz, or for a `waveform` target from 0.2 over its longest compensated pulse in seconds when that is lower (2.02 Hz for an 11 ms half-sine with shoulders 4 times its duration), to the lesser of 5000 Hz and 0.4 times the rate | The band identification excites and the law corrects, below half the rate. A `waveform` target is refused (`band_cuts_velocity_change`) when, cut to the band, a perfect delivery of a control's pulse keeps less than half the margin its own velocity change leaves to the standard's tolerance |
+| `acquisition.lead_s` | 0.05 | Where every target starts in its record, seconds |
+| `schedule.mode` | `auto` | `auto` fires at the time between pulses; `manual` waits for `mimo_shock.fire` |
+| `schedule.levels_db` | -12, -9, -6, -3, -1.5, 0 | The levels, dB, ascending, the last 0 (full level) |
+| `schedule.max_pulses_per_level` | 3 | Pulses at one level without a joint pass before the run ends `not_converged`; 1 to 100 |
+| `schedule.full_level_pulses` | 3 | Passing pulses at full level that complete the run; 1 to 100. A level below full advances on its first passing pulse |
+| `spacing` | 1, 0.5, 0.25 | As Classical Shock's: the time between pulse starts is the largest |
+| `identification.drive_vrms` | 0.05 | The most each drive plays, volts rms, under its ceiling at its peak. The shot's level is found by a probe at a tenth of it: each control's response 20 dB under its target's rms, never over this |
+| `identification.frames` | the larger of 64 and 10 times the drives | Records averaged in the one identification shot; 10 times the drives to 4096 |
+| `identification.coherence_floor` | 0.5 | Lines where a control's multiple coherence is under it are not trusted (0 to 1) |
+| `identification.review` | true | Hold for the operator after identification (`review`) |
+| `control.law` | `inverse` for `waveform`, `shape` for `srs` | The control law by catalog `id` (world `shock_mimo`; built in: `inverse`, `shape`, `paired`) and values for the parameters its entry declares (`params` by key; defaults fill the rest). A law whose entry does not accept the target kind is refused `law_wrong_target` |
+| `control.law_budget`, `law_misses`, `max_pulses` | 0.25, 3, 100 | As Classical Shock's. A law that panics ends the run at once (`law_fault`, `panicked`). Before the first pulse a second copy of the law is built, seeded and timed on one iteration over the identified plant's predicted response: a law that cannot answer a pulse inside `law_budget` ends the run then (`law_fault`, `law_too_slow`), not in the middle of the ladder |
+| `control.seed_budget_s` | 60 | The time the law may take to be built and to answer its seed, seconds (above 0, at most 3600): the seed is where a law fits its model of the plant. Over it, the run ends before the first pulse (`law_fault`, `seed_over_budget`) |
+| `control.max_growth_db` | 6 | The most any drive's peak may grow from one pulse to the next beyond the level step, dB (above 0, at most 40); an answer over it is not used (`peak_rise`) |
+| `control.max_band_growth_db` | 10 | The same for any third-octave band of a drive (above 0, at most 40; `bin_rise`) |
+| `control.divergence_pulses` | 3 | Pulses in a row at one level with the waveform error rising that end the run in the controlled stop (`divergence`); 1 to 100 |
+| `control.divergence_drive_ratio` | 1.3 | A drive whose rms at one level passes this many times its rms on that level's first pulse ends the run the same way (above 1, at most 10) |
+| `control.first_drive_ratio` | 2 | The seed's predicted response peak at every control is at most this times its target's at the first level (1 to 10; `first_drive`) |
+| `control.abort_db` | null: twice the standard's amplitude tolerance for `waveform` (2.28 dB under MIL-STD-810), 6 dB for `srs` | Each control's abort margin, dB, above 0, at most 40. The **absolute** line is this margin over the control's target peak at **full level**: a measured peak over it aborts the run at any level (`aborted`, `control_abort_absolute`), whatever `scaled_aborts` says. The **scaled** line is the same margin over the target's peak at the level played |
+| `control.scaled_aborts` | true | On: a measured peak over its scaled line ends the run in the controlled stop (`safe_stop`, `control_abort_scaled`). Off: the pulse is judged failing (the ladder does not climb on it), a warning names every control that crossed its scaled line, the run goes on, and the state carries a standing `notice`. Either way every row reports each control's margin to both lines. It cannot change while a run is live |
+| `control.max_velocity_ips`, `max_displacement_in` | null | A control's peak velocity (in/s) or peak-to-peak displacement (in), predicted or measured, over it ends the run (`kinematics`) |
+| `simulator.plant` | null: chosen by size | The simulator's plant by name: `shock-linear-4x4`, `shock-jointed-4x4-moderate`, `shock-jointed-4x4-severe` or `shock-jointed-6x3`. Null takes `shock-linear-4x4` for 4 controls and 4 drives and `shock-jointed-6x3` for 6 and 3. Ignored on NI |
+| `capture`, `metadata` | as shown | Random's. With `capture.auto_start` and a capture root, every pulse's drives and input rows, the identification, every law call and the end are written to `<capture root>/<run_name>_<run_id>/` when the run ends |
+
+A configuration whose shape is wrong is refused `bad_params` naming the field; its content errors
+are refused `config_invalid` with the items, located by `field` or `channel`.
+
+**Result.** `state` (`configured`), `derived` and `warnings`. `derived`:
+
+```
+{"grid":{"fs_hz":12800,"record_len":8192,"lines":4097,"actual":false},
+ "controls":[{"channel":1,"peak":20}, ...],
+ "spacing_s":1,"call_budget_s":0.25}
+```
+
+`controls` holds each control's full-level target peak (EU).
+`views` are each control's **Target** *n* view at full level (*n* its table index), and for an
+`srs` target its **Target SRS** *n* view.
+
+Item reasons (MIMO Shock): errors `out_of_range`, `levels_empty`, `levels_not_ascending`,
+`band_above_grid`, `record_too_long` (one record is as long as the controller timeout),
+`controls_out_of_range`, `drives_out_of_range`, `duplicate_channel` (a channel named twice among
+the controls, drives and limits), `control_unknown_channel`, `drive_unknown_channel` (also a
+table drive row the run does not name, or the drives out of the table's order),
+`limit_unknown_channel`, `targets_length_mismatch` (not one target per control),
+`delays_length_mismatch` (a `hold` without one delay per control), `target_invalid` (a target the
+service cannot build at the rate: a pulse that is not usable, a target that does not fit the
+record), `bands_empty`, `target_not_covering` and `target_not_ascending` (an SRS control's
+breakpoints, as SRS Shock's), `components_engine_mismatch` and `component_invalid` (an SRS
+control's synthesis table, as SRS Shock's), `verdict_needs_srs` (`global` with a `waveform`
+target), `plant_unknown`, `law_unknown`, `law_wrong_world`, `law_wrong_target`,
+`law_param_unknown`, `law_param_invalid`, `band_cuts_velocity_change` (a classical control's
+target cut to the band keeps less than half of its velocity-change margin; the message gives both
+figures).
+
+### Running a MIMO Shock Test
+
+- **`mimo_shock.arm`** opens the station with every drive row as an output and every control and
+  limit row as an input on one clock, asks it for `acquisition.fs_hz`, adopts the rate it
+  programs, derives the grid and builds the targets at that rate, and passes the arm gate. Nothing
+  is driven. On the simulator the plant must be the table's size (`arm_refused`). An imported law
+  without a passed check is refused `law_not_checked` on a hardware station. The station's own
+  refusals are Random's (`arm_refused`, `hardware_busy`, ...).
+- **`mimo_shock.start`** from `configured` arms first, then plays the identification shot
+  (`phase` `sysid`) and estimates the plant, controls by drives, on the pulse grid (the path
+  delays are in it). A control whose band-mean coherence is under 0.8, or whose target has under
+  90% of its energy on trusted lines, ends the run `held`. It then computes each control's
+  reachable floor and holds for review (`review`), or without a review goes on as `proceed` does.
+  It answers at once.
+- **The unreachable hold.** With `verdict` `all`, a control whose best reachable response (the
+  identified plant's least-squares fit to its target on the trusted lines) fails its own judge
+  holds the run in `review` before any pulse, with `review.hold` naming `unreachable_target` and
+  each control's floor, whatever `identification.review` says. `mimo_shock.proceed` is then
+  refused `unreachable_target` (with the floors) unless it carries a non-empty `acknowledge`, the
+  operator's own words, which go in the log. With `verdict` `global` the floors are shown and
+  nothing holds.
+- **`mimo_shock.proceed`** builds the law and seeds it for the first level. Before any pulse
+  fires, the seed's predicted response at every control is held to `first_drive_ratio`; a seed
+  over it fires nothing (`law_fault`, `first_drive`). In `auto` the ladder then fires; in
+  `manual` it waits for `mimo_shock.fire`.
+- **Every pulse**, in this order: build and check the drives (each drive's ceiling and abort, the
+  predicted response of every control and limit), fire them in one shot, measure every input,
+  judge each control, check the measured response against the abort lines, tick the ladder (which
+  fixes the next level), watch for divergence, call the law with the next level, and check its
+  answer (shape, budget, growth caps, the predicted response at the next level). An answer that is
+  not used counts a miss and the last drive is played again at the next level.
+- **`mimo_shock.fire`** fires one pulse. Refused `wrong_mode` in `auto`, and `not_yet` (with
+  `seconds`) before the time between pulses has passed or while a pulse is in flight.
+- **`mimo_shock.stop`** ends the run at the next boundary: the pulse in flight finishes and
+  nothing more fires (`operator_stop`). **`mimo_shock.abort`** takes every drive down with the
+  station's own stop at once (`operator_abort`). Both reach a fire in flight.
+- **When nobody holds control**, firing pauses; a claim within `timeout_s` resumes it, and
+  otherwise the run ends `safe_stop`.
+- **The run's end** releases the station (and on hardware its lock) before the end is published,
+  so a run started the moment the end arrives finds the station free.
+
+### MIMO Shock Run State
+
+```
+{"run_id":"ms-0002","state":"running","phase":"waiting","title":"Four-Drive Half-Sine",
+ "source":"SIM","station":{"kind":"sim","class":"sim","devices":[],"plant":"shock-linear-4x4"},
+ "grid":{"fs_hz":12800,"record_len":8192,"lines":4097,"actual":true},"clock":"shared",
+ "target":"waveform","timing":"free","verdict":"all","scaled_aborts":true,"notice":null,
+ "mode":"auto",
+ "levels_db":[-12,-9,-6,-3,-1.5,0],"level_db":-6,"rung":2,
+ "pulses":{"fired":5,"passed":3,"at_level":1,"of_level":3},
+ "next_pulse_s":0.6,"elapsed_s":14.2,
+ "identification":{...},"review":{...},"last_pulse":{row},
+ "law":{"id":"inverse","name":"inverse","version":"0.1.0","sha256":null,"params":{...},
+        "misses":0},
+ "end":null}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
+| `armed` | `armed` | Station open and gated; nothing driven yet |
+| `running` | `sysid`, `waiting`, `firing` | Identification; waiting out the time to the next pulse (or for `mimo_shock.fire`); a pulse playing |
+| `review` | `awaiting_review` | Identification done; nothing fires until `mimo_shock.proceed` |
+| `stopping` | `stopping` | The pulse in flight finishes; nothing more fires |
+| `finished` | `stopped`, `aborted`, `held` | Ended; `end` says how |
+
+- `station.plant` is the simulator's plant (null on NI). `target`, `timing`, `verdict` and
+  `scaled_aborts` are the configuration's. `notice` is null while scaled aborts are on; with them
+  off it is a standing sentence saying so, which a screen shows with the run.
+- `level_db` is the level the next pulse fires at (the last pulse's once finished; null before the
+  law is seeded); `rung` its place in `levels_db` (null when a halved step left the table's
+  levels). `pulses.passed` counts the pulses the joint verdict passed; `at_level` the pulses fired
+  at this level; `of_level` the most this level may fire without a pass.
+- `next_pulse_s` as Classical Shock's.
+- `identification` is null until identification is done:
+
+```
+{"realizations":64,"drive_vrms":[0.05,0.05,0.05,0.05],"drive_vpk":[0.18,0.18,0.18,0.18],
+ "coherence_mean":[0.998,0.997,0.998,0.996],"coverage":[0.999,0.999,0.998,0.999],
+ "trusted_lines":1596,"band_lines":1596,"condition_max":3.1,"coherence_floor":0.5,
+ "passed":true}
+```
+
+  Each drive's rms and peak in the shot, volts; each control's band-mean multiple coherence and
+  the share of its target's energy on trusted lines; the trusted and in-band lines; the largest
+  condition number of the plant on a trusted line; `passed` false when it held the run.
+- `review` is null until identification is done, then each control's reachable floor and the
+  hold, and after the seed each control's predicted peak:
+
+```
+{"controls":[{"channel":1,"reachable":0.9998,"floor_db":-31.2,"reachable_ok":true,
+              "predicted_peak_ratio":1.01}, ...],
+ "hold":null,"acknowledged":null}
+```
+
+  `reachable` is the share of the control's target energy the drives can reach at all;
+  `floor_db` the waveform error (`waveform`, at least -120 dB, the precision it is computed to)
+  or the largest SRS deviation (`srs`) of its best reachable response, dB; `reachable_ok` whether that response passes the control's own judge.
+  `predicted_peak_ratio` is the seed's predicted peak over the target's at the first level (null
+  before the seed). `hold` is null or `{"reason":"unreachable_target","message"}`;
+  `acknowledged` the operator's words once given.
+- `last_pulse` is the last pulse's row (below); `law` the run's law, its parameter values in force
+  and its unusable calls in a row now.
+- `end` is null until the run finishes, then `{"outcome","reason","message","at_s","level_db",
+  "pulse"}`: `pulse` the pulse it ended at (null before any).
+
+| `outcome` | How the run ended |
+|---|---|
+| `completed` | Full level passed its pulses |
+| `operator_stop` | `mimo_shock.stop` |
+| `operator_abort` | `mimo_shock.abort` |
+| `safe_stop` | The controlled stop: nobody held control (`reason` `orphan`), the service shut down (`shutdown`), a control over its level-scaled line with scaled aborts on (`control_abort_scaled`), the divergence watch (`divergence`), a predicted response over a scaled line before a fire (`predicted_abort`), or the pulse cap (`max_pulses`) |
+| `aborted` | A protection tripped on what was driven or measured: `drive_abort`, `control_abort_absolute` (a control over its full-level line), `limit_abort`, `kinematics` |
+| `not_converged` | `max_pulses_per_level` pulses at one level without a joint pass (`not_converged`) |
+| `held` | Identification held the run before any pulse: `low_coherence` or `reference_out_of_band` |
+| `law_fault` | The law gave no usable drives `law_misses` times in a row, panicked, could not be built, or its seed was refused; `reason` is the last miss's: `error`, `panicked`, `over_budget`, `wrong_length`, `non_finite`, `undeclared_value`, `too_many_values`, `peak_rise`, `bin_rise`, `predicted_peak`, `first_drive`, `target_not_accepted` |
+| `fault` | The run or the station failed; `message` is the controller's words |
+
+### MIMO Shock Pulses
+
+Every pulse fired has a row; `mimo_shock.pulses` and `mimo_shock.pulse` are `shock.pulses` and
+`shock.pulse` for MIMO Shock. `mimo_shock.pulse`'s views are, per control, **Pulse** *n* (the
+target at the level fired, moved by the control's delay, its tolerance band for a `waveform`
+target, and the measured response, EU, against time) and for an `srs` target **SRS** *n* (the
+measured SRS, the target at the level fired and its tolerance band), then **Drives** (every
+drive as played, one trace each, `Drive` *n*). Every per-channel view carries `channel`, its
+table index.
+
+```
+{"index":4,"scheduled_db":-6,"level_db":-6,"passed":false,"at_s":11.2,
+ "drives":[{"channel":5,"vpk":0.29,"limit_scale":1}, ...],
+ "controls":[{"channel":1,"passed":false,"reasons":["tolerance"],"error_db":-21.4,
+              "over_test_db":0.4,"delay_s":0.00031,"peak":10.0,"peak_ratio":1.047,
+              "scaled_margin_db":-1.88,"absolute_margin_db":-7.88,
+              "timing_ok":true,"polarity_ok":true,"duration_ratio":null,"duration_ok":true,
+              "energy_db":0.21,"rms_duration_ratio":1.01,"velocity_ips":12.1,
+              "displacement_pk_pk_in":0.18,"predicted_peak_ratio":0.99,"srs":null}, ...],
+ "over_test_db":0.4,"global_srs_error_db":null,"arrival_spread_s":0.0004,
+ "warnings":[],"step_note":null,
+ "law":{"used":true,"miss":null,"call_ms":3.1,"delays_s":null,
+        "values":[{"key":"waveform_error","value":0.031}, ...]}}
+```
+
+- `scheduled_db` is the level the ladder asked for and `level_db` the level fired (the same: a
+  drive the ceiling scales is reported in its `limit_scale`, not as a level). `passed` is the joint
+  verdict the ladder was fed. `at_s` is the pulse's start, seconds from arm.
+- `drives`: each drive's peak as played, volts, and the scale its ceiling applied (1 when none).
+- `controls`: each control's judgement. `reasons` names why it failed: `tolerance` (outside its
+  standard's tolerance, or its SRS outside the tolerance band), `timing` (its delay outside its
+  window), `polarity` (upside down) and `duration` (an `srs` control's effective duration outside
+  0.8 to 1.2 times its synthesized waveform's); empty when it passed. `error_db` is the waveform
+  error after the control's delay is removed (`waveform`) or the largest SRS deviation (`srs`);
+  `over_test_db` the worst signed error, positive an over-test (the peak over the target's peak,
+  or the SRS deviation above the target); `delay_s` the control's delay; `peak` (EU) and
+  `peak_ratio` (over the target's peak at the level); `scaled_margin_db` and `absolute_margin_db`
+  the measured peak against the control's scaled and absolute abort lines, dB, positive over the
+  line; `duration_ratio` the effective duration over
+  the target's (`srs`, else null); `energy_db` and `rms_duration_ratio` the response's energy and
+  rms duration against the target's, reported (a stated tolerance of 1 dB and 10% gives a
+  warning, never a failure); `velocity_ips` and `displacement_pk_pk_in` through the pure
+  integrator; `predicted_peak_ratio` the prediction before the fire; `srs` for an `srs` target
+  `{"worst_err_db","worst_band_hz","bands","passed_bands"}`, else null.
+- `over_test_db` is the worst over every control; `global_srs_error_db` the energy-weighted SRS
+  error over every control (MIL-STD-810H Method 527.2 Annex C; the joint verdict with `verdict`
+  `global`, else shown only; null for a `waveform` target); `arrival_spread_s` the latest control
+  delay less the earliest.
+- `warnings`: what is reported beside the verdict: every control that crossed its scaled abort
+  line (always, whatever `scaled_aborts` says), an arrival spread over the window, energy or rms
+  duration outside its stated tolerance.
+- `step_note`: when the ladder stepped up after this pulse by less than the table's step (the
+  first pulses' trend predicted an over-test above the upper tolerance at the table's next
+  level), `{"from_db","planned_db","taken_db","predicted_planned_db","predicted_taken_db",
+  "tolerance_db"}`; else null.
+- `law` is the call that produced the drives this pulse played: `used` false and `miss` the
+  reason when the drives in force were played again after a miss; `call_ms` its time; `delays_s`
+  the delay it expected at each control, when it gave one; `values` its named values.
+
+### MIMO Shock Display
+
+Event topics:
+
+- `mimo_shock.state` (text): the state object on every change.
+- `mimo_shock.log` (text): new log entries, as Random's.
+- `mimo_shock.live` (binary, to every connection, 5 times a second from arm until the run has
+  finished, then once more): `{"run_id","source","state","phase","mode","level_db","rung",
+  "pulses","next_pulse_s"}`.
+- `mimo_shock.pulse` (binary, to every connection, once per pulse): `{"run_id","pulse":row,
+  "views"}` with the views of `mimo_shock.pulse` at 1024 points.
+- `mimo_shock.data` (binary, to one subscribed connection): `mimo_shock.live`'s fields and `plots`,
+  once per pulse, once when identification ends, and at once on subscribe, at most `rate_hz`
+  frames a second.
+
+`mimo_shock.subscribe` takes Classical Shock's form (`{"rate_hz","plots":[plot...]}` or
+`{"default":true}`); a plot is `{"id","quantity","points","channel"}`, `points` for the time
+histories only (default 1024, 64 to 8192), `channel` (optional) a control's table index for the
+per-control quantities. The result is `{"default","rate_hz","plots","quantities"}`, every default
+filled in. In `mimo_shock.data` each plot comes back as `{"id","quantity","views"}`.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `pulse` | **Pulse** *n*, one per control or the plot's `channel` | As `mimo_shock.pulse`'s |
+| `srs` | **SRS** *n*, one per control or the plot's `channel` (an `srs` target) | As `mimo_shock.pulse`'s |
+| `drives` | **Drives** | Every drive as played, V |
+| `verdicts` | one `table` | Each control's judgement of the latest pulse |
+| `ladder` | one `table` | The levels, the pulses fired and passed at each, the level in force |
+| `identification` | **Identification Gain** *n*, **Coherence** | `abs(H)` from every drive to the plot's `channel` (default the first control), EU per volt, one trace per drive (`Drive` *n*); every control's multiple coherence (`Control` *n*) with the floor |
+| `review` | one `table` | Each control's reachable share, floor and whether it is reachable, and the seed's predicted peak |
+| `law` | one `reading` | The law's named values on its last call |
+| `readings` | one `reading` | The run's numbers |
+| `pulses` | one `table` | The pulse rows |
+
+A plot of the latest pulse is empty until a pulse has fired, and `identification` and `review`
+until identification has ended.
 
 ## Sine
 
@@ -5162,7 +5529,7 @@ folder.
 
 | Method | Params | Result |
 |---|---|---|
-| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, `sine`, `twr`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
+| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, `sine`, `twr`, `shock_mimo`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
 | `laws.import` | `{"path"}` | `{"law":entry}` |
 | `laws.check` | `{"id"}` or `{"path"}`, and `{"params"}` and `{"mixed"}` (optional; `mixed` see "Mixed Mode Laws") | `{"law":entry,"report":{"passed","recorded","tool_version","cases":[case...]}}` |
 
@@ -5199,6 +5566,13 @@ folder.
 - A Mixed Mode run takes a `single` law for its floor and a `sine` law for its tones, listed and checked as "Mixed Mode Laws" says; there is no `mixed` world.
 - A TWR law's entry has `world: "twr"`; its `diagnostics` are scalar values (`layout` null), at
   most 8, reported once per call. The built-in `twr_correct` comes first.
+- A MIMO Shock law's entry has `world: "shock_mimo"`, its `diagnostics` scalar values (`layout`
+  null), at most 8, reported once per call, and `targets`: the target kinds it accepts
+  (`waveform`, `srs` or both). The built-ins `inverse`, `shape` and `paired` come first, in that
+  order. `default_for` lists the target kinds a law is the default for, the law a new setup of
+  that kind opens on (`["waveform"]` on `inverse`, `["srs"]` on `shape`, empty on every other
+  entry). `laws.import` takes a `shock-mimo` law file like any other; it runs on the simulator at
+  once and drives hardware after a passing `laws.check`.
 - `check.hardware` says whether the law may drive hardware: a built-in law always may; an
   imported law only with a passing check record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.

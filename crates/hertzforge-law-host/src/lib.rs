@@ -1,11 +1,12 @@
 //! The control-law host: loads a control law compiled to a WebAssembly
 //! component (the `random-single`, `random-mimo`, `shock-classical`,
-//! `shock-srs` or `sine-single` world of `hertzforge:control-law@0.1.0`, in
-//! `wit/control-law/`) and runs it contained. [`LawHost::load`] loads a
-//! single-output Random law, [`LawHost::load_mimo`] a multiple-output one,
-//! [`LawHost::load_classical`] a classical shock law, [`LawHost::load_srs`] an
-//! SRS shock law, [`LawHost::load_sine`] a Sine law, and [`LawHost::load_any`]
-//! whichever the file is.
+//! `shock-srs`, `sine-single`, `twr-single` or `shock-mimo` world of
+//! `hertzforge:control-law@0.1.0`, in `wit/control-law/`) and runs it
+//! contained. [`LawHost::load`] loads a single-output Random law,
+//! [`LawHost::load_mimo`] a multiple-output one, [`LawHost::load_classical`] a
+//! classical shock law, [`LawHost::load_srs`] an SRS shock law,
+//! [`LawHost::load_sine`] a Sine law, [`LawHost::load_shock_mimo`] a MIMO Shock
+//! law, and [`LawHost::load_any`] whichever the file is.
 //!
 //! # What the host guarantees
 //!
@@ -76,6 +77,7 @@ mod host;
 pub mod mimo;
 mod sandbox;
 pub mod shock_classical;
+pub mod shock_mimo;
 pub mod shock_srs;
 pub mod sine;
 mod ticker;
@@ -84,7 +86,8 @@ mod types;
 pub mod validate;
 
 pub use error::{
-    ClassicalOutputRule, MimoOutputRule, SineOutputRule, SrsOutputRule, TwrOutputRule,
+    ClassicalOutputRule, MimoOutputRule, ShockMimoOutputRule, SineOutputRule, SrsOutputRule,
+    TwrOutputRule,
 };
 pub use error::{LawError, OutputRule};
 pub use host::{law_file_sha256, AnyLaw, HostConfig, LawHost, LawInstance, LoadedLaw};
@@ -94,6 +97,10 @@ pub use mimo::{
 pub use shock_classical::{
     ClassicalInputs, ClassicalLawInstance, ClassicalOutputs, ClassicalPlant, ClassicalSetup,
     ClassicalVerdict, LoadedClassicalLaw, MAX_CLASSICAL_VALUES,
+};
+pub use shock_mimo::{
+    drive_over_ceiling, CeilingExcess, LoadedShockMimoLaw, ShockMimoLawInstance, ShockMimoManifest,
+    MAX_SHOCK_MIMO_VALUES,
 };
 pub use shock_srs::{
     LoadedSrsLaw, SrsInputs, SrsLawInstance, SrsOutputs, SrsSetup, MAX_SRS_VALUES,
@@ -122,6 +129,8 @@ pub const MIMO_WORLD: &str = "random-mimo";
 pub const CLASSICAL_WORLD: &str = "shock-classical";
 /// The world an SRS shock law file implements.
 pub const SRS_WORLD: &str = "shock-srs";
+/// The world a MIMO Shock law file implements.
+pub const SHOCK_MIMO_WORLD: &str = "shock-mimo";
 /// The world a single-output Sine law file implements.
 pub const SINE_WORLD: &str = "sine-single";
 /// The world a time waveform replication law file implements.

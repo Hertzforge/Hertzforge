@@ -1187,7 +1187,7 @@ mod tests {
             stored: Arc::new(stored),
             facts: crate::laws::builtin_twr_facts(),
             table: table(),
-            station: StationPlan::Sim { fs_hz: 12_800.0 },
+            station: StationPlan::sim(12_800.0),
             scanner: Arc::new(FixedScanner(Err(
                 hertzforge_station::StationBuildError::NoNiDevices,
             ))),
@@ -1340,7 +1340,7 @@ mod tests {
 
     /// The plan on a simulated station built at the default rate, not the asked one.
     fn on_a_default_rate_station(mut p: ArmPlan) -> ArmPlan {
-        p.station = StationPlan::Sim { fs_hz: DEFAULT_HZ };
+        p.station = StationPlan::sim(DEFAULT_HZ);
         p
     }
 

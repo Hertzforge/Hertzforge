@@ -332,7 +332,7 @@ impl Service {
             }
             let fs_hz = run.wire.fs_hz;
             let plan = match inner.stations.selected() {
-                Selection::Sim => StationPlan::Sim { fs_hz },
+                Selection::Sim => StationPlan::sim(fs_hz),
                 Selection::Ni { devices } => {
                     let (inputs, _) = hertzforge_station::physical_from_table(&inner.table.table);
                     StationPlan::Ni {

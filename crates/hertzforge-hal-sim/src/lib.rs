@@ -25,13 +25,17 @@
 //!   real resonances and phase, and each input has its own noise.
 //! - **[`PlantModel::Frf`].** Plays any FRF matrix (a measured one, say) by block
 //!   convolution.
+//! - **[`PlantModel::Jointed`].** A cross-coupled modal plant whose modes fall in
+//!   frequency and rise in damping with their own amplitude, as a bolted structure's do,
+//!   with a delay per output ([`jointed`]). Its `analytic_frf` is the small-signal FRF.
 //! - **Noise floor.** Additive Gaussian noise from a deterministic xorshift PRNG
 //!   ([`Xorshift64`]) seeded from config, so tests are reproducible.
 //! - **Exact truth.** [`PlantModel::analytic_frf`] is the complex FRF of the discretized
 //!   plant the backend steps, so an identification can be checked against it.
 //!
 //! [`plants`] holds a standard set of modal plants (with their geometry and their
-//! conditioning claims) for MIMO control work.
+//! conditioning claims) for MIMO control work, and a standard set of shock plants
+//! (`plants::ShockPlant`) whose jointed modes change with level.
 //!
 //! ## Output-buffer model
 //!
@@ -63,10 +67,12 @@
 
 pub mod bench_network;
 mod fitted;
+pub mod jointed;
 pub mod plant;
 pub mod plants;
 
 pub use hertzforge_sdm::{MatrixStack, C64};
+pub use jointed::{JointLaw, JointedMode, JointedPlant, Simulated, Stepper};
 pub use plant::{
     Discretization, FrfPlant, FrfTaps, ModalPlant, ModalSoftening, Mode, ModeResponse, PlantModel,
     ResonatorBank, DEFAULT_FEEDTHROUGH, DEFAULT_FRF_BLOCK_FRAMES, DEFAULT_FRF_MAX_TAPS,
@@ -429,12 +435,13 @@ impl SimConfig {
         self
     }
 
-    /// Broadband feedthrough of a resonator bank or a modal plant. An FRF plant plays
+    /// Broadband feedthrough of a resonator bank, a modal plant or a jointed plant. An FRF plant plays
     /// its stack as given and has none, so this does not change it.
     pub fn feedthrough(mut self, g: f64) -> Self {
         match &mut self.plant {
             PlantModel::Resonators(b) => b.feedthrough = g,
             PlantModel::Modal(m) => m.feedthrough = g,
+            PlantModel::Jointed(j) => j.feedthrough = g,
             PlantModel::Frf(_) => {}
         }
         self

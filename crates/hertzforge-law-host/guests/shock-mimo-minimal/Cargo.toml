@@ -1,0 +1,16 @@
+[package]
+name = "law-fixture-shock-mimo-minimal"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# A test fixture for the law host, not a law to use: the smallest law file of the
+# `shock-mimo` world (wit/control-law/shock-mimo.wit), written against the world's
+# own bindings. It describes itself and returns silence on every drive. Built to
+# WebAssembly by scripts/build_laws.sh.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.61", default-features = false, features = ["macros", "realloc", "std"] }

@@ -1,0 +1,49 @@
+{
+ "type": "response",
+ "id": 75,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "p1",
+    "quantity": "pulse",
+    "points": 1024,
+    "channel": 1
+   },
+   {
+    "id": "drives",
+    "quantity": "drives",
+    "points": 1024
+   },
+   {
+    "id": "verdicts",
+    "quantity": "verdicts"
+   },
+   {
+    "id": "ladder",
+    "quantity": "ladder"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   }
+  ],
+  "quantities": [
+   "pulse",
+   "srs",
+   "drives",
+   "verdicts",
+   "ladder",
+   "identification",
+   "review",
+   "law",
+   "readings",
+   "pulses"
+  ]
+ }
+}

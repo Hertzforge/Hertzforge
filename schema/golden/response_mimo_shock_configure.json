@@ -1,0 +1,103 @@
+{
+ "type": "response",
+ "id": 71,
+ "result": {
+  "state": {
+   "run_id": "ms-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Four-Drive Half-Sine",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": [],
+    "plant": "shock-linear-4x4"
+   },
+   "grid": {
+    "fs_hz": 12800,
+    "record_len": 8192,
+    "lines": 4097,
+    "actual": false
+   },
+   "clock": null,
+   "target": "waveform",
+   "timing": "free",
+   "verdict": "all",
+   "scaled_aborts": true,
+   "notice": null,
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -9,
+    -6,
+    -3,
+    -1.5,
+    0
+   ],
+   "level_db": null,
+   "rung": null,
+   "pulses": {
+    "fired": 0,
+    "passed": 0,
+    "at_level": 0,
+    "of_level": 0
+   },
+   "next_pulse_s": null,
+   "elapsed_s": null,
+   "identification": null,
+   "review": null,
+   "last_pulse": null,
+   "law": {
+    "id": "inverse",
+    "name": "inverse",
+    "version": "0.1.0",
+    "sha256": null,
+    "params": {
+     "lambda_rel": 0.001,
+     "gain": 1,
+     "watchdog": true,
+     "refresh": false,
+     "refresh_mu": 0.5,
+     "align": false,
+     "align_max_ms": 2,
+     "model": "frozen",
+     "modes": 0,
+     "track_from_identification": false,
+     "predicted_step": false
+    },
+    "misses": 0
+   },
+   "end": null
+  },
+  "derived": {
+   "grid": {
+    "fs_hz": 12800,
+    "record_len": 8192,
+    "lines": 4097,
+    "actual": false
+   },
+   "controls": [
+    {
+     "channel": 1,
+     "peak": 20
+    },
+    {
+     "channel": 2,
+     "peak": 18
+    },
+    {
+     "channel": 3,
+     "peak": 20
+    },
+    {
+     "channel": 4,
+     "peak": 18
+    }
+   ],
+   "spacing_s": 1,
+   "call_budget_s": 0.25
+  },
+  "warnings": []
+ }
+}

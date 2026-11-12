@@ -75,6 +75,7 @@ import { createMixedMock } from './mixed';
 import { createTwrMock } from './twr';
 import { createExplorerMock } from './explorer';
 import { createRecorderMock } from './recorder';
+import { createMimoShockMock } from './mimoShock';
 import { binEdges } from './bins';
 import {
 	breakpointArrays,
@@ -109,6 +110,8 @@ export interface ControlServerOptions {
 	coherence?: number;
 	/** The Recorder's data volume, free bytes (default 100 GiB); null when it cannot be read. */
 	recorderFreeBytes?: number | null;
+	/** A MIMO Shock run's second level ends on an absolute abort line. */
+	mimoShockAbsoluteAbort?: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -789,7 +792,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const isLive = () => random !== null && LIVE_STATES.includes(random.state);
 	/** A run of any test type is live (the seat's countdown runs for every one). */
-	const anyLive = () => isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive();
+	const anyLive = () => isLive() || mimoShock.isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive();
 	const orphanS = () => (seatDeadline !== null && anyLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
@@ -825,6 +828,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			twr.seatExpired();
 			explorer.seatExpired();
 			recorder.seatExpired();
+			mimoShock.seatExpired();
 		}
 		sessionChanged();
 	}
@@ -968,6 +972,23 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		clientName,
 		feasibilityExceeds: options.feasibilityExceeds ?? false,
 		toneLaws: () => sine.laws()
+	});
+	// ---- MIMO Shock, on the same run slot and seat ----------------------------------------------
+	const mimoShock = createMimoShockMock({
+		speed,
+		timeoutS,
+		own,
+		hasController: () => !!seat?.conn,
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
+		broadcast: (topic, data) => broadcast(topic, data),
+		rows: () => rows,
+		station: () => {
+			const sel = selected();
+			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
+			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
+		},
+		clientName,
+		absoluteAbort: options.mimoShockAbsoluteAbort ?? false
 	});
 
 	// ---- stations and the channel table -------------------------------------------------------
@@ -1731,7 +1752,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function notWhileShock(what: string) {
-		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId();
+		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId() ?? mimoShock.liveId();
 		if (id) refuse('refused', 'run_active', `Run ${id} is live; stop it before ${what}.`, { run_id: id });
 	}
 
@@ -1763,6 +1784,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			twr.detach(c);
 			explorer.detach(c);
 			recorder.detach(c);
+			mimoShock.detach(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1780,6 +1802,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			...twr.methods,
 			...explorer.methods,
 			...recorder.methods,
+			...mimoShock.methods,
 			// The law catalog holds both shock worlds, Sine's and TWR's: each lists its own, and a law
 			// file goes to the world it implements (the mock tells an SRS, a Sine or a TWR law file by
 			// its name).
@@ -1788,7 +1811,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const classical = (shock.methods['laws.list'](params, conn) as { laws: unknown[] }).laws;
 				const all = world === undefined || world === null;
 				return {
-					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : [])],
+					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : []), ...(all || world === 'shock_mimo' ? mimoShock.laws() : [])],
 					problems: []
 				};
 			},

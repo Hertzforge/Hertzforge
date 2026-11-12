@@ -983,3 +983,36 @@ fn an_envelope_pair_is_under_then_over_the_target_as_the_controller_judges_it() 
     );
     assert!(at(-10.0).aborted(), "10 dB under is past the 9 dB under");
 }
+
+#[test]
+fn mimo_shock_srs_refuses_a_second_drive_row() {
+    // Single-output SRS plays one drive record. With two enabled drive rows a station opens
+    // both as outputs and the one record would be split across them as interleaved frames.
+    let w = config::parse(&golden_config()).unwrap();
+    let mut t = table();
+    let mut second = table::new_row(9);
+    second.role = ChannelRole::Drive;
+    second.units = Units::VoltageV;
+    t.channels.push(second);
+    let (r, _) = w.check(&CheckContext {
+        table: &t,
+        law: &law,
+        timeout_s: 30.0,
+    });
+    assert!(
+        r.errors.iter().any(|i| i.reason == "extra_drive_channels"),
+        "{:?}",
+        r.errors
+    );
+    t.channels.last_mut().unwrap().enabled = false;
+    let (r, _) = w.check(&CheckContext {
+        table: &t,
+        law: &law,
+        timeout_s: 30.0,
+    });
+    assert!(
+        !r.errors.iter().any(|i| i.reason == "extra_drive_channels"),
+        "{:?}",
+        r.errors
+    );
+}

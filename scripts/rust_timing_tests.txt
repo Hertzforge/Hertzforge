@@ -340,3 +340,25 @@ sds-control  test:recorder_protocol  recorder_verbs_are_refused_by_name_in_every
 sds-control  test:recorder_protocol  recorder_log_reaches_every_connection_and_names_the_folder
 sds-control  test:recorder_records  recorder_run_folder_holds_its_records
 sds-control  test:mixed_law_record  an_imported_tone_law_needs_its_own_check_and_the_tones_record
+hertzforge-law-host  test:shock_mimo_host  mimo_shock_a_late_law_is_stopped_at_its_budget_and_stays_stopped
+hertzforge-mimo-shock-laws  test:law_files  mimo_shock_a_late_law_file_is_over_budget_for_the_core
+sds-control  test:mimo_shock_sim_run  mimo_shock_classical_on_the_linear_plant_completes_with_three_full_level_passes
+sds-control  test:mimo_shock_sim_run  mimo_shock_srs_on_the_linear_plant_reaches_full_level_passes
+sds-control  test:mimo_shock_sim_run  mimo_shock_the_severe_jointed_plant_ends_in_a_judged_or_controlled_stop
+sds-control  test:mimo_shock_sim_run  mimo_shock_stop_and_abort_mid_ladder_fire_nothing_after
+sds-control  test:mimo_shock_sim_run  mimo_shock_a_dropped_controller_ends_in_the_safe_stop
+sds-control  test:mimo_shock_sim_run  mimo_shock_a_law_that_panics_ends_the_run_by_name
+sds-control  test:mimo_shock_sim_run  mimo_shock_a_law_files_refusal_is_named_by_the_hosts_rule
+sds-control  test:mimo_shock_sim_run  mimo_shock_the_unreachable_hold_and_its_acknowledgement
+sds-control  test:mimo_shock_sim_run  mimo_shock_the_global_verdict_does_not_hold_and_judges_the_global_error
+sds-control  test:mimo_shock_sim_run  mimo_shock_every_pulse_is_written_to_the_capture_root
+sds-control  test:mimo_shock_protocol  mimo_shock_refusals_follow_the_run_through_its_states
+sds-control  test:mimo_shock_protocol  mimo_shock_auto_refuses_the_manual_fire_and_shutdown_refuses_the_drive
+sds-control  test:mimo_shock_law_check  mimo_shock_laws_check_runs_every_case_and_records_a_law_file
+hertzforge-mimo-shock-law-math  test:research_fit  mimo_shock_rf3_fit_cost
+hertzforge-mimo-shock-law-math  test:research_warp  mimo_shock_w5_warp_cost_per_pulse
+
+# Mixed Mode: a live band switch waited on against a wall-clock deadline, and the tone law file's
+# check, which runs each case with the law's time budget armed
+sds-control  test:mixed_sim_run  a_band_switched_off_live_ramps_out_and_back
+hertzforge-mixed-laws  test:tone_law_file  a_tone_law_file_passes_the_mixed_check_from_the_role_s_start_values
