@@ -5615,8 +5615,8 @@ MSHOCK_CONFIG_SPECTRUM = {
                             _mshock_spectrum_control(24, 'negative'),
                             _mshock_spectrum_control(24, 'positive'),
                             _mshock_spectrum_control(24, 'negative')]},
-    **{**MSHOCK_COMMON, 'acquisition': {'fs_hz': 12800, 'record_len': 16384,
-                                        'band_hz': [5, 2500], 'lead_s': 0.05}},
+    **MSHOCK_COMMON,
+    'acquisition': {'fs_hz': 12800, 'record_len': 16384, 'band_hz': [5, 2500], 'lead_s': 0.05},
     'verdict': 'global',
     'control': {'law': {'id': 'shape', 'params': {'max_step_db': 6}}, **MSHOCK_CONTROL},
     'simulator': {'plant': 'shock-jointed-4x4-moderate'},
@@ -5635,7 +5635,9 @@ MSHOCK_LEVELS = [-12, -9, -6, -3, -1.5, 0]
 MSHOCK_STATION = {'kind': 'sim', 'class': 'sim', 'devices': [], 'plant': 'shock-linear-4x4'}
 MSHOCK_LAW = {'id': 'inverse', 'name': 'inverse', 'version': '0.1.0', 'sha256': None,
               'params': {'lambda_rel': 0.001, 'gain': 1, 'watchdog': True, 'refresh': False,
-                         'refresh_mu': 0.5, 'align': False, 'align_max_ms': 2},
+                         'refresh_mu': 0.5, 'align': False, 'align_max_ms': 2,
+                         'model': 'frozen', 'modes': 0, 'track_from_identification': False,
+                         'predicted_step': False},
               'misses': 0}
 
 
