@@ -34,23 +34,23 @@ describe('the test types', () => {
 		expect(typesIn('acquisition').map((t) => t.title)).toEqual(['Recorder']);
 		// Every test type is in exactly one section, and the keyboard order is the sections' order.
 		expect(TEST_GROUPS.flatMap((g) => typesIn(g.id))).toEqual([...TEST_TYPES]);
-		// MIMO Random is offered; the other MIMO test types are coming.
-		expect(typesIn('mimo').filter((t) => t.ready).map((t) => t.id)).toEqual(['mimo_random']);
+		// MIMO Random and MIMO Shock are offered; the other MIMO test types are coming.
+		expect(typesIn('mimo').filter((t) => t.ready).map((t) => t.id)).toEqual(['mimo_random', 'mimo_shock']);
 		expect(typesIn('acquisition')[0].summary).toMatch(/no drive/);
 	});
 
-	it('gives each of the thirteen test types one plain line, and only Random, Sine, Mixed Mode, Classical Shock, SRS, TWR, Explorer, MIMO Random and Recorder can be chosen', () => {
+	it('gives each of the thirteen test types one plain line, and only Random, Sine, Mixed Mode, Classical Shock, SRS, TWR, Explorer, MIMO Random, MIMO Shock and Recorder can be chosen', () => {
 		expect(TEST_TYPES).toHaveLength(13);
 		// Mixed Mode is listed in Single Output, after Sine, and can be chosen.
 		expect(TEST_TYPES.find((t) => t.id === 'mixed')).toMatchObject({ group: 'single', title: 'Mixed Mode', ready: true });
-		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'sine', 'mixed', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
+		expect(TEST_TYPES.filter((t) => t.ready).map((t) => t.id)).toEqual(['random', 'sine', 'mixed', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'mimo_shock', 'recorder']);
 		for (const t of TEST_TYPES) {
 			expect(t.summary).toMatch(/^[A-Z][^\n]{20,100}\.$/);
 			// What the test is, never a note to developers.
 			expect(t.summary).not.toMatch(/\b[QM]\d+\b|#\d+|todo|tbd|port|issue|milestone/i);
 		}
 		const { view } = viewOf(null);
-		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'sine', 'mixed', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'recorder']);
+		expect(TEST_TYPES.filter((t) => view.canChoose(t.id)).map((t) => t.id)).toEqual(['random', 'sine', 'mixed', 'shock', 'srs', 'twr', 'explorer', 'mimo_random', 'mimo_shock', 'recorder']);
 		expect(TEST_TYPES.filter((t) => !t.ready).every((t) => view.whyNot(t.id) === 'Coming')).toBe(true);
 	});
 });
@@ -69,7 +69,7 @@ describe('the chooser', () => {
 		expect(view.last).toBeNull();
 
 		// A test type still to come is refused, and the chooser stays.
-		expect(view.choose('mimo_shock')).toBe(false);
+		expect(view.choose('mimo_sine')).toBe(false);
 		expect(view.screen).toBe('chooser');
 		expect(view.takeFocus()).toBe(false);
 
@@ -187,6 +187,20 @@ describe('the chooser', () => {
 		expect(liveTestOf(random, 'open', mimo, shock, { status: null, syncError: 'refused' })).toBeNull();
 		// SRS shock is served: its card can be chosen.
 		expect(new TestTypeView(() => null).whyNot('srs')).toBeNull();
+	});
+
+	it('reads a live MIMO Shock run, waits for its store to answer, and keeps the other cards closed while it runs', () => {
+		const random = { run: { state: 'configured' } as RandomState, syncError: null };
+		const idle = { status: { state: 'unconfigured' as const }, syncError: null };
+		const live = (state: 'running' | 'review' | 'finished' | null) => liveTestOf(random, 'open', idle, idle, idle, idle, undefined, undefined, undefined, idle, state === null ? { status: null, syncError: null } : { status: { state }, syncError: null });
+		expect(live('running')).toBe('mimo_shock');
+		expect(live('review')).toBe('mimo_shock');
+		expect(live('finished')).toBeNull();
+		expect(live(null)).toBeUndefined();
+		const view = new TestTypeView(() => 'mimo_shock');
+		expect(view.whyNot('shock')).toBe('Opens when the MIMO Shock run ends.');
+		expect(view.canChoose('mimo_shock')).toBe(true);
+		expect(new TestTypeView(() => null).whyNot('mimo_shock')).toBeNull();
 	});
 });
 
