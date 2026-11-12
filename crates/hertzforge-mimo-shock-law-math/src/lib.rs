@@ -51,15 +51,21 @@
 pub mod check;
 pub mod delay;
 pub mod inverse;
+pub mod lsq;
+pub mod modal;
 pub mod model;
 pub mod paired;
+pub mod provider;
 pub mod refresh;
+pub mod robust;
 pub mod shape;
 pub mod spectrum;
 pub mod srs;
 
 #[cfg(feature = "reference-plant")]
 pub mod reference_plant;
+#[cfg(feature = "reference-plant")]
+pub mod research_plant;
 
 pub use hertzforge_sdm::{MatrixStack, C64};
 

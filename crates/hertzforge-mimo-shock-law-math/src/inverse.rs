@@ -24,7 +24,9 @@
 
 use crate::delay::estimate_delay;
 use crate::model::regularized_inverse;
+use crate::provider::{ModelProvider, Observation};
 use crate::refresh::refresh_along_drive;
+use crate::robust::weighted_inverse;
 use crate::spectrum::{apply, omegas, relative_error, rms_all, rows_irfft, rows_rfft, smooth};
 use crate::{
     check_inputs, check_setup, drive_mask, level_scale, LawSteps, MatrixStack, PulseInputs,
@@ -80,6 +82,22 @@ impl Default for InverseParams {
     }
 }
 
+/// What [`InverseLaw::with_options`] adds to the law.
+#[derive(Default)]
+pub struct InverseExtras {
+    /// The model provider; `None` keeps the model as `params` says.
+    pub provider: Option<Box<dyn ModelProvider>>,
+    /// When set, the first pulse of each new level uses the
+    /// uncertainty-weighted inverse with these mode-frequency drops around the
+    /// provider's model.
+    pub robust_first: Option<Vec<f64>>,
+    /// At a level step, correct the error the next level is predicted to have,
+    /// `R - Y - (Hh_next - Hh_k) D`, instead of the error measured at the level
+    /// just played (`Derivations.md` D17). Needs a provider that keeps the
+    /// model of the level played apart from the prediction.
+    pub predicted_step: bool,
+}
+
 /// The `inverse` law's state.
 pub struct InverseLaw {
     setup: Setup,
@@ -91,6 +109,7 @@ pub struct InverseLaw {
     reference: Vec<Vec<C64>>,
     gains: Vec<f64>,
     previous_energy: Option<Vec<f64>>,
+    extras: Option<InverseExtras>,
 }
 
 impl InverseLaw {
@@ -118,6 +137,7 @@ impl InverseLaw {
             omegas: omegas(setup.fs_hz, setup.record_len),
             gains: vec![params.gain; lines],
             previous_energy: None,
+            extras: None,
             setup,
             params,
             mask,
@@ -125,6 +145,32 @@ impl InverseLaw {
             inverse,
             reference,
         })
+    }
+
+    /// The law with a model provider (and the weighted first pulse of a
+    /// level). With `InverseExtras::default()` it is the law of
+    /// [`InverseLaw::new`].
+    pub fn with_options(
+        setup: Setup,
+        params: InverseParams,
+        extras: InverseExtras,
+    ) -> Result<Self, String> {
+        if extras.provider.is_some() && params.refresh {
+            return Err("a model provider replaces the refresh; turn the refresh off".into());
+        }
+        if extras.robust_first.is_some() && extras.provider.is_none() {
+            return Err("the weighted first pulse needs a model provider".into());
+        }
+        let mut law = InverseLaw::new(setup, params)?;
+        if let Some(p) = &extras.provider {
+            if p.current().dims() != law.model.dims() {
+                return Err("the provider's model does not match the setup".into());
+            }
+            law.model = p.current().clone();
+            law.inverse = regularized_inverse(&law.model, &law.mask, law.params.lambda_rel)?;
+        }
+        law.extras = Some(extras);
+        Ok(law)
     }
 
     /// The gain per line now in force.
@@ -219,8 +265,64 @@ impl LawSteps for InverseLaw {
             self.inverse = regularized_inverse(&self.model, &self.mask, self.params.lambda_rel)?;
         }
 
+        // The provider's model for the next pulse.
+        let mut extra_values: Vec<(&'static str, f64)> = Vec::new();
+        let mut first_inverse: Option<MatrixStack> = None;
+        if let Some(ex) = self.extras.as_mut() {
+            if let Some(p) = ex.provider.as_mut() {
+                p.observe(&Observation {
+                    level_db: inputs.level_db,
+                    drives: &d,
+                    responses: &y,
+                })?;
+                p.model_for(inputs.next_level_db)?;
+                self.model = p.current().clone();
+                self.inverse =
+                    regularized_inverse(&self.model, &self.mask, self.params.lambda_rel)?;
+                if let Some(drops) = &ex.robust_first {
+                    if inputs.next_level_db != inputs.level_db {
+                        if let Some(rad) = p.radius(inputs.next_level_db, drops) {
+                            first_inverse = Some(weighted_inverse(
+                                &self.model,
+                                &self.mask,
+                                self.params.lambda_rel,
+                                &rad,
+                            )?);
+                        }
+                    }
+                }
+                let rep = p.report();
+                extra_values.push(("model_prediction_residual", rep.prediction_residual));
+                extra_values.push(("model_fit_residual", rep.fit_residual));
+                extra_values.push(("model_fallback_residual", rep.fallback_residual));
+                extra_values.push(("model_gate_fired", f64::from(u8::from(rep.gate_fired))));
+                extra_values.push(("model_source", rep.source.code()));
+            }
+        }
+
+        // At a level step, the error the next level is predicted to have.
+        let mut e = e;
+        if let Some(ex) = self.extras.as_ref() {
+            if let (true, Some(p)) = (ex.predicted_step, ex.provider.as_ref()) {
+                if inputs.next_level_db != inputs.level_db {
+                    if let Some(hk) = p.level_model() {
+                        let shift = apply(p.current(), &d);
+                        let here = apply(hk, &d);
+                        for (ec, (sc, hc)) in e.iter_mut().zip(shift.iter().zip(&here)) {
+                            for (f, v) in ec.iter_mut().enumerate() {
+                                if self.mask[f] {
+                                    *v -= sc[f] - hc[f];
+                                }
+                            }
+                        }
+                        extra_values.push(("predicted_step", 1.0));
+                    }
+                }
+            }
+        }
+
         // The correction.
-        let step = apply(&self.inverse, &e);
+        let step = apply(first_inverse.as_ref().unwrap_or(&self.inverse), &e);
         let next: Vec<Vec<C64>> = d
             .iter()
             .zip(&step)
@@ -245,20 +347,22 @@ impl LawSteps for InverseLaw {
             .zip(&self.mask)
             .filter(|(_, &m)| m)
             .fold(f64::INFINITY, |a, (g, _)| a.min(*g));
+        let mut values = vec![
+            (
+                "waveform_error",
+                relative_error(&y_t, &self.setup.reference),
+            ),
+            ("drive_rms_full_level", rms_all(&drives) / s_next),
+            (
+                "least_line_gain",
+                if min_gain.is_finite() { min_gain } else { 0.0 },
+            ),
+            ("lines_cut", cut as f64),
+            ("lines_refreshed", refreshed as f64),
+        ];
+        values.extend(extra_values);
         Ok(PulseOutputs {
-            values: vec![
-                (
-                    "waveform_error",
-                    relative_error(&y_t, &self.setup.reference),
-                ),
-                ("drive_rms_full_level", rms_all(&drives) / s_next),
-                (
-                    "least_line_gain",
-                    if min_gain.is_finite() { min_gain } else { 0.0 },
-                ),
-                ("lines_cut", cut as f64),
-                ("lines_refreshed", refreshed as f64),
-            ],
+            values,
             drives,
             delays_s: delays,
         })
