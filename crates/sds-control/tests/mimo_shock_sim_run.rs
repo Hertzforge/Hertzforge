@@ -226,6 +226,27 @@ async fn mimo_shock_classical_on_the_linear_plant_completes_with_three_full_leve
     assert_eq!(end["pulses"]["passed"], passed);
 }
 
+/// A control the drives reach in full reports its floor at the precision the
+/// floor is computed to, not at the guard that keeps the logarithm finite.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_a_fully_reachable_control_reports_a_floor_of_minus_120_db() {
+    let addr = serve(Service::with_options(opts(Duration::from_secs(30)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 4).await;
+    let mut cfg = classical("shock-linear-4x4", "auto");
+    cfg["identification"]["review"] = json!(true);
+    configure(&mut c, cfg).await;
+    c.ok("mimo_shock.start", json!({})).await;
+    let s = ms_state(&mut c, "review").await;
+    let controls = s["review"]["controls"].as_array().unwrap().clone();
+    assert_eq!(controls.len(), 4);
+    for k in &controls {
+        assert_eq!(k["reachable"], 1.0, "{k}");
+        assert_eq!(k["floor_db"], -120.0, "{k}");
+    }
+    c.ok("mimo_shock.abort", json!({})).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mimo_shock_srs_on_the_linear_plant_reaches_full_level_passes() {
     let addr = serve(Service::with_options(opts(Duration::from_secs(30)))).await;

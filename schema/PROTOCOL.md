@@ -2917,8 +2917,8 @@ record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target),
 ```
 
   `reachable` is the share of the control's target energy the drives can reach at all;
-  `floor_db` the waveform error (`waveform`) or the largest SRS deviation (`srs`) of its best
-  reachable response, dB; `reachable_ok` whether that response passes the control's own judge.
+  `floor_db` the waveform error (`waveform`, at least -120 dB, the precision it is computed to)
+  or the largest SRS deviation (`srs`) of its best reachable response, dB; `reachable_ok` whether that response passes the control's own judge.
   `predicted_peak_ratio` is the seed's predicted peak over the target's at the first level (null
   before the seed). `hold` is null or `{"reason":"unreachable_target","message"}`;
   `acknowledged` the operator's words once given.

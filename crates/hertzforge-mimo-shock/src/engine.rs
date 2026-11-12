@@ -771,6 +771,10 @@ pub struct SeedReport {
 /// (the single-output classical identification's floor).
 pub const MIN_MEAN_COHERENCE: f64 = 0.8;
 
+/// The lowest reachable floor a waveform control reports, dB: the precision the
+/// unreachable share of its target's energy is computed to.
+pub const FLOOR_DB_MIN: f64 = -120.0;
+
 /// The share of a control's target energy that must lie on trusted lines
 /// before the run holds (the single-output classical rule).
 pub const MIN_BAND_ENERGY: f64 = 0.9;
@@ -1892,7 +1896,9 @@ impl MimoShockEngine {
                         .fold(0.0f64, f64::max)
                 }
                 (Target::Waveform(_), _) | (Target::Srs(_), None) => {
-                    10.0 * (1.0 - fraction[c]).max(1e-30).log10()
+                    // The unreachable share comes from a difference of energies, good to
+                    // about twelve digits: a floor under -120 dB is that rounding, not the plant.
+                    (10.0 * (1.0 - fraction[c]).max(0.0).log10()).max(FLOOR_DB_MIN)
                 }
             })
             .collect();
