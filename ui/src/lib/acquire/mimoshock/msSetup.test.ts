@@ -84,6 +84,17 @@ describe('the MIMO Shock channels', () => {
 	});
 });
 
+describe('a new setup', () => {
+	it('asks for a rate at which the longest record holds an SRS target from the default lowest band', () => {
+		// The service's records are at most 16384 samples and a synthesized SRS target from 50 Hz needs
+		// more than the 0.32 s that is at 51 200 Hz; at 12 800 Hz it is 1.28 s.
+		const d = defaultMsSetup();
+		expect(d.acquisition.fs_hz).toBe(12800);
+		expect(16384 / d.acquisition.fs_hz).toBeGreaterThan(1);
+		expect(d.acquisition.band_hz[1]).toBeLessThan(0.4 * d.acquisition.fs_hz);
+	});
+});
+
 describe('what the editor names before sending', () => {
 	it('a setup with its drives given checks clean', () => {
 		expect(localErrors(ready())).toEqual({});
