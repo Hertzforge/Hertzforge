@@ -326,7 +326,7 @@ pub fn validate_shock_mimo_outputs(
         s.record_len as usize,
     );
     if o.drives.len() != nd * len {
-        return if !o.drives.is_empty() && o.drives.len() % len == 0 {
+        return if !o.drives.is_empty() && o.drives.len().is_multiple_of(len) {
             bad(
                 ShockMimoOutputRule::WrongDriveCount,
                 format!(

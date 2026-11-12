@@ -34,3 +34,7 @@ hertzforge-sdm = { path = "../hertzforge-sdm" }
 # `parity::bench`: a scripted run on the law mathematics' exact reference plant,
 # used by the law files' parity tests and a contributor's first run of a new law.
 reference-plant = ["dep:hertzforge-mimo-shock-law-math", "hertzforge-mimo-shock-law-math/reference-plant"]
+
+[[example]]
+name = "try_mimo_shock_law"
+required-features = ["reference-plant"]

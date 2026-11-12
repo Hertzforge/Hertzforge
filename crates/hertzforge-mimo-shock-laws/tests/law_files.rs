@@ -3,9 +3,7 @@
 //! manifest and its check record, and its faults reported to the core by name.
 
 use hertzforge_law_host::{HostConfig, LawHost, Param, ParamValue};
-use hertzforge_mimo_shock::{
-    MimoShockLawFactory, PlantStack, Setup, Target, TargetKind, Timing, WaveformTarget,
-};
+use hertzforge_mimo_shock::{PlantStack, Setup, Target, TargetKind, Timing, WaveformTarget};
 use hertzforge_mimo_shock_laws::{
     all_facts, builtin_facts, check_record, entries, load_law_file, resolve, BuiltinMimoShock,
     CaseVerdict, MimoShockCheckCase, ResolveError,

@@ -173,6 +173,10 @@ fn verdicts(setup: &Setup, responses: &[f64], level_db: f64) -> Vec<ControlVerdi
         .collect()
 }
 
+/// The plant of a scripted run: the flat drives as played (drive after
+/// drive) and their level in dB to the flat responses (control after control).
+pub type ScriptedPlant<'a> = dyn FnMut(&[f64], f64) -> Result<Vec<f64>, String> + 'a;
+
 /// Play `levels` (one pulse per entry) through `plant` with law `a`'s drives,
 /// hand both laws the same inputs after every pulse (`b`'s own drives are
 /// compared, never played) and report how far apart the drives were.
@@ -186,7 +190,7 @@ pub fn compare_laws(
     b: &mut dyn MimoShockLaw,
     setup: &Setup,
     levels: &[f64],
-    plant: &mut dyn FnMut(&[f64], f64) -> Result<Vec<f64>, String>,
+    plant: &mut ScriptedPlant<'_>,
 ) -> Result<ParityReport, String> {
     let first = *levels.first().ok_or("the script has no pulse")?;
     let fault = |w: &str, f: LawFault| format!("law {w}: {} ({})", f.reason(), f_text(&f));
@@ -389,6 +393,89 @@ pub mod bench {
                 .collect();
             spectrum::rms_all(&rows)
         }
+    }
+
+    /// What one pulse of [`play`] measured.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct BenchRow {
+        /// The level played, dB.
+        pub level_db: f64,
+        /// Every control's waveform error, response over target at the played
+        /// level: `20 log10(|y - s r| / |s r|)` over every control together.
+        pub waveform_error_db: f64,
+        /// For an SRS target, the largest SRS deviation over every control and
+        /// frequency, dB.
+        pub worst_srs_db: Option<f64>,
+        /// Rms of every drive together, referred to full level, volts.
+        pub drive_rms_full_level: f64,
+    }
+
+    /// Play `levels` on `bench` with `law` alone, each pulse with the drives
+    /// it returned, and measure each pulse.
+    pub fn play(
+        law: &mut dyn MimoShockLaw,
+        bench: &Bench,
+        levels: &[f64],
+    ) -> Result<Vec<BenchRow>, String> {
+        let s = &bench.setup;
+        let len = s.record_len;
+        let rows =
+            |flat: &[f64]| -> Vec<Vec<f64>> { flat.chunks(len).map(<[f64]>::to_vec).collect() };
+        let fault =
+            |f: hertzforge_shock_common::law_guard::LawFault| format!("{} ({f:?})", f.reason());
+        let mut out = law.seed(levels[0]).map_err(fault)?;
+        let mut table = Vec::new();
+        for (k, &level) in levels.iter().enumerate() {
+            let sc = level_scale(level);
+            let y = bench.respond(&out.drives, level)?;
+            let r = s.target.waveforms();
+            let e: f64 = y.iter().zip(r).map(|(y, r)| (y - sc * r).powi(2)).sum();
+            let n: f64 = r.iter().map(|r| (sc * r).powi(2)).sum();
+            let srs = match &s.target {
+                Target::Srs(t) => Some(srs::srs_rows(&rows(&y), s.fs_hz, &t.natural_hz, t.q, 1.0)),
+                Target::Waveform(_) => None,
+            };
+            let worst_srs_db = match (&srs, &s.target) {
+                (Some(m), Target::Srs(t)) => {
+                    let target: Vec<Vec<f64>> = t
+                        .points
+                        .chunks(t.natural_hz.len())
+                        .map(|p| p.iter().map(|v| v * sc).collect())
+                        .collect();
+                    Some(srs::worst_error_db(m, &target))
+                }
+                _ => None,
+            };
+            table.push(BenchRow {
+                level_db: level,
+                waveform_error_db: 10.0 * (e / n).log10(),
+                worst_srs_db,
+                drive_rms_full_level: spectrum::rms_all(&rows(&out.drives)) / sc,
+            });
+            if k + 1 == levels.len() {
+                break;
+            }
+            let inputs = hertzforge_mimo_shock::PulseInputs {
+                pulse_index: k as u64 + 1,
+                level_db: level,
+                next_level_db: levels[k + 1],
+                drives: out.drives.clone(),
+                srs: srs.map(|m| m.into_iter().flatten().collect()),
+                verdicts: vec![
+                    hertzforge_mimo_shock::ControlVerdict {
+                        passed: false,
+                        error_db: 0.0,
+                        delay_s: 0.0,
+                        peak_ratio: 1.0,
+                    };
+                    s.n_controls
+                ],
+                responses: y,
+                limited: false,
+            };
+            out = law.iterate(&inputs).map_err(fault)?;
+        }
+        Ok(table)
     }
 
     /// The built law file `<crate_name>.wasm` (as `scripts/build_laws.sh`

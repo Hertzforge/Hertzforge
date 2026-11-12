@@ -431,7 +431,7 @@ pub fn inputs_from_wit(
 ) -> Result<Inputs, String> {
     let srs = match i.srs {
         Some(s) => {
-            let nf = if controls == 0 { 0 } else { s.len() / controls };
+            let nf = s.len().checked_div(controls).unwrap_or(0);
             Some(rows("the measured SRS", s, controls, nf)?)
         }
         None => None,
