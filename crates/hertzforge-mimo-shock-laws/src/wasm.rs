@@ -151,7 +151,14 @@ pub struct WasmMimoShockLaw {
     budget: Duration,
     first_fault: Option<LawFault>,
     name: String,
+    host_rule: HostRule,
 }
+
+/// The host's own name for the last output it refused (`wrong_drive_count`,
+/// `delays_shape`, ...), shared by a factory and every law it built: the core's
+/// fault folds some of them into `wrong_length`, and a run's end names the
+/// host's.
+pub type HostRule = std::sync::Arc<std::sync::Mutex<Option<&'static str>>>;
 
 impl WasmMimoShockLaw {
     /// The law `instance`, called with `budget` as every call's deadline.
@@ -162,6 +169,7 @@ impl WasmMimoShockLaw {
             budget,
             first_fault: None,
             name,
+            host_rule: HostRule::default(),
         }
     }
 
@@ -185,6 +193,11 @@ impl WasmMimoShockLaw {
                     .collect(),
             }),
             Err(e) => {
+                if let LawError::BadShockMimoOutput { rule, .. } = &e {
+                    if let Ok(mut g) = self.host_rule.lock() {
+                        *g = Some(rule.as_str());
+                    }
+                }
                 let f = shock_mimo_law_fault(&e);
                 if e.poisons() {
                     self.first_fault = Some(f.clone());
@@ -224,6 +237,7 @@ pub struct WasmMimoShockLawFactory {
     law: LoadedShockMimoLaw,
     params: Vec<Param>,
     budget: Duration,
+    host_rule: HostRule,
 }
 
 impl WasmMimoShockLawFactory {
@@ -234,7 +248,20 @@ impl WasmMimoShockLawFactory {
             law,
             params,
             budget,
+            host_rule: HostRule::default(),
         }
+    }
+
+    /// The host's name for the last output it refused from a law this factory
+    /// built (`wrong_drive_count`, `wrong_length`, `delays_shape`, ...).
+    pub fn last_host_rule(&self) -> Option<&'static str> {
+        self.host_rule.lock().ok().and_then(|g| *g)
+    }
+
+    /// The shared cell [`Self::last_host_rule`] reads, for a caller that holds
+    /// the factory only as the core's trait.
+    pub fn host_rule(&self) -> HostRule {
+        self.host_rule.clone()
     }
 
     /// The loaded law file.
@@ -269,7 +296,9 @@ impl MimoShockLawFactory for WasmMimoShockLawFactory {
             .law
             .instantiate(&host_setup(setup), &self.params, self.budget)
             .map_err(|e| shock_mimo_law_fault(&e))?;
-        Ok(Box::new(WasmMimoShockLaw::new(instance, self.budget)))
+        let mut law = WasmMimoShockLaw::new(instance, self.budget);
+        law.host_rule = self.host_rule.clone();
+        Ok(Box::new(law))
     }
 
     fn describe(&self) -> LawDescriptor {

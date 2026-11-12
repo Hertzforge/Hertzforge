@@ -132,8 +132,11 @@ fn mimo_shock_a_law_file_resolves_from_the_catalog_and_runs_as_the_core_law() {
     // A built-in id goes to the built-in branch; an unknown id is unknown; a
     // law file of another world is named as such.
     assert_eq!(
-        resolve(&cat, "shape", Vec::new(), Duration::from_secs(1)).err(),
-        Some(ResolveError::NotBuilt("shape"))
+        resolve(&cat, "shape", Vec::new(), Duration::from_secs(1))
+            .unwrap()
+            .describe()
+            .id,
+        "shape"
     );
     assert_eq!(
         resolve(&cat, "nope", Vec::new(), Duration::from_secs(1)).err(),

@@ -270,21 +270,35 @@ fn mimo_shock_engine_the_severe_twist_seed_is_let_through_to_the_measured_abort(
     );
     assert!(20.0 * predicted.log10() < 1.0);
     assert!(20.0 * measured.log10() > 6.0);
+    // The line it crosses is its level's (scaled) line, not the absolute one;
+    // the scaled abort is the controlled stop.
     assert_eq!(
         (end.outcome, end.reason.as_str()),
-        (EndOutcome::Aborted, "control_abort")
+        (EndOutcome::SafeStop, "control_abort_scaled")
     );
 }
 
 #[test]
 fn mimo_shock_engine_r6_more_controls_than_drives_ends_near_its_floor() {
+    // The targets are unreachable by construction (more controls than
+    // drives): the run holds before the first pulse until the hold is
+    // acknowledged.
     let cfg = config(6, 0, 3, LEN_SRS);
-    let (mut e, _) = ready(
-        ShockPlant::Jointed6x3,
-        cfg,
-        srs(&[20.0, 16.0, 20.0, 16.0, 18.0, 18.0]),
-        Arc::new(ShapeFactory::default()),
-    );
+    let mut e = MimoShockEngine::new(cfg, Arc::new(ShapeFactory::default()))
+        .unwrap()
+        .with_target_spec(srs(&[20.0, 16.0, 20.0, 16.0, 18.0, 18.0]))
+        .with_clock(Arc::new(ManualClock::default()))
+        .with_pacing(false);
+    e.arm(
+        station(ShockPlant::Jointed6x3, FS, 11),
+        table(6, 0, 3),
+        StationClass::HertzforgeSim,
+    )
+    .unwrap();
+    e.identify().unwrap();
+    assert!(e.unreachable().is_some());
+    e.acknowledge_unreachable("more controls than drives");
+    e.proceed().unwrap();
     let seed = e.seed_report().cloned().expect("a seed report");
     let end = e.run_to_end(None).unwrap();
     println!("{}", trace(&e));

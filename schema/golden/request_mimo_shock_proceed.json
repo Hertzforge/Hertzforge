@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 73,
+ "method": "mimo_shock.proceed",
+ "params": {
+  "acknowledge": "Controls 1 and 3 are known to be short; run it."
+ }
+}

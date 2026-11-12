@@ -1,0 +1,622 @@
+{
+ "type": "event",
+ "topic": "mimo_shock.pulse",
+ "seq": 212,
+ "data": {
+  "run_id": "ms-0004",
+  "pulse": {
+   "index": 0,
+   "scheduled_db": -12,
+   "level_db": -12,
+   "passed": true,
+   "at_s": 11.25,
+   "drives": [
+    {
+     "channel": 5,
+     "vpk": 0.29,
+     "limit_scale": 1
+    },
+    {
+     "channel": 6,
+     "vpk": 0.29,
+     "limit_scale": 1
+    }
+   ],
+   "controls": [
+    {
+     "channel": 1,
+     "passed": true,
+     "reasons": [],
+     "error_db": 1.1,
+     "over_test_db": 0.4,
+     "delay_s": 0.0003,
+     "peak": 3.1,
+     "peak_ratio": 1.02,
+     "scaled_margin_db": -2.11,
+     "absolute_margin_db": -8.11,
+     "timing_ok": true,
+     "polarity_ok": true,
+     "duration_ratio": 1.04,
+     "duration_ok": true,
+     "energy_db": 0.21,
+     "rms_duration_ratio": 1.01,
+     "velocity_ips": 12.1,
+     "displacement_pk_pk_in": 0.18,
+     "predicted_peak_ratio": 0.99,
+     "srs": {
+      "worst_err_db": 1.1,
+      "worst_band_hz": 400,
+      "bands": 3,
+      "passed_bands": 3
+     }
+    },
+    {
+     "channel": 2,
+     "passed": false,
+     "reasons": [
+      "polarity"
+     ],
+     "error_db": 0.9,
+     "over_test_db": -0.9,
+     "delay_s": 0.0004,
+     "peak": 3.0,
+     "peak_ratio": 0.99,
+     "scaled_margin_db": -2.37,
+     "absolute_margin_db": -8.37,
+     "timing_ok": true,
+     "polarity_ok": false,
+     "duration_ratio": 0.97,
+     "duration_ok": true,
+     "energy_db": 0.21,
+     "rms_duration_ratio": 1.01,
+     "velocity_ips": 12.1,
+     "displacement_pk_pk_in": 0.18,
+     "predicted_peak_ratio": 0.99,
+     "srs": {
+      "worst_err_db": -0.9,
+      "worst_band_hz": 200,
+      "bands": 3,
+      "passed_bands": 3
+     }
+    }
+   ],
+   "over_test_db": 0.4,
+   "global_srs_error_db": 0.75,
+   "arrival_spread_s": 0.0001,
+   "warnings": [
+    "control 2's rms duration is 1.15 times its target's"
+   ],
+   "step_note": null,
+   "law": {
+    "used": true,
+    "miss": null,
+    "call_ms": 2.5,
+    "delays_s": [
+     0.0003,
+     0.0004
+    ],
+    "values": [
+     {
+      "key": "weight",
+      "value": 0.5
+     }
+    ]
+   }
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Pulse 1",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Acceleration",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Target",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.5,
+        0.0,
+        7.5,
+        10.0,
+        7.5,
+        0.0,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.25,
+        0.25,
+        7.25,
+        9.75,
+        7.75,
+        0.25,
+        -0.5
+       ]
+      }
+     }
+    ],
+    "link": "time",
+    "channel": 1
+   },
+   {
+    "view": "spectrum",
+    "title": "SRS 1",
+    "x": {
+     "label": "Natural frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Peak acceleration",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Target",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.5,
+        15.0,
+        11.0
+       ]
+      }
+     },
+     {
+      "name": "Tolerance high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        17.5,
+        21.0,
+        15.5
+       ]
+      }
+     },
+     {
+      "name": "Tolerance low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        9.0,
+        10.5,
+        7.75
+       ]
+      }
+     },
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.25,
+        15.5,
+        10.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency",
+    "channel": 1
+   },
+   {
+    "view": "spectrum",
+    "title": "Pulse 2",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Acceleration",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Target",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.5,
+        0.0,
+        7.5,
+        10.0,
+        7.5,
+        0.0,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.25,
+        0.25,
+        7.25,
+        9.75,
+        7.75,
+        0.25,
+        -0.5
+       ]
+      }
+     }
+    ],
+    "link": "time",
+    "channel": 2
+   },
+   {
+    "view": "spectrum",
+    "title": "SRS 2",
+    "x": {
+     "label": "Natural frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Peak acceleration",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Target",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.5,
+        15.0,
+        11.0
+       ]
+      }
+     },
+     {
+      "name": "Tolerance high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        17.5,
+        21.0,
+        15.5
+       ]
+      }
+     },
+     {
+      "name": "Tolerance low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        9.0,
+        10.5,
+        7.75
+       ]
+      }
+     },
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        100.0,
+        200.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        12.25,
+        15.5,
+        10.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency",
+    "channel": 2
+   },
+   {
+    "view": "spectrum",
+    "title": "Drives",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Drive",
+     "unit": "V",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Drive 5",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.0125,
+        0.0,
+        0.1875,
+        0.25,
+        0.1875,
+        0.0,
+        -0.0125
+       ]
+      }
+     },
+     {
+      "name": "Drive 6",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.006,
+        0.007
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.0125,
+        0.0,
+        0.1875,
+        0.25,
+        0.1875,
+        0.0,
+        -0.0125
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   }
+  ]
+ }
+}

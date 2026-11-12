@@ -1,0 +1,535 @@
+{
+ "type": "event",
+ "topic": "mimo_shock.data",
+ "seq": 213,
+ "data": {
+  "run_id": "ms-0002",
+  "source": "SIM",
+  "state": "running",
+  "phase": "waiting",
+  "mode": "auto",
+  "level_db": -6,
+  "rung": 2,
+  "pulses": {
+   "fired": 5,
+   "passed": 3,
+   "at_level": 2,
+   "of_level": 3
+  },
+  "next_pulse_s": 0.6,
+  "plots": [
+   {
+    "id": "p1",
+    "quantity": "pulse",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Pulse 1",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Target",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.5,
+          0.0,
+          7.5,
+          10.0,
+          7.5,
+          0.0,
+          -0.5
+         ]
+        }
+       },
+       {
+        "name": "Tolerance high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          1.5,
+          1.0,
+          1.5,
+          9.0,
+          11.5,
+          9.0,
+          1.5,
+          1.0
+         ]
+        }
+       },
+       {
+        "name": "Tolerance low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          -1.5,
+          -2.0,
+          -1.5,
+          6.0,
+          8.5,
+          6.0,
+          -1.5,
+          -2.0
+         ]
+        }
+       },
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.25,
+          0.25,
+          7.25,
+          9.75,
+          7.75,
+          0.25,
+          -0.5
+         ]
+        }
+       }
+      ],
+      "link": "time",
+      "channel": 1
+     }
+    ]
+   },
+   {
+    "id": "drives",
+    "quantity": "drives",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Drives",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Drive",
+       "unit": "V",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Drive 5",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.0125,
+          0.0,
+          0.1875,
+          0.25,
+          0.1875,
+          0.0,
+          -0.0125
+         ]
+        }
+       },
+       {
+        "name": "Drive 6",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.0125,
+          0.0,
+          0.1875,
+          0.25,
+          0.1875,
+          0.0,
+          -0.0125
+         ]
+        }
+       },
+       {
+        "name": "Drive 7",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.0125,
+          0.0,
+          0.1875,
+          0.25,
+          0.1875,
+          0.0,
+          -0.0125
+         ]
+        }
+       },
+       {
+        "name": "Drive 8",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005,
+          0.006,
+          0.007
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.0125,
+          0.0,
+          0.1875,
+          0.25,
+          0.1875,
+          0.0,
+          -0.0125
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "verdicts",
+    "quantity": "verdicts",
+    "views": [
+     {
+      "view": "table",
+      "title": "Verdicts",
+      "columns": [
+       "Control",
+       "Passed",
+       "Failed on",
+       "Error (dB)",
+       "Over-test (dB)",
+       "Delay (ms)",
+       "Peak ratio"
+      ],
+      "rows": [
+       [
+        "1",
+        "pass",
+        "",
+        "-21.4",
+        "-0.1",
+        "0.3",
+        "0.998"
+       ],
+       [
+        "2",
+        "fail",
+        "tolerance",
+        "-12.5",
+        "1.3",
+        "0.4",
+        "1.16"
+       ],
+       [
+        "3",
+        "pass",
+        "",
+        "-22",
+        "-0.05",
+        "0.2",
+        "0.999"
+       ],
+       [
+        "4",
+        "pass",
+        "",
+        "-20.9",
+        "0.08",
+        "0.3",
+        "1.01"
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "id": "ladder",
+    "quantity": "ladder",
+    "views": [
+     {
+      "view": "table",
+      "title": "Ladder",
+      "columns": [
+       "Level (dB)",
+       "Fired",
+       "Passed",
+       "Now"
+      ],
+      "rows": [
+       [
+        "-12",
+        "1",
+        "1",
+        ""
+       ],
+       [
+        "-9",
+        "2",
+        "1",
+        ""
+       ],
+       [
+        "-6",
+        "2",
+        "1",
+        "in force"
+       ],
+       [
+        "-3",
+        "0",
+        "0",
+        ""
+       ],
+       [
+        "-1.5",
+        "0",
+        "0",
+        ""
+       ],
+       [
+        "0",
+        "0",
+        "0",
+        ""
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "id": "law",
+    "quantity": "law",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Law",
+      "rows": [
+       {
+        "label": "Drive rms at full level",
+        "value": 0.5,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Waveform error",
+        "value": 0.125,
+        "unit": null,
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Level",
+        "value": -6.0,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Pulses fired",
+        "value": 5.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Pulses passed",
+        "value": 3.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Last over-test",
+        "value": 1.3,
+        "unit": "dB",
+        "status": "fail"
+       },
+       {
+        "label": "Next pulse",
+        "value": 0.6,
+        "unit": "s",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

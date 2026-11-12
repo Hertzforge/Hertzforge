@@ -470,6 +470,19 @@ mod tests {
                         peak_ratio: 1.0,
                     },
                     peak: 1.0,
+                    waveform_error_db: e,
+                    velocity_ips: 0.0,
+                    displacement_pk_pk_in: 0.0,
+                    timing_ok: true,
+                    shape_ok: passed,
+                    over_test_db: 0.0,
+                    polarity_ok: true,
+                    duration_ratio: None,
+                    duration_ok: true,
+                    energy_db: 0.0,
+                    rms_duration_ratio: 1.0,
+                    scaled_margin_db: -6.0,
+                    absolute_margin_db: -6.0,
                 })
                 .collect(),
             passed,
@@ -477,6 +490,13 @@ mod tests {
             at_s: index as f64,
             law_used: true,
             law_miss: None,
+            law_values: Vec::new(),
+            predicted_peak_ratio: Vec::new(),
+            end: None,
+            over_test_db: 0.0,
+            arrival_spread_s: 0.0,
+            warnings: Vec::new(),
+            step_note: None,
         }
     }
 
