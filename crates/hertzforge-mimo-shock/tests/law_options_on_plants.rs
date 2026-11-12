@@ -4,8 +4,8 @@
 //! Each row is one whole run, identification to the end, through the host
 //! firer, at the engine's defaults except where the row says (the law's
 //! `model` and options, the ladder, the level-scaled aborts). The rows are
-//! printed; the requirements below are asserted by the tests that name them,
-//! and the study tests only print.
+//! printed; the requirements below are asserted by the tests that name them
+//! (ignored with the reason while not met), and the study tests only print.
 //!
 //! Requirements, fixed before the first run (rate 12 800 Hz, SRS records
 //! 16384 samples and classical 8192, targets as the engine's run tests:
@@ -517,4 +517,41 @@ fn mimo_shock_x_study_model_misses_on_the_severe_plant() {
         };
         print(model.name(), &r);
     }
+}
+
+#[test]
+#[ignore = "not met: the first pulse is the identification's, +15 dB over at -12 and -18 dB; no tracked option reaches full level (no linear model reproduces a pulse on this plant)"]
+fn mimo_shock_x1_x2_severe_twist_srs_tracked_shape() {
+    let r = run(
+        ShockPlant::Jointed4x4Severe,
+        srs_twist(),
+        LEN_SRS,
+        Arc::new(shape(ModelChoice::Track, 12.0)),
+        LadderPlan::default().levels_db,
+        true,
+    );
+    print("shape track clamp", &r);
+    assert!(!r.aborted, "X1: {}", r.end);
+    assert!(r.f1_db.is_some_and(|v| v <= 1.0), "X1: {:?}", r.f1_db);
+    assert!(
+        r.f3_err_db.is_some_and(|v| v <= 3.0),
+        "X2: {:?}",
+        r.f3_err_db
+    );
+}
+
+#[test]
+#[ignore = "not met: every option is held at -12 dB, its corrections refused by the band growth cap"]
+fn mimo_shock_x3_severe_twist_classical_tracked_inverse() {
+    let r = run(
+        ShockPlant::Jointed4x4Severe,
+        classical_twist(),
+        LEN_CLASSICAL,
+        Arc::new(inverse(ModelChoice::TrackSecant, true)),
+        LadderPlan::default().levels_db,
+        true,
+    );
+    print("inverse track_secant step", &r);
+    assert!(!r.aborted, "X3: {}", r.end);
+    assert!(r.f1_db.is_some_and(|v| v <= 1.0), "X3: {:?}", r.f1_db);
 }
