@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shock-inverse"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1174,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shock-paired"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-law-mimo-shock-shape"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1289,7 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-shock"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-channel-table",
  "hertzforge-dsp",
@@ -1308,7 +1308,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-shock-law-math"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-dsp",
  "hertzforge-mimo-shock-law-math",
@@ -1317,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-shock-laws"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-law-host",
  "hertzforge-law-sdk",
@@ -1865,14 +1865,14 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-shock-mimo-minimal"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "wit-bindgen",
 ]
 
 [[package]]
 name = "law-fixture-shock-mimo-misbehave"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "hertzforge-law-sdk",
 ]
