@@ -8,7 +8,8 @@
 //! - **Classical** (a classical pulse per control): the classical standard's
 //!   tolerance (amplitude envelope, velocity change, substitution) on the
 //!   control's response, normalized to full level, after its own best-fit
-//!   alignment.
+//!   alignment, with the mean of the record's quiet stretch before the pulse
+//!   taken off ([`quiet_mean`]; an input offset is not a velocity change).
 //! - **Envelope** (a waveform given sample by sample): every sample within the
 //!   tolerance of the target's peak after the delay is removed.
 //! - **SRS**: the control's SRS at its target's frequencies inside
@@ -299,7 +300,10 @@ pub fn judge_control(
         (Judging::Classical { controls, standard }, _) => {
             let ctl = &controls[c];
             let sign = if ctl.inverted { -1.0 } else { 1.0 };
-            let norm: Vec<f64> = y.iter().map(|v| sign * v / s).collect();
+            // The record's offset comes off first: integrated over the
+            // standard's window a constant input offset reads as velocity.
+            let base = quiet_mean(y, r, fs_hz, tau);
+            let norm: Vec<f64> = y.iter().map(|v| sign * (v - base) / s).collect();
             check_tolerance(&norm, &ctl.pulse, fs_hz, *standard).overall_pass
         }
         (Judging::Envelope { tol_frac_of_peak }, _) => {
@@ -344,6 +348,22 @@ pub fn judge_control(
     out.shape_ok = shape_ok;
     out.verdict.passed = shape_ok && timing_ok && out.polarity_ok && out.duration_ok;
     out
+}
+
+/// The mean of the measured record `y` over its quiet stretch: from the start
+/// of the record to where its target `r` begins (the target's lead), less the
+/// found delay `tau` and a millisecond's guard. Zero when that stretch is under
+/// 16 samples (nothing quiet to measure).
+pub fn quiet_mean(y: &[f64], r: &[f64], fs_hz: f64, tau: f64) -> f64 {
+    let Some(first) = r.iter().position(|v| *v != 0.0) else {
+        return 0.0;
+    };
+    let guard = ((tau.min(0.0).abs() + 0.001) * fs_hz).ceil() as usize;
+    let end = first.saturating_sub(guard).min(y.len());
+    if end < 16 {
+        return 0.0;
+    }
+    y[..end].iter().sum::<f64>() / end as f64
 }
 
 /// The spread of the controls' delays, s, and in `free` timing a warning when
@@ -400,6 +420,55 @@ mod tests {
             window_s: 0.001,
         });
         assert_eq!(arrival_spread(&[-0.0008, 0.0, 0.0007], &hold).1, None);
+    }
+
+    /// A 516 half-sine of 0.4 g, 11 ms, rectangular shoulders 4 T, played
+    /// upside down or not, built as the service builds it (12 800 Hz, 8192).
+    fn classical_target(inverted: bool) -> crate::targets::BuiltTarget {
+        use crate::targets::{ClassicalControl, TargetSpec};
+        use hertzforge_dsp::shock::{CompensationConfig, CompensationShape};
+        use hertzforge_shock_host::spec::{ClassicalPulseSpec, ClassicalShape};
+        use hertzforge_shock_host::tolerance::ToleranceStandard;
+        let mut pulse = ClassicalPulseSpec::new(ClassicalShape::HalfSine, 0.4, 11.0);
+        pulse.compensation = CompensationConfig {
+            shape: CompensationShape::Rectangular,
+            pre_frac: 4.0,
+            post_frac: 4.0,
+            symmetric: true,
+        };
+        TargetSpec::Classical {
+            controls: vec![ClassicalControl { pulse, inverted }],
+            standard: ToleranceStandard::Mil810_516,
+            lead_s: 0.05,
+        }
+        .build(12_800.0, 8192)
+        .expect("builds")
+    }
+
+    #[test]
+    fn mimo_shock_engine_an_input_offset_is_not_read_as_a_velocity_change() {
+        // The NI loopback, 2026-11-11: AO plus AI offsets of +0.2 to +0.9 mV
+        // (1 g reads 1 V) under a -12 dB pulse. Integrated over the 516 window
+        // a constant offset reads as velocity: 3 mV takes an upside-down pulse
+        // from -6.7 % to about -14 % of its dV and fails it. The pulse is the
+        // target exactly; only the offset differs, so every case must pass.
+        let fs = 12_800.0;
+        let level_db = -12.0;
+        let s = 10f64.powf(level_db / 20.0);
+        let free = Timing::Free { window_s: 0.002 };
+        for inverted in [false, true] {
+            let b = classical_target(inverted);
+            let r = b.target.waveforms()[..8192].to_vec();
+            for offset in [0.0, 0.003, -0.003] {
+                let y: Vec<f64> = r.iter().map(|v| s * v + offset).collect();
+                let j = judge_control(0, &y, level_db, fs, &b.target, &b.judging, &free);
+                assert!(
+                    j.verdict.passed,
+                    "inverted {inverted}, offset {offset} g: shape_ok {}",
+                    j.shape_ok
+                );
+            }
+        }
     }
 
     #[test]
