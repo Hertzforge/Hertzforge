@@ -134,6 +134,24 @@ def adoptable_records(frf: Frf, shapes: ShapeSet,
             and _split_sign(frf.reference_dof[i])[0] in lookup]
 
 
+def _mixed_quantities(frf: Frf, rows: Sequence[int]) -> str:
+    """Why these records cannot be fitted together for what they measure, or ''
+    when they measure one quantity. The fit holds one power of i omega for all
+    of them (accelerance, mobility or receptance), so a velocity record in an
+    accelerance fit would be fitted in the wrong form, with nothing to show it
+    (Brandon, 2026-11-11). Records that say nothing of their quantity pass."""
+    seen: list[str] = []
+    for i in rows:
+        numerator = frf.known_dim(i).partition('/')[0]
+        if numerator in _POWERS and numerator not in seen:
+            seen.append(numerator)
+    if len(seen) < 2:
+        return ''
+    words = ['displacement' if q == 'length' else q for q in seen]
+    return (f'these records measure {", ".join(words[:-1])} and {words[-1]}: a fit takes one '
+            'quantity, so pick the records of one')
+
+
 def fit_refusal(frf: Frf, records: Sequence[int] | None = None,
                 shapes: ShapeSet | None = None) -> str:
     """Why a fit of these records, from this set when given, cannot start,
@@ -147,7 +165,7 @@ def fit_refusal(frf: Frf, records: Sequence[int] | None = None,
         rows = adoptable_records(frf, shapes, rows)
         if not rows:
             return 'The shape set has no value at the DOFs of any record of this FRF'
-    why = _missing_pairs(*_fit_table(frf, rows))
+    why = _missing_pairs(*_fit_table(frf, rows)) or _mixed_quantities(frf, rows)
     return why[0].upper() + why[1:] if why else ''
 
 
@@ -211,7 +229,8 @@ class ModalFitSession:
         self.responses: list[str]
         self.references: list[str]
         self.responses, self.references, self._places = _fit_table(frf, self.rows)
-        missing = _missing_pairs(self.responses, self.references, self._places)
+        missing = (_missing_pairs(self.responses, self.references, self._places)
+                   or _mixed_quantities(frf, self.rows))
         if missing:
             raise ValueError(missing)
         # the measured quantity, from the first record that says;

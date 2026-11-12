@@ -128,6 +128,13 @@ def _cross_terms(project: Any, name: str) -> str:
     return 'It needs cross terms' if isinstance(data, Psd) and data.reference_dof is None else ''
 
 
+def _fittable(project: Any, name: str) -> str:
+    """Why Fit Modes, which fits every record, cannot fit this FRF (`fit_refusal`)."""
+    from hertzforge.core.modal_fit import fit_refusal
+
+    return fit_refusal(project[name])
+
+
 def _solids(project: Any, name: str) -> str:
     return '' if project[name].solids else 'It has no solids yet'
 
@@ -171,6 +178,7 @@ WHEN: dict[str, tuple[str, Callable[[Any, str], str]]] = {
     'project.remove_shock': ('history', _shocks_to_unmark),
     'project.truncate_data': ('source', _span),
     'project.sensors': ('table', _sensors_placed),
+    'project.fit_modes': ('frf', _fittable),
 }
 
 #: why the core (`Project.selection_verbs`) turns down a pair, where the verb's own reason
