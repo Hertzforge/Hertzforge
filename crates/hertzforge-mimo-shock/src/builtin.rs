@@ -279,14 +279,24 @@ impl ShapeFactory {
                 "refresh_mu" => num(v).map(|x| p.refresh_mu = x),
                 "refresh_floor_rel" => num(v).map(|x| p.refresh_floor_rel = x),
                 "anchor" => match v.as_str() {
-                    Some("target") => Ok(p.anchor = Anchor::Target),
-                    Some("measured") => Ok(p.anchor = Anchor::Measured),
+                    Some("target") => {
+                        p.anchor = Anchor::Target;
+                        Ok(())
+                    }
+                    Some("measured") => {
+                        p.anchor = Anchor::Measured;
+                        Ok(())
+                    }
                     _ => Err("`target` or `measured`".into()),
                 },
                 "seed_timing" => match v.as_str() {
-                    Some("zero") => Ok(p.seed_timing = SeedTiming::Zero),
+                    Some("zero") => {
+                        p.seed_timing = SeedTiming::Zero;
+                        Ok(())
+                    }
                     Some("least_effort") => {
-                        Ok(p.seed_timing = SeedTiming::LeastEffort(LeastEffort::default()))
+                        p.seed_timing = SeedTiming::LeastEffort(LeastEffort::default());
+                        Ok(())
                     }
                     _ => Err("`zero` or `least_effort`".into()),
                 },

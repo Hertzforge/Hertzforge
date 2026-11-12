@@ -697,6 +697,10 @@ const PROBE_REALIZATIONS: usize = 2;
 /// the next level. The core holds it to the controls' abort line.
 pub const LAW_PREDICTED_OVER_TEST: &str = "predicted_over_test_db";
 
+/// Predicted peaks before a fire: each control's over its target's peak at
+/// the level, each limit's in its units, and a kinematic breach in words.
+type Predicted = (Vec<f64>, Vec<f64>, Option<String>);
+
 /// A law's answer, timed and caught.
 enum Answer {
     Used(PulseOutputs),
@@ -1401,11 +1405,7 @@ impl MimoShockEngine {
     /// The predicted peak of every control (over its target's peak at
     /// `level_db`) and every limit (in its units) for `drives`, and whether any
     /// control's predicted kinematics are over their limits.
-    fn predicted(
-        &self,
-        drives: &[f64],
-        level_db: f64,
-    ) -> Result<(Vec<f64>, Vec<f64>, Option<String>), String> {
+    fn predicted(&self, drives: &[f64], level_db: f64) -> Result<Predicted, String> {
         let h = self.plant_all.as_ref().ok_or("no plant")?;
         let y = predict(h, drives, self.config.record_len)?;
         let nc = self.config.controls.len();
