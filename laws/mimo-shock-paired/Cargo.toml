@@ -1,0 +1,22 @@
+[package]
+name = "hertzforge-law-mimo-shock-paired"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The MIMO Shock law `paired` as a law file, written out in full: the template a
+# contributor copies to try an idea (see docs/control-laws.md, "Trying a New Idea").
+# Built to a law file by `scripts/build_laws.sh`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
+
+[dev-dependencies]
+# The parity test runs the law file through the law host beside the same
+# mathematics called natively, over a scripted run on the reference plant.
+hertzforge-mimo-shock-laws = { path = "../../crates/hertzforge-mimo-shock-laws" }
+hertzforge-mimo-shock = { path = "../../crates/hertzforge-mimo-shock" }
+hertzforge-mimo-shock-law-math = { path = "../../crates/hertzforge-mimo-shock-law-math", features = ["reference-plant"] }

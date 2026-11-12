@@ -7,7 +7,7 @@ publish = false
 
 # The guest side of the control-law interface: what a law author depends on
 # to build a law file. Generates the bindings for the `random-single`,
-# `random-mimo`, `shock-classical`, `shock-srs` and `sine-single` worlds of
+# `random-mimo`, `shock-classical`, `shock-srs`, `shock-mimo` and `sine-single` worlds of
 # `wit/control-law/` and wraps them in the `RandomLaw`, `RandomMimoLaw`,
 # `ShockClassicalLaw`, `ShockSrsLaw` and `SineSingleLaw` traits and their
 # `export_*!` macros. Builds for the host too (so the workspace lints it and a law's math
@@ -24,6 +24,11 @@ hertzforge-sdm = { path = "../hertzforge-sdm" }
 # in the world's convention, and the built-in law's arithmetic for the law file
 # that wraps it. Plain math that builds for `wasm32-wasip2`.
 hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
+# The MIMO Shock laws' mathematics (transforms on the pulse grid, the
+# regularized inverse, the SRS, delays, and the built-in laws' steps), re-exported
+# as `shock_mimo::math` so a MIMO Shock law file runs the controller's own code.
+# Plain math that builds for `wasm32-wasip2`.
+hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math" }
 # The native Sine law seam (`hertzforge_sine::law`) and the built-in Sine law,
 # for a Sine law file that wraps a native law (`laws/sine-servo`). The control
 # core alone, without the run service: plain math that builds for
