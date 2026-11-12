@@ -82,7 +82,7 @@ fn classical(plant: &str, mode: &str) -> Value {
         "target": {"kind": "waveform", "pulses": [
             half_sine(20.0, "positive"), half_sine(18.0, "positive"),
             half_sine(20.0, "positive"), half_sine(18.0, "positive")]},
-        "acquisition": {"fs_hz": 12800, "record_len": 8192, "band_hz": [5, 2500]},
+        "acquisition": {"fs_hz": 12800, "record_len": 8192, "band_hz": [2, 2500]},
         "schedule": {"mode": mode, "levels_db": [-12, -9, -6, -3, 0]},
         "spacing": {"cooling_s": 0.2, "settling_s": 0, "compute_s": 0},
         "identification": {"drive_vrms": 1, "frames": 40, "review": false},

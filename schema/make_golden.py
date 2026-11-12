@@ -5568,7 +5568,7 @@ MSHOCK_CHANNELS = {
 
 MSHOCK_COMMON = {
     'timing': {'mode': 'free', 'window_s': 0.002, 'delays_s': None},
-    'acquisition': {'fs_hz': 12800, 'record_len': 8192, 'band_hz': [5, 2500], 'lead_s': 0.05},
+    'acquisition': {'fs_hz': 12800, 'record_len': 8192, 'band_hz': [2, 2500], 'lead_s': 0.05},
     'schedule': {'mode': 'auto', 'levels_db': [-12, -9, -6, -3, -1.5, 0],
                  'max_pulses_per_level': 3, 'full_level_pulses': 3},
     'spacing': {'cooling_s': 1, 'settling_s': 0.5, 'compute_s': 0.25},

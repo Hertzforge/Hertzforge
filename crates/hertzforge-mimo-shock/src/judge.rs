@@ -350,6 +350,85 @@ pub fn judge_control(
     out
 }
 
+/// What a control band does to a classical target's velocity change, against
+/// the standard's ideal pulse (the judge's nominal): the target as built, and
+/// the target with every line outside the band removed (what the drives can
+/// deliver when the plant is known only inside the band).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BandVelocity {
+    /// The control, by position.
+    pub control: usize,
+    /// The target's own dV error, as a fraction of the ideal pulse's.
+    pub target_err_frac: f64,
+    /// The band-limited target's dV error.
+    pub band_err_frac: f64,
+    /// The standard's dV tolerance.
+    pub tol_frac: f64,
+}
+
+impl BandVelocity {
+    /// The share of the target's own margin to the tolerance that the band
+    /// leaves: 1 when the band costs nothing, 0 when a perfect delivery of the
+    /// band-limited target sits on the tolerance.
+    pub fn margin_kept(&self) -> f64 {
+        let own = self.tol_frac - self.target_err_frac.abs();
+        if own > 0.0 {
+            (self.tol_frac - self.band_err_frac.abs()) / own
+        } else {
+            0.0
+        }
+    }
+
+    /// The band takes more than half of the target's own margin: a run held
+    /// to this band fails on its first input offset or drive error.
+    pub fn holds(&self) -> bool {
+        self.margin_kept() < 0.5
+    }
+}
+
+/// [`BandVelocity`] for each control of a classical target at `fs_hz` and
+/// `n`, for the band `[lo_hz, hi_hz]`; empty for any other kind of target.
+pub fn band_velocity_change(
+    built: &crate::targets::BuiltTarget,
+    fs_hz: f64,
+    n: usize,
+    lo_hz: f64,
+    hi_hz: f64,
+) -> Vec<BandVelocity> {
+    let Judging::Classical { controls, standard } = &built.judging else {
+        return Vec::new();
+    };
+    let w = built.target.waveforms();
+    controls
+        .iter()
+        .enumerate()
+        .filter_map(|(c, ctl)| {
+            let sign = if ctl.inverted { -1.0 } else { 1.0 };
+            let r: Vec<f64> = w
+                .get(c * n..(c + 1) * n)?
+                .iter()
+                .map(|v| sign * v)
+                .collect();
+            let mut s = rfft(&r).ok()?;
+            for (k, v) in s.iter_mut().enumerate() {
+                let f = k as f64 * fs_hz / n as f64;
+                if f < lo_hz || f > hi_hz {
+                    *v = hertzforge_sdm::C64::new(0.0, 0.0);
+                }
+            }
+            let band = irfft(&s, n).ok()?;
+            let own = check_tolerance(&r, &ctl.pulse, fs_hz, *standard).velocity_change;
+            let cut = check_tolerance(&band, &ctl.pulse, fs_hz, *standard).velocity_change;
+            Some(BandVelocity {
+                control: c,
+                target_err_frac: own.error_frac,
+                band_err_frac: cut.error_frac,
+                tol_frac: own.tol_frac,
+            })
+        })
+        .collect()
+}
+
 /// The mean of the measured record `y` over its quiet stretch: from the start
 /// of the record to where its target `r` begins (the target's lead), less the
 /// found delay `tau` and a millisecond's guard. Zero when that stretch is under
@@ -468,6 +547,30 @@ mod tests {
                     j.shape_ok
                 );
             }
+        }
+    }
+
+    #[test]
+    fn mimo_shock_engine_a_band_that_cuts_the_targets_velocity_change_is_named() {
+        // The NI bench, 2026-11-11: the 516 half-sine (11 ms, shoulders 4 T)
+        // inside a 5 Hz to 2.5 kHz band is already -9.0 % of the ideal
+        // pulse's dV against the 10 % tolerance (the target itself -6.1 %:
+        // the standard's window takes in part of the shoulders), so a perfect
+        // delivery fails at the first offset or drive error. From 2 Hz the
+        // band costs almost nothing.
+        let fs = 12_800.0;
+        for inverted in [false, true] {
+            let b = classical_target(inverted);
+            let at5 = band_velocity_change(&b, fs, 8192, 5.0, 2500.0);
+            assert_eq!(at5.len(), 1);
+            let v = &at5[0];
+            assert!((v.target_err_frac + 0.0612).abs() < 0.002, "{v:?}");
+            assert!((v.band_err_frac + 0.0900).abs() < 0.002, "{v:?}");
+            assert!((v.tol_frac - 0.10).abs() < 1e-12, "{v:?}");
+            assert!(v.holds(), "{v:?}");
+            let at2 = band_velocity_change(&b, fs, 8192, 2.0, 2500.0);
+            assert!(!at2[0].holds(), "{:?}", at2[0]);
+            assert!(at2[0].margin_kept() > 0.9, "{:?}", at2[0]);
         }
     }
 

@@ -168,7 +168,8 @@ export type MimoShockItemReason =
 	| 'law_wrong_world'
 	| 'law_wrong_target'
 	| 'law_param_unknown'
-	| 'law_param_invalid';
+	| 'law_param_invalid'
+	| 'band_cuts_velocity_change';
 
 export type MimoShockReportItem = Omit<ReportItem, 'reason'> & { reason: MimoShockItemReason };
 

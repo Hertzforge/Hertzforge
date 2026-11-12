@@ -8,6 +8,7 @@ use crate::shock::config::{self as sc, Obj, WirePulse};
 use crate::srs::config::{self as srsc, WireBands, WireSynthesis};
 use crate::table::{At, Item, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
+use hertzforge_mimo_shock::judge::band_velocity_change;
 use hertzforge_mimo_shock::{
     ClassicalControl, DriveChannel, GuardPlan, HoldTiming, IdentificationPlan, LadderPlan,
     LimitChannel, MimoShockConfig, SrsSpec, Target, TargetKind, TargetSpec, Timing, VerdictMode,
@@ -25,6 +26,18 @@ pub const DEFAULT_FS_HZ: f64 = 51_200.0;
 pub const DEFAULT_LEVELS_DB: [f64; 6] = [-12.0, -9.0, -6.0, -3.0, -1.5, 0.0];
 /// Where every target starts in its record, s.
 pub const DEFAULT_LEAD_S: f64 = 0.05;
+
+/// The correction band's low edge when none is given, Hz.
+pub const DEFAULT_BAND_LO_HZ: f64 = 5.0;
+
+/// A classical target's default low edge times its longest compensated pulse
+/// (main pulse and shoulders), s x Hz. The standard's velocity check takes in
+/// part of the shoulders, whose energy lies about one over the pulse's length
+/// and below: at 0.2 an 11 ms half-sine with shoulders four times as long
+/// (99 ms) starts at 2.02 Hz, where the band costs 0.2 % of its velocity change
+/// against the 3 to 4 % the target leaves of the 10 % tolerance; from 5 Hz it
+/// costs about 2.9 %, and the NI bench's ladders stopped at their first level.
+pub const CLASSICAL_BAND_LO_TIMES_LENGTH: f64 = 0.2;
 /// The shortest record the default length picks.
 pub const DEFAULT_MIN_RECORD: usize = 1024;
 /// The simulator's standard shock plants.
@@ -496,9 +509,29 @@ impl WireMs {
         self.cooling_s.max(self.settling_s).max(self.compute_s)
     }
 
-    /// The correction band, Hz.
+    /// The correction band, Hz. Unless given: up to 5 kHz (at most 0.4 of the
+    /// rate), from 5 Hz, or for classical pulses from [`CLASSICAL_BAND_LO_TIMES_LENGTH`]
+    /// over the longest compensated pulse when that is lower.
     pub fn band(&self, fs_hz: f64) -> (f64, f64) {
-        self.band_hz.unwrap_or((5.0, 5000f64.min(0.4 * fs_hz)))
+        self.band_hz.unwrap_or_else(|| {
+            let hi = 5000f64.min(0.4 * fs_hz);
+            let lo = match &self.target {
+                WireTargetSet::Waveform { pulses, .. } if fs_hz > 0.0 => {
+                    let longest = pulses
+                        .iter()
+                        .filter(|p| p.spec().validate().is_ok())
+                        .map(|p| p.spec().synthesize(fs_hz).waveform_g.len() as f64 / fs_hz)
+                        .fold(0.0f64, f64::max);
+                    if longest > 0.0 {
+                        DEFAULT_BAND_LO_HZ.min(CLASSICAL_BAND_LO_TIMES_LENGTH / longest)
+                    } else {
+                        DEFAULT_BAND_LO_HZ
+                    }
+                }
+                _ => DEFAULT_BAND_LO_HZ,
+            };
+            (lo, hi)
+        })
     }
 
     /// The identification frames.
@@ -1140,6 +1173,33 @@ impl WireMs {
                 return (r, None);
             }
         };
+        // A band that leaves a classical target too little of its velocity
+        // tolerance is refused by name before anything plays.
+        let (lo, hi) = self.band(fs);
+        for v in band_velocity_change(&built, fs, n, lo, hi) {
+            if v.holds() {
+                err(
+                    &mut r,
+                    "band_cuts_velocity_change",
+                    "acquisition.band_hz",
+                    format!(
+                        "Control {}: inside the band from {} Hz its target's velocity change is \
+                         {} % of the ideal pulse's (the target itself {} %, the tolerance {} %), \
+                         so a perfect delivery keeps {} % of the target's margin. Start the band \
+                         lower (an empty band takes the default for the pulse).",
+                        self.controls.get(v.control).copied().unwrap_or_default(),
+                        num(sc::round(lo, 2)),
+                        num(sc::round(100.0 * v.band_err_frac, 2)),
+                        num(sc::round(100.0 * v.target_err_frac, 2)),
+                        num(sc::round(100.0 * v.tol_frac, 2)),
+                        num(sc::round(100.0 * v.margin_kept().max(0.0), 0)),
+                    ),
+                );
+            }
+        }
+        if !r.errors.is_empty() {
+            return (r, None);
+        }
         let record_s = n as f64 / fs;
         if record_s >= ctx.timeout_s {
             err(

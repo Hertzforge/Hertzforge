@@ -76,7 +76,9 @@ fn config(mode: &str) -> Value {
         },
         "target": {"kind": "waveform", "pulses": (0..4).map(|_| json!({
             "shape": "half_sine", "amplitude_g": 20, "duration_ms": 11})).collect::<Vec<_>>()},
-        "acquisition": {"fs_hz": 12800, "record_len": 8192, "band_hz": [5, 2500]},
+        // The band is the default for the pulses (a 5 Hz edge is refused for an
+        // 11 ms pulse: see the band test below).
+        "acquisition": {"fs_hz": 12800, "record_len": 8192},
         "schedule": {"mode": mode, "levels_db": [-12, -6, 0]},
         "spacing": {"cooling_s": 0.5, "settling_s": 0, "compute_s": 0},
         "identification": {"drive_vrms": 1, "frames": 40, "review": true},
@@ -422,4 +424,43 @@ async fn mimo_shock_scaled_aborts_are_a_setting_and_their_absence_is_stated() {
         .await,
         "run_active"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_a_band_that_eats_the_velocity_tolerance_is_refused_and_the_default_keeps_it() {
+    // The NI bench, 2026-11-11: an 11 ms 516 half-sine inside a 5 Hz to 2.5 kHz
+    // band is -9 % of the ideal pulse's dV before anything is played, against
+    // the 10 % tolerance, and the ladder stopped at its first level. The run is
+    // refused by name before it arms; the default band for a classical target
+    // starts low enough to keep the target's own margin.
+    let addr = serve(svc()).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let errors = |v: &Value| -> Vec<Value> { v["errors"].as_array().cloned().unwrap_or_default() };
+    let mut cfg = config("auto");
+    cfg["acquisition"]["band_hz"] = json!([5, 2500]);
+    let dry = c
+        .ok(
+            "mimo_shock.configure",
+            json!({"config": cfg, "dry_run": true}),
+        )
+        .await;
+    let cut: Vec<Value> = errors(&dry)
+        .into_iter()
+        .filter(|i| i["reason"] == "band_cuts_velocity_change")
+        .collect();
+    assert_eq!(cut.len(), 4, "{dry}");
+    assert!(
+        cut[0]["message"].as_str().unwrap().contains("5 Hz"),
+        "{}",
+        cut[0]
+    );
+    let cfg = config("auto");
+    let dry = c
+        .ok(
+            "mimo_shock.configure",
+            json!({"config": cfg, "dry_run": true}),
+        )
+        .await;
+    assert!(errors(&dry).is_empty(), "{dry}");
 }

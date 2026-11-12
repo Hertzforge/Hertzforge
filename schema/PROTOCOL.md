@@ -2735,7 +2735,7 @@ views travels as a binary frame.
                                       "symmetric":true}}, ...]},
  "timing":{"mode":"free","window_s":0.002,"delays_s":null},
  "verdict":"all",
- "acquisition":{"fs_hz":12800,"record_len":8192,"band_hz":[5,2500],"lead_s":0.05},
+ "acquisition":{"fs_hz":12800,"record_len":8192,"band_hz":[2,2500],"lead_s":0.05},
  "schedule":{"mode":"auto","levels_db":[-12,-9,-6,-3,-1.5,0],"max_pulses_per_level":3,
              "full_level_pulses":3},
  "spacing":{"cooling_s":1,"settling_s":0.5,"compute_s":0.25},
@@ -2774,7 +2774,7 @@ An SRS target replaces `target`:
 | `verdict` | `all` | The joint verdict the ladder is fed. `all`: every control inside its own tolerance. `global` (an `srs` target only): the energy-weighted global SRS error inside the tolerance, and no control over its abort line |
 | `acquisition.fs_hz` | 51200 | The rate requested of the station, 1000 to 204800 Hz; the run adopts the rate it runs at and derives the grid and the targets from it |
 | `acquisition.record_len` | the shortest power of two (at least 1024) whose first three quarters hold every target from `lead_s` | Every record's length, a power of two from 64 to 16384 |
-| `acquisition.band_hz` | 5 to the lesser of 5000 Hz and 0.4 times the rate | The band identification excites and the law corrects, below half the rate |
+| `acquisition.band_hz` | from 5 Hz, or for a `waveform` target from 0.2 over its longest compensated pulse in seconds when that is lower (2.02 Hz for an 11 ms half-sine with shoulders 4 times its duration), to the lesser of 5000 Hz and 0.4 times the rate | The band identification excites and the law corrects, below half the rate. A `waveform` target is refused (`band_cuts_velocity_change`) when, cut to the band, a perfect delivery of a control's pulse keeps less than half the margin its own velocity change leaves to the standard's tolerance |
 | `acquisition.lead_s` | 0.05 | Where every target starts in its record, seconds |
 | `schedule.mode` | `auto` | `auto` fires at the time between pulses; `manual` waits for `mimo_shock.fire` |
 | `schedule.levels_db` | -12, -9, -6, -3, -1.5, 0 | The levels, dB, ascending, the last 0 (full level) |
@@ -2826,7 +2826,9 @@ record), `bands_empty`, `target_not_covering` and `target_not_ascending` (an SRS
 breakpoints, as SRS Shock's), `components_engine_mismatch` and `component_invalid` (an SRS
 control's synthesis table, as SRS Shock's), `verdict_needs_srs` (`global` with a `waveform`
 target), `plant_unknown`, `law_unknown`, `law_wrong_world`, `law_wrong_target`,
-`law_param_unknown`, `law_param_invalid`.
+`law_param_unknown`, `law_param_invalid`, `band_cuts_velocity_change` (a classical control's
+target cut to the band keeps less than half of its velocity-change margin; the message gives both
+figures).
 
 ### Running a MIMO Shock Test
 

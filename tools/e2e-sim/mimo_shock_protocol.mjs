@@ -76,7 +76,7 @@ function config() {
 			controls: [1, 2, 3, 4].map((channel) => ({ channel })),
 			drives: [5, 6, 7, 8].map((channel) => ({ channel, ceiling_vpk: 6, abort_vpk: 9 })),
 		},
-		acquisition: { fs_hz: 12800, record_len: KIND === 'srs' ? 16384 : 8192, band_hz: [5, 2500] },
+		acquisition: { fs_hz: 12800, record_len: KIND === 'srs' ? 16384 : 8192, band_hz: KIND === 'srs' ? [5, 2500] : [2, 2500] },
 		schedule: { mode: 'auto', levels_db: [-12, -9, -6, -3, 0] },
 		spacing: { cooling_s: 0.2, settling_s: 0, compute_s: 0 },
 		identification: { drive_vrms: 1, frames: 40, review: true },

@@ -93,6 +93,14 @@ describe('a new setup', () => {
 		expect(16384 / d.acquisition.fs_hz).toBeGreaterThan(1);
 		expect(d.acquisition.band_hz[1]).toBeLessThan(0.4 * d.acquisition.fs_hz);
 	});
+
+	it('starts its band low enough that an 11 ms classical pulse keeps its velocity-change margin', () => {
+		// The service refuses (band_cuts_velocity_change) a band from 5 Hz under an 11 ms half-sine with
+		// shoulders four times as long; its own default for that pulse starts at 0.2 / 99 ms = 2.02 Hz.
+		const d = defaultMsSetup();
+		expect(d.kind).toBe('waveform');
+		expect(d.acquisition.band_hz[0]).toBeLessThanOrEqual(0.2 / 0.099);
+	});
 });
 
 describe('what the editor names before sending', () => {
