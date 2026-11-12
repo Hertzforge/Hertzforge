@@ -64,6 +64,7 @@ enum Fol {
     Choice,
     ChoiceBands,
     ChoiceTrackFirst,
+    TrackWarpFallback,
 }
 
 #[derive(Clone, Copy)]
@@ -342,6 +343,23 @@ fn follower(
         ),
         Fol::Track => (Some(track(modal.ok_or("no modal fit")?, &h)?), None),
         Fol::Warp => (Some(w(Some(WarpSecant::NoiseRidge), None)), None),
+        Fol::TrackWarpFallback => {
+            let modal = modal.ok_or("no modal fit")?;
+            (
+                Some(Box::new(PoleTrackModel::new(
+                    modal.clone(),
+                    h.clone(),
+                    band,
+                    FS_HZ,
+                    TrackOptions {
+                        secant: Some(SecantOptions::default()),
+                        ..Default::default()
+                    },
+                    w(Some(WarpSecant::NoiseRidge), None),
+                )?)),
+                None,
+            )
+        }
         Fol::WarpPlainSecant => (
             Some(w(Some(WarpSecant::Plain(SecantOptions::default())), None)),
             None,
@@ -806,6 +824,64 @@ fn part_cost() {
     }
 }
 
+/// Pole tracking with the warp as its fallback (in place of the plain
+/// secant), beside each follower alone, on every plant and case.
+fn part_fallback(only: Option<&str>) {
+    let rows = [
+        row("shape track+secant", Kind::Shape, Fol::Track),
+        row("shape warp+secant", Kind::Shape, Fol::Warp),
+        row(
+            "shape track, warp fallback",
+            Kind::Shape,
+            Fol::TrackWarpFallback,
+        ),
+        Row {
+            predicted_step: true,
+            ..row(
+                "inverse track, warp fb, step",
+                Kind::Inverse,
+                Fol::TrackWarpFallback,
+            )
+        },
+    ];
+    let keys: Vec<&str> = match only {
+        Some(k) => vec![k],
+        None => ALL.to_vec(),
+    };
+    for key in keys {
+        let c = case(key);
+        for h1 in [false, true] {
+            let (setup0, modal) = if h1 {
+                (&c.setup_h1, c.modal_h1.as_ref())
+            } else {
+                (&c.setup_true, Some(&c.modal_true))
+            };
+            let warp0 = base_warp(setup0);
+            for mixed in [false, true] {
+                let setup = with_polarity(setup0, mixed);
+                for noise in [0.0, 0.30] {
+                    println!(
+                        "\n== {}; identification {}; targets {}; noise {:.0}%",
+                        c.name,
+                        if h1 { "H1" } else { "true" },
+                        if mixed { "mixed" } else { "in phase" },
+                        100.0 * noise
+                    );
+                    println!("{}", header());
+                    for r in &rows {
+                        let mut resp = |d: &[Vec<f64>], s: f64| (c.respond)(d, s);
+                        if let Some((o, pick)) =
+                            run_row(r, &setup, modal, &warp0, &mut resp, &LADDER_DB, noise)
+                        {
+                            print_outcome(r.name, &o, &pick);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The warp with the secant on the 4 x 4 at 8%, exact identification, noise
 /// 30%, over noise seeds 1 to 8 (for comparison with another implementation
 /// whose noise generator differs).
@@ -957,6 +1033,7 @@ fn main() {
         "combos" => part_combos(),
         "cost" => part_cost(),
         "seeds" => part_seeds(),
+        "fallback" => part_fallback(plant.as_deref()),
         "diag" => part_diag(plant.as_deref().unwrap_or("dense")),
         other => eprintln!("unknown part {other}"),
     }
