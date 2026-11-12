@@ -53,8 +53,8 @@
 //! in its `Cargo.toml`, change [`describe`](Paired::describe) (name, summary,
 //! parameters, values), and change `new`, `seed` and `iterate`. Build it with
 //! `scripts/build_laws.sh`; the law file lands in
-//! `<target>/wasm32-wasip2/release/`. `docs/control-laws.md` ("Trying a New
-//! Idea") has the commands that run it against the standard plants and the
+//! `<target>/wasm32-wasip2/release/`. `docs/control-laws.md` ("Trying a new
+//! idea") has the commands that run it against the standard plants and the
 //! check.
 
 use hertzforge_law_sdk::shock_mimo::*;
