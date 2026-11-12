@@ -264,6 +264,7 @@
             "count": {"type": "integer", "minimum": 0},
             "param": {"type": "string"},
             "off": {"type": "integer", "minimum": 0},
+            "others": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2},
             "faces": {"$ref": "#/$defs/arrayRef"},
             "kept": {"type": "array", "items": {"type": "integer"}},
             "out": {"type": "string"},
@@ -488,6 +489,7 @@
         "in_view": {"type": "boolean"},
         "setting": {"type": "string", "pattern": "^[a-z][a-z_]*\\.[a-z][a-z_]*$"},
         "length": {"type": "boolean"},
+        "quantity": {"type": "string"},
         "suggest": {"type": "string"},
         "shown_with": {"type": "array", "prefixItems": [{"type": "string"}, {}], "minItems": 2, "maxItems": 2}
       }

@@ -616,3 +616,18 @@ def test_a_line_that_is_not_finite_is_left_out_of_the_fit():
     assert fit.session.frequencies[0] == 0.25
     fitting.act(fit, 'fit.find', {})
     assert fitting.state(fit)['pending']['frequency'] > 0.0
+
+
+def test_an_frf_of_two_quantities_is_not_fitted_and_the_rows_say_why(project):
+    # Brandon, 2026-11-11: a set mixing accelerometers and velocity channels is refused
+    frf = project['FRF']
+    dims = list(frf.ordinate_dim)
+    project['FRF'] = Frf(frf.abscissa, frf.ordinate, response_dof=frf.response_dof,
+                         reference_dof=frf.reference_dof,
+                         ordinate_dim=['velocity/force', *dims[1:]])
+    rows = {row['id']: row for column in action_table(project, ['FRF'], {})['columns']
+            for row in column['rows']}
+    for row in ('self.fit', 'project.fit_modes'):
+        assert not rows[row]['ready'] and 'a fit takes one quantity' in rows[row]['reason']
+    with pytest.raises(ProtocolError, match='a fit takes one quantity'):
+        fitting.start(project, {'frf': 'FRF'})

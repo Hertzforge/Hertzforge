@@ -93,3 +93,42 @@ def places_view(geometry: Any, name: str, op: str, params: dict[str, Any], place
         pick=v.picking(op, params, 'nodes', hint,
                        ids=[int(geometry.node_id[i]) for i in ordered], count=1, param='toggle',
                        off=sum(n in out for n in places)))
+
+
+def sides_view(geometry: Any, name: str, op: str, params: dict[str, Any],
+               picking: tuple[tuple[int, ...], set[int]], other: tuple[tuple[int, ...], set[int]],
+               hint: str, pickable: bool = True) -> dict:
+    """A geometry drawn see-through with two sets of places marked through it, each as
+    (the nodes offered, those held): `picking`, whose nodes a click toggles in `op`'s
+    `toggle`, as the first rows, those held first and the rest dim; then `other`, drawn in
+    a second colour and not clicked (`pick.others`: how many held, how many not). A mate's
+    two sides: coincident nodes of the two are told apart by which side is picked."""
+    rows, triangles, lines = drawn_mesh(geometry)
+    index = {int(node): i for i, node in enumerate(geometry.node_id)}
+
+    def split(offered: tuple[int, ...], held: set[int]) -> tuple[list[int], list[int]]:
+        return ([index[n] for n in offered if n in held],
+                [index[n] for n in offered if n not in held])
+
+    on, off = split(*picking)
+    other_on, other_off = split(*other)
+    if not pickable:
+        on, off, other_on, other_off = [], [], on + other_on, off + other_off
+    marked = on + off + other_on + other_off
+    first = set(marked)
+    final = np.asarray(marked + [int(r) for r in rows if int(r) not in first], dtype=np.int64)
+    position = np.full(geometry.num_nodes, -1, dtype=np.int64)
+    position[final] = np.arange(final.size)
+    return v.shape3d(
+        name, 'm' if geometry.units_defined else 'undefined',
+        np.asarray(geometry.node_xyz, dtype=float)[final], [],
+        triangles=position[rows[triangles]] if len(triangles) else triangles,
+        lines=position[rows[lines]] if len(lines) else lines,
+        node_ids=np.asarray(geometry.node_id)[final], opacity=SEE_THROUGH,
+        pick=v.picking(op, params, 'nodes', hint,
+                       ids=[int(geometry.node_id[i]) for i in on + off], count=1,
+                       param='toggle', off=len(off), others=[len(other_on), len(other_off)]))
+
+
+#: how solid a model is drawn when what matters is on its surfaces inside
+SEE_THROUGH = 0.3

@@ -312,6 +312,29 @@ def near_surface(geometry: Any, nodes: Any, faces: list, distance: float) -> np.
     return gap <= distance
 
 
+def offered(geometry: Any, groups: tuple[int, int], reach: float | None = None
+            ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """The nodes each side of a mate between `groups` may hold: each
+    group's outer-face nodes within `reach` of the other group's outer
+    faces. `reach` is the groups' finest node spacing when omitted, so
+    the band takes the patch and the nodes about one element around
+    it."""
+    from .mesh import group_skin
+
+    first, second = (int(g) for g in groups)
+    if reach is None:
+        reach = float(geometry.node_spacing([first, second]) or 0.0)
+    skins = {g: group_skin(geometry, g) for g in (first, second)}
+    out = []
+    for own, other in ((first, second), (second, first)):
+        nodes = np.array(sorted({int(n) for face in skins[own] for n in face}),
+                         dtype=np.int64)
+        near = near_surface(geometry, nodes, skins[other], reach * 1.01) if reach else (
+            np.zeros(len(nodes), dtype=bool))
+        out.append(tuple(int(n) for n in nodes[near]))
+    return out[0], out[1]
+
+
 def _patches(skin_a: list, nodes: np.ndarray) -> list[np.ndarray]:
     """`nodes` split into the pieces the faces of `skin_a` connect."""
     index = {int(n): k for k, n in enumerate(nodes)}

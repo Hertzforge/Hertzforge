@@ -52,7 +52,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	TableEdit,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, validateAll, withDisplayLengths, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
 import { baseName, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
@@ -138,7 +138,8 @@ class AnalyzeState {
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		const params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		let params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		if (op.params.some((p) => p.quantity) && !this.undefinedGeometry(op)) params = withDisplayQuantities(params, this.app.units.quantities);
 		const length = this.app.units.length;
 		if (!length || !op.params.some((p) => p.length)) return params;
 		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
@@ -150,11 +151,16 @@ class AnalyzeState {
 		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
 	}
 
-	/** The display system changed: each form holds the same lengths, in the new unit. */
-	lengthsChanged(ratio: number): void {
+	/**
+	 * The display system changed: each form holds the same lengths, and the same amount of each
+	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new).
+	 */
+	unitsChanged(ratio: number | null, ratios: Record<string, number>): void {
 		const next = { ...this.values };
 		for (const op of this.app.catalog?.operations ?? []) {
-			if (next[op.id] && op.params.some((p) => p.length) && !this.undefinedGeometry(op)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+			if (!next[op.id] || this.undefinedGeometry(op)) continue;
+			if (ratio !== null && op.params.some((p) => p.length)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+			if (op.params.some((p) => p.quantity)) next[op.id] = rescaledQuantities(op.params, next[op.id], ratios);
 		}
 		this.values = next;
 	}
@@ -301,10 +307,11 @@ class AnalyzeState {
 				if (row?.ready && current) void this.perform(row, current);
 				return;
 			}
-			// an open form follows the selection while the selection can still take it
+			// an open form follows the selection while the selection can still take it; only
+			// what the selection now fills differently is filled again, so a value typed stays
 			if (this.formOpen) {
 				const row = current?.rows.find((r) => r.id === this.opId && r.ready);
-				if (row) this.openRow(row);
+				if (row) this.followRow(row);
 				else this.closeForm();
 			}
 			this.fitWeighing = false;
@@ -385,6 +392,14 @@ class AnalyzeState {
 		if (formats && !formats.some((f) => f.value === this.currentValues.format)) {
 			this.pickAction({ id: row.id, fill: { format: formats[0].value } });
 		}
+	}
+
+	/** The open form's row as the actions now give it: the fields it fills differently from before are filled. */
+	private followRow(row: ActionRow): void {
+		const was = this.formRow?.id === row.id ? (this.formRow.fill ?? {}) : {};
+		const fill = Object.fromEntries(Object.entries(row.fill ?? {}).filter(([key, text]) => was[key] !== text));
+		this.pickAction({ id: row.id, fill });
+		this.formRow = row;
 	}
 
 	/** Export in the desktop app: the native save window says where and in which format. */
@@ -1267,9 +1282,14 @@ export class ReportState {
 }
 
 /** A unit system's length unit, and what takes it to meters. */
-interface LengthUnit {
-	unit: string;
-	to_si: number;
+type LengthUnit = DisplayUnit;
+
+/** What `units.system` answers. */
+interface UnitsAnswer {
+	name: string;
+	systems: string[];
+	length?: LengthUnit;
+	quantities?: Record<string, DisplayUnit>;
 }
 
 /** Where the chosen unit system is kept between launches. */
@@ -1285,6 +1305,8 @@ export class UnitsState {
 	systems = $state<string[]>([]);
 	/** The system's length unit, and what takes it to meters: what a solid's form is typed in. */
 	length = $state.raw<LengthUnit | null>(null);
+	/** The system's unit for each quantity a param is typed in (`force/length`), and what takes it to SI. */
+	quantities = $state.raw<Record<string, DisplayUnit>>({});
 
 	constructor(private readonly app: AppState) {}
 
@@ -1300,16 +1322,12 @@ export class UnitsState {
 	async sync(): Promise<void> {
 		const wanted = this.stored();
 		try {
-			const res = await this.app.analysis.request<{ name: string; systems: string[]; length?: LengthUnit }>('units.system', {});
+			const res = await this.app.analysis.request<UnitsAnswer>('units.system', {});
 			this.systems = res.systems;
-			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
-				const set = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name: wanted });
-				this.name = set.name;
-				this.length = set.length ?? null;
-			} else {
-				this.name = res.name;
-				this.length = res.length ?? null;
-			}
+			const set = wanted && wanted !== res.name && res.systems.includes(wanted) ? await this.app.analysis.request<UnitsAnswer>('units.system', { name: wanted }) : res;
+			this.name = set.name;
+			this.length = set.length ?? null;
+			this.quantities = set.quantities ?? {};
 		} catch {
 			// an older service without units: its own SI stands
 		}
@@ -1317,11 +1335,15 @@ export class UnitsState {
 
 	async choose(name: string): Promise<void> {
 		if (name === this.name) return;
-		const res = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name });
+		const res = await this.app.analysis.request<UnitsAnswer>('units.system', { name });
 		this.name = res.name;
 		const before = this.length;
+		const beforeQuantities = this.quantities;
 		this.length = res.length ?? null;
-		if (before && this.length) this.app.analyze.lengthsChanged(before.to_si / this.length.to_si);
+		this.quantities = res.quantities ?? {};
+		const ratios: Record<string, number> = {};
+		for (const [q, now] of Object.entries(this.quantities)) if (beforeQuantities[q]) ratios[q] = beforeQuantities[q].to_si / now.to_si;
+		this.app.analyze.unitsChanged(before && this.length ? before.to_si / this.length.to_si : null, ratios);
 		try {
 			localStorage.setItem(UNITS_KEY, res.name);
 		} catch {

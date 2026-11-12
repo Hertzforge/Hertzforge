@@ -185,8 +185,6 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.drive_points': 'drive_point',
 	'project.drive_prediction': 'drive_prediction',
 	'project.dwell': 'sine_profile',
-	'project.edit_mate_sides': 'mate_surfaces',
-	'project.edit_mated_surfaces': 'edit',
 	'project.edit_solid': 'edit',
 	'project.edit_specification': 'edit',
 	'project.element_groups': 'groups',

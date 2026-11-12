@@ -230,6 +230,8 @@ export interface Shape3DView {
 	note?: string;
 	/** What a click in the view does. */
 	pick?: Pick3D;
+	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
+	opacity?: number;
 	gizmo?: Gizmo3D;
 	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
 	frames?: { origin: number[]; axes: number[][]; length: number }[];
@@ -279,6 +281,8 @@ export interface Pick3D {
 	param?: string;
 	/** nodes: how many of the last `ids` are left out, and drawn dim. */
 	off?: number;
+	/** nodes: a second set of places after the `ids` rows, drawn in their own color and not clicked: how many held, then how many not. */
+	others?: [number, number];
 	/** faces: each triangle's surface, -1 for none. */
 	faces?: Int32Array;
 	/** faces: the surfaces in use now. */
@@ -517,6 +521,8 @@ export interface ParamDescriptor {
 	in_view?: boolean;
 	/** A length, or a text of lengths, typed in the display system (`withDisplayLengths`). */
 	length?: boolean;
+	/** A number of this dimension ('force/length') typed in the display system (`withDisplayQuantities`). */
+	quantity?: string;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
 	/** A request for this field's value, asked with the form's values by a button beside it; `{value}` comes back in the display units. */
