@@ -1,0 +1,117 @@
+{
+ "type": "event",
+ "topic": "mimo_shock.state",
+ "seq": 220,
+ "data": {
+  "run_id": "ms-0003",
+  "state": "review",
+  "phase": "awaiting_review",
+  "title": "Six Controls, Three Drives",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": [],
+   "plant": "shock-jointed-6x3"
+  },
+  "grid": {
+   "fs_hz": 12800,
+   "record_len": 16384,
+   "lines": 8193,
+   "actual": true
+  },
+  "clock": "shared",
+  "target": "srs",
+  "timing": "free",
+  "verdict": "all",
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -9,
+   -6,
+   -3,
+   -1.5,
+   0
+  ],
+  "level_db": null,
+  "rung": null,
+  "pulses": {
+   "fired": 0,
+   "passed": 0,
+   "at_level": 0,
+   "of_level": 0
+  },
+  "next_pulse_s": null,
+  "elapsed_s": 3.5,
+  "identification": {
+   "realizations": 64,
+   "drive_vrms": [
+    0.05,
+    0.05,
+    0.05
+   ],
+   "drive_vpk": [
+    0.18,
+    0.18,
+    0.18
+   ],
+   "coherence_mean": [
+    0.998,
+    0.997,
+    0.998
+   ],
+   "coverage": [
+    0.999,
+    0.999,
+    0.998
+   ],
+   "trusted_lines": 3192,
+   "band_lines": 3192,
+   "condition_max": 7.5,
+   "coherence_floor": 0.5,
+   "passed": true
+  },
+  "review": {
+   "controls": [
+    {
+     "channel": 1,
+     "reachable": 0.97,
+     "floor_db": 4.2,
+     "reachable_ok": false,
+     "predicted_peak_ratio": null
+    },
+    {
+     "channel": 2,
+     "reachable": 0.99,
+     "floor_db": 1.8,
+     "reachable_ok": true,
+     "predicted_peak_ratio": null
+    },
+    {
+     "channel": 3,
+     "reachable": 0.91,
+     "floor_db": 12.6,
+     "reachable_ok": false,
+     "predicted_peak_ratio": null
+    }
+   ],
+   "hold": {
+    "reason": "unreachable_target",
+    "message": "Controls 1 and 3 cannot reach their targets: their best reachable responses are 4.2 and 12.6 dB from them, outside the tolerance. Proceed with an acknowledgement, or judge the run by the global verdict."
+   },
+   "acknowledged": null
+  },
+  "last_pulse": null,
+  "law": {
+   "id": "shape",
+   "name": "shape",
+   "version": "0.1.4",
+   "sha256": null,
+   "params": {
+    "max_step_db": 6
+   },
+   "misses": 0
+  },
+  "end": null
+ }
+}
