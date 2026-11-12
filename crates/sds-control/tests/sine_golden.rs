@@ -154,12 +154,19 @@ fn the_import_reads_the_golden_rows_to_the_golden_profile() {
 #[test]
 fn the_sine_law_entry_is_the_golden_one() {
     let dir = std::env::temp_dir().join(format!(
-        "sds-control-sine-golden-{}-{}",
+        "sds-control-sine-golden-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        // the clock alone repeats: macOS reads it to the microsecond, and two
+        // tests running at once could share a folder and delete it under each other
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        }
     ));
     let cat = hertzforge_random_laws::LawCatalog::open(&dir).unwrap();
     let list = sds_control::laws::list_json(&cat, Some(hertzforge_random_laws::LawWorld::Sine));
