@@ -13,11 +13,14 @@
 use crate::law::{LawManifest, MimoShockLaw, MimoShockLawFactory};
 use crate::pulse::{PulseInputs, PulseOutputs};
 use crate::setup::{Setup, Target, TargetKind};
+use hertzforge_law_sdk::shock_mimo::builtin::{
+    InverseConfig, ModelChoice, ModelOptions, ShapeConfig, INVERSE, SHAPE,
+};
 use hertzforge_mimo_shock_law_math as math;
 use hertzforge_mimo_shock_law_math::delay::LeastEffort;
-use hertzforge_mimo_shock_law_math::inverse::{InverseLaw, InverseParams};
+use hertzforge_mimo_shock_law_math::inverse::InverseParams;
 use hertzforge_mimo_shock_law_math::paired::{PairedLaw, PairedParams};
-use hertzforge_mimo_shock_law_math::shape::{Anchor, SeedTiming, ShapeLaw, ShapeParams};
+use hertzforge_mimo_shock_law_math::shape::{Anchor, SeedTiming, ShapeParams};
 use hertzforge_mimo_shock_law_math::LawSteps;
 use hertzforge_shock_common::law_guard::{LawDescriptor, LawFault, LawValue};
 use serde_json::{json, Map, Value};
@@ -185,19 +188,71 @@ fn count(v: &Value) -> Result<usize, String> {
         .ok_or_else(|| "not a whole number".to_string())
 }
 
+/// The model keys every modal-capable built-in reads.
+fn read_model(m: &mut ModelOptions, k: &str, v: &Value) -> Option<Result<(), String>> {
+    Some(match k {
+        "model" => v
+            .as_str()
+            .ok_or_else(|| "a model name".to_string())
+            .and_then(ModelChoice::from_name)
+            .map(|c| m.model = c),
+        "modes" => count(v).map(|x| m.modes = x),
+        "track_from_identification" => flag(v).map(|x| m.from_identification = x),
+        _ => return None,
+    })
+}
+
+fn model_json(m: &ModelOptions) -> [(&'static str, Value); 3] {
+    [
+        ("model", json!(m.model.name())),
+        ("modes", json!(m.modes)),
+        ("track_from_identification", json!(m.from_identification)),
+    ]
+}
+
+fn values_of(decl: &hertzforge_law_sdk::shock_mimo::builtin::LawDecl) -> Vec<String> {
+    decl.values.iter().map(|v| v.key.to_string()).collect()
+}
+
+/// The identification level a law is told, NaN when it was not measured.
+fn id_level(setup: &Setup) -> f64 {
+    setup.identification_level_db.unwrap_or(f64::NAN)
+}
+
 /// `inverse`: the regularized inverse of the plant per line, corrected between
 /// pulses with a gain per line (accepts waveform and SRS targets; an SRS target
-/// is followed through the waveform synthesized for it).
-#[derive(Debug, Clone, Default)]
+/// is followed through the waveform synthesized for it). Built by the same
+/// constructor as its law file ([`InverseConfig::build`]).
+#[derive(Debug, Clone)]
 pub struct InverseFactory {
     pub params: InverseParams,
+    /// How the model follows the plant.
+    pub model: ModelOptions,
+    /// Correct the next level's predicted error at a level step.
+    pub predicted_step: bool,
+}
+
+impl Default for InverseFactory {
+    /// The declared defaults.
+    fn default() -> Self {
+        let c = InverseConfig::default();
+        InverseFactory {
+            params: c.params,
+            model: c.model,
+            predicted_step: c.predicted_step,
+        }
+    }
 }
 
 impl InverseFactory {
     /// The factory at the defaults with the keys of `params` set.
     pub fn from_params(params: &Value) -> Result<Self, String> {
-        let mut p = InverseParams::default();
+        let mut f = InverseFactory::default();
+        let (p, m, ps) = (&mut f.params, &mut f.model, &mut f.predicted_step);
         read_params(params, |k, v| {
+            if let Some(r) = read_model(m, k, v) {
+                return Some(r);
+            }
             Some(match k {
                 "lambda_rel" => num(v).map(|x| p.lambda_rel = x),
                 "gain" => num(v).map(|x| p.gain = x),
@@ -211,55 +266,82 @@ impl InverseFactory {
                 "refresh_floor_rel" => num(v).map(|x| p.refresh_floor_rel = x),
                 "align" => flag(v).map(|x| p.align = x),
                 "align_max_s" => num(v).map(|x| p.align_max_s = x),
+                "predicted_step" => flag(v).map(|x| *ps = x),
                 _ => return None,
             })
         })?;
-        Ok(InverseFactory { params: p })
+        Ok(f)
+    }
+
+    /// The configuration the law is built from.
+    pub fn config(&self) -> InverseConfig {
+        InverseConfig {
+            params: self.params.clone(),
+            model: self.model,
+            predicted_step: self.predicted_step,
+        }
     }
 }
 
 impl MimoShockLawFactory for InverseFactory {
     fn build(&self, setup: &Setup) -> Result<Box<dyn MimoShockLaw + Send>, LawFault> {
-        let law =
-            InverseLaw::new(math_setup(setup), self.params.clone()).map_err(LawFault::Failed)?;
+        let law = self
+            .config()
+            .build(math_setup(setup), id_level(setup))
+            .map_err(LawFault::Failed)?;
         Ok(adapter("inverse", setup, law))
     }
 
     fn describe(&self) -> LawDescriptor {
         let p = &self.params;
-        descriptor(
-            "inverse",
-            json!({
-                "lambda_rel": p.lambda_rel, "gain": p.gain, "watchdog": p.watchdog,
-                "watchdog_lines": p.watchdog_lines, "watchdog_grow": p.watchdog_grow,
-                "watchdog_cut": p.watchdog_cut, "watchdog_restore": p.watchdog_restore,
-                "refresh": p.refresh, "refresh_mu": p.refresh_mu,
-                "refresh_floor_rel": p.refresh_floor_rel, "align": p.align,
-                "align_max_s": p.align_max_s,
-            }),
-        )
+        let mut v = json!({
+            "lambda_rel": p.lambda_rel, "gain": p.gain, "watchdog": p.watchdog,
+            "watchdog_lines": p.watchdog_lines, "watchdog_grow": p.watchdog_grow,
+            "watchdog_cut": p.watchdog_cut, "watchdog_restore": p.watchdog_restore,
+            "refresh": p.refresh, "refresh_mu": p.refresh_mu,
+            "refresh_floor_rel": p.refresh_floor_rel, "align": p.align,
+            "align_max_s": p.align_max_s, "predicted_step": self.predicted_step,
+        });
+        for (k, x) in model_json(&self.model) {
+            v[k] = x;
+        }
+        descriptor("inverse", v)
     }
 
     fn manifest(&self) -> LawManifest {
         LawManifest {
             targets: TargetKind::ALL.to_vec(),
-            values: keys(&[
-                "drive_rms_full_level",
-                "waveform_error",
-                "least_line_gain",
-                "lines_cut",
-                "lines_refreshed",
-            ]),
+            values: values_of(&INVERSE),
         }
     }
 }
 
 /// `shape`: each control's target shaped by a real gain from its SRS ratio,
 /// the drives the plant's inverse applied to the shaped targets (SRS targets
-/// only).
-#[derive(Debug, Clone, Default)]
+/// only). Built by the same constructor as its law file
+/// ([`ShapeConfig::build`]).
+#[derive(Debug, Clone)]
 pub struct ShapeFactory {
     pub params: ShapeParams,
+    /// How the model follows the plant.
+    pub model: ModelOptions,
+    /// The gain clamp, dB; zero: none.
+    pub gain_clamp_db: f64,
+    /// The stall flag's tolerance, dB.
+    pub stall_tol_db: f64,
+}
+
+impl Default for ShapeFactory {
+    /// The declared defaults.
+    fn default() -> Self {
+        let c = ShapeConfig::default();
+        ShapeFactory {
+            params: c.params,
+            model: c.model,
+            gain_clamp_db: c.gain_clamp_db,
+            stall_tol_db: c.stall_tol_db,
+        }
+    }
 }
 
 impl ShapeFactory {
@@ -268,8 +350,17 @@ impl ShapeFactory {
     /// `measured`; `seed_timing` is `zero` or `least_effort` (at the search's
     /// default settings).
     pub fn from_params(params: &Value) -> Result<Self, String> {
-        let mut p = ShapeParams::default();
+        let mut f = ShapeFactory::default();
+        let (p, m, gc, st) = (
+            &mut f.params,
+            &mut f.model,
+            &mut f.gain_clamp_db,
+            &mut f.stall_tol_db,
+        );
         read_params(params, |k, v| {
+            if let Some(r) = read_model(m, k, v) {
+                return Some(r);
+            }
             Some(match k {
                 "lambda_rel" => num(v).map(|x| p.lambda_rel = x),
                 "max_step_db" => num(v).map(|x| p.max_step_db = x),
@@ -278,6 +369,8 @@ impl ShapeFactory {
                 "refresh" => flag(v).map(|x| p.refresh = x),
                 "refresh_mu" => num(v).map(|x| p.refresh_mu = x),
                 "refresh_floor_rel" => num(v).map(|x| p.refresh_floor_rel = x),
+                "gain_clamp_db" => num(v).map(|x| *gc = x),
+                "stall_tol_db" => num(v).map(|x| *st = x),
                 "anchor" => match v.as_str() {
                     Some("target") => {
                         p.anchor = Anchor::Target;
@@ -315,48 +408,55 @@ impl ShapeFactory {
                 _ => return None,
             })
         })?;
-        Ok(ShapeFactory { params: p })
+        Ok(f)
+    }
+
+    /// The configuration the law is built from.
+    pub fn config(&self) -> ShapeConfig {
+        ShapeConfig {
+            params: self.params.clone(),
+            model: self.model,
+            gain_clamp_db: self.gain_clamp_db,
+            stall_tol_db: self.stall_tol_db,
+        }
     }
 }
 
 impl MimoShockLawFactory for ShapeFactory {
     fn build(&self, setup: &Setup) -> Result<Box<dyn MimoShockLaw + Send>, LawFault> {
-        let law =
-            ShapeLaw::new(math_setup(setup), self.params.clone()).map_err(LawFault::Failed)?;
+        let law = self
+            .config()
+            .build(math_setup(setup), id_level(setup))
+            .map_err(LawFault::Failed)?;
         Ok(adapter("shape", setup, law))
     }
 
     fn describe(&self) -> LawDescriptor {
         let p = &self.params;
-        descriptor(
-            "shape",
-            json!({
-                "lambda_rel": p.lambda_rel,
-                "weights": p.weights.iter().map(|(l, w)| json!([l, w])).collect::<Vec<_>>(),
-                "max_step_db": p.max_step_db, "delay_relax": p.delay_relax,
-                "delay_bound_s": p.delay_bound_s,
-                "anchor": match p.anchor { Anchor::Target => "target", Anchor::Measured => "measured" },
-                "refresh": p.refresh, "refresh_mu": p.refresh_mu,
-                "refresh_floor_rel": p.refresh_floor_rel,
-                "seed_timing": match p.seed_timing {
-                    SeedTiming::Zero => "zero",
-                    SeedTiming::LeastEffort(_) => "least_effort",
-                },
-            }),
-        )
+        let mut v = json!({
+            "lambda_rel": p.lambda_rel,
+            "weights": p.weights.iter().map(|(l, w)| json!([l, w])).collect::<Vec<_>>(),
+            "max_step_db": p.max_step_db, "delay_relax": p.delay_relax,
+            "delay_bound_s": p.delay_bound_s,
+            "anchor": match p.anchor { Anchor::Target => "target", Anchor::Measured => "measured" },
+            "refresh": p.refresh, "refresh_mu": p.refresh_mu,
+            "refresh_floor_rel": p.refresh_floor_rel,
+            "seed_timing": match p.seed_timing {
+                SeedTiming::Zero => "zero",
+                SeedTiming::LeastEffort(_) => "least_effort",
+            },
+            "gain_clamp_db": self.gain_clamp_db, "stall_tol_db": self.stall_tol_db,
+        });
+        for (k, x) in model_json(&self.model) {
+            v[k] = x;
+        }
+        descriptor("shape", v)
     }
 
     fn manifest(&self) -> LawManifest {
         LawManifest {
             targets: vec![TargetKind::Srs],
-            values: keys(&[
-                "effort_cost_zero_delay",
-                "effort_cost_seed",
-                "drive_rms_full_level",
-                "worst_srs_error_db",
-                "weight",
-                "lines_refreshed",
-            ]),
+            values: values_of(&SHAPE),
         }
     }
 }

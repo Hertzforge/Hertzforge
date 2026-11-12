@@ -1295,6 +1295,7 @@ dependencies = [
  "hertzforge-dsp",
  "hertzforge-hal",
  "hertzforge-hal-sim",
+ "hertzforge-law-sdk",
  "hertzforge-mimo-shock-law-math",
  "hertzforge-module-abi",
  "hertzforge-sdm",

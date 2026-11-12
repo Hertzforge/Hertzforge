@@ -808,6 +808,8 @@ it.
 | `refresh_mu` | How far the refresh moves the model (default 0.5) |
 | `align` | Remove each control's best-fit delay before the error is formed (default off) |
 | `align_max_ms` | The largest delay removed (default 2 ms) |
+| `model`, `modes`, `track_from_identification` | How the model follows the plant (below; default `frozen`) |
+| `predicted_step` | At a level step, correct the error the next level is predicted to have, from the tracked model's change between the two levels, instead of the error just measured; needs `model` `track` or `track_secant` (default off) |
 
 **`shape`** (the default for an SRS target; SRS only). A smooth real gain per control shapes that
 control's target by its SRS ratio after every pulse, with a weight that rises with level (0.5 at
@@ -825,6 +827,38 @@ it stalls short of tolerance on a strongly coupled structure.
 | `anchor` | `target` (default) or `measured`: shape the measured response with its own phase; needs `refresh` |
 | `refresh`, `refresh_mu` | As for `inverse` (default off, 1) |
 | `seed_timing` | `zero` (default) or `least_effort`: start the delays where the least drive and unreachable energy are needed |
+| `model`, `modes`, `track_from_identification` | How the model follows the plant (below; default `frozen`) |
+| `gain_clamp_db` | Each control's accumulated gain stays within this many dB of one; 0 leaves it free (default 0) |
+| `stall_tol_db` | A point is reported stalled (the `stalled_points` value) when its gain is at the clamp, or its error is above this and has not fallen in two pulses at one level (default 1.5 dB) |
+
+**How the model follows the plant (`model`).** `inverse` and `shape` build every drive through a
+model of the structure. A jointed structure softens as it is driven harder, so the model measured
+at identification is wrong by full level. `model` chooses how the law keeps its model current:
+
+| `model` | What it does | Cost |
+|---|---|---|
+| `frozen` (default) | The identification, never changed | Nothing |
+| `secant` | After each pulse, the least change of the model that reproduces every pulse played at the current level | Small, every pulse |
+| `track` | Fits a modal model (common resonances and damping, a delay per control) to the identification before the first pulse; after each pulse re-fits the resonances and damping from that pulse, and predicts the first pulse of each new level from their trend with level. When the tracked model explains the pulses worse than `secant` would, `secant`'s model is used until it does better again | A fit before the first pulse (seconds), and a small re-fit every pulse |
+| `track_secant` | `track`, with the pulses of the level being played reproduced exactly on top of the tracked model | As `track` |
+
+`modes` sets the number of modes fitted; 0 (the default) counts the identified plant's resonance
+peaks in the band, then adds two modes at a time until the fit is within 1 % of the
+identification. A fit further than 5 % from the identification is not trusted: the run starts on
+`secant`'s model, and the `model_source` value says 3. `track_from_identification` takes the
+identification as the first point of the level trend, at the level the controller measured it at
+(the identification's peak over the target's peak, the largest among the controls).
+
+Where they help and where they do not. On a plant whose modes soften with the pulse's level but
+not within one pulse, `track` with the identification as a level point takes the first full-level
+pulse from about 10 dB over the SRS to under 1 dB. On the simulator's jointed plants, whose joints
+soften within each pulse and recover as it decays, no option helps: no single linear model
+reproduces one of those pulses (the best modal re-fit of a pulse leaves 8 % of it unexplained at
+-30 dB and 47 % at -18 dB), and the tracked model is set aside for `secant`'s within a pulse or two.
+There, on targets that drive the joints hard, `frozen` reached full level where every other option
+stopped at a lower level, and on milder ones the options did no better than `frozen`. That is why
+the default is `frozen`. A structure's joints decide which of the two it is like, and a run on it says which:
+`model_prediction_residual` is how far the model missed the pulse it built.
 
 **`paired`** (both kinds). Each control is paired with one drive (control 1 with drive 1, and so
 on); that drive's spectrum is scaled by the smoothed ratio of wanted to measured magnitude at its
@@ -833,8 +867,14 @@ other; it is there to show that, and as the template. Parameters `weight` (the p
 default 0.8), `smooth_lines` (default 15) and `max_step_db` (default 6 dB).
 
 Each runs natively and as a law file (`laws/mimo-shock-inverse`, `laws/mimo-shock-shape`,
-`laws/mimo-shock-paired`), from the same mathematics; the law file's drives match the native
-law's within 1e-12 of each record's peak.
+`laws/mimo-shock-paired`), from the same mathematics and the same constructor; the law file's
+drives match the native law's within 1e-12 of each record's peak, for every option.
+
+**Time.** A law is built and seeded before the first pulse, under `control.seed_budget_s` (60 s by
+default): that is where `track` fits its modal model. Each pulse's call has the call budget, a
+quarter of the time between pulses by default. Before the first pulse the controller times one
+iteration of a second copy of the law on the identified plant's predicted response, so a law that
+cannot answer in time is named (`law_too_slow`) before the run, not in the middle of it.
 
 ### Trying a new idea
 

@@ -265,7 +265,11 @@
     "refresh": false,
     "refresh_mu": 0.5,
     "align": false,
-    "align_max_ms": 2
+    "align_max_ms": 2,
+    "model": "frozen",
+    "modes": 0,
+    "track_from_identification": false,
+    "predicted_step": false
    },
    "misses": 0
   },

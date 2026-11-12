@@ -51,6 +51,14 @@ impl BuiltinMimoShock {
         BuiltinMimoShock::Paired,
     ];
 
+    /// The target kinds this built-in is the default for.
+    pub fn default_kinds(self) -> Vec<TargetKind> {
+        TargetKind::ALL
+            .into_iter()
+            .filter(|k| Self::default_for(*k) == self)
+            .collect()
+    }
+
     /// The catalog id.
     pub fn id(self) -> &'static str {
         match self {
@@ -160,12 +168,23 @@ pub fn resolve_builtin_with(
     }
     let bad = |e: String| ResolveError::BadParams(format!("the law `{id}`: {e}"));
     Ok(match b {
-        BuiltinMimoShock::Inverse => Arc::new(InverseFactory {
-            params: decl::inverse_params(&all).map_err(bad)?,
-        }),
-        BuiltinMimoShock::Shape => Arc::new(ShapeFactory {
-            params: decl::shape_params(&all).map_err(bad)?,
-        }),
+        BuiltinMimoShock::Inverse => {
+            let c = decl::inverse_config(&all).map_err(bad)?;
+            Arc::new(InverseFactory {
+                params: c.params,
+                model: c.model,
+                predicted_step: c.predicted_step,
+            })
+        }
+        BuiltinMimoShock::Shape => {
+            let c = decl::shape_config(&all).map_err(bad)?;
+            Arc::new(ShapeFactory {
+                params: c.params,
+                model: c.model,
+                gain_clamp_db: c.gain_clamp_db,
+                stall_tol_db: c.stall_tol_db,
+            })
+        }
         BuiltinMimoShock::Paired => {
             let count = all.integer("smooth_lines").map_err(bad)?;
             Arc::new(PairedFactory {
@@ -231,16 +250,19 @@ pub fn resolve(
 
 /// [`resolve`] for a run: the factory, and for a law file the cell its host
 /// fills with its own name for the last output it refused, so the run's end can
-/// name it where the core's fault folds it into `wrong_length`.
+/// name it where the core's fault folds it into `wrong_length`. A law file's
+/// constructor and seed each have `seed_budget`.
 pub fn resolve_for_run(
     catalog: &LawCatalog,
     id: &str,
     params: Vec<Param>,
     budget: Duration,
+    seed_budget: Duration,
 ) -> Result<(Arc<dyn MimoShockLawFactory>, Option<HostRule>), ResolveError> {
     if BuiltinMimoShock::from_id(id).is_none() {
         if let Some(law) = catalog.shock_mimo_law(id) {
-            let f = WasmMimoShockLawFactory::new(law.clone(), params, budget);
+            let f = WasmMimoShockLawFactory::new(law.clone(), params, budget)
+                .with_seed_budget(seed_budget);
             let rule = f.host_rule();
             return Ok((Arc::new(f), Some(rule)));
         }

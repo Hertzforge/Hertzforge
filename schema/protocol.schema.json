@@ -2148,6 +2148,7 @@
         "id": {"type": "string", "minLength": 1},
         "world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "shock_mimo"]},
         "targets": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
+        "default_for": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
         "builtin": {"type": "boolean"},
         "name": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},

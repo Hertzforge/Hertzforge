@@ -127,52 +127,82 @@ pub fn decl(b: BuiltinMimoShock) -> &'static LawDecl {
     }
 }
 
-const STUDY: &str = "expected from the law study on the reference plants; not yet run on the \
-                     check's simulator plants";
+const NO_LIMITS: &str =
+    "a MIMO Shock law is told nothing of the limit channels, so it cannot hold \
+                         one under its line; the controller stops the run when one would cross it";
 
-/// The check cases a built-in law is expected to fail. The cases are written
-/// for a good law; these are where today's built-ins fall short of one.
+/// The check cases a built-in law fails at its defaults, as the check ran them
+/// on the simulator. The cases are written for a good law; these are where
+/// today's built-ins fall short of one.
 pub fn known_failures(b: BuiltinMimoShock) -> Vec<KnownFailure> {
     use MimoShockCheckCase::*;
-    let both = [TargetKind::Waveform, TargetKind::Srs];
+    use TargetKind::{Srs, Waveform};
     let mut out = Vec::new();
-    let mut add = |cases: &[MimoShockCheckCase], kinds: &[TargetKind], why: String| {
-        for &case in cases {
-            for &kind in kinds {
-                out.push(KnownFailure {
-                    case,
-                    kind,
-                    why: why.clone(),
-                });
-            }
+    let mut add = |case: MimoShockCheckCase, kinds: &[TargetKind], why: &str| {
+        for &kind in kinds {
+            out.push(KnownFailure {
+                case,
+                kind,
+                why: why.into(),
+            });
         }
     };
     match b {
-        // The watchdog limits the rate of the divergence on a plant that
-        // shifts with level; it does not bound it.
-        BuiltinMimoShock::Inverse => add(
-            &[Jointed4x4Severe, IdentificationError],
-            &both,
-            format!("diverges slowly where the plant shifts with level; {STUDY}"),
-        ),
-        // Bounded everywhere, but stalls short of tolerance on a strongly
-        // coupled square plant.
-        BuiltinMimoShock::Shape => add(
-            &[
-                Jointed4x4Moderate,
-                Jointed4x4Severe,
-                IdentificationError,
+        BuiltinMimoShock::Inverse => {
+            add(
+                Jointed6x3,
+                &[Waveform, Srs],
+                "with more controls than drives the targets are out of reach, so no pulse passes \
+                 and the run stays at the first level",
+            );
+            add(
+                DelayError,
+                &[Waveform],
+                "with every path's delay 0.5 ms wrong in its model it does not pass the -9 dB level",
+            );
+            add(
+                DelayError,
+                &[Srs],
+                "with every path's delay wrong its first correction is refused by the drive growth \
+                 cap",
+            );
+            add(
                 MeasurementNoise,
-            ],
-            &[TargetKind::Srs],
-            format!("stalls short of tolerance on a strongly coupled plant; {STUDY}"),
-        ),
+                &[Srs],
+                "it corrects the noise too, and its first correction is refused by the band growth \
+                 cap",
+            );
+            add(LimitChannel, &[Waveform, Srs], NO_LIMITS);
+        }
+        BuiltinMimoShock::Shape => {
+            add(
+                Jointed6x3,
+                &[Srs],
+                "with more controls than drives its first correction is refused by the band growth \
+                 cap",
+            );
+            add(
+                DelayError,
+                &[Srs],
+                "with every path's delay wrong it does not pass the first level",
+            );
+            add(
+                MeasurementNoise,
+                &[Srs],
+                "under measurement noise it does not pass the first level",
+            );
+            add(LimitChannel, &[Srs], NO_LIMITS);
+        }
         // No cross-path model: the pairs fight on any coupled structure.
-        BuiltinMimoShock::Paired => add(
-            &MimoShockCheckCase::ALL,
-            &both,
-            "uses no cross path of the plant, and every check plant is coupled".into(),
-        ),
+        BuiltinMimoShock::Paired => {
+            for case in MimoShockCheckCase::ALL {
+                add(
+                    case,
+                    &[Waveform, Srs],
+                    "uses no cross path of the plant, and every check plant is coupled",
+                );
+            }
+        }
     }
     out
 }

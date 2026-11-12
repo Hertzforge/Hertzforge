@@ -65,6 +65,7 @@ pub fn resolve(
     id: &str,
     given: &Map<String, Value>,
     budget: Duration,
+    seed_budget: Duration,
     hardware: bool,
 ) -> Result<Chosen, MethodError> {
     let f = facts(cat, id).ok_or_else(|| {
@@ -90,13 +91,14 @@ pub fn resolve(
         }
     }
     let params = crate::mimo::adapter::params_of(&f.params, given);
-    let (factory, host_rule) = msl::resolve_for_run(cat, id, params, budget).map_err(|e| {
-        MethodError::named(
-            ErrorCode::Refused,
-            "arm_refused",
-            format!("The control law could not be built: {e}."),
-        )
-    })?;
+    let (factory, host_rule) =
+        msl::resolve_for_run(cat, id, params, budget, seed_budget).map_err(|e| {
+            MethodError::named(
+                ErrorCode::Refused,
+                "arm_refused",
+                format!("The control law could not be built: {e}."),
+            )
+        })?;
     let values = msl::entries(cat)
         .into_iter()
         .find(|e| e.id == id)
@@ -122,8 +124,15 @@ pub fn list(cat: &LawCatalog) -> Vec<Value> {
                 .find(|f| f.id == e.id)
                 .map(|f| f.targets.iter().map(|k| kind_name(*k)).collect())
                 .unwrap_or_default();
+            // The target kinds this law is the default for (a built-in only):
+            // what a client opens a new setup of that kind on.
+            let default_for: Vec<&str> = msl::BuiltinMimoShock::from_id(&e.id)
+                .filter(|_| e.builtin)
+                .map(|b| b.default_kinds().into_iter().map(kind_name).collect())
+                .unwrap_or_default();
             if let Value::Object(m) = &mut v {
                 m.insert("targets".into(), Value::from(targets));
+                m.insert("default_for".into(), Value::from(default_for));
             }
             v
         })
