@@ -247,6 +247,51 @@ async fn mimo_shock_a_fully_reachable_control_reports_a_floor_of_minus_120_db() 
     c.ok("mimo_shock.abort", json!({})).await;
 }
 
+/// A pulse that played the drives in force again after a miss names the miss
+/// by its reason, as the end of a run does: the twisted pulses on the severe
+/// plant have the core refuse the law's answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_a_refused_law_answer_is_named_by_its_reason_on_the_pulse() {
+    let addr = serve(Service::with_options(opts(Duration::from_secs(30)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 4).await;
+    let mut cfg = classical("shock-jointed-4x4-severe", "auto");
+    cfg["target"]["pulses"] = json!([
+        half_sine(20.0, "positive"),
+        half_sine(18.0, "negative"),
+        half_sine(20.0, "positive"),
+        half_sine(18.0, "negative")
+    ]);
+    let id = configure(&mut c, cfg).await;
+    c.ok("mimo_shock.start", json!({})).await;
+    wait_end(&mut c, &id).await;
+    let rows = rows(&mut c).await;
+    print_rows(&rows);
+    let names = [
+        "error",
+        "panicked",
+        "over_budget",
+        "wrong_length",
+        "non_finite",
+        "undeclared_value",
+        "too_many_values",
+        "peak_rise",
+        "bin_rise",
+        "predicted_peak",
+        "first_drive",
+        "target_not_accepted",
+    ];
+    let missed: Vec<&Value> = rows.iter().filter(|r| r["law"]["used"] == false).collect();
+    assert!(
+        !missed.is_empty(),
+        "no pulse played the drives in force again"
+    );
+    for r in missed {
+        let m = r["law"]["miss"].as_str().unwrap_or_default();
+        assert!(names.contains(&m), "pulse {}: miss {m:?}", r["index"]);
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mimo_shock_srs_on_the_linear_plant_reaches_full_level_passes() {
     let addr = serve(Service::with_options(opts(Duration::from_secs(30)))).await;
