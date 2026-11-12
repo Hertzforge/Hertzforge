@@ -775,6 +775,8 @@ export interface OperationDescriptor {
 	outputs: ViewKind[];
 	/** The form shows this while it is typed: `op.run` with `preview`, on a copy. */
 	previews?: boolean;
+	/** The boolean param that says go ahead: the form does not ask it, Preview sends it false and Apply true. */
+	commits?: string;
 }
 
 export interface Catalog {
