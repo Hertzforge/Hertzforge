@@ -51,6 +51,29 @@ async function toReview(ms: MimoShockStore) {
 }
 
 describe('the MIMO Shock store', () => {
+	it("opens a new setup on the service's default law for its target kind, and follows the default when the kind changes", async () => {
+		const { ms, client, acq } = await screen();
+		const all = (await client.request<{ laws: { id: string; default_for?: string[] }[] }>('laws.list', { world: 'shock_mimo' })).laws;
+		const defaultFor = (kind: 'waveform' | 'srs') => all.find((l) => l.default_for?.includes(kind))?.id;
+		expect(defaultFor('waveform')).toBe('inverse');
+		expect(defaultFor('srs')).toBe('shape');
+		expect(ms.setup.law.id).toBe('inverse');
+		ms.setKind('srs');
+		expect(ms.setup.law.id).toBe('shape');
+		ms.setKind('waveform');
+		expect(ms.setup.law.id).toBe('inverse');
+		// a law the operator chose that accepts the new kind stays
+		ms.chooseLaw('paired');
+		ms.setKind('srs');
+		expect(ms.setup.law.id).toBe('paired');
+		// a new SRS setup with no law yet opens on the SRS default, not the first law that accepts SRS
+		const fresh = new MimoShockStore(acq, { local: null, checkDelayMs: 0 });
+		fresh.setup.kind = 'srs';
+		fresh.setup.law = { id: '', params: {} };
+		await fresh.refreshLaws();
+		expect(fresh.setup.law.id).toBe('shape');
+	});
+
 	it("lists the shock_mimo world's laws as the catalog gives them, those that accept the target kind", async () => {
 		const { ms, client } = await screen();
 		const all = (await client.request<{ laws: { id: string; world: string; targets?: string[] }[] }>('laws.list', { world: 'shock_mimo' })).laws;

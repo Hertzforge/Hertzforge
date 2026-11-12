@@ -27,8 +27,11 @@ export type MimoShockRefusalReason = ShockRefusalReason | 'unreachable_target';
 
 export type MimoShockTargetKind = 'waveform' | 'srs';
 
-/** A catalog entry of the `shock_mimo` world: every law's entry, with the target kinds it accepts. */
-export type MimoShockLawEntry = LawEntry & { targets?: MimoShockTargetKind[] };
+/**
+ * A catalog entry of the `shock_mimo` world: every law's entry, with the target kinds it accepts and
+ * the kinds it is the default for (the law a new setup of that kind opens on).
+ */
+export type MimoShockLawEntry = LawEntry & { targets?: MimoShockTargetKind[]; default_for?: MimoShockTargetKind[] };
 
 // --- configuration -------------------------------------------------------------------------
 
@@ -98,6 +101,8 @@ export interface MimoShockIdentification {
 export interface MimoShockControl {
 	law?: { id: string; params?: Record<string, unknown> };
 	law_budget?: number;
+	/** The time the law may take to be built and to answer its seed, seconds. */
+	seed_budget_s?: number;
 	law_misses?: number;
 	max_pulses?: number;
 	max_growth_db?: number;
