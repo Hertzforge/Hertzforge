@@ -12,7 +12,7 @@ mod support;
 
 use hertzforge_hal_sim::plants::StandardPlant;
 use hertzforge_law_host::{LawIdentity, Param};
-use hertzforge_random_laws::{ChoiceError, MimoLawFactory};
+use hertzforge_random_laws::{ChoiceError, LawBudgets, MimoLawFactory};
 use hertzforge_sdm::law::{
     LawError, MimoControlLaw, MimoInput, MimoLoopInputs, MimoLoopOutputs, MimoSetup, MimoShape,
 };
@@ -411,7 +411,7 @@ impl MimoLawFactory for FailingFactory {
     fn build(
         &self,
         s: &MimoSetup,
-        b: Duration,
+        b: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
         Ok(Box::new(Failing(self.0.build(s, b)?)))
     }
@@ -444,24 +444,28 @@ async fn the_law_miss_count_on_the_wire_is_the_count_that_stops_the_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_law_budget_too_small_for_the_law_stops_the_run_before_it_drives() {
+async fn a_law_budget_too_small_for_the_law_ends_the_run_in_a_law_fault() {
     let svc = Service::with_options(real_options());
     let addr = serve(svc).await;
     let mut c = Client::connect(addr).await;
     controller(&mut c, table(4, 0, 4)).await;
     let mut s = setup(true);
     s["control"]["law_budget"] = json!(1e-7);
+    s["control"]["law_misses"] = json!(1);
     c.ok("mimo_random.setup", json!({"setup": s})).await;
     c.ok("mimo_random.start", json!({})).await;
-    let done = wait_mimo(&mut c, "the end", |d| d["state"] == "finished").await;
-    let m = done["end"]["message"].as_str().unwrap_or("");
-    assert!(m.contains("seed"), "{done}");
-    let seen: Vec<String> = c
-        .of_topic("mimo_random.status")
-        .iter()
-        .map(|e| e.data()["phase"].as_str().unwrap_or("").to_owned())
-        .collect();
-    assert!(!seen.iter().any(|p| p == "engaged"), "{seen:?}");
+    // The law budget is a loop call's. The first solve has its own, in seconds,
+    // so the run still reaches the review hold with its prediction.
+    wait_mimo(&mut c, "the review hold", |d| {
+        d["phase"] == "awaiting_review"
+    })
+    .await;
+    c.ok("mimo_random.proceed", json!({})).await;
+    // The first loop call cannot meet a budget of 1e-7 of a loop: a miss, and
+    // with one miss allowed the run takes its controlled stop.
+    let done = wait_mimo(&mut c, "the law fault", |d| d["state"] == "finished").await;
+    assert_eq!(done["end"]["trip"]["kind"], "law_fault", "{done}");
+    assert_eq!(done["end"]["trip"]["reason"], "over_budget", "{done}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

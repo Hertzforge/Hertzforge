@@ -319,6 +319,10 @@ The controller holds every law to these, whichever law it is:
 | Diverging loops to abort | 5 | Consecutive loops the controller judges the error to be growing before it aborts |
 | Level ramp, shutdown ramp | 3 s each | How fast the level moves between rungs, and down at a stop |
 
+The law's first solve, the one behind the Prediction page, is not held to the law time budget. It
+has 120 s, once, with the outputs stopped; a first solve that takes longer is not used and the run
+goes no further. This budget is not a setting on this page yet.
+
 A cap on one drive is applied so that the drive matrix stays realizable and every pair's coherence
 is unchanged. Limit channels are protected the same way: where a limit channel's predicted PSD would
 pass its ceiling on a line, the whole drive on that line is scaled down.
@@ -351,6 +355,10 @@ Both run without the operator. The noise floor is measured with the drives off; 
 steps the uncorrelated drive up to its level and measures for the frames set. Stop and Abort work
 throughout.
 
+When identification has its frames, the outputs ramp to zero and stop. They stay stopped through
+the gates, an override and the prediction, however long those take, and start again when the loop
+engages.
+
 ### The Gates and the Override
 
 When identification is done, the Predict step comes forward. **Identification Gates** shows the
@@ -363,8 +371,10 @@ to stop, change the setup (a sensor, a drive, the band, the limits) and start ag
 
 ### The Prediction Page
 
-Before anything drives at test level, the law is run once against the identification and the page
-shows:
+Before anything drives at test level, the law is run once against the identification. This first
+solve is where a law does its heavy work, and it can take seconds: on a plate with 48 controls and
+12 drives at 8193 lines the built-in laws took from 0.2 s (the default) to 12 s (minimum drive).
+The outputs are stopped while it runs. The page then shows:
 
 - **Drive per Output.** Each drive's predicted rms against its ceiling, as a bar with the ceiling
   as a tick. A drive over its ceiling would be capped during the run, leaving its controls short of

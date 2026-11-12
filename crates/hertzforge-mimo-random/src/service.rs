@@ -35,7 +35,7 @@ use hertzforge_random::service::engine::{
 };
 use hertzforge_random::service::law::{LawClock, MonotonicClock};
 use hertzforge_random::service::ramp::DriveRamp;
-use hertzforge_random_laws::MimoLawFactory;
+use hertzforge_random_laws::{LawBudgets, MimoLawFactory};
 use hertzforge_sdm::law::{
     DiagnosticValue, MimoControlLaw, MimoInput, MimoLoopInputs, MimoLoopOutputs, MimoSetup,
     MimoShape,
@@ -1401,6 +1401,7 @@ impl MimoRandomService {
                      wiring and sensitivities",
                     id.tolerance_db
                 );
+                self.drive_discontinuity();
                 self.note(msg.clone());
                 return Err(MimoError::IdentUnreachable(msg));
             }
@@ -1424,6 +1425,17 @@ impl MimoRandomService {
             acc = Some(merge(acc, e));
         }
         let e = acc.expect("identification record");
+        // Nothing feeds the outputs from here until the loop engages: the
+        // matrices are solved, the gate may hold for the operator and the law's
+        // first solve may take seconds. Stop the station now, with its
+        // controlled ramp to zero, so the outputs sit at zero through all of
+        // it. Left running, the output buffer runs dry within its lookahead and
+        // a DAQ card then holds its last identification sample on the wire.
+        self.drive_discontinuity();
+        self.note(
+            "Identification is recorded: the outputs are ramped to zero and stopped until the \
+             loop engages.",
+        );
         let level = self.level_vs_reference(&e.g_cc)?;
         self.finish_identification(e, vrms, level, steps)?;
         Ok(())
@@ -1807,6 +1819,12 @@ impl MimoRandomService {
         self.cfg.law_guards.budget_fraction * self.loop_cfg.segment_seconds()
     }
 
+    /// The budget of the law's first solve, which runs once with the outputs
+    /// stopped.
+    fn seed_budget_s(&self) -> f64 {
+        self.cfg.seed_budget_s
+    }
+
     fn setup(&self) -> MimoSetup {
         MimoSetup {
             controls: self.n_r,
@@ -1830,9 +1848,12 @@ impl MimoRandomService {
             ))
         })?;
         let setup = self.setup();
-        let budget = std::time::Duration::from_secs_f64(self.law_budget_s().max(1e-3));
+        let budgets = LawBudgets {
+            call: std::time::Duration::from_secs_f64(self.law_budget_s().max(1e-3)),
+            seed: std::time::Duration::from_secs_f64(self.seed_budget_s().max(1e-3)),
+        };
         let law = factory
-            .build(&setup, budget)
+            .build(&setup, budgets)
             .map_err(|e| MimoError::Law(e.to_string()))?;
         let shape = MimoShape::of(self.n_r, self.n_u);
         if !law.shapes().contains(&shape) {
@@ -1885,9 +1906,19 @@ impl MimoRandomService {
         if k.is_finite() {
             let _ = resp.scale_lines(&vec![k; self.lines]);
         }
+        let t0 = Instant::now();
         let out = self.call_law(0, &resp, f64::from(2 * set.frames as u32), None);
+        let took_s = t0.elapsed().as_secs_f64();
         let out = match out {
             Ok(o) => o,
+            Err(m) if m.reason == MimoFaultReason::OverBudget => {
+                return Err(MimoError::Law(format!(
+                    "the law's first solve ran past its budget of {:.0} s ({}), so it was not \
+                     used and nothing was driven; choose a faster law or parameters",
+                    self.seed_budget_s(),
+                    m.detail
+                )))
+            }
             Err(m) => {
                 return Err(MimoError::Law(format!(
                     "the law's seed was not usable: {}; change the law or its parameters",
@@ -1895,6 +1926,11 @@ impl MimoRandomService {
                 )))
             }
         };
+        self.note(format!(
+            "The law's first solve took {took_s:.1} s of its {:.0} s budget, with the outputs \
+             stopped.",
+            self.seed_budget_s()
+        ));
         self.prediction_from(out, 0)?;
         self.transition(MimoState::Predict);
         Ok(())
@@ -2282,7 +2318,12 @@ impl MimoRandomService {
             sysid_noise: sysid_noise.as_ref(),
         };
         let clock = self.law_clock.clone();
-        let budget = self.law_budget_s();
+        // The first solve has its own budget; every call after it has the loop's.
+        let budget = if loop_index == 0 {
+            self.seed_budget_s()
+        } else {
+            self.law_budget_s()
+        };
         let law = match self.law.as_mut() {
             Some(l) => l,
             None => {
@@ -2925,6 +2966,7 @@ impl MimoRandomService {
             "estimation": c.estimation,
             "caps": c.caps,
             "law_budget": c.law_guards.budget_fraction,
+            "seed_budget_s": c.seed_budget_s,
             "soft_start_db": c.soft_start_db,
             "law_misses": c.law_guards.max_misses,
         })

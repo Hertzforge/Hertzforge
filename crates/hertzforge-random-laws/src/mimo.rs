@@ -106,6 +106,30 @@ fn manifest_of(spec: &LawSpec) -> MimoManifest {
     }
 }
 
+/// The time a run gives its law.
+///
+/// The first solve (`seed`) happens once, before anything drives at test level
+/// and with the outputs stopped, so its length matters to the operator and not
+/// to the loop: it has a budget of its own, in seconds. Every call after it has
+/// to fit in the loop it serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LawBudgets {
+    /// Every `iterate` call, and a law file's constructor.
+    pub call: Duration,
+    /// The first solve, `seed`.
+    pub seed: Duration,
+}
+
+impl LawBudgets {
+    /// One budget for the first solve and for every call after it.
+    pub fn same(budget: Duration) -> Self {
+        LawBudgets {
+            call: budget,
+            seed: budget,
+        }
+    }
+}
+
 /// Builds a multiple-output law for each run, with the parameter values it was
 /// chosen with (complete and checked).
 pub trait MimoLawFactory: Send + Sync {
@@ -115,15 +139,16 @@ pub trait MimoLawFactory: Send + Sync {
     /// The complete parameter values, in manifest order (for the run record).
     fn params(&self) -> &[Param];
 
-    /// The law built for a run of `setup`. A law file gets `call_budget` as
-    /// the deadline of its constructor and of every call after it; a built-in
-    /// law runs natively, and the run measures its calls against the same
-    /// budget. Fails when the law refuses the setup (a shape it does not
-    /// support, dimensions it cannot run).
+    /// The law built for a run of `setup`. A law file gets `budgets.call` as
+    /// the deadline of its constructor and of every `iterate` call, and
+    /// `budgets.seed` as the deadline of its first solve; a built-in law runs
+    /// natively, and the run measures its calls against the same budgets.
+    /// Fails when the law refuses the setup (a shape it does not support,
+    /// dimensions it cannot run).
     fn build(
         &self,
         setup: &MimoSetup,
-        call_budget: Duration,
+        budgets: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError>;
 }
 
@@ -179,7 +204,7 @@ impl MimoLawFactory for BuiltinMimoFactory {
     fn build(
         &self,
         setup: &MimoSetup,
-        _call_budget: Duration,
+        _budgets: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
         let vals = self
             .params
@@ -223,15 +248,15 @@ impl MimoLawFactory for WasmMimoLawFactory {
     fn build(
         &self,
         setup: &MimoSetup,
-        call_budget: Duration,
+        budgets: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
-        if call_budget.is_zero() {
+        if budgets.call.is_zero() || budgets.seed.is_zero() {
             return Err(ChoiceError::BadConfig(
-                "a law call budget of zero is not a usable time".into(),
+                "a law budget of zero is not a usable time".into(),
             ));
         }
-        WasmMimoLaw::build(&self.law, setup, &self.params, call_budget)
-            .map(|w| Box::new(w) as Box<dyn MimoControlLaw + Send>)
+        WasmMimoLaw::build(&self.law, setup, &self.params, budgets.call)
+            .map(|w| Box::new(w.with_seed_budget(budgets.seed)) as Box<dyn MimoControlLaw + Send>)
             .map_err(|e| match e {
                 LawError::ParamInvalid { key, reason } => ChoiceError::BadParam { key, reason },
                 other => ChoiceError::BadConfig(other.to_string()),

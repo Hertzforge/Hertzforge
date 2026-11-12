@@ -16,13 +16,12 @@ use hertzforge_mimo_random::{
     MimoEventKind, MimoFaultReason, MimoRandomService, MimoState, MimoTripKind,
 };
 use hertzforge_random::service::law::LawClock;
-use hertzforge_random_laws::{ChoiceError, MimoLawFactory};
+use hertzforge_random_laws::{ChoiceError, LawBudgets, MimoLawFactory};
 use hertzforge_sdm::law::{
     LawError, MimoControlLaw, MimoInput, MimoLoopInputs, MimoLoopOutputs, MimoSetup, MimoShape,
 };
 use hertzforge_sdm::{linalg, HermitianStack, C64};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 const CEILING: f64 = 0.8;
 
@@ -166,10 +165,10 @@ impl MimoLawFactory for AdversaryFactory {
     fn build(
         &self,
         setup: &MimoSetup,
-        budget: Duration,
+        budgets: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
         Ok(Box::new(Adversary {
-            inner: self.inner.build(setup, budget)?,
+            inner: self.inner.build(setup, budgets)?,
             mode: self.mode,
             clock: self.clock.clone(),
             calls: 0,
