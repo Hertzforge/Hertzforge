@@ -165,6 +165,37 @@ def parse_dof(text: str) -> tuple[int | None, str]:
     return int(text[:digits]), text[digits:]
 
 
+def same_axis(a: str, b: str) -> bool:
+    """Whether two DOFs are one node and one axis, whatever their signs:
+    '206X-' and '206X+' are, as are '206X' and '206X-'; '206X+' and
+    '206RX+' are not.
+
+    A drive point is often measured with the accelerometer mounted
+    opposite the force, so its response and reference differ only in
+    sign. A DOF that does not parse matches only itself.
+
+    Parameters
+    ----------
+    a, b : str
+        The DOF strings.
+
+    Returns
+    -------
+    bool
+        True when the nodes are the same and the direction codes are
+        the same in magnitude.
+    """
+    if str(a).strip() == str(b).strip():
+        return True
+    (node_a, rest_a), (node_b, rest_b) = parse_dof(a), parse_dof(b)
+    if node_a is None or node_a != node_b:
+        return False
+    try:
+        return abs(direction_code(rest_a)) == abs(direction_code(rest_b))
+    except ValueError:
+        return False
+
+
 #: how much imaginary part, against the real, is a measurement rather
 #: than the residue of computing one. A measured autospectrum comes back
 #: with an imaginary part about 1e-17 of its real one — the arithmetic,
