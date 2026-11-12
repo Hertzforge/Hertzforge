@@ -256,7 +256,10 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// `mimo-band-average` law file. So was the MIMO Shock set (2026-11-11), written
 /// with its contracts: the choice of a law (`hertzforge-mimo-shock-laws`) and the
 /// `shock-mimo-minimal` host fixture, the smallest law file of the `shock-mimo`
-/// world, written against the world's own bindings.
+/// world, written against the world's own bindings. Its law files followed
+/// (2026-11-11): `mimo-shock-inverse`, `mimo-shock-shape` and `mimo-shock-paired`
+/// (the SDK over the same law mathematics) and the `shock-mimo-misbehave` host
+/// fixture.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -266,6 +269,9 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-mimo-min-drive",
     "hertzforge-law-mimo-open-loop",
     "hertzforge-law-mimo-pinv",
+    "hertzforge-law-mimo-shock-inverse",
+    "hertzforge-law-mimo-shock-paired",
+    "hertzforge-law-mimo-shock-shape",
     "hertzforge-law-mimo-shape",
     "hertzforge-law-mimo-zero",
     "hertzforge-law-ratio",
@@ -288,6 +294,7 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-mimo-misbehave",
     "law-fixture-misbehave",
     "law-fixture-shock-mimo-minimal",
+    "law-fixture-shock-mimo-misbehave",
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
     "law-fixture-sine-misbehave",
