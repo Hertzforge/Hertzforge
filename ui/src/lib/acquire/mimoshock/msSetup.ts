@@ -246,6 +246,8 @@ export function mergeMsSetup(saved: Partial<MsDraft> | null): MsDraft {
  * and one held delay per control, each kept with its control. Returns whether anything changed.
  */
 export function fitChannels(d: MsDraft, rows: ChannelRow[]): boolean {
+	// A table not read yet holds no rows: the draft keeps what it has (its drives' ceilings, its targets).
+	if (!rows.length) return false;
 	const before = JSON.stringify([d.controls, d.drives, d.limits, d.pulses.length, d.srs.controls.length, d.timing.delays_ms, d.notControls]);
 	const on = rows.filter((r) => r.enabled);
 	const controlRows = on.filter((r) => r.role === 'control').map((r) => r.index);

@@ -8,6 +8,8 @@
 	 * compact.
 	 */
 	import type { Snippet } from 'svelte';
+	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
+	import type { BodyPanel, PlotBodies } from '../screen/bodies';
 	import LawLine from '../pulse/LawLine.svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
 	import type { PlotPanel } from '../screen/screen.svelte';
@@ -41,6 +43,9 @@
 		return status?.review?.hold?.message ?? (bad.length ? `Controls ${bad.join(', ')} cannot reach their targets.` : '');
 	});
 
+	/** The quantities the service sends as tables, drawn as tables in their panels. */
+	const bodies: PlotBodies = { verdicts: tableBody, ladder: tableBody, review: tableBody, pulses: tableBody };
+
 	function empty(p: PlotPanel): string {
 		if (!streaming) return 'Appears when a run starts.';
 		switch (p.plot.quantity) {
@@ -59,6 +64,17 @@
 		}
 	}
 </script>
+
+{#snippet tableBody(panel: BodyPanel)}
+	{@const tables = views.views(panel.id).filter((v) => v.view === 'table')}
+	<div class="tables" data-testid="ms-table-{panel.plot.quantity}">
+		{#if tables.length}
+			{#each tables as v, i (i)}<ViewRenderer view={v} showTitle={tables.length > 1} />{/each}
+		{:else}
+			<p class="aq-small aq-muted empty">{empty(panel as unknown as PlotPanel)}</p>
+		{/if}
+	</div>
+{/snippet}
 
 {#snippet verbs()}
 	{#if fire.visible}
@@ -113,6 +129,7 @@
 			review={ms.mustAcknowledge ? null : 'Identification is done and each control\'s reachable floor is on the level card; nothing fires until you proceed.'}
 			{notes}
 			{cards}
+			{bodies}
 			{channels}
 			{empty}
 			live={streaming}
@@ -134,6 +151,19 @@
 	.fill {
 		flex: 1;
 		min-height: 0;
+	}
+
+	.tables {
+		height: 100%;
+		overflow: auto;
+		padding: 4px var(--sp-2);
+	}
+
+	.empty {
+		display: grid;
+		place-items: center;
+		height: 100%;
+		margin: 0;
 	}
 
 	.notice {

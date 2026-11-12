@@ -35,6 +35,13 @@ describe('the MIMO Shock channels', () => {
 		expect(fitChannels(d, TABLE)).toBe(false);
 	});
 
+	it('keeps the whole draft while the table has not been read', () => {
+		const d = ready();
+		expect(fitChannels(d, [])).toBe(false);
+		expect(d.drives.map((x) => x.ceiling_vpk)).toEqual([4, 4]);
+		expect(d.controls).toEqual([1, 2, 3]);
+	});
+
 	it("keeps each control's own target with it as rows go off and on", () => {
 		const d = defaultMsSetup();
 		fitChannels(d, TABLE);
