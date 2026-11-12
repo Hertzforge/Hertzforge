@@ -474,14 +474,15 @@ export class MimoShockStore {
 	}
 
 	async loadPulses(runId: string | null): Promise<void> {
+		// Another run's rows never stay: a pulse row is keyed by its index within its own run.
+		if (runId !== this.pulsesRun) {
+			this.pulses = [];
+			this.log = [];
+		}
 		this.pulsesRun = runId;
 		this.lastViews = [];
 		this.picked = null;
-		if (!runId) {
-			this.pulses = [];
-			this.log = [];
-			return;
-		}
+		if (!runId) return;
 		try {
 			const [res, log] = await Promise.all([
 				this.control.request<MimoShockPulsesResult>('mimo_shock.pulses', { since: 0 }),

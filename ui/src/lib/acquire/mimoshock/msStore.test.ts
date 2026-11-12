@@ -12,7 +12,7 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { ChannelRow } from '$lib/protocol/types';
 import { AcquireState } from '../store.svelte';
 import { lawAccepts, MimoShockStore } from './msStore.svelte';
-import { abortLineOf, endWords, scaledCrossingWords } from './msWords';
+import { abortLineOf, endWords, ladderRungs, scaledCrossingWords } from './msWords';
 
 const until = async (cond: () => boolean, ms = 8000) => {
 	const t0 = Date.now();
@@ -161,6 +161,30 @@ describe('the MIMO Shock store', () => {
 		expect(ms.status?.state).toBe('running');
 		await ms.abort();
 	});
+
+	it("a new run's pulse rows and ladder are its own, not the run before's", async () => {
+		const { ms } = await screen();
+		ms.setup.simulator.plant = 'shock-jointed-4x4-severe';
+		ms.setup.identification.review = false;
+		expect(await ms.apply()).toBe(true);
+		expect(await ms.start()).toBe(true);
+		await until(() => ms.status?.state === 'finished', 20000);
+		const first = ms.status!.run_id;
+		expect(ms.pulses.some((p) => !p.passed)).toBe(true);
+		expect(await ms.reset()).toBe(true);
+		ms.setup.simulator.plant = 'shock-linear-4x4';
+		expect(await ms.apply()).toBe(true);
+		await until(() => ms.status?.run_id !== first && ms.status?.state === 'configured');
+		expect(ms.pulses).toEqual([]);
+		expect(await ms.start()).toBe(true);
+		await until(() => ms.status?.state === 'finished', 20000);
+		expect(ms.status?.end?.outcome).toBe('completed');
+		expect(ms.pulses.length).toBe(ms.status!.pulses.fired);
+		expect(ms.pulses.map((p) => p.index)).toEqual(Array.from({ length: ms.status!.pulses.fired }, (_, i) => i));
+		expect(ms.pulses.at(-1)?.passed).toBe(true);
+		const rungs = ladderRungs(ms.status!.levels_db, ms.pulses, ms.status!.level_db);
+		expect(rungs.reduce((n, r) => n + r.fired, 0)).toBe(ms.status!.pulses.fired);
+	}, 40000);
 
 	it('stops on the scaled line while scaled aborts are on, and says so in plain words', async () => {
 		const { ms } = await screen();
