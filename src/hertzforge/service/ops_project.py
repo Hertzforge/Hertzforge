@@ -533,7 +533,7 @@ MODAL_VERB_OPERATIONS = (
                 'inertia about it when asked.',
         params=(_source('generate_rigid_body_modes', 'Geometry'), *RIGID_POINT,
                 RIGID_NORMALIZE, RIGID_MASS, *RIGID_INERTIA, RIGID_KEEP),
-        outputs=('shape3d', 'reading'), run=rigid_body_modes),
+        outputs=('shape3d', 'reading'), run=rigid_body_modes, commits='keep'),
     Operation(
         id='project.solve_modes', title='Solve Modes', workspace='geometry',
         summary='The normal modes of a geometry whose element groups have properties: a '

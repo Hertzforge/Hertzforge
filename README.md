@@ -86,6 +86,25 @@ npm --prefix tools/e2e-sim ci
 node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 ```
 
+### Guides
+
+| Guide | What it covers |
+|---|---|
+| [`docs/shock.md`](docs/shock.md) | Classical Shock: a compensated pulse on one shaker |
+| [`docs/srs.md`](docs/srs.md) | SRS: a shock response spectrum on one shaker |
+| [`docs/sine.md`](docs/sine.md) | Sine: one tone, its amplitude controlled as it sweeps |
+| [`docs/mixed.md`](docs/mixed.md) | Mixed Mode: sine or narrow-band random over a random floor |
+| [`docs/twr.md`](docs/twr.md) | TWR: time waveform replication |
+| [`docs/mimo-random.md`](docs/mimo-random.md) | MIMO Random: random control with several shakers |
+| [`docs/mimo-shock.md`](docs/mimo-shock.md) | MIMO Shock: classical pulses and SRS with several shakers |
+| [`docs/explorer.md`](docs/explorer.md) | Explorer: one sine tone steered by hand |
+| [`docs/recorder.md`](docs/recorder.md) | Recorder: the station's inputs recorded, nothing driven |
+| [`docs/control-laws.md`](docs/control-laws.md), [`docs/control-law-spec.md`](docs/control-law-spec.md) | Writing a control law as a law file, and the interface it is written against |
+| [`docs/reference-file.md`](docs/reference-file.md), [`docs/reference-from-field-data.md`](docs/reference-from-field-data.md) | Reference files, and references from field data |
+| [`docs/hforge-format.md`](docs/hforge-format.md) | The `.hforge` run file |
+| [`docs/desktop-app.md`](docs/desktop-app.md) | The desktop app |
+| [`docs/documentation.md`](docs/documentation.md) | Documentation and typing conventions for contributors |
+
 ## License
 
 Hertzforge is released under the MIT License (`LICENSE`). The source is at

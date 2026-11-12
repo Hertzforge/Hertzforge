@@ -158,7 +158,7 @@ export function defaultSrsControl(): MsSrsControlDraft {
 		points: [
 			{ freq_hz: 50, accel_g: 4 },
 			{ freq_hz: 300, accel_g: 24 },
-			{ freq_hz: 2000, accel_g: 24 }
+			{ freq_hz: 2500, accel_g: 24 }
 		],
 		engine: 'wavsyn',
 		max_iters: 50,
@@ -181,7 +181,7 @@ export function defaultMsSetup(): MsDraft {
 		srs: { bands: { f_lo_hz: 50, f_hi_hz: 2000, bands_per_octave: 3, q: 10 }, tolerance_db: [-3, 3], controls: [] },
 		timing: { mode: 'free', window_ms: 2, delays_ms: [] },
 		verdict: 'all',
-		acquisition: { fs_hz: 51200, record_len: null, band_hz: [5, 2500], lead_s: 0.05 },
+		acquisition: { fs_hz: 12800, record_len: null, band_hz: [5, 2500], lead_s: 0.05 },
 		schedule: { mode: 'auto', levels_db: [-12, -9, -6, -3, -1.5, 0], max_pulses_per_level: 3, full_level_pulses: 3 },
 		spacing: { cooling_s: 1, settling_s: 0.5, compute_s: 0.25 },
 		identification: { drive_vrms: 0.05, frames: null, coherence_floor: 0.5, review: true },

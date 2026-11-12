@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MimoShockControlVerdict, MimoShockEnd, MimoShockPulseRow } from '$lib/protocol/mimoShock';
 import { verdictGrid } from './msGrid';
-import { abortLineOf, endWords, ladderRungs, lastPulseWords, needsAcknowledgement, reasonsWords, rungWord, scaledCrossings, scaledCrossingWords, signedDb, spreadWarning, stepNoteWords } from './msWords';
+import { abortLineOf, endWords, ladderRungs, lastPulseWords, needsAcknowledgement, reasonsWords, rungWord, scaledCrossings, scaledCrossingWords, otherWarnings, signedDb, spreadWarning, stepNoteWords } from './msWords';
 
 function control(channel: number, over: number, reasons: MimoShockControlVerdict['reasons'] = [], scaled = -2): MimoShockControlVerdict {
 	return {
@@ -112,5 +112,20 @@ describe('the hold before the first pulse', () => {
 		expect(needsAcknowledgement({ state: 'review', review: { ...review, acknowledged: 'known short' } })).toBe(false);
 		expect(needsAcknowledgement({ state: 'review', review: { ...review, hold: null } })).toBe(false);
 		expect(needsAcknowledgement({ state: 'running', review })).toBe(false);
+	});
+});
+
+describe("the service's other warnings on a pulse", () => {
+	it('leave out what the card already says, in the words the engine uses, and read as sentences', () => {
+		const engine = [
+			'the controls arrive 2.80 ms apart, over the 2.00 ms window',
+			'control 2 crossed the abort line scaled to -6 dB',
+			'controls 1, 3 crossed the abort line scaled to -6 dB',
+			"control 4's rms duration is 1.16 times its target's",
+			"control 1 has +1.20 dB of its target's energy"
+		];
+		expect(otherWarnings(engine, { spread: true, crossing: true })).toEqual(["Control 4's rms duration is 1.16 times its target's.", "Control 1 has +1.20 dB of its target's energy."]);
+		// what the card does not flag stays
+		expect(otherWarnings(engine.slice(0, 2), { spread: false, crossing: false })).toEqual(['The controls arrive 2.80 ms apart, over the 2.00 ms window.', 'Control 2 crossed the abort line scaled to -6 dB.']);
 	});
 });

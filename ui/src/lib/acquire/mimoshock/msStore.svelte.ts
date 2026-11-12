@@ -10,7 +10,8 @@
  * every number; this store keeps the operator's edits beside it and sends them when told to.
  *
  * The law panel lists whatever the catalog holds for the world and the target kind: no law is
- * named here. A draft whose law does not accept the target kind takes the first law that does.
+ * named here. A new setup opens on the law the catalog names the default for its target kind; a
+ * draft whose law does not accept the kind takes that default.
  */
 
 import { untrack } from 'svelte';
@@ -473,14 +474,15 @@ export class MimoShockStore {
 	}
 
 	async loadPulses(runId: string | null): Promise<void> {
+		// Another run's rows never stay: a pulse row is keyed by its index within its own run.
+		if (runId !== this.pulsesRun) {
+			this.pulses = [];
+			this.log = [];
+		}
 		this.pulsesRun = runId;
 		this.lastViews = [];
 		this.picked = null;
-		if (!runId) {
-			this.pulses = [];
-			this.log = [];
-			return;
-		}
+		if (!runId) return;
 		try {
 			const [res, log] = await Promise.all([
 				this.control.request<MimoShockPulsesResult>('mimo_shock.pulses', { since: 0 }),
@@ -510,10 +512,18 @@ export class MimoShockStore {
 		this.fitLaw();
 	}
 
-	/** The draft's law stays when it accepts the target kind; otherwise the first that does. */
+	/** The law the catalog names the default for a target kind, when it lists one. */
+	defaultLaw(kind: MimoShockTargetKind): MimoShockLawEntry | null {
+		return this.laws?.find((l) => l.default_for?.includes(kind) && lawAccepts(l, kind)) ?? null;
+	}
+
+	/**
+	 * The draft's law stays when it accepts the target kind; otherwise the service's default for the
+	 * kind, else the first law that accepts it.
+	 */
 	private fitLaw() {
 		if (!this.laws || this.locked) return;
-		const law = this.law ?? this.kindLaws[0] ?? null;
+		const law = this.law ?? this.defaultLaw(this.setup.kind) ?? this.kindLaws[0] ?? null;
 		if (!law) return;
 		const same = law.id === this.setup.law.id;
 		const params = lawValues(law, same ? this.setup.law.params : undefined, this.setup.controls.length || 1);
@@ -527,10 +537,16 @@ export class MimoShockStore {
 		this.setup.law = { id, params: lawValues(law, id === this.setup.law.id ? this.setup.law.params : undefined, this.setup.controls.length || 1) };
 	}
 
-	/** Change the target kind; a law that does not accept it gives way to the first that does. */
+	/**
+	 * Change the target kind. A draft on the old kind's default law moves to the new kind's default;
+	 * a law the operator chose stays while it accepts the new kind, and otherwise gives way.
+	 */
 	setKind(kind: MimoShockTargetKind) {
 		if (this.locked || kind === this.setup.kind) return;
+		const wasDefault = this.setup.law.id !== '' && this.setup.law.id === this.defaultLaw(this.setup.kind)?.id;
 		this.setup.kind = kind;
+		const next = this.defaultLaw(kind);
+		if (wasDefault && next && next.id !== this.setup.law.id) this.setup.law = { id: next.id, params: lawValues(next, undefined, this.setup.controls.length || 1) };
 		if (kind === 'waveform' && this.setup.verdict === 'global') this.setup.verdict = 'all';
 		this.fitLaw();
 	}

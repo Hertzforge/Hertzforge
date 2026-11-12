@@ -75,9 +75,10 @@ const round = (v: number, d = 3) => Math.round(v * 10 ** d) / 10 ** d;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 // ---------------------------------------------------------------------------------------------
-// The law catalog of the shock_mimo world, as a service would list it
+// The law catalog of the shock_mimo world, as the service lists it: each law's parameters,
+// diagnostics, the target kinds it accepts and those it is the default for
 
-const builtIn = (id: string, name: string, summary: string, targets: ('waveform' | 'srs')[], params: MimoShockLawEntry['params'], diagnostics: MimoShockLawEntry['diagnostics']): MimoShockLawEntry => ({
+const builtIn = (id: string, name: string, summary: string, targets: ('waveform' | 'srs')[], defaultFor: ('waveform' | 'srs')[], params: MimoShockLawEntry['params'], diagnostics: MimoShockLawEntry['diagnostics']): MimoShockLawEntry => ({
 	id,
 	world: 'shock_mimo' as MimoShockLawEntry['world'],
 	builtin: true,
@@ -91,7 +92,8 @@ const builtIn = (id: string, name: string, summary: string, targets: ('waveform'
 	diagnostics,
 	shapes: null,
 	needs: null,
-	targets
+	targets,
+	default_for: defaultFor
 });
 
 const LAWS: MimoShockLawEntry[] = [
@@ -99,49 +101,78 @@ const LAWS: MimoShockLawEntry[] = [
 		'inverse',
 		'inverse',
 		"Builds every drive through the regularized inverse of the identified plant, correcting a fraction of the waveform error after each pulse.",
-		['waveform', 'srs'],
+		["waveform", "srs"],
+		["waveform"],
 		[
-			{ key: 'lambda_rel', label: 'Regularization', help: "Regularization of the inverse on each line, relative to that line's largest singular value.", kind: 'number', unit: '', min: 0.00001, max: 1, step: 0.0005, default: 0.001 },
-			{ key: 'gain', label: 'Correction gain', help: "The fraction of each pulse's error corrected.", kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 1 },
-			{ key: 'watchdog', label: 'Line gain cut', help: 'Halve the gain on a line whose smoothed error grew.', kind: 'toggle', default: true },
-			{ key: 'refresh', label: 'Refresh the model', help: 'After every pulse, move the model the least amount that reproduces that pulse.', kind: 'toggle', default: false },
-			{ key: 'refresh_mu', label: 'Refresh step', help: 'How far the refresh moves the model.', kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 0.5 },
-			{ key: 'align', label: 'Align', help: "Remove each control's best-fit delay before the error is formed.", kind: 'toggle', default: false },
-			{ key: 'align_max_ms', label: 'Largest delay removed', help: 'The largest delay the alignment removes.', kind: 'number', unit: 'ms', min: 0, max: 20, step: 0.5, default: 2 }
+			{"key": "lambda_rel", "label": "Regularization", "help": "Tikhonov regularization of the plant inverse on each line, relative to that line's largest singular value. Larger is safer and less exact.", "kind": "number", "unit": "", "min": 1e-06, "max": 1, "step": 1e-06, "default": 0.001},
+			{"key": "gain", "label": "Correction gain", "help": "The fraction of each pulse's waveform error corrected on the next pulse.", "kind": "number", "unit": "", "min": 0.05, "max": 1, "step": 0.05, "default": 1},
+			{"key": "watchdog", "label": "Per-line watchdog", "help": "Halve a line's gain when its smoothed error grew, and restore it slowly.", "kind": "toggle", "default": true},
+			{"key": "refresh", "label": "Refresh the model", "help": "After every pulse, move the plant model the least amount that makes it reproduce that pulse, blended by the refresh weight.", "kind": "toggle", "default": false},
+			{"key": "refresh_mu", "label": "Refresh weight", "help": "How far the refresh moves the model toward the last pulse, 0 to 1.", "kind": "number", "unit": "", "min": 0.05, "max": 1, "step": 0.05, "default": 0.5},
+			{"key": "align", "label": "Remove each control's delay", "help": "Remove each control's best-fit delay from its response before the error is formed.", "kind": "toggle", "default": false},
+			{"key": "align_max_ms", "label": "Largest delay removed", "help": "The largest delay the alignment removes.", "kind": "number", "unit": "ms", "min": 0, "max": 20, "step": 0.1, "default": 2},
+			{"key": "model", "label": "Model", "help": "How the plant model follows a plant that changes with level: `frozen` keeps the identification; `secant` reproduces every pulse of the level being played; `track` fits the plant's modes once and re-fits their frequencies and damping from every pulse, predicting each new level from the trend; `track_secant` is `track` with the level's pulses reproduced on top.", "kind": "choice", "options": ["frozen", "secant", "track", "track_secant"], "default": "frozen"},
+			{"key": "modes", "label": "Modes", "help": "Modes in the tracked model; zero counts the resonance peaks of the identified plant in the band.", "kind": "integer", "unit": "", "min": 0, "max": 24, "step": 1, "default": 0},
+			{"key": "track_from_identification", "label": "Track from the identification", "help": "Take the identification as the first point of the level trend, at the level the controller measured it at, so the second level is already predicted from the first.", "kind": "toggle", "default": false},
+			{"key": "predicted_step", "label": "Predicted level step", "help": "At a level step, correct the error the next level is predicted to have (the tracked model's change between the levels) instead of the one just measured. Needs a tracked model.", "kind": "toggle", "default": false}
 		],
 		[
-			{ key: 'drive_rms_full_level', label: 'Drive rms at full level', unit: 'V', help: 'The drives at full level, rms.', layout: null },
-			{ key: 'waveform_error', label: 'Waveform error', unit: '', help: 'The waveform error the law saw.', layout: null }
+			{"key": "waveform_error", "label": "Waveform error", "unit": "", "help": "Norm of the response error over the norm of the target, at full level.", "layout": null},
+			{"key": "drive_rms_full_level", "label": "Drive rms at full level", "unit": "V", "help": "Rms of every drive together, referred to full level.", "layout": null},
+			{"key": "least_line_gain", "label": "Least line gain", "unit": "", "help": "The smallest correction gain on any driven line.", "layout": null},
+			{"key": "lines_cut", "label": "Lines cut", "unit": "", "help": "Lines whose gain the watchdog cut on this pulse.", "layout": null},
+			{"key": "lines_refreshed", "label": "Lines refreshed", "unit": "", "help": "Lines whose model the refresh moved on this pulse.", "layout": null},
+			{"key": "model_source", "label": "Model source", "unit": "", "help": "Where the next pulse's model came from: 0 the identification, 1 learned at this level, 2 predicted for a new level, 3 the secant model after the tracked one predicted worse.", "layout": null},
+			{"key": "model_prediction_residual", "label": "Model prediction error", "unit": "", "help": "How far the model that built the last pulse missed its measured response, relative, over the band.", "layout": null},
+			{"key": "predicted_step", "label": "Predicted step", "unit": "", "help": "1 when the last correction was for the next level's predicted error.", "layout": null}
 		]
 	),
 	builtIn(
 		'shape',
 		'shape',
 		"Shapes each control's target by its SRS ratio after every pulse; no waveform error is formed.",
-		['srs'],
+		["srs"],
+		["srs"],
 		[
-			{ key: 'lambda_rel', label: 'Regularization', help: "Regularization of the inverse on each line, relative to that line's largest singular value.", kind: 'number', unit: '', min: 0.00001, max: 1, step: 0.0005, default: 0.001 },
-			{ key: 'max_step_db', label: 'Largest change per pulse', help: "The largest change of a control's gain in one pulse.", kind: 'number', unit: 'dB', min: 0.5, max: 12, step: 0.5, default: 6 },
-			{ key: 'delay_relax', label: 'Delay relaxation', help: 'How far each delay moves toward the measured one per pulse; 0 holds them.', kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 0.5 },
-			{ key: 'delay_bound_ms', label: 'Delay bound', help: "Each control's delay stays this close to the first control's.", kind: 'number', unit: 'ms', min: 0, max: 20, step: 0.5, default: 2 },
-			{ key: 'anchor', label: 'Anchor', help: 'Shape the target, or the measured response with its own phase.', kind: 'choice', options: ['target', 'measured'], default: 'target' },
-			{ key: 'refresh', label: 'Refresh the model', help: 'After every pulse, move the model the least amount that reproduces that pulse.', kind: 'toggle', default: false },
-			{ key: 'refresh_mu', label: 'Refresh step', help: 'How far the refresh moves the model.', kind: 'number', unit: '', min: 0, max: 1, step: 0.05, default: 1 },
-			{ key: 'seed_timing', label: 'Seed timing', help: 'Start the delays at zero, or where the least drive and unreachable energy are needed.', kind: 'choice', options: ['zero', 'least_effort'], default: 'zero' }
+			{"key": "lambda_rel", "label": "Regularization", "help": "Tikhonov regularization of the plant inverse on each line, relative to that line's largest singular value. Larger is safer and less exact.", "kind": "number", "unit": "", "min": 1e-06, "max": 1, "step": 1e-06, "default": 0.001},
+			{"key": "max_step_db", "label": "Largest step", "help": "The largest change of a control's gain in one pulse.", "kind": "number", "unit": "dB", "min": 0.5, "max": 12, "step": 0.5, "default": 6},
+			{"key": "delay_relax", "label": "Delay relaxation", "help": "How far each control's delay moves toward its measured delay per pulse; zero holds the delays.", "kind": "number", "unit": "", "min": 0, "max": 1, "step": 0.05, "default": 0.5},
+			{"key": "delay_bound_ms", "label": "Delay bound", "help": "Each control's delay stays this close to the first control's.", "kind": "number", "unit": "ms", "min": 0, "max": 10, "step": 0.1, "default": 2},
+			{"key": "anchor", "label": "Anchor", "help": "Shape the target (default), or the measured response with its own phase (needs the refresh).", "kind": "choice", "options": ["target", "measured"], "default": "target"},
+			{"key": "refresh", "label": "Refresh the model", "help": "After every pulse, move the plant model the least amount that makes it reproduce that pulse, blended by the refresh weight.", "kind": "toggle", "default": false},
+			{"key": "refresh_mu", "label": "Refresh weight", "help": "How far the refresh moves the model toward the last pulse, 0 to 1.", "kind": "number", "unit": "", "min": 0.05, "max": 1, "step": 0.05, "default": 1},
+			{"key": "seed_timing", "label": "Seed timing", "help": "Start every control at zero delay, or at the delays that need the least unreachable energy and drive.", "kind": "choice", "options": ["zero", "least_effort"], "default": "zero"},
+			{"key": "model", "label": "Model", "help": "How the plant model follows a plant that changes with level: `frozen` keeps the identification; `secant` reproduces every pulse of the level being played; `track` fits the plant's modes once and re-fits their frequencies and damping from every pulse, predicting each new level from the trend; `track_secant` is `track` with the level's pulses reproduced on top.", "kind": "choice", "options": ["frozen", "secant", "track", "track_secant"], "default": "frozen"},
+			{"key": "modes", "label": "Modes", "help": "Modes in the tracked model; zero counts the resonance peaks of the identified plant in the band.", "kind": "integer", "unit": "", "min": 0, "max": 24, "step": 1, "default": 0},
+			{"key": "track_from_identification", "label": "Track from the identification", "help": "Take the identification as the first point of the level trend, at the level the controller measured it at, so the second level is already predicted from the first.", "kind": "toggle", "default": false},
+			{"key": "gain_clamp_db", "label": "Gain clamp", "help": "Each control's accumulated gain stays within this many dB of one; zero leaves it free.", "kind": "number", "unit": "dB", "min": 0, "max": 40, "step": 0.5, "default": 0},
+			{"key": "stall_tol_db", "label": "Stall tolerance", "help": "A point is reported stalled when its gain is at the clamp, or its error is above this and has not fallen in two pulses at one level.", "kind": "number", "unit": "dB", "min": 0.25, "max": 12, "step": 0.25, "default": 1.5}
 		],
-		[{ key: 'weight', label: 'Weight', unit: '', help: 'The share of the SRS ratio taken this pulse.', layout: null }]
+		[
+			{"key": "worst_srs_error_db", "label": "Worst SRS error", "unit": "dB", "help": "The largest SRS deviation over every control and frequency.", "layout": null},
+			{"key": "weight", "label": "Weight", "unit": "", "help": "The weight on the SRS ratio at the level just played.", "layout": null},
+			{"key": "drive_rms_full_level", "label": "Drive rms at full level", "unit": "V", "help": "Rms of every drive together, referred to full level.", "layout": null},
+			{"key": "effort_cost_seed", "label": "Effort at the seed delays", "unit": "", "help": "The seed timing's cost at the delays chosen.", "layout": null},
+			{"key": "gain_extent_db", "label": "Gain extent", "unit": "dB", "help": "The largest accumulated gain of any control on any driven line, either way.", "layout": null},
+			{"key": "stalled_points", "label": "Stalled points", "unit": "", "help": "SRS points whose gain is at the clamp or whose error has stopped falling.", "layout": null},
+			{"key": "model_source", "label": "Model source", "unit": "", "help": "Where the next pulse's model came from: 0 the identification, 1 learned at this level, 2 predicted for a new level, 3 the secant model after the tracked one predicted worse.", "layout": null},
+			{"key": "model_prediction_residual", "label": "Model prediction error", "unit": "", "help": "How far the model that built the last pulse missed its measured response, relative, over the band.", "layout": null}
+		]
 	),
 	builtIn(
 		'paired',
 		'paired',
 		"Pairs each control with one drive and scales that drive's spectrum by the smoothed ratio of wanted to measured magnitude. No plant model.",
-		['waveform', 'srs'],
+		["waveform", "srs"],
+		[],
 		[
-			{ key: 'weight', label: 'Weight', help: 'The power on the ratio.', kind: 'number', unit: '', min: 0.05, max: 1, step: 0.05, default: 0.8 },
-			{ key: 'smooth_lines', label: 'Smoothing', help: 'Lines the ratio is smoothed over.', kind: 'integer', unit: 'lines', min: 1, max: 101, step: 2, default: 15 },
-			{ key: 'max_step_db', label: 'Largest change per pulse', help: 'The most a line may change in one pulse.', kind: 'number', unit: 'dB', min: 0.5, max: 12, step: 0.5, default: 6 }
+			{"key": "weight", "label": "Weight", "help": "The power the magnitude ratio is raised to, 0 to 1.", "kind": "number", "unit": "", "min": 0, "max": 1, "step": 0.05, "default": 0.8},
+			{"key": "smooth_lines", "label": "Smoothing", "help": "Lines the magnitudes are smoothed over (odd).", "kind": "integer", "unit": "lines", "min": 1, "max": 99, "step": 1, "default": 15},
+			{"key": "max_step_db", "label": "Largest step", "help": "The largest change of a line in one pulse.", "kind": "number", "unit": "dB", "min": 0.5, "max": 12, "step": 0.5, "default": 6}
 		],
-		[{ key: 'ratio_db', label: 'Largest ratio', unit: 'dB', help: 'The largest correction applied.', layout: null }]
+		[
+			{"key": "drive_rms_full_level", "label": "Drive rms at full level", "unit": "V", "help": "Rms of every drive together, referred to full level.", "layout": null}
+		]
 	)
 ];
 
@@ -394,6 +425,17 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 		} else {
 			if (t.controls.length !== nc) errors.push(item('targets_length_mismatch', `${t.controls.length} targets for ${nc} controls; give one target per control.`, 'config.target.controls'));
 			if (!(t.bands.f_hi_hz > t.bands.f_lo_hz)) errors.push(item('bands_empty', 'The band grid holds no bands.', 'config.target.bands'));
+			else {
+				// as the service: a breakpoint target covers the band grid, from its lowest edge to its top centre
+				const n = t.bands.bands_per_octave ?? 3;
+				let top = t.bands.f_lo_hz;
+				for (let k = 0; k < 400 && top < t.bands.f_hi_hz - 1e-9; k++) top = t.bands.f_lo_hz * 2 ** ((k + 1) / n);
+				t.controls.forEach((ctl, i) => {
+					const pts = ctl.target.kind === 'breakpoints' ? ctl.target.points : [];
+					if (pts.length && (pts[0][0] > t.bands.f_lo_hz || pts[pts.length - 1][0] < top))
+						errors.push(item('target_not_covering', `The breakpoints run from ${pts[0][0]} to ${pts[pts.length - 1][0]} Hz; they cover the band grid, from ${t.bands.f_lo_hz} Hz to its top centre at ${round(top, 2)} Hz.`, `config.target.controls[${i}].target.points`));
+				});
+			}
 		}
 		const timing = c.timing ?? { mode: 'free' };
 		if (timing.mode === 'hold' && (timing.delays_s?.length ?? 0) !== nc) errors.push(item('delays_length_mismatch', 'Give one delay for every control.', 'config.timing.delays_s'));
@@ -551,8 +593,9 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			step_note: null,
 			law: { used: true, miss: null, call_ms: 2.8, delays_s: null, values: r.law.diagnostics.map((d, k) => ({ key: d.key, value: round(0.5 / (n + 1 + k), 3) })) }
 		};
-		for (const x of crossings) row.warnings.push(`Control ${x.channel} crossed its scaled abort line by ${x.over_db} dB.`);
-		if (row.arrival_spread_s > windowS) row.warnings.push(`The controls' arrivals spread over ${round(row.arrival_spread_s * 1000, 2)} ms, past the ${round(windowS * 1000, 2)} ms window.`);
+		// the engine's own words
+		if (crossings.length) row.warnings.push(`control${crossings.length === 1 ? '' : 's'} ${crossings.map((x) => x.channel).join(', ')} crossed the abort line scaled to ${row.level_db} dB`);
+		if (row.arrival_spread_s > windowS) row.warnings.push(`the controls arrive ${(row.arrival_spread_s * 1000).toFixed(2)} ms apart, over the ${(windowS * 1000).toFixed(2)} ms window`);
 		if (r.config.verdict === 'global' && row.global_srs_error_db !== null) row.passed = row.global_srs_error_db <= tol;
 		r.rows.push(row);
 		// the law improves every control that is not growing

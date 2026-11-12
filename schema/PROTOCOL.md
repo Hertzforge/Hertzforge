@@ -523,6 +523,11 @@ in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied 
 Nothing reaches the project or its journal. A reading's `Added` row says `Would add`. `preview` on an
 operation without `previews` is a `bad_request`, and nothing runs.
 
+**Commits.** An operation with `commits` names a boolean param that says go ahead. Run with it
+false, the operation answers with what it would do and changes nothing; run with it true, it does
+it. The shell's form does not ask that param: its Preview button sends it false and Apply sends it
+true.
+
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
 the first line making the project. The shell shows it read-only along the bottom of the window, to be copied into a script; nothing is typed into it.
@@ -631,7 +636,7 @@ geometry named Geometry (then Geometry (2) and on) in the display system's lengt
 `unit` names another, and the shell picks it; so is New Channel Table, named Channel Table. One solid picked offers its shape's Add as `Edit`, with
 `"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
-it, and a live form is run each time a changed field is left, with no Run button. Edit Solid stays for
+it, and a live form is run each time a changed field is left, with no Apply button. Edit Solid stays for
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
 color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
@@ -2817,8 +2822,11 @@ table drive row the run does not name, or the drives out of the table's order),
 `limit_unknown_channel`, `targets_length_mismatch` (not one target per control),
 `delays_length_mismatch` (a `hold` without one delay per control), `target_invalid` (a target the
 service cannot build at the rate: a pulse that is not usable, a target that does not fit the
-record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target), `plant_unknown`,
-`law_unknown`, `law_wrong_world`, `law_wrong_target`, `law_param_unknown`, `law_param_invalid`.
+record), `bands_empty`, `target_not_covering` and `target_not_ascending` (an SRS control's
+breakpoints, as SRS Shock's), `components_engine_mismatch` and `component_invalid` (an SRS
+control's synthesis table, as SRS Shock's), `verdict_needs_srs` (`global` with a `waveform`
+target), `plant_unknown`, `law_unknown`, `law_wrong_world`, `law_wrong_target`,
+`law_param_unknown`, `law_param_invalid`.
 
 ### Running a MIMO Shock Test
 
@@ -2917,8 +2925,8 @@ record), `bands_empty`, `verdict_needs_srs` (`global` with a `waveform` target),
 ```
 
   `reachable` is the share of the control's target energy the drives can reach at all;
-  `floor_db` the waveform error (`waveform`) or the largest SRS deviation (`srs`) of its best
-  reachable response, dB; `reachable_ok` whether that response passes the control's own judge.
+  `floor_db` the waveform error (`waveform`, at least -120 dB, the precision it is computed to)
+  or the largest SRS deviation (`srs`) of its best reachable response, dB; `reachable_ok` whether that response passes the control's own judge.
   `predicted_peak_ratio` is the seed's predicted peak over the target's at the first level (null
   before the seed). `hold` is null or `{"reason":"unreachable_target","message"}`;
   `acknowledged` the operator's words once given.

@@ -12,7 +12,7 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { ChannelRow } from '$lib/protocol/types';
 import { AcquireState } from '../store.svelte';
 import { lawAccepts, MimoShockStore } from './msStore.svelte';
-import { abortLineOf, endWords, scaledCrossingWords } from './msWords';
+import { abortLineOf, endWords, ladderRungs, scaledCrossingWords } from './msWords';
 
 const until = async (cond: () => boolean, ms = 8000) => {
 	const t0 = Date.now();
@@ -51,6 +51,29 @@ async function toReview(ms: MimoShockStore) {
 }
 
 describe('the MIMO Shock store', () => {
+	it("opens a new setup on the service's default law for its target kind, and follows the default when the kind changes", async () => {
+		const { ms, client, acq } = await screen();
+		const all = (await client.request<{ laws: { id: string; default_for?: string[] }[] }>('laws.list', { world: 'shock_mimo' })).laws;
+		const defaultFor = (kind: 'waveform' | 'srs') => all.find((l) => l.default_for?.includes(kind))?.id;
+		expect(defaultFor('waveform')).toBe('inverse');
+		expect(defaultFor('srs')).toBe('shape');
+		expect(ms.setup.law.id).toBe('inverse');
+		ms.setKind('srs');
+		expect(ms.setup.law.id).toBe('shape');
+		ms.setKind('waveform');
+		expect(ms.setup.law.id).toBe('inverse');
+		// a law the operator chose that accepts the new kind stays
+		ms.chooseLaw('paired');
+		ms.setKind('srs');
+		expect(ms.setup.law.id).toBe('paired');
+		// a new SRS setup with no law yet opens on the SRS default, not the first law that accepts SRS
+		const fresh = new MimoShockStore(acq, { local: null, checkDelayMs: 0 });
+		fresh.setup.kind = 'srs';
+		fresh.setup.law = { id: '', params: {} };
+		await fresh.refreshLaws();
+		expect(fresh.setup.law.id).toBe('shape');
+	});
+
 	it("lists the shock_mimo world's laws as the catalog gives them, those that accept the target kind", async () => {
 		const { ms, client } = await screen();
 		const all = (await client.request<{ laws: { id: string; world: string; targets?: string[] }[] }>('laws.list', { world: 'shock_mimo' })).laws;
@@ -83,6 +106,14 @@ describe('the MIMO Shock store', () => {
 		expect(ms.actions.apply.enabled).toBe(true);
 	});
 
+	it("a new SRS setup's targets cover the default band grid, so it checks clean as it opens", async () => {
+		const { ms } = await screen();
+		ms.setKind('srs');
+		await ms.checkSetup();
+		expect(ms.check?.errors).toEqual([]);
+		expect(ms.counts.target.errors).toBe(0);
+	});
+
 	it("puts the service's dry-run findings on the setup's fields", async () => {
 		const { ms } = await screen();
 		ms.setup.srs.bands.f_hi_hz = 10;
@@ -106,7 +137,7 @@ describe('the MIMO Shock store', () => {
 		// every pulse row came, the verdicts improved and the arrival spread was warned about once
 		expect(ms.pulses.length).toBe(ms.status!.pulses.fired);
 		expect(ms.pulses.at(-1)?.passed).toBe(true);
-		expect(ms.pulses.some((p) => p.warnings.some((w) => /spread/.test(w)))).toBe(true);
+		expect(ms.pulses.some((p) => p.warnings.some((w) => /arrive .* apart/.test(w)))).toBe(true);
 		expect(ms.primary).toBe('reset');
 	}, 30000);
 
@@ -130,6 +161,30 @@ describe('the MIMO Shock store', () => {
 		expect(ms.status?.state).toBe('running');
 		await ms.abort();
 	});
+
+	it("a new run's pulse rows and ladder are its own, not the run before's", async () => {
+		const { ms } = await screen();
+		ms.setup.simulator.plant = 'shock-jointed-4x4-severe';
+		ms.setup.identification.review = false;
+		expect(await ms.apply()).toBe(true);
+		expect(await ms.start()).toBe(true);
+		await until(() => ms.status?.state === 'finished', 20000);
+		const first = ms.status!.run_id;
+		expect(ms.pulses.some((p) => !p.passed)).toBe(true);
+		expect(await ms.reset()).toBe(true);
+		ms.setup.simulator.plant = 'shock-linear-4x4';
+		expect(await ms.apply()).toBe(true);
+		await until(() => ms.status?.run_id !== first && ms.status?.state === 'configured');
+		expect(ms.pulses).toEqual([]);
+		expect(await ms.start()).toBe(true);
+		await until(() => ms.status?.state === 'finished', 20000);
+		expect(ms.status?.end?.outcome).toBe('completed');
+		expect(ms.pulses.length).toBe(ms.status!.pulses.fired);
+		expect(ms.pulses.map((p) => p.index)).toEqual(Array.from({ length: ms.status!.pulses.fired }, (_, i) => i));
+		expect(ms.pulses.at(-1)?.passed).toBe(true);
+		const rungs = ladderRungs(ms.status!.levels_db, ms.pulses, ms.status!.level_db);
+		expect(rungs.reduce((n, r) => n + r.fired, 0)).toBe(ms.status!.pulses.fired);
+	}, 40000);
 
 	it('stops on the scaled line while scaled aborts are on, and says so in plain words', async () => {
 		const { ms } = await screen();

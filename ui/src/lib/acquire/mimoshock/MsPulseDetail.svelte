@@ -10,7 +10,7 @@
 	import StatusMark from '$lib/viz/StatusMark.svelte';
 	import { formatNumber } from '$lib/viz/format';
 	import { db } from '../words';
-	import { FAIL_WORDS, marginWords, MS_LAW_MISS_WORDS, overUnder, scaledCrossingWords, signedDb, spreadWarning, stepNoteWords } from './msWords';
+	import { FAIL_WORDS, marginWords, MS_LAW_MISS_WORDS, otherWarnings, overUnder, scaledCrossingWords, signedDb, spreadWarning, stepNoteWords } from './msWords';
 
 	interface Props {
 		row: MimoShockPulseRow | null;
@@ -26,7 +26,7 @@
 	const spread = $derived(row ? spreadWarning(row, windowS) : null);
 	const step = $derived(row ? stepNoteWords(row) : null);
 	/** The service's own warnings, less the scaled crossings this card already flags. */
-	const others = $derived((row?.warnings ?? []).filter((w) => !/scaled abort line/i.test(w) && !(spread && /spread/i.test(w))));
+	const others = $derived(otherWarnings(row?.warnings ?? [], { spread: !!spread, crossing: !!crossing }));
 </script>
 
 <section class="detail" aria-label="Pulse in detail" data-testid="ms-pulse-detail">

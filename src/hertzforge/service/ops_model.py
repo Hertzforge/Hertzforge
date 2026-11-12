@@ -430,7 +430,7 @@ OPERATIONS = (
                 'left in merged into one node; tolerance 0 for the core\'s own.',
         params=(GEOMETRY, GROUPS, TOLERANCE, LEFT_OUT, TOGGLE, MERGE_KEEP),
         outputs=('reading', 'shape3d'),
-        run=merge_coincident_nodes, edits=True, edits_when=_kept),
+        run=merge_coincident_nodes, edits=True, edits_when=_kept, commits='keep'),
     Operation(
         id='project.element_groups', title='Element Groups', workspace='geometry',
         summary='A geometry\'s element groups: each one\'s name, what its elements are, '
@@ -454,7 +454,7 @@ OPERATIONS = (
                 'nearest node of an element group or a second patch.',
         params=(GEOMETRY, ELEMENTS, TIE_TO, TIE_SECOND, TIE_SIDE, TIE_ADD, TIE_DROP, TIE_KEEP),
         outputs=('reading', 'shape3d'), run=tie_elements,
-        edits=True, edits_when=_kept),
+        edits=True, edits_when=_kept, commits='keep'),
     Operation(
         id='project.align_meshes', title='Align Meshes', workspace='geometry',
         summary='Where parts meshed apart meet, every move of a coarser node onto a finer '
@@ -462,5 +462,5 @@ OPERATIONS = (
                 'half the coarsest spacing.',
         params=(GEOMETRY, GROUPS, REACH, LEFT_OUT, TOGGLE, ALIGN_KEEP),
         outputs=('reading', 'shape3d'), run=align_meshes,
-        edits=True, edits_when=_kept),
+        edits=True, edits_when=_kept, commits='keep'),
 )

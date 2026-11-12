@@ -515,7 +515,8 @@ pub struct PulseReport {
     pub at_s: f64,
     /// The drive this pulse played came from a law call that was used.
     pub law_used: bool,
-    /// Why the law's last answer was not used, when it was not.
+    /// Why the law's last answer was not used, when it was not: the miss's
+    /// reason by name (its detail is among the pulse's warnings).
     pub law_miss: Option<String>,
     /// The values the law reported with the drive this pulse played.
     pub law_values: Vec<LawValue>,
@@ -771,6 +772,10 @@ pub struct SeedReport {
 /// (the single-output classical identification's floor).
 pub const MIN_MEAN_COHERENCE: f64 = 0.8;
 
+/// The lowest reachable floor a waveform control reports, dB: the precision the
+/// unreachable share of its target's energy is computed to.
+pub const FLOOR_DB_MIN: f64 = -120.0;
+
 /// The share of a control's target energy that must lie on trusted lines
 /// before the run holds (the single-output classical rule).
 pub const MIN_BAND_ENERGY: f64 = 0.9;
@@ -827,7 +832,8 @@ pub struct MimoShockEngine {
     next_drive: Vec<f64>,
     next_level: f64,
     next_used: bool,
-    next_miss: Option<String>,
+    /// The last miss, by its reason, and its detail in words.
+    next_miss: Option<(String, String)>,
     /// Seconds the law took to be built.
     build_s: f64,
     next_values: Vec<LawValue>,
@@ -1892,7 +1898,9 @@ impl MimoShockEngine {
                         .fold(0.0f64, f64::max)
                 }
                 (Target::Waveform(_), _) | (Target::Srs(_), None) => {
-                    10.0 * (1.0 - fraction[c]).max(1e-30).log10()
+                    // The unreachable share comes from a difference of energies, good to
+                    // about twelve digits: a floor under -120 dB is that rounding, not the plant.
+                    (10.0 * (1.0 - fraction[c]).max(0.0).log10()).max(FLOOR_DB_MIN)
                 }
             })
             .collect();
@@ -1950,7 +1958,7 @@ impl MimoShockEngine {
             global_srs_error_db: None,
             at_s: 0.0,
             law_used: self.next_used,
-            law_miss: self.next_miss.take(),
+            law_miss: None,
             law_values: std::mem::take(&mut self.next_values),
             predicted_peak_ratio: Vec::new(),
             end: None,
@@ -1959,6 +1967,10 @@ impl MimoShockEngine {
             warnings: Vec::new(),
             step_note: None,
         };
+        if let Some((reason, detail)) = self.next_miss.take() {
+            report.law_miss = Some(reason);
+            report.warnings.push(detail);
+        }
         if index >= self.config.guards.law.max_pulses {
             let end = self.finish(
                 EndOutcome::SafeStop,
@@ -2343,7 +2355,7 @@ impl MimoShockEngine {
                 self.next_drive = drives.iter().map(|v| v * step).collect();
                 self.next_values = Vec::new();
                 self.next_used = false;
-                self.next_miss = Some(format!("{} ({})", f, f.reason()));
+                self.next_miss = Some((f.reason().to_string(), f.to_string()));
             }
         }
         self.next_level = next_level;

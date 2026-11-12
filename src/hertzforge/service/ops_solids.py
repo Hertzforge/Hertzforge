@@ -1426,19 +1426,21 @@ OPERATIONS = (
         run=pattern_solids, edits=True, previews=True),
     Operation(
         id='project.mesh_solids', title='Mesh Solids', workspace='geometry',
-        summary='Mesh parts into hexes, tetras or shells, each part an element group; the '
-                'preview until Mesh is ticked. The size sets the time: a fine size is slow.',
+        summary='Mesh parts into hexes, tetras or shells, each part an element group; Preview '
+                'draws the mesh without adding it. The size sets the time: a fine size is slow.',
         params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,
                 MESH_KEEP),
         outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True,
-        edits_when=lambda params: params['keep']),
+        edits_when=lambda params: params['keep'], commits='keep'),
     Operation(
         id='project.mate_surfaces', title='Mate Surfaces', workspace='geometry',
-        summary='Find where element groups\' surfaces mate; Keep ties each patch, along the '
-                'normal and in the plane, rigidly, by a stiffness or not at all.',
+        summary='Find where element groups\' surfaces mate; Apply ties each patch, along the '
+                'normal and in the plane, rigidly, by a stiffness or not at all, and Preview '
+                'only finds them.',
         params=(GEOMETRY, GROUPS, MATE_TOLERANCE, NORMAL, NORMAL_STIFFNESS, SHEAR,
                 SHEAR_STIFFNESS, PATCHES, MATE_KEEP),
-        outputs=('reading', 'table', 'shape3d', 'table'), run=mate_surfaces, edits=True),
+        outputs=('reading', 'table', 'shape3d', 'table'), run=mate_surfaces, edits=True,
+        commits='keep'),
     Operation(
         id='project.edit_mated_surfaces', title='Edit Mated Surfaces', workspace='geometry', summary='Change how a kept set of mated surfaces is held, or its '
                                    'name.',
