@@ -38,7 +38,7 @@ HIDDEN = frozenset(f'project.{name}' for name in (
 VERBS = {f'project.{name}': verb for name, verb in {
     'compute_psds': 'Compute PSDs', 'compute_frfs': 'Compute FRFs', 'fit_modes': 'Fit Modes',
     'integrate': 'Integrate', 'differentiate': 'Differentiate', 'filter_data': 'Apply Filter',
-    'truncate_data': 'Apply Truncation', 'resample': 'Resample',
+    'truncate_data': 'Apply Truncation', 'resample': 'Resample', 'rescale': 'Rescale',
     'compute_spectra': 'Compute Spectra', 'compute_cpsds': 'Compute CPSDs',
     'compute_srs': 'Compute SRS', 'compute_multiple_coherence': 'Compute Coherence',
     'compute_octave': 'Compute Octaves', 'make_realizable': 'Make Realizable',
