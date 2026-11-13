@@ -59,6 +59,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'filter_data': (_HISTORY, ''),
     'truncate_data': (_HISTORY, ''),
     'resample': (_HISTORY, ''),
+    'rescale': (_HISTORY, ''),
     'detect_shocks': (_HISTORY, ''),
     'compute_spectra': (_HISTORY, ''),
     'compute_psds': (_HISTORY, ''),
