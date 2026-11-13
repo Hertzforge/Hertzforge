@@ -66,6 +66,9 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
+	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+	import { wideLines } from './wideLines';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
 	import { colormap, colormapGradient } from './colormap';
@@ -371,7 +374,8 @@
 	let shapeImagAttr: BufferAttribute;
 	let colorAttr: BufferAttribute;
 	let surface: Mesh;
-	let outline: LineSegments | null = null;
+	/** The tracelines and bar elements, the lines off the faces, drawn `LINE_WIDTH` wide. */
+	let outline: LineSegments2 | null = null;
 	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
@@ -409,11 +413,11 @@
 	let bodyShapeAttr: BufferAttribute | null = null;
 	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
-	let overlayLineGeometry: BufferGeometry | null = null;
 	let overlayAttr: BufferAttribute;
 	let overlayImagAttr: BufferAttribute;
 	let overlaySurface: Mesh | null = null;
-	let overlayOutline: LineSegments | null = null;
+	let overlayOutline: LineSegments2 | null = null;
+	let overlayEdges: LineSegments | null = null;
 	/** The surfaces not in use, drawn muted over the model, when clicks leave surfaces out. */
 	let mutedSurface: Mesh | null = null;
 	/** The nodes picked and the one under the cursor. */
@@ -540,6 +544,7 @@
 		const visible = !!o && !!current;
 		overlaySurface.visible = visible;
 		if (overlayOutline) overlayOutline.visible = visible;
+		if (overlayEdges) overlayEdges.visible = visible;
 		dirty = true;
 		if (!o || !current) return;
 		const columns = view.overlays!.length;
@@ -593,7 +598,7 @@
 		const lineColor = new Color(cssVar('--text-2'));
 		(ghostSurface.material as MeshBasicMaterial).color = ghostColor;
 		if (ghostOutline) (ghostOutline.material as LineBasicMaterial).color = ghostColor;
-		if (outline) (outline.material as LineBasicMaterial).color = lineColor;
+		if (outline) (outline.material as LineMaterial).color = lineColor;
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
 		// beside a second set of places, the ones a click picks wear the accent
@@ -716,15 +721,25 @@
 			overlaySurface.visible = false;
 			scene.add(overlaySurface);
 			if (view.lines && view.lines.length) {
-				overlayLineGeometry = new BufferGeometry();
-				overlayLineGeometry.setAttribute('position', position);
-				overlayLineGeometry.setAttribute('shape', overlayAttr);
-				overlayLineGeometry.setAttribute('shapeImag', overlayImagAttr);
-				overlayLineGeometry.setIndex(new BufferAttribute(view.lines, 1));
-				overlayOutline = new LineSegments(overlayLineGeometry, displaced(new LineBasicMaterial({ color: OVERLAY_COLOR })));
-				overlayOutline.frustumCulled = false;
-				overlayOutline.visible = false;
-				scene.add(overlayOutline);
+				// its tracelines and bars as wide as the mode's; the edges on its faces stay thin
+				const { onFaces, apart } = splitOnFaces(view.lines, view.triangles);
+				if (apart.length) {
+					overlayOutline = wideLines(apart, view.nodes, overlayAttr, overlayImagAttr, uniforms, { color: OVERLAY_COLOR });
+					materials.push(overlayOutline.material);
+					overlayOutline.visible = false;
+					scene.add(overlayOutline);
+				}
+				if (onFaces.length) {
+					const g = new BufferGeometry();
+					g.setAttribute('position', position);
+					g.setAttribute('shape', overlayAttr);
+					g.setAttribute('shapeImag', overlayImagAttr);
+					g.setIndex(new BufferAttribute(onFaces, 1));
+					overlayEdges = new LineSegments(g, displaced(new LineBasicMaterial({ color: OVERLAY_COLOR })));
+					overlayEdges.frustumCulled = false;
+					overlayEdges.visible = false;
+					scene.add(overlayEdges);
+				}
 			}
 		}
 
@@ -778,8 +793,8 @@
 			};
 			lineGeometry = linked(view.lines);
 			if (apart.length) {
-				outline = new LineSegments(linked(apart), displaced(new LineBasicMaterial({ transparent: true, opacity: 0.9 })));
-				outline.frustumCulled = false;
+				outline = wideLines(apart, view.nodes, shapeAttr, shapeImagAttr, uniforms, { transparent: true, opacity: 0.9 });
+				materials.push(outline.material);
 				scene.add(outline);
 			}
 			if (onFaces.length) {
@@ -1122,7 +1137,8 @@
 		otherOff?.geometry.dispose();
 		markGeometry?.dispose();
 		overlayGeometry?.dispose();
-		overlayLineGeometry?.dispose();
+		overlayOutline?.geometry.dispose();
+		overlayEdges?.geometry.dispose();
 		for (const m of materials) m.dispose();
 		renderer.dispose();
 		renderer.forceContextLoss();
