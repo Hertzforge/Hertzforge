@@ -2,10 +2,10 @@
 
 `convert` reads a run folder (`hertzforge.io.run_folder`) and writes a
 `.hforge` project every analysis tool opens with `Project.open`, by
-default `<run name>.hforge` inside the folder. The control service's
-Random, MIMO Random, Sine, Mixed Mode, Classical Shock, SRS shock, TWR and
-Explorer modules and its Recorder write a run folder for every run; MIMO
-Shock does not yet. This is the analysis side of that bridge.
+default `<run name>.hforge` inside the folder. Every control module of
+the control service writes a run folder for every run: Random, MIMO
+Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock, TWR,
+Explorer and the Recorder. This is the analysis side of that bridge.
 
 The project holds, in this order:
 
@@ -46,14 +46,16 @@ The project holds, in this order:
   `psd`, `cpsd`, `frf` or `coherence`, converted to SI, cross terms as
   written (the control service writes them in the file's convention,
   conj(X) Y, so nothing is conjugated here);
-- an `Srs` per result of kind `srs` (a record per pulse), and a
-  `ShockSpecification` per result of kind `srs_reference`, its band as
-  the warning limits and its abort band (where it has one) as the abort
-  limits, in SI at the result's Q;
-- the `TransientSpecification` a TWR run was controlled to, from its
-  result of kind `transient_reference` (the prepared section between its
-  pads at full level, time from the section's start), in SI; it has no
-  limits, so its alarm and abort shares stay in the result's description;
+- an `Srs` per result of kind `srs` (a record per pulse, and for a MIMO
+  Shock run per control), and a `ShockSpecification` per result of kind
+  `srs_reference`, its band as the warning limits and its abort band
+  (where it has one) as the abort limits, in SI at the result's Q;
+- the `TransientSpecification` a TWR or MIMO Shock waveform run was
+  controlled to, from its result of kind `transient_reference` (a TWR
+  run's prepared section between its pads at full level, time from the
+  section's start; a MIMO Shock run's reference at every control), in
+  SI; it has no limits, so its tolerance stays in the result's
+  description;
 - the `RunRecord`: the manifest, the table and setup as written, the
   law, the log, the end, each stream's and result's description, the
   arrays of results no analysis class holds (an Explorer run's survey
@@ -124,33 +126,61 @@ def _number(value: Any) -> Any:
     return '' if value is None else value
 
 
-def channel_table_from_rows(rows: Sequence[Mapping[str, Any]]) -> Any:
+#: a row's optional text members that are the analysis table's columns of
+#: the same name (`analysis_role` is its `role`)
+_TEXT_MEMBERS = {'direction': 'direction', 'channel_type': 'channel_type',
+                 'analysis_role': 'role', 'serial_number': 'serial_number', 'make': 'make',
+                 'model': 'model', 'triax_dof': 'triax_dof', 'expiration': 'expiration'}
+
+#: a row's optional number members, by the analysis table's column
+_RANGE_MEMBERS = {'daq_range_v': 'daq_range', 'sensor_range_v': 'sensor_range'}
+
+#: every optional member a control channel row may carry (schema/PROTOCOL.md,
+#: "Channel Table"): the analysis side's columns, the analysis tier, the
+#: limit mark and `extra`
+ANALYSIS_MEMBERS = ('node', *_TEXT_MEMBERS, *_RANGE_MEMBERS, 'analysis_tier', 'limit', 'extra')
+
+
+def channel_table_from_rows(rows: Sequence[Mapping[str, Any]],
+                            environments: Mapping[str, Any] | None = None) -> Any:
     """The `ChannelTable` a control channel table's rows describe.
 
-    Each row is in the protocol's spelling (`index`, `enabled`,
-    `description`, `role`, `physical`, `interface`, `iepe_bias_v`,
-    `units`, `sensitivity_mv_per_eu`, `range_max`, `polarity`,
-    `control_group`, `abort`), with any further columns as text under
-    `extra` (node, direction, serial number, make, model and the rest,
-    by any name the table reads). The row's own fields win over an
-    `extra` of the same column. A channel's loop role is three columns:
-    a drive is `drive`, a control channel `control`, and a reference a
-    `role` of reference. Its analysis role is the `extra` role where it
-    gives one (a monitor is never a reference), else reference for a
-    drive or a reference and response for the rest. A channel with no
-    node is given its channel number as its node, a node-only identity,
-    so no two channels share a DOF.
+    Each row is in the protocol's spelling: the fields every row has
+    (`index`, `enabled`, `description`, `role`, `physical`, `interface`,
+    `iepe_bias_v`, `units`, `sensitivity_mv_per_eu`, `range_max`,
+    `polarity`, `control_group`, `abort`) and the optional members
+    (`ANALYSIS_MEMBERS`): `node`, `direction`, `channel_type`,
+    `analysis_role`, `daq_range_v`, `sensor_range_v`, `serial_number`,
+    `make`, `model`, `triax_dof`, `expiration`, `analysis_tier`, `limit`
+    and `extra`. A member is the table's column of the same name, except
+    `description` (its `comment`), `units` (`unit`),
+    `sensitivity_mv_per_eu` (`sensitivity`), `analysis_role` (`role`) and
+    the two ranges (`daq_range`, `sensor_range`). An `extra` entry whose
+    name the table reads as one of its columns fills that column where
+    the row's own member does not; the rest are kept together in the
+    table's `extra` column. A channel's loop role is three columns: a
+    drive is `drive`, a control channel `control`, and a reference a
+    `role` of reference. Its analysis role is the one the row states
+    (a monitor is never a reference), else reference for a drive or a
+    reference and response for the rest. A channel with no node is given
+    its channel number as its node, a node-only identity, so no two
+    channels share a DOF.
 
     Parameters
     ----------
     rows : sequence of mapping
         The control table's rows.
+    environments : mapping of str to Environment or mapping, optional
+        The table's control loops by name, each an `Environment` or its
+        JSON form (`environment_from_json`).
 
     Returns
     -------
     ChannelTable
         The table, with the controller's columns.
     """
+    import json
+
     from ..core.channel_table import ChannelTable, canonical_name
 
     columns: dict[str, list[Any]] = {}
@@ -160,25 +190,36 @@ def channel_table_from_rows(rows: Sequence[Mapping[str, Any]]) -> Any:
         columns.setdefault(name, [''] * count)[k] = value
 
     for k, row in enumerate(rows):
-        extra = {canonical_name(str(key)): value
+        given = {canonical_name(str(key)): value
                  for key, value in (row.get('extra') or {}).items()}
-        for name, value in extra.items():
-            put(name, k, '' if value is None else value)
+        kept = {}
+        for name, value in given.items():
+            if name in ChannelTable.COLUMNS and name not in ('extra', 'channel'):
+                put(name, k, '' if value is None else value)
+            else:
+                kept[name] = '' if value is None else str(value)
+        stated = {column: str(row.get(member) or '')
+                  for member, column in _TEXT_MEMBERS.items() if row.get(member)}
+        for column, text in stated.items():
+            put(column, k, text)
+        for member, column in _RANGE_MEMBERS.items():
+            if row.get(member) is not None:
+                put(column, k, _number(row.get(member)))
         role = str(row.get('role', 'monitor'))
-        stated = str(extra.get('role', '') or '').strip().lower()
+        said = str(stated.get('role', given.get('role', '')) or '').strip().lower()
         if role == 'reference':
             analysis = 'reference'
-        elif stated in ChannelTable.ROLES and not (role == 'monitor'
-                                                    and stated == 'reference'):
-            analysis = stated
+        elif said in ChannelTable.ROLES and not (role == 'monitor' and said == 'reference'):
+            analysis = said
         else:
             analysis = 'reference' if role == 'drive' else 'response'
         physical = row.get('physical')
         abort = row.get('abort') or {}
-        node = str(extra.get('node', '') or '').strip()
+        node = row.get('node')
+        node = str(node) if node is not None else str(given.get('node', '') or '').strip()
         put('channel', k, int(row['index']))
         put('node', k, node or str(int(row['index'])))
-        put('direction', k, str(extra.get('direction', '') or ''))
+        put('direction', k, stated.get('direction', str(given.get('direction', '') or '')))
         put('comment', k, str(row.get('description', '') or ''))
         put('role', k, analysis)
         put('control', k, role == 'control')
@@ -196,10 +237,45 @@ def channel_table_from_rows(rows: Sequence[Mapping[str, Any]]) -> Any:
         put('abort_accel_g', k, _number(abort.get('accel_g')))
         put('abort_velocity_ips', k, _number(abort.get('velocity_ips')))
         put('abort_displacement_mil', k, _number(abort.get('displacement_mil')))
+        tier = str(row.get('analysis_tier') or '')
+        put('analysis_tier', k, '' if tier == 'full' else tier)
+        put('limit', k, bool(row.get('limit', False)))
+        put('extra', k, json.dumps(kept, sort_keys=True) if kept else '')
     if not rows:
         columns = {name: [] for name in ('channel', 'node', 'direction', 'unit',
                                          *ChannelTable.CONTROLLER)}
-    return ChannelTable(columns)
+    loops = {name: environment_from_json(value)
+             for name, value in (environments or {}).items()}
+    return ChannelTable(columns, loops)
+
+
+def environment_from_json(value: Any) -> Any:
+    """An `Environment` from its JSON form (`environment_to_json`), or the
+    `Environment` itself."""
+    from ..core.channel_table import TRANSFORMATION_FORMS, Environment
+
+    if isinstance(value, Environment):
+        return value
+    if not isinstance(value, Mapping):
+        raise TypeError('an environment is an object with "controls" and "drives"')
+    matrices = {f'{form}_transformation': value.get(f'{form}_transformation')
+                for form in TRANSFORMATION_FORMS}
+    return Environment(controls=list(value.get('controls') or []),
+                       drives=list(value.get('drives') or []), **matrices)
+
+
+def environment_to_json(environment: Any) -> dict[str, Any]:
+    """An `Environment` as JSON: its control and drive channel numbers in
+    the controller's order, and each transformation as a list of rows, or
+    None."""
+    from ..core.channel_table import TRANSFORMATION_FORMS
+
+    out: dict[str, Any] = {'controls': [int(n) for n in environment.controls],
+                           'drives': [int(n) for n in environment.drives]}
+    for form in TRANSFORMATION_FORMS:
+        matrix = environment.matrix(form)
+        out[f'{form}_transformation'] = None if matrix is None else matrix.tolist()
+    return out
 
 
 def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
@@ -208,8 +284,10 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
 
     A cell the table leaves blank takes a new row's value (a drive in V
     at 1000 mV/V and 10 V full scale, any other channel in g at 100 mV/g
-    and 100 g). The measurement's columns other than the row's own
-    (node, direction, serial number and the rest) go under `extra`.
+    and 100 g). Each optional member is written only when its column
+    holds something: the measurement's columns (node, direction, the
+    sensor's identity and the rest), the analysis tier, the limit mark,
+    and the `extra` column's entries under `extra`.
 
     Parameters
     ----------
@@ -226,6 +304,8 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
     ValueError
         If the table has no controller columns.
     """
+    import json
+
     if not table.has_controller_settings:
         raise ValueError('the table has no controller columns; convert it to carry them first')
 
@@ -237,8 +317,6 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
         return default if not text else (int(text) if name == 'control_group'
                                          else float(text))
 
-    own = {'channel', 'comment', 'role', 'control', 'drive', 'unit', 'sensitivity',
-           'channel_type', *table.CONTROLLER}
     out = []
     for k in range(table.num_channels):
         if cell('drive', k) == 'True':
@@ -252,7 +330,7 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
         drive = role == 'drive'
         physical = cell('physical', k)
         device, slash, channel = physical.partition('/')
-        out.append({
+        row: dict[str, Any] = {
             'index': int(table['channel'][k]),
             'enabled': cell('enabled', k) != 'False',
             'description': cell('comment', k),
@@ -269,9 +347,23 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
             'abort': {'accel_g': number('abort_accel_g', k),
                       'velocity_ips': number('abort_velocity_ips', k),
                       'displacement_mil': number('abort_displacement_mil', k)},
-            'extra': {name: cell(name, k) for name in table.column_names
-                      if name not in own and cell(name, k)},
-        })
+        }
+        if cell('node', k):
+            row['node'] = int(cell('node', k))
+        for member, column in _TEXT_MEMBERS.items():
+            if cell(column, k):
+                row[member] = cell(column, k)
+        for member, column in _RANGE_MEMBERS.items():
+            if cell(column, k):
+                row[member] = float(cell(column, k))
+        if cell('analysis_tier', k) not in ('', 'full'):
+            row['analysis_tier'] = cell('analysis_tier', k)
+        if cell('limit', k) == 'True':
+            row['limit'] = True
+        if cell('extra', k):
+            row['extra'] = {str(name): str(value)
+                            for name, value in json.loads(cell('extra', k)).items()}
+        out.append(row)
     return out
 
 
@@ -448,12 +540,16 @@ def _shot_spans(stream: run_folder.Stream
 
 def _shot_label(k: int, shot: Mapping[str, Any]) -> str:
     """A shot's record label: its pulse ('pulse 3') or its play ('play
-    3') where it names one, counted from 1, else its place in the stream
-    ('shot 1')."""
+    3') where it names one, counted from 1, the step it was where it names
+    one (a MIMO Shock identification's 'probe' or 'estimate'), else its
+    place in the stream ('shot 1')."""
     for name in ('pulse', 'play'):
         number = shot.get(name)
         if isinstance(number, int) and not isinstance(number, bool):
             return f'{name} {number + 1}'
+    step = shot.get('step')
+    if isinstance(step, str) and step:
+        return step
     return f'shot {k + 1}'
 
 
@@ -559,8 +655,7 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
     `Specification` on the control channels, in SI, its alarm band as the
     warning limits and its abort band as the abort limits. A row's bands
     hold from that row to the next (`SpecificationDraft` segments)."""
-    from ..core.author import SpecificationDraft
-    from ..units import si_transform
+    from .setup_convert import specification_from_random_profile
 
     profile = run.setup.get('resolved', {}).get('profile') if isinstance(
         run.setup.get('resolved'), Mapping) else None
@@ -570,8 +665,7 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
         return None
     points = [p for p in profile['breakpoints'] if isinstance(p, Mapping)]
     try:
-        frequencies = [float(p['freq_hz']) for p in points]
-        levels = [float(p['psd_g2_hz']) for p in points]
+        [(float(p['freq_hz']), float(p['psd_g2_hz'])) for p in points]
     except (KeyError, TypeError, ValueError):
         lacked.append('the resolved profile does not give every breakpoint as freq_hz and '
                       'psd_g2_hz, so the run has no specification')
@@ -582,27 +676,11 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
         lacked.append('no enabled control channel holds the profile, so the run has no '
                       'specification')
         return None
-    scale = si_transform('g')[0] ** 2
-
-    def band(name: str, default: Sequence[float]) -> list[tuple[float, float]]:
-        # the protocol's [below, above] in positive dB, as the draft holds
-        # a band: signed, below the target negative
-        own = profile.get(name, default)
-        return [(-float(below), float(above))
-                for below, above in (p.get(name) or own for p in points[:-1])]
-
-    warning, abort = band('alarm_db', (3.0, 3.0)), band('abort_db', (6.0, 6.0))
     dofs = table.dof_strings()
-    draft = SpecificationDraft(
-        channels=[dofs[k] for k in controls], dims=['acceleration'] * len(controls),
-        frequencies=frequencies, levels=[[v * scale for v in levels] for _ in controls],
-        bands=[{'warning': warning, 'abort': abort,
-                'symmetric': all(lo == -hi for lo, hi in warning + abort),
-                'uniform': len(set(warning)) == 1 and len(set(abort)) == 1}
-               for _ in controls])
-    spec = draft.make('the Random profile as the control service resolved it')
-    spec.ordinate_unit = ['g'] * spec.num_records
-    return spec
+    # the one mapping between a Random profile and a specification
+    return specification_from_random_profile(
+        profile, [dofs[k] for k in controls],
+        'the Random profile as the control service resolved it')
 
 
 def _mixed_rate(rate: Mapping[str, Any]) -> tuple[float, int]:
@@ -723,7 +801,8 @@ def _sine_specification(run: run_folder.RunFolder, table: Any, lacked: list[str]
     dwell. The tone's breakpoints are the points the service resolved
     the profile at (`results/reference`), so the interpolation between
     them follows the profile the run followed."""
-    from ..core.sine import LINEAR, LOG, SineSweepSpecification, SineTone
+    from ..core.sine import SineSweepSpecification
+    from .setup_convert import sine_tone
 
     resolved = run.setup.get('resolved') if isinstance(run.setup.get('resolved'),
                                                        Mapping) else {}
@@ -747,28 +826,8 @@ def _sine_specification(run: run_folder.RunFolder, table: Any, lacked: list[str]
         lacked.append(f'the profile is in a unit of {dim!r}, not acceleration, so the run has '
                       'no sine specification')
         return None
-    m = len(controls)
-
-    def columns(values: np.ndarray) -> np.ndarray:
-        return np.tile(np.asarray(values, dtype=np.float64)[:, np.newaxis], (1, m))
-
-    if kind == 'dwell':
-        dwell = test.get('dwell') or {}
-        frequency = float(test['freq_hz'])
-        seconds = (float(dwell['seconds']) if 'seconds' in dwell
-                   else float(dwell.get('cycles', 0)) / frequency)
-        tone = SineTone.dwell(SINE_TONE, frequency, target[:1].repeat(m), seconds,
-                              **{k: v[:1].repeat(m) for k, v in limits.items()})
-    else:
-        rate = test.get('rate') or {}
-        law = LOG if rate.get('law') == 'log' else LINEAR
-        speed = float(rate['oct_per_min'] if law == LOG else rate['hz_per_s'])
-        order = np.argsort(frequencies)
-        if test.get('direction') == 'down':
-            order, speed = order[::-1], -speed
-        tone = SineTone(SINE_TONE, 0.0, frequencies[order], columns(target[order]),
-                        [law] * (len(order) - 1), [speed] * (len(order) - 1),
-                        **{k: columns(v[order]) for k, v in limits.items()})
+    # the one mapping between a Sine test and the tone it plays
+    tone = sine_tone(test, frequencies, target, limits, len(controls), SINE_TONE)
     dofs = table.dof_strings()
     return SineSweepSpecification(
         [tone], [dofs[k] for k in controls], ordinate_dim='acceleration',
@@ -964,28 +1023,33 @@ def _srs_object(result: run_folder.Result, table: Any,
     result of kind `srs_reference` (a nominal SRS and its tolerance band)
     a `ShockSpecification` with the band as its warning limits and an
     abort band, where the result has one, as its abort limits. In SI, at
-    the result's Q and type."""
+    the result's Q and type. A result over several channels (a MIMO Shock
+    run's, one row per control) holds each channel's records together,
+    in record order, every channel in the unit its arrays state."""
     from ..core.data import ShockSpecification, Srs
     from ..units import UNKNOWN, si_transform
 
     channels = result.description.get('channels') or {}
     responses = [int(i) for i in channels.get('responses') or []]
-    if len(responses) != 1 or responses[0] not in units:
-        return None, 'it does not name one response channel the table holds'
-    channel = responses[0]
+    if not responses or any(i not in units for i in responses):
+        return None, 'it does not name its response channels in the table'
     spec = result.kind == 'srs_reference'
     name = 'reference' if spec else 'values'
     if name not in result.arrays:
         return None, f'it holds no array named {name}'
+    width = len(responses)
     values = np.asarray(result.arrays[name], dtype=np.float64)
     repeated = result.records is not None and not spec
-    stack = values.reshape(values.shape[0], -1) if repeated else values.reshape(1, -1)
+    if values.size % width:
+        return None, f'its values do not hold {width} channels'
+    stack = (values.reshape(values.shape[0], width, -1) if repeated
+             else values.reshape(1, width, -1))
     lines = stack.shape[-1]
     abscissa = _abscissa(result, lines)
     if abscissa is None or len(abscissa) != lines:
         return None, 'its abscissa is not stated, or not as long as its values'
-    scale, dim, unit = _unit_scale(units[channel])
-    known = dim != UNKNOWN
+    scales = [_unit_scale(units[i]) for i in responses]
+    known = all(dim != UNKNOWN for _s, dim, _u in scales)
     described = next((a for a in result.description.get('arrays') or []
                       if a.get('name') == name), {})
     if known:
@@ -994,31 +1058,37 @@ def _srs_object(result: run_folder.Result, table: Any,
             stated = si_transform(declared)[0] if declared else None
         except Exception:  # noqa: BLE001 - an unreadable unit is reported, not raised
             stated = None
-        if stated is None or not np.isclose(stated, scale, rtol=1e-9):
-            return None, (f'its unit {described.get("unit")!r} is not the one channel '
-                          f'{channel} gives')
-    factor = scale if known else 1.0
-    dof = table.dof_strings()[{int(i): k for k, i in enumerate(table['channel'])}[channel]]
+        for channel, (scale, _d, _u) in zip(responses, scales, strict=True):
+            if stated is None or not np.isclose(stated, scale, rtol=1e-9):
+                return None, (f'its unit {described.get("unit")!r} is not the one channel '
+                              f'{channel} gives')
+    factors = [scale if known else 1.0 for scale, _d, _u in scales]
+    row = {int(i): k for k, i in enumerate(table['channel'])}
+    dofs = [table.dof_strings()[row[i]] for i in responses]
     count = stack.shape[0]
+    # channel-major: each channel's records together, in record order
+    ordinate = np.concatenate([stack[:, c, :] * factors[c] for c in range(width)], axis=0)
+    expand = (lambda seq: [v for v in seq for _ in range(count)])
     kwargs: dict[str, Any] = {
-        'abscissa': abscissa, 'ordinate': stack * factor, 'response_dof': [dof] * count,
-        'ordinate_dim': [dim if known else UNKNOWN] * count,
-        'ordinate_unit': [unit if known else None] * count,
+        'abscissa': abscissa, 'ordinate': ordinate, 'response_dof': expand(dofs),
+        'ordinate_dim': expand([dim if known else UNKNOWN for _s, dim, _u in scales]),
+        'ordinate_unit': expand([unit if known else None for _s, _d, unit in scales]),
         'comment': result.description.get('description', '') or result.name,
         'q': result.description.get('q'),
         'kind': str(result.description.get('srs_kind') or 'maximax')}
     if repeated:
-        kwargs['block'] = [(f'pulse {r["pulse"] + 1}' if isinstance(r.get('pulse'), int)
-                            else f'record {r.get("index", k)}')
-                           for k, r in enumerate(result.records or [])]
+        labels = [(f'pulse {r["pulse"] + 1}' if isinstance(r.get('pulse'), int)
+                   else f'record {r.get("index", k)}')
+                  for k, r in enumerate(result.records or [])]
+        kwargs['block'] = [label for _c in range(width) for label in labels]
     if not spec:
         return Srs(**kwargs), ''
     limits = {}
     for array, limit in (('band_low', 'warning_lower'), ('band_high', 'warning_upper'),
                          ('abort_low', 'abort_lower'), ('abort_high', 'abort_upper')):
         if array in result.arrays:
-            limits[limit] = np.asarray(result.arrays[array], dtype=np.float64).reshape(
-                1, -1) * factor
+            given = np.asarray(result.arrays[array], dtype=np.float64).reshape(width, -1)
+            limits[limit] = given * np.asarray(factors)[:, np.newaxis]
     return ShockSpecification(**kwargs, **limits), ''
 
 
@@ -1077,29 +1147,35 @@ def _sdm_specification(result: run_folder.Result, table: Any,
 
 def _transient_specification(result: run_folder.Result, table: Any,
                              units: Mapping[int, str]) -> tuple[Any, str]:
-    """A TWR run's target as the analysis holds a required waveform, or
-    (None, why not): a `TransientSpecification` of its control channel,
-    in SI, against time from the section's start."""
+    """A required waveform as the analysis holds it, or (None, why not):
+    a `TransientSpecification` of its control channels (a TWR run's one,
+    a MIMO Shock run's every control, a record each), in SI, against time
+    from the start the result states."""
     from ..core.data import TransientSpecification
     from ..units import UNKNOWN
 
     channels = result.description.get('channels') or {}
     responses = [int(i) for i in channels.get('responses') or []]
-    if len(responses) != 1 or responses[0] not in units:
-        return None, 'it does not name one response channel the table holds'
+    if not responses or any(i not in units for i in responses):
+        return None, 'it does not name its response channels in the table'
     if 'reference' not in result.arrays:
         return None, 'it holds no array named reference'
-    values = np.asarray(result.arrays['reference'], dtype=np.float64).reshape(-1)
-    abscissa = _abscissa(result, len(values))
-    if abscissa is None or len(abscissa) != len(values):
+    values = np.asarray(result.arrays['reference'], dtype=np.float64)
+    if values.size % len(responses):
+        return None, f'its reference does not hold {len(responses)} channels'
+    values = values.reshape(len(responses), -1)
+    abscissa = _abscissa(result, values.shape[1])
+    if abscissa is None or len(abscissa) != values.shape[1]:
         return None, 'its abscissa is not stated, or not as long as its values'
-    channel = responses[0]
-    scale, dim, unit = _unit_scale(units[channel])
-    known = dim != UNKNOWN
-    dof = table.dof_strings()[{int(i): k for k, i in enumerate(table['channel'])}[channel]]
+    scales = [_unit_scale(units[i]) for i in responses]
+    row = {int(i): k for k, i in enumerate(table['channel'])}
+    dofs = table.dof_strings()
     return TransientSpecification(
-        abscissa, values[np.newaxis] * (scale if known else 1.0), response_dof=[dof],
-        ordinate_dim=[dim], ordinate_unit=[unit if known else None],
+        abscissa, np.array([v * (scale if dim != UNKNOWN else 1.0)
+                            for v, (scale, dim, _u) in zip(values, scales, strict=True)]),
+        response_dof=[dofs[row[i]] for i in responses],
+        ordinate_dim=[dim for _s, dim, _u in scales],
+        ordinate_unit=[unit if dim != UNKNOWN else None for _s, dim, unit in scales],
         comment=result.description.get('description', '') or result.name), ''
 
 

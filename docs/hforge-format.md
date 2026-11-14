@@ -344,7 +344,12 @@ input) and `iepe_bias` (volts), `polarity` ('positive' or 'negative',
 blank for positive), `range_max` (the input's full scale in the
 channel's unit), `control_group`, and the abort limits `abort_accel_g`,
 `abort_velocity_ips` and `abort_displacement_mil`, blank where none is
-set. Their presence in `column_order` is the record that the table was
+set, then `limit` ('True' for a limit channel, a mark only; each test's
+limits stay in its setup), `analysis_tier` ('full', 'rotating' or
+'decimated:N', blank for full) and `extra` (any other column the control
+service carries for the row, a JSON object of text by column name, blank
+for none). A file written before the last three existed reads them
+blank. Their presence in `column_order` is the record that the table was
 converted to carry them; a table that never was has none of them and
 reads exactly as before. A channel's role in a control loop is read
 from three columns: a drive is `drive`, a control channel is `control`,
@@ -498,7 +503,8 @@ run folder's `table.json` holds them.
   `run_id`, and the record's `name` in the project when it had one;
 - `seed`: a part of it filled from an analysis object in the project,
   with the object's `name` as `object`, its SHA-256 as `checksum`, and
-  what it filled as `fills`.
+  what it filled as `fills`; `also` lists any second object it read
+  (`object` and `checksum`), as a Mixed Mode floor's tones.
 
 `origin_kind` repeats `origin.kind` so a browser of the file sees it.
 A run record's `setup.config` has the same form, so a setup opened from
@@ -513,9 +519,9 @@ recorded in, one folder per run: `run.json` (the manifest, `schema`
 `hertzforge-run/1`), `table.json`, `setup.json`, `law/`, `log.jsonl`,
 `streams/<name>/` (`telemetry.f32`, little-endian float32,
 frame-interleaved, in engineering units, and `stream.json`),
-`results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. The control
-service's Random and Sine modules and its Recorder write one for every run, as
-`docs/run-folder.md` describes; the other control modules do not yet.
+`results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. Every control
+module of the control service writes one for every run, as
+`docs/run-folder.md` describes.
 
 `hertzforge.io.run_convert.convert` (and `hertzforge convert-run
 FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default
@@ -585,6 +591,16 @@ identification an `Frf`, a `MultipleCoherence` and spectral matrices, its loops 
 records, and the rest stays in the run record (`docs/run-folder.md`, "What a MIMO
 Random Run Saves"). The separate `run/` group a MIMO run was once converted into is
 retired, with its converter.
+
+## MIMO Shock Runs
+
+A MIMO Shock run is a run folder and converts as one ("Run Folders and Their
+Conversion"): its streams are time histories of one record per shot (the
+identification's `probe` and `estimate`, and each pulse), each control's target SRS
+a `ShockSpecification` and each pulse's SRS an `Srs` with a record per control and
+pulse, a waveform target a `TransientSpecification` of every control, its
+identification an `Frf` and a `MultipleCoherence`, and the rest stays in the run
+record (`docs/run-folder.md`, "What a MIMO Shock Run Saves").
 
 ## Reading One Without Hertzforge
 

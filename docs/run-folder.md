@@ -5,9 +5,9 @@ control service while the run goes, that needs no other file and no running
 service to be read. The analysis side converts it into an ordinary project file
 (`hertzforge convert-run FOLDER`, or open the folder or its `run.json`), so a
 finished run reaches every analysis tool with its channel table, its setup, its
-log and its measurements. Today the Random, MIMO Random, Sine, Mixed Mode,
-Classical Shock, SRS shock and TWR modules, Explorer and the Recorder write one
-for every run; MIMO Shock does not yet.
+log and its measurements. Every control module writes one for every run: the
+Random, MIMO Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock
+and TWR modules, Explorer and the Recorder.
 
 The exact form is the reader's, `hertzforge.io.run_folder`; the conversion is
 `hertzforge.io.run_convert`, described in `docs/hforge-format.md` ("Run Folders
@@ -26,12 +26,14 @@ Folders"). A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_sine_<run id>`, a Mixed Mode run's
 `<YYYYMMDD-HHMMSS>_mixed_<run id>`, a Classical Shock run's
 `<YYYYMMDD-HHMMSS>_classical_shock_<run id>`, an SRS shock run's
-`<YYYYMMDD-HHMMSS>_srs_<run id>` and a TWR run's
+`<YYYYMMDD-HHMMSS>_srs_<run id>`, a MIMO Shock run's
+`<YYYYMMDD-HHMMSS>_mimo_shock_<run id>` and a TWR run's
 `<YYYYMMDD-HHMMSS>_twr_<run id>`, the time it armed in UTC. A Recorder run's
 folder, and an Explorer run's, is the plain name its setup gives
 (`capture.run_name`). The run's state names the folder from arm on
 (`random.state`, `mimo_random.status`, `sine.state`, `mixed.state`, `shock.state`,
-`srs.state`, `twr.state`, `explorer.state` and `recorder.state`, `record.folder`).
+`srs.state`, `mimo_shock.state`, `twr.state`, `explorer.state` and
+`recorder.state`, `record.folder`).
 
 ## Layout
 
@@ -340,6 +342,76 @@ started from, not a waveform the test was controlled to.
 The golden folder is written by `cargo test -p sds-control --test
 srs_golden_run` from a short run on the simulator, with fixed seeds, its wall
 times, its law calls' times and build fields normalized;
+`scripts/make_golden_runs.sh` rewrites it.
+
+## What a MIMO Shock Run Saves
+
+From arm: `run.json` (with the simulator's plant by name in `sim.plant`),
+`table.json`, `setup.json` (the configuration as accepted; resolved, the
+control channels with their units and each control's reference peak and rms
+at full level, the drives with their ceilings and aborts, the limit channels,
+the target with its kind and tolerance (a waveform target's standard and its
+share of each peak; an SRS target's bands, natural frequencies, tolerance and
+each control's SRS at full level on them), the timing and the verdict, the
+level schedule and pulse counts, the spacing, the identification with its
+probe, its records and its holds, the law and its parameters in force, the
+limits and guards, and the rates with the record's quiet frames; the derived
+values), `law/law.json` (the law's identity, its parameters as given and in
+force, and its guards) and `log.jsonl` (every state, the station, the
+identification's hold, the seed, each pulse fired with its level and verdict,
+override, trip and the end, each with its facts in `data`), and these files,
+each checked against the golden run folder (`schema/golden/runs/mimo_shock/`)
+by `tests/test_run_folder_golden_mimo_shock.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order, a shot for each of the identification's two shots (`step` `probe` and `estimate`) and one for each pulse (`kind` `inputs`) |
+| `streams/drives` | Every drive as the device accepted it, in volts, shot for shot with the inputs (`kind` `drives`) |
+| `results/srs_reference` | Each control's target SRS at full level on the natural frequencies, with the band it passes in (`kind` `srs_reference`) |
+| `results/synthesis` | The waveform the module synthesized for each control from its target SRS, at full level (`kind` `mimo_shock_synthesis`, kept as arrays) |
+| `results/identification_frf` | The identification's transfer function matrix, each drive to each control, on the band (`kind` `frf`) |
+| `results/identification_coherence` | Each control's multiple coherence with the drives (`kind` `coherence`) |
+| `results/identification` | The rms and peak each drive played, and each control's band-mean coherence, its target's share on trusted lines and its peak response (`kind` `mimo_shock_identification`, kept as arrays) |
+| `results/seed` | Before the first pulse, each control's reachable share and floor, whether its best reachable response passes, and the seed's predicted peak ratio (`kind` `mimo_shock_seed`, kept as arrays) |
+| `results/pulse_srs` | Each pulse's SRS at each control, with each control's target at the level fired and its band (`kind` `srs`, one record per pulse) |
+| `results/pulse_drives` | The drives each pulse played (`kind` `mimo_shock_drives`, kept as arrays, one record per pulse) |
+| `results/pulses` | Each pulse as judged: its levels, joint verdict, worst over-test, global SRS error and arrival spread; per control its verdict, error, over-test, delay, peak and peak ratio, margins to both abort lines, its checks, energy, rms duration, kinematics and predicted peak ratio; per drive its peak and limit scale (`kind` `pulse_results`, kept as arrays, one record per pulse) |
+| `results/law_calls` | Every call of the control law: the drives it returned and the delay it expects at each control; the record line says seed or iterate, the pulse it followed, the level, whether it was used and why not, its time and its values (`kind` `mimo_shock_law_calls`, kept as arrays, one record per call) |
+| `end.json` | The end, as the run's state reports it, with the pulses fired and passed, the law's calls and misses and the shots |
+
+A waveform target saves `results/target` in place of `srs_reference`,
+`synthesis` and `pulse_srs`: each control's reference waveform at full level,
+time from the record's start, with the standard and its share of the peak
+(`kind` `transient_reference`). Each pulse's results are written when the pulse
+is judged, the last pulse of the run included, and each law call as the module
+makes it; nothing is held to the end of the run. Every record of a shot follows
+the quiet frames the station plays before it (`pre_frames`), so a shot's firing
+is its record's first sample. A shot no pulse was judged on (a pulse stopped part
+way, or a drive committed and withheld before it played) is named `unjudged`; a
+withheld one holds the drives committed for it and no input frames, and says
+`played` false. A run that ends before its identification has no
+identification and no pulses; one held by identification has its
+identification and no pulses. With `record.streams` false there is no
+`streams/` folder.
+
+On the analysis side the streams become time histories, one record per shot;
+each control's target SRS a `ShockSpecification` and each pulse's SRS an `Srs`,
+a record per control and pulse; a waveform target a `TransientSpecification`
+of every control; the transfer function matrix an `Frf` and the coherence a
+`MultipleCoherence`; all in SI, opened in the Shock workspace. The synthesized
+waveforms, the identification's facts, the seed, the drives each pulse played,
+the law's calls and the verdicts and measures of `pulses` have no analysis
+class and stay in the run record as named arrays.
+
+The module's engine keeps its own record of every pulse and law call in memory
+for its replay (`hertzforge_mimo_shock::records`); the control service no longer
+writes it.
+
+The golden folder is written by `cargo test -p sds-control --test
+mimo_shock_golden_run` from a short SRS run on the simulator's linear 4 by 4
+plant on records of 64 samples, with fixed seeds, its wall times, build fields
+and each law call's measured duration normalized, and each shot of its streams
+cut to its first 80 frames (`cut_from_frames`, on the stream and on each shot);
 `scripts/make_golden_runs.sh` rewrites it.
 
 ## What a TWR Run Saves

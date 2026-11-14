@@ -1,0 +1,124 @@
+{
+  "name": "channel_levels",
+  "kind": "sine_levels",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2
+    ]
+  },
+  "description": "each input's tracked level, peak, and phase against the drive, with the tone's frequency, the scheduled level, the sweep's direction and pass, and the control composite's target, measured value and drive, as the run went; a point is NaN where a record was not filled",
+  "records": {
+    "index": "record",
+    "points": "the points the record holds before its NaN fill"
+  },
+  "units": [
+    {
+      "channel": 1,
+      "unit": "g"
+    },
+    {
+      "channel": 2,
+      "unit": "g"
+    }
+  ],
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "Hz",
+      "offset": 512
+    },
+    {
+      "name": "level_db",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "dB",
+      "offset": 1024
+    },
+    {
+      "name": "direction",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 1536
+    },
+    {
+      "name": "pass",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 2048
+    },
+    {
+      "name": "target",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "g",
+      "offset": 2560
+    },
+    {
+      "name": "measured",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "g",
+      "offset": 3072
+    },
+    {
+      "name": "drive",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "V",
+      "offset": 3584
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        2,
+        64
+      ],
+      "unit": "g",
+      "offset": 4096
+    },
+    {
+      "name": "phase",
+      "dtype": "f8",
+      "shape": [
+        2,
+        64
+      ],
+      "unit": "deg",
+      "offset": 5120
+    }
+  ]
+}

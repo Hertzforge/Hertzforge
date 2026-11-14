@@ -166,9 +166,15 @@
    "simulator": {
     "plant": "shock-linear-4x4"
    },
-   "capture": {
-    "auto_start": false,
-    "run_name": "mimo_shock"
+   "operator": "Operator",
+   "article": "Bracket",
+   "notes": "",
+   "specification": {
+    "document": "Example procedure",
+    "clause": "4.2"
+   },
+   "record": {
+    "streams": true
    },
    "metadata": [
     {

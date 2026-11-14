@@ -1,0 +1,34 @@
+{
+  "id": "shape",
+  "name": "shape",
+  "version": "0.1.0",
+  "sha256": null,
+  "builtin": true,
+  "params": {
+    "lambda_rel": 0.001,
+    "max_step_db": 6,
+    "delay_relax": 0.5,
+    "delay_bound_ms": 2,
+    "anchor": "target",
+    "refresh": false,
+    "refresh_mu": 1,
+    "seed_timing": "zero",
+    "model": "frozen",
+    "modes": 0,
+    "track_from_identification": false,
+    "gain_clamp_db": 0,
+    "stall_tol_db": 1.5
+  },
+  "params_given": {},
+  "guards": {
+    "law_budget": 1.0,
+    "seed_budget_s": 60.0,
+    "law_misses": 3,
+    "max_pulses": 100,
+    "max_growth_db": 6.0,
+    "max_band_growth_db": 10.0,
+    "first_drive_ratio": 2.0,
+    "divergence_pulses": 3,
+    "divergence_drive_ratio": 1.3
+  }
+}

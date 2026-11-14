@@ -45,7 +45,7 @@ export type SetupOrigin =
 	| { kind: 'typed' }
 	| { kind: 'setup'; name: string }
 	| { kind: 'run'; run_uid?: string; run_id?: string; name?: string }
-	| { kind: 'seed'; object: string; checksum: string; fills?: string };
+	| { kind: 'seed'; object: string; checksum: string; fills?: string; also?: { object: string; checksum: string }[] };
 
 /** The channel table a setup was made with, each member when known. */
 export interface SetupTable {
@@ -129,6 +129,10 @@ export function configDifferences(theirs: unknown, ours: unknown, path = ''): st
 			else out.push(...configDifferences(theirs[k], ours[k], at));
 		}
 		return out;
+	}
+	if (Array.isArray(theirs) && Array.isArray(ours) && theirs.length === ours.length && theirs.length > 0) {
+		// a list of the same length differs member by member
+		return theirs.flatMap((t, i) => configDifferences(t, ours[i], path ? `${path}.${i}` : String(i)));
 	}
 	return [`${path || 'the setup'}: ${shown(theirs)} in the setup; this screen would send ${shown(ours)}`];
 }
@@ -227,9 +231,9 @@ export function originWords(origin: SetupOrigin, edited: boolean): string {
 			: origin.kind === 'run'
 				? `run ${origin.run_id || origin.run_uid || ''}`.trim()
 				: origin.kind === 'seed'
-					? `${origin.fills ? `${origin.fills} ` : ''}seeded from "${origin.object}"`
+					? `${origin.fills ? `${origin.fills} ` : ''}seeded from "${origin.object}" (SHA-256 ${origin.checksum.slice(0, 12)})`
 					: '';
 	if (origin.kind === 'typed') return 'Setup typed here';
 	if (edited) return `Setup edited here, after opening ${whence}`;
-	return origin.kind === 'seed' ? `Setup ${whence}` : `Setup from ${whence}`;
+	return origin.kind === 'seed' ? `Setup with ${whence}` : `Setup from ${whence}`;
 }

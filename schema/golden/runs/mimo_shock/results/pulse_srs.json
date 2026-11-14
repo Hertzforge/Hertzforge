@@ -1,0 +1,76 @@
+{
+  "name": "pulse_srs",
+  "kind": "srs",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "description": "each pulse's SRS at each control, and each control's target at the level fired with the band it passes in (band)",
+  "srs_kind": "maximax",
+  "records": {
+    "index": "record",
+    "pulse": "the pulse, from 0",
+    "level_db": "the level fired",
+    "frame": "the station frame when it was kept"
+  },
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        3
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 24
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 120
+    },
+    {
+      "name": "band_low",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 216
+    },
+    {
+      "name": "band_high",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 312
+    }
+  ]
+}

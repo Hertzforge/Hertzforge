@@ -1,0 +1,38 @@
+{
+  "name": "Field Record",
+  "kind": "waveform",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "responses": [
+      1
+    ]
+  },
+  "sha256": "65a17f2eaf9aa86b293526687a043f20139429122d65fd09ee20401f645fab8d",
+  "format": "text",
+  "fs_hz": 2048,
+  "description": "the reference as imported, at its own rate, before it was prepared",
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        160
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        160
+      ],
+      "unit": "g",
+      "offset": 1280
+    }
+  ]
+}

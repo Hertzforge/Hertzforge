@@ -1,0 +1,33 @@
+{
+  "name": "identification_frf",
+  "kind": "frf",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 40.0,
+    "step": 20.0
+  },
+  "channels": {
+    "responses": [
+      1
+    ],
+    "references": [
+      3
+    ]
+  },
+  "convention": "file",
+  "description": "system identification: drive to control response",
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "c16",
+      "shape": [
+        1,
+        1,
+        9
+      ],
+      "unit": "g/V",
+      "offset": 0
+    }
+  ]
+}
