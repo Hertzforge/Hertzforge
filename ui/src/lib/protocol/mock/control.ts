@@ -113,9 +113,9 @@ export interface ControlServerOptions {
 	recorderFreeBytes?: number | null;
 	/** A MIMO Shock run's second level ends on an absolute abort line. */
 	mimoShockAbsoluteAbort?: boolean;
-	/** Where a Random run's folder is made (default `~/Hertzforge_Data`). */
+	/** Where a Random or Sine run's folder is made (default `~/Hertzforge_Data`). */
 	dataRoot?: string;
-	/** A Random run's record: refused at arm (`unwritable`), or a stream stops while it runs (`problem`). */
+	/** A Random or Sine run's record: refused at arm (`unwritable`), or a stream stops while it runs (`problem`). */
 	record?: 'unwritable' | 'problem';
 }
 
@@ -662,10 +662,10 @@ interface RandomRun {
 }
 
 /** A run folder's name: the time it armed in UTC, the test and the run's id. */
-export function runFolderName(at: Date, runId: string): string {
+export function runFolderName(at: Date, runId: string, test = 'random'): string {
 	const p = (n: number) => String(n).padStart(2, '0');
 	const stamp = `${at.getUTCFullYear()}${p(at.getUTCMonth() + 1)}${p(at.getUTCDate())}-${p(at.getUTCHours())}${p(at.getUTCMinutes())}${p(at.getUTCSeconds())}`;
-	return `${stamp}_random_${runId}`;
+	return `${stamp}_${test}_${runId}`;
 }
 
 const LIVE_STATES: RandomRunState[] = ['armed', 'running', 'review', 'stopping'];
@@ -913,7 +913,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
-		feasibilityExceeds: options.feasibilityExceeds ?? false
+		feasibilityExceeds: options.feasibilityExceeds ?? false,
+		dataRoot: options.dataRoot,
+		record: options.record,
+		folderName: runFolderName
 	});
 	const twr = createTwrMock({
 		speed,

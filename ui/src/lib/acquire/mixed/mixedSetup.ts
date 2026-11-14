@@ -30,6 +30,14 @@ import { lawWireParams, type LawDraft } from '../law/lawForm';
 import { defaultControl, newBreakpoint, shakerRecord, type BreakpointDraft, type ControlDraft, type FieldErrors, type LevelDraft } from '../setup';
 import { newRow, profileDraftOf, profileOf, type SineProfileDraft } from '../sine/sineSetup';
 
+/** Mixed Mode's capture rules: what its run records beyond its report. */
+export const CAPTURE_RULES: { id: SineCaptureRule; label: string; help: string }[] = [
+	{ id: 'off', label: 'Off', help: 'Nothing is recorded beyond the run report.' },
+	{ id: 'entire_test', label: 'Entire test', help: 'Everything from engage to the end.' },
+	{ id: 'manual', label: 'Manual', help: 'Only when you start and stop it.' },
+	{ id: 'first_seconds', label: 'First seconds at each level', help: 'A set number of seconds at each level, once it has settled there.' }
+];
+
 // ---------------------------------------------------------------------------------------------
 // The draft
 

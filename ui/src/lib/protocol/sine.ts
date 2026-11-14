@@ -21,6 +21,7 @@ import type {
 	ReadingView,
 	RefusalReason,
 	ReportItem,
+	RunRecordRef,
 	SpectrumView,
 	StationClass,
 	StationRef,
@@ -226,7 +227,14 @@ export interface SineConfig {
 	limits: SineLimits;
 	cola?: SineCola;
 	feasibility?: SineFeasibility | null;
-	capture?: SineCapture;
+	/** The operator's words, kept in the run's record (Random's). */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	/** The document and clause the test is run to. */
+	specification?: { document: string; clause: string } | null;
+	/** `streams: false` keeps the record without the inputs and drive streams. */
+	record?: { streams?: boolean } | null;
 	/** Random's fields; `label` is the key when absent. */
 	metadata?: { key: string; label?: string; value: string }[];
 }
@@ -535,6 +543,8 @@ export interface SineState {
 	law: SineLawRef | null;
 	feasibility: FeasibilityVerdict | null;
 	end: SineEnd | null;
+	/** The run's record, from arm on (Random's). */
+	record?: RunRecordRef;
 }
 
 export interface SineLogResult {

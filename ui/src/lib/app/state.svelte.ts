@@ -1999,6 +1999,8 @@ export class AppState {
 	readonly acquire: AcquireState;
 	/** A finished Random run's way to its data on the analysis side. */
 	readonly runOpen: RunOpen;
+	/** A finished Sine run's way to its data on the analysis side. */
+	readonly sineRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2058,13 +2060,15 @@ export class AppState {
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
-		this.runOpen = new RunOpen({
-			bring: (folder) => this.project.takeRun(folder),
-			show: (workspace) => {
+		const runHost = {
+			bring: (folder: string) => this.project.takeRun(folder),
+			show: (workspace: Workspace) => {
 				this.go(workspace);
 				this.analyze.selectProject();
 			}
-		});
+		};
+		this.runOpen = new RunOpen(runHost);
+		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});

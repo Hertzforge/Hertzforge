@@ -230,6 +230,13 @@ Abort, and Cmd or Ctrl and period aborts from any of them.
 When nobody holds control, the run goes on; if no screen takes control within the timeout, it ends
 with the controlled stop.
 
+From arm, the Run card says where the run is being recorded: the run folder's name and its full
+path, and when the time histories are off, that they are not kept. When the record cannot write
+something (a stream stopped, a file not written), a notice says so and the run goes on. Once the run
+has ended, **Open in Analysis** converts the folder and opens its data in the Sine workspace (or
+imports it into the project already open), and **Copy Folder Path** puts the folder's path on the
+clipboard.
+
 ## How a Run Ends
 
 | Outcome | Meaning |

@@ -11,7 +11,7 @@
 	import OverrideDialog from '../OverrideDialog.svelte';
 	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
-	import SineCapture from './SineCapture.svelte';
+	import SineRecord from './SineRecord.svelte';
 	import SineControl from './SineControl.svelte';
 	import SineLimits from './SineLimits.svelte';
 	import SineModeEditor from './SineModeEditor.svelte';
@@ -84,7 +84,7 @@
 	{:else if section === 'limits'}
 		<SineLimits {sine} />
 	{:else}
-		<SineCapture {sine} />
+		<SineRecord {sine} />
 	{/if}
 {/snippet}
 
@@ -95,7 +95,7 @@
 {#snippet station()}<StationPanel acq={sine.acq} />{/snippet}
 
 {#snippet run()}
-	<SineRunView {sine} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'sine')} />
+	<SineRunView {sine} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'sine')} opener={app.sineRunOpen} />
 {/snippet}
 
 <PulseScreen
