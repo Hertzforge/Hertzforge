@@ -10,6 +10,10 @@ import { createControlServer } from '$lib/protocol/mock/control';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import { loadTable, saveTable } from '$lib/tables/tableFiles';
 import { AcquireState } from './store.svelte';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { ChannelRow } from '$lib/protocol/types';
+import type { ChannelEnvironment } from '$lib/tables/tableFiles';
 
 const until = async (cond: () => boolean, ms = 8000) => {
 	const t0 = Date.now();
@@ -118,54 +122,91 @@ describe('the channel table sized from the station', () => {
 });
 
 describe('the channel table as a file', () => {
-	it('saves every row shown, and opens it again in place of the draft with the columns it carried', async () => {
+	it('saves every row shown with its analysis columns, and opens it again in place of the draft', async () => {
 		const { acq, control, analysis } = await screen();
 		acq.editRows([0], { field: 'sensitivity_mv_per_eu', value: 10.2 });
+		acq.materializeTable();
+		acq.rows[0] = { ...acq.rows[0], node: 101, direction: 'Z+', serial_number: 'SN0', extra: { cable: 'C-1' } };
 		const saved = acq.tableData();
-		expect(saved.rows).toHaveLength(9);
-		// a table from the analysis side: a node and a serial number the control table does not edit
-		const columns = [...saved.columns, 'node', 'serial_number'];
-		const rows = saved.rows.map((r, k) => [...r, 100 + k, `SN${k}`]);
-		await saveTable(analysis, 'channels', null, { columns, rows }, '/tests/bench/channels');
+		expect(saved.channels).toHaveLength(9);
+		expect(saved.columns).toEqual([]);
+		const environments = { Random: { controls: [1], drives: [2], response_transformation: null, reference_transformation: null } };
+		await saveTable(analysis, 'channels', null, { ...saved, environments }, '/tests/bench/channels');
 		acq.discardTable();
 		expect(acq.rows).toHaveLength(2);
 
 		acq.openTable(await loadTable(analysis, 'channels', null, '/tests/bench/channels.hforge'), '/tests/bench/channels.hforge');
 		expect(acq.rows).toHaveLength(9);
 		expect(acq.rows[0].sensitivity_mv_per_eu).toBe(10.2);
+		expect(acq.rows[0].node).toBe(101);
+		expect(acq.rows[0].extra).toEqual({ cable: 'C-1' });
 		expect(acq.tableFile).toBe('/tests/bench/channels.hforge');
-		// an edit, then a save: the carried columns go back unchanged
+		expect(acq.tableEnvironments).toEqual(environments);
+		// an edit, then a save: the analysis columns and the loops go back unchanged
 		acq.editRows([1], { field: 'description', value: 'Drive A' });
 		const again = acq.tableData();
-		expect(again.columns).toEqual(columns);
-		expect(again.rows.map((r) => r.slice(-2))).toEqual(rows.map((r) => r.slice(-2)));
-		expect(again.rows[1][again.columns.indexOf('comment')]).toBe('Drive A');
-		// a channel renumbered keeps its columns
-		acq.editRows([2], { field: 'index', value: 30 });
-		expect(acq.tableExtras[30]?.serial_number).toBe('SN2');
+		expect(again.channels?.[0].serial_number).toBe('SN0');
+		expect(again.channels?.[1].description).toBe('Drive A');
+		expect(again.environments).toEqual(environments);
+		// a channel renumbered keeps its columns: they are the row's own
+		acq.editRows([0], { field: 'index', value: 30 });
+		expect(acq.rows[0].index).toBe(30);
+		expect(acq.rows[0].direction).toBe('Z+');
 		control.close();
 		analysis.close();
 	});
 
-	it("discarding a file's rows drops its columns; those of the table applied stay", async () => {
+	it("the round trip's shell leg: the golden request's rows open and write back unchanged", async () => {
+		// The same rows the control service's and the analysis side's tests read.
+		const golden = JSON.parse(readFileSync(resolve(process.cwd(), '../schema/golden/request_tables_save_channels.json'), 'utf-8')) as {
+			params: { channels: ChannelRow[]; environments: Record<string, ChannelEnvironment> };
+		};
+		const { acq, control, analysis } = await screen();
+		acq.openTable({ columns: [], rows: [], channels: golden.params.channels, environments: golden.params.environments });
+		acq.materializeTable();
+		const out = acq.tableData();
+		const byIndex = new Map((out.channels ?? []).map((r) => [r.index, r]));
+		for (const row of golden.params.channels) expect(byIndex.get(row.index)).toEqual(row);
+		expect(out.environments).toEqual(golden.params.environments);
+		control.close();
+		analysis.close();
+	});
+
+	it('the analysis columns survive applying the table and a page reload', async () => {
+		const server = createControlServer({ speed: 10 });
+		const open = async () => {
+			const control = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(server, 1) });
+			const acq = new AcquireState(control, { name: 'Shell on bench-pc', session: null, local: null, checkDelayMs: 0 });
+			control.connect();
+			await control.whenOpen();
+			await acq.sync();
+			return { acq, control };
+		};
+		const first = await open();
+		await first.acq.claim();
+		first.acq.rows[0] = { ...first.acq.rows[0], node: 7, direction: 'X-', make: 'Maker', limit: true };
+		expect(await first.acq.applyTable()).toBe(true);
+		first.control.close();
+		// a new page: nothing of the first is in memory, the service holds the table
+		const reloaded = await open();
+		await until(() => reloaded.acq.server !== null);
+		const row = reloaded.acq.server!.channels[0];
+		expect([row.node, row.direction, row.make, row.limit]).toEqual([7, 'X-', 'Maker', true]);
+		expect(reloaded.acq.rows[0].node).toBe(7);
+		reloaded.control.close();
+	});
+
+	it("discarding a file's rows brings back the table applied and its loops", async () => {
 		const { acq, control, analysis } = await screen();
 		await acq.claim();
-		acq.openTable({ columns: ['channel', 'node', 'control', 'drive'], rows: [[1, 7, true, false], [2, 8, false, true]] });
+		const loops = { A: { controls: [1], drives: [2], response_transformation: null, reference_transformation: null } };
+		acq.openTable({ columns: [], rows: [], channels: acq.rows.map((r) => ({ ...r, node: r.index + 6 })), environments: loops });
 		expect(await acq.applyTable()).toBe(true);
-		acq.openTable({ columns: ['channel', 'node'], rows: [[1, 99]] });
-		expect(acq.tableExtras[1]?.node).toBe(99);
+		acq.openTable({ columns: [], rows: [], channels: [{ ...acq.rows[0], node: 99 }], environments: {} });
+		expect(acq.rows[0].node).toBe(99);
 		acq.discardTable();
-		expect(acq.tableExtras[1]?.node).toBe(7);
-		expect(acq.rows).toHaveLength(2);
-		control.close();
-		analysis.close();
-	});
-
-	it('a removed row takes its carried columns with it', async () => {
-		const { acq, control, analysis } = await screen();
-		acq.openTable({ columns: ['channel', 'node', 'drive'], rows: [[1, 7, false], [2, 8, true], [3, 9, false]] });
-		acq.removeRow(2);
-		expect(Object.keys(acq.tableExtras)).toEqual(['1', '2']);
+		expect(acq.rows[0].node).toBe(7);
+		expect(acq.tableEnvironments).toEqual(loops);
 		control.close();
 		analysis.close();
 	});

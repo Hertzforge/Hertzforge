@@ -768,11 +768,29 @@ whose `id`, `name`, `follows` and a tone's `profile` (its rows as `freq quantity
 by `;`) are text). `columns` names the
 table's columns and each row holds one value per column.
 
+A channel table may instead be sent as the control service's own rows: `channels`, a list of
+rows in `channels.get`'s spelling (every field, and any optional member), in place of `columns`
+and `rows`, with `environments`, its control loops by name (each `{"controls","drives",
+"response_transformation","reference_transformation"}`: channel numbers in the controller's
+order, and each transformation a list of rows or null). The analysis service maps the rows onto
+the channel table's columns (`hertzforge.io.run_convert`, the one mapping, used both ways), and
+`tables.load` of a channel table answers `channels` and `environments` beside `columns` and
+`rows`, so a client that keeps the control rows never maps a column itself. A row's optional
+members are the channel table's columns of the same name (`analysis_role` is `role`,
+`daq_range_v` and `sensor_range_v` the two ranges, `extra` the column `extra`, held as text); an
+`extra` entry the table holds a column for fills that column. A row read back has every member
+whose column holds something, and the analysis side fills a row with no `node` with its channel
+number (a node-only identity) and a blank `channel_type` from its unit. A `.hforge` file keeps the
+control loops; the text and workbook forms hold the rows only and answer `environments` empty.
+A loop's control channels are the table's control channels: a row a loop controls reads back as
+a control row.
+
 A channel table's columns are the channel table object's own (`channel`, `node`, `direction`,
 `role`, `control`, `channel_type`, `unit`, `sensitivity`, the two ranges, the sensor's identity,
 `comment`), then the controller's settings, an optional group present on a table converted to
 carry them: `enabled`, `drive`, `physical`, `iepe`, `iepe_bias`, `polarity`, `range_max`,
-`control_group`, `abort_accel_g`, `abort_velocity_ips` and `abort_displacement_mil`. A value is a whole number for `channel`, a whole number or `null` for
+`control_group`, `abort_accel_g`, `abort_velocity_ips`, `abort_displacement_mil`, `limit`,
+`analysis_tier` and `extra` (the row's other columns, a JSON object as text). A value is a whole number for `channel`, a whole number or `null` for
 `node` and `control_group`, a number or `null` for the measurements (`sensitivity`, the ranges,
 the bias, the abort limits), `true` or `false` for a flag, and text (`""` for blank) for the rest.
 A control channel row maps onto them so: its `index` is `channel`, `description` is `comment`,
@@ -785,9 +803,9 @@ of the channel table, the controller's included: a table without them is convert
 (every channel on, none a drive, each full scale from its clip level and sensitivity where both
 are stated), and `warnings` says so. A client that edits only some columns keeps the others'
 values for each row and sends them back with its own, so a table opened and saved keeps every
-column and row. A channel table's control loops (its environments, which a `.hforge` table can
-hold) are not among them: `tables.load` does not return them and `tables.save` does not write
-them, so a `.hforge` table that held them is saved without them. A table saved with the controller's columns among its columns is written converted;
+column and row. A channel table's control loops (its environments) travel as `environments`:
+`tables.load` returns them and `tables.save` writes them, so a `.hforge` table that held them is
+saved with them. A table saved with the controller's columns among its columns is written converted;
 one saved without them is written as the measurement's table alone.
 
 A breakpoint table's columns are its kind's: `freq_hz` and `psd_g2_hz`, `slope_db_oct` for a
@@ -802,8 +820,8 @@ and for a profile the bands, `alarm_below_db`, `alarm_above_db`, `abort_below_db
 `tables.save` writes the table to `path` in the form its suffix names: `.hforge` (a single-object
 file, `docs/hforge-format.md`), `.csv`, `.tsv` or `.txt` (tab-delimited) or `.xlsx`; a path with no
 suffix is given `.hforge`. A write is strict: a column that is not the kind's, a value the column
-cannot hold (a sensitivity of 0, a polarity that is not `positive` or `negative`, a channel number
-used twice) or a row of the wrong length is refused `bad_request`, naming the row and column, and
+cannot hold (a sensitivity of 0 on an enabled input, a polarity that is not `positive` or
+`negative`, a channel number used twice, a unit the analysis side cannot read) or a row of the wrong length is refused `bad_request`, naming the row and column, and
 nothing is written. The file is replaced in one step, so a failed save leaves it as it was. A
 channel table is written as the channel table object writes itself: `.hforge` as its
 `channel_table/` object and `.xlsx` as its workbook, and the text forms under the same headings.
@@ -1301,6 +1319,21 @@ the program reads as the same quantity: `g`, `in/s**2` (or `in/s^2`), `m/s**2` (
 `mm/s**2`, `in/s`, `m/s`, `mm/s`, `mil`, `in`, `m`, `mm`, `lbf`, `N`, `kN`, `psi`, `Pa`, `kPa`,
 `MPa`, `V`, `mV`, `strain`, `microstrain`, `m/m`, `degC`, `degF`, `K` and `degR`. A unit outside it
 is held, kept exactly as written, and runs as written, with the warning `unit_unknown`.
+
+**One rule set.** The control service, the analysis side's channel table and the shell's mock
+service check a table by the same rules, and `schema/golden/channel_table_rules.json` holds them as
+cases that a test in each language reads:
+
+- **Channel numbers.** `index` (the analysis side's `channel`) is a whole number from 0, and no two
+  rows share one (`duplicate_index`).
+- **Sensitivity.** A number. It is not 0 on an enabled row that is not a drive
+  (`zero_sensitivity`); a disabled row and a drive row may hold any number, 0 included.
+- **IEPE bias.** A number or null; 0 is a number like any other. A bias on a `single_ended` row
+  (`bias_on_single_ended`) and none on an `iepe` row (`iepe_without_bias`) are warnings.
+- **Units.** Never empty. Every name in the unit vocabulary above is held by all three with no
+  finding. A unit outside it is held by the control service with the warning `unit_unknown`; a
+  table file holds it when the analysis side's unit reader reads it, and refuses it, naming the
+  row, when it does not.
 
 **What control needs of a unit.** A drive is written to the device in volts and the kinematic
 abort limits read a row's samples as acceleration in g, whatever the row says. An enabled drive row

@@ -909,6 +909,102 @@ mod tests {
         }
     }
 
+    /// The round trip's control leg: the rows of the golden `tables.save`
+    /// request (every optional member, on every row) read as the service reads
+    /// `channels.set` and written as `channels.get` writes them are the same
+    /// rows. The shell's and the analysis side's tests read the same file, so a
+    /// row goes from this table through the wire, the shell and a `.hforge` file
+    /// and back unchanged.
+    #[test]
+    fn channel_table_round_trip_golden_rows_are_the_services_own() {
+        let golden: Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../schema/golden/request_tables_save_channels.json"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let rows = &golden["params"]["channels"];
+        let table = parse_rows(rows).unwrap();
+        let back = Value::Array(table.channels.iter().map(row_json).collect());
+        assert_eq!(&back, rows);
+        let sim = StationContext {
+            selection: &Selection::Sim,
+            scan: &[],
+        };
+        assert!(validate(&table, &sim).errors.is_empty());
+    }
+
+    /// The one rule set, as the golden table file holds it: what the control
+    /// service answers each case with, and that every vocabulary unit is known.
+    ///
+    /// Falsified by letting a disabled row's 0 sensitivity count (dropping the
+    /// `ch.enabled` gate in `validate_report`): the case "sensitivity 0 on a
+    /// disabled row" answers `table_invalid`.
+    #[test]
+    fn channel_table_rules_golden_holds_in_rust() {
+        let golden: Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../schema/golden/channel_table_rules.json"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let sim = StationContext {
+            selection: &Selection::Sim,
+            scan: &[],
+        };
+        for case in golden["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let control = case["control"].as_str().unwrap();
+            let table = match parse_rows(&case["rows"]) {
+                Err(e) => {
+                    assert_eq!(e.reason, Some("bad_params"), "{name}");
+                    assert_eq!(control, "bad_params", "{name}");
+                    continue;
+                }
+                Ok(t) => t,
+            };
+            let r = validate(&table, &sim);
+            let errors = reasons(&r.errors);
+            let want: Vec<&str> = case["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect();
+            assert_eq!(errors, want, "{name}");
+            let answer = if errors.is_empty() {
+                "ok"
+            } else {
+                "table_invalid"
+            };
+            assert_eq!(answer, control, "{name}");
+            let warnings = reasons(&r.warnings);
+            for w in case["warnings"].as_array().unwrap() {
+                let w = w.as_str().unwrap();
+                assert!(warnings.contains(&w), "{name}: {w} in {warnings:?}");
+            }
+        }
+        let vocabulary: Vec<&str> = golden["unit_vocabulary"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(vocabulary, hertzforge_channel_table::UNIT_VOCABULARY);
+        for unit in vocabulary {
+            let mut row = new_row(1);
+            row.units = Units::from_name(unit);
+            let mut t = Table::new().table;
+            t.channels.push(Channel { index: 3, ..row });
+            let r = validate(&t, &sim);
+            assert!(!reasons(&r.warnings).contains(&"unit_unknown"), "{unit}");
+        }
+    }
+
     #[test]
     fn a_missing_field_names_the_parameter() {
         let mut row = row_json(&new_row(1));

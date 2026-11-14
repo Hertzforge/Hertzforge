@@ -65,7 +65,7 @@ def test_the_channel_table_is_the_table_that_was_set(converted):
     rows = _json('table.json')['rows']
     back = run_convert.rows_from_channel_table(table)
     for given, read in zip(rows, back, strict=True):
-        assert {k: v for k, v in read.items() if k != 'extra'} == given
+        assert {k: v for k, v in read.items() if k not in run_convert.ANALYSIS_MEMBERS} == given
 
 
 def test_the_inputs_and_the_drive_are_time_histories_in_si(converted):

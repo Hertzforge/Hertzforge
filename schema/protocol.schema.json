@@ -917,8 +917,19 @@
     },
     "tableFileKind": {"enum": ["channels", "breakpoints"]},
     "tableCell": {"type": ["number", "string", "boolean", "null"]},
+    "channelEnvironment": {
+      "type": "object", "required": ["controls", "drives", "response_transformation", "reference_transformation"],
+      "additionalProperties": false,
+      "properties": {
+        "controls": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "drives": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "response_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}},
+        "reference_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}}
+      }
+    },
     "tablesSaveParams": {
-      "type": "object", "required": ["kind", "columns", "rows", "path"], "additionalProperties": false,
+      "type": "object", "required": ["kind", "path"], "additionalProperties": false,
+      "anyOf": [{"required": ["columns", "rows"]}, {"required": ["channels"]}],
       "properties": {
         "kind": {"$ref": "#/$defs/tableFileKind"},
         "table_kind": {"type": ["string", "null"]},
@@ -926,7 +937,9 @@
         "rows": {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/tableCell"}}},
         "path": {"type": "string", "minLength": 1},
         "x_unit": {"type": ["string", "null"]},
-        "y_unit": {"type": ["string", "null"]}
+        "y_unit": {"type": ["string", "null"]},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
+        "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
     "tablesSaveResult": {
@@ -952,7 +965,9 @@
         "rows": {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/tableCell"}}},
         "warnings": {"type": "array", "items": {"type": "string"}},
         "x_unit": {"type": "string"},
-        "y_unit": {"type": "string"}
+        "y_unit": {"type": "string"},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
+        "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
     "catalog": {

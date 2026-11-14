@@ -452,10 +452,10 @@ def channel(columns, *rows):
     (channel(['channel', 'serial'], [1, 'A']), "'serial' is not a column of a channel table"),
     (channel(['comment'], ['x']), 'has a Channel column'),
     (channel(['channel'], [1.5]), 'row 1, Channel: 1.5 is not a whole number'),
-    (channel(['channel'], [0]), 'row 1, Channel: channel must be positive'),
+    (channel(['channel'], [-1]), 'row 1, Channel: channel must be at least 0'),
     (channel(['channel'], [1], [1]), 'channel 1 is in the table twice'),
     (channel(['channel', 'enabled'], [1, 'yes']), "row 1, Enabled: 'yes' is not true or false"),
-    (channel(['channel', 'sensitivity'], [1, 0]), 'sensitivity must be greater than 0'),
+    (channel(['channel', 'sensitivity'], [1, 0]), 'an enabled input with a sensitivity of 0'),
     (channel(['channel', 'range_max'], [1, float('nan')]), 'not a finite number'),
     (channel(['channel', 'polarity'], [1, 'reversed']), 'polarity is one of positive'),
     (channel(['channel', 'unit'], [1, 'wibbles per fortnight squared']), 'row 1, Unit'),
@@ -547,6 +547,6 @@ def test_the_analysis_view_shows_the_controller_columns_only_on_a_converted_tabl
     assert headers[len(ChannelTable.SCHEMA):] == [
         'Enabled', 'Drive', 'Physical', 'IEPE', 'IEPE Bias (V)', 'Polarity',
         'Range Max (Unit)', 'Control Group', 'Abort Accel (g)', 'Abort Velocity (in/s)',
-        'Abort Displacement (mil)']
+        'Abort Displacement (mil)', 'Limit', 'Analysis Tier', 'Other Columns']
     assert rows[0][len(ChannelTable.SCHEMA):] == ['True', 'False', '', 'False', '', '',
-                                                  '490.196', '', '', '', '']
+                                                  '490.196', '', '', '', '', 'False', '', '']
