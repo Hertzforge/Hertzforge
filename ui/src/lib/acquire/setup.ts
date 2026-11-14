@@ -488,11 +488,13 @@ export interface ProfileHost {
 
 /** What the run record editor reads and edits: the record fields, the sample rate, and the channels a stream would hold. */
 export interface RecordHost {
-	setup: { record: RecordDraft; acquisition: { fs_hz: number } };
+	setup: { record: RecordDraft };
 	locked: boolean;
 	fieldErrors: FieldErrors;
 	/** Enabled inputs plus drives in the channel table being edited. */
 	readonly recordChannels: number;
+	/** The sample rate the run asks for, Hz. */
+	readonly recordRateHz: number;
 }
 
 /** What the schedule editor reads and edits: the level schedule and the findings on it. */

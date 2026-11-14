@@ -3,9 +3,9 @@
 `convert` reads a run folder (`hertzforge.io.run_folder`) and writes a
 `.hforge` project every analysis tool opens with `Project.open`, by
 default `<run name>.hforge` inside the folder. The control service's
-Random module and its Recorder write a run folder for every run; the
-other control modules do not yet. This is the analysis side of that
-bridge.
+Random and Sine modules and its Recorder write a run folder for every
+run; the other control modules do not yet. This is the analysis side of
+that bridge.
 
 The project holds, in this order:
 
@@ -21,7 +21,16 @@ The project holds, in this order:
   recorded (`native.StreamedHistory`);
 - the `Specification` a Random run was controlled to, from the setup's
   resolved profile, with its alarm and abort bands as warning and abort
-  limits;
+  limits; for a Sine sweep or dwell, the `SineSweepSpecification` it was
+  controlled to, one tone over the control channels, from the profile
+  as the service resolved it on the run's band (`results/reference`),
+  with its alarm and abort bands as the tone's warning and abort limits;
+- for a Sine sweep or step test, a `SineLevelSet` of the inputs' tracked
+  levels (a result of kind `sine_levels`): the last one-way sweep at the
+  highest level the run reached, as one `SineLevel` of that tone over
+  every enabled input, complex (the tracked amplitude at the phase the
+  run measured against the drive), with the time each line was read;
+  every point of every pass stays in the run record as arrays;
 - a `Psd`, `Frf`, `Coherence` or `MultipleCoherence` per result of kind
   `psd`, `cpsd`, `frf` or `coherence`, converted to SI, cross terms as
   written (the control service writes them in the file's convention,
@@ -61,7 +70,10 @@ PROJECT_TYPES = {'random': 'Random Vibration', 'mimo_random': 'Random Vibration'
 
 #: the result kinds that become an analysis object; any other is kept in
 #: the run record as named arrays
-ANALYSIS_KINDS = ('psd', 'cpsd', 'frf', 'coherence')
+ANALYSIS_KINDS = ('psd', 'cpsd', 'frf', 'coherence', 'sine_levels')
+
+#: the name of the one tone a Sine run's specification and levels hold
+SINE_TONE = 'Tone 1'
 
 
 @dataclass
@@ -527,6 +539,142 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
     return spec
 
 
+def _sine_tone_arrays(run: run_folder.RunFolder, lacked: list[str]) -> Any:
+    """The profile as the service resolved it on the run's band, in SI:
+    (frequencies, the target, the alarm and abort bands as
+    {limit name: values}, the ordinate's dimension), or None."""
+    reference = run.results.get('reference')
+    if reference is None or 'frequency' not in reference.arrays:
+        lacked.append('the run has no resolved profile (results/reference), so it has no '
+                      'sine specification')
+        return None
+    units = {a.get('name'): str(a.get('unit') or '') for a in
+             reference.description.get('arrays') or []}
+    scale, dim, _unit = _unit_scale(units.get('reference', ''))
+    frequencies = np.asarray(reference.arrays['frequency'], dtype=np.float64)
+    names = {'warning_lower': 'alarm_low', 'warning_upper': 'alarm_high',
+             'abort_lower': 'abort_low', 'abort_upper': 'abort_high'}
+    limits = {limit: np.asarray(reference.arrays[array], dtype=np.float64) * scale
+              for limit, array in names.items() if array in reference.arrays}
+    target = np.asarray(reference.arrays['reference'], dtype=np.float64) * scale
+    return frequencies, target, limits, dim
+
+
+def _sine_specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> Any:
+    """The Sine profile as the analysis holds a requirement: one tone,
+    asked of every enabled control channel, in SI. A sweep's tone is one
+    pass across the band in the direction the run started, at the rate
+    and on the law it swept at; a dwell's holds its frequency for its
+    dwell. The tone's breakpoints are the points the service resolved
+    the profile at (`results/reference`), so the interpolation between
+    them follows the profile the run followed."""
+    from ..core.sine import LINEAR, LOG, SineSweepSpecification, SineTone
+
+    resolved = run.setup.get('resolved') if isinstance(run.setup.get('resolved'),
+                                                       Mapping) else {}
+    test = resolved.get('test') if isinstance(resolved.get('test'), Mapping) else {}
+    kind = test.get('kind')
+    if kind not in ('sweep', 'dwell'):
+        lacked.append(f'a {kind or "Sine"} test\'s profile is no tone the analysis holds, so '
+                      'the run has no sine specification; the profile stays in the setup')
+        return None
+    held = _sine_tone_arrays(run, lacked)
+    if held is None:
+        return None
+    frequencies, target, limits, dim = held
+    controls = [k for k in range(table.num_channels)
+                if str(table['control'][k]) == 'True' and str(table['enabled'][k]) != 'False']
+    if not controls:
+        lacked.append('no enabled control channel holds the profile, so the run has no sine '
+                      'specification')
+        return None
+    if dim != 'acceleration':
+        lacked.append(f'the profile is in a unit of {dim!r}, not acceleration, so the run has '
+                      'no sine specification')
+        return None
+    m = len(controls)
+
+    def columns(values: np.ndarray) -> np.ndarray:
+        return np.tile(np.asarray(values, dtype=np.float64)[:, np.newaxis], (1, m))
+
+    if kind == 'dwell':
+        dwell = test.get('dwell') or {}
+        frequency = float(test['freq_hz'])
+        seconds = (float(dwell['seconds']) if 'seconds' in dwell
+                   else float(dwell.get('cycles', 0)) / frequency)
+        tone = SineTone.dwell(SINE_TONE, frequency, target[:1].repeat(m), seconds,
+                              **{k: v[:1].repeat(m) for k, v in limits.items()})
+    else:
+        rate = test.get('rate') or {}
+        law = LOG if rate.get('law') == 'log' else LINEAR
+        speed = float(rate['oct_per_min'] if law == LOG else rate['hz_per_s'])
+        order = np.argsort(frequencies)
+        if test.get('direction') == 'down':
+            order, speed = order[::-1], -speed
+        tone = SineTone(SINE_TONE, 0.0, frequencies[order], columns(target[order]),
+                        [law] * (len(order) - 1), [speed] * (len(order) - 1),
+                        **{k: columns(v[order]) for k, v in limits.items()})
+    dofs = table.dof_strings()
+    return SineSweepSpecification(
+        [tone], [dofs[k] for k in controls], ordinate_dim='acceleration',
+        ordinate_unit='m/s**2',
+        comment='the Sine profile as the control service resolved it on the run\'s band')
+
+
+def _sine_levels(result: run_folder.Result, table: Any, units: Mapping[int, str],
+                 test: str | None) -> tuple[Any, str]:
+    """The inputs' tracked levels as a `SineLevelSet`, or (None, why
+    not): the last one-way sweep at the highest level the run reached,
+    its lines where the tone moved (a hold and the stop's ramp, where it
+    stood still, are left to the arrays)."""
+    from ..core.sine import SineLevel, SineLevelSet
+
+    if test not in ('sweep', 'step'):
+        return None, (f'a {test or "Sine"} test\'s levels are against time, which no '
+                      'analysis class holds')
+    channels = [int(i) for i in (result.description.get('channels') or {}).get(
+        'responses') or []]
+    unknown = [i for i in channels if i not in units]
+    if not channels or unknown:
+        return None, 'it does not name its channels in the table'
+    a = result.arrays
+    flat = {name: np.asarray(a[name], dtype=np.float64).reshape(-1)
+            for name in ('time', 'frequency', 'level_db', 'pass', 'direction') if name in a}
+    if len(flat) < 5 or 'values' not in a or 'phase' not in a:
+        return None, 'it does not hold the arrays a sine level is read from'
+    # records first, then a channel's points: channels by points, in time order
+    values = np.concatenate(list(np.asarray(a['values'], dtype=np.float64)), axis=-1)
+    phase = np.concatenate(list(np.asarray(a['phase'], dtype=np.float64)), axis=-1)
+    kept = np.isfinite(flat['time']) & np.isfinite(flat['frequency'])
+    if test == 'sweep':
+        # a sweep's lines are where the tone moved: not a hold, nor the stop's ramp
+        kept &= flat['direction'] != 0
+    if not kept.any():
+        return None, 'it holds no point'
+    level = np.where(kept, flat['level_db'], -np.inf)
+    top = level.max()
+    at_top = kept & (flat['level_db'] == top)
+    last = flat['pass'][at_top].max()
+    chosen = at_top & (flat['pass'] == last)
+    order = np.argsort(flat['frequency'][chosen], kind='stable')
+    scale_dims = [_unit_scale(units[i]) for i in channels]
+    ordinate = np.array([values[c][chosen][order] * scale_dims[c][0]
+                         * np.exp(1j * np.deg2rad(phase[c][chosen][order]))
+                         for c in range(len(channels))])
+    dofs = table.dof_strings()
+    row = {int(i): k for k, i in enumerate(table['channel'])}
+    seconds = flat['time'][chosen][order]
+    said = f'pass {int(last) + 1} at {top:g} dB'
+    level_object = SineLevel(
+        abscissa=flat['frequency'][chosen][order], ordinate=ordinate,
+        response_dof=[dofs[row[i]] for i in channels],
+        ordinate_dim=[d for _s, d, _u in scale_dims],
+        ordinate_unit=[u for _s, _d, u in scale_dims],
+        comment=[f'{SINE_TONE} at channel {i}: the tracked level, {said}' for i in channels],
+        tone=SINE_TONE, onset=float(seconds.min()), seconds=seconds)
+    return SineLevelSet([level_object]), ''
+
+
 # ---- results -----------------------------------------------------------
 
 def _abscissa(result: run_folder.Result, lines: int) -> np.ndarray | None:
@@ -717,7 +865,10 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
     objects: dict[str, Any] = {'Channel Table': table}
     for name, history in _histories(run, table, lacked, progress):
         objects[_unique(name, objects)] = history
-    spec = _specification(run, table, lacked)
+    if run.test == 'sine':
+        spec = _sine_specification(run, table, lacked)
+    else:
+        spec = _specification(run, table, lacked)
     if spec is not None:
         objects[_unique('Specification', objects)] = spec
     units = {int(row['index']): str(row.get('units', '') or '') for row in run.rows}
@@ -729,6 +880,18 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
             descriptions[name]['records'] = result.records
         why = f'its kind {result.kind!r} has no analysis class'
         held = None
+        if result.kind == 'sine_levels':
+            test = ((run.setup.get('resolved') or {}).get('test') or {}).get('kind')
+            held, why = _sine_levels(result, table, units, test)
+            if held is not None:
+                for level in held:
+                    level.source = run.source
+                # the set holds one pass; every point of every pass stays as arrays
+                objects[_unique('Sine Levels', objects)] = held
+                unmapped[name] = dict(result.arrays)
+                continue
+            unmapped[name] = dict(result.arrays)
+            continue
         if result.kind in ANALYSIS_KINDS:
             held, why = _analysis_object(result, table, units)
         if held is None:

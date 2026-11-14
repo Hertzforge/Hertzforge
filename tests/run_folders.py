@@ -5,8 +5,10 @@
 goes through it, so folders written by the control service can replace
 or join these by swapping what calls it. The builders give a Random run
 (inputs, a drive, a resolved profile, PSD, FRF and coherence results, a
-log, a law and an end), a Recorder run (a recording with a pre-trigger
-and a gap), a pulse run (one stream of shots), and an unfinished run.
+log, a law and an end), a Sine run (a sweep or a dwell, its resolved
+profile, its levels and its control trace), a Recorder run (a recording
+with a pre-trigger and a gap), a pulse run (one stream of shots), and an
+unfinished run.
 Values are fixed, so a folder written twice is the same bytes.
 """
 
@@ -257,6 +259,108 @@ def random_run(folder: str, frames: int = 4096, *, complete: bool = True,
         law=({'id': 'law-1', 'name': 'Diagonal', 'version': '1.0', 'sha256': 'b' * 64,
               'builtin': False, 'params': {'gain': 0.5}, 'guards': []}, 'diagonal.py',
              b'def iterate(state):\n    return state\n'))
+
+
+def sine_run(folder: str, test: str = 'sweep', frames: int = 2048) -> str:
+    """A finished Sine run, as the control service writes one: a control
+    input, a monitor and the drive; a profile of 0.5 g resolved on 200 to
+    400 Hz; a `sweep` up and back down at 2 oct/min at -6 dB then 0 dB, or
+    a `dwell` of 30 s at 250 Hz; its levels in two records of 64 points
+    (the last filled out with NaN) and its control trace."""
+    rows = [row(1, 'control', description='Control'), row(2, 'monitor', description='Monitor'),
+            row(3, 'drive', 'V', description='Drive')]
+    if test == 'dwell':
+        band, resolved_test = (250.0, 250.0), {'kind': 'dwell', 'freq_hz': 250.0,
+                                               'dwell': {'seconds': 30.0}}
+        freq = np.array([250.0])
+    else:
+        band = (200.0, 400.0)
+        resolved_test = {'kind': 'sweep', 'band_hz': list(band),
+                         'rate': {'law': 'log', 'oct_per_min': 2.0}, 'start_hz': 200.0,
+                         'direction': 'up', 'sweeps': 2, 'duration_s': None}
+        freq = 200.0 * 2.0 ** (np.arange(9) / 8)
+    target = np.full(len(freq), 0.5)
+    reference = {'frequency': freq, 'reference': target, 'alarm_low': target * 10 ** -0.075,
+                 'alarm_high': target * 10 ** 0.075, 'abort_low': target * 10 ** -0.15,
+                 'abort_high': target * 10 ** 0.15}
+    n, half = 100, 50
+    t = np.arange(n) * 0.1
+    if test == 'dwell':
+        f = np.full(n, 250.0)
+        direction = np.zeros(n)
+        passes = np.zeros(n)
+    else:
+        up = 200.0 * 2.0 ** (np.arange(half) / (half - 1))
+        f = np.concatenate([up, up[::-1]])
+        direction = np.concatenate([[0.0], np.ones(half - 1), -np.ones(half)])
+        passes = np.concatenate([np.zeros(half), np.ones(half)])
+    level = np.concatenate([np.full(half, -6.0), np.zeros(n - half)])
+    tracked = np.stack([0.5 * 10 ** (level / 20), 1.5 * 10 ** (level / 20)])
+    phase = np.stack([np.full(n, -10.0), np.full(n, -95.0)])
+
+    def blocks(values: np.ndarray) -> np.ndarray:
+        padded = np.full((*values.shape[:-1], 128), np.nan)
+        padded[..., :n] = values
+        return np.stack([padded[..., :64], padded[..., 64:]])
+
+    levels = {'time': blocks(t), 'frequency': blocks(f), 'level_db': blocks(level),
+              'direction': blocks(direction), 'pass': blocks(passes),
+              'target': blocks(0.5 * 10 ** (level / 20)), 'measured': blocks(tracked[0]),
+              'drive': blocks(0.1 * 10 ** (level / 20)), 'values': blocks(tracked),
+              'phase': blocks(phase)}
+    trace = {'time': np.arange(64.0) * 0.1, 'frequency': np.full(64, 250.0),
+             'target': np.full(64, 0.5), 'measured': np.full(64, 0.49),
+             'applied': np.full(64, 0.1)}
+    results = {
+        'reference': ({'kind': 'envelope', 'abscissa': {'kind': 'frequency', 'unit': 'Hz',
+                                                        'array': 'frequency'},
+                       'channels': {'controls': [1]},
+                       'units': {'frequency': 'Hz', **{k: 'g' for k in reference
+                                                       if k != 'frequency'}}},
+                      reference, None),
+        'channel_levels': ({'kind': 'sine_levels', 'abscissa': {'kind': 'time', 'unit': 's',
+                                                                'array': 'time'},
+                            'channels': {'responses': [1, 2]},
+                            'records': {'index': 'record'},
+                            'units': {'time': 's', 'frequency': 'Hz', 'level_db': 'dB',
+                                      'target': 'g', 'measured': 'g', 'drive': 'V',
+                                      'values': 'g', 'phase': 'deg'}},
+                           levels, [{'index': 0, 'points': 64}, {'index': 1, 'points': 36}]),
+        'control_trace': ({'kind': 'sine_control', 'abscissa': {'kind': 'time', 'unit': 's',
+                                                                'array': 'time'},
+                           'channels': {}, 'records': {'index': 'record'},
+                           'units': {'time': 's', 'frequency': 'Hz', 'target': 'g',
+                                     'measured': 'g', 'applied': 'V'}},
+                          {k: v[np.newaxis] for k, v in trace.items()},
+                          [{'index': 0, 'calls': 64}]),
+    }
+    setup = {'config': {'title': 'Golden sine', 'test': {'kind': test}},
+             'resolved': {'test': resolved_test,
+                          'profile': {'breakpoints': [
+                              {'freq_hz': 100.0, 'quantity': 'accel_g_pk', 'value': 0.5,
+                               'accel_g_pk': 0.5, 'alarm_db': [1.5, 1.5],
+                               'abort_db': [3.0, 3.0]},
+                              {'freq_hz': 1000.0, 'quantity': 'accel_g_pk', 'value': 0.5,
+                               'accel_g_pk': 0.5, 'alarm_db': [1.5, 1.5],
+                               'abort_db': [3.0, 3.0]}], 'unit': 'g'}},
+             'derived': {}, 'feasibility': None}
+    del band
+    return write_run(
+        folder, _manifest('sine', grid={'fs_hz': FS, 'tick_frames': 102}),
+        {'revision': 3, 'sha256': 'c' * 64, 'rows': rows}, setup,
+        streams={'inputs': ({'kind': 'inputs', 'fs_hz': FS,
+                             'channels': [{'index': 1, 'unit': 'g'}, {'index': 2, 'unit': 'g'}],
+                             'first_station_frame': 0, 'frames': frames, 'gaps': [],
+                             'complete': True, 'fault': None}, _wave(frames, 2)),
+                 'drives': ({'kind': 'drives', 'fs_hz': FS,
+                             'channels': [{'index': 3, 'unit': 'V'}],
+                             'first_station_frame': 0, 'frames': frames, 'gaps': [],
+                             'complete': True, 'fault': None}, _wave(frames, 1, seed=1.0))},
+        results=results,
+        log=[{'seq': 0, 'at_unix': START['unix'], 'frame': None, 'kind': 'state',
+              'text': 'configured', 'data': {'to': 'idle'}}],
+        end={'run_uid': 'uid-sine-0001', 'end': {'outcome': 'completed', 'message': 'Done.'},
+             'at_unix': START['unix'] + 10, 'station_frames': frames, 'streams': {}})
 
 
 def recorder_run(folder: str, frames: int = 2048, pre: int = 256,

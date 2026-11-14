@@ -10,14 +10,16 @@
 
 	interface Props {
 		acq: RecordHost;
+		/** What the record keeps beside the time histories, in words, for the line under the switch. */
+		kept?: string;
 	}
-	let { acq }: Props = $props();
+	let { acq, kept = 'The setup, the channel table, the log and the spectra are still kept.' }: Props = $props();
 
 	const r = $derived(acq.setup.record);
 	const locked = $derived(acq.locked);
 	const E = $derived(acq.fieldErrors);
 	const channels = $derived(acq.recordChannels);
-	const bytes = $derived(recordBytesPerHour(channels, acq.setup.acquisition.fs_hz));
+	const bytes = $derived(recordBytesPerHour(channels, acq.recordRateHz));
 	const docErrors = $derived((E['specification.document'] ?? []).map((message) => ({ level: 'error' as const, message })));
 </script>
 
@@ -67,7 +69,7 @@
 					The size per hour shows once the sample rate is a number.
 				{/if}
 			{:else}
-				Every enabled input and drive goes unrecorded. The setup, the channel table, the log and the spectra are still kept.
+				Every enabled input and drive goes unrecorded. {kept}
 			{/if}
 		</p>
 	</div>

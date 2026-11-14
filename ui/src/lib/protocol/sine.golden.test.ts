@@ -125,7 +125,7 @@ describe('Sine goldens through the shell', () => {
 		const config = testConfig()!;
 		const mine = toSineConfig({ ...defaultSineSetup(), limits: { ...defaultSineSetup().limits, drive_vpk_ceiling: 0.5, drive_vpk_abort: 0.8 } }, null);
 		expect(Object.keys(mine).sort()).toEqual(Object.keys(config).sort());
-		for (const k of ['test', 'acquisition', 'schedule', 'identification', 'control', 'limits', 'cola', 'capture'] as const) expect(Object.keys(mine[k] ?? {}).sort()).toEqual(Object.keys(config[k] ?? {}).sort());
+		for (const k of ['test', 'acquisition', 'schedule', 'identification', 'control', 'limits', 'cola', 'record'] as const) expect(Object.keys(mine[k] ?? {}).sort()).toEqual(Object.keys(config[k] ?? {}).sort());
 	});
 
 	it.skipIf(!has('response_laws_list_sine.json'))('the Sine world lists its built-in law first, with a form the shell draws and its live parameters', () => {

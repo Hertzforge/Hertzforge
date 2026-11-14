@@ -1076,7 +1076,7 @@ plain words: it never names a protocol method.
 | `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
-| `record_unwritable` | `refused` | `random.arm` or `random.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
+| `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm` or `sine.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, Mixed Mode, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
@@ -3180,8 +3180,8 @@ binary frame.
  "feasibility":{"shaker":{"name":"Bench shaker",...},
                 "moving_mass_lb":{"armature":45,"slip_table":0,"drive_adapter":3,"fixturing":10,
                                   "test_article":12}},
- "capture":{"rule":"off","first_s":null,"level_settle_s":1,"periodic_save_s":null,
-            "run_name":"sine"},
+ "operator":"A. Operator","article":"Bracket, serial 7","notes":"first article",
+ "specification":{"document":"Test procedure 12","clause":"4.2"},"record":{"streams":true},
  "metadata":[{"key":"run_number","label":"Run Number","value":"7"}]}
 ```
 
@@ -3220,10 +3220,13 @@ binary frame.
 | `limits.notch` | `{"drive_floor":0.01,"smoothing_ticks":3,"release_ramp_db_per_s":20}` | The notch: the drive under which a channel's gain is not estimated (a fraction of full drive, above 0 and under 1), the ticks its estimate is smoothed over (at least 1), and how fast the drive may come back once the notch releases, dB/s |
 | `cola` | off | A second, constant-amplitude reference output locked to the tone: `enabled`, `volts_pk` (default 0.1, above 0 and at most 10), `waveform` `sine` (the default), `square` or `dc`. It needs a second drive row and a station with two outputs (the simulator has one): `cola_needs_two_outputs` |
 | `feasibility` | null | Random's shaker record and moving mass (no crest factor: a sine's is 1). Checked at configure and at arm against the profile's peaks; a record that does not parse is refused `shaker_record_invalid`. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
-| `capture` | off | `rule` `off` or `entire_test` (the whole test from engage, in the run folder `run_name` under the local data root, or the first free `<run_name>-<n>` when that name is taken, so no run writes over another); `manual` and `first_seconds` are refused `out_of_range` (there is no verb to start a recording and no first-seconds rule); `level_settle_s` (default 1) and `first_s` are kept for them; `periodic_save_s` (null: none) saves a snapshot (`snapshot_<unix seconds>.json`) that often, in test time, while recording; `run_name` (default `sine`) is a plain name with no path in it. A recording holds `capture.json` (the channel table, the rate and the run's settings), the law's record `law.json` and a record per control tick (`law_ticks.bin`, described by `law_ticks.json`), and the snapshots; its sample stream `telemetry.f32` is written empty, so a Sine run records no time history |
+| `operator`, `article`, `notes`, `specification`, `record` | empty, null, `{"streams":true}` | Random's, for the run's record (see Sine Run Folders): the operator's words, the document and clause the test is run to, and whether the record keeps the inputs and the drive as streams. None of them changes how the run drives |
 | `metadata` | the default fields | Random's: `{"key","label","value"}`, `label` the key when absent |
 | `operator`, `article`, `notes` | empty | The operator's words for the run's record, as Random's. Empty `operator` and `article` take the `metadata` fields `operator` and `test_article` |
 | `specification` | null | `{"document","clause"}`, as Random's: what the run was made to |
+
+Sine takes no `capture`: every run is recorded (see Sine Run Folders), and a configuration that
+gives one is refused `bad_params` at `config.capture`.
 
 The control channels are the table's enabled `control` rows, each with its weight (1 unless
 `control.weights` names it); the drive is its first enabled `drive` row (with COLA, the second
@@ -3396,7 +3399,9 @@ service's clock: it measures how long nobody has held control.
                    "trusted_frac":0.97,"passed":true},
  "law":{"id":"servo_blend","name":"Servo blend","version":"0.1.0","sha256":null,"misses":0,
         "capped_ticks":0,"live":{"blend_w":0.5}},
- "feasibility":{"verdict":"pass","message":"..."},"end":null}
+ "feasibility":{"verdict":"pass","message":"..."},"end":null,
+ "record":{"folder":"/home/operator/Hertzforge_Data/20261101-142233_sine_sine-0003",
+           "streams":"on","problem":null}}
 ```
 
 | `state` | `phase` | Meaning |
@@ -3431,6 +3436,8 @@ service's clock: it measures how long nobody has held control.
   `ramp_s` the controlled stop's length on the station's clock (null for an abort; a
   `divergence` trip and a `law_fault` take the controlled stop, so theirs is a number, from the
   trip's tick).
+- `record` is Random's: absent until the run arms, then the run folder, whether it holds the
+  streams, and the latest problem writing it.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -3460,6 +3467,25 @@ A `law_fault` trip's `reason` is `error` (the law reported one, or could not be 
 `panicked` (it panicked or, for a law file, trapped), `over_budget`, `over_memory` (a law file),
 `non_finite` (the drive or a value), `negative` (the drive), `undeclared_value` or
 `too_many_values`.
+
+### Sine Run Folders
+
+Every Sine run that arms leaves a run folder as Random's does (Run Folders, and
+`docs/run-folder.md`, "What a Sine Run Saves"), named `<YYYYMMDD-HHMMSS>_sine_<run id>`: claimed
+at arm and never written over, `run.json`, `table.json`, `setup.json` (the configuration as
+accepted; what it resolved to: the profile's breakpoints with their quantity and the
+acceleration they give, the test's sweep law, rate, direction, count, dwell and step settings,
+the level ladder, the alarm and abort bands, the limit channels and the notch, the control
+settings and the controller's own configuration; the derived values; feasibility) and
+`law/law.json` (the law's identity, parameters and guards) before the first sample, or the arm
+is refused `record_unwritable`. Every `sine.log` entry is appended as it is made, with the
+station frame and structured `data` for each state, level, alarm, trip, overload, override and
+operator action; the inputs and the drive as the device accepted it are streams unless
+`record.streams` is false; the results (the profile and its bands on the run's band, each limit
+channel's lines, the identification's transfer function and coherence, each input's tracked
+level and phase as the run went, and every control-law call) are written as the run goes, off
+the control thread; `end.json` holds `end` as `sine.state` reports it. A failure to write the
+record is a log entry of kind `record` and the state's `record.problem`; the run goes on.
 
 ### Sine Display
 
@@ -3757,7 +3783,7 @@ and meaning are theirs, and the field applies as stated here:
 | `limits.kinematic_monitor` | true | Sine's: with `feasibility`, abort when the response's velocity or displacement, read on raw samples (tones in), passes the shaker's rating (`kinematic`). Off, the station's own raw-sample watchdog still trips on each channel's own velocity limit: the switch does not turn raw-sample protection off |
 | `limits.channels` | none | Random's limit rows, `{"channel","kind","rows":[{"freq_hz","ceiling"}]}`, on any enabled input, a control channel too, as Random's, ceilings in the channel's unit squared per Hz. The service lowers the random part where a channel would pass its ceiling; a limit never aborts, and it does not lower a tone |
 | `feasibility` | null | Random's shaker record, moving mass and `crest_factor` (default 3). Checked at configure and arm against the predicted peaks (below) |
-| `capture` | off | Sine's members and rules, with `run_name` default `mixed`. `entire_test` records from engage, when the drive starts after the identification and any review hold, until the run ends: the control channels at the run's rate (`telemetry.f32`, with `capture.json`: the channel table, the rate and the configuration), the law records' description (`law.json`) and every law call (`law_ticks.bin`). No other input and no drive is recorded. `periodic_save_s` is checked and saves nothing |
+| `capture` | off | `rule` `off` or `entire_test` (in the run folder `run_name` under the local data root, or the first free `<run_name>-<n>` when that name is taken, so no run writes over another); `manual` and `first_seconds` are refused `out_of_range`; `level_settle_s` (default 1) and `first_s` are kept for them; `run_name` (default `mixed`) is a plain name with no path in it. `entire_test` records from engage, when the drive starts after the identification and any review hold, until the run ends: the control channels at the run's rate (`telemetry.f32`, with `capture.json`: the channel table, the rate and the configuration), the law records' description (`law.json`) and every law call (`law_ticks.bin`). No other input and no drive is recorded. `periodic_save_s` is checked and saves nothing |
 | `metadata` | the default fields | Random's |
 
 The control channels are the table's enabled `control` rows; the drive is its first enabled

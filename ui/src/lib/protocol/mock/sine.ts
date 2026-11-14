@@ -18,7 +18,7 @@
  * the shell has something to draw. Nothing here is the service's profile math or control.
  */
 
-import type { ChannelRow, DataSource, LogEntry, LogKind, ReadingRow, RefusalReason, Series, SpectrumView, StationRef, View } from '../types';
+import type { ChannelRow, DataSource, LogEntry, LogKind, ReadingRow, RefusalReason, RunRecordRef, Series, SpectrumView, StationRef, View } from '../types';
 import type { LawEntry, LawParam } from '../mimo';
 import type {
 	SineAlarm,
@@ -446,6 +446,8 @@ interface Run {
 	timer: ReturnType<typeof setInterval> | null;
 	trace: Trace;
 	grid: number[];
+	/** The run's record, from arm on. */
+	record: RunRecordRef | null;
 }
 
 export interface SineMock {
@@ -463,8 +465,15 @@ export interface SineMock {
 const LIVE: SineRunState[] = ['armed', 'running', 'review', 'stopping'];
 const DRIVING: SinePhase[] = ['engaged', 'full_level'];
 
-/** What the Sine mock needs of the control service around it: classical shock's. */
-export type SineMockHost = ShockMockHost;
+/**
+ * What the Sine mock needs of the control service around it: classical shock's, and where a run's
+ * folder is made, how its record behaves (refused at arm, or failing as it runs), and its name.
+ */
+export type SineMockHost = ShockMockHost & {
+	dataRoot?: string;
+	record?: 'unwritable' | 'problem';
+	folderName?: (at: Date, runId: string, test: string) => string;
+};
 
 export function createSineMock(host: SineMockHost): SineMock {
 	let run: Run | null = null;
@@ -559,13 +568,14 @@ export function createSineMock(host: SineMockHost): SineMock {
 			identification: r.identification,
 			law: { id: r.law.id, name: r.law.name, version: r.law.version, sha256: r.law.sha256, misses: r.misses, capped_ticks: r.capped, live: { ...r.lawLive } },
 			feasibility: r.feasibility,
-			end: r.end
+			end: r.end,
+			...(r.record ? { record: { ...r.record } } : {})
 		};
 	}
 
 	function stateChanged(force = false) {
 		const s = stateOf(run);
-		const key = JSON.stringify([s.run_id, s.state, s.phase, s.mode, s.level_db, s.held, s.alarm, s.notch, s.end]);
+		const key = JSON.stringify([s.run_id, s.state, s.phase, s.mode, s.level_db, s.held, s.alarm, s.notch, s.end, s.record]);
 		if (!force && key === lastStateKey) return;
 		lastStateKey = key;
 		host.broadcast('sine.state', s as unknown as Record<string, unknown>);
@@ -690,10 +700,6 @@ export function createSineMock(host: SineMockHost): SineMock {
 			if (host.station().ref.kind === 'sim' || drives < 2) errors.push(item('cola_needs_two_outputs', 'The reference output needs a second drive row and a station with two outputs; the simulator has one.', 'config.cola.enabled'));
 			if (config.cola.volts_pk !== undefined && !(config.cola.volts_pk > 0)) errors.push(item('out_of_range', 'The reference output is above 0 V pk.', 'config.cola.volts_pk'));
 		}
-		const cap = config.capture ?? {};
-		if (cap.rule === 'first_seconds' && !(isNum(cap.first_s) && cap.first_s > 0)) errors.push(item('out_of_range', 'The seconds captured at each level are above 0.', 'config.capture.first_s'));
-		if (cap.periodic_save_s != null && !(cap.periodic_save_s > 0)) errors.push(item('out_of_range', 'A periodic save is above 0 s, or none.', 'config.capture.periodic_save_s'));
-		if (cap.run_name !== undefined && /[\\/]/.test(cap.run_name)) errors.push(item('out_of_range', 'The run folder is a name, not a path.', 'config.capture.run_name'));
 		if (!controlRows().length) errors.push({ reason: 'no_control_channel', message: 'The channel table has no enabled control row.' } as Item);
 		if (!host.rows().some((r) => r.enabled && r.role === 'drive')) errors.push({ reason: 'no_drive_channel', message: 'The channel table has no enabled drive row.' } as Item);
 		const tracking = trackingOf(config);
@@ -798,7 +804,8 @@ export function createSineMock(host: SineMockHost): SineMock {
 			end: null,
 			timer: null,
 			trace: newTrace(grid, t.kind === 'dwell' || t.kind === 'rstd'),
-			grid
+			grid,
+			record: null
 		};
 	}
 
@@ -851,12 +858,28 @@ export function createSineMock(host: SineMockHost): SineMock {
 			addLog('feasibility', 'feasibility exceeded; arming needs an acknowledgement');
 			refuse('refused', 'feasibility_exceeded', "The profile's displacement exceeds the shaker's stroke; arm with an acknowledgement to go on.", { verdict: 'exceeded' });
 		}
+		claimRecord(r);
 		if (ack) addLog('override', `armed past feasibility: "${ack}"`);
 		r.feasibility = r.derived.feasibility;
 		r.derived = { ...r.derived, grid: { ...r.derived.grid, actual: true } };
 		setPhase(r, 'armed', 'armed');
 		addLog('station', `armed on ${r.station.class}; nothing driven`);
 		startLive();
+	}
+
+	/** Claim the run's folder at arm, or refuse the arm as the service does when it cannot be written. */
+	function claimRecord(r: Run) {
+		if (r.record) return;
+		const root = (host.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '');
+		const name = host.folderName ? host.folderName(new Date(), r.id, 'sine') : `sine_${r.id}`;
+		const folder = `${root}/${name}`;
+		if (host.record === 'unwritable') {
+			const reason = 'Permission denied';
+			refuse('refused', 'record_unwritable', `The run's record could not be written, so the run did not arm: ${folder} (${reason}). Choose a data folder that can be written.`, { path: folder, reason });
+		}
+		const streams = r.config.record?.streams === false ? 'off' : 'on';
+		r.record = { folder, streams, problem: null };
+		if (streams === 'off') addLog('record', "the run's streams are not recorded: switched off in the setup");
 	}
 
 	function start(r: Run) {
@@ -1095,6 +1118,12 @@ export function createSineMock(host: SineMockHost): SineMock {
 				break;
 			default:
 				return;
+		}
+		if (host.record === 'problem' && r.record && r.record.streams === 'on' && r.record.problem === null && r.t >= 2) {
+			const problem = 'Recording of the inputs stream stopped: a write failed: no space left on the disk. The run goes on.';
+			r.record = { ...r.record, problem };
+			addLog('record', problem);
+			stateChanged(true);
 		}
 		r.t += dt;
 		// a law file that answers late on purpose: misses in a row stop the run with the ramp
@@ -1505,6 +1534,8 @@ export function createSineMock(host: SineMockHost): SineMock {
 			'sine.configure': (params, conn) => {
 				if (!isObject(params.config)) bad('config', 'Configuring needs a test configuration.');
 				shapeOk(params.config as Record<string, unknown>);
+				if ((params.config as Record<string, unknown>).capture != null)
+					bad('config.capture', 'Sine takes no "capture": every run is recorded in its run folder, and "record.streams" says whether the record keeps its time histories.');
 				const config = params.config as unknown as SineConfig;
 				const checked = check(config);
 				if (params.dry_run === true) return { errors: checked.errors, warnings: checked.warnings, derived: checked.derived, views: checked.views };

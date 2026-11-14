@@ -44,6 +44,7 @@ import {
 	bandOf,
 	defaultSineSetup,
 	fromSineConfig,
+	SINE_DEFAULT_FS_HZ,
 	localErrors,
 	mergeSineSetup,
 	newLimitChannel,
@@ -223,6 +224,16 @@ export class SineStore {
 		return this.acq.isController;
 	}
 
+	/** The channels a run's streams would hold: every enabled input and drive of the table being edited. */
+	get recordChannels(): number {
+		return this.rows.filter((r) => r.enabled).length;
+	}
+
+	/** The sample rate the run asks for (the usual one when none is given), for the size its streams take. */
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz ?? SINE_DEFAULT_FS_HZ;
+	}
+
 	get rows(): ChannelRow[] {
 		return this.acq.rows;
 	}
@@ -393,7 +404,8 @@ export class SineStore {
 			level_db: s.level_db,
 			at_level_s: s.at_level_s,
 			remaining_at_level_s: null,
-			end: s.end as unknown as RunHead['end']
+			end: s.end as unknown as RunHead['end'],
+			record: s.record ?? null
 		};
 	}
 

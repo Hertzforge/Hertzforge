@@ -212,18 +212,37 @@ pub fn station_member(
 }
 
 fn sim_json(f: &ArmFacts<'_>) -> Option<Value> {
-    match f.plan {
+    sim_value(f.plan, f.class)
+}
+
+/// The manifest's `sim` for a simulated run (the plant's model, its parameters
+/// and its seed); `None` for any other station.
+pub fn sim_value(plan: &StationPlan, class: StationClass) -> Option<Value> {
+    match plan {
         StationPlan::Sim {
             fs_hz,
             plant,
             outputs,
-        } if source_of(f.class) == "SIM" => Some(station::sim_identity(&station::sim_spec(
+        } if source_of(class) == "SIM" => Some(station::sim_identity(&station::sim_spec(
             *fs_hz,
             plant.as_ref(),
             *outputs,
         ))),
         _ => None,
     }
+}
+
+/// The manifest's `build`: the version, the commit and whether it was dirty.
+pub fn build_value(core_build: &str) -> Value {
+    json!({"version": env!("CARGO_PKG_VERSION"),
+           "commit": core_build.trim_end_matches("-dirty"),
+           "dirty": core_build.ends_with("-dirty")})
+}
+
+/// A stream's channel as `stream.json` lists it: its table index, its unit and
+/// its description.
+pub fn stream_channel_value(c: &Channel) -> Value {
+    stream_channel(c)
 }
 
 fn control_json(cfg: &WireConfig) -> Value {

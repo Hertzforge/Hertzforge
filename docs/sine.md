@@ -9,7 +9,7 @@ drive ceiling and an abort that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
 station and channels, the profile, the test, the schedule and identification, control, limits and
-capture, then the run itself. Sine shares its run bar, station panel, channel table and control-law
+the run's record, then the run itself. Sine shares its run bar, station panel, channel table and control-law
 panel with the other test types, and its level and ladder controls with Random.
 
 ## What the Test Does
@@ -166,26 +166,20 @@ identification predicts at the present frequency. Its prediction weight is live.
   against at arm. Without them, feasibility is not evaluated, the kinematic monitor is off, and the
   run says so.
 
-## Capture
+## Run Record
 
-What the run records beyond its report: nothing (`off`, the default) or the entire test
-(`entire_test`); recording only what is started and stopped by hand, or the first seconds at each
-level, is refused when the setup is applied. Also here: how often to save a snapshot, and the run
-folder's name under the program's local data folder (`sine` unless named); when that name is
-taken, the run gets the next free one (`sine-2`, `sine-3`, ...). Fields kept with the run (a run
-number, an operator) are listed here.
+Every run is recorded. From arm, the control service writes the run into a run folder of its own
+under the program's local data folder: the channel table, the setup as accepted and as resolved,
+the law, the log, the inputs and the drive as time histories, and the results the test is judged
+by: each input's tracked level and phase against frequency (against time in a dwell), the control
+point's target, measured amplitude and drive at every control call, the identification, and the
+profile's and the limit channels' lines. `docs/run-folder.md` says what is in the folder and how
+the analysis side opens it.
 
-The entire test is recorded from the moment the tone starts until the run ends. The run folder
-holds:
-
-- the capture description (`capture.json`): the channel table, the station rate and the run's
-  settings. Its sample stream (`telemetry.f32`) is empty: a Sine run records no time history.
-- the control law's record (`law.json`) and one record per control tick (`law_ticks.bin`,
-  described by `law_ticks.json`): the tone's frequency, the target, the measured amplitude, the
-  drive in force, the law's output and what was applied.
-- with a save interval set, a snapshot of the run's state at each interval of test time
-  (`snapshot_<time>.json`): the frequency, level, target and measured amplitude, each channel's
-  tracked and broadband amplitude, the distortion and coherence.
+This page takes who ran the test, on what article, the document and clause it is run to, notes,
+and whether the record keeps the time histories (they are most of a folder's size). Fields kept
+with the run's report (a run number, a serial number) are listed here too. A run whose record
+cannot be written in the data folder does not arm, and the screen says why.
 
 ## The Run
 
@@ -235,6 +229,13 @@ Abort, and Cmd or Ctrl and period aborts from any of them.
 
 When nobody holds control, the run goes on; if no screen takes control within the timeout, it ends
 with the controlled stop.
+
+From arm, the Run card says where the run is being recorded: the run folder's name and its full
+path, and when the time histories are off, that they are not kept. When the record cannot write
+something (a stream stopped, a file not written), a notice says so and the run goes on. Once the run
+has ended, **Open in Analysis** converts the folder and opens its data in the Sine workspace (or
+imports it into the project already open), and **Copy Folder Path** puts the folder's path on the
+clipboard.
 
 ## How a Run Ends
 
