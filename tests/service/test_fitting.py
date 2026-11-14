@@ -627,7 +627,6 @@ def test_an_frf_of_two_quantities_is_not_fitted_and_the_rows_say_why(project):
                          ordinate_dim=['velocity/force', *dims[1:]])
     rows = {row['id']: row for column in action_table(project, ['FRF'], {})['columns']
             for row in column['rows']}
-    for row in ('self.fit', 'project.fit_modes'):
-        assert not rows[row]['ready'] and 'a fit takes one quantity' in rows[row]['reason']
+    assert not rows['self.fit']['ready'] and 'a fit takes one quantity' in rows['self.fit']['reason']
     with pytest.raises(ProtocolError, match='a fit takes one quantity'):
         fitting.start(project, {'frf': 'FRF'})

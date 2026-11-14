@@ -181,9 +181,11 @@ PARTS = {f'project.{name}': part for name, part in {
 #: is a cylinder to subtract (Brandon, 2026-10-20); an object is placed in a
 #: group, and a solid among its siblings, by dragging it there in the tree; and
 #: a geometry's entities are deleted in their part's Edit table, and its solids seen by
-#: picking them (Brandon, 2026-11-10; Edit, not the plot, holds the table, 2026-11-13)
+#: picking them (Brandon, 2026-11-10; Edit, not the plot, holds the table, 2026-11-13);
+#: and modes are fitted on the fitting screen alone, the band fit left to scripts and
+#: to recomputing what it made (2026-11-14)
 UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
-                       'project.delete_entities', 'project.solids'})
+                       'project.delete_entities', 'project.solids', 'project.fit_modes'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',
