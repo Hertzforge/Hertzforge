@@ -18,7 +18,7 @@
  * Nothing here is a measurement: the numbers are made up so that every screen can be reached.
  */
 
-import type { ChannelRow, DataSource, LogEntry, LogKind, RefusalReason, Series, SpectrumView, StationRef, View } from '../types';
+import type { ChannelRow, DataSource, LogEntry, LogKind, RefusalReason, RunRecordRef, Series, SpectrumView, StationRef, View } from '../types';
 import type {
 	MimoShockConfig,
 	MimoShockControlVerdict,
@@ -50,6 +50,10 @@ export interface MimoShockMockHost {
 	clientName(conn: MockConnection): string;
 	/** The run's second level ends on an absolute abort line. */
 	absoluteAbort?: boolean;
+	/** The run's record: refused at arm or start (`unwritable`), or a stream stops while it runs (`problem`). */
+	record?: 'unwritable' | 'problem';
+	/** Where a run's folder goes, by its id. */
+	recordFolder?(runId: string): string;
 }
 
 export interface MimoShockMock {
@@ -310,6 +314,8 @@ interface Run {
 	lawParams: Record<string, unknown>;
 	halved: boolean;
 	timer: ReturnType<typeof setInterval> | null;
+	/** The run's record, from arm on. */
+	record: RunRecordRef | null;
 }
 
 function plantOf(c: MimoShockConfig): string {
@@ -374,8 +380,22 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			law: { id: r.law.id, name: r.law.name, version: r.law.version, sha256: r.law.sha256, params: r.lawParams, misses: 0 },
 			end: r.end,
 			scaled_aborts: r.config.control?.scaled_aborts ?? true,
-			notice: (r.config.control?.scaled_aborts ?? true) ? null : "Level-scaled aborts are off: a pulse over its level's abort line is flagged and judged failing, and only the full-level (absolute) lines end the run."
+			notice: (r.config.control?.scaled_aborts ?? true) ? null : "Level-scaled aborts are off: a pulse over its level's abort line is flagged and judged failing, and only the full-level (absolute) lines end the run.",
+			...(r.record ? { record: { ...r.record } } : {})
 		};
+	}
+
+	/** Claim the run's folder at arm, or refuse the arm as the service does when it cannot be written. */
+	function claimRecord(r: Run) {
+		if (r.record) return;
+		const folder = host.recordFolder?.(r.id) ?? `~/Hertzforge_Data/${r.id}`;
+		if (host.record === 'unwritable') {
+			const reason = 'Permission denied';
+			refuse('refused', 'record_unwritable', `The run's record could not be written, so the run did not arm: ${folder} (${reason}). Choose a data folder that can be written.`, { path: folder, reason });
+		}
+		const streams = r.config.record?.streams === false ? 'off' : 'on';
+		r.record = { folder, streams, problem: null };
+		if (streams === 'off') addLog('record', "the run's streams are not recorded: switched off in the setup");
 	}
 
 	function stateChanged(force = false) {
@@ -598,6 +618,11 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 		if (row.arrival_spread_s > windowS) row.warnings.push(`the controls arrive ${(row.arrival_spread_s * 1000).toFixed(2)} ms apart, over the ${(windowS * 1000).toFixed(2)} ms window`);
 		if (r.config.verdict === 'global' && row.global_srs_error_db !== null) row.passed = row.global_srs_error_db <= tol;
 		r.rows.push(row);
+		if (host.record === 'problem' && r.record && r.record.streams === 'on' && r.record.problem === null && r.rows.length >= 2) {
+			const problem = 'Recording of the inputs stream stopped: a write failed: No space left on device (os error 28). The run goes on.';
+			r.record = { ...r.record, problem };
+			addLog('record', problem);
+		}
 		// the law improves every control that is not growing
 		r.errors = r.errors.map((e, i) => (severe && i === 1 && level >= -6 - 1e-9 ? e : round(e * 0.4, 3)));
 		addLog('pulse', `Pulse ${n + 1} at ${level} dB: ${row.passed ? 'passed' : 'did not pass'}.`);
@@ -867,13 +892,16 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			law,
 			lawParams: params,
 			halved: false,
-			timer: null
+			timer: null,
+			record: null
 		};
 	}
 
 	const methods: Record<string, MockMethod> = {
 		'mimo_shock.configure': (params, conn) => {
 			if (!isObject(params.config)) refuse('bad_request', 'bad_params', 'Give the configuration.', { param: 'config' });
+			if ((params.config as Record<string, unknown>).capture != null)
+				refuse('bad_request', 'bad_params', 'A MIMO Shock run is always recorded in its run folder; "capture" is no longer taken. Use "record" to keep or leave out the streams.', { param: 'config.capture' });
 			const config = params.config as unknown as MimoShockConfig;
 			const dry = params.dry_run === true;
 			if (!dry) host.own(conn);
@@ -896,6 +924,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			if (r.state !== 'configured') wrong(r, 'Arm');
 			const other = host.otherRun();
 			if (other) refuse('refused', 'run_active', `Run ${other} holds the station.`, { run_id: other });
+			claimRecord(r);
 			r.state = 'armed';
 			r.phase = 'armed';
 			addLog('station', 'Armed: the station is open; nothing is driven.');
@@ -909,6 +938,7 @@ export function createMimoShockMock(host: MimoShockMockHost): MimoShockMock {
 			if (r.state !== 'configured' && r.state !== 'armed') wrong(r, 'Start');
 			const other = host.otherRun();
 			if (other) refuse('refused', 'run_active', `Run ${other} holds the station.`, { run_id: other });
+			claimRecord(r);
 			r.state = 'running';
 			r.phase = 'sysid';
 			r.phaseT = 0;

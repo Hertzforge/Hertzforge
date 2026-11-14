@@ -81,7 +81,7 @@
 {#snippet station()}<StationPanel acq={ms.acq} />{/snippet}
 
 {#snippet run()}
-	<MsRunView {ms} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_shock')} />
+	<MsRunView {ms} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'mimo_shock')} opener={app.mimoShockRunOpen} />
 {/snippet}
 
 <PulseScreen

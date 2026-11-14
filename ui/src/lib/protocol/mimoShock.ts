@@ -5,7 +5,7 @@
  * from the control-law catalog's `shock_mimo` world. Where a part of the wire is classical shock's
  * or SRS shock's, the type is theirs.
  */
-import type { ClockDomain, DataSource, ItemReason, LadderMode, LogEntry, ReportItem, StationRef, View } from './types';
+import type { ClockDomain, DataSource, ItemReason, LadderMode, LogEntry, ReportItem, RunRecordRef, StationRef, View } from './types';
 import type { LawEntry } from './mimo';
 import type { ShockGrid, ShockPulse, ShockRefusalReason, ShockStandardName, ShockSubscribeResult } from './shock';
 import type { SrsBands, SrsSynthesis, SrsTarget } from './srs';
@@ -133,7 +133,12 @@ export interface MimoShockConfig {
 	identification?: MimoShockIdentification;
 	control?: MimoShockControl;
 	simulator?: { plant: string | null };
-	capture?: { auto_start: boolean; run_name: string };
+	/** The run's record (Random's): the operator's words, what the test is run to, and whether the folder keeps the time histories. */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	specification?: { document: string; clause: string } | null;
+	record?: { streams: boolean };
 	metadata?: { key: string; label: string; value: string }[];
 }
 
@@ -369,6 +374,8 @@ export interface MimoShockState {
 	scaled_aborts: boolean;
 	/** Null while scaled aborts are on; with them off, a standing sentence saying so. */
 	notice: string | null;
+	/** The run's record, from arm on (Random's): its folder, whether it keeps the time histories, its problem. */
+	record?: RunRecordRef;
 }
 
 export interface MimoShockProceedParams {

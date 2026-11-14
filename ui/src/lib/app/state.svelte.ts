@@ -2033,6 +2033,8 @@ export class AppState {
 	readonly shockRunOpen: RunOpen;
 	/** A finished SRS shock run's way to its data: the Shock workspace. */
 	readonly srsRunOpen: RunOpen;
+	/** A finished MIMO Shock run's way to its data: the Shock workspace. */
+	readonly mimoShockRunOpen: RunOpen;
 	/** A finished Sine run's way to its data on the analysis side. */
 	readonly sineRunOpen: RunOpen;
 	/** A finished Mixed Mode run's way to its data on the analysis side. */
@@ -2112,6 +2114,7 @@ export class AppState {
 		this.runOpen = new RunOpen(runHost);
 		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
 		this.srsRunOpen = new RunOpen(runHost, 'srs');
+		this.mimoShockRunOpen = new RunOpen(runHost, 'mimo_shock');
 		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mixedRunOpen = new RunOpen(runHost, 'mixed');
 		this.explorerRunOpen = new RunOpen(runHost, 'explorer');

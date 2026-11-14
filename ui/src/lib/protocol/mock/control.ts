@@ -115,7 +115,7 @@ export interface ControlServerOptions {
 	mimoShockAbsoluteAbort?: boolean;
 	/** Where a Random or Sine run's folder is made (default `~/Hertzforge_Data`). */
 	dataRoot?: string;
-	/** A Random, Sine, classical shock, SRS shock, TWR or Explorer run's record: refused at arm or start (`unwritable`), or a stream stops while it runs (`problem`). */
+	/** A Random, Sine, classical shock, SRS shock, MIMO Shock, TWR or Explorer run's record: refused at arm or start (`unwritable`), or a stream stops while it runs (`problem`). */
 	record?: 'unwritable' | 'problem';
 }
 
@@ -1015,7 +1015,9 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
-		absoluteAbort: options.mimoShockAbsoluteAbort ?? false
+		absoluteAbort: options.mimoShockAbsoluteAbort ?? false,
+		record: options.record,
+		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'mimo_shock')}`
 	});
 
 	// ---- stations and the channel table -------------------------------------------------------
