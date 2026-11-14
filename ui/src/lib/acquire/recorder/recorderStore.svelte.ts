@@ -392,7 +392,10 @@ export class RecorderStore {
 			level_db: null,
 			at_level_s: null,
 			remaining_at_level_s: null,
-			end: s.end as unknown as RunHead['end']
+			end: s.end as unknown as RunHead['end'],
+			// The run folder, for the Run card's recording line and the end's actions; a Recorder run
+			// always keeps its recordings.
+			record: s.record ? { folder: s.record.folder, streams: 'on', problem: s.record.problem } : null
 		};
 	}
 

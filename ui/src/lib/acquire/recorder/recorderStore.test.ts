@@ -16,6 +16,7 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { RecorderData, RecorderLive, RecorderState } from '$lib/protocol/recorder';
 import { ExplorerStore } from '../explorer/explorerStore.svelte';
 import { AcquireState } from '../store.svelte';
+import { workspaceForRun } from '../runOpen.svelte';
 import { RecorderStore } from './recorderStore.svelte';
 import { RecorderViewsState } from './recorderViews.svelte';
 import { recorderCardStatus } from './recorderWords';
@@ -411,6 +412,19 @@ describe('the Recorder store', () => {
 		await until(() => recorder.folder?.endsWith('/recorder-2') ?? false, 3000);
 		expect(recorder.log.filter((e) => /^records in /.test(e.text)).map((e) => e.text)).toEqual(['records in ~/Hertzforge_Data/recorder-2']);
 		await recorder.abort();
+	}, 15000);
+
+	it('names the Recorder run folder on the run head from start on, kept after the end, and opens a finished run in the Signals workspace', async () => {
+		const { recorder } = await screen();
+		Object.assign(recorder.setup.trigger, { mode: 'start', record_s: 0.5 });
+		expect(recorder.run?.record ?? null).toBeNull();
+		await running(recorder);
+		await until(() => !!recorder.folder);
+		expect(recorder.run?.record).toEqual({ folder: recorder.folder, streams: 'on', problem: null });
+		await recorder.stop();
+		await until(() => recorder.status?.state === 'finished');
+		expect(recorder.run?.record?.folder).toMatch(/\/recorder$/);
+		expect(workspaceForRun('recorder')).toBe('signals');
 	}, 15000);
 
 	it('round-trips every Recorder setup field through what the service holds', async () => {

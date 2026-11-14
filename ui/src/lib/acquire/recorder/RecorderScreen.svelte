@@ -73,7 +73,7 @@
 {#snippet station()}<StationPanel acq={recorder.acq} />{/snippet}
 
 {#snippet run()}
-	<RecorderRunView {recorder} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')} />
+	<RecorderRunView {recorder} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')} opener={app.recorderRunOpen} />
 {/snippet}
 
 <PulseScreen
