@@ -32,7 +32,7 @@ const run = (more: Partial<RecorderCardRun>): RecorderCardRun => ({ state: 'runn
 const LEVEL: RecorderCardSetup = { row: { index: 1, unit: 'g' }, level: 0.25, slope: 'rising' };
 const REC: RecorderRecording = {
 	name: 'rec_0002',
-	folder: 'recordings/rec_0002',
+	folder: 'streams/rec_0002',
 	trigger: 'level',
 	requested_fs_hz: 12800,
 	fs_hz: 12800,
