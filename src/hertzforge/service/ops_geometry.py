@@ -301,40 +301,46 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
 
 
 def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] | None:
-    """What a part of a geometry picked in the tree shows: its entities as a table
-    beside the geometry, cells typed over and rows deleted in place, as the earlier
-    toolset's edit mode had them (Brandon, 2026-11-10). The nodes or coordinate
-    systems; a family's elements; element groups and their elements. None for a part
-    with no table of its own (solids, mated surfaces)."""
-    from hertzforge.core.geometry import FAMILY_LABELS
-
-    from .verbs import part_key, picked_ids
+    """What a part of a geometry picked in the tree shows: the geometry drawn, with the
+    coordinate systems' axes when they are the part, and no table: a part's table is its
+    Edit verb (`view_entities`), not its plot (Brandon, 2026-11-13). None for a part
+    drawn another way (solids, mated surfaces)."""
+    from .verbs import part_key
 
     where = part_key(part)
-    if where in ('part:nodes', 'part:coordinate_systems'):
-        return _shown(name, geometry, where.removeprefix('part:'))
-    if where == 'family':
-        family = str(part['id'])
-        element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
-        return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
-                      element, family=family)
-    if where == 'group':
-        groups = [int(g) for g in picked_ids(part)]
-        runs = id_runs_text(groups)
-        said = ('element group ' if len(groups) == 1 else 'element groups ') + runs
-        drawn, elements = _shown(name, geometry, 'elements', said, groups=runs)
-        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
-                                    name, groups=runs), elements]
-    return None
+    if where not in ('part:nodes', 'part:coordinate_systems', 'family', 'group'):
+        return None
+    drawn = _drawn(name, geometry)
+    if where == 'part:coordinate_systems':
+        drawn['frames'] = frames(geometry, drawn['nodes'])
+    return [drawn]
 
 
 # ---- View Entities and the edits ----------------------------------------------------
 
 def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.view_entities`: one kind of a geometry's entities as its
-    table, beside the geometry drawn."""
+    """`project.view_entities`, a part's Edit: its entities as a table beside the geometry
+    drawn, cells typed over and rows deleted in place, and a click in the view adding one
+    (Brandon, 2026-11-13: the table is editing's, not the plot's). The nodes or coordinate
+    systems; a family's elements (`family`); element groups and their elements, with
+    their connections (`groups`)."""
+    from hertzforge.core.geometry import FAMILY_LABELS
+
     name = params['geometry']
-    return _shown(name, project[name], params['kind'])
+    geometry = project[name]
+    family, runs = params['family'].strip(), params['groups'].strip()
+    if runs:
+        groups = parse_id_runs(runs)
+        runs = id_runs_text(groups)
+        said = ('element group ' if len(groups) == 1 else 'element groups ') + runs
+        drawn, elements = _shown(name, geometry, 'elements', said, groups=runs)
+        return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
+                                    name, groups=runs), elements]
+    if family:
+        element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
+        return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
+                      element, family=family)
+    return _shown(name, geometry, params['kind'])
 
 
 def _optional_id(value: int) -> int | None:
@@ -1438,10 +1444,13 @@ DRAWN = ('shape3d', 'table')
 GROUPS = ('table',)
 
 OPERATIONS = (
-    _model('project.view_entities', 'View Entities',
-           'A geometry\'s nodes, coordinate systems, elements or element groups as a '
-           'table, beside the geometry drawn.',
-           (GEOMETRY, KIND), DRAWN, view_entities, edits=False),
+    _model('project.view_entities', 'Edit',
+           'A geometry\'s nodes, coordinate systems, a family\'s elements or element groups '
+           'as a table to edit, beside the geometry drawn.',
+           (GEOMETRY, KIND, Param('family', 'Family whose elements the table shows', 'string',
+                                  default=''),
+            Param('groups', 'Element groups the table shows', 'string', default='')),
+           DRAWN, view_entities, edits=False),
     _model('project.add_node', 'Add Node',
            'A node at typed coordinates, in meters once the geometry\'s units are '
            'declared.',

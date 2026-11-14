@@ -63,7 +63,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'srs_synthesis': 'Synthesize', 'compute_modal_responses': 'Modal Responses', 'synthesize_modal_frfs': 'Modal FRFs',
     'sweep_rate': 'Sweep Rate', 'fatigue': 'Fatigue', 'drive_prediction': 'Predict Drive',
     'notch_prediction': 'Predict Notch', 'conditioning': 'Conditioning',
-    'realizability': 'Realizability', 'view_entities': 'Show Entities', 'add_node': 'Add Node',
+    'realizability': 'Realizability', 'view_entities': 'Edit', 'add_node': 'Add Node',
     'add_coordinate_system': 'Add System', 'add_element': 'Add Element',
     'add_element_group': 'Add Group', 'delete_entities': 'Delete Picks',
     'rotate_coordinate_system': 'Rotate', 'slide_coordinate_system': 'Slide',
@@ -160,6 +160,7 @@ PARTS = {f'project.{name}': part for name, part in {
     'align_meshes': 'group',
     'mate_surfaces': ('group', 'mate'),
     'add_node': 'part:nodes',
+    'view_entities': ('part:nodes', 'part:coordinate_systems', 'family', 'group'),
     'add_coordinate_system': 'part:coordinate_systems',
     'rotate_coordinate_system': 'part:coordinate_systems',
     'slide_coordinate_system': 'part:coordinate_systems',
@@ -179,10 +180,10 @@ PARTS = {f'project.{name}': part for name, part in {
 #: operations kept off the action table, though they stay operations: a hole
 #: is a cylinder to subtract (Brandon, 2026-10-20); an object is placed in a
 #: group, and a solid among its siblings, by dragging it there in the tree; and
-#: a geometry's entities and solids are seen, and entities deleted, by picking
-#: their part in the tree, which shows their table (Brandon, 2026-11-10)
+#: a geometry's entities are deleted in their part's Edit table, and its solids seen by
+#: picking them (Brandon, 2026-11-10; Edit, not the plot, holds the table, 2026-11-13)
 UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
-                       'project.view_entities', 'project.delete_entities', 'project.solids'})
+                       'project.delete_entities', 'project.solids'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',

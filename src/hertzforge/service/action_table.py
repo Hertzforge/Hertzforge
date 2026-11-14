@@ -437,6 +437,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 (where, f'{where}s', 'family')) if key in fill]
             if picked_fields:
                 more['omit'] = picked_fields
+        if op.id == 'project.view_entities':
+            # a part's Edit opens its own table (Brandon, 2026-11-13)
+            fill['kind'] = {'part:nodes': 'nodes', 'part:coordinate_systems': 'coordinate_systems',
+                            'family': 'elements', 'group': 'groups'}[where]
+            # every field filled, so the row opens the table at once rather than a form
+            fill.setdefault('family', '')
+            fill.setdefault('groups', '')
+            more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'kind', 'family',
+                                               'groups']))
         if op.id == 'project.mesh_solids' and where == 'solid':
             # the solids picked, all at one size: the size they are likely to hold at,
             # as shells when every one is flat
