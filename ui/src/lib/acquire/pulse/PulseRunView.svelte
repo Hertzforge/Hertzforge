@@ -10,6 +10,9 @@
 	 */
 	import type { Snippet } from 'svelte';
 	import type { ActionId, RunBarHost } from '../actions';
+	import RunOpenActions from '../RunOpenActions.svelte';
+	import RunRecordLine from '../RunRecordLine.svelte';
+	import type { RunOpen } from '../runOpen.svelte';
 	import RunVerbs from '../RunVerbs.svelte';
 	import type { PlotBodies } from '../screen/bodies';
 	import Dock from '../screen/Dock.svelte';
@@ -18,9 +21,6 @@
 	import type { PlotPanel, ScreenState } from '../screen/screen.svelte';
 	import type { CardKind } from '../screen/types';
 	import type { RunRecordRef } from '$lib/protocol/types';
-	import type { RunOpen } from '../runOpen.svelte';
-	import RunOpenActions from '../RunOpenActions.svelte';
-	import RunRecordLine from '../RunRecordLine.svelte';
 	import { clock, db, OUTCOME_WORDS, outcomeTone } from '../words';
 
 	interface Props {
@@ -58,7 +58,7 @@
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false, record = null, opener = null }: Props = $props();
+	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false, record: given = null, opener = null }: Props = $props();
 
 	const run = $derived(host.run);
 	const end = $derived(run?.state === 'finished' ? run.end : null);
@@ -75,6 +75,8 @@
 		return `at ${clock(end.at_s)}${level}`;
 	});
 	const page = $derived(screen.page);
+	/** The record a caller gives, or the one its run's head carries. */
+	const record = $derived(given ?? run?.record ?? null);
 </script>
 
 {#snippet card(kind: CardKind)}
@@ -220,6 +222,10 @@
 		color: var(--blue-1);
 		background: var(--blue-weak);
 		border-color: var(--blue-2);
+	}
+
+	.end {
+		flex-wrap: wrap;
 	}
 
 	.end.pass {

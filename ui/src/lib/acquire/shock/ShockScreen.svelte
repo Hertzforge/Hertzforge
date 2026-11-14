@@ -97,7 +97,7 @@
 {#snippet station()}<StationPanel acq={shock.acq} />{/snippet}
 
 {#snippet run()}
-	<ShockRunView {shock} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'shock')} />
+	<ShockRunView {shock} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'shock')} opener={app.shockRunOpen} />
 {/snippet}
 
 <PulseScreen

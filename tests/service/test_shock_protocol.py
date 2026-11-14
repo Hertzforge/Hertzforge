@@ -117,7 +117,8 @@ def test_a_configuration_carries_every_field_and_the_drive_limits_are_required(v
     config = _text('request_shock_configure')['params']['config']
     assert set(config) == {'title', 'pulse', 'standard', 'acquisition', 'schedule', 'spacing',
                            'identification', 'control', 'limits', 'feasibility', 'train',
-                           'gunfire', 'capture', 'metadata'}
+                           'gunfire', 'operator', 'article', 'notes', 'specification',
+                           'record', 'metadata'}
     for missing in ('drive_vpk_ceiling', 'drive_vpk_abort'):
         bad = copy.deepcopy(config)
         del bad['limits'][missing]

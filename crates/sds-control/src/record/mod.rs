@@ -27,6 +27,12 @@
 //! A run that stops any way, a killed service included, leaves a folder the reader
 //! takes whole: `run.json` says `complete: false` until [`RunRecord::finish`] has
 //! written `end.json`.
+//!
+//! A pulse module's stream is a run of shots. A stream opened with a `shots` member
+//! in its description keeps a list of them: the tap marks where each begins and
+//! ends ([`tap::StreamTap::begin_shot`]), in order with its blocks, so each shot's
+//! `first_frame` and `frames` are its place in the file as written, and the run
+//! names what each shot was ([`RunRecord::label_shot`]).
 
 pub mod tap;
 
@@ -224,6 +230,19 @@ enum Msg {
         stream: usize,
         patch: Map<String, Value>,
     },
+    /// A shot begins (`facts` set) or ends (`None`) in a stream of shots, after
+    /// the frames already sent; `dropped_before` frames were lost just before it.
+    Shot {
+        stream: usize,
+        begin: Option<Map<String, Value>>,
+        dropped_before: u64,
+    },
+    /// What the shot `ordinal` (from 0, in the order the shots began) was.
+    ShotLabel {
+        stream: usize,
+        ordinal: usize,
+        facts: Map<String, Value>,
+    },
     Finish(Map<String, Value>),
 }
 
@@ -320,6 +339,17 @@ impl RunRecord {
         let _ = self.tx.send(Msg::StreamPatch { stream, patch });
     }
 
+    /// Name what a stream's shot `ordinal` (from 0, in the order they began) was:
+    /// its members are set on the shot in `stream.json`. A label may come before
+    /// its shot has begun; it is kept until it has.
+    pub fn label_shot(&self, stream: usize, ordinal: usize, facts: Map<String, Value>) {
+        let _ = self.tx.send(Msg::ShotLabel {
+            stream,
+            ordinal,
+            facts,
+        });
+    }
+
     /// Write a result. `record` is `None` for a result written once (its `.json`
     /// and `.bin` whole), or the line of `<name>.jsonl` for a result that repeats
     /// (each call appends its arrays to `<name>.bin`; the arrays of every record
@@ -363,6 +393,45 @@ struct StreamState {
     fault: Option<String>,
     link: tap::Returns,
     bytes: Vec<u8>,
+    /// A stream of shots: each shot's members, the one open, and labels for
+    /// shots not yet begun. `None` for a continuous stream.
+    shots: Option<Shots>,
+}
+
+/// A stream's shots as the writer keeps them.
+#[derive(Default)]
+struct Shots {
+    list: Vec<Map<String, Value>>,
+    open: Option<usize>,
+    waiting: Vec<(usize, Map<String, Value>)>,
+}
+
+impl Shots {
+    fn label(&mut self, ordinal: usize, facts: Map<String, Value>) {
+        match self.list.get_mut(ordinal) {
+            Some(shot) => shot.extend(facts),
+            None => self.waiting.push((ordinal, facts)),
+        }
+    }
+
+    /// Every shot in the reader's form: a shot labelled with `pre_frames` is
+    /// fired at its first station frame plus them (`station_frame`).
+    fn to_json(&self) -> Value {
+        Value::Array(
+            self.list
+                .iter()
+                .map(|shot| {
+                    let mut s = shot.clone();
+                    let first = s.get("first_station_frame").and_then(Value::as_u64);
+                    let pre = s.get("pre_frames").and_then(Value::as_u64);
+                    if let (Some(first), Some(pre)) = (first, pre) {
+                        s.insert("station_frame".into(), Value::from(first + pre));
+                    }
+                    Value::Object(s)
+                })
+                .collect(),
+        )
+    }
 }
 
 impl StreamState {
@@ -384,7 +453,40 @@ impl StreamState {
             "fault".into(),
             self.fault.as_deref().map_or(Value::Null, Value::from),
         );
+        if let Some(shots) = &self.shots {
+            d.insert("shots".into(), shots.to_json());
+        }
         Value::Object(d)
+    }
+
+    /// A shot begins at the next frame the file holds, or the open one ends with
+    /// the frames the file holds for it.
+    fn shot(&mut self, begin: Option<Map<String, Value>>, dropped_before: u64) {
+        self.lost(dropped_before);
+        let at = self.frames;
+        let Some(shots) = self.shots.as_mut() else {
+            return;
+        };
+        if let Some(k) = shots.open.take() {
+            if let Some(shot) = shots.list.get_mut(k) {
+                let first = shot
+                    .get("first_frame")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(at);
+                shot.insert("frames".into(), Value::from(at.saturating_sub(first)));
+            }
+        }
+        if let Some(mut facts) = begin {
+            facts.insert("first_frame".into(), Value::from(at));
+            facts.insert("frames".into(), Value::from(0));
+            shots.list.push(facts);
+            let k = shots.list.len() - 1;
+            shots.open = Some(k);
+            let waiting = std::mem::take(&mut shots.waiting);
+            for (ordinal, facts) in waiting {
+                shots.label(ordinal, facts);
+            }
+        }
     }
 
     fn lost(&mut self, frames: u64) {
@@ -524,12 +626,13 @@ impl Writer {
             finished: false,
             last_flush: Instant::now(),
         };
-        for spec in begin.streams {
+        for mut spec in begin.streams {
             let width = spec
                 .description
                 .get("channels")
                 .and_then(Value::as_array)
                 .map_or(0, Vec::len);
+            let shots = spec.description.remove("shots").map(|_| Shots::default());
             let mut s = StreamState {
                 dir: folder.join("streams").join(&spec.name),
                 name: spec.name,
@@ -542,6 +645,7 @@ impl Writer {
                 fault: None,
                 link: spec.link.returns(),
                 bytes: Vec::new(),
+                shots,
             };
             let made = std::fs::create_dir_all(&s.dir).and_then(|_| {
                 OpenOptions::new()
@@ -629,6 +733,29 @@ impl Writer {
                     for (k, v) in patch {
                         s.description.insert(k, v);
                     }
+                    self.write_sidecar(stream, false);
+                }
+            }
+            Msg::Shot {
+                stream,
+                begin,
+                dropped_before,
+            } => {
+                let ended = begin.is_none();
+                if let Some(s) = self.streams.get_mut(stream) {
+                    s.shot(begin, dropped_before);
+                    if ended {
+                        self.write_sidecar(stream, false);
+                    }
+                }
+            }
+            Msg::ShotLabel {
+                stream,
+                ordinal,
+                facts,
+            } => {
+                if let Some(shots) = self.streams.get_mut(stream).and_then(|s| s.shots.as_mut()) {
+                    shots.label(ordinal, facts);
                     self.write_sidecar(stream, false);
                 }
             }
@@ -892,6 +1019,10 @@ impl Writer {
         for s in self.streams.iter_mut() {
             let n = s.link.take_unsent();
             s.lost(n);
+            // a shot still open when the run ended ends with what the file holds
+            if s.shots.as_ref().is_some_and(|x| x.open.is_some()) {
+                s.shot(None, 0);
+            }
         }
     }
 
@@ -1106,6 +1237,75 @@ mod tests {
         assert!(lost > 0, "{side}");
         // the four buffers made before the run reached the file, then the rest was lost
         assert_eq!(side["gaps"][0]["at_frame"], 4 * 64, "{side}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A stream of shots says where each shot is in its file and what it was: the
+    /// marks travel in order with the blocks, so a shot's first frame and length
+    /// are the file's own, and a label sent before its shot began still lands on
+    /// it. Red if a mark overtook the frames before it (the second shot would
+    /// begin at 0) or if an early label were lost.
+    #[test]
+    fn a_stream_of_shots_places_each_shot_in_its_file() {
+        let root = scratch("shots");
+        let (stream, link) = tap::pair(1, 8, 64);
+        let mut d = Map::new();
+        d.insert("kind".into(), json!("inputs"));
+        d.insert("fs_hz".into(), json!(1000));
+        d.insert("channels".into(), json!([{"index": 1, "unit": "g"}]));
+        d.insert("shots".into(), json!([]));
+        let mut manifest = Map::new();
+        manifest.insert("test".into(), json!("classical_shock"));
+        manifest.insert("source".into(), json!("SIM"));
+        let record = RunRecord::open(
+            Begin {
+                root: root.clone(),
+                name: "run".into(),
+                manifest,
+                table: json!({"rows": []}),
+                setup: json!({"config": {}}),
+                law: None,
+                log: Vec::new(),
+                streams: vec![StreamSpec {
+                    name: "inputs".into(),
+                    description: d,
+                    link,
+                }],
+            },
+            &RecordOptions::default(),
+            Box::new(|_, _| {}),
+        )
+        .unwrap();
+        let mut stream = stream;
+        let status = record.status();
+        let mut label = Map::new();
+        label.insert("level_db".into(), json!(-6.0));
+        label.insert("pre_frames".into(), json!(3));
+        record.label_shot(0, 1, label);
+        let mut first = Map::new();
+        first.insert("first_station_frame".into(), json!(0));
+        stream.begin_shot(first);
+        stream.push(&[1.0; 5], 5);
+        stream.end_shot();
+        let mut second = Map::new();
+        second.insert("first_station_frame".into(), json!(100));
+        stream.begin_shot(second);
+        stream.push(&[2.0; 7], 7);
+        stream.end_shot();
+        drop(stream);
+        record.finish(Map::new());
+        wait_finished(&status);
+        let side = read(&status.folder.join("streams/inputs/stream.json"));
+        assert_eq!(side["frames"], 12, "{side}");
+        let shots = side["shots"].as_array().unwrap();
+        assert_eq!(shots.len(), 2, "{side}");
+        assert_eq!(shots[0]["first_frame"], 0);
+        assert_eq!(shots[0]["frames"], 5);
+        assert_eq!(shots[1]["first_frame"], 5);
+        assert_eq!(shots[1]["frames"], 7);
+        assert_eq!(shots[1]["level_db"], -6.0);
+        assert_eq!(shots[1]["station_frame"], 103, "{side}");
+        assert!(shots[0].get("station_frame").is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 

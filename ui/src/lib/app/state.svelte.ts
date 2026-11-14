@@ -2029,6 +2029,8 @@ export class AppState {
 	readonly acquire: AcquireState;
 	/** A finished Random run's way to its data on the analysis side. */
 	readonly runOpen: RunOpen;
+	/** A finished classical shock run's way to its data: the Shock workspace. */
+	readonly shockRunOpen: RunOpen;
 	/** A finished Sine run's way to its data on the analysis side. */
 	readonly sineRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
@@ -2098,6 +2100,7 @@ export class AppState {
 			}
 		};
 		this.runOpen = new RunOpen(runHost);
+		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
 		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});

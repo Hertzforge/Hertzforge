@@ -3,9 +3,9 @@
 `convert` reads a run folder (`hertzforge.io.run_folder`) and writes a
 `.hforge` project every analysis tool opens with `Project.open`, by
 default `<run name>.hforge` inside the folder. The control service's
-Random and Sine modules and its Recorder write a run folder for every
-run; the other control modules do not yet. This is the analysis side of
-that bridge.
+Random, Sine and Classical Shock modules and its Recorder write a run
+folder for every run; the other control modules do not yet. This is the
+analysis side of that bridge.
 
 The project holds, in this order:
 
@@ -17,8 +17,10 @@ The project holds, in this order:
   the setup names, and a run identity whose source is the controller.
   A recording's time is measured from its trigger, so its pre-trigger
   samples are at negative times; a pulse module's stream is one record
-  per shot. The samples are copied a block at a time, float32 as
-  recorded (`native.StreamedHistory`);
+  per shot, timed from its firing, with a history for each kind of shot
+  (a Classical Shock run's identification, its pulses). The samples are
+  copied a block at a time, float32 as recorded
+  (`native.StreamedHistory`);
 - the `Specification` a Random run was controlled to, from the setup's
   resolved profile, with its alarm and abort bands as warning and abort
   limits; for a Sine sweep or dwell, the `SineSweepSpecification` it was
@@ -35,6 +37,9 @@ The project holds, in this order:
   `psd`, `cpsd`, `frf` or `coherence`, converted to SI, cross terms as
   written (the control service writes them in the file's convention,
   conj(X) Y, so nothing is conjugated here);
+- an `Srs` per result of kind `srs` (a record per pulse), and a
+  `ShockSpecification` per result of kind `srs_reference`, its band as
+  the warning limits, in SI at the result's Q;
 - the `RunRecord`: the manifest, the table and setup as written, the
   law, the log, the end, each stream's and result's description, the
   arrays of results no analysis class holds, and what the folder
@@ -70,7 +75,11 @@ PROJECT_TYPES = {'random': 'Random Vibration', 'mimo_random': 'Random Vibration'
 
 #: the result kinds that become an analysis object; any other is kept in
 #: the run record as named arrays
-ANALYSIS_KINDS = ('psd', 'cpsd', 'frf', 'coherence', 'sine_levels')
+ANALYSIS_KINDS = ('psd', 'cpsd', 'frf', 'coherence', 'srs', 'srs_reference', 'sine_levels')
+
+#: the arrays of a result kind its analysis object holds (its abscissa
+#: besides); the rest are kept in the run record
+_HELD_ARRAYS = {'srs_reference': ('reference', 'band_low', 'band_high')}
 
 #: the name of the one tone a Sine run's specification and levels hold
 SINE_TONE = 'Tone 1'
@@ -394,11 +403,12 @@ def _header(run: run_folder.RunFolder, dofs: Sequence[str], dims: Sequence[str],
     return history
 
 
-def _shot_spans(stream: run_folder.Stream) -> list[tuple[int, int, float, Any]]:
+def _shot_spans(stream: run_folder.Stream
+                ) -> list[tuple[int, int, float, Any, Mapping[str, Any]]]:
     """Each shot of a pulse stream as (first frame, frames, time of its
-    first sample from its firing, level). A shot's `pre_frames`, the
-    frames kept before it fired, put its first sample at a negative
-    time; without it the first sample is the firing."""
+    first sample from its firing, level, the shot as described). A shot's
+    `pre_frames`, the frames kept before it fired, put its first sample
+    at a negative time; without it the first sample is the firing."""
     spans = []
     for shot in stream.description.get('shots') or []:
         if not isinstance(shot, Mapping):
@@ -407,8 +417,26 @@ def _shot_spans(stream: run_folder.Stream) -> list[tuple[int, int, float, Any]]:
         frames = max(0, min(int(shot.get('frames', 0)), stream.frames - at))
         pre = shot.get('pre_frames')
         t0 = -pre / stream.rate if isinstance(pre, int) else 0.0
-        spans.append((at, frames, t0, shot.get('level_db')))
+        spans.append((at, frames, t0, shot.get('level_db'), shot))
     return spans
+
+
+def _shot_label(k: int, shot: Mapping[str, Any]) -> str:
+    """A shot's record label: its pulse ('pulse 3') where it names one,
+    else its place in the stream ('shot 1')."""
+    pulse = shot.get('pulse')
+    return f'pulse {pulse + 1}' if isinstance(pulse, int) else f'shot {k + 1}'
+
+
+def _shot_groups(spans: Sequence[tuple[int, int, float, Any, Mapping[str, Any]]]
+                 ) -> list[list[int]]:
+    """The shots that make one history: those that share a length, a
+    place relative to their firing and what they were (an identification
+    is not a pulse), in the order the first of each was fired."""
+    groups: dict[tuple[int, float, str], list[int]] = {}
+    for k, (_a, frames, t0, _l, shot) in enumerate(spans):
+        groups.setdefault((frames, t0, str(shot.get('what') or '')), []).append(k)
+    return list(groups.values())
 
 
 def _histories(run: run_folder.RunFolder, table: Any, lacked: list[str],
@@ -463,23 +491,28 @@ def _histories(run: run_folder.RunFolder, table: Any, lacked: list[str],
                 history, stream.frames, _first_instant(run, stream), stream.rate,
                 copy.continuous)))
             continue
-        # a pulse module's stream: one record per shot when the shots share
-        # a length and a place relative to their firing, otherwise one
-        # history per shot
-        groups = ([list(range(len(spans)))]
-                  if len({(frames, t0) for _a, frames, t0, _l in spans}) == 1
-                  else [[k] for k in range(len(spans))])
-        for members in groups:
-            labels = [f'shot {k + 1}' for k in members]
-            said = [label + (f' at {level_text(float(spans[k][3]))}'
-                             if isinstance(spans[k][3], (int, float)) else '')
-                    for k, label in zip(members, labels)]
+        # a pulse module's stream: one record per shot for the shots that
+        # share a length, a place relative to their firing and what they
+        # were, one history for each such group
+        groups = _shot_groups(spans)
+        whats = [str(spans[g[0]][4].get('what') or '') for g in groups]
+        for members, what in zip(groups, whats, strict=True):
+            labels = [_shot_label(k, spans[k][4]) for k in members]
+            said = [label + (f' ({what})' if what and what != 'pulse' else '')
+                    + (f' at {level_text(float(spans[k][3]))}'
+                       if isinstance(spans[k][3], (int, float)) else '')
+                    for k, label in zip(members, labels, strict=True)]
             comments = ['; '.join(part for part in (shot, note) if part)
                         for _c in range(width) for shot in said]
             history = _header(run, dofs_here, dims, units, roles, identity, comments,
                               [label for _c in range(width) for label in labels],
                               len(members))
-            name = stream.name if len(groups) == 1 else f'{stream.name} {labels[0]}'
+            if len(groups) == 1:
+                name = stream.name
+            elif what and whats.count(what) == 1:
+                name = f'{stream.name} {what}'
+            else:
+                name = f'{stream.name} {labels[0]}'
             out.append((name, native.StreamedHistory(
                 history, spans[members[0]][1], spans[members[0]][2], stream.rate,
                 functools.partial(copy.shots, [spans[k][:2] for k in members]))))
@@ -802,6 +835,69 @@ def _analysis_object(result: run_folder.Result, table: Any,
     return Psd(reference_dof=expand(reference_dof), **kwargs), ''
 
 
+def _srs_object(result: run_folder.Result, table: Any,
+                units: Mapping[int, str]) -> tuple[Any, str]:
+    """An SRS result as the analysis holds it, or (None, why not): a
+    result of kind `srs` an `Srs`, a record per pulse where it repeats; a
+    result of kind `srs_reference` (a nominal SRS and its tolerance band)
+    a `ShockSpecification` with the band as its warning limits. In SI,
+    at the result's Q and type."""
+    from ..core.data import ShockSpecification, Srs
+    from ..units import UNKNOWN, si_transform
+
+    channels = result.description.get('channels') or {}
+    responses = [int(i) for i in channels.get('responses') or []]
+    if len(responses) != 1 or responses[0] not in units:
+        return None, 'it does not name one response channel the table holds'
+    channel = responses[0]
+    spec = result.kind == 'srs_reference'
+    name = 'reference' if spec else 'values'
+    if name not in result.arrays:
+        return None, f'it holds no array named {name}'
+    values = np.asarray(result.arrays[name], dtype=np.float64)
+    repeated = result.records is not None and not spec
+    stack = values.reshape(values.shape[0], -1) if repeated else values.reshape(1, -1)
+    lines = stack.shape[-1]
+    abscissa = _abscissa(result, lines)
+    if abscissa is None or len(abscissa) != lines:
+        return None, 'its abscissa is not stated, or not as long as its values'
+    scale, dim, unit = _unit_scale(units[channel])
+    known = dim != UNKNOWN
+    described = next((a for a in result.description.get('arrays') or []
+                      if a.get('name') == name), {})
+    if known:
+        declared = str(described.get('unit') or '').replace('^', '**')
+        try:
+            stated = si_transform(declared)[0] if declared else None
+        except Exception:  # noqa: BLE001 - an unreadable unit is reported, not raised
+            stated = None
+        if stated is None or not np.isclose(stated, scale, rtol=1e-9):
+            return None, (f'its unit {described.get("unit")!r} is not the one channel '
+                          f'{channel} gives')
+    factor = scale if known else 1.0
+    dof = table.dof_strings()[{int(i): k for k, i in enumerate(table['channel'])}[channel]]
+    count = stack.shape[0]
+    kwargs: dict[str, Any] = {
+        'abscissa': abscissa, 'ordinate': stack * factor, 'response_dof': [dof] * count,
+        'ordinate_dim': [dim if known else UNKNOWN] * count,
+        'ordinate_unit': [unit if known else None] * count,
+        'comment': result.description.get('description', '') or result.name,
+        'q': result.description.get('q'),
+        'kind': str(result.description.get('srs_kind') or 'maximax')}
+    if repeated:
+        kwargs['block'] = [(f'pulse {r["pulse"] + 1}' if isinstance(r.get('pulse'), int)
+                            else f'record {r.get("index", k)}')
+                           for k, r in enumerate(result.records or [])]
+    if not spec:
+        return Srs(**kwargs), ''
+    limits = {}
+    for array, limit in (('band_low', 'warning_lower'), ('band_high', 'warning_upper')):
+        if array in result.arrays:
+            limits[limit] = np.asarray(result.arrays[array], dtype=np.float64).reshape(
+                1, -1) * factor
+    return ShockSpecification(**kwargs, **limits), ''
+
+
 # ---- the conversion ----------------------------------------------------
 
 def default_output(folder: str | os.PathLike) -> str:
@@ -892,7 +988,9 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
                 continue
             unmapped[name] = dict(result.arrays)
             continue
-        if result.kind in ANALYSIS_KINDS:
+        if result.kind in ('srs', 'srs_reference'):
+            held, why = _srs_object(result, table, units)
+        elif result.kind in ANALYSIS_KINDS:
             held, why = _analysis_object(result, table, units)
         if held is None:
             if result.kind in ANALYSIS_KINDS:
@@ -902,7 +1000,8 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
         held.source = run.source
         objects[_unique(name, objects)] = held
         abscissa = (result.description.get('abscissa') or {}).get('array')
-        extra = {k: v for k, v in result.arrays.items() if k not in ('values', abscissa)}
+        kept = ('values', abscissa, *_HELD_ARRAYS.get(result.kind, ()))
+        extra = {k: v for k, v in result.arrays.items() if k not in kept}
         if extra:
             unmapped[name] = extra
     record = RunRecord(run.manifest, run.table, run.setup, log=run.log, end=run.end,

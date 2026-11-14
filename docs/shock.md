@@ -7,7 +7,7 @@ volts throughout, held under a drive ceiling and an abort that the operator give
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
 station and channels, the pulse, the standard, the schedule, identification, control and limits,
-trains and capture, then the run itself. Classical shock shares its run bar, station panel,
+trains and the run's record, then the run itself. Classical shock shares its run bar, station panel,
 channel table and control-law panel with Random and MIMO Random, so an engineer who has run one
 will find the others familiar.
 
@@ -137,26 +137,25 @@ the pulses in a row with a growing error that end the run.
   displacement the pulse may leave. Checked at arm; the shaker's ratings are also the run's
   kinematic aborts. Without them, feasibility is not evaluated and the run says so.
 
-## Trains and Capture
+## Trains and the Run Record
 
 On the manual ladder, a **train** fires a count of pulses at the present level, at least the time
 between pulses apart (its first pulse too, from the pulse before it), and a **gunfire burst** fires
 rounds at a rate. Each fires the drive in force,
-with no law call inside it, and every pulse is judged. The capture can start when the run arms;
-fields kept with the run (a run number, an operator) are listed here. With it on, the run folder
-goes under the program's local data folder with the run name given (`classical_shock` unless
-named); when that name is taken, the run gets the next free one (`classical_shock-2`, ...). It
-holds:
+with no law call inside it, and every pulse is judged. Fields kept with the run (a run number, an
+operator) are listed here.
 
-- the control channel's record of each pulse, one after another at the station rate, with the
-  channel table and the run's settings beside it. Only the control channel is recorded; the other
-  inputs and the drive are not.
-- the control law's record (`law.json`) and every call made to it (`law_pulses.bin` and
-  `law_pulses.jsonl`): the response and drive it was given, the drive it returned, and the verdict
-  on the pulse before the call. A pulse's verdict is written with the call that follows it, so the
-  last pulse's verdict is not in these records.
-
-With capture off, nothing is written to disk.
+Every run is recorded in a run folder from the moment it arms, as a Random run is
+(`docs/run-folder.md`, "What a Classical Shock Run Saves"). The **Run Record** panel takes the
+operator, the test article, the specification document and clause, and notes, and whether the
+folder keeps the time histories: every enabled input and the drive, a shot for identification and
+one for each pulse. With them off, the setup, the table, the log and every pulse's results are
+still kept. A run whose folder cannot be written does not arm, and says which folder and why.
+Once armed, the Run card names the folder; when recording has a problem the card says so and the
+run goes on. A finished run's end line offers **Open in Analysis**, which converts the folder and
+opens its data in the Shock workspace (each pulse's time history and SRS, the reference SRS and its
+band, the identification), and **Copy Folder Path**. The run has no capture of its own any more:
+the run folder is the one record.
 
 ## The Run
 

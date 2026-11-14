@@ -2707,6 +2707,13 @@
             "null"
           ]
         },
+        "operator": {"type": "string"},
+        "article": {"type": "string"},
+        "notes": {"type": "string"},
+        "specification": {"type": ["object", "null"], "additionalProperties": false,
+                          "properties": {"document": {"type": "string"}, "clause": {"type": "string"}}},
+        "record": {"type": ["object", "null"], "additionalProperties": false,
+                   "properties": {"streams": {"type": "boolean"}}},
         "pulse": {
           "$ref": "#/$defs/shockPulse"
         },
@@ -3206,31 +3213,6 @@
                 "rounds": {
                   "type": "integer",
                   "minimum": 0
-                }
-              }
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "capture": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "auto_start": {
-                  "type": [
-                    "boolean",
-                    "null"
-                  ]
-                },
-                "run_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
                 }
               }
             },
@@ -4485,7 +4467,8 @@
         },
         "end": {
           "$ref": "#/$defs/shockEnd"
-        }
+        },
+        "record": {"$ref": "#/$defs/runRecordRef"}
       },
       "allOf": [
         {

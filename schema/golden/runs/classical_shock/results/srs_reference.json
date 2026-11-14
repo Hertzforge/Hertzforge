@@ -1,0 +1,56 @@
+{
+  "name": "srs_reference",
+  "kind": "srs_reference",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      1
+    ]
+  },
+  "q": 10,
+  "srs_kind": "maximax",
+  "band_db": 3,
+  "description": "the nominal pulse's SRS at full level and its informational band, the tolerance each pulse's SRS is counted against",
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "g",
+      "offset": 136
+    },
+    {
+      "name": "band_low",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "g",
+      "offset": 272
+    },
+    {
+      "name": "band_high",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "g",
+      "offset": 408
+    }
+  ]
+}

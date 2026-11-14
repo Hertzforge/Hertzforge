@@ -429,13 +429,7 @@ pub fn begin(f: &ArmFacts<'_>, root: PathBuf, links: (TapLink, TapLink)) -> Begi
                "n_pts": f.grid.n_pts, "n_avg": cfg.n_avg, "df_hz": num(f.grid.df_hz),
                "lines": f.grid.lines, "loop_s": num(f.grid.loop_s)}),
     );
-    let core = f.provenance.core_build;
-    manifest.insert(
-        "build".into(),
-        json!({"version": env!("CARGO_PKG_VERSION"),
-               "commit": core.trim_end_matches("-dirty"),
-               "dirty": core.ends_with("-dirty")}),
-    );
+    manifest.insert("build".into(), build_value(f.provenance.core_build));
     manifest.insert(
         "armed".into(),
         json!({"unix": f.armed_unix, "utc_offset_s": f.utc_offset_s}),

@@ -287,8 +287,29 @@ mod shock_late {
         fn misses(&self) -> u32 {
             self.inner.misses()
         }
-        fn take_log(&mut self) -> Vec<(&'static str, String)> {
+        fn take_log(&mut self) -> Vec<sds_control::shock::engine::LogLine> {
             self.inner.take_log()
+        }
+        fn release(&mut self) {
+            self.inner.release()
+        }
+        fn take_station_facts(&mut self) -> Option<sds_control::shock::record::StationFacts> {
+            self.inner.take_station_facts()
+        }
+        fn ident_record(&self) -> Option<sds_control::shock::record::IdentRecord> {
+            self.inner.ident_record()
+        }
+        fn pulse_kinematics(
+            &self,
+            index: u64,
+        ) -> Option<sds_control::shock::record::PulseKinematics> {
+            self.inner.pulse_kinematics(index)
+        }
+        fn reference_srs(&self) -> Option<(Vec<f64>, Vec<f64>)> {
+            self.inner.reference_srs()
+        }
+        fn shot_pre_frames(&self) -> usize {
+            self.inner.shot_pre_frames()
         }
         fn last_pulse_start(&self) -> Option<Instant> {
             self.last

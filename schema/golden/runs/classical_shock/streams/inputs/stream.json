@@ -1,0 +1,56 @@
+{
+  "kind": "inputs",
+  "fs_hz": 2048,
+  "channels": [
+    {
+      "index": 1,
+      "unit": "g",
+      "description": "Control"
+    },
+    {
+      "index": 2,
+      "unit": "g",
+      "description": "Monitor"
+    }
+  ],
+  "first_station_frame": 0,
+  "name": "inputs",
+  "frames": 1536,
+  "gaps": [],
+  "complete": true,
+  "fault": null,
+  "shots": [
+    {
+      "first_station_frame": 0,
+      "first_frame": 0,
+      "frames": 1024,
+      "what": "identification",
+      "pulse": null,
+      "level_db": null,
+      "pre_frames": 0,
+      "station_frame": 0
+    },
+    {
+      "first_station_frame": 1024,
+      "first_frame": 1024,
+      "frames": 256,
+      "what": "pulse",
+      "pulse": 0,
+      "origin": "ladder",
+      "level_db": -6,
+      "pre_frames": 104,
+      "station_frame": 1128
+    },
+    {
+      "first_station_frame": 1280,
+      "first_frame": 1280,
+      "frames": 256,
+      "what": "pulse",
+      "pulse": 1,
+      "origin": "ladder",
+      "level_db": -0.6874167738983188,
+      "pre_frames": 104,
+      "station_frame": 1384
+    }
+  ]
+}

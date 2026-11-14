@@ -135,9 +135,17 @@ pub struct Shared<V> {
     /// Set once the service has started publishing this run's live frames.
     pub live_started: AtomicBool,
     notify: tokio::sync::mpsc::UnboundedSender<Notice<V>>,
+    /// The run's record from arm on, for a module that records: every log entry
+    /// is appended to it as it is made. `None` for a module that does not.
+    record: Mutex<Option<crate::record::LogHandle>>,
+    /// The input frames the station has delivered since it started
+    /// ([`crate::random::run::NO_FRAME`] before the first), for the record's
+    /// entries.
+    pub station_frame: Arc<AtomicU64>,
 }
 
-fn now_unix() -> f64 {
+/// Seconds since the Unix epoch, now.
+pub fn now_unix() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
@@ -155,6 +163,8 @@ impl<V> Shared<V> {
             stop_outcome: Mutex::new(None),
             live_started: AtomicBool::new(false),
             notify,
+            record: Mutex::new(None),
+            station_frame: Arc::new(AtomicU64::new(crate::random::run::NO_FRAME)),
         }
     }
 
@@ -170,20 +180,64 @@ impl<V> Shared<V> {
     }
 
     pub fn add_log(&self, kind: &'static str, text: impl Into<String>) {
-        self.add_log_seq(kind, text);
+        self.add_log_data(kind, text, None);
     }
 
     /// [`Shared::add_log`], answering the entry's place in the log.
     pub fn add_log_seq(&self, kind: &'static str, text: impl Into<String>) -> u64 {
+        self.push_log(kind, text.into(), None)
+    }
+
+    /// A log entry with structured facts for the record (`data`), appended to the
+    /// record as it is made when the run has one. The hand-off never waits.
+    pub fn add_log_data(&self, kind: &'static str, text: impl Into<String>, data: Option<Value>) {
+        self.push_log(kind, text.into(), data);
+    }
+
+    fn push_log(&self, kind: &'static str, text: String, data: Option<Value>) -> u64 {
         let mut log = lock(&self.log);
         let seq = log.len() as u64;
-        log.push(LogEntry {
+        let entry = LogEntry {
             seq,
             at_unix: now_unix(),
             kind,
-            text: text.into(),
-        });
+            text,
+        };
+        if let Some(r) = lock(&self.record).as_ref() {
+            r.append(self.record_entry(&entry, data));
+        }
+        log.push(entry);
         seq
+    }
+
+    /// An entry as the record holds it: the wire's members, the station frame
+    /// when the station has delivered one, and `data` when there is any.
+    fn record_entry(&self, e: &LogEntry, data: Option<Value>) -> Value {
+        let frame = self.station_frame.load(Ordering::Relaxed);
+        let mut v = serde_json::json!({"seq": e.seq, "at_unix": e.at_unix,
+            "frame": if frame == crate::random::run::NO_FRAME { Value::Null } else { Value::from(frame) },
+            "kind": e.kind, "text": e.text});
+        if let (Some(d), Value::Object(m)) = (data, &mut v) {
+            m.insert("data".into(), d);
+        }
+        v
+    }
+
+    /// Start appending the log to the run's record: the entries made so far first,
+    /// in order, then every later entry as it is made. Done under the log's lock,
+    /// so none is missed or written twice.
+    pub fn attach_record(&self, handle: crate::record::LogHandle) {
+        let log = lock(&self.log);
+        for e in log.iter() {
+            handle.append(self.record_entry(e, None));
+        }
+        *lock(&self.record) = Some(handle);
+    }
+
+    /// Stop appending to the record (the run has ended).
+    pub fn detach_record(&self) {
+        let _log = lock(&self.log);
+        *lock(&self.record) = None;
     }
 
     pub fn log_since(&self, since: u64) -> (Vec<LogEntry>, u64) {
