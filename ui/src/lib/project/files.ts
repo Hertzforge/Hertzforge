@@ -13,10 +13,22 @@ import type { ExportFormat } from '$lib/protocol/types';
 /** What `project.open` reads as a whole project; anything else is imported into one. */
 export const PROJECT_SUFFIXES = ['.hforge', '.vdyn', '.mat', '.h5', '.hdf5', '.escdf'];
 
-/** Whether a path names a project file, which opens, rather than a file to import. */
+/** Whether a path names a project file, which opens, rather than a file to import: a run folder's `run.json` opens as the project the folder converts to. */
 export function isProjectFile(path: string): boolean {
 	const lower = path.toLowerCase();
-	return PROJECT_SUFFIXES.some((suffix) => lower.endsWith(suffix));
+	return PROJECT_SUFFIXES.some((suffix) => lower.endsWith(suffix)) || isRunManifest(path);
+}
+
+/** The run folder of the one run record picked, when its folder is there; null otherwise. */
+export function runRecordFolder(objects: { name: string; kind: string; run_folder?: string }[], picked: string[]): string | null {
+	if (picked.length !== 1) return null;
+	const one = objects.find((o) => o.name === picked[0]);
+	return one?.kind === 'run_record' && one.run_folder ? one.run_folder : null;
+}
+
+/** Whether a path names a control run's `run.json`, which opens its run folder. */
+export function isRunManifest(path: string): boolean {
+	return (path.split(/[\\/]/).pop() ?? '') === 'run.json';
 }
 
 /**
@@ -62,7 +74,7 @@ interface TauriGlobals {
 		listen: (name: string, handler: (event: { payload: string }) => void) => Promise<() => void>;
 	};
 	dialog?: {
-		open(options: { multiple?: boolean; directory?: boolean; title?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
+		open(options: { multiple?: boolean; directory?: boolean; title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | string[] | null>;
 		save(options: { title?: string; defaultPath?: string; filters?: DialogFilter[] }): Promise<string | null>;
 		ask(text: string, options?: { title?: string; kind?: 'info' | 'warning' | 'error'; okLabel?: string; cancelLabel?: string }): Promise<boolean>;
 	};
@@ -267,6 +279,52 @@ export function listenForFileMenu(onAct: (act: string) => void): () => void {
 	return () => {
 		stopped = true;
 		stop?.();
+	};
+}
+
+/**
+ * The files the operating system asked the desktop app to open (a double-clicked project, a run's
+ * `run.json` opened with the app), each time more come: `onPaths` gets them in order. Nothing in a
+ * browser. Returns how to stop listening.
+ */
+export function listenForOpenedFiles(onPaths: (paths: string[]) => void): () => void {
+	const t = tauri();
+	if (!t?.core || !t.dialog) return () => {};
+	const core = t.core;
+	const take = () =>
+		void core
+			.invoke<string[]>('opened_files', {})
+			.then((paths) => {
+				if (paths.length) onPaths(paths);
+			})
+			.catch(() => {});
+	let stop: (() => void) | null = null;
+	let stopped = false;
+	if (t.event) {
+		void t.event.listen('opened-files', () => take()).then((unlisten) => (stopped ? unlisten() : (stop = unlisten)));
+	}
+	// the files the app was opened with, queued before the window was there
+	take();
+	return () => {
+		stopped = true;
+		stop?.();
+	};
+}
+
+/** The desktop app's run files: its data folder, a folder chooser and the file manager. Null in a browser. */
+export function desktopRunFiles(): import('$lib/app/runFiles.svelte').DesktopRunFiles | null {
+	const t = tauri();
+	const core = t?.core;
+	const dialog = t?.dialog;
+	if (!core || !dialog) return null;
+	return {
+		dataFolder: () => core.invoke('data_folder', {}),
+		setDataFolder: (path) => core.invoke('set_data_folder', { path }),
+		chooseFolder: async (start) => {
+			const picked = await dialog.open({ title: 'Where Runs Are Kept', directory: true, multiple: false, ...(start ? { defaultPath: start } : {}) });
+			return Array.isArray(picked) ? (picked[0] ?? null) : picked;
+		},
+		showFolder: (path) => core.invoke('show_folder', { path })
 	};
 }
 

@@ -149,8 +149,37 @@ not exited ten seconds after.
 
 Logs of each launch are kept (the last ten): on macOS in `~/Library/Logs/org.hertzforge.app/`, with
 `app.log`, `control.log` and `analysis.log`. The analysis service's cache is in the app's cache
-folder (`~/Library/Caches/org.hertzforge.app/` on macOS). The control service's data root stays
-`<home>/Hertzforge_Data`.
+folder (`~/Library/Caches/org.hertzforge.app/` on macOS). Where the control service keeps runs is
+below (Run Folders).
+
+## Run Folders
+
+Every control run leaves a run folder in the data folder (`docs/run-folder.md`).
+
+- **The data folder** is shown in the Station panel: its path, where it comes from and whether a
+  run's record can be written there. The app starts both services with it in
+  `HERTZFORGE_DATA_ROOT`: a folder chosen with Change Folder, else the variable as the app was
+  started with it, else `Hertzforge_Data` in the home folder. The choice is kept in the app's
+  settings file (`settings.json` in its configuration folder, `~/Library/Application
+  Support/org.hertzforge.app/` on macOS) and takes effect at the next start; until then the panel
+  says which folder the next start uses. It is refused while a run is live (the app asks the
+  control service, as the quit does, about every module) and when the folder cannot be written,
+  with the reason. Existing runs are never moved or deleted; Use Default goes back. The control
+  service still refuses an arm whose record cannot be written, naming the path and the reason. In
+  a browser the folder is read from the analysis service (`runs.data_folder`) and shown only.
+- **Show Folder** opens the run's folder in the file manager (selected in its parent on macOS and
+  Windows), wherever a run is named.
+- **Delete Run** is the analysis service's (`runs.delete`); see `docs/run-folder.md`.
+- **Opening a run from the file manager.** A plain folder cannot be associated with an app on
+  Windows or Linux, so a run opens through its `run.json`. On macOS the app is listed under Open
+  With for JSON files, as an alternate viewer that never becomes the default
+  (`tauri.macos.conf.json`); on Windows and Linux, Open With and the app chosen by hand pass the
+  file as an argument. Either way the shell opens it as Open in Analysis does. A `.hforge` file is
+  associated with the app on every system (`bundle.fileAssociations`) and opens the same way.
+- **Large run files on Windows.** Arrays of 64 MB or more are mapped from the file rather than
+  read (`io/native.py`), everywhere but Windows, where a mapped file cannot be replaced by the next
+  save. A run's converted file is mapped there too: while it is mapped, a save over it is refused
+  with a pointer to save under a new name, and the file is left as it was.
 
 ## Unsigned Builds
 
@@ -276,9 +305,13 @@ later app updates from.
 ## Not Done Yet
 
 - The Windows and Linux installers are built by CI and have not been installed and run.
-- The `.hforge` file association. On macOS the File menu has Open, Import, Save and Save As; on Windows
-  and Linux, which have no menu bar yet, those are buttons in the top bar. They use the native dialogs, and
-  files dropped on the window open or import by their paths (`capabilities/main.json` grants the
-  main window its events and the two dialogs; the display windows get nothing).
+- The file associations are configured and not yet tried from an installed app on any system. On
+  Windows and Linux, opening a file while the app runs starts a second copy of the app with
+  services of its own (there is no single-instance handling yet). On Linux the `.hforge` type is
+  named by a MIME type no package declares yet.
+- On macOS the File menu has Open, Import, Save and Save As; on Windows and Linux, which have no menu
+  bar yet, those are buttons in the top bar. They use the native dialogs, and files dropped on the
+  window open or import by their paths (`capabilities/main.json` grants the main window its events
+  and the two dialogs; the display windows get nothing).
 - Windows on Arm.
 - Updates on Windows and Linux: the updater is wired for the macOS app only.

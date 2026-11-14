@@ -36,6 +36,7 @@ from . import (
     op_progress,
     projects,
     reports,
+    run_files,
     run_logs,
     table_files,
     verbs,
@@ -646,6 +647,14 @@ class Connection:
                                                           method, params, project, self.system)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in run_files.RUN_METHODS:
+                async with self.project_lock:
+                    held = ([self.project.project.file]
+                            if self.project is not None and self.project.project.file else [])
+                    result = await self.service.in_worker(run_files.request, method, params,
+                                                          held)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in table_files.TABLE_METHODS:
                 result = await self.service.in_worker(table_files.request, method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
@@ -663,7 +672,8 @@ class Connection:
                     f'{", ".join(PROJECT_METHODS)}, '
                     f'{", ".join(fitting.FIT_METHODS)}, '
                     f'{", ".join(run_logs.RUN_LOG_METHODS)}, '
-                    f'{", ".join(table_files.TABLE_METHODS)} and '
+                    f'{", ".join(table_files.TABLE_METHODS)}, '
+                    f'{", ".join(run_files.RUN_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)

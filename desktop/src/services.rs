@@ -147,8 +147,10 @@ pub struct Services {
 }
 
 impl Services {
-    /// Start both services and wait until each says where it listens.
-    pub fn start(layout: &Layout) -> Result<Services, String> {
+    /// Start both services and wait until each says where it listens. Both are told the data
+    /// folder in `HERTZFORGE_DATA_ROOT`: the control service keeps its runs there, and the
+    /// analysis service names the same folder (`run_files.rs`).
+    pub fn start(layout: &Layout, data_root: &Path) -> Result<Services, String> {
         let log_dir = new_log_dir(&layout.log_root)?;
         for (what, path) in [
             ("the control service", &layout.control_exe),
@@ -162,7 +164,9 @@ impl Services {
             }
         }
         let mut control = Command::new(&layout.control_exe);
-        control.args(["--port", "0", "--watch-stdin"]);
+        control
+            .args(["--port", "0", "--watch-stdin"])
+            .env(crate::run_files::DATA_ROOT_ENV, data_root);
         let control = spawn("control", control, &log_dir)?;
 
         let mut analysis = Command::new(&layout.python_exe);
@@ -170,7 +174,8 @@ impl Services {
         // site folder says; -B: never write bytecode into the installed app.
         analysis
             .args(["-I", "-B", "-m", "hertzforge", "serve"])
-            .args(["--port", "0", "--watch-stdin"]);
+            .args(["--port", "0", "--watch-stdin"])
+            .env(crate::run_files::DATA_ROOT_ENV, data_root);
         let analysis = match spawn("analysis", analysis, &log_dir) {
             Ok(a) => a,
             Err(e) => {

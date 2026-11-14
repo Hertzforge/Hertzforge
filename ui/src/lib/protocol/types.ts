@@ -557,6 +557,28 @@ export interface ProjectObject {
 	verbs?: string[];
 	/** A time history's analysis settings, each group present only when set; a report's features. */
 	settings?: Record<string, Record<string, number | string | boolean>>;
+	/** A run record's run folder, while it is there: for Show Folder and Delete Run. */
+	run_folder?: string;
+}
+
+/** `runs.data_folder`: where the control service keeps runs, as the analysis service resolves it. */
+export interface DataFolderInfo {
+	path: string;
+	/** `setting`: chosen in the desktop app; `environment`: `HERTZFORGE_DATA_ROOT`; `default`: in the home folder. */
+	source: 'setting' | 'environment' | 'default';
+	exists?: boolean;
+	/** Whether a run's record can be written there now; absent when the folder does not exist yet. */
+	writable?: boolean;
+	/** Why it cannot be written. */
+	reason?: string;
+}
+
+/** `runs.delete`: what deleting a run removes (with `dry_run`, would remove). */
+export interface RunDeletePlan {
+	folder: string;
+	project_file: string;
+	project_file_exists: boolean;
+	deleted: boolean;
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */
