@@ -891,6 +891,8 @@ export type RefusalReason =
 	| 'hardware_busy'
 	| 'stale_revision'
 	| 'table_invalid'
+	| 'table_not_applied'
+	| 'nothing_to_apply'
 	| 'config_invalid'
 	| 'shaker_record_invalid'
 	// MIMO Random and the law catalog
@@ -1160,12 +1162,54 @@ export interface ChannelTable {
 	revision: number;
 	channels: ChannelRow[];
 	report: ValidationReport;
+	/** Present while the table came from the kept file, a project or a file and is not applied: no run arms on it. */
+	restored?: RestoredTable;
+	/** Why the kept table was not used at start, or why the last keeping write failed. */
+	kept_problem?: string;
+}
+
+/** Where a restored table came from and when (PROTOCOL.md, "Restored Tables"). */
+export interface RestoredTable {
+	source: 'kept' | 'project' | 'file';
+	/** The project table's or the file's name; the kept file's name for a kept table. */
+	name: string;
+	/** When it was taken (a kept table: when it was written), unix seconds. */
+	at_unix: number;
+	/** The same instant as `YYYY-MM-DD HH:MM:SS UTC`. */
+	at: string;
+}
+
+/** What a client names as a table's source in `channels.set`. */
+export interface TableSource {
+	kind: 'project' | 'file';
+	name: string;
 }
 
 export interface ChannelsSetParams {
 	revision: number;
 	channels: ChannelRow[];
 	dry_run?: boolean;
+	/** A table from a project or a file arrives restored; none is a table typed or edited here. */
+	source?: TableSource | null;
+}
+
+export interface ChannelsApplyParams {
+	revision: number;
+}
+
+export interface ChannelsApplyResult {
+	revision: number;
+	applied: RestoredTable;
+	report: ValidationReport;
+}
+
+/** `project.channel_table`: a project table as the control service's rows. */
+export interface ProjectChannelTable {
+	name: string;
+	channels: ChannelRow[];
+	tables: string[];
+	environments: Record<string, unknown>;
+	warnings: string[];
 }
 
 export interface ChannelsSetResult {

@@ -266,6 +266,8 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	hardware_busy: 'The Hardware Is In Use',
 	stale_revision: 'The Channel Table Changed',
 	table_invalid: 'The Channel Table Has Errors',
+	table_not_applied: 'The Channel Table Is Not Applied',
+	nothing_to_apply: 'The Channel Table Is Already Applied',
 	config_invalid: 'The Setup Has Errors',
 	shaker_record_invalid: 'The Shaker Record Does Not Read',
 	setup_invalid: 'The Setup Has Errors',
