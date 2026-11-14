@@ -38,6 +38,18 @@ the log's own chronology (`RunLogExtract.draft_chronology`). The draft
 says which log, test and entry it was drawn from, with the extract's
 badge when the log has newer entries, and the editing page marks it as
 drafted from the run log until the author accepts it.
+
+A run the control service recorded carries its own record
+(`core.run_record`, linked to its histories by one object group), and
+that record is read before anything is inferred
+(`report.run_records`): the run's level is the level it ended at, as the
+controller logged it; the chronology lists the run once, however many
+streams it has, with the holds, resumes and trips the controller logged
+and the outcome in the record's own words, and under the table its
+operator, article, specification, level changes, alarms and counts. A
+run with no record is read from its name and its signal levels exactly
+as before, and where the two kinds are mixed the table says which each
+row was read from.
 """
 
 from __future__ import annotations
@@ -51,6 +63,7 @@ from ..core.runs import (
     DROP_DB,
     ENTERED,
     FIELD_NAMES,
+    FROM_CONTROLLER,
     MIN_S,
     WINDOW_S,
     RecordReading,
@@ -60,6 +73,7 @@ from ..core.runs import (
     order,
     read_levels,
 )
+from .run_records import RunFacts, facts, record_of
 
 # P27 of the report-features plan (Kevin Cross, 2026-10-24): run
 # identity on each record, the Results section per run, and the
@@ -215,6 +229,14 @@ def identity(objects: Mapping[str, Any], name: str,
     if stored.reason('level_db') or stored.source('level_db') == ENTERED:
         return stored
     groups = _groups(objects, object_groups)
+    record = record_of(objects, root, groups)
+    if record is not None:
+        # the controller logged the level it ran at: read it, never infer
+        # it from the signal; a record that holds none leaves it unknown
+        level = facts(record).level_db
+        if level is None or stored.level_db == level:
+            return stored
+        return stored.with_values({'level_db': level}, FROM_CONTROLLER)
     level, where, why = _comparison_level(objects, root, groups)
     if stored.level_db is None:
         if level is not None:
@@ -533,11 +555,18 @@ def read_log(objects: Mapping[str, Any],
 
 def outcomes(objects: Mapping[str, Any]) -> dict[str, Outcome]:
     """The outcome of each run, by record name, from a source other than
-    the record: the run log extracts in the project (`read_log`). Empty
-    when the project holds none, and the chronology then leaves the
+    its signal: its run record where it has one, in the record's words,
+    else the run log extracts in the project (`read_log`). Empty when
+    the project holds neither, and the chronology then leaves the
     Outcome column and the explanation of each interruption to the
     author."""
-    return dict(read_log(objects).outcomes)
+    found = dict(read_log(objects).outcomes)
+    groups = _groups(objects, None)
+    for name in histories(objects):
+        record = record_of(objects, name, groups)
+        if record is not None:
+            found[name] = Outcome(facts(record).outcome_text)
+    return found
 
 
 # ---- the chronology -----------------------------------------------------
@@ -551,6 +580,10 @@ class RunRow:
     identity: RunIdentity
     reading: RecordReading
     outcome: Outcome = Outcome()
+    #: what the run's record says of it, None for a run read from its
+    #: signal; and the other histories of the same run
+    record: RunFacts | None = None
+    together: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -591,6 +624,25 @@ def chronology(objects: Mapping[str, Any],
         raise ValueError('the project holds no time history, so there are '
                          'no runs to list')
     groups = _groups(objects, object_groups)
+    # a recorded run's streams (its inputs and drives, its shots of each
+    # kind) are one run: listed once, under its first history
+    owner: dict[int, str] = {}
+    together: dict[str, list[str]] = {}
+    held: dict[str, RunFacts] = {}
+    kept = []
+    for name in names:
+        record = record_of(objects, name, groups)
+        if record is None:
+            kept.append(name)
+            continue
+        first = owner.setdefault(id(record), name)
+        if first != name:
+            together[first].append(name)
+            continue
+        together[name] = []
+        held[name] = facts(record)
+        kept.append(name)
+    names = kept
     identities = [(name, identity(objects, name, groups)) for name in names]
     ordered = order(identities)
     by_name = dict(identities)
@@ -598,6 +650,19 @@ def chronology(objects: Mapping[str, Any],
     rows, notes = [], []
     for done, name in enumerate(ordered, start=1):
         found = by_name[name]
+        if name in held:
+            ran = held[name]
+            rows.append(RunRow(name, found, RecordReading(0.0, 0.0, ran.at_full_level_s),
+                               Outcome(ran.outcome_text), ran, tuple(together[name])))
+            logged_as = log.outcomes.get(name)
+            if logged_as is not None and logged_as.text:
+                notes.append(f'{name}: the run log records its outcome as '
+                             f'{logged_as.text}; the table gives the run record\'s.')
+            for missing in ran.missing:
+                notes.append(f'{name}: the run record says {missing}.')
+            if progress is not None:
+                progress(done, len(ordered))
+            continue
         reading = read_record(objects, name, groups, window_s, drop_db, min_s)
         outcome = log.outcomes.get(name, Outcome())
         logged = len(outcome.explanations)
@@ -630,6 +695,38 @@ def chronology(objects: Mapping[str, Any],
                       log.lines, log.logs)
 
 
+def _recorded_lines(found: Chronology, recorded: Sequence[RunRow],
+                    mixed: bool) -> list[str]:
+    """What the draft says under its table when a run was read from its
+    run record: which rows were, how, and each recorded run's facts."""
+    ordered = (f'The runs are in the order of their {found.ordered_by}. '
+               if found.ordered_by else '')
+    said = (f'{ordered}A run marked "run record" is read from the record the '
+            'control service kept of it: its level and level changes, the '
+            'holds, resumes and trips it logged, its time at full level from '
+            'the states it logged, and the outcome in its own words. Nothing in '
+            'those rows is read from the signal levels.')
+    if mixed:
+        settings = next((row.reading.settings for row in found.rows
+                         if row.record is None), {})
+        said += (' A run marked "signal levels" has no run record: its time at '
+                 "level is read from the running RMS of its control channels over "
+                 f"{settings.get('window_s', WINDOW_S):g} s, and an interruption "
+                 f"is a drop of at least {settings.get('drop_db', DROP_DB):g} dB "
+                 f"for at least {settings.get('min_s', MIN_S):g} s; its outcome "
+                 'and the cause of each interruption are for the author to enter.')
+    else:
+        said = said.replace('A run marked "run record" is', 'Each run is')
+    said += " What the outcomes mean for the test is the author's to say."
+    lines = ['', said, '']
+    lines += [f'- {row.record.summary_line(row.name, row.together)}'
+              for row in recorded]
+    lines += list(found.logged)
+    if found.notes:
+        lines += [''] + [f'- {note}' for note in found.notes]
+    return lines
+
+
 def _cell(text: str) -> str:
     return str(text).replace('|', '\\|').replace('\n', ' ')
 
@@ -642,17 +739,25 @@ def draft(found: Chronology) -> str:
     Draft text only: nothing places it in a report until the author
     accepts it (`Project.report_section`)."""
     commented = any(row.identity.comment for row in found.rows)
+    recorded = [row for row in found.rows if row.record is not None]
+    mixed = bool(recorded) and len(recorded) < len(found.rows)
     head = ['Run', 'Axis', 'Level', 'Start', 'Record', 'At level',
             'Interruptions found', 'Outcome']
     if commented:
         head.append('Comment')
+    if mixed:
+        head.append('Read from')
     lines = ['| ' + ' | '.join(head) + ' |',
              '|' + '|'.join('---:' if title == 'At level' else '---'
                             for title in head) + '|']
     for row in found.rows:
         who = row.identity
         reading = row.reading
-        if reading.not_read:
+        if row.record is not None:
+            at = ('not in the run record' if row.record.at_full_level_s is None
+                  else f'{row.record.at_full_level_s:.1f} s at full level')
+            breaks = row.record.interruptions_text()
+        elif reading.not_read:
             at = 'not read'
             breaks = 'not read'
         else:
@@ -668,7 +773,11 @@ def draft(found: Chronology) -> str:
                  row.outcome.text]
         if commented:
             cells.append(who.comment)
+        if mixed:
+            cells.append('run record' if row.record is not None else 'signal levels')
         lines.append('| ' + ' | '.join(_cell(cell) for cell in cells) + ' |')
+    if recorded:
+        return '\n'.join(lines + _recorded_lines(found, recorded, mixed))
     settings = found.rows[0].reading.settings if found.rows else {}
     window = settings.get('window_s', WINDOW_S)
     drop = settings.get('drop_db', DROP_DB)
