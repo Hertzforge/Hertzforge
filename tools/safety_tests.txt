@@ -1,0 +1,460 @@
+# The safety tests: the tests that protect a shaker. Each must exist, must not
+# be ignored, and must be compiled in the test build (tools/check_drive_path.py
+# checks all three); CI runs them with every other test. A pull request that
+# removes one, ignores one, or removes a line here says so in its title
+# (docs/drive-path.md, "Weakening a protection").
+#
+# Format, one test per line, fields separated by spaces:
+#
+#   crate  file  test  kind  what it protects
+#
+# crate is the folder under crates/; file is the path inside it; test is the
+# test function's name, or module::name when one file has two tests of that
+# name. kind is one of:
+#
+#   drive-ceiling       the drive is held at or under its ceiling
+#   drive-abort         a drive past its abort ends the run
+#   stop-ramp           a stop ramps the drive down, never a step
+#   abort-to-zero       an abort takes the drive to zero at once
+#   run-thread-failure  a failure on a run thread ends in a stop, not a drive left playing
+#   law-guard           a control law's bad, late or panicking answer is held and stops the run
+#   envelope            a response outside its tolerance ends the run
+#   kinematic           acceleration, velocity and displacement limits
+#   divergence          a loop that grows instead of converging is stopped
+#   overload            an input at the end of its range is caught
+#   underrun            an output that runs dry ramps down and stops
+#   dropped-controller  a run whose controller goes away ends in the safe stop
+#   late-tick           a loop that falls behind real time is caught
+#   watchdog            the raw-input abort limits on the loop thread
+#   arm-gate            a run that cannot be driven safely is refused before it drives
+#   checked-input       a value read from a file or the wire is checked before it reaches a run
+#   authority           only the controller drives, and only through the control service
+#   shutdown            a service or app that ends takes its run's controlled stop first
+
+# ---------------------------------------------------------------- drive ceiling
+hertzforge-dsp          tests/control.rs                       servo_absolute_ceiling_bounds_drive                       drive-ceiling  the level servo never commands past its absolute ceiling
+hertzforge-random       src/control/tests.rs                   notch_clamps_drive_and_reports_mask                       drive-ceiling  Random's notch clamps the drive on a response ceiling
+hertzforge-random       src/control/tests.rs                   notch_takes_tightest_ceiling_across_channels              drive-ceiling  the tightest ceiling across limit channels wins
+hertzforge-random       tests/sysid_protection.rs              a_level_the_ceiling_cannot_reach_is_refused_by_name       drive-ceiling  Random refuses a level its drive ceiling cannot reach
+hertzforge-mimo-random  src/guards.rs                          caps_hold_each_drive_and_keep_coherence                   drive-ceiling  each multiple-output drive is capped without breaking coherence
+hertzforge-mimo-random  src/guards.rs                          a_ceiling_scales_only_its_drive                           drive-ceiling  a drive ceiling scales only its own drive
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_runaway_law_is_held_by_the_caps_and_the_ceilings        drive-ceiling  a runaway multiple-output law is held at its caps and ceilings
+hertzforge-sine         tests/law_guards.rs                    a_law_raising_the_drive_while_the_notch_holds_it_stays_under_the_ceiling  drive-ceiling  a Sine law cannot push the drive past the ceiling
+hertzforge-sine         tests/law_guards.rs                    a_first_drive_at_the_ceiling_is_bounded_by_the_prediction  drive-ceiling  the first Sine drive is bounded by its prediction
+hertzforge-sine         tests/control.rs                       drive_guard_verdicts                                      drive-ceiling  the Sine drive guard's verdicts
+hertzforge-mixed        tests/drive_ceiling.rs                 a_ceiling_tone_is_untouched_at_minus_12_db_and_held_at_the_ceiling_as_the_ladder_climbs  drive-ceiling  a Mixed tone is held at its ceiling
+hertzforge-mixed        tests/drive_ceiling.rs                 a_band_the_random_ceiling_holds_does_not_wind_its_gain_up  drive-ceiling  a held random band does not wind up behind its ceiling
+hertzforge-mixed        tests/guards_more.rs                   the_random_part_is_held_to_its_rms_ceiling_and_ends_the_run_at_its_abort  drive-ceiling  the Mixed random part is held to its RMS ceiling
+hertzforge-shock-common src/tests/drive_limit_tests.rs         pre_fire_accel_under_ceiling_is_allowed                   drive-ceiling  a pulse under the pre-fire ceiling is allowed unchanged
+hertzforge-shock-common src/tests/drive_limit_tests.rs         pre_fire_accel_refuses_on_invalid_prediction              drive-ceiling  a pulse with no valid prediction is refused
+hertzforge-shock-host   src/service/mod.rs                     pre_fire_ceiling_scales_the_full_level_pulse              drive-ceiling  the full-level shock pulse is scaled to the ceiling
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_drive_over_the_ceiling_is_scaled_to_it_and_judged_as_commanded  drive-ceiling  a closed-loop shock drive is scaled to its ceiling
+hertzforge-shock-host   tests/service_sim.rs                   f_drive_limit_scales_the_over_g_pulse_before_firing       drive-ceiling  an over-limit shock pulse is scaled before it fires
+hertzforge-srs          tests/closed_loop_guards.rs            a_drive_over_the_ceiling_is_scaled_to_it_and_logged       drive-ceiling  an SRS drive is scaled to its ceiling
+hertzforge-srs          src/control.rs                         the_defaults_validate_and_cap_identification_at_a_tenth_of_the_ceiling  drive-ceiling  SRS identification stays at a tenth of the ceiling
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_drive_over_its_ceiling_is_scaled_to_it  drive-ceiling  a multiple-drive shock drive is scaled to its ceiling
+hertzforge-mimo-shock   src/ident.rs                           mimo_shock_engine_identification_drive_keeps_its_rms_and_peak_cap  drive-ceiling  multiple-drive identification keeps its RMS and peak caps
+hertzforge-twr          src/limits.rs                          a_cleared_drive_ceiling_refuses_to_validate               drive-ceiling  a waveform replication setup with no drive ceiling is refused
+hertzforge-twr          src/service/tests.rs                   the_drive_ceiling_refuses_by_name_with_both_numbers       drive-ceiling  a waveform drive over its ceiling is refused
+hertzforge-twr          src/service/tests.rs                   a_level_step_at_the_ceiling_refuses_and_leaves_the_drive_unchanged  drive-ceiling  a level step at the ceiling changes nothing
+hertzforge-twr          tests/law_guards.rs                    auto_ends_at_proceed_when_the_full_level_drive_is_over_the_ceiling  drive-ceiling  an automatic waveform run stops before an over-ceiling level
+hertzforge-twr          tests/law_guards.rs                    manual_refuses_a_level_move_over_the_ceiling              drive-ceiling  a manual level move over the ceiling is refused
+hertzforge-explorer-host src/step.rs                           amplitude_intents_clamp_to_the_volts_ceiling              drive-ceiling  an Explorer amplitude is clamped to the volts ceiling
+hertzforge-backendd     src/shock.rs                           the_drive_ceiling_refuses_with_both_numbers_and_passes_inside_it  drive-ceiling  the daemon's shock path refuses an over-ceiling drive
+hertzforge-protocol     tests/v6.rs                            a_cleared_drive_ceiling_survives_the_wire_and_an_absent_one_defaults_safe  drive-ceiling  an absent drive ceiling on the wire defaults to the safe value
+sds-control             tests/twr_sim_run.rs                   sim_4_a_ceiling_under_the_full_level_drive_ends_auto_and_refuses_manual  drive-ceiling  the waveform ceiling holds through the control service
+sds-control             tests/shock_protocol.rs                wrong_mode_and_the_drive_ceiling_on_a_level_move          drive-ceiling  the shock drive ceiling holds on a level move through the protocol
+sds-control             tests/srs_protocol.rs                  wrong_mode_and_the_drive_ceiling_on_a_level_move          drive-ceiling  the SRS drive ceiling holds on a level move through the protocol
+sds-control             tests/mimo_setup_fields.rs             a_prediction_over_a_ceiling_engages_only_on_its_own_acknowledgement  drive-ceiling  a multiple-output run predicted over a ceiling waits for its acknowledgement
+
+# ------------------------------------------------------------------ drive abort
+hertzforge-random       tests/service_acceptance.rs            acceptance_i_drive_vrms_abort                             drive-abort    a Random drive past its RMS abort ends the run
+hertzforge-random       tests/sysid_protection.rs              a_drive_abort_below_the_identification_drive_trips_before_driving  drive-abort  identification refuses to drive past the drive abort
+hertzforge-mixed        tests/guards.rs                        the_summed_drive_peak_ends_the_run_naming_no_part         drive-abort    the summed Mixed drive peak ends the run
+hertzforge-mixed        tests/drive_ceiling.rs                 a_tone_the_ceiling_holds_under_its_abort_ends_on_its_own_abort_naming_the_ceiling  drive-abort  a held tone still ends on its own abort
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_drive_past_the_abort_is_refused_before_it_plays         drive-abort    a shock drive past its abort never plays
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_predicted_drive_over_the_abort_ends_the_run_before_any_pulse  drive-abort  a predicted over-abort drive ends the run before a pulse
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_level_move_past_the_abort_is_refused_with_both_numbers  drive-abort    a shock level move past the abort is refused
+hertzforge-srs          tests/closed_loop_guards.rs            a_predicted_drive_over_the_abort_ends_the_run_before_any_pulse  drive-abort  an SRS drive predicted over its abort ends the run before a pulse
+hertzforge-srs          tests/closed_loop_guards.rs            a_drive_that_grows_past_the_abort_is_refused_before_it_plays  drive-abort  an SRS drive past its abort never plays
+hertzforge-srs          tests/closed_loop_guards.rs            a_level_move_past_the_abort_is_refused                    drive-abort    an SRS level move past the abort is refused
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_drive_over_its_abort_fires_nothing    drive-abort    a multiple-drive shock drive over its abort fires nothing
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_drive_predicted_over_an_abort_line_is_refused  drive-abort  a drive predicted over an abort line is refused
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_seed_over_the_first_drive_bound_fires_nothing  drive-abort  a seed drive over its first bound fires nothing
+hertzforge-mimo-shock   tests/engine_audit.rs                  mimo_shock_engine_a3_a_law_predicting_its_own_over_test_is_held_to_the_abort_line  drive-abort  a law predicting its own over-test is held to the abort line
+hertzforge-explorer-host tests/explorer_guards.rs              explorer_a_sample_over_the_ceiling_aborts_drive_vpk       drive-abort    an Explorer drive sample over the ceiling aborts
+sds-control             tests/shock_sim_run.rs                 the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse  drive-abort  the shock drive abort through the control service
+sds-control             tests/srs_sim_run.rs                   the_drive_abort_under_the_prediction_ends_the_run_before_a_pulse  drive-abort  the SRS drive abort through the control service
+
+# -------------------------------------------------------------------- stop ramp
+hertzforge-engine       src/output.rs                          ramp_never_steps_or_cliffs                                stop-ramp      the engine's ramp down never steps
+hertzforge-random       src/service/ramp.rs                    a_stop_walks_its_depth_over_its_time_from_where_it_was_asked  stop-ramp  a Random stop walks down over its time
+hertzforge-random       tests/smooth_ramp.rs                   a_level_change_and_the_controlled_stop_ramp_block_by_block  stop-ramp     the controlled stop ramps block by block
+hertzforge-mimo-random  tests/end_to_end.rs                    a_whole_run_walks_every_step_and_takes_a_ramped_stop      stop-ramp      a multiple-output run ends with a ramped stop
+hertzforge-sine         tests/stop_ramp_protections.rs         the_ramp_walks_the_drive_down_rather_than_cliffing_it     stop-ramp      a Sine stop walks the drive down
+hertzforge-sine         tests/stop_ramp_protections.rs         a_genuine_hazard_during_the_ramp_still_aborts             stop-ramp      a hazard during the stop ramp still aborts
+hertzforge-sine         tests/stop_paths.rs                    an_operator_stop_stops_the_backend                        stop-ramp      an operator stop reaches the backend
+hertzforge-mixed        tests/sor_closed_loop.rs               the_drive_is_phase_continuous_and_every_change_is_a_ramp  stop-ramp      every Mixed drive change is a ramp
+hertzforge-mixed        src/tone/tests.rs                      a_part_ramp_ends_at_zero_and_never_overshoots             stop-ramp      a tone's ramp ends at zero and never overshoots
+hertzforge-explorer-host tests/sim_end_to_end.rs               the_stop_ramp_never_cliffs                                stop-ramp      an Explorer stop never steps
+hertzforge-explorer-host src/step.rs                           a_ramp_to_zero_actually_reaches_zero                      stop-ramp      an Explorer ramp to zero reaches zero
+hertzforge-explorer-host tests/pipeline_alignment.rs           explorer_a_ramped_stop_stops_the_station_only_once_the_zeros_have_played  stop-ramp  the station stops only after the ramp's zeros played
+hertzforge-twr          src/service/tests.rs                   stop_midplay_ends_stopped_not_aborted                     stop-ramp      a waveform stop mid-play ends stopped, not aborted
+hertzforge-hal-ni       src/backend.rs                         a_cut_taper_is_followed_by_a_zero_attempt_on_stop_and_on_abort  stop-ramp  a cut stop taper is followed by a zero write
+sds-control             src/random/backend.rs                  a_stop_uses_the_stations_controlled_stop                  stop-ramp      a Random stop uses the station's controlled stop
+sds-control             tests/random_protocol.rs               the_controlled_stop_starts_at_once_and_walks_down_smoothly  stop-ramp   the Random controlled stop through the protocol
+sds-control             tests/sine_sim_run.rs                  sim_1_a_sweep_completes_within_its_band_at_its_rate_and_ramps_down  stop-ramp  a Sine run ends with its ramp through the control service
+sds-control             src/sine/run.rs                        a_stop_ramps_down_and_ends_operator_stop_at_the_level_it_was_asked  stop-ramp  a Sine stop ramps from the level it was asked at
+sds-control             tests/mixed_sim_run.rs                 a_stop_ramps_every_part_down_and_ends_operator_stop       stop-ramp      a Mixed stop ramps every part down
+sds-control             tests/mimo_service.rs                  a_real_run_goes_from_setup_to_full_level_and_a_ramped_stop  stop-ramp    a multiple-output run's ramped stop through the control service
+
+# ---------------------------------------------------------------- abort to zero
+hertzforge-hal-sim      src/lib.rs                             emergency_stop_drives_output_toward_zero                  abort-to-zero  the simulator's emergency stop takes the output to zero
+hertzforge-hal-ni       src/backend.rs                         emergency_stop_is_safe_with_no_driver_and_never_panics    abort-to-zero  the hardware emergency stop never panics
+hertzforge-hal-ni       src/backend.rs                         the_zero_write_is_one_frame_of_zeros_on_a_started_on_demand_task  abort-to-zero  the zero write is a frame of zeros
+hertzforge-hal-ni       src/backend.rs                         a_refused_zero_write_reports_and_never_leaves_its_task_behind  abort-to-zero  a refused zero write still releases its task
+hertzforge-sine         tests/sim_e2e.rs                       cola_ramps_down_with_drive_on_abort                       abort-to-zero  a Sine abort takes the drive down
+hertzforge-mimo-random  tests/end_to_end.rs                    a_kinematic_limit_aborts_the_run_with_the_drive_taken_to_zero  abort-to-zero  a multiple-output abort takes the drive to zero
+hertzforge-mixed        tests/sor_closed_loop.rs               an_abort_is_a_fast_ramp_and_ends_the_run                  abort-to-zero  a Mixed abort ends the run at once
+hertzforge-explorer-host tests/sim_end_to_end.rs               an_abort_is_immediate_and_terminal                        abort-to-zero  an Explorer abort is immediate
+hertzforge-shock-host   src/service/mod.rs                     abort_emergency_stops_the_fire_path_and_latches_the_operator_trip  abort-to-zero  a shock abort emergency stops the fire path
+hertzforge-srs          src/service/tests.rs                   i_stop_parks_the_plant_and_abort_emergency_stops_it       abort-to-zero  an SRS abort emergency stops the plant
+hertzforge-srs          tests/cold_task_shape.rs               f_emergency_stop_reaches_the_backend_as_itself            abort-to-zero  the SRS emergency stop reaches the backend unchanged
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_stop_and_abort_end_the_run_and_release_the_station  abort-to-zero  multiple-drive shock stop and abort end the run
+hertzforge-twr          src/service/tests.rs                   stop_and_abort_raise_the_cancel_flag_first                abort-to-zero  a waveform stop or abort cancels the play first
+sds-control             src/random/backend.rs                  an_abort_takes_the_station_down_with_its_own_abort_stop_at_the_next_read  abort-to-zero  a Random abort takes the station down at the next read
+sds-control             src/random/backend.rs                  ending_on_a_trip_gives_the_abort_stop_not_the_taper      abort-to-zero  a trip ends with the abort stop, not the taper
+sds-control             src/sine/run.rs                        an_abort_ends_without_the_ramp                            abort-to-zero  a Sine abort does not ramp
+sds-control             src/pulse/observe.rs                   a_stop_is_the_emergency_stop_while_the_abort_is_raised_and_only_then  abort-to-zero  a pulse run's abort is the emergency stop
+sds-control             tests/mixed_sim_run.rs                 an_abort_ends_operator_abort_without_the_ramp             abort-to-zero  a Mixed abort does not ramp
+sds-control             tests/mimo_service.rs                  an_abort_on_the_ladder_takes_the_drive_down_at_once       abort-to-zero  a multiple-output abort takes the drive down at once
+sds-control             tests/sim_run.rs                       an_abort_ends_the_run_as_stopped_and_says_why             abort-to-zero  a simulated Random abort ends the run
+sds-control             tests/mimo_shock_sim_run.rs            mimo_shock_stop_and_abort_mid_ladder_fire_nothing_after   abort-to-zero  nothing fires after a multiple-drive shock stop or abort
+
+# ------------------------------------------------------- run-thread failure
+hertzforge-engine       tests/delivery.rs                      an_output_that_never_accepts_is_a_faulted_stop            run-thread-failure  an output that never accepts ends the run as a fault
+hertzforge-engine       tests/delivery.rs                      an_output_that_accepts_zero_while_claiming_space_is_a_faulted_stop  run-thread-failure  an output that lies about its space ends the run
+hertzforge-engine       tests/safety_gates.rs                  an_eternally_silent_input_is_a_faulted_stop_not_a_clean_end  run-thread-failure  a silent input ends the run as a fault
+hertzforge-hal          src/stream.rs                          an_endless_no_data_yet_is_a_bounded_stall_error           run-thread-failure  a stream that never delivers is a bounded error
+hertzforge-hal          src/delegated/testing.rs               a_scripted_fault_faults_the_device_and_only_the_emergency_stop_clears_it  run-thread-failure  a device fault holds until the emergency stop
+hertzforge-hal-ni       src/control_thread.rs                  a_reading_thread_that_panics_is_reverted                  run-thread-failure  a panicking reading thread is cleaned up
+hertzforge-random       tests/service_acceptance.rs            t_loop_fault_publishes_aborted_not_engaged                run-thread-failure  a loop fault reads aborted, never engaged
+hertzforge-sine         tests/oscillator_range.rs              an_out_of_domain_sweep_faults_instead_of_panicking        run-thread-failure  an out-of-range sweep faults instead of panicking
+hertzforge-shock-host   src/service/mod.rs                     a_missing_ladder_is_a_typed_error_not_a_panic             run-thread-failure  a missing shock ladder is an error, not a panic
+sds-control             src/pulse/rails.rs                     a_panic_is_caught_with_its_words                          run-thread-failure  a panic on a pulse run's thread is caught
+
+# -------------------------------------------------------------------- law guards
+hertzforge-random       tests/law_guards.rs                    a_law_returning_nan_is_held_and_the_run_stops_under_control  law-guard  a NaN drive from a Random law is held and the run stops
+hertzforge-random       tests/law_guards.rs                    a_law_returning_a_ragged_or_negative_drive_is_held_and_the_run_stops  law-guard  a malformed Random law drive is held
+hertzforge-random       tests/law_guards.rs                    a_panicking_law_is_contained_and_the_run_stops_under_control  law-guard  a panicking Random law is contained
+hertzforge-random       tests/law_guards.rs                    a_slow_law_misses_its_budget_is_held_and_the_run_stops_under_control  law-guard  a slow Random law is held and the run stops
+hertzforge-random       tests/law_guards.rs                    a_law_that_cannot_seed_is_refused_before_anything_engages  law-guard  a Random law that cannot seed never drives
+hertzforge-random       src/control/tests.rs                   a_knob_refuses_what_is_outside_its_declaration            law-guard      a law parameter outside its declaration is refused
+hertzforge-random-laws  tests/guarded_guests.rs                a_trapping_law_file_is_stopped_under_control              law-guard      a trapping law file stops the run under control
+hertzforge-random-laws  tests/guarded_guests.rs                a_law_file_that_never_returns_is_stopped_at_the_runs_own_call_budget  law-guard  a law file that never returns is stopped
+hertzforge-random-laws  tests/guarded_guests.rs                a_law_file_that_grows_past_its_memory_cap_is_stopped_under_control  law-guard  a law file past its memory cap is stopped
+hertzforge-random-laws  tests/guarded_guests.rs                a_law_file_returning_a_nan_drive_is_held_and_stopped      law-guard      a law file's NaN drive is held
+hertzforge-random-laws  tests/guarded_guests.rs                a_law_file_returning_a_short_drive_is_held_and_stopped    law-guard      a law file's short drive is held
+hertzforge-random-laws  tests/guarded_guests.rs                a_law_file_reporting_an_undeclared_diagnostic_is_held_and_stopped  law-guard  a law file's undeclared output is held
+hertzforge-random-laws  tests/guarded_guests.rs                a_law_files_own_error_is_held_and_stopped                 law-guard      a law file's own error is held
+hertzforge-random-laws  tests/catalog.rs                       hardware_arms_only_a_built_in_law_or_one_that_passed_its_check  law-guard  hardware arms only a built-in or checked law
+hertzforge-random-laws  tests/mimo_catalog.rs                  the_arming_gate_applies_to_mimo_laws_alike                law-guard      the hardware arming check covers multiple-output laws
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_nan_drive_is_refused_and_three_end_the_run              law-guard      a multiple-output NaN drive is refused; three end the run
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_non_hermitian_drive_is_refused                          law-guard      a non-Hermitian drive matrix is refused
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_drive_of_the_wrong_dimensions_is_refused                law-guard      a drive matrix of the wrong size is refused
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_drive_outside_the_band_is_refused                       law-guard      a drive outside the band is refused
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_badly_indefinite_drive_is_refused                       law-guard      a badly indefinite drive matrix is refused
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_slow_law_misses_three_times_and_the_run_stops_with_the_drive_held  law-guard  a slow multiple-output law stops the run with the drive held
+hertzforge-mimo-random  tests/guards_adversarial.rs            a_trapping_law_is_contained                               law-guard      a trapping multiple-output law is contained
+hertzforge-mimo-random  tests/end_to_end.rs                    a_law_fault_ends_the_run_with_a_controlled_stop           law-guard      a multiple-output law fault ends in a controlled stop
+hertzforge-sine         tests/law_guards.rs                    a_nan_drive_is_refused_three_times_then_the_run_stops     law-guard      a NaN Sine drive is refused; three stop the run
+hertzforge-sine         tests/law_guards.rs                    a_negative_drive_is_refused_three_times_then_the_run_stops  law-guard    a negative Sine drive is refused
+hertzforge-sine         tests/law_guards.rs                    a_panicking_law_is_caught_per_call                        law-guard      a panicking Sine law is caught on every call
+hertzforge-sine         tests/law_seam_contract.rs             a_law_that_cannot_be_built_ends_the_run_before_it_drives  law-guard      a Sine law that cannot be built never drives
+hertzforge-sine         tests/law_seam_contract.rs             guards_out_of_range_are_refused_by_the_config_check_first  law-guard     Sine law guard settings out of range are refused
+hertzforge-sine         tests/law_no_alloc.rs                  the_control_tick_allocates_nothing_with_or_without_the_guards  law-guard  the Sine control tick does no allocation, guards included
+hertzforge-shock-common src/law_guard.rs                       each_guard_out_of_range_is_refused_by_name                law-guard      shock law guard settings out of range are refused
+hertzforge-shock-common src/law_guard.rs                       misses_trip_at_the_limit_and_a_usable_call_starts_the_count_again  law-guard  shock law misses trip at their limit
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_drive_that_is_not_a_number_is_refused_and_never_plays   law-guard      a NaN shock drive never plays
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_short_record_is_refused                                 law-guard      a short shock drive is refused
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_bin_that_jumps_twenty_db_is_refused                     law-guard      a shock drive that jumps 20 dB in a bin is refused
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_peak_that_runs_away_is_refused                          law-guard      a runaway shock drive peak is refused
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_slow_law_on_the_test_clock_is_over_budget               law-guard      a slow shock law is over budget
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_panic_is_contained_and_counted                          law-guard      a panicking shock law is contained
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_first_drive_three_times_the_reference_fires_nothing     law-guard      an outsized first shock drive fires nothing
+hertzforge-shock-host   tests/closed_loop_guards.rs            every_drive_starts_and_ends_at_rest_whatever_the_law_returns  law-guard  every shock drive starts and ends at rest
+hertzforge-srs          tests/closed_loop_guards.rs            a_nan_gain_is_refused_and_three_in_a_row_end_the_run      law-guard      a NaN SRS gain is refused; three end the run
+hertzforge-srs          tests/closed_loop_guards.rs            a_zero_gain_is_refused                                    law-guard      a zero SRS gain is refused
+hertzforge-srs          tests/closed_loop_guards.rs            a_negative_gain_is_refused                                law-guard      a negative SRS gain is refused
+hertzforge-srs          tests/closed_loop_guards.rs            a_short_gains_list_is_refused                             law-guard      a short SRS gain list is refused
+hertzforge-srs          tests/closed_loop_guards.rs            a_gain_rising_7_db_in_a_pulse_is_refused                  law-guard      an SRS gain rising 7 dB in a pulse is refused
+hertzforge-srs          tests/closed_loop_guards.rs            a_slow_law_is_over_budget_on_the_test_clock               law-guard      a slow SRS law is over budget
+hertzforge-srs          tests/closed_loop_guards.rs            a_panicking_law_is_contained                              law-guard      a panicking SRS law is contained
+hertzforge-twr          tests/law_guards.rs                    a_wrong_length_drive_is_a_miss                            law-guard      a waveform drive of the wrong length is a miss
+hertzforge-twr          tests/law_guards.rs                    a_drive_with_a_nan_is_a_miss                              law-guard      a waveform drive with a NaN is a miss
+hertzforge-twr          tests/law_guards.rs                    a_panicking_call_is_caught_as_a_miss                      law-guard      a panicking waveform law is a miss
+hertzforge-twr          tests/law_guards.rs                    a_first_drive_over_its_bound_plays_nothing                law-guard      an outsized first waveform drive plays nothing
+hertzforge-twr          tests/law_guards.rs                    a_peak_rise_over_the_cap_is_refused                       law-guard      a waveform peak rising past its cap is refused
+hertzforge-twr          tests/law_guards.rs                    a_bin_rise_over_the_cap_is_refused                        law-guard      a waveform bin rising past its cap is refused
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_the_growth_cap_refuses_a_drive_that_more_than_doubles  law-guard  a multiple-drive shock drive that doubles is refused
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_the_growth_cap_refuses_a_band_that_grows  law-guard   a band that grows past its cap is refused
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_law_that_panics_ends_the_run_at_once  law-guard     a panicking multiple-drive shock law ends the run
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_law_over_its_budget_three_times_ends_the_run  law-guard  a slow multiple-drive shock law ends the run
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_law_answering_a_non_finite_drive_ends_the_run  law-guard  a non-finite multiple-drive shock drive ends the run
+hertzforge-mixed        tests/guards.rs                        a_tone_law_fault_ends_the_run_by_the_controlled_stop      law-guard      a Mixed tone law fault ends in a controlled stop
+hertzforge-mixed        tests/guards_more.rs                   a_floor_law_fault_ends_the_run_by_the_controlled_stop     law-guard      a Mixed floor law fault ends in a controlled stop
+hertzforge-law-host     tests/law_host.rs                      bytes_that_are_not_a_law_are_refused                      law-guard      the law host refuses a file that is not a law
+hertzforge-law-host     tests/law_host.rs                      a_manifest_that_breaks_a_rule_is_refused_at_load          law-guard      a law whose manifest breaks a rule is refused
+hertzforge-law-host     tests/law_host.rs                      a_law_that_never_returns_is_stopped_by_its_deadline       law-guard      a law that never returns is stopped
+hertzforge-law-host     tests/law_host.rs                      the_deadline_stops_a_spinning_law_within_a_tick_of_its_budget  law-guard  a spinning law is stopped within a tick
+hertzforge-law-host     tests/law_host.rs                      a_law_that_grows_past_its_memory_cap_is_stopped           law-guard      a law past its memory cap is stopped
+hertzforge-law-host     tests/law_host.rs                      a_trapping_law_is_reported_and_its_instance_poisoned      law-guard      a trapping law is never called again
+hertzforge-law-host     tests/law_host.rs                      malformed_inputs_are_refused_before_the_law_sees_them     law-guard      malformed inputs never reach a law
+hertzforge-law-host     tests/validation.rs                    each_bad_output_is_refused                                law-guard      every malformed law output is refused
+hertzforge-law-host     tests/validation.rs                    each_manifest_rule_refuses_its_case                       law-guard      every manifest rule refuses its case
+hertzforge-law-host     tests/mimo_host.rs                     a_nan_in_the_drive_is_refused                             law-guard      a NaN multiple-output law drive is refused
+hertzforge-law-host     tests/mimo_host.rs                     a_drive_that_is_not_hermitian_is_refused                  law-guard      a non-Hermitian law drive is refused
+hertzforge-law-host     tests/mimo_host.rs                     a_law_that_spins_is_stopped_at_its_budget_and_poisoned    law-guard      a spinning multiple-output law is stopped
+hertzforge-law-host     tests/sine_host.rs                     a_late_sine_law_is_stopped_within_its_tick_budget_and_stays_stopped  law-guard  a late Sine law file is stopped
+hertzforge-law-host     tests/twr_host.rs                      a_late_twr_law_is_stopped_at_its_budget_and_stays_stopped  law-guard  a late waveform law file is stopped
+hertzforge-law-host     tests/shock_classical_host.rs          a_late_law_is_stopped_at_its_budget_and_stays_stopped     law-guard      a late classical shock law file is stopped
+hertzforge-law-host     tests/shock_srs_host.rs                a_late_srs_law_is_stopped_at_its_budget_and_stays_stopped  law-guard  a late SRS law file is stopped
+hertzforge-law-host     tests/shock_mimo_host.rs               mimo_shock_a_late_law_is_stopped_at_its_budget_and_stays_stopped  law-guard  a late multiple-drive shock law file is stopped
+sds-control             tests/law_check.rs                     the_zero_law_fails_every_case_with_its_reasons_and_stays_off_hardware  law-guard  a law that fails its check stays off hardware
+sds-control             tests/law_check.rs                     the_misbehaving_fixture_fails_with_the_outputs_that_were_refused  law-guard  a misbehaving law fails its check
+sds-control             tests/sine_law_check.rs                a_misbehaving_sine_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware  law-guard  an unchecked Sine law cannot arm on hardware
+sds-control             tests/shock_law_check.rs               a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware  law-guard  an unchecked shock law cannot arm on hardware
+sds-control             tests/srs_law_check.rs                 a_misbehaving_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware  law-guard  an unchecked SRS law cannot arm on hardware
+sds-control             tests/twr_law_check.rs                 a_misbehaving_twr_law_fails_a_good_one_is_recorded_and_an_unchecked_one_cannot_arm_on_hardware  law-guard  an unchecked waveform law cannot arm on hardware
+sds-control             tests/mixed_law_record.rs              an_imported_floor_law_arms_on_hardware_only_through_its_mixed_record  law-guard  an imported Mixed law arms on hardware only when checked
+sds-control             src/mimo/adapter.rs                    hardware_arms_only_with_a_checked_law_and_the_simulator_with_any  law-guard  hardware arms a multiple-output law only when checked
+sds-control             tests/mimo_setup_fields.rs             a_law_budget_too_small_for_the_law_stops_the_run_before_it_drives  law-guard  a law budget too small stops the run before it drives
+sds-control             tests/sine_sim_run.rs                  sim_6_a_law_that_runs_late_three_times_ends_law_fault_with_the_drive_held_then_ramped  law-guard  a late Sine law ends the run with the drive held, then ramped
+sds-control             tests/twr_sim_run.rs                   sim_6_a_law_past_its_budget_misses_three_times_then_the_run_ends  law-guard  a late waveform law ends the run
+sds-control             tests/shock_sim_run.rs                 a_slow_law_ends_the_run_after_three_misses                law-guard      a slow shock law ends the run
+sds-control             tests/srs_sim_run.rs                   a_slow_law_ends_the_run_after_three_misses                law-guard      a slow SRS law ends the run
+sds-control             tests/mimo_shock_sim_run.rs            mimo_shock_a_law_that_panics_ends_the_run_by_name         law-guard      a panicking multiple-drive shock law ends the run
+
+# --------------------------------------------------------------------- envelope
+hertzforge-breakpoints  src/tests.rs                           envelope_low_breach_detected                              envelope       a response under its envelope is caught
+hertzforge-breakpoints  src/tests.rs                           envelope_global_bands_hit_and_miss                        envelope       the global envelope bands are judged
+hertzforge-breakpoints  src/tests.rs                           envelope_per_row_override_beats_global                    envelope       a channel's own envelope overrides the global one
+hertzforge-random       tests/service_acceptance.rs            acceptance_d_envelope_abort_on_unfillable_antiresonance   envelope       a Random response outside its envelope aborts
+hertzforge-random       tests/estimate_across_levels.rs        a_ten_db_excursion_at_a_new_level_still_aborts_on_its_first_judged_loop  envelope  an excursion at a new level aborts on its first judged loop
+hertzforge-mixed        tests/floor_rms_abort.rs               a_floor_driven_3_db_high_trips_the_rms_abort_with_a_tone_sweeping  envelope  a Mixed floor 3 dB high trips its RMS abort
+hertzforge-mixed        tests/guards_more.rs                   the_floor_rms_and_line_aborts_trip                        envelope       the Mixed floor RMS and line aborts trip
+hertzforge-mixed        tests/guards.rs                        a_tone_abort_names_the_tone                               envelope       a Mixed tone outside its abort ends the run
+hertzforge-mixed        tests/small_tone.rs                    a_small_tone_played_4_db_low_still_ends_in_its_abort      envelope       a small Mixed tone 4 dB low still aborts
+hertzforge-sine         tests/sim_e2e.rs                       abort_trips_and_ramps                                     envelope       a Sine response past its abort ends the run
+hertzforge-sine         tests/sim_e2e.rs                       dead_control_channel_aborts_even_while_notch_binds        envelope       a dead control channel aborts even while notching
+hertzforge-sine         tests/retune_settle.rs                 a_commanded_retune_does_not_trip_the_scalar_abort_and_a_dead_loop_still_does  envelope  a dead Sine loop still aborts after a retune
+hertzforge-shock-host   src/service/mod.rs                     tolerance_breach_aborts_the_run                           envelope       a shock pulse outside tolerance aborts
+hertzforge-shock-host   tests/closed_loop_guards.rs            an_overshoot_of_half_aborts_at_the_first_pulse            envelope       a shock overshoot of half aborts at the first pulse
+hertzforge-shock-host   tests/service_sim.rs                   b_wrong_amplitude_pulse_trips_the_tolerance_abort         envelope       a wrong-amplitude shock pulse aborts
+hertzforge-srs          src/service/tests.rs                   c_envelope_abort_trips_on_gross_over_level                envelope       an SRS over-level aborts
+hertzforge-twr          src/limits.rs                          envelope_alarm_latches_and_abort_debounces                envelope       the waveform envelope alarm and abort
+hertzforge-twr          src/service/tests.rs                   envelope_abort_fires_on_a_plant_gain_step                 envelope       a waveform envelope abort on a plant change
+hertzforge-twr          tests/law_guards.rs                    a_predicted_peak_over_the_envelope_is_refused             envelope       a waveform drive predicted over the envelope is refused
+hertzforge-twr          tests/law_guards.rs                    the_envelope_is_watched_during_a_play                     envelope       the waveform envelope is watched during a play
+hertzforge-mimo-shock   tests/engine_service_changes.rs        mimo_shock_engine_a_pulse_over_the_absolute_line_aborts_by_it_in_both_settings  envelope  a multiple-drive shock pulse over its absolute line aborts
+hertzforge-mimo-shock   tests/engine_service_changes.rs        mimo_shock_engine_with_scaled_aborts_a_pulse_over_its_level_line_ends_the_run_by_that_line  envelope  a pulse over its level line ends the run
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_limit_over_its_abort_in_identification_ends_the_run  envelope  a limit channel over its abort in identification ends the run
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_a_limit_predicted_over_its_abort_fires_nothing  envelope  a limit channel predicted over its abort fires nothing
+sds-control             tests/mimo_setup_fields.rs             a_limit_channel_aborts_the_run_past_its_ceiling           envelope       a multiple-output limit channel aborts past its ceiling
+sds-control             tests/mixed_sim_run.rs                 the_random_parts_rms_abort_trips_and_names_no_part        envelope       the Mixed random RMS abort through the control service
+
+# ------------------------------------------------------------ kinematic limits
+hertzforge-breakpoints  src/tests.rs                           kinematics_positive_and_consistent_units                  kinematic      reference kinematics are positive and in consistent units
+hertzforge-shaker-db    src/tests.rs                           feasibility_displacement_limited_low_freq_profile_trips   kinematic      a profile past the shaker's stroke is caught
+hertzforge-random       tests/service_acceptance.rs            acceptance_e_kinematic_abort_on_tight_monitor_limit       kinematic      a Random kinematic abort
+hertzforge-random       tests/sysid_protection.rs              a_kinematic_abort_trips_during_identification             kinematic      the kinematic abort during identification
+hertzforge-sine         tests/sim_e2e.rs                       kinematic_monitor_trips_at_runtime                        kinematic      the Sine kinematic monitor trips
+hertzforge-sine         tests/feasibility.rs                   displacement_limited_low_frequency_profile_exceeds_small_stroke  kinematic  a Sine profile past a small stroke is caught
+hertzforge-mixed        tests/guards_more.rs                   a_velocity_limit_on_the_raw_samples_ends_the_run          kinematic      a Mixed velocity limit ends the run
+hertzforge-shock-common src/tests/feasibility_tests.rs         compensated_pulse_hard_blocks_on_small_stroke_shaker_displacement  kinematic  a shock pulse past the stroke is blocked
+hertzforge-shock-host   tests/closed_loop_guards.rs            predicted_kinematics_over_the_shaker_stop_the_first_full_level_pulse  kinematic  predicted shock kinematics over the shaker stop the run
+hertzforge-shock-host   tests/service_sim.rs                   c_feasibility_hard_blocks_overweight_article_and_override_arms  kinematic  an overweight article is blocked for shock
+hertzforge-srs          tests/closed_loop_guards.rs            the_predicted_kinematics_refuse_the_first_full_level_pulse  kinematic   predicted SRS kinematics refuse the pulse
+hertzforge-srs          src/service/tests.rs                   d_feasibility_hard_blocks_overweight_article_and_override_arms  kinematic  an overweight article is blocked for SRS
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_predicted_kinematics_over_their_limit_fire_nothing  kinematic  predicted multiple-drive kinematics over their limit fire nothing
+hertzforge-explorer-host src/guards.rs                         velocity_trips_after_settle                               kinematic      the Explorer velocity limit trips
+hertzforge-twr          src/limits.rs                          feasibility_blocks_on_any_failed_ceiling                  kinematic      a waveform test past any shaker ceiling is blocked
+sds-control             tests/sine_sim_run.rs                  sim_4_the_shakers_displacement_limit_trips_the_kinematic_abort  kinematic  the shaker's stroke trips the Sine kinematic abort
+sds-control             tests/shock_sim_run.rs                 a_displacement_limit_under_the_prediction_aborts_predicted  kinematic   the shock displacement limit through the control service
+sds-control             tests/srs_sim_run.rs                   a_displacement_ceiling_under_the_prediction_aborts_predicted  kinematic  the SRS displacement limit through the control service
+sds-control             tests/random_protocol.rs               a_kinematic_abort_trips_during_system_identification      kinematic      the kinematic abort through the protocol
+sds-control             tests/mimo_setup_fields.rs             the_article_and_moving_mass_decide_whether_the_shaker_can_carry_the_test  kinematic  the multiple-output shaker rating check
+
+# ------------------------------------------------------------------ divergence
+hertzforge-dsp          tests/control.rs                       servo_never_diverges_on_noisy_plant                       divergence     the level servo does not diverge on noise
+hertzforge-random       src/control/tests.rs                   divergence_reported_after_n_consecutive_clamped_iters     divergence     Random divergence after clamped iterations
+hertzforge-random       tests/law_guards.rs                    a_runaway_law_is_capped_and_aborted_for_divergence        divergence     a runaway Random law is aborted for divergence
+hertzforge-random       tests/law_guards.rs                    an_oscillating_law_is_capped_and_aborted_for_divergence   divergence     an oscillating Random law is aborted for divergence
+hertzforge-random       tests/service_acceptance.rs            acceptance_j_divergence_abort_caller_contract             divergence     the Random divergence abort
+hertzforge-mimo-random  tests/guards_adversarial.rs            an_oscillating_law_trips_the_divergence_abort             divergence     an oscillating multiple-output law trips divergence
+hertzforge-sine         tests/law_guards.rs                    twenty_db_a_tick_is_capped_to_one_and_trips_divergence_after_a_second  divergence  a Sine law stepping 20 dB a tick trips divergence
+hertzforge-mixed        tests/drive_ceiling.rs                 a_law_pushing_against_its_rate_cap_with_nothing_holding_it_still_trips_divergence  divergence  a Mixed law against its rate cap trips divergence
+hertzforge-shock-host   tests/closed_loop_guards.rs            a_law_that_diverges_trips_divergence                      divergence     a diverging shock law is stopped
+hertzforge-shock-host   src/service/closed.rs                  divergence_counts_rises_in_a_row_at_one_level             divergence     shock divergence counts rises at one level
+hertzforge-twr          src/metrics.rs                         divergence_needs_consecutive_rises_above_gate             divergence     waveform divergence needs consecutive rises
+hertzforge-twr          src/service/tests.rs                   divergence_guard_aborts_on_a_sign_flipped_plant           divergence     a waveform run on a sign-flipped plant aborts
+hertzforge-mimo-shock   src/guards.rs                          mimo_shock_engine_divergence_watch_trips_on_three_rises_or_drive_growth  divergence  the multiple-drive shock divergence watch
+hertzforge-mimo-shock   tests/engine_guards.rs                 mimo_shock_engine_the_divergence_watch_stops_an_error_rising_at_one_level  divergence  a rising error at one level is stopped
+hertzforge-mimo-shock   tests/engine_audit.rs                  mimo_shock_engine_a6_a_slow_divergence_is_stopped_by_the_tenth_pulse_at_its_level  divergence  a slow multiple-drive divergence is stopped
+hertzforge-mimo-shock   tests/engine_runs.rs                   mimo_shock_engine_r4_a_diverging_law_is_stopped_before_its_drive_doubles  divergence  a diverging law is stopped before its drive doubles
+hertzforge-mimo-shock-law-math tests/requirements.rs          mimo_shock_r2b_watchdog_bounds_the_divergence             divergence     the shock watchdog bounds a frozen-inverse divergence
+
+# -------------------------------------------------------------------- overload
+hertzforge-hal          src/lib.rs                             an_input_overloads_at_98_percent_of_its_own_range         overload       an input overloads at 98 percent of its range
+hertzforge-hal-sim      src/lib.rs                             an_input_driven_to_its_range_is_reported_overloaded       overload       the simulator reports an overloaded input
+hertzforge-random       tests/station_overload.rs              a_station_overload_report_latches_that_channel            overload       Random latches a station's overload report
+hertzforge-mixed        tests/guards_more.rs                   a_control_channel_overload_ends_the_run_naming_the_channel  overload    a Mixed control-channel overload ends the run
+hertzforge-mixed        tests/guards_more.rs                   a_monitor_channel_overload_latches_and_the_run_goes_on    overload       a Mixed monitor overload latches
+
+# -------------------------------------------------------------------- underrun
+hertzforge-engine       src/output.rs                          ramp_down_on_low_water_reaches_zero_then_aborts           underrun       a starving output ramps to zero, then aborts
+hertzforge-engine       src/output.rs                          hold_last_policy_holds_then_aborts                        underrun       the hold-last policy holds, then aborts
+hertzforge-engine       src/output.rs                          hard_underrun_is_immediate_abort                          underrun       a hard underrun aborts at once
+hertzforge-engine       tests/engine.rs                        drive_underrun_ramps_and_aborts                           underrun       an engine drive underrun ramps and aborts
+hertzforge-engine       tests/delivery.rs                      an_output_that_reports_no_space_from_the_first_tick_still_faults  underrun  an output with no space from the start faults
+hertzforge-hal-ni       src/ffi.rs                             only_output_underrun_warnings_count_as_underruns          underrun       the hardware's underrun warnings are counted
+hertzforge-random       tests/cold_prefill.rs                  cold_start_plays_drive_from_the_first_clocked_sample      underrun       a Random cold start has its drive ready from the first sample
+# Not listed: hertzforge-mimo-random tests/output_seams.rs
+# identification_keeps_a_real_time_output_fed_across_every_seam keeps a real-time
+# output fed across identification's seams, but it is ignored in debug builds
+# (`cfg_attr(debug_assertions, ignore)`) and every CI pass builds in debug, so it
+# never runs in CI. It belongs here once CI runs it.
+
+# ---------------------------------------------------------- dropped controller
+hertzforge-backendd     src/lease.rs                           a_vanished_controller_starts_a_clock_and_the_run_continues  dropped-controller  a vanished controller starts the timeout clock
+hertzforge-backendd     src/lease.rs                           an_unadopted_clean_close_still_safe_stops                 dropped-controller  a clean close nobody takes over still safe stops
+hertzforge-backendd     tests/wire.rs                          a_vanished_controller_leaves_the_run_up_then_the_timeout_safe_stops_it  dropped-controller  the daemon safe stops after the controller timeout
+hertzforge-backendd     src/config.rs                          a_timeout_shorter_than_the_heartbeat_is_refused           dropped-controller  a controller timeout shorter than the heartbeat is refused
+hertzforge-backendd     src/explorer.rs                        a_stop_ramp_that_outlasts_the_controller_timeout_is_refused_with_both_numbers  dropped-controller  a stop ramp longer than the timeout is refused
+hertzforge-backendd     src/sine.rs                            a_ramp_that_outlasts_the_controller_timeout_is_refused_with_both_numbers  dropped-controller  a Sine ramp longer than the timeout is refused
+sds-control             src/session.rs                         nobody_claiming_a_live_run_in_time_is_a_safe_stop         dropped-controller  an unclaimed live run takes the safe stop
+sds-control             tests/random_protocol.rs               an_unattended_run_ends_with_the_safe_stop_and_its_ramp    dropped-controller  an unattended Random run takes the safe stop
+sds-control             tests/random_protocol.rs               a_silent_connection_is_gone_after_three_heartbeats        dropped-controller  a silent connection is dropped after three heartbeats
+sds-control             tests/mimo_protocol.rs                 an_unattended_mimo_run_takes_the_safe_stop                dropped-controller  an unattended multiple-output run takes the safe stop
+sds-control             tests/mimo_service.rs                  a_lost_controller_during_a_run_ends_in_the_safe_stop      dropped-controller  a lost controller ends a multiple-output run safely
+sds-control             tests/explorer_protocol.rs             explorer_nobody_at_the_controls_ends_in_the_safe_stop     dropped-controller  an unattended Explorer run takes the safe stop
+sds-control             tests/explorer_sim_run.rs              explorer_sim_5_a_lost_controller_and_a_shutdown_end_in_the_safe_stop  dropped-controller  a lost Explorer controller ends in the safe stop
+sds-control             tests/sine_sim_run.rs                  sim_5_a_lost_controller_and_a_shutdown_each_safe_stop_with_the_ramp  dropped-controller  a lost Sine controller ends in the safe stop
+sds-control             tests/mixed_sim_run.rs                 a_dropped_controller_ends_in_the_safe_stop                dropped-controller  a lost Mixed controller ends in the safe stop
+sds-control             tests/mimo_shock_sim_run.rs            mimo_shock_a_dropped_controller_ends_in_the_safe_stop     dropped-controller  a lost multiple-drive shock controller ends in the safe stop
+sds-control             tests/shock_sim_run.rs                 the_controller_lost_and_the_shutdown_safe_stop            dropped-controller  a lost shock controller ends in the safe stop
+sds-control             tests/srs_sim_run.rs                   the_controller_lost_and_the_shutdown_safe_stop            dropped-controller  a lost SRS controller ends in the safe stop
+sds-control             tests/twr_sim_run.rs                   sim_5_a_closed_controller_and_a_shutdown_each_end_in_the_safe_stop  dropped-controller  a lost waveform controller ends in the safe stop
+sds-control             tests/shock_protocol.rs                firing_holds_when_the_controller_goes_resumes_on_a_reclaim_and_safe_stops_after  dropped-controller  shock firing holds while the controller is gone
+sds-control             tests/srs_protocol.rs                  firing_holds_when_the_controller_goes_resumes_on_a_reclaim_and_safe_stops_after  dropped-controller  SRS firing holds while the controller is gone
+sds-control             tests/twr_protocol.rs                  plays_hold_when_the_controller_goes_resume_on_a_reclaim_and_safe_stop_after  dropped-controller  waveform plays hold while the controller is gone
+sds-control             tests/recorder_sim_run.rs              recorder_sim_a_lost_controller_and_a_shutdown_end_safely  dropped-controller  a lost recorder controller ends safely
+
+# -------------------------------------------------------------------- late tick
+hertzforge-engine       src/health.rs                          period_jitter_flagged_when_starved                        late-tick      a starved loop's period jitter is flagged
+hertzforge-engine       src/health.rs                          compute_overrun_flagged                                   late-tick      a tick over its compute budget is flagged
+hertzforge-engine       tests/safety_gates.rs                  a_stalled_tick_still_polls_the_watchdog_and_still_feeds_the_drive  late-tick  a stalled tick still runs the watchdog and the drive
+hertzforge-engine       src/ring.rs                            full_ring_drops_and_counts_overruns                       late-tick      a full input ring counts its overruns
+hertzforge-random       tests/scheduling_fault_rule.rs         a_hardware_station_never_retries_a_scheduling_fault       late-tick      a hardware station never retries a scheduling fault
+hertzforge-random       tests/scheduling_fault_rule.rs         the_plant_loop_carries_the_station_it_armed_against       late-tick      the scheduling rule follows the station armed against
+hertzforge-sine         tests/rate_honesty.rs                  a_control_tick_longer_than_a_batch_refuses_arm            late-tick      a Sine control tick longer than a batch is refused
+hertzforge-explorer-host tests/arm_gate_consulted.rs           a_hardware_station_with_no_abort_latency_bound_is_refused  late-tick     a hardware station with no abort latency bound is refused
+
+# --------------------------------------------------------------------- watchdog
+hertzforge-engine       src/watchdog.rs                        accel_over_limit_trips_and_calls_estop                    watchdog       an acceleration over its limit trips the emergency stop
+hertzforge-engine       src/watchdog.rs                        velocity_limit_trips_on_integrated_signal                 watchdog       the velocity limit trips on the integrated signal
+hertzforge-engine       src/limits.rs                          accel_trips_on_sustained_over_limit                       watchdog       a sustained over-limit acceleration trips
+hertzforge-engine       tests/engine.rs                        over_limit_spike_trips_watchdog_and_estops                watchdog       an over-limit spike trips the watchdog and emergency stops
+hertzforge-engine       tests/engine.rs                        multichannel_tail_breach_still_reaches_the_watchdog       watchdog       a breach on the last channel still reaches the watchdog
+hertzforge-engine       tests/safety_gates.rs                  a_dropped_raw_frame_fails_a_limits_armed_run              watchdog       a dropped raw frame fails a limits-armed run
+hertzforge-engine       tests/safety_gates.rs                  limits_armed_follows_the_channel_table                    watchdog       the watchdog arms from the channel table
+hertzforge-engine       tests/safety_gates.rs                  zero_blanking_trips_on_the_first_breach                   watchdog       with no blanking the first breach trips
+hertzforge-engine       tests/safety_gates.rs                  a_blanking_window_past_the_cap_is_refused_not_clamped     watchdog       a blanking window past its cap is refused
+hertzforge-sine         tests/sim_e2e.rs                       watchdog_arms_accel_axis_from_profile_abort_ceiling       watchdog       the Sine watchdog arms from the profile's abort ceiling
+hertzforge-sine         tests/watchdog_constants.rs            a_hardware_station_arms_a_tighter_coarse_backstop         watchdog       a hardware station arms a tighter backstop
+hertzforge-explorer-host src/guards.rs                         accel_trip_fires_over_limit                               watchdog       the Explorer acceleration trip
+hertzforge-explorer-host src/guards.rs                         out_of_range_limited_channel_is_refused_not_clamped       watchdog       an Explorer limit on a missing channel is refused
+sds-control             tests/explorer_sim_run.rs              explorer_sim_7_an_accel_limit_aborts_by_the_watchdog      watchdog       the Explorer watchdog through the control service
+
+# --------------------------------------------------------------------- arm gate
+hertzforge-module-abi   src/lib.rs                             host_per_tick_refuses_an_unproven_clock_and_accepts_a_shared_one  arm-gate  a host-closed loop needs a proven shared clock
+hertzforge-module-abi   src/lib.rs                             a_converging_request_is_refused_not_degraded_to_playback  arm-gate       a closed-loop request is refused, never degraded
+hertzforge-module-abi   src/lib.rs                             delegation_to_a_host_loop_backend_is_refused              arm-gate       delegation to a host-loop backend is refused
+hertzforge-module-abi   src/lib.rs                             host_synthesized_drive_on_a_device_backend_is_refused     arm-gate       a host drive on a device-loop backend is refused
+hertzforge-module-abi   src/lib.rs                             a_hardware_station_with_a_drive_path_refuses_without_an_abort_bound  arm-gate  a hardware drive needs an abort latency bound
+hertzforge-module-abi   src/lib.rs                             an_unusable_actual_rate_refuses_rather_than_passing_vacuously  arm-gate  an unusable rate is refused
+hertzforge-module-abi   src/lib.rs                             arm_gate_runs_the_resolver_first_so_a_loop_refusal_wins  arm-gate      the loop refusal is checked first
+hertzforge-protocol     src/caps.rs                            hosted_closed_loop_requires_a_proven_shared_clock         arm-gate       the wire capability needs a proven shared clock
+hertzforge-random       tests/arm_gate_consulted.rs            random_arm_refuses_an_unproven_clock_with_the_gates_typed_reason  arm-gate  Random consults the arm gate
+hertzforge-random       tests/one_drive_row.rs                 two_drive_rows_are_refused_before_the_device_opens        arm-gate       two Random drive rows are refused
+hertzforge-random       tests/station_rate_adoption.rs         an_unusable_reported_rate_is_refused_not_ignored          arm-gate       an unusable station rate is refused
+hertzforge-sine         tests/arm_gate_consulted.rs            sine_arm_refuses_an_unproven_clock_with_the_gates_typed_reason  arm-gate  Sine consults the arm gate
+hertzforge-sine         tests/rate_honesty.rs                  a_backend_that_answers_zero_hz_refuses_arm                arm-gate       a station answering zero hertz is refused
+hertzforge-sine         tests/tracking_lag_gate.rs             arm_refuses_a_configuration_the_check_rejects             arm-gate       Sine refuses a configuration its tracking check rejects
+hertzforge-sine         tests/review_hold.rs                   a_passing_gate_parks_at_awaiting_review_and_drives_nothing  arm-gate    a Sine run parked for review drives nothing
+hertzforge-shock-host   tests/arm_gate_consulted.rs            shock_arm_refuses_a_device_closes_loop_backend_with_the_gates_typed_reason  arm-gate  shock consults the arm gate
+hertzforge-shock-host   tests/rate_adoption_and_cold_task.rs   a_firer_with_no_actual_rate_refuses_to_arm                arm-gate       a shock firer with no rate is refused
+hertzforge-shock-host   tests/withheld_shot.rs                 a_stop_in_the_ladders_wait_parks_the_armed_shot_and_nothing_plays  arm-gate  a stop in the wait parks the armed shot
+hertzforge-srs          tests/arm_gate_consulted.rs            srs_arm_refuses_a_device_closes_loop_backend_with_the_gates_typed_reason  arm-gate  SRS consults the arm gate
+hertzforge-srs          tests/withheld_shot.rs                 a_stop_in_the_wait_parks_the_armed_shot_and_nothing_plays  arm-gate     a stop in the SRS wait parks the armed shot
+hertzforge-twr          tests/arm_gate_consulted.rs            twr_arm_refuses_a_device_closes_loop_backend_with_the_gates_typed_reason  arm-gate  waveform replication consults the arm gate
+hertzforge-twr          tests/station_rate.rs                  a_station_that_cannot_run_at_the_requested_rate_is_refused_before_anything_plays  arm-gate  a waveform station at the wrong rate is refused
+hertzforge-twr          src/player.rs                          a_two_drive_table_is_refused_by_name_at_bring_up          arm-gate       two waveform drive rows are refused
+hertzforge-explorer-host tests/arm_gate_consulted.rs           a_device_closes_loop_backend_is_refused_with_no_host_drive_path  arm-gate  Explorer consults the arm gate
+hertzforge-explorer-host tests/arm_gate_consulted.rs           a_refused_arm_never_reached_the_device_lifecycle          arm-gate       a refused Explorer arm never reaches the device
+hertzforge-explorer-host src/step.rs                           the_step_arms_at_exactly_zero_volts                       arm-gate       an Explorer step arms at zero volts
+hertzforge-mixed        tests/guards_more.rs                   an_exclusion_narrower_than_two_lines_is_refused_at_arm    arm-gate       a Mixed exclusion too narrow is refused at arm
+hertzforge-station      src/lib.rs                             an_absent_ni_driver_refuses_and_never_yields_a_sim        arm-gate       a missing hardware driver never falls back to the simulator
+hertzforge-station      src/lib.rs                             a_mixed_simulated_and_real_set_is_refused                 arm-gate       a station mixing simulated and real devices is refused
+hertzforge-station      src/lib.rs                             a_set_spanning_two_timing_families_is_refused_at_station_build  arm-gate  a station spanning two clocks is refused
+hertzforge-station      src/lock.rs                            a_second_holder_is_refused_and_the_refusal_names_the_first  arm-gate     a second holder of the station is refused
+hertzforge-hal-ni       src/config.rs                          a_row_asking_more_volts_than_its_module_measures_is_refused_by_name  arm-gate  a row asking more volts than its module has is refused
+hertzforge-hal-ni       src/timing.rs                          drive_on_a_different_family_than_the_inputs_is_refused    arm-gate       a drive on another clock than its inputs is refused
+hertzforge-backendd     src/core.rs                            every_drive_producing_module_precedes_the_recorder        arm-gate       every drive-producing module is stopped before the recorder
+sds-control             tests/random_protocol.rs               ni_selection_binding_and_arm_are_refused_by_name_and_never_simulated  arm-gate  a hardware selection never silently becomes the simulator
+sds-control             tests/random_protocol.rs               driver_simulated_ni_is_never_hardware                     arm-gate       a driver-simulated device is never reported as hardware
+sds-control             src/twr/engine.rs                      a_station_that_cannot_run_at_the_asked_rate_is_refused_at_arm  arm-gate  a waveform station at the wrong rate is refused at arm
+
+# -------------------------------------------------------------- checked input
+hertzforge-channel-table src/lib.rs                            a_future_schema_is_refused_rather_than_truncated          checked-input  a channel table from a newer schema is refused
+hertzforge-breakpoints  src/tests.rs                           alarm_wider_than_abort_warns                              checked-input  an alarm wider than its abort is reported
+hertzforge-sine         tests/profile.rs                       alarm_wider_than_abort_per_row_warns                      checked-input  a Sine alarm wider than its abort is reported
+hertzforge-reference    src/tests.rs                           a_non_hermitian_full_matrix_is_refused_with_its_line      checked-input  a non-Hermitian reference is refused
+hertzforge-reference    src/tests.rs                           zero_diagonal_in_band_and_energy_out_of_band_are_refused  checked-input  a reference with no energy in band is refused
+hertzforge-reference    src/tests.rs                           a_changed_binary_or_sidecar_is_refused                    checked-input  a changed reference file is refused
+hertzforge-reference    src/npz.rs                             a_non_hermitian_file_is_refused                           checked-input  a non-Hermitian reference file is refused
+hertzforge-twr          src/reference.rs                       non_finite_rejected                                       checked-input  a waveform reference with non-finite samples is refused
+hertzforge-backendd     src/table.rs                           an_invalid_table_is_refused_at_upload                     checked-input  an invalid channel table is refused at upload
+hertzforge-backendd     src/twr/reference.rs                   a_wrong_digest_is_refused_naming_both_digests             checked-input  a waveform reference upload with the wrong digest is refused
+hertzforge-backendd     src/twr/tests.rs                       a_cleared_drive_ceiling_is_refused_at_configure           checked-input  a waveform setup with no drive ceiling is refused
+hertzforge-backendd     src/core.rs                            a_foreign_schema_is_refused_before_the_handler_runs       checked-input  a command in a foreign schema is refused
+hertzforge-protocol     tests/v5.rs                            the_omitted_safety_fields_default_to_the_safe_value       checked-input  omitted safety fields default to the safe value
+hertzforge-protocol     tests/sine_golden.rs                   a_dropped_required_field_is_refused_rather_than_defaulted  checked-input  a missing required field is refused, not defaulted
+sds-control             tests/mimo_service.rs                  a_setup_with_a_changed_reference_file_or_a_rank_deficient_transform_is_refused  checked-input  a multiple-output setup with a changed reference is refused
+
+# -------------------------------------------------------------------- authority
+hertzforge-backendd     src/lease.rs                           a_second_controller_is_refused_unless_it_asked_for_the_downgrade  authority  a second controller is refused
+hertzforge-backendd     src/lease.rs                           observers_are_unlimited_and_never_take_the_lease          authority      an observer never takes control
+hertzforge-backendd     src/config.rs                          the_wildcard_bind_is_refused_and_the_refusal_says_why     authority      the daemon refuses to listen on every address
+hertzforge-backendd     tests/wire.rs                          a_bad_or_absent_token_is_refused_without_echoing_it       authority      a bad token is refused
+hertzforge-backendd     tests/wire.rs                          an_observer_is_refused_every_mutating_command_and_served_every_read_only_one  authority  an observer cannot drive
+hertzforge-protocol     tests/v3.rs                            the_mutating_split_covers_every_command_and_abort_is_mutating  authority  every command is classed as driving or reading
+hertzforge-protocol     src/session.rs                         the_default_role_is_observer                              authority      a connection is an observer unless it claims control
+sds-control             tests/random_protocol.rs               the_service_refuses_a_non_loopback_host_at_startup        authority      the control service listens on loopback only
+sds-control             tests/random_protocol.rs               observers_read_stop_and_abort_and_nothing_else            authority      an observer may only read, stop and abort
+sds-control             tests/mimo_shock_protocol.rs           mimo_shock_an_observer_may_read_and_stop_but_not_drive    authority      a multiple-drive shock observer cannot drive
+sds-control             tests/forbidden_deps.rs                the_desktop_app_is_not_reachable                          authority      the control service does not depend on the shell
+sds-control             tests/forbidden_deps.rs                controller_crates_are_the_reviewed_set                    authority      the control service reaches only reviewed controller crates
+hertzforge-recorder     tests/recorder_guards.rs               recorder_writes_no_drive_sample                           authority      the recorder writes no drive sample (why it is off the drive path)
+hertzforge-recorder     tests/recorder_guards.rs               recorder_records_on_a_station_with_no_outputs             authority      the recorder needs no output (why it is off the drive path)
+
+# -------------------------------------------------------------------- shutdown
+sds-control             tests/shutdown.rs                      the_shutdown_ends_a_driving_run_with_its_ramp_and_starts_no_other  shutdown  a shutdown ramps a driving run down and starts no other
+sds-control             tests/shutdown.rs                      the_end_of_standard_input_stops_the_run_then_the_process  shutdown      the end of standard input stops the run first
+sds-control             tests/shutdown.rs                      sigterm_stops_the_run_then_the_process                    shutdown       a terminate signal stops the run first
+sds-control             tests/sine_protocol.rs                 shutdown_refuses_the_drive_verbs_and_leaves_hold_stop_and_abort  shutdown  a shutting-down Sine run refuses drive commands
+sds-control             tests/mixed_protocol.rs                mixed_shutdown_refuses_the_drive_verbs_and_leaves_hold_stop_and_abort  shutdown  a shutting-down Mixed run refuses drive commands
+sds-control             tests/shock_protocol.rs                shutdown_refuses_the_drive_verbs_and_safe_stops_the_run   shutdown       a shutting-down shock run safe stops
+sds-control             tests/srs_protocol.rs                  shutdown_refuses_the_drive_verbs_and_safe_stops_the_run   shutdown       a shutting-down SRS run safe stops
+sds-control             tests/twr_protocol.rs                  shutdown_refuses_the_twr_verbs_and_safe_stops_the_run     shutdown       a shutting-down waveform run safe stops
+sds-control             tests/mimo_shock_protocol.rs           mimo_shock_auto_refuses_the_manual_fire_and_shutdown_refuses_the_drive  shutdown  a shutting-down multiple-drive shock run refuses drive commands
