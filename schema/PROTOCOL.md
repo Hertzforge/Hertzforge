@@ -1074,7 +1074,7 @@ plain words: it never names a protocol method.
 | `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
-| `record_unwritable` | `refused` | `random.arm` or `random.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
+| `record_unwritable` | `refused` | `random.arm`, `random.start`, `shock.arm` or `shock.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, Mixed Mode, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
@@ -1709,7 +1709,7 @@ and is the run's level history and alarm record. `shock.log` and its event take 
 
 ### Run Folders
 
-Every Random run that arms leaves a run folder in the service's data folder, laid out in
+Every Random run and every classical shock run that arms leaves a run folder in the service's data folder, laid out in
 `docs/run-folder.md`, which the analysis side converts into a project file
 (`hertzforge.io.run_convert`). It is claimed at arm, never written over (a taken name gets the
 next free one) and valid at every moment: `run.json`, `table.json` (the table the run armed
@@ -1721,7 +1721,11 @@ level change's level, an alarm's lines, a trip's facts, an overload's channel, w
 the inputs and the drive are recorded as streams unless `record.streams` is false. At the end,
 any way the run ends, `end.json` holds `end` as `random.state` reports it, and `run.json` says
 `complete`. A service stopped mid-run leaves the folder with `complete` false. The state's
-`record` names the folder from arm on.
+`record` names the folder from arm on. A classical shock run's streams are runs of shots, one for
+its identification and one for each pulse fired, each named in the stream's `shots`, and its
+results include each pulse's SRS, verdicts and kinematics, written as the pulse is judged
+(`docs/run-folder.md`, "What a Classical Shock Run Saves"). `shock.state` carries `record` as
+`random.state` does.
 
 The record is written on its own thread. A failure to write it is a log entry of kind `record`
 and the state's `record.problem`; the run goes on.
@@ -2157,7 +2161,8 @@ running, holding for review or stopping. `shock.configure` replaces a run that i
                 "residual_velocity_ips":0.1,"residual_disp_in":0.001},
  "train":{"count":5,"spacing_s":6},
  "gunfire":{"rounds_per_min":30,"rounds":3},
- "capture":{"auto_start":false,"run_name":"classical_shock"},
+ "operator":"Operator","article":"Bracket","notes":"",
+ "specification":{"document":"Example procedure","clause":"4.2"},"record":{"streams":true},
  "metadata":[{"key":"run_number","label":"Run Number","value":"7"}]}
 ```
 
@@ -2205,7 +2210,12 @@ running, holding for review or stopping. `shock.configure` replaces a run that i
 | `feasibility` | null | Random's shaker record and moving mass, and the composite's residual velocity (in/s) and displacement (in) tolerances (default 0.1 and 0.001). Checked at arm; the run's kinematic aborts are the shaker's ratings. Without it, feasibility is not evaluated and the run says so |
 | `train` | one pulse | A train's pulse count (1 to 1000) and spacing, seconds (at least `derived.spacing_s` when more than one); `shock.train` without params fires it |
 | `gunfire` | null | A gunfire burst (`shock.burst`): rounds per minute (its spacing, 60 / rounds per minute, at least `derived.spacing_s`) and rounds (1 to 10000) |
-| `capture`, `metadata` | as shown | Random's |
+| `operator`, `article`, `notes`, `specification`, `record` | empty, null, `{"streams":true}` | The run's record, as Random's (see "Random Test Configuration" and "Run Folders"): the operator's words, what the test is run to, and whether the record holds the inputs and the drive as streams. None of them changes how the run drives |
+| `metadata` | as shown | Random's |
+
+A configuration that gives `capture` is refused `bad_params` at `config.capture`: every classical
+shock run is recorded in its run folder (see "Run Folders"), and the module has no capture of its
+own.
 
 The control channel is the table's first enabled `control` row; the drive is its first enabled
 `drive` row. A configuration whose shape is wrong (a missing part, a wrong type, a name that is not
@@ -2252,7 +2262,8 @@ the station would open every one as an output and split the one pulse across the
 ### Running a Classical Shock Test
 
 - **`shock.arm`** checks feasibility (when given), opens the station, adopts its rate, derives the
-  grid at that rate and passes the arm gate. Nothing is driven. A pulse over the shaker's ratings
+  grid at that rate, passes the arm gate and claims the run's folder (see "Run Folders"; refused
+  `record_unwritable` when it cannot be written). Nothing is driven. A pulse over the shaker's ratings
   is refused `feasibility_exceeded` and the state becomes `blocked`; `shock.arm` with a non-empty
   `override_ack` arms past it (`override_not_needed` when nothing blocks). An imported law without
   a passed check for its exact file is refused `law_not_checked` on a hardware station. The
@@ -2327,6 +2338,7 @@ the station would open every one as an output and split the one pulse across the
   row now; `feasibility` is null until arm.
 - `end` is null until the run finishes, then `{"outcome","message","at_s","level_db","pulse",
   "trip"}`: `at_s` from the start, `pulse` the pulse it ended at (null before any).
+- `record` is absent until the run arms, then Random's `{"folder","streams","problem"}`.
 
 | `outcome` | How the run ended |
 |---|---|

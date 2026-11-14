@@ -11,10 +11,11 @@
 
 use super::config::WireShock;
 use super::engine::{
-    ArmOutcome, ArmPlan, Armed, EngineContext, EngineEnd, Fired, Identified, LevelMove, Position,
-    Seeded, ShockEngine,
+    ArmOutcome, ArmPlan, Armed, EngineContext, EngineEnd, Fired, Identified, LevelMove, LogLine,
+    Position, Seeded, ShockEngine,
 };
 use super::preview::{self, Reference};
+use super::record::StationFacts;
 use super::view::{
     IdentFacts, IdentFigures, LawCall, LawReading, Prediction, PulseFigures, Row, StationRef, Trip,
     TripFacts,
@@ -43,7 +44,7 @@ pub struct SimulatedEngine {
     fired: u64,
     passed: u64,
     armed_at: Option<Instant>,
-    log: Vec<(&'static str, String)>,
+    log: Vec<LogLine>,
 }
 
 impl SimulatedEngine {
@@ -188,6 +189,10 @@ impl SimulatedEngine {
                     amplitude * commanded * MEASURED_RATIO,
                     3
                 ))
+            ),
+            Some(
+                serde_json::json!({"pulse": index, "level_db": level, "measured": true,
+                                    "passed": true}),
             ),
         ));
         Ok((row, figures))
@@ -445,7 +450,22 @@ impl ShockEngine for SimulatedEngine {
         0
     }
 
-    fn take_log(&mut self) -> Vec<(&'static str, String)> {
+    fn take_station_facts(&mut self) -> Option<StationFacts> {
+        Some(StationFacts {
+            source: "SIM",
+            station: serde_json::json!({"kind": "sim", "class": "sim", "label": "simulated engine",
+                                        "backend": "none", "devices": [], "clock": "shared"}),
+            sim: Some(serde_json::json!({"model": "simulated_engine",
+                                         "parameters": {"gain_v_per_g": GAIN_V_PER_G},
+                                         "seed": null})),
+            build: serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "commit": null,
+                                      "dirty": null}),
+            output_latency: serde_json::json!({"frames": null, "how": "unknown"}),
+            links: None,
+        })
+    }
+
+    fn take_log(&mut self) -> Vec<LogLine> {
         std::mem::take(&mut self.log)
     }
 }

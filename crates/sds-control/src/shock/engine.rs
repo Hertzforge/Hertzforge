@@ -11,6 +11,7 @@
 
 use super::config::{self, WireShock};
 use super::preview::{self, Reference};
+use super::record::{IdentRecord, PulseKinematics, ShotRecording, StationFacts};
 use super::view::{
     Band, IdentFacts, IdentFigures, LawCall, LawReading, Prediction, PulseFigures, Row, SrsFigures,
     StationRef, TimeFigures, Trip, TripFacts,
@@ -47,7 +48,6 @@ pub struct ArmPlan {
     pub scanner: Arc<dyn NiScanner>,
     /// The service's local data directory: the hardware lock lives here.
     pub data_root: PathBuf,
-    pub capture_root: Option<PathBuf>,
     pub bind: String,
     /// The run's law, resolved by the service from the catalog.
     pub law: Result<Arc<dyn ClassicalLawFactory>, MethodError>,
@@ -55,7 +55,19 @@ pub struct ArmPlan {
     pub law_values: Vec<DiagnosticSpec>,
     /// The operator's acknowledgement to arm past a feasibility exceedance.
     pub ack: Option<String>,
+    /// The devices of the last scan, for the record's models and serial numbers.
+    pub devices: Vec<hertzforge_hal::DiscoveredDevice>,
+    /// Whether the record keeps the streams, and how many seconds of samples
+    /// their buffers hold before blocks are dropped.
+    pub streams: bool,
+    pub stream_buffer_s: f64,
+    /// The station frame, set by the station wrapper after every read.
+    pub station_frame: Arc<std::sync::atomic::AtomicU64>,
 }
+
+/// A log line from an engine: its kind, its words and its structured facts for the
+/// run's record.
+pub type LogLine = (&'static str, String, Option<serde_json::Value>);
 
 /// An armed station's facts.
 pub struct Armed {
@@ -157,8 +169,33 @@ pub trait ShockEngine: Send {
     fn law_values(&self) -> Vec<LawReading>;
     /// Unusable law calls in a row now.
     fn misses(&self) -> u32;
-    /// Log lines since the last call.
-    fn take_log(&mut self) -> Vec<(&'static str, String)>;
+    /// Log lines since the last call, each with its facts for the record.
+    fn take_log(&mut self) -> Vec<LogLine>;
+    /// Let the station go after an arm the run refused (its record could not be
+    /// written): nothing has been driven.
+    fn release(&mut self) {}
+    /// What the run's record says of the station armed, and its streams' links;
+    /// taken once, after an arm.
+    fn take_station_facts(&mut self) -> Option<StationFacts> {
+        None
+    }
+    /// The identification as the record keeps it, once done.
+    fn ident_record(&self) -> Option<IdentRecord> {
+        None
+    }
+    /// Pulse `index`'s kinematics as the pulse store measured them.
+    fn pulse_kinematics(&self, _index: u64) -> Option<PulseKinematics> {
+        None
+    }
+    /// The reference's SRS at full level on the run's SRS grid: the frequencies
+    /// and the values.
+    fn reference_srs(&self) -> Option<(Vec<f64>, Vec<f64>)> {
+        None
+    }
+    /// The frames of a pulse's record before the main pulse starts, as played.
+    fn shot_pre_frames(&self) -> usize {
+        0
+    }
     /// When the device started the last pulse, as the controller stamped it once
     /// the station's clock ran: the moment the time between pulses is held from.
     /// `None` leaves the run thread its own moment of asking for the pulse.
@@ -504,9 +541,11 @@ pub struct ServiceEngine {
     unit: String,
     rows_seen: usize,
     log_seen: usize,
-    log: Vec<(&'static str, String)>,
+    log: Vec<LogLine>,
     /// Each pulse's bring-up not yet in the service log.
     bring_ups: Vec<(u64, hertzforge_shock_common::BringUp)>,
+    /// What the record says of the station armed, until the run takes it.
+    station_facts: Option<StationFacts>,
 }
 
 impl ServiceEngine {
@@ -522,6 +561,7 @@ impl ServiceEngine {
             log_seen: 0,
             log: Vec::new(),
             bring_ups: Vec::new(),
+            station_facts: None,
         }
     }
 
@@ -572,12 +612,10 @@ impl ServiceEngine {
         let Some(svc) = self.svc.as_mut() else {
             return Fired::default();
         };
-        // With capture running the controller writes each law call into the run
-        // folder; without it the records have nowhere to go and are let go here
-        // rather than held for the whole run.
-        if !svc.status().capturing {
-            let _ = svc.drain_law_records();
-        }
+        // The controller's own capture never runs here (the run's record is the
+        // one way a classical shock run records), so its law-call records have
+        // nowhere to go and are let go rather than held for the whole run.
+        let _ = svc.drain_law_records();
         let Some(svc) = self.svc.as_ref() else {
             return Fired::default();
         };
@@ -707,19 +745,21 @@ fn sentence(words: &str) -> String {
 }
 
 /// The controller's events since `seen`, as log lines.
-fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Service) {
+fn forward_log(seen: &mut usize, log: &mut Vec<LogLine>, svc: &Service) {
     use hertzforge_shock_host::service::report::EventKind;
     let level = |db: f64| crate::protocol::num(config::round(db, 2));
     let events = svc.log().events();
     for e in events.iter().skip(*seen) {
         let line = match &e.kind {
-            EventKind::Note { text } => Some(("note", text.clone())),
+            EventKind::Note { text } => Some(("note", text.clone(), None)),
             EventKind::PulseFired {
                 pulse,
+                scheduled_level_db,
                 commanded_db,
+                measured,
                 peak_g,
+                velocity_change_ips,
                 tolerance_pass,
-                ..
             } => Some((
                 "pulse",
                 format!(
@@ -733,6 +773,12 @@ fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Se
                         (None, _) => "not measured".to_owned(),
                     }
                 ),
+                Some(json!({
+                    "pulse": pulse, "level_db": commanded_db,
+                    "scheduled_db": scheduled_level_db, "measured": measured,
+                    "peak_g": peak_g, "velocity_change_ips": velocity_change_ips,
+                    "passed": tolerance_pass,
+                })),
             )),
             EventKind::LawCalled {
                 pulse,
@@ -754,6 +800,10 @@ fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Se
                         .as_deref()
                         .map_or_else(String::new, |d| format!(": {d}"))
                 ),
+                Some(
+                    json!({"after_pulses": pulse, "used": false, "reason": reason,
+                            "detail": detail}),
+                ),
             )),
             EventKind::Identified {
                 coherence_mean,
@@ -770,6 +820,9 @@ fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Se
                     100.0 * band_energy,
                     drive_vpk
                 ),
+                Some(json!({"identified": true, "coherence_mean": coherence_mean,
+                            "trusted_bins": trusted_bins, "band_energy": band_energy,
+                            "drive_vpk": drive_vpk})),
             )),
             EventKind::DriveLimitAction {
                 pulse,
@@ -783,9 +836,13 @@ fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Se
                     pulse + 1,
                     scale
                 ),
+                Some(json!({"drive_limit": phase, "pulse": pulse, "scale": scale,
+                            "reason": reason})),
             )),
             EventKind::ToleranceAlarm {
-                pulse, error_frac, ..
+                pulse,
+                error_frac,
+                worst_deviation_frac_of_peak,
             } => Some((
                 "alarm",
                 format!(
@@ -793,8 +850,14 @@ fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Se
                     pulse + 1,
                     100.0 * error_frac.abs()
                 ),
+                Some(
+                    json!({"pulse": pulse, "velocity_change_error_pct": 100.0 * error_frac.abs(),
+                            "worst_deviation_frac": worst_deviation_frac_of_peak}),
+                ),
             )),
-            EventKind::DriverWarning { text, .. } => Some(("note", format!("driver: {text}"))),
+            EventKind::DriverWarning { text, .. } => {
+                Some(("note", format!("driver: {text}"), None))
+            }
             EventKind::RateAdopted {
                 requested_hz,
                 actual_hz,
@@ -802,6 +865,7 @@ fn forward_log(seen: &mut usize, log: &mut Vec<(&'static str, String)>, svc: &Se
             } => Some((
                 "station",
                 format!("the device runs at {actual_hz} Hz (asked for {requested_hz} Hz)"),
+                Some(json!({"requested_hz": requested_hz, "actual_hz": actual_hz})),
             )),
             _ => None,
         };
@@ -837,9 +901,6 @@ impl ShockEngine for ServiceEngine {
     fn arm(&mut self, plan: ArmPlan) -> Result<ArmOutcome, MethodError> {
         let law = plan.law?;
         let mut cfg = plan.cfg.build();
-        if plan.capture_root.is_some() {
-            cfg.capture.auto_start = cfg.capture.auto_start && plan.capture_root.is_some();
-        }
         // The run thread holds for review itself (the protocol's hold) and calls
         // the seed when it is over, so the controller always stops there.
         if let Some(c) = cfg.control.as_mut() {
@@ -869,15 +930,57 @@ impl ShockEngine for ServiceEngine {
         };
         let class = built.station;
         let provenance = built.provenance.clone();
+        // The streams are taken where the station's blocks pass: every input as
+        // read and the drive as the device accepted it, a shot per start. Their
+        // buffers are made here, before anything runs.
+        let caps = built.backend.caps();
+        let buffers = if plan.streams {
+            crate::random::record::tap_buffers(plan.cfg.fs_hz, plan.stream_buffer_s)
+        } else {
+            1
+        };
+        let (inputs_tap, inputs_link) = crate::record::tap::pair(
+            crate::random::record::input_rows(&plan.table).len(),
+            crate::random::record::TAP_BLOCK_FRAMES,
+            buffers,
+        );
+        let (drives_tap, drives_link) = crate::record::tap::pair(
+            crate::random::record::drive_rows(&plan.table).len(),
+            crate::random::record::TAP_BLOCK_FRAMES,
+            buffers,
+        );
+        let backend = ShotRecording::wrap(
+            built.backend,
+            inputs_tap,
+            drives_tap,
+            plan.station_frame.clone(),
+        );
+        self.station_facts = Some(StationFacts {
+            source: station::source_of(class),
+            station: crate::random::record::station_value(
+                &plan.station,
+                class,
+                &provenance,
+                &plan.devices,
+                &caps,
+            ),
+            sim: crate::random::record::sim_value(&plan.station, class),
+            build: crate::random::record::build_value(&provenance),
+            output_latency: match &caps.output_buffer {
+                Some(b) => json!({"frames": b.min_lookahead_frames, "how": "declared"}),
+                None => json!({"frames": null, "how": "unknown"}),
+            },
+            links: Some((inputs_link, drives_link)),
+        });
         self.unit = plan
             .table
             .channels
             .iter()
             .find(|c| c.enabled && c.role == ChannelRole::Control)
             .map_or_else(|| "g".to_owned(), |c| crate::table::unit_name(&c.units));
-        let firer = BackendPulseFirer::new(built.backend, plan.table.clone(), class)
-            .map_err(arm_refused)?;
-        let mut svc = ClassicalShockService::new(cfg, plan.table, firer, plan.capture_root)
+        let firer =
+            BackendPulseFirer::new(backend, plan.table.clone(), class).map_err(arm_refused)?;
+        let mut svc = ClassicalShockService::new(cfg, plan.table, firer, None)
             .map_err(arm_refused)?
             .with_law_factory(law);
         let own = svc.cancel_flag();
@@ -1178,8 +1281,83 @@ impl ShockEngine for ServiceEngine {
             .map_or(0, |l| l.misses_in_a_row)
     }
 
-    fn take_log(&mut self) -> Vec<(&'static str, String)> {
+    fn take_log(&mut self) -> Vec<LogLine> {
         std::mem::take(&mut self.log)
+    }
+
+    fn release(&mut self) {
+        if let Some(mut svc) = self.svc.take() {
+            let _ = svc.stop();
+        }
+    }
+
+    fn take_station_facts(&mut self) -> Option<StationFacts> {
+        self.station_facts.take()
+    }
+
+    fn ident_record(&self) -> Option<IdentRecord> {
+        let svc = self.svc.as_ref()?;
+        let cfg = self.cfg.as_deref()?;
+        let v = svc.identification_view()?;
+        let (lo, hi) = cfg.band_hz;
+        let bins: Vec<usize> = (1..v.h_mag.len().min(v.h_phase.len()))
+            .filter(|&k| (lo..=hi).contains(&(k as f64 * v.df_hz)))
+            .collect();
+        let first = *bins.first()?;
+        Some(IdentRecord {
+            first_hz: first as f64 * v.df_hz,
+            df_hz: v.df_hz,
+            h: bins
+                .iter()
+                .map(|&k| {
+                    (
+                        v.h_mag[k] * v.h_phase[k].cos(),
+                        v.h_mag[k] * v.h_phase[k].sin(),
+                    )
+                })
+                .collect(),
+            coherence: bins
+                .iter()
+                .map(|&k| v.coherence.get(k).copied().unwrap_or(0.0))
+                .collect(),
+            trusted: bins
+                .iter()
+                .map(|&k| {
+                    let on_grid = (k as f64 * v.df_hz / v.grid_df_hz).round() as usize;
+                    v.trusted.get(on_grid).copied().unwrap_or(false)
+                })
+                .collect(),
+        })
+    }
+
+    fn pulse_kinematics(&self, index: u64) -> Option<PulseKinematics> {
+        let svc = self.svc.as_ref()?;
+        let report = svc.report_data();
+        let row = report.pulses.iter().find(|p| p.pulse == index)?;
+        let rec = svc.pulse_store().get(row.store_seq?)?;
+        Some(PulseKinematics {
+            peak: rec.kinematics.peak_accel_g,
+            peak_velocity_ips: rec.kinematics.peak_velocity_ips,
+            displacement_pk_pk_in: rec.kinematics.pk_pk_disp_in,
+        })
+    }
+
+    fn reference_srs(&self) -> Option<(Vec<f64>, Vec<f64>)> {
+        let svc = self.svc.as_ref()?;
+        let (reference, _, _) = svc.grid_reference()?;
+        let freqs = svc.srs_freqs().to_vec();
+        if freqs.is_empty() {
+            return None;
+        }
+        let values = srs_analyze(reference, svc.fs_hz(), &freqs, DEFAULT_SRS_Q);
+        Some((freqs, values))
+    }
+
+    fn shot_pre_frames(&self) -> usize {
+        self.svc
+            .as_ref()
+            .and_then(|s| s.grid_reference())
+            .map_or(0, |(_, main_start, _)| main_start)
     }
 
     fn last_pulse_start(&self) -> Option<Instant> {

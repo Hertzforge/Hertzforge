@@ -144,6 +144,39 @@ impl StreamTap {
         }
     }
 
+    /// Mark a shot beginning at the next frame pushed, with `facts` for its
+    /// members (a stream of shots, `docs/run-folder.md`): what was pushed before
+    /// it goes to the writer first. Never blocks; nothing when not attached.
+    pub fn begin_shot(&mut self, facts: serde_json::Map<String, serde_json::Value>) {
+        self.shot(Some(facts));
+    }
+
+    /// Mark the end of the shot open: its frames are those pushed since it began.
+    pub fn end_shot(&mut self) {
+        self.shot(None);
+    }
+
+    fn shot(&mut self, begin: Option<serde_json::Map<String, serde_json::Value>>) {
+        if self.width == 0 || self.link.sink.get().is_none() {
+            return;
+        }
+        self.send();
+        let Some((tx, id)) = self.link.sink.get() else {
+            return;
+        };
+        let dropped_before = self.link.unsent.swap(0, Ordering::Relaxed);
+        let mark = Msg::Shot {
+            stream: *id,
+            begin,
+            dropped_before,
+        };
+        if tx.send(mark).is_err() {
+            self.link
+                .unsent
+                .fetch_add(dropped_before, Ordering::Relaxed);
+        }
+    }
+
     /// Send the buffer being filled, if it holds any frames.
     fn send(&mut self) {
         let Some((buf, before)) = self.current.take() else {

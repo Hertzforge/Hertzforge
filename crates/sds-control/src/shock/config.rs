@@ -167,8 +167,15 @@ pub struct WireShock {
     pub train_count: u32,
     pub train_spacing_s: f64,
     pub gunfire: Option<GunfireSpec>,
-    pub capture: CaptureRules,
     pub metadata: Vec<MetaField>,
+    /// The operator's words for the run's record: who ran it, on what, and notes.
+    pub operator: String,
+    pub article: String,
+    pub notes: String,
+    /// What the test is run to: the document and its clause.
+    pub specification: Option<(String, String)>,
+    /// Whether the record holds the inputs and the drive as streams.
+    pub record_streams: bool,
     /// The configuration as accepted, kept with the run.
     pub raw: Value,
 }
@@ -876,15 +883,34 @@ pub fn parse(config: &Value) -> Result<WireShock, MethodError> {
                 })?,
         }),
     };
-    let capture = match c.opt_obj("capture")? {
-        None => CaptureRules::default(),
-        Some(o) => {
-            let d = CaptureRules::default();
-            CaptureRules {
-                auto_start: o.opt_bool("auto_start")?.unwrap_or(d.auto_start),
-                run_name: o.opt_str("run_name")?.map_or(d.run_name, str::to_owned),
-            }
+    // Every run is recorded in its run folder (`record`); the module's own
+    // capture is gone, and a configuration that still asks for it is told so
+    // rather than left to believe it is capturing.
+    if !matches!(c.m.get("capture"), None | Some(Value::Null)) {
+        return Err(MethodError::bad_params(
+            "config.capture",
+            "A classical shock run is always recorded in its run folder; \"capture\" is no \
+             longer taken. Use \"record\" to keep or leave out the streams.",
+        ));
+    }
+    let words =
+        |k: &str| -> Result<String, MethodError> { Ok(c.opt_str(k)?.unwrap_or("").to_owned()) };
+    let (operator, article, notes) = (words("operator")?, words("article")?, words("notes")?);
+    let specification = match c.m.get("specification") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let o = Obj::of(v, "config.specification")?;
+            Some((
+                o.opt_str("document")?.unwrap_or("").to_owned(),
+                o.opt_str("clause")?.unwrap_or("").to_owned(),
+            ))
         }
+    };
+    let record_streams = match c.m.get("record") {
+        None | Some(Value::Null) => true,
+        Some(v) => Obj::of(v, "config.record")?
+            .opt_bool("streams")?
+            .unwrap_or(true),
     };
     let metadata = match c.array("metadata")? {
         None => MetaField::defaults(),
@@ -956,8 +982,12 @@ pub fn parse(config: &Value) -> Result<WireShock, MethodError> {
         train_count: clip32(train_count),
         train_spacing_s,
         gunfire,
-        capture,
         metadata,
+        operator,
+        article,
+        notes,
+        specification,
+        record_streams,
         raw: config.clone(),
     })
 }
@@ -1140,8 +1170,35 @@ impl WireShock {
         // Every failed pulse aborts in the open loop; the closed loop's own rule
         // (`control.tolerance_abort`) says when a failure aborts instead.
         cfg.abort_on_tolerance_failure = self.tolerance_abort == ToleranceAbort::EveryLevel;
-        cfg.capture = self.capture.clone();
+        // The run's record is the one way a classical shock run records: the
+        // controller's own capture stays off.
+        cfg.capture = CaptureRules {
+            auto_start: false,
+            ..CaptureRules::default()
+        };
         cfg.metadata = self.metadata.clone();
+        // The operator's words travel with the controller's configuration too, so
+        // its own report carries them.
+        for field in cfg.metadata.iter_mut() {
+            match field.key.as_str() {
+                "operator" if !self.operator.is_empty() => field.value = self.operator.clone(),
+                "test_article" if !self.article.is_empty() => field.value = self.article.clone(),
+                _ => {}
+            }
+        }
+        if !self.notes.is_empty() {
+            cfg.metadata
+                .push(MetaField::new("notes", "Notes", self.notes.clone()));
+        }
+        if let Some((document, clause)) = &self.specification {
+            cfg.metadata.push(MetaField::new(
+                "specification",
+                "Specification",
+                document.clone(),
+            ));
+            cfg.metadata
+                .push(MetaField::new("clause", "Clause", clause.clone()));
+        }
         cfg.control = Some(self.control());
         cfg
     }
