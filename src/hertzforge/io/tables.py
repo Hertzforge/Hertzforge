@@ -128,6 +128,13 @@ class Table:
     x_unit: str | None = None
     y_unit: str | None = None
     warnings: list[str] = field(default_factory=list)
+    #: a channel table's rows in the control protocol's spelling, given in
+    #: place of `columns` and `rows` to write, and answered beside them by a
+    #: read (`io.run_convert.channel_table_from_rows`, the one mapping)
+    channels: list[dict[str, Any]] | None = None
+    #: a channel table's control loops by name, in JSON
+    #: (`io.run_convert.environment_to_json`)
+    environments: dict[str, Any] | None = None
 
 
 def normalize(text: str) -> str:
@@ -347,7 +354,8 @@ def write(path: str | os.PathLike, table: Table) -> str:
                                 f'not {table.kind!r}')
     try:
         if table.kind == 'channels':
-            _write_channels(path, form, channel_table(table))
+            _write_channels(path, form, channel_table(table) if table.channels is None
+                            else channel_table_of_rows(table.channels, table.environments))
             return path
         checked = _checked(table)
         writer = {'hforge': _write_hforge, 'csv': _write_delimited, 'tsv': _write_delimited,
@@ -438,7 +446,80 @@ def channel_table(table: Table) -> Any:
         seen.add(number)
     for core in ChannelTable.CORE:
         columns.setdefault(core, [''] * len(table.rows))
-    return ChannelTable(columns)
+    out = ChannelTable(columns)
+    try:
+        for name, environment in (table.environments or {}).items():
+            from .run_convert import environment_from_json
+            out.set_environment(name, environment_from_json(environment))
+    except (ValueError, TypeError) as error:
+        raise TableContentError(f'environment: {error}') from None
+    broken = out.rule_errors()
+    if broken:
+        raise TableContentError('; '.join(broken))
+    return out
+
+
+def channel_table_of_rows(rows: Any, environments: Mapping[str, Any] | None = None) -> Any:
+    """A `ChannelTable` of control channel rows (the protocol's spelling),
+    through the one mapping (`io.run_convert.channel_table_from_rows`), each
+    value checked as `channel_table` checks a column's: a write is strict.
+
+    Raises TableContentError, naming the row and column, for anything the
+    table cannot hold.
+    """
+    from ..core.channel_table import ChannelTable
+    from .run_convert import channel_table_from_rows
+
+    if not isinstance(rows, list) or not all(isinstance(r, Mapping) for r in rows):
+        raise TableContentError('a channel table\'s "channels" is a list of rows, each an '
+                                'object in the control protocol\'s spelling')
+    for at, row in enumerate(rows, start=1):
+        index = row.get('index')
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TableContentError(f'row {at}: "index" is a whole number from 0')
+        if not isinstance(row.get('units', 'g'), str) or not row.get('units', 'g'):
+            raise TableContentError(f'row {at}: "units" names a unit')
+    if environments is not None and not isinstance(environments, Mapping):
+        raise TableContentError('"environments" is an object of control loops by name')
+    mapped = channel_table_from_rows(rows)
+    names = mapped.column_names
+    # the mapped table is read leniently; check what the rows said, cell by
+    # cell, as a write checks a column
+    raw = _mapped_columns(rows)
+    cells = []
+    for k in range(len(rows)):
+        cells.append([_json_cell(ChannelTable.COLUMNS[name].kind,
+                                 raw[name][k] if name in raw else mapped[name][k])
+                      for name in names])
+    return channel_table(Table('channels', list(names), cells, environments=environments))
+
+
+def _mapped_columns(rows: Any) -> dict[str, list[Any]]:
+    """The cells the mapping put each row's values in, before the table
+    reads them: so a unit the table cannot read is refused, not blanked."""
+    out: dict[str, list[Any]] = {'channel': [], 'unit': [], 'sensitivity': [],
+                                 'iepe_bias': []}
+    for row in rows:
+        out['channel'].append(row.get('index'))
+        out['unit'].append(str(row.get('units', '') or ''))
+        out['sensitivity'].append(row.get('sensitivity_mv_per_eu'))
+        out['iepe_bias'].append(row.get('iepe_bias_v'))
+    return out
+
+
+def _json_cell(kind: str, value: Any) -> Any:
+    """A mapped cell as `channel_table` takes it: a JSON value."""
+    if value is None or (isinstance(value, str) and value == '' and kind != 'text'):
+        return None if kind in ('int', 'index', 'float', 'flag') else ''
+    if kind == 'flag':
+        return value if isinstance(value, bool) else str(value) == 'True'
+    if kind == 'int':
+        return int(value)
+    if kind == 'index':
+        return int(float(value))
+    if kind == 'float':
+        return value if isinstance(value, (int, float)) else float(value)
+    return str(value)
 
 
 def _channel_text(name: str, value: Any, where: str) -> str:
@@ -552,10 +633,15 @@ def _channel_result(table: Any, warnings: list[str], name: str) -> Table:
         added = (f'{name} had no controller settings, so each channel was given them at '
                  'their defaults: on, unbound and without abort limits.')
         warnings = [*warnings, added]
+    from .run_convert import environment_to_json, rows_from_channel_table
+
     names, rows = channel_rows(table)
     if not rows:
         warnings = [*warnings, f'{name} has no rows.']
-    return Table('channels', names, rows, warnings=warnings)
+    return Table('channels', names, rows, warnings=warnings,
+                 channels=rows_from_channel_table(table),
+                 environments={key: environment_to_json(environment)
+                               for key, environment in table.environments.items()})
 
 
 def _left_out(key: str) -> str:

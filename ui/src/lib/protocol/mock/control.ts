@@ -357,12 +357,29 @@ function plantT2(f: number): number {
 // ---------------------------------------------------------------------------------------------
 // Validation (the item reasons of PROTOCOL.md, "Refusals")
 
-interface Selection {
+export interface Selection {
 	kind: 'sim' | 'ni';
 	devices: string[];
 }
 
-function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[]): ValidationReport {
+/** The channel table's unit vocabulary (PROTOCOL.md, "Channel Table"): every name all three sides read as one quantity. */
+export const UNIT_VOCABULARY = [
+	'g', 'in/s**2', 'm/s**2', 'mm/s**2', 'in/s', 'm/s', 'mm/s', 'mil', 'in', 'm', 'mm', 'lbf', 'N', 'kN', 'psi', 'Pa', 'kPa', 'MPa', 'V', 'mV',
+	'strain', 'microstrain', 'm/m', 'degC', 'degF', 'K', 'degR', 'in/s^2', 'm/s^2'
+];
+
+const hasAbort = (r: ChannelRow) => r.abort.accel_g !== null || r.abort.velocity_ips !== null || r.abort.displacement_mil !== null;
+
+/** The row whose shape `channels.set` refuses `bad_params`, by the parameter it names; null when every row is well formed. */
+export function badRowParam(rows: ChannelRow[]): string | null {
+	for (const [i, r] of rows.entries()) {
+		if (!Number.isInteger(r.index) || r.index < 0) return `channels[${i}].index`;
+		if (typeof r.units !== 'string' || r.units === '') return `channels[${i}].units`;
+	}
+	return null;
+}
+
+export function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[]): ValidationReport {
 	const errors: ReportItem[] = [];
 	const warnings: ReportItem[] = [];
 	const seen = new Set<number>();
@@ -382,6 +399,15 @@ function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[
 				if (r.sensitivity_mv_per_eu === 0) errors.push(item('zero_sensitivity', `channel ${r.index} has zero sensitivity`, { channel: r.index }));
 				if (!(r.range_max > 0)) errors.push(item('non_positive_range', `channel ${r.index} has non-positive range`, { channel: r.index }));
 			}
+		}
+		if (!UNIT_VOCABULARY.includes(r.units)) {
+			warnings.push(item('unit_unknown', `channel ${r.index}'s unit is not one the program knows the quantity of; it runs in it as written`, { channel: r.index }));
+		}
+		if (r.enabled && r.role === 'drive' && r.units !== 'V') {
+			warnings.push(item('drive_not_in_volts', `channel ${r.index} is a drive whose unit is not V; a drive is written in volts`, { channel: r.index }));
+		}
+		if (hasAbort(r) && r.units !== 'g') {
+			warnings.push(item('abort_not_in_g', `channel ${r.index} has an abort limit and its unit is not g; the abort limits read it as g`, { channel: r.index }));
 		}
 		if (r.interface === 'iepe' && r.iepe_bias_v === null) {
 			warnings.push(item('iepe_without_bias', `channel ${r.index} is IEPE but has no bias voltage set`, { channel: r.index }));
@@ -1963,6 +1989,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				if (!Array.isArray(p.channels) || typeof p.revision !== 'number') {
 					refuse('bad_request', 'bad_params', 'A table edit names the revision it was made from and carries its rows.', { param: Array.isArray(p.channels) ? 'revision' : 'channels' });
 				}
+				const bad = badRowParam(p.channels);
+				if (bad) refuse('bad_request', 'bad_params', `A channel row is not well formed at ${bad}.`, { param: bad });
 				const report = validateTable(p.channels, selection, scan);
 				if (p.dry_run) return { revision, report };
 				own(conn);

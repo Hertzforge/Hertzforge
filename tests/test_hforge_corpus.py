@@ -275,3 +275,25 @@ def test_compress_is_refused_where_it_does_nothing(tmp_path):
         with pytest.raises(ValueError, match='compress applies to a .hforge file'):
             project.save(tmp_path / name, compress=True)
     assert not list(tmp_path.iterdir())
+
+
+def test_schema4_holds_test_setups():
+    """The schema 4 file is the schema 3 project plus two test setups:
+    one typed, and one taken from the converted run's record, which
+    holds that run's configuration exactly."""
+    from hertzforge.core.test_setup import TestSetup
+
+    held = native.load(os.path.join(CORPUS, 'schema4.hforge'))
+    older = native.load(os.path.join(CORPUS, 'schema3.hforge'))
+    with h5py.File(os.path.join(CORPUS, 'schema4.hforge')) as f:
+        assert f.attrs[native.STAMP] == native.TEST_SETUP_SCHEMA
+    assert list(held)[:len(older)] == list(older)
+    typed, taken = held['Recorder Setup'], held['Random Setup']
+    assert isinstance(typed, TestSetup) and isinstance(taken, TestSetup)
+    assert (typed.module, typed.origin, typed.table) == ('recorder', {'kind': 'typed'}, {})
+    assert typed.notes == 'typed on the Recorder screen'
+    record = held['Run Record']
+    assert taken.module == 'random' and taken.config == record.config
+    assert taken.origin == {'kind': 'run', 'run_uid': record.run_uid,
+                            'run_id': record.run_id, 'name': 'Run Record'}
+    assert taken.table['rows'] == record.table['rows']

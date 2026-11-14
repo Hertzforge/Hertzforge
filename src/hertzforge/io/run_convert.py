@@ -126,33 +126,61 @@ def _number(value: Any) -> Any:
     return '' if value is None else value
 
 
-def channel_table_from_rows(rows: Sequence[Mapping[str, Any]]) -> Any:
+#: a row's optional text members that are the analysis table's columns of
+#: the same name (`analysis_role` is its `role`)
+_TEXT_MEMBERS = {'direction': 'direction', 'channel_type': 'channel_type',
+                 'analysis_role': 'role', 'serial_number': 'serial_number', 'make': 'make',
+                 'model': 'model', 'triax_dof': 'triax_dof', 'expiration': 'expiration'}
+
+#: a row's optional number members, by the analysis table's column
+_RANGE_MEMBERS = {'daq_range_v': 'daq_range', 'sensor_range_v': 'sensor_range'}
+
+#: every optional member a control channel row may carry (schema/PROTOCOL.md,
+#: "Channel Table"): the analysis side's columns, the analysis tier, the
+#: limit mark and `extra`
+ANALYSIS_MEMBERS = ('node', *_TEXT_MEMBERS, *_RANGE_MEMBERS, 'analysis_tier', 'limit', 'extra')
+
+
+def channel_table_from_rows(rows: Sequence[Mapping[str, Any]],
+                            environments: Mapping[str, Any] | None = None) -> Any:
     """The `ChannelTable` a control channel table's rows describe.
 
-    Each row is in the protocol's spelling (`index`, `enabled`,
-    `description`, `role`, `physical`, `interface`, `iepe_bias_v`,
-    `units`, `sensitivity_mv_per_eu`, `range_max`, `polarity`,
-    `control_group`, `abort`), with any further columns as text under
-    `extra` (node, direction, serial number, make, model and the rest,
-    by any name the table reads). The row's own fields win over an
-    `extra` of the same column. A channel's loop role is three columns:
-    a drive is `drive`, a control channel `control`, and a reference a
-    `role` of reference. Its analysis role is the `extra` role where it
-    gives one (a monitor is never a reference), else reference for a
-    drive or a reference and response for the rest. A channel with no
-    node is given its channel number as its node, a node-only identity,
-    so no two channels share a DOF.
+    Each row is in the protocol's spelling: the fields every row has
+    (`index`, `enabled`, `description`, `role`, `physical`, `interface`,
+    `iepe_bias_v`, `units`, `sensitivity_mv_per_eu`, `range_max`,
+    `polarity`, `control_group`, `abort`) and the optional members
+    (`ANALYSIS_MEMBERS`): `node`, `direction`, `channel_type`,
+    `analysis_role`, `daq_range_v`, `sensor_range_v`, `serial_number`,
+    `make`, `model`, `triax_dof`, `expiration`, `analysis_tier`, `limit`
+    and `extra`. A member is the table's column of the same name, except
+    `description` (its `comment`), `units` (`unit`),
+    `sensitivity_mv_per_eu` (`sensitivity`), `analysis_role` (`role`) and
+    the two ranges (`daq_range`, `sensor_range`). An `extra` entry whose
+    name the table reads as one of its columns fills that column where
+    the row's own member does not; the rest are kept together in the
+    table's `extra` column. A channel's loop role is three columns: a
+    drive is `drive`, a control channel `control`, and a reference a
+    `role` of reference. Its analysis role is the one the row states
+    (a monitor is never a reference), else reference for a drive or a
+    reference and response for the rest. A channel with no node is given
+    its channel number as its node, a node-only identity, so no two
+    channels share a DOF.
 
     Parameters
     ----------
     rows : sequence of mapping
         The control table's rows.
+    environments : mapping of str to Environment or mapping, optional
+        The table's control loops by name, each an `Environment` or its
+        JSON form (`environment_from_json`).
 
     Returns
     -------
     ChannelTable
         The table, with the controller's columns.
     """
+    import json
+
     from ..core.channel_table import ChannelTable, canonical_name
 
     columns: dict[str, list[Any]] = {}
@@ -162,25 +190,36 @@ def channel_table_from_rows(rows: Sequence[Mapping[str, Any]]) -> Any:
         columns.setdefault(name, [''] * count)[k] = value
 
     for k, row in enumerate(rows):
-        extra = {canonical_name(str(key)): value
+        given = {canonical_name(str(key)): value
                  for key, value in (row.get('extra') or {}).items()}
-        for name, value in extra.items():
-            put(name, k, '' if value is None else value)
+        kept = {}
+        for name, value in given.items():
+            if name in ChannelTable.COLUMNS and name not in ('extra', 'channel'):
+                put(name, k, '' if value is None else value)
+            else:
+                kept[name] = '' if value is None else str(value)
+        stated = {column: str(row.get(member) or '')
+                  for member, column in _TEXT_MEMBERS.items() if row.get(member)}
+        for column, text in stated.items():
+            put(column, k, text)
+        for member, column in _RANGE_MEMBERS.items():
+            if row.get(member) is not None:
+                put(column, k, _number(row.get(member)))
         role = str(row.get('role', 'monitor'))
-        stated = str(extra.get('role', '') or '').strip().lower()
+        said = str(stated.get('role', given.get('role', '')) or '').strip().lower()
         if role == 'reference':
             analysis = 'reference'
-        elif stated in ChannelTable.ROLES and not (role == 'monitor'
-                                                    and stated == 'reference'):
-            analysis = stated
+        elif said in ChannelTable.ROLES and not (role == 'monitor' and said == 'reference'):
+            analysis = said
         else:
             analysis = 'reference' if role == 'drive' else 'response'
         physical = row.get('physical')
         abort = row.get('abort') or {}
-        node = str(extra.get('node', '') or '').strip()
+        node = row.get('node')
+        node = str(node) if node is not None else str(given.get('node', '') or '').strip()
         put('channel', k, int(row['index']))
         put('node', k, node or str(int(row['index'])))
-        put('direction', k, str(extra.get('direction', '') or ''))
+        put('direction', k, stated.get('direction', str(given.get('direction', '') or '')))
         put('comment', k, str(row.get('description', '') or ''))
         put('role', k, analysis)
         put('control', k, role == 'control')
@@ -198,10 +237,45 @@ def channel_table_from_rows(rows: Sequence[Mapping[str, Any]]) -> Any:
         put('abort_accel_g', k, _number(abort.get('accel_g')))
         put('abort_velocity_ips', k, _number(abort.get('velocity_ips')))
         put('abort_displacement_mil', k, _number(abort.get('displacement_mil')))
+        tier = str(row.get('analysis_tier') or '')
+        put('analysis_tier', k, '' if tier == 'full' else tier)
+        put('limit', k, bool(row.get('limit', False)))
+        put('extra', k, json.dumps(kept, sort_keys=True) if kept else '')
     if not rows:
         columns = {name: [] for name in ('channel', 'node', 'direction', 'unit',
                                          *ChannelTable.CONTROLLER)}
-    return ChannelTable(columns)
+    loops = {name: environment_from_json(value)
+             for name, value in (environments or {}).items()}
+    return ChannelTable(columns, loops)
+
+
+def environment_from_json(value: Any) -> Any:
+    """An `Environment` from its JSON form (`environment_to_json`), or the
+    `Environment` itself."""
+    from ..core.channel_table import TRANSFORMATION_FORMS, Environment
+
+    if isinstance(value, Environment):
+        return value
+    if not isinstance(value, Mapping):
+        raise TypeError('an environment is an object with "controls" and "drives"')
+    matrices = {f'{form}_transformation': value.get(f'{form}_transformation')
+                for form in TRANSFORMATION_FORMS}
+    return Environment(controls=list(value.get('controls') or []),
+                       drives=list(value.get('drives') or []), **matrices)
+
+
+def environment_to_json(environment: Any) -> dict[str, Any]:
+    """An `Environment` as JSON: its control and drive channel numbers in
+    the controller's order, and each transformation as a list of rows, or
+    None."""
+    from ..core.channel_table import TRANSFORMATION_FORMS
+
+    out: dict[str, Any] = {'controls': [int(n) for n in environment.controls],
+                           'drives': [int(n) for n in environment.drives]}
+    for form in TRANSFORMATION_FORMS:
+        matrix = environment.matrix(form)
+        out[f'{form}_transformation'] = None if matrix is None else matrix.tolist()
+    return out
 
 
 def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
@@ -210,8 +284,10 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
 
     A cell the table leaves blank takes a new row's value (a drive in V
     at 1000 mV/V and 10 V full scale, any other channel in g at 100 mV/g
-    and 100 g). The measurement's columns other than the row's own
-    (node, direction, serial number and the rest) go under `extra`.
+    and 100 g). Each optional member is written only when its column
+    holds something: the measurement's columns (node, direction, the
+    sensor's identity and the rest), the analysis tier, the limit mark,
+    and the `extra` column's entries under `extra`.
 
     Parameters
     ----------
@@ -228,6 +304,8 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
     ValueError
         If the table has no controller columns.
     """
+    import json
+
     if not table.has_controller_settings:
         raise ValueError('the table has no controller columns; convert it to carry them first')
 
@@ -239,8 +317,6 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
         return default if not text else (int(text) if name == 'control_group'
                                          else float(text))
 
-    own = {'channel', 'comment', 'role', 'control', 'drive', 'unit', 'sensitivity',
-           'channel_type', *table.CONTROLLER}
     out = []
     for k in range(table.num_channels):
         if cell('drive', k) == 'True':
@@ -254,7 +330,7 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
         drive = role == 'drive'
         physical = cell('physical', k)
         device, slash, channel = physical.partition('/')
-        out.append({
+        row: dict[str, Any] = {
             'index': int(table['channel'][k]),
             'enabled': cell('enabled', k) != 'False',
             'description': cell('comment', k),
@@ -271,9 +347,23 @@ def rows_from_channel_table(table: Any) -> list[dict[str, Any]]:
             'abort': {'accel_g': number('abort_accel_g', k),
                       'velocity_ips': number('abort_velocity_ips', k),
                       'displacement_mil': number('abort_displacement_mil', k)},
-            'extra': {name: cell(name, k) for name in table.column_names
-                      if name not in own and cell(name, k)},
-        })
+        }
+        if cell('node', k):
+            row['node'] = int(cell('node', k))
+        for member, column in _TEXT_MEMBERS.items():
+            if cell(column, k):
+                row[member] = cell(column, k)
+        for member, column in _RANGE_MEMBERS.items():
+            if cell(column, k):
+                row[member] = float(cell(column, k))
+        if cell('analysis_tier', k) not in ('', 'full'):
+            row['analysis_tier'] = cell('analysis_tier', k)
+        if cell('limit', k) == 'True':
+            row['limit'] = True
+        if cell('extra', k):
+            row['extra'] = {str(name): str(value)
+                            for name, value in json.loads(cell('extra', k)).items()}
+        out.append(row)
     return out
 
 

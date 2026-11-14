@@ -430,3 +430,5 @@ hertzforge-mimo-shock-law-math  test:research_warp  mimo_shock_w5_warp_cost_per_
 # check, which runs each case with the law's time budget armed
 sds-control  test:mixed_sim_run  a_band_switched_off_live_ramps_out_and_back
 hertzforge-mixed-laws  test:tone_law_file  a_tone_law_file_passes_the_mixed_check_from_the_role_s_start_values
+# The channel table through a loopback service: set, get and a second connection
+sds-control  test:channel_table_protocol  channel_table_analysis_columns_survive_set_get_and_a_new_connection

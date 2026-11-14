@@ -17,6 +17,9 @@ interface StoredTable {
 	rows: Cell[][];
 	x_unit?: string;
 	y_unit?: string;
+	/** A channel table saved as the control service's rows, and its control loops. */
+	channels?: unknown[];
+	environments?: unknown;
 }
 
 const SUFFIXES = ['.hforge', '.csv', '.tsv', '.txt', '.xlsx'];
@@ -52,10 +55,20 @@ export function createAnalysisServer(): MockServer {
 		hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: '0.1.0-mock' },
 		methods: {
 			'catalog.list': (): Catalog => ({ operations: [] }),
+			// where runs are kept, as the service resolves it; the mock deletes nothing
+			'runs.data_folder': () => ({ path: '~/Hertzforge_Data', source: 'default', exists: true, writable: true }),
+			'runs.delete': (params) => {
+				throw new MockError('refused', `${String(params.folder)} is not inside the data folder ~/Hertzforge_Data; only a run in the data folder is deleted here`);
+			},
 			'tables.save': (params) => {
 				const path = tablePath(params.path);
 				const kind = String(params.kind);
 				if (kind !== 'channels' && kind !== 'breakpoints') throw new MockError('bad_request', 'tables.save "kind" is one of channels, breakpoints');
+				if (kind === 'channels' && Array.isArray(params.channels)) {
+					// The control rows as given: the real service maps them onto the file's columns and back.
+					files.set(path, { kind, table_kind: null, columns: [], rows: [], channels: structuredClone(params.channels), environments: structuredClone(params.environments ?? {}) });
+					return { path };
+				}
 				const columns = params.columns as string[];
 				const rows = params.rows as Cell[][];
 				if (!Array.isArray(columns) || !Array.isArray(rows) || rows.some((r) => !Array.isArray(r) || r.length !== columns.length)) {

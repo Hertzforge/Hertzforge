@@ -149,6 +149,27 @@ def test_channel_rows_carry_every_field(validate):
     _refused(validate, {**row, 'interface': 'icp'}, 'channelRow')
 
 
+#: a channel row's optional members, each with a value it holds and one it refuses
+OPTIONAL_ROW_MEMBERS = {
+    'node': (101, -1), 'direction': ('Z+', 3), 'channel_type': ('acceleration', None),
+    'analysis_role': ('response', 'drive'), 'daq_range_v': (5.0, 0),
+    'sensor_range_v': (None, -1), 'serial_number': ('0042', 42), 'make': ('Maker', None),
+    'model': ('M-1', None), 'triax_dof': ('Z', None), 'expiration': ('2027-03-01', None),
+    'analysis_tier': ('decimated:8', 'decimated:0'), 'limit': (True, 'yes'),
+    'extra': ({'bay': '3'}, {'bay': 3}),
+}
+
+
+def test_channel_rows_may_carry_the_analysis_columns(validate):
+    row = _text('response_channels_get')['result']['channels'][0]
+    full = {**row, **{k: good for k, (good, _bad) in OPTIONAL_ROW_MEMBERS.items()}}
+    validate(full, 'channelRow')
+    for member, (_good, bad) in OPTIONAL_ROW_MEMBERS.items():
+        validate({k: v for k, v in full.items() if k != member}, 'channelRow')
+        _refused(validate, {**full, member: bad}, 'channelRow')
+    _refused(validate, {**full, 'save': True}, 'channelRow')
+
+
 def test_finished_runs_say_how_they_ended(validate):
     state = _text('event_random_state')['data']
     _refused(validate, {**state, 'end': None}, 'randomState')

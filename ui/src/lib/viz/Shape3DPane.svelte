@@ -39,8 +39,13 @@
 		BufferGeometry,
 		Color,
 		ConeGeometry,
+		DataTexture,
 		Group,
 		DirectionalLight,
+		LinearFilter,
+		RGBAFormat,
+		SRGBColorSpace,
+		UnsignedByteType,
 		DoubleSide,
 		LineBasicMaterial,
 		Box3,
@@ -71,7 +76,7 @@
 	import { wideLines } from './wideLines';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
-	import { colormap, colormapGradient } from './colormap';
+	import { colormap, colormapBytes, colormapGradient } from './colormap';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
@@ -430,7 +435,21 @@
 	let otherOff: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
 	const materials: Material[] = [];
-	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
+	/**
+	 * The deflection's two parts, and for the surface's colors: the largest travel at the scale
+	 * drawn (`uPeak`), the colormap as a texture (`uMap`), and whether to color by deflection at
+	 * all (`uScalar`). Each node's color is its offset at this instant over the largest any node
+	 * reaches, looked up per pixel, as the earlier toolset colored a mode: the whole colormap runs
+	 * across a face, not a blend of its corners' colors, and the colors swing with the shape
+	 * (Brandon, 2026-11-14).
+	 */
+	const uniforms = {
+		uRe: { value: 0 },
+		uIm: { value: 0 },
+		uPeak: { value: 1 },
+		uMap: { value: colormapTexture() },
+		uScalar: { value: 0 }
+	};
 	let maxMag = 1;
 	let raf = 0;
 	let phase = 0;
@@ -453,19 +472,47 @@
 	let shownSample = -1;
 	let moved = new Uint32Array(0);
 
-	/** Inject the deformation into a built-in material's vertex shader. */
-	function displaced<M extends Material>(material: M): M {
+	/** The colormap as a 256-step texture, read in sRGB so the shader gets linear colors. */
+	function colormapTexture(): DataTexture {
+		const texture = new DataTexture(colormapBytes(256), 256, 1, RGBAFormat, UnsignedByteType);
+		texture.colorSpace = SRGBColorSpace;
+		texture.magFilter = LinearFilter;
+		texture.minFilter = LinearFilter;
+		texture.needsUpdate = true;
+		return texture;
+	}
+
+	/**
+	 * Inject the deformation into a built-in material's vertex shader; with `scalar`, color the
+	 * fragments by the deflection at this instant (`uniforms`) in place of the vertex colors.
+	 */
+	function displaced<M extends Material>(material: M, scalar = false): M {
 		material.onBeforeCompile = (shader) => {
 			shader.uniforms.uRe = uniforms.uRe;
 			shader.uniforms.uIm = uniforms.uIm;
 			shader.vertexShader = shader.vertexShader
 				.replace(
 					'#include <common>',
-					'#include <common>\nattribute vec3 shape;\nattribute vec3 shapeImag;\nuniform float uRe;\nuniform float uIm;'
+					'#include <common>\nattribute vec3 shape;\nattribute vec3 shapeImag;\nuniform float uRe;\nuniform float uIm;' +
+						(scalar ? '\nuniform float uPeak;\nvarying float vTravel;' : '')
 				)
-				.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += shape * uRe + shapeImag * uIm;');
+				.replace(
+					'#include <begin_vertex>',
+					'#include <begin_vertex>\nvec3 offsetNow = shape * uRe + shapeImag * uIm;\ntransformed += offsetNow;' +
+						(scalar ? '\nvTravel = length(offsetNow) / uPeak;' : '')
+				);
+			if (!scalar) return;
+			shader.uniforms.uPeak = uniforms.uPeak;
+			shader.uniforms.uMap = uniforms.uMap;
+			shader.uniforms.uScalar = uniforms.uScalar;
+			shader.fragmentShader = shader.fragmentShader
+				.replace('#include <common>', '#include <common>\nuniform sampler2D uMap;\nuniform float uScalar;\nvarying float vTravel;')
+				.replace(
+					'#include <color_fragment>',
+					'#include <color_fragment>\nif (uScalar > 0.5) diffuseColor.rgb = texture2D(uMap, vec2(clamp(vTravel, 0.0, 1.0), 0.5)).rgb;'
+				);
 		};
-		material.customProgramCacheKey = () => 'sds-displaced';
+		material.customProgramCacheKey = () => (scalar ? 'sds-displaced-scalar' : 'sds-displaced');
 		materials.push(material);
 		return material;
 	}
@@ -690,7 +737,7 @@
 		// the faces a little back, so the elements' edges drawn on them win the depth test
 		surface = new Mesh(
 			geometry,
-			displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }))
+			displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }), true)
 		);
 		surface.frustumCulled = false;
 		scene.add(surface);
@@ -1032,6 +1079,13 @@
 		if (uniforms.uRe.value !== re || uniforms.uIm.value !== im) {
 			uniforms.uRe.value = re;
 			uniforms.uIm.value = im;
+			dirty = true;
+		}
+		// a node's color is its offset now over the farthest any node goes: `peak` at this scale
+		const byDeflection = colored && !colors && (!!motion || !!current) ? 1 : 0;
+		if (uniforms.uScalar.value !== byDeflection || uniforms.uPeak.value !== (peak || 1)) {
+			uniforms.uScalar.value = byDeflection;
+			uniforms.uPeak.value = peak || 1;
 			dirty = true;
 		}
 		if (!dirty && !moved) {
@@ -1465,7 +1519,7 @@
 		{:else if moves && colored}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
-				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
+				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Displacement (${display.unit})`}
 			</div>
 			<div class="bar" style:background={colormapGradient()}></div>
 			<div class="ticks num">

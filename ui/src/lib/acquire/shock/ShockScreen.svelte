@@ -23,6 +23,7 @@
 	import ShockSummary from './ShockSummary.svelte';
 	import ShockTrains from './ShockTrains.svelte';
 	import { runChannels, SHOCK_SECTIONS, type ShockSection } from './shockSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -91,6 +92,7 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="classical_shock" />
 	<ShockSummary {shock} onopen={(s: ShockSection) => open(s)} />
 {/snippet}
 

@@ -10,6 +10,7 @@
 	import type { Snippet } from 'svelte';
 	import type { SpectrumView } from '$lib/protocol/types';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
+	import type { RunOpen } from '../runOpen.svelte';
 	import type { BodyPanel, PlotExtras } from '../screen/bodies';
 	import type { PlotPanel } from '../screen/screen.svelte';
 	import type { CardKind } from '../screen/types';
@@ -29,8 +30,10 @@
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
+		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
+		opener?: RunOpen | null;
 	}
-	let { recorder, views, station, onpopout, abortKeys, compact = false }: Props = $props();
+	let { recorder, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(recorder.now);
 	const live = $derived(recorder.frameOfRun);
@@ -136,6 +139,7 @@
 	{onpopout}
 	{abortKeys}
 	{compact}
+	{opener}
 />
 
 <style>

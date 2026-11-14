@@ -36,6 +36,7 @@ from . import (
     op_progress,
     projects,
     reports,
+    run_files,
     run_logs,
     table_files,
     verbs,
@@ -69,7 +70,8 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.sav
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
                    'project.mesh_size', 'project.journal',
-                   'project.show', 'project.actions')
+                   'project.show', 'project.actions',
+                   'project.setups', 'project.save_setup', 'project.open_setup')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -349,6 +351,16 @@ class Connection:
                  'project.activate': (projects.activate, ('geometry',)),
                  'project.duplicate': (projects.duplicate, ('names',)),
                  'project.refresh': (projects.refresh, ('names',))}
+        if method == 'project.setups':
+            _only(params, (), method)
+            return await call(projects.setups, self.project, params)
+        if method == 'project.save_setup':
+            _only(params, ('name', 'setup', 'replace'), method)
+            name = await call(projects.save_setup, self.project, params)
+            return {'name': name, 'project': projects.summary(self.project)}
+        if method == 'project.open_setup':
+            _only(params, ('name',), method)
+            return {'setup': await call(projects.open_setup, self.project, params)}
         if method == 'project.journal':
             _only(params, (), method)
             return await call(projects.journal, self.project, params)
@@ -646,6 +658,14 @@ class Connection:
                                                           method, params, project, self.system)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in run_files.RUN_METHODS:
+                async with self.project_lock:
+                    held = ([self.project.project.file]
+                            if self.project is not None and self.project.project.file else [])
+                    result = await self.service.in_worker(run_files.request, method, params,
+                                                          held)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in table_files.TABLE_METHODS:
                 result = await self.service.in_worker(table_files.request, method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
@@ -663,7 +683,8 @@ class Connection:
                     f'{", ".join(PROJECT_METHODS)}, '
                     f'{", ".join(fitting.FIT_METHODS)}, '
                     f'{", ".join(run_logs.RUN_LOG_METHODS)}, '
-                    f'{", ".join(table_files.TABLE_METHODS)} and '
+                    f'{", ".join(table_files.TABLE_METHODS)}, '
+                    f'{", ".join(run_files.RUN_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)

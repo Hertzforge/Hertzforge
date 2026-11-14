@@ -26,6 +26,7 @@
 	import MimoSpace from './MimoSpace.svelte';
 	import MimoSummary from './MimoSummary.svelte';
 	import type { MimoSection } from './mimoSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -187,6 +188,7 @@
 		</div>
 
 		<div class="body" bind:this={body} id="mm-panel" role="tabpanel" aria-labelledby="mm-tab-{section}" tabindex="-1">
+			<SetupFileBar {app} module="mimo_random" />
 			<div class="withsum">
 				<div class="main">
 					{#if section === 'channels'}

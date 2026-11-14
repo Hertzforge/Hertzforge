@@ -915,10 +915,103 @@
         "path": {"type": "string"}
       }
     },
+    "testSetupOrigin": {
+      "type": "object", "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["typed", "setup", "run", "seed"]},
+        "name": {"type": "string"},
+        "run_uid": {"type": "string"},
+        "run_id": {"type": "string"},
+        "object": {"type": "string"},
+        "checksum": {"type": "string"},
+        "fills": {"type": "string"}
+      }
+    },
+    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock"]},
+    "testSetup": {
+      "type": "object", "required": ["module", "protocol", "config", "table", "title", "notes", "origin"],
+      "properties": {
+        "module": {"$ref": "#/$defs/testSetupModule"},
+        "protocol": {"type": "string"},
+        "config": {"type": "object"},
+        "table": {
+          "type": "object",
+          "properties": {
+            "rows": {"type": "array", "items": {"type": "object"}},
+            "revision": {"type": "integer"},
+            "sha256": {"type": "string"}
+          }
+        },
+        "title": {"type": "string"},
+        "notes": {"type": "string"},
+        "origin": {"$ref": "#/$defs/testSetupOrigin"}
+      }
+    },
+    "projectSetupsResult": {
+      "type": "object", "required": ["setups", "runs"],
+      "properties": {
+        "setups": {"type": "array", "items": {
+          "type": "object", "required": ["name", "module", "title", "protocol", "origin", "holds"],
+          "properties": {
+            "name": {"type": "string"},
+            "module": {"$ref": "#/$defs/testSetupModule"},
+            "title": {"type": "string"},
+            "protocol": {"type": "string"},
+            "origin": {"$ref": "#/$defs/testSetupOrigin"},
+            "holds": {"type": "string"}
+          }
+        }},
+        "runs": {"type": "array", "items": {
+          "type": "object", "required": ["name", "module", "title", "run_uid", "run_id", "outcome", "has_config", "holds"],
+          "properties": {
+            "name": {"type": "string"},
+            "module": {"type": "string"},
+            "title": {"type": "string"},
+            "run_uid": {"type": "string"},
+            "run_id": {"type": "string"},
+            "outcome": {"type": "string"},
+            "source": {"type": ["string", "null"]},
+            "has_config": {"type": "boolean"},
+            "holds": {"type": "string"}
+          }
+        }}
+      }
+    },
+    "projectSaveSetupParams": {
+      "type": "object", "required": ["name", "setup"], "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "setup": {"type": "object", "required": ["module", "config"]},
+        "replace": {"type": "boolean"}
+      }
+    },
+    "projectSaveSetupResult": {
+      "type": "object", "required": ["name", "project"],
+      "properties": {"name": {"type": "string"}, "project": {"$ref": "#/$defs/project"}}
+    },
+    "projectOpenSetupParams": {
+      "type": "object", "required": ["name"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}}
+    },
+    "projectOpenSetupResult": {
+      "type": "object", "required": ["setup"],
+      "properties": {"setup": {"$ref": "#/$defs/testSetup"}}
+    },
     "tableFileKind": {"enum": ["channels", "breakpoints"]},
     "tableCell": {"type": ["number", "string", "boolean", "null"]},
+    "channelEnvironment": {
+      "type": "object", "required": ["controls", "drives", "response_transformation", "reference_transformation"],
+      "additionalProperties": false,
+      "properties": {
+        "controls": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "drives": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "response_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}},
+        "reference_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}}
+      }
+    },
     "tablesSaveParams": {
-      "type": "object", "required": ["kind", "columns", "rows", "path"], "additionalProperties": false,
+      "type": "object", "required": ["kind", "path"], "additionalProperties": false,
+      "anyOf": [{"required": ["columns", "rows"]}, {"required": ["channels"]}],
       "properties": {
         "kind": {"$ref": "#/$defs/tableFileKind"},
         "table_kind": {"type": ["string", "null"]},
@@ -926,7 +1019,9 @@
         "rows": {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/tableCell"}}},
         "path": {"type": "string", "minLength": 1},
         "x_unit": {"type": ["string", "null"]},
-        "y_unit": {"type": ["string", "null"]}
+        "y_unit": {"type": ["string", "null"]},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
+        "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
     "tablesSaveResult": {
@@ -952,7 +1047,9 @@
         "rows": {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/tableCell"}}},
         "warnings": {"type": "array", "items": {"type": "string"}},
         "x_unit": {"type": "string"},
-        "y_unit": {"type": "string"}
+        "y_unit": {"type": "string"},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
+        "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
     "catalog": {
@@ -992,8 +1089,8 @@
                "control_group_gap", "reference_without_control", "unsupported_schema",
                "channel_unbound", "physical_channel_unknown", "physical_channel_wrong_direction",
                "physical_channel_shared", "mixed_timing_families",
-               "iepe_without_bias", "bias_on_single_ended", "reference_count_mismatch",
-               "drive_channel_present",
+               "iepe_without_bias", "bias_on_single_ended",
+               "drive_channel_present", "unit_unknown", "drive_not_in_volts", "abort_not_in_g",
                "profile_empty", "first_row_not_anchor", "row_level_ambiguous",
                "frequency_not_positive", "frequency_not_ascending", "psd_negative",
                "alarm_wider_than_abort",
@@ -1199,7 +1296,21 @@
             "velocity_ips": {"type": ["number", "null"], "exclusiveMinimum": 0},
             "displacement_mil": {"type": ["number", "null"], "exclusiveMinimum": 0}
           }
-        }
+        },
+        "node": {"type": ["integer", "null"], "minimum": 0},
+        "direction": {"type": "string"},
+        "channel_type": {"type": "string"},
+        "analysis_role": {"enum": ["reference", "response", "monitor", ""]},
+        "daq_range_v": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "sensor_range_v": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "serial_number": {"type": "string"},
+        "make": {"type": "string"},
+        "model": {"type": "string"},
+        "triax_dof": {"type": "string"},
+        "expiration": {"type": "string"},
+        "analysis_tier": {"type": "string", "pattern": "^(full|rotating|decimated:[1-9][0-9]*)$"},
+        "limit": {"type": "boolean"},
+        "extra": {"type": "object", "additionalProperties": {"type": "string"}}
       }
     },
     "channelTable": {

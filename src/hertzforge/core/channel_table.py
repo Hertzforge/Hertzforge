@@ -104,6 +104,8 @@ TITLES = {
     'abort_accel_g': 'Abort Accel (g)',
     'abort_velocity_ips': 'Abort Velocity (in/s)',
     'abort_displacement_mil': 'Abort Displacement (mil)',
+    'analysis_tier': 'Analysis Tier',
+    'extra': 'Other Columns',
 }
 
 #: the columns a geometry adds beside the table's own, in order: the
@@ -374,14 +376,18 @@ class ChannelTable:
         # join key — but a node nobody recorded is the ordinary case
         # this table exists to let someone fix, and 0 cannot stand in
         # for 'unstated' when 0 is itself a legal node number.
-        'channel': Spec('int', minimum=1, unique=True),
+        # From 0, as the control service numbers its rows (the one rule set,
+        # schema/PROTOCOL.md "Channel Table")
+        'channel': Spec('int', minimum=0, unique=True),
         'node': Spec('index', minimum=0),
         'direction': Spec('choice', choices=DIRECTIONS),
         'role': Spec('choice', choices=ROLES),
         'control': Spec('flag', default='False'),
         'channel_type': Spec('choice', choices=CHANNEL_TYPES),
         'unit': Spec('unit'),
-        'sensitivity': Spec('float', minimum=0),
+        # any number in a cell; 0 is refused on an enabled input row by the
+        # rule set (`rule_errors`), and allowed on a disabled or a drive row
+        'sensitivity': Spec('float'),
         # Two limits, either of which clips a channel: the DAQ input's
         # range and the sensor's own full-scale output (an ICP
         # accelerometer saturates near 5 V whatever the DAQ is set to).
@@ -411,7 +417,8 @@ class ChannelTable:
         # '<device>/<channel>' on the hardware, blank when unbound
         'physical': Spec('text'),
         'iepe': Spec('flag', default='False'),
-        'iepe_bias': Spec('float', minimum=0),
+        # a number, 0 included, as the control service holds it
+        'iepe_bias': Spec('float'),
         'polarity': Spec('choice', choices=('positive', 'negative')),
         # the input's full scale in the channel's own unit, where the two
         # ranges above are volts
@@ -422,11 +429,20 @@ class ChannelTable:
         'abort_accel_g': Spec('float', minimum=0),
         'abort_velocity_ips': Spec('float', minimum=0),
         'abort_displacement_mil': Spec('float', minimum=0),
+        # A limit channel: an input a test's limits are set on. A mark only;
+        # the limits stay in each test's setup.
+        'limit': Spec('flag', default='False'),
+        # 'full', 'rotating' or 'decimated:N', blank for full: how much
+        # analysis the controller gives the row per block
+        'analysis_tier': Spec('text'),
+        # any other column the control service carries for the row, as a
+        # JSON object of text by column name, blank for none
+        'extra': Spec('text'),
     }
     #: the controller's columns, last in `COLUMNS`: all of them or none
     CONTROLLER = ('enabled', 'drive', 'physical', 'iepe', 'iepe_bias', 'polarity',
                   'range_max', 'control_group', 'abort_accel_g', 'abort_velocity_ips',
-                  'abort_displacement_mil')
+                  'abort_displacement_mil', 'limit', 'analysis_tier', 'extra')
     #: the columns every table has: all but the controller's, which are last
     SCHEMA = tuple(COLUMNS)[:len(COLUMNS) - len(CONTROLLER)]
     #: What other people call these columns. Applied after a generic
@@ -462,6 +478,7 @@ class ChannelTable:
         'abort_accel_g': ('abort_accel', 'abort_acceleration'),
         'abort_velocity_ips': ('abort_velocity',),
         'abort_displacement_mil': ('abort_displacement',),
+        'extra': ('other_columns',),
     }
     #: the four a table is meaningless without; a source missing one is
     #: refused rather than filled in
@@ -635,6 +652,31 @@ class ChannelTable:
             return text
         return text
 
+    def rule_errors(self) -> list[str]:
+        """What the table breaks of the rules a row is checked by on both
+        sides of the program, beyond what one cell can say (schema/PROTOCOL.md,
+        "Channel Table"): a sensitivity of 0 on an enabled row that is not a
+        drive. A table without the controller's columns has every row on and
+        none a drive. Empty when it breaks none.
+
+        Returns
+        -------
+        list of str
+            One sentence per finding, naming the channel.
+        """
+        found = []
+        for r in range(self.num_channels):
+            text = str(self['sensitivity'][r]).strip()
+            if not text or float(text) != 0.0:
+                continue
+            on = ('enabled' not in self.frame.columns
+                  or str(self['enabled'][r]) != 'False')
+            drive = 'drive' in self.frame.columns and str(self['drive'][r]) == 'True'
+            if on and not drive:
+                found.append(f'channel {int(self["channel"][r])} is an enabled input with a '
+                             'sensitivity of 0; only a disabled row or a drive may hold 0')
+        return found
+
     def set_cell(self, name: str, row: int, value: object) -> None:
         """Write one cell, or refuse a value the column cannot hold.
 
@@ -698,6 +740,14 @@ class ChannelTable:
         # pair"; force and voltage control are why it was not one.
         if name == 'unit' and coerced:
             self._agrees_with_type(row, str(coerced))
+        if name == 'sensitivity' and coerced != '' and float(coerced) == 0.0:
+            on = ('enabled' not in self.frame.columns
+                  or str(self.frame.loc[row, 'enabled']) != 'False')
+            drive = ('drive' in self.frame.columns
+                     and str(self.frame.loc[row, 'drive']) == 'True')
+            if on and not drive:
+                raise ValueError('sensitivity cannot be 0 on an enabled input; only a '
+                                 'disabled row or a drive may hold 0')
         self.frame.loc[row, name] = coerced
         if name == 'channel_type':
             # a unit of some other kind is no longer an answer here —
