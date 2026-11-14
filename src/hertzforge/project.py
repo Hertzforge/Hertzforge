@@ -51,6 +51,7 @@ from .core.photos import Photos
 from .core.prediction import Predictions
 from .core.report import Report
 from .core.run_log_extract import RunLogExtract
+from .core.run_record import RunRecord
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
 from .names import display_name
@@ -84,7 +85,7 @@ ObjectGroup = dict[str, Any]
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
               _CoherenceBase, ShapeSet, MatchedModes, Predictions,
-              RunLogExtract, Report)
+              RunLogExtract, RunRecord, Report)
 
 
 def type_rank(obj: Any) -> int:
@@ -135,6 +136,8 @@ def describe(obj: Any) -> str:
         count = len(obj.entries)
         return (f'test {obj.test}, {obj.kind}, {count} '
                 f'entr{"y" if count == 1 else "ies"} to log entry #{obj.upto}')
+    elif isinstance(obj, RunRecord):
+        return obj.describe()
     elif isinstance(obj, Report):
         counts = [(obj.num_blocks, 'block')]
     else:
@@ -293,6 +296,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('matches', 'match_sets', MatchedModes),
     ('predictions', 'prediction_sets', Predictions),
     ('run_log_extract', 'run_log_extracts', RunLogExtract),
+    ('run_record', 'run_records', RunRecord),
     ('report', 'reports', Report),
 )
 
@@ -370,6 +374,8 @@ class Selection:
         prediction_sets: list[Predictions]
         run_log_extract: RunLogExtract
         run_log_extracts: list[RunLogExtract]
+        run_record: RunRecord
+        run_records: list[RunRecord]
         report: Report
         reports: list[Report]
 
@@ -542,6 +548,8 @@ class Project(dict):
         prediction_sets: list[Predictions]
         run_log_extract: RunLogExtract
         run_log_extracts: list[RunLogExtract]
+        run_record: RunRecord
+        run_records: list[RunRecord]
         report: Report
         reports: list[Report]
 
@@ -745,7 +753,8 @@ class Project(dict):
         """Import a file into this project and return the names added.
 
         The file can be anything hertzforge reads: a geometry, a
-        Rattlesnake run or a saved project. A saved project brings its
+        Rattlesnake run, a saved project, or a control run's folder,
+        imported as the project file it converts to. A saved project brings its
         object groups, which follow the objects even when a name clash
         renamed them, and when this project is empty it also brings its
         name, type and active geometry. When a reader returns several
@@ -776,9 +785,13 @@ class Project(dict):
             The names of every object added, in the order added.
         """
         from .io import import_file as read
-        from .io import project_type_of
+        from .io import project_type_of, run_convert, run_folder
         from .io.native import REFERENCE_FROM_BYTES, object_sizes
 
+        if run_folder.folder_of(path) is not None:
+            # a control run's folder is imported as the project file it
+            # converts to, so a large stream is held by reference to it
+            path = run_convert.converted(path)
         was_empty = not self
         result = read(str(path), **options)
         local = os.path.abspath(os.path.expanduser(str(path)))
@@ -8978,15 +8991,23 @@ class Project(dict):
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
         """Read a project from a `.hforge`, an older `.vdyn`, a
-        `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file.
+        `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file, or from a
+        control run's folder (or its `run.json`), which opens as the
+        `.hforge` file it converts to inside the folder, converted first
+        when there is none or the run has changed since
+        (`io.run_convert.converted`).
 
         The journal starts over with the one line that opens the file. A
         file holding a single object rather than a project raises
         SingleObjectFile, a ValueError.
         """
-        from .io import import_file, load
+        from .io import import_file, load, run_convert, run_folder
         from .io.escdf_objects import SUFFIXES
 
+        if run_folder.folder_of(path) is not None:
+            # a control run's folder opens as the project file it
+            # converts to, which is where the project saves
+            path = run_convert.converted(path)
         loaded = (import_file(str(path))
                   if str(path).endswith(('.mat', *SUFFIXES))
                   else load(str(path)))

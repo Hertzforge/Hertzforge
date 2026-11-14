@@ -35,6 +35,8 @@ from . import (
     rattlesnake_sine,
     rattlesnake_specification,
     report_template,
+    run_convert,
+    run_folder,
     sdynpy_data,
     sdynpy_npz,
     sdynpy_shapes,
@@ -259,14 +261,17 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     imports without units, holding the file's values as they are until
     `define_units()` is called. `format` chooses an importer by name
     instead of by recognizing the file; a `.hforge` or `.vdyn` file is
-    always read by the native loader. `progress` is a (done, total) callable, used
+    always read by the native loader, and a control run's folder (or the
+    `run.json` in it) is read as the project file it converts to,
+    converting it first when it has none or the run has changed since
+    (`run_convert.converted`). `progress` is a (done, total) callable, used
     where the reader can count (a project file's objects, a Rattlesnake
     run's samples) and ignored where it cannot: a UFF file is read in
     one parse with no partial progress to report. A leading `~` in the
     path is expanded.
 
     Raises FileNotFoundError when there is no file at `path`,
-    IsADirectoryError for a folder, and ValueError for an unknown
+    IsADirectoryError for a folder that is not a run folder, and ValueError for an unknown
     `format` or a file no importer recognizes (the message says what
     the file appears to be, where that can be told).
 
@@ -308,6 +313,10 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     path = os.path.expanduser(str(path))
     if not os.path.exists(path):
         raise FileNotFoundError(f'no file at {path}')
+    # a control run's folder, or its manifest, is read as the project
+    # file it converts to (`run_convert.converted`)
+    if run_folder.folder_of(path) is not None:
+        return load(run_convert.converted(path), progress=progress)
     if os.path.isdir(path):
         raise IsADirectoryError(f'{path} is a folder, not a file')
     if path.endswith(('.hforge', '.vdyn')):
