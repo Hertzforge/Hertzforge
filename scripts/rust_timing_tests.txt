@@ -422,4 +422,5 @@ hertzforge-mimo-shock-law-math  test:research_warp  mimo_shock_w5_warp_cost_per_
 # Mixed Mode: a live band switch waited on against a wall-clock deadline, and the tone law file's
 # check, which runs each case with the law's time budget armed
 sds-control  test:mixed_sim_run  a_band_switched_off_live_ramps_out_and_back
+sds-control  test:mixed_sim_run  mixed_identification_views_carry_their_curves_at_the_hold_and_after_the_run
 hertzforge-mixed-laws  test:tone_law_file  a_tone_law_file_passes_the_mixed_check_from_the_role_s_start_values

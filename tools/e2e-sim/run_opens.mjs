@@ -17,7 +17,7 @@
 //    setup, and fills the run's record: operator, test article, the specification's document and
 //    clause, and notes. Screenshot: the Run Record panel.
 // 2. It runs: while it runs, the recording line names the run folder under the service's data
-//    folder (screenshot). It runs to its end; Explorer and the Recorder, which run until stopped,
+//    folder (screenshot); a review hold is shown before it goes on (screenshot). It runs to its end; Explorer and the Recorder, which run until stopped,
 //    are stopped once they have something to keep.
 // 3. The end line says where the run was recorded and offers its actions. The run folder holds the
 //    operator's words in run.json and is complete.
@@ -531,11 +531,18 @@ try {
 
 	// Past a review hold, a prediction, or both, to the end.
 	let shotRunning = false;
+	let shotHold = false;
 	const t0 = Date.now();
 	for (;;) {
 		if (await outcomeOf(a)) break;
 		if (Date.now() - t0 > 600_000) throw new Error('timed out waiting for the run to end');
 		if ((await a.locator('[data-testid="review-proceed"]').count()) && (await tid(a, 'review-proceed').isVisible()) && (await tid(a, 'review-proceed').getAttribute('aria-disabled')) !== 'true') {
+			if (!shotHold) {
+				// The review hold, once: what the identification drew before the run goes on.
+				await a.waitForTimeout(1500);
+				await shot(a, '02-hold');
+				shotHold = true;
+			}
 			await tid(a, 'review-proceed').click().catch(() => {});
 		} else if ((await a.locator('[data-testid="predict-engage-go"]').count()) && (await tid(a, 'predict-engage-go').isVisible())) {
 			if ((await attr(a, 'mimo-predict', 'data-phase')) === 'gate_failed') {
