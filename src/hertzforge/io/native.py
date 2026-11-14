@@ -21,6 +21,11 @@ A project can hold an object by reference to another `.hforge` file
 instead of a copy (schema 2): the object's group names the file and the
 object, with the file's size and SHA-256, and the reader reads the
 object from there (`Reference`).
+
+A converted control run holds a run record (schema 3), the control
+service's own record of the run (`core.run_record`), and its streams are
+written block by block (`StreamedHistory`), so a run larger than memory
+converts.
 """
 
 from __future__ import annotations
@@ -32,7 +37,7 @@ import mmap
 import os
 import uuid
 import warnings
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -51,6 +56,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.prediction import Predictions
     from ..core.report import Report
     from ..core.run_log_extract import RunLogExtract
+    from ..core.run_record import RunRecord
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
 
@@ -59,16 +65,20 @@ STAMP = 'hertzforge_schema'
 
 #: the newest .hforge schema this build reads. Schema 1 holds everything
 #: `.vdyn` schema 3 held; schema 2 adds objects held by reference to
-#: another file. The schema grows by addition, and a file is stamped
+#: another file; schema 3 adds the run record. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: the stamp of a file with no object held by reference
 BASE_SCHEMA = 1
 
 #: the stamp of a file with one or more objects held by reference
 REFERENCE_SCHEMA = 2
+
+#: the stamp of a file holding a run record (`core.run_record`), the
+#: control service's own record of a run, whether held or referred to
+RUN_RECORD_SCHEMA = 3
 
 #: the smallest object, in bytes stored, that a project imported from
 #: another `.hforge` holds by reference rather than copying: the size a
@@ -494,9 +504,15 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     """
     from ..core.data import DataArray  # noqa: F401 (documented schema owner)
 
-    group.attrs['function_type'] = data.function_type
     _write_array(group, 'abscissa', data.abscissa)
     _write_array(group, 'ordinate', data.ordinate)
+    _save_data_fields(data, group)
+
+
+def _save_data_fields(data: DataArray, group: h5py.Group) -> None:
+    """Everything `save_data` writes but the abscissa and the ordinate,
+    which `save_streamed_history` writes in blocks instead."""
+    group.attrs['function_type'] = data.function_type
     _write_strings(group, 'response_dof', data.response_dof)
     if data.reference_dof is not None:
         _write_strings(group, 'reference_dof', data.reference_dof)
@@ -1196,6 +1212,152 @@ def load_sine_levels(group: h5py.Group) -> SineLevelSet:
                                 if 'sine_cycles' in group.attrs else None))
 
 
+#: the most bytes of samples `save_streamed_history` asks for at once
+STREAM_BLOCK_BYTES = 16 * 2**20
+
+#: a block of samples: the ordinate's rows it fills (a slice, or row
+#: numbers in increasing order), the first column, and the values,
+#: those rows by as many columns as it holds
+StreamBlock = tuple[slice | Sequence[int], int, np.ndarray]
+
+
+class StreamedHistory:
+    """A time history to be saved from blocks of samples, so it is never
+    whole in memory.
+
+    A converted run's streams can be larger than the memory of the
+    machine converting them. `header` carries everything a time history
+    saves but its samples (DOFs, units, roles, averaging, run identity,
+    source), with an ordinate of no columns; `blocks()` yields the samples
+    a block at a time (`StreamBlock`), and the abscissa is written from
+    its first instant and rate. It saves as the `data` kind, and reads
+    back as the `TimeHistory` it describes.
+
+    Parameters
+    ----------
+    header : TimeHistory
+        The history's fields, with as many records as the ordinate has
+        rows and no samples.
+    samples : int
+        Columns of the ordinate.
+    first : float
+        The first instant, seconds.
+    rate : float
+        Samples per second.
+    blocks : callable
+        Called once, while saving; returns an iterable of `StreamBlock`
+        that fills every row and column between them.
+    dtype : numpy dtype, optional
+        What the ordinate is stored as: float32 by default, the precision
+        the control service records.
+    """
+
+    def __init__(self, header: Any, samples: int, first: float, rate: float,
+                 blocks: Callable[[], Iterable[StreamBlock]],
+                 dtype: Any = np.float32) -> None:
+        self.header: Any = header
+        self.samples: int = int(samples)
+        self.first: float = float(first)
+        self.rate: float = float(rate)
+        self.blocks: Callable[[], Iterable[StreamBlock]] = blocks
+        self.dtype: np.dtype = np.dtype(dtype)
+
+
+def save_streamed_history(history: StreamedHistory, group: h5py.Group) -> None:
+    """Write a `StreamedHistory` into `group` in the layout `save_data`
+    writes, the abscissa and ordinate filled block by block, so memory
+    holds one block at a time. The arrays are written plainly
+    (uncompressed, unchunked) whatever the save asks, so a large one is
+    mapped when it is read (`_read_array`)."""
+    records = history.header.num_records
+    abscissa = group.create_dataset('abscissa', shape=(history.samples,),
+                                    dtype=np.float64)
+    step = max(1, STREAM_BLOCK_BYTES // 8)
+    for start in range(0, history.samples, step):
+        stop = min(history.samples, start + step)
+        abscissa[start:stop] = (history.first
+                                + np.arange(start, stop, dtype=np.float64) / history.rate)
+    ordinate = group.create_dataset('ordinate', shape=(records, history.samples),
+                                    dtype=history.dtype)
+    for rows, column, values in history.blocks():
+        values = np.asarray(values, dtype=history.dtype)
+        where = rows if isinstance(rows, slice) else list(rows)
+        ordinate[where, column:column + values.shape[1]] = values
+    _save_data_fields(history.header, group)
+
+
+def save_run_record(record: RunRecord, group: h5py.Group) -> None:
+    """Write a `RunRecord` into `group`: its identity as attributes, each
+    JSON member as one UTF-8 string dataset (they pass the 64 KiB an
+    attribute holds), the log as JSON Lines, the law file's bytes
+    verbatim, and the arrays of results no analysis class holds in
+    numbered subgroups, since a result's name is free text."""
+    import json
+
+    import h5py
+
+    group.attrs['test'] = record.test
+    group.attrs['run_uid'] = record.run_uid
+    group.attrs['run_id'] = record.run_id
+    group.attrs['title'] = record.title
+    group.attrs['complete'] = record.complete
+    group.attrs['outcome'] = record.outcome
+    if record.source is not None:
+        group.attrs['source'] = record.source
+
+    def text(name: str, value: str) -> None:
+        group.create_dataset(name, data=value, dtype=h5py.string_dtype('utf-8'))
+
+    for name in ('manifest', 'table', 'setup', 'streams', 'results', 'missing'):
+        text(name, json.dumps(getattr(record, name)))
+    text('log', ''.join(json.dumps(entry) + '\n' for entry in record.log))
+    if record.end is not None:
+        text('end', json.dumps(record.end))
+    if record.law is not None:
+        text('law', json.dumps(record.law))
+    if record.law_file is not None:
+        held = group.create_dataset(
+            'law_file', data=np.frombuffer(record.law_file[1], dtype=np.uint8))
+        held.attrs['name'] = record.law_file[0]
+    if record.arrays:
+        arrays = group.create_group('arrays')
+        for k, (result, held_arrays) in enumerate(record.arrays.items()):
+            sub = arrays.create_group(f'{k:04d}')
+            sub.attrs['result'] = result
+            for j, (name, values) in enumerate(held_arrays.items()):
+                sub.create_dataset(f'{j:04d}', data=values).attrs['name'] = name
+
+
+def load_run_record(group: h5py.Group) -> RunRecord:
+    """Read a `RunRecord` written by `save_run_record`."""
+    import json
+
+    from ..core.run_record import RunRecord
+
+    def text(name: str) -> Any:
+        if name not in group:
+            return None
+        raw = group[name][()]
+        return json.loads(raw.decode('utf-8') if isinstance(raw, bytes) else raw)
+
+    raw = group['log'][()]
+    lines = (raw.decode('utf-8') if isinstance(raw, bytes) else raw).splitlines()
+    law_file = None
+    if 'law_file' in group:
+        law_file = (str(group['law_file'].attrs['name']),
+                    group['law_file'][()].tobytes())
+    arrays: dict[str, dict[str, np.ndarray]] = {}
+    for key in sorted(group.get('arrays', {})):
+        sub = group['arrays'][key]
+        arrays[str(sub.attrs['result'])] = {
+            str(sub[name].attrs['name']): sub[name][()] for name in sorted(sub)}
+    return RunRecord(text('manifest'), text('table'), text('setup'),
+                     log=[json.loads(line) for line in lines if line],
+                     end=text('end'), law=text('law'), law_file=law_file,
+                     streams=text('streams'), results=text('results'),
+                     arrays=arrays, missing=text('missing'))
+
+
 def _savers():
     from ..core.channel_table import ChannelTable
     from ..core.data import DataArray
@@ -1205,10 +1367,13 @@ def _savers():
     from ..core.prediction import Predictions
     from ..core.report import Report
     from ..core.run_log_extract import RunLogExtract
+    from ..core.run_record import RunRecord
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
 
     return [(Geometry, 'geometry', save_geometry),
+            (StreamedHistory, 'data', save_streamed_history),
+            (RunRecord, 'run_record', save_run_record),
             (SineSweepSpecification, 'sine_specification',
              save_sine_specification),
             (SineLevelSet, 'sine_levels', save_sine_levels),
@@ -1232,7 +1397,44 @@ _LOADERS = {'geometry': load_geometry,
             'matches': load_matches,
             'channel_table': load_channel_table,
             'predictions': load_predictions,
-            'run_log_extract': load_run_log_extract}
+            'run_log_extract': load_run_log_extract,
+            'run_record': load_run_record}
+
+
+def _loader(kind: str, name: str, path: str) -> Callable[[h5py.Group], Any]:
+    """The loader of objects of `kind`. A kind this build does not know
+    was added by a newer Hertzforge, so it is refused saying so, by the
+    object's name, rather than half loading the project."""
+    loader = _LOADERS.get(kind)
+    if loader is None:
+        raise ValueError(
+            f'{path or "The file"}: the object {name!r} is of kind {kind!r}, '
+            'which this build does not read: it was written by a newer '
+            'Hertzforge. Update Hertzforge to open it.')
+    return loader
+
+
+def schema_for(kinds: Iterable[str], references: bool = False) -> int:
+    """The schema a file holding objects of `kinds` is stamped with: the
+    earliest that holds everything in it.
+
+    Parameters
+    ----------
+    kinds : iterable of str
+        The kinds of the objects in the file, held or referred to.
+    references : bool, optional
+        Whether any object is held by reference to another file.
+
+    Returns
+    -------
+    int
+        `RUN_RECORD_SCHEMA` when any is a run record, otherwise
+        `REFERENCE_SCHEMA` for a file with references, otherwise
+        `BASE_SCHEMA`.
+    """
+    if 'run_record' in set(kinds):
+        return RUN_RECORD_SCHEMA
+    return REFERENCE_SCHEMA if references else BASE_SCHEMA
 
 
 #: the root groups of the single-table files `io.tables` writes that hold
@@ -1292,7 +1494,7 @@ def save_into(obj: Any, f: h5py.File) -> None:
     memory and store it inside their own files.
     """
     group_name, saver = _saver_for(obj)
-    f.attrs[STAMP] = BASE_SCHEMA
+    f.attrs[STAMP] = schema_for([group_name])
     saver(obj, f.create_group(group_name))
 
 
@@ -1448,7 +1650,7 @@ def _follow(group: h5py.Group, folder: str, depth: int = 0
                 return _follow(target, os.path.dirname(where), depth + 1)
             reference = Reference(where, expected.object, expected.kind,
                                   size, expected.sha256, modified)
-            return _LOADERS[expected.kind](target), reference
+            return _loader(expected.kind, expected.object, where)(target), reference
     reason = CHANGED if found else NOT_FOUND
     return None, Reference(expected.path, expected.object, expected.kind,
                            expected.size, expected.sha256,
@@ -1512,7 +1714,10 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     """`save_test` into an open, empty HDF5 file (see `save_into`).
     References are written relative to the folder the file is in."""
     references = dict(references or {})
-    f.attrs[STAMP] = REFERENCE_SCHEMA if references else BASE_SCHEMA
+    f.attrs[STAMP] = schema_for(
+        [*(_saver_for(obj)[0] for name, obj in objects.items() if name not in references),
+         *(reference.kind for reference in references.values())],
+        bool(references))
     f.attrs['test_name'] = name
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''
@@ -1628,7 +1833,7 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
                     objects[name] = obj
                     followed[name] = reference
             else:
-                objects[name] = _LOADERS[group.attrs['kind']](group)
+                objects[name] = _loader(str(group.attrs['kind']), name, path)(group)
             if progress is not None:
                 progress(done, len(keys))
         import json

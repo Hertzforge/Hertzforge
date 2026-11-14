@@ -21,11 +21,12 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1 or 2   (integer)
+    hertzforge_schema = 1, 2 or 3   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
-object is stamped 2.
+object is stamped 2. Schema 3 adds the run record (`run_record/`,
+below), and only a file holding one, or referring to one, is stamped 3.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -38,6 +39,8 @@ opens it. The reader follows three rules:
   the file is never half loaded;
 - a file with neither this stamp nor the `.vdyn` stamp
   is refused as not a Hertzforge file, since every writer stamps;
+- an object of a kind the reader does not know is refused by its name
+  and kind, saying the file was written by a newer Hertzforge;
 - an older stamp always loads.
 
 While Hertzforge is an alpha this is a practice, not a promise: the
@@ -49,7 +52,7 @@ every earlier file starts with the first release that is not an alpha.
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
-`predictions/` or `run_log_extract/`. The loader recognizes the file by
+`predictions/`, `run_log_extract/` or `run_record/`. The loader recognizes the file by
 the group it finds.
 
 A breakpoint table file is a single-object file too, holding one of a
@@ -219,7 +222,10 @@ the function type alone cannot say which class to rebuild:
     attrs   function_type        UFF dataset 58 code
             data_class           the class name, e.g. 'Psd'
     dsets   abscissa             one shared axis
-            ordinate             records × points, real or complex
+            ordinate             records × points, real or complex;
+                                 float64, or float32 for a time
+                                 history converted from a control run,
+                                 the precision it was recorded at
             response_dof         strings, one per record
             ordinate_dim, comment, ordinate_unit, reference_unit,
             dimension_hint       strings, '' = undefined / not stated
@@ -426,9 +432,105 @@ offset), `log_size` the log file's size in bytes then, `after` and
 and of the test, and `problems` the lines before `upto` skipped as not
 entries.
 
+## `run_record/`
+
+    run_record/  attrs: test, run_uid, run_id, title, complete, outcome,
+                 source ('SIM' or 'HARDWARE', when the run said)
+                 dsets (each one UTF-8 string of JSON):
+                   manifest   the run folder's run.json, whole
+                   table      its table.json, whole: every channel row in
+                              the control service's spelling, with any
+                              column the channel table has none for
+                   setup      its setup.json: config as accepted,
+                              resolved, derived, feasibility, seeded_from
+                   streams    {stream: its stream.json}, gaps and shots
+                              included
+                   results    {result: its <name>.json}, with a repeating
+                              result's records under "records"
+                   missing    [what the folder lacked, in words]
+                   log        the run's log, JSON Lines, in order
+                   end        its end.json (absent for a run that did not
+                              end cleanly)
+                   law        its law/law.json (absent when no law ran)
+                 law_file     the law file's bytes, uint8; attr name
+                              (absent unless the law is a file)
+                 arrays/<k>/  one group per result no analysis class
+                              holds (and a mapped result's other arrays);
+                              attr result (its name); dsets <j>, each with
+                              attr name, the array as written, a
+                              repeating result's records first
+
+The control service's own record of one run, kept whole beside the
+objects the run converts to (below), so nothing in the run folder is
+lost. `complete` is true for a run whose manifest says so and that has
+an end; `outcome` is the end's own (`completed`, `aborted`,
+`operator_stop`, and so on), '' when it has none.
+
+## Run Folders and Their Conversion
+
+A run folder (`hertzforge.io.run_folder`) is the layout a control run is
+recorded in, one folder per run: `run.json` (the manifest, `schema`
+`hertzforge-run/1`), `table.json`, `setup.json`, `law/`, `log.jsonl`,
+`streams/<name>/` (`telemetry.f32`, little-endian float32,
+frame-interleaved, in engineering units, and `stream.json`),
+`results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. The control
+modules do not write it yet: the reader and the converter are built to
+the layout, so a folder the control service writes converts the moment
+it does.
+
+`hertzforge.io.run_convert.convert` (and `hertzforge convert-run
+FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default
+`<run name>.hforge` inside the folder. Opening or importing the folder,
+or its `run.json`, opens or imports that file, converting first when
+there is none or the manifest was written after it. The project holds,
+in this order, all in one object group named for the run:
+
+- `Channel Table`, a `channel_table/` with the controller's columns.
+  Each row maps so: `index` is `channel`, `description` is `comment`,
+  `units` is `unit`, `sensitivity_mv_per_eu` is `sensitivity`,
+  `physical` is `"<device>/<channel>"`, `interface` `iepe` sets `iepe`,
+  `iepe_bias_v` is `iepe_bias`, the three `abort` limits are the abort
+  columns, a `drive` row sets `drive` and a `control` row `control`; a
+  row's `extra` columns fill the table's columns by name. A channel with
+  no node has its channel number as its node.
+- One time history per stream, named for the stream: values in SI,
+  float32, each channel's declared unit kept, the run's source, its
+  roles (a drive is a reference), the averaging the setup names, and a
+  run identity whose run and start come from the controller. Time is
+  from the run's start frame, or for a recording from its trigger, so
+  its pre-trigger samples are at negative times. A gap is not padded:
+  the samples after it follow on, and every record's comment says where
+  it was and how many frames it lost. A stream of shots is one record
+  per shot (`block` 'shot k'), each shot's first sample at minus its
+  `pre_frames`, or one history per shot when the shots differ in
+  length or timing.
+- `Specification`, from a Random setup's resolved profile (each
+  breakpoint's `freq_hz` and `psd_g2_hz`, with `alarm_db` and `abort_db`
+  as `[below, above]` held from that breakpoint to the next) on the
+  enabled control channels, its bands as warning and abort limits.
+- A `Psd` for a result of kind `psd` or `cpsd`, an `Frf` for `frf`, a
+  `Coherence` or `MultipleCoherence` for `coherence`, from the array
+  named `values` (records last on the frequency axis), in SI by the
+  channels' units. Cross terms are taken as written, already in this
+  format's convention. A result whose stated unit is not the one its
+  channels give, or of any other kind, is kept in the run record as
+  arrays. A repeating result is one record per line of its `.jsonl`
+  (`block` 'record k').
+- `Run Record`, the `run_record/` above.
+
+The file is written to a temporary name and renamed into place, with no
+timestamps and in a fixed order: a failed conversion leaves no file, and
+one folder converted twice gives the same bytes. A stream is copied a
+block of at most 16 MiB at a time, so a run larger than memory
+converts; opening the file reads a float32 stream into a float64 array,
+twice its size on disk.
+
 ## `run/`, a MIMO Random Run (Proposal)
 
-*A proposal for the analysis maintainer, not yet part of schema 1.* The
+*A proposal for the analysis maintainer, not part of any schema.* The
+run folder and its run record (above) are what the analysis side reads;
+the two converters that write this group (`mimo_run_convert`,
+`recorder_run_convert`) still do, and the reader refuses it. The
 control service records a multiple-output random run in its own folder
 while it runs, and `hertzforge.io.mimo_run_convert` turns that folder
 into a `.hforge` file at the end (or afterwards, for a run that did not
