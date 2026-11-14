@@ -22,20 +22,54 @@ export interface Span {
 	column: number;
 }
 
+/** Each group's color, in the order of `links`: a color per group, counted over every group so colors stay put. */
+function groupColors(links: NonNullable<ProjectSummary['links']>): string[] {
+	let others = 0;
+	return links.map((group) => (group.role === 'Basis' ? BASIS_COLOR : CURVE_COLORS[1 + (others++ % (CURVE_COLORS.length - 1))]));
+}
+
 /** The spans to paint for `links`, given the tree's row `order`; groups with one row shown are left out. */
 export function spans(links: ProjectSummary['links'] | undefined, order: string[]): Span[] {
 	if (!links) return [];
-	let others = 0;
+	const colors = groupColors(links);
 	const out: Span[] = [];
-	for (const group of links) {
+	for (const [k, group] of links.entries()) {
 		const basis = group.role === 'Basis';
-		// a color per group, counted over every group so colors stay put
-		const color = basis ? BASIS_COLOR : CURVE_COLORS[1 + (others++ % (CURVE_COLORS.length - 1))];
+		const color = colors[k];
 		const rows = order.filter((name) => group.members.includes(name));
 		if (rows.length < 2) continue;
 		out.push({ rows, color, bold: basis, name: group.name, column: 0 });
 	}
 	out.sort((a, b) => order.indexOf(a.rows[0]) - order.indexOf(b.rows[0]));
 	out.forEach((span, k) => (span.column = k % 2));
+	return out;
+}
+
+export interface Tick {
+	/** The Matched Modes object's row. */
+	row: string;
+	/** Its sets' group colors, first set's first: one color is a solid tick, two a striped one. */
+	colors: string[];
+}
+
+/**
+ * A short bracket on each Matched Modes object's row, striped in the colors of the groups its two
+ * shape sets are in, so the row reads as belonging to both (Brandon, 2026-11-14). One color when
+ * both sets share a group or only one is grouped; none when neither is, or when the object is in a
+ * group of its own (its group's bracket marks it).
+ */
+export function ticks(links: ProjectSummary['links'] | undefined, objects: ProjectSummary['objects']): Tick[] {
+	if (!links) return [];
+	const colors = groupColors(links);
+	const colorOf = (name: string) => {
+		const k = links.findIndex((g) => g.members.includes(name));
+		return k < 0 ? null : colors[k];
+	};
+	const out: Tick[] = [];
+	for (const o of objects) {
+		if (!o.between || colorOf(o.name)) continue;
+		const found = [...new Set(o.between.map(colorOf).filter((c): c is string => c !== null))];
+		if (found.length) out.push({ row: o.name, colors: found });
+	}
 	return out;
 }

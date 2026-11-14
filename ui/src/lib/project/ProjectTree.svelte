@@ -13,7 +13,7 @@
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import type { Modifiers } from './selection';
 	import { tick } from 'svelte';
-	import { spans } from './brackets';
+	import { spans, ticks } from './brackets';
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
@@ -264,6 +264,8 @@
 
 	/** The link brackets: each group's members as rows, and where those rows sit, measured after each render. */
 	const painted = $derived(spans(p.summary?.links, order));
+	/** The striped brackets on Matched Modes rows, in the colors of both sets' groups. */
+	const striped = $derived(ticks(p.summary?.links, p.summary?.objects ?? []));
 	let treeBox = $state<HTMLDivElement | null>(null);
 	const rowBoxes = new Map<string, HTMLDivElement>();
 	let centers = $state<Record<string, number>>({});
@@ -294,7 +296,7 @@
 	}
 	$effect(() => {
 		// rows move when objects, open rows or their children change
-		void [p.summary, p.expanded, p.children, painted];
+		void [p.summary, p.expanded, p.children, painted, striped];
 		void tick().then(measure);
 	});
 	$effect(() => {
@@ -343,8 +345,8 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the keys and the pointer act on the rows inside) -->
-<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} class:place-end={place === null} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
-	{#if painted.length}
+<div class="tree" class:bracketed={painted.length > 0 || striped.length > 0} class:dragging={!!dragging} class:place-end={place === null} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
+	{#if painted.length || striped.length}
 		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
 				{@const ys = span.rows.map((r) => centers[r]).filter((y) => y !== undefined)}
@@ -359,6 +361,18 @@
 					{#if span.name && bottom - top > 40}
 						<text x={x - 1} y={bottom - 4} transform="rotate(-90 {x - 1} {bottom - 4})" fill={span.color} font-size="8" textLength={Math.min(bottom - top - 8, span.name.length * 5)} lengthAdjust="spacingAndGlyphs">{span.name}</text>
 					{/if}
+				{/if}
+			{/each}
+			{#each striped as t (t.row)}
+				{@const y = centers[t.row]}
+				{#if y !== undefined}
+					<!-- a short bracket on its one row, each color a dash in turn, so it reads as both groups' -->
+					<g stroke-width="2" stroke-linecap="butt" data-matched={t.row}>
+						{#each t.colors as color, k (k)}
+							<line x1="3" y1={y - 7} x2="3" y2={y + 7} stroke={color} stroke-dasharray={t.colors.length > 1 ? '3.5 3.5' : undefined} stroke-dashoffset={k * 3.5} />
+							<line x1="3" y1={y} x2="7" y2={y} stroke={color} stroke-dasharray={t.colors.length > 1 ? '2 2' : undefined} stroke-dashoffset={k * 2} />
+						{/each}
+					</g>
 				{/if}
 			{/each}
 		</svg>

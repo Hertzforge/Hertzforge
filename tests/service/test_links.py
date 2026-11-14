@@ -58,3 +58,23 @@ def test_the_summary_brackets_the_groups_and_marks_what_does_not_fit(validate):
 def test_a_project_with_no_groups_has_no_links():
     state = projects.new({'title': 'Empty'})
     assert projects.summary(state)['links'] == []
+
+
+def test_a_matched_modes_object_names_the_two_sets_it_pairs(validate):
+    """For the tree to set it beside both sets' groups and stripe its bracket with their colors
+    (Brandon, 2026-11-14)."""
+    from hertzforge.core.matches import MatchedModes
+    from hertzforge.core.shapes import ShapeSet
+
+    state, _added = projects.import_file(None, {'path': str(PLATE / 'geometry.unv'),
+                                                'units': {'length_unit': 'mm'}})
+    project = state.project
+    for name in ('Test Modes', 'FEM Modes'):
+        project.add(name, ShapeSet(frequency=[10.0], damping=[0.01], shape_matrix=np.ones((1, 2)),
+                                   coordinate=['101Z+', '102Z+']))
+    project.add('Matched', MatchedModes('Test Modes', 'FEM Modes', pairs=[[0, 0]], macs=[1.0]))
+    summary = projects.summary(state)
+    validate(summary, 'project')
+    listed = {o['name']: o for o in summary['objects']}
+    assert listed['Matched']['between'] == ['Test Modes', 'FEM Modes']
+    assert 'between' not in listed['Test Modes']

@@ -518,6 +518,7 @@
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
         "banded": {"type": "boolean"},
+        "between": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
         "holds": {"type": "string"},
         "issue": {
           "type": "object", "required": ["message", "sub_items"], "additionalProperties": false,

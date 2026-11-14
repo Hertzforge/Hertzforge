@@ -93,6 +93,9 @@ def summary(state: OpenProject) -> dict[str, Any]:
         entry['verbs'] = verbs_of(project, name)
         if tree.banded(obj):
             entry['banded'] = True
+        between = _between(obj)
+        if between:
+            entry['between'] = between
         entry['holds'] = describe(obj)
         settings = settings_of(obj)
         if settings:
@@ -116,6 +119,14 @@ def summary(state: OpenProject) -> dict[str, Any]:
              'reason': reference.reason}
             for name, reference in project.unresolved.items()]
     return out
+
+
+def _between(obj: Any) -> list[str] | None:
+    """The two shape sets a Matched Modes object pairs, first and second, for the tree to set it
+    beside their groups and stripe its bracket with both (Brandon, 2026-11-14)."""
+    from hertzforge.core.matches import MatchedModes
+
+    return [obj.first, obj.second] if isinstance(obj, MatchedModes) else None
 
 
 def compatibility_issues(project: Any) -> dict[str, dict[str, Any]]:
