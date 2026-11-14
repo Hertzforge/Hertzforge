@@ -16,7 +16,7 @@
 import { configDifferences, type SetupModule, type SetupOrigin } from './setupFile';
 
 /** The modules a project object can seed, in the order a person meets them. */
-export const SEED_MODULES: readonly SetupModule[] = ['random', 'sine', 'srs', 'classical_shock', 'twr'];
+export const SEED_MODULES: readonly SetupModule[] = ['random', 'sine', 'srs', 'classical_shock', 'twr', 'mixed'];
 
 /** One object `project.seeds` offers. */
 export interface SeedOffer {

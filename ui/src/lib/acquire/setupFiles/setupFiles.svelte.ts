@@ -248,7 +248,7 @@ export class SetupFiles {
 	 * Read what the object `name` would fill (`project.seed`) and name every member it changes. The
 	 * draft is untouched until the operator takes it with `takeSeed`.
 	 */
-	async chooseSeed(name: string, options: { channel?: string; record?: number } = {}): Promise<boolean> {
+	async chooseSeed(name: string, options: { channel?: string; record?: number; tones?: string } = {}): Promise<boolean> {
 		this.refused = null;
 		this.pending = null;
 		this.seedPending = null;

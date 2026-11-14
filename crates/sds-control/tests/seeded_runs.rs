@@ -143,3 +143,8 @@ async fn a_seeded_classical_shock_setup_runs_on_the_simulator() {
 async fn a_seeded_twr_setup_runs_on_the_simulator() {
     check("twr").await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_seeded_mixed_setup_runs_on_the_simulator() {
+    check("mixed").await;
+}

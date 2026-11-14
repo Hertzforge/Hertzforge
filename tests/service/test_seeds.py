@@ -58,7 +58,7 @@ G = 9.80665
 #: the modules seeded end to end, with the configure request each takes
 MODULES = {'random': 'randomConfigureParams', 'sine': 'sineConfigureParams',
            'srs': 'srsConfigureParams', 'classical_shock': 'shockConfigureParams',
-           'twr': 'twrConfigureParams'}
+           'twr': 'twrConfigureParams', 'mixed': 'mixedConfigureParams'}
 
 
 def _row(index, role, description, sensitivity=100, top=100):
@@ -139,10 +139,23 @@ BASES = {
         'schedule': {'mode': 'auto', 'levels_db': [-6, 0], 'gate_pct': 5.5},
         'run': {'schedule': 'once'},
         'limits': {'drive_vpk_ceiling': 5}},
+    'mixed': {
+        'title': 'Seeded Mixed Mode', **RECORD,
+        'parts': [{'id': 'floor', 'kind': 'floor',
+                   'breakpoints': [{'freq_hz': 100, 'psd_g2_hz': 0.0005},
+                                   {'freq_hz': 500, 'psd_g2_hz': 0.0005}],
+                   'alarm_db': [3, 3], 'abort_db': [6, 6]}],
+        'exclusion_hz': 32,
+        'acquisition': {'fs_hz': 4096, 'n_pts': 256, 'n_avg': 8, 'tick_ms': 100},
+        'schedule': {'mode': 'auto', 'levels': [{'db': -6, 'dwell_s': 1}, {'db': 0}],
+                     'full_level_s': 1},
+        'control': {'pretest': {'averages': 2}, 'floor_settle_s': 1, 'part_ramp_s': 0.5,
+                    'level_ramp_s': 0.5, 'shutdown_ramp_s': 0.5, 'review_after_sysid': False},
+        'limits': {'drive_vpk_ceiling': 5, 'drive_vpk_abort': 8}},
 }
 
 TABLES = {'random': _rows(), 'sine': _rows(), 'srs': _rows(1000, 10),
-          'classical_shock': _rows(1000, 10), 'twr': _rows()}
+          'classical_shock': _rows(1000, 10), 'twr': _rows(), 'mixed': _rows()}
 
 
 # ---- the source objects, written as the analysis side writes them ----------------------------
@@ -195,15 +208,41 @@ def _twr_history():
                        ordinate_dim=['acceleration'], ordinate_unit=['m/s**2'])
 
 
+def _mixed_floor():
+    from hertzforge.core.mixed_mode import Narrowband
+
+    f = np.array([100.0, 500.0])
+    level = np.full(2, 0.0005 * G ** 2)
+    floor = Specification(
+        abscissa=f, ordinate=level[np.newaxis], response_dof=['1Z+'],
+        ordinate_dim=['acceleration**2/frequency'], ordinate_unit=['g**2/Hz'],
+        warning_lower=level[np.newaxis] * 10 ** -0.3, warning_upper=level[np.newaxis] * 10 ** 0.3,
+        abort_lower=level[np.newaxis] * 10 ** -0.6, abort_upper=level[np.newaxis] * 10 ** 0.6)
+    floor.narrowbands = (Narrowband(350.0, 0.002 * G ** 2, width=32.0, sweep_to=420.0,
+                                    rate=20.0, name='Mesh'),)
+    floor.tone_exclusion = 32.0
+    return floor
+
+
+def _mixed_tones():
+    from hertzforge.core.mixed_mode import Tone
+
+    return SineSweepSpecification([Tone(200.0, 0.5 * G, name='Blade').sine_tone(4.0, 1)],
+                                  ['1Z+'], ordinate_dim='acceleration', ordinate_unit='m/s**2')
+
+
 SOURCES = {'random': ('Floor Spec', _random_spec), 'sine': ('Sweep Spec', _sine_spec),
            'srs': ('Shock Spec', _srs_spec), 'classical_shock': ('Pulse', _pulse_spec),
-           'twr': ('Field Record', _twr_history)}
+           'twr': ('Field Record', _twr_history), 'mixed': ('Floor', _mixed_floor)}
 
 
 def _project(module):
     name, make = SOURCES[module]
     project = Project('seeds')
     project.add(name, make())
+    if module == 'mixed':
+        project.add('Tones', _mixed_tones())
+        project.link(name, 'Tones')
     return project, name
 
 
@@ -212,7 +251,8 @@ def seeded(module):
     and its protective numbers as the operator typed them, its imports,
     and the seed."""
     project, name = _project(module)
-    found = seeds.seed(project, name, module)
+    found = seeds.seed(project, name, module,
+                       tones=seeds.offers(project, module)[0].get('tones'))
     typed = [{'path': p['path'], 'value': p['value']} for p in found['protective']]
     config = seeds.apply(BASES[module], found['sets'] + typed)
     return {'config': config, 'channels': TABLES[module], 'imports': found['imports'],
@@ -382,6 +422,26 @@ def test_twr_the_run_holds_the_source_record(converted):
     peak = np.max(np.abs(want.ordinate[0]))
     assert np.max(np.abs(section - np.real(want.ordinate[0]))) <= sc.TOLERANCE * peak
     assert np.max(np.abs(np.real(got.ordinate[0, :pads['pre']]))) <= sc.TOLERANCE * peak
+
+
+def test_mixed_the_run_holds_the_source_floor_narrowbands_and_tones(converted):
+    from hertzforge.core.mixed_mode import Tone
+
+    _folder, project = converted['mixed']
+    floor = _one(project, Specification)
+    want = _mixed_floor()
+    assert np.allclose(np.real(floor.ordinate[0]), np.real(want.ordinate[0]), rtol=sc.TOLERANCE,
+                       atol=0)
+    (band,), (source,) = floor.narrowbands, want.narrowbands
+    assert band.center == pytest.approx(source.center) and band.sweep_to == source.sweep_to
+    assert band.level == pytest.approx(source.level, rel=sc.TOLERANCE)
+    assert band.width == source.width and band.rate == source.rate
+    assert floor.tone_exclusion == want.tone_exclusion
+    (tone,) = _one(project, SineSweepSpecification).tones
+    got, expected = Tone.of(tone), Tone.of(_mixed_tones().tones[0])
+    assert got.frequency == pytest.approx(expected.frequency)
+    assert got.amplitude == pytest.approx(expected.amplitude, rel=sc.TOLERANCE)
+    assert got.fixed and expected.fixed
 
 
 # ---- falsification: a dropped unit conversion fails ------------------------------------------

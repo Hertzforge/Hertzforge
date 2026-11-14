@@ -821,6 +821,9 @@ def mixed_parts(floor: Any, tones: Any = None, channel: str | None = None) -> di
             if found:
                 tone_limits[ident] = found
     exclusion = getattr(floor, 'tone_exclusion', None)
+    # the floor, the tones, then the narrowbands: the order the module's screen lists them in
+    parts = [parts[0], *(p for p in parts if p['kind'] == 'tone'),
+             *(p for p in parts if p['kind'] == 'narrowband')]
     return {'parts': parts, 'exclusion_hz': None if exclusion is None else float(exclusion),
             'floor': profile, 'tone_limits': tone_limits, 'notes': notes}
 

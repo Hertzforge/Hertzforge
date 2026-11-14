@@ -57,10 +57,11 @@
 		else if (open) await files.refresh();
 	}
 
-	function seedOptions(name: string, channels: string[]): { channel?: string; record?: number } {
+	function seedOptions(name: string, channels: string[], tones?: string): { channel?: string; record?: number; tones?: string } {
 		const at = readAt[name];
-		if (!at || channels.length < 2) return {};
-		return byRecord ? { record: Math.max(0, channels.indexOf(at)) } : { channel: at };
+		const beside = tones ? { tones } : {};
+		if (!at || channels.length < 2) return beside;
+		return { ...beside, ...(byRecord ? { record: Math.max(0, channels.indexOf(at)) } : { channel: at }) };
 	}
 
 	const saveWhy = $derived(files.saveBlocked);
@@ -92,8 +93,8 @@
 				<ul>
 					{#each files.seedOffers ?? [] as o (o.name)}
 						<li>
-							<button class="btn link" data-testid="setup-seed-item" disabled={files.busy !== null} onclick={() => files.chooseSeed(o.name, seedOptions(o.name, o.channels))}>{o.name}</button>
-							<span class="aq-small">{o.holds}; fills {o.fills}</span>
+							<button class="btn link" data-testid="setup-seed-item" disabled={files.busy !== null} onclick={() => files.chooseSeed(o.name, seedOptions(o.name, o.channels, o.tones))}>{o.name}</button>
+							<span class="aq-small">{o.holds}; fills {o.fills}{o.tones ? `, with the tones of "${o.tones}"` : ''}</span>
 							{#if o.channels.length > 1}
 								<label class="aq-small">{byRecord ? 'Record' : 'Channel'}
 									<select class="field" data-testid="setup-seed-at" value={readAt[o.name] ?? o.channels[0]} onchange={(e) => (readAt = { ...readAt, [o.name]: (e.currentTarget as HTMLSelectElement).value })}>

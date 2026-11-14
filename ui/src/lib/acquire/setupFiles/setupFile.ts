@@ -130,6 +130,10 @@ export function configDifferences(theirs: unknown, ours: unknown, path = ''): st
 		}
 		return out;
 	}
+	if (Array.isArray(theirs) && Array.isArray(ours) && theirs.length === ours.length && theirs.length > 0) {
+		// a list of the same length differs member by member
+		return theirs.flatMap((t, i) => configDifferences(t, ours[i], path ? `${path}.${i}` : String(i)));
+	}
 	return [`${path || 'the setup'}: ${shown(theirs)} in the setup; this screen would send ${shown(ours)}`];
 }
 

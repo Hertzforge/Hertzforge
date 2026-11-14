@@ -17,6 +17,7 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { ProjectSummary } from '$lib/protocol/types';
 import { AcquireState } from '../store.svelte';
 import { SineStore } from '../sine/sineStore.svelte';
+import { MixedStore } from '../mixed/mixedStore.svelte';
 import { ShockStore } from '../shock/shockStore.svelte';
 import { SrsStore } from '../srs/srsStore.svelte';
 import { TwrStore } from '../twr/twrStore.svelte';
@@ -41,11 +42,13 @@ class FakeAnalysis implements AnalysisClient {
 		if (method === 'project.seeds') {
 			if (!SEED_MODULES.includes(module)) return { seeds: [] } as R;
 			const a = seeded(module).answer;
-			return { seeds: [{ name: a.origin.object, kind: 'Specification', fills: a.origin.fills, holds: '', channels: ['1Z+'] }] } as R;
+			const tones = a.origin.also?.[0]?.object;
+			return { seeds: [{ name: a.origin.object, kind: 'Specification', fills: a.origin.fills, holds: '', channels: ['1Z+'], ...(tones ? { tones } : {}) }] } as R;
 		}
 		if (method === 'project.seed') {
 			const a = seeded(module).answer;
 			if (params.name !== a.origin.object) throw new Error(`the project has no object named '${params.name}'`);
+			if (a.origin.also && params.tones !== a.origin.also[0].object) throw new Error('the floor is read without its tones');
 			return structuredClone(a) as R;
 		}
 		throw new Error(`unexpected ${method}`);
@@ -61,7 +64,7 @@ async function shell() {
 	await acq.sync();
 	await acq.claim();
 	const opts = { local: null, checkDelayMs: 0 };
-	const stores = { sine: new SineStore(acq, opts), shock: new ShockStore(acq, opts), srs: new SrsStore(acq, opts), twr: new TwrStore(acq, opts) };
+	const stores = { sine: new SineStore(acq, opts), mixed: new MixedStore(acq, opts), shock: new ShockStore(acq, opts), srs: new SrsStore(acq, opts), twr: new TwrStore(acq, opts) };
 	await Promise.all(Object.values(stores).map((s) => s.sync()));
 	const asked: { method: string; params: Record<string, unknown> }[] = [];
 	const request = client.request.bind(client);
@@ -102,11 +105,13 @@ describe('a project object seeds a test setup', () => {
 			await files.refreshSeeds();
 			expect(files.seedOffers!.map((o) => o.name)).toEqual([answer.origin.object]);
 
-			expect(await files.chooseSeed(answer.origin.object), files.refused ?? '').toBe(true);
+			const offer = files.seedOffers![0];
+			expect(await files.chooseSeed(offer.name, offer.tones ? { tones: offer.tones } : {}), files.refused ?? '').toBe(true);
 			const p = files.seedPending!;
 			expect(host.key(), 'choosing a seed changes nothing').toBe(before);
 			expect(p.vetting.changes.length).toBeGreaterThan(0);
-			expect(p.vetting.lost, 'the screen holds the seed exactly').toEqual([]);
+			// the screen may spell out a default the seed leaves to the service; it drops and changes nothing
+			expect(p.vetting.lost.filter((l) => !/: not in the setup; this screen adds /.test(l)), 'the screen holds the seed').toEqual([]);
 			// every member the seed changes is named before anything changes
 			const [was, will] = [host.roundTrip(base)!, host.roundTrip(config)!];
 			for (const s of [...answer.sets, ...answer.protective]) {
