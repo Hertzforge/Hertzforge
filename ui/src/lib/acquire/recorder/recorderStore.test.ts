@@ -423,8 +423,11 @@ describe('the Recorder store', () => {
 		recorder.setup.analysis = { block: 4096, window: 'flattop', overlap_pct: 60, averaging: 'exponential', averages: 16, decimation: 2, frf: { reference: 3, response: 4 } };
 		recorder.setup.capture = { run_name: 'fixture_a', keep_free_gb: 2 };
 		recorder.setup.metadata = [{ key: 'run_number', label: 'Run Number', value: '3' }];
+		recorder.setup.record = { operator: 'A. Operator', article: 'Bracket, serial 7', notes: 'first article', document: 'Test procedure 12', clause: '4.2', streams: true };
 		expect(await recorder.apply()).toBe(true);
 		await until(() => recorder.served?.config?.title === 'Fixture A');
+		const held = recorder.served!.config!;
+		expect([held.operator, held.article, held.notes, held.specification]).toEqual(['A. Operator', 'Bracket, serial 7', 'first article', { document: 'Test procedure 12', clause: '4.2' }]);
 		const wire = structuredClone(recorder.wire);
 		recorder.setup = { ...recorder.setup, title: 'changed' };
 		expect(recorder.setupStatus).toBe('changed');

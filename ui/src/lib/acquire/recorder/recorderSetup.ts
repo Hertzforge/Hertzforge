@@ -13,7 +13,7 @@
 
 import type { ChannelRow, ReportItem } from '$lib/protocol/types';
 import type { RecorderAveraging, RecorderConfig, RecorderSlope, RecorderTriggerMode, RecorderWindow } from '$lib/protocol/recorder';
-import type { FieldErrors } from '../setup';
+import { defaultRecord, type FieldErrors, type RecordDraft } from '../setup';
 
 // ---------------------------------------------------------------------------------------------
 // The draft
@@ -49,6 +49,11 @@ export interface RecorderDraft {
 	};
 	capture: { run_name: string; keep_free_gb: number };
 	metadata: { key: string; label: string; value: string }[];
+	/**
+	 * The run's record: the operator's words, as the other modules take them. The Recorder always
+	 * keeps its recordings, so `streams` stays true and is never sent.
+	 */
+	record: RecordDraft;
 }
 
 /** The analysis blocks the service takes: powers of two from 256 to 65536 frames. */
@@ -83,7 +88,8 @@ export function defaultRecorderSetup(): RecorderDraft {
 		trigger: { mode: 'manual', row: null, level: NaN, slope: 'rising', hysteresis: null, pre_s: 1, record_s: null, count: 1, holdoff_s: 0 },
 		analysis: { block: 2048, window: 'hann', overlap_pct: null, averaging: 'linear', averages: 8, decimation: 1, frf: null },
 		capture: { run_name: 'recorder', keep_free_gb: 1 },
-		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
+		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }],
+		record: defaultRecord()
 	};
 }
 
@@ -101,6 +107,7 @@ export function mergeRecorderSetup(saved: Partial<RecorderDraft> | null): Record
 	out.analysis = { ...base.analysis, ...(saved.analysis ?? {}) };
 	out.capture = { ...base.capture, ...(saved.capture ?? {}) };
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
+	out.record = { ...base.record, ...(saved.record ?? {}), streams: true };
 	return out;
 }
 
@@ -113,6 +120,8 @@ export function mergeRecorderSetup(saved: Partial<RecorderDraft> | null): Record
  */
 export function toRecorderConfig(d: RecorderDraft): RecorderConfig {
 	const t = d.trigger;
+	const r = d.record;
+	const [document, clause] = [r.document.trim(), r.clause.trim()];
 	const a = d.analysis;
 	const trigger: NonNullable<RecorderConfig['trigger']> = { mode: t.mode };
 	if (t.mode === 'level') {
@@ -134,7 +143,12 @@ export function toRecorderConfig(d: RecorderDraft): RecorderConfig {
 			frf: a.frf ? { reference: a.frf.reference, response: a.frf.response } : null
 		},
 		capture: { run_name: d.capture.run_name.trim(), keep_free_gb: d.capture.keep_free_gb },
-		metadata: d.metadata.map((m) => (m.label ? { key: m.key, label: m.label, value: m.value } : { key: m.key, value: m.value }))
+		metadata: d.metadata.map((m) => (m.label ? { key: m.key, label: m.label, value: m.value } : { key: m.key, value: m.value })),
+		// The run record's words, each only when given: the service reads an absent one as empty.
+		...(r.operator.trim() ? { operator: r.operator.trim() } : {}),
+		...(r.article.trim() ? { article: r.article.trim() } : {}),
+		...(r.notes.trim() ? { notes: r.notes.trim() } : {}),
+		...(document || clause ? { specification: { document, clause } } : {})
 	};
 }
 
@@ -169,7 +183,15 @@ export function fromRecorderConfig(c: RecorderConfig): RecorderDraft {
 			frf: a.frf ? { reference: a.frf.reference, response: a.frf.response } : null
 		},
 		capture: { run_name: c.capture?.run_name ?? 'recorder', keep_free_gb: c.capture?.keep_free_gb ?? 1 },
-		metadata: (c.metadata ?? []).map((m) => ({ key: m.key, label: m.label ?? '', value: m.value }))
+		metadata: (c.metadata ?? []).map((m) => ({ key: m.key, label: m.label ?? '', value: m.value })),
+		record: {
+			operator: c.operator ?? '',
+			article: c.article ?? '',
+			notes: c.notes ?? '',
+			document: c.specification?.document ?? '',
+			clause: c.specification?.clause ?? '',
+			streams: true
+		}
 	};
 }
 
@@ -231,7 +253,7 @@ export function recorderByKey(items: { field?: string | null; channel?: number |
 /** The section a key belongs to. */
 export function recorderSectionOf(key: string): RecorderSection {
 	if (/^station|^table|^channel/.test(key)) return 'station';
-	if (/^(capture|metadata|title)(\.|$)/.test(key)) return 'capture';
+	if (/^(capture|metadata|title|operator|article|notes|specification)(\.|$)/.test(key)) return 'capture';
 	if (/^analysis(\.|$)/.test(key)) return 'analysis';
 	return 'trigger';
 }
@@ -275,5 +297,6 @@ export function localErrors(d: RecorderDraft): FieldErrors {
 	if (a.frf && !(Number.isInteger(a.frf.reference) && Number.isInteger(a.frf.response))) add(out, 'analysis.frf', 'Choose both rows of the pair.');
 	if (!d.capture.run_name.trim()) add(out, 'capture.run_name', 'Name the run folder.');
 	need(out, 'capture.keep_free_gb', d.capture.keep_free_gb);
+	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
 }

@@ -48,6 +48,7 @@ import {
 	mergeRecorderSetup,
 	RECORDER_SECTIONS,
 	recorderByKey,
+	recorderRows,
 	recorderSectionOf,
 	toRecorderConfig,
 	type RecorderDraft,
@@ -222,6 +223,15 @@ export class RecorderStore {
 
 	get rows(): ChannelRow[] {
 		return this.acq.rows;
+	}
+
+	/** The rows a run records (the Run Record panel's count; the Recorder opens no drive). */
+	get recordChannels(): number {
+		return recorderRows(this.rows).recorded.length;
+	}
+
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz;
 	}
 
 	get isLive(): boolean {
