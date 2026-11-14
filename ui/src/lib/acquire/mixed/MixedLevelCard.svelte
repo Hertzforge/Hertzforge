@@ -8,7 +8,7 @@
 	 */
 	import type { MixedLiveHead, MixedState } from '$lib/protocol/mixed';
 	import { formatNumber } from '$lib/viz/format';
-	import { clock, db } from '../words';
+	import { clock, db, levelReadout } from '../words';
 	import { identificationWords } from '../sine/sineWords';
 	import { mixedLevelStatus, mixedTripFacts, MIXED_TRIP_WORDS } from './mixedWords';
 
@@ -21,8 +21,9 @@
 	let { status, live, partName, compact = false }: Props = $props();
 
 	const st = $derived(mixedLevelStatus(status, live));
-	const level = $derived(live?.level_db ?? null);
-	const commanded = $derived(live?.commanded_db ?? status?.level_db ?? null);
+	const shown = $derived(levelReadout(live?.level_db ?? null, live?.commanded_db ?? status?.level_db ?? null, status?.end));
+	const level = $derived(shown.level);
+	const commanded = $derived(shown.commanded);
 	const total = $derived(live?.total ?? status?.total ?? null);
 	const trip = $derived(status?.end?.trip ?? null);
 	const idWords = $derived(identificationWords(status?.identification ?? null));
@@ -59,13 +60,18 @@
 		{#if status?.mode}<span class="mode">{status.mode === 'auto' ? 'Automatic' : 'Manual'}</span>{/if}
 	</div>
 
-	<div class="big num" data-testid="mixed-level-db">{db(level ?? commanded)}{#if level !== null && commanded !== null && Math.abs(level - commanded) > 0.05}<span class="sub">{` to ${db(commanded)}`}</span>{/if}{#if status?.held}<span class="tag">Held</span>{/if}</div>
+	<div class="big num" data-testid="mixed-level-db" data-ended={shown.ended ? 'true' : 'false'}>{db(level ?? commanded)}{#if shown.ended}<span class="sub">{level === null ? ' never driven' : ' last level in force'}</span>{:else if level !== null && commanded !== null && Math.abs(level - commanded) > 0.05}<span class="sub">{` to ${db(commanded)}`}</span>{/if}{#if status?.held}<span class="tag">Held</span>{/if}</div>
 
 	<dl class="nums">
 		<div><dt>Parts time</dt><dd class="num" data-testid="mixed-parts-s">{status?.parts_s === null || status?.parts_s === undefined ? 'Not yet' : clock(status.parts_s)}</dd></div>
 		<div><dt>At this level</dt><dd class="num">{clock(status?.at_level_s)}{#if status?.remaining_at_level_s !== null && status?.remaining_at_level_s !== undefined}<span class="sub">, {clock(status.remaining_at_level_s)} left</span>{/if}</dd></div>
-		<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">{num(total?.rms_g, 'g rms')}<span class="sub">{` against ${num(total?.reference_rms_g, 'g rms')} at this level`}</span></dd></div>
-		<div><dt>Summed drive</dt><dd class="num" data-testid="mixed-drive">{num(total?.drive_vpk, 'V pk')}<span class="sub">{`, ${num(total?.drive_vrms, 'V rms')}`}</span></dd></div>
+		{#if shown.ended}
+			<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">The run has ended</dd></div>
+			<div><dt>Summed drive</dt><dd class="num" data-testid="mixed-drive">The run has ended</dd></div>
+		{:else}
+			<div><dt>Composite</dt><dd class="num" data-testid="mixed-total">{num(total?.rms_g, 'g rms')}<span class="sub">{` against ${num(total?.reference_rms_g, 'g rms')} at this level`}</span></dd></div>
+			<div><dt>Summed drive</dt><dd class="num" data-testid="mixed-drive">{num(total?.drive_vpk, 'V pk')}<span class="sub">{`, ${num(total?.drive_vrms, 'V rms')}`}</span></dd></div>
+		{/if}
 	</dl>
 	{#if status?.limiting}<p class="line warn" data-testid="mixed-limiting">A cap, a limit channel or the drive ceiling holds a part down.</p>{/if}
 

@@ -5,7 +5,7 @@ import type { ChannelRow, NiDevice, RandomState, RefusalReason } from '$lib/prot
 import { primaryAction, runActions, type RunContext } from './actions';
 import { byField, defaultSetup, fromConfig, itemKey, localErrors, toConfig } from './setup';
 import { bindUnbound, newRow, rowFindings, tableChanges } from './table';
-import { clock, db, outcomeTone, overloadNote, RANGE_MEANING, refusalTitle, toRefusal, tripFacts } from './words';
+import { clock, db, levelReadout, outcomeTone, overloadNote, RANGE_MEANING, refusalTitle, toRefusal, tripFacts } from './words';
 
 function state(over: Partial<RandomState>): RandomState {
 	return {
@@ -156,6 +156,15 @@ describe('channel table', () => {
 });
 
 describe('words', () => {
+	it('shows the last level in force once a run has ended, never the stop ramp\'s tail', () => {
+		// While the run lives: the level the drive is at, against the level commanded.
+		expect(levelReadout(-6.2, -6, null)).toEqual({ level: -6.2, commanded: -6, ended: false });
+		// Ended: the last frame holds the ramp's tail (-248.8 dB); the readout shows the end's level.
+		expect(levelReadout(-248.8, -248.8, { level_db: 0 })).toEqual({ level: 0, commanded: null, ended: true });
+		// Ended before it drove: no level at all.
+		expect(levelReadout(-120, -120, { level_db: null })).toEqual({ level: null, commanded: null, ended: true });
+	});
+
 	it('says Overload only while an input is in it; otherwise the word is only defined', () => {
 		expect(overloadNote([])).toBeNull();
 		expect(overloadNote([3])).toBe('Overload: channel 3 reached the top of its range during this run (90 % of it in the run, or 98 % at the station).');

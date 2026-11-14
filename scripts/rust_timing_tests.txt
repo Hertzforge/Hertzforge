@@ -213,6 +213,10 @@ sds-control  lib  record::tests::crossing_the_free_space_floor_stops_the_stream_
 # the parallel pass; it passes alone)
 sds-control  test:mimo_setup_fields  the_loop_soft_starts_below_the_first_rung_and_climbs_to_it
 
+# MIMO Random's setup check on the controller's service: a socket session against the
+# service, as every service test is
+sds-control  test:mimo_service  mimo_random_a_table_the_simulator_cannot_play_is_said_by_the_setup_check
+
 # Classical shock laws: the host's deadline on a classical law file, and a law
 # file call's time against its budget
 hertzforge-law-host  test:shock_classical_host  a_spinning_classical_law_is_stopped_within_a_tick_of_its_budget
@@ -390,6 +394,7 @@ sds-control  test:recorder_sim_run  recorder_sim_runs_exclude_each_other_and_shu
 sds-control  test:recorder_protocol  recorder_verbs_are_refused_by_name_in_every_state_and_mode
 sds-control  test:recorder_protocol  recorder_log_reaches_every_connection_and_names_the_folder
 sds-control  test:recorder_records  recorder_run_folder_holds_its_records
+sds-control  test:recorder_records  recorder_an_unwritable_data_folder_refuses_the_start_record_unwritable
 sds-control  test:recorder_golden_run  todays_code_writes_the_golden_recorder_run_folder
 sds-control  test:recorder_golden_run  the_golden_recorder_run_repeats_exactly
 sds-control  test:explorer_record  explorer_run_leaves_a_complete_self_describing_folder
@@ -429,6 +434,7 @@ hertzforge-mimo-shock-law-math  test:research_warp  mimo_shock_w5_warp_cost_per_
 # Mixed Mode: a live band switch waited on against a wall-clock deadline, and the tone law file's
 # check, which runs each case with the law's time budget armed
 sds-control  test:mixed_sim_run  a_band_switched_off_live_ramps_out_and_back
+sds-control  test:mixed_sim_run  mixed_identification_views_carry_their_curves_at_the_hold_and_after_the_run
 hertzforge-mixed-laws  test:tone_law_file  a_tone_law_file_passes_the_mixed_check_from_the_role_s_start_values
 # The channel table through a loopback service: set, get and a second connection
 sds-control  test:channel_table_protocol  channel_table_analysis_columns_survive_set_get_and_a_new_connection

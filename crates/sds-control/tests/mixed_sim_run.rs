@@ -858,3 +858,83 @@ async fn mixed_a_part_waiting_for_the_floor_reads_off() {
     assert_eq!(t1["on"], true, "{t1}");
     c.ok("mixed.abort", json!({})).await;
 }
+
+/// The `identification` and `coherence` views of one `mixed.data` frame, each
+/// series' x and y, decoded.
+fn identification_curves(e: &support::Event) -> Vec<(String, Vec<f64>, Vec<f64>)> {
+    let d = e.decoded.as_ref().expect("a binary frame");
+    let mut out = Vec::new();
+    for plot in e.data()["plots"].as_array().unwrap() {
+        for view in plot["views"].as_array().unwrap() {
+            for s in view["series"].as_array().unwrap() {
+                let x = d.array(&s["x"]).unwrap().to_f64();
+                let y = d.array(&s["y"]).unwrap().to_f64();
+                out.push((format!("{} {}", view["title"], s["name"]), x, y));
+            }
+        }
+    }
+    out
+}
+
+/// Once the identification is done its gain and coherence are drawn: at the
+/// review hold, before the floor's loop engages, and after the run has ended,
+/// each view carries its curve, an x for every y on the floor band's lines.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mixed_identification_views_carry_their_curves_at_the_hold_and_after_the_run() {
+    let addr = serve(paced(Duration::from_secs(30), 8.0)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    c.ok(
+        "mixed.subscribe",
+        json!({"rate_hz": 4, "plots": [{"id": "id", "quantity": "identification"},
+                                        {"id": "coh", "quantity": "coherence"}]}),
+    )
+    .await;
+    let r = c
+        .ok(
+            "mixed.configure",
+            json!({"config": config(vec![floor(), tone("t1", 160.0, 0.5)], auto(2.0))}),
+        )
+        .await;
+    assert_eq!(r["state"]["state"], "configured", "{r}");
+    c.ok("mixed.start", json!({})).await;
+    wait_state(&mut c, "review").await;
+    let drawn = |e: &support::Event| {
+        e.topic() == "mixed.data"
+            && e.data()["plots"]
+                .as_array()
+                .is_some_and(|p| p.iter().all(|p| !p["views"].as_array().unwrap().is_empty()))
+    };
+    let check = |stage: &str, curves: Vec<(String, Vec<f64>, Vec<f64>)>| {
+        assert!(curves.len() >= 2, "{stage}: {} series", curves.len());
+        for (name, x, y) in curves {
+            assert!(
+                !y.is_empty() && x.len() == y.len(),
+                "{stage}: {name} draws no curve: {} x for {} y",
+                x.len(),
+                y.len()
+            );
+            assert!(
+                (x[0] - 20.0).abs() < 1e-9 && (x[x.len() - 1] - 1000.0).abs() < 1e-9,
+                "{stage}: {name} from {} to {} Hz",
+                x[0],
+                x[x.len() - 1]
+            );
+        }
+    };
+    let i = c
+        .wait_for("identification views at the hold", LONG, |e| drawn(e))
+        .await;
+    check("at the hold", identification_curves(&c.events[i]));
+    c.ok("mixed.proceed", json!({})).await;
+    let end = wait_state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+    c.pump(Duration::from_secs(1)).await;
+    let last = c
+        .of_topic("mixed.data")
+        .into_iter()
+        .rev()
+        .find(|e| drawn(e))
+        .expect("identification views after the run");
+    check("after the run", identification_curves(last));
+}

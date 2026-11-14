@@ -28,8 +28,10 @@
 		unit?: string;
 		/** What the table is called in the file dialogs and as a new file's name. */
 		fileName?: string;
+		/** The title the setup gives, shown in the empty title field; the title follows it until one is typed. */
+		titleHint?: string;
 	}
-	let { acq, heading = 'Profile', sub = 'The reference PSD the run controls to, at full level.', showTitle = true, rowBands = true, showBands = true, unit = 'g²/Hz', fileName = 'Random Profile' }: Props = $props();
+	let { acq, heading = 'Profile', sub = 'The reference PSD the run controls to, at full level.', showTitle = true, rowBands = true, showBands = true, unit = 'g²/Hz', fileName = 'Random Profile', titleHint = '' }: Props = $props();
 
 	const d = $derived(acq.setup);
 	const locked = $derived(acq.locked);
@@ -106,7 +108,7 @@
 	{#if showTitle}
 		<div class="title-row">
 			<label for="setup-title" class="lbl">Test title</label>
-			<input id="setup-title" class="field" bind:value={d.title} disabled={locked} aria-invalid={at(E, 'title').length > 0} data-testid="setup-title" />
+			<input id="setup-title" class="field" bind:value={d.title} placeholder={titleHint} disabled={locked} aria-invalid={at(E, 'title').length > 0} data-testid="setup-title" />
 			<Findings items={at(E, 'title').map((message) => ({ level: 'error' as const, message }))} />
 		</div>
 	{/if}

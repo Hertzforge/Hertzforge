@@ -225,8 +225,8 @@ and `kurtosis` over the whole run) and each recording's `complete`; its
 - **The end.** When `end.json` cannot be written, the folder keeps
   `complete: false`, and the reader says the run did not end cleanly.
 - **A Recorder run** refuses its start under its own free-space floor
-  (`not_enough_space`, before anything is made) and refuses it `arm_refused`,
-  naming the path and the reason, when the folder, `run.json`, `table.json`,
+  (`not_enough_space`, before anything is made) and refuses it
+  `record_unwritable`, naming the path and the reason, when the folder, `run.json`, `table.json`,
   `setup.json` or `streams/` cannot be made. While it records, a recording
   that cannot be written, the free space falling under the floor, or a disk so
   far behind that a batch cannot be queued ends the run (`write_failed` or

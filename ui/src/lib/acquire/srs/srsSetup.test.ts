@@ -269,3 +269,20 @@ describe('the per-band lists and the band grid', () => {
 		expect(fitToBands(same, 2, () => 0)).toBe(same);
 	});
 });
+
+describe('the SRS title', () => {
+	it('follows the target and the bands until the operator types one', () => {
+		const d = defaultSrsSetup();
+		expect(toSrsConfig(d, null).title).toBe('SRS 100 g, 100 to 2000 Hz');
+		d.target.points = [{ freq_hz: 100, accel_g: 0.4 }, { freq_hz: 1000, accel_g: 1 }, { freq_hz: 2500, accel_g: 1 }];
+		expect(toSrsConfig(d, null).title).toBe('SRS 1 g, 100 to 2000 Hz');
+		d.target = { kind: 'flat', accel_g: 30, points: d.target.points };
+		d.bands.f_hi_hz = 5000;
+		expect(toSrsConfig(d, null).title).toBe('SRS 30 g, 100 to 5000 Hz');
+		d.title = 'Separation shock';
+		expect(toSrsConfig(d, null).title).toBe('Separation shock');
+		expect(fromSrsConfig(toSrsConfig(defaultSrsSetup(), null)).title).toBe('');
+		expect(fromSrsConfig(toSrsConfig(d, null)).title).toBe('Separation shock');
+		expect(mergeSrsSetup({ ...d, title: 'SRS 100 g, 100 to 2000 Hz' }).title).toBe('');
+	});
+});

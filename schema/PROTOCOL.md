@@ -1174,7 +1174,7 @@ plain words: it never names a protocol method.
 | `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
-| `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm`, `sine.start`, `shock.arm`, `shock.start`, `srs.arm`, `srs.start`, `twr.arm`, `twr.start`, `mimo_random.start`, `mimo_shock.arm`, `mimo_shock.start`, `explorer.start`, `mixed.arm` or `mixed.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
+| `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm`, `sine.start`, `shock.arm`, `shock.start`, `srs.arm`, `srs.start`, `twr.arm`, `twr.start`, `mimo_random.start`, `mimo_shock.arm`, `mimo_shock.start`, `explorer.start`, `recorder.start`, `mixed.arm` or `mixed.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, Mixed Mode, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
@@ -1217,7 +1217,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
 | Control and limits | `no_control_channel`, `weight_unknown_channel`, `weights_sum_not_positive`, `limit_unknown_channel`, `limit_rows_not_ascending` | |
 | Any number | `out_of_range` (`field` names it, `message` states the range) | |
-| MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected` | `transform_ill_conditioned`, `alarm_wider_than_abort` |
+| MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected`, and on the simulator `plant_unknown` (the table's enabled inputs by drives is not a size the simulator plays; the message names the sizes it plays) | `transform_ill_conditioned`, `alarm_wider_than_abort` |
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
 | Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `extra_drive_channels`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
@@ -5528,9 +5528,10 @@ station with four recorded rows at 12 800 Hz and the configuration above:
   naming the other), `table_invalid`, `config_invalid` (the table, as it is now, no longer carries
   the run: the same items as configure), `not_enough_space` (the free space is under the floor;
   `detail` `free_bytes` and `floor_bytes`), then, once the station is being opened,
-  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused, the
-  message the controller's own; or, once the station is up, the run folder, `run.json`,
-  `table.json`, `setup.json` or `streams/` could not be written, `detail` `path` and `reason`).
+  `devices_absent`, `hardware_busy`, `record_unwritable` (once the station is up, the run folder,
+  `run.json`, `table.json`, `setup.json` or `streams/` could not be written in the data folder,
+  naming the path and the reason; `detail` `path` and `reason`) and `arm_refused` (the station or
+  the arm gate refused, the message the controller's own).
   No refusal before the station is opened makes a folder. A refusal once the station is being
   opened ends the run `arm_refused`, and `recorder.reset` comes before another start.
 - **`recorder.arm`** (`manual` and `level` modes, from `monitoring`) starts filling the

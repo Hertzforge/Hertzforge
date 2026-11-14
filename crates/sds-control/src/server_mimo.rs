@@ -61,8 +61,8 @@ impl Service {
     fn new_driver(&self, ctx: &StartContext) -> Box<dyn crate::mimo::driver::MimoRunDriver> {
         match &self.opts.mimo_driver {
             Some(f) => f(ctx),
-            None => Box::new(crate::mimo::adapter::ServiceDriver::new(
-                crate::mimo::adapter::AdapterOptions {
+            None => Box::new(
+                crate::mimo::adapter::ServiceDriver::new(crate::mimo::adapter::AdapterOptions {
                     data_root: self.opts.data_root.clone(),
                     capture_root: Some(self.opts.records_root()),
                     sim_speed: self.opts.sim_speed,
@@ -71,8 +71,9 @@ impl Service {
                     catalog: Some(self.catalog.clone()),
                     law_factory: None,
                     record: self.opts.record.clone(),
-                },
-            )),
+                })
+                .on_station(ctx),
+            ),
         }
     }
 

@@ -21,7 +21,7 @@ import type { LawEntry } from '$lib/protocol/mimo';
 import type { ShockAdvance, ShockMonitor } from '$lib/protocol/shock';
 import type { SrsBandDb, SrsConfig, SrsDampedSineRow, SrsEngine, SrsExcitation, SrsPreviewParams, SrsSynthesis, SrsTarget, SrsWaveletRow } from '$lib/protocol/srs';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { defaultRecord, shakerRecord, type FieldErrors, type RecordDraft } from '../setup';
+import { defaultRecord, followTitle, shakerRecord, titleNumber, type FieldErrors, type RecordDraft } from '../setup';
 import { newMonitor, runChannels, type ShockDraft } from '../shock/shockSetup';
 
 export { newMonitor, runChannels };
@@ -150,7 +150,8 @@ export function newLimitChannel(row: ChannelRow | undefined): SrsLimitChannelDra
 
 export function defaultSrsSetup(): SrsDraft {
 	return {
-		title: 'SRS 100 g, 100 to 2000 Hz',
+		// Empty: the title follows the target and the bands (`srsTitle`) until the operator types one.
+		title: '',
 		target: {
 			kind: 'breakpoints',
 			accel_g: 100,
@@ -202,6 +203,24 @@ export function defaultSrsSetup(): SrsDraft {
 }
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
+/** The title the target and the bands give: "SRS 100 g, 100 to 2000 Hz". */
+export function srsTitle(d: SrsDraft): string {
+	const t = d.target;
+	const g = t.kind === 'flat' ? t.accel_g : Math.max(...t.points.map((p) => p.accel_g));
+	const level = Number.isFinite(g) ? ` ${titleNumber(g)} g` : '';
+	const { f_lo_hz: lo, f_hi_hz: hi } = d.bands;
+	const band = Number.isFinite(lo) && Number.isFinite(hi) ? `, ${titleNumber(lo)} to ${titleNumber(hi)} Hz` : '';
+	return `SRS${level}${band}`;
+}
+
+/** The title a configuration carries: the one typed, else the one the setup gives. */
+export function srsTitleOf(d: SrsDraft): string {
+	return d.title.trim() || srsTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its target. */
+const STALE_SRS_TITLES = ['SRS 100 g, 100 to 2000 Hz'];
+
 export function mergeSrsSetup(saved: Partial<SrsDraft> | null): SrsDraft {
 	const base = defaultSrsSetup();
 	if (!saved || typeof saved !== 'object') return base;
@@ -232,7 +251,7 @@ export function mergeSrsSetup(saved: Partial<SrsDraft> | null): SrsDraft {
 	delete (out as Partial<SrsDraft> & { capture?: unknown }).capture;
 	out.record = { ...base.record, ...(saved.record ?? {}) };
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, srsTitle, STALE_SRS_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -260,7 +279,7 @@ export function toSrsConfig(d: SrsDraft, law: LawEntry | null): SrsConfig {
 	const shaker = f.enabled ? shakerRecord(f.shaker_text) : null;
 	const lc = d.limit_channels;
 	return {
-		title: d.title.trim(),
+		title: srsTitleOf(d),
 		target: targetOf(d),
 		bands: bandsOf(d),
 		synthesis: synthesisOf(d),
@@ -318,6 +337,10 @@ export function toSrsConfig(d: SrsDraft, law: LawEntry | null): SrsConfig {
  * the shell's where it does not; one pulse count for every level is spread over the levels.
  */
 export function fromSrsConfig(c: SrsConfig): SrsDraft {
+	return followTitle(srsDraftOf(c), srsTitle);
+}
+
+function srsDraftOf(c: SrsConfig): SrsDraft {
 	const base = defaultSrsSetup();
 	const levels = c.schedule.levels_db.map((db, i) => ({ db, pulses: c.schedule.pulses.length === 1 ? c.schedule.pulses[0] : (c.schedule.pulses[i] ?? NaN) }));
 	const t = c.target;
@@ -525,14 +548,13 @@ function needPair(map: FieldErrors, key: string, v: readonly number[]) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, a table with too few rows, a drive ceiling or
+ * Fields that hold no number, a table with too few rows, a drive ceiling or
  * abort not given (or the abort not above the ceiling), a limit channel or monitor on a row the
  * table does not enable, a shaker record that does not read. Everything else, the synthesis and
  * the band grid included, is the service's to judge in the dry run.
  */
 export function localErrors(d: SrsDraft, rows: ChannelRow[] = []): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	if (d.target.kind === 'flat') need(out, 'target.accel_g', d.target.accel_g);
 	else {
 		if (d.target.points.length < 2) add(out, 'target.points', 'Give at least two points of the target.');

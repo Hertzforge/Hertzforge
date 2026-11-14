@@ -24,7 +24,7 @@ import {
 	type RecorderSubscribeParams,
 	type RecorderSubscribeResult
 } from './recorder';
-import { ServiceClient } from './client.svelte';
+import { RequestError, ServiceClient } from './client.svelte';
 import { createControlServer } from './mock/control';
 import { mockSocketFactory } from './mock/socket';
 import { AcquireState } from '$lib/acquire/store.svelte';
@@ -34,6 +34,7 @@ import type { PlotPanel } from '$lib/acquire/screen/screen.svelte';
 import { defaultRecorderSetup, fromRecorderConfig, recorderByKey, recorderSectionOf, toRecorderConfig } from '$lib/acquire/recorder/recorderSetup';
 import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { recorderCardStatus, RECORDER_OUTCOME_WORDS, savedWords } from '$lib/acquire/recorder/recorderWords';
+import { toRefusal } from '$lib/acquire/words';
 
 const DIR = fileURLToPath(new URL('../../../../schema/golden/', import.meta.url));
 const golden = (name: string) => `${DIR}${name}`;
@@ -163,6 +164,17 @@ describe('Recorder goldens through the shell', () => {
 			const want = it.reason === 'no_input_channel' ? 'station' : /^(capture|metadata|title)/.test(it.field ?? '') ? 'capture' : /^analysis/.test(it.field ?? '') ? 'analysis' : 'trigger';
 			expect(section).toBe(want);
 		}
+	});
+
+	it.skipIf(!has('response_error_recorder_record_unwritable.json'))('a data folder that cannot be written refuses the start as every module does, with the path and the reason', () => {
+		const err = readJson('response_error_recorder_record_unwritable.json') as ResponseErr;
+		expect([err.error.code, err.error.reason]).toEqual(['refused', 'record_unwritable']);
+		const r = toRefusal('Start', new RequestError('refused', err.error.message, 'recorder.start', err.error.reason, err.error.detail));
+		expect(r.title).toBe("The Run's Record Cannot Be Written");
+		expect(r.reason).toBe('record_unwritable');
+		const path = String(err.error.detail?.path);
+		expect(r.message).toContain(path);
+		expect(r.message).toContain(String(err.error.detail?.reason));
 	});
 
 	it.skipIf(!has('response_recorder_start.json'))('a Recorder start answers once acquisition runs, with the station figures', () => {

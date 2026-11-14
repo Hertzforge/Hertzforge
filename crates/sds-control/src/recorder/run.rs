@@ -115,6 +115,21 @@ fn refuse(reason: &'static str, message: impl Into<String>) -> MethodError {
     MethodError::named(ErrorCode::Refused, reason, message)
 }
 
+/// The start refused because the run's record (its folder, `run.json`, `table.json`,
+/// `setup.json` or `streams/`) cannot be written at `path`, for `reason`: the
+/// refusal every module gives, with the path and the reason in `detail`.
+pub fn record_unwritable(path: &std::path::Path, reason: &str) -> MethodError {
+    refuse(
+        "record_unwritable",
+        format!(
+            "The run's record could not be written, so the run did not start: {} ({reason}). \
+             Choose a data folder that can be written.",
+            path.display()
+        ),
+    )
+    .with_detail(json!({"path": path.display().to_string(), "reason": reason}))
+}
+
 /// The refusal of a verb in a phase it does not apply in.
 pub fn wrong_state(v: &RecorderView, verb: &str) -> MethodError {
     refuse(
@@ -476,16 +491,7 @@ impl RecorderRun {
             Ok(r) => r,
             Err(e) => {
                 let _ = svc.stop_monitor();
-                let err = refuse(
-                    "arm_refused",
-                    format!(
-                        "The run's record could not be written, so the run did not start: {} \
-                         ({}). Choose a data folder that can be written.",
-                        e.path.display(),
-                        e.reason
-                    ),
-                )
-                .with_detail(json!({"path": e.path.display().to_string(), "reason": e.reason}));
+                let err = record_unwritable(&e.path, &e.reason);
                 self.end_before_start(&err);
                 return Err(err);
             }
@@ -497,18 +503,18 @@ impl RecorderRun {
         let made = std::fs::create_dir(&streams);
         svc.set_data_root(streams.clone());
         let begun = made
-            .map_err(|e| format!("{} could not be made: {e}", streams.display()))
+            .map_err(|e| record_unwritable(&streams, &e.to_string()))
             .and_then(|()| {
                 if w.trigger.mode == Mode::Start {
-                    svc.record_from_start()
-                        .map_err(|e| format!("The recording could not begin: {e}"))
+                    svc.record_from_start().map_err(|e| {
+                        refuse("arm_refused", format!("The recording could not begin: {e}"))
+                    })
                 } else {
                     Ok(())
                 }
             });
-        if let Err(words) = begun {
+        if let Err(err) = begun {
             let _ = svc.stop_monitor();
-            let err = refuse("arm_refused", words);
             self.end_before_start(&err);
             let mut end = serde_json::Map::new();
             end.insert("run_uid".into(), Value::from(run_uid.as_str()));

@@ -117,7 +117,7 @@ impl AdapterOptions {
 
 /// A driver factory that runs every MIMO setup on the controller's service.
 pub fn factory(opts: AdapterOptions) -> super::driver::DriverFactory {
-    Arc::new(move |_ctx: &StartContext| Box::new(ServiceDriver::new(opts.clone())))
+    Arc::new(move |ctx: &StartContext| Box::new(ServiceDriver::new(opts.clone()).on_station(ctx)))
 }
 
 // ---- the reference on the run's grid ------------------------------------------------
@@ -546,6 +546,44 @@ pub fn sim_plant_for(inputs: usize, drives: usize) -> Option<SimStandardPlant> {
         .find(|p| p.dims() == (inputs, drives))
 }
 
+/// The size a table asks of the simulator, `(inputs, drives)`: its enabled input
+/// rows (every role but drive) and its enabled drive rows.
+pub fn sim_size(table: &ChannelTable) -> (usize, usize) {
+    let enabled = |drive: bool| {
+        table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && (c.role == ChannelRole::Drive) == drive)
+            .count()
+    };
+    (enabled(false), enabled(true))
+}
+
+/// The sizes the simulator plays, inputs by drives: "4 by 4, 12 by 6, ... or 72 by 24".
+pub fn sim_sizes_words() -> String {
+    let mut dims: Vec<(usize, usize)> = Vec::new();
+    for p in SimStandardPlant::ALL {
+        if !dims.contains(&p.dims()) {
+            dims.push(p.dims());
+        }
+    }
+    let words: Vec<String> = dims.iter().map(|(i, d)| format!("{i} by {d}")).collect();
+    match words.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
+
+/// Why the simulator cannot play a table of `inputs` by `drives`, naming the sizes it plays.
+pub fn sim_size_words(inputs: usize, drives: usize) -> String {
+    format!(
+        "The simulator plays a standard plant of {} (inputs by drives), and this table has \
+         {inputs} inputs and {drives} drives; enable that many rows to run on the simulator.",
+        sim_sizes_words()
+    )
+}
+
 /// The station wrapper the run drives through: paced on the simulator, and the
 /// drive to zero when it is dropped (the end of a run, a panic on the run thread, or
 /// the service dropping the run). Every call is forwarded explicitly.
@@ -771,6 +809,9 @@ pub struct ServiceDriver {
     tx: Option<Sender<Cmd>>,
     /// An identification set to load when the run starts.
     pending_ident: Option<PathBuf>,
+    /// On the simulator, the size its table asks, `(inputs, drives)`, for the
+    /// setup's check; `None` on hardware.
+    sim_size: Option<(usize, usize)>,
 }
 
 fn idle_status(law: LawRef) -> MimoStatus {
@@ -830,7 +871,17 @@ impl ServiceDriver {
             law,
             tx: None,
             pending_ident: None,
+            sim_size: None,
         }
+    }
+
+    /// The driver for a run on the station `ctx` names: on the simulator its
+    /// setup's check says when the table is not a size the simulator plays.
+    pub fn on_station(mut self, ctx: &StartContext) -> ServiceDriver {
+        self.sim_size = (ctx.kind == "sim")
+            .then(|| ctx.table.as_ref().map(sim_size))
+            .flatten();
+        self
     }
 
     /// The run's log of operator events (who stopped it, a lost controller), oldest
@@ -888,6 +939,17 @@ impl MimoRunDriver for ServiceDriver {
         items: Report,
     ) -> Validation {
         let mut v = super::check::numeric(&setup, items, law.clone());
+        // The simulator plays only its standard plants: a table of another size is
+        // said now, as the arm would refuse it. Hardware is not affected.
+        if let Some((inputs, drives)) = self.sim_size {
+            if sim_plant_for(inputs, drives).is_none() {
+                v.report.errors.push(Item::field(
+                    "plant_unknown",
+                    "setup.channels",
+                    sim_size_words(inputs, drives),
+                ));
+            }
+        }
         // A reference file is read and its hash checked now, so a wrong file is
         // refused with the setup rather than when the run starts.
         if matches!(setup.reference, Reference::File { .. }) {
@@ -1800,29 +1862,12 @@ impl Actor {
             MethodError::internal("the MIMO run was started without the channel table")
         })?;
         // The station.
-        let inputs = table
-            .channels
-            .iter()
-            .filter(|c| c.enabled && c.role != ChannelRole::Drive)
-            .count();
-        let drives = table
-            .channels
-            .iter()
-            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
-            .count();
+        let (inputs, drives) = sim_size(&table);
         let fs = setup.estimation.fs_hz;
         let mut sim_identity = None;
         let built = if ctx.kind == "sim" {
-            let plant = sim_plant_for(inputs, drives).ok_or_else(|| {
-                refused(
-                    "arm_refused",
-                    format!(
-                        "The simulator plays a standard plant of 4 by 4, 12 by 6, 24 by 24 or \
-                         72 by 24 (inputs by drives), and this table has {inputs} inputs and \
-                         {drives} drives; enable that many rows to run on the simulator."
-                    ),
-                )
-            })?;
+            let plant = sim_plant_for(inputs, drives)
+                .ok_or_else(|| refused("arm_refused", sim_size_words(inputs, drives)))?;
             let spec = StationSpec {
                 sim: SimPlantSpec {
                     sample_rate_hz: fs,

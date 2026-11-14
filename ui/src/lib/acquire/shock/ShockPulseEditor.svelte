@@ -9,7 +9,7 @@
 	import { formatNumber } from '$lib/viz/format';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
-	import { COMPENSATIONS, SHAPES } from './shockSetup';
+	import { COMPENSATIONS, SHAPES, shockTitle } from './shockSetup';
 	import type { ShockStore } from './shockStore.svelte';
 
 	interface Props {
@@ -35,7 +35,7 @@
 			<div class="aq-fields">
 				<div class="sel wide">
 					<label for="sp-name" class="lbl">Test title</label>
-					<input id="sp-name" class="field" bind:value={d.title} disabled={locked} aria-invalid={errs('title').length > 0} data-testid="shock-title" />
+					<input id="sp-name" class="field" bind:value={d.title} placeholder={shockTitle(d)} title="Follows the pulse until a title is typed" disabled={locked} aria-invalid={errs('title').length > 0} data-testid="shock-title" />
 					<Findings items={errs('title').map((message) => ({ level: 'error' as const, message }))} />
 				</div>
 				<div class="sel">

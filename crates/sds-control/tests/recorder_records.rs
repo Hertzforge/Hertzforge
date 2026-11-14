@@ -130,3 +130,44 @@ async fn recorder_run_folder_holds_its_records() {
         assert_eq!(side["frames"], 12_800);
     }
 }
+
+/// A data folder that cannot be written refuses the start `record_unwritable`, as
+/// every other module does, naming the path and the reason; the run ends
+/// `arm_refused` with nothing recorded, and no folder is made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn recorder_an_unwritable_data_folder_refuses_the_start_record_unwritable() {
+    let mut opts = options(
+        FixedScanner(Err(StationBuildError::NiDriverUnavailable("none".into()))),
+        1.0,
+        Duration::from_secs(30),
+        Duration::from_millis(300),
+    );
+    // The data folder is a file: no folder can be made in it.
+    std::fs::create_dir_all(&opts.data_root).unwrap();
+    let blocked = opts.data_root.join("not-a-folder");
+    std::fs::write(&blocked, b"a file").unwrap();
+    opts.capture_root = Some(blocked.clone());
+    let addr = serve(Service::with_options(opts)).await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Shell"})).await;
+    c.ok("station.select", json!({"kind": "sim"})).await;
+    c.ok(
+        "recorder.configure",
+        json!({"config": {"trigger": {"mode": "start", "record_s": 1}}}),
+    )
+    .await;
+    let e = c.refused("recorder.start", json!({})).await;
+    assert_eq!(e["code"], "refused", "{e}");
+    assert_eq!(e["reason"], "record_unwritable", "{e}");
+    let message = e["message"].as_str().unwrap();
+    assert!(
+        message.contains(&blocked.display().to_string()),
+        "{message}"
+    );
+    assert_eq!(e["detail"]["path"], blocked.display().to_string());
+    assert!(!e["detail"]["reason"].as_str().unwrap().is_empty(), "{e}");
+    let s = c.ok("recorder.state", json!({})).await;
+    assert_eq!(s["end"]["outcome"], "arm_refused", "{s}");
+    assert_eq!(s["recordings"], 0, "{s}");
+    assert!(blocked.is_file(), "nothing was made in its place");
+}

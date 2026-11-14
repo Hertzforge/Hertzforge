@@ -76,3 +76,27 @@ export interface FormSpec {
 	/** The entry a correction corrects. */
 	target?: number;
 }
+
+/** A run record of the project this connection holds, as `project.setups` lists it. */
+export interface RunRecordRow {
+	name: string;
+	module: string;
+	title: string;
+	run_id: string;
+	outcome: string | null;
+}
+
+/** One event of a run record, proposed as a log entry (`runlog.run_events`). */
+export interface RunEvent {
+	index: number;
+	/** The entry kind it would be written as, and that kind's label. */
+	kind: string;
+	label: string;
+	fields: Record<string, unknown>;
+	/** The entry's words, ending with the marker that names the run and the event. */
+	text: string;
+	/** When the controller logged it (ISO), or null when the record has no time for it. */
+	time: string | null;
+	/** The open log holds it already. */
+	accepted: boolean;
+}
