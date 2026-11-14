@@ -43,6 +43,7 @@ crates/sds-control/src/mimo_shock   multiple-drive shock's setup and run on the 
 crates/sds-control/src/mixed        Mixed Mode's setup and run on the wire
 crates/sds-control/src/pulse        the pulse modules' run records
 crates/sds-control/src/random       Random's setup and run on the wire
+crates/sds-control/src/record       the run record every module writes through: the run folder's files, streams and results
 crates/sds-control/src/recorder     the Recorder's setup, run and records on the wire
 crates/sds-control/src/shock        classical shock's setup and run on the wire
 crates/sds-control/src/sine         Sine's setup and run on the wire
@@ -83,10 +84,13 @@ ui/src/lib/tables                   the channel and breakpoint table files the s
 
 # The seam on the analysis side
 src/hertzforge/io/mimo_run_convert.py      turns a multiple-output Random run into analysis objects
-src/hertzforge/io/recorder_run_convert.py  turns a Recorder run into analysis objects
+src/hertzforge/io/run_folder.py           reads a run folder: the manifest, the table, the setup, the log, the streams, the results
+src/hertzforge/io/run_convert.py          turns a run folder into analysis objects; the one mapping between a control channel row and the channel table
+src/hertzforge/core/run_record.py         the control service's record of a run, as a project holds it
 src/hertzforge/io/tables.py                channel and breakpoint tables as files, for both sides
 src/hertzforge/io/reference_convert.py     writes the controller's reference file from a specification
 src/hertzforge/core/channel_table.py       the channel table both sides use
 docs/hforge-format.md#channel_table        how a channel table is stored in a project
+docs/run-folder.md                         the run folder: what a control run leaves on disk
 docs/hforge-format.md#breakpoint_table     how a profile's breakpoint table is stored in a project
 docs/hforge-format.md#run-a-mimo-random-run-proposal  how a run is stored in a project
