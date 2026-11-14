@@ -881,7 +881,9 @@ export type RefusalReason =
 	| 'law_check_running'
 	| 'law_check_not_recorded'
 	| 'law_not_checked'
-	| 'shutting_down';
+	| 'shutting_down'
+	// a Random run's record
+	| 'record_unwritable';
 
 export type ItemReason =
 	// channel table
@@ -1436,7 +1438,7 @@ export interface RandomData extends RandomLiveHead {
 }
 
 /** `pulse` and `law` are classical shock's: a line per pulse fired, and the law's calls that were not used. */
-export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note' | 'pulse' | 'law';
+export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note' | 'pulse' | 'law' | 'record';
 
 export interface LogEntry {
 	seq: number;

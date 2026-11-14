@@ -30,7 +30,8 @@ export interface ShellConfig {
 	/**
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
-	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`.
+	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`,
+	 * `mock_record=unwritable|problem` (a Random run's record refused at arm, or failing as it runs).
 	 */
 	mockControl: ControlServerOptions;
 }
@@ -71,7 +72,8 @@ export function readConfig(search: string): ShellConfig {
 			niInstalled: q.get('mock_ni') === 'absent' ? false : undefined,
 			abortDemoAtS: num(q.get('mock_abort_at')),
 			feasibilityExceeds: q.get('mock_feasibility') === 'exceeds' ? true : undefined,
-			coherence: num(q.get('mock_coherence'))
+			coherence: num(q.get('mock_coherence')),
+			record: q.get('mock_record') === 'unwritable' ? 'unwritable' : q.get('mock_record') === 'problem' ? 'problem' : undefined
 		}
 	};
 }

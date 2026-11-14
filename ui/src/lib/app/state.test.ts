@@ -372,6 +372,57 @@ describe('a value typed into an open form', () => {
 	});
 });
 
+describe('a finished run opened in Analysis', () => {
+	const runObjects = ['Channel Table', 'inputs', 'drives', 'Specification', 'Run Record'].map((name) => ({ name, kind: 'time_history', records: 1, groups: ['run'], verbs: [] }));
+	function runApp(start: ProjectSummary | null) {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const sent: [string, Record<string, unknown>][] = [];
+		const answers = { refuse: '' };
+		const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+			if (method === 'project.open' || method === 'project.import') {
+				sent.push([method, params]);
+				if (answers.refuse) throw new RequestError('refused', answers.refuse, method);
+				const before = method === 'project.import' ? (app.project.summary?.objects ?? []) : [];
+				return { added: runObjects.map((o) => o.name), project: { ...summary, title: 'run', file: null, objects: [...before, ...runObjects] } };
+			}
+			if (method === 'project.actions') return { table: { columns: [] } };
+			return {};
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		app.project.summary = start;
+		app.workspace = 'acquire';
+		return { app, sent, answers };
+	}
+
+	it('opens the folder as the project when the project holds nothing, and shows the Random workspace', async () => {
+		const { app, sent } = runApp({ ...summary, objects: [], active_geometry: null } as unknown as ProjectSummary);
+		expect(await app.runOpen.open('/data/20261113-180000_random_r-0001')).toBe(true);
+		expect(sent).toEqual([['project.open', { path: '/data/20261113-180000_random_r-0001' }]]);
+		expect(app.workspace).toBe('random');
+		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
+		expect(app.project.busy).toBeNull();
+	});
+
+	it('imports it into a project that holds objects, keeping them', async () => {
+		const { app, sent } = runApp(summary);
+		expect(await app.runOpen.open('/data/run')).toBe(true);
+		expect(sent.map(([m]) => m)).toEqual(['project.import']);
+		expect(app.project.summary?.objects.map((o) => o.name)).toEqual(['G', 'H', ...runObjects.map((o) => o.name)]);
+		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
+		expect(app.workspace).toBe('random');
+	});
+
+	it('stays on the run screen and says why when the analysis service refuses', async () => {
+		const { app, answers } = runApp(summary);
+		answers.refuse = 'The folder has no run.json.';
+		expect(await app.runOpen.open('/data/run')).toBe(false);
+		expect(app.workspace).toBe('acquire');
+		expect(app.runOpen.status).toBe('refused');
+		expect(app.runOpen.refusal?.message).toBe('The folder has no run.json.');
+		expect(app.project.busy).toBeNull();
+	});
+});
+
 describe('deleting parts', () => {
 	it('says "all of" an object whose every part is picked, which deletes the object', () => {
 		const { app } = make();

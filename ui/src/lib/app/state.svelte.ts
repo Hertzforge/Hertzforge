@@ -9,6 +9,7 @@ import { pairsText, togglePick } from '$lib/viz/macBars';
 import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
+import { RunOpen } from '$lib/acquire/runOpen.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
 import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
@@ -1528,6 +1529,37 @@ export class ProjectState {
 		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
 	}
 
+	/**
+	 * A control run's folder into the analysis side: opened as the project when the project holds
+	 * nothing yet, otherwise imported into it. The service converts the folder; the objects it
+	 * brought are selected in the tree. Resolves with their names; a refusal is passed on.
+	 */
+	async takeRun(path: string): Promise<string[]> {
+		const s = this.summary;
+		const fresh = !s || (!s.file && s.objects.length === 0);
+		this.busy = `Opening ${baseName(path)}`;
+		this.progress = null;
+		this.error = null;
+		try {
+			let added: string[];
+			if (fresh) {
+				const res = await this.app.analysis.request<{ project: ProjectSummary }>('project.open', { path }, { timeoutMs: FILE_TIMEOUT_MS });
+				this.apply(res.project);
+				added = res.project.objects.map((o) => o.name);
+			} else {
+				const res = await this.app.analysis.request<{ added: string[]; project: ProjectSummary }>('project.import', { path }, { timeoutMs: FILE_TIMEOUT_MS });
+				this.apply(res.project);
+				added = res.added;
+			}
+			const names = added.filter((n) => this.summary?.objects.some((o) => o.name === n));
+			this.selected({ objects: names, records: {}, part: null, anchor: names[0] ?? null });
+			return names;
+		} finally {
+			this.busy = null;
+			this.progress = null;
+		}
+	}
+
 	importFile(path: string, units?: Record<string, string>): Promise<boolean> {
 		return this.call(`Importing ${baseName(path)}`, 'project.import', units ? { path, units } : { path });
 	}
@@ -1995,6 +2027,8 @@ export class AppState {
 	readonly console: ConsoleState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
+	/** A finished Random run's way to its data on the analysis side. */
+	readonly runOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2054,6 +2088,13 @@ export class AppState {
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
 		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
+		this.runOpen = new RunOpen({
+			bring: (folder) => this.project.takeRun(folder),
+			show: (workspace) => {
+				this.go(workspace);
+				this.analyze.selectProject();
+			}
+		});
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
