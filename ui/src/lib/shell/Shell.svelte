@@ -3,7 +3,7 @@
 	/** The shell frame: top bar, workspace rail, the active workspace, and the command palette. */
 	import { onMount } from 'svelte';
 	import { getApp } from '$lib/app/state.svelte';
-	import { hasFileMenu, listenForDrops, listenForFileMenu } from '$lib/project/files';
+	import { hasFileMenu, listenForDrops, listenForFileMenu, listenForOpenedFiles } from '$lib/project/files';
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
 	import Acquire from '$lib/workspaces/Acquire.svelte';
@@ -37,11 +37,23 @@
 			app.go('signals');
 			app.project.error = 'A browser gives the shell a dropped file\'s contents but not its path. Drop files on the desktop app, or give the path under Project.';
 		});
+		// files the app was asked to open (a double-clicked project, a run's run.json): opened
+		// once the analysis service has the project, as a drop opens them
+		const stopOpened = listenForOpenedFiles((paths) => (opening = [...opening, ...paths]));
 		return () => {
 			stopMenu();
 			stopUpdates();
 			stopDrops();
+			stopOpened();
 		};
+	});
+
+	let opening = $state<string[]>([]);
+	$effect(() => {
+		if (!opening.length || !app.analysis.isOpen || !app.project.summary) return;
+		const paths = opening;
+		opening = [];
+		void app.project.openPaths(paths);
 	});
 
 	// each time the analysis service connects it is told the display units chosen before, and the
