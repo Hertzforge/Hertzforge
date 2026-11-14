@@ -53,6 +53,7 @@ import type {
 	ReadingRow,
 	RefusalReason,
 	ReportItem,
+	RunRecordRef,
 	RunState,
 	SessionState,
 	SimProfile,
@@ -112,6 +113,10 @@ export interface ControlServerOptions {
 	recorderFreeBytes?: number | null;
 	/** A MIMO Shock run's second level ends on an absolute abort line. */
 	mimoShockAbsoluteAbort?: boolean;
+	/** Where a Random run's folder is made (default `~/Hertzforge_Data`). */
+	dataRoot?: string;
+	/** A Random run's record: refused at arm (`unwritable`), or a stream stops while it runs (`problem`). */
+	record?: 'unwritable' | 'problem';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -652,6 +657,15 @@ interface RandomRun {
 	driveRms: number | null;
 	channelRms: Map<number, number>;
 	timer: ReturnType<typeof setInterval> | null;
+	/** The run's record, from arm on. */
+	record: RunRecordRef | null;
+}
+
+/** A run folder's name: the time it armed in UTC, the test and the run's id. */
+export function runFolderName(at: Date, runId: string): string {
+	const p = (n: number) => String(n).padStart(2, '0');
+	const stamp = `${at.getUTCFullYear()}${p(at.getUTCMonth() + 1)}${p(at.getUTCDate())}-${p(at.getUTCHours())}${p(at.getUTCMinutes())}${p(at.getUTCSeconds())}`;
+	return `${stamp}_random_${runId}`;
 }
 
 const LIVE_STATES: RandomRunState[] = ['armed', 'running', 'review', 'stopping'];
@@ -1119,14 +1133,15 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			remaining_at_level_s: timing.remaining,
 			alarm: r.alarmLines > 0 || r.overload.size > 0,
 			feasibility: r.feasibility,
-			end: r.end
+			end: r.end,
+			...(r.record ? { record: { ...r.record } } : {})
 		};
 	}
 
 	/** Send `random.state` when anything the run bar shows has changed. */
 	function stateChanged(force = false) {
 		const state = stateOf(random);
-		const key = JSON.stringify([state.run_id, state.state, state.phase, state.mode, state.level_db, state.alarm, state.end, state.feasibility, state.clock]);
+		const key = JSON.stringify([state.run_id, state.state, state.phase, state.mode, state.level_db, state.alarm, state.end, state.feasibility, state.clock, state.record]);
 		if (!force && key === lastStateKey) return;
 		lastStateKey = key;
 		broadcast('random.state', state as unknown as Record<string, unknown>);
@@ -1199,8 +1214,23 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			controlRms: null,
 			driveRms: null,
 			channelRms: new Map(),
-			timer: null
+			timer: null,
+			record: null
 		};
+	}
+
+	/** Claim the run's folder at arm, or refuse the arm as the service does when it cannot be written. */
+	function claimRecord(r: RandomRun) {
+		if (r.record) return;
+		const root = options.dataRoot ?? '~/Hertzforge_Data';
+		const folder = `${root.replace(/[\\/]+$/, '')}/${runFolderName(new Date(), r.id)}`;
+		if (options.record === 'unwritable') {
+			const reason = 'Permission denied';
+			refuse('refused', 'record_unwritable', `The run's record could not be written, so the run did not arm: ${folder} (${reason}). Choose a data folder that can be written.`, { path: folder, reason });
+		}
+		const streams = r.config.record?.streams === false ? 'off' : 'on';
+		r.record = { folder, streams, problem: null };
+		if (streams === 'off') addLog('record', 'the time histories are not recorded: switched off in the setup');
 	}
 
 	/** Feasibility, the station's actual rate and grid, and the arm gate. Nothing is driven. */
@@ -1240,6 +1270,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		if (grid.lines < MIN_LINES) {
 			refuse('refused', 'arm_refused', `arm refused: the station configured ${grid.fs_hz} Hz, which leaves ${grid.lines} control lines in the band (minimum ${MIN_LINES}).`);
 		}
+		claimRecord(r);
 		r.grid = grid;
 		r.clock = 'shared';
 		r.lines = buildLines(r);
@@ -1456,6 +1487,11 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				break;
 			case 'engaged':
 			case 'full_level': {
+				if (options.record === 'problem' && r.record && r.record.streams === 'on' && r.record.problem === null && r.engagedT >= 2) {
+					const problem = 'the inputs stream stopped: no space left on the disk';
+					r.record = { ...r.record, problem };
+					addLog('record', problem);
+				}
 				r.engagedT += dt;
 				r.atLevelT += dt;
 				walk(r, dt);

@@ -4,7 +4,8 @@
 	 * them, and the control dock with the run's cards. Run holds the verbs that apply now, and a
 	 * review hold or the run's end as one line with its button (the trip and its axis when a
 	 * protection stopped it). Level, Readings (the band's lines), Inputs (every input's rms with its
-	 * overload mark) and Log follow. Nothing here computes a number.
+	 * overload mark) and Log follow. From arm on, the Run card names the folder the run is recorded
+	 * in. Nothing here computes a number.
 	 */
 	import { formatFixed } from '$lib/viz/format';
 	import StatusMark from '$lib/viz/StatusMark.svelte';
@@ -18,7 +19,7 @@
 	import RunVerbs from './RunVerbs.svelte';
 	import type { AcquireState } from './store.svelte';
 	import type { ActionId } from './actions';
-	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
+	import { clock, db, folderName, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
 
 	interface Props {
 		acq: AcquireState;
@@ -56,6 +57,7 @@
 	/** Verbs the Run card draws as its hold and end lines, so not twice. */
 	const omit = $derived<ActionId[]>(['apply', ...(review ? (['proceed'] as const) : []), ...(end ? (['reset'] as const) : [])]);
 	const reset = $derived(acq.actions.reset);
+	const record = $derived(run?.record ?? null);
 
 	function empty(p: PlotPanel): string {
 		const data = display.plotData(p.id);
@@ -76,6 +78,16 @@
 		<div class="runcard">
 			<!-- The verbs first: Stop and Abort stay in view however short the card is. -->
 			<RunVerbs {acq} {onoverride} {abortKeys} {compact} layout="card" {omit} />
+			{#if record}
+				<div class="rec" data-testid="record-line" data-streams={record.streams}>
+					<svg class="mk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M1.5 3.2h4l1.3 1.4h5.7v6.9h-11z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+					<div class="what">
+						<p class="recname"><span class="k">{end ? 'Recorded in' : 'Recording to'}</span><strong title={record.folder} data-testid="record-folder">{folderName(record.folder)}</strong></p>
+						<p class="path" title={record.folder} data-testid="record-path">{record.folder}</p>
+						{#if record.streams === 'off'}<p class="msg" data-testid="record-streams-off">Time histories are not kept for this run.</p>{/if}
+					</div>
+				</div>
+			{/if}
 			{#if end}
 				<div class="line end {tone}" role={tone === 'fail' ? 'alert' : 'status'} data-testid="run-end" data-outcome={end.outcome}>
 					<span class="mk" aria-hidden="true">
@@ -311,6 +323,49 @@
 	.btn.off {
 		opacity: 0.45;
 		cursor: default;
+	}
+
+	/* Where the run is recorded: the folder's name, and its full path under it. */
+	.rec {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--sp-2);
+		font-size: var(--text-xs);
+		color: var(--text-2);
+	}
+
+	.rec .mk {
+		flex: none;
+		margin-top: 1px;
+		color: var(--text-3);
+	}
+
+	.rec .what {
+		min-width: 0;
+	}
+
+	.recname {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.recname .k {
+		color: var(--text-3);
+	}
+
+	.recname strong {
+		font-family: var(--font-mono);
+		font-weight: var(--weight-medium);
+		color: var(--text-1);
+		word-break: break-all;
+	}
+
+	.rec .path {
+		font-family: var(--font-mono);
+		font-size: var(--text-2xs);
+		color: var(--text-3);
+		word-break: break-all;
+		user-select: text;
 	}
 
 	.lines {

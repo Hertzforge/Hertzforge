@@ -216,8 +216,29 @@ export const LOG_WORDS: Record<LogKind, string> = {
 	trip: 'Trip',
 	note: 'Note',
 	pulse: 'Pulse',
-	law: 'Control Law'
+	law: 'Control Law',
+	record: 'Recording'
 };
+
+// ---------------------------------------------------------------------------------------------
+// The run's record
+
+/** The last part of a folder's path, whichever separator the service's machine uses. */
+export function folderName(path: string): string {
+	const parts = path.split(/[\\/]+/).filter(Boolean);
+	return parts.at(-1) ?? path;
+}
+
+/**
+ * The notice while the run's record has a problem: the run goes on. Once the run has ended, what
+ * went wrong stays said, in the past. Null when there is no problem.
+ */
+export function recordProblem(record: { problem: string | null } | null | undefined, ended = false): { title: string; text: string } | null {
+	const problem = record?.problem?.trim();
+	if (!problem) return null;
+	const said = `${problem.replace(/^./, (c) => c.toUpperCase())}${/[.!?]$/.test(problem) ? '' : '.'}`;
+	return ended ? { title: 'Recording Had a Problem', text: said } : { title: 'Recording Has a Problem', text: `The run goes on. ${said}` };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Refusals
@@ -258,7 +279,8 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	law_check_running: 'A Law Check Is Already Running',
 	law_check_not_recorded: 'The Check Was Not Recorded',
 	law_not_checked: 'The Law Has Not Passed Its Check',
-	shutting_down: 'The Control Service Is Shutting Down'
+	shutting_down: 'The Control Service Is Shutting Down',
+	record_unwritable: "The Run's Record Cannot Be Written"
 };
 
 /** Refusals of one test type's own methods (classical shock's, Sine's, TWR's, Explorer's), beside the shared ones. */
@@ -379,6 +401,10 @@ export function refusalFacts(reason: string | null | undefined, detail: Record<s
 			break;
 		case 'out_of_band':
 			if (Array.isArray(detail.band_hz)) out.push(`Band: ${String(detail.band_hz[0])} to ${String(detail.band_hz[1])} Hz`);
+			break;
+		case 'record_unwritable':
+			if (has('path')) out.push(`Path: ${String(detail.path)}`);
+			if (has('reason')) out.push(`Reason: ${String(detail.reason)}`);
 			break;
 		case 'adjust_refused':
 			if (has('key')) out.push(`Parameter: ${String(detail.key)}`);

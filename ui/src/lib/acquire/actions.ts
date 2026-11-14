@@ -172,7 +172,8 @@ export interface NoticesHost {
 	refusal: import('./words').Refusal | null;
 	note: { tone: 'pass' | 'info' | 'warn'; text: string } | null;
 	connected: boolean;
-	run: { state: RandomRunState } | null;
+	/** `record` is the run's record (Random's), whose problem is shown while the run goes on. */
+	run: { state: RandomRunState; record?: { problem: string | null } | null } | null;
 	isLive: boolean;
 	control: { url: string; detail: string | null };
 	syncError: string | null;
