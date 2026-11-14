@@ -193,8 +193,8 @@ def add_converted_run(project: hertzforge.Project) -> None:
     import sys
     import tempfile
 
-    sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tests'))
-    import run_folders
+    sys.path.insert(0, os.path.dirname(HERE))
+    from tests import run_folders
 
     from hertzforge.io import run_convert
 
