@@ -239,14 +239,14 @@ def merge_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
 def delete_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.delete_element_groups`: element groups deleted with their
     elements and the nodes only they used, except nodes where data in the
-    project is measured or solved (`Project.delete_element_groups`)."""
+    project is measured or solved (`Project.delete_element_groups`). Every
+    group may go: a geometry with none is still a geometry, its solids left to
+    mesh again (Brandon, 2026-11-13)."""
     name = params['geometry']
     geometry = project[name]
     if not params['groups'].strip():
         raise refused('name the element groups to delete, such as 2, 4')
     chosen = _groups(geometry, params['groups'])
-    if len(chosen) == len(geometry.groups.ids):
-        raise refused('that is every element group: delete the geometry instead')
     try:
         project.delete_element_groups(name, chosen)
     except ValueError as error:

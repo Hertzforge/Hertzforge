@@ -415,8 +415,9 @@ def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.delete_parts`: the sub-items picked in the tree deleted
     from their objects, `parts` mapping each object's name to the indices
     picked: a data object's records, a shape set's modes, a channel table's
-    channels, a Photos object's photos. Every item of an object is refused (delete the object
-    instead), nothing is deleted when any part is refused, and each
+    channels, a Photos object's photos. Every item of an object picked deletes the object
+    itself, as `project.remove` does, since none of these can be empty (Brandon,
+    2026-11-13: it was refused). Nothing is deleted when any part is refused, and each
     deletion is journaled as the call a script would make."""
     from hertzforge.core.channel_table import ChannelTable
     from hertzforge.core.data import DataArray
@@ -435,7 +436,7 @@ def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
              'data': DataArray}
     counts = {'photos': 'num_photos', 'shapes': 'num_shapes', 'channel_table': 'num_channels',
               'data': 'num_records'}
-    planned = []
+    planned, whole = [], []
     for name, picks in parts.items():
         if name not in state.project:
             raise not_found(f'the project has no object named {name!r}')
@@ -450,7 +451,8 @@ def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         if chosen[-1] >= count:
             raise not_found(f'{name} has {count} {word}s; there is no {word} {chosen[-1] + 1}')
         if len(chosen) >= count:
-            raise refused(f'that is every {word} of {name}; delete the object instead')
+            whole.append(name)
+            continue
         planned.append((name, obj, deleter, chosen))
     for name, obj, deleter, chosen in planned:
         try:
@@ -458,6 +460,8 @@ def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         except ValueError as error:
             raise refused(f'{name}: {error}') from None
         state.project.record_call(obj, deleter, chosen)
+    if whole:
+        state.project.remove(*whole)
     state.modified = True
 
 
