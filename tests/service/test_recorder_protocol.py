@@ -34,6 +34,7 @@ TEXT = {
     'response_recorder_recordings': ('result', 'recorderRecordingsResult'),
     'response_recorder_marks': ('result', 'recorderMarksResult'),
     'response_error_recorder_config_invalid': ('error.detail', 'report'),
+    'response_error_recorder_record_unwritable': ('error', None),
 }
 
 #: binary golden -> (path to its payload, the schema definition the payload follows)
@@ -79,7 +80,8 @@ def test_recorder_text_golden_validates(name, validate):
     message = _text(name)
     validate(message)
     path, definition = TEXT[name]
-    validate(_at(message, path), definition)
+    if definition:
+        validate(_at(message, path), definition)
 
 
 @pytest.mark.parametrize('name', sorted(BINARY))

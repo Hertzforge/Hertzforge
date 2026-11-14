@@ -510,7 +510,10 @@ try {
 		check('the refusal is the record that cannot be written', (await attr(a, 'refusal', 'data-reason')) === 'record_unwritable', await attr(a, 'refusal', 'data-reason'));
 		check('the refusal names the data folder', words.includes(DATA_ROOT) || words.includes(fs.realpathSync(DATA_ROOT)), words);
 		check('the refusal says why', /permission|denied|read-only|not permitted/i.test(words), words);
-		check('nothing is armed or running', ['configured', 'idle', null].includes(await stateOf(a)), String(await stateOf(a)));
+		// A module whose refusal comes once the station is being opened (Explorer, the Recorder)
+		// ends the run `arm_refused`: finished, nothing armed or running.
+		const st = await stateOf(a);
+		check('nothing is armed or running', ['configured', 'idle', null].includes(st) || (st === 'finished' && (await outcomeOf(a)) === 'arm_refused'), `${st} ${(await outcomeOf(a)) ?? ''}`);
 		await tid(a, 'refusal').scrollIntoViewIfNeeded();
 		await shot(a, '05-refused');
 		throw null;

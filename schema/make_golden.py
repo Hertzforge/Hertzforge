@@ -5428,6 +5428,15 @@ RECORDER_TEXT_GOLDENS = {
                        'message': 'Row 5 is a drive row; a Recorder run does not open or '
                                   'record it.'}]}},
     },
+    'response_error_recorder_record_unwritable': {
+        'type': 'response', 'id': 110,
+        'error': {'code': 'refused', 'reason': 'record_unwritable',
+                  'message': "The run's record could not be written, so the run did not start: "
+                             '/home/operator/Hertzforge_Data/recorder (Permission denied (os '
+                             'error 13)). Choose a data folder that can be written.',
+                  'detail': {'path': '/home/operator/Hertzforge_Data/recorder',
+                             'reason': 'Permission denied (os error 13)'}},
+    },
 }
 
 # --- MIMO Shock (PROTOCOL.md, "MIMO Shock") ---
