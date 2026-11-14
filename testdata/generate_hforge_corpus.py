@@ -8,7 +8,9 @@ purpose (a few KB): it is a schema exercise, not a dataset, but it
 holds every object kind and the optional fields (averaging, scale_db,
 complex modal mass and damping, element-group properties, object groups,
 roles, project type, predictions, a run log extract) whose handling
-when absent is what future readers must keep. The run log extract is
+when absent is what future readers must keep. From schema 3 it also
+holds a converted control run: its channel table, streams, specification,
+results and run record. The run log extract is
 taken from the frozen run log in `vdlog_corpus/` and stored as if the
 log sat beside the project file, so the file holds a relative path and
 the log is not found beside it, a case a reader must keep too.
@@ -41,7 +43,7 @@ from hertzforge.core.sine import (
     SineSweepSpecification,
     SineTone,
 )
-from hertzforge.io.native import SCHEMA_VERSION, SUFFIX
+from hertzforge.io.native import RUN_RECORD_SCHEMA, SCHEMA_VERSION, SUFFIX
 
 #: the smallest legal PNG: 1x1, opaque. The corpus needs image *bytes*
 #: that survive verbatim, not a picture.
@@ -178,7 +180,30 @@ def build_project() -> hertzforge.Project:
     project.link('Geometry', 'Time History', psds, srs, 'FRF', 'Shapes')
     project.set_basis('Geometry', 'Time History', psds, srs, 'FRF',
                       'Shapes')
+    if SCHEMA_VERSION >= RUN_RECORD_SCHEMA:
+        add_converted_run(project)
     return project
+
+
+def add_converted_run(project: hertzforge.Project) -> None:
+    """A short Random run, written as a run folder by the tests' own
+    builder and converted, its objects added under their names (a
+    clash takes a number) and grouped as the conversion grouped them.
+    Schema 3 is the run record, so its file holds one."""
+    import sys
+    import tempfile
+
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tests'))
+    import run_folders
+
+    from hertzforge.io import run_convert
+
+    with tempfile.TemporaryDirectory() as scratch:
+        folder = run_folders.random_run(os.path.join(scratch, 'golden_random'), 256)
+        run = hertzforge.Project.open(run_convert.convert(folder).path)
+    names = [project.add(name, obj) for name, obj in run.items()]
+    project.object_groups.append({'members': names, 'role': None,
+                                  'name': 'golden_random'})
 
 
 if __name__ == '__main__':

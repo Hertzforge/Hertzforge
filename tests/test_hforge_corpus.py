@@ -105,6 +105,34 @@ def test_schema1_values_are_intact():
     assert geometry.group_name == vdyn['Geometry'].group_name
 
 
+def test_schema3_holds_a_converted_run():
+    """The schema 3 file is the schema 1 project plus a converted control
+    run: its channel table, streams, specification, results and the run
+    record, grouped as the conversion grouped them."""
+    from hertzforge.core.run_record import RunRecord
+
+    held = native.load(os.path.join(CORPUS, 'schema3.hforge'))
+    plain = native.load(os.path.join(CORPUS, 'schema1.hforge'))
+    with h5py.File(os.path.join(CORPUS, 'schema3.hforge')) as f:
+        assert f.attrs[native.STAMP] == native.RUN_RECORD_SCHEMA
+    assert list(held)[:len(plain)] == list(plain)
+    for name in ('Geometry', 'Time History', 'FRF', 'Shapes', 'Channel Table'):
+        assert held[name] == plain[name], name
+    record = held['Run Record']
+    assert isinstance(record, RunRecord)
+    assert (record.test, record.outcome, record.source) == ('random', 'completed', 'SIM')
+    assert [entry['kind'] for entry in record.log] == [
+        'state', 'station', 'level', 'alarm', 'level', 'state']
+    assert record.law_file[0] == 'diagonal.py'
+    inputs = held['inputs']
+    assert inputs.ordinate.shape == (2, 256) and inputs.source == 'SIM'
+    assert inputs.response_dof == ['101Z+', '2']
+    assert held['Channel Table (2)'].has_controller_settings
+    assert held['Specification'].limits['abort_upper'].shape == (1, 4)
+    (group,) = [g for g in held.object_groups if g.get('name') == 'golden_random']
+    assert 'Run Record' in group['members'] and 'Channel Table (2)' in group['members']
+
+
 @pytest.mark.parametrize('name', sorted(
     os.path.basename(p) for p in glob.glob(VDYN_CORPUS + '/*.vdyn')))
 def test_a_vdyn_project_moves_across_unchanged(tmp_path, name):
