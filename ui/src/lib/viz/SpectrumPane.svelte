@@ -470,20 +470,29 @@
 		playLine.addEventListener('pointerdown', startDrag);
 		plot.over.appendChild(playLine);
 		placePlayLine();
-		markerLine = document.createElement('div');
-		markerLine.className = 'marker';
-		if (onMarkerDrag) {
-			const grip = document.createElement('div');
-			grip.className = 'marker-grip';
-			grip.title = 'Drag across to move the cursor, up and down to set the damping';
-			// the line's own drag, not the plot's zoom
-			grip.addEventListener('mousedown', (e) => e.stopPropagation());
-			grip.addEventListener('click', (e) => e.stopPropagation());
-			grip.addEventListener('pointerdown', startMarkerDrag);
-			markerLine.appendChild(grip);
+		// a rebuild mid-drag (a reply adding the pending mode's curve) keeps the line in hand where
+		// the drag has it, and the drag goes on
+		if (markerLine && markerHeld) {
+			plot.over.appendChild(markerLine);
+		} else {
+			markerLine = document.createElement('div');
+			markerLine.className = 'marker';
+			if (onMarkerDrag) {
+				// a thing to grab, solid and red as the earlier toolset drew it: at a dashed pixel
+				// it read as a grid line (Brandon, 2026-11-14)
+				markerLine.classList.add('draggable');
+				const grip = document.createElement('div');
+				grip.className = 'marker-grip';
+				grip.title = 'Drag across to move the cursor, up and down to set the damping';
+				// the line's own drag, not the plot's zoom
+				grip.addEventListener('mousedown', (e) => e.stopPropagation());
+				grip.addEventListener('click', (e) => e.stopPropagation());
+				grip.addEventListener('pointerdown', startMarkerDrag);
+				markerLine.appendChild(grip);
+			}
+			plot.over.appendChild(markerLine);
+			placeMarker();
 		}
-		plot.over.appendChild(markerLine);
-		placeMarker();
 		guideEls = [];
 		placeGuides();
 		regionEls = (view.regions ?? []).map((r, k) => {
@@ -763,13 +772,15 @@
 		e.stopPropagation();
 		const fromX = e.clientX;
 		const fromY = e.clientY;
-		const grip = e.currentTarget as HTMLElement;
-		grip.setPointerCapture?.(e.pointerId);
+		// followed on the window: a rebuild under the drag does not end it
+		const grip = window;
+		markerHeld = true;
 		const report = (ev: PointerEvent, done: boolean) => {
 			if (!plot || !markerLine) return;
-			const box = plot.over.getBoundingClientRect();
+			const box = (markerLine.parentElement ?? plot.over).getBoundingClientRect();
 			const left = Math.min(box.width, Math.max(0, ev.clientX - box.left));
-			const moved = { x: Math.abs(ev.clientX - fromX) > 3, y: Math.abs(ev.clientY - fromY) > 3 };
+			// no dead band: any movement up or down is the damping (Brandon, 2026-11-14, to try)
+			const moved = { x: ev.clientX !== fromX, y: ev.clientY !== fromY };
 			if (moved.x) markerLine.style.left = `${left}px`;
 			const fraction = Math.min(1, Math.max(0, (ev.clientY - box.top) / box.height));
 			onMarkerDrag?.(plot.posToVal(left, 'x'), fraction, moved, done);
@@ -782,10 +793,12 @@
 		};
 		const up = (ev: PointerEvent) => {
 			stop();
+			markerHeld = false;
 			report(ev, true);
 		};
 		const cancel = () => {
 			stop();
+			markerHeld = false;
 			placeMarker();
 			onMarkerDrag?.(marker ?? 0, 0, { x: false, y: false }, true);
 		};
@@ -895,8 +908,11 @@
 	}
 
 	/** Put the marker line at `marker`, or hide it when there is none or it is off the plot. */
+	/** The marker held by a drag, which a reply arriving mid-drag must not pull back. */
+	let markerHeld = false;
+
 	function placeMarker() {
-		if (!plot || !markerLine) return;
+		if (!plot || !markerLine || markerHeld) return;
 		const left = marker === null ? -1 : plot.valToPos(marker, 'x');
 		const inside = left >= 0 && left <= plot.over.clientWidth;
 		markerLine.style.display = inside ? '' : 'none';
@@ -1561,6 +1577,11 @@
 		width: 0;
 		border-left: 1px dashed var(--text-2);
 		pointer-events: none;
+	}
+
+	.plot :global(.marker.draggable) {
+		margin-left: -1.5px;
+		border-left: 3px solid #e5534b;
 	}
 
 	.plot :global(.u-cursor-x) {
