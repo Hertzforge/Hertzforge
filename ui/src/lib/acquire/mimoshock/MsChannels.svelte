@@ -5,11 +5,12 @@
 	 * out of the controls to be a limit; a drive row is a drive, in the table's order, with its own
 	 * ceiling and abort in volts peak (there is no default: they are the amplifier inputs); a monitor
 	 * row can be a limit with the peak it stops the run at. On the simulator, the plant the run is
-	 * played on; and the capture.
+	 * played on; and the run's record (the shared Run Record panel).
 	 */
 	import ChannelTable from '../ChannelTable.svelte';
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
+	import RunRecordEditor from '../RunRecordEditor.svelte';
 	import StationPanel from '../StationPanel.svelte';
 	import { limitRows, MAX_CONTROLS, MAX_DRIVES, PLANTS, setControl } from './msSetup';
 	import type { MimoShockStore } from './msStore.svelte';
@@ -136,22 +137,9 @@
 			</div>
 		</div>
 
-		<div class="aq-group">
-			<h3>Capture</h3>
-			<div class="aq-fields">
-				<label class="aq-switch">
-					<input type="checkbox" role="switch" aria-checked={d.capture.auto_start} bind:checked={d.capture.auto_start} disabled={locked} data-testid="ms-capture-auto" />
-					<span class="track" aria-hidden="true"><span class="thumb"></span></span>
-					<span class="word">{d.capture.auto_start ? 'Write the run to disk when it ends' : 'Do not write the run to disk'}</span>
-				</label>
-				<div class="sel">
-					<label for="ms-run-name" class="lbl">Run name</label>
-					<input id="ms-run-name" class="field" bind:value={d.capture.run_name} disabled={locked || !d.capture.auto_start} data-testid="ms-run-name" />
-					<Findings items={errs('capture.run_name').map((message) => ({ level: 'error' as const, message }))} />
-				</div>
-			</div>
-		</div>
 	</section>
+	<!-- The run's record is Random's: the operator's words and whether the folder keeps the time histories. -->
+	<RunRecordEditor acq={ms} kept="The setup, the channel table, the log, the targets, the identification, every pulse's results and the law's calls are still kept." />
 </div>
 
 <style>

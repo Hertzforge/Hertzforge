@@ -89,6 +89,8 @@ src/hertzforge/core/run_record.py         the control service's record of a run,
 src/hertzforge/core/test_setup.py         a test's setup, as a project holds it and a test screen opens it
 src/hertzforge/io/tables.py                channel and breakpoint tables as files, for both sides
 src/hertzforge/io/reference_convert.py     writes the controller's reference file from a specification
+src/hertzforge/io/setup_convert.py         the one mapping between each control table kind and its analysis object
+src/hertzforge/io/seeds.py                 what an analysis object fills of a test's setup, and its origin
 src/hertzforge/core/channel_table.py       the channel table both sides use
 docs/hforge-format.md#channel_table        how a channel table is stored in a project
 docs/run-folder.md                         the run folder: what a control run leaves on disk

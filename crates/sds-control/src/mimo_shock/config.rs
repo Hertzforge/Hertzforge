@@ -140,8 +140,14 @@ pub struct WireMs {
     pub max_velocity_ips: Option<f64>,
     pub max_displacement_in: Option<f64>,
     pub plant: Option<String>,
-    pub capture_auto_start: bool,
-    pub run_name: String,
+    /// The operator's words for the run's record: who ran it, on what, and notes.
+    pub operator: String,
+    pub article: String,
+    pub notes: String,
+    /// The document and clause the test is run to, when named.
+    pub specification: Option<(String, String)>,
+    /// The record keeps the inputs and the drives as streams.
+    pub record_streams: bool,
 }
 
 fn bad(field: &str, message: impl Into<String>) -> MethodError {
@@ -382,8 +388,11 @@ pub fn parse(config: &Value) -> Result<WireMs, MethodError> {
         max_velocity_ips: None,
         max_displacement_in: None,
         plant: None,
-        capture_auto_start: false,
-        run_name: "mimo_shock".into(),
+        operator: String::new(),
+        article: String::new(),
+        notes: String::new(),
+        specification: None,
+        record_streams: true,
     };
     if let Some(s) = c.opt_obj("control")? {
         if let Some(l) = s.opt_obj("law")? {
@@ -420,12 +429,35 @@ pub fn parse(config: &Value) -> Result<WireMs, MethodError> {
     if let Some(s) = c.opt_obj("simulator")? {
         w.plant = s.opt_str("plant")?.map(str::to_owned);
     }
-    if let Some(s) = c.opt_obj("capture")? {
-        w.capture_auto_start = s.opt_bool("auto_start")?.unwrap_or(false);
-        if let Some(n) = s.opt_str("run_name")? {
-            w.run_name = n.to_owned();
-        }
+    // Every run is recorded in its run folder (`record`); the module's own capture
+    // is gone, and a configuration that still asks for it is told so rather than
+    // left to believe it is capturing.
+    if !matches!(c.m.get("capture"), None | Some(Value::Null)) {
+        return Err(bad(
+            "config.capture",
+            "A MIMO Shock run is always recorded in its run folder; \"capture\" is no longer \
+             taken. Use \"record\" to keep or leave out the streams.",
+        ));
     }
+    let words =
+        |k: &str| -> Result<String, MethodError> { Ok(c.opt_str(k)?.unwrap_or("").to_owned()) };
+    (w.operator, w.article, w.notes) = (words("operator")?, words("article")?, words("notes")?);
+    w.specification = match c.m.get("specification") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let o = Obj::of(v, "config.specification")?;
+            Some((
+                o.opt_str("document")?.unwrap_or("").to_owned(),
+                o.opt_str("clause")?.unwrap_or("").to_owned(),
+            ))
+        }
+    };
+    w.record_streams = match c.m.get("record") {
+        None | Some(Value::Null) => true,
+        Some(v) => Obj::of(v, "config.record")?
+            .opt_bool("streams")?
+            .unwrap_or(true),
+    };
     if let Some(m) = c.array("metadata")? {
         for (i, v) in m.iter().enumerate() {
             Obj::of(v, &format!("config.metadata[{i}]"))?;

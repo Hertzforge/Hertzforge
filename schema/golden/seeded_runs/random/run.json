@@ -1,0 +1,100 @@
+{
+  "test": "random",
+  "run_uid": "20261114-191820-57a1b241",
+  "run_id": "r-0001",
+  "title": "Seeded Random",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "3.1"
+  },
+  "source": "SIM",
+  "sim": {
+    "model": "resonator_bank",
+    "parameters": {
+      "sample_rate_hz": 1280.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 1
+    },
+    "seed": 1515852340
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 1280,
+    "fs_hz": 1280,
+    "n_pts": 64,
+    "n_avg": 2,
+    "df_hz": 20,
+    "lines": 9,
+    "loop_s": 0.1
+  },
+  "build": {
+    "version": "0.1.9",
+    "commit": "f27e7e2e",
+    "dirty": true
+  },
+  "armed": {
+    "unix": 1794683900.749879,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794683900.809307,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "off",
+    "why": "switched off in the setup"
+  },
+  "schema": "hertzforge-run/1",
+  "streams": [],
+  "results": [
+    {
+      "name": "reference",
+      "kind": "envelope"
+    },
+    {
+      "name": "identification_frf",
+      "kind": "frf"
+    },
+    {
+      "name": "identification_coherence",
+      "kind": "coherence"
+    },
+    {
+      "name": "control_psd",
+      "kind": "psd"
+    },
+    {
+      "name": "response_psd",
+      "kind": "psd"
+    },
+    {
+      "name": "drive_psd",
+      "kind": "psd"
+    }
+  ],
+  "complete": true
+}

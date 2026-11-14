@@ -26,7 +26,7 @@
 	import MixedRunView from './MixedRunView.svelte';
 	import MixedSchedule from './MixedSchedule.svelte';
 	import MixedSummary from './MixedSummary.svelte';
-	import { MIXED_SECTIONS, type MixedSection } from './mixedSetup';
+	import { MIXED_SECTIONS, mixedTitle, type MixedSection } from './mixedSetup';
 	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
@@ -101,7 +101,7 @@
 		</div>
 	{:else if section === 'floor'}
 		<div class="stack">
-			<ProfileEditor acq={mixed.floorHost} heading="Floor" sub="The broadband random every other part plays over, at full level. Its band is the test's band." fileName="Floor Profile" />
+			<ProfileEditor acq={mixed.floorHost} heading="Floor" sub="The broadband random every other part plays over, at full level. Its band is the test's band." fileName="Floor Profile" titleHint={mixedTitle(mixed.setup)} />
 			<section class="aq-panel" aria-labelledby="mx-ref" data-testid="mixed-reference-preview">
 				<div class="aq-head"><h2 id="mx-ref">Reference</h2><span class="aq-sub">The floor and each narrowband where it starts, at full level, as the service computed it.</span></div>
 				{#if reference}<ViewRenderer view={reference} showTitle={false} minHeight={220} />{:else}<p class="aq-small aq-muted">{mixed.checking ? 'Checking the setup.' : 'Drawn once the setup checks clean.'}</p>{/if}

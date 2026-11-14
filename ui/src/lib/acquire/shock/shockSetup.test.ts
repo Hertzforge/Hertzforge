@@ -211,7 +211,8 @@ describe('what the editor names before anything is sent', () => {
 		d.feasibility.shaker_text = '{ not json';
 		d.title = ' ';
 		const e = localErrors(d, rows);
-		expect(Object.keys(e).sort()).toEqual(['feasibility.shaker', 'limits.monitors.0.channel', 'limits.monitors.1.channel', 'pulse.duration_ms', 'schedule.levels.1.pulses', 'title']);
+		// An empty title is not an error: the title follows the pulse.
+		expect(Object.keys(e).sort()).toEqual(['feasibility.shaker', 'limits.monitors.0.channel', 'limits.monitors.1.channel', 'pulse.duration_ms', 'schedule.levels.1.pulses']);
 	});
 
 	it('the trapezoid edges count only for a trapezoid, the post shoulder only when not symmetric', () => {
@@ -266,5 +267,24 @@ describe('the preview request', () => {
 		] as unknown as ChannelRow[];
 		const c = runChannels(rows);
 		expect([c.control?.index, c.drive?.index]).toEqual([5, 6]);
+	});
+});
+
+describe('the title', () => {
+	it('follows the pulse until the operator types one', () => {
+		const d = defaultShockSetup();
+		expect(toShockConfig(d, null).title).toBe('Half-Sine 20 g 11 ms');
+		d.pulse.amplitude_g = 1;
+		expect(toShockConfig(d, null).title).toBe('Half-Sine 1 g 11 ms');
+		d.pulse.shape = 'terminal_peak_sawtooth';
+		d.pulse.duration_ms = 6.5;
+		expect(toShockConfig(d, null).title).toBe('Terminal-Peak Sawtooth 1 g 6.5 ms');
+		d.title = 'Bracket drop';
+		expect(toShockConfig(d, null).title).toBe('Bracket drop');
+		// A configuration whose title is the one its pulse gives opens following; a typed one stays.
+		expect(fromShockConfig(toShockConfig(defaultShockSetup(), null)).title).toBe('');
+		expect(fromShockConfig(toShockConfig(d, null)).title).toBe('Bracket drop');
+		// A draft an older shell cached with its default follows its pulse again.
+		expect(mergeShockSetup({ ...d, title: 'Half-Sine 20 g 11 ms' }).title).toBe('');
 	});
 });

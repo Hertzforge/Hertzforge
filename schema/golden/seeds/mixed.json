@@ -1,0 +1,328 @@
+{
+ "config": {
+  "title": "Seeded Mixed Mode",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "parts": [
+   {
+    "kind": "floor",
+    "id": "floor",
+    "name": "Floor",
+    "breakpoints": [
+     {
+      "freq_hz": 100.0,
+      "psd_g2_hz": 0.0005
+     },
+     {
+      "freq_hz": 500.0,
+      "psd_g2_hz": 0.0005
+     }
+    ],
+    "alarm_db": [
+     3.0,
+     3.0
+    ],
+    "abort_db": [
+     6.0,
+     6.0
+    ]
+   },
+   {
+    "kind": "tone",
+    "id": "tone1",
+    "name": "Blade",
+    "schedule": {
+     "kind": "fixed",
+     "freq_hz": 200.0,
+     "end": {
+      "seconds": 4.0
+     }
+    },
+    "amplitude_g": 0.5
+   },
+   {
+    "kind": "narrowband",
+    "id": "band1",
+    "name": "Mesh",
+    "schedule": {
+     "kind": "sweep",
+     "band_hz": [
+      350.0,
+      420.0
+     ],
+     "rate": {
+      "law": "linear",
+      "hz_per_s": 20.0
+     },
+     "start_hz": 350.0,
+     "direction": "up"
+    },
+    "level_g2_hz": 0.002,
+    "width_hz": 32.0
+   }
+  ],
+  "exclusion_hz": 32.0,
+  "acquisition": {
+   "fs_hz": 4096,
+   "n_pts": 256,
+   "n_avg": 8,
+   "tick_ms": 100
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels": [
+    {
+     "db": -6,
+     "dwell_s": 1
+    },
+    {
+     "db": 0
+    }
+   ],
+   "full_level_s": 1
+  },
+  "control": {
+   "pretest": {
+    "averages": 2
+   },
+   "floor_settle_s": 1,
+   "part_ramp_s": 0.5,
+   "level_ramp_s": 0.5,
+   "shutdown_ramp_s": 0.5,
+   "review_after_sysid": false
+  },
+  "limits": {
+   "drive_vpk_ceiling": 5,
+   "drive_vpk_abort": 8
+  }
+ },
+ "channels": [
+  {
+   "index": 1,
+   "enabled": true,
+   "description": "Control",
+   "role": "control",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 100,
+   "range_max": 100,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 2,
+   "enabled": true,
+   "description": "Monitor",
+   "role": "monitor",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 100,
+   "range_max": 100,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 3,
+   "enabled": true,
+   "description": "Drive",
+   "role": "drive",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "V",
+   "sensitivity_mv_per_eu": 1000,
+   "range_max": 10,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  }
+ ],
+ "imports": [],
+ "base": {
+  "title": "Seeded Mixed Mode",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "parts": [
+   {
+    "id": "floor",
+    "kind": "floor",
+    "breakpoints": [
+     {
+      "freq_hz": 100,
+      "psd_g2_hz": 0.0005
+     },
+     {
+      "freq_hz": 500,
+      "psd_g2_hz": 0.0005
+     }
+    ],
+    "alarm_db": [
+     3,
+     3
+    ],
+    "abort_db": [
+     6,
+     6
+    ]
+   }
+  ],
+  "exclusion_hz": 32,
+  "acquisition": {
+   "fs_hz": 4096,
+   "n_pts": 256,
+   "n_avg": 8,
+   "tick_ms": 100
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels": [
+    {
+     "db": -6,
+     "dwell_s": 1
+    },
+    {
+     "db": 0
+    }
+   ],
+   "full_level_s": 1
+  },
+  "control": {
+   "pretest": {
+    "averages": 2
+   },
+   "floor_settle_s": 1,
+   "part_ramp_s": 0.5,
+   "level_ramp_s": 0.5,
+   "shutdown_ramp_s": 0.5,
+   "review_after_sysid": false
+  },
+  "limits": {
+   "drive_vpk_ceiling": 5,
+   "drive_vpk_abort": 8
+  }
+ },
+ "answer": {
+  "module": "mixed",
+  "sets": [
+   {
+    "path": "parts",
+    "value": [
+     {
+      "kind": "floor",
+      "id": "floor",
+      "name": "Floor",
+      "breakpoints": [
+       {
+        "freq_hz": 100.0,
+        "psd_g2_hz": 0.0005
+       },
+       {
+        "freq_hz": 500.0,
+        "psd_g2_hz": 0.0005
+       }
+      ],
+      "alarm_db": [
+       3.0,
+       3.0
+      ]
+     },
+     {
+      "kind": "tone",
+      "id": "tone1",
+      "name": "Blade",
+      "schedule": {
+       "kind": "fixed",
+       "freq_hz": 200.0,
+       "end": {
+        "seconds": 4.0
+       }
+      },
+      "amplitude_g": 0.5
+     },
+     {
+      "kind": "narrowband",
+      "id": "band1",
+      "name": "Mesh",
+      "schedule": {
+       "kind": "sweep",
+       "band_hz": [
+        350.0,
+        420.0
+       ],
+       "rate": {
+        "law": "linear",
+        "hz_per_s": 20.0
+       },
+       "start_hz": 350.0,
+       "direction": "up"
+      },
+      "level_g2_hz": 0.002,
+      "width_hz": 32.0
+     }
+    ]
+   },
+   {
+    "path": "exclusion_hz",
+    "value": 32.0
+   }
+  ],
+  "protective": [
+   {
+    "path": "parts.0.abort_db",
+    "value": [
+     6.0,
+     6.0
+    ],
+    "words": "The abort band of Floor, dB below and above"
+   }
+  ],
+  "imports": [],
+  "notes": [],
+  "origin": {
+   "kind": "seed",
+   "object": "Floor",
+   "checksum": "8b0f1aaafd24bdce3c81744b59c492d48e0fb9a3a2a0b54e40ebe40c67e78d96",
+   "fills": "the parts",
+   "also": [
+    {
+     "object": "Tones",
+     "checksum": "80e23cd6f597f317c371974aebc1f0252aec4aadd77212bb3fae4912f1543d00"
+    }
+   ]
+  }
+ }
+}

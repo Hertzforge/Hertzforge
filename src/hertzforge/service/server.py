@@ -72,7 +72,8 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.sav
                    'project.mesh_size', 'project.journal',
                    'project.show', 'project.actions',
                    'project.setups', 'project.save_setup', 'project.open_setup',
-                   'project.channel_table', 'project.put_channel_table')
+                   'project.channel_table', 'project.put_channel_table',
+                   'project.seeds', 'project.seed')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -369,6 +370,12 @@ class Connection:
         if method == 'project.open_setup':
             _only(params, ('name',), method)
             return {'setup': await call(projects.open_setup, self.project, params)}
+        if method == 'project.seeds':
+            _only(params, ('module',), method)
+            return await call(projects.seeds, self.project, params)
+        if method == 'project.seed':
+            _only(params, ('name', 'module', 'channel', 'record', 'units', 'tones'), method)
+            return await call(projects.seed, self.project, params)
         if method == 'project.journal':
             _only(params, (), method)
             return await call(projects.journal, self.project, params)

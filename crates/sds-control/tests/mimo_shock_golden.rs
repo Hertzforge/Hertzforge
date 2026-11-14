@@ -171,6 +171,11 @@ fn view_of(s: &Value) -> MsView {
         misses: 0,
         end: None,
         streaming: true,
+        record: s.get("record").map(|r| view::RecordRef {
+            folder: r["folder"].as_str().unwrap().into(),
+            streams: r["streams"] == "on",
+            problem: r["problem"].as_str().map(str::to_owned),
+        }),
     }
 }
 

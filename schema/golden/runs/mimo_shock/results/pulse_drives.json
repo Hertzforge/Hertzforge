@@ -1,0 +1,36 @@
+{
+  "name": "pulse_drives",
+  "kind": "mimo_shock_drives",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "start": 0.0,
+    "step": 0.000244140625
+  },
+  "channels": {
+    "references": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "the drives each pulse played, after the module's ceilings and limits, time from the record's start",
+  "records": {
+    "index": "record",
+    "pulse": "the pulse, from 0",
+    "level_db": "the level fired"
+  },
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        4,
+        64
+      ],
+      "unit": "V",
+      "offset": 0
+    }
+  ]
+}

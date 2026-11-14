@@ -1,0 +1,77 @@
+{
+  "test": "srs",
+  "run_uid": "20261114-191820-4aad5d2d",
+  "run_id": "srs-0001",
+  "title": "Seeded SRS",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "3.1"
+  },
+  "source": "SIM",
+  "sim": {
+    "model": "simulated_engine",
+    "parameters": {
+      "gain_v_per_g": 0.02
+    },
+    "seed": null
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "simulated engine",
+    "backend": "none",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 2048,
+    "fs_hz": 2048,
+    "record_len": 182
+  },
+  "build": {
+    "version": "0.1.9",
+    "commit": null,
+    "dirty": null
+  },
+  "armed": {
+    "unix": 1794683900.752084,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794683900.818039,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "off",
+    "why": "switched off in the setup"
+  },
+  "schema": "hertzforge-run/1",
+  "streams": [],
+  "results": [
+    {
+      "name": "srs_reference",
+      "kind": "srs_reference"
+    },
+    {
+      "name": "synthesis",
+      "kind": "srs_synthesis"
+    },
+    {
+      "name": "pulse_srs",
+      "kind": "srs"
+    },
+    {
+      "name": "drive_tables",
+      "kind": "srs_drive_table"
+    },
+    {
+      "name": "pulses",
+      "kind": "pulse_results"
+    }
+  ],
+  "complete": true
+}

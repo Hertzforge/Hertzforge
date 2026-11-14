@@ -29,6 +29,16 @@ export function db(v: number | null | undefined, digits = 1): string {
 	return `${sign}${s} dB`;
 }
 
+/**
+ * The level a run's readout shows. While the run lives, the level the drive is at and the level
+ * commanded. Once it has ended, the last level in force (the end's) and nothing commanded: the last
+ * frame and state hold the stop ramp's tail, which is never shown as the run's level.
+ */
+export function levelReadout(level: number | null, commanded: number | null, end: { level_db: number | null } | null | undefined): { level: number | null; commanded: number | null; ended: boolean } {
+	if (end) return { level: end.level_db, commanded: null, ended: true };
+	return { level, commanded, ended: false };
+}
+
 /** Run clock: "42.0 s" under a minute, "12:05" from a minute, "1:02:05" from an hour. */
 export function clock(seconds: number | null | undefined): string {
 	if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '-';

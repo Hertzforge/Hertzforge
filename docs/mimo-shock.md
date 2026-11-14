@@ -80,14 +80,12 @@ The channel table is the one every test type shares. MIMO Shock reads its enable
   with the peak, in its own unit, that ends the run. A limit is watched, not controlled.
 
 On the simulator you may name the simulated structure the run is played on; its size must match
-the controls and drives. The capture switch writes the run's records to disk when the run ends,
-however it ends; until then they are held in memory, and nothing is written while the run is going.
-They go under the program's local data folder, in a folder named by the run name (`mimo_shock`
-unless named) and the run's id, such as `mimo_shock_ms-0001`; the id counts again from 1 each time
-the control service starts, and when a name is taken the run gets the next free one. The
-folder holds the identified setup and the law (`setup.json`), every law call with what it was given
-and what it answered (`law_calls.jsonl`), and every pulse with its level, the drives as played and
-every input row (`pulses.jsonl`). With the switch off, nothing is written.
+the controls and drives.
+
+The **Run Record** panel below the channels is the one every test type shares: who runs the test,
+on what, the document and clause it is run to, and notes, all optional, and whether the run's
+folder keeps the time histories. Every run is recorded, on the simulator and on hardware: see
+"What a Run Leaves Behind".
 
 ### Targets
 
@@ -308,6 +306,30 @@ The dock holds the Run card (the verbs, Fire in On Fire mode, and the acknowledg
 holds for one), the level card (the law, the ladder, the floors before the first pulse, the end),
 the verdict grid, the pulse in detail and the station. A page opens in a window of its own for
 another monitor; every window keeps Stop and Abort.
+
+## What a Run Leaves Behind
+
+Every MIMO Shock run is recorded in a run folder under the program's local data folder, named for
+the time it armed and its id, such as `20261114-140000_mimo_shock_ms-0001`, and never written
+over. The folder is claimed at arm, with the setup, the channel table and the law written before
+anything is driven; a data folder that cannot be written refuses the arm, in words, and nothing
+arms. While the run goes the log is written as each entry is made, every enabled input and every
+drive are kept as shots (the identification's probe and estimate, then each pulse), and each
+pulse's results are written as it is judged: each control's SRS (an SRS target), its measures and
+verdict, the drives it played, and every call of the law. Nothing waits for the disk: a slow or
+failing disk is a notice on the screen and an entry in the log, and the run goes on. The end is
+written however the run ends. `docs/run-folder.md`, "What a MIMO Shock Run Saves", lists every
+file.
+
+The run card names the folder from arm on. Once the run has ended, **Open in Analysis** converts it
+into a project and opens it in the Shock workspace: the time histories of every shot, each
+control's target SRS as a shock specification (or a classical target as a transient
+specification), each pulse's SRS, the identification's transfer function matrix and coherence,
+and the run record with the setup, the log and the outcome. **Copy Folder Path** puts the folder's
+path on the clipboard.
+
+The run's records used to be written only with a capture switched on, and only when the run ended;
+that switch is gone, and a configuration that still asks for it is refused by name.
 
 ## Limits of This Version
 

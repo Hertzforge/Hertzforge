@@ -521,6 +521,8 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.open_setup` | `{"name"}` | `{"setup"}`: a saved setup, or the setup a run record holds |
 | `project.channel_table` | `{"name"?}` | `{"name","channels":[row...],"tables","environments","warnings"}`: a channel table as the control service's rows (The Channel Table's Home below) |
 | `project.put_channel_table` | `{"name","channels":[row...],"environments"?,"replace"?}` | `{"name","project"}` |
+| `project.seeds` | `{"module"}` | `{"seeds":[...]}`: the objects that could fill part of that module's setup (Seeds below) |
+| `project.seed` | `{"name","module","channel"?,"record"?,"units"?,"tones"?}` | `{"module","sets","protective","imports","notes","origin"}` |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
@@ -578,6 +580,32 @@ shows the operator every row that would change, checks it with `channels.set` `d
 it with `"source": {"kind": "project", "name"}`, so it arrives restored (Restored Tables, under the
 control service's Channel Table). Send Table to Project reads `channels.get`, shows what would change
 in the project's table, and saves it with `project.put_channel_table`.
+
+**Seeds.** An analysis object in the project can fill part of a test's setup, as the conversions
+in `hertzforge.io.setup_convert` read it: a `Specification` fills Random's `profile`; a
+`SineSweepSpecification` of one tone fills Sine's `profile` and `test`; a `ShockSpecification`
+fills SRS's `target`, `bands` and `envelope`; a `TransientSpecification` or `TimeHistory` record
+that is a classical pulse fills Classical Shock's `pulse`; a `TimeHistory` record fills TWR's
+`reference`; a floor `Specification` with its narrowbands, and the `SineSweepSpecification` of
+tones beside it in an object group, fill Mixed Mode's `parts`; a `Specification` with cross terms
+fills MIMO Random's `reference` (inline, in g²/Hz, in the controller's convention, at least 8 lines)
+and each control's `alarm_db` and `abort_db`, in the specification's channel order. `project.seeds` lists the objects
+of the kinds a module takes (`name`, `kind`, `fills`, `holds`, `channels`, and `tones` for Mixed
+Mode). `project.seed` answers what one fills: `sets`, each `{"path","value"}`, a dotted member of
+the configure request (a list member by its index) and the value put there whole, in order;
+`protective`, each `{"path","value","words"}`, an abort band or a ceiling the object gave, which
+the shell fills only once the operator has typed it; `imports`, each `{"method","params","set"}`,
+a request the shell sends the control service (`twr.reference.import`) whose stored reference's
+`sha256` is then put at `set`; `notes`; and `origin`, `{"kind":"seed","object","checksum","fills"}`
+(`checksum` the object's SHA-256; `also` names a second object read, each with its own).
+`channel` reads a specification at one channel where its channels differ, `record` picks a time
+history's record (default 0), `units` is the TWR control channel's unit (default `g`), and
+`tones` names a Mixed Mode floor's tones. An object of another kind, in another quantity, or of a
+shape the module cannot control to (cross terms on Random, several tones on Sine, a band that
+varies on an SRS target, a waveform that is no classical pulse) is refused (`refused`) with the
+reason; nothing is adapted. Nothing here reaches the control service: the shell lists every
+member a seed changes before the draft takes it, and the draft goes through that module's
+configure call and checks as one typed in.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
@@ -1162,7 +1190,7 @@ plain words: it never names a protocol method.
 | `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
-| `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm`, `sine.start`, `shock.arm`, `shock.start`, `srs.arm`, `srs.start`, `twr.arm`, `twr.start`, `mimo_random.start`, `explorer.start`, `mixed.arm` or `mixed.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
+| `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm`, `sine.start`, `shock.arm`, `shock.start`, `srs.arm`, `srs.start`, `twr.arm`, `twr.start`, `mimo_random.start`, `mimo_shock.arm`, `mimo_shock.start`, `explorer.start`, `recorder.start`, `mixed.arm` or `mixed.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
 | `stale_revision` | `refused` | `channels.set` or `channels.apply` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `table_not_applied` | `refused` | An arm, or a start that arms, met a restored table the operator has not applied ("Restored Tables") | `revision`, `restored` |
@@ -1207,7 +1235,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
 | Control and limits | `no_control_channel`, `weight_unknown_channel`, `weights_sum_not_positive`, `limit_unknown_channel`, `limit_rows_not_ascending` | |
 | Any number | `out_of_range` (`field` names it, `message` states the range) | |
-| MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected` | `transform_ill_conditioned`, `alarm_wider_than_abort` |
+| MIMO channels and control space | `control_unknown_channel`, `drive_unknown_channel`, `duplicate_channel`, `no_control_channel`, `no_drive_channel`, `transform_shape`, `transform_rank_deficient`, `backend_not_selected`, and on the simulator `plant_unknown` (the table's enabled inputs by drives is not a size the simulator plays; the message names the sizes it plays) | `transform_ill_conditioned`, `alarm_wider_than_abort` |
 | MIMO reference | `reference_shape`, `reference_too_large_inline`, `reference_not_hermitian`, `reference_not_psd`, `too_few_lines`, `frequency_not_ascending` | `reference_repaired`, `reference_rank_above_drives`, `reference_file_unread` |
 | MIMO law | `law_unknown`, `law_wrong_world`, `law_shape_not_supported`, `law_param_unknown`, `law_param_invalid` | |
 | Classical shock | `out_of_range`, `levels_empty`, `levels_not_ascending`, `pulses_length_mismatch`, `band_above_grid`, `record_too_long`, `spacing_below_floor`, `limit_unknown_channel`, `no_control_channel`, `no_drive_channel`, `extra_drive_channels`, `law_unknown`, `law_wrong_world`, `law_param_unknown`, `law_param_invalid` | `quiet_window_exceeded` |
@@ -1918,7 +1946,13 @@ identification and each pulse's SRS, drive table, kinematics and verdict (`docs/
 "What an SRS Run Saves"); `srs.state` carries `record` as `random.state` does. A TWR run's streams
 are shots too, one for its identification and one for each play, the play the run ended on and one
 cut short included, and its results include each play's measures and outcome and every call of its
-law (`docs/run-folder.md`, "What a TWR Run Saves"); `twr.state` carries `record` likewise.
+law (`docs/run-folder.md`, "What a TWR Run Saves"); `twr.state` carries `record` likewise. A
+MIMO Shock run's streams are shots of every enabled input and every drive, two for its
+identification (the probe and the estimate) and one for each pulse, and its results include each
+control's reference, the identification's transfer function matrix and coherence, each pulse's
+SRS at every control (an SRS target), measures, verdicts and the drives it played, and every call
+of its law, each written as it is made (`docs/run-folder.md`, "What a MIMO Shock Run Saves");
+`mimo_shock.state` carries `record` likewise.
 
 The record is written on its own thread. A failure to write it is a log entry of kind `record`
 and the state's `record.problem`; the run goes on.
@@ -3015,7 +3049,8 @@ views travels as a binary frame.
             "divergence_drive_ratio":1.3,"first_drive_ratio":2,"abort_db":null,
             "scaled_aborts":true,"max_velocity_ips":null,"max_displacement_in":null},
  "simulator":{"plant":null},
- "capture":{"auto_start":false,"run_name":"mimo_shock"},
+ "operator":"Operator","article":"Bracket","notes":"",
+ "specification":{"document":"Example procedure","clause":"4.2"},"record":{"streams":true},
  "metadata":[]}
 ```
 
@@ -3067,11 +3102,13 @@ An SRS target replaces `target`:
 | `control.scaled_aborts` | true | On: a measured peak over its scaled line ends the run in the controlled stop (`safe_stop`, `control_abort_scaled`). Off: the pulse is judged failing (the ladder does not climb on it), a warning names every control that crossed its scaled line, the run goes on, and the state carries a standing `notice`. Either way every row reports each control's margin to both lines. It cannot change while a run is live |
 | `control.max_velocity_ips`, `max_displacement_in` | null | A control's peak velocity (in/s) or peak-to-peak displacement (in), predicted or measured, over it ends the run (`kinematics`) |
 | `simulator.plant` | null: chosen by size | The simulator's plant by name: `shock-linear-4x4`, `shock-jointed-4x4-moderate`, `shock-jointed-4x4-severe` or `shock-jointed-6x3`. Null takes `shock-linear-4x4` for 4 controls and 4 drives and `shock-jointed-6x3` for 6 and 3. Ignored on NI |
-| `capture` | as shown | `{"auto_start","run_name"}`. With `auto_start`, the run's records are held in memory and written when the run ends, however it ends, to `<run_name>_<run_id>/` under the local data root (a name already taken gets the first free `<run_name>_<run_id>-<n>`, so no run writes over another; the run id counts from 1 again each time the service starts): `setup.json` (the identified setup and the law), `law_calls.jsonl` (every law call with its inputs and its answer) and `pulses.jsonl` (every pulse's level, drives as played and input rows). Nothing is written while the run is going. With `auto_start` false nothing is written |
+| `operator`, `article`, `notes`, `specification`, `record` | empty, null, `{"streams":true}` | The run's record, as Random's (see "Random Test Configuration" and "Run Folders"): the operator's words, what the test is run to, and whether the record holds the inputs and the drives as streams. None of them changes how the run drives. Every MIMO Shock run is recorded in its run folder (`docs/run-folder.md`, "What a MIMO Shock Run Saves") |
 | `metadata` | as shown | Random's |
 
 A configuration whose shape is wrong is refused `bad_params` naming the field; its content errors
-are refused `config_invalid` with the items, located by `field` or `channel`.
+are refused `config_invalid` with the items, located by `field` or `channel`. A configuration
+that gives `capture` is refused `bad_params` at `config.capture`: every MIMO Shock run is
+recorded in its run folder (see "Run Folders"), and the module has no capture of its own.
 
 **Result.** `state` (`configured`), `derived` and `warnings`. `derived`:
 
@@ -3105,8 +3142,9 @@ figures).
 
 - **`mimo_shock.arm`** opens the station with every drive row as an output and every control and
   limit row as an input on one clock, asks it for `acquisition.fs_hz`, adopts the rate it
-  programs, derives the grid and builds the targets at that rate, and passes the arm gate. Nothing
-  is driven. On the simulator the plant must be the table's size (`arm_refused`). An imported law
+  programs, derives the grid and builds the targets at that rate, passes the arm gate and claims
+  the run's folder (see "Run Folders"; refused `record_unwritable`, with the path and the reason,
+  when it cannot be written, and the station released). Nothing is driven. On the simulator the plant must be the table's size (`arm_refused`). An imported law
   without a passed check is refused `law_not_checked` on a hardware station. The station's own
   refusals are Random's (`arm_refused`, `hardware_busy`, ...).
 - **`mimo_shock.start`** from `configured` arms first, then plays the identification shot
@@ -3156,7 +3194,9 @@ figures).
  "identification":{...},"review":{...},"last_pulse":{row},
  "law":{"id":"inverse","name":"inverse","version":"0.1.0","sha256":null,"params":{...},
         "misses":0},
- "end":null}
+ "end":null,
+ "record":{"folder":"/home/operator/Hertzforge_Data/20261114-140000_mimo_shock_ms-0002",
+           "streams":"on","problem":null}}
 ```
 
 | `state` | `phase` | Meaning |
@@ -3207,6 +3247,7 @@ figures).
   and its unusable calls in a row now.
 - `end` is null until the run finishes, then `{"outcome","reason","message","at_s","level_db",
   "pulse"}`: `pulse` the pulse it ended at (null before any).
+- `record` is absent until the run arms, then Random's `{"folder","streams","problem"}`.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -5555,9 +5596,10 @@ station with four recorded rows at 12 800 Hz and the configuration above:
   naming the other), `table_invalid`, `config_invalid` (the table, as it is now, no longer carries
   the run: the same items as configure), `not_enough_space` (the free space is under the floor;
   `detail` `free_bytes` and `floor_bytes`), then, once the station is being opened,
-  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused, the
-  message the controller's own; or, once the station is up, the run folder, `run.json`,
-  `table.json`, `setup.json` or `streams/` could not be written, `detail` `path` and `reason`).
+  `devices_absent`, `hardware_busy`, `record_unwritable` (once the station is up, the run folder,
+  `run.json`, `table.json`, `setup.json` or `streams/` could not be written in the data folder,
+  naming the path and the reason; `detail` `path` and `reason`) and `arm_refused` (the station or
+  the arm gate refused, the message the controller's own).
   No refusal before the station is opened makes a folder. A refusal once the station is being
   opened ends the run `arm_refused`, and `recorder.reset` comes before another start.
 - **`recorder.arm`** (`manual` and `level` modes, from `monitoring`) starts filling the

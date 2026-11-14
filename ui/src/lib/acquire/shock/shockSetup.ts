@@ -26,7 +26,7 @@ import type {
 	ShockStandardName
 } from '$lib/protocol/shock';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { defaultRecord, shakerRecord, type FieldErrors, type RecordDraft } from '../setup';
+import { defaultRecord, followTitle, shakerRecord, titleCase, titleNumber, type FieldErrors, type RecordDraft } from '../setup';
 
 // ---------------------------------------------------------------------------------------------
 // The draft
@@ -137,7 +137,8 @@ export const STANDARDS: { id: ShockStandardName; label: string; amplitude: numbe
 
 export function defaultShockSetup(): ShockDraft {
 	return {
-		title: 'Half-Sine 20 g 11 ms',
+		// Empty: the title follows the pulse (`shockTitle`) until the operator types one.
+		title: '',
 		pulse: {
 			shape: 'half_sine',
 			amplitude_g: 20,
@@ -195,6 +196,22 @@ export function defaultShockSetup(): ShockDraft {
 }
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
+/** The title the pulse gives: "Half-Sine 20 g 11 ms". */
+export function shockTitle(d: ShockDraft): string {
+	const p = d.pulse;
+	const shape = titleCase(SHAPES.find((x) => x.id === p.shape)?.label ?? 'Pulse');
+	if (!Number.isFinite(p.amplitude_g) || !Number.isFinite(p.duration_ms)) return shape;
+	return `${shape} ${titleNumber(p.amplitude_g)} g ${titleNumber(p.duration_ms)} ms`;
+}
+
+/** The title a configuration carries: the one typed, else the one the pulse gives. */
+export function shockTitleOf(d: ShockDraft): string {
+	return d.title.trim() || shockTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its pulse. */
+const STALE_SHOCK_TITLES = ['Half-Sine 20 g 11 ms'];
+
 export function mergeShockSetup(saved: Partial<ShockDraft> | null): ShockDraft {
 	const base = defaultShockSetup();
 	if (!saved || typeof saved !== 'object') return base;
@@ -220,7 +237,7 @@ export function mergeShockSetup(saved: Partial<ShockDraft> | null): ShockDraft {
 	delete (out as Partial<ShockDraft> & { capture?: unknown }).capture;
 	out.record = { ...base.record, ...(saved.record ?? {}) };
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, shockTitle, STALE_SHOCK_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -232,7 +249,7 @@ export function toShockConfig(d: ShockDraft, law: LawEntry | null): ShockConfig 
 	const f = d.feasibility;
 	const shaker = f.enabled ? shakerRecord(f.shaker_text) : null;
 	return {
-		title: d.title.trim(),
+		title: shockTitleOf(d),
 		pulse: {
 			shape: d.pulse.shape,
 			amplitude_g: d.pulse.amplitude_g,
@@ -286,6 +303,10 @@ export function toShockConfig(d: ShockDraft, law: LawEntry | null): ShockConfig 
  * and the shell's where it does not; one pulse count for every level is spread over the levels.
  */
 export function fromShockConfig(c: ShockConfig): ShockDraft {
+	return followTitle(shockDraftOf(c), shockTitle);
+}
+
+function shockDraftOf(c: ShockConfig): ShockDraft {
 	const base = defaultShockSetup();
 	const levels = c.schedule.levels_db.map((db, i) => ({ db, pulses: c.schedule.pulses.length === 1 ? c.schedule.pulses[0] : (c.schedule.pulses[i] ?? NaN) }));
 	const comp = c.pulse.compensation;
@@ -469,13 +490,12 @@ function needOptional(map: FieldErrors, key: string, v: number | null) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, a drive ceiling or abort not given (or the
+ * Fields that hold no number, a drive ceiling or abort not given (or the
  * abort not above the ceiling), a shaker record that does not read. Everything else, the pulse's
  * physics included, is the service's to judge in the dry run.
  */
 export function localErrors(d: ShockDraft, rows: ChannelRow[] = []): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	const p = d.pulse;
 	need(out, 'pulse.amplitude_g', p.amplitude_g);
 	need(out, 'pulse.duration_ms', p.duration_ms);

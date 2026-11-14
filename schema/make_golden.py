@@ -2565,8 +2565,11 @@ MIXED_CONFIG = {
                     'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
                                        'fixturing': 10, 'test_article': 12},
                     'crest_factor': 3},
-    'capture': {'rule': 'off', 'first_s': None, 'level_settle_s': 1, 'periodic_save_s': None,
-                'run_name': 'mixed'},
+    'operator': 'A. Operator',
+    'article': 'Rotor housing, serial 4',
+    'notes': 'first article',
+    'specification': {'document': 'Test procedure 12', 'clause': '4.3'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'}],
 }
 
@@ -3358,7 +3361,10 @@ MIXED_BUILT_TEXT = {'response_mixed_configure': {'type': 'response',
                                 'feasibility': {'verdict': 'pass',
                                                 'message': "The test is within the shaker's "
                                                            'ratings.'},
-                                'end': None}},
+                                'end': None,
+                                'record': {'folder': '/home/operator/Hertzforge_Data/'
+                                                     '20261101-142233_mixed_mixed-0002',
+                                           'streams': 'on', 'problem': None}}},
  'response_error_mixed_config_invalid': {'type': 'response',
                                          'id': 92,
                                          'error': {'code': 'bad_request',
@@ -4950,6 +4956,11 @@ EXPLORER_CONFIG = {
     'display': {'nfft': 4096},
     'capture': {'run_name': 'explorer'},
     'metadata': EXPLORER_METADATA,
+    'operator': 'A. Operator',
+    'article': 'Bracket, SN 0042',
+    'notes': '',
+    'specification': {'document': 'Test procedure', 'clause': '4.2'},
+    'record': {'streams': True},
 }
 
 EXPLORER_STATION = {'kind': 'ni', 'class': 'ni_real',
@@ -4983,21 +4994,25 @@ def _explorer_state(**over) -> dict:
         'grid': EXPLORER_GRID, 'clock': None, 'band_hz': [20, 2000], 'max_drive_vpk': 0.5,
         'slew': EXPLORER_SLEW, 'pipeline_frames': 1063, 't_s': None, 'frequency_hz': None,
         'target_hz': None, 'drive_vpk': None, 'target_vpk': None, 'sweep': None,
-        'health': None, 'stall': None, 'stop': None, 'end': None,
+        'health': None, 'stall': None, 'stop': None, 'end': None, 'record': None,
     }
     s.update(over)
     return s
 
 
+#: The run's record, from start on (`explorer.state.record`).
+EXPLORER_RECORD = {'folder': '/home/operator/Hertzforge_Data/explorer', 'streams': 'on',
+                   'problem': None}
+
 EXPLORER_STARTED = _explorer_state(
     state='running', phase='quiet', grid=EXPLORER_GRID_ACTUAL, clock='shared', t_s=0.04,
     frequency_hz=250, target_hz=250, drive_vpk=0, target_vpk=0,
-    health=_explorer_health(2, 0.38, 1.2, 1.2, None))
+    health=_explorer_health(2, 0.38, 1.2, 1.2, None), record=EXPLORER_RECORD)
 
 EXPLORER_RUNNING = _explorer_state(
     run_id='explorer-0002', state='running', phase='steady', grid=EXPLORER_GRID_ACTUAL,
     clock='shared', t_s=41.38, frequency_hz=250, target_hz=250, drive_vpk=0.2, target_vpk=0.2,
-    health=_explorer_health(2069, 0.41, 1.9, 3.4, 4.1))
+    health=_explorer_health(2069, 0.41, 1.9, 3.4, 4.1), record=EXPLORER_RECORD)
 
 EXPLORER_HEAD = {
     'run_id': 'explorer-0002', 'source': 'HARDWARE', 'class': 'ni_real', 'state': 'running',
@@ -5469,6 +5484,15 @@ RECORDER_TEXT_GOLDENS = {
                        'message': 'Row 5 is a drive row; a Recorder run does not open or '
                                   'record it.'}]}},
     },
+    'response_error_recorder_record_unwritable': {
+        'type': 'response', 'id': 110,
+        'error': {'code': 'refused', 'reason': 'record_unwritable',
+                  'message': "The run's record could not be written, so the run did not start: "
+                             '/home/operator/Hertzforge_Data/recorder (Permission denied (os '
+                             'error 13)). Choose a data folder that can be written.',
+                  'detail': {'path': '/home/operator/Hertzforge_Data/recorder',
+                             'reason': 'Permission denied (os error 13)'}},
+    },
 }
 
 # --- MIMO Shock (PROTOCOL.md, "MIMO Shock") ---
@@ -5522,7 +5546,9 @@ MSHOCK_CONFIG = {
     'verdict': 'all',
     'control': {'law': {'id': 'inverse', 'params': {}}, **MSHOCK_CONTROL},
     'simulator': {'plant': 'shock-linear-4x4'},
-    'capture': {'auto_start': False, 'run_name': 'mimo_shock'},
+    'operator': 'Operator', 'article': 'Bracket', 'notes': '',
+    'specification': {'document': 'Example procedure', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '3'}],
 }
 
@@ -5550,7 +5576,8 @@ MSHOCK_CONFIG_SPECTRUM = {
     'verdict': 'global',
     'control': {'law': {'id': 'shape', 'params': {'max_step_db': 6}}, **MSHOCK_CONTROL},
     'simulator': {'plant': 'shock-jointed-4x4-moderate'},
-    'capture': {'auto_start': True, 'run_name': 'mimo_shock_spectrum'},
+    'operator': '', 'article': '', 'notes': '', 'specification': None,
+    'record': {'streams': False},
     'metadata': [],
 }
 
@@ -5658,7 +5685,9 @@ MSHOCK_RUNNING = _mshock_state(
     grid={'fs_hz': 12800, 'record_len': 8192, 'lines': 4097, 'actual': True}, clock='shared',
     level_db=-6, rung=2, pulses={'fired': 5, 'passed': 3, 'at_level': 2, 'of_level': 3},
     next_pulse_s=0.6, elapsed_s=14.2, identification=MSHOCK_IDENT, review=MSHOCK_REVIEW,
-    last_pulse=MSHOCK_ROW)
+    last_pulse=MSHOCK_ROW,
+    record={'folder': '/data/runs/20261114-140000_mimo_shock_ms-0002', 'streams': 'on',
+            'problem': None})
 
 MSHOCK_REVIEW_STATE = _mshock_state(
     run_id='ms-0003', state='review', phase='awaiting_review', title='Six Controls, Three Drives',

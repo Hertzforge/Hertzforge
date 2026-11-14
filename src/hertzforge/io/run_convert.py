@@ -2,10 +2,10 @@
 
 `convert` reads a run folder (`hertzforge.io.run_folder`) and writes a
 `.hforge` project every analysis tool opens with `Project.open`, by
-default `<run name>.hforge` inside the folder. The control service's
-Random, MIMO Random, Sine, Mixed Mode, Classical Shock, SRS shock, TWR and
-Explorer modules and its Recorder write a run folder for every run; MIMO
-Shock does not yet. This is the analysis side of that bridge.
+default `<run name>.hforge` inside the folder. Every control module of
+the control service writes a run folder for every run: Random, MIMO
+Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock, TWR,
+Explorer and the Recorder. This is the analysis side of that bridge.
 
 The project holds, in this order:
 
@@ -46,14 +46,16 @@ The project holds, in this order:
   `psd`, `cpsd`, `frf` or `coherence`, converted to SI, cross terms as
   written (the control service writes them in the file's convention,
   conj(X) Y, so nothing is conjugated here);
-- an `Srs` per result of kind `srs` (a record per pulse), and a
-  `ShockSpecification` per result of kind `srs_reference`, its band as
-  the warning limits and its abort band (where it has one) as the abort
-  limits, in SI at the result's Q;
-- the `TransientSpecification` a TWR run was controlled to, from its
-  result of kind `transient_reference` (the prepared section between its
-  pads at full level, time from the section's start), in SI; it has no
-  limits, so its alarm and abort shares stay in the result's description;
+- an `Srs` per result of kind `srs` (a record per pulse, and for a MIMO
+  Shock run per control), and a `ShockSpecification` per result of kind
+  `srs_reference`, its band as the warning limits and its abort band
+  (where it has one) as the abort limits, in SI at the result's Q;
+- the `TransientSpecification` a TWR or MIMO Shock waveform run was
+  controlled to, from its result of kind `transient_reference` (a TWR
+  run's prepared section between its pads at full level, time from the
+  section's start; a MIMO Shock run's reference at every control), in
+  SI; it has no limits, so its tolerance stays in the result's
+  description;
 - the `RunRecord`: the manifest, the table and setup as written, the
   law, the log, the end, each stream's and result's description, the
   arrays of results no analysis class holds (an Explorer run's survey
@@ -538,12 +540,16 @@ def _shot_spans(stream: run_folder.Stream
 
 def _shot_label(k: int, shot: Mapping[str, Any]) -> str:
     """A shot's record label: its pulse ('pulse 3') or its play ('play
-    3') where it names one, counted from 1, else its place in the stream
-    ('shot 1')."""
+    3') where it names one, counted from 1, the step it was where it names
+    one (a MIMO Shock identification's 'probe' or 'estimate'), else its
+    place in the stream ('shot 1')."""
     for name in ('pulse', 'play'):
         number = shot.get(name)
         if isinstance(number, int) and not isinstance(number, bool):
             return f'{name} {number + 1}'
+    step = shot.get('step')
+    if isinstance(step, str) and step:
+        return step
     return f'shot {k + 1}'
 
 
@@ -649,8 +655,7 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
     `Specification` on the control channels, in SI, its alarm band as the
     warning limits and its abort band as the abort limits. A row's bands
     hold from that row to the next (`SpecificationDraft` segments)."""
-    from ..core.author import SpecificationDraft
-    from ..units import si_transform
+    from .setup_convert import specification_from_random_profile
 
     profile = run.setup.get('resolved', {}).get('profile') if isinstance(
         run.setup.get('resolved'), Mapping) else None
@@ -660,8 +665,7 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
         return None
     points = [p for p in profile['breakpoints'] if isinstance(p, Mapping)]
     try:
-        frequencies = [float(p['freq_hz']) for p in points]
-        levels = [float(p['psd_g2_hz']) for p in points]
+        [(float(p['freq_hz']), float(p['psd_g2_hz'])) for p in points]
     except (KeyError, TypeError, ValueError):
         lacked.append('the resolved profile does not give every breakpoint as freq_hz and '
                       'psd_g2_hz, so the run has no specification')
@@ -672,27 +676,11 @@ def _specification(run: run_folder.RunFolder, table: Any, lacked: list[str]) -> 
         lacked.append('no enabled control channel holds the profile, so the run has no '
                       'specification')
         return None
-    scale = si_transform('g')[0] ** 2
-
-    def band(name: str, default: Sequence[float]) -> list[tuple[float, float]]:
-        # the protocol's [below, above] in positive dB, as the draft holds
-        # a band: signed, below the target negative
-        own = profile.get(name, default)
-        return [(-float(below), float(above))
-                for below, above in (p.get(name) or own for p in points[:-1])]
-
-    warning, abort = band('alarm_db', (3.0, 3.0)), band('abort_db', (6.0, 6.0))
     dofs = table.dof_strings()
-    draft = SpecificationDraft(
-        channels=[dofs[k] for k in controls], dims=['acceleration'] * len(controls),
-        frequencies=frequencies, levels=[[v * scale for v in levels] for _ in controls],
-        bands=[{'warning': warning, 'abort': abort,
-                'symmetric': all(lo == -hi for lo, hi in warning + abort),
-                'uniform': len(set(warning)) == 1 and len(set(abort)) == 1}
-               for _ in controls])
-    spec = draft.make('the Random profile as the control service resolved it')
-    spec.ordinate_unit = ['g'] * spec.num_records
-    return spec
+    # the one mapping between a Random profile and a specification
+    return specification_from_random_profile(
+        profile, [dofs[k] for k in controls],
+        'the Random profile as the control service resolved it')
 
 
 def _mixed_rate(rate: Mapping[str, Any]) -> tuple[float, int]:
@@ -813,7 +801,8 @@ def _sine_specification(run: run_folder.RunFolder, table: Any, lacked: list[str]
     dwell. The tone's breakpoints are the points the service resolved
     the profile at (`results/reference`), so the interpolation between
     them follows the profile the run followed."""
-    from ..core.sine import LINEAR, LOG, SineSweepSpecification, SineTone
+    from ..core.sine import SineSweepSpecification
+    from .setup_convert import sine_tone
 
     resolved = run.setup.get('resolved') if isinstance(run.setup.get('resolved'),
                                                        Mapping) else {}
@@ -837,28 +826,8 @@ def _sine_specification(run: run_folder.RunFolder, table: Any, lacked: list[str]
         lacked.append(f'the profile is in a unit of {dim!r}, not acceleration, so the run has '
                       'no sine specification')
         return None
-    m = len(controls)
-
-    def columns(values: np.ndarray) -> np.ndarray:
-        return np.tile(np.asarray(values, dtype=np.float64)[:, np.newaxis], (1, m))
-
-    if kind == 'dwell':
-        dwell = test.get('dwell') or {}
-        frequency = float(test['freq_hz'])
-        seconds = (float(dwell['seconds']) if 'seconds' in dwell
-                   else float(dwell.get('cycles', 0)) / frequency)
-        tone = SineTone.dwell(SINE_TONE, frequency, target[:1].repeat(m), seconds,
-                              **{k: v[:1].repeat(m) for k, v in limits.items()})
-    else:
-        rate = test.get('rate') or {}
-        law = LOG if rate.get('law') == 'log' else LINEAR
-        speed = float(rate['oct_per_min'] if law == LOG else rate['hz_per_s'])
-        order = np.argsort(frequencies)
-        if test.get('direction') == 'down':
-            order, speed = order[::-1], -speed
-        tone = SineTone(SINE_TONE, 0.0, frequencies[order], columns(target[order]),
-                        [law] * (len(order) - 1), [speed] * (len(order) - 1),
-                        **{k: columns(v[order]) for k, v in limits.items()})
+    # the one mapping between a Sine test and the tone it plays
+    tone = sine_tone(test, frequencies, target, limits, len(controls), SINE_TONE)
     dofs = table.dof_strings()
     return SineSweepSpecification(
         [tone], [dofs[k] for k in controls], ordinate_dim='acceleration',
@@ -1054,28 +1023,33 @@ def _srs_object(result: run_folder.Result, table: Any,
     result of kind `srs_reference` (a nominal SRS and its tolerance band)
     a `ShockSpecification` with the band as its warning limits and an
     abort band, where the result has one, as its abort limits. In SI, at
-    the result's Q and type."""
+    the result's Q and type. A result over several channels (a MIMO Shock
+    run's, one row per control) holds each channel's records together,
+    in record order, every channel in the unit its arrays state."""
     from ..core.data import ShockSpecification, Srs
     from ..units import UNKNOWN, si_transform
 
     channels = result.description.get('channels') or {}
     responses = [int(i) for i in channels.get('responses') or []]
-    if len(responses) != 1 or responses[0] not in units:
-        return None, 'it does not name one response channel the table holds'
-    channel = responses[0]
+    if not responses or any(i not in units for i in responses):
+        return None, 'it does not name its response channels in the table'
     spec = result.kind == 'srs_reference'
     name = 'reference' if spec else 'values'
     if name not in result.arrays:
         return None, f'it holds no array named {name}'
+    width = len(responses)
     values = np.asarray(result.arrays[name], dtype=np.float64)
     repeated = result.records is not None and not spec
-    stack = values.reshape(values.shape[0], -1) if repeated else values.reshape(1, -1)
+    if values.size % width:
+        return None, f'its values do not hold {width} channels'
+    stack = (values.reshape(values.shape[0], width, -1) if repeated
+             else values.reshape(1, width, -1))
     lines = stack.shape[-1]
     abscissa = _abscissa(result, lines)
     if abscissa is None or len(abscissa) != lines:
         return None, 'its abscissa is not stated, or not as long as its values'
-    scale, dim, unit = _unit_scale(units[channel])
-    known = dim != UNKNOWN
+    scales = [_unit_scale(units[i]) for i in responses]
+    known = all(dim != UNKNOWN for _s, dim, _u in scales)
     described = next((a for a in result.description.get('arrays') or []
                       if a.get('name') == name), {})
     if known:
@@ -1084,31 +1058,37 @@ def _srs_object(result: run_folder.Result, table: Any,
             stated = si_transform(declared)[0] if declared else None
         except Exception:  # noqa: BLE001 - an unreadable unit is reported, not raised
             stated = None
-        if stated is None or not np.isclose(stated, scale, rtol=1e-9):
-            return None, (f'its unit {described.get("unit")!r} is not the one channel '
-                          f'{channel} gives')
-    factor = scale if known else 1.0
-    dof = table.dof_strings()[{int(i): k for k, i in enumerate(table['channel'])}[channel]]
+        for channel, (scale, _d, _u) in zip(responses, scales, strict=True):
+            if stated is None or not np.isclose(stated, scale, rtol=1e-9):
+                return None, (f'its unit {described.get("unit")!r} is not the one channel '
+                              f'{channel} gives')
+    factors = [scale if known else 1.0 for scale, _d, _u in scales]
+    row = {int(i): k for k, i in enumerate(table['channel'])}
+    dofs = [table.dof_strings()[row[i]] for i in responses]
     count = stack.shape[0]
+    # channel-major: each channel's records together, in record order
+    ordinate = np.concatenate([stack[:, c, :] * factors[c] for c in range(width)], axis=0)
+    expand = (lambda seq: [v for v in seq for _ in range(count)])
     kwargs: dict[str, Any] = {
-        'abscissa': abscissa, 'ordinate': stack * factor, 'response_dof': [dof] * count,
-        'ordinate_dim': [dim if known else UNKNOWN] * count,
-        'ordinate_unit': [unit if known else None] * count,
+        'abscissa': abscissa, 'ordinate': ordinate, 'response_dof': expand(dofs),
+        'ordinate_dim': expand([dim if known else UNKNOWN for _s, dim, _u in scales]),
+        'ordinate_unit': expand([unit if known else None for _s, _d, unit in scales]),
         'comment': result.description.get('description', '') or result.name,
         'q': result.description.get('q'),
         'kind': str(result.description.get('srs_kind') or 'maximax')}
     if repeated:
-        kwargs['block'] = [(f'pulse {r["pulse"] + 1}' if isinstance(r.get('pulse'), int)
-                            else f'record {r.get("index", k)}')
-                           for k, r in enumerate(result.records or [])]
+        labels = [(f'pulse {r["pulse"] + 1}' if isinstance(r.get('pulse'), int)
+                   else f'record {r.get("index", k)}')
+                  for k, r in enumerate(result.records or [])]
+        kwargs['block'] = [label for _c in range(width) for label in labels]
     if not spec:
         return Srs(**kwargs), ''
     limits = {}
     for array, limit in (('band_low', 'warning_lower'), ('band_high', 'warning_upper'),
                          ('abort_low', 'abort_lower'), ('abort_high', 'abort_upper')):
         if array in result.arrays:
-            limits[limit] = np.asarray(result.arrays[array], dtype=np.float64).reshape(
-                1, -1) * factor
+            given = np.asarray(result.arrays[array], dtype=np.float64).reshape(width, -1)
+            limits[limit] = given * np.asarray(factors)[:, np.newaxis]
     return ShockSpecification(**kwargs, **limits), ''
 
 
@@ -1167,29 +1147,35 @@ def _sdm_specification(result: run_folder.Result, table: Any,
 
 def _transient_specification(result: run_folder.Result, table: Any,
                              units: Mapping[int, str]) -> tuple[Any, str]:
-    """A TWR run's target as the analysis holds a required waveform, or
-    (None, why not): a `TransientSpecification` of its control channel,
-    in SI, against time from the section's start."""
+    """A required waveform as the analysis holds it, or (None, why not):
+    a `TransientSpecification` of its control channels (a TWR run's one,
+    a MIMO Shock run's every control, a record each), in SI, against time
+    from the start the result states."""
     from ..core.data import TransientSpecification
     from ..units import UNKNOWN
 
     channels = result.description.get('channels') or {}
     responses = [int(i) for i in channels.get('responses') or []]
-    if len(responses) != 1 or responses[0] not in units:
-        return None, 'it does not name one response channel the table holds'
+    if not responses or any(i not in units for i in responses):
+        return None, 'it does not name its response channels in the table'
     if 'reference' not in result.arrays:
         return None, 'it holds no array named reference'
-    values = np.asarray(result.arrays['reference'], dtype=np.float64).reshape(-1)
-    abscissa = _abscissa(result, len(values))
-    if abscissa is None or len(abscissa) != len(values):
+    values = np.asarray(result.arrays['reference'], dtype=np.float64)
+    if values.size % len(responses):
+        return None, f'its reference does not hold {len(responses)} channels'
+    values = values.reshape(len(responses), -1)
+    abscissa = _abscissa(result, values.shape[1])
+    if abscissa is None or len(abscissa) != values.shape[1]:
         return None, 'its abscissa is not stated, or not as long as its values'
-    channel = responses[0]
-    scale, dim, unit = _unit_scale(units[channel])
-    known = dim != UNKNOWN
-    dof = table.dof_strings()[{int(i): k for k, i in enumerate(table['channel'])}[channel]]
+    scales = [_unit_scale(units[i]) for i in responses]
+    row = {int(i): k for k, i in enumerate(table['channel'])}
+    dofs = table.dof_strings()
     return TransientSpecification(
-        abscissa, values[np.newaxis] * (scale if known else 1.0), response_dof=[dof],
-        ordinate_dim=[dim], ordinate_unit=[unit if known else None],
+        abscissa, np.array([v * (scale if dim != UNKNOWN else 1.0)
+                            for v, (scale, dim, _u) in zip(values, scales, strict=True)]),
+        response_dof=[dofs[row[i]] for i in responses],
+        ordinate_dim=[dim for _s, dim, _u in scales],
+        ordinate_unit=[unit if dim != UNKNOWN else None for _s, dim, unit in scales],
         comment=result.description.get('description', '') or result.name), ''
 
 

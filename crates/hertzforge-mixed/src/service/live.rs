@@ -1187,10 +1187,20 @@ impl MixedService {
     }
 
     /// The display: spectra on the line grid and each tone's and band's
-    /// history. Empty before the loop engages.
+    /// history. Before the loop engages only the identification, once it has
+    /// run, on the grid it was made on.
     pub fn display(&self) -> MixedDisplay {
         let Some(rt) = self.rt.as_ref().filter(|r| r.floor_law.is_some()) else {
+            let grid = self
+                .rt
+                .as_ref()
+                .map_or_else(LineGrid::default, |rt| LineGrid {
+                    f0_hz: 0.0,
+                    df_hz: rt.df,
+                    lines: rt.lines,
+                });
             return MixedDisplay {
+                grid,
                 identification: self.frf(),
                 ..MixedDisplay::default()
             };

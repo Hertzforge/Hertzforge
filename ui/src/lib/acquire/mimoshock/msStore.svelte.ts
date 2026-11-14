@@ -16,7 +16,7 @@
 
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
-import type { ChannelRow, LogEntry, View } from '$lib/protocol/types';
+import type { ChannelRow, LogEntry, RunRecordRef, View } from '$lib/protocol/types';
 import type { LawsListResult } from '$lib/protocol/mimo';
 import {
 	MIMO_SHOCK_TOPICS,
@@ -342,8 +342,24 @@ export class MimoShockStore {
 			level_db: s.level_db,
 			at_level_s: null,
 			remaining_at_level_s: null,
-			end: s.end as unknown as RunHead['end']
+			end: s.end as unknown as RunHead['end'],
+			record: s.record ?? null
 		};
+	}
+
+	/** The run's record, from arm on: its folder, whether it keeps the time histories, its problem. */
+	get record(): RunRecordRef | null {
+		return this.status?.record ?? null;
+	}
+
+	/** Enabled inputs plus drives in the channel table being edited, for the size its streams take. */
+	get recordChannels(): number {
+		return this.rows.filter((r) => r.enabled).length;
+	}
+
+	/** The sample rate the run asks for, for the size its streams take. */
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz;
 	}
 
 	readonly frame = null;

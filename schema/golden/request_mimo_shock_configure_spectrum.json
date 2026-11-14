@@ -229,9 +229,12 @@
    "simulator": {
     "plant": "shock-jointed-4x4-moderate"
    },
-   "capture": {
-    "auto_start": true,
-    "run_name": "mimo_shock_spectrum"
+   "operator": "",
+   "article": "",
+   "notes": "",
+   "specification": null,
+   "record": {
+    "streams": false
    },
    "metadata": []
   },

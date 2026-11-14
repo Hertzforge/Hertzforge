@@ -19,6 +19,7 @@ import {
 	mixedByKey,
 	mixedItemKey,
 	mixedSectionOf,
+	newBand,
 	newTone,
 	partsOf,
 	scheduleDraftOf,
@@ -175,5 +176,23 @@ describe('several rows at once', () => {
 		expect(d.tones.every((t) => Number.isNaN(t.amplitude.g))).toBe(true);
 		expect(copyField(d.tones, [0, 1], 0, 'id')).toBe(0);
 		expect(d.tones.map((t) => t.id)).toEqual(['t1', 't2', 't3']);
+	});
+});
+
+describe('the Mixed Mode title', () => {
+	it('follows the parts until the operator types one', () => {
+		const d = defaultMixedSetup();
+		const laws = { floor: null, tones: null };
+		expect(toMixedConfig(d, laws).title).toBe('Sine on Random');
+		d.tones = [];
+		d.bands = [newBand('b1', 1)];
+		expect(toMixedConfig(d, laws).title).toBe('Random on Random');
+		d.tones = defaultMixedSetup().tones;
+		expect(toMixedConfig(d, laws).title).toBe('Sine and Random on Random');
+		d.title = 'Rotor survey';
+		expect(toMixedConfig(d, laws).title).toBe('Rotor survey');
+		expect(fromMixedConfig(toMixedConfig(defaultMixedSetup(), laws)).title).toBe('');
+		expect(fromMixedConfig(toMixedConfig(d, laws)).title).toBe('Rotor survey');
+		expect(mergeMixedSetup({ ...d, title: 'Sine on Random' }).title).toBe('');
 	});
 });

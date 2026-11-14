@@ -78,6 +78,18 @@ impl ShotRecording {
         station_frame: Arc<AtomicU64>,
         shots: Arc<AtomicU64>,
     ) -> Box<dyn Backend> {
+        Self::wrap_send(inner, inputs, drives, station_frame, shots)
+    }
+
+    /// [`ShotRecording::wrap`] for an engine that takes a station it may send to
+    /// another thread.
+    pub fn wrap_send(
+        inner: Box<dyn Backend>,
+        inputs: StreamTap,
+        drives: StreamTap,
+        station_frame: Arc<AtomicU64>,
+        shots: Arc<AtomicU64>,
+    ) -> Box<dyn Backend + Send> {
         Box::new(ShotRecording {
             inner,
             inputs,

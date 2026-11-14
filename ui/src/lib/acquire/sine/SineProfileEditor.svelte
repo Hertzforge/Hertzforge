@@ -12,7 +12,7 @@
 	import NumberField from '../NumberField.svelte';
 	import SineKinematics from './SineKinematics.svelte';
 	import SineProfileTable from './SineProfileTable.svelte';
-	import { hasProfileText } from './sineSetup';
+	import { hasProfileText, sineTitle } from './sineSetup';
 	import type { SineStore } from './sineStore.svelte';
 
 	interface Props {
@@ -62,7 +62,7 @@
 			<div class="aq-fields">
 				<div class="sel wide">
 					<label for="np-name" class="lbl">Test title</label>
-					<input id="np-name" class="field" bind:value={d.title} disabled={locked} aria-invalid={errs('title').length > 0} data-testid="sine-title" />
+					<input id="np-name" class="field" bind:value={d.title} placeholder={sineTitle(d)} title="Follows the profile and the test until a title is typed" disabled={locked} aria-invalid={errs('title').length > 0} data-testid="sine-title" />
 					<Findings items={errs('title').map((message) => ({ level: 'error' as const, message }))} />
 				</div>
 				<div class="sel">

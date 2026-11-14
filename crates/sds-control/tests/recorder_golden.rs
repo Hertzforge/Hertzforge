@@ -151,6 +151,19 @@ fn recorder_a_configuration_with_errors_is_refused_as_the_golden_error() {
 }
 
 #[test]
+fn recorder_a_data_folder_that_cannot_be_written_is_refused_as_the_golden_error() {
+    let e = sds_control::recorder::run::record_unwritable(
+        std::path::Path::new("/home/operator/Hertzforge_Data/recorder"),
+        "Permission denied (os error 13)",
+    );
+    same(
+        &protocol::error_response(110, &e),
+        &read_json("response_error_recorder_record_unwritable.json"),
+        "error",
+    );
+}
+
+#[test]
 fn recorder_the_subscription_parses_to_the_golden_result() {
     let request = read_json("request_recorder_subscribe.json");
     let parsed = protocol::parse_request(&request).unwrap();

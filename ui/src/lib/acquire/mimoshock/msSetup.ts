@@ -20,7 +20,7 @@ import type { CompensationShape, ShockPolarity, ShockShape, ShockStandardName } 
 import type { SrsEngine } from '$lib/protocol/srs';
 import type { MimoShockConfig, MimoShockLawEntry, MimoShockTargetKind, MimoShockVerdictMode } from '$lib/protocol/mimoShock';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import type { FieldErrors } from '../setup';
+import { defaultRecord, type FieldErrors, type RecordDraft } from '../setup';
 
 // ---------------------------------------------------------------------------------------------
 // The draft
@@ -104,7 +104,8 @@ export interface MsDraft {
 		scaled_aborts: boolean;
 	};
 	simulator: { plant: string | null };
-	capture: { auto_start: boolean; run_name: string };
+	/** The run's record: the operator's words and whether the folder keeps the time histories (Random's). */
+	record: RecordDraft;
 	metadata: { key: string; label: string; value: string }[];
 }
 
@@ -201,7 +202,7 @@ export function defaultMsSetup(): MsDraft {
 			scaled_aborts: true
 		},
 		simulator: { plant: null },
-		capture: { auto_start: false, run_name: 'mimo_shock' },
+		record: defaultRecord(),
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
 }
@@ -231,7 +232,9 @@ export function mergeMsSetup(saved: Partial<MsDraft> | null): MsDraft {
 	out.law = { ...base.law, ...(saved.law ?? {}) };
 	out.control = { ...base.control, ...(saved.control ?? {}) };
 	out.simulator = { ...base.simulator, ...(saved.simulator ?? {}) };
-	out.capture = { ...base.capture, ...(saved.capture ?? {}) };
+	// A draft saved before the run's record took the capture's place has a capture and no record.
+	delete (out as { capture?: unknown }).capture;
+	out.record = { ...base.record, ...(saved.record ?? {}) };
 	out.metadata = arr(saved.metadata, base.metadata);
 	return out;
 }
@@ -343,7 +346,11 @@ export function toMsConfig(d: MsDraft, law: MimoShockLawEntry | null): MimoShock
 			...d.control
 		},
 		simulator: { plant: d.simulator.plant },
-		capture: { ...d.capture },
+		operator: d.record.operator.trim(),
+		article: d.record.article.trim(),
+		notes: d.record.notes.trim(),
+		specification: d.record.document.trim() || d.record.clause.trim() ? { document: d.record.document.trim(), clause: d.record.clause.trim() } : null,
+		record: { streams: d.record.streams },
 		metadata: d.metadata.map((m) => ({ ...m }))
 	};
 }
@@ -418,7 +425,14 @@ export function fromMsConfig(c: MimoShockConfig): MsDraft {
 		law: { id: wireLaw?.id ?? '', params: { ...((wireLaw?.params ?? {}) as LawDraft['params']) } },
 		control: { ...base.control, ...rest },
 		simulator: { plant: c.simulator?.plant ?? null },
-		capture: { ...base.capture, ...(c.capture ?? {}) },
+		record: {
+			operator: c.operator ?? '',
+			article: c.article ?? '',
+			notes: c.notes ?? '',
+			document: c.specification?.document ?? '',
+			clause: c.specification?.clause ?? '',
+			streams: c.record?.streams ?? true
+		},
 		metadata: (c.metadata ?? []).map((m) => ({ ...m }))
 	};
 }
@@ -485,7 +499,7 @@ export function msByKey(items: { field?: string | null; channel?: number | null;
 
 /** The section a key belongs to. */
 export function msSectionOf(key: string): MsSection {
-	if (/^(channels|drives|station|table|simulator|capture|metadata)(\.|$)/.test(key)) return 'channels';
+	if (/^(channels|drives|station|table|simulator|metadata|operator|article|notes|specification|record)(\.|$)/.test(key)) return 'channels';
 	if (/^(title|kind|standard|pulses|srs)(\.|$)/.test(key)) return 'target';
 	if (/^(timing|verdict)(\.|$)/.test(key)) return 'timing';
 	if (/^(schedule|spacing|identification|acquisition)(\.|$)/.test(key)) return 'ladder';
@@ -591,7 +605,7 @@ export function localErrors(d: MsDraft): FieldErrors {
 	for (const k of ['law_budget', 'max_growth_db', 'max_band_growth_db', 'divergence_drive_ratio', 'first_drive_ratio'] as const) need(out, `control.${k}`, c[k]);
 	for (const k of ['law_misses', 'max_pulses', 'divergence_pulses'] as const) need(out, `control.${k}`, c[k], true);
 	for (const k of ['abort_db', 'max_velocity_ips', 'max_displacement_in'] as const) needOptional(out, `control.${k}`, c[k]);
-	if (d.capture.auto_start && !d.capture.run_name.trim()) add(out, 'capture.run_name', 'Name the capture, or turn auto start off.');
+	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
 }
 

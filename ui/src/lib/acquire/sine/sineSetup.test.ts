@@ -185,7 +185,8 @@ describe('the Sine setup draft', () => {
 		d.record.clause = '4.2';
 		d.limits.drive_vpk_abort = 0.4;
 		const e = localErrors(d, ROWS);
-		expect(e.title).toEqual(['Give the test a title.']);
+		// An empty title is not an error: the title follows the profile and the test.
+		expect(e.title).toBeUndefined();
 		expect(e['profile.rows']).toEqual(['Give at least two rows.']);
 		expect(e['profile.rows.0.value']).toEqual(['Enter a number.']);
 		expect(e['schedule.per_level']).toEqual(['Sweeps count in a sweep test only; give seconds.']);
@@ -244,5 +245,29 @@ describe('the Sine setup draft', () => {
 		expect(d.limits.channels[0].profile.rows).toHaveLength(2);
 		expect(d.schedule).toEqual(defaultSineSetup().schedule);
 		expect(mergeSineSetup(null)).toEqual(defaultSineSetup());
+	});
+});
+
+describe('the Sine title', () => {
+	it('follows the profile and the test until the operator types one', () => {
+		const d = defaultSineSetup();
+		expect(toSineConfig(d, null).title).toBe('Sine 1 g, 20 to 2000 Hz');
+		d.profile.rows = [newRow(10, 'accel_g', 0.5), newRow(500, 'accel_g', 0.5)];
+		d.test.band_hz = [10, 500];
+		expect(toSineConfig(d, null).title).toBe('Sine 0.5 g, 10 to 500 Hz');
+		d.test.kind = 'dwell';
+		d.test.dwell.freq_hz = 80;
+		expect(toSineConfig(d, null).title).toBe('Sine 0.5 g, dwell at 80 Hz');
+		d.title = 'Bracket survey';
+		expect(toSineConfig(d, null).title).toBe('Bracket survey');
+		expect(fromSineConfig(toSineConfig(defaultSineSetup(), null)).title).toBe('');
+		expect(fromSineConfig(toSineConfig(d, null)).title).toBe('Bracket survey');
+		expect(mergeSineSetup({ ...d, title: 'Sine 1 g, 20 to 2000 Hz' }).title).toBe('');
+	});
+
+	it('opens with no profile name, so none outlives the rows it named', () => {
+		const d = defaultSineSetup();
+		expect(d.profile.label).toBe('');
+		expect(toSineConfig(d, null).profile.label).toBeUndefined();
 	});
 });
