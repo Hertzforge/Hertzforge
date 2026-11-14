@@ -225,6 +225,8 @@ export interface Shape3DView {
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
+	paired?: boolean;
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;

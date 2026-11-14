@@ -387,6 +387,31 @@ def test_two_shape_sets_show_their_mac_and_the_pair_it_selects(plate, validate):
         project.remove('Set A')
 
 
+def test_a_matched_modes_object_draws_its_pairs_overlaid_beside_its_table(plate, validate):
+    """Each second-set mode over its first-set mode, stepped together, with the table of pairs
+    (Brandon, 2026-11-14)."""
+    project = plate.project
+    _two_sets(project)
+    try:
+        from hertzforge.service.ops_tables import OPERATIONS
+        add = next(op for op in OPERATIONS if op.id == 'project.add_matches')
+        add.run(project, {'first': 'Set A', 'second': 'Set B', 'pairs': '1,1; 3,2'})
+        name = named(plate, 'matched_modes')
+        out = shown(plate, name, validate=validate)
+        stage, table = out['views']
+        assert stage['view'] == 'shape3d' and stage['paired'] is True
+        assert table['view'] == 'table' and len(table['rows']) == 2
+        assert [m['index'] for m in stage['modes']] == [1, 3], 'the first set\'s mode of each pair'
+        assert [m['index'] for m in stage['overlays']] == [1, 2], 'its match in the second'
+        assert stage['overlays'][0]['label'] == 'Set B mode 1'
+        assert stage['overlay_phase'].shape == (2, 2)
+    finally:
+        for gone in [n for n, o in project.items() if projects.kind_of(o) == 'matched_modes']:
+            project.remove(gone)
+        project.remove('Set B')
+        project.remove('Set A')
+
+
 def test_a_lone_shape_set_has_four_views_one_at_a_time(plate, validate):
     project = plate.project
     geometry = project[named(plate, 'geometry')]

@@ -241,6 +241,7 @@
         },
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
+        "paired": {"type": "boolean"},
         "link": {"type": "string"},
         "note": {"type": "string"},
         "gizmo": {

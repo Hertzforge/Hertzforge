@@ -164,7 +164,8 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 "Mode <index>", for a shape that is not a mode.
 
 `overlays` and `overlay_phase` (optional) carry a second set of shapes on the same nodes, for a
-`matrix` view that `selects` this one (below).
+`matrix` view that `selects` this one (below). With `paired` (optional) overlay k goes with mode k
+and the shell draws it over that mode as the modes are stepped: a Matched Modes object's pairs.
 
 `pick` (optional) says what a click in the view does. A click is a press and release in one place; a drag still turns the
 view. The shell runs `op` with `params` and what was clicked, and the views it answers with take
