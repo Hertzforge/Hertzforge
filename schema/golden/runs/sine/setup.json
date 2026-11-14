@@ -1,0 +1,509 @@
+{
+  "config": {
+    "title": "Golden Sine",
+    "operator": "Operator",
+    "article": "Bracket",
+    "notes": "the golden run folder",
+    "specification": {
+      "document": "Example procedure",
+      "clause": "3.2"
+    },
+    "profile": {
+      "rows": [
+        {
+          "freq_hz": 250,
+          "quantity": "accel_g",
+          "value": 0.2
+        },
+        {
+          "freq_hz": 350,
+          "quantity": "accel_g",
+          "value": 0.4
+        }
+      ],
+      "alarm_db": [
+        1.5,
+        1.5
+      ],
+      "abort_db": [
+        3,
+        3
+      ]
+    },
+    "test": {
+      "kind": "sweep",
+      "band_hz": [
+        300,
+        320
+      ],
+      "rate": {
+        "law": "log",
+        "oct_per_min": 3
+      },
+      "start_hz": 300,
+      "direction": "up",
+      "end": {
+        "sweeps": 2
+      }
+    },
+    "acquisition": {
+      "fs_hz": 4096,
+      "tick_ms": 100
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels_db": [
+        -6,
+        0
+      ],
+      "per_level": {
+        "sweeps": 1
+      },
+      "full_level": {
+        "sweeps": 1
+      }
+    },
+    "identification": {
+      "review": false
+    },
+    "limits": {
+      "drive_vpk_ceiling": 5,
+      "drive_vpk_abort": 8,
+      "channels": [
+        {
+          "channel": 2,
+          "profile": {
+            "rows": [
+              {
+                "freq_hz": 250,
+                "quantity": "accel_g",
+                "value": 2
+              },
+              {
+                "freq_hz": 350,
+                "quantity": "accel_g",
+                "value": 2
+              }
+            ],
+            "alarm_db": [
+              1.5,
+              1.5
+            ],
+            "abort_db": [
+              3,
+              3
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "resolved": {
+    "profile": {
+      "breakpoints": [
+        {
+          "freq_hz": 250,
+          "quantity": "accel_g_pk",
+          "value": 0.2,
+          "accel_g_pk": 0.2,
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            3,
+            3
+          ]
+        },
+        {
+          "freq_hz": 350,
+          "quantity": "accel_g_pk",
+          "value": 0.4,
+          "accel_g_pk": 0.39999999999999997,
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            3,
+            3
+          ]
+        }
+      ],
+      "alarm_db": [
+        1.5,
+        1.5
+      ],
+      "abort_db": [
+        3,
+        3
+      ],
+      "unit": "g",
+      "label": ""
+    },
+    "test": {
+      "kind": "sweep",
+      "band_hz": [
+        300,
+        320
+      ],
+      "rate": {
+        "law": "log",
+        "oct_per_min": 3
+      },
+      "start_hz": 300,
+      "direction": "up",
+      "sweeps": 2,
+      "duration_s": null
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels_db": [
+        -6,
+        0
+      ],
+      "start_db": -6,
+      "per_level": {
+        "sweeps": 1
+      },
+      "full_level": {
+        "sweeps": 1
+      }
+    },
+    "tolerances": {
+      "alarm_db": [
+        1.5,
+        1.5
+      ],
+      "abort_db": [
+        3,
+        3
+      ]
+    },
+    "limits": [
+      {
+        "channel": 2,
+        "unit": "g",
+        "shared_name": null,
+        "profile": {
+          "breakpoints": [
+            {
+              "freq_hz": 250,
+              "quantity": "accel_g_pk",
+              "value": 2,
+              "accel_g_pk": 2,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                3,
+                3
+              ]
+            },
+            {
+              "freq_hz": 350,
+              "quantity": "accel_g_pk",
+              "value": 2,
+              "accel_g_pk": 2,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                3,
+                3
+              ]
+            }
+          ],
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            3,
+            3
+          ],
+          "unit": "g",
+          "label": ""
+        }
+      }
+    ],
+    "aborts": {
+      "envelope": {
+        "alarm_db": [
+          1.5,
+          1.5
+        ],
+        "abort_db": [
+          3,
+          3
+        ]
+      },
+      "drive": {
+        "ceiling_vpk": 5,
+        "abort_vpk": 8
+      },
+      "divergence_s": 1,
+      "fault_debounce_ticks": 50,
+      "kinematic_monitor": true,
+      "channels": [],
+      "notch": {
+        "drive_floor": 0.01,
+        "smoothing_ticks": 3,
+        "release_ramp_db_per_s": 20
+      }
+    },
+    "identification": {
+      "level_db": -20,
+      "gate_coherence": 0.5,
+      "trust_coherence": 0.5,
+      "trust_h_floor_frac": 0.05,
+      "review": false
+    },
+    "control": {
+      "composite": "weightedavg",
+      "weights": [],
+      "tracking": {
+        "pct": 10,
+        "max_hz": 100
+      },
+      "law_budget": 0.25,
+      "law_misses": 3,
+      "max_step_db": 1,
+      "max_rise_db_per_s": 240,
+      "cola": {
+        "enabled": false,
+        "volts_pk": 0.1,
+        "waveform": "Sine"
+      }
+    },
+    "control_channels": [
+      1
+    ],
+    "acquisition": {
+      "requested_fs_hz": 4096,
+      "fs_hz": 4096,
+      "tick_ms": 100,
+      "tick_frames": 410
+    },
+    "controller": {
+      "profile": {
+        "label": "",
+        "rows": [
+          {
+            "freq_hz": 250.0,
+            "quantity": "AccelGPk",
+            "value": 0.2,
+            "alarm_db": null,
+            "abort_db": null
+          },
+          {
+            "freq_hz": 350.0,
+            "quantity": "AccelGPk",
+            "value": 0.4,
+            "alarm_db": null,
+            "abort_db": null
+          }
+        ],
+        "global_alarm_db": [
+          1.5,
+          1.5
+        ],
+        "global_abort_db": [
+          3.0,
+          3.0
+        ]
+      },
+      "mode": {
+        "Sweep": {
+          "band": [
+            300.0,
+            320.0
+          ],
+          "rate": {
+            "LogOctPerMin": 3.0
+          },
+          "start_hz": 300.0,
+          "initial_direction": "Up",
+          "target": {
+            "Sweeps": 2
+          }
+        }
+      },
+      "control": {
+        "channels": [
+          {
+            "index": 1,
+            "weight": 1.0
+          }
+        ],
+        "mode": "WeightedAvg"
+      },
+      "limit_profiles": [
+        {
+          "channel_index": 2,
+          "profile": {
+            "label": "",
+            "rows": [
+              {
+                "freq_hz": 250.0,
+                "quantity": "AccelGPk",
+                "value": 2.0,
+                "alarm_db": null,
+                "abort_db": null
+              },
+              {
+                "freq_hz": 350.0,
+                "quantity": "AccelGPk",
+                "value": 2.0,
+                "alarm_db": null,
+                "abort_db": null
+              }
+            ],
+            "global_alarm_db": [
+              1.5,
+              1.5
+            ],
+            "global_abort_db": [
+              3.0,
+              3.0
+            ]
+          },
+          "shared_name": null
+        }
+      ],
+      "blend_w": 0.5,
+      "compression": "Slow",
+      "tracking_bw": {
+        "Proportional": {
+          "pct": 10.0,
+          "max_hz": 100.0
+        }
+      },
+      "feedforward": {
+        "coherence_floor": 0.5,
+        "h_floor_frac": 0.05
+      },
+      "notch": {
+        "drive_floor": 0.01,
+        "smoothing_ticks": 3.0,
+        "release_ramp_db_per_s": 20.0
+      },
+      "ladder": {
+        "sysid_level_db": -20.0,
+        "start_db": -6.0,
+        "table_db": [
+          -6.0,
+          0.0
+        ],
+        "per_rung": {
+          "Sweeps": 1
+        },
+        "full_for": {
+          "Sweeps": 1
+        }
+      },
+      "sysid_level_db": -20.0,
+      "coherence_floor": 0.5,
+      "drive_vpk_ceiling": 5.0,
+      "drive_vpk_abort": 8.0,
+      "fault_debounce_ticks": 50,
+      "kinematic_monitor": true,
+      "capture": {
+        "rule": "Off",
+        "level_settle_s": 1.0,
+        "periodic_save_s": null
+      },
+      "cola": {
+        "enabled": false,
+        "volts_pk": 0.1,
+        "waveform": "Sine"
+      },
+      "shaker": null,
+      "moving_mass": {
+        "armature_lb": 0.0,
+        "slip_table_lb": 0.0,
+        "drive_adapter_lb": 0.0,
+        "fixturing_lb": 0.0,
+        "test_article_lb": 0.0
+      },
+      "control_tick_frames": 410,
+      "fs_hz": 4096.0,
+      "review_hold": true,
+      "metadata": [
+        {
+          "key": "run_number",
+          "value": ""
+        },
+        {
+          "key": "test_article",
+          "value": ""
+        },
+        {
+          "key": "serial_number",
+          "value": ""
+        },
+        {
+          "key": "operator",
+          "value": ""
+        }
+      ],
+      "law_guards": {
+        "max_step_db": 1.0,
+        "max_rise_db_per_s": 240.0,
+        "budget_fraction": 0.25,
+        "max_misses": 3,
+        "divergence_s": 1.0
+      },
+      "control_tick_s": 0.1
+    }
+  },
+  "derived": {
+    "band_hz": [
+      300,
+      320
+    ],
+    "grid": {
+      "fs_hz": 4096,
+      "tick_frames": 410,
+      "tick_s": 0.10009765625,
+      "actual": true
+    },
+    "profile": {
+      "crossovers": [],
+      "peak_accel_g": 0.3326,
+      "peak_velocity_ips": 0.06386,
+      "peak_disp_pp_in": 0.00006352
+    },
+    "test_s": 3.7,
+    "identification_s": 32,
+    "call_budget_s": 0.0250244,
+    "stop_ramp_db_per_s": 120,
+    "safe_stop_s": 1.116,
+    "tracking": {
+      "verdict": "ok",
+      "ratio": 0.00541,
+      "at_hz": null,
+      "message": null
+    },
+    "law": {
+      "id": "servo_blend",
+      "name": "Servo blend",
+      "version": "0.1.0",
+      "sha256": null,
+      "live": [
+        "blend_w"
+      ]
+    },
+    "feasibility": {
+      "verdict": "not_evaluated",
+      "message": "No shaker was given, so the profile was not checked against shaker ratings."
+    }
+  },
+  "feasibility": {
+    "inputs": null,
+    "verdict": "not_evaluated",
+    "message": "No shaker was given, so the profile was not checked against shaker ratings."
+  }
+}

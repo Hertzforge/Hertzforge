@@ -5,8 +5,8 @@ control service while the run goes, that needs no other file and no running
 service to be read. The analysis side converts it into an ordinary project file
 (`hertzforge convert-run FOLDER`, or open the folder or its `run.json`), so a
 finished run reaches every analysis tool with its channel table, its setup, its
-log and its measurements. Today the Random module writes one for every run; the
-other control modules do not yet.
+log and its measurements. Today the Random and Sine modules write one for every
+run; the other control modules do not yet.
 
 The exact form is the reader's, `hertzforge.io.run_folder`; the conversion is
 `hertzforge.io.run_convert`, described in `docs/hforge-format.md` ("Run Folders
@@ -17,8 +17,9 @@ written by.
 
 Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
 `Hertzforge_Data` in the home folder. A Random run's folder is named
-`<YYYYMMDD-HHMMSS>_random_<run id>`, the time it armed in UTC. The run's state
-(`random.state`) names the folder from arm on (`record.folder`).
+`<YYYYMMDD-HHMMSS>_random_<run id>` and a Sine run's
+`<YYYYMMDD-HHMMSS>_sine_<run id>`, the time it armed in UTC. The run's state
+(`random.state`, `sine.state`) names the folder from arm on (`record.folder`).
 
 ## Layout
 
@@ -99,6 +100,8 @@ in slot order (each with its table `index` and `unit`), `first_station_frame`,
 played and whether that is `declared` by the station or `measured`; a Random
 run adds `pipeline_lag_frames`, the drive-to-response lag its system
 identification measured. A gap is never padded: the samples after it follow on.
+A golden folder whose streams were cut to their first frames says so with
+`cut_from_frames`, the frames the run recorded (`frames` is what the file holds).
 
 ### `results/`
 
@@ -109,7 +112,9 @@ the values (little-endian float64; complex as real and imaginary pairs). A
 result that repeats appends a record's arrays to `<name>.bin` and a line to
 `<name>.jsonl` each time. Cross terms are in the file's convention, conj(X)·Y,
 converted once by the control service. Values are in the channels' own units;
-the analysis side converts them to SI.
+the analysis side converts them to SI. A result kept in fixed-length records (a
+Sine run's `channel_levels` and `control_trace`) fills its last record out with
+NaN, and each record's line says how many it holds (`points`, `calls`).
 
 ### `end.json`
 
@@ -190,3 +195,48 @@ ends before its system identification has no identification or spectra.
 The golden folder is written by `cargo test -p sds-control --test
 random_golden_run` from a short run on the simulator, with fixed seeds, its wall
 times and build fields normalized; `scripts/make_golden_runs.sh` rewrites it.
+
+## What a Sine Run Saves
+
+From arm: `run.json`, `table.json`, `setup.json` (with `resolved.test`, the
+sweep, dwell, step or resonance search as resolved, `resolved.profile`, the
+breakpoints with the quantity each was given in and the acceleration the
+controller makes of it there, `resolved.limits` with the notch in
+`resolved.aborts`, and `resolved.controller`, the controller's own
+configuration), `law/law.json` (the law's identity, its parameters and its
+guards; a law file is named by its SHA-256, its bytes are not copied) and
+`log.jsonl`, and these files, each checked against the golden run folder
+(`schema/golden/runs/sine/`) by `tests/test_run_folder_golden_sine.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order (`kind` `inputs`), the identification's burst included |
+| `streams/drives` | The drive as the device accepted it, in volts, and the reference output's when there is one (`kind` `drives`) |
+| `results/reference` | The profile and its alarm and abort bands at 0 dB, peak, on the run's band: its breakpoints and points between them (`kind` `envelope`) |
+| `results/identification_frf` | The identification's complex transfer function, drive to control response, on the band the gate judges, the response taken the lag it measured later (`kind` `frf`) |
+| `results/identification_coherence` | Its ordinary coherence (`kind` `coherence`) |
+| `results/channel_levels` | Each input's tracked level, peak, and phase against the drive, with the tone's frequency, the scheduled level, the direction (+1 rising, -1 falling, 0 standing), the pass (the one-way sweep, counted from 0, which changes when the sweep turns or the level changes), and the control point's target, measured value and drive, as the run went (`kind` `sine_levels`, about twenty points a second, records of 64) |
+| `results/control_trace` | Every call of the control law: time from engage, frequency, target, measured, the drive in force, the law's output, the drive the core took, the prediction, why the core held, a miss, a cap, the call's time and the law's declared values (`kind` `sine_control`, records of 64 calls) |
+| `end.json` | The end, as the run's state reports it |
+
+A run with a limit channel adds `results/limit_ch<n>`, its lines on the run's
+band: the level the notch holds it to and its abort bound (`kind` `limit`). With
+`record.streams` false there is no `streams/` folder. A run that ends before
+identification has no identification; one that ends before it engages has no
+levels and no trace.
+
+On the analysis side a sweep or a dwell becomes a `SineSweepSpecification` of
+one tone over the control channels (a sweep's tone is one pass across the band
+in the direction the run started, at its rate and law), and a sweep's or a step
+test's `channel_levels` a `SineLevelSet`: the last one-way sweep at the highest
+level the run reached, where the tone moved. Every point of every pass, a
+dwell's levels against time, the trace, the reference and the limit lines stay
+in the run record as named arrays. A step test and a resonance search have no
+specification: their profile stays in the setup.
+
+The golden folder is written by `cargo test -p sds-control --test
+sine_golden_run` from a short sweep on the simulator, with fixed seeds, its wall
+times, build fields and each law call's measured duration normalized, and its
+streams cut to their first 1024 frames (`cut_from_frames`): the identification's
+burst alone is 131 072 frames;
+`scripts/make_golden_runs.sh` rewrites it.

@@ -3,9 +3,10 @@
 A run folder (schema `hertzforge-run/1`) is how a control run is meant
 to reach the analysis side: one folder per run, valid at every moment,
 needing no other file and no running service to be read. The control
-service's Random module writes one for every run (`docs/run-folder.md`);
-the other control modules do not yet. `hertzforge.io.run_convert` turns
-a folder into an ordinary project file. Its members:
+service's Random and Sine modules write one for every run
+(`docs/run-folder.md`); the other control modules do not yet.
+`hertzforge.io.run_convert` turns a folder into an ordinary project
+file. Its members:
 
 - `run.json`, the manifest: the schema, the test, the run's identity,
   the operator's words, the source (`SIM` or `HARDWARE`, never absent),
