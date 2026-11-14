@@ -5,9 +5,15 @@
 	 * Run card holds the verbs that apply now, the shared ones and the test type's own, then a review
 	 * hold or the run's end as one line with its button, then any line of the type's own (a hold, the
 	 * last verb's answer). The other cards are the type's: its level, its own panels, the station.
+	 * A test type that keeps a run folder (its run's `record`) has the folder named in the Run card
+	 * from arm on, and, given an opener, Open in Analysis and Copy Folder Path on its end line, as
+	 * Random's run view has them.
 	 */
 	import type { Snippet } from 'svelte';
 	import type { ActionId, RunBarHost } from '../actions';
+	import RunOpenActions from '../RunOpenActions.svelte';
+	import RunRecordLine from '../RunRecordLine.svelte';
+	import type { RunOpen } from '../runOpen.svelte';
 	import RunVerbs from '../RunVerbs.svelte';
 	import type { PlotBodies } from '../screen/bodies';
 	import Dock from '../screen/Dock.svelte';
@@ -47,8 +53,10 @@
 		abortKeys: string;
 		/** A window on another monitor: the plots and the cards, with Stop and Abort the only verbs. */
 		compact?: boolean;
+		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
+		opener?: RunOpen | null;
 	}
-	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false }: Props = $props();
+	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const run = $derived(host.run);
 	const end = $derived(run?.state === 'finished' ? run.end : null);
@@ -65,6 +73,7 @@
 		return `at ${clock(end.at_s)}${level}`;
 	});
 	const page = $derived(screen.page);
+	const record = $derived(run?.record ?? null);
 </script>
 
 {#snippet card(kind: CardKind)}
@@ -72,6 +81,7 @@
 		<div class="runcard">
 			<!-- The verbs first: Stop and Abort stay in view however short the card is. -->
 			<RunVerbs acq={host} {onoverride} {abortKeys} {compact} {verbs} layout="card" {omit} />
+			{#if record}<RunRecordLine {record} ended={!!end} />{/if}
 			{#if holding}
 				<div class="line hold" role="status" data-testid="{prefix}-review">
 					<span class="mk" aria-hidden="true">
@@ -106,6 +116,7 @@
 					{#if reset.visible && !compact}
 						<button class="btn" class:primary={reset.enabled} data-testid="act-reset" aria-disabled={!reset.enabled} class:off={!reset.enabled} title={reset.reason ?? 'A new run from the same setup.'} onclick={() => reset.enabled && host.reset()}>New Run</button>
 					{/if}
+					{#if record && opener && !compact}<RunOpenActions {record} {opener} />{/if}
 				</div>
 			{/if}
 			{#if notes}{@render notes()}{/if}
@@ -208,6 +219,10 @@
 		color: var(--blue-1);
 		background: var(--blue-weak);
 		border-color: var(--blue-2);
+	}
+
+	.end {
+		flex-wrap: wrap;
 	}
 
 	.end.pass {

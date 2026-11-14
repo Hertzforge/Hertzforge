@@ -89,7 +89,11 @@ const FULL: ShockConfig = {
 	},
 	train: { count: 4, spacing_s: 8 },
 	gunfire: { rounds_per_min: 900, rounds: 12 },
-	capture: { auto_start: true, run_name: 'trap_run' },
+	operator: 'A. Tester',
+	article: 'Bracket, unit 3',
+	notes: 'Second axis.',
+	specification: { document: 'Test Method 516', clause: '4.2' },
+	record: { streams: false },
 	metadata: [
 		{ key: 'run_number', label: 'Run Number', value: '17' },
 		{ key: 'operator', label: 'Operator', value: 'A. Tester' }
@@ -135,6 +139,27 @@ describe('a configuration through the draft and back', () => {
 		expect(d.pulse.compensation).toEqual({ shape: 'rectangular', pre_frac: 4, post_frac: 4, symmetric: true });
 		expect(d.standard).toEqual({ name: 'mil_std_810_516', tolerance_abort: 'full_level', overshoot_abort: null });
 		expect(d.train.count).toBe(1);
+	});
+
+	it("takes the run's record as Random's: the words trimmed, a specification when either part is given, the switch, and no capture", () => {
+		const d = fromShockConfig(FULL);
+		expect(d.record).toEqual({ operator: 'A. Tester', article: 'Bracket, unit 3', notes: 'Second axis.', document: 'Test Method 516', clause: '4.2', streams: false });
+		d.record = { operator: '  J. Operator ', article: '', notes: ' ', document: '', clause: '', streams: true };
+		const c = toShockConfig(d, LAW);
+		expect([c.operator, c.article, c.notes, c.specification, c.record]).toEqual(['J. Operator', '', '', null, { streams: true }]);
+		expect('capture' in c).toBe(false);
+		// a clause names its document
+		d.record.clause = '4.2';
+		expect(localErrors(d)['specification.document']).toEqual(['Name the document this clause is from.']);
+		expect(shockSectionOf('specification.document')).toBe('trains');
+		expect(shockSectionOf('record.streams')).toBe('trains');
+	});
+
+	it('reads a draft saved with the old capture as one with the run record, time histories on', () => {
+		const old = JSON.stringify({ ...defaultShockSetup(), record: undefined, capture: { auto_start: true, run_name: 'old' } });
+		const d = loadShockSetup(old);
+		expect(d.record).toEqual(defaultShockSetup().record);
+		expect('capture' in d).toBe(false);
 	});
 
 	it('sends only the parameters the law declares', () => {

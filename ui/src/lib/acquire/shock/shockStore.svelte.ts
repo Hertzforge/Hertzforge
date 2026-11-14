@@ -14,7 +14,7 @@
 import { regresses } from '../runOrder';
 import { untrack } from 'svelte';
 import type { ServiceClient } from '$lib/protocol/client.svelte';
-import type { ChannelRow, LogEntry, View } from '$lib/protocol/types';
+import type { ChannelRow, LogEntry, RunRecordRef, View } from '$lib/protocol/types';
 import type { LawEntry, LawsListResult } from '$lib/protocol/mimo';
 import {
 	SHOCK_TOPICS,
@@ -212,6 +212,16 @@ export class ShockStore {
 		return this.isLive || this.acq.isLive;
 	}
 
+	/** The channels the run's streams would hold: every enabled input and the drive. */
+	get recordChannels(): number {
+		return this.rows.filter((r) => r.enabled).length;
+	}
+
+	/** The run's record, from arm on: its folder, whether it keeps the time histories, its problem. */
+	get record(): RunRecordRef | null {
+		return this.status?.record ?? null;
+	}
+
 	/** The classical world's laws: built in first, then imported, as the service lists them. */
 	get classicalLaws(): LawEntry[] {
 		return lawsOfWorld(this.laws, 'shock_classical');
@@ -335,7 +345,8 @@ export class ShockStore {
 			level_db: s.level_db,
 			at_level_s: null,
 			remaining_at_level_s: null,
-			end: s.end as unknown as RunHead['end']
+			end: s.end as unknown as RunHead['end'],
+			record: s.record ?? null
 		};
 	}
 

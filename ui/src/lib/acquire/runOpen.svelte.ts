@@ -20,8 +20,11 @@ export interface RunOpenHost {
 
 /** The analysis workspace a run's data opens in, by the test that made it. */
 export function workspaceForRun(test: string): Workspace {
-	// PSDs against their specification are the Random workspace's; any other run's recordings, Signals'.
-	return test === 'random' ? 'random' : 'signals';
+	// PSDs against their specification are the Random workspace's; a classical shock run's pulses,
+	// SRS and their band the Shock workspace's; any other run's recordings, Signals'.
+	if (test === 'random') return 'random';
+	if (test === 'classical_shock') return 'shock';
+	return 'signals';
 }
 
 const VERB = 'Open in Analysis';

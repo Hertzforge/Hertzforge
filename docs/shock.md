@@ -7,7 +7,7 @@ volts throughout, held under a drive ceiling and an abort that the operator give
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
 station and channels, the pulse, the standard, the schedule, identification, control and limits,
-trains and capture, then the run itself. Classical shock shares its run bar, station panel,
+trains and the run's record, then the run itself. Classical shock shares its run bar, station panel,
 channel table and control-law panel with Random and MIMO Random, so an engineer who has run one
 will find the others familiar.
 
@@ -137,13 +137,25 @@ the pulses in a row with a growing error that end the run.
   displacement the pulse may leave. Checked at arm; the shaker's ratings are also the run's
   kinematic aborts. Without them, feasibility is not evaluated and the run says so.
 
-## Trains and Capture
+## Trains and the Run Record
 
 On the manual ladder, a **train** fires a count of pulses at the present level, at least the time
 between pulses apart (its first pulse too, from the pulse before it), and a **gunfire burst** fires
 rounds at a rate. Each fires the drive in force,
-with no law call inside it, and every pulse is judged. The capture can start when the run arms;
-fields kept with the run (a run number, an operator) are listed here.
+with no law call inside it, and every pulse is judged. Fields kept with the run (a run number, an
+operator) are listed here.
+
+Every run is recorded in a run folder from the moment it arms, as a Random run is
+(`docs/run-folder.md`, "What a Classical Shock Run Saves"). The **Run Record** panel takes the
+operator, the test article, the specification document and clause, and notes, and whether the
+folder keeps the time histories: every enabled input and the drive, a shot for identification and
+one for each pulse. With them off, the setup, the table, the log and every pulse's results are
+still kept. A run whose folder cannot be written does not arm, and says which folder and why.
+Once armed, the Run card names the folder; when recording has a problem the card says so and the
+run goes on. A finished run's end line offers **Open in Analysis**, which converts the folder and
+opens its data in the Shock workspace (each pulse's time history and SRS, the reference SRS and its
+band, the identification), and **Copy Folder Path**. The run has no capture of its own any more:
+the run folder is the one record.
 
 ## The Run
 

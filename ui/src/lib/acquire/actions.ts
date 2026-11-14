@@ -127,6 +127,8 @@ export interface RunHead {
 	at_level_s: number | null;
 	remaining_at_level_s: number | null;
 	end: import('$lib/protocol/types').RunEnd | null;
+	/** The run's record, from arm on, for a test type that keeps one. */
+	record?: import('$lib/protocol/types').RunRecordRef | null;
 }
 
 /**
@@ -172,7 +174,7 @@ export interface NoticesHost {
 	refusal: import('./words').Refusal | null;
 	note: { tone: 'pass' | 'info' | 'warn'; text: string } | null;
 	connected: boolean;
-	/** `record` is the run's record (Random's), whose problem is shown while the run goes on. */
+	/** `record` is the run's record (Random's, classical shock's), whose problem is shown while the run goes on. */
 	run: { state: RandomRunState; record?: { problem: string | null } | null } | null;
 	isLive: boolean;
 	control: { url: string; detail: string | null };

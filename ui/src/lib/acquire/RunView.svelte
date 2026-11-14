@@ -20,8 +20,10 @@
 	import RunVerbs from './RunVerbs.svelte';
 	import type { AcquireState } from './store.svelte';
 	import type { ActionId } from './actions';
-	import { runOpenWords, type RunOpen } from './runOpen.svelte';
-	import { clock, db, folderName, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
+	import RunOpenActions from './RunOpenActions.svelte';
+	import RunRecordLine from './RunRecordLine.svelte';
+	import type { RunOpen } from './runOpen.svelte';
+	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
 
 	interface Props {
 		acq: AcquireState;
@@ -62,8 +64,6 @@
 	const omit = $derived<ActionId[]>(['apply', ...(review ? (['proceed'] as const) : []), ...(end ? (['reset'] as const) : [])]);
 	const reset = $derived(acq.actions.reset);
 	const record = $derived(run?.record ?? null);
-	const opening = $derived(opener && record ? opener.at(record.folder) : 'idle');
-	const openWords = $derived(opener ? runOpenWords(opening, opener.refusal, opener.added) : null);
 
 	function empty(p: PlotPanel): string {
 		const data = display.plotData(p.id);
@@ -84,16 +84,7 @@
 		<div class="runcard">
 			<!-- The verbs first: Stop and Abort stay in view however short the card is. -->
 			<RunVerbs {acq} {onoverride} {abortKeys} {compact} layout="card" {omit} />
-			{#if record}
-				<div class="rec" data-testid="record-line" data-streams={record.streams}>
-					<svg class="mk" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M1.5 3.2h4l1.3 1.4h5.7v6.9h-11z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
-					<div class="what">
-						<p class="recname"><span class="k">{end ? 'Recorded in' : 'Recording to'}</span><strong title={record.folder} data-testid="record-folder">{folderName(record.folder)}</strong></p>
-						<p class="path" title={record.folder} data-testid="record-path">{record.folder}</p>
-						{#if record.streams === 'off'}<p class="msg" data-testid="record-streams-off">Time histories are not kept for this run.</p>{/if}
-					</div>
-				</div>
-			{/if}
+			{#if record}<RunRecordLine {record} ended={!!end} />{/if}
 			{#if end}
 				<div class="line end {tone}" role={tone === 'fail' ? 'alert' : 'status'} data-testid="run-end" data-outcome={end.outcome}>
 					<span class="mk" aria-hidden="true">
@@ -122,30 +113,7 @@
 					{#if reset.visible && !compact}
 						<button class="btn" class:primary={reset.enabled} data-testid="act-reset" aria-disabled={!reset.enabled} class:off={!reset.enabled} title={reset.reason ?? 'A new run from the same setup.'} onclick={() => reset.enabled && acq.reset()}>New Run</button>
 					{/if}
-					{#if record && opener && openWords && !compact}
-						<div class="endfoot">
-						<div class="endacts" data-testid="run-end-actions">
-							<button class="btn sm" data-testid="act-open-analysis" data-status={opening} aria-busy={opening === 'working'} aria-disabled={opening === 'working'} class:off={opening === 'working'} title="Convert the run folder and open its data in the analysis side." onclick={() => void opener.open(record.folder)}>
-								{#if opening === 'working'}<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>{/if}
-								{openWords.label}
-							</button>
-							<button class="btn sm ghost" data-testid="act-copy-path" title={record.folder} onclick={() => void opener.copyPath(record.folder)}>Copy Folder Path</button>
-						</div>
-						{#if openWords.line}
-							<p class="openline {opening}" role={opening === 'refused' ? 'alert' : 'status'} data-testid="open-analysis-status" data-status={opening}>
-								{#if opening === 'done'}
-									<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M2.5 7.3l2.8 2.8 6-6.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-								{:else if opening === 'refused'}
-									<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /><path d="M4.8 7h4.4" stroke="var(--bg-1)" stroke-width="1.7" stroke-linecap="round" /></svg>
-								{/if}
-								<span>{openWords.line}</span>
-							</p>
-						{/if}
-						{#if opener.copy !== 'idle'}
-							<p class="openline" role="status" data-testid="copy-path-status">{opener.copy === 'copied' ? "Copied the folder's path." : 'The clipboard cannot be written here. The path is shown above, to select and copy.'}</p>
-						{/if}
-						</div>
-					{/if}
+					{#if record && opener && !compact}<RunOpenActions {record} {opener} />{/if}
 				</div>
 			{/if}
 
@@ -355,97 +323,8 @@
 		cursor: default;
 	}
 
-	/* Where the run is recorded: the folder's name, and its full path under it. */
-	.rec {
-		display: flex;
-		align-items: flex-start;
-		gap: var(--sp-2);
-		font-size: var(--text-xs);
-		color: var(--text-2);
-	}
-
-	.rec .mk {
-		flex: none;
-		margin-top: 1px;
-		color: var(--text-3);
-	}
-
-	.rec .what {
-		min-width: 0;
-	}
-
-	.recname {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.recname .k {
-		color: var(--text-3);
-	}
-
-	.recname strong {
-		font-family: var(--font-mono);
-		font-weight: var(--weight-medium);
-		color: var(--text-1);
-		word-break: break-all;
-	}
-
-	.rec .path {
-		font-family: var(--font-mono);
-		font-size: var(--text-2xs);
-		color: var(--text-3);
-		word-break: break-all;
-		user-select: text;
-	}
-
 	.end {
 		flex-wrap: wrap;
-	}
-
-	/* The end line's actions take its whole width, under its words. */
-	.endfoot {
-		flex-basis: 100%;
-		padding-left: 24px;
-		color: var(--text-2);
-	}
-
-	.endacts {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-
-	.openline {
-		display: flex;
-		align-items: flex-start;
-		gap: 5px;
-		margin-top: 4px;
-		font-size: var(--text-xs);
-		color: var(--text-2);
-	}
-
-	.openline svg {
-		flex: none;
-		margin-top: 2px;
-	}
-
-	.openline.done {
-		color: var(--blue-1);
-	}
-
-	.openline.refused {
-		font-weight: var(--weight-strong);
-		color: var(--amber-1);
-	}
-
-	.spin {
-		animation: spin 0.8s linear infinite;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
 	}
 
 	.lines {

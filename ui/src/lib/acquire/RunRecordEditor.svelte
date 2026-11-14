@@ -10,8 +10,10 @@
 
 	interface Props {
 		acq: RecordHost;
+		/** What the folder still keeps with the time histories off, in the test type's words. */
+		kept?: string;
 	}
-	let { acq }: Props = $props();
+	let { acq, kept = 'Every enabled input and drive goes unrecorded. The setup, the channel table, the log and the spectra are still kept.' }: Props = $props();
 
 	const r = $derived(acq.setup.record);
 	const locked = $derived(acq.locked);
@@ -67,7 +69,7 @@
 					The size per hour shows once the sample rate is a number.
 				{/if}
 			{:else}
-				Every enabled input and drive goes unrecorded. The setup, the channel table, the log and the spectra are still kept.
+				{kept}
 			{/if}
 		</p>
 	</div>
