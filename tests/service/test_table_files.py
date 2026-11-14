@@ -20,7 +20,8 @@ GOLDENS = {'request_tables_save': ('params', 'tablesSaveParams'),
            'response_tables_load': ('result', 'tablesLoadResult'),
            'request_tables_save_bound': ('params', 'tablesSaveParams'),
            'request_tables_load_gain': ('params', 'tablesLoadParams'),
-           'response_tables_load_gain': ('result', 'tablesLoadResult')}
+           'response_tables_load_gain': ('result', 'tablesLoadResult'),
+           'request_tables_save_channels': ('params', 'tablesSaveParams')}
 
 
 def _golden(name):
@@ -210,7 +211,7 @@ def test_a_channel_table_converts_to_carry_controller_settings_and_back(validate
 
     table, reading = run('project.add_controller_settings')
     validate(table, 'tableView')
-    assert table['columns'][-11] == 'Enabled' and reading['title'].endswith('added')
+    assert table['columns'][-14] == 'Enabled' and reading['title'].endswith('added')
     assert project['Channels'].has_controller_settings
     # the converted columns edit as the others do
     assert 'enabled' in table['edit']['columns']
@@ -221,3 +222,34 @@ def test_a_channel_table_converts_to_carry_controller_settings_and_back(validate
     assert 'Enabled' not in table['columns']
     assert project.journal[-2:] == ["project['Channels'].add_controller_settings()",
                                     "project['Channels'].remove_controller_settings()"]
+
+
+@pytest.mark.parametrize('suffix', ('.hforge', '.csv', '.xlsx'))
+def test_control_rows_save_and_open_with_every_member(tmp_path, suffix, validate):
+    """The control service's rows (`channels.get`'s spelling, every optional
+    member set) go through `tables.save` and come back from `tables.load`
+    unchanged; the control loops come back from a `.hforge` file, which is
+    the form that holds them. The same golden request is read by the control
+    service's and the shell's tests, so the row is one row in all three."""
+    params = dict(_golden('request_tables_save_channels')['params'],
+                  path=str(tmp_path / f'ch{suffix}'))
+    validate(params, 'tablesSaveParams')
+    saved, opened = asyncio.run(_exchange([
+        ('tables.save', params),
+        ('tables.load', {'path': params['path'], 'kind': 'channels'})]))
+    assert saved['result'] == {'path': params['path']}
+    result = opened['result']
+    validate(result, 'tablesLoadResult')
+    assert result['channels'] == params['channels']
+    assert result['environments'] == (params['environments'] if suffix == '.hforge' else {})
+
+
+def test_control_rows_a_table_cannot_hold_are_refused_by_row(tmp_path):
+    params = dict(_golden('request_tables_save_channels')['params'],
+                  path=str(tmp_path / 'ch.hforge'))
+    rows = [dict(row) for row in params['channels']]
+    rows[0]['units'] = 'blorp'
+    (refused,) = asyncio.run(_exchange([('tables.save', {**params, 'channels': rows})]))
+    assert refused['error']['code'] == 'bad_request'
+    assert 'row 1' in refused['error']['message'], refused
+    assert not (tmp_path / 'ch.hforge').exists()

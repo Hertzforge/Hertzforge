@@ -201,6 +201,8 @@ impl Service {
             cfg: wire.clone(),
             record_len,
             timeout_s: self.opts.timeout.as_secs_f64(),
+            derived: derived.to_json(),
+            record: self.opts.record.clone(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         mrun::spawn(plan, initial.clone(), shared.clone(), data.clone(), rx)
@@ -250,7 +252,7 @@ impl Service {
     /// What a run arms on now: the table, the selected station and its law.
     async fn mimo_shock_arm_context(&self, run: &MsRun) -> Result<ArmContext, MethodError> {
         let w = run.wire.clone();
-        let (tbl, station_plan, hardware) = {
+        let (tbl, station_plan, hardware, revision, devices) = {
             let inner = self.inner.lock().await;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
@@ -275,7 +277,13 @@ impl Service {
                     )
                 }
             };
-            (inner.table.table.clone(), plan, hardware)
+            (
+                inner.table.table.clone(),
+                plan,
+                hardware,
+                inner.table.revision,
+                inner.stations.devices().to_vec(),
+            )
         };
         let id = w.law_id.clone();
         let given = w.law_params.clone();
@@ -302,11 +310,13 @@ impl Service {
             station: station_plan,
             scanner: self.opts.scanner.clone(),
             data_root: self.opts.data_root.clone(),
-            capture_root: Some(self.opts.records_root()),
+            records_root: self.opts.records_root(),
             bind: self.opts.bind.clone(),
             law,
             host_rule,
             law_values,
+            revision,
+            devices,
         })
     }
 

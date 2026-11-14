@@ -2,19 +2,26 @@
 //!
 //! One table, filled once, used by every module. The schema is a superset of a typical
 //! commercial controller's channel-config dialog: per
-//! channel identity, interface, sensitivity, range, role, and tri-field abort limits,
-//! plus MIMO reference fields. The table holds channel IDENTITY, not the test
+//! channel identity, interface, sensitivity, range, role, and tri-field abort limits.
+//! The table holds channel IDENTITY, not the test
 //! definition (that scope line is deliberate).
 //!
-//! Types are pinned by the integrator. The TSV round-trip is implemented so the
-//! spreadsheet copy/paste spine works today; CSV/JSON/UFF import-export and the full
-//! invariant set are hardened by later channel-table work.
+//! A row holds what the controller runs the channel at and, beside it, the
+//! columns the analysis side reads (node, direction, the sensor's identity and
+//! the rest, [`AnalysisColumns`]), so one table reaches a run and comes back from
+//! it with nothing dropped. The control service keeps the analysis columns as the
+//! table's identity and never runs anything from them.
+//!
+//! JSON is this crate's one serialized form. The table's files (`.hforge`, CSV,
+//! tab-delimited text, Excel) are written and read by the analysis side, under
+//! its own headings, from the protocol's rows; this crate keeps no second
+//! spelling of them.
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 
-pub mod csv;
 pub mod uff;
 
 /// The schema this build reads and writes.
@@ -76,10 +83,9 @@ impl PhysicalChannelRef {
 
     /// Split a resolved physical name at its FIRST separator.
     ///
-    /// This is the one place in the tree that splits a physical name, and it
-    /// exists because the flat CSV/TSV forms have exactly one cell per field:
-    /// a two-field reference has to survive as one string there. JSON keeps the
-    /// two halves apart and is the lossless format.
+    /// A flat form (a spreadsheet cell, `"<device>/<channel>"`) has one cell per
+    /// field, so a two-field reference survives there as one string. JSON and
+    /// the protocol keep the two halves apart.
     ///
     /// A cell with no separator is a PARSE ERROR rather than a guess. Guessing
     /// (whole string as the device, or as the channel) would silently produce a
@@ -112,6 +118,49 @@ pub enum AnalysisTier {
     Decimated(u32),
     /// Analyzed in a round-robin slice of a wide channel set.
     Rotating,
+}
+
+impl AnalysisTier {
+    /// The protocol's spelling: `full`, `rotating`, or `decimated:N`.
+    pub fn name(self) -> String {
+        match self {
+            AnalysisTier::Full => "full".into(),
+            AnalysisTier::Decimated(n) => format!("decimated:{n}"),
+            AnalysisTier::Rotating => "rotating".into(),
+        }
+    }
+
+    /// Read a tier from its spelling. Blank is `Full`. The short forms `dec:N`
+    /// and `rot` are read too. An unrecognized spelling is refused rather than
+    /// read as `Full`: an intended `decimated:8` mistyped and silently promoted to
+    /// full analysis is a 400-channel budget blown with nothing said.
+    pub fn from_name(s: &str) -> Result<AnalysisTier, TableError> {
+        let t = s.trim().to_ascii_lowercase();
+        if t.is_empty() || t == "full" || t == "f" {
+            return Ok(AnalysisTier::Full);
+        }
+        if t == "rot" || t == "rotating" {
+            return Ok(AnalysisTier::Rotating);
+        }
+        if let Some(n) = t
+            .strip_prefix("dec:")
+            .or_else(|| t.strip_prefix("decimated:"))
+        {
+            let n: u32 = n
+                .trim()
+                .parse()
+                .map_err(|_| TableError::Parse(format!("bad decimation factor '{s}'")))?;
+            if n == 0 {
+                return Err(TableError::Parse(
+                    "decimation factor 0 is not a cadence".into(),
+                ));
+            }
+            return Ok(AnalysisTier::Decimated(n));
+        }
+        Err(TableError::Parse(format!(
+            "bad analysis tier '{s}': expected full, decimated:N or rotating"
+        )))
+    }
 }
 
 /// Why a row's [`AnalysisTier`] came out the way it did.
@@ -151,6 +200,11 @@ pub fn derived_analysis_tier(ch: &Channel) -> (AnalysisTier, TierBasis) {
     (AnalysisTier::Full, basis)
 }
 
+/// A row's engineering unit. The five named variants are the units the
+/// controller has always named; any other unit is [`Units::Custom`], kept by its
+/// name exactly as written. Any unit the analysis side reads can be held, and the
+/// names in [`UNIT_VOCABULARY`] are the ones every part of the program knows the
+/// quantity of.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Units {
     AccelG,
@@ -159,6 +213,79 @@ pub enum Units {
     ForceLbf,
     VoltageV,
     Custom(String),
+}
+
+/// The channel table's unit vocabulary: the names every part of the program reads
+/// as the same quantity, grouped as the analysis side offers them for each channel
+/// type (acceleration, velocity, displacement, force, pressure, voltage, strain,
+/// temperature). A unit outside it is still held and still runs; the control
+/// service says so with a warning, and the analysis side reads it with its own
+/// unit reader or refuses it when that cannot.
+pub const UNIT_VOCABULARY: [&str; 29] = [
+    "g",
+    "in/s**2",
+    "m/s**2",
+    "mm/s**2",
+    "in/s",
+    "m/s",
+    "mm/s",
+    "mil",
+    "in",
+    "m",
+    "mm",
+    "lbf",
+    "N",
+    "kN",
+    "psi",
+    "Pa",
+    "kPa",
+    "MPa",
+    "V",
+    "mV",
+    "strain",
+    "microstrain",
+    "m/m",
+    "degC",
+    "degF",
+    "K",
+    "degR",
+    "in/s^2",
+    "m/s^2",
+];
+
+impl Units {
+    /// The unit's name as the protocol writes it.
+    pub fn name(&self) -> String {
+        match self {
+            Units::AccelG => "g".into(),
+            Units::VelocityIps => "in/s".into(),
+            Units::DisplacementMil => "mil".into(),
+            Units::ForceLbf => "lbf".into(),
+            Units::VoltageV => "V".into(),
+            Units::Custom(s) => s.clone(),
+        }
+    }
+
+    /// The unit a name gives. Only the five names the controller has always used
+    /// map to their variants; every other name, other spellings of those five
+    /// included, is kept as written. Exact on purpose: a name read here reaches a
+    /// running test, and folding `G` onto `g` would change what an existing table
+    /// runs with.
+    pub fn from_name(s: &str) -> Units {
+        match s {
+            "g" => Units::AccelG,
+            "in/s" => Units::VelocityIps,
+            "mil" => Units::DisplacementMil,
+            "lbf" => Units::ForceLbf,
+            "V" => Units::VoltageV,
+            other => Units::Custom(other.to_owned()),
+        }
+    }
+
+    /// True when the name is in [`UNIT_VOCABULARY`].
+    pub fn is_known(&self) -> bool {
+        UNIT_VOCABULARY.contains(&self.name().as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,6 +305,60 @@ pub enum ChannelRole {
     Reference,
 }
 
+/// The columns the analysis side reads, carried by the control service as the
+/// row's identity: where the channel is (node and direction), what it measures,
+/// the sensor and its calibration, and any other column by name. Every member is
+/// optional, and nothing the controller runs is read from them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisColumns {
+    /// The geometry node the channel is at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<u32>,
+    /// The direction it measures along, as the analysis side spells it (`X+`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub direction: String,
+    /// The quantity it measures (`acceleration`, `force`, ...).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub channel_type: String,
+    /// What the channel is to a frequency response: `reference`, `response`
+    /// or `monitor`. Apart from the loop's role, because a controlled force can
+    /// be a response's reference.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub role: String,
+    /// The input's range, volts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daq_range_v: Option<f64>,
+    /// The sensor's own full-scale output, volts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_range_v: Option<f64>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub serial_number: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub make: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    /// Which leg of a triaxial sensor (`X`, `Y` or `Z`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub triax_dof: String,
+    /// When the sensor's calibration runs out, `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub expiration: String,
+    /// Any other column, by its name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
+}
+
+impl AnalysisColumns {
+    /// True when no member holds anything.
+    pub fn is_blank(&self) -> bool {
+        self == &AnalysisColumns::default()
+    }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// Tri-field per-channel abort limits: acceleration (g), velocity (in/s),
 /// displacement (mil). `None` means no limit on that axis. Mirrors the SMART dialog's
 /// g / in-s / mil trio.
@@ -192,8 +373,6 @@ pub struct AbortLimits {
 pub struct Channel {
     pub index: u32,
     pub enabled: bool,
-    pub save: bool,
-    pub stream: bool,
     pub interface: Interface,
     /// IEPE bias volts; `None` when interface is `SingleEnded`.
     pub iepe_bias_v: Option<f64>,
@@ -217,6 +396,14 @@ pub struct Channel {
     /// assigns anything but `Full` does not exist yet.
     #[serde(default)]
     pub analysis_tier: AnalysisTier,
+    /// Marks the row as a limit channel: an input a test's limits are set on.
+    /// A mark only. The limits themselves stay in each test's setup, and no
+    /// module reads this flag.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub limit: bool,
+    /// The analysis side's columns, carried with the row and never run from.
+    #[serde(default, skip_serializing_if = "AnalysisColumns::is_blank")]
+    pub analysis: AnalysisColumns,
 }
 
 impl Channel {
@@ -224,8 +411,6 @@ impl Channel {
         Channel {
             index,
             enabled: true,
-            save: true,
-            stream: false,
             interface: Interface::SingleEnded,
             iepe_bias_v: None,
             units: Units::AccelG,
@@ -238,6 +423,8 @@ impl Channel {
             abort: AbortLimits::default(),
             physical: None,
             analysis_tier: AnalysisTier::Full,
+            limit: false,
+            analysis: AnalysisColumns::default(),
         }
     }
 
@@ -262,15 +449,6 @@ impl Channel {
     }
 }
 
-/// MIMO reference specification. Held here for channel identity only; the numeric
-/// reference/weighting/DOF-transform matrices for a given test are supplied by the
-/// module at configure time. (Identity here, test definition elsewhere.)
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct ReferenceSpec {
-    pub n_reference: u32,
-    pub notes: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelTable {
     /// The schema this table's contents follow. Absent in serialized form means
@@ -278,7 +456,6 @@ pub struct ChannelTable {
     #[serde(default = "unversioned")]
     pub schema_version: u32,
     pub channels: Vec<Channel>,
-    pub reference: Option<ReferenceSpec>,
 }
 
 impl Default for ChannelTable {
@@ -288,7 +465,6 @@ impl Default for ChannelTable {
         ChannelTable {
             schema_version: SCHEMA_VERSION,
             channels: Vec::new(),
-            reference: None,
         }
     }
 }
@@ -364,11 +540,18 @@ pub enum TableWarning {
     /// Reference channels exist but no Control channel is present. MIMO control
     /// needs at least one control channel to close the loop against the references.
     ReferenceWithoutControl,
-    /// `reference.n_reference` disagrees with the count of `Reference`-role channels.
-    ReferenceCountMismatch { declared: u32, found: u32 },
     /// An enabled channel is a Drive output. Informational: drive channels are
     /// outputs, not sensor inputs, so their sensitivity/range fields are advisory.
     DriveChannelPresent(u32),
+    /// The row's unit is not in [`UNIT_VOCABULARY`]. The row runs in it as
+    /// written; its quantity is unknown to the rest of the program.
+    UnitUnknown(u32),
+    /// An enabled drive row is not in volts: a drive is written to the device in
+    /// volts, whatever the row says.
+    DriveNotInVolts(u32),
+    /// A row with an abort limit is not in g: the kinematic limits read the
+    /// row's samples as acceleration in g.
+    AbortNotInG(u32),
 }
 
 impl fmt::Display for TableWarning {
@@ -384,13 +567,21 @@ impl fmt::Display for TableWarning {
                 f,
                 "reference channels are present but no control channel closes the loop"
             ),
-            TableWarning::ReferenceCountMismatch { declared, found } => write!(
-                f,
-                "reference spec declares {declared} references but {found} reference-role channels exist"
-            ),
             TableWarning::DriveChannelPresent(i) => {
                 write!(f, "channel {i} is a drive output (sensitivity/range are advisory)")
             }
+            TableWarning::UnitUnknown(i) => write!(
+                f,
+                "channel {i}'s unit is not one the program knows the quantity of; it runs in it as written"
+            ),
+            TableWarning::DriveNotInVolts(i) => write!(
+                f,
+                "channel {i} is a drive whose unit is not V; a drive is written in volts"
+            ),
+            TableWarning::AbortNotInG(i) => write!(
+                f,
+                "channel {i} has an abort limit and its unit is not g; the abort limits read it as g"
+            ),
         }
     }
 }
@@ -418,11 +609,9 @@ impl ChannelTable {
 
     /// Upgrade a table parsed from an older schema to [`SCHEMA_VERSION`].
     ///
-    /// This is the ONE place a version is interpreted, and every load path calls
-    /// it: [`ChannelTable::from_json`], [`ChannelTable::from_tsv`],
-    /// [`ChannelTable::from_csv`] and both clipboard-paste entry points. A table
-    /// that reached a module without passing through here is a table nobody
-    /// checked the version of.
+    /// This is the ONE place a version is interpreted, and the load path calls
+    /// it: [`ChannelTable::from_json`]. A table that reached a module without
+    /// passing through here is a table nobody checked the version of.
     ///
     /// v1 -> v2 needs no content rewrite: [`Channel::physical`] defaults to
     /// `None` (unbound is the honest state for a table authored before physical
@@ -478,9 +667,10 @@ impl ChannelTable {
     /// single pass. Use this for a table editor that wants to surface every problem
     /// at once; use [`ChannelTable::validate`] for the go/no-go gate.
     ///
-    /// Warnings (non-fatal): IEPE/bias interface mismatch per channel, a declared
-    /// `n_reference` that disagrees with the reference-role channel count, and the
-    /// presence of drive-output channels (informational). Warnings never block use.
+    /// Warnings (non-fatal): IEPE/bias interface mismatch per channel, the
+    /// presence of drive-output channels (informational), a unit outside
+    /// [`UNIT_VOCABULARY`], a drive not in volts, and an abort limit on a row not
+    /// in g. Warnings never block use.
     pub fn validate_report(&self) -> ValidationReport {
         let mut report = ValidationReport::default();
 
@@ -517,6 +707,17 @@ impl ChannelTable {
                         report.errors.push(TableError::NonPositiveRange(ch.index));
                     }
                 }
+            }
+            if !ch.units.is_known() {
+                report.warnings.push(TableWarning::UnitUnknown(ch.index));
+            }
+            if ch.enabled && ch.role == ChannelRole::Drive && ch.units != Units::VoltageV {
+                report
+                    .warnings
+                    .push(TableWarning::DriveNotInVolts(ch.index));
+            }
+            if ch.has_armed_limit() && ch.units != Units::AccelG {
+                report.warnings.push(TableWarning::AbortNotInG(ch.index));
             }
             // IEPE bias/interface coherence (a warning, not a hard error).
             match (ch.interface, ch.iepe_bias_v) {
@@ -559,24 +760,12 @@ impl ChannelTable {
             report.errors.push(TableError::ReferenceWithoutControl);
         }
 
-        // --- reference-count consistency (warning): declared vs. found ---
-        if let Some(ref spec) = self.reference {
-            if spec.n_reference != n_reference_role {
-                report.warnings.push(TableWarning::ReferenceCountMismatch {
-                    declared: spec.n_reference,
-                    found: n_reference_role,
-                });
-            }
-        }
-
         report
     }
 
     // --- JSON (serde, pretty) ---
 
-    /// Serialize the whole table (channels + reference spec) to pretty JSON. This is
-    /// the canonical on-disk / interchange format; it preserves every field including
-    /// the reference spec that the flat TSV/CSV forms drop.
+    /// Serialize the whole table to pretty JSON, every member of every row.
     pub fn to_json(&self) -> Result<String, TableError> {
         serde_json::to_string_pretty(self)
             .map_err(|e| TableError::Parse(format!("json serialize: {e}")))
@@ -588,193 +777,6 @@ impl ChannelTable {
     pub fn from_json(s: &str) -> Result<Self, TableError> {
         let mut t: ChannelTable =
             serde_json::from_str(s).map_err(|e| TableError::Parse(format!("json parse: {e}")))?;
-        t.migrate_to_current()?;
-        Ok(t)
-    }
-
-    // --- column headers shared by the TSV/CSV flat forms ---
-
-    /// Canonical short field keys, in column order, for the flat TSV/CSV forms. The
-    /// `paste_from_clipboard_tsv` header mapper resolves human column names onto these.
-    ///
-    /// Schema v2 appended `physical` and `tier` as the LAST two columns, which is
-    /// what makes a v1 file (16 columns, no version marker) loadable: the missing
-    /// cells pad to their defaults exactly as Excel's dropped trailing empties
-    /// already did.
-    pub const FIELD_KEYS: [&'static str; 18] = [
-        "idx",
-        "en",
-        "save",
-        "stream",
-        "iface",
-        "iepe_v",
-        "units",
-        "sens_mv_eu",
-        "range",
-        "pol",
-        "role",
-        "group",
-        "abort_g",
-        "abort_ips",
-        "abort_mil",
-        "desc",
-        "physical",
-        "tier",
-    ];
-
-    /// The column count of the schema-v1 flat form. A parsed row no wider than
-    /// this is a v1 row, which is how the versionless flat forms date themselves.
-    pub const V1_COLUMNS: usize = 16;
-
-    const TSV_HEADER: &'static str =
-        "idx\ten\tsave\tstream\tiface\tiepe_v\tunits\tsens_mv_eu\trange\tpol\trole\tgroup\tabort_g\tabort_ips\tabort_mil\tdesc\tphysical\ttier";
-
-    /// Excel-compatible TSV for spreadsheet copy/paste (goal 6). One header row, one
-    /// row per channel. Description must not contain tabs or newlines.
-    pub fn to_tsv(&self) -> String {
-        let mut out = String::from(Self::TSV_HEADER);
-        for c in &self.channels {
-            out.push('\n');
-            out.push_str(&channel_to_ordered_fields(c).join("\t"));
-        }
-        out
-    }
-
-    /// Parse the TSV produced by `to_tsv`. Hardened for real spreadsheet paste:
-    ///
-    /// - tolerates a present-or-absent header row (detected by a leading `idx` cell),
-    /// - tolerates CRLF line endings and a trailing blank line,
-    /// - tolerates trailing whitespace/tabs on a row (Excel adds these),
-    /// - tolerates rows with FEWER than 18 columns by padding trailing empties
-    ///   (Excel drops empty trailing cells on copy - and a schema-v1 file has 16),
-    ///   but rejects rows with MORE.
-    ///
-    /// The widest row DATES the file: no wider than [`ChannelTable::V1_COLUMNS`]
-    /// means a v1 table, which then goes through
-    /// [`ChannelTable::migrate_to_current`] like any other older-schema load.
-    ///
-    /// `desc` is taken verbatim, so a description may itself contain no tab. For
-    /// reordered/renamed columns use [`ChannelTable::paste_from_clipboard_tsv`].
-    pub fn from_tsv(s: &str) -> Result<Self, TableError> {
-        let ncols = Self::FIELD_KEYS.len();
-        let mut channels = Vec::new();
-        let mut widest = 0usize;
-        for line in s.lines() {
-            let line = line.trim_end_matches('\r');
-            // Excel often leaves trailing tabs/spaces; strip them but keep interior tabs.
-            let line = line.trim_end_matches([' ', '\t']);
-            if line.is_empty() {
-                continue;
-            }
-            if is_header_row(line, '\t') {
-                continue;
-            }
-            let mut f: Vec<&str> = line.split('\t').collect();
-            if f.len() > ncols {
-                return Err(TableError::Parse(format!(
-                    "expected at most {ncols} columns, got {}",
-                    f.len()
-                )));
-            }
-            widest = widest.max(f.len());
-            while f.len() < ncols {
-                f.push(""); // pad dropped trailing empties
-            }
-            channels.push(channel_from_ordered_fields(&f)?);
-        }
-        let mut t = ChannelTable {
-            schema_version: flat_schema_version(widest),
-            channels,
-            reference: None,
-        };
-        t.migrate_to_current()?;
-        Ok(t)
-    }
-
-    /// Clipboard-paste entry point that tolerates REORDERED and RENAMED columns.
-    ///
-    /// Requires a header row. Each header cell is matched case-insensitively (and
-    /// ignoring spaces/underscores/`#`) against a set of aliases per field, so a paste
-    /// from a spreadsheet whose columns are, e.g., `Channel #`, `Sensitivity (mV/EU)`,
-    /// `Enabled`, `Description` in any order maps onto the schema where unambiguous.
-    ///
-    /// Unmapped columns are ignored. Missing columns take the field default from
-    /// [`Channel::new`]. `index` is required (either an `idx`-family column, or row
-    /// position + 1 as a fallback). Ambiguous headers (two columns mapping to the same
-    /// field) are rejected. On any structural problem a [`TableError::Parse`] is
-    /// returned with a human-readable reason.
-    pub fn paste_from_clipboard_tsv(s: &str) -> Result<Self, TableError> {
-        Self::paste_from_clipboard_delim(s, '\t')
-    }
-
-    /// Comma-delimited sibling of [`ChannelTable::paste_from_clipboard_tsv`]: same
-    /// header-aliasing, reordering, and RFC-4180 quote handling, for clipboard or file
-    /// content whose columns are renamed/reordered but comma-separated. Use this (not
-    /// [`ChannelTable::from_csv`]) when the CSV has friendly/renamed headers; `from_csv`
-    /// expects the fixed 16-column schema order.
-    pub fn paste_from_clipboard_csv(s: &str) -> Result<Self, TableError> {
-        Self::paste_from_clipboard_delim(s, ',')
-    }
-
-    /// Shared header-mapping paste for both tab- and comma-delimited clipboard data.
-    fn paste_from_clipboard_delim(s: &str, delim: char) -> Result<Self, TableError> {
-        // Find the first non-blank line; it must be the header.
-        let mut lines = s
-            .lines()
-            .map(|l| l.trim_end_matches('\r'))
-            .filter(|l| !l.trim().is_empty());
-        let header_line = lines
-            .next()
-            .ok_or_else(|| TableError::Parse("empty paste (no header row)".into()))?;
-
-        let header_cells: Vec<String> = split_row(header_line, delim);
-        // Map each column position -> the schema field it feeds (if any).
-        let mut col_field: Vec<Option<Field>> = Vec::with_capacity(header_cells.len());
-        let mut assigned: std::collections::BTreeMap<Field, usize> = Default::default();
-        for (col, name) in header_cells.iter().enumerate() {
-            let field = Field::from_header(name);
-            if let Some(fd) = field {
-                if let Some(prev) = assigned.insert(fd, col) {
-                    return Err(TableError::Parse(format!(
-                        "ambiguous header: columns {prev} and {col} both map to `{}`",
-                        fd.key()
-                    )));
-                }
-            }
-            col_field.push(field);
-        }
-
-        let mut channels = Vec::new();
-        for (row_i, line) in lines.enumerate() {
-            let cells = split_row(line, delim);
-            if cells.iter().all(|c| c.trim().is_empty()) {
-                continue;
-            }
-            let mut ch = Channel::new(row_i as u32 + 1); // positional index fallback
-            let mut saw_index = false;
-            for (col, field) in col_field.iter().enumerate() {
-                let Some(field) = field else { continue };
-                let raw = cells.get(col).map(|s| s.as_str()).unwrap_or("").trim();
-                if raw.is_empty() && *field != Field::Description {
-                    continue; // leave the Channel::new default in place
-                }
-                field.apply(&mut ch, raw)?;
-                if *field == Field::Index {
-                    saw_index = true;
-                }
-            }
-            let _ = saw_index; // positional fallback already applied above
-            channels.push(ch);
-        }
-        // A header-mapped paste is versionless by construction (columns are named,
-        // not positional), so it is treated as the OLDEST schema and migrated:
-        // whichever v2 columns the paste did carry are already applied, and the
-        // ones it did not are at their defaults.
-        let mut t = ChannelTable {
-            schema_version: SCHEMA_VERSION_UNVERSIONED,
-            channels,
-            reference: None,
-        };
         t.migrate_to_current()?;
         Ok(t)
     }
@@ -836,390 +838,6 @@ impl ChannelTable {
         }
         t
     }
-}
-
-// --- small serializers/parsers (kept private; may be replaced with serde later) ---
-fn b2s(b: bool) -> &'static str {
-    if b {
-        "1"
-    } else {
-        "0"
-    }
-}
-fn s2b(s: &str) -> bool {
-    let s = s.trim();
-    matches!(
-        s,
-        "1" | "true"
-            | "TRUE"
-            | "True"
-            | "yes"
-            | "Yes"
-            | "YES"
-            | "y"
-            | "Y"
-            | "on"
-            | "ON"
-            | "x"
-            | "X"
-    )
-}
-fn iface_str(i: Interface) -> &'static str {
-    match i {
-        Interface::SingleEnded => "SE",
-        Interface::Iepe => "IEPE",
-    }
-}
-fn iface_from(s: &str) -> Interface {
-    let s = s.trim();
-    if s.eq_ignore_ascii_case("iepe") || s.eq_ignore_ascii_case("icp") {
-        Interface::Iepe
-    } else {
-        Interface::SingleEnded
-    }
-}
-fn pol_str(p: Polarity) -> &'static str {
-    match p {
-        Polarity::Positive => "+",
-        Polarity::Negative => "-",
-    }
-}
-fn pol_from(s: &str) -> Polarity {
-    let s = s.trim();
-    if s == "-" || s.eq_ignore_ascii_case("neg") || s.eq_ignore_ascii_case("negative") {
-        Polarity::Negative
-    } else {
-        Polarity::Positive
-    }
-}
-fn role_str(r: ChannelRole) -> &'static str {
-    match r {
-        ChannelRole::Control => "control",
-        ChannelRole::Monitor => "monitor",
-        ChannelRole::Drive => "drive",
-        ChannelRole::Reference => "reference",
-    }
-}
-fn role_from(s: &str) -> ChannelRole {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "control" | "ctrl" | "c" => ChannelRole::Control,
-        "drive" | "output" | "out" | "d" => ChannelRole::Drive,
-        "reference" | "ref" | "r" => ChannelRole::Reference,
-        _ => ChannelRole::Monitor,
-    }
-}
-pub(crate) fn units_str(u: &Units) -> String {
-    match u {
-        Units::AccelG => "g".into(),
-        Units::VelocityIps => "ips".into(),
-        Units::DisplacementMil => "mil".into(),
-        Units::ForceLbf => "lbf".into(),
-        Units::VoltageV => "V".into(),
-        Units::Custom(s) => s.clone(),
-    }
-}
-fn units_from(s: &str) -> Units {
-    match s.trim() {
-        "g" | "G" => Units::AccelG,
-        "ips" | "in/s" | "in-s" => Units::VelocityIps,
-        "mil" => Units::DisplacementMil,
-        "lbf" => Units::ForceLbf,
-        "V" | "v" | "volt" | "volts" => Units::VoltageV,
-        other => Units::Custom(other.to_string()),
-    }
-}
-fn opt_f(v: Option<f64>) -> String {
-    v.map(|x| x.to_string()).unwrap_or_default()
-}
-fn opt_u(v: Option<u32>) -> String {
-    v.map(|x| x.to_string()).unwrap_or_default()
-}
-fn parse_u(s: &str) -> Result<u32, TableError> {
-    s.trim()
-        .parse()
-        .map_err(|_| TableError::Parse(format!("bad u32 '{s}'")))
-}
-fn parse_f(s: &str) -> Result<f64, TableError> {
-    s.trim()
-        .parse()
-        .map_err(|_| TableError::Parse(format!("bad f64 '{s}'")))
-}
-fn parse_opt_f(s: &str) -> Result<Option<f64>, TableError> {
-    if s.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(parse_f(s)?))
-    }
-}
-fn parse_opt_u(s: &str) -> Result<Option<u32>, TableError> {
-    if s.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(parse_u(s)?))
-    }
-}
-
-/// Render an [`AnalysisTier`] to its flat-form cell: `full`, `dec:N`, `rot`.
-pub(crate) fn tier_str(t: AnalysisTier) -> String {
-    match t {
-        AnalysisTier::Full => "full".into(),
-        AnalysisTier::Decimated(n) => format!("dec:{n}"),
-        AnalysisTier::Rotating => "rot".into(),
-    }
-}
-
-/// Parse an [`AnalysisTier`] cell. Empty is `Full` (the v1 default, and what an
-/// operator leaving the column blank means). An unrecognized spelling is a parse
-/// ERROR rather than a silent `Full`: quietly promoting an intended `dec:8` row
-/// to full analysis is a 400-channel budget blown with nothing said.
-pub(crate) fn tier_from(s: &str) -> Result<AnalysisTier, TableError> {
-    let t = s.trim().to_ascii_lowercase();
-    if t.is_empty() || t == "full" || t == "f" {
-        return Ok(AnalysisTier::Full);
-    }
-    if t == "rot" || t == "rotating" {
-        return Ok(AnalysisTier::Rotating);
-    }
-    if let Some(n) = t
-        .strip_prefix("dec:")
-        .or_else(|| t.strip_prefix("decimated:"))
-    {
-        let n: u32 = n
-            .trim()
-            .parse()
-            .map_err(|_| TableError::Parse(format!("bad decimation factor '{s}'")))?;
-        if n == 0 {
-            return Err(TableError::Parse(
-                "decimation factor 0 is not a cadence".into(),
-            ));
-        }
-        return Ok(AnalysisTier::Decimated(n));
-    }
-    Err(TableError::Parse(format!(
-        "bad analysis tier '{s}': expected full | dec:N | rot"
-    )))
-}
-
-/// Which schema a FLAT (versionless) form's widest row implies. `0` columns
-/// means an empty file, which is treated as current rather than as v1: there is
-/// nothing in it to migrate.
-fn flat_schema_version(widest_row: usize) -> u32 {
-    if widest_row == 0 || widest_row > ChannelTable::V1_COLUMNS {
-        SCHEMA_VERSION
-    } else {
-        SCHEMA_VERSION_UNVERSIONED
-    }
-}
-
-/// True if a delimited line is a header row (first cell resolves to the `idx` field
-/// or is literally `idx`). Case-insensitive, space/underscore/`#`-insensitive.
-pub(crate) fn is_header_row(line: &str, delim: char) -> bool {
-    match line.split(delim).next() {
-        Some(first) => matches!(Field::from_header(first), Some(Field::Index)),
-        None => false,
-    }
-}
-
-/// Build a `Channel` from exactly 18 ordered string fields (the fixed TSV/CSV column
-/// order). Shared by `from_tsv` and `csv::from_csv`.
-pub(crate) fn channel_from_ordered_fields(f: &[&str]) -> Result<Channel, TableError> {
-    debug_assert_eq!(f.len(), ChannelTable::FIELD_KEYS.len());
-    Ok(Channel {
-        index: parse_u(f[0])?,
-        enabled: s2b(f[1]),
-        save: s2b(f[2]),
-        stream: s2b(f[3]),
-        interface: iface_from(f[4]),
-        iepe_bias_v: parse_opt_f(f[5])?,
-        units: units_from(f[6]),
-        sensitivity_mv_per_eu: parse_f(f[7])?,
-        range_max: parse_f(f[8])?,
-        polarity: pol_from(f[9]),
-        role: role_from(f[10]),
-        control_group: parse_opt_u(f[11])?,
-        abort: AbortLimits {
-            accel_g: parse_opt_f(f[12])?,
-            velocity_ips: parse_opt_f(f[13])?,
-            displacement_mil: parse_opt_f(f[14])?,
-        },
-        description: f[15].to_string(),
-        physical: if f[16].trim().is_empty() {
-            None
-        } else {
-            Some(PhysicalChannelRef::parse_resolved(f[16].trim())?)
-        },
-        analysis_tier: tier_from(f[17])?,
-    })
-}
-
-/// Render a `Channel` to the 18 ordered string fields (the fixed TSV/CSV column
-/// order). Shared by `to_tsv` and `csv::to_csv`.
-pub(crate) fn channel_to_ordered_fields(c: &Channel) -> [String; 18] {
-    [
-        c.index.to_string(),
-        b2s(c.enabled).to_string(),
-        b2s(c.save).to_string(),
-        b2s(c.stream).to_string(),
-        iface_str(c.interface).to_string(),
-        opt_f(c.iepe_bias_v),
-        units_str(&c.units),
-        c.sensitivity_mv_per_eu.to_string(),
-        c.range_max.to_string(),
-        pol_str(c.polarity).to_string(),
-        role_str(c.role).to_string(),
-        opt_u(c.control_group),
-        opt_f(c.abort.accel_g),
-        opt_f(c.abort.velocity_ips),
-        opt_f(c.abort.displacement_mil),
-        c.description.clone(),
-        c.physical_name(),
-        tier_str(c.analysis_tier),
-    ]
-}
-
-/// Split one delimited row into owned cells. For tab-delimited data this is a plain
-/// split (spreadsheets never quote TSV). For comma-delimited data the CSV module owns
-/// RFC-4180 quote handling; here we use the CSV parser so quoted fields survive paste.
-fn split_row(line: &str, delim: char) -> Vec<String> {
-    if delim == ',' {
-        csv::parse_csv_line(line)
-    } else {
-        line.split(delim).map(|s| s.to_string()).collect()
-    }
-}
-
-/// The 18 schema fields addressable by a paste header. Used to map arbitrary
-/// spreadsheet column names onto the channel fields (case/space/underscore-insensitive).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Field {
-    Index,
-    Enabled,
-    Save,
-    Stream,
-    Interface,
-    IepeBias,
-    Units,
-    Sensitivity,
-    Range,
-    Polarity,
-    Role,
-    Group,
-    AbortG,
-    AbortIps,
-    AbortMil,
-    Description,
-    Physical,
-    Tier,
-}
-
-impl Field {
-    fn key(self) -> &'static str {
-        match self {
-            Field::Index => "idx",
-            Field::Enabled => "en",
-            Field::Save => "save",
-            Field::Stream => "stream",
-            Field::Interface => "iface",
-            Field::IepeBias => "iepe_v",
-            Field::Units => "units",
-            Field::Sensitivity => "sens_mv_eu",
-            Field::Range => "range",
-            Field::Polarity => "pol",
-            Field::Role => "role",
-            Field::Group => "group",
-            Field::AbortG => "abort_g",
-            Field::AbortIps => "abort_ips",
-            Field::AbortMil => "abort_mil",
-            Field::Description => "desc",
-            Field::Physical => "physical",
-            Field::Tier => "tier",
-        }
-    }
-
-    /// Resolve a human/short header name to a field. Normalizes by lowercasing and
-    /// dropping spaces, underscores, hyphens, `#`, and parenthetical unit suffixes,
-    /// then matches a curated alias set. Returns `None` for unrecognized columns.
-    fn from_header(raw: &str) -> Option<Field> {
-        let n = normalize_header(raw);
-        match n.as_str() {
-            "idx" | "index" | "ch" | "chan" | "channel" | "channelno" | "chno" | "no" | "num"
-            | "number" => Some(Field::Index),
-            "en" | "enable" | "enabled" | "on" | "active" => Some(Field::Enabled),
-            "save" | "record" | "log" => Some(Field::Save),
-            "stream" | "streaming" | "telemetry" => Some(Field::Stream),
-            "iface" | "interface" | "coupling" | "input" | "inputtype" | "sensortype" => {
-                Some(Field::Interface)
-            }
-            "iepev" | "iepebias" | "bias" | "biasv" | "iepebiasv" | "iepe" => Some(Field::IepeBias),
-            "units" | "unit" | "eu" | "engunit" | "engunits" | "engineeringunit"
-            | "engineeringunits" => Some(Field::Units),
-            "sensmveu" | "sens" | "sensitivity" | "sensmvg" | "mvg" | "mveu" | "mvpereu"
-            | "mvperg" | "cal" | "calibration" => Some(Field::Sensitivity),
-            "range" | "rangemax" | "fullscale" | "fs" | "max" | "maxrange" => Some(Field::Range),
-            "pol" | "polarity" | "sign" | "direction" => Some(Field::Polarity),
-            "role" | "type" | "channelrole" | "function" => Some(Field::Role),
-            "group" | "controlgroup" | "ctrlgroup" | "grp" | "cgroup" => Some(Field::Group),
-            "abortg" | "abortaccel" | "abortlimitg" | "glimit" | "accelabort" | "limitg" => {
-                Some(Field::AbortG)
-            }
-            "abortips" | "abortvel" | "abortvelocity" | "ipslimit" | "velabort" | "limitips"
-            | "abortins" | "insabort" => Some(Field::AbortIps),
-            "abortmil" | "abortdisp" | "abortdisplacement" | "millimit" | "dispabort"
-            | "limitmil" => Some(Field::AbortMil),
-            "desc" | "description" | "label" | "name" | "tag" | "location" | "note" | "notes"
-            | "comment" => Some(Field::Description),
-            // Schema v2. `name` stays a Description alias (it always was one) and
-            // is deliberately NOT claimed here: an operator's "Name" column has
-            // meant the human label since v1 and silently rebinding it to a
-            // physical channel would move real tables onto wrong hardware.
-            "physical" | "physicalchannel" | "physchan" | "phys" | "devchan" | "hwchannel"
-            | "hwchan" => Some(Field::Physical),
-            "tier" | "analysistier" | "analysis" | "atier" => Some(Field::Tier),
-            _ => None,
-        }
-    }
-
-    /// Apply a raw cell value to the matching field of a channel. Empty is a no-op for
-    /// every field except `Description` (which may legitimately be empty).
-    fn apply(self, ch: &mut Channel, raw: &str) -> Result<(), TableError> {
-        match self {
-            Field::Index => ch.index = parse_u(raw)?,
-            Field::Enabled => ch.enabled = s2b(raw),
-            Field::Save => ch.save = s2b(raw),
-            Field::Stream => ch.stream = s2b(raw),
-            Field::Interface => ch.interface = iface_from(raw),
-            Field::IepeBias => ch.iepe_bias_v = parse_opt_f(raw)?,
-            Field::Units => ch.units = units_from(raw),
-            Field::Sensitivity => ch.sensitivity_mv_per_eu = parse_f(raw)?,
-            Field::Range => ch.range_max = parse_f(raw)?,
-            Field::Polarity => ch.polarity = pol_from(raw),
-            Field::Role => ch.role = role_from(raw),
-            Field::Group => ch.control_group = parse_opt_u(raw)?,
-            Field::AbortG => ch.abort.accel_g = parse_opt_f(raw)?,
-            Field::AbortIps => ch.abort.velocity_ips = parse_opt_f(raw)?,
-            Field::AbortMil => ch.abort.displacement_mil = parse_opt_f(raw)?,
-            Field::Description => ch.description = raw.to_string(),
-            Field::Physical => {
-                ch.physical = if raw.trim().is_empty() {
-                    None
-                } else {
-                    Some(PhysicalChannelRef::parse_resolved(raw.trim())?)
-                }
-            }
-            Field::Tier => ch.analysis_tier = tier_from(raw)?,
-        }
-        Ok(())
-    }
-}
-
-/// Normalize a header cell for alias matching: lowercase, drop everything after a `(`
-/// (unit suffixes like `Sensitivity (mV/g)`), and strip spaces/underscores/hyphens/`#`.
-fn normalize_header(raw: &str) -> String {
-    let base = raw.split('(').next().unwrap_or(raw);
-    base.chars()
-        .filter(|c| !matches!(c, ' ' | '_' | '-' | '#' | '.' | '/'))
-        .flat_map(|c| c.to_lowercase())
-        .collect()
 }
 
 #[cfg(test)]
@@ -1289,147 +907,6 @@ mod tests {
         t.channels.push(Channel::new(1));
         t.channels.push(Channel::new(1));
         assert_eq!(t.validate(), Err(TableError::DuplicateIndex(1)));
-    }
-
-    // --- TSV round-trips + hardening -------------------------------------------
-
-    #[test]
-    fn tsv_round_trips() {
-        // The non-uniform seed is this round-trip's fixture.
-        #[allow(deprecated)]
-        let t = ChannelTable::nonuniform_default_8ch();
-        let tsv = t.to_tsv();
-        let back = ChannelTable::from_tsv(&tsv).unwrap();
-        assert_eq!(t.channels, back.channels);
-    }
-
-    #[test]
-    fn tsv_round_trips_full_field_coverage() {
-        // Exercise every non-default field so the flat form is proven lossless.
-        let mut t = ChannelTable::new();
-        let mut c = Channel::new(7);
-        c.enabled = false;
-        c.save = false;
-        c.stream = true;
-        c.interface = Interface::Iepe;
-        c.iepe_bias_v = Some(12.5);
-        c.units = Units::Custom("psi".into());
-        c.sensitivity_mv_per_eu = 33.3;
-        c.range_max = 250.0;
-        c.polarity = Polarity::Negative;
-        c.role = ChannelRole::Reference;
-        c.control_group = Some(0);
-        c.abort = AbortLimits {
-            accel_g: Some(9.0),
-            velocity_ips: Some(70.0),
-            displacement_mil: Some(2250.0),
-        };
-        c.description = "Ref X".into();
-        t.channels.push(c);
-        // add a control so a reference-only table is still coherent
-        let mut ctrl = Channel::new(1);
-        ctrl.role = ChannelRole::Control;
-        ctrl.control_group = Some(0);
-        t.channels.push(ctrl);
-        let back = ChannelTable::from_tsv(&t.to_tsv()).unwrap();
-        assert_eq!(t.channels, back.channels);
-    }
-
-    #[test]
-    fn from_tsv_tolerates_crlf_and_trailing_ws_and_no_header() {
-        // No header, CRLF endings, trailing spaces after the description, and a
-        // trailing blank line. The trailing whitespace is stripped from the row.
-        let body = "1\t1\t1\t0\tSE\t\tg\t100\t100\t+\tcontrol\t\t\t\t\tHeadless  \r\n\r\n";
-        let t = ChannelTable::from_tsv(body).unwrap();
-        assert_eq!(t.channels.len(), 1);
-        assert_eq!(t.channels[0].index, 1);
-        assert_eq!(t.channels[0].role, ChannelRole::Control);
-        // Trailing spaces after "Headless" are stripped along with row trailing ws.
-        assert_eq!(t.channels[0].description, "Headless");
-    }
-
-    #[test]
-    fn from_tsv_pads_short_rows() {
-        // Excel drops trailing empty cells on copy: only 11 columns present.
-        let row = "3\t1\t1\t0\tIEPE\t2.5\tg\t10\t50\t+\tmonitor";
-        let t = ChannelTable::from_tsv(row).unwrap();
-        assert_eq!(t.channels.len(), 1);
-        assert_eq!(t.channels[0].index, 3);
-        assert_eq!(t.channels[0].interface, Interface::Iepe);
-        assert_eq!(t.channels[0].iepe_bias_v, Some(2.5));
-        assert_eq!(t.channels[0].control_group, None);
-        assert_eq!(t.channels[0].abort, AbortLimits::default());
-    }
-
-    #[test]
-    fn from_tsv_rejects_too_many_columns() {
-        // 19 cells: one past the v2 schema width.
-        let row = "1\t1\t1\t0\tSE\t\tg\t100\t100\t+\tmonitor\t\t\t\t\tdesc\tDev/ai0\tfull\tEXTRA";
-        let err = ChannelTable::from_tsv(row).unwrap_err();
-        match err {
-            TableError::Parse(ref m) => assert!(
-                m.contains("at most 18"),
-                "the refusal must name the schema width: {m}"
-            ),
-            other => panic!("expected a width refusal, got {other:?}"),
-        }
-    }
-
-    // --- clipboard paste with reordered / renamed columns ----------------------
-
-    #[test]
-    fn paste_reordered_renamed_headers() {
-        // Human header names, reordered, with unit suffixes and a junk column.
-        let pasted = "\
-Description\tChannel #\tSensitivity (mV/g)\tEnabled\tType\tScratch
-Airbags\t1\t1000.0\tyes\tcontrol\tfoo
-Trunions\t2\t10.25\tyes\tmonitor\tbar";
-        let t = ChannelTable::paste_from_clipboard_tsv(pasted).unwrap();
-        assert_eq!(t.channels.len(), 2);
-        assert_eq!(t.channels[0].index, 1);
-        assert_eq!(t.channels[0].description, "Airbags");
-        assert_eq!(t.channels[0].sensitivity_mv_per_eu, 1000.0);
-        assert_eq!(t.channels[0].role, ChannelRole::Control);
-        assert_eq!(t.channels[1].index, 2);
-        assert_eq!(t.channels[1].sensitivity_mv_per_eu, 10.25);
-        // Unmapped fields take Channel::new defaults.
-        assert_eq!(t.channels[0].range_max, 100.0);
-    }
-
-    #[test]
-    fn paste_positional_index_fallback() {
-        // No index column at all: index falls back to row position + 1.
-        let pasted = "Sensitivity\tDescription\n50\tA\n60\tB";
-        let t = ChannelTable::paste_from_clipboard_tsv(pasted).unwrap();
-        assert_eq!(t.channels[0].index, 1);
-        assert_eq!(t.channels[1].index, 2);
-        assert_eq!(t.channels[1].description, "B");
-    }
-
-    #[test]
-    fn paste_rejects_ambiguous_headers() {
-        let pasted = "channel\tch #\tsens\n1\t1\t100";
-        assert!(matches!(
-            ChannelTable::paste_from_clipboard_tsv(pasted),
-            Err(TableError::Parse(_))
-        ));
-    }
-
-    // --- JSON round-trip (incl. reference spec) --------------------------------
-
-    #[test]
-    fn json_round_trips_with_reference_spec() {
-        // The non-uniform seed is this round-trip's fixture.
-        #[allow(deprecated)]
-        let mut t = ChannelTable::nonuniform_default_8ch();
-        t.reference = Some(ReferenceSpec {
-            n_reference: 0,
-            notes: "seeded from run002".into(),
-        });
-        let json = t.to_json().unwrap();
-        assert!(json.contains("run002"));
-        let back = ChannelTable::from_json(&json).unwrap();
-        assert_eq!(t, back); // full struct equality, reference included
     }
 
     // --- validate_report: MIMO + IEPE rules ------------------------------------
@@ -1513,6 +990,7 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
         let mut t = ChannelTable::new();
         let mut d = Channel::new(1);
         d.role = ChannelRole::Drive;
+        d.units = Units::VoltageV;
         d.sensitivity_mv_per_eu = 0.0; // would be a hard error for an input row
         d.range_max = 0.0;
         t.channels.push(d);
@@ -1521,32 +999,57 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
             report.is_ok(),
             "drive rows skip the sensitivity/range hard checks"
         );
-        assert!(report
-            .warnings
-            .contains(&TableWarning::DriveChannelPresent(1)));
+        assert_eq!(report.warnings, [TableWarning::DriveChannelPresent(1)]);
     }
 
+    // --- the unit vocabulary, and what control needs of a unit -----------------
+
+    /// Every vocabulary name is known; the five controller names map onto their
+    /// variants and back unchanged; any other name is kept exactly as written.
+    ///
+    /// Falsified by folding `G` onto `Units::AccelG` in `from_name`: the
+    /// "kept as written" assertion fails.
     #[test]
-    fn reference_count_mismatch_is_warning() {
+    fn channel_table_units_keep_every_name_as_written() {
+        for name in UNIT_VOCABULARY {
+            let u = Units::from_name(name);
+            assert!(u.is_known(), "{name}");
+            assert_eq!(u.name(), name);
+        }
+        assert_eq!(Units::from_name("g"), Units::AccelG);
+        assert_eq!(Units::from_name("V"), Units::VoltageV);
+        for name in ["G", "ips", "ft/s", "A"] {
+            assert_eq!(Units::from_name(name), Units::Custom(name.into()));
+            assert_eq!(Units::from_name(name).name(), name);
+        }
+        assert!(!Units::from_name("A").is_known());
+    }
+
+    /// A unit outside the vocabulary, a drive not in volts and an abort limit on
+    /// a row not in g are warnings, never errors: the table runs as before.
+    #[test]
+    fn channel_table_unit_needs_are_warnings_only() {
         let mut t = ChannelTable::new();
         let mut ctrl = Channel::new(1);
         ctrl.role = ChannelRole::Control;
-        let mut r = Channel::new(2);
-        r.role = ChannelRole::Reference;
-        t.channels.push(ctrl);
-        t.channels.push(r);
-        t.reference = Some(ReferenceSpec {
-            n_reference: 3, // claims 3, only 1 reference-role channel
-            notes: String::new(),
-        });
+        ctrl.units = Units::Custom("A".into());
+        ctrl.abort.accel_g = Some(5.0);
+        let mut drive = Channel::new(2);
+        drive.role = ChannelRole::Drive;
+        t.channels.extend([ctrl, drive]);
         let report = t.validate_report();
-        assert!(report.is_ok());
-        assert!(report
-            .warnings
-            .contains(&TableWarning::ReferenceCountMismatch {
-                declared: 3,
-                found: 1
-            }));
+        assert!(report.is_ok(), "{:?}", report.errors);
+        for w in [
+            TableWarning::UnitUnknown(1),
+            TableWarning::AbortNotInG(1),
+            TableWarning::DriveNotInVolts(2),
+        ] {
+            assert!(
+                report.warnings.contains(&w),
+                "{w:?} in {:?}",
+                report.warnings
+            );
+        }
     }
 
     // --- schema v2: physical binding + analysis tier + the migration ----------
@@ -1563,6 +1066,7 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
         let c = Channel::new(1);
         assert_eq!(c.physical, None);
         assert_eq!(c.analysis_tier, AnalysisTier::Full);
+        assert!(c.analysis.is_blank() && !c.limit);
     }
 
     /// The resolved physical name splits at the FIRST separator and rebuilds
@@ -1600,29 +1104,26 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
 
     /// An unrecognized tier spelling is a refusal, not a silent `Full`.
     ///
-    /// RED-MUTATION: give `tier_from` a `_ => Ok(AnalysisTier::Full)` arm and
-    /// this reds - which is the point: a `dec:8` typo'd as `decim:8` silently
-    /// promoted to full analysis blows a 400-channel budget with nothing said.
+    /// RED-MUTATION: give `from_name` a `_ => Ok(AnalysisTier::Full)` arm and
+    /// this reds.
     #[test]
     fn analysis_tier_parses_its_spellings_and_refuses_the_rest() {
-        assert_eq!(tier_from("").unwrap(), AnalysisTier::Full);
-        assert_eq!(tier_from(" full ").unwrap(), AnalysisTier::Full);
-        assert_eq!(tier_from("ROT").unwrap(), AnalysisTier::Rotating);
-        assert_eq!(tier_from("dec:8").unwrap(), AnalysisTier::Decimated(8));
-        assert_eq!(
-            tier_from("decimated:16").unwrap(),
-            AnalysisTier::Decimated(16)
-        );
-        assert!(tier_from("decim:8").is_err());
-        assert!(tier_from("dec:0").is_err(), "0 is not a cadence");
-        assert!(tier_from("dec:x").is_err());
-        // And every spelling the renderer emits parses back.
+        let read = AnalysisTier::from_name;
+        assert_eq!(read("").unwrap(), AnalysisTier::Full);
+        assert_eq!(read(" full ").unwrap(), AnalysisTier::Full);
+        assert_eq!(read("ROT").unwrap(), AnalysisTier::Rotating);
+        assert_eq!(read("dec:8").unwrap(), AnalysisTier::Decimated(8));
+        assert_eq!(read("decimated:16").unwrap(), AnalysisTier::Decimated(16));
+        assert!(read("decim:8").is_err());
+        assert!(read("decimated:0").is_err(), "0 is not a cadence");
+        assert!(read("dec:x").is_err());
+        // And every spelling the protocol writes reads back.
         for t in [
             AnalysisTier::Full,
             AnalysisTier::Rotating,
             AnalysisTier::Decimated(4),
         ] {
-            assert_eq!(tier_from(&tier_str(t)).unwrap(), t);
+            assert_eq!(read(&t.name()).unwrap(), t);
         }
     }
 
@@ -1653,63 +1154,30 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
         assert_eq!(derived_analysis_tier(&plain).0, AnalysisTier::Full);
     }
 
-    /// v2's two new columns survive the flat TSV form in BOTH directions.
+    /// JSON keeps every member: the physical ref's two halves, the tier, the
+    /// limit mark and every analysis column.
     #[test]
-    fn tsv_round_trips_the_v2_columns() {
-        let mut t = ChannelTable::new();
-        let mut ctrl = Channel::new(1);
-        ctrl.role = ChannelRole::Control;
-        ctrl.physical = Some(PhysicalChannelRef::new("cDAQ9178Sim1Mod1", "ai0"));
-        ctrl.analysis_tier = AnalysisTier::Full;
-        let mut mon = Channel::new(2);
-        mon.physical = Some(PhysicalChannelRef::new("cDAQ9178Sim1Mod1", "ai1"));
-        mon.analysis_tier = AnalysisTier::Decimated(8);
-        let mut unbound = Channel::new(3);
-        unbound.analysis_tier = AnalysisTier::Rotating;
-        t.channels.extend([ctrl, mon, unbound]);
-
-        let tsv = t.to_tsv();
-        assert!(tsv
-            .lines()
-            .next()
-            .unwrap()
-            .ends_with("desc\tphysical\ttier"));
-        let back = ChannelTable::from_tsv(&tsv).unwrap();
-        assert_eq!(t.channels, back.channels);
-        assert_eq!(back.schema_version, SCHEMA_VERSION);
-        assert_eq!(back.channels[2].physical, None, "unbound stays unbound");
-    }
-
-    /// Same for CSV, including a description that forces quoting so the two new
-    /// columns stay on the right side of the quoting logic.
-    #[test]
-    fn csv_round_trips_the_v2_columns_with_a_quoted_description() {
-        let mut t = ChannelTable::new();
-        let mut c = Channel::new(1);
-        c.role = ChannelRole::Control;
-        c.description = "fixture, \"aft\"".into();
-        c.physical = Some(PhysicalChannelRef::new("cDAQ1Mod1", "ai0"));
-        c.analysis_tier = AnalysisTier::Decimated(4);
-        t.channels.push(c);
-        let back = ChannelTable::from_csv(&t.to_csv()).unwrap();
-        assert_eq!(t.channels, back.channels);
-        assert_eq!(back.channels[0].description, "fixture, \"aft\"");
-        assert_eq!(
-            back.channels[0].physical.as_ref().unwrap().resolved(),
-            "cDAQ1Mod1/ai0"
-        );
-        assert_eq!(back.channels[0].analysis_tier, AnalysisTier::Decimated(4));
-    }
-
-    /// JSON is the lossless format and keeps the two halves of the physical ref
-    /// apart (nothing downstream ever has to split the opaque id).
-    #[test]
-    fn json_round_trips_the_v2_fields_and_the_version() {
+    fn json_round_trips_every_member_and_the_version() {
         let mut t = ChannelTable::new();
         let mut c = Channel::new(1);
         c.role = ChannelRole::Control;
         c.physical = Some(PhysicalChannelRef::new("cDAQ1Mod1", "ai0"));
         c.analysis_tier = AnalysisTier::Decimated(2);
+        c.limit = true;
+        c.analysis = AnalysisColumns {
+            node: Some(101),
+            direction: "Z+".into(),
+            channel_type: "acceleration".into(),
+            role: "response".into(),
+            daq_range_v: Some(5.0),
+            sensor_range_v: Some(4.5),
+            serial_number: "0042".into(),
+            make: "Maker".into(),
+            model: "M-1".into(),
+            triax_dof: "Z".into(),
+            expiration: "2027-03-01".into(),
+            extra: BTreeMap::from([("bay".into(), "3".into())]),
+        };
         t.channels.push(c);
         let json = t.to_json().unwrap();
         assert!(json.contains("\"schema_version\": 2"), "{json}");
@@ -1718,12 +1186,44 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
         assert_eq!(t, back);
     }
 
+    /// A row with no analysis columns and no limit mark serializes exactly as it
+    /// did before they existed, so a record written from it is unchanged.
+    ///
+    /// Falsified by dropping `skip_serializing_if` from `Channel::analysis`: the
+    /// member list grows by `analysis`.
+    #[test]
+    fn channel_table_row_without_analysis_columns_keeps_its_serialized_shape() {
+        let v = serde_json::to_value(Channel::new(1)).unwrap();
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "abort",
+                "analysis_tier",
+                "control_group",
+                "description",
+                "enabled",
+                "iepe_bias_v",
+                "index",
+                "interface",
+                "physical",
+                "polarity",
+                "range_max",
+                "role",
+                "sensitivity_mv_per_eu",
+                "units"
+            ]
+        );
+    }
+
     /// THE MIGRATION: a v1 JSON table (no `schema_version`, no `physical`, no
     /// `analysis_tier`) loads at the current schema with the honest defaults.
+    /// Members a v1 table had that this build no longer holds (`save`, `stream`,
+    /// `reference`) are read past.
     ///
     /// RED-MUTATION: drop the `t.migrate_to_current()?` call from `from_json`
-    /// and this reds on the version assertion - which is exactly the state where
-    /// a v1 table would reach a module claiming to be v1 forever.
+    /// and this reds on the version assertion.
     #[test]
     fn a_v1_json_table_migrates_with_defaults() {
         let v1 = r#"{
@@ -1748,24 +1248,6 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
         t.validate().unwrap();
     }
 
-    /// A v1 FLAT file (16 columns, no version marker anywhere) dates itself by
-    /// its width and goes through the same migration.
-    #[test]
-    fn a_v1_flat_row_dates_itself_by_width_and_migrates() {
-        // Exactly the v1 header + one v1 data row.
-        let v1_tsv = "idx\ten\tsave\tstream\tiface\tiepe_v\tunits\tsens_mv_eu\trange\tpol\trole\tgroup\tabort_g\tabort_ips\tabort_mil\tdesc\n\
-                      1\t1\t1\t0\tSE\t\tg\t100\t100\t+\tcontrol\t\t\t\t\tCH1";
-        let t = ChannelTable::from_tsv(v1_tsv).unwrap();
-        assert_eq!(t.schema_version, SCHEMA_VERSION);
-        assert_eq!(t.channels[0].physical, None);
-        assert_eq!(t.channels[0].analysis_tier, AnalysisTier::Full);
-        assert_eq!(t.channels[0].description, "CH1");
-        // The width rule itself, stated directly.
-        assert_eq!(flat_schema_version(16), SCHEMA_VERSION_UNVERSIONED);
-        assert_eq!(flat_schema_version(18), SCHEMA_VERSION);
-        assert_eq!(flat_schema_version(0), SCHEMA_VERSION, "nothing to migrate");
-    }
-
     /// A table from a FUTURE build is refused, never partly loaded. A silently
     /// dropped `physical` binding is a run on the wrong physical channel.
     ///
@@ -1787,34 +1269,6 @@ Trunions\t2\t10.25\tyes\tmonitor\tbar";
         // And through the JSON door, which is how one would actually arrive.
         let json = serde_json::to_string(&t).unwrap();
         assert!(ChannelTable::from_json(&json).is_err());
-    }
-
-    /// The header-mapped clipboard path carries the physical column, which is
-    /// what makes the 400-row bulk assign a paste rather than 400 dropdowns.
-    #[test]
-    fn a_header_mapped_paste_carries_physical_and_tier() {
-        let pasted = "\
-Channel\tPhysical Channel\tAnalysis\tRole
-1\tcDAQ1Mod1/ai0\tfull\tcontrol
-2\tcDAQ1Mod1/ai1\tdec:4\tmonitor";
-        let t = ChannelTable::paste_from_clipboard_tsv(pasted).unwrap();
-        assert_eq!(t.schema_version, SCHEMA_VERSION);
-        assert_eq!(
-            t.channels[0].physical,
-            Some(PhysicalChannelRef::new("cDAQ1Mod1", "ai0"))
-        );
-        assert_eq!(t.channels[1].analysis_tier, AnalysisTier::Decimated(4));
-        assert_eq!(t.channels[1].role, ChannelRole::Monitor);
-    }
-
-    /// A `Name` column stays the human description. It has meant that since v1,
-    /// and rebinding it to the physical channel would move real tables onto
-    /// hardware their author never named.
-    #[test]
-    fn a_name_column_is_still_the_description_not_a_physical_binding() {
-        let t = ChannelTable::paste_from_clipboard_tsv("Channel\tName\n1\tAirbags").unwrap();
-        assert_eq!(t.channels[0].description, "Airbags");
-        assert_eq!(t.channels[0].physical, None);
     }
 
     #[test]

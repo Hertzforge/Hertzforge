@@ -96,7 +96,13 @@ pub struct MsView {
     pub end: Option<End>,
     /// Armed at least once: the live frame streams.
     pub streaming: bool,
+    /// The run's record, from arm on.
+    pub record: Option<RecordRef>,
 }
+
+/// The run's record, from arm on: its folder, whether it holds the streams, and
+/// the latest problem in words.
+pub use crate::random::view::RecordRef;
 
 /// The standing notice of a run whose level-scaled abort lines are off.
 pub const SCALED_OFF_NOTICE: &str = "Level-scaled aborts are off: a pulse over its level's abort \
@@ -131,7 +137,7 @@ pub fn state_json(v: Option<&MsView>) -> Value {
             "last_pulse": null, "law": null, "end": null,
         });
     };
-    json!({
+    let mut out = json!({
         "run_id": v.run_id,
         "state": v.state.name(),
         "phase": v.phase,
@@ -171,7 +177,15 @@ pub fn state_json(v: Option<&MsView>) -> Value {
             "misses": v.misses,
         },
         "end": v.end.as_ref().map_or(Value::Null, End::to_json),
-    })
+    });
+    if let (Some(r), Value::Object(m)) = (&v.record, &mut out) {
+        m.insert(
+            "record".into(),
+            json!({"folder": r.folder, "streams": if r.streams { "on" } else { "off" },
+                   "problem": r.problem}),
+        );
+    }
+    out
 }
 
 /// What decides whether a `mimo_shock.state` event is due: everything but the

@@ -1,0 +1,56 @@
+{
+  "name": "law_calls",
+  "kind": "mimo_shock_law_calls",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "start": 0.0,
+    "step": 0.000244140625
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "references": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "every call of the control law: the drives it returned, time from the record's start (NaN when it gave none), and the delay it expects at each control (NaN when none)",
+  "records": {
+    "index": "the call, from 0",
+    "call": "seed or iterate",
+    "after_pulse": "the pulse it followed, from 0 (null for the seed)",
+    "level_db": "the level it was asked for",
+    "used": "its answer was used",
+    "miss": "why not",
+    "call_ms": "how long it took",
+    "values": "the values it reported"
+  },
+  "arrays": [
+    {
+      "name": "drives",
+      "dtype": "f8",
+      "shape": [
+        4,
+        64
+      ],
+      "unit": "V",
+      "offset": 0
+    },
+    {
+      "name": "delays",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "s",
+      "offset": 2048
+    }
+  ]
+}

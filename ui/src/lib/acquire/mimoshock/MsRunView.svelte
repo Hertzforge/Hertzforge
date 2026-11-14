@@ -12,6 +12,7 @@
 	import type { BodyPanel, PlotBodies } from '../screen/bodies';
 	import LawLine from '../pulse/LawLine.svelte';
 	import PulseRunView from '../pulse/PulseRunView.svelte';
+	import type { RunOpen } from '../runOpen.svelte';
 	import type { PlotPanel } from '../screen/screen.svelte';
 	import type { CardKind } from '../screen/types';
 	import MsLevelCard from './MsLevelCard.svelte';
@@ -28,8 +29,10 @@
 		onpopout?: (pageId: string) => boolean;
 		abortKeys: string;
 		compact?: boolean;
+		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
+		opener?: RunOpen | null;
 	}
-	let { ms, views, station, onpopout, abortKeys, compact = false }: Props = $props();
+	let { ms, views, station, onpopout, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const status = $derived(ms.now);
 	const state = $derived(ms.run?.state ?? null);
@@ -136,6 +139,7 @@
 			{onpopout}
 			{abortKeys}
 			{compact}
+			{opener}
 		/>
 	</div>
 </div>

@@ -22,12 +22,12 @@ export interface RunOpenHost {
 export function workspaceForRun(test: string): Workspace {
 	// PSDs against their specification are the Random workspace's (a MIMO Random run's spectral
 	// matrices and its reference with its cross terms too), sine levels against theirs the Sine
-	// workspace's, and a classical or SRS shock run's pulses, SRS and their band the Shock
+	// workspace's, and a classical, SRS or MIMO Shock run's pulses, SRS and their band the Shock
 	// workspace's; a Mixed Mode run's floor and tones the Sine workspace's, where its data sheet
 	// is; any other run's recordings, Signals'.
 	if (test === 'random' || test === 'mimo_random') return 'random';
 	if (test === 'sine' || test === 'mixed') return 'sine';
-	if (test === 'classical_shock' || test === 'srs') return 'shock';
+	if (test === 'classical_shock' || test === 'srs' || test === 'mimo_shock') return 'shock';
 	// A TWR run's plays against the target it was controlled to: Transient Analysis.
 	if (test === 'twr') return 'transient';
 	return 'signals';

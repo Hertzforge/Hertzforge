@@ -39,11 +39,17 @@ def test_columns_of_different_lengths_name_the_odd_one():
                       'direction': ['Z+', 'Z+', 'X+']})
 
 
-def test_a_sensitivity_is_more_than_zero():
+def test_a_sensitivity_is_not_zero_on_an_enabled_input():
+    # the one rule set (schema/PROTOCOL.md, "Channel Table"): a table with no
+    # controller columns has every row on and none a drive
     table = _table()
     table.set_cell('sensitivity', 0, '0.001')
-    with pytest.raises(ValueError, match='sensitivity must be greater than 0'):
+    with pytest.raises(ValueError, match='sensitivity cannot be 0 on an enabled input'):
         table.set_cell('sensitivity', 0, '0')
+    table.add_controller_settings()
+    table.set_cell('enabled', 0, 'False')
+    table.set_cell('sensitivity', 0, '0')
+    assert table['sensitivity'][0] == '0'
 
 
 def test_a_new_type_withdraws_a_unit_of_another_kind_and_keeps_its_own():

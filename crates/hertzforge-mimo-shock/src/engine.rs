@@ -963,6 +963,12 @@ impl MimoShockEngine {
         self.fs_hz
     }
 
+    /// The quiet frames played before (and after) every record of every shot,
+    /// once armed: where a shot's record starts in what the station read.
+    pub fn quiet_frames(&self) -> usize {
+        self.quiet
+    }
+
     /// The pulse grid's line spacing, Hz.
     pub fn df_hz(&self) -> f64 {
         self.fs_hz / self.config.record_len as f64
