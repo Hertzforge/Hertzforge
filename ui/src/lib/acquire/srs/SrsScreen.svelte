@@ -25,6 +25,7 @@
 	import SrsSynthesis from './SrsSynthesis.svelte';
 	import SrsTarget from './SrsTarget.svelte';
 	import { runChannels, SRS_SECTIONS, type SrsSection } from './srsSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -97,6 +98,7 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="srs" />
 	<SrsSummary {srs} onopen={(s: SrsSection) => open(s)} />
 {/snippet}
 
