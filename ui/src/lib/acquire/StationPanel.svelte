@@ -7,6 +7,7 @@
 	 */
 	import type { NiDevice } from '$lib/protocol/types';
 	import type { AcquireState } from './store.svelte';
+	import DataFolderLine from '$lib/shell/DataFolderLine.svelte';
 
 	interface Props {
 		acq: AcquireState;
@@ -166,6 +167,7 @@
 				<button class="btn primary sm" data-testid="station-use" disabled={disabled || !!useWhy || (draft.kind === 'ni' && draft.devices.length === 0) || acq.busy !== null} onclick={() => acq.useStation()}>Use This Station</button>
 			</div>
 		{/if}
+		<DataFolderLine locked={acq.locked} />
 	</div>
 </section>
 
