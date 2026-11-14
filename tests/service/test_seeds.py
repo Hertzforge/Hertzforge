@@ -507,7 +507,15 @@ def _differences(a, b, path=''):
     if isinstance(a, dict) and isinstance(b, dict):
         if a.keys() != b.keys():
             return [f'{path}: members {sorted(a)} and {sorted(b)}']
-        return [d for k in a for d in _differences(a[k], b[k], f'{path}.{k}' if path else k)]
+
+        def member(k):
+            # an entry of `sets` or `protective` names the member it fills in its
+            # own `path`: its value is judged as that member's (a band in decibels)
+            if k == 'value' and isinstance(a.get('path'), str):
+                return f'{path}.value@{a["path"]}'
+            return f'{path}.{k}' if path else k
+
+        return [d for k in a for d in _differences(a[k], b[k], member(k))]
     if isinstance(a, list) and isinstance(b, list):
         if len(a) != len(b):
             return [f'{path}: {len(a)} and {len(b)} members']
