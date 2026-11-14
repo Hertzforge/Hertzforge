@@ -89,7 +89,10 @@
 		view: Shape3DView;
 		/** Index into `view.modes`. */
 		mode?: number;
-		/** Index into `view.overlays`, drawn over the mode; none when null. */
+		/**
+		 * Index into `view.overlays`, drawn over the mode; none when null. A `paired` view draws the
+		 * overlay paired with the mode unless this is null (the Overlay toggle off).
+		 */
 		overlay?: number | null;
 		/**
 		 * Each node's own color, sRGB 0 to 1, f32 [N, 3], in place of the travel colormap: a view
@@ -106,7 +109,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, mode = $bindable(0), overlay = null, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
+	let { view, mode = $bindable(0), overlay = undefined, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
 
 	// kept across the view each drag answers with
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
@@ -318,7 +321,18 @@
 	const motion = $derived(view.motion);
 	/** Whether anything moves: a geometry on its own has no play, amplitude, ghost or legend to offer. */
 	const moves = $derived(view.modes.length > 0 || !!motion);
-	const shown = $derived(overlay !== null && view.overlays ? view.overlays[overlay] : undefined);
+	/**
+	 * The overlay drawn: the one the matrix picked, or with `view.paired` the one paired with the
+	 * mode shown, as a Matched Modes object's pairs step together (Brandon, 2026-11-14).
+	 */
+	const overlaid = $derived(
+		view.paired && view.overlays?.length
+			? overlay === null
+				? null
+				: Math.min(Math.max(0, mode), view.overlays.length - 1)
+			: (overlay ?? null)
+	);
+	const shown = $derived(overlaid !== null && view.overlays ? view.overlays[overlaid] : undefined);
 	const samples = $derived(motion ? sampleCount(motion) : 0);
 	let speedIndex = $state(NORMAL_SPEED);
 	/** The sample shown, for the scrubber and the time readout. */
@@ -595,7 +609,7 @@
 		dirty = true;
 		if (!o || !current) return;
 		const columns = view.overlays!.length;
-		const phi = view.overlay_phase ? view.overlay_phase[Math.min(mode, view.modes.length - 1) * columns + overlay!] : 0;
+		const phi = view.overlay_phase ? view.overlay_phase[Math.min(mode, view.modes.length - 1) * columns + overlaid!] : 0;
 		alignedShape(o.shape, o.shape_imag, phi, maxMag, overlayAttr.array as Float32Array, overlayImagAttr.array as Float32Array);
 		overlayAttr.needsUpdate = true;
 		overlayImagAttr.needsUpdate = true;
@@ -1489,8 +1503,9 @@
 
 		{#if current}
 			<div class="modetag">
-				{#if view.modes.length > 1 && !view.overlays}
-					<!-- a view shown outside a workspace with a mode table steps here; a MAC pair is chosen in its matrix -->
+				{#if view.modes.length > 1 && (!view.overlays || view.paired)}
+					<!-- a view shown outside a workspace with a mode table steps here, and paired modes step
+					     with their overlays; a MAC pair is chosen in its matrix -->
 					<span class="stepper">
 						<button class="btn icon sm" data-testid="shape3d-previous" disabled={mode <= 0} onclick={() => step(-1)} title="Previous mode (Up)" aria-label="Previous mode">
 							<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>

@@ -164,7 +164,8 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 "Mode <index>", for a shape that is not a mode.
 
 `overlays` and `overlay_phase` (optional) carry a second set of shapes on the same nodes, for a
-`matrix` view that `selects` this one (below).
+`matrix` view that `selects` this one (below). With `paired` (optional) overlay k goes with mode k
+and the shell draws it over that mode as the modes are stepped: a Matched Modes object's pairs.
 
 `pick` (optional) says what a click in the view does. A click is a press and release in one place; a drag still turns the
 view. The shell runs `op` with `params` and what was clicked, and the views it answers with take
@@ -652,10 +653,11 @@ measurement beside its requirement gives the comparison's spectra, two PSDs over
 no joint reading shows each object on its own, and `note` says what was left out. The views come in the
 connection's display units, as an operation's do. `prefs` is how the window reads data, kept across
 selections: `flat` (the plot in place of the stage for a whole data
-object), `log_frequency` (decades on every frequency axis) and `component` (`magnitude`, `real`, `imag`
+object) and `component` (`magnitude`, `real`, `imag`
 or `phase` of complex data) and `line`, the frequency in Hz the stage's operating shape or envelope is
 read at (null for the loudest line); `offers` says which of them the selection can take (`flat` for a
-data object, `complex` for complex frequency data, `frequency` for anything on a frequency axis). A
+data object, `complex` for complex frequency data). A frequency axis is made linear or log on the
+plot itself, as the stage's is. A
 `shape3d` that reads at a line carries `cursor: "frequency"`, and its plot carries `link: "frequency"`,
 so the plot's cursor moves the line. A `waterfall` may say its opening `facing` (a coherence opens on
 the map, `top`). Several data objects of one type show on one stage, merged for the drawing; a CPSD

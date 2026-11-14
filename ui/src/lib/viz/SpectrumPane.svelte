@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** Each scope's choice of a linear or log frequency axis, kept as the selection changes. */
+	const keptLogX = new Map<string, boolean>();
+</script>
+
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
 	/**
@@ -65,6 +70,11 @@
 		readout?: boolean;
 		/** The Copy Image button above the plot. */
 		copyButton?: boolean;
+		/**
+		 * A Lin/Log choice for a frequency axis above the plot, as the 3D stage has, kept for the
+		 * `scope` (Brandon, 2026-11-14: it was the bar's Log f, a second control for the stage's).
+		 */
+		scaleToggle?: boolean;
 		/** Each series' look in place of its role's, by index into `view.series`. */
 		styles?: (SeriesOverride | undefined)[];
 		/** A legend entry pressed, by series index; with it the entries are buttons. */
@@ -118,6 +128,7 @@
 		legendCorner = 'top-right',
 		readout = true,
 		copyButton = true,
+		scaleToggle = false,
 		styles = [],
 		onlegend,
 		xFixed = null,
@@ -175,7 +186,14 @@
 	const shownGroup = $derived(view.groups?.length ? view.groups[Math.min(group, view.groups.length - 1)] : null);
 	const inGroup = (i: number) => !shownGroup || shownGroup.series.includes(i);
 
-	const logX = $derived(view.x.scale === 'log');
+	/** The frequency axis chosen on the plot, or null to take the view's scale. */
+	let logXChoice = $state<boolean | null>(untrack(() => (scope ? (keptLogX.get(scope) ?? null) : null)));
+	const choosesX = $derived(scaleToggle && view.x.unit === 'Hz');
+	const logX = $derived(choosesX && logXChoice !== null ? logXChoice : view.x.scale === 'log');
+	function setLogX(log: boolean) {
+		logXChoice = log;
+		if (scope) keptLogX.set(scope, log);
+	}
 	const logY = $derived(view.y.scale === 'log');
 
 	/**
@@ -211,7 +229,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey]);
+		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey, logX]);
 	}
 
 	/**
@@ -1029,6 +1047,7 @@
 		// Track the view, the theme and the look; rebuild or update in place.
 		void view;
 		void theme.version;
+		void logX;
 		void yFixed;
 		void optionsKey;
 		// a caller that holds the zoom lets go of y: range on the data, not on the range let go of
@@ -1120,7 +1139,7 @@
 	/** The marks' readout sits in a top corner the legend does not take. */
 	const marksCorner = $derived<Corner>(legend === 'inside' && legendCorner === 'top-left' ? 'top-right' : 'top-left');
 
-	const showHead = $derived(showTitle || copyButton || (legend === 'outside' && readout) || !!view.groups?.length);
+	const showHead = $derived(showTitle || copyButton || choosesX || (legend === 'outside' && readout) || !!view.groups?.length);
 
 	/** A note being dragged: where it is, as fractions of the plot area. */
 	let dragNote = $state<{ id: string; fx: number; fy: number } | null>(null);
@@ -1206,6 +1225,13 @@
 				<span class="group-readout" data-status={r.status}>{r.label}: <b>{r.text}</b> <span class="word">{r.status}</span></span>
 			{/each}
 		</span>
+		{/if}
+		{#if choosesX}
+		<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
+			<span class="lbl">{view.x.label}</span>
+			<button role="radio" aria-checked={!logX} class:on={!logX} data-testid="spectrum-x-linear" title="Linear frequency axis" onclick={() => setLogX(false)}>Lin</button>
+			<button role="radio" aria-checked={logX} class:on={logX} data-testid="spectrum-x-log" title="Log frequency axis" onclick={() => setLogX(true)}>Log</button>
+		</div>
 		{/if}
 		{#if copyButton}
 		<button class="btn ghost sm copyimg" data-testid="spectrum-copy-image" onclick={copyImage} title="Copy the plot as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1299,8 +1325,43 @@
 		min-width: 0;
 	}
 
+	.seg {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		align-self: center;
+		padding: 2px;
+		background: var(--bg-2);
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-md);
+	}
+
+	.seg .lbl {
+		padding: 0 var(--sp-2) 0 var(--sp-1);
+		font-size: var(--text-xs);
+		color: var(--text-3);
+	}
+
+	.seg button {
+		height: 20px;
+		padding: 0 var(--sp-2);
+		font-size: var(--text-xs);
+		color: var(--text-2);
+		background: transparent;
+		border: 0;
+		border-radius: 4px;
+	}
+
+	.seg button.on {
+		color: var(--text-1);
+		background: var(--bg-4);
+		box-shadow: inset 0 0 0 1px var(--line-3);
+	}
+
 	.head {
 		display: flex;
+		flex: none;
+		flex-wrap: wrap;
 		align-items: baseline;
 		gap: var(--sp-3);
 		padding: 0 var(--sp-1) var(--sp-1);

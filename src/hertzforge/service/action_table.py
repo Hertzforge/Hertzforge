@@ -90,6 +90,10 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 
 #: the rows that read a geometry's nodes, off until it has some
+#: operations whose blank records are every record, so that a row with none picked runs at
+#: once: CMIF plots the whole FRF (Brandon, 2026-11-14)
+EVERY_RECORD = frozenset(('project.cmif',))
+
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
 
 #: an object param that takes this many types takes anything: it says nothing
@@ -356,10 +360,12 @@ def _fit_refusal(project: Any, names: list[str], records: dict[str, list[int]]) 
 
 
 def _fit_rows(kinds: list[str], reason: str = '') -> list[dict[str, Any]]:
-    """The fitting screen's way in, which is not an operation: an FRF to fit by
-    hand, or an FRF with the shape set to go on editing."""
+    """The fitting screen's way in, which is not an operation: an FRF to fit, or an
+    FRF with the shape set to go on editing. Every fit is made on the fitting screen,
+    one mode at a time; the band fit (`project.fit_modes`) is not offered (Brandon,
+    2026-11-14)."""
     if kinds == ['frf']:
-        return [_row('self.fit', 'Fit by Hand', 'self', reason, modules=['modal'])]
+        return [_row('self.fit', 'Fit Modes', 'self', reason, modules=['modal'])]
     if sorted(kinds) == ['frf', 'shape_set']:
         return [_row('self.edit_fit', 'Edit Fit', 'self', reason, modules=['modal'])]
     return []
@@ -412,6 +418,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
+        elif op.id in EVERY_RECORD:
+            # nothing picked is every record: the row runs at once, with no form
+            fill['records'] = ''
         if where in ('mate', 'solid', 'group') and part:
             # what is picked in the tree is what the row acts on
             picked = verbs.picked_ids(part)
