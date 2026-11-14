@@ -517,6 +517,9 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `project.setups` | `{}` | `{"setups":[...],"runs":[...]}`: what a test's screen can open (Test Setups below) |
+| `project.save_setup` | `{"name","setup","replace"?}` | `{"name","project"}` |
+| `project.open_setup` | `{"name"}` | `{"setup"}`: a saved setup, or the setup a run record holds |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
@@ -538,6 +541,26 @@ operation without `previews` is a `bad_request`, and nothing runs.
 false, the operation answers with what it would do and changes nothing; run with it true, it does
 it. The shell's form does not ask that param: its Preview button sends it false and Apply sends it
 true.
+
+**Test Setups.** A test's setup is an object in the project, of kind `test_setup`
+(`docs/hforge-format.md`): `{"module","protocol","config","table","title","notes","origin"}`.
+`module` is the test it is for, by the name a run's manifest gives its test (`random`, `sine`,
+`mixed`, `classical_shock`, `srs`, `twr`, `explorer`, `recorder`, `mimo_random`, `mimo_shock`);
+`config` is exactly what that module's configure request carries (`random.configure`'s
+`config`, `mimo_random.setup`'s `setup`, ...); `table` is the channel table it was made with
+(`rows`, `revision`, `sha256`, each when known); `origin` is where it came from, by `kind`:
+`typed`, `setup` (with the saved setup's `name`), `run` (with `run_uid`, `run_id` and the
+record's `name`) or `seed` (with the analysis object's name as `object`, its SHA-256 as
+`checksum`, and what it filled as `fills`). `project.setups` lists the saved setups (`name`,
+`module`, `title`, `protocol`, `origin`, `holds`) and the project's run records (`name`,
+`module`, `title`, `run_uid`, `run_id`, `outcome`, `source`, `has_config`, `holds`), and answers
+empty lists while no project is open. `project.save_setup` adds one under `name`; a name the
+project holds is refused unless `replace` is true and that object is a setup. `project.open_setup`
+answers a saved setup, or for a run record the setup its `setup.config` holds with the run as its
+origin. Nothing here reaches the control service: the shell fills a test's draft with the
+answer, and the draft goes through that module's configure call and checks as one typed in.
+The shell refuses a setup for another module or another protocol before its draft is touched,
+and asks before opening one made with a different channel table.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),

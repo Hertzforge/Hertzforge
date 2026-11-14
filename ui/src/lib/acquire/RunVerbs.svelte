@@ -11,6 +11,7 @@
 	import Icon from '$lib/shell/Icon.svelte';
 	import type { Snippet } from 'svelte';
 	import type { ActionId, RunBarHost } from './actions';
+	import SetupOriginNote from './setupFiles/SetupOriginNote.svelte';
 	import { db } from './words';
 
 	interface Props {
@@ -88,6 +89,7 @@
 		{@render verb('proceed', 'Proceed', 'play', () => acq.proceed(), 'act-proceed')}
 		{@render verb('reset', 'New Run', 'reset', () => acq.reset(), 'act-reset')}
 	</div>
+	<SetupOriginNote host={acq} />
 
 	{#if verbs}{@render verbs()}{/if}
 

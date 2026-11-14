@@ -21,6 +21,7 @@
 	import SineSummary from './SineSummary.svelte';
 	import { runChannels, SINE_SECTIONS, type SineSection } from './sineSetup';
 	import { hz, sweepWords } from './sineWords';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -89,6 +90,7 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="sine" />
 	<SineSummary {sine} onopen={(s: SineSection) => open(s)} />
 {/snippet}
 

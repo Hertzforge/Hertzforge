@@ -19,6 +19,7 @@
 	import MsTargets from './MsTargets.svelte';
 	import MsTiming from './MsTiming.svelte';
 	import { MS_SECTIONS, type MsSection } from './msSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -75,6 +76,7 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="mimo_shock" />
 	<MsSummary {ms} onopen={(s: MsSection) => open(s)} />
 {/snippet}
 

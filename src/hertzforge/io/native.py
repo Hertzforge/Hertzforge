@@ -60,16 +60,18 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.run_record import RunRecord
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
+    from ..core.test_setup import TestSetup
 
 #: the root attribute every file written here is stamped with
 STAMP = 'hertzforge_schema'
 
 #: the newest .hforge schema this build reads. Schema 1 holds everything
 #: `.vdyn` schema 3 held; schema 2 adds objects held by reference to
-#: another file; schema 3 adds the run record. The schema grows by addition, and a file is stamped
+#: another file; schema 3 adds the run record; schema 4 adds the test
+#: setup. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: the stamp of a file with no object held by reference
 BASE_SCHEMA = 1
@@ -80,6 +82,10 @@ REFERENCE_SCHEMA = 2
 #: the stamp of a file holding a run record (`core.run_record`), the
 #: control service's own record of a run, whether held or referred to
 RUN_RECORD_SCHEMA = 3
+
+#: the stamp of a file holding a test setup (`core.test_setup`), one test
+#: module's configuration as the control service accepts it
+TEST_SETUP_SCHEMA = 4
 
 #: the smallest object, in bytes stored, that a project imported from
 #: another `.hforge` holds by reference rather than copying: the size a
@@ -1419,6 +1425,53 @@ def load_run_record(group: h5py.Group) -> RunRecord:
                      arrays=arrays, missing=text('missing'))
 
 
+def save_test_setup(setup: TestSetup, group: h5py.Group) -> None:
+    """Write a `TestSetup` into `group`: its module, protocol, title and
+    origin kind as attributes, and its configuration, channel table,
+    origin and notes each as one UTF-8 string dataset, the first three
+    as JSON."""
+    import json
+
+    import h5py
+
+    group.attrs['module'] = setup.module
+    group.attrs['protocol'] = setup.protocol
+    group.attrs['title'] = setup.title
+    group.attrs['origin_kind'] = setup.origin['kind']
+
+    def text(name: str, value: str) -> None:
+        group.create_dataset(name, data=value, dtype=h5py.string_dtype('utf-8'))
+
+    text('config', json.dumps(setup.config))
+    text('table', json.dumps(setup.table))
+    text('origin', json.dumps(setup.origin))
+    text('notes', setup.notes)
+
+
+def load_test_setup(group: h5py.Group) -> TestSetup:
+    """Read a `TestSetup` written by `save_test_setup`."""
+    import json
+
+    from ..core.test_setup import PROTOCOL, TestSetup
+
+    def text(name: str) -> str | None:
+        if name not in group:
+            return None
+        raw = group[name][()]
+        return raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
+
+    def attr(name: str, default: str) -> str:
+        value = group.attrs.get(name, default)
+        return value.decode('utf-8') if isinstance(value, bytes) else str(value)
+
+    table, held_origin = text('table'), text('origin')
+    return TestSetup(attr('module', ''), json.loads(text('config') or '{}'),
+                     protocol=attr('protocol', PROTOCOL),
+                     table=json.loads(table) if table else None, title=attr('title', ''),
+                     notes=text('notes') or '',
+                     origin=json.loads(held_origin) if held_origin else None)
+
+
 def _savers():
     from ..core.channel_table import ChannelTable
     from ..core.data import DataArray
@@ -1431,10 +1484,12 @@ def _savers():
     from ..core.run_record import RunRecord
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
+    from ..core.test_setup import TestSetup
 
     return [(Geometry, 'geometry', save_geometry),
             (StreamedHistory, 'data', save_streamed_history),
             (RunRecord, 'run_record', save_run_record),
+            (TestSetup, 'test_setup', save_test_setup),
             (SineSweepSpecification, 'sine_specification',
              save_sine_specification),
             (SineLevelSet, 'sine_levels', save_sine_levels),
@@ -1459,7 +1514,8 @@ _LOADERS = {'geometry': load_geometry,
             'channel_table': load_channel_table,
             'predictions': load_predictions,
             'run_log_extract': load_run_log_extract,
-            'run_record': load_run_record}
+            'run_record': load_run_record,
+            'test_setup': load_test_setup}
 
 
 def _loader(kind: str, name: str, path: str) -> Callable[[h5py.Group], Any]:
@@ -1489,11 +1545,15 @@ def schema_for(kinds: Iterable[str], references: bool = False) -> int:
     Returns
     -------
     int
+        `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
         `RUN_RECORD_SCHEMA` when any is a run record, otherwise
         `REFERENCE_SCHEMA` for a file with references, otherwise
         `BASE_SCHEMA`.
     """
-    if 'run_record' in set(kinds):
+    kinds = set(kinds)
+    if 'test_setup' in kinds:
+        return TEST_SETUP_SCHEMA
+    if 'run_record' in kinds:
         return RUN_RECORD_SCHEMA
     return REFERENCE_SCHEMA if references else BASE_SCHEMA
 
