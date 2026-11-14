@@ -361,3 +361,24 @@ def test_a_band_of_a_few_lines_has_no_octave_scale_to_read(projects):
     spec, measured = project['Specification'], project['control_spectra']
     assert read_scale_db(spec, measured) is None
     assert comparison_scale_db(spec, measured) == 0
+
+
+def test_the_mimo_comparison_draws_the_controlled_spectra(projects):
+    """On a converted MIMO Random run the control matrix is the run's
+    controlled spectra, not the identification's spectral matrices,
+    which come first in the project."""
+    from hertzforge.core.report import resolve_binding
+
+    project = projects['mimo_random']
+    assert resolve_binding('@basis:Psd', project, project.object_groups) == \
+        'identification_response'
+    report = _report(project)
+    compared = [b for b in report.blocks if b.get('specification') == '@basis:Specification'
+                or (b['kind'] == 'bars' and b.get('mode') in ('error', 'lines'))]
+    assert compared
+    for block in compared:
+        assert block.get('source') == 'control_spectra' or \
+            block.get('measured') == 'control_spectra'
+    _html, blocks, _text = _page(project, report)
+    assert any(b.get('caption', '').startswith('Control against specification')
+               for b in blocks)

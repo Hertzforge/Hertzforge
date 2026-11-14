@@ -3152,9 +3152,23 @@ def _holds_cross_terms(name: str | None,
                for record in range(data.num_records))
 
 
+def _controlled_spectra(objects: Mapping[str, Any],
+                        object_groups: Sequence[Mapping[str, Any]] | None) -> str:
+    """The controlled spectra of a recorded MIMO Random run: the Psd
+    `control_spectra` in the object group of its run record; '' for a
+    project with no such run, which binds the first Psd as before."""
+    from ..report.run_records import record_of
+
+    name = _named(objects, 'control_spectra', 'Psd')
+    if not name:
+        return ''
+    record = record_of(objects, name, object_groups)
+    return name if record is not None and record.test == 'mimo_random' else ''
+
+
 def _matrix_refusal(objects: Mapping[str, Any],
-                    object_groups: Sequence[Mapping[str, Any]] | None
-                    ) -> str:
+                    object_groups: Sequence[Mapping[str, Any]] | None,
+                    measured_token: str = '@basis:Psd') -> str:
     """Why the control matrix cannot be judged against its
     specification as a matrix, or '' when it can be (and in an empty
     project, where the template itself is read): no control spectra,
@@ -3162,7 +3176,7 @@ def _matrix_refusal(objects: Mapping[str, Any],
     if not objects:
         return ''
     measured = _holds_cross_terms(
-        resolve_binding('@basis:Psd', objects, object_groups), objects)
+        resolve_binding(measured_token, objects, object_groups), objects)
     specified = _holds_cross_terms(
         resolve_binding('@basis:Specification', objects, object_groups),
         objects)
@@ -3279,8 +3293,15 @@ def mimo_template(objects: Mapping[str, Any],
         return (f'The project holds no {" and no ".join(missing)} to read '
                 'it from.')
 
+    # a converted MIMO Random run holds several Psds (the identification's
+    # spectral matrices first, in the folder's order); the control matrix
+    # is the run's controlled spectra, `control_spectra`, so a recorded
+    # run binds that one by name, and any other project the first Psd
+    controlled = _controlled_spectra(objects, object_groups)
+    if controlled:
+        psd = controlled
     controls = control_channel_labels(objects, object_groups)
-    refusal = _matrix_refusal(objects, object_groups)
+    refusal = _matrix_refusal(objects, object_groups, psd)
     # what the run record of a recorded run holds of the owed readings:
     # the identification's condition numbers and the drives the law's
     # seed asked for, the drives played and the control error at the end
