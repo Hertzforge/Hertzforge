@@ -37,9 +37,11 @@ _PRINTS = ("<script>history.replaceState(null, '', '#print');</script>",
 #: dialog once its figures are drawn (`ReportViewer`)
 PRINT_FLAG = '<meta name="hertzforge-print" content="1" />'
 
-#: the starter templates; 'empty' starts blank
+#: the starter templates; 'empty' starts blank, and 'run' is the template of
+#: the test the project's run record is a run of (`core.report.TEST_TEMPLATES`)
 TEMPLATES = ('modal', 'random', 'shock', 'transient', 'sine', 'sysid', 'mimo', 'model',
-             'specify', 'signals', 'empty')
+             'specify', 'signals', 'mixed_mode', 'explorer', 'recorder', 'mimo_shock', 'empty',
+             'run')
 
 THEMES = ('light', 'dark')
 
@@ -66,10 +68,31 @@ def generate(project: Any, params: Mapping[str, Any]) -> str:
     name = params.get('name', 'Report')
     if not isinstance(name, str) or not name.strip():
         raise bad_request('report.generate "name" is a name')
+    if template == 'run':
+        template = run_template(project)
     try:
         return project.generate_report(template, name=name.strip())
     except ValueError as error:
         raise refused(str(error)) from None
+
+
+def run_template(project: Any) -> str:
+    """The template of the test the project's run record is a run of;
+    refused when the project holds no run record, or records of runs of
+    different tests, or a test with no template of its own."""
+    from hertzforge.core.report import TEST_TEMPLATES
+    from hertzforge.core.run_record import RunRecord
+
+    tests = sorted({obj.test for obj in project.values() if isinstance(obj, RunRecord)})
+    if not tests:
+        raise refused('the project holds no run record, so no test names its template; '
+                      'choose a template')
+    if len(tests) > 1:
+        raise refused(f'the project holds runs of {", ".join(tests)}; choose a template')
+    if tests[0] not in TEST_TEMPLATES:
+        raise refused(f'a {tests[0] or "unnamed"} run has no template of its own; '
+                      'choose a template')
+    return TEST_TEMPLATES[tests[0]]
 
 
 def render(project: Any, params: Mapping[str, Any], method: str = 'report.render',
