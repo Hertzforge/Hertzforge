@@ -1316,6 +1316,7 @@ def run_events(keeper: Keeper, project: Any, params: Mapping[str, Any]) -> dict[
 
 
 def self_entries(keeper: Keeper) -> tuple[Entry, ...]:
+    """The open log's entries, or none when no log is open."""
     return () if keeper.log is None else keeper.log.entries
 
 
