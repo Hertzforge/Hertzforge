@@ -870,3 +870,147 @@ def specification_from_limit(limit: Mapping[str, Any], dof: str) -> Any:
                          comment='a Random limit channel\'s ceiling')
     spec.interpolation = Specification.reading_of(frequency)
     return spec
+
+
+# ---- MIMO Random: a reference and a specification with cross terms ---------------------------
+
+#: the fewest points a MIMO Random reference given inline holds
+MOST_INLINE_POINTS_AT_LEAST = 8
+
+#: the densities a MIMO Random reference is of, an autospectrum's and a cross term's
+_MIMO_DIMS = (_ACCEL_DENSITY, 'acceleration*acceleration/frequency')
+
+
+def mimo_reference(spec: Any, unit: str = 'g', source: str = 'specification'
+                   ) -> dict[str, Any]:
+    """The MIMO Random reference a `Specification` with cross terms asks
+    for, as the setup takes one inline: through `reference_convert.build`
+    (the controller's grid, the checks of Hermitian symmetry and positive
+    semi-definiteness, the one conjugation from the file's convention to
+    the controller's), in `unit` squared per hertz: the specification's
+    SI densities are divided by `si_transform(unit)` squared here, and
+    nowhere else.
+
+    Returns
+    -------
+    dict
+        `reference` (`{kind: 'inline', freqs_hz, n, re, im}`, the upper
+        triangle row by row at each line of the band), `channels` (the
+        specification's channels, in the reference's order), `alarm_db`
+        and `abort_db` (one band per channel, or None where it has no such
+        limit), `limits`, `notes`.
+
+    Raises
+    ------
+    ConversionRefused
+        For an object that is not a random specification, has no cross
+        term, is not of acceleration, is not on evenly spaced lines, whose
+        matrix `build` refuses, or whose bands vary along a channel.
+    """
+    from ..core.data import Specification, autospectrum
+    from . import reference_convert
+
+    if not isinstance(spec, Specification):
+        raise ConversionRefused(f'a {type(spec).__name__} is not a random specification')
+    autos = [i for i in range(spec.num_records) if autospectrum(spec, i)]
+    if len(autos) == spec.num_records:
+        raise ConversionRefused('it holds no cross term between channels; it seeds Random')
+    for i in range(spec.num_records):
+        dim = spec.ordinate_dim[i]
+        if dim == UNKNOWN:
+            raise ConversionRefused(f'{spec.response_dof[i]} has no declared units; declare '
+                                    'them first')
+        if dim not in _MIMO_DIMS:
+            raise ConversionRefused(f'a record of {spec.response_dof[i]} is a density of {dim}, '
+                                    'and a MIMO Random reference is of acceleration')
+    channels = [spec.response_dof[i] for i in autos]
+    n = len(channels)
+    at = {dof: k for k, dof in enumerate(channels)}
+    references = spec.reference_dof or list(spec.response_dof)
+    frequency = np.asarray(spec.abscissa, dtype=float)
+    steps = np.diff(frequency)
+    if len(frequency) < 2 or not _close(steps, steps[0]) or steps[0] <= 0:
+        raise ConversionRefused('its lines are not evenly spaced, as a controller\'s are')
+    df = float(steps[0])
+    scale = si_transform(unit)[0] ** 2
+    # the file's convention, conj(X) Y, as the specification holds it; a pair it
+    # does not hold is zero, as the controller's specification writer has it
+    cpsd = np.zeros((len(frequency), n, n), dtype=np.complex128)
+    held = set()
+    for i in range(spec.num_records):
+        a, b = at.get(spec.response_dof[i]), at.get(references[i])
+        if a is None or b is None:
+            raise ConversionRefused(f'a cross term names {references[i]}, which has no '
+                                    'autospectrum')
+        cpsd[:, a, b] = np.asarray(spec.ordinate[i]) / scale
+        held.add((a, b))
+    for a, b in list(held):
+        if (b, a) not in held:
+            cpsd[:, b, a] = np.conj(cpsd[:, a, b])
+    limits = {}
+    found = []
+    for kind in ('warning', 'abort'):
+        if all(_has_limit(spec, kind, i) for i in autos):
+            found.append(kind)
+            for side in ('lower', 'upper'):
+                limits[f'{kind}_{side}'] = np.stack(
+                    [np.real(spec.limits[f'{kind}_{side}'][i]) for i in autos], axis=1) / scale
+    try:
+        ref = reference_convert.build(
+            cpsd, frequency, df_hz=df, lines=round(frequency[-1] / df) + 1, labels=channels,
+            unit=unit, limits=limits, conjugate_on_import=True, method='hforge', source=source,
+            created_unix_secs=0)
+    except ValueError as error:
+        raise ConversionRefused(str(error)) from error
+    lo, hi = ref.band
+    if hi - lo < MOST_INLINE_POINTS_AT_LEAST:
+        raise ConversionRefused(f'it holds {hi - lo} lines in its band, and a reference given '
+                                f'inline holds at least {MOST_INLINE_POINTS_AT_LEAST}; write it '
+                                'as a reference file')
+    upper = [(r, c) for r in range(n) for c in range(r, n)]
+    values = [ref.sdm[k, r, c] for k in range(lo, hi) for r, c in upper]
+    out: dict[str, Any] = {
+        'reference': {'kind': 'inline', 'freqs_hz': [float(k * df) for k in range(lo, hi)],
+                      'n': n, 're': [float(np.real(v)) for v in values],
+                      'im': [float(np.imag(v)) for v in values]},
+        'channels': channels, 'alarm_db': None, 'abort_db': None, 'limits': found,
+        'notes': [f'the reference\'s channels, in order: {", ".join(channels)}']}
+    for kind, wire in (('warning', 'alarm_db'), ('abort', 'abort_db')):
+        if kind not in found:
+            continue
+        bands = []
+        for a, i in enumerate(autos):
+            target = np.real(spec.ordinate[i])
+            pairs = _db_pairs(target, np.real(spec.limits[f'{kind}_lower'][i]),
+                              np.real(spec.limits[f'{kind}_upper'][i]), 10.0)
+            if not np.all(np.isfinite(pairs)) or np.any(pairs < 0) or not _uniform(pairs):
+                raise ConversionRefused(f'{channels[a]}\'s {kind} band varies along it, and MIMO '
+                                        'Random holds one band per channel')
+            bands.append(_wire_db(pairs[0]))
+        out[wire] = bands
+    return out
+
+
+def specification_from_mimo_reference(reference: Mapping[str, Any], channels: Sequence[str],
+                                      unit: str = 'g') -> Any:
+    """An inline MIMO Random reference (`unit` squared per hertz, the
+    controller's convention `E[X X^H]`) as a `Specification` in SI and the
+    file's convention: the inverse of `mimo_reference`, with no limits."""
+    from ..core.data import Specification
+
+    n = int(reference['n'])
+    if len(channels) != n:
+        raise ConversionRefused(f'{len(channels)} channels for a reference of {n}')
+    upper = [(r, c) for r in range(n) for c in range(r, n)]
+    values = (np.asarray(reference['re'], dtype=float)
+              + 1j * np.asarray(reference['im'], dtype=float)).reshape(-1, len(upper))
+    scale = si_transform(unit)[0] ** 2
+    # back to the file's convention: the one conjugation, undone
+    ordinate = np.conj(values.T) * scale
+    spec = Specification(
+        abscissa=np.asarray(reference['freqs_hz'], dtype=float), ordinate=ordinate,
+        response_dof=[channels[r] for r, _c in upper], reference_dof=[channels[c] for _r, c in upper],
+        ordinate_dim=[_ACCEL_DENSITY if r == c else 'acceleration*acceleration/frequency'
+                      for r, c in upper],
+        ordinate_unit=['m**2/s**4/Hz'] * len(upper), comment='a MIMO Random reference')
+    return spec

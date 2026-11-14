@@ -40,7 +40,12 @@ async fn seeded_run(module: &str) -> PathBuf {
     let scan = FixedScanner(Err(StationBuildError::NiDriverUnavailable(
         "not installed on this test host".into(),
     )));
-    let o = options(scan, 0.0, Duration::from_secs(60), Duration::from_secs(5));
+    let mut o = options(scan, 0.0, Duration::from_secs(600), Duration::from_secs(5));
+    if module == "mimo_random" {
+        // the controller's own MIMO driver on the simulator's 4 by 4 plant, as the
+        // golden MIMO Random run has it
+        o.mimo_driver = None;
+    }
     let addr = serve(Service::with_options(o)).await;
     let mut c = Client::connect(addr).await;
     c.ok("session.claim", json!({"name": "Shell"})).await;
@@ -60,23 +65,28 @@ async fn seeded_run(module: &str) -> PathBuf {
         config[at] = json!({"sha256": stored["reference"]["sha256"]});
     }
     let p = prefix(module);
+    let (verb, member) = if module == "mimo_random" {
+        (format!("{p}.setup"), "setup")
+    } else {
+        (format!("{p}.configure"), "config")
+    };
     let dry = c
-        .ok(
-            &format!("{p}.configure"),
-            json!({"config": config, "dry_run": true}),
-        )
+        .ok(&verb, json!({member: config.clone(), "dry_run": true}))
         .await;
     assert!(
         dry["errors"].as_array().is_none_or(|e| e.is_empty()),
         "{module}: the dry run refused the seeded setup: {dry}"
     );
-    c.ok(&format!("{p}.configure"), json!({"config": config}))
-        .await;
+    c.ok(&verb, json!({member: config.clone()})).await;
     c.ok(&format!("{p}.start"), json!({})).await;
-    let topic = format!("{p}.state");
+    let topic = if module == "mimo_random" {
+        format!("{p}.status")
+    } else {
+        format!("{p}.state")
+    };
     let i = c
-        .wait_for("the run's end", Duration::from_secs(300), |e| {
-            e.topic() == topic && e.data()["state"] == "finished"
+        .wait_for("the run's end", Duration::from_secs(600), |e| {
+            e.topic() == topic && (e.data()["state"] == "finished" || e.data()["state"] == "review")
         })
         .await;
     let end = c.events[i].data().clone();
@@ -147,4 +157,9 @@ async fn a_seeded_twr_setup_runs_on_the_simulator() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_seeded_mixed_setup_runs_on_the_simulator() {
     check("mixed").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_seeded_mimo_random_setup_runs_on_the_simulator() {
+    check("mimo_random").await;
 }

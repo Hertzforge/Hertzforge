@@ -307,3 +307,55 @@ def test_a_ceiling_goes_to_a_specification_in_si_and_back():
     assert sc.limit_profile(spec, 3) == {**limit, 'rows': [
         {'freq_hz': 20.0, 'ceiling': pytest.approx(0.1, rel=1e-12)},
         {'freq_hz': 2000.0, 'ceiling': pytest.approx(0.5, rel=1e-12)}]}
+
+
+# ---- MIMO Random -----------------------------------------------------------------------------
+
+def _two_channel_spec(phase_deg=40.0):
+    f = 100.0 + 2.0 * np.arange(8)
+    a, b = 0.02 * G ** 2, 0.01 * G ** 2
+    cross = 0.5 * np.sqrt(a * b) * np.exp(1j * np.deg2rad(phase_deg))
+    ordinate = np.array([np.full(8, a), np.full(8, cross), np.full(8, b)], dtype=complex)
+    lim = np.real(ordinate)
+    return Specification(
+        abscissa=f, ordinate=ordinate, response_dof=['1X+', '1X+', '2X+'],
+        reference_dof=['1X+', '2X+', '2X+'],
+        ordinate_dim=['acceleration**2/frequency', 'acceleration*acceleration/frequency',
+                      'acceleration**2/frequency'],
+        warning_lower=lim * 10 ** -0.3, warning_upper=lim * 10 ** 0.3,
+        abort_lower=lim * 10 ** -0.6, abort_upper=lim * 10 ** 0.6)
+
+
+def test_a_cross_spectral_specification_goes_to_a_reference_in_g_and_back():
+    spec = _two_channel_spec()
+    ref = sc.mimo_reference(spec)
+    inline = ref['reference']
+    assert inline['n'] == 2 and inline['freqs_hz'] == list(100.0 + 2.0 * np.arange(8))
+    # in g²/Hz: the SI density over g squared, made explicit
+    assert inline['re'][0] == pytest.approx(0.02, rel=1e-12)
+    assert inline['re'][2] == pytest.approx(0.01, rel=1e-12)
+    # the controller's convention E[X X^H]: the file's +40 degrees arrives at -40
+    cross = inline['re'][1] + 1j * inline['im'][1]
+    assert np.degrees(np.angle(cross)) == pytest.approx(-40.0, abs=1e-9)
+    assert ref['alarm_db'] == [[3.0, 3.0], [3.0, 3.0]] and ref['abort_db'] == [[6.0, 6.0]] * 2
+    back = sc.specification_from_mimo_reference(inline, ref['channels'])
+    assert np.allclose(back.ordinate, spec.ordinate, rtol=1e-12, atol=0)
+
+
+def test_a_reference_is_refused_without_cross_terms_or_off_even_lines():
+    with pytest.raises(sc.ConversionRefused, match='seeds Random'):
+        sc.mimo_reference(sc.specification_from_random_profile(PROFILE, ['1X+']))
+    spec = _two_channel_spec()
+    spec.abscissa = spec.abscissa.copy()
+    spec.abscissa[-1] += 1.0
+    with pytest.raises(sc.ConversionRefused, match='evenly spaced'):
+        sc.mimo_reference(spec)
+    few = _two_channel_spec()
+    few.abscissa, few.ordinate = few.abscissa[:4], few.ordinate[:, :4]
+    few.limits.clear()
+    with pytest.raises(sc.ConversionRefused, match='at least 8'):
+        sc.mimo_reference(few)
+    bad = _two_channel_spec()
+    bad.ordinate[1] *= 10  # a cross term larger than its autospectra allow
+    with pytest.raises(sc.ConversionRefused, match='positive semi-definite|not positive'):
+        sc.mimo_reference(bad)

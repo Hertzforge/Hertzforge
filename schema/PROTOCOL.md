@@ -569,7 +569,9 @@ in `hertzforge.io.setup_convert` read it: a `Specification` fills Random's `prof
 fills SRS's `target`, `bands` and `envelope`; a `TransientSpecification` or `TimeHistory` record
 that is a classical pulse fills Classical Shock's `pulse`; a `TimeHistory` record fills TWR's
 `reference`; a floor `Specification` with its narrowbands, and the `SineSweepSpecification` of
-tones beside it in an object group, fill Mixed Mode's `parts`. `project.seeds` lists the objects
+tones beside it in an object group, fill Mixed Mode's `parts`; a `Specification` with cross terms
+fills MIMO Random's `reference` (inline, in g²/Hz, in the controller's convention, at least 8 lines)
+and each control's `alarm_db` and `abort_db`, in the specification's channel order. `project.seeds` lists the objects
 of the kinds a module takes (`name`, `kind`, `fills`, `holds`, `channels`, and `tones` for Mixed
 Mode). `project.seed` answers what one fills: `sets`, each `{"path","value"}`, a dotted member of
 the configure request (a list member by its index) and the value put there whole, in order;

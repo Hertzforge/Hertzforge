@@ -16,7 +16,7 @@
 import { configDifferences, type SetupModule, type SetupOrigin } from './setupFile';
 
 /** The modules a project object can seed, in the order a person meets them. */
-export const SEED_MODULES: readonly SetupModule[] = ['random', 'sine', 'srs', 'classical_shock', 'twr', 'mixed'];
+export const SEED_MODULES: readonly SetupModule[] = ['random', 'sine', 'srs', 'classical_shock', 'twr', 'mixed', 'mimo_random'];
 
 /** One object `project.seeds` offers. */
 export interface SeedOffer {
@@ -72,6 +72,7 @@ export function applySets(config: Config, sets: readonly SeedSet[]): Config {
 		let at: unknown = out;
 		for (const key of keys.slice(0, -1)) {
 			if (Array.isArray(at)) {
+				if (!isObject(at[Number(key)]) && !Array.isArray(at[Number(key)])) at[Number(key)] = {};
 				at = at[Number(key)];
 				continue;
 			}

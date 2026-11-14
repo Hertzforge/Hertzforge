@@ -33,6 +33,8 @@ classical_shock           TransientSpecification or           the pulse
                           pulse
 twr                       TimeHistory or                      the reference
                           TransientSpecification
+mimo_random               Specification with cross terms      the reference and its
+                          (through `reference_convert`)       control bands
 mixed                     Specification (a floor, with its    the parts
                           narrowbands), and the tones a
                           SineSweepSpecification beside it
@@ -51,7 +53,7 @@ from . import setup_convert as sc
 #: the modules a seed fills, and what each fills, in words
 FILLS = {'random': 'the profile', 'sine': 'the profile and test',
          'srs': 'the target and bands', 'classical_shock': 'the pulse',
-         'twr': 'the reference', 'mixed': 'the parts'}
+         'twr': 'the reference', 'mixed': 'the parts', 'mimo_random': 'the reference'}
 
 
 class SeedRefused(ValueError):
@@ -75,6 +77,7 @@ def _kinds(module: str) -> tuple[type, ...]:
     from ..core.sine import SineSweepSpecification
 
     return {'random': (Specification,), 'mixed': (Specification,),
+            'mimo_random': (Specification,),
             'sine': (SineSweepSpecification,), 'srs': (ShockSpecification,),
             'classical_shock': (TimeHistory,), 'twr': (TimeHistory,)}.get(module, ())
 
@@ -84,7 +87,7 @@ def _offered(obj: Any, module: str) -> bool:
 
     if not isinstance(obj, _kinds(module)):
         return False
-    if module in ('random', 'mixed'):
+    if module in ('random', 'mixed', 'mimo_random'):
         # a shock specification is a specification of another kind
         return isinstance(obj, Specification) and not isinstance(obj, ShockSpecification)
     return True
@@ -232,6 +235,18 @@ def _mixed(obj: Any, tones: Any, channel: str | None, sets, protective) -> list[
     return found['notes']
 
 
+def _mimo(obj: Any, name: str, sets, protective) -> list[str]:
+    found = sc.mimo_reference(obj, 'g', name)
+    _put(sets, 'reference', found['reference'])
+    for k, dof in enumerate(found['channels']):
+        if found['alarm_db'] is not None:
+            _put(sets, f'channels.controls.{k}.alarm_db', found['alarm_db'][k])
+        if found['abort_db'] is not None:
+            _guard(protective, f'channels.controls.{k}.abort_db', found['abort_db'][k],
+                   f'The abort band of control {k + 1} ({dof}), dB below and above')
+    return found['notes']
+
+
 def seed(project: Any, name: str, module: str, *, channel: str | None = None,
          record: int = 0, units: str | None = None, tones: str | None = None
          ) -> dict[str, Any]:
@@ -294,6 +309,8 @@ def seed(project: Any, name: str, module: str, *, channel: str | None = None,
             notes = _srs(obj, channel, sets, protective)
         elif module == 'classical_shock':
             notes = _pulse(obj, int(record), sets)
+        elif module == 'mimo_random':
+            notes = _mimo(obj, name, sets, protective)
         elif module == 'twr':
             ref = sc.twr_reference(obj, int(record), units or 'g')
             imports.append({'method': 'twr.reference.import', 'set': 'reference',
@@ -326,7 +343,12 @@ def apply(config: Mapping[str, Any], sets: list[Mapping[str, Any]]) -> dict[str,
         at: Any = out
         for key in keys[:-1]:
             if isinstance(at, list):
-                at = at[int(key)]
+                k = int(key)
+                while len(at) <= k:
+                    at.append({})
+                if not isinstance(at[k], (dict, list)):
+                    at[k] = {}
+                at = at[k]
                 continue
             if not isinstance(at.get(key), (dict, list)):
                 at[key] = {}

@@ -18,6 +18,7 @@ import type { ProjectSummary } from '$lib/protocol/types';
 import { AcquireState } from '../store.svelte';
 import { SineStore } from '../sine/sineStore.svelte';
 import { MixedStore } from '../mixed/mixedStore.svelte';
+import { MimoState } from '../mimo/mimoStore.svelte';
 import { ShockStore } from '../shock/shockStore.svelte';
 import { SrsStore } from '../srs/srsStore.svelte';
 import { TwrStore } from '../twr/twrStore.svelte';
@@ -64,7 +65,7 @@ async function shell() {
 	await acq.sync();
 	await acq.claim();
 	const opts = { local: null, checkDelayMs: 0 };
-	const stores = { sine: new SineStore(acq, opts), mixed: new MixedStore(acq, opts), shock: new ShockStore(acq, opts), srs: new SrsStore(acq, opts), twr: new TwrStore(acq, opts) };
+	const stores = { sine: new SineStore(acq, opts), mixed: new MixedStore(acq, opts), mimo: new MimoState(acq, opts), shock: new ShockStore(acq, opts), srs: new SrsStore(acq, opts), twr: new TwrStore(acq, opts) };
 	await Promise.all(Object.values(stores).map((s) => s.sync()));
 	const asked: { method: string; params: Record<string, unknown> }[] = [];
 	const request = client.request.bind(client);
@@ -79,12 +80,12 @@ async function shell() {
 		const host = hostFor(app, module);
 		return new SetupFiles(host, analysis, project, originFor(host.store, () => new SetupOriginState(() => host.key())));
 	};
-	return { asked, bar };
+	return { asked, bar, acq, stores };
 }
 
 /** Anything that could configure, arm or start a run. */
 const notChecks = (asked: { method: string; params: Record<string, unknown> }[]) =>
-	asked.filter((a) => /\.(arm|start|fire|record|proceed)$/.test(a.method) || (/\.configure$/.test(a.method) && !a.params.dry_run));
+	asked.filter((a) => /\.(arm|start|fire|record|proceed)$/.test(a.method) || ((/\.configure$/.test(a.method) || a.method === 'mimo_random.setup') && !a.params.dry_run));
 
 const withoutReference = (c: Config | null) => {
 	const out = structuredClone(c ?? {});
@@ -95,7 +96,14 @@ const withoutReference = (c: Config | null) => {
 describe('a project object seeds a test setup', () => {
 	for (const module of SEED_MODULES) {
 		it(`${module}: fills the draft only after naming every change and the typed protective numbers`, async () => {
-			const { asked, bar } = await shell();
+			const { asked, bar, acq, stores } = await shell();
+			const { channels } = JSON.parse(readFileSync(resolve(GOLDEN, `seeds/${module}.json`), 'utf8')) as { channels: unknown[] };
+			if (module === 'mimo_random') {
+				// MIMO Random's setup names its controls by the table's channels: the table it ran with
+				acq.rows = channels as never;
+				expect(await acq.applyTable()).toBe(true);
+				await stores.mimo.sync();
+			}
 			const files = bar(module);
 			const host = files.host;
 			const { base, config, answer } = seeded(module);

@@ -58,7 +58,11 @@ G = 9.80665
 #: the modules seeded end to end, with the configure request each takes
 MODULES = {'random': 'randomConfigureParams', 'sine': 'sineConfigureParams',
            'srs': 'srsConfigureParams', 'classical_shock': 'shockConfigureParams',
-           'twr': 'twrConfigureParams', 'mixed': 'mixedConfigureParams'}
+           'twr': 'twrConfigureParams', 'mixed': 'mixedConfigureParams',
+           'mimo_random': 'mimoSetupParams'}
+
+#: the golden MIMO Random run: its setup is the short one the 4 by 4 plant reaches
+MIMO_GOLDEN = ROOT / 'schema' / 'golden' / 'runs' / 'mimo_random'
 
 
 def _row(index, role, description, sensitivity=100, top=100):
@@ -154,8 +158,23 @@ BASES = {
         'limits': {'drive_vpk_ceiling': 5, 'drive_vpk_abort': 8}},
 }
 
+def _mimo_base():
+    config = json.loads((MIMO_GOLDEN / 'setup.json').read_text(encoding='utf-8'))['config']
+    config = {**config, 'title': 'Seeded MIMO Random', 'record': {'streams': False}}
+    # the reference the seed replaces: none of the golden one is kept
+    config['reference'] = {'kind': 'inline', 'freqs_hz': [160.0, 166.0], 'n': 4,
+                           're': [1e-6 if r == c else 0.0 for _f in range(2)
+                                  for r in range(4) for c in range(r, 4)],
+                           'im': [0.0] * 20}
+    return config
+
+
+BASES['mimo_random'] = _mimo_base()
+
 TABLES = {'random': _rows(), 'sine': _rows(), 'srs': _rows(1000, 10),
-          'classical_shock': _rows(1000, 10), 'twr': _rows(), 'mixed': _rows()}
+          'classical_shock': _rows(1000, 10), 'twr': _rows(), 'mixed': _rows(),
+          'mimo_random': json.loads((MIMO_GOLDEN / 'table.json').read_text(
+              encoding='utf-8'))['rows']}
 
 
 # ---- the source objects, written as the analysis side writes them ----------------------------
@@ -231,9 +250,41 @@ def _mixed_tones():
                                   ['1Z+'], ordinate_dim='acceleration', ordinate_unit='m/s**2')
 
 
+def _mimo_spec():
+    """A specification with cross terms the 4 by 4 plant reaches: the reference
+    of the golden MIMO Random run, as its converted project holds it (in SI, in
+    the file's convention)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as scratch:
+        folder = os.path.join(scratch, 'mimo_random')
+        shutil.copytree(MIMO_GOLDEN, folder)
+        project = Project.open(run_convert.convert(folder).path)
+        found = [obj for _name, obj in project.items() if type(obj) is Specification]
+    assert len(found) == 1
+    run = found[0]
+    # on half-hertz lines across the run's band, each a mix of its two neighbors
+    # (still a spectral matrix): enough points to be given inline
+    f = np.arange(run.abscissa[0], run.abscissa[-1] + 0.25, 0.5)
+
+    def across(values):
+        values = np.asarray(values)
+        return np.array([np.interp(f, run.abscissa, np.real(v)) + 1j * np.interp(
+            f, run.abscissa, np.imag(v)) for v in values])
+
+    limits = {k: np.real(across(v)) for k, v in run.limits.items()}
+    return Specification(abscissa=f, ordinate=across(run.ordinate),
+                         response_dof=list(run.response_dof),
+                         reference_dof=list(run.reference_dof),
+                         ordinate_dim=list(run.ordinate_dim),
+                         ordinate_unit=list(run.ordinate_unit),
+                         reference_unit=list(run.reference_unit), **limits)
+
+
 SOURCES = {'random': ('Floor Spec', _random_spec), 'sine': ('Sweep Spec', _sine_spec),
            'srs': ('Shock Spec', _srs_spec), 'classical_shock': ('Pulse', _pulse_spec),
-           'twr': ('Field Record', _twr_history), 'mixed': ('Floor', _mixed_floor)}
+           'twr': ('Field Record', _twr_history), 'mixed': ('Floor', _mixed_floor),
+           'mimo_random': ('Field Reference', _mimo_spec)}
 
 
 def _project(module):
@@ -277,7 +328,8 @@ def test_the_seeded_setup_on_file_is_what_seeding_gives(module):
 
 @pytest.mark.parametrize('module', MODULES)
 def test_the_seeded_setup_is_a_configure_request(module, validate):
-    validate({'config': seeded(module)[0]['config']}, MODULES[module])
+    member = 'setup' if module == 'mimo_random' else 'config'
+    validate({member: seeded(module)[0]['config']}, MODULES[module])
 
 
 @pytest.mark.parametrize('module', ['random', 'sine', 'srs'])
@@ -355,7 +407,15 @@ def test_the_run_was_accepted_with_the_seeded_setup(module, converted):
     made = seeded(module)[0]['config']
     accepted = _accepted(folder)
     for key, value in made.items():
+        if key == 'reference' and module == 'twr':
+            # TWR's reference is the control service's store, by the SHA-256 it gave
+            continue
         if key == 'reference':
+            # MIMO Random's, as numbers, to the last bits the arithmetic leaves
+            took = accepted[key]
+            assert took['n'] == value['n'] and took['freqs_hz'] == value['freqs_hz']
+            for part in ('re', 'im'):
+                assert np.allclose(took[part], value[part], rtol=1e-12, atol=1e-15), part
             continue
         assert accepted.get(key) == json.loads(json.dumps(value)), key
 
@@ -444,6 +504,24 @@ def test_mixed_the_run_holds_the_source_floor_narrowbands_and_tones(converted):
     assert got.fixed and expected.fixed
 
 
+def test_mimo_random_the_run_holds_the_source_reference_with_its_cross_terms(converted):
+    _folder, project = converted['mimo_random']
+    got, source = _one(project, Specification), _mimo_spec()
+    assert got.num_records == source.num_records == 10
+    # the run's lines are the source's at every other point
+    lines = [int(np.argmin(np.abs(source.abscissa - f))) for f in got.abscissa]
+    assert np.allclose(source.abscissa[lines], got.abscissa, rtol=sc.TOLERANCE, atol=0)
+    want = source
+    want_ordinate = source.ordinate[:, lines]
+    assert list(got.response_dof) == list(want.response_dof)
+    assert list(got.reference_dof) == list(want.reference_dof)
+    peak = np.max(np.abs(want.ordinate))
+    # every term, cross terms with their phase, in the file's convention
+    assert np.max(np.abs(got.ordinate - want_ordinate)) <= sc.TOLERANCE * peak
+    cross = [i for i in range(want.num_records) if want.response_dof[i] != want.reference_dof[i]]
+    assert cross and np.max(np.abs(np.imag(want.ordinate[cross]))) > 1e-3 * peak
+
+
 # ---- falsification: a dropped unit conversion fails ------------------------------------------
 
 @pytest.mark.parametrize('module', MODULES)
@@ -456,12 +534,14 @@ def test_a_dropped_unit_conversion_no_longer_gives_the_run_setup(module, monkeyp
         assert made['imports'][0]['params']['text'] != _on_file(module)['imports'][0]['params'][
             'text']
         return
+    if module == 'mimo_random':
+        monkeypatch.setattr(sc, 'si_transform', lambda unit, dimension=None: (1.0, 0.0))
     monkeypatch.setattr(sc, 'G', 1.0)
     monkeypatch.setitem(sc.SINE_QUANTITIES, 'acceleration', ('accel_g', 1.0))
     made = seeded(module)[0]['config']
     accepted = _accepted(folder)
-    assert any(accepted.get(k) != json.loads(json.dumps(v)) for k, v in
-               _without_reference(made).items())
+    kept = made if module == 'mimo_random' else _without_reference(made)
+    assert any(accepted.get(k) != json.loads(json.dumps(v)) for k, v in kept.items())
 
 
 # ---- the verbs -------------------------------------------------------------------------------
