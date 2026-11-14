@@ -997,6 +997,44 @@
       "type": "object", "required": ["setup"],
       "properties": {"setup": {"$ref": "#/$defs/testSetup"}}
     },
+    "projectSeedsParams": {
+      "type": "object", "required": ["module"], "additionalProperties": false,
+      "properties": {"module": {"$ref": "#/$defs/testSetupModule"}}
+    },
+    "projectSeedsResult": {
+      "type": "object", "required": ["seeds"],
+      "properties": {"seeds": {"type": "array", "items": {
+        "type": "object", "required": ["name", "kind", "fills", "holds", "channels"],
+        "properties": {"name": {"type": "string"}, "kind": {"type": "string"},
+                       "fills": {"type": "string"}, "holds": {"type": "string"},
+                       "channels": {"type": "array", "items": {"type": "string"}},
+                       "tones": {"type": "string"}}}}}
+    },
+    "projectSeedParams": {
+      "type": "object", "required": ["name", "module"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1},
+                     "module": {"$ref": "#/$defs/testSetupModule"},
+                     "channel": {"type": "string"}, "record": {"type": "integer", "minimum": 0},
+                     "units": {"type": "string"}, "tones": {"type": "string"}}
+    },
+    "projectSeedResult": {
+      "type": "object", "required": ["module", "sets", "protective", "imports", "notes", "origin"],
+      "properties": {
+        "module": {"$ref": "#/$defs/testSetupModule"},
+        "sets": {"type": "array", "items": {"type": "object", "required": ["path", "value"],
+                                             "properties": {"path": {"type": "string"}, "value": {}}}},
+        "protective": {"type": "array", "items": {
+          "type": "object", "required": ["path", "value", "words"],
+          "properties": {"path": {"type": "string"}, "value": {}, "words": {"type": "string"}}}},
+        "imports": {"type": "array", "items": {
+          "type": "object", "required": ["method", "params", "set"],
+          "properties": {"method": {"type": "string"}, "params": {"type": "object"},
+                         "set": {"type": "string"}}}},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "origin": {"allOf": [{"$ref": "#/$defs/testSetupOrigin"},
+                             {"required": ["object", "checksum", "fills"],
+                              "properties": {"kind": {"const": "seed"}}}]}}
+    },
     "tableFileKind": {"enum": ["channels", "breakpoints"]},
     "tableCell": {"type": ["number", "string", "boolean", "null"]},
     "tablesSaveParams": {

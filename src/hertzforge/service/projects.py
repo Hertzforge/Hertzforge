@@ -809,3 +809,46 @@ def open_setup(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str
         except ValueError as error:
             raise refused(f'{name}: {error}') from error
     raise refused(f'{name} is a {kind_of(obj).replace("_", " ")}, not a setup or a run record')
+
+
+# ---- seeds: an analysis object fills part of a test's setup ------------------------------------
+
+def seeds(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.seeds`: the objects in the open project that could fill
+    part of `module`'s setup (`io.seeds.offers`); an empty list while no
+    project is open."""
+    from hertzforge.io import seeds as seeding
+
+    module = _name(params, 'module', 'project.seeds')
+    if state is None:
+        return {'seeds': []}
+    return {'seeds': seeding.offers(state.project, module)}
+
+
+def seed(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.seed`: the part of `module`'s configuration the object
+    `name` fills, its protective numbers apart, and its origin
+    (`io.seeds.seed`). Nothing is configured: the shell puts the part
+    into a test's draft once the operator has seen what it changes, and
+    the draft goes through the same configure call and checks as one
+    typed in. An object the module cannot control to is refused with
+    the reason."""
+    from hertzforge.io import seeds as seeding
+
+    state = _open(state, 'project.seed')
+    name = _name(params, 'name', 'project.seed')
+    module = _name(params, 'module', 'project.seed')
+    options: dict[str, Any] = {}
+    for key, kind in (('channel', str), ('units', str), ('tones', str), ('record', int)):
+        value = params.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, kind) or isinstance(value, bool):
+            raise bad_request(f'project.seed "{key}" is a {kind.__name__}')
+        options[key] = value
+    try:
+        return seeding.seed(state.project, name, module, **options)
+    except KeyError as error:
+        raise not_found(f'the project has no object named {error.args[0]!r}') from error
+    except seeding.SeedRefused as error:
+        raise refused(str(error)) from error
