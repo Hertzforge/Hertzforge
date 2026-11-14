@@ -259,7 +259,11 @@ Each pulse's results are written when the pulse is judged, the last pulse of
 the run included; a record's line names the pulse, its level, its origin and
 the station frame. A run that ends before its identification has no
 identification and no pulses; one held by identification has its identification
-and no pulses. With `record.streams` false there is no `streams/` folder. The
+and no pulses. A pulse whose drive was committed and then withheld in the wait
+before it (held while nobody held control, or stopped there) still has its shot
+in both streams: the drive committed for it, and an input shot with no frames
+that says `played` false, so the two streams stay shot for shot; nothing names
+what that shot was. With `record.streams` false there is no `streams/` folder. The
 analysis side keeps the nominal pulse and its time-domain tolerance as the
 setup's `resolved.pulse` and `resolved.tolerance` and as the arrays of
 `pulse_reference` in the run record, since no analysis class holds a nominal

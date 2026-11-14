@@ -8,11 +8,19 @@
 
 mod support;
 
-use hertzforge_station::StationBuildError;
+use hertzforge_channel_table::ChannelTable;
+use hertzforge_hal::{
+    AcquisitionConfig, Backend, BackendStatus, Caps, ConfiguredActual, HalError, InputRead,
+};
+use hertzforge_station::{BackendKind, StationBuildError, StationSpec};
+use sds_control::record::{tap, Begin, RecordOptions, RunRecord, StreamSpec};
 use sds_control::server::{Service, ServiceOptions};
+use sds_control::shock::record::ShotRecording;
 use sds_control::station::FixedScanner;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use support::schema::Schema;
 use support::{options, serve, Client};
@@ -389,4 +397,149 @@ async fn a_writer_stalled_on_every_write_leaves_the_firing_and_the_outcome_uncha
     );
     // The record is still being written: the run did not wait for it.
     assert!(!folder.join("end.json").exists(), "the writer kept up");
+}
+
+/// The simulator's caps under a station that plays every drive frame offered and
+/// reads back as many frames as are asked for, so the test says exactly which
+/// calls a shot sees.
+struct Plain {
+    caps: Caps,
+}
+
+impl Backend for Plain {
+    fn caps(&self) -> Caps {
+        self.caps.clone()
+    }
+    fn open(&mut self) -> Result<(), HalError> {
+        Ok(())
+    }
+    fn close(&mut self) -> Result<(), HalError> {
+        Ok(())
+    }
+    fn configure(
+        &mut self,
+        _table: &ChannelTable,
+        _acq: &AcquisitionConfig,
+    ) -> Result<ConfiguredActual, HalError> {
+        Err(HalError::Unsupported("configure"))
+    }
+    fn arm(&mut self) -> Result<(), HalError> {
+        Ok(())
+    }
+    fn start(&mut self) -> Result<(), HalError> {
+        Ok(())
+    }
+    fn stop(&mut self) -> Result<(), HalError> {
+        Ok(())
+    }
+    fn read_input(&mut self, out: &mut [f32]) -> Result<InputRead, HalError> {
+        out.fill(1.0);
+        Ok(InputRead::Frames(out.len()))
+    }
+    fn write_drive(&mut self, drive: &[f32]) -> Result<usize, HalError> {
+        Ok(drive.len())
+    }
+    fn poll_status(&mut self) -> BackendStatus {
+        BackendStatus::default()
+    }
+    fn emergency_stop(&mut self) -> Result<(), HalError> {
+        Ok(())
+    }
+}
+
+/// A Classical Shock pulse whose drive was committed and then withheld before its
+/// start (the run held or stopped in the wait before it) keeps the two streams'
+/// shots in step: the inputs get an empty shot that says nothing was played, and
+/// the drive keeps what was committed. Red if the inputs skipped the withheld shot
+/// (every later shot would sit one place early in the inputs against the drive).
+/// The station wrapper alone, on the simulator's caps; nothing here is about
+/// hardware.
+#[test]
+fn a_classical_shock_withheld_pulse_keeps_the_inputs_and_the_drive_in_step() {
+    let caps =
+        hertzforge_station::try_build_station_backend(BackendKind::Sim, &StationSpec::default())
+            .unwrap()
+            .backend
+            .caps();
+    let root = std::env::temp_dir().join(format!(
+        "shock-shots-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let stream = |kind: &str, link| {
+        let mut d = Map::new();
+        d.insert("kind".into(), json!(kind));
+        d.insert("fs_hz".into(), json!(1000));
+        d.insert("channels".into(), json!([{"index": 1, "unit": "g"}]));
+        d.insert("shots".into(), json!([]));
+        StreamSpec {
+            name: kind.into(),
+            description: d,
+            link,
+        }
+    };
+    let (inputs, inputs_link) = tap::pair(1, 8, 64);
+    let (drives, drives_link) = tap::pair(1, 8, 64);
+    let mut manifest = Map::new();
+    manifest.insert("test".into(), json!("classical_shock"));
+    manifest.insert("source".into(), json!("SIM"));
+    let record = RunRecord::open(
+        Begin {
+            root: root.clone(),
+            name: "run".into(),
+            manifest,
+            table: json!({"rows": []}),
+            setup: json!({"config": {}}),
+            law: None,
+            log: Vec::new(),
+            streams: vec![stream("inputs", inputs_link), stream("drives", drives_link)],
+        },
+        &RecordOptions::default(),
+        Box::new(|_, _| {}),
+    )
+    .unwrap();
+    let status = record.status();
+    let mut b = ShotRecording::wrap(
+        Box::new(Plain { caps }),
+        inputs,
+        drives,
+        Arc::new(AtomicU64::new(0)),
+    );
+    let mut frame = [0.0f32; 4];
+    // the identification and a pulse played, a pulse withheld, then one played
+    for played in [true, true, false, true] {
+        b.write_drive(&[0.5; 4]).unwrap();
+        if played {
+            b.start().unwrap();
+            b.read_input(&mut frame).unwrap();
+        }
+        b.stop().unwrap();
+    }
+    drop(b);
+    record.finish(Map::new());
+    let t0 = Instant::now();
+    while !status.finished() {
+        assert!(t0.elapsed() < LONG, "the writer did not finish");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let side = |name: &str| read_json(&status.folder.join(format!("streams/{name}/stream.json")));
+    let (i, d) = (side("inputs"), side("drives"));
+    let frames = |v: &Value| -> Vec<u64> {
+        v["shots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["frames"].as_u64().unwrap())
+            .collect()
+    };
+    assert_eq!(frames(&i), vec![4, 4, 0, 4], "{i}");
+    assert_eq!(frames(&d), vec![4, 4, 4, 4], "{d}");
+    assert_eq!(i["shots"][2]["played"], false, "{i}");
+    for k in [0, 1, 3] {
+        assert!(i["shots"][k].get("played").is_none(), "{i}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }

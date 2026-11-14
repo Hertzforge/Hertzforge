@@ -70,6 +70,11 @@ pub struct PulseKinematics {
 /// station's start (the drive from its first accepted frame after an arm) to its
 /// stop, and the station frame.
 ///
+/// A shot whose drive was committed and then withheld before the start (the run
+/// was held or stopped in the wait before a pulse) still takes its place in both
+/// streams, an empty one in the inputs that says `played` false, so the two
+/// streams' shots stay in step. It begins no start, so `starts` does not count it.
+///
 /// It only watches: every call goes to the station unchanged and its answer comes
 /// back unchanged, no recording outcome can fail a call, and it does no file work,
 /// takes no lock and never waits ([`StreamTap`]).
@@ -81,6 +86,8 @@ pub struct ShotRecording {
     station_frame: Arc<AtomicU64>,
     inputs_open: bool,
     drives_open: bool,
+    /// The open shot has started (the station's start returned).
+    started: bool,
     /// Counts the station's starts, each the beginning of a shot, when a run
     /// asks to know which shot a play was ([`ShotRecording::wrap_counted`]).
     starts: Option<Arc<AtomicU64>>,
@@ -103,6 +110,7 @@ impl ShotRecording {
             station_frame,
             inputs_open: false,
             drives_open: false,
+            started: false,
             starts: None,
         })
     }
@@ -125,6 +133,7 @@ impl ShotRecording {
             station_frame,
             inputs_open: false,
             drives_open: false,
+            started: false,
             starts: Some(starts),
         })
     }
@@ -136,6 +145,14 @@ impl ShotRecording {
     }
 
     fn end_shots(&mut self) {
+        if self.drives_open && !self.inputs_open && !self.started {
+            // committed and never started: an empty shot in the inputs keeps the
+            // two streams' shots in step, and says nothing was played
+            let mut facts = self.begin();
+            facts.insert("played".into(), Value::from(false));
+            self.inputs.begin_shot(facts);
+            self.inputs_open = true;
+        }
         if self.inputs_open {
             self.inputs.end_shot();
             self.inputs_open = false;
@@ -144,6 +161,7 @@ impl ShotRecording {
             self.drives.end_shot();
             self.drives_open = false;
         }
+        self.started = false;
     }
 }
 
@@ -173,6 +191,7 @@ impl Backend for ShotRecording {
     }
     fn start(&mut self) -> Result<(), HalError> {
         self.inner.start()?;
+        self.started = true;
         if !self.inputs_open {
             let facts = self.begin();
             self.inputs.begin_shot(facts);
