@@ -1,15 +1,15 @@
-{"seq":0,"at_unix":1794691915.1201,"frame":null,"kind":"state","text":"configured \"Seeded Mixed Mode\" on sim"}
-{"seq":1,"at_unix":1794691915.215522,"frame":null,"kind":"record","text":"the run's streams are not recorded: switched off in the setup","data":{"stream":null,"failed":"switched off in the setup"}}
-{"seq":2,"at_unix":1794691915.215591,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
-{"seq":3,"at_unix":1794691915.215598,"frame":null,"kind":"station","text":"armed on sim at 4096 Hz, a 410 frame tick, shared clock","data":{"class":"sim","fs_hz":4096.0,"tick_frames":410}}
-{"seq":4,"at_unix":1794691915.215619,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
-{"seq":5,"at_unix":1794691915.263774,"frame":9728,"kind":"note","text":"identification at 0.0447 V rms: band coherence 0.988, lag 72 frames"}
-{"seq":6,"at_unix":1794691915.263791,"frame":9728,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
-{"seq":7,"at_unix":1794691915.263999,"frame":9728,"kind":"state","text":"coherence gate to floor only","data":{"from":"coherence_gate","to":"floor_only","state":"running"}}
-{"seq":8,"at_unix":1794691915.277716,"frame":19968,"kind":"note","text":"the floor did not equalize in 2.3 s (the larger of its settle time and the 2.3 s this grid needs for 120 degrees of freedom); the parts come in now"}
-{"seq":9,"at_unix":1794691915.277747,"frame":19968,"kind":"state","text":"floor only to engaged","data":{"from":"floor_only","to":"engaged","state":"running"}}
-{"seq":10,"at_unix":1794691915.288229,"frame":28160,"kind":"level","text":"level 0 dB","data":{"level_db":0.0,"t_s":4.4375}}
-{"seq":11,"at_unix":1794691915.291035,"frame":30208,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
-{"seq":12,"at_unix":1794691915.29728,"frame":34304,"kind":"state","text":"full level to ramping down","data":{"from":"full_level","to":"ramping_down","state":"stopping"}}
-{"seq":13,"at_unix":1794691915.300305,"frame":36096,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
-{"seq":14,"at_unix":1794691915.300321,"frame":36096,"kind":"note","text":"Test complete: the schedule finished and every part ramped down with the controlled stop.","data":{"outcome":"completed","end":{"outcome":"completed","message":"Test complete: the schedule finished and every part ramped down with the controlled stop.","at_s":6.25,"level_db":0,"ramp_s":0.688,"trip":null}}}
+{"seq":0,"at_unix":1794692112.406284,"frame":null,"kind":"state","text":"configured \"Seeded Mixed Mode\" on sim"}
+{"seq":1,"at_unix":1794692112.520864,"frame":null,"kind":"record","text":"the run's streams are not recorded: switched off in the setup","data":{"stream":null,"failed":"switched off in the setup"}}
+{"seq":2,"at_unix":1794692112.520941,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":3,"at_unix":1794692112.520948,"frame":null,"kind":"station","text":"armed on sim at 4096 Hz, a 410 frame tick, shared clock","data":{"class":"sim","fs_hz":4096.0,"tick_frames":410}}
+{"seq":4,"at_unix":1794692112.520969,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":5,"at_unix":1794692112.570313,"frame":9728,"kind":"note","text":"identification at 0.0447 V rms: band coherence 0.988, lag 72 frames"}
+{"seq":6,"at_unix":1794692112.570328,"frame":9728,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
+{"seq":7,"at_unix":1794692112.570529,"frame":9728,"kind":"state","text":"coherence gate to floor only","data":{"from":"coherence_gate","to":"floor_only","state":"running"}}
+{"seq":8,"at_unix":1794692112.584493,"frame":19968,"kind":"note","text":"the floor did not equalize in 2.3 s (the larger of its settle time and the 2.3 s this grid needs for 120 degrees of freedom); the parts come in now"}
+{"seq":9,"at_unix":1794692112.584516,"frame":19968,"kind":"state","text":"floor only to engaged","data":{"from":"floor_only","to":"engaged","state":"running"}}
+{"seq":10,"at_unix":1794692112.597055,"frame":28160,"kind":"level","text":"level 0 dB","data":{"level_db":0.0,"t_s":4.4375}}
+{"seq":11,"at_unix":1794692112.600438,"frame":30208,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
+{"seq":12,"at_unix":1794692112.607058,"frame":34304,"kind":"state","text":"full level to ramping down","data":{"from":"full_level","to":"ramping_down","state":"stopping"}}
+{"seq":13,"at_unix":1794692112.610036,"frame":36096,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
+{"seq":14,"at_unix":1794692112.610054,"frame":36096,"kind":"note","text":"Test complete: the schedule finished and every part ramped down with the controlled stop.","data":{"outcome":"completed","end":{"outcome":"completed","message":"Test complete: the schedule finished and every part ramped down with the controlled stop.","at_s":6.25,"level_db":0,"ramp_s":0.688,"trip":null}}}

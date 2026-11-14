@@ -1,5 +1,5 @@
 {
-  "run_uid": "20261114-213155-c427ac5c",
+  "run_uid": "20261114-213512-dae47302",
   "end": {
     "outcome": "completed",
     "message": "Test complete: 0.5 s held at full level.",
@@ -7,12 +7,12 @@
     "level_db": 0,
     "trip": null
   },
-  "at_unix": 1794691915.219381,
+  "at_unix": 1794692112.526461,
   "station_frames": 3456,
   "summary": {
     "loops": 11,
     "spectra_kept": 2,
-    "elapsed_s": 0.012774875
+    "elapsed_s": 0.010916083
   },
   "streams": {}
 }

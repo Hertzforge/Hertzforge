@@ -180,7 +180,7 @@ TABLES = {'random': _rows(), 'sine': _rows(), 'srs': _rows(1000, 10),
 # ---- the source objects, written as the analysis side writes them ----------------------------
 
 #: the significant digits a source's stored numbers are settled to
-SETTLED_DIGITS = 12
+SETTLED_DIGITS = 7
 
 
 def _settle(values):
@@ -190,7 +190,7 @@ def _settle(values):
     libraries; the object's SHA-256 (the seed's origin) is of its bytes, so
     the stored numbers must be the same bytes everywhere. Decimal formatting
     is correctly rounded on every platform, and a last-bit difference does
-    not survive twelve digits."""
+    not survive seven digits."""
     a = np.asarray(values)
 
     def fixed(x):
@@ -202,6 +202,12 @@ def _settle(values):
     return fixed(a)
 
 
+#: the arrays settled, by whether the object is a time history
+_SETTLED_ARRAYS = {False: ('abscissa', 'ordinate', 'frequency', 'amplitude', 'phase',
+                           'segment_rate'),
+                   True: ('ordinate',)}
+
+
 def _settled(make):
     """A source builder whose object stores only settled numbers (`_settle`)."""
     import functools
@@ -210,8 +216,9 @@ def _settled(make):
     def build():
         obj = make()
         for o in [obj, *getattr(obj, 'tones', [])]:
-            for name in ('abscissa', 'ordinate', 'frequency', 'amplitude', 'phase',
-                         'segment_rate'):
+            # a time history's clock is k / rate, exact arithmetic that is the same
+            # everywhere, and rounding it would make its steps uneven
+            for name in _SETTLED_ARRAYS[isinstance(o, TimeHistory)]:
                 if isinstance(getattr(o, name, None), np.ndarray):
                     setattr(o, name, _settle(getattr(o, name)))
             for key, value in list(getattr(o, 'limits', {}).items()):
@@ -635,7 +642,7 @@ def test_a_source_stores_only_settled_numbers(module):
     from the golden run's files and mixed linearly, with no such function.)"""
     obj = SOURCES[module][1]()
     for o in [obj, *getattr(obj, 'tones', [])]:
-        arrays = [getattr(o, n) for n in ('abscissa', 'ordinate', 'frequency', 'amplitude')
+        arrays = [getattr(o, n) for n in _SETTLED_ARRAYS[isinstance(o, TimeHistory)]
                   if isinstance(getattr(o, n, None), np.ndarray)]
         for values in arrays + list(getattr(o, 'limits', {}).values()):
             assert np.array_equal(_settle(values), values)

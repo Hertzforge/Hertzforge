@@ -1,5 +1,5 @@
 {
-  "run_uid": "20261114-213155-c22c6a0c",
+  "run_uid": "20261114-213512-d572fd8c",
   "end": {
     "outcome": "completed",
     "message": "Test complete: the schedule finished and every part ramped down with the controlled stop.",
@@ -8,7 +8,7 @@
     "ramp_s": 0.688,
     "trip": null
   },
-  "at_unix": 1794691915.300772,
+  "at_unix": 1794692112.610579,
   "station_frames": 36096,
   "summary": {
     "elapsed_s": 6.25,

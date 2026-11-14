@@ -15,28 +15,28 @@
    "breakpoints": [
     {
      "freq_hz": 40.0,
-     "psd_g2_hz": 0.010000000000000002
+     "psd_g2_hz": 0.009999999560935518
     },
     {
      "freq_hz": 80.0,
-     "psd_g2_hz": 0.020000000000000004
+     "psd_g2_hz": 0.020000003281155657
     },
     {
      "freq_hz": 160.0,
-     "psd_g2_hz": 0.020000000000000004
+     "psd_g2_hz": 0.020000003281155657
     },
     {
      "freq_hz": 200.0,
-     "psd_g2_hz": 0.016
+     "psd_g2_hz": 0.015999998465639906
     }
    ],
    "alarm_db": [
     2.0,
-    2.0
+    2.000001
    ],
    "abort_db": [
     4.0,
-    5.0
+    5.000001
    ]
   },
   "acquisition": {
@@ -201,19 +201,19 @@
     "value": [
      {
       "freq_hz": 40.0,
-      "psd_g2_hz": 0.010000000000000002
+      "psd_g2_hz": 0.009999999560935518
      },
      {
       "freq_hz": 80.0,
-      "psd_g2_hz": 0.020000000000000004
+      "psd_g2_hz": 0.020000003281155657
      },
      {
       "freq_hz": 160.0,
-      "psd_g2_hz": 0.020000000000000004
+      "psd_g2_hz": 0.020000003281155657
      },
      {
       "freq_hz": 200.0,
-      "psd_g2_hz": 0.016
+      "psd_g2_hz": 0.015999998465639906
      }
     ]
    },
@@ -221,7 +221,7 @@
     "path": "profile.alarm_db",
     "value": [
      2.0,
-     2.0
+     2.000001
     ]
    }
   ],
@@ -230,7 +230,7 @@
     "path": "profile.abort_db",
     "value": [
      4.0,
-     5.0
+     5.000001
     ],
     "words": "The abort band, dB below and above the profile"
    }
@@ -240,7 +240,7 @@
   "origin": {
    "kind": "seed",
    "object": "Floor Spec",
-   "checksum": "de61c54644f76a27d3f709c61680d9b08a69e3b6d85a1407d25dc1e060ef9846",
+   "checksum": "27933c8891e814634e70e2fa1ef90531774bb94622c498328ed18299601345e7",
    "fills": "the profile"
   }
  }

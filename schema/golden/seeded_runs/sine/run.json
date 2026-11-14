@@ -1,6 +1,6 @@
 {
   "test": "sine",
-  "run_uid": "20261114-213155-b0a2fca8",
+  "run_uid": "20261114-213512-975c10c1",
   "run_id": "sine-0001",
   "title": "Seeded Sine",
   "operator": "Operator",
@@ -49,15 +49,15 @@
   },
   "build": {
     "version": "0.1.9",
-    "commit": "cb92500a",
+    "commit": "10150d1f",
     "dirty": true
   },
   "armed": {
-    "unix": 1794691915.120037,
+    "unix": 1794692112.410727,
     "utc_offset_s": -25200
   },
   "start": {
-    "unix": 1794691915.215403,
+    "unix": 1794692112.523719,
     "utc_offset_s": -25200,
     "station_frame": 0
   },
