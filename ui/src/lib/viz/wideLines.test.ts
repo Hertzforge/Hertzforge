@@ -41,12 +41,12 @@ describe('tracelines and bar elements', () => {
 		shape.needsUpdate = true;
 		shapeImag.setXYZ(2, 0, 0, 2);
 		shapeImag.needsUpdate = true;
-		lines.onBeforeRender(renderer, null!, null!, null!, null!, null!);
+		lines.onBeforeRender(renderer);
 		expect(ends()).toEqual([0.5, -0.25, 2]);
 		expect(lines.material.resolution.toArray()).toEqual([800, 600]);
 		shape.setXYZ(2, 3, 0, 0);
 		shape.needsUpdate = true;
-		lines.onBeforeRender(renderer, null!, null!, null!, null!, null!);
+		lines.onBeforeRender(renderer);
 		expect(ends()).toEqual([3, 0, 2]);
 	});
 });
