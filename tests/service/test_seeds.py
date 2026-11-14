@@ -31,6 +31,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -376,9 +377,18 @@ def test_the_seeded_setup_on_file_is_what_seeding_gives(module):
         SEEDS.mkdir(parents=True, exist_ok=True)
         (SEEDS / f'{module}.json').write_text(json.dumps(made, indent=1) + '\n',
                                               encoding='utf-8')
-    assert _on_file(module) == json.loads(json.dumps(made))
-    assert found['origin']['kind'] == 'seed' and found['origin']['object'] == SOURCES[module][0]
-    assert len(found['origin']['checksum']) == 64
+    # within the seeds' tolerance, not to the bit: a conversion's last bit
+    # depends on the platform's math library and on the order it is computed
+    # in, and a number at a rounding tie can go either way
+    problems = _differences(_on_file(module), json.loads(json.dumps(made)))
+    assert not problems, problems
+    origin = found['origin']
+    assert origin['kind'] == 'seed' and origin['object'] == SOURCES[module][0]
+    # the checksum is the SHA-256 of the object as this run built it
+    project, name = _project(module)
+    assert origin['checksum'] == seeds.checksum(project[name])
+    for also in origin.get('also', []):
+        assert also['checksum'] == seeds.checksum(project[also['object']])
 
 
 @pytest.mark.parametrize('module', MODULES)
@@ -465,20 +475,71 @@ def test_the_run_was_accepted_with_the_seeded_setup(module, converted):
         if key == 'reference' and module == 'twr':
             # TWR's reference is the control service's store, by the SHA-256 it gave
             continue
-        assert _same(accepted.get(key), json.loads(json.dumps(value))), key
+        problems = _differences(accepted.get(key), json.loads(json.dumps(value)), key)
+        assert not problems, problems
 
 
-def _same(a, b):
-    """Equal, numbers to 1e-12: the control service reads a JSON number to
-    within its last bit, and writes back what it read."""
+#: numbers in a seeded setup agree to this, relative (the seeds' own
+#: tolerance); a band in decibels to `DB_AGREE` decibels
+AGREE = sc.TOLERANCE
+DB_AGREE = 1e-5
+
+#: the lists that are a record's samples (a reference's, inline or as text)
+SAMPLES = ('re', 'im', 'text')
+
+_NUMBER = re.compile(r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?')
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _differences(a, b, path=''):
+    """Where `a` and `b` differ, in words: the structure exactly, every
+    number within `AGREE` relative (a record's samples, `SAMPLES`, relative
+    to the largest, so a sample near zero is judged on the record's scale), a band
+    in decibels within `DB_AGREE`, a checksum not at all (it is checked
+    against the object itself), and the numbers inside a string (TWR's
+    samples, a note) as numbers."""
+    key = path.rsplit('.', 1)[-1]
+    if key == 'checksum':
+        return []
     if isinstance(a, dict) and isinstance(b, dict):
-        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+        if a.keys() != b.keys():
+            return [f'{path}: members {sorted(a)} and {sorted(b)}']
+        return [d for k in a for d in _differences(a[k], b[k], f'{path}.{k}' if path else k)]
     if isinstance(a, list) and isinstance(b, list):
-        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(
-            a, bool) and not isinstance(b, bool):
-        return bool(np.isclose(a, b, rtol=1e-12, atol=1e-300))
-    return a == b
+        if len(a) != len(b):
+            return [f'{path}: {len(a)} and {len(b)} members']
+        if key in SAMPLES and all(_is_number(x) for x in a + b):
+            # a record's samples, judged on the record's scale
+            tol = AGREE * max(abs(x) for x in a + b)
+            off = [i for i, (x, y) in enumerate(zip(a, b, strict=True)) if abs(x - y) > tol]
+            return [f'{path}.{i}: {a[i]!r} and {b[i]!r}' for i in off[:3]]
+        return [d for i, (x, y) in enumerate(zip(a, b, strict=True))
+                for d in _differences(x, y, f'{path}.{i}')]
+    if _is_number(a) and _is_number(b):
+        tol = DB_AGREE if '_db' in path else AGREE * max(abs(a), abs(b))
+        return [] if abs(a - b) <= tol else [f'{path}: {a!r} and {b!r}']
+    if isinstance(a, str) and isinstance(b, str) and a != b:
+        words_a, words_b = _NUMBER.split(a), _NUMBER.split(b)
+        nums_a = [float(x) for x in _NUMBER.findall(a)]
+        nums_b = [float(x) for x in _NUMBER.findall(b)]
+        if words_a != words_b or len(nums_a) != len(nums_b):
+            return [f'{path}: {a[:60]!r} and {b[:60]!r}']
+        if not nums_a:
+            return []
+        if key == 'text':
+            return _differences(nums_a, nums_b, path)
+        # a number written in a note is rounded to its printed digits
+        return [f'{path}: {x!r} and {y!r}' for x, y in zip(nums_a, nums_b, strict=True)
+                if abs(x - y) > 1e-2 * max(abs(x), abs(y))]
+    return [] if a == b else [f'{path}: {a!r} and {b!r}']
+
+
+def _same(a, b, path=''):
+    """Equal within the seeds' tolerance (`_differences`)."""
+    return not _differences(a, b, path)
 
 def _one(project, kind):
     found = [obj for _name, obj in project.items() if type(obj) is kind]
@@ -591,8 +652,8 @@ def test_a_dropped_unit_conversion_no_longer_gives_the_run_setup(module, monkeyp
     if module == 'twr':
         monkeypatch.setattr(sc, 'si_transform', lambda unit, dimension=None: (1.0, 0.0))
         made = seeded(module)[0]
-        assert made['imports'][0]['params']['text'] != _on_file(module)['imports'][0]['params'][
-            'text']
+        assert not _same(made['imports'][0]['params']['text'],
+                         _on_file(module)['imports'][0]['params']['text'], 'text')
         return
     if module == 'mimo_random':
         monkeypatch.setattr(sc, 'si_transform', lambda unit, dimension=None: (1.0, 0.0))
@@ -601,7 +662,8 @@ def test_a_dropped_unit_conversion_no_longer_gives_the_run_setup(module, monkeyp
     made = seeded(module)[0]['config']
     accepted = _accepted(folder)
     kept = made if module == 'mimo_random' else _without_reference(made)
-    assert any(accepted.get(k) != json.loads(json.dumps(v)) for k, v in kept.items())
+    assert any(not _same(accepted.get(k), json.loads(json.dumps(v)), k)
+               for k, v in kept.items())
 
 
 # ---- the verbs -------------------------------------------------------------------------------
