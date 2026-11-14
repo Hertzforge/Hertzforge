@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
@@ -230,6 +230,8 @@ pub struct ServiceOptions {
     /// [`crate::twr::engine::ServiceEngine`]). Tests that need no real run give
     /// [`simulated_twr_engine`].
     pub twr_engine: Option<crate::twr::engine::EngineFactory>,
+    /// How a run's record is written (`docs/run-folder.md`).
+    pub record: crate::record::RecordOptions,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -289,6 +291,7 @@ impl Default for ServiceOptions {
             shock_engine: None,
             srs_engine: None,
             twr_engine: None,
+            record: crate::record::RecordOptions::default(),
         }
     }
 }
@@ -2308,17 +2311,9 @@ impl Service {
             limits: Arc::new(Vec::new()),
             level_s: None,
             streaming: false,
+            record: None,
         };
-        let shared = Arc::new(RunShared {
-            view: std::sync::Mutex::new(Arc::new(initial.clone())),
-            log: std::sync::Mutex::new(Vec::new()),
-            signal: Arc::new(AtomicU8::new(0)),
-            ended_by: std::sync::Mutex::new(None),
-            pending_stop: std::sync::Mutex::new(None),
-            ramp: std::sync::Mutex::new(None),
-            requested_level: std::sync::Mutex::new(None),
-            notify: self.notify.clone(),
-        });
+        let shared = Arc::new(RunShared::new(initial.clone(), self.notify.clone()));
         let raw = cfg.raw.clone();
         let reference = Arc::new(view::lines_on(&cfg.loop_config(), &cfg));
         let title = cfg.title.clone();
@@ -2328,6 +2323,7 @@ impl Service {
             sim_speed: self.opts.sim_speed,
             capture_root: Some(self.opts.records_root()),
             timeout_s: self.opts.timeout.as_secs_f64(),
+            record: self.opts.record.clone(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         rrun::spawn(plan, initial.clone(), shared.clone(), rx)
@@ -2378,6 +2374,8 @@ impl Service {
             scanner: self.opts.scanner.clone(),
             data_root: self.opts.data_root.clone(),
             bind: self.opts.bind.clone(),
+            revision: inner.table.revision,
+            devices: inner.stations.devices().to_vec(),
         })
     }
 

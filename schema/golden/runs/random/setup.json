@@ -1,0 +1,269 @@
+{
+  "config": {
+    "title": "Golden Random",
+    "operator": "Operator",
+    "article": "Bracket",
+    "notes": "the golden run folder",
+    "specification": {
+      "document": "Example procedure",
+      "clause": "3.1"
+    },
+    "profile": {
+      "breakpoints": [
+        {
+          "freq_hz": 40,
+          "psd_g2_hz": 0.01
+        },
+        {
+          "freq_hz": 80,
+          "slope_db_oct": 3
+        },
+        {
+          "freq_hz": 160,
+          "psd_g2_hz": 0.02
+        },
+        {
+          "freq_hz": 200,
+          "slope_db_oct": -3
+        }
+      ],
+      "alarm_db": [
+        3,
+        3
+      ],
+      "abort_db": [
+        6,
+        6
+      ]
+    },
+    "acquisition": {
+      "fs_hz": 1280,
+      "n_pts": 64,
+      "n_avg": 2
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels": [
+        {
+          "db": -3,
+          "dwell_s": 0.25
+        },
+        {
+          "db": 0
+        }
+      ],
+      "full_level_s": 0.5
+    },
+    "control": {
+      "review_after_sysid": false,
+      "drive_ceiling_vrms": 20,
+      "level_ramp_s": 0.1,
+      "shutdown_ramp_s": 0.1,
+      "soft_start_db": 0,
+      "pretest": {
+        "averages": 1
+      }
+    },
+    "limits": [
+      {
+        "channel": 2,
+        "kind": "response",
+        "rows": [
+          {
+            "freq_hz": 40,
+            "ceiling": 1.0
+          },
+          {
+            "freq_hz": 200,
+            "ceiling": 1.0
+          }
+        ]
+      }
+    ],
+    "feasibility": null
+  },
+  "resolved": {
+    "profile": {
+      "breakpoints": [
+        {
+          "freq_hz": 40,
+          "psd_g2_hz": 0.01,
+          "alarm_db": [
+            3,
+            3
+          ],
+          "abort_db": [
+            6,
+            6
+          ]
+        },
+        {
+          "freq_hz": 80,
+          "psd_g2_hz": 0.019952623149688795,
+          "alarm_db": [
+            3,
+            3
+          ],
+          "abort_db": [
+            6,
+            6
+          ]
+        },
+        {
+          "freq_hz": 160,
+          "psd_g2_hz": 0.02,
+          "alarm_db": [
+            3,
+            3
+          ],
+          "abort_db": [
+            6,
+            6
+          ]
+        },
+        {
+          "freq_hz": 200,
+          "psd_g2_hz": 0.016012220690634925,
+          "alarm_db": [
+            3,
+            3
+          ],
+          "abort_db": [
+            6,
+            6
+          ]
+        }
+      ],
+      "alarm_db": [
+        3,
+        3
+      ],
+      "abort_db": [
+        6,
+        6
+      ],
+      "unit": "g^2/Hz"
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels": [
+        {
+          "db": -3,
+          "dwell_s": 0.25
+        },
+        {
+          "db": 0,
+          "dwell_s": 0.5
+        }
+      ],
+      "full_level_s": 0.5
+    },
+    "tolerances": {
+      "alarm_db": [
+        3,
+        3
+      ],
+      "abort_db": [
+        6,
+        6
+      ]
+    },
+    "limits": [
+      {
+        "channel": 2,
+        "kind": "response",
+        "unit": "g^2/Hz",
+        "rows": [
+          {
+            "freq_hz": 40,
+            "ceiling": 1
+          },
+          {
+            "freq_hz": 200,
+            "ceiling": 1
+          }
+        ]
+      }
+    ],
+    "aborts": {
+      "envelope": {
+        "abort_db": [
+          6,
+          6
+        ],
+        "max_lines_out": 10
+      },
+      "divergence": {
+        "max_loops_out": 5
+      },
+      "drive": {
+        "abort_vrms": null,
+        "ceiling_vrms": 20,
+        "max_sigma": 5
+      },
+      "channels": []
+    },
+    "control": {
+      "composite": "weighted_avg",
+      "weights": [],
+      "control_dof": 120,
+      "damping": 4,
+      "max_lines_out": 10,
+      "max_loops_out": 5,
+      "max_sigma": 5,
+      "drive_ceiling_vrms": 20,
+      "drive_abort_vrms": null,
+      "coherence_floor": 0.5,
+      "review_after_sysid": false,
+      "pretest": {
+        "averages": 1,
+        "level_db": -20,
+        "max_vrms": 1,
+        "start_vrms": 0.01,
+        "shaped": false
+      },
+      "soft_start_db": 0,
+      "soft_start_relax_db": 6,
+      "level_ramp_s": 0.1,
+      "shutdown_ramp_s": 0.1
+    },
+    "control_channels": [
+      1
+    ],
+    "acquisition": {
+      "requested_fs_hz": 1280,
+      "fs_hz": 1280,
+      "n_pts": 64,
+      "n_avg": 2
+    }
+  },
+  "derived": {
+    "grms_g": 1.706,
+    "velocity_rms_ips": 1.1,
+    "displacement_rms_mil": 2.6,
+    "band_hz": [
+      40,
+      200
+    ],
+    "grid": {
+      "fs_hz": 1280,
+      "n_pts": 64,
+      "df_hz": 20,
+      "lines": 9,
+      "loop_s": 0.1,
+      "actual": true
+    },
+    "control_channels": [
+      1
+    ],
+    "band_lines": {
+      "first_hz": 40,
+      "lines": 9
+    }
+  },
+  "feasibility": {
+    "inputs": null,
+    "verdict": "not_evaluated",
+    "message": "No shaker was given, so the profile was not checked against shaker ratings."
+  }
+}

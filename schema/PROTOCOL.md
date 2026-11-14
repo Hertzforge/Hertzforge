@@ -1076,6 +1076,7 @@ plain words: it never names a protocol method.
 | `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
+| `record_unwritable` | `refused` | `random.arm` or `random.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, Mixed Mode, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
@@ -1381,6 +1382,12 @@ record in the controller's shaker-database form, `moving_mass_lb` is `{"armature
 "drive_adapter","fixturing","test_article"}`, `crest_factor` defaults to 3. Checked at arm.
 Without it, feasibility is not evaluated and the run says so.
 
+**The run's record.** Optional, for the run folder (see Run Folders): `operator`, `article` and
+`notes` are the operator's words (strings, empty when not given); `specification`
+`{"document","clause"}` names what the test is run to; `record` `{"streams"}` (default true)
+says whether the record holds the inputs and the drive as streams. None of them changes how the
+run drives.
+
 **Result.** `state` is the `random.state` object (`configured`). `derived`:
 
 ```
@@ -1525,6 +1532,11 @@ time left on it (null in `manual`). `alarm` is true while an alarm condition hol
 `level_db` and `message` give the level where the end began: where the drive was when the stop
 or abort was asked for (a controlled stop's ramp-down starts there), or where the trip came;
 `level_db` is null when nothing drove.
+
+`record` is absent until the run arms, then `{"folder","streams","problem"}`: the run folder's
+path, `streams` `on` or `off` (off when switched off in the configuration, or when the disk was
+under its free-space floor at arm), and `problem`, null, or in words the latest thing the record
+could not write (a stream stopped, a file not written). A problem never stops the run.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -1692,17 +1704,29 @@ has `channels: []` and no views.
 `random.log` returns `{"entries":[entry...],"next"}` from `since`, and the `random.log` text
 event carries `{"run_id","entries":[...]}` as entries are written. An entry is
 `{"seq","at_unix","kind","text"}`, `kind` one of `state`, `feasibility`, `override`, `station`,
-`gate`, `level`, `alarm`, `overload`, `trip`, `note`, and for classical shock also `pulse` (one
+`gate`, `level`, `alarm`, `overload`, `trip`, `note`, `record` (the run's record could not write
+something), and for classical shock also `pulse` (one
 line per pulse fired) and `law` (the law's calls that were not used). The log starts at configure
 and is the run's level history and alarm record. `shock.log` and its event take the same form.
 
-### Run Files (Later)
+### Run Folders
 
-A run already carries what its `.hforge` file will record: `run_id`, `source` and `station`,
-the configuration as accepted, the actual grid, the log, and `end`. When run files are added,
-the control service writes the recording under its local data directory while the run goes and
-converts it to `.hforge` when the run finishes, and `end` names the file. That layout is
-specified with the run-file format, not here.
+Every Random run that arms leaves a run folder in the service's data folder, laid out in
+`docs/run-folder.md`, which the analysis side converts into a project file
+(`hertzforge.io.run_convert`). It is claimed at arm, never written over (a taken name gets the
+next free one) and valid at every moment: `run.json`, `table.json` (the table the run armed
+with, every row as `channels.get` gives it, with `revision` and `sha256`) and `setup.json` (the
+configuration as accepted, and what it resolved to) are written before the first sample, or the
+arm is refused `record_unwritable`. While the run goes, every run log entry is appended to its
+`log.jsonl` as it is made, with the station frame where one applies and structured `data` (a
+level change's level, an alarm's lines, a trip's facts, an overload's channel, who acted), and
+the inputs and the drive are recorded as streams unless `record.streams` is false. At the end,
+any way the run ends, `end.json` holds `end` as `random.state` reports it, and `run.json` says
+`complete`. A service stopped mid-run leaves the folder with `complete` false. The state's
+`record` names the folder from arm on.
+
+The record is written on its own thread. A failure to write it is a log entry of kind `record`
+and the state's `record.problem`; the run goes on.
 
 ## MIMO Random
 

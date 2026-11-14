@@ -1,0 +1,26 @@
+{
+  "kind": "drives",
+  "fs_hz": 1280,
+  "channels": [
+    {
+      "index": 3,
+      "unit": "V",
+      "description": "Drive"
+    }
+  ],
+  "first_station_frame": 0,
+  "output_latency_frames": {
+    "frames": 4,
+    "how": "declared"
+  },
+  "pipeline_lag_frames": {
+    "frames": 15,
+    "how": "measured",
+    "by": "system identification: drive to control response"
+  },
+  "name": "drives",
+  "frames": 3472,
+  "gaps": [],
+  "complete": true,
+  "fault": null
+}

@@ -1,0 +1,13 @@
+{
+  "id": null,
+  "name": null,
+  "version": null,
+  "sha256": null,
+  "builtin": true,
+  "params": {},
+  "guards": {
+    "max_change_db": 6.0,
+    "budget_fraction": 0.25,
+    "max_misses": 3
+  }
+}

@@ -474,9 +474,8 @@ recorded in, one folder per run: `run.json` (the manifest, `schema`
 `streams/<name>/` (`telemetry.f32`, little-endian float32,
 frame-interleaved, in engineering units, and `stream.json`),
 `results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. The control
-modules do not write it yet: the reader and the converter are built to
-the layout, so a folder the control service writes converts the moment
-it does.
+service's Random module writes one for every run, as `docs/run-folder.md`
+describes; the other control modules do not yet.
 
 `hertzforge.io.run_convert.convert` (and `hertzforge convert-run
 FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default

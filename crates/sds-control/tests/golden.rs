@@ -321,6 +321,7 @@ fn data_run() -> RunView {
         }]),
         level_s: Some(300.0),
         streaming: true,
+        record: None,
     }
 }
 

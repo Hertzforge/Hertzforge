@@ -1208,6 +1208,14 @@ export interface FeasibilityInputs {
 
 export interface RandomConfig {
 	title: string;
+	/** The operator's words, kept in the run's record. */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	/** The document and clause the test is run to. */
+	specification?: { document: string; clause: string } | null;
+	/** `streams: false` keeps the record without the inputs and drive streams. */
+	record?: { streams?: boolean } | null;
 	profile: RandomProfile;
 	acquisition: Acquisition;
 	schedule: Schedule;
@@ -1335,6 +1343,14 @@ export interface RandomState {
 	alarm: boolean;
 	feasibility: FeasibilityVerdict | null;
 	end: RunEnd | null;
+	/** The run's record, from arm on: its folder, whether it holds the streams, and the latest problem writing it. */
+	record?: RunRecordRef;
+}
+
+export interface RunRecordRef {
+	folder: string;
+	streams: 'on' | 'off';
+	problem: string | null;
 }
 
 export interface LiveChannel {
