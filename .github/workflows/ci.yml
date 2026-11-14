@@ -185,6 +185,14 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # Line tables only. A panic and a backtrace keep their file and line, and the
+      # test build is much smaller and links faster than with full debug
+      # information. The size matters: a recording refuses to start when the disk
+      # is under its free-space floor, and the run then goes on without one, so a
+      # test that looks for the run's folder fails on a runner whose disk the
+      # build has filled. The last step prints what was left.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
       - name: Install the toolchain rust-toolchain.toml names
@@ -203,6 +211,9 @@ jobs:
       # tests (scripts/rust_timing_tests.txt) run in the `timing` job below.
       - name: Test
         run: bash scripts/rust_tests.sh parallel
+      - name: Disk space left after the build and the tests
+        if: always()
+        run: df -h .
 
   # The timing tests: real-time pacing, deadlines and the 400-channel run,
   # one at a time. They assume a machine that keeps up with real time, which a
