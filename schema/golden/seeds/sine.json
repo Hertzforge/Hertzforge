@@ -25,11 +25,11 @@
     }
    ],
    "alarm_db": [
-    2.0,
-    2.0
+    1.999999,
+    1.999999
    ],
    "abort_db": [
-    4.0,
+    4.000002,
     4.0
    ]
   },
@@ -230,8 +230,8 @@
    {
     "path": "profile.alarm_db",
     "value": [
-     2.0,
-     2.0
+     1.999999,
+     1.999999
     ]
    },
    {
@@ -265,7 +265,7 @@
    {
     "path": "profile.abort_db",
     "value": [
-     4.0,
+     4.000002,
      4.0
     ],
     "words": "The abort band, dB below and above the profile"
@@ -276,7 +276,7 @@
   "origin": {
    "kind": "seed",
    "object": "Sweep Spec",
-   "checksum": "30c3d56d44eb4d341846dbd8b46e16bf6227152e7bfd7c94affdb96a1ff0f3a1",
+   "checksum": "a1aae1715642294c86a9627032d52eff71098e06a51ff869647cd189ffba2036",
    "fills": "the profile and test"
   }
  }

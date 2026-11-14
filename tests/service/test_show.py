@@ -245,22 +245,22 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
     stage = shown(plate, frf, validate=validate)
     assert stage['views'][0]['view'] == 'waterfall'
     def data_offers(out):
-        return {k: out['offers'][k] for k in ('flat', 'complex', 'frequency', 'projection')}
+        return {k: out['offers'][k] for k in ('flat', 'complex', 'projection')}
 
-    assert data_offers(stage) == {'flat': True, 'complex': True, 'frequency': True, 'projection': False}
+    assert data_offers(stage) == {'flat': True, 'complex': True, 'projection': False}
+    assert 'frequency' not in stage['offers'], 'a frequency axis is chosen on the plot (Brandon, 2026-11-14)'
     flat = shown(plate, frf, prefs={'flat': True}, validate=validate)
     (plot,) = flat['views']
     assert plot['view'] == 'spectrum' and len(plot['series']) == plate.project[frf].num_records
     assert plot['x']['scale'] != 'log'
-    decades = shown(plate, frf, prefs={'flat': True, 'log_frequency': True})
-    assert decades['views'][0]['x']['scale'] == 'log'
+    with pytest.raises(ProtocolError, match='"prefs"'):
+        projects.show(plate, {'objects': [frf], 'prefs': {'log_frequency': True}})
     phase = shown(plate, frf, prefs={'flat': True, 'component': 'phase'})
     assert 'phase' in phase['views'][0]['y']['label'].lower() or phase['views'][0]['y']['unit'] in ('°', 'deg', 'rad')
     time = shown(plate, history, validate=validate)
-    assert data_offers(time) == {'flat': True, 'complex': False, 'frequency': False,
-                                 'projection': False}
+    assert data_offers(time) == {'flat': True, 'complex': False, 'projection': False}
     assert data_offers(shown(plate, named(plate, 'geometry'))) == {'flat': False, 'complex': False,
-                                                                  'frequency': False, 'projection': False}
+                                                                  'projection': False}
     with pytest.raises(ProtocolError, match='"prefs"'):
         projects.show(plate, {'objects': [frf], 'prefs': {'stage': True}})
     with pytest.raises(ProtocolError, match='component'):
@@ -383,6 +383,31 @@ def test_two_shape_sets_show_their_mac_and_the_pair_it_selects(plate, validate):
     finally:
         for name in [n for n, o in project.items() if projects.kind_of(o) == 'matched_modes']:
             project.remove(name)
+        project.remove('Set B')
+        project.remove('Set A')
+
+
+def test_a_matched_modes_object_draws_its_pairs_overlaid_beside_its_table(plate, validate):
+    """Each second-set mode over its first-set mode, stepped together, with the table of pairs
+    (Brandon, 2026-11-14)."""
+    project = plate.project
+    _two_sets(project)
+    try:
+        from hertzforge.service.ops_tables import OPERATIONS
+        add = next(op for op in OPERATIONS if op.id == 'project.add_matches')
+        add.run(project, {'first': 'Set A', 'second': 'Set B', 'pairs': '1,1; 3,2'})
+        name = named(plate, 'matched_modes')
+        out = shown(plate, name, validate=validate)
+        stage, table = out['views']
+        assert stage['view'] == 'shape3d' and stage['paired'] is True
+        assert table['view'] == 'table' and len(table['rows']) == 2
+        assert [m['index'] for m in stage['modes']] == [1, 3], 'the first set\'s mode of each pair'
+        assert [m['index'] for m in stage['overlays']] == [1, 2], 'its match in the second'
+        assert stage['overlays'][0]['label'] == 'Set B mode 1'
+        assert stage['overlay_phase'].shape == (2, 2)
+    finally:
+        for gone in [n for n, o in project.items() if projects.kind_of(o) == 'matched_modes']:
+            project.remove(gone)
         project.remove('Set B')
         project.remove('Set A')
 

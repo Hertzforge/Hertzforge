@@ -73,3 +73,32 @@ def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
     return [matrix, shape]
 
 
+
+
+def matched_stage(geometry: Any, title: str, rows: Any, columns: Any, pairs: Any,
+                  second: str) -> dict:
+    """A Matched Modes object's pairs on `geometry`: the first set's mode of each pair as
+    `modes`, the second set's as `overlays`, `paired` so the shell draws overlay k over mode k as
+    it steps through them, each aligned by its pair's phase (`core.shapes.alignment_phases`).
+    The pairs overlaid, where the earlier toolset showed only their table (Brandon,
+    2026-11-14)."""
+    from hertzforge.core.shapes import alignment_phases
+
+    drawn, triangles, lines = drawn_mesh(geometry)
+    row_modes = [int(a) for a, _b in pairs]
+    column_modes = [int(b) for _a, b in pairs]
+    moved = translations(geometry, rows.coordinate, rows.shape_matrix[row_modes], drawn)
+    modes = [v.mode(r + 1, float(rows.frequency[r]), float(rows.damping[r]), moved[k])
+             for k, r in enumerate(row_modes)]
+    moved = translations(geometry, columns.coordinate, columns.shape_matrix[column_modes], drawn)
+    overlays = [v.mode(c + 1, float(columns.frequency[c]),
+                       float(columns.damping[c]) if columns.damping[c] > 0 else None,
+                       moved[k], label=f'{second} mode {c + 1}')
+                for k, c in enumerate(column_modes)]
+    phase = alignment_phases(rows, row_modes, columns, column_modes).astype(np.float32)
+    shape = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
+                      np.asarray(geometry.node_xyz, dtype=float)[drawn], modes,
+                      triangles=triangles, lines=lines, overlays=overlays,
+                      overlay_phase=phase)
+    shape['paired'] = True
+    return shape

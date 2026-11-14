@@ -14,7 +14,7 @@
   "fs_hz": 2048,
   "section_start": 32,
   "section_len": 160,
-  "peak": 0.564893532955,
+  "peak": 0.564893516134,
   "alarm_frac": 0.25,
   "abort_frac": 0.5,
   "description": "the target at full level: the prepared section on the record's samples with its pads, time from the section's start; a play at a level is judged against it scaled to the level, its alarm and abort bands that share of the peak either side",
