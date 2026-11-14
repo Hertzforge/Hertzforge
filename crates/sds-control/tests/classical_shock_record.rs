@@ -271,7 +271,7 @@ async fn a_classical_shock_run_leaves_a_complete_self_describing_folder() {
 /// The arm gate: a record that cannot be written refuses the arm, naming the path
 /// and the reason, and nothing is armed. Red if the arm went ahead without a record.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_data_folder_that_cannot_be_written_refuses_the_arm() {
+async fn a_data_folder_that_cannot_be_written_refuses_the_shock_arm() {
     let mut o = real(0.0);
     let blocked = o.data_root.join("not-a-folder");
     std::fs::create_dir_all(&o.data_root).unwrap();
@@ -302,7 +302,7 @@ async fn a_data_folder_that_cannot_be_written_refuses_the_arm() {
 /// `record.streams: false` keeps the record and its results and leaves out the
 /// streams, and the manifest and the log say so.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn record_streams_false_writes_the_record_without_streams() {
+async fn shock_record_streams_false_writes_the_record_without_streams() {
     let addr = serve(Service::with_options(real(0.0))).await;
     let mut c = Client::connect(addr).await;
     let mut cfg = config(0.05);
