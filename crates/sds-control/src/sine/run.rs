@@ -23,16 +23,22 @@
 //! on that same count.
 
 use super::config::{LawFacts, WireSine, WireTest};
+use super::record::{self as srec, Blocks, LevelPoint};
 use super::view::{
     Alarm, End, Figures, IdentFacts, IdentFigures, InputCurves, LiveChannel, Rate, SineView, State,
     StationRef, IDENT_POINTS,
 };
 use crate::protocol::{num, ErrorCode, MethodError};
 use crate::random::backend::{Interruptible, ABORT, NONE};
-use crate::random::run::{LevelTarget, LogEntry};
+use crate::random::record as rrec;
+use crate::random::run::{LevelTarget, LogEntry, NO_FRAME};
+use crate::random::view::RecordRef;
+use crate::record::tap::{self, Recording};
+use crate::record::{LogHandle, ProblemFn, RecordOptions, RecordStatus, RunRecord};
 use crate::station::{self, class_name, NiScanner, StationPlan};
 use crate::table::{role_name, unit_name};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
+use hertzforge_sine::service::law_records::LawRecord;
 use hertzforge_sine::service::report::EventKind;
 use hertzforge_sine::service::AdjustRefusal;
 use hertzforge_sine::{
@@ -41,7 +47,7 @@ use hertzforge_sine::{
 };
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -74,6 +80,11 @@ pub struct RunShared {
     pub notify: tokio::sync::mpsc::UnboundedSender<Notice>,
     /// The `sine.live` task has been started for this run.
     pub live_started: AtomicBool,
+    /// The run's record from arm on: every log entry is appended to it as it is made.
+    pub record: Mutex<Option<LogHandle>>,
+    /// The input frames the station has delivered since it started
+    /// ([`NO_FRAME`] before the first), for the record's entries.
+    pub station_frame: Arc<AtomicU64>,
 }
 
 impl RunShared {
@@ -87,6 +98,8 @@ impl RunShared {
             ended_by: Mutex::new(None),
             notify,
             live_started: AtomicBool::new(false),
+            record: Mutex::new(None),
+            station_frame: Arc::new(AtomicU64::new(NO_FRAME)),
         }
     }
 
@@ -108,17 +121,71 @@ impl RunShared {
     }
 
     pub fn add_log(&self, kind: &'static str, text: impl Into<String>) {
+        self.add_log_data(kind, text, None);
+    }
+
+    /// A log entry with structured facts for the record (`data`): the level of a
+    /// level change, the facts of an alarm, a trip or an overload, what an operator
+    /// did.
+    pub fn add_log_data(&self, kind: &'static str, text: impl Into<String>, data: Option<Value>) {
         let mut log = match self.log.lock() {
             Ok(l) => l,
             Err(p) => p.into_inner(),
         };
         let seq = log.len() as u64;
-        log.push(LogEntry {
+        let entry = LogEntry {
             seq,
             at_unix: now_unix(),
             kind,
             text: text.into(),
-        });
+        };
+        // Appended in the order the entries are made: the hand-off never waits.
+        if let Ok(record) = self.record.lock() {
+            if let Some(r) = record.as_ref() {
+                r.append(self.record_entry(&entry, data));
+            }
+        }
+        log.push(entry);
+    }
+
+    /// An entry as the record holds it: the wire's members, the station frame
+    /// when the station has delivered one, and `data` when there is any.
+    pub fn record_entry(&self, e: &LogEntry, data: Option<Value>) -> Value {
+        let frame = self.station_frame.load(Ordering::Relaxed);
+        let mut v = json!({"seq": e.seq, "at_unix": e.at_unix,
+                           "frame": if frame == NO_FRAME { Value::Null } else { Value::from(frame) },
+                           "kind": e.kind, "text": e.text});
+        if let (Some(d), Value::Object(m)) = (data, &mut v) {
+            m.insert("data".into(), d);
+        }
+        v
+    }
+
+    /// The entries made so far, as the record holds them, and from now on every
+    /// entry appended to the record as it is made. Done under the log's lock, so
+    /// none is missed or written twice.
+    pub fn attach_record(&self, handle: LogHandle) {
+        let log = match self.log.lock() {
+            Ok(l) => l,
+            Err(p) => p.into_inner(),
+        };
+        for e in log.iter() {
+            handle.append(self.record_entry(e, None));
+        }
+        if let Ok(mut r) = self.record.lock() {
+            *r = Some(handle);
+        }
+    }
+
+    /// Stop appending to the record (the run has ended).
+    pub fn detach_record(&self) {
+        let _log = match self.log.lock() {
+            Ok(l) => l,
+            Err(p) => p.into_inner(),
+        };
+        if let Ok(mut r) = self.record.lock() {
+            *r = None;
+        }
     }
 
     fn publish(&self, view: SineView) {
@@ -172,6 +239,10 @@ pub struct ArmContext {
     pub bind: String,
     /// The run's law, resolved from the catalog; `Err` is why it could not be.
     pub law: Result<Arc<dyn SineLawFactory>, MethodError>,
+    /// The table's revision, for the run's record.
+    pub revision: u64,
+    /// The devices of the last scan, for the record's models and serial numbers.
+    pub devices: Vec<hertzforge_hal::DiscoveredDevice>,
 }
 
 type Reply<T> = oneshot::Sender<Result<T, MethodError>>;
@@ -241,6 +312,34 @@ pub struct RunPlan {
     pub capture_root: Option<PathBuf>,
     /// The orphan timeout, for the safe stop's message.
     pub timeout_s: f64,
+    /// How the run's record is written.
+    pub record: RecordOptions,
+    /// The configuration's derived values, as configure returned them.
+    pub derived: Value,
+}
+
+/// What the record is kept with while the run goes.
+struct Keeping {
+    record: RunRecord,
+    status: Arc<RecordStatus>,
+    run_uid: String,
+    utc_offset_s: Option<i64>,
+    /// Every enabled input in table order, with its unit.
+    inputs: Vec<(u32, String)>,
+    control_unit: String,
+    drive_unit: String,
+    tick_s: f64,
+    levels: Blocks<LevelPoint>,
+    trace: Blocks<LawRecord>,
+    /// The law's declared values, once it is built.
+    diagnostics: Option<Vec<String>>,
+    /// The station time of the last level point kept.
+    last_t: f64,
+    last_freq: Option<f64>,
+    last_level: Option<f64>,
+    last_dir: f64,
+    pass: f64,
+    identified: bool,
 }
 
 /// The run thread's state.
@@ -271,6 +370,10 @@ struct Actor {
     time_fs_hz: f64,
     identification: Option<IdentFigures>,
     alarm_was: bool,
+    /// The channels overloaded at the last status.
+    overloaded: Vec<u32>,
+    /// The run's record, from arm until the run ends.
+    keep: Option<Keeping>,
 }
 
 fn refuse(reason: &'static str, message: impl Into<String>) -> MethodError {
@@ -340,6 +443,8 @@ pub fn spawn(
             time_fs_hz: 0.0,
             identification: None,
             alarm_was: false,
+            overloaded: Vec::new(),
+            keep: None,
         };
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.run(rx)));
         if r.is_err() {
@@ -366,6 +471,7 @@ pub fn spawn(
             a.view.state = State::Finished;
             a.view.phase = "aborted";
             a.shared.add_log("note", msg);
+            a.finish_record();
             a.shared.publish(a.view.clone());
         }
     })
@@ -410,22 +516,29 @@ impl Actor {
         }
         self.svc = None;
         self.lock = None;
+        // The record keeps what it has, `complete: false`: the run did not end.
+        self.shared.detach_record();
+        self.keep = None;
     }
 
     fn publish(&mut self) {
+        if let (Some(k), Some(r)) = (self.keep.as_ref(), self.view.record.as_mut()) {
+            r.problem = k.status.problem();
+        }
         self.last_publish = Some(Instant::now());
         self.shared.publish(self.view.clone());
     }
 
     fn set(&mut self, state: State, phase: &'static str) {
         if self.view.phase != phase {
-            self.shared.add_log(
+            self.shared.add_log_data(
                 "state",
                 format!(
                     "{} to {}",
                     self.view.phase.replace('_', " "),
                     phase.replace('_', " ")
                 ),
+                Some(json!({"from": self.view.phase, "to": phase, "state": state.name()})),
             );
         }
         self.view.state = state;
@@ -547,13 +660,27 @@ impl Actor {
         }
         self.view.streaming = true;
         self.set(State::Running, "sysid");
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             format!(
                 "started; identification at {} under full level",
                 db(self.plan.config.ident_level_db)
             ),
+            Some(json!({"action": "start", "level_db": self.plan.config.ident_level_db})),
         );
+        if let Some(k) = self.keep.as_ref() {
+            let frame = self.shared.station_frame.load(Ordering::Relaxed);
+            let mut patch = Map::new();
+            patch.insert(
+                "start".into(),
+                rrec::start_json(
+                    now_unix(),
+                    k.utc_offset_s,
+                    if frame == NO_FRAME { 0 } else { frame },
+                ),
+            );
+            k.record.patch_manifest(patch);
+        }
         Ok(())
     }
 
@@ -590,7 +717,34 @@ impl Actor {
         };
         let class = station.station;
         let provenance = station.provenance.clone();
-        let backend = Interruptible::wrap(station.backend, self.shared.signal.clone());
+        let caps = station.backend.caps();
+        let cfg_wire = self.plan.config.clone();
+        let outputs = cfg.out_channels();
+        // The streams are taken where the station's blocks pass (record::tap): the
+        // inputs as read and the drive as the device accepted it. Their buffers are
+        // made here, before anything runs.
+        let buffers = if cfg_wire.record_streams {
+            rrec::tap_buffers(cfg_wire.fs_hz(), self.plan.record.stream_buffer_s)
+        } else {
+            1
+        };
+        let (inputs_tap, inputs_link) = tap::pair(
+            rrec::input_rows(&table).len(),
+            rrec::TAP_BLOCK_FRAMES,
+            buffers,
+        );
+        let (drives_tap, drives_link) = tap::pair(
+            srec::played_drives(&table, outputs).len(),
+            rrec::TAP_BLOCK_FRAMES,
+            buffers,
+        );
+        let recorded = Recording::wrap(
+            station.backend,
+            inputs_tap,
+            drives_tap,
+            self.shared.station_frame.clone(),
+        );
+        let backend = Interruptible::wrap(recorded, self.shared.signal.clone());
         let svc = SineService::new(
             cfg,
             table.clone(),
@@ -613,6 +767,8 @@ impl Actor {
         let mut svc = svc.with_law_factory(law);
         svc.set_run_mode(self.view.mode)
             .map_err(|e| arm_refused(e.to_string()))?;
+        // The law's calls are kept for the record, taken between batches.
+        svc.keep_law_records(true);
         if let Ok(mut c) = self.shared.sysid_cancel.lock() {
             *c = Some(svc.sysid_cancel_flag());
         }
@@ -631,8 +787,11 @@ impl Actor {
             match &ack {
                 Some(a) => {
                     svc.arm_with_override(a).map_err(arm_refused)?;
-                    self.shared
-                        .add_log("override", format!("operator acknowledgement: {a}"));
+                    self.shared.add_log_data(
+                        "override",
+                        format!("operator acknowledgement: {a}"),
+                        Some(json!({"what": "feasibility_exceeded", "acknowledgement": a})),
+                    );
                 }
                 None => {
                     self.set(State::Blocked, "feasibility_blocked");
@@ -664,6 +823,129 @@ impl Actor {
             tick_frames: frames,
             actual: true,
         };
+
+        // The run's record, before any sample: refused here, the arm is refused and
+        // the station released (nothing has been driven).
+        let armed_unix = now_unix();
+        let utc_offset_s = rrec::utc_offset_s();
+        let run_uid = rrec::run_uid(armed_unix, &self.plan.run_id);
+        let root = self
+            .plan
+            .capture_root
+            .clone()
+            .unwrap_or_else(hertzforge_capture::default_data_root);
+        let streams_off = if !cfg_wire.record_streams {
+            Some("switched off in the setup".to_owned())
+        } else {
+            match hertzforge_capture::free_space_bytes_for(&root) {
+                Ok(free) if free < self.plan.record.free_space_floor_bytes => Some(format!(
+                    "the disk had {} MB free, under the {} MB kept free",
+                    free / 1_000_000,
+                    self.plan.record.free_space_floor_bytes / 1_000_000
+                )),
+                _ => None,
+            }
+        };
+        let law_facts = &self.plan.law;
+        let law_json = json!({
+            "id": law_facts.id, "name": law_facts.name,
+            "version": if law_facts.version.is_empty() { Value::Null } else { Value::from(law_facts.version.as_str()) },
+            "sha256": if law_facts.sha256.is_empty() { Value::Null } else { Value::from(law_facts.sha256.as_str()) },
+            "builtin": law_facts.builtin,
+            "params": cfg_wire.law.params,
+            "live": law_facts.live,
+            "guards": serde_json::to_value(&svc.config().law_guards).unwrap_or(Value::Null),
+        });
+        let facts = srec::ArmFacts {
+            run_id: &self.plan.run_id,
+            run_uid: &run_uid,
+            cfg: &cfg_wire,
+            controller: svc.config(),
+            table: &table,
+            revision: ctx.revision,
+            plan: &ctx.station,
+            class,
+            provenance: &provenance,
+            devices: &ctx.devices,
+            caps: &caps,
+            fs_hz: fs,
+            tick_frames: frames,
+            derived: self.plan.derived.clone(),
+            feasibility: self.view.feasibility.as_ref(),
+            law: law_json,
+            armed_unix,
+            utc_offset_s,
+            streams_off: streams_off.clone(),
+            outputs,
+        };
+        let begin = srec::begin(&facts, root, (inputs_link, drives_link), Vec::new());
+        let shared = self.shared.clone();
+        let problem: ProblemFn = Box::new(move |words: String, data: Value| {
+            shared.add_log_data("record", words.clone(), Some(data));
+            let mut v = (*shared.view()).clone();
+            if let Some(r) = v.record.as_mut() {
+                r.problem = Some(words);
+                shared.publish(v);
+            }
+        });
+        let record = RunRecord::open(begin, &self.plan.record, problem).map_err(|e| {
+            refuse(
+                "record_unwritable",
+                format!(
+                    "The run's record could not be written, so the run did not arm: {} ({}). \
+                     Choose a data folder that can be written.",
+                    e.path.display(),
+                    e.reason
+                ),
+            )
+            .with_detail(json!({"path": e.path.display().to_string(), "reason": e.reason}))
+        })?;
+        self.shared.attach_record(record.log());
+        if let Some(why) = &streams_off {
+            self.shared.add_log_data(
+                "record",
+                format!("the run's streams are not recorded: {why}"),
+                Some(json!({"stream": null, "failed": why})),
+            );
+        }
+        let ctl_unit = control_unit(&table);
+        for (name, d, arrays) in
+            std::iter::once(srec::reference_result(&cfg_wire, &table, &ctl_unit))
+                .chain(srec::limit_results(&cfg_wire, &table))
+        {
+            record.put_result(&name, d, arrays, None);
+        }
+        self.view.record = Some(RecordRef {
+            folder: record.folder().display().to_string(),
+            streams: streams_off.is_none(),
+            problem: None,
+        });
+        let inputs = rrec::input_rows(&table)
+            .into_iter()
+            .map(|c| (c.index, unit_name(&c.units).to_string()))
+            .collect();
+        let drive_unit = rrec::drive_rows(&table)
+            .first()
+            .map_or_else(|| "V".to_owned(), |c| unit_name(&c.units).to_string());
+        self.keep = Some(Keeping {
+            status: record.status(),
+            record,
+            run_uid,
+            utc_offset_s,
+            inputs,
+            control_unit: ctl_unit,
+            drive_unit,
+            tick_s: frames as f64 / fs,
+            levels: Blocks::new(srec::LEVEL_BLOCK),
+            trace: Blocks::new(srec::TRACE_BLOCK),
+            diagnostics: None,
+            last_t: f64::NEG_INFINITY,
+            last_freq: None,
+            last_level: None,
+            last_dir: 0.0,
+            pass: 0.0,
+            identified: false,
+        });
         self.view.clock = Some("shared");
         self.view.station = StationRef {
             kind: if matches!(ctx.station, StationPlan::Sim { .. }) {
@@ -724,6 +1006,7 @@ impl Actor {
             return;
         }
         self.identification = self.identification_figures();
+        self.keep_identification();
         // The review hold is where the identification is read, before the tone
         // runs: the figures the views are drawn from carry it from here on.
         let mut figures = self
@@ -879,9 +1162,10 @@ impl Actor {
         if self.view.state != State::Review {
             return Err(wrong_state(&self.view, "Proceeding"));
         }
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             "the operator reviewed the identification and proceeded",
+            Some(json!({"action": "proceed"})),
         );
         self.proceed()
     }
@@ -910,18 +1194,6 @@ impl Actor {
     }
 
     fn engaged(&mut self) {
-        if let Some(svc) = self.svc.as_mut() {
-            if self.plan.config.capture.rule == "entire_test" {
-                match svc.start_capture(&self.plan.config.capture.run_name) {
-                    Ok(dir) => self
-                        .shared
-                        .add_log("note", format!("recording to {}", dir.display())),
-                    Err(e) => self
-                        .shared
-                        .add_log("note", format!("the recording did not start: {e}")),
-                }
-            }
-        }
         self.law_state_init();
         self.set(State::Running, "engaged");
         self.refresh(true);
@@ -990,6 +1262,7 @@ impl Actor {
         if let Some((blk, stride)) = last_block {
             self.keep_samples(&blk, stride);
         }
+        self.keep_results();
         match r {
             Ok(true) => {
                 self.forward_log_now();
@@ -1163,16 +1436,36 @@ impl Actor {
         }
         if st.alarm_active && !self.alarm_was {
             if let Some(Alarm::Band { side, error_db }) = alarms.first() {
-                self.shared.add_log(
+                self.shared.add_log_data(
                     "alarm",
                     format!(
                         "the control point is outside its alarm band ({side}, {}) at {} Hz",
                         db(*error_db),
                         num(super::config::round(st.freq_hz, 2))
                     ),
+                    Some(
+                        json!({"side": side, "error_db": error_db, "at_hz": st.freq_hz,
+                                "level_db": st.level_db, "measured": st.measured_g,
+                                "target": st.target_g}),
+                    ),
                 );
             }
         }
+        let overloaded: Vec<u32> = self
+            .view
+            .channels
+            .iter()
+            .filter(|c| c.overload)
+            .map(|c| c.index)
+            .collect();
+        for ch in overloaded.iter().filter(|c| !self.overloaded.contains(c)) {
+            self.shared.add_log_data(
+                "overload",
+                format!("channel {ch} overloaded its input range"),
+                Some(json!({"channel": ch, "at_hz": st.freq_hz, "level_db": st.level_db})),
+            );
+        }
+        self.overloaded = overloaded;
         self.alarm_was = st.alarm_active;
         self.view.alarm = !alarms.is_empty();
         self.view.alarms = alarms;
@@ -1369,8 +1662,11 @@ impl Actor {
         .map_err(|e| refuse("wrong_state", e.to_string()))?;
         self.settle_command();
         let level = self.view.level_db.unwrap_or(0.0);
-        self.shared
-            .add_log("level", format!("level {} (operator)", db(level)));
+        self.shared.add_log_data(
+            "level",
+            format!("level {} (operator)", db(level)),
+            Some(json!({"level_db": level, "by": "operator", "action": "level"})),
+        );
         Ok(level)
     }
 
@@ -1389,9 +1685,10 @@ impl Actor {
                 svc.set_run_mode(mode)
                     .map_err(|e| refuse("wrong_state", e.to_string()))?;
                 self.view.mode = mode;
-                self.shared.add_log(
+                self.shared.add_log_data(
                     "note",
                     format!("ladder mode {}", super::config::mode_name(mode)),
+                    Some(json!({"action": "mode", "mode": super::config::mode_name(mode)})),
                 );
                 Ok(())
             }
@@ -1411,13 +1708,14 @@ impl Actor {
             .ok_or_else(|| wrong_state(&self.view, "Holding"))?;
         if on { svc.hold() } else { svc.resume() }
             .map_err(|e| refuse("wrong_state", e.to_string()))?;
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             if on {
                 "held: the test's progress stops, the tone stays under control"
             } else {
                 "resumed"
             },
+            Some(json!({"action": if on { "hold" } else { "resume" }})),
         );
         self.settle_command();
         Ok(())
@@ -1439,13 +1737,14 @@ impl Actor {
             .as_ref()
             .ok_or_else(|| wrong_state(&self.view, verb))?;
         let applied = act(svc).map_err(|e| refuse("wrong_state", e.to_string()))?;
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             if applied > 0.0 {
                 format!("{verb}: to {} Hz", num(super::config::round(applied, 2)))
             } else {
                 verb.to_owned()
             },
+            Some(json!({"action": verb, "to_hz": (applied > 0.0).then_some(applied)})),
         );
         self.settle_command();
         Ok(applied)
@@ -1523,9 +1822,10 @@ impl Actor {
                 None => l.live.push((key.to_owned(), value)),
             }
         }
-        self.shared.add_log(
+        self.shared.add_log_data(
             "law",
             format!("{} set to {} (operator)", spec.label, num(value)),
+            Some(json!({"action": "adjust", "key": key, "value": value})),
         );
         if self.driving() {
             self.settle_command();
@@ -1547,7 +1847,7 @@ impl Actor {
         }
         self.stop = Some((outcome, by.clone()));
         self.note_end_level();
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             if outcome == "safe_stop" && by == SHUTDOWN_BY {
                 "the control service is shutting down; stopping the run with its controlled stop"
@@ -1560,6 +1860,7 @@ impl Actor {
             } else {
                 format!("stop requested by {by}")
             },
+            Some(json!({"action": "stop", "outcome": outcome, "by": by})),
         );
         match self.view.state {
             State::Armed | State::Review => self.end_stopped(outcome, None),
@@ -1583,6 +1884,13 @@ impl Actor {
 
     fn abort_now(&mut self, by: &str) {
         self.note_end_level();
+        if self.view.state.is_live() {
+            self.shared.add_log_data(
+                "note",
+                format!("abort requested by {by}"),
+                Some(json!({"action": "abort", "by": by})),
+            );
+        }
         self.shared.signal.store(ABORT, Ordering::SeqCst);
         if let Some(svc) = self.svc.as_mut() {
             let _ = svc.abort(&format!("aborted by {by}"));
@@ -1620,7 +1928,8 @@ impl Actor {
                 ) =>
             {
                 let (json, message) = trip_facts(&t, &self.view.control_unit);
-                self.shared.add_log("trip", message.clone());
+                self.shared
+                    .add_log_data("trip", message.clone(), Some(json.clone()));
                 let t_trip = t.at_tick as f64 * self.view.grid.tick_s();
                 let ramp = Some((t_end - t_trip).max(0.0));
                 let outcome = if matches!(t.kind, TripKind::LawFault { .. }) {
@@ -1632,7 +1941,8 @@ impl Actor {
             }
             (RunState::Aborted, Some(t)) => {
                 let (json, message) = trip_facts(&t, &self.view.control_unit);
-                self.shared.add_log("trip", message.clone());
+                self.shared
+                    .add_log_data("trip", message.clone(), Some(json.clone()));
                 self.end("aborted", "aborted", Some(json), Some(message), None);
             }
             (RunState::Aborted, None) => {
@@ -1739,9 +2049,7 @@ impl Actor {
         if unramped {
             self.shared.signal.store(ABORT, Ordering::SeqCst);
         }
-        if let Some(svc) = self.svc.as_mut() {
-            let _ = svc.stop_capture();
-        }
+        self.keep_results();
         self.svc = None;
         self.lock = None;
         self.view.end = Some(End {
@@ -1755,8 +2063,173 @@ impl Actor {
         });
         self.set(State::Finished, phase);
         self.view.held = false;
-        self.shared.add_log("note", message);
+        self.shared
+            .add_log_data("note", message, Some(json!({"outcome": outcome, "by": by})));
+        self.finish_record();
         self.publish();
+    }
+
+    // ---- the record -------------------------------------------------------------
+
+    /// The identification's transfer function and coherence, into the record, once.
+    fn keep_identification(&mut self) {
+        let (Some(k), Some(svc)) = (self.keep.as_mut(), self.svc.as_ref()) else {
+            return;
+        };
+        if k.identified {
+            return;
+        }
+        let (Some(frf), Some(h)) = (svc.frf(), svc.frf_complex()) else {
+            return;
+        };
+        for (name, d, arrays) in srec::identification_results(
+            &frf.freqs,
+            h,
+            &frf.coherence,
+            self.plan.config.test.band(),
+            svc.sysid_lag_frames(),
+            &self.table,
+        ) {
+            k.record.put_result(&name, d, arrays, None);
+        }
+        k.identified = true;
+    }
+
+    /// Between batches: the law's calls and the inputs' levels since the last
+    /// batch, into the record a full block at a time. Only copies and sends: no
+    /// file is touched here.
+    fn keep_results(&mut self) {
+        let (Some(k), Some(svc)) = (self.keep.as_mut(), self.svc.as_mut()) else {
+            return;
+        };
+        if k.diagnostics.is_none() {
+            k.diagnostics = svc.law_descriptor().map(|d| d.diagnostics.clone());
+        }
+        for call in svc.take_law_records() {
+            if let Some(block) = k.trace.push(call) {
+                Self::put_trace(k, &block);
+            }
+        }
+        let d = svc.display();
+        let h = &d.history;
+        for (i, &t) in d.history_t_s.iter().enumerate() {
+            if t <= k.last_t {
+                continue;
+            }
+            k.last_t = t;
+            let f = |v: &[f32]| v.get(i).map_or(f64::NAN, |x| f64::from(*x));
+            let freq = f(&h.freq_hz);
+            let level = f(&h.level_db);
+            let dir = match k.last_freq {
+                Some(last) if (freq - last).abs() > 1e-9 * freq.abs().max(1.0) => {
+                    (freq - last).signum()
+                }
+                _ => 0.0,
+            };
+            let turned = dir != 0.0 && k.last_dir != 0.0 && dir != k.last_dir;
+            let relevelled = k
+                .last_level
+                .is_some_and(|l| level.is_finite() && (level - l).abs() > 1e-9);
+            if turned || relevelled {
+                k.pass += 1.0;
+            }
+            if dir != 0.0 {
+                k.last_dir = dir;
+            }
+            if relevelled {
+                k.last_dir = 0.0;
+            }
+            k.last_freq = Some(freq);
+            if level.is_finite() {
+                k.last_level = Some(level);
+            }
+            let by_input = |pick: &dyn Fn(&hertzforge_sine::SineInputCurves) -> f64| -> Vec<f64> {
+                k.inputs
+                    .iter()
+                    .map(|(ix, _)| {
+                        h.inputs
+                            .iter()
+                            .find(|c| c.channel_index == *ix)
+                            .map_or(f64::NAN, pick)
+                    })
+                    .collect()
+            };
+            let point = LevelPoint {
+                t_s: t,
+                freq_hz: freq,
+                level_db: level,
+                direction: dir,
+                pass: k.pass,
+                measured: f(&h.measured),
+                target: f(&h.target),
+                drive: f(&h.drive_vpk),
+                tracked: by_input(&|c| c.tracked.get(i).map_or(f64::NAN, |x| f64::from(*x))),
+                phase_deg: by_input(&|c| c.phase_deg.get(i).map_or(f64::NAN, |x| f64::from(*x))),
+            };
+            if let Some(block) = k.levels.push(point) {
+                Self::put_levels(k, &block);
+            }
+        }
+    }
+
+    fn put_levels(k: &mut Keeping, block: &[LevelPoint]) {
+        let (name, d, arrays) =
+            srec::levels_result(block, &k.inputs, &k.control_unit, &k.drive_unit);
+        let line = json!({"index": k.levels.kept, "points": block.len(),
+                          "first_s": block.first().map(|p| p.t_s),
+                          "last_s": block.last().map(|p| p.t_s)});
+        k.record.put_result(&name, d, arrays, Some(line));
+        k.levels.kept += 1;
+    }
+
+    fn put_trace(k: &mut Keeping, block: &[LawRecord]) {
+        let diagnostics = k.diagnostics.clone().unwrap_or_default();
+        let (name, d, arrays) = srec::trace_result(
+            block,
+            k.tick_s,
+            &diagnostics,
+            &k.control_unit,
+            &k.drive_unit,
+        );
+        let line = json!({"index": k.trace.kept, "calls": block.len(),
+                          "first_tick": block.first().map(|r| r.tick),
+                          "last_tick": block.last().map(|r| r.tick)});
+        k.record.put_result(&name, d, arrays, Some(line));
+        k.trace.kept += 1;
+    }
+
+    /// End the record: the part-filled blocks, `end.json` with the run's end as
+    /// its state reports it, then `complete`.
+    fn finish_record(&mut self) {
+        let Some(mut k) = self.keep.take() else {
+            return;
+        };
+        if let Some(block) = k.levels.rest() {
+            Self::put_levels(&mut k, &block);
+        }
+        if let Some(block) = k.trace.rest() {
+            Self::put_trace(&mut k, &block);
+        }
+        self.shared.detach_record();
+        let state = super::view::state_json(Some(&self.view));
+        let frame = self.shared.station_frame.load(Ordering::Relaxed);
+        let mut end = Map::new();
+        end.insert("run_uid".into(), Value::from(k.run_uid.as_str()));
+        end.insert("end".into(), state["end"].clone());
+        end.insert("at_unix".into(), Value::from(now_unix()));
+        end.insert(
+            "station_frames".into(),
+            Value::from(if frame == NO_FRAME { 0 } else { frame }),
+        );
+        end.insert(
+            "summary".into(),
+            json!({"elapsed_s": self.view.elapsed_s, "t_s": self.view.t_s,
+                   "level_records": k.levels.kept, "trace_records": k.trace.kept}),
+        );
+        if let Some(r) = self.view.record.as_mut() {
+            r.problem = k.status.problem();
+        }
+        k.record.finish(end);
     }
 
     // ---- the controller's log -------------------------------------------------------
@@ -1855,8 +2328,33 @@ impl Actor {
                 )),
                 EventKind::Note { text } => Some(("note", text.clone())),
             };
+            let data = match &e.kind {
+                EventKind::LevelChange {
+                    from_db,
+                    to_db,
+                    auto,
+                } => Some(json!({"level_db": to_db, "from_db": from_db,
+                                 "by": if *auto { "schedule" } else { "operator" }})),
+                EventKind::CoherenceGate {
+                    band_coherence,
+                    floor,
+                    passed,
+                } => Some(json!({"band_coherence": band_coherence, "gate": floor,
+                                 "passed": passed})),
+                EventKind::LawMisses {
+                    reason,
+                    count,
+                    consecutive,
+                    at_tick,
+                } => Some(json!({"reason": reason, "count": count,
+                                 "consecutive": consecutive, "at_tick": at_tick})),
+                EventKind::RstdSearchDone { f_peak, q } => {
+                    Some(json!({"f_peak_hz": f_peak, "q": q}))
+                }
+                _ => None,
+            };
             if let Some((kind, text)) = entry {
-                self.shared.add_log(kind, text);
+                self.shared.add_log_data(kind, text, data);
             }
         }
         self.forwarded = events.len();
@@ -2131,6 +2629,11 @@ mod tests {
             sim_speed: 0.0,
             capture_root: Some(std::env::temp_dir().join("sds-sine-run-tests")),
             timeout_s: 30.0,
+            record: RecordOptions {
+                stream_buffer_s: 120.0,
+                ..RecordOptions::default()
+            },
+            derived: json!({}),
         };
         let thread = spawn(plan, initial, shared.clone(), rx).unwrap();
         let _ = table;
@@ -2154,6 +2657,8 @@ mod tests {
                 )
                 .unwrap(),
             )),
+            revision: 1,
+            devices: Vec::new(),
         }
     }
 
@@ -2361,22 +2866,34 @@ mod tests {
         wait_until(&r, 30, |v| v.state == State::Finished);
     }
 
+    /// The module's own capture is gone: a configuration that asks for it is
+    /// refused by name, and every run leaves its run folder instead, with no
+    /// recording of the old kind. Red if `capture` were still taken, or if the run
+    /// started the controller's own capture.
     #[test]
-    fn the_capture_run_name_reaches_the_controllers_capture() {
-        let r = rig(config(|c| {
-            c["capture"] = json!({"rule": "entire_test", "run_name": "sine_name_reaches"});
-        }));
+    fn capture_is_refused_and_every_run_leaves_its_run_folder() {
+        let mut c = serde_json::to_value(&config(|_| {}).raw).unwrap();
+        c["capture"] = json!({"rule": "entire_test", "run_name": "sine"});
+        let e = super::super::config::parse(&c).unwrap_err();
+        assert!(e.message.contains("capture"), "{}", e.message);
+        let r = rig(config(|_| {}));
         ask(&r, |reply| Cmd::Start { ctx: ctx(), reply }).unwrap();
-        wait_until(&r, 120, |v| v.state == State::Finished);
+        let v = wait_until(&r, 120, |v| v.state == State::Finished);
+        let folder = PathBuf::from(&v.record.as_ref().expect("the record").folder);
+        let t0 = Instant::now();
+        while !folder.join("end.json").is_file() {
+            assert!(t0.elapsed() < Duration::from_secs(60), "no end.json");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let run: Value =
+            serde_json::from_slice(&std::fs::read(folder.join("run.json")).unwrap()).unwrap();
+        assert_eq!(run["test"], "sine");
         let (log, _) = r.shared.log_since(0);
-        let rec = log
-            .iter()
-            .find(|e| e.text.starts_with("recording to"))
-            .map(|e| e.text.clone())
-            .unwrap_or_default();
-        assert!(rec.contains("sine_name_reaches"), "{rec}");
-        let dir = rec.trim_start_matches("recording to ").to_owned();
-        let _ = std::fs::remove_dir_all(dir);
+        assert!(
+            !log.iter().any(|e| e.text.starts_with("recording to")),
+            "{log:?}"
+        );
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]

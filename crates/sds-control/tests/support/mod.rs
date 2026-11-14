@@ -2,6 +2,7 @@
 //! started with test options, and the schema checker.
 #![allow(dead_code)]
 
+pub mod golden_runs;
 pub mod schema;
 
 use futures_util::{SinkExt, StreamExt};

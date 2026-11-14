@@ -781,8 +781,10 @@ columns: `drive` true is a drive, else `control` true is a control, else a `role
 of the channel table, the controller's included: a table without them is converted on the way in
 (every channel on, none a drive, each full scale from its clip level and sensitivity where both
 are stated), and `warnings` says so. A client that edits only some columns keeps the others'
-values for each row and sends them back with its own, so a table opened and saved loses
-nothing. A table saved with the controller's columns among its columns is written converted;
+values for each row and sends them back with its own, so a table opened and saved keeps every
+column and row. A channel table's control loops (its environments, which a `.hforge` table can
+hold) are not among them: `tables.load` does not return them and `tables.save` does not write
+them, so a `.hforge` table that held them is saved without them. A table saved with the controller's columns among its columns is written converted;
 one saved without them is written as the measurement's table alone.
 
 A breakpoint table's columns are its kind's: `freq_hz` and `psd_g2_hz`, `slope_db_oct` for a
@@ -1074,7 +1076,7 @@ plain words: it never names a protocol method.
 | `mixed_timing_families` | `refused` | The selection spans devices that cannot share one sample clock | `families` |
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
-| `record_unwritable` | `refused` | `random.arm`, `random.start`, `shock.arm` or `shock.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
+| `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm`, `sine.start`, `shock.arm` or `shock.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
 | `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
 | `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, Mixed Mode, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
@@ -2548,7 +2550,7 @@ SRS shock has no trains and no gunfire bursts: every pulse is a synthesized puls
 | `limits.monitors` | none | Monitored inputs by table `index`, as classical shock's |
 | `limit_channels` | null | Inputs whose response must stay under a bound: `headroom_db` (0 to 40) how far under its bound a prediction must stay, and `channels`, each a table `index` (any row but the control row; without an `frf`, an enabled input), a `bound` (`{"kind":"flat","accel_g"}` or `{"kind":"per_band","bounds_g":[...]}`, one per band, null for no bound at a band) and an optional `frf` (`{"freqs_hz":[...],"mag":[...]}`, the drive-to-channel gain in g per volt, frequencies ascending from 0; null: identification measures it). At proceed the service notches the drive where a prediction would pass a bound, and before each pulse caps every component by what the prediction leaves. An empty `channels` list is no limit channels |
 | `feasibility` | null | Random's shaker record and moving mass, and the synthesis's residual velocity (in/s) and displacement (in) tolerances (default 0.1 and 0.001). Checked at arm. Without it, feasibility is not evaluated and the run says so |
-| `capture` | off | Random's: with `auto_start` every pulse's record is written to the run folder under the local data root from arm, and the law's records with it |
+| `capture` | off | `{"auto_start","run_name"}`. With `auto_start` the recording starts at arm in the run folder `srs_run_<unix seconds>` under the local data root, or the first free `srs_run_<unix seconds>-<n>` when that name is taken; `run_name` is accepted and not used. It holds the control channel's record of each pulse, one after another at the station rate (`telemetry.f32`, with `capture.json`: the channel table, the rate and the run's settings); the limit channels, the identification and the drive are not recorded. Beside it go the law's records: `law.json` once, and `law_pulses.bin` with its index `law_pulses.jsonl`, a record per law call holding the target and measured spectra it was handed, the gains it returned and what was applied. With `auto_start` false nothing is written |
 | `metadata` | the default fields | Random's |
 
 The control channel is the table's first enabled `control` row; the drive is its first enabled
@@ -2858,7 +2860,8 @@ An SRS target replaces `target`:
 | `control.scaled_aborts` | true | On: a measured peak over its scaled line ends the run in the controlled stop (`safe_stop`, `control_abort_scaled`). Off: the pulse is judged failing (the ladder does not climb on it), a warning names every control that crossed its scaled line, the run goes on, and the state carries a standing `notice`. Either way every row reports each control's margin to both lines. It cannot change while a run is live |
 | `control.max_velocity_ips`, `max_displacement_in` | null | A control's peak velocity (in/s) or peak-to-peak displacement (in), predicted or measured, over it ends the run (`kinematics`) |
 | `simulator.plant` | null: chosen by size | The simulator's plant by name: `shock-linear-4x4`, `shock-jointed-4x4-moderate`, `shock-jointed-4x4-severe` or `shock-jointed-6x3`. Null takes `shock-linear-4x4` for 4 controls and 4 drives and `shock-jointed-6x3` for 6 and 3. Ignored on NI |
-| `capture`, `metadata` | as shown | Random's. With `capture.auto_start`, every pulse's drives and input rows, the identification, every law call and the end are written to `<run_name>_<run_id>/` under the local data root when the run ends (a name already taken gets the first free `<run_name>_<run_id>-<n>`, so no run writes over another) |
+| `capture` | as shown | `{"auto_start","run_name"}`. With `auto_start`, the run's records are held in memory and written when the run ends, however it ends, to `<run_name>_<run_id>/` under the local data root (a name already taken gets the first free `<run_name>_<run_id>-<n>`, so no run writes over another; the run id counts from 1 again each time the service starts): `setup.json` (the identified setup and the law), `law_calls.jsonl` (every law call with its inputs and its answer) and `pulses.jsonl` (every pulse's level, drives as played and input rows). Nothing is written while the run is going. With `auto_start` false nothing is written |
+| `metadata` | as shown | Random's |
 
 A configuration whose shape is wrong is refused `bad_params` naming the field; its content errors
 are refused `config_invalid` with the items, located by `field` or `channel`.
@@ -3188,8 +3191,8 @@ binary frame.
  "feasibility":{"shaker":{"name":"Bench shaker",...},
                 "moving_mass_lb":{"armature":45,"slip_table":0,"drive_adapter":3,"fixturing":10,
                                   "test_article":12}},
- "capture":{"rule":"off","first_s":null,"level_settle_s":1,"periodic_save_s":null,
-            "run_name":"sine"},
+ "operator":"A. Operator","article":"Bracket, serial 7","notes":"first article",
+ "specification":{"document":"Test procedure 12","clause":"4.2"},"record":{"streams":true},
  "metadata":[{"key":"run_number","label":"Run Number","value":"7"}]}
 ```
 
@@ -3228,8 +3231,13 @@ binary frame.
 | `limits.notch` | `{"drive_floor":0.01,"smoothing_ticks":3,"release_ramp_db_per_s":20}` | The notch: the drive under which a channel's gain is not estimated (a fraction of full drive, above 0 and under 1), the ticks its estimate is smoothed over (at least 1), and how fast the drive may come back once the notch releases, dB/s |
 | `cola` | off | A second, constant-amplitude reference output locked to the tone: `enabled`, `volts_pk` (default 0.1, above 0 and at most 10), `waveform` `sine` (the default), `square` or `dc`. It needs a second drive row and a station with two outputs (the simulator has one): `cola_needs_two_outputs` |
 | `feasibility` | null | Random's shaker record and moving mass (no crest factor: a sine's is 1). Checked at configure and at arm against the profile's peaks; a record that does not parse is refused `shaker_record_invalid`. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
-| `capture` | off | `rule` `off` or `entire_test` (the whole test from engage, in the run folder `run_name` under the local data root, or the first free `<run_name>-<n>` when that name is taken, so no run writes over another); `manual` and `first_seconds` are refused `out_of_range` (there is no verb to start a recording and no first-seconds rule); `level_settle_s` (default 1) and `first_s` are kept for them; `periodic_save_s` (null: none) saves a snapshot that often while recording; `run_name` (default `sine`) is a plain name with no path in it |
+| `operator`, `article`, `notes`, `specification`, `record` | empty, null, `{"streams":true}` | Random's, for the run's record (see Sine Run Folders): the operator's words, the document and clause the test is run to, and whether the record keeps the inputs and the drive as streams. None of them changes how the run drives |
 | `metadata` | the default fields | Random's: `{"key","label","value"}`, `label` the key when absent |
+| `operator`, `article`, `notes` | empty | The operator's words for the run's record, as Random's. Empty `operator` and `article` take the `metadata` fields `operator` and `test_article` |
+| `specification` | null | `{"document","clause"}`, as Random's: what the run was made to |
+
+Sine takes no `capture`: every run is recorded (see Sine Run Folders), and a configuration that
+gives one is refused `bad_params` at `config.capture`.
 
 The control channels are the table's enabled `control` rows, each with its weight (1 unless
 `control.weights` names it); the drive is its first enabled `drive` row (with COLA, the second
@@ -3402,7 +3410,9 @@ service's clock: it measures how long nobody has held control.
                    "trusted_frac":0.97,"passed":true},
  "law":{"id":"servo_blend","name":"Servo blend","version":"0.1.0","sha256":null,"misses":0,
         "capped_ticks":0,"live":{"blend_w":0.5}},
- "feasibility":{"verdict":"pass","message":"..."},"end":null}
+ "feasibility":{"verdict":"pass","message":"..."},"end":null,
+ "record":{"folder":"/home/operator/Hertzforge_Data/20261101-142233_sine_sine-0003",
+           "streams":"on","problem":null}}
 ```
 
 | `state` | `phase` | Meaning |
@@ -3437,6 +3447,8 @@ service's clock: it measures how long nobody has held control.
   `ramp_s` the controlled stop's length on the station's clock (null for an abort; a
   `divergence` trip and a `law_fault` take the controlled stop, so theirs is a number, from the
   trip's tick).
+- `record` is Random's: absent until the run arms, then the run folder, whether it holds the
+  streams, and the latest problem writing it.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -3466,6 +3478,25 @@ A `law_fault` trip's `reason` is `error` (the law reported one, or could not be 
 `panicked` (it panicked or, for a law file, trapped), `over_budget`, `over_memory` (a law file),
 `non_finite` (the drive or a value), `negative` (the drive), `undeclared_value` or
 `too_many_values`.
+
+### Sine Run Folders
+
+Every Sine run that arms leaves a run folder as Random's does (Run Folders, and
+`docs/run-folder.md`, "What a Sine Run Saves"), named `<YYYYMMDD-HHMMSS>_sine_<run id>`: claimed
+at arm and never written over, `run.json`, `table.json`, `setup.json` (the configuration as
+accepted; what it resolved to: the profile's breakpoints with their quantity and the
+acceleration they give, the test's sweep law, rate, direction, count, dwell and step settings,
+the level ladder, the alarm and abort bands, the limit channels and the notch, the control
+settings and the controller's own configuration; the derived values; feasibility) and
+`law/law.json` (the law's identity, parameters and guards) before the first sample, or the arm
+is refused `record_unwritable`. Every `sine.log` entry is appended as it is made, with the
+station frame and structured `data` for each state, level, alarm, trip, overload, override and
+operator action; the inputs and the drive as the device accepted it are streams unless
+`record.streams` is false; the results (the profile and its bands on the run's band, each limit
+channel's lines, the identification's transfer function and coherence, each input's tracked
+level and phase as the run went, and every control-law call) are written as the run goes, off
+the control thread; `end.json` holds `end` as `sine.state` reports it. A failure to write the
+record is a log entry of kind `record` and the state's `record.problem`; the run goes on.
 
 ### Sine Display
 
@@ -3763,7 +3794,7 @@ and meaning are theirs, and the field applies as stated here:
 | `limits.kinematic_monitor` | true | Sine's: with `feasibility`, abort when the response's velocity or displacement, read on raw samples (tones in), passes the shaker's rating (`kinematic`). Off, the station's own raw-sample watchdog still trips on each channel's own velocity limit: the switch does not turn raw-sample protection off |
 | `limits.channels` | none | Random's limit rows, `{"channel","kind","rows":[{"freq_hz","ceiling"}]}`, on any enabled input, a control channel too, as Random's, ceilings in the channel's unit squared per Hz. The service lowers the random part where a channel would pass its ceiling; a limit never aborts, and it does not lower a tone |
 | `feasibility` | null | Random's shaker record, moving mass and `crest_factor` (default 3). Checked at configure and arm against the predicted peaks (below) |
-| `capture` | off | Sine's, with `run_name` default `mixed` |
+| `capture` | off | `rule` `off` or `entire_test` (in the run folder `run_name` under the local data root, or the first free `<run_name>-<n>` when that name is taken, so no run writes over another); `manual` and `first_seconds` are refused `out_of_range`; `level_settle_s` (default 1) and `first_s` are kept for them; `run_name` (default `mixed`) is a plain name with no path in it. `entire_test` records from engage, when the drive starts after the identification and any review hold, until the run ends: the control channels at the run's rate (`telemetry.f32`, with `capture.json`: the channel table, the rate and the configuration), the law records' description (`law.json`) and every law call (`law_ticks.bin`). No other input and no drive is recorded. `periodic_save_s` is checked and saves nothing |
 | `metadata` | the default fields | Random's |
 
 The control channels are the table's enabled `control` rows; the drive is its first enabled
@@ -4435,7 +4466,8 @@ parameter for a wrong shape (`reference.sha256` that is not 64 lowercase hexadec
 | `limits.divergence_plays`, `divergence_rise_frac` | 3, 0.1 | Correction plays in a row at one level, above the gate, each with its error up more than this fraction of the last, that end the run (`aborted`, `divergence`) |
 | `feasibility.peak_accel`, `peak_velocity_ips`, `disp_pkpk_in` | null | Ceilings on the prepared section's kinematics at full level (control unit, in/s, in pk-pk). Over any, arming is blocked until acknowledged (`feasibility_exceeded`); null for none |
 | `feasibility.kinematics_hp_hz` | 5 | The high-pass the kinematics are integrated after, Hz |
-| `capture`, `metadata` | as shown | Random's |
+| `capture` | as shown | `auto_start` starts the recording after the identification and any review hold, before the first play, in the run folder `run_name` (default `twr_run`) under the local data root, or the first free `<run_name>-<n>` when that name is taken. It holds the control channel's response to each play, one play after another at the station rate (`telemetry.f32`, with `capture.json`: the player's channel table, the rate and the configuration, the reference described in place of its samples); the identification, the pads between plays, a play cut short and the drive are not recorded. The reference is written once beside it (`reference.bin`, little-endian `f64` samples as imported, described by `reference.json`), and the law's records with it: `law.json` once, and `law_calls.bin` (each call's returned drive, `f32`) with its index `law_calls.jsonl`. The law is called after an iteration play that misses its gate, and after a playback play only with `adaptation.during_playback` on. With `auto_start` false nothing is written to disk. Either way `twr.record` answers from the service's memory, for the last eight plays |
+| `metadata` | as shown | Random's |
 
 The control channel is the table's first enabled `control` row; the drive is its first enabled
 `drive` row. A configuration whose shape is wrong is refused `bad_params` naming the field. Its
@@ -5251,8 +5283,10 @@ station with four recorded rows at 12 800 Hz and the configuration above:
   naming the other), `table_invalid`, `config_invalid` (the table, as it is now, no longer carries
   the run: the same items as configure), `not_enough_space` (the free space is under the floor;
   `detail` `free_bytes` and `floor_bytes`), then, once the station is being opened,
-  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused; the
-  message is the controller's own). No refusal makes a folder. A refusal once the station is being
+  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused, the
+  message the controller's own; or, once the station is up, the run folder, `run.json`,
+  `table.json`, `setup.json` or `streams/` could not be written, `detail` `path` and `reason`).
+  No refusal before the station is opened makes a folder. A refusal once the station is being
   opened ends the run `arm_refused`, and `recorder.reset` comes before another start.
 - **`recorder.arm`** (`manual` and `level` modes, from `monitoring`) starts filling the
   pre-window with the frames acquired from the next batch on, and in `level` mode arms the
@@ -5324,7 +5358,8 @@ number timed by the service's clock.
          "fault":null},
  "health":{"batches":284,"blocks_dropped":0,"driver_warnings":0,"station_errors":0,
            "pass_ms":{"last":1.2,"worst":2.8},"batch_gap_ms":3.9},
- "stop":null,"end":null}
+ "stop":null,"end":null,
+ "record":{"folder":"/home/operator/Hertzforge_Data/recorder","problem":null}}
 ```
 
 | `state` | `phase` | Meaning |
@@ -5370,6 +5405,10 @@ number timed by the service's clock.
   <name>: every recording is saved."; `write_failed` the fault's words and the recording that
   holds what was written; `write_behind` how far behind the disk was; a fault is the controller's
   words.
+- `record` is null until the run has started, then the run's record: `folder`, the run folder
+  (see "Recorder Records"), and `problem`, null or the latest problem writing the run folder's own
+  files in words (a log line it could not write, say; each is also a `record` entry in the log).
+  A recording that cannot be written is not a problem here: it ends the run `write_failed`.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -5387,7 +5426,7 @@ number timed by the service's clock.
 the one in progress last with `complete` false, and `next`, the position after the last:
 
 ```
-{"name":"rec_0001","folder":"recordings/rec_0001","trigger":"level",
+{"name":"rec_0001","folder":"streams/rec_0001","trigger":"level",
  "requested_fs_hz":12800,"fs_hz":12800,"group_delay_frames":38.44,"rows":[1,2,3,4],
  "first_station_frame":102422,"trigger_station_frame":108822,"pre_frames":6400,
  "pre_frames_asked":6400,"frames":19200,"seconds":1.5,"bytes":307200,
@@ -5397,7 +5436,7 @@ the one in progress last with `complete` false, and `next`, the position after t
 `folder` is relative to the run folder. `frames` and `bytes` are the file's, `seconds` its frames
 over `fs_hz`; `gaps` lists every place frames are missing, `{"at_frame","dropped_frames"}` (the
 file frame the missing frames would have started at, and how many); `marks` counts the limit marks
-inside it. The other fields are its `recorder.json`'s (see "Recorder Records").
+inside it. The other fields are its `stream.json`'s (see "Recorder Records").
 
 ### Recorder Marks
 
@@ -5419,43 +5458,61 @@ row's `range_max`); `recording` names the recording the mark fell in, or null.
 ### Recorder Records
 
 Each run writes its folder `capture.run_name` under the local data root (`HERTZFORGE_DATA_ROOT`,
-else `Hertzforge_Data` in the home folder; the log names the folder at start, "records in
-<path>"); a name already taken gets the first free `<name>-<n>`, so no run writes over another.
-The wire offers no other place.
+else `Hertzforge_Data` in the home folder); a name already taken gets the first free `<name>-<n>`,
+so no run writes over another. The state names it from start on (`record.folder`), and the log
+names it at start ("records in <path>"). The wire offers no other place. The folder is a run
+folder (`docs/run-folder.md`, schema `hertzforge-run/1`), which the analysis side converts into a
+project (`hertzforge.io.run_convert`):
 
 ```
 <run folder>/run.json
+             table.json
+             setup.json
              log.jsonl
-             marks.jsonl
              end.json
-             recordings/rec_0001/telemetry.f32
-                                 capture.json
-                                 recorder.json
+             streams/rec_0001/telemetry.f32
+                              stream.json
+                              capture.json
 ```
 
-- `run.json`, written at start: `run_id`, `title`, `source`, `station` (as in the state),
-  `config` (the configuration as sent), `requested_fs_hz` and `fs_hz` (the rate asked and the
-  rate the station programmed), `group_delay_frames`, `outputs` (`"none"`), `rows` (each recorded
-  row's `index`, `description`, `role`, `unit` and `range_max`, in column order), `derived` (as
-  configure's, at the programmed rate, `actual` true) and `overload` (`fraction`, 0.9, and
-  `definition`, the indicator's definition in words).
-- `log.jsonl` and `marks.jsonl`: a line for every log entry (`{"seq","at_unix","kind","text"}`)
-  and every mark, as `recorder.log` and `recorder.marks` give them, each a compact JSON object.
-- `end.json`, written when the run finishes: `run_id`, `end` (as in the state), `station_frames`
-  (the frames acquired) and `rows`, each recorded row's statistics over the whole run
-  (`index`, `mean`, `rms`, `peak`, `crest` and `kurtosis`, kurtosis 3 for a Gaussian signal).
-- `recordings/rec_NNNN/`, numbered from `rec_0001` in the order they began:
+- `run.json`, written at start and rewritten as each recording begins and at the end: the
+  manifest, `test` `recorder`, with the run's identity (`run_uid`, unique across restarts, and
+  `run_id`), `title`, `operator`, `article`, `notes`, `specification`, `metadata`, `source`, `sim`
+  on the simulator, `station` (its devices with their serial numbers), `grid` (the rate asked and
+  programmed, `block_frames`, `batch_frames`, `group_delay_frames`, the analysis rate, line
+  spacing and lines), `build`, `start` (`unix`, `utc_offset_s`, `station_frame` 0), `streams`
+  (each recording begun, `kind` `recording`) and `complete`.
+- `table.json`: every row of the channel table the run started with, in the spelling of
+  `channels.get`, with its `revision` and `sha256`.
+- `setup.json`: `config` (the configuration as sent), `resolved` (the acquisition at the
+  programmed rate, `outputs` `"none"`, `rows` (each recorded row's `index`, `description`,
+  `role`, `unit` and `range_max`, in column order), the trigger with its hysteresis and its
+  frames, the analysis and the capture with its floor), `derived` (as configure's, at the
+  programmed rate, `actual` true) and `overload` (`fraction`, 0.9, and `definition`, the
+  indicator's definition in words).
+- `log.jsonl`: a line for every log entry, `{"seq","at_unix","frame","kind","text"}` as
+  `recorder.log` gives it with `frame`, the station frame when the run's thread passed it to
+  the record, ten times a second (null before the first batch); a mark's line (`mark` or `overload`) has the mark's own `station_frame` as its
+  `frame` and the mark, as `recorder.marks` gives it, as its `data`.
+- `end.json`, written when the run finishes: `run_uid`, `run_id`, `end` (as in the state),
+  `at_unix`, `station_frames` (the frames acquired), `rows`, each recorded row's statistics over
+  the whole run (`index`, `mean`, `rms`, `peak`, `crest` and `kurtosis`, kurtosis 3 for a Gaussian
+  signal), and `streams`, each recording's `frames`, `drops`, `gaps`, `fault` and `complete`. The
+  finished state is published once it is written.
+- `streams/rec_NNNN/`, numbered from `rec_0001` in the order they began:
   - `telemetry.f32`: no header; little-endian 32-bit floats, one frame after another, each frame
     one value per recorded row in `rows` order, in the row's unit, at `fs_hz`. The file's size is
     the authority on its length: a reader counts its frames as the size over 4 times the rows.
+  - `stream.json`: the recording's facts, written whole before any frame and again when the
+    recording ends.
   - `capture.json`: the writer's own record: the channel table at capture time, the rate
     (`config.sample_rate_hz`, the programmed rate), `frames_written`, `chunks_dropped`, `flushes`,
     `free_space_floor_bytes`, `complete` and `fault`.
-  - `recorder.json`: the recording's facts, written provisionally before any frame and
-    finalized when the recording ends.
 
-| `recorder.json` field | Meaning |
+| `stream.json` field | Meaning |
 |---|---|
+| `kind` | `recording` |
+| `channels` | The recorded rows, `{"index","unit","description"}`, in column order |
 | `complete` | False until the recording is finalized: a recording found with `complete` false was cut short by a crash, and its file holds what reached the disk |
 | `name`, `trigger` | `rec_NNNN`; `start`, `manual` or `level` |
 | `requested_fs_hz`, `fs_hz` | The rate asked and the rate the station programmed; the file is at `fs_hz` |
@@ -5464,16 +5521,18 @@ The wire offers no other place.
 | `first_station_frame` | The station frame of the file's first frame |
 | `trigger_station_frame` | The station frame of the trigger, file frame `pre_frames`; t = 0 |
 | `pre_frames`, `pre_frames_asked` | The pre-window held and asked; held less than asked when it had not filled |
-| `frames` | The frames written, as the writer counted them |
+| `frames` | The frames written, as the writer counted them (0 until finalized) |
 | `gaps` | `[{"at_frame","dropped_frames"}]`, empty when gap-free |
 | `marks` | The marks inside the recording, as `recorder.marks` gives them |
 | `fault` | Null, or the write fault's words |
+| `writer` | Once finalized: the writer's `ring_capacity`, `chunks_written`, `chunks_dropped`, `flushes`, `free_space_at_start_bytes` and `free_space_floor_bytes` |
 
 A frame's time from the trigger is `(file frame - pre_frames) / fs_hz` seconds, and its station
 frame is `first_station_frame` plus its file frame plus the frames missing before it. A reader
-ignores fields it does not know. Every file is written by the run's own thread or its record
-thread, never by the thread that reads the station; the record thread flushes and syncs the data
-every 5 s, so a crash loses at most the last 5 s.
+ignores fields it does not know. The run folder's own files are written by the run's record
+thread and the recordings by the Recorder's record thread, never by the thread that reads the
+station; the recordings are flushed and synced every 5 s and the log every 5 s, so a crash loses
+at most the last 5 s.
 
 ### The Recorder on the Simulator
 

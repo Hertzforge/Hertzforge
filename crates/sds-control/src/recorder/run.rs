@@ -4,23 +4,27 @@
 //! The pump thread is the station's reading thread. It holds the service for one batch
 //! and one analysis pass, hands the batch to the display ring, and does nothing else:
 //! no file, no free-space query, no join. The run's thread composes the view ten times
-//! a second, reads the free space once a second, logs, and writes the run folder's
-//! records. The core's record thread writes the recordings. Verbs take the service
-//! lock, so the server runs them on the blocking pool with a bounded wait.
+//! a second, reads the free space once a second, logs, and hands the run's record its
+//! log, its streams and its end. The shared record's writer thread writes the run
+//! folder's own files (`run.json`, `table.json`, `setup.json`, `log.jsonl`, `end.json`)
+//! and the core's record thread writes the recordings under `streams/`. Verbs take the
+//! service lock, so the server runs them on the blocking pool with a bounded wait.
 
 use super::config::{frames_for, round, Derived, Mode, RecorderStation, WireRecorder};
-use super::records::{self, Records};
+use super::records::{self, StartFacts};
 use super::sim_signal::{Signal, Tap, Warnings};
 use super::subscribe::{FrfData, RowSpectrum};
-use super::view::{Disk, End, Health, LiveRow, RecorderView, Recording, State, Trigger};
+use super::view::{Disk, End, Health, LiveRow, RecordRef, RecorderView, Recording, State, Trigger};
 use crate::protocol::{num, ErrorCode, MethodError};
 use crate::pulse::rails::Shared;
+use crate::random::record as run_ids;
+use crate::record::{ProblemFn, RecordOptions, RecordStatus, RunRecord};
 use crate::station::{self, NiScanner, StationPlan};
 use hertzforge_channel_table::ChannelTable;
 use hertzforge_recorder::service::{EndCause, Mark, RecState, RecStatus};
 use hertzforge_recorder::RecorderService;
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -32,6 +36,8 @@ pub const PUBLISH_PERIOD: Duration = Duration::from_millis(100);
 pub const FREE_SPACE_PERIOD: Duration = Duration::from_secs(1);
 /// Seconds of every recorded row the display ring keeps.
 pub const DISPLAY_S: f64 = 2.0;
+/// The longest the run's thread waits, at the end, for the record to write its end.
+const RECORD_FINISH_WAIT: Duration = Duration::from_secs(10);
 /// The longest a wall-clock-paced pump sleeps in one go, so a stop is never left
 /// waiting behind a long pause.
 const MAX_PACE: Duration = Duration::from_millis(50);
@@ -143,6 +149,14 @@ pub struct StartContext {
     pub bind: String,
     /// What the simulator's inputs carry: the stated source, or a test's.
     pub signal: Option<Signal>,
+    /// The signal in words, for the record of a simulated run.
+    pub signal_words: Option<Value>,
+    /// The table's revision, for the record.
+    pub revision: u64,
+    /// The devices of the last scan, for the record's models and serial numbers.
+    pub devices: Vec<hertzforge_hal::DiscoveredDevice>,
+    /// How the run's record is written.
+    pub record: RecordOptions,
 }
 
 /// What the pump and the run's thread hand on for the display.
@@ -209,6 +223,10 @@ pub struct RecorderRun {
     handoff: Handoff,
     /// The run's marks, kept when the service is released at the end.
     final_marks: Mutex<Vec<Mark>>,
+    /// The run's record's status (its folder and its latest problem), once open.
+    record_status: Mutex<Option<Arc<RecordStatus>>>,
+    /// The run's identity, unique across restarts, once started.
+    run_uid: Mutex<String>,
 }
 
 impl RecorderRun {
@@ -236,6 +254,8 @@ impl RecorderRun {
             saved_at_arm: Mutex::new(0),
             handoff: Handoff::default(),
             final_marks: Mutex::new(Vec::new()),
+            record_status: Mutex::new(None),
+            run_uid: Mutex::new(String::new()),
         }
     }
 
@@ -330,12 +350,9 @@ impl RecorderRun {
                 hertzforge_hal::ClockDomain::Independent => "independent",
                 hertzforge_hal::ClockDomain::Unknown => "unknown",
             };
-            let records = Records::open(&ctx.records_root, &w.run_name).map_err(|e| {
-                refuse(
-                    "arm_refused",
-                    format!("The run folder could not be made: {e}"),
-                )
-            })?;
+            let class = station.station;
+            let provenance = station.provenance.clone();
+            let caps = station.backend.caps();
             let signal = if hardware { None } else { ctx.signal.clone() };
             let backend: Box<dyn hertzforge_hal::Backend> =
                 Box::new(Tap::new(station.backend, signal, n_rows, warnings.clone()));
@@ -344,7 +361,9 @@ impl RecorderRun {
                 ctx.table.clone(),
                 backend,
                 station.station,
-                records.recordings(),
+                // The recordings' place is the run folder's `streams/`, named once the
+                // folder is made below.
+                ctx.records_root.join(records::STREAMS),
             )
             .map_err(|e| refuse("arm_refused", format!("The station refused to start: {e}")))?
             .with_block_frames(hertzforge_hal::default_block_frames(fs))
@@ -353,14 +372,9 @@ impl RecorderRun {
                 .map_err(|e| refuse("arm_refused", format!("The station refused to start: {e}")))?;
             svc.start_monitor()
                 .map_err(|e| refuse("arm_refused", format!("The station refused to start: {e}")))?;
-            if w.trigger.mode == Mode::Start {
-                svc.record_from_start().map_err(|e| {
-                    refuse("arm_refused", format!("The recording could not begin: {e}"))
-                })?;
-            }
-            Ok::<_, MethodError>((svc, guard, clock, hardware, records))
+            Ok::<_, MethodError>((svc, guard, clock, hardware, class, provenance, caps))
         })();
-        let (svc, guard, clock, hardware, records) = match built {
+        let (mut svc, guard, clock, hardware, class, provenance, caps) = match built {
             Ok(b) => b,
             Err(e) => {
                 self.end_before_start(&e);
@@ -368,8 +382,6 @@ impl RecorderRun {
             }
         };
         let programmed = svc.actual_rate_hz();
-        let folder = records.folder().to_path_buf();
-        *lock(&self.folder) = Some(folder.clone());
         if (programmed - fs).abs() > 1e-9 {
             self.shared.add_log(
                 "station",
@@ -388,8 +400,6 @@ impl RecorderRun {
                 num(fs)
             ),
         );
-        self.shared
-            .add_log("note", format!("records in {}", folder.display()));
         let drives: Vec<String> = ctx
             .table
             .channels
@@ -409,8 +419,9 @@ impl RecorderRun {
             },
         );
 
-        // run.json: the configuration, the station and the derived numbers at the
-        // programmed rate.
+        // The run's record, before the first batch is read: `run.json`, `table.json`,
+        // `setup.json` and the log so far, on the record's own thread. Refused here,
+        // the start is refused and the station released.
         let derived_now = {
             let mut d = self.wire.derive(
                 &ctx.table,
@@ -423,27 +434,98 @@ impl RecorderRun {
             d.batch_frames = super::config::BLOCKS_PER_BATCH * d.block_frames;
             d
         };
-        let v0 = self.view();
-        records.write_run(&json!({
-            "run_id": self.id,
-            "title": self.wire.title,
-            "source": v0.source.unwrap_or("SIM"),
-            "station": v0.station.to_json(),
-            "config": self.config,
-            "requested_fs_hz": num(fs),
-            "fs_hz": num(programmed),
-            "group_delay_frames": num(derived_now.group_delay_frames),
-            "outputs": "none",
-            "rows": v0.live_rows.iter().map(|r| {
-                let range = ctx.table.channels.iter().find(|c| c.index == r.index)
-                    .map_or(0.0, |c| c.range_max);
-                json!({"index": r.index, "description": r.description, "role": r.role,
-                       "unit": r.unit, "range_max": num(range)})
-            }).collect::<Vec<_>>(),
-            "derived": derived_now.to_json(),
-            "overload": {"fraction": num(super::config::OVERLOAD_FRACTION),
-                         "definition": OVERLOAD_DEFINITION},
-        }));
+        let started_unix = now_unix();
+        let run_uid = run_ids::run_uid(started_unix, &self.id);
+        *lock(&self.run_uid) = run_uid.clone();
+        let rows = self.view().live_rows.clone();
+        let (log_so_far, log_written) = self.shared.log_since(0);
+        let facts = StartFacts {
+            run_id: &self.id,
+            run_uid: &run_uid,
+            wire: &self.wire,
+            table: &ctx.table,
+            revision: ctx.revision,
+            plan: &ctx.station,
+            class,
+            provenance: &provenance,
+            devices: &ctx.devices,
+            caps: &caps,
+            derived: &derived_now,
+            rows: &rows,
+            sim_source: if hardware {
+                None
+            } else {
+                ctx.signal_words.clone()
+            },
+            started_unix,
+            utc_offset_s: run_ids::utc_offset_s(),
+            overload: json!({"fraction": num(super::config::OVERLOAD_FRACTION),
+                             "definition": OVERLOAD_DEFINITION}),
+            log: log_so_far
+                .iter()
+                .map(|e| log_entry(e, None, None))
+                .collect(),
+        };
+        let begin = records::begin(&facts, ctx.records_root.clone());
+        let shared = self.shared.clone();
+        let problem: ProblemFn = Box::new(move |words: String, _data: Value| {
+            // In the log and, through the record's status, in the state's `record`.
+            shared.add_log("record", words);
+        });
+        let record = match RunRecord::open(begin, &ctx.record, problem) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = svc.stop_monitor();
+                let err = refuse(
+                    "arm_refused",
+                    format!(
+                        "The run's record could not be written, so the run did not start: {} \
+                         ({}). Choose a data folder that can be written.",
+                        e.path.display(),
+                        e.reason
+                    ),
+                )
+                .with_detail(json!({"path": e.path.display().to_string(), "reason": e.reason}));
+                self.end_before_start(&err);
+                return Err(err);
+            }
+        };
+        let folder = record.folder().to_path_buf();
+        let streams = folder.join(records::STREAMS);
+        // Made here, on the start's thread, as the run folder is: the record thread
+        // claims each recording's folder inside it.
+        let made = std::fs::create_dir(&streams);
+        svc.set_data_root(streams.clone());
+        let begun = made
+            .map_err(|e| format!("{} could not be made: {e}", streams.display()))
+            .and_then(|()| {
+                if w.trigger.mode == Mode::Start {
+                    svc.record_from_start()
+                        .map_err(|e| format!("The recording could not begin: {e}"))
+                } else {
+                    Ok(())
+                }
+            });
+        if let Err(words) = begun {
+            let _ = svc.stop_monitor();
+            let err = refuse("arm_refused", words);
+            self.end_before_start(&err);
+            let mut end = serde_json::Map::new();
+            end.insert("run_uid".into(), Value::from(run_uid.as_str()));
+            end.insert("run_id".into(), Value::from(self.id.as_str()));
+            end.insert("end".into(), view_end_json(&self.view()));
+            end.insert("at_unix".into(), Value::from(now_unix()));
+            end.insert("station_frames".into(), Value::from(0));
+            for e in self.shared.log_since(log_written).0.iter() {
+                record.log().append(log_entry(e, None, None));
+            }
+            record.finish(end);
+            return Err(err);
+        }
+        *lock(&self.folder) = Some(folder.clone());
+        *lock(&self.record_status) = Some(record.status());
+        self.shared
+            .add_log("note", format!("records in {}", folder.display()));
 
         let mut v = (*self.view()).clone();
         v.state = State::Running;
@@ -459,8 +541,19 @@ impl RecorderRun {
         v.clock = Some(clock);
         v.t_s = Some(0.0);
         v.station_frames = Some(0);
+        v.record = Some(RecordRef {
+            folder: folder.display().to_string(),
+            problem: None,
+        });
         self.shared
             .add_log("state", format!("running, {}", v.phase));
+        // The entries made before the first batch, to the record now: the station has
+        // delivered no frame yet.
+        let (entries, log_written) = self.shared.log_since(log_written);
+        let to_record = record.log();
+        for e in &entries {
+            to_record.append(log_entry(e, None, None));
+        }
         self.publish(v);
 
         {
@@ -489,7 +582,7 @@ impl RecorderRun {
             let _ = std::thread::Builder::new()
                 .name("hertzforge-recorder-run".into())
                 .spawn(move || {
-                    let last = run.watch(&svc, &pump_done, records, warnings);
+                    let last = run.watch(&svc, &pump_done, record, log_written, warnings);
                     // The run is finished only once the hardware is free: the service (and with
                     // it the station) goes, then the lock, then the finished state is published.
                     // Published first, a start sent on it found the lock still held and was
@@ -708,21 +801,27 @@ impl RecorderRun {
         &self,
         svc: &Arc<Mutex<RecorderService>>,
         pump_done: &AtomicBool,
-        records: Records,
+        record: RunRecord,
+        mut log_written: u64,
         warnings: Warnings,
     ) -> Option<RecorderView> {
-        let fs_asked = self.wire.fs_hz;
+        let folder = record.folder().to_path_buf();
+        let streams_dir = folder.join(records::STREAMS);
+        let log = record.log();
+        let rows = self.view().live_rows.clone();
         let mut free: Option<u64> = None;
         let mut free_read: Option<Instant> = None;
         let mut marks_sent = 0usize;
-        let mut log_written = 0u64;
+        // The facts of the log's mark entries, by their place in the log, until written.
+        let mut mark_data: HashMap<u64, (Value, u64)> = HashMap::new();
+        let mut declared: Vec<String> = Vec::new();
         let mut known_recording: Option<String> = None;
         let mut saved_logged = 0usize;
         let mut driver_warnings = 0u64;
         loop {
             let done = pump_done.load(Ordering::SeqCst);
             if free_read.is_none_or(|t| t.elapsed() >= FREE_SPACE_PERIOD) || done {
-                free = hertzforge_capture::free_space_bytes_for(records.folder()).ok();
+                free = hertzforge_capture::free_space_bytes_for(&folder).ok();
                 free_read = Some(Instant::now());
             }
             for w in std::mem::take(&mut *lock(&warnings)) {
@@ -744,18 +843,15 @@ impl RecorderRun {
                 let stats = s.row_stats();
                 (st, fs, floor, marks, (acq_df, spectra), frf, saved, stats)
             };
-            // Marks and recordings, to the log and the records.
+            // Marks to the log, each entry with the mark's own facts for the record.
             if !marks.is_empty() {
                 marks_sent += marks.len();
-                let lines: Vec<Value> = marks
-                    .iter()
-                    .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
-                    .collect();
                 for m in &marks {
                     let (kind, text) = mark_words(m);
-                    self.shared.add_log(kind, text);
+                    let seq = self.shared.add_log_seq(kind, text);
+                    let data = serde_json::to_value(m).unwrap_or(Value::Null);
+                    mark_data.insert(seq, (data, mark_frame(m)));
                 }
-                records.marks(&lines);
             }
             let now_name = st.recording.as_ref().map(|r| r.name.clone());
             if now_name != known_recording {
@@ -793,6 +889,20 @@ impl RecorderRun {
                 );
             }
             saved_logged = saved.len();
+            // Every recording begun is declared in the manifest as a stream, in the order
+            // they began (one begun and saved between two passes included).
+            let mut begun: Vec<String> = saved.iter().map(|r| r.name.clone()).collect();
+            if let Some(r) = &st.recording {
+                if !begun.contains(&r.name) {
+                    begun.push(r.name.clone());
+                }
+            }
+            if begun.len() > declared.len() {
+                declared = begun;
+                let mut patch = serde_json::Map::new();
+                patch.insert("streams".into(), records::streams_member(&declared, &rows));
+                record.patch_manifest(patch);
+            }
 
             // The display's spectra.
             {
@@ -826,37 +936,64 @@ impl RecorderRun {
             }
 
             let v = self.compose(&st, fs, floor, free, driver_warnings, done);
-            for e in self.shared.log_since(log_written).0.iter() {
-                records.log(&[e.to_json()]);
-            }
-            log_written = self.shared.log_since(0).1;
-            let finished = v.state == State::Finished;
-            if finished {
-                let end = v.end.as_ref().map_or(Value::Null, End::to_json);
-                records.write_end(&json!({
-                    "run_id": self.id,
-                    "end": end,
-                    "station_frames": v.station_frames,
-                    "rows": stats.iter().zip(&v.live_rows).map(|(s, r)| json!({
-                        "index": r.index,
-                        "mean": num(round(s.mean, 6)),
-                        "rms": num(round(s.rms, 6)),
-                        "peak": num(round(s.peak, 6)),
-                        "crest": num(round(s.crest, 6)),
-                        "kurtosis": num(round(s.kurtosis, 6)),
-                    })).collect::<Vec<_>>(),
-                }));
-            }
-            if finished {
-                // The log's last lines; the caller publishes the finished state once the
-                // hardware is free.
-                for e in self.shared.log_since(log_written).0.iter() {
-                    records.log(&[e.to_json()]);
+            // The log to the record, each entry with the station frame now (a mark's
+            // own), and a mark's facts.
+            let frame = (st.batches > 0).then_some(st.station_frames);
+            let forward = |log_written: &mut u64, mark_data: &mut HashMap<u64, (Value, u64)>| {
+                let (entries, next) = self.shared.log_since(*log_written);
+                for e in &entries {
+                    let (data, at) = match mark_data.remove(&e.seq) {
+                        Some((d, f)) => (Some(d), Some(f)),
+                        None => (None, frame),
+                    };
+                    log.append(log_entry(e, at, data));
+                }
+                *log_written = next;
+            };
+            forward(&mut log_written, &mut mark_data);
+            if v.state == State::Finished {
+                // The log's last lines, then the end; the caller publishes the finished
+                // state once the hardware is free. Every recording is final by now: the
+                // pump closed the record thread before it said it was done.
+                forward(&mut log_written, &mut mark_data);
+                let mut end = serde_json::Map::new();
+                end.insert("run_uid".into(), Value::from(lock(&self.run_uid).as_str()));
+                end.insert("run_id".into(), Value::from(self.id.as_str()));
+                end.insert("end".into(), view_end_json(&v));
+                end.insert("at_unix".into(), Value::from(now_unix()));
+                end.insert("station_frames".into(), json!(v.station_frames));
+                end.insert(
+                    "rows".into(),
+                    Value::Array(
+                        stats
+                            .iter()
+                            .zip(&v.live_rows)
+                            .map(|(s, r)| {
+                                json!({
+                                    "index": r.index,
+                                    "mean": num(round(s.mean, 6)),
+                                    "rms": num(round(s.rms, 6)),
+                                    "peak": num(round(s.peak, 6)),
+                                    "crest": num(round(s.crest, 6)),
+                                    "kurtosis": num(round(s.kurtosis, 6)),
+                                })
+                            })
+                            .collect(),
+                    ),
+                );
+                end.insert("streams".into(), records::end_streams(&streams_dir));
+                let status = record.status();
+                record.finish(end);
+                // The finished state is published once the record says so: `end.json`
+                // written and `run.json` complete. This thread reads no station; the
+                // wait is bounded so a disk that hangs cannot hold the run's end.
+                let t0 = Instant::now();
+                while !status.finished() && t0.elapsed() < RECORD_FINISH_WAIT {
+                    std::thread::sleep(Duration::from_millis(5));
                 }
                 return Some(v);
             }
             self.publish(v);
-            let _ = fs_asked;
             std::thread::sleep(PUBLISH_PERIOD);
         }
     }
@@ -1067,6 +1204,9 @@ impl RecorderRun {
         if v.state == State::Finished {
             v.recording = None;
         }
+        if let (Some(r), Some(status)) = (v.record.as_mut(), lock(&self.record_status).as_ref()) {
+            r.problem = status.problem();
+        }
         v
     }
 
@@ -1077,7 +1217,7 @@ impl RecorderRun {
         };
         let v = self.view();
         let in_progress = v.recording.as_ref().map(|r| r.name.clone());
-        let all = records::list(&folder.join(records::RECORDINGS), in_progress.as_deref());
+        let all = records::list(&folder.join(records::STREAMS), in_progress.as_deref());
         let next = all.len() as u64;
         (all.into_iter().skip(since as usize).collect(), next)
     }
@@ -1102,6 +1242,37 @@ impl RecorderRun {
     /// The live rows as the view holds them, for a new configuration of the table.
     pub fn rows(&self) -> Vec<LiveRow> {
         self.view().live_rows.clone()
+    }
+}
+
+/// Seconds since 1970, from the wall clock.
+fn now_unix() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// A log entry as the run's record holds it: the wire's members, the station frame
+/// when it was handed to the record (null before the station has delivered one; a
+/// mark's own), and `data`, a mark's facts, when there are any.
+fn log_entry(e: &crate::random::run::LogEntry, frame: Option<u64>, data: Option<Value>) -> Value {
+    let mut v = json!({"seq": e.seq, "at_unix": e.at_unix, "frame": frame,
+                       "kind": e.kind, "text": e.text});
+    if let (Some(d), Value::Object(m)) = (data, &mut v) {
+        m.insert("data".into(), d);
+    }
+    v
+}
+
+/// The state's `end`, for `end.json`.
+fn view_end_json(v: &RecorderView) -> Value {
+    v.end.as_ref().map_or(Value::Null, End::to_json)
+}
+
+/// The station frame a mark was made at.
+fn mark_frame(m: &Mark) -> u64 {
+    match m {
+        Mark::Limit { station_frame, .. } | Mark::Overload { station_frame, .. } => *station_frame,
     }
 }
 

@@ -1,9 +1,8 @@
 <script lang="ts">
 	/**
-	 * A finished run's way to its data, on the end line of every test type that keeps a run folder:
-	 * Open in Analysis (then Show in Analysis), which converts the folder and opens it in the
-	 * analysis workspace that suits the run, and Copy Folder Path; each with the line that says how
-	 * it went. The status is a word and a mark, never a colour alone.
+	 * A finished run's way to its data, under the end line of any test type whose runs leave a run
+	 * folder: Open in Analysis (then Show in Analysis) and Copy Folder Path, with the line that says
+	 * how either went. The state is the opener's (`RunOpen`); nothing here converts anything.
 	 */
 	import type { RunRecordRef } from '$lib/protocol/types';
 	import { runOpenWords, type RunOpen } from './runOpen.svelte';
@@ -15,25 +14,25 @@
 	let { record, opener }: Props = $props();
 
 	const opening = $derived(opener.at(record.folder));
-	const openWords = $derived(runOpenWords(opening, opener.refusal, opener.added));
+	const words = $derived(runOpenWords(opening, opener.refusal, opener.added));
 </script>
 
 <div class="endfoot">
 	<div class="endacts" data-testid="run-end-actions">
 		<button class="btn sm" data-testid="act-open-analysis" data-status={opening} aria-busy={opening === 'working'} aria-disabled={opening === 'working'} class:off={opening === 'working'} title="Convert the run folder and open its data in the analysis side." onclick={() => void opener.open(record.folder)}>
 			{#if opening === 'working'}<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>{/if}
-			{openWords.label}
+			{words.label}
 		</button>
 		<button class="btn sm ghost" data-testid="act-copy-path" title={record.folder} onclick={() => void opener.copyPath(record.folder)}>Copy Folder Path</button>
 	</div>
-	{#if openWords.line}
+	{#if words.line}
 		<p class="openline {opening}" role={opening === 'refused' ? 'alert' : 'status'} data-testid="open-analysis-status" data-status={opening}>
 			{#if opening === 'done'}
 				<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M2.5 7.3l2.8 2.8 6-6.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			{:else if opening === 'refused'}
 				<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M4.5 1h5L13 4.5v5L9.5 13h-5L1 9.5v-5z" fill="currentColor" /><path d="M4.8 7h4.4" stroke="var(--bg-1)" stroke-width="1.7" stroke-linecap="round" /></svg>
 			{/if}
-			<span>{openWords.line}</span>
+			<span>{words.line}</span>
 		</p>
 	{/if}
 	{#if opener.copy !== 'idle'}

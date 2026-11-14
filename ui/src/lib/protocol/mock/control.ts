@@ -113,9 +113,9 @@ export interface ControlServerOptions {
 	recorderFreeBytes?: number | null;
 	/** A MIMO Shock run's second level ends on an absolute abort line. */
 	mimoShockAbsoluteAbort?: boolean;
-	/** Where a Random run's folder is made (default `~/Hertzforge_Data`). */
+	/** Where a Random or Sine run's folder is made (default `~/Hertzforge_Data`). */
 	dataRoot?: string;
-	/** A Random or classical shock run's record: refused at arm (`unwritable`), or a stream stops while it runs (`problem`). */
+	/** A Random, Sine or classical shock run's record: refused at arm (`unwritable`), or a stream stops while it runs (`problem`). */
 	record?: 'unwritable' | 'problem';
 }
 
@@ -915,7 +915,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
-		feasibilityExceeds: options.feasibilityExceeds ?? false
+		feasibilityExceeds: options.feasibilityExceeds ?? false,
+		dataRoot: options.dataRoot,
+		record: options.record,
+		folderName: runFolderName
 	});
 	const twr = createTwrMock({
 		speed,

@@ -64,6 +64,11 @@
    "verdict": "pass",
    "message": "The profile is within the shaker's ratings."
   },
-  "end": null
+  "end": null,
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/20261101-142233_sine_sine-0003",
+   "streams": "on",
+   "problem": null
+  }
  }
 }

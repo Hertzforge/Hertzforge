@@ -957,15 +957,15 @@ impl ShockEngine for ServiceEngine {
         );
         self.station_facts = Some(StationFacts {
             source: station::source_of(class),
-            station: crate::random::record::station_value(
-                &plan.station,
+            station: crate::random::record::station_member(
+                matches!(&plan.station, station::StationPlan::Sim { .. }),
                 class,
                 &provenance,
                 &plan.devices,
                 &caps,
             ),
             sim: crate::random::record::sim_value(&plan.station, class),
-            build: crate::random::record::build_value(&provenance),
+            build: crate::random::record::build_value(provenance.core_build),
             output_latency: match &caps.output_buffer {
                 Some(b) => json!({"frames": b.min_lookahead_frames, "how": "declared"}),
                 None => json!({"frames": null, "how": "unknown"}),

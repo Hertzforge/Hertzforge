@@ -1801,6 +1801,36 @@ export class ProjectState {
 		return parts;
 	}
 
+	/** How many parts an open object holds, as its row lists them; null when it is not open. */
+	partCount(name: string): number | null {
+		const kids = this.children[name];
+		if (!kids) return null;
+		switch (kids.kind) {
+			case 'grid':
+				return new Set(kids.cells.flat().filter((i) => i >= 0)).size;
+			case 'modes':
+				return kids.modes.length;
+			case 'channels':
+				return kids.channels.length;
+			case 'photos':
+				return kids.photos.length;
+			case 'matches':
+				return kids.matches.length;
+			default:
+				return null;
+		}
+	}
+
+	/**
+	 * The picked parts as the confirmation says them: "3 of A", or "all of B" when every part of
+	 * B is picked, which deletes B itself (Brandon, 2026-11-13).
+	 */
+	partsSaid(parts: Record<string, number[]>): string {
+		return Object.entries(parts)
+			.map(([name, picks]) => (picks.length === this.partCount(name) ? `all of ${name}` : `${picks.length} of ${name}`))
+			.join(', ');
+	}
+
 	/**
 	 * What Delete takes with a part of a geometry picked: the solids, element groups or mated
 	 * surfaces picked, never the geometry. Null for a part Delete leaves alone (the nodes, a
@@ -1907,7 +1937,7 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// a study keeps the window; any other workspace goes to Signals, the recordings' module
+				// a study keeps the window; any other workspace goes to Signal Processing, the recordings' module
 				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
 				this.app.analyze.selectProject();
 			}
@@ -2001,6 +2031,8 @@ export class AppState {
 	readonly runOpen: RunOpen;
 	/** A finished classical shock run's way to its data: the Shock workspace. */
 	readonly shockRunOpen: RunOpen;
+	/** A finished Sine run's way to its data on the analysis side. */
+	readonly sineRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2069,6 +2101,7 @@ export class AppState {
 		};
 		this.runOpen = new RunOpen(runHost);
 		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
+		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});

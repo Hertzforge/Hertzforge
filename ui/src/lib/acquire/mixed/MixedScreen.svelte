@@ -17,7 +17,7 @@
 	import ProfileEditor from '../ProfileEditor.svelte';
 	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
-	import SineCapture from '../sine/SineCapture.svelte';
+	import MixedCapture from './MixedCapture.svelte';
 	import { runChannels } from '../sine/sineSetup';
 	import { clock } from '../words';
 	import MixedControl from './MixedControl.svelte';
@@ -124,7 +124,7 @@
 	{:else if section === 'limits'}
 		<MixedLimits {mixed} />
 	{:else}
-		<SineCapture sine={mixed} />
+		<MixedCapture sine={mixed} />
 	{/if}
 {/snippet}
 

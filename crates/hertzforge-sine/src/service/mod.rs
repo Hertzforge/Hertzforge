@@ -418,6 +418,12 @@ pub struct SineService {
     law_drain: Vec<law_records::LawRecord>,
     /// `law_ticks.bin` in the capture's folder while a capture runs.
     law_ticks_out: Option<std::io::BufWriter<std::fs::File>>,
+    /// The law's call records kept for the host since it last took them, when it
+    /// asked for them ([`SineService::keep_law_records`]).
+    law_kept: Option<Vec<law_records::LawRecord>>,
+    /// The identification's complex transfer function on the grid of
+    /// [`FrfDisplay::freqs`], as the estimator gave it.
+    frf_h: Option<Vec<(f64, f64)>>,
 }
 
 /// The law's calls as the service has seen them (from the records ring).
@@ -649,6 +655,8 @@ impl SineService {
             law_tally: LawTally::default(),
             law_drain: Vec::new(),
             law_ticks_out: None,
+            law_kept: None,
+            frf_h: None,
         })
     }
 
@@ -1102,6 +1110,32 @@ impl SineService {
     /// runs at the gate and (for the local packer) once per display window.
     pub fn frf(&self) -> Option<&FrfDisplay> {
         self.frf.as_ref()
+    }
+
+    /// The identification's complex transfer function, drive to control response,
+    /// on the grid of [`SineService::frf`] (its `freqs`), as the estimator
+    /// (`hertzforge_dsp::frf::h_estimate_hv_with_coherence`) gave it, after the
+    /// alignment by [`SineService::sysid_lag_frames`]. `None` until identification
+    /// has run. For a host's record; nothing in the run reads it.
+    pub fn frf_complex(&self) -> Option<&[(f64, f64)]> {
+        self.frf_h.as_deref()
+    }
+
+    /// Keep every law call record the service drains between batches for the host
+    /// to take ([`SineService::take_law_records`]), or stop keeping them. Off by
+    /// default. The records are drained between batches as before; keeping them
+    /// is a copy there, never on the control tick.
+    pub fn keep_law_records(&mut self, keep: bool) {
+        self.law_kept = keep.then(Vec::new);
+    }
+
+    /// The law call records drained since the last take, in order; empty when
+    /// they are not kept.
+    pub fn take_law_records(&mut self) -> Vec<law_records::LawRecord> {
+        match self.law_kept.as_mut() {
+            Some(kept) => std::mem::take(kept),
+            None => Vec::new(),
+        }
     }
 
     /// The step's shared [`engine::StatusCell`]; `None` until the step is built
@@ -2089,6 +2123,7 @@ impl SineService {
         // residual the +-1 dB bar was hitting). DC carries no sine-FRF information
         // anyway. Start the grid at bin 1 (the real feedforward fix).
         let coh: Vec<f64> = coh_full.iter().skip(1).copied().collect();
+        self.frf_h = Some(h_full.iter().skip(1).copied().collect());
         let h_mag: Vec<f64> = h_full
             .iter()
             .skip(1)
@@ -2774,6 +2809,9 @@ impl SineService {
                 consecutive,
                 at_tick: tick,
             });
+        }
+        if let Some(kept) = self.law_kept.as_mut() {
+            kept.extend_from_slice(&drained);
         }
         if let Some(out) = self.law_ticks_out.as_mut() {
             use std::io::Write;

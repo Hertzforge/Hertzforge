@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
-	 * Where a run is recorded, for the Run card of every test type that keeps a run folder: the
-	 * folder's name, its full path under it, and a word when the folder keeps no time histories.
-	 * Recording to it while the run goes, recorded in it once the run has ended.
+	 * Where a run is recorded, for the Run card of any test type whose runs leave a run folder: from
+	 * arm on, "Recording to" (after the end, "Recorded in") with the folder's name, the full path
+	 * under it in small type, selectable, and a line when the time histories are not kept.
 	 */
 	import type { RunRecordRef } from '$lib/protocol/types';
 	import { folderName } from './words';
@@ -34,7 +34,7 @@
 		color: var(--text-2);
 	}
 
-	.mk {
+	.rec .mk {
 		flex: none;
 		margin-top: 1px;
 		color: var(--text-3);
@@ -70,7 +70,6 @@
 
 	.msg {
 		margin-top: 2px;
-		font-size: var(--text-xs);
 		color: var(--text-2);
 	}
 </style>

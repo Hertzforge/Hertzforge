@@ -422,3 +422,16 @@ describe('a finished run opened in Analysis', () => {
 		expect(app.project.busy).toBeNull();
 	});
 });
+
+describe('deleting parts', () => {
+	it('says "all of" an object whose every part is picked, which deletes the object', () => {
+		const { app } = make();
+		app.project.children = {
+			Run: { kind: 'grid', rows: [], columns: [], cells: [[0, 1], [2, -1]], icons: [], undefined: [] },
+			Modes: { kind: 'modes', modes: [{ index: 0, frequency: 10, damping: 0.01, description: '' }] }
+		} as never;
+		expect(app.project.partsSaid({ Run: [0, 2] })).toBe('2 of Run');
+		expect(app.project.partsSaid({ Run: [0, 1, 2], Modes: [0] })).toBe('all of Run, all of Modes');
+		expect(app.project.partsSaid({ Closed: [0] }), 'an object not open is counted as picked').toBe('1 of Closed');
+	});
+});

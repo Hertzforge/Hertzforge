@@ -28,9 +28,11 @@ Four things, each with a control-side form and an analysis-side form:
   operator action, and the measured streams. Where a module records, the control service writes
   the run into a run folder (`crates/hertzforge-capture`, `crates/hertzforge-recorder`).
 - **The results.** What the module computed from the run: spectra, pulses, verdicts,
-  identifications. The analysis side has converters for two modules' run folders
-  (`src/hertzforge/io/*_run_convert.py`); `run/` in `docs/hforge-format.md` is the layout they
-  write.
+  identifications. The analysis side converts a run folder into an ordinary project
+  (`src/hertzforge/io/run_folder.py`, `src/hertzforge/io/run_convert.py`; `docs/run-folder.md` is
+  the folder's layout), with the control service's own record of the run kept in it
+  (`run_record/` in `docs/hforge-format.md`). `docs/run-folder.md` lists, module by
+  module, what a run saves; a module that is not listed there does not write the folder yet.
 
 `tools/run_data_paths.txt` lists the code that decides what these hold, on the control side and at
 the seam. A change to the analysis side alone is not on it.

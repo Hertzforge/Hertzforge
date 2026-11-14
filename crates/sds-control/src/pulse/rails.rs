@@ -183,21 +183,31 @@ impl<V> Shared<V> {
         self.add_log_data(kind, text, None);
     }
 
+    /// [`Shared::add_log`], answering the entry's place in the log.
+    pub fn add_log_seq(&self, kind: &'static str, text: impl Into<String>) -> u64 {
+        self.push_log(kind, text.into(), None)
+    }
+
     /// A log entry with structured facts for the record (`data`), appended to the
     /// record as it is made when the run has one. The hand-off never waits.
     pub fn add_log_data(&self, kind: &'static str, text: impl Into<String>, data: Option<Value>) {
+        self.push_log(kind, text.into(), data);
+    }
+
+    fn push_log(&self, kind: &'static str, text: String, data: Option<Value>) -> u64 {
         let mut log = lock(&self.log);
         let seq = log.len() as u64;
         let entry = LogEntry {
             seq,
             at_unix: now_unix(),
             kind,
-            text: text.into(),
+            text,
         };
         if let Some(r) = lock(&self.record).as_ref() {
             r.append(self.record_entry(&entry, data));
         }
         log.push(entry);
+        seq
     }
 
     /// An entry as the record holds it: the wire's members, the station frame

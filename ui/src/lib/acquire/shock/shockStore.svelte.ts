@@ -217,6 +217,11 @@ export class ShockStore {
 		return this.rows.filter((r) => r.enabled).length;
 	}
 
+	/** The sample rate the run asks for, for the size its streams take. */
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz;
+	}
+
 	/** The run's record, from arm on: its folder, whether it keeps the time histories, its problem. */
 	get record(): RunRecordRef | null {
 		return this.status?.record ?? null;

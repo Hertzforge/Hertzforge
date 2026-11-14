@@ -1,0 +1,65 @@
+{
+  "kind": "recording",
+  "complete": true,
+  "name": "rec_0001",
+  "trigger": "level",
+  "requested_fs_hz": 1000.0,
+  "fs_hz": 1000.0,
+  "group_delay_frames": 0.0,
+  "rows": [
+    1,
+    2
+  ],
+  "units": [
+    "g",
+    "g"
+  ],
+  "channels": [
+    {
+      "index": 1,
+      "unit": "g",
+      "description": "Markers"
+    },
+    {
+      "index": 2,
+      "unit": "g",
+      "description": "Tone"
+    }
+  ],
+  "first_station_frame": 402,
+  "trigger_station_frame": 502,
+  "pre_frames": 100,
+  "pre_frames_asked": 100,
+  "frames": 300,
+  "gaps": [],
+  "marks": [
+    {
+      "kind": "overload",
+      "row": 1,
+      "value": 0.47551992535591125,
+      "level": 0.45,
+      "station_frame": 504,
+      "recording": "rec_0001"
+    }
+  ],
+  "fault": null,
+  "writer": {
+    "ring_capacity": 512,
+    "chunks_written": 3,
+    "chunks_dropped": 0,
+    "flushes": 1,
+    "free_space_at_start_bytes": 107374182400,
+    "free_space_floor_bytes": 1073741824
+  },
+  "t0_convention": "trigger",
+  "n_channels": 2,
+  "config": {
+    "native_rate_hz": 1000.0,
+    "analysis_decimation": 1,
+    "block_size": 256,
+    "window": "Hann",
+    "overlap_pct": 50.0,
+    "averaging": "Linear",
+    "average_count": 4
+  }
+}

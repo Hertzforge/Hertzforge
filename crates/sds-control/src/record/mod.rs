@@ -1040,7 +1040,14 @@ impl Writer {
                 )
             })
             .collect();
-        end.insert("streams".into(), Value::Object(streams));
+        // A run whose streams are written elsewhere (the Recorder's recordings) states
+        // them itself; the writer's own join them.
+        match end.get_mut("streams") {
+            Some(Value::Object(given)) => given.extend(streams),
+            _ => {
+                end.insert("streams".into(), Value::Object(streams));
+            }
+        }
         self.pause();
         let path = self.status.folder.join("end.json");
         match hertzforge_capture::write_atomic(&path, &pretty(&Value::Object(end))) {

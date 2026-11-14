@@ -5,9 +5,8 @@
 	 * Run card holds the verbs that apply now, the shared ones and the test type's own, then a review
 	 * hold or the run's end as one line with its button, then any line of the type's own (a hold, the
 	 * last verb's answer). The other cards are the type's: its level, its own panels, the station.
-	 * A test type that keeps a run folder (its run's `record`) has the folder named in the Run card
-	 * from arm on, and, given an opener, Open in Analysis and Copy Folder Path on its end line, as
-	 * Random's run view has them.
+	 * A type whose runs leave a run folder passes its record: from arm on the Run card names the
+	 * folder, and a finished run's end line offers Open in Analysis and Copy Folder Path.
 	 */
 	import type { Snippet } from 'svelte';
 	import type { ActionId, RunBarHost } from '../actions';
@@ -21,6 +20,7 @@
 	import PageTabs from '../screen/PageTabs.svelte';
 	import type { PlotPanel, ScreenState } from '../screen/screen.svelte';
 	import type { CardKind } from '../screen/types';
+	import type { RunRecordRef } from '$lib/protocol/types';
 	import { clock, db, OUTCOME_WORDS, outcomeTone } from '../words';
 
 	interface Props {
@@ -53,10 +53,12 @@
 		abortKeys: string;
 		/** A window on another monitor: the plots and the cards, with Stop and Abort the only verbs. */
 		compact?: boolean;
+		/** The run's record, from arm on, for a type whose runs leave a run folder. */
+		record?: RunRecordRef | null;
 		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
 		opener?: RunOpen | null;
 	}
-	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false, opener = null }: Props = $props();
+	let { host, screen, prefix, attrs = {}, verbs, review = null, notes, cards, bodies, channels, empty, live, onpopout, onoverride = () => {}, abortKeys, compact = false, record: given = null, opener = null }: Props = $props();
 
 	const run = $derived(host.run);
 	const end = $derived(run?.state === 'finished' ? run.end : null);
@@ -73,7 +75,8 @@
 		return `at ${clock(end.at_s)}${level}`;
 	});
 	const page = $derived(screen.page);
-	const record = $derived(run?.record ?? null);
+	/** The record a caller gives, or the one its run's head carries. */
+	const record = $derived(given ?? run?.record ?? null);
 </script>
 
 {#snippet card(kind: CardKind)}

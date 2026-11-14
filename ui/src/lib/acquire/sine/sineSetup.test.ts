@@ -93,7 +93,7 @@ function everything(): SineDraft {
 	};
 	d.cola = { enabled: true, volts_pk: 0.2, waveform: 'square' };
 	d.feasibility = { enabled: true, shaker_text: '{"name":"Bench shaker"}', moving_mass_lb: { armature: 45, slip_table: 5, drive_adapter: 3, fixturing: 10, test_article: 12 } };
-	d.capture = { rule: 'first_seconds', first_s: 15, level_settle_s: 2, periodic_save_s: 60, run_name: 'survey' };
+	d.record = { operator: 'A. Operator', article: 'Bracket, serial 7', notes: 'first article', document: 'Test procedure 12', clause: '4.2', streams: false };
 	d.metadata = [
 		{ key: 'run_number', label: 'Run Number', value: '7' },
 		{ key: 'operator', label: '', value: 'K' }
@@ -109,7 +109,8 @@ describe('the Sine setup draft', () => {
 		expect(c.test).toEqual({ kind: 'sweep', band_hz: [20, 2000], rate: { law: 'log', oct_per_min: 2 }, start_hz: 20, direction: 'up', end: { sweeps: 4, duration_s: null } });
 		expect(c.schedule).toEqual({ mode: 'auto', levels_db: [-12, -6, 0], start_db: -12, per_level: { sweeps: 1 }, full_level: { sweeps: 2 } });
 		expect(c.acquisition).toEqual({ fs_hz: null, tick_ms: 10 });
-		expect(c.capture).toEqual({ rule: 'off', first_s: null, level_settle_s: 1, periodic_save_s: null, run_name: 'sine' });
+		expect('capture' in c).toBe(false);
+		expect([c.operator, c.article, c.notes, c.specification, c.record]).toEqual(['', '', '', null, { streams: true }]);
 		expect(c.feasibility).toBeNull();
 		expect(localErrors(ready())).toEqual({});
 	});
@@ -181,8 +182,7 @@ describe('the Sine setup draft', () => {
 			{ channel: 1, shared_name: '', profile: { label: '', rows: [newRow(10, 'accel_g', 1), newRow(2000, 'accel_g', 1)], alarm_db: [1.5, 1.5], abort_db: [3, 3] } },
 			{ channel: 5, shared_name: '', profile: { label: '', rows: [newRow(10, 'accel_g', 1), newRow(2000, 'accel_g', 1)], alarm_db: [1.5, 1.5], abort_db: [3, 3] } }
 		];
-		d.capture.rule = 'entire_test';
-		d.capture.run_name = '';
+		d.record.clause = '4.2';
 		d.limits.drive_vpk_abort = 0.4;
 		const e = localErrors(d, ROWS);
 		expect(e.title).toEqual(['Give the test a title.']);
@@ -192,7 +192,8 @@ describe('the Sine setup draft', () => {
 		expect(e['limits.channels.0.channel']).toEqual(['Channel 1 is a control channel; a limit channel is another input.']);
 		expect(e['limits.channels.1.channel']).toEqual(['Channel 5 is not an enabled input of the channel table.']);
 		expect(e['limits.drive_vpk_abort']).toEqual(['The drive abort is at least the drive ceiling.']);
-		expect(e['capture.run_name']).toEqual(['Name the run folder, or turn capture off.']);
+		expect(e['specification.document']).toEqual(['Name the document this clause is from.']);
+		expect(sineSectionOf('specification.document')).toBe('record');
 	});
 
 	it('lands each service finding on its field and section', () => {
@@ -215,7 +216,8 @@ describe('the Sine setup draft', () => {
 			[{ reason: 'value_not_positive', field: 'limits.channels[1].profile.rows[0].value' }, 'limits.channels.1.profile', 'limits'],
 			[{ reason: 'cola_needs_two_outputs', field: 'cola.enabled' }, 'cola.enabled', 'limits'],
 			[{ reason: 'out_of_range', field: 'feasibility.shaker' }, 'feasibility.shaker', 'limits'],
-			[{ reason: 'out_of_range', field: 'capture.run_name' }, 'capture.run_name', 'capture'],
+			[{ reason: 'out_of_range', field: 'config.notes' }, 'notes', 'record'],
+			[{ reason: 'out_of_range', field: 'metadata[0].value' }, 'metadata.0.value', 'record'],
 			[{ reason: 'no_control_channel' }, 'station.channels', 'station']
 		];
 		for (const [it, key, section] of cases) {

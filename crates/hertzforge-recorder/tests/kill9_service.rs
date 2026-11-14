@@ -21,7 +21,7 @@
 //! * the parent then reads the wreckage back and asserts it is HONEST.
 //!
 //! "Honest" is the whole point and it is a conjunction: `capture.json` says
-//! `complete: false`, `recorder.json` says `clean: false`, the binary is a whole
+//! `complete: false`, `stream.json` says `clean: false`, the binary is a whole
 //! number of frames, `RecordingReader` opens it and reports the unclean status,
 //! and the frame count it reports comes from the FILE - never from a sidecar
 //! counter that a dead process never got to update. A capture that came back
@@ -232,9 +232,9 @@ fn a_kill_9_mid_recording_leaves_readable_honest_artifacts() {
     );
 
     // 2. The RECORDER sidecar exists, parses, and says the run was not clean.
-    let rec_json = std::fs::read_to_string(run_dir.join("recorder.json"))
-        .expect("recorder.json must be readable (written before any data)");
-    let rec: serde_json::Value = serde_json::from_str(&rec_json).expect("recorder.json JSON");
+    let rec_json = std::fs::read_to_string(run_dir.join("stream.json"))
+        .expect("stream.json must be readable (written before any data)");
+    let rec: serde_json::Value = serde_json::from_str(&rec_json).expect("stream.json JSON");
     assert_eq!(
         rec["complete"],
         serde_json::Value::Bool(false),

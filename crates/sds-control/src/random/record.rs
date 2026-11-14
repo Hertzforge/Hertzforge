@@ -166,13 +166,19 @@ pub fn start_json(unix: f64, utc_offset_s: Option<i64>, station_frame: u64) -> V
 }
 
 fn station_json(f: &ArmFacts<'_>) -> Value {
-    station_value(f.plan, f.class, f.provenance, f.devices, f.caps)
+    station_member(
+        matches!(f.plan, StationPlan::Sim { .. }),
+        f.class,
+        f.provenance,
+        f.devices,
+        f.caps,
+    )
 }
 
-/// The manifest's `station`: its kind and class, each device with its model and
-/// serial number, and the clock. Shared by every module that records.
-pub fn station_value(
-    plan: &StationPlan,
+/// The manifest's `station`: its kind and class, the station's label and backend,
+/// every device with its model and serial number, and its clock.
+pub fn station_member(
+    sim: bool,
     class: StationClass,
     provenance: &hertzforge_station::ProvenanceBasis,
     devices: &[DiscoveredDevice],
@@ -196,7 +202,7 @@ pub fn station_value(
         _ => "unknown",
     };
     json!({
-        "kind": if matches!(plan, StationPlan::Sim { .. }) { "sim" } else { "ni" },
+        "kind": if sim { "sim" } else { "ni" },
         "class": class_name(class),
         "label": provenance.station_label,
         "backend": provenance.backend_kind,
@@ -209,8 +215,8 @@ fn sim_json(f: &ArmFacts<'_>) -> Option<Value> {
     sim_value(f.plan, f.class)
 }
 
-/// The manifest's `sim` for a simulated run: the plant, its parameters and its
-/// seed. `None` for a run on hardware.
+/// The manifest's `sim` for a simulated run (the plant's model, its parameters
+/// and its seed); `None` for any other station.
 pub fn sim_value(plan: &StationPlan, class: StationClass) -> Option<Value> {
     match plan {
         StationPlan::Sim {
@@ -226,12 +232,17 @@ pub fn sim_value(plan: &StationPlan, class: StationClass) -> Option<Value> {
     }
 }
 
-/// The manifest's `build`, from the station's provenance.
-pub fn build_value(provenance: &hertzforge_station::ProvenanceBasis) -> Value {
-    let core = provenance.core_build;
+/// The manifest's `build`: the version, the commit and whether it was dirty.
+pub fn build_value(core_build: &str) -> Value {
     json!({"version": env!("CARGO_PKG_VERSION"),
-           "commit": core.trim_end_matches("-dirty"),
-           "dirty": core.ends_with("-dirty")})
+           "commit": core_build.trim_end_matches("-dirty"),
+           "dirty": core_build.ends_with("-dirty")})
+}
+
+/// A stream's channel as `stream.json` lists it: its table index, its unit and
+/// its description.
+pub fn stream_channel_value(c: &Channel) -> Value {
+    stream_channel(c)
 }
 
 fn control_json(cfg: &WireConfig) -> Value {
@@ -418,7 +429,7 @@ pub fn begin(f: &ArmFacts<'_>, root: PathBuf, links: (TapLink, TapLink)) -> Begi
                "n_pts": f.grid.n_pts, "n_avg": cfg.n_avg, "df_hz": num(f.grid.df_hz),
                "lines": f.grid.lines, "loop_s": num(f.grid.loop_s)}),
     );
-    manifest.insert("build".into(), build_value(f.provenance));
+    manifest.insert("build".into(), build_value(f.provenance.core_build));
     manifest.insert(
         "armed".into(),
         json!({"unix": f.armed_unix, "utc_offset_s": f.utc_offset_s}),

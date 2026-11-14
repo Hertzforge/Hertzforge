@@ -127,7 +127,7 @@ export interface RunHead {
 	at_level_s: number | null;
 	remaining_at_level_s: number | null;
 	end: import('$lib/protocol/types').RunEnd | null;
-	/** The run's record, from arm on, for a test type that keeps one. */
+	/** The run's record, from arm on, for a test type whose runs leave a run folder. */
 	record?: import('$lib/protocol/types').RunRecordRef | null;
 }
 

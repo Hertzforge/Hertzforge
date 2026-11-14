@@ -20,9 +20,9 @@
 	import RunVerbs from './RunVerbs.svelte';
 	import type { AcquireState } from './store.svelte';
 	import type { ActionId } from './actions';
+	import type { RunOpen } from './runOpen.svelte';
 	import RunOpenActions from './RunOpenActions.svelte';
 	import RunRecordLine from './RunRecordLine.svelte';
-	import type { RunOpen } from './runOpen.svelte';
 	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
 
 	interface Props {

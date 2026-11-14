@@ -70,8 +70,6 @@ const SETUP_KEY = 'hertzforge.acquire.recorder.setup.v1';
 const HELD_KEY = 'hertzforge.acquire.recorder.held.v1';
 /** Most log entries kept on screen; the service keeps the full log with the run. */
 const LOG_LIMIT = 500;
-/** The log's words for the run folder at start. */
-const FOLDER_LINE = /^records in (.+)$/;
 
 function storageOf(name: 'localStorage'): Storage | null {
 	try {
@@ -321,13 +319,9 @@ export class RecorderStore {
 		return s && l && l.run_id === s.run_id ? l : null;
 	}
 
-	/** The run folder, as the run's log names it at start. */
+	/** The run folder, as the run's state names it from start on. */
 	get folder(): string | null {
-		for (const e of this.log) {
-			const m = FOLDER_LINE.exec(e.text);
-			if (m) return m[1].trim();
-		}
-		return null;
+		return this.status?.record?.folder ?? null;
 	}
 
 	/** The last recording saved, or null. */

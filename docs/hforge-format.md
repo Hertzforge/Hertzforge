@@ -474,8 +474,8 @@ recorded in, one folder per run: `run.json` (the manifest, `schema`
 `streams/<name>/` (`telemetry.f32`, little-endian float32,
 frame-interleaved, in engineering units, and `stream.json`),
 `results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. The control
-service's Random module writes one for every run, as `docs/run-folder.md`
-describes; the other control modules do not yet.
+service's Random and Sine modules and its Recorder write one for every run, as
+`docs/run-folder.md` describes; the other control modules do not yet.
 
 `hertzforge.io.run_convert.convert` (and `hertzforge convert-run
 FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default
@@ -506,7 +506,20 @@ in this order, all in one object group named for the run:
 - `Specification`, from a Random setup's resolved profile (each
   breakpoint's `freq_hz` and `psd_g2_hz`, with `alarm_db` and `abort_db`
   as `[below, above]` held from that breakpoint to the next) on the
-  enabled control channels, its bands as warning and abort limits.
+  enabled control channels, its bands as warning and abort limits. For a
+  Sine sweep or dwell, a `SineSweepSpecification` of one tone (`Tone 1`)
+  on the enabled control channels in m/s**2, its breakpoints the points
+  of `results/reference` (the profile as the service resolved it on the
+  run's band) and its alarm and abort bands as the tone's warning and
+  abort limits; a sweep's tone is one pass across the band in the
+  direction the run started, at its rate and law (`resolved.test`), a
+  dwell's holds its frequency for its dwell.
+- `Sine Levels`, a `SineLevelSet`, for a Sine sweep's or step test's
+  result of kind `sine_levels`: one `SineLevel` of `Tone 1` over the
+  result's channels, complex (`values` at `phase`), in SI, its lines the
+  points of the last pass at the highest level the run reached where
+  the tone moved, ascending in frequency, with the time each was read.
+  The result's arrays stay in the run record whole.
 - A `Psd` for a result of kind `psd` or `cpsd`, an `Frf` for `frf`, a
   `Coherence` or `MultipleCoherence` for `coherence`, from the array
   named `values` (records last on the frequency axis), in SI by the
@@ -528,8 +541,9 @@ twice its size on disk.
 
 *A proposal for the analysis maintainer, not part of any schema.* The
 run folder and its run record (above) are what the analysis side reads;
-the two converters that write this group (`mimo_run_convert`,
-`recorder_run_convert`) still do, and the reader refuses it. The
+the one converter that writes this group (`mimo_run_convert`) still
+does, and the reader refuses it. A Recorder run is a run folder and
+converts as one ("Run Folders and Their Conversion"). The
 control service records a multiple-output random run in its own folder
 while it runs, and `hertzforge.io.mimo_run_convert` turns that folder
 into a `.hforge` file at the end (or afterwards, for a run that did not

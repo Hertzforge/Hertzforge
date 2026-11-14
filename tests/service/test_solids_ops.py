@@ -56,24 +56,26 @@ def test_the_descriptors_validate(validate):
 
 
 def test_a_new_geometry_is_empty_and_records_its_unit(project, validate):
-    reading, table = run(project, 'project.new_geometry', unit='in')
-    wire_views([reading, table], validate)
+    (reading,) = run(project, 'project.new_geometry', unit='in')
+    wire_views([reading], validate)
     assert rows(reading)['Added']['value'] == 'Geometry'
-    assert project['Geometry'].length_unit == 'in' and table['rows'] == []
+    assert project['Geometry'].length_unit == 'in' and project['Geometry'].solids == []
     with pytest.raises(ProtocolError, match='not one of the choices'):
         run(project, 'project.new_geometry', unit='furlong')
 
 
-def test_a_block_is_added_drawn_and_listed(project, validate):
-    reading, view, table = block(project, x=0.02, name='base')
-    wire_views([reading, view, table], validate)
-    assert rows(reading)['Volume']['value'] == pytest.approx(0.1 * 0.05 * 0.01)
+def test_a_block_is_added_and_drawn_with_nothing_said_beside_it(project, validate):
+    """Adding a solid answers with the drawing alone: no box saying it was added, no solids
+    table (Brandon, 2026-11-13)."""
+    from hertzforge.core import solids
+    (view,) = block(project, x=0.02, name='base')
+    wire_views([view], validate)
     # the block just added is drawn lit, in the view's bodies
     assert view['view'] == 'shape3d' and len(view['bodies']['triangles']) >= 12
     assert np.ptp(view['bodies']['nodes'][:, 0]) == pytest.approx(0.1, rel=1e-5)
-    assert table['rows'][0][:3] == ['1', 'base', 'Block']
-    assert table['rows'][0][3] == '0.1 m × 0.05 m × 0.01 m'
-    assert table['rows'][0][4] == '(0.02 m, 0 m, 0 m)'
+    item = solids.solid(project['Part'], 1)
+    assert (item.name, item.kind, tuple(item.widths)) == ('base', 'block', (0.1, 0.05, 0.01))
+    assert tuple(item.center) == (0.02, 0.0, 0.0)
     refused(project, 'project.add_solid_block', 'width', width_x=0.0)
 
 
@@ -91,11 +93,13 @@ def test_a_block_is_added_drawn_and_listed(project, validate):
     ('project.add_solid_hole', {'diameter': 0.01, 'depth': 0.02}, 'Volume',
      math.pi * 0.005 ** 2 * 0.02),
 ])
-def test_each_solid_reads_its_size(project, validate, op_id, given, label, expected):
-    reading, view, table = run(project, op_id, **given)
-    wire_views([reading, view, table], validate)
-    assert rows(reading)[label]['value'] == pytest.approx(expected, rel=2e-3)
-    assert len(table['rows']) == 1
+def test_each_solid_is_made_its_size(project, validate, op_id, given, label, expected):
+    from hertzforge.core import solids
+    (view,) = run(project, op_id, **given)
+    wire_views([view], validate)
+    measure = solids.area if label == 'Area' else solids.volume
+    assert measure(project['Part'], 1) == pytest.approx(expected, rel=2e-3)
+    assert len(project['Part'].solids) == 1
 
 
 @pytest.mark.parametrize(('op_id', 'given', 'match'), [
@@ -114,35 +118,39 @@ def test_what_a_solid_cannot_be_is_refused(project, op_id, given, match):
 
 
 def test_a_section_opens_on_its_shape_s_dimensions(project):
-    reading, _view, table = run(project, 'project.add_solid_section', shape='round tube')
+    from hertzforge.core import solids
+    run(project, 'project.add_solid_section', shape='round tube')
     outer, wall = 1.0, 0.1
-    assert rows(reading)['Volume']['value'] == pytest.approx(
+    assert solids.volume(project['Part'], 1) == pytest.approx(
         math.pi / 4 * (outer ** 2 - (outer - 2 * wall) ** 2) * 4.0, rel=2e-3)
-    assert table['rows'][0][3] == 'outer diameter 1 m, wall 0.1 m, length 4 m'
+    item = solids.solid(project['Part'], 1)
+    assert (tuple(item.dimensions), item.length) == ((1.0, 0.1), 4.0)
 
 
 def test_a_cylinder_subtracted_from_a_block_leaves_a_hole(project, validate):
     block(project)
     run(project, 'project.add_solid_cylinder', radius=0.01, length=0.02)
-    reading, view, table = run(project, 'project.combine_solids', operation='subtract',
-                               solids='1, 2', name='plate')
-    wire_views([reading, view, table], validate)
+    reading, view = run(project, 'project.combine_solids', operation='subtract',
+                        solids='1, 2', name='plate')
+    wire_views([reading, view], validate)
     assert rows(reading)['Volume']['value'] == pytest.approx(
         0.1 * 0.05 * 0.01 - math.pi * 0.01 ** 2 * 0.01, rel=1e-6)
     assert rows(reading)['Parts']['value'] == 1.0
-    assert [r[0] for r in table['rows']] == ['3', '1', '2']
-    assert table['rows'][0][6] == 'subtract of 1, 2'
-    assert table['rows'][2][6] == 'part, in 3'
+    from hertzforge.core import solids
+    made = solids.solid(project['Part'], 3)
+    assert (made.kind, tuple(made.operands)) == ('subtract', (1, 2))
+    assert [item.id for item in solids.top_level(project['Part'])] == [3]
     refused(project, 'project.combine_solids', 'part of solid 3', solids='1, 2')
     refused(project, 'project.combine_solids', 'not 9', solids='3, 9')
 
 
 def test_a_solid_is_edited_by_the_fields_typed(project):
     block(project)
-    reading, _view, table = run(project, 'project.edit_solid', solid=1,
-                                widths='0.2, 0.05, 0.01', name='wide')
-    assert table['rows'][0][1] == 'wide' and table['rows'][0][3] == '0.2 m × 0.05 m × 0.01 m'
-    assert 'widths' in rows(reading)['Changed']['value']
+    from hertzforge.core import solids
+    (view,) = run(project, 'project.edit_solid', solid=1, widths='0.2, 0.05, 0.01', name='wide')
+    assert view['view'] == 'shape3d'
+    item = solids.solid(project['Part'], 1)
+    assert (item.name, tuple(item.widths)) == ('wide', (0.2, 0.05, 0.01))
     refused(project, 'project.edit_solid', 'type what changes', solid=1)
     refused(project, 'project.edit_solid', 'has no radius', solid=1, radius='0.1')
     refused(project, 'project.edit_solid', 'no solid 4', solid=4, name='x')
@@ -152,7 +160,7 @@ def test_parts_are_moved_and_turned_whole(project):
     block(project)
     run(project, 'project.add_solid_cylinder', radius=0.01, length=0.02)
     run(project, 'project.combine_solids', operation='subtract', solids='1, 2')
-    reading, _view, _table = run(project, 'project.move_solids', solids='3', offset_z=0.5)
+    reading, _view = run(project, 'project.move_solids', solids='3', offset_z=0.5)
     from hertzforge.core import solids
     part = project['Part']
     assert solids.solid(part, 1).center[2] == pytest.approx(0.5)
@@ -163,10 +171,10 @@ def test_parts_are_moved_and_turned_whole(project):
 def test_solids_are_copied_into_another_geometry(project):
     block(project)
     project.new_geometry('Other', unit='m')
-    reading, _view, table = run(project, 'project.copy_solids', geometry='Part', solids='1',
-                                into='Other')
+    reading, view = run(project, 'project.copy_solids', geometry='Part', solids='1',
+                        into='Other')
     assert rows(reading)['Copied']['value'] == '1 as 1'
-    assert len(project['Other'].solids) == 1 and table['title'] == 'Solids of Other'
+    assert len(project['Other'].solids) == 1 and view['title'] == 'Other'
     refused(project, 'project.copy_solids', 'not 5', geometry='Part', solids='5',
             into='Other')
 
@@ -174,8 +182,9 @@ def test_solids_are_copied_into_another_geometry(project):
 def test_the_parts_are_reordered(project):
     block(project)
     run(project, 'project.add_solid_sphere', radius=0.01)
-    _reading, _view, table = run(project, 'project.reorder_solids', solids='2, 1')
-    assert [r[0] for r in table['rows']] == ['2', '1']
+    from hertzforge.core import solids
+    run(project, 'project.reorder_solids', solids='2, 1')
+    assert [item.id for item in solids.top_level(project['Part'])] == [2, 1]
     refused(project, 'project.reorder_solids', 'give each of them', solids='2')
 
 
@@ -183,21 +192,23 @@ def test_a_boolean_is_taken_apart_and_deleted(project):
     block(project)
     run(project, 'project.add_solid_sphere', radius=0.01)
     run(project, 'project.combine_solids', operation='union', solids='1, 2')
-    reading, _view, table = run(project, 'project.separate_solids', solids='3')
-    assert rows(reading)['Parts']['value'] == 2.0 and len(table['rows']) == 2
+    reading, _view = run(project, 'project.separate_solids', solids='3')
+    assert rows(reading)['Parts']['value'] == 2.0 and len(project['Part'].solids) == 2
     refused(project, 'project.separate_solids', 'is a block', solids='1')
-    reading, _view, table = run(project, 'project.delete_solids', solids='1, 2')
-    assert rows(reading)['Deleted']['value'] == '2 solids' and table['rows'] == []
+    reading, _view = run(project, 'project.delete_solids', solids='1, 2')
+    assert rows(reading)['Deleted']['value'] == '2 solids' and project['Part'].solids == []
     refused(project, 'project.delete_solids', 'no solids yet', solids='')
 
 
 def test_a_pattern_copies_its_solids(project, validate):
     run(project, 'project.add_solid_cylinder', radius=0.01, length=0.02)
-    reading, view, table = run(project, 'project.pattern_solids', solids='1', count_x=3,
-                               count_y=2, spacing_x=0.05, spacing_y=0.04)
-    wire_views([reading, view, table], validate)
+    from hertzforge.core import solids
+    reading, view = run(project, 'project.pattern_solids', solids='1', count_x=3,
+                        count_y=2, spacing_x=0.05, spacing_y=0.04)
+    wire_views([reading, view], validate)
     assert rows(reading)['Copies']['value'] == 5.0
-    assert table['rows'][0][3] == '3 × 2 × 1, spacing 0.05 m, 0.04 m, 0 m'
+    made = solids.solid(project['Part'], 2)
+    assert (tuple(made.counts), tuple(made.widths)) == ((3, 2, 1), (0.05, 0.04, 0.0))
     # the pattern just made is drawn lit, in the view's bodies
     assert np.ptp(view['bodies']['nodes'][:, 0]) == pytest.approx(0.12, rel=1e-3)
     refused(project, 'project.pattern_solids', 'needs a spacing', solids='2', count_y=2,
@@ -213,8 +224,8 @@ def test_mesh_solids_previews_and_then_meshes(project, validate):
     assert found['Bricks']['value'] == 20 * 10 * 2
     assert found['Method']['value'] == 'extruded along Z'
     assert project['Part'].num_nodes == 0
-    reading, view, table = run(project, 'project.mesh_solids', size=0.005, keep=True)
-    wire_views([reading, view, table], validate)
+    reading, view = run(project, 'project.mesh_solids', size=0.005, keep=True)
+    wire_views([reading, view], validate)
     assert rows(reading)['Nodes in all']['value'] == 21 * 11 * 3
     assert len(project['Part'].elem_id) == 400
     reading, _view = run(project, 'project.mesh_solids', size=0.01)
@@ -304,12 +315,12 @@ def test_the_default_view_is_set_and_reset(project, validate):
     refused(project, 'project.set_view', 'line of sight', eye_z=1.0, up_z=1.0)
 
 
-def test_the_solids_are_listed(project, validate):
+def test_the_solids_are_drawn_with_no_table(project, validate):
     wire_views(run(project, 'project.solids'), validate)
     block(project)
-    reading, view, table = run(project, 'project.solids')
-    wire_views([reading, view, table], validate)
-    assert rows(reading)['Parts']['value'] == 1.0 and table['rows'][0][0] == '1'
+    (view,) = run(project, 'project.solids')
+    wire_views([view], validate)
+    assert view['view'] == 'shape3d' and len(view['triangles']) == 12
 
 
 def test_move_part_offers_arrows_and_rings(project, validate):
@@ -343,7 +354,7 @@ def test_a_form_previews_on_a_copy(validate):
     views = server._said_as_preview(run(scratch, 'project.add_solid_block', x=2.0),
                                     display_units.DEFAULT)
     wire_views(views, validate)
-    assert views[0]['rows'][0]['label'] == 'Would add'
+    assert [view['view'] for view in views] == ['shape3d']
     assert len(scratch[name].solids) == held + 1
     assert len(project[name].solids) == held and project.journal == journal
 
@@ -366,8 +377,8 @@ def test_a_preview_over_the_socket_leaves_the_project_unmodified():
     results = [got[-1] for got in responses]
     previewed = results[2]['result']
     assert 'project' not in previewed
-    assert previewed['views'][0]['rows'][0]['label'] == 'Would add'
-    assert 'Would add' not in str(results[4]['result']['views'][0])
+    assert [view['view'] for view in previewed['views']] == ['shape3d']
+    assert [view['view'] for view in results[4]['result']['views']] == ['shape3d']
     assert results[3]['error']['code'] == 'bad_request', 'an operation with no preview runs nothing'
     assert 'x' not in [o['name'] for o in results[4]['result']['project']['objects']]
 
@@ -568,9 +579,9 @@ def test_a_single_turned_solid_meshes_swept_along_its_own_axis(project, kind, ke
 def test_move_part_moves_a_flat_part_and_gives_it_a_gizmo(project, add):
     given = dict(add)
     run(project, given.pop('op'), **given)
-    (_reading, view, _table) = run(project, 'project.move_solids', solids='1')
+    (_reading, view) = run(project, 'project.move_solids', solids='1')
     assert view['gizmo']['origin'] == [0.0, 0.0, 0.0], 'the middle of its extent'
-    (_reading, view, _table) = run(project, 'project.move_solids', solids='1', offset_z=1.0)
+    (_reading, view) = run(project, 'project.move_solids', solids='1', offset_z=1.0)
     assert project['Part'].solids[0].center == (0.0, 0.0, 1.0)
     assert view['gizmo']['origin'] == [0.0, 0.0, 1.0]
     run(project, 'project.move_solids', solids='1', turn_x=90.0)
@@ -878,7 +889,8 @@ def test_looking_at_a_view_first_operation_leaves_the_project_unmodified(tmp_pat
         assert answer['result']['project']['modified'], (op, params)
 
 
-def test_a_preview_of_an_edit_says_what_would_change():
+def test_an_edit_and_its_preview_answer_with_the_drawing_alone():
+    """No box saying Changed (or Would change) over the solid being edited (Brandon, 2026-11-13)."""
     import asyncio
 
     from .test_projects import _exchange
@@ -891,8 +903,8 @@ def test_a_preview_of_an_edit_says_what_would_change():
             'geometry': 'Part', 'solid': 1, 'radius': '', 'widths': '2 2 2'}, 'preview': True}),
         ('op.run', {'op': 'project.edit_solid', 'params': {
             'geometry': 'Part', 'solid': 1, 'widths': '2 2 2'}})]))
-    preview, real = (got[-1]['result']['views'][0]['rows'][0]['label'] for got in responses[3:])
-    assert (preview, real) == ('Would change', 'Changed')
+    for got in responses[3:]:
+        assert [view['view'] for view in got[-1]['result']['views']] == ['shape3d']
 
 
 def test_a_part_taken_apart_and_remade_under_its_name_replaces_its_mesh(project):
@@ -946,7 +958,8 @@ def test_a_solid_picked_is_edited_in_its_own_add_form(op_id):
     project.new_geometry('Part', unit='m')
     views = run(project, op_id)
     item = project['Part'].solids[-1]
-    assert 'gizmo' in views[1] and 'bodies' in views[1], 'the new solid lit, the gimbal on it'
+    (view,) = views
+    assert 'gizmo' in view and 'bodies' in view, 'the new solid lit, the gimbal on it'
     before = item.as_record()
     edit = _edit_row(state, item.id, 'in-slinch-lbf-s (g)')
     assert edit['id'] == op_id and edit['live'] and edit['fill']['solid'] == str(item.id)
@@ -959,7 +972,7 @@ def test_a_solid_picked_is_edited_in_its_own_add_form(op_id):
     views = _run_typed(project, op_id, moved, 'in-slinch-lbf-s (g)')
     assert project['Part'].solids[-1].center[0] == pytest.approx(2 * 0.0254)
     assert len(project['Part'].solids) == 1, 'changed, not added'
-    assert 'gizmo' in views[1]
+    assert 'gizmo' in views[0]
 
 
 def test_the_solids_row_adds_at_once_and_a_wrong_kind_is_refused():

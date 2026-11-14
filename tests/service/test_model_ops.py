@@ -120,8 +120,10 @@ def test_deleting_an_element_group_takes_its_elements():
     project = _parts()
     (view,) = run(project, 'project.delete_element_groups', geometry='Plate', groups='2')
     assert [row[1] for row in view['rows']] == ['floor']
-    with pytest.raises(ProtocolError, match='delete the geometry instead'):
-        run(project, 'project.delete_element_groups', geometry='Plate', groups='1')
+    # the last group goes too, and the geometry stays (Brandon, 2026-11-13)
+    (view,) = run(project, 'project.delete_element_groups', geometry='Plate', groups='1')
+    assert view['rows'] == [] and 'Plate' in project
+    assert len(project['Plate'].groups.ids) == 0
 
 
 def test_a_patch_ties_to_a_group_by_name():

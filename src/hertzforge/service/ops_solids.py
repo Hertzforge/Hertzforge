@@ -137,76 +137,6 @@ def _in_meters(geometry: Any) -> str:
     return ' m' if geometry.units_defined else ''
 
 
-def _dimensions(geometry: Any, item: Any) -> str:
-    """A solid's size as typed, in a few words, each length with its unit so the server can
-    say it in the display system."""
-    from hertzforge.core import solids
-
-    unit = _in_meters(geometry)
-
-    def size(value: float) -> str:
-        return f'{_f(value)}{unit}'
-
-    kind = item.kind
-    if kind == 'block':
-        corner = f', corner {size(item.corner)}' if item.corner else ''
-        return ' × '.join(size(w) for w in item.widths) + corner
-    if kind in ('cylinder', 'sphere', 'disk'):
-        long = f', length {size(item.length)}' if kind == 'cylinder' else ''
-        return f'radius {size(item.radius)}{long}'
-    if kind == 'cone':
-        return (f'base radius {size(item.radius)}, top radius {size(solids._top(item))}, '
-                f'height {size(item.length)}')
-    if kind == 'plate':
-        return ' × '.join(size(w) for w in item.widths[:2])
-    if kind in solids.SECTIONS:
-        named = ', '.join(f'{n} {size(d)}' for n, d in zip(solids.SECTIONS[kind], item.dimensions,
-                                                            strict=True))
-        return f'{named}, length {size(item.length)}'
-    if kind == solids.HOLE:
-        diameter, depth, wide, deep = item.dimensions
-        said = f'diameter {size(diameter)}, ' + (f'depth {size(depth)}' if depth else 'through')
-        if wide:
-            said += f', counterbore {size(wide)} across {size(deep)} deep'
-        return said
-    if kind == solids.PATTERN:
-        return (' × '.join(str(c) for c in item.counts) + ', spacing '
-                + ', '.join(size(w) for w in item.widths))
-    return ''
-
-
-def _solids_table(name: str, geometry: Any) -> dict:
-    """The solids: each part,
-    and under a boolean or a pattern the solids it is made of."""
-    from hertzforge.core import solids
-
-    used = solids.used_by(geometry)
-    unit = _in_meters(geometry)
-    rows: list[list[str]] = []
-
-    def add(item: Any, depth: int) -> None:
-        primitive = item.kind in solids.PRIMITIVES
-        if item.operands:
-            operation = f'{item.kind} of {", ".join(map(str, item.operands))}'
-        else:
-            operation = 'part'
-        if item.id in used:
-            operation += f', in {used[item.id]}'
-        rows.append([str(item.id), '  ' * depth + _label(item), _kind_label(item.kind),
-                     _dimensions(geometry, item),
-                     f'({", ".join(f"{_f(c)}{unit}" for c in item.center)})' if primitive else '',
-                     f'({", ".join(_f(a) for a in item.angles)})°'
-                     if primitive or item.kind == solids.PATTERN else '',
-                     operation])
-        for operand in item.operands:
-            add(solids.solid(geometry, operand), depth + 1)
-
-    for item in solids.top_level(geometry):
-        add(item, 0)
-    return v.table(f'Solids of {name}', ['Id', 'Solid', 'Kind', 'Dimensions', 'Center',
-                                         'Angles', 'Operation'], rows)
-
-
 #: the color a solid being added, edited or picked is drawn in
 HIGHLIGHT = (88, 166, 255)
 
@@ -269,14 +199,19 @@ def _parts_holding(geometry: Any, ids: Any) -> set[int]:
 
 
 def _result(name: str, geometry: Any, title: str, rows: list[dict],
-            picked: list[int] | None = None) -> list[dict]:
-    """What a solids operation answers with: what it did, the geometry
-    drawn, and its solids table. The solids `picked` (one added or edited)
-    are highlighted and carry the gimbal."""
+            picked: list[int] | None = None, quiet: bool = False) -> list[dict]:
+    """What a solids operation answers with: what it did, and the geometry
+    drawn. The solids `picked` (one added or edited) are highlighted and
+    carry the gimbal. A `quiet` one says what it did only when something
+    warns: adding or editing a solid shows it drawn, which says the rest
+    (Brandon, 2026-11-13)."""
     view, notes = _drawn(name, geometry, highlight=picked or ())
     if picked:
         view['gizmo'] = _solids_gizmo(name, geometry, picked)
-    return [v.reading(title, rows + notes), view, _solids_table(name, geometry)]
+    said = rows + notes
+    if quiet and not any(row['status'] in ('warn', 'fail') for row in said):
+        return [view]
+    return [v.reading(title, said), view]
 
 
 def _parts_row(geometry: Any) -> dict:
@@ -303,30 +238,27 @@ def new_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     if unit not in ('m', 'mm', 'in', 'ft'):
         unit = 'm'
     added = _call(lambda: project.new_geometry(params['name'].strip() or 'Geometry', unit=unit))
-    geometry = project[added]
     return [v.reading(f'New geometry {added}', [
         v.row('Added', added, None, 'pass'),
         v.row('Length unit', unit, None, 'info'),
-        v.row('Next', 'add a plate, a block or another solid to it', None, 'info')]),
-        _solids_table(added, geometry)]
+        v.row('Next', 'add a plate, a block or another solid to it', None, 'info')])]
 
 
 def part_solids(name: str, geometry: Any, ids: list[int] | None = None) -> list[dict]:
     """What the Solids row or solids picked in the tree show: each part's surface
-    drawn with the mesh, before it is meshed too, and the solids table with their ids
-    (Brandon, 2026-11-10). Solids picked (`ids`) carry the gimbal, whose drag runs
-    Move Part on them. A part the kernel cannot make is said above them."""
+    drawn with the mesh, before it is meshed too (Brandon, 2026-11-10). Solids picked
+    (`ids`) carry the gimbal, whose drag runs Move Part on them. A part the kernel
+    cannot make is said above it."""
     view, notes = _drawn(name, geometry, highlight=ids or ())
     if ids:
         view['gizmo'] = _solids_gizmo(name, geometry, ids)
-    return [*([v.reading(f'Solids of {name}', notes)] if notes else []), view,
-            _solids_table(name, geometry)]
+    return [*([v.reading(name, notes)] if notes else []), view]
 
 
 def view_solids(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.solids`: a geometry's solids listed, with the geometry drawn; it changes nothing."""
+    """`project.solids`: a geometry's solids drawn; it changes nothing."""
     name, geometry = _geometry(project, params)
-    return _result(name, geometry, f'Solids of {name}', [_parts_row(geometry)])
+    return _result(name, geometry, name, [], quiet=True)
 
 
 # ---- adding a solid -------------------------------------------------------------
@@ -452,7 +384,7 @@ def _edited(project: Any, name: str, geometry: Any, params: dict[str, Any],
                   'pass' if changes else 'info')]
     if geometry.num_nodes:
         rows.append(v.row('Mesh', 'Mesh Solids again to mesh the change', None, 'info'))
-    return _result(name, geometry, f'Edited {name}', rows, [solid_id])
+    return _result(name, geometry, f'Edited {name}', rows, [solid_id], quiet=True)
 
 
 def _add(project: Any, params: dict[str, Any], make: Callable[[str], int],
@@ -479,7 +411,7 @@ def _add(project: Any, params: dict[str, Any], make: Callable[[str], int],
     except ValueError as error:
         rows.append(v.row('Volume', f'not read: {error}', None, 'warn'))
     rows.append(_parts_row(geometry))
-    return _result(name, geometry, f'Added to {name}', rows, [new])
+    return _result(name, geometry, f'Added to {name}', rows, [new], quiet=True)
 
 
 def add_solid_block(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -606,7 +538,7 @@ def edit_solid(project: Any, params: dict[str, Any]) -> list[dict]:
                   None, 'pass')]
     if geometry.num_nodes:
         rows.append(v.row('Mesh', 'Mesh Solids again to mesh the change', None, 'info'))
-    return _result(name, geometry, f'Edited {name}', rows)
+    return _result(name, geometry, f'Edited {name}', rows, quiet=True)
 
 
 OFFSET = tuple(_length(f'offset_{axis}', f'Move along {axis.upper()}', 0.0) for axis in 'xyz')
@@ -1343,25 +1275,24 @@ OPERATIONS = (
         id='project.new_geometry', title='New Geometry', workspace='geometry',
         summary='An empty geometry to build a part in from solids, in the display units '
                 'unless a length unit is named.',
-        params=(GEOMETRY_NAME, UNIT), outputs=('reading', 'table'), run=new_geometry),
+        params=(GEOMETRY_NAME, UNIT), outputs=('reading',), run=new_geometry),
     Operation(
         id='project.solids', title='Solids', workspace='geometry',
-        summary='A geometry\'s solids, each part and what it is made of, with their ids '
-                'for the other solid tools, and the geometry drawn.',
-        params=(GEOMETRY,), outputs=('reading', 'shape3d', 'table'), run=view_solids),
+        summary='A geometry\'s solids drawn.',
+        params=(GEOMETRY,), outputs=('shape3d',), run=view_solids),
     Operation(
         id='project.add_solid_block', title='Add Block', workspace='geometry',
         summary='A block, its widths along its own axes, centered and turned; a corner radius '
                 'rounds its four edges along its own Z.',
         params=(GEOMETRY, SOLID_ID, *CENTER, *WIDTHS, *ANGLES, CORNER, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_block, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_block, edits=True, previews=True),
     Operation(
         id='project.add_solid_cylinder', title='Add Cylinder', workspace='geometry',
         summary='A cylinder of a radius about its own Z and a length along it, centered and '
                 'turned; subtracted from a part it makes a hole.',
         params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Radius', 0.25, 0.0),
                 _length('length', 'Length', 1.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_cylinder, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_cylinder, edits=True, previews=True),
     Operation(
         id='project.add_solid_cone', title='Add Cone', workspace='geometry',
         summary='A cone or frustum along its own Z, a radius at its base and its top (either '
@@ -1369,11 +1300,11 @@ OPERATIONS = (
         params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Base radius', 0.5, 0.0),
                 _length('top_radius', 'Top radius', 0.25, 0.0),
                 _length('height', 'Height', 1.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_cone, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_cone, edits=True, previews=True),
     Operation(
         id='project.add_solid_sphere', title='Add Sphere', workspace='geometry', summary='A sphere of a radius about its center.',
         params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Radius', 0.5, 0.0), NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_sphere, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_sphere, edits=True, previews=True),
     Operation(
         id='project.add_solid_section', title='Add Section', workspace='geometry',
         summary='A structural section along its own Z. Dimensions in order: I-beam and '
@@ -1385,19 +1316,19 @@ OPERATIONS = (
                 Param('dimensions', 'Dimensions [m], in order', 'string', default='',
                       length=True),
                 _length('length', 'Length', 4.0, 0.0), *CENTER, *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_section, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_section, edits=True, previews=True),
     Operation(
         id='project.add_solid_plate', title='Add Plate', workspace='geometry',
         summary='A flat rectangle in its own XY plane, centered and turned; it is meshed '
                 'into shells, whose element group takes the thickness.',
         params=(GEOMETRY, SOLID_ID, *CENTER, *WIDTHS[:2], *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_plate, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_plate, edits=True, previews=True),
     Operation(
         id='project.add_solid_disk', title='Add Disk', workspace='geometry',
         summary='A flat circle in its own XY plane, centered and turned; it is meshed into '
                 'shells, whose element group takes the thickness.',
         params=(GEOMETRY, SOLID_ID, *CENTER, _length('radius', 'Radius', 0.5, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_disk, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_disk, edits=True, previews=True),
     Operation(
         id='project.add_solid_hole', title='Add Hole', workspace='geometry',
         summary='A hole entering at its center and running down its own Z, a depth of 0 '
@@ -1406,56 +1337,56 @@ OPERATIONS = (
                 _length('depth', 'Depth (0 through)', 0.0, 0.0),
                 _length('counterbore_diameter', 'Counterbore diameter (0 none)', 0.0, 0.0),
                 _length('counterbore_depth', 'Counterbore depth', 0.0, 0.0), *ANGLES, NAME),
-        outputs=('reading', 'shape3d', 'table'), run=add_solid_hole, edits=True, previews=True),
+        outputs=('reading', 'shape3d'), run=add_solid_hole, edits=True, previews=True),
     Operation(
         id='project.edit_solid', title='Edit Solid', workspace='geometry',
         summary='Change a solid after it is made: only the fields typed change, lists as '
                 '"0, 0, 0.1". A boolean it is part of changes with it; Mesh Solids again to '
                 'mesh the change.',
-        params=(GEOMETRY, SOLID, *EDIT_FIELDS), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLID, *EDIT_FIELDS), outputs=('reading', 'shape3d'),
         run=edit_solid, edits=True, previews=True),
     Operation(
         id='project.move_solids', title='Move Part', workspace='geometry',
         summary='Move parts whole, each with every solid it is made of: turned about the '
                 'middle of their extent, then moved.',
-        params=(GEOMETRY, SOLIDS, *OFFSET, *TURN), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLIDS, *OFFSET, *TURN), outputs=('reading', 'shape3d'),
         run=move_solids, edits=True,
         edits_when=lambda params: any(params[p.name] for p in (*OFFSET, *TURN))),
     Operation(
         id='project.copy_solids', title='Copy Solids', workspace='geometry',
         summary='Copy solids, recipe and all, into the same geometry or another; a boolean '
                 'or pattern comes with every solid it is made of.',
-        params=(GEOMETRY, SOLIDS, INTO), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLIDS, INTO), outputs=('reading', 'shape3d'),
         run=copy_solids, edits=True),
     Operation(
         id='project.reorder_solids', title='Reorder Solids', workspace='geometry',
         summary='Put the parts, or one boolean\'s solids, in a new order, naming every one; '
                 'a subtraction cuts the rest from the first.',
-        params=(GEOMETRY, SOLIDS, WITHIN), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLIDS, WITHIN), outputs=('reading', 'shape3d'),
         run=reorder_solids, edits=True),
     Operation(
         id='project.combine_solids', title='Combine Solids', workspace='geometry',
         summary='Make two or more parts one: their union, the rest subtracted from the '
                 'first, or their intersection.',
-        params=(GEOMETRY, OPERATION, SOLIDS, NAME), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, OPERATION, SOLIDS, NAME), outputs=('reading', 'shape3d'),
         run=combine_solids, edits=True),
     Operation(
         id='project.separate_solids', title='Take Apart', workspace='geometry',
         summary='Undo booleans or patterns: the solids they were made of stand on their own '
                 'again.',
-        params=(GEOMETRY, SOLIDS), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLIDS), outputs=('reading', 'shape3d'),
         run=separate_solids, edits=True),
     Operation(
         id='project.delete_solids', title='Delete Solids', workspace='geometry',
         summary='Delete solids, each with every solid it is made of; a mesh made from them '
                 'stays.',
-        params=(GEOMETRY, SOLIDS), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLIDS), outputs=('reading', 'shape3d'),
         run=delete_solids, edits=True),
     Operation(
         id='project.pattern_solids', title='Pattern', workspace='geometry',
         summary='Copy parts in rows, columns and layers along X, Y and Z, the originals '
                 'counted, as one solid whose copies follow them.',
-        params=(GEOMETRY, SOLIDS, *COUNTS, *SPACING), outputs=('reading', 'shape3d', 'table'),
+        params=(GEOMETRY, SOLIDS, *COUNTS, *SPACING), outputs=('reading', 'shape3d'),
         run=pattern_solids, edits=True, previews=True),
     Operation(
         id='project.mesh_solids', title='Mesh Solids', workspace='geometry',
@@ -1463,7 +1394,7 @@ OPERATIONS = (
                 'draws the mesh without adding it. The size sets the time: a fine size is slow.',
         params=(GEOMETRY, PARTS, ELEMENTS, SIZE, PIECE_SIZES, DETECT_SIZES, APART, PARTS_APART, ANYWAY,
                 MESH_KEEP),
-        outputs=('reading', 'shape3d', 'table'), run=mesh_solids, edits=True,
+        outputs=('reading', 'shape3d'), run=mesh_solids, edits=True,
         edits_when=lambda params: params['keep'], commits='keep'),
     Operation(
         id='project.mate_surfaces', title='Mate Surfaces', workspace='geometry',

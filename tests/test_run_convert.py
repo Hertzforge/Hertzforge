@@ -410,3 +410,43 @@ def test_a_gigabyte_stream_converts_under_a_stated_ceiling(tmp_path):
     _done, peak, seconds = _peak_converting(folder)
     print(f'1 GiB stream: peak {peak / 2**20:.1f} MiB, {seconds:.1f} s')
     assert peak < 128 * 2**20
+
+
+# ---- a Sine run ------------------------------------------------------------
+
+def test_a_sine_sweep_becomes_a_specification_and_its_last_full_level_pass(tmp_path):
+    from hertzforge.core.sine import LOG, SineLevelSet, SineSweepSpecification
+
+    done = run_convert.convert(rf.sine_run(str(tmp_path / 'sine')))
+    project = Project.open(done.path)
+    assert done.lacked == [] and project.project_type == 'Sine Sweep'
+    spec = project['Specification']
+    assert isinstance(spec, SineSweepSpecification) and spec.response_dof == ['1']
+    (tone,) = spec.tones
+    assert tone.frequency[0] == 200 and tone.frequency[-1] == 400
+    assert np.all(tone.segment_type == LOG) and np.all(tone.segment_rate == 2.0)
+    assert np.allclose(tone.amplitude, 0.5 * rf.G)
+    levels = project['Sine Levels']
+    assert isinstance(levels, SineLevelSet)
+    (level,) = levels
+    # the down pass at 0 dB: every one of its points, ascending in frequency
+    assert len(level.abscissa) == 50 and np.all(np.diff(level.abscissa) >= 0)
+    assert np.allclose(np.abs(level.ordinate[0]), 0.5 * rf.G)
+    assert np.allclose(np.angle(level.ordinate[1], deg=True), -95.0)
+    # and every point of every pass, the NaN fill included, stays as arrays
+    record = project['Run Record']
+    assert record.arrays['channel_levels']['values'].shape == (2, 2, 64)
+    assert 'control_trace' in record.arrays
+
+
+def test_a_sine_dwell_holds_its_frequency_and_keeps_its_levels_as_arrays(tmp_path):
+    from hertzforge.core.sine import SineSweepSpecification
+
+    done = run_convert.convert(rf.sine_run(str(tmp_path / 'dwell'), test='dwell'))
+    project = Project.open(done.path)
+    assert done.lacked == []
+    (tone,) = project['Specification'].tones
+    assert isinstance(project['Specification'], SineSweepSpecification)
+    assert tone.dwell_segments() == [0] and tone.duration() == pytest.approx(30.0)
+    assert 'Sine Levels' not in project
+    assert 'channel_levels' in project['Run Record'].arrays

@@ -94,7 +94,7 @@ pub struct RecordRef {
 }
 
 impl RecordRef {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         json!({"folder": self.folder, "streams": if self.streams { "on" } else { "off" },
                "problem": self.problem})
     }

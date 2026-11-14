@@ -58,7 +58,7 @@
 
 	<div class="stack">
 		<!-- The run's record is Random's: the operator's words and whether the folder keeps the time histories. -->
-		<RunRecordEditor acq={shock} kept="Every enabled input and the drive go unrecorded. The setup, the channel table, the log and every pulse's results are still kept." />
+		<RunRecordEditor acq={shock} kept="The setup, the channel table, the log and every pulse's results are still kept." />
 		<section class="aq-panel" aria-labelledby="st-meta">
 			<div class="aq-head"><h2 id="st-meta">Kept With the Run</h2><span class="aq-sub">Fields the controller's own report carries.</span></div>
 			<div class="aq-group">

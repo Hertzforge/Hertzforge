@@ -340,6 +340,11 @@ export class AcquireState {
 		return this.rows.filter((r) => r.enabled).length;
 	}
 
+	/** The sample rate the run asks for, for the size its streams take. */
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz;
+	}
+
 	get tableErrorCount(): number {
 		return this.tableReport?.errors.length ?? 0;
 	}

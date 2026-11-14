@@ -5,7 +5,7 @@
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
 use hertzforge_sine::{
-    BandwidthMode, CaptureRule, ColaWaveform, CompositeMode, CompressionPreset, DwellFor, Quantity,
+    BandwidthMode, ColaWaveform, CompositeMode, CompressionPreset, DwellFor, Quantity,
     RstdDwellMode, RungFor, SineMode, SineTestConfig, StepSpacing, SweepDirection, SweepRate,
     SweepTarget,
 };
@@ -289,19 +289,23 @@ fn every_wire_field_reaches_the_controllers_configuration() {
             c.shaker.as_ref().is_some_and(|s| s.name == "Other shaker")
         }),
         ("feasibility", Value::Null, |c, _| c.shaker.is_none()),
-        ("capture.rule", json!("entire_test"), |c, _| {
-            c.capture.rule == CaptureRule::EntireTest
+        // The run's record: the operator's words and whether the streams are kept.
+        ("operator", json!("B. Operator"), |_, w| {
+            w.operator == "B. Operator"
         }),
-        ("capture.level_settle_s", json!(2), |c, _| {
-            c.capture.level_settle_s == 2.0
+        ("article", json!("Bracket, serial 8"), |_, w| {
+            w.article == "Bracket, serial 8"
         }),
-        ("capture.periodic_save_s", json!(30), |c, _| {
-            c.capture.periodic_save_s == Some(30.0)
+        ("notes", json!("second article"), |_, w| {
+            w.notes == "second article"
         }),
-        // The run name reaches the controller's capture at engage
-        // (`sine::run`'s test of it, on the controller).
-        ("capture.run_name", json!("bench_s1"), |_, w| {
-            w.capture.run_name == "bench_s1"
+        (
+            "specification",
+            json!({"document": "Procedure 12", "clause": "4.2"}),
+            |_, w| w.specification == Some(("Procedure 12".to_owned(), "4.2".to_owned())),
+        ),
+        ("record", json!({"streams": false}), |_, w| {
+            !w.record_streams
         }),
         ("metadata[0].value", json!("8"), |c, _| {
             c.metadata[0].value == "8"
@@ -588,24 +592,6 @@ fn each_refusal_is_named_at_its_field() {
             "cola_needs_two_outputs",
             "cola.enabled",
         ),
-        (
-            "capture.rule",
-            json!("manual"),
-            "out_of_range",
-            "capture.rule",
-        ),
-        (
-            "capture.rule",
-            json!("first_seconds"),
-            "out_of_range",
-            "capture.rule",
-        ),
-        (
-            "capture.run_name",
-            json!("../elsewhere"),
-            "out_of_range",
-            "capture.run_name",
-        ),
     ];
     assert!(
         refusals(&golden(), 1).is_empty(),
@@ -636,6 +622,8 @@ fn each_refusal_is_named_at_its_field() {
             "config.control.tracking.kind",
         ),
         ("cola.waveform", json!("triangle"), "config.cola.waveform"),
+        // The module's own capture is gone: every run is recorded.
+        ("capture", json!({"rule": "off"}), "config.capture"),
     ] {
         let mut c = golden();
         set(&mut c, path, value);
