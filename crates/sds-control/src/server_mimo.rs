@@ -64,7 +64,7 @@ impl Service {
             None => Box::new(crate::mimo::adapter::ServiceDriver::new(
                 crate::mimo::adapter::AdapterOptions {
                     data_root: self.opts.data_root.clone(),
-                    capture_root: self.opts.capture_root.clone(),
+                    capture_root: Some(self.opts.records_root()),
                     sim_speed: self.opts.sim_speed,
                     scanner: self.opts.scanner.clone(),
                     bind: self.opts.bind.clone(),

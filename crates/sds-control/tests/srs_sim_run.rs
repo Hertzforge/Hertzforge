@@ -150,6 +150,55 @@ async fn auto_with_the_default_law_completes_inside_the_band() {
     }
 }
 
+/// With the capture switch on, a service built as the program builds it (a data
+/// root and no capture root) records the run under its data root, at the
+/// station's rate.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn capture_on_records_under_the_data_root_at_the_station_rate() {
+    let mut o = real(Duration::from_secs(30));
+    o.capture_root = None;
+    let root = o.data_root.clone();
+    let addr = serve(Service::with_options(o)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let mut cfg = config("auto");
+    cfg["capture"] = json!({"auto_start": true});
+    let id = run_id(&mut c, cfg).await;
+    c.ok("srs.start", json!({})).await;
+    let end = wait_end(&mut c, &id).await;
+    assert_eq!(end["end"]["outcome"], "completed", "{end}");
+    let n = rows(&mut c).await.len();
+    // The SRS core names its folder for the time it armed (`srs_run_<unix secs>`).
+    let dirs: Vec<PathBuf> = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join("capture.json").exists())
+        .collect();
+    assert_eq!(
+        dirs.len(),
+        1,
+        "one run folder under the data root: {dirs:?}"
+    );
+    let dir = &dirs[0];
+    let side: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("capture.json")).expect("a sidecar"))
+            .unwrap();
+    assert_eq!(side["complete"], true);
+    assert_eq!(
+        side["config"]["sample_rate_hz"], 20480.0,
+        "{}",
+        side["config"]
+    );
+    assert_eq!(side["config"]["decimation"], 1);
+    // Every pulse's record, one sample a frame.
+    assert_eq!(side["chunks_written"], n as u64);
+    let frames = side["frames_written"].as_u64().unwrap();
+    let bytes = std::fs::metadata(dir.join("telemetry.f32")).unwrap().len();
+    assert_eq!(bytes, frames * 4);
+    assert!(dir.join("law.json").exists());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// srs-2: MANUAL fire within ±1 dB of the table, go to a rung, an early fire
 /// refused `not_yet`, then Stop with no pulse after.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

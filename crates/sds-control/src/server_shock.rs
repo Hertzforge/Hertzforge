@@ -415,7 +415,7 @@ impl Service {
             station: station_plan,
             scanner: self.opts.scanner.clone(),
             data_root: self.opts.data_root.clone(),
-            capture_root: self.opts.capture_root.clone(),
+            capture_root: Some(self.opts.records_root()),
             bind: self.opts.bind.clone(),
             law,
             law_values,

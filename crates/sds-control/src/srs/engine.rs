@@ -729,7 +729,8 @@ impl SrsEngine for ServiceEngine {
     fn arm(&mut self, plan: ArmPlan) -> Result<ArmOutcome, MethodError> {
         let law = plan.law?;
         let mut cfg = plan.cfg.build(&plan.table);
-        // The capture root, when the service has one, is the controller's data root.
+        // The service always gives a records root (`ServiceOptions::records_root`);
+        // a plan without one has nowhere to record.
         cfg.capture.trigger = if plan.cfg.capture_auto_start && plan.capture_root.is_some() {
             hertzforge_srs::service::config::ShockCaptureTrigger::EveryPulse
         } else {

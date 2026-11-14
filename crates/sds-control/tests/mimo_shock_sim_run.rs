@@ -546,6 +546,29 @@ async fn mimo_shock_every_pulse_is_written_to_the_capture_root() {
     assert!(back.setup.is_some());
 }
 
+/// With the capture switch on, a service built as the program builds it (a data
+/// root and no capture root) writes the run's records under its data root.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_capture_on_records_under_the_data_root() {
+    let mut o = opts(Duration::from_secs(30));
+    o.capture_root = None;
+    let root = o.data_root.clone();
+    let addr = serve(Service::with_options(o)).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 4).await;
+    let mut cfg = classical("shock-linear-4x4", "auto");
+    cfg["capture"] = json!({"auto_start": true, "run_name": "kept"});
+    cfg["schedule"]["levels_db"] = json!([0]);
+    let id = configure(&mut c, cfg).await;
+    c.ok("mimo_shock.start", json!({})).await;
+    wait_end(&mut c, &id).await;
+    let n = rows(&mut c).await.len();
+    let dir = root.join(format!("kept_{}", id.as_str().unwrap()));
+    let back = hertzforge_mimo_shock::RunRecord::read_dir(&dir).expect("records written");
+    assert_eq!(back.pulses.len(), n);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// The run id starts again with each service, so a second service on the same
 /// records root asks for the same folder: it gets the next free one, and the
 /// first run's records are left whole.

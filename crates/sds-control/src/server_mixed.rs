@@ -247,7 +247,7 @@ impl Service {
             core: core.clone(),
             law: facts.clone(),
             sim_speed: self.opts.sim_speed,
-            capture_root: self.opts.capture_root.clone(),
+            capture_root: Some(self.opts.records_root()),
             timeout_s: self.opts.timeout.as_secs_f64(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
