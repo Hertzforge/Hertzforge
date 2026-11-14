@@ -216,25 +216,47 @@ def test_a_pattern_copies_its_solids(project, validate):
     refused(project, 'project.pattern_solids', 'no copies yet', solids='2', count_x=1)
 
 
+def no_mesher(monkeypatch):
+    """Every mesher refuses to run: a preview reads its count without meshing (Brandon,
+    2026-11-13: a preview that meshed cost as much as meshing)."""
+    from hertzforge.core import shells, solids, tetmesh
+
+    def refuse(*_a, **_k):
+        raise AssertionError('the preview meshed')
+    for module, name in ((solids, 'brick_mesh'), (tetmesh, 'tet_mesh'), (shells, 'shell_mesh')):
+        monkeypatch.setattr(module, name, refuse)
+
+
 def test_mesh_solids_previews_and_then_meshes(project, validate):
     block(project)
-    reading, view = run(project, 'project.mesh_solids', size=0.005)
-    wire_views([reading, view], validate)
-    found = rows(reading)
-    assert found['Bricks']['value'] == 20 * 10 * 2
-    assert found['Method']['value'] == 'extruded along Z'
-    assert project['Part'].num_nodes == 0
+    with pytest.MonkeyPatch.context() as patched:
+        no_mesher(patched)
+        reading, view = run(project, 'project.mesh_solids', size=0.005)
+        wire_views([reading, view], validate)
+        # the block stays drawn, and the box says only about how many bricks
+        assert [row['label'] for row in reading['rows']] == ['Bricks']
+        assert rows(reading)['Bricks']['value'] == 'about 400'
+        assert len(view['triangles']) == 12 and project['Part'].num_nodes == 0
+        for elements, label in (('tetras', 'Tetrahedra'), ('quads', 'Quads'),
+                                ('triangles', 'Triangles')):
+            (said, _view) = run(project, 'project.mesh_solids', size=0.005, elements=elements)
+            assert rows(said)[label]['value'].startswith('about ')
     reading, view = run(project, 'project.mesh_solids', size=0.005, keep=True)
     wire_views([reading, view], validate)
+    assert rows(reading)['Method']['value'] == 'extruded along Z'
+    assert 'Element size' not in rows(reading) and 'Solids' not in rows(reading)
     assert rows(reading)['Nodes in all']['value'] == 21 * 11 * 3
     assert len(project['Part'].elem_id) == 400
-    reading, _view = run(project, 'project.mesh_solids', size=0.01)
+    reading, view = run(project, 'project.mesh_solids', size=0.01)
     assert 'the 400 elements' in rows(reading)['Replaces']['value']
+    assert view['view'] == 'shape3d', 'the mesh made stays drawn under the preview'
 
 
 def test_a_plate_meshes_into_shells_only(project):
     run(project, 'project.add_solid_plate', width_x=0.1, width_y=0.05)
     reading, _view = run(project, 'project.mesh_solids', elements='quads', size=0.01)
+    assert rows(reading)['Quads']['value'] == 'about 50'
+    reading, _view = run(project, 'project.mesh_solids', elements='quads', size=0.01, keep=True)
     assert rows(reading)['Shells']['value'] == 50
     refused(project, 'project.mesh_solids', 'is flat', elements='hexes', size=0.01)
 
@@ -400,9 +422,8 @@ def test_mesh_solids_takes_a_size_per_piece(monkeypatch):
     """The table: a union meshed in pieces lists a row a piece, each takes its own size,
     and Detect fills every row with the size that piece is likely to hold at. The fit
     itself is the core's test, stood in for here."""
-    from hertzforge.service import ops_solids
 
-    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    no_mesher(monkeypatch)
     project, both, cut, bar = _union_in_pieces()
     params = {'solids': str(both), 'size': 0.01}
     views = run(project, 'project.mesh_solids', **params)
@@ -569,7 +590,10 @@ def test_a_single_turned_solid_meshes_swept_along_its_own_axis(project, kind, ke
         run(project, 'project.add_solid_section', shape='rectangular tube',
             dimensions='1 0.5 0.1', **given)
     (reading, *_rest) = run(project, 'project.mesh_solids', size=0.1, keep=keep)
-    assert rows(reading)['Method']['value'] == 'swept along its own axis'
+    if keep:
+        assert rows(reading)['Method']['value'] == 'swept along its own axis'
+    else:
+        assert rows(reading)['Bricks']['value'].startswith('about ')
     assert bool(project['Part'].num_nodes) == keep
 
 
@@ -610,9 +634,8 @@ def test_detect_on_parts_that_mesh_as_one_says_so(project):
 
 
 def test_a_size_for_a_piece_that_is_not_there_is_refused(monkeypatch, project):
-    from hertzforge.service import ops_solids
 
-    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    no_mesher(monkeypatch)
     run(project, 'project.add_solid_block', width_x=1, width_y=1, width_z=1)
     refused(project, 'project.mesh_solids', 'mesh as one', sizes='1: 0.5', size=0.5)
     in_pieces, both, _cut, _bar = _union_in_pieces()
@@ -626,10 +649,9 @@ def _spheres(project):
 
 
 def test_the_fold_check_reads_each_piece_at_its_own_size(monkeypatch, project):
-    from hertzforge.service import ops_solids
 
     _spheres(project)
-    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    no_mesher(monkeypatch)
     (reading, *_rest) = run(project, 'project.mesh_solids', size=0.2, sizes='1: 0.1, 2: 0.1')
     assert 'Fit' not in rows(reading), 'both pieces are given a size they hold at'
     (reading, *_rest) = run(project, 'project.mesh_solids', size=0.1, sizes='1: 0.3')
@@ -649,7 +671,7 @@ def test_a_piece_with_a_hole_reads_its_likely_size_with_the_hole(monkeypatch, pr
     from hertzforge.core import solids
     from hertzforge.service import ops_solids
 
-    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    no_mesher(monkeypatch)
     block(project, width_x=0.4, width_y=0.2, width_z=0.1)
     block(project, x=0.1, z=0.1, width_x=0.1, width_y=0.2, width_z=0.1)
     run(project, 'project.combine_solids', solids='1, 2', operation='union')
@@ -675,21 +697,19 @@ def test_an_undefined_geometry_reports_its_numbers_without_a_unit(undefined):
     assert not project['Raw'].units_defined
     run(project, 'project.add_solid_block', geometry='Raw', width_x=100.0, width_y=100.0,
         width_z=10.0)
-    views = run(project, 'project.mesh_solids', geometry='Raw', size=10.0)
+    views = run(project, 'project.mesh_solids', geometry='Raw', size=10.0, keep=True)
     assert views[-1]['unit'] == 'undefined'
     said = rows(views[0])
-    assert said['Element size']['unit'] is None and said['Shortest edge']['unit'] is None
+    assert said['Shortest edge']['unit'] is None
     display_units.convert(views, display_units.START)
     said = rows(views[0])
-    assert said['Element size']['value'] == 10.0 and said['Element size']['unit'] is None
-    assert said['Shortest edge']['value'] == 10.0
+    assert said['Shortest edge']['value'] == 10.0 and said['Shortest edge']['unit'] is None
 
 
 def test_an_undefined_geometry_says_a_refusal_and_a_fold_without_a_unit(monkeypatch, undefined):
-    from hertzforge.service import ops_solids
 
     project = undefined
-    monkeypatch.setattr(ops_solids, '_preview', lambda *_a, **_k: (None, []))
+    no_mesher(monkeypatch)
     for x in (0.0, 5.0):
         run(project, 'project.add_solid_sphere', geometry='Raw', x=x, radius=0.5)
     (reading, *_rest) = run(project, 'project.mesh_solids', geometry='Raw', size=0.3)
@@ -697,6 +717,7 @@ def test_an_undefined_geometry_says_a_refusal_and_a_fold_without_a_unit(monkeypa
     views = run(project, 'project.mesh_solids', geometry='Raw', size=0.3)
     table = next(view for view in views if view.get('title') == 'Pieces')
     assert table['columns'][3:5] == ['Size', 'Likely size']
+    monkeypatch.undo()
     run(project, 'project.mesh_solids', geometry='Raw', size=0.1, anyway=True, keep=True)
     with pytest.raises(ProtocolError) as error:
         run(project, 'project.mate_surfaces', geometry='Raw', tolerance=0.001)

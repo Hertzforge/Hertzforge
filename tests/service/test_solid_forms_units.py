@@ -138,12 +138,12 @@ def test_mesh_sizes_are_typed_in_the_display_system():
         ('op.run', {'op': 'project.mesh_solids', 'params': {'geometry': 'Part', 'size': 0.5}}),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
             'geometry': 'Part', 'size': 0.5, 'keep': True}}))
-    for answer in (preview, kept):
-        said = rows(answer)
-        assert said['Element size']['unit'] == 'in'
-        assert said['Element size']['value'] == pytest.approx(0.5)
-        assert said['Bricks']['value'] == 8.0
-        assert said['Shortest edge']['value'] == pytest.approx(0.5)
+    # half-inch bricks in an inch block: eight, so the size was taken as inches
+    assert rows(preview)['Bricks']['value'] == 'about 8'
+    said = rows(kept)
+    assert said['Bricks']['value'] == 8.0
+    assert said['Shortest edge']['unit'] == 'in'
+    assert said['Shortest edge']['value'] == pytest.approx(0.5)
 
 
 def test_piece_sizes_and_what_a_fold_says_are_in_the_display_system():
