@@ -1875,7 +1875,7 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// a study keeps the window; any other workspace goes to Signals, the recordings' module
+				// a study keeps the window; any other workspace goes to Signal Processing, the recordings' module
 				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
 				this.app.analyze.selectProject();
 			}
