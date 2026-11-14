@@ -18,6 +18,7 @@
 	import OverrideDialog from '$lib/acquire/OverrideDialog.svelte';
 	import ProfileEditor from '$lib/acquire/ProfileEditor.svelte';
 	import ReferencePreview from '$lib/acquire/ReferencePreview.svelte';
+	import RunRecordEditor from '$lib/acquire/RunRecordEditor.svelte';
 	import ScheduleEditor from '$lib/acquire/ScheduleEditor.svelte';
 	import SetupSummary from '$lib/acquire/SetupSummary.svelte';
 	import StationPanel from '$lib/acquire/StationPanel.svelte';
@@ -41,7 +42,7 @@
 		if (app.tests.takeFocus()) heading?.focus();
 	});
 
-	const TEST_KEYS = ['title', 'profile', 'acquisition', 'schedule'];
+	const TEST_KEYS = ['title', 'profile', 'acquisition', 'schedule', 'specification'];
 	const CONTROL_KEYS = ['control', 'limits', 'feasibility'];
 
 	function countUnder(prefixes: string[], map: Record<string, string[]>): number {
@@ -166,7 +167,7 @@
 		bind:heading
 	/>
 	<!-- Notices float over the top of the page, so one never pushes the plots down. -->
-	<div class="notices"><div class="stack"><Notices {acq} /></div></div>
+	<div class="notices"><div class="float"><Notices {acq} /></div></div>
 
 	{#if !running}
 	<div class="tabs" role="tablist" aria-label="Acquire and control sections" bind:this={tablist} tabindex="-1" onkeydown={onTabKey}>
@@ -219,6 +220,7 @@
 				<div class="stack">
 					<SetupSummary {acq} />
 					<ScheduleEditor {acq} />
+					<RunRecordEditor {acq} />
 				</div>
 			</div>
 		{:else}
@@ -388,7 +390,7 @@
 		z-index: 40;
 	}
 
-	.stack {
+	.float {
 		position: absolute;
 		top: var(--sp-2);
 		left: 50%;
@@ -400,17 +402,17 @@
 		pointer-events: none;
 	}
 
-	.stack > :global(*) {
+	.float > :global(*) {
 		pointer-events: auto;
 		box-shadow: var(--shadow-pop);
 	}
 
 	/* The tinted notices are translucent: lay them on the page colour so a plot never shows through. */
-	.stack > :global(.aq-notice.warn) {
+	.float > :global(.aq-notice.warn) {
 		background: linear-gradient(var(--amber-weak), var(--amber-weak)), var(--bg-2);
 	}
 
-	.stack > :global(.aq-notice.pass) {
+	.float > :global(.aq-notice.pass) {
 		background: linear-gradient(var(--blue-weak), var(--blue-weak)), var(--bg-2);
 	}
 

@@ -143,6 +143,7 @@ function loadSetup(storage: Storage | null): SetupDraft {
 		merged.control = { ...base.control, ...(saved.control ?? {}) };
 		merged.control.pretest = { ...base.control.pretest, ...(saved.control?.pretest ?? {}) };
 		merged.feasibility = { ...base.feasibility, ...(saved.feasibility ?? {}) };
+		merged.record = { ...base.record, ...(saved.record ?? {}) };
 		if (!Array.isArray(merged.breakpoints) || !Array.isArray(merged.schedule?.levels)) return base;
 		return merged;
 	} catch {
@@ -332,6 +333,11 @@ export class AcquireState {
 	/** Errors that block applying: the editor's, the setup dry run's, and the service's table. */
 	get setupErrorCount(): number {
 		return errorCount(this.local) + (this.setupCheck?.errors.length ?? 0);
+	}
+
+	/** The channels a run's streams would hold: every enabled input and drive of the table being edited. */
+	get recordChannels(): number {
+		return this.rows.filter((r) => r.enabled).length;
 	}
 
 	get tableErrorCount(): number {
