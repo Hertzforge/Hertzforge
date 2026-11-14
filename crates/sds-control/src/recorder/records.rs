@@ -20,24 +20,12 @@ pub struct Records {
 
 impl Records {
     /// Make the run folder `name` under `root`, or the first free `name-<n>`, with its
-    /// recordings folder.
+    /// recordings folder. The folder is claimed by creating it, so a run never
+    /// shares one with another.
     pub fn open(root: &Path, name: &str) -> std::io::Result<Records> {
-        for n in 1..10_000u32 {
-            let p = if n == 1 {
-                root.join(name)
-            } else {
-                root.join(format!("{name}-{n}"))
-            };
-            if p.exists() {
-                continue;
-            }
-            std::fs::create_dir_all(p.join(RECORDINGS))?;
-            return Ok(Records { folder: p });
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!("no free run folder named {name} under {}", root.display()),
-        ))
+        let folder = hertzforge_capture::claim_run_dir(root, name)?;
+        std::fs::create_dir_all(folder.join(RECORDINGS))?;
+        Ok(Records { folder })
     }
 
     pub fn folder(&self) -> &Path {

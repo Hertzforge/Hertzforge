@@ -284,3 +284,45 @@ fn every_call_is_recorded_in_the_capture_folder() {
     assert_eq!((line.misses, line.capped_ticks), (0, 0));
     let _ = std::fs::remove_dir_all(data_root("records"));
 }
+
+#[test]
+fn a_second_run_under_one_name_keeps_the_first_runs_records() {
+    let _ = std::fs::remove_dir_all(data_root("same-name"));
+    let run = || {
+        let mut c = cfg();
+        c.mode = SineMode::Dwell(DwellPlan {
+            freq_hz: 220.0,
+            for_: DwellFor::Seconds(1.0),
+        });
+        let mut s = service_with(c, None, "same-name");
+        engage(&mut s);
+        let dir = s.start_capture("sine").unwrap();
+        while matches!(s.state(), RunState::Engaged | RunState::FullLevel) {
+            if !s.run_chunk().unwrap() {
+                break;
+            }
+        }
+        s.stop_capture().unwrap();
+        (dir, s.law_tally().calls)
+    };
+    let (first, first_calls) = run();
+    let (second, second_calls) = run();
+    assert_eq!(first, data_root("same-name").join("sine"));
+    assert_eq!(second, data_root("same-name").join("sine-2"));
+    // Each folder holds its own run whole: the stream, its sidecar, and the
+    // law's records beside them, every call of that run and no other's.
+    for (dir, calls) in [(&first, first_calls), (&second, second_calls)] {
+        let side: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("capture.json")).unwrap()).unwrap();
+        assert_eq!(side["complete"], true);
+        let frames = side["frames_written"].as_u64().unwrap();
+        let n_ch = side["config"]["n_channels"].as_u64().unwrap();
+        let stream = std::fs::metadata(dir.join("telemetry.f32")).unwrap().len();
+        assert_eq!(stream, frames * n_ch * 4, "{}", dir.display());
+        assert!(dir.join("law.json").exists());
+        let ticks = std::fs::read(dir.join("law_ticks.bin")).unwrap();
+        assert!(calls > 0);
+        assert_eq!((ticks.len() / LawRecord::BYTES) as u64, calls);
+    }
+    let _ = std::fs::remove_dir_all(data_root("same-name"));
+}

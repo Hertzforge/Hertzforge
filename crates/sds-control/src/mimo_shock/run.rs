@@ -186,7 +186,9 @@ struct Actor {
     engine: Option<MimoShockEngine>,
     view: MsView,
     lock: Option<hertzforge_station::lock::LockGuard>,
-    capture_dir: Option<PathBuf>,
+    /// Where the run's records go when it ends: the records root and the folder
+    /// name asked for. The folder is claimed then, as the first free one.
+    capture_to: Option<(PathBuf, String)>,
     host_rule: Option<HostRule>,
     law_values: Vec<DiagnosticSpec>,
     started: Option<Instant>,
@@ -215,7 +217,7 @@ pub fn spawn(
             engine: None,
             view: initial,
             lock: None,
-            capture_dir: None,
+            capture_to: None,
             host_rule: None,
             law_values: Vec::new(),
             started: None,
@@ -493,10 +495,10 @@ impl Actor {
         self.lock = lock;
         self.host_rule = ctx.host_rule;
         self.law_values = ctx.law_values;
-        self.capture_dir = ctx
+        self.capture_to = ctx
             .capture_root
             .filter(|_| cfg.capture_auto_start)
-            .map(|root| root.join(format!("{}_{}", cfg.run_name, self.plan.run_id)));
+            .map(|root| (root, format!("{}_{}", cfg.run_name, self.plan.run_id)));
         self.engine = Some(engine);
         self.armed_at = Some(Instant::now());
         self.set(State::Armed, "armed");
@@ -1228,9 +1230,14 @@ impl Actor {
         self.view.level_db = level_db.or(self.view.level_db);
         self.view.review = self.review_json().or(self.view.review.take());
         self.data.set_next_due(None);
-        if let (Some(dir), Some(e)) = (self.capture_dir.as_ref(), self.engine.as_ref()) {
-            match e.records().write_dir(dir) {
-                Ok(()) => self
+        if let (Some((root, name)), Some(e)) = (self.capture_to.as_ref(), self.engine.as_ref()) {
+            // The run id restarts with each service process, so the name can repeat:
+            // the folder is the first free one, never an earlier run's.
+            let written = hertzforge_capture::claim_run_dir(root, name)
+                .map_err(|e| e.to_string())
+                .and_then(|dir| e.records().write_dir(&dir).map(|()| dir));
+            match written {
+                Ok(dir) => self
                     .shared
                     .add_log("capture", format!("records written to {}", dir.display())),
                 Err(m) => self

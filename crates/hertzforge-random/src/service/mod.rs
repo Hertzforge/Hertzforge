@@ -3009,7 +3009,8 @@ impl RandomService {
 
     // --- capture (capture rules + periodic save) ------------------------------------
 
-    /// Start streaming telemetry capture to `data_root/<run_name>/`. Logs
+    /// Start streaming telemetry capture to `data_root/<run_name>/` (or the first
+    /// free `<run_name>-<n>`; the folder used is returned). Logs
     /// the start. Manual/EntireTest callers use this directly; AUTO opens/closes it
     /// automatically on the debounced level-entry windows.
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, ServiceError> {

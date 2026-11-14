@@ -546,6 +546,45 @@ async fn mimo_shock_every_pulse_is_written_to_the_capture_root() {
     assert!(back.setup.is_some());
 }
 
+/// The run id starts again with each service, so a second service on the same
+/// records root asks for the same folder: it gets the next free one, and the
+/// first run's records are left whole.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_shock_a_repeated_run_name_keeps_the_earlier_records() {
+    let first = opts(Duration::from_secs(30));
+    let root = first.capture_root.clone().unwrap();
+    let mut runs = Vec::new();
+    for o in [first, {
+        let mut o = opts(Duration::from_secs(30));
+        o.data_root = root.clone();
+        o.capture_root = Some(root.clone());
+        o
+    }] {
+        let addr = serve(Service::with_options(o)).await;
+        let mut c = Client::connect(addr).await;
+        controller(&mut c, 4, 4).await;
+        let mut cfg = classical("shock-linear-4x4", "auto");
+        cfg["capture"] = json!({"auto_start": true, "run_name": "again"});
+        cfg["schedule"]["levels_db"] = json!([0]);
+        let id = configure(&mut c, cfg).await;
+        c.ok("mimo_shock.start", json!({})).await;
+        wait_end(&mut c, &id).await;
+        runs.push((id.as_str().unwrap().to_owned(), rows(&mut c).await.len()));
+    }
+    assert_eq!(
+        runs[0].0, runs[1].0,
+        "each service numbers its runs from one"
+    );
+    let name = format!("again_{}", runs[0].0);
+    for (dir, (_, n)) in [root.join(&name), root.join(format!("{name}-2"))]
+        .iter()
+        .zip(&runs)
+    {
+        let back = hertzforge_mimo_shock::RunRecord::read_dir(dir).expect("records written");
+        assert_eq!(back.pulses.len(), *n, "{}", dir.display());
+    }
+}
+
 /// A contributor's law file, imported under a name of its own, is listed with
 /// the target kinds it accepts, chosen by its id and run on the simulator; the
 /// built-ins say which target kind each is the default for.

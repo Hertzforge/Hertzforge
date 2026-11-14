@@ -2156,7 +2156,8 @@ impl SrsShockService {
 
     // --- capture + snapshots ---------------------------------------------
 
-    /// Start streaming pulse capture to `data_root/<run_name>/`. EveryPulse runs
+    /// Start streaming pulse capture to `data_root/<run_name>/` (or the first free
+    /// `<run_name>-<n>`; the folder used is returned). EveryPulse runs
     /// open one automatically at arm; Manual callers use this directly.
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, ServiceError> {
         if let Some(sink) = self.capture.as_ref() {

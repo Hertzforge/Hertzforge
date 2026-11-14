@@ -194,25 +194,6 @@ fn sanitize_run_name(name: &str) -> String {
     out
 }
 
-/// Resolve a collision-free run directory name under `data_root`: the
-/// sanitized name as-is if free, else `<name>_2`, `<name>_3`, ... (same-second
-/// collision handling).
-fn unique_run_name(data_root: &Path, wanted: &str) -> io::Result<String> {
-    if !data_root.join(wanted).exists() {
-        return Ok(wanted.to_string());
-    }
-    for suffix in 2..10_000u32 {
-        let candidate = format!("{wanted}_{suffix}");
-        if !data_root.join(&candidate).exists() {
-            return Ok(candidate);
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        format!("could not find a free run name for '{wanted}'"),
-    ))
-}
-
 fn write_recorder_sidecar(run_dir: &Path, sidecar: &RecorderSidecar) -> io::Result<()> {
     let json = serde_json::to_string_pretty(sidecar)
         .map_err(|e| io::Error::other(format!("recorder sidecar serialize: {e}")))?;
@@ -270,7 +251,8 @@ pub struct RecordingWriter {
 }
 
 impl RecordingWriter {
-    /// Start a recording under `data_root/<sanitized run_name>/`.
+    /// Start a recording under `data_root/<sanitized run_name>/`, or the first free
+    /// `<name>_<n>` when that folder exists.
     ///
     /// Order of operations: sanitize and de-collide the name, create the folder,
     /// write the provisional `recorder.json` (`complete: false`) before any frame,
@@ -347,9 +329,13 @@ impl RecordingWriter {
             ));
         }
 
-        let name = unique_run_name(data_root, &sanitize_run_name(run_name))?;
-        let run_dir = data_root.join(&name);
-        std::fs::create_dir_all(&run_dir)?;
+        // The sanitized name if free, else `<name>_2`, `<name>_3`, ...: claimed by
+        // making the folder, so two recordings can never be handed one folder.
+        let run_dir = hertzforge_capture::claim_dir(data_root, &sanitize_run_name(run_name), "_")?;
+        let name = run_dir
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         let station = facts.station.clone();
         let (pre_frames, trigger_station_frame, t0_convention) = match &pretrigger {
@@ -397,15 +383,9 @@ impl RecordingWriter {
         cfg.ring_capacity = ring_capacity;
         let run_config_json = serde_json::to_string(acq)
             .map_err(|e| io::Error::other(format!("acquisition config serialize: {e}")))?;
-        let sink = CaptureSink::start_durable(
-            data_root,
-            &name,
-            cfg,
-            table,
-            run_config_json,
-            facts.durability,
-        )
-        .map_err(io::Error::from)?;
+        let sink =
+            CaptureSink::start_durable_in(&run_dir, cfg, table, run_config_json, facts.durability)
+                .map_err(io::Error::from)?;
 
         // ~100 ms of frames, rounded up to a power of two (2048 at 12 800 Hz).
         let chunk_frames = ((acq.native_rate_hz * 0.1).round() as usize)
