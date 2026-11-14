@@ -54,6 +54,7 @@ from .core.run_log_extract import RunLogExtract
 from .core.run_record import RunRecord
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
+from .core.test_setup import TestSetup
 from .names import display_name
 from .report.features import FeatureSelection
 
@@ -85,7 +86,7 @@ ObjectGroup = dict[str, Any]
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
               _CoherenceBase, ShapeSet, MatchedModes, Predictions,
-              RunLogExtract, RunRecord, Report)
+              RunLogExtract, RunRecord, TestSetup, Report)
 
 
 def type_rank(obj: Any) -> int:
@@ -136,7 +137,7 @@ def describe(obj: Any) -> str:
         count = len(obj.entries)
         return (f'test {obj.test}, {obj.kind}, {count} '
                 f'entr{"y" if count == 1 else "ies"} to log entry #{obj.upto}')
-    elif isinstance(obj, RunRecord):
+    elif isinstance(obj, (RunRecord, TestSetup)):
         return obj.describe()
     elif isinstance(obj, Report):
         counts = [(obj.num_blocks, 'block')]
@@ -297,6 +298,7 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('predictions', 'prediction_sets', Predictions),
     ('run_log_extract', 'run_log_extracts', RunLogExtract),
     ('run_record', 'run_records', RunRecord),
+    ('test_setup', 'test_setups', TestSetup),
     ('report', 'reports', Report),
 )
 
@@ -376,6 +378,8 @@ class Selection:
         run_log_extracts: list[RunLogExtract]
         run_record: RunRecord
         run_records: list[RunRecord]
+        test_setup: TestSetup
+        test_setups: list[TestSetup]
         report: Report
         reports: list[Report]
 
@@ -550,6 +554,8 @@ class Project(dict):
         run_log_extracts: list[RunLogExtract]
         run_record: RunRecord
         run_records: list[RunRecord]
+        test_setup: TestSetup
+        test_setups: list[TestSetup]
         report: Report
         reports: list[Report]
 

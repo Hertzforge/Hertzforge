@@ -17,7 +17,10 @@ written by.
 ## Where It Goes
 
 Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
-`Hertzforge_Data` in the home folder. A Random run's folder is named
+`Hertzforge_Data` in the home folder. The desktop app shows the folder in the
+Station panel and starts the control service with it; a folder chosen there
+takes effect at the services' next start (`docs/desktop-app.md`, "Run
+Folders"). A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_random_<run id>`, a MIMO Random run's
 `<YYYYMMDD-HHMMSS>_mimo_random_<run id>`, a Sine run's
 `<YYYYMMDD-HHMMSS>_sine_<run id>`, a Mixed Mode run's
@@ -228,6 +231,24 @@ and `kurtosis` over the whole run) and each recording's `complete`; its
   `write_behind`), the recording finalized with what reached the disk and its
   `fault` or its gap stated. A log line the record cannot write is a `record`
   entry and the state's `record.problem`, and the run goes on.
+
+## Opening, Showing and Deleting a Run
+
+- **Opening.** A run folder opens through its `run.json`: opened with the
+  desktop app from the file manager, or dropped on the window, it opens as Open
+  in Analysis does, converted first when it has no project file or the run
+  changed since.
+- **Showing.** Wherever the shell names a run (the Run card's recording line, a
+  finished run's end line, a run record picked in the project), Show Folder
+  opens the folder in the file manager (the desktop app) beside Copy Folder Path.
+- **Deleting.** Delete Run removes the run folder and its project file
+  together, after a confirmation that names both paths. The analysis service
+  deletes it (`runs.delete`, `hertzforge.io.data_folder`), the one place a run
+  is deleted, and refuses, deleting nothing, a folder outside the data folder
+  or the data folder itself, one reached through a link, one that is not a run
+  folder (no `run.json` of the run folder schema), one with a link inside it, a
+  run whose `run.json` does not say `complete: true` (still going, or did not
+  end cleanly), and a run whose project file is open.
 
 ## What a Classical Shock Run Saves
 
@@ -647,3 +668,18 @@ it measured, and the values of the survey's levels and of the spectra (their
 shapes, channels and units are kept). Its streams are cut to their first 256
 frames, before the first steer (`cut_from_frames`);
 `scripts/make_golden_runs.sh` rewrites it.
+
+## Reports and the Run Log
+
+A converted run's report reads its run record before anything else. The
+runs block takes the run's level from the level the controller logged, the
+chronology lists the run once with the holds, resumes and trips it logged
+and its outcome in the record's words, and under the table its operator,
+article, specification, level changes, alarms and counts; a report of a
+recorded run has a Run section of the same facts. Mixed Mode, Explorer, the
+Recorder and MIMO Shock have report templates of their own, and the MIMO
+Random report reads the condition numbers, the drive prediction and the
+drives' rms from the record. Data with no run record is reported as it was.
+The run's log is not written into a run log (`.hflog`): each entry is
+offered to the log keeper as a proposed entry, and only an accepted one is
+written (`hertzforge.core.run_log_events`).

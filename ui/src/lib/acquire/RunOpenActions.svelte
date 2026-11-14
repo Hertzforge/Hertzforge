@@ -2,9 +2,12 @@
 	/**
 	 * A finished run's way to its data, under the end line of any test type whose runs leave a run
 	 * folder: Open in Analysis (then Show in Analysis) and Copy Folder Path, with the line that says
-	 * how either went. The state is the opener's (`RunOpen`); nothing here converts anything.
+	 * how either went, then Show Folder and Delete Run (`RunFolderActions`). The state is the
+	 * opener's (`RunOpen`) and the app's run files'; nothing here converts or deletes anything.
 	 */
 	import type { RunRecordRef } from '$lib/protocol/types';
+	import { getApp } from '$lib/app/state.svelte';
+	import RunFolderActions from './RunFolderActions.svelte';
 	import { runOpenWords, type RunOpen } from './runOpen.svelte';
 
 	interface Props {
@@ -15,15 +18,19 @@
 
 	const opening = $derived(opener.at(record.folder));
 	const words = $derived(runOpenWords(opening, opener.refusal, opener.added));
+	// Show Folder and Delete Run beside Copy Folder Path; a deleted run opens no more
+	const files = getApp().runFiles;
+	const gone = $derived(files.at(record.folder) === 'done');
 </script>
 
 <div class="endfoot">
 	<div class="endacts" data-testid="run-end-actions">
-		<button class="btn sm" data-testid="act-open-analysis" data-status={opening} aria-busy={opening === 'working'} aria-disabled={opening === 'working'} class:off={opening === 'working'} title="Convert the run folder and open its data in the analysis side." onclick={() => void opener.open(record.folder)}>
+		{#if !gone}<button class="btn sm" data-testid="act-open-analysis" data-status={opening} aria-busy={opening === 'working'} aria-disabled={opening === 'working'} class:off={opening === 'working'} title="Convert the run folder and open its data in the analysis side." onclick={() => void opener.open(record.folder)}>
 			{#if opening === 'working'}<svg class="spin" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>{/if}
 			{words.label}
 		</button>
-		<button class="btn sm ghost" data-testid="act-copy-path" title={record.folder} onclick={() => void opener.copyPath(record.folder)}>Copy Folder Path</button>
+		<button class="btn sm ghost" data-testid="act-copy-path" title={record.folder} onclick={() => void opener.copyPath(record.folder)}>Copy Folder Path</button>{/if}
+		<RunFolderActions folder={record.folder} {files} copy={false} deletable />
 	</div>
 	{#if words.line}
 		<p class="openline {opening}" role={opening === 'refused' ? 'alert' : 'status'} data-testid="open-analysis-status" data-status={opening}>

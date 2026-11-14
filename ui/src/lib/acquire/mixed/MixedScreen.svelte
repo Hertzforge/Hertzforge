@@ -27,6 +27,7 @@
 	import MixedSchedule from './MixedSchedule.svelte';
 	import MixedSummary from './MixedSummary.svelte';
 	import { MIXED_SECTIONS, type MixedSection } from './mixedSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -129,6 +130,7 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="mixed" />
 	<MixedSummary {mixed} onopen={(s: MixedSection) => open(s)} />
 {/snippet}
 

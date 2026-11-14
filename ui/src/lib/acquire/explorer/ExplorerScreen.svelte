@@ -15,6 +15,7 @@
 	import ExplorerSummary from './ExplorerSummary.svelte';
 	import { EXPLORER_SECTIONS, explorerChannels, type ExplorerSection } from './explorerSetup';
 	import { hz, sweepWords, vpk } from './explorerWords';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -65,6 +66,7 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="explorer" />
 	<ExplorerSummary {explorer} onopen={(s: ExplorerSection) => open(s)} />
 {/snippet}
 

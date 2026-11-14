@@ -39,6 +39,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      {
+        "ext": ["hforge"],
+        "name": "Hertzforge Project",
+        "description": "Hertzforge project",
+        "role": "Editor",
+        "rank": "Owner",
+        "mimeType": "application/x-hertzforge",
+        "exportedType": { "identifier": "org.hertzforge.project", "conformsTo": ["public.data"] }
+      }
+    ],
     "license": "MIT",
     "resources": {
       "../LICENSE": "LICENSE",

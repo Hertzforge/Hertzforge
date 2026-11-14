@@ -1107,8 +1107,13 @@ def read_scale_db(specification: Specification, measured: DataArray,
         # band by band, the same cells the comparison is judged on —
         # each a density: the power asked and held over the same band,
         # over its width
-        level = judge(specification, measured, spec_index, measured_index,
-                      None, True, scale_db=0)
+        # a band narrower than two octave bands (a few lines of a narrow
+        # multiple-input run) has no octave cells to read a level from
+        try:
+            level = judge(specification, measured, spec_index, measured_index,
+                          None, True, scale_db=0)
+        except ValueError:
+            continue
         width = np.array([cell['width'] for cell in level['cells']],
                          dtype=float)
         with np.errstate(divide='ignore', invalid='ignore'):

@@ -669,6 +669,14 @@ def _field_value(obj, field, us):
         return f'{obj.num_channels}' if field == 'num_channels' else None
     if isinstance(obj, Photos):
         return f'{obj.num_photos}' if field == 'num_photos' else None
+    from ..core.run_record import RunRecord
+
+    if isinstance(obj, RunRecord):
+        # what the control service recorded of the run, in words
+        # (`report.run_records`)
+        from .run_records import field_value
+
+        return field_value(obj, field)
     if not hasattr(obj, 'abscissa'):
         return None
     # a data array: counts first, then whatever its abscissa can say

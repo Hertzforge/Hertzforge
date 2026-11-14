@@ -73,6 +73,7 @@ def summary(state: OpenProject) -> dict[str, Any]:
               for k, group in enumerate(project.object_groups)]
     stale = project.stale()
     issues = compatibility_issues(project)
+    run_folders = _run_folders(project)
     objects = []
     for name, obj in project.items():
         entry: dict[str, Any] = {'name': name, 'kind': kind_of(obj)}
@@ -102,6 +103,8 @@ def summary(state: OpenProject) -> dict[str, Any]:
             entry['settings'] = settings
         if name in stale:
             entry['stale'] = stale[name]
+        if name in run_folders:
+            entry['run_folder'] = run_folders[name]
         objects.append(entry)
     out = {'title': project.name, 'file': project.file,
            'modified': state.modified, 'objects': objects,
@@ -118,6 +121,28 @@ def summary(state: OpenProject) -> dict[str, Any]:
             {'name': name, 'kind': reference.kind, 'path': reference.path,
              'reason': reference.reason}
             for name, reference in project.unresolved.items()]
+    return out
+
+
+def _run_folders(project: Any) -> dict[str, str]:
+    """The run folder each run record came from, by object name, where
+    that folder is still there: the folder of a run's converted file the
+    project was opened from or imported, for Show Folder and Delete Run."""
+    from hertzforge.io.native import is_run_file
+
+    records = [name for name, obj in project.items() if kind_of(obj) == 'run_record']
+    if not records:
+        return {}
+    out: dict[str, str] = {}
+    for entry in project.data_index.records():
+        path = entry.get('path')
+        if isinstance(path, str) and path and is_run_file(path):
+            for name in entry.get('objects', ()):
+                if name in records:
+                    out[name] = os.path.dirname(os.path.abspath(path))
+    if project.file and is_run_file(project.file):
+        for name in records:
+            out.setdefault(name, os.path.dirname(os.path.abspath(project.file)))
     return out
 
 
@@ -709,3 +734,78 @@ def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         state.project.active_geometry = name
         state.project.journal.append(f'project.active_geometry = {name!r}')
         state.modified = True
+
+
+# ---- test setups ------------------------------------------------------------------------------
+
+def setups(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.setups`: what a test's screen can open, the project's
+    saved setups and its runs' records, each with the module it is for.
+    With no project open both lists are empty: there is nothing to open."""
+    from hertzforge.core.run_record import RunRecord
+    from hertzforge.core.test_setup import TestSetup
+
+    if state is None:
+        return {'setups': [], 'runs': []}
+    saved, runs = [], []
+    for name, obj in state.project.items():
+        if isinstance(obj, TestSetup):
+            saved.append({'name': name, 'module': obj.module, 'title': obj.title,
+                          'protocol': obj.protocol, 'origin': dict(obj.origin),
+                          'holds': obj.describe()})
+        elif isinstance(obj, RunRecord):
+            runs.append({'name': name, 'module': obj.test, 'title': obj.title,
+                         'run_uid': obj.run_uid, 'run_id': obj.run_id,
+                         'outcome': obj.outcome, 'source': obj.source,
+                         'has_config': bool(obj.config), 'holds': obj.describe()})
+    return {'setups': saved, 'runs': runs}
+
+
+def save_setup(state: OpenProject | None, params: Mapping[str, Any]) -> str:
+    """`project.save_setup`: a test's setup saved into the project under
+    `name`. A name the project already holds is refused unless `replace`
+    is true and that object is itself a setup. Answers the name used."""
+    from hertzforge.core.test_setup import TestSetup
+
+    state = _open(state, 'project.save_setup')
+    name = _name(params, 'name', 'project.save_setup')
+    held = params.get('setup')
+    if not isinstance(held, Mapping) or not isinstance(held.get('config'), Mapping):
+        raise bad_request('project.save_setup needs "setup", with "module" and "config"')
+    try:
+        setup = TestSetup.from_dict(held)
+    except (KeyError, TypeError, ValueError) as error:
+        raise bad_request(f'project.save_setup: {error}') from error
+    project = state.project
+    if name in project or name in project.unresolved:
+        if not (params.get('replace') is True and isinstance(project.get(name), TestSetup)):
+            raise refused(f'the project already holds an object named {name!r}; '
+                          'choose another name or replace a saved setup')
+        project[name] = setup
+    else:
+        name = project.add(name, setup)
+    state.modified = True
+    return name
+
+
+def open_setup(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.open_setup`: a saved setup, or the setup a run's record
+    holds, as the shell fills a test's draft with it. Nothing is
+    configured: the shell's draft goes through the same configure call
+    and checks as one typed in."""
+    from hertzforge.core.run_record import RunRecord
+    from hertzforge.core.test_setup import TestSetup
+
+    state = _open(state, 'project.open_setup')
+    name = _name(params, 'name', 'project.open_setup')
+    if name not in state.project:
+        raise not_found(f'the project has no object named {name!r}')
+    obj = state.project[name]
+    if isinstance(obj, TestSetup):
+        return obj.as_dict()
+    if isinstance(obj, RunRecord):
+        try:
+            return TestSetup.from_run(obj, name).as_dict()
+        except ValueError as error:
+            raise refused(f'{name}: {error}') from error
+    raise refused(f'{name} is a {kind_of(obj).replace("_", " ")}, not a setup or a run record')
