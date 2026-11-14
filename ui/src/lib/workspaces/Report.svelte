@@ -40,7 +40,15 @@
 
 	// the template of the module the person came from, unless they choose another
 	// read once, as the module opens: choosing another module later does not change the choice here
-	let template = $state<string>(untrack(() => defaultTemplate(app.lastModule, app.tests.screen)));
+	let template = $state<string>(
+		untrack(() =>
+			defaultTemplate(
+				app.lastModule,
+				app.tests.screen,
+				(app.project.summary?.objects ?? []).some((o) => o.kind === 'run_record')
+			)
+		)
+	);
 	let inserting = $state('markdown');
 	const ed = $derived(r.editor);
 	const block = $derived(ed?.block ?? null);

@@ -73,6 +73,7 @@ def summary(state: OpenProject) -> dict[str, Any]:
               for k, group in enumerate(project.object_groups)]
     stale = project.stale()
     issues = compatibility_issues(project)
+    run_folders = _run_folders(project)
     objects = []
     for name, obj in project.items():
         entry: dict[str, Any] = {'name': name, 'kind': kind_of(obj)}
@@ -102,6 +103,8 @@ def summary(state: OpenProject) -> dict[str, Any]:
             entry['settings'] = settings
         if name in stale:
             entry['stale'] = stale[name]
+        if name in run_folders:
+            entry['run_folder'] = run_folders[name]
         objects.append(entry)
     out = {'title': project.name, 'file': project.file,
            'modified': state.modified, 'objects': objects,
@@ -118,6 +121,28 @@ def summary(state: OpenProject) -> dict[str, Any]:
             {'name': name, 'kind': reference.kind, 'path': reference.path,
              'reason': reference.reason}
             for name, reference in project.unresolved.items()]
+    return out
+
+
+def _run_folders(project: Any) -> dict[str, str]:
+    """The run folder each run record came from, by object name, where
+    that folder is still there: the folder of a run's converted file the
+    project was opened from or imported, for Show Folder and Delete Run."""
+    from hertzforge.io.native import is_run_file
+
+    records = [name for name, obj in project.items() if kind_of(obj) == 'run_record']
+    if not records:
+        return {}
+    out: dict[str, str] = {}
+    for entry in project.data_index.records():
+        path = entry.get('path')
+        if isinstance(path, str) and path and is_run_file(path):
+            for name in entry.get('objects', ()):
+                if name in records:
+                    out[name] = os.path.dirname(os.path.abspath(path))
+    if project.file and is_run_file(project.file):
+        for name in records:
+            out.setdefault(name, os.path.dirname(os.path.abspath(project.file)))
     return out
 
 

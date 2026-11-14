@@ -68,7 +68,7 @@ from .protocol import bad_request, refused
 
 RUN_LOG_METHODS = ('runlog.new', 'runlog.open', 'runlog.close', 'runlog.reload',
                    'runlog.state', 'runlog.form', 'runlog.preview', 'runlog.write',
-                   'runlog.export')
+                   'runlog.export', 'runlog.run_events', 'runlog.accept_event')
 
 #: what a prediction field reads when none is drawn
 NO_PREDICTION = 'no prediction in a project'
@@ -1280,6 +1280,87 @@ class Keeper:
         return {'log': shown(after), 'said': said_after(name, written, after)}
 
 
+# ---- a recorded run's events, offered to the log --------------------------
+
+def _record(project: Any, params: Mapping[str, Any], method: str) -> Any:
+    """The run record `params['record']` names in the connection's project."""
+    from hertzforge.core.run_record import RunRecord
+
+    name = params.get('record')
+    if not isinstance(name, str) or not name:
+        raise bad_request(f'{method} needs "record", a run record\'s name')
+    if project is None or name not in project:
+        raise refused(f'the project has no object named {name!r}')
+    if not isinstance(project[name], RunRecord):
+        raise refused(f'{name} is not a run record')
+    return project[name]
+
+
+def run_events(keeper: Keeper, project: Any, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`runlog.run_events`: every event of a run record offered as a run log
+    entry (`core.run_log_events.offer`), each with its index, kind, label,
+    fields, words and time, and whether the open log holds it already.
+    Nothing is written."""
+    from hertzforge.core import run_log_events
+
+    record = _record(project, params, 'runlog.run_events')
+    texts = [entry.text for entry in self_entries(keeper)]
+    events = []
+    for index, proposal in enumerate(run_log_events.offer(record)):
+        events.append({
+            'index': index, 'kind': proposal.kind, 'label': KINDS[proposal.kind].label,
+            'fields': _plain(dict(proposal.fields)), 'text': proposal.text,
+            'time': _iso(proposal.event_time),
+            'accepted': any(proposal.marker in text for text in texts)})
+    return {'record': params['record'], 'events': events}
+
+
+def self_entries(keeper: Keeper) -> tuple[Entry, ...]:
+    return () if keeper.log is None else keeper.log.entries
+
+
+def accept_event(keeper: Keeper, project: Any, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`runlog.accept_event`: write the run record's event `index` into the
+    open log, as `author` confirms it, at the controller's time (or `time`
+    for an event the record has none for), in `test` and `run` when given.
+    Refused with no log open for writing, without initials, and for an
+    event the log holds already."""
+    from hertzforge.core import run_log_events
+
+    method = 'runlog.accept_event'
+    record = _record(project, params, method)
+    if keeper.log is None:
+        raise refused('No log is open: start one with New Log, or open one.')
+    if not keeper.log.writable:
+        raise refused('This log is open read-only. ' + keeper.read_only)
+    author = _text(params, 'author', method).strip()
+    if not author:
+        raise refused('Type your initials first: every entry records its author.')
+    offered = run_log_events.offer(record)
+    index = params.get('index')
+    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(offered):
+        raise bad_request(f'{method} "index" is one of the record\'s events, 0 to '
+                          f'{len(offered) - 1}')
+    place = {}
+    for key in ('test', 'run'):
+        value = params.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise bad_request(f'{method} "{key}" is a whole number')
+        place[key] = value
+    when = _text(params, 'time', method)
+    try:
+        at = datetime.fromisoformat(when) if when else None
+    except ValueError:
+        raise bad_request(f'{method} "time" is not a time: {when!r}') from None
+    try:
+        entry = run_log_events.accept(keeper.log, offered[index], author=author,
+                                      axis=_text(params, 'axis', method).strip() or None,
+                                      event_time=at, **place)
+    except (run_log_events.RunEventsError, RunLogError) as error:
+        raise refused(str(error)) from None
+    return {'log': shown(snapshot(keeper.log, keeper.read_only)), 'entry': entry.id}
+
+
 def _text(params: Mapping[str, Any], key: str, method: str, default: str = '') -> str:
     value = params.get(key, default)
     if value is None:
@@ -1311,6 +1392,10 @@ def request(keeper: Keeper, method: str, params: Any, project: Any = None,
         return keeper.state()
     if method == 'runlog.reload':
         return keeper.reload()
+    if method == 'runlog.run_events':
+        return run_events(keeper, project, params)
+    if method == 'runlog.accept_event':
+        return accept_event(keeper, project, params)
     if method == 'runlog.export':
         return keeper.export(_text(params, 'path', method), _text(params, 'view', method),
                              params.get('test', 'all'))

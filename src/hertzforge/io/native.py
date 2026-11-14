@@ -37,6 +37,7 @@ import mmap
 import os
 import uuid
 import warnings
+import weakref
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -156,20 +157,77 @@ def _read_array(dataset: h5py.Dataset) -> np.ndarray:
     copy-on-write: an edit in memory never reaches the file. Mapping
     needs the bytes laid out plainly in a file on disk, so an array that
     is compressed or chunked (a compressed save), one in a file held in
-    memory (the `.mat` and ESCDF readers), and every array on Windows,
-    where a mapped file cannot be replaced by the next save, are read
-    as before. `save` and `save_test` replace a file whole
-    (`_replaced`), so saving over a file an open project maps leaves
-    the mapping on the bytes it had."""
-    if (os.name != 'nt' and dataset.nbytes >= MAP_FROM_BYTES
+    memory (the `.mat` and ESCDF readers), are read as before. On
+    Windows, where a mapped file cannot be replaced by the next save
+    (`REPLACE_WHILE_MAPPED`), only a run's converted file is mapped
+    (`is_run_file`): it is never saved over in place while it is mapped,
+    so a save goes to a new name. `save` and `save_test` replace a file
+    whole (`_replaced`), so saving over a file an open project maps
+    leaves the mapping on the bytes it had."""
+    if (dataset.nbytes >= MAP_FROM_BYTES
             and dataset.chunks is None and dataset.compression is None
             and dataset.dtype.kind in 'biufc'
-            and dataset.file.driver == 'sec2'):
+            and dataset.file.driver == 'sec2'
+            and (REPLACE_WHILE_MAPPED or is_run_file(dataset.file.filename))):
         offset = dataset.id.get_offset()
         if offset is not None:
-            return np.memmap(dataset.file.filename, dtype=dataset.dtype,
-                             mode='c', offset=offset, shape=dataset.shape)
+            mapped = np.memmap(dataset.file.filename, dtype=dataset.dtype,
+                               mode='c', offset=offset, shape=dataset.shape)
+            _mapped.setdefault(_file_key(dataset.file.filename), []).append(
+                weakref.ref(mapped))
+            return mapped
     return dataset[()]
+
+
+#: whether the operating system lets a save replace a file an open
+#: project has mapped: everywhere but Windows, where a mapped file is held
+#: open and the rename that ends a save fails
+REPLACE_WHILE_MAPPED = os.name != 'nt'
+
+#: the arrays mapped from each file, by `_file_key`, for as long as any
+#: of them (or a view of one) is held
+_mapped: dict[str, list[weakref.ref[np.memmap]]] = {}
+
+
+def _file_key(path: str | os.PathLike) -> str:
+    return os.path.normcase(os.path.realpath(os.fspath(path)))
+
+
+def mapped_files() -> list[str]:
+    """The files arrays are mapped from now, by their real paths: what an
+    open project still holds open."""
+    for key in list(_mapped):
+        _mapped[key] = [ref for ref in _mapped[key] if ref() is not None]
+        if not _mapped[key]:
+            del _mapped[key]
+    return sorted(_mapped)
+
+
+def is_run_file(path: str | os.PathLike) -> bool:
+    """Whether `path` is a control run's converted project file: the
+    `<run name>.hforge` inside its own run folder, beside the folder's
+    `run.json` (`run_convert.default_output`). Nothing replaces it in
+    place while it is mapped, so it can be mapped on Windows too."""
+    path = os.path.abspath(os.fspath(path))
+    folder = os.path.dirname(path)
+    if os.path.basename(path) != os.path.basename(folder) + SUFFIX:
+        return False
+    from .run_folder import folder_of
+    return folder_of(folder) is not None
+
+
+class MappedFileError(PermissionError):
+    """A save over a file an open project has mapped, where the operating
+    system cannot replace a mapped file (Windows): the file is left as it
+    was, and the save is made under a new name instead."""
+
+
+def _refuse_mapped(path: str) -> None:
+    if REPLACE_WHILE_MAPPED or _file_key(path) not in mapped_files():
+        return
+    raise MappedFileError(
+        f'{os.path.basename(path)} is open read-only, mapped from the disk, so it '
+        'is never saved over in place; save the project under a new name')
 
 
 @contextlib.contextmanager
@@ -178,7 +236,10 @@ def _replaced(path: str) -> Iterator[str]:
     `path` in one rename, and on failure it is removed and `path` is left
     as it was. A crash mid-save therefore never costs the last saved
     file, and an open project whose arrays are mapped from `path` keeps
-    reading the bytes it mapped, which the rename does not touch."""
+    reading the bytes it mapped, which the rename does not touch. Where a
+    mapped file cannot be replaced (Windows), a save over one is refused
+    before anything is written (`MappedFileError`)."""
+    _refuse_mapped(path)
     folder, name = os.path.split(os.path.abspath(path))
     partial = os.path.join(folder, f'.{name}.{os.getpid()}.partial')
     try:
