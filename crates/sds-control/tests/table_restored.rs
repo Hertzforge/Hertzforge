@@ -570,3 +570,51 @@ async fn restored_table_source_and_apply_are_checked_by_name() {
     let e = o.refused("channels.apply", json!({"revision": rev})).await;
     assert_eq!(e["reason"], "not_controller", "{e}");
 }
+
+/// The control leg of the round trip project to service to project: the rows the
+/// analysis side's `project.channel_table` answers for the golden table (every
+/// optional member on every row; `tests/service/test_project_channel_table.py`
+/// reads the same file) come back from the service unchanged when taken from a
+/// project, when applied, and after a restart.
+///
+/// Falsified by leaving `extra` out of `row_json`: the first comparison fails.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn project_table_rows_survive_restore_apply_and_a_restart() {
+    let golden: Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../schema/golden/request_tables_save_channels.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let rows = golden["params"]["channels"].clone();
+    let root = scratch("project");
+    let rev = {
+        let addr = serve(Service::with_options(keeping(&root))).await;
+        let mut c = Client::connect(addr).await;
+        claim(&mut c).await;
+        let r = c
+            .ok(
+                "channels.set",
+                json!({"revision": 1, "channels": rows,
+                       "source": {"kind": "project", "name": "Bench table"}}),
+            )
+            .await;
+        let got = c.ok("channels.get", json!({})).await;
+        assert_eq!(got["channels"], rows, "taken from the project");
+        assert_eq!(got["restored"]["source"], "project");
+        assert_eq!(got["restored"]["name"], "Bench table");
+        c.ok("channels.apply", json!({"revision": r["revision"]}))
+            .await;
+        let got = c.ok("channels.get", json!({})).await;
+        assert_eq!(got["channels"], rows, "applied");
+        r["revision"].as_u64().unwrap()
+    };
+    wait_kept(&root, rev);
+    let addr = serve(Service::with_options(keeping(&root))).await;
+    let mut c = Client::connect(addr).await;
+    let got = c.ok("channels.get", json!({})).await;
+    assert_eq!(got["channels"], rows, "after a restart");
+    let _ = std::fs::remove_dir_all(&root);
+}

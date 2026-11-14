@@ -519,6 +519,8 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.setups` | `{}` | `{"setups":[...],"runs":[...]}`: what a test's screen can open (Test Setups below) |
 | `project.save_setup` | `{"name","setup","replace"?}` | `{"name","project"}` |
 | `project.open_setup` | `{"name"}` | `{"setup"}`: a saved setup, or the setup a run record holds |
+| `project.channel_table` | `{"name"?}` | `{"name","channels":[row...],"tables","environments","warnings"}`: a channel table as the control service's rows (The Channel Table's Home below) |
+| `project.put_channel_table` | `{"name","channels":[row...],"environments"?,"replace"?}` | `{"name","project"}` |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
@@ -560,6 +562,22 @@ origin. Nothing here reaches the control service: the shell fills a test's draft
 answer, and the draft goes through that module's configure call and checks as one typed in.
 The shell refuses a setup for another module or another protocol before its draft is touched,
 and asks before opening one made with a different channel table.
+
+**The Channel Table's Home.** The project is where a channel table lives; the control service
+holds the one a run arms with. `project.channel_table` answers one of the project's channel tables
+in the control service's own spelling for a channel row (`channels.get`), mapped once, in Python,
+with every analysis column and the table's control loops (`environments`); with no `name` it answers
+the project's only channel table, refuses a project with several (naming them in `tables`) and
+answers `not_found` for a project with none. A table without the controller's columns is given them
+at their defaults, said in `warnings`. `project.put_channel_table` saves the control service's rows
+as the channel table `name`, through the same mapping, each value checked as a table file's write
+checks it (`bad_request`, naming the row and column); a name the project holds is refused unless
+`replace` is true and that object is a channel table, whose control loops are kept when
+`environments` is not given. Acquire's Use the Project's Channel Table reads a table this way,
+shows the operator every row that would change, checks it with `channels.set` `dry_run`, and sends
+it with `"source": {"kind": "project", "name"}`, so it arrives restored (Restored Tables, under the
+control service's Channel Table). Send Table to Project reads `channels.get`, shows what would change
+in the project's table, and saves it with `project.put_channel_table`.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),

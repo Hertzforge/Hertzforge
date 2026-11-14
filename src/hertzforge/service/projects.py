@@ -9,6 +9,7 @@ with the core's own words when the core refuses a file.
 from __future__ import annotations
 
 import atexit
+import copy
 import os
 import re
 import shutil
@@ -809,3 +810,89 @@ def open_setup(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str
         except ValueError as error:
             raise refused(f'{name}: {error}') from error
     raise refused(f'{name} is a {kind_of(obj).replace("_", " ")}, not a setup or a run record')
+
+
+# ---- the channel table's home ---------------------------------------------------------------
+
+def _channel_tables(project: Any) -> list[str]:
+    from hertzforge.core.channel_table import ChannelTable
+
+    return [name for name, obj in project.items() if isinstance(obj, ChannelTable)]
+
+
+def channel_table(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.channel_table`: one of the project's channel tables as the
+    control service's rows, through the one mapping
+    (`io.run_convert.rows_from_channel_table`), with its control loops.
+    With no `name`, the project's only channel table; a project with
+    several names them and asks for one. A table without the controller's
+    columns is given them at their defaults, and the answer says so."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.io.run_convert import environment_to_json, rows_from_channel_table
+
+    state = _open(state, 'project.channel_table')
+    held = _channel_tables(state.project)
+    name = params.get('name')
+    if name is None:
+        if not held:
+            raise not_found('the project holds no channel table')
+        if len(held) > 1:
+            raise refused(f'the project holds {len(held)} channel tables '
+                          f'({", ".join(held)}); name one')
+        name = held[0]
+    name = _name({'name': name}, 'name', 'project.channel_table')
+    if name not in state.project:
+        raise not_found(f'the project has no object named {name!r}')
+    table = state.project[name]
+    if not isinstance(table, ChannelTable):
+        raise refused(f'{name} is a {kind_of(table).replace("_", " ")}, not a channel table')
+    warnings: list[str] = []
+    if not table.has_controller_settings:
+        table = copy.deepcopy(table)
+        table.add_controller_settings()
+        warnings.append(f'{name} had no controller settings, so each channel was given them '
+                        'at their defaults: on, unbound and without abort limits.')
+    try:
+        rows = rows_from_channel_table(table)
+    except (ValueError, TypeError) as error:
+        raise refused(f'{name}: {error}') from error
+    return {'name': name, 'channels': rows, 'tables': held,
+            'environments': {key: environment_to_json(env)
+                             for key, env in table.environments.items()},
+            'warnings': warnings}
+
+
+def put_channel_table(state: OpenProject | None, params: Mapping[str, Any]) -> str:
+    """`project.put_channel_table`: the control service's rows saved as the
+    project's channel table `name`, through the one mapping
+    (`io.tables.channel_table_of_rows`), each value checked as a write
+    checks a column. A name the project already holds is refused unless
+    `replace` is true and that object is itself a channel table; the
+    table's control loops are kept when `environments` is not given.
+    Answers the name used."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.io import tables
+    from hertzforge.io.run_convert import environment_to_json
+
+    state = _open(state, 'project.put_channel_table')
+    name = _name(params, 'name', 'project.put_channel_table')
+    project = state.project
+    present = project.get(name) if name in project else None
+    held = name in project or name in project.unresolved
+    if held and not (params.get('replace') is True and isinstance(present, ChannelTable)):
+        raise refused(f'the project already holds an object named {name!r}; '
+                      'choose another name or replace a channel table')
+    environments = params.get('environments')
+    if environments is None and isinstance(present, ChannelTable):
+        environments = {key: environment_to_json(env)
+                        for key, env in present.environments.items()}
+    try:
+        table = tables.channel_table_of_rows(params.get('channels'), environments)
+    except (tables.TableContentError, ValueError, TypeError) as error:
+        raise bad_request(f'project.put_channel_table: {error}') from error
+    if isinstance(present, ChannelTable):
+        project[name] = table
+    else:
+        name = project.add(name, table)
+    state.modified = True
+    return name
