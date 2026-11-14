@@ -273,6 +273,11 @@
    },
    "misses": 0
   },
-  "end": null
+  "end": null,
+  "record": {
+   "folder": "/data/runs/20261114-140000_mimo_shock_ms-0002",
+   "streams": "on",
+   "problem": null
+  }
  }
 }

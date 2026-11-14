@@ -1,0 +1,39 @@
+{
+  "name": "identification_frf",
+  "kind": "frf",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 704.0,
+    "step": 64.0
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "references": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "identification: the transfer function matrix from each drive to each control",
+  "convention": "file",
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "c16",
+      "shape": [
+        4,
+        4,
+        21
+      ],
+      "unit": "g/V",
+      "offset": 0
+    }
+  ]
+}

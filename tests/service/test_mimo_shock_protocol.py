@@ -118,3 +118,31 @@ def test_a_pulse_row_names_why_a_control_failed_and_its_margins(validate):
     bad['controls'][0]['reasons'] = ['sideways']
     with pytest.raises(jsonschema.ValidationError):
         validate(bad, 'mimoShockRow')
+
+
+def test_a_mimo_shock_configuration_carries_every_field_and_the_record(validate):
+    config = _text('request_mimo_shock_configure')['params']['config']
+    assert set(config) == {'title', 'channels', 'target', 'timing', 'verdict', 'acquisition',
+                           'schedule', 'spacing', 'identification', 'control', 'simulator',
+                           'operator', 'article', 'notes', 'specification', 'record',
+                           'metadata'}
+    spectrum = _text('request_mimo_shock_configure_spectrum')['params']['config']
+    assert 'capture' not in spectrum and spectrum['record'] == {'streams': False}
+    for key, value in (('record', {'streams': 'yes'}), ('record', {'folder': 'x'}),
+                       ('specification', {'document': 1})):
+        bad = copy.deepcopy(config)
+        bad[key] = value
+        with pytest.raises(jsonschema.ValidationError):
+            validate(bad, 'mimoShockConfig')
+
+
+def test_the_mimo_shock_state_names_its_run_folder_from_arm_on(validate):
+    running = _text('event_mimo_shock_state')['data']
+    assert running['record'] == {'folder': '/data/runs/20261114-140000_mimo_shock_ms-0002',
+                                 'streams': 'on', 'problem': None}
+    configured = _text('response_mimo_shock_configure')['result']['state']
+    assert 'record' not in configured
+    bad = copy.deepcopy(running)
+    bad['record']['streams'] = True
+    with pytest.raises(jsonschema.ValidationError):
+        validate(bad, 'mimoShockState')

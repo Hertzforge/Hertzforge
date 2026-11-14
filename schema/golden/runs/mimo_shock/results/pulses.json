@@ -1,0 +1,272 @@
+{
+  "name": "pulses",
+  "kind": "pulse_results",
+  "abscissa": {
+    "kind": "none"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "references": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "each pulse as judged: its levels and joint verdict, and per control and per drive the measures its row shows (1 pass, 0 fail, NaN not judged)",
+  "records": {
+    "index": "the pulse, from 0",
+    "frame": "the station frame when it was kept",
+    "at_s": "the pulse's start, seconds from arm"
+  },
+  "arrays": [
+    {
+      "name": "level_db",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "dB",
+      "offset": 0
+    },
+    {
+      "name": "scheduled_db",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "dB",
+      "offset": 8
+    },
+    {
+      "name": "passed",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "",
+      "offset": 16
+    },
+    {
+      "name": "over_test",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "dB",
+      "offset": 24
+    },
+    {
+      "name": "global_srs_error",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "dB",
+      "offset": 32
+    },
+    {
+      "name": "arrival_spread",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "s",
+      "offset": 40
+    },
+    {
+      "name": "control_passed",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 48
+    },
+    {
+      "name": "error",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 80
+    },
+    {
+      "name": "control_over_test",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 112
+    },
+    {
+      "name": "delay",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "s",
+      "offset": 144
+    },
+    {
+      "name": "peak",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "g",
+      "offset": 176
+    },
+    {
+      "name": "peak_ratio",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 208
+    },
+    {
+      "name": "waveform_error",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 240
+    },
+    {
+      "name": "scaled_margin",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 272
+    },
+    {
+      "name": "absolute_margin",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 304
+    },
+    {
+      "name": "shape_ok",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 336
+    },
+    {
+      "name": "timing_ok",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 368
+    },
+    {
+      "name": "polarity_ok",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 400
+    },
+    {
+      "name": "duration_ratio",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 432
+    },
+    {
+      "name": "duration_ok",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 464
+    },
+    {
+      "name": "energy",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 496
+    },
+    {
+      "name": "rms_duration_ratio",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 528
+    },
+    {
+      "name": "peak_velocity",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "in/s",
+      "offset": 560
+    },
+    {
+      "name": "displacement_pk_pk",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "in",
+      "offset": 592
+    },
+    {
+      "name": "predicted_peak_ratio",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 624
+    },
+    {
+      "name": "drive_peak",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "V",
+      "offset": 656
+    },
+    {
+      "name": "limit_scale",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 688
+    }
+  ]
+}

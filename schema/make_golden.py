@@ -5481,7 +5481,9 @@ MSHOCK_CONFIG = {
     'verdict': 'all',
     'control': {'law': {'id': 'inverse', 'params': {}}, **MSHOCK_CONTROL},
     'simulator': {'plant': 'shock-linear-4x4'},
-    'capture': {'auto_start': False, 'run_name': 'mimo_shock'},
+    'operator': 'Operator', 'article': 'Bracket', 'notes': '',
+    'specification': {'document': 'Example procedure', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '3'}],
 }
 
@@ -5509,7 +5511,7 @@ MSHOCK_CONFIG_SPECTRUM = {
     'verdict': 'global',
     'control': {'law': {'id': 'shape', 'params': {'max_step_db': 6}}, **MSHOCK_CONTROL},
     'simulator': {'plant': 'shock-jointed-4x4-moderate'},
-    'capture': {'auto_start': True, 'run_name': 'mimo_shock_spectrum'},
+    'record': {'streams': False},
     'metadata': [],
 }
 
@@ -5617,7 +5619,9 @@ MSHOCK_RUNNING = _mshock_state(
     grid={'fs_hz': 12800, 'record_len': 8192, 'lines': 4097, 'actual': True}, clock='shared',
     level_db=-6, rung=2, pulses={'fired': 5, 'passed': 3, 'at_level': 2, 'of_level': 3},
     next_pulse_s=0.6, elapsed_s=14.2, identification=MSHOCK_IDENT, review=MSHOCK_REVIEW,
-    last_pulse=MSHOCK_ROW)
+    last_pulse=MSHOCK_ROW,
+    record={'folder': '/data/runs/20261114-140000_mimo_shock_ms-0002', 'streams': 'on',
+            'problem': None})
 
 MSHOCK_REVIEW_STATE = _mshock_state(
     run_id='ms-0003', state='review', phase='awaiting_review', title='Six Controls, Three Drives',

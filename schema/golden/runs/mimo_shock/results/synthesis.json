@@ -1,0 +1,32 @@
+{
+  "name": "synthesis",
+  "kind": "mimo_shock_synthesis",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "start": 0.0,
+    "step": 0.000244140625
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "description": "the waveform the module synthesized for each control at full level, from its target SRS: a design the drives started from, not a measurement",
+  "fs_hz": 4096,
+  "arrays": [
+    {
+      "name": "waveform",
+      "dtype": "f8",
+      "shape": [
+        4,
+        64
+      ],
+      "unit": "g",
+      "offset": 0
+    }
+  ]
+}
