@@ -85,6 +85,7 @@ class Event:
     data: Mapping[str, Any] = field(default_factory=dict)
 
     def when(self) -> str:
+        """'at 15.0 s', or that the record holds no time for the event."""
         return 'at a time not recorded' if self.at_s is None else f'at {self.at_s:.1f} s'
 
 
@@ -128,6 +129,8 @@ class RunFacts:
 
     @property
     def test_name(self) -> str:
+        """The test in words, or the record's own word for one with no
+        name here."""
         return TEST_NAMES.get(self.test, self.test or NOT_RECORDED)
 
     def levels_text(self) -> str:
@@ -148,6 +151,7 @@ class RunFacts:
         return '; '.join(f'{_sort(e)} {e.when()}: {e.text}' for e in found)
 
     def counts_text(self) -> str:
+        """'3 pulses, 2 levels', or that the record holds no counts."""
         if not self.counts:
             return 'no counts in the run record'
         return ', '.join(f'{n} {words}' for n, words in self.counts)
@@ -678,6 +682,7 @@ def row_statistics_text(record: Any) -> str:
 
 
 def events_text(found: Sequence[Event]) -> str:
+    """The events in order, each with its time, or 'none'."""
     if not found:
         return 'none'
     return '; '.join(f'{e.when()}: {e.text}' for e in found)
