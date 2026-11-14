@@ -164,13 +164,16 @@ def new(params: Mapping[str, Any]) -> OpenProject:
 def open_file(params: Mapping[str, Any]) -> OpenProject:
     """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
     file holds, or a new project holding the object when the file holds
-    one (Save As writes those formats for one object). Any other file is
+    one (Save As writes those formats for one object), or the project a
+    control run's folder converts to (`Project.open`). Any other file is
     refused with a pointer to import it."""
     import hertzforge as hz
+    from hertzforge.io.run_folder import folder_of
     from hertzforge.project import SingleObjectFile
 
     path = _path(params, 'project.open')
-    if not path.lower().endswith(PROJECT_SUFFIXES):
+    # a control run's folder opens as the project file it converts to
+    if folder_of(path) is None and not path.lower().endswith(PROJECT_SUFFIXES):
         raise refused(f'{os.path.basename(path)} is not a project file '
                       f'({", ".join(PROJECT_SUFFIXES)}); import it into a '
                       'project instead')
