@@ -1,0 +1,113 @@
+# The drive path: code that can change what reaches an output channel, or
+# whether and how a run stops. docs/drive-path.md says what a pull request
+# that touches one of these paths must carry, and tools/check_drive_path.py
+# checks it.
+#
+# Format: a section header, then one path per line (a directory or a file,
+# from the repository root, with no trailing slash) and a short reason. A
+# path covers everything under it. Comments start with '#'.
+#
+# Every crate under crates/ and every folder under modules/, laws/, wit/ and
+# abi/, and every entry directly under schema/, is on exactly one of the two
+# lists, so a new one cannot arrive unclassified: the check fails until it is
+# added to one of them. Moving a path off the drive path list loosens a rule
+# and needs the pull request title to say so (docs/drive-path.md).
+
+[drive path]
+
+# Hardware and the simulator
+crates/hertzforge-hal               the backend trait every output is written through, its stop and emergency stop
+crates/hertzforge-hal-ni            the hardware backend: output tasks, the stop taper and the zero write
+crates/hertzforge-hal-sim           the simulator every drive-path change is proven on before hardware
+crates/hertzforge-station           builds the station a run drives, and refuses mixed or unproven ones
+
+# The real-time engine and module hosting
+crates/hertzforge-engine            the loop thread: drive delivery, underrun ramp, input watchdog, scheduling faults
+crates/hertzforge-module-abi        the arm gate every module passes before it may drive
+crates/hertzforge-host              module hosting (a stub today); it will run module code on the loop
+crates/hertzforge-automation        test sequencing over the station (a stub today); it will start and stop runs
+crates/hertzforge-ipc               the transport module hosting depends on (a stub today)
+crates/hertzforge-capture           its writer is fed from module run threads and must never block them; a capture fault ends a run
+modules/mimo_compile_probe          a module built against the module ABI (a stub today)
+modules/random_sim_slice            a module built against the module ABI (a stub today)
+modules/smart                       a module built against the module ABI (a stub today)
+abi/hertzforge_module_abi.h         the C layout a module cdylib is built against
+
+# Test modules: each synthesizes a drive, judges it and stops its run
+crates/hertzforge-random            Random: drive synthesis, ceilings, aborts, stop ramp
+crates/hertzforge-mimo-random       multiple-output Random: drive caps, ceilings, law guards, aborts
+crates/hertzforge-sine              Sine: oscillator, notching, kinematic and drive aborts, stop ramp
+crates/hertzforge-mixed             Mixed Mode: summed tone and random drive, its ceilings and aborts
+crates/hertzforge-shock-common      classical shock: pulse limits, pre-fire drive ceiling, law guard settings
+crates/hertzforge-shock-host        the shock firer: pulse ceilings, tolerance aborts, emergency stop on abort
+crates/hertzforge-mimo-shock        multiple-drive shock: growth caps, abort lines, divergence watch
+crates/hertzforge-srs               SRS shock: synthesized pulse, its ceiling and aborts
+crates/hertzforge-twr               time waveform replication: drive ceiling, envelope and divergence aborts
+crates/hertzforge-explorer-host     Explorer: stepped drive, its ceiling, watchdog and stop ramp
+
+# Control laws: they compute the next drive
+crates/hertzforge-law-host          the sandbox law files run in, with their budgets and output checks
+crates/hertzforge-law-sdk           what a law file is built against; its types reach the controller
+crates/hertzforge-random-laws       the Random law catalog, the law guards and the hardware arming check
+crates/hertzforge-mimo-laws         the built-in multiple-output Random laws
+crates/hertzforge-sine-laws         the built-in Sine laws and their check
+crates/hertzforge-shock-laws        the built-in classical shock and SRS laws
+crates/hertzforge-mimo-shock-laws   the built-in multiple-drive shock laws
+crates/hertzforge-twr-laws          the built-in waveform replication laws
+crates/hertzforge-mixed-laws        the law roles of a Mixed Mode test
+crates/hertzforge-law-ratio-math    the ratio law's math, run by the built-in laws
+crates/hertzforge-law-band-average-math  the band-average law's math, run by a built-in law
+crates/hertzforge-shock-law-math    the classical, SRS and waveform shock law math
+crates/hertzforge-mimo-shock-law-math  the multiple-drive shock law math and its safe-gain checks
+laws/hinv                           a law file: computes a drive
+laws/mimo-band-average              a law file: computes a drive
+laws/mimo-buzz                      a law file: computes a drive
+laws/mimo-min-drive                 a law file: computes a drive
+laws/mimo-open-loop                 a law file: computes a drive
+laws/mimo-pinv                      a law file: computes a drive
+laws/mimo-shape                     a law file: computes a drive
+laws/mimo-shock-inverse             a law file: computes a drive
+laws/mimo-shock-paired              a law file: computes a drive
+laws/mimo-shock-shape               a law file: computes a drive
+laws/mimo-zero                      a law file: computes a drive
+laws/ratio                          a law file: computes a drive
+laws/shock-fdc                      a law file: computes a drive
+laws/shock-srs-ratio                a law file: computes a drive
+laws/sine-servo                     a law file: computes a drive
+laws/twr-correct                    a law file: computes a drive
+wit/control-law                     the interface between the controller and a law file
+
+# What the control math and the limits are built from
+crates/hertzforge-dsp               the control math: synthesis, servos, estimators, kinematics
+crates/hertzforge-sdm               spectral density matrices and the multiple-output law boundary
+crates/hertzforge-breakpoints       references and limit profiles, read from files
+crates/hertzforge-reference         the multiple-output reference, read from files and checked
+crates/hertzforge-channel-table     channel sensitivities, ranges and abort limits, read from files
+crates/hertzforge-shaker-db         shaker ratings the kinematic limits come from
+
+# The control service and its protocol
+crates/sds-control                  the control service: run commands, arm gates, sessions, shutdown
+crates/hertzforge-backendd          the station daemon: leases, controller timeout, module stops
+crates/hertzforge-protocol          the daemon's wire contract: who may drive and what a run command carries
+desktop/src                         starts and ends the control service; on quit it decides whether a live run gets its controlled stop
+
+[not drive path]
+
+# Reads, writes and analyses data; opens no output and cannot stop a run
+crates/hertzforge-recorder          records inputs only: drive rows stripped, no output channel, capture-only arm gate
+crates/hertzforge-formats           file readers and writers for recorded data
+crates/hertzforge-data              data containers for recorded and analysed data
+crates/hertzforge-insight           offline analysis of recorded runs
+crates/hertzforge-buildinfo         the build stamp a run's provenance carries
+crates/hertzforge-demo              a demonstration bound to the simulator; nothing in the product depends on it
+# The suite's protocol: one contract for both services. Its control part is
+# mirrored in crates/hertzforge-protocol and crates/sds-control, and a change to
+# a contract changes the schema, the Rust and the other languages together, so
+# a control change reaches the drive path through those crates. Listing these
+# files as drive path would catch every analysis-only change as well.
+schema/protocol.schema.json         the suite's protocol schema, for both services; its control part reaches the drive path through the Rust crates
+schema/PROTOCOL.md                  the suite's protocol, for both services; its control part reaches the drive path through the Rust crates
+schema/golden                       test frames every codec is checked against
+schema/make_golden.py               writes the test frames
+src/hertzforge                      the analysis service and the Python package; it has no route to a drive
+ui                                  the shell: a client of the control service, never the only protection (invariant 4)
