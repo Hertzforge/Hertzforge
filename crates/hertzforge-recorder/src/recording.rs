@@ -3,9 +3,10 @@
 //! [`RecordingWriter`] puts a recording onto the capture crate's [`CaptureSink`] (a
 //! writer thread behind a bounded ring): it batches frames into chunks of about
 //! 100 ms, keeps position-accurate gap records, and writes the recording's own record,
-//! `recorder.json`, provisionally (`complete: false`) before any frame reaches the
+//! `stream.json`, provisionally (`complete: false`) before any frame reaches the
 //! disk, so a recording cut short by a crash is still readable, and again when it
-//! ends. `recorder.json` sits beside the writer's `capture.json`.
+//! ends. `stream.json` is the run folder's description of a stream of kind
+//! `recording` (`docs/run-folder.md`); it sits beside the writer's `capture.json`.
 //!
 //! [`RecordingReader`] opens a recording's folder, reads both records, recovers a
 //! recording whose writer died before `capture.json` was written, and takes the frame
@@ -23,6 +24,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::acq::AcquisitionConfig;
 use crate::trigger::TriggerEvent;
+
+/// The recording's own record in its folder: the run folder's stream description.
+pub const STREAM_FILE: &str = "stream.json";
+
+/// The stream kind a recording is, in the run folder.
+pub const RECORDING_KIND: &str = "recording";
 
 /// The `t0_convention` value for trigger-relative time (t=0 at the trigger
 /// sample; pre-trigger frames have negative time).
@@ -47,12 +54,25 @@ pub struct GapRecord {
     pub dropped_frames: u64,
 }
 
-/// The recording's own record (`recorder.json`), written alongside the writer's
+/// One recorded row as a stream names it: its table index, its unit and its words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamChannel {
+    pub index: u32,
+    pub unit: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// The recording's own record (`stream.json`), written alongside the writer's
 /// `capture.json`: provisionally (`complete: false`) before any data, finalized when the
-/// recording ends. Its fields are PROTOCOL's ("Recorder Records"); a reader ignores
-/// fields it does not know.
+/// recording ends. It is the run folder's description of a stream of kind `recording`
+/// (`docs/run-folder.md`), with the Recorder's own facts as further members; its fields
+/// are PROTOCOL's ("Recorder Records"); a reader ignores fields it does not know.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecorderSidecar {
+    /// The stream's kind in the run folder: always `recording`.
+    #[serde(default = "recording_kind")]
+    pub kind: String,
     /// `false` until the recording is finalized. A recording found on disk with
     /// `complete: false` was cut short by a crash, and its file holds what reached
     /// the disk.
@@ -79,6 +99,9 @@ pub struct RecorderSidecar {
     /// The recorded rows' units, in column order.
     #[serde(default)]
     pub units: Vec<String>,
+    /// The recorded rows in slot order, as the run folder names a stream's channels.
+    #[serde(default)]
+    pub channels: Vec<StreamChannel>,
     /// The station frame of the file's first frame.
     #[serde(default)]
     pub first_station_frame: u64,
@@ -102,12 +125,33 @@ pub struct RecorderSidecar {
     /// The write fault's words, if writing stopped on one.
     #[serde(default)]
     pub fault: Option<String>,
+    /// What the writer did, from its own record (`capture.json`), once the recording
+    /// is finalized: so the stream's description holds it wherever it is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writer: Option<WriterRecord>,
     /// Time-zero convention: [`T0_TRIGGER`] or [`T0_START`].
     pub t0_convention: String,
     /// Channels per interleaved frame.
     pub n_channels: usize,
     /// The acquisition and analysis selection at record time (its rate the file's).
     pub config: AcquisitionConfig,
+}
+
+/// What the capture writer did for a recording, as its `capture.json` states it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WriterRecord {
+    /// The writer's ring depth, in chunks.
+    pub ring_capacity: usize,
+    pub chunks_written: u64,
+    pub chunks_dropped: u64,
+    /// The flushes and syncs to the disk.
+    pub flushes: u64,
+    pub free_space_at_start_bytes: Option<u64>,
+    pub free_space_floor_bytes: u64,
+}
+
+fn recording_kind() -> String {
+    RECORDING_KIND.to_owned()
 }
 
 /// The station facts of a recording, for its record.
@@ -195,9 +239,11 @@ fn sanitize_run_name(name: &str) -> String {
 }
 
 fn write_recorder_sidecar(run_dir: &Path, sidecar: &RecorderSidecar) -> io::Result<()> {
-    let json = serde_json::to_string_pretty(sidecar)
-        .map_err(|e| io::Error::other(format!("recorder sidecar serialize: {e}")))?;
-    std::fs::write(run_dir.join("recorder.json"), json)
+    let mut json = serde_json::to_vec_pretty(sidecar)
+        .map_err(|e| io::Error::other(format!("recording record serialize: {e}")))?;
+    json.push(b'\n');
+    // Whole, to a temporary name and renamed into place: a reader never finds half.
+    hertzforge_capture::write_atomic(&run_dir.join(STREAM_FILE), &json)
 }
 
 /// What a recording states beyond its acquisition selection.
@@ -228,7 +274,7 @@ impl Default for WriterFacts {
 /// plus the recorder-owned sidecar lifecycle.
 ///
 /// If the writer is dropped without [`RecordingWriter::finish`] (crash,
-/// abort), the sink's own `Drop` stops its thread and `recorder.json` stays
+/// abort), the sink's own `Drop` stops its thread and `stream.json` stays
 /// provisional (`clean: false`) - exactly what [`RecordingReader`] recovers.
 pub struct RecordingWriter {
     sink: CaptureSink,
@@ -255,7 +301,7 @@ impl RecordingWriter {
     /// `<name>_<n>` when that folder exists.
     ///
     /// Order of operations: sanitize and de-collide the name, create the folder,
-    /// write the provisional `recorder.json` (`complete: false`) before any frame,
+    /// write the provisional `stream.json` (`complete: false`) before any frame,
     /// then start the capture sink (at the acquisition's rate, no decimation, ring
     /// [`DEFAULT_RING_CAPACITY`]). If `pretrigger` is given, its pre-window frames are
     /// pushed first and the record states `pre_frames`, `trigger_station_frame` and
@@ -347,6 +393,7 @@ impl RecordingWriter {
             None => (0, station.first_station_frame, T0_START.to_string()),
         };
         let record = RecorderSidecar {
+            kind: recording_kind(),
             complete: false,
             name: if station.name.is_empty() {
                 name.clone()
@@ -363,6 +410,15 @@ impl RecordingWriter {
             group_delay_frames: station.group_delay_frames,
             rows: table.channels.iter().map(|c| c.index).collect(),
             units: table.channels.iter().map(|c| unit_name(&c.units)).collect(),
+            channels: table
+                .channels
+                .iter()
+                .map(|c| StreamChannel {
+                    index: c.index,
+                    unit: unit_name(&c.units),
+                    description: c.description.clone(),
+                })
+                .collect(),
             first_station_frame: trigger_station_frame.saturating_sub(pre_frames),
             trigger_station_frame,
             pre_frames,
@@ -371,6 +427,7 @@ impl RecordingWriter {
             gaps: Vec::new(),
             marks: Vec::new(),
             fault: None,
+            writer: None,
             t0_convention,
             n_channels,
             config: acq.clone(),
@@ -501,7 +558,7 @@ impl RecordingWriter {
     }
 
     /// Flush the pending partial chunk, finish the sink (writes
-    /// `capture.json`), and finalize `recorder.json` (`clean: true` + final
+    /// `capture.json`), and finalize `stream.json` (`complete: true` + final
     /// gap list).
     pub fn finish(mut self) -> io::Result<RecordingSummary> {
         // Flush the partial chunk through the same drop-accounted path.
@@ -527,6 +584,14 @@ impl RecordingWriter {
         record.gaps = self.gaps.clone();
         record.fault = capture_sidecar.fault.clone();
         record.marks = std::mem::take(&mut self.marks);
+        record.writer = Some(WriterRecord {
+            ring_capacity: capture_sidecar.config.ring_capacity,
+            chunks_written: capture_sidecar.chunks_written,
+            chunks_dropped: capture_sidecar.chunks_dropped,
+            flushes: capture_sidecar.flushes,
+            free_space_at_start_bytes: capture_sidecar.free_space_at_start_bytes,
+            free_space_floor_bytes: capture_sidecar.free_space_floor_bytes,
+        });
         write_recorder_sidecar(&self.run_dir, &record)?;
 
         Ok(RecordingSummary {
@@ -564,7 +629,7 @@ pub struct RecordingInfo {
     /// for legacy runs judged only by `capture.json` presence).
     pub clean: bool,
     /// True when `capture.json` was missing and the run was recovered from the
-    /// provisional `recorder.json` + the file size.
+    /// provisional `stream.json` + the file size.
     pub recovered: bool,
     /// Present when a sidecar's frame count disagrees with the file size; the
     /// file wins, and this string states both numbers.
@@ -587,9 +652,9 @@ pub struct RecordingReader {
 impl RecordingReader {
     /// Open a run directory.
     ///
-    /// Normal path: both `capture.json` and `recorder.json` exist.
+    /// Normal path: both `capture.json` and `stream.json` exist.
     /// CRASH RECOVERY: `capture.json` MISSING but a provisional
-    /// `recorder.json` exists - channels/rate come from `recorder.json`,
+    /// `stream.json` exists - channels/rate come from `stream.json`,
     /// frames from the `telemetry.f32` size, status `"recovered (unclean)"`.
     /// Plain captures (only `capture.json`) also open, with t0 =
     /// `"start"` and no gap info.
@@ -611,9 +676,9 @@ impl RecordingReader {
                 Err(e) => return Err(e),
             };
         let recorder_sidecar: Option<RecorderSidecar> =
-            match std::fs::read_to_string(run_dir.join("recorder.json")) {
+            match std::fs::read_to_string(run_dir.join(STREAM_FILE)) {
                 Ok(text) => Some(serde_json::from_str(&text).map_err(|e| {
-                    io::Error::new(io::ErrorKind::InvalidData, format!("recorder.json: {e}"))
+                    io::Error::new(io::ErrorKind::InvalidData, format!("{STREAM_FILE}: {e}"))
                 })?),
                 Err(e) if e.kind() == io::ErrorKind::NotFound => None,
                 Err(e) => return Err(e),
@@ -627,7 +692,7 @@ impl RecordingReader {
             (None, None) => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "no sidecar found (neither recorder.json nor capture.json)",
+                    "no record found (neither stream.json nor capture.json)",
                 ));
             }
         };

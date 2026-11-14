@@ -3218,6 +3218,8 @@ binary frame.
 | `feasibility` | null | Random's shaker record and moving mass (no crest factor: a sine's is 1). Checked at configure and at arm against the profile's peaks; a record that does not parse is refused `shaker_record_invalid`. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
 | `capture` | off | `rule` `off` or `entire_test` (the whole test from engage, in the run folder `run_name` under the local data root, or the first free `<run_name>-<n>` when that name is taken, so no run writes over another); `manual` and `first_seconds` are refused `out_of_range` (there is no verb to start a recording and no first-seconds rule); `level_settle_s` (default 1) and `first_s` are kept for them; `periodic_save_s` (null: none) saves a snapshot that often while recording; `run_name` (default `sine`) is a plain name with no path in it |
 | `metadata` | the default fields | Random's: `{"key","label","value"}`, `label` the key when absent |
+| `operator`, `article`, `notes` | empty | The operator's words for the run's record, as Random's. Empty `operator` and `article` take the `metadata` fields `operator` and `test_article` |
+| `specification` | null | `{"document","clause"}`, as Random's: what the run was made to |
 
 The control channels are the table's enabled `control` rows, each with its weight (1 unless
 `control.weights` names it); the drive is its first enabled `drive` row (with COLA, the second
@@ -5239,8 +5241,10 @@ station with four recorded rows at 12 800 Hz and the configuration above:
   naming the other), `table_invalid`, `config_invalid` (the table, as it is now, no longer carries
   the run: the same items as configure), `not_enough_space` (the free space is under the floor;
   `detail` `free_bytes` and `floor_bytes`), then, once the station is being opened,
-  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused; the
-  message is the controller's own). No refusal makes a folder. A refusal once the station is being
+  `devices_absent`, `hardware_busy` and `arm_refused` (the station or the arm gate refused, the
+  message the controller's own; or, once the station is up, the run folder, `run.json`,
+  `table.json`, `setup.json` or `streams/` could not be written, `detail` `path` and `reason`).
+  No refusal before the station is opened makes a folder. A refusal once the station is being
   opened ends the run `arm_refused`, and `recorder.reset` comes before another start.
 - **`recorder.arm`** (`manual` and `level` modes, from `monitoring`) starts filling the
   pre-window with the frames acquired from the next batch on, and in `level` mode arms the
@@ -5312,7 +5316,8 @@ number timed by the service's clock.
          "fault":null},
  "health":{"batches":284,"blocks_dropped":0,"driver_warnings":0,"station_errors":0,
            "pass_ms":{"last":1.2,"worst":2.8},"batch_gap_ms":3.9},
- "stop":null,"end":null}
+ "stop":null,"end":null,
+ "record":{"folder":"/home/operator/Hertzforge_Data/recorder","problem":null}}
 ```
 
 | `state` | `phase` | Meaning |
@@ -5358,6 +5363,10 @@ number timed by the service's clock.
   <name>: every recording is saved."; `write_failed` the fault's words and the recording that
   holds what was written; `write_behind` how far behind the disk was; a fault is the controller's
   words.
+- `record` is null until the run has started, then the run's record: `folder`, the run folder
+  (see "Recorder Records"), and `problem`, null or the latest problem writing the run folder's own
+  files in words (a log line it could not write, say; each is also a `record` entry in the log).
+  A recording that cannot be written is not a problem here: it ends the run `write_failed`.
 
 | `outcome` | How the run ended |
 |---|---|
@@ -5375,7 +5384,7 @@ number timed by the service's clock.
 the one in progress last with `complete` false, and `next`, the position after the last:
 
 ```
-{"name":"rec_0001","folder":"recordings/rec_0001","trigger":"level",
+{"name":"rec_0001","folder":"streams/rec_0001","trigger":"level",
  "requested_fs_hz":12800,"fs_hz":12800,"group_delay_frames":38.44,"rows":[1,2,3,4],
  "first_station_frame":102422,"trigger_station_frame":108822,"pre_frames":6400,
  "pre_frames_asked":6400,"frames":19200,"seconds":1.5,"bytes":307200,
@@ -5385,7 +5394,7 @@ the one in progress last with `complete` false, and `next`, the position after t
 `folder` is relative to the run folder. `frames` and `bytes` are the file's, `seconds` its frames
 over `fs_hz`; `gaps` lists every place frames are missing, `{"at_frame","dropped_frames"}` (the
 file frame the missing frames would have started at, and how many); `marks` counts the limit marks
-inside it. The other fields are its `recorder.json`'s (see "Recorder Records").
+inside it. The other fields are its `stream.json`'s (see "Recorder Records").
 
 ### Recorder Marks
 
@@ -5407,43 +5416,61 @@ row's `range_max`); `recording` names the recording the mark fell in, or null.
 ### Recorder Records
 
 Each run writes its folder `capture.run_name` under the local data root (`HERTZFORGE_DATA_ROOT`,
-else `Hertzforge_Data` in the home folder; the log names the folder at start, "records in
-<path>"); a name already taken gets the first free `<name>-<n>`, so no run writes over another.
-The wire offers no other place.
+else `Hertzforge_Data` in the home folder); a name already taken gets the first free `<name>-<n>`,
+so no run writes over another. The state names it from start on (`record.folder`), and the log
+names it at start ("records in <path>"). The wire offers no other place. The folder is a run
+folder (`docs/run-folder.md`, schema `hertzforge-run/1`), which the analysis side converts into a
+project (`hertzforge.io.run_convert`):
 
 ```
 <run folder>/run.json
+             table.json
+             setup.json
              log.jsonl
-             marks.jsonl
              end.json
-             recordings/rec_0001/telemetry.f32
-                                 capture.json
-                                 recorder.json
+             streams/rec_0001/telemetry.f32
+                              stream.json
+                              capture.json
 ```
 
-- `run.json`, written at start: `run_id`, `title`, `source`, `station` (as in the state),
-  `config` (the configuration as sent), `requested_fs_hz` and `fs_hz` (the rate asked and the
-  rate the station programmed), `group_delay_frames`, `outputs` (`"none"`), `rows` (each recorded
-  row's `index`, `description`, `role`, `unit` and `range_max`, in column order), `derived` (as
-  configure's, at the programmed rate, `actual` true) and `overload` (`fraction`, 0.9, and
-  `definition`, the indicator's definition in words).
-- `log.jsonl` and `marks.jsonl`: a line for every log entry (`{"seq","at_unix","kind","text"}`)
-  and every mark, as `recorder.log` and `recorder.marks` give them, each a compact JSON object.
-- `end.json`, written when the run finishes: `run_id`, `end` (as in the state), `station_frames`
-  (the frames acquired) and `rows`, each recorded row's statistics over the whole run
-  (`index`, `mean`, `rms`, `peak`, `crest` and `kurtosis`, kurtosis 3 for a Gaussian signal).
-- `recordings/rec_NNNN/`, numbered from `rec_0001` in the order they began:
+- `run.json`, written at start and rewritten as each recording begins and at the end: the
+  manifest, `test` `recorder`, with the run's identity (`run_uid`, unique across restarts, and
+  `run_id`), `title`, `operator`, `article`, `notes`, `specification`, `metadata`, `source`, `sim`
+  on the simulator, `station` (its devices with their serial numbers), `grid` (the rate asked and
+  programmed, `block_frames`, `batch_frames`, `group_delay_frames`, the analysis rate, line
+  spacing and lines), `build`, `start` (`unix`, `utc_offset_s`, `station_frame` 0), `streams`
+  (each recording begun, `kind` `recording`) and `complete`.
+- `table.json`: every row of the channel table the run started with, in the spelling of
+  `channels.get`, with its `revision` and `sha256`.
+- `setup.json`: `config` (the configuration as sent), `resolved` (the acquisition at the
+  programmed rate, `outputs` `"none"`, `rows` (each recorded row's `index`, `description`,
+  `role`, `unit` and `range_max`, in column order), the trigger with its hysteresis and its
+  frames, the analysis and the capture with its floor), `derived` (as configure's, at the
+  programmed rate, `actual` true) and `overload` (`fraction`, 0.9, and `definition`, the
+  indicator's definition in words).
+- `log.jsonl`: a line for every log entry, `{"seq","at_unix","frame","kind","text"}` as
+  `recorder.log` gives it with `frame`, the station frame when the run's thread passed it to
+  the record, ten times a second (null before the first batch); a mark's line (`mark` or `overload`) has the mark's own `station_frame` as its
+  `frame` and the mark, as `recorder.marks` gives it, as its `data`.
+- `end.json`, written when the run finishes: `run_uid`, `run_id`, `end` (as in the state),
+  `at_unix`, `station_frames` (the frames acquired), `rows`, each recorded row's statistics over
+  the whole run (`index`, `mean`, `rms`, `peak`, `crest` and `kurtosis`, kurtosis 3 for a Gaussian
+  signal), and `streams`, each recording's `frames`, `drops`, `gaps`, `fault` and `complete`. The
+  finished state is published once it is written.
+- `streams/rec_NNNN/`, numbered from `rec_0001` in the order they began:
   - `telemetry.f32`: no header; little-endian 32-bit floats, one frame after another, each frame
     one value per recorded row in `rows` order, in the row's unit, at `fs_hz`. The file's size is
     the authority on its length: a reader counts its frames as the size over 4 times the rows.
+  - `stream.json`: the recording's facts, written whole before any frame and again when the
+    recording ends.
   - `capture.json`: the writer's own record: the channel table at capture time, the rate
     (`config.sample_rate_hz`, the programmed rate), `frames_written`, `chunks_dropped`, `flushes`,
     `free_space_floor_bytes`, `complete` and `fault`.
-  - `recorder.json`: the recording's facts, written provisionally before any frame and
-    finalized when the recording ends.
 
-| `recorder.json` field | Meaning |
+| `stream.json` field | Meaning |
 |---|---|
+| `kind` | `recording` |
+| `channels` | The recorded rows, `{"index","unit","description"}`, in column order |
 | `complete` | False until the recording is finalized: a recording found with `complete` false was cut short by a crash, and its file holds what reached the disk |
 | `name`, `trigger` | `rec_NNNN`; `start`, `manual` or `level` |
 | `requested_fs_hz`, `fs_hz` | The rate asked and the rate the station programmed; the file is at `fs_hz` |
@@ -5452,16 +5479,18 @@ The wire offers no other place.
 | `first_station_frame` | The station frame of the file's first frame |
 | `trigger_station_frame` | The station frame of the trigger, file frame `pre_frames`; t = 0 |
 | `pre_frames`, `pre_frames_asked` | The pre-window held and asked; held less than asked when it had not filled |
-| `frames` | The frames written, as the writer counted them |
+| `frames` | The frames written, as the writer counted them (0 until finalized) |
 | `gaps` | `[{"at_frame","dropped_frames"}]`, empty when gap-free |
 | `marks` | The marks inside the recording, as `recorder.marks` gives them |
 | `fault` | Null, or the write fault's words |
+| `writer` | Once finalized: the writer's `ring_capacity`, `chunks_written`, `chunks_dropped`, `flushes`, `free_space_at_start_bytes` and `free_space_floor_bytes` |
 
 A frame's time from the trigger is `(file frame - pre_frames) / fs_hz` seconds, and its station
 frame is `first_station_frame` plus its file frame plus the frames missing before it. A reader
-ignores fields it does not know. Every file is written by the run's own thread or its record
-thread, never by the thread that reads the station; the record thread flushes and syncs the data
-every 5 s, so a crash loses at most the last 5 s.
+ignores fields it does not know. The run folder's own files are written by the run's record
+thread and the recordings by the Recorder's record thread, never by the thread that reads the
+station; the recordings are flushed and synced every 5 s and the log every 5 s, so a crash loses
+at most the last 5 s.
 
 ### The Recorder on the Simulator
 

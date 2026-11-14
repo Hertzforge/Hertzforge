@@ -342,11 +342,16 @@ impl Service {
                 }
             };
             run.mark_starting();
-            let signal = match self.recorder_signal.lock() {
+            let installed = match self.recorder_signal.lock() {
                 Ok(g) => g.clone(),
                 Err(p) => p.into_inner().clone(),
-            }
-            .unwrap_or_else(sim_signal::stated);
+            };
+            let signal_words = match &installed {
+                None => sim_signal::stated_json(),
+                Some(_) => json!({"stated": false,
+                                  "words": "a signal installed by a test, not the stated source"}),
+            };
+            let signal = installed.unwrap_or_else(sim_signal::stated);
             let ctx = StartContext {
                 table: inner.table.table.clone(),
                 station: plan,
@@ -355,6 +360,10 @@ impl Service {
                 records_root: self.recorder_root(),
                 bind: self.opts.bind.clone(),
                 signal: Some(signal),
+                signal_words: Some(signal_words),
+                revision: inner.table.revision,
+                devices: inner.stations.devices().to_vec(),
+                record: self.opts.record.clone(),
             };
             (run, ctx)
         };

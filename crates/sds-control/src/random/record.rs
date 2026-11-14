@@ -166,31 +166,47 @@ pub fn start_json(unix: f64, utc_offset_s: Option<i64>, station_frame: u64) -> V
 }
 
 fn station_json(f: &ArmFacts<'_>) -> Value {
-    let devices: Vec<Value> = f
-        .provenance
+    station_member(
+        matches!(f.plan, StationPlan::Sim { .. }),
+        f.class,
+        f.provenance,
+        f.devices,
+        f.caps,
+    )
+}
+
+/// The manifest's `station`: its kind and class, the station's label and backend,
+/// every device with its model and serial number, and its clock.
+pub fn station_member(
+    sim: bool,
+    class: StationClass,
+    provenance: &hertzforge_station::ProvenanceBasis,
+    devices: &[DiscoveredDevice],
+    caps: &Caps,
+) -> Value {
+    let listed: Vec<Value> = provenance
         .device_ids
         .iter()
-        .zip(f.provenance.serials.iter())
+        .zip(provenance.serials.iter())
         .map(|(id, serial)| {
-            let model = f
-                .devices
+            let model = devices
                 .iter()
                 .find(|d| &d.id == id)
                 .map_or(Value::Null, |d| Value::from(d.product.as_str()));
             json!({"id": id, "model": model, "serial": serial})
         })
         .collect();
-    let clock = match f.caps.clock {
+    let clock = match caps.clock {
         hertzforge_hal::ClockDomain::Shared => "shared",
         hertzforge_hal::ClockDomain::Independent => "independent",
         _ => "unknown",
     };
     json!({
-        "kind": if matches!(f.plan, StationPlan::Sim { .. }) { "sim" } else { "ni" },
-        "class": class_name(f.class),
-        "label": f.provenance.station_label,
-        "backend": f.provenance.backend_kind,
-        "devices": devices,
+        "kind": if sim { "sim" } else { "ni" },
+        "class": class_name(class),
+        "label": provenance.station_label,
+        "backend": provenance.backend_kind,
+        "devices": listed,
         "clock": clock,
     })
 }

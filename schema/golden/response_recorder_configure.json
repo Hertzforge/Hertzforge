@@ -58,7 +58,8 @@
    },
    "health": null,
    "stop": null,
-   "end": null
+   "end": null,
+   "record": null
   },
   "derived": {
    "grid": {

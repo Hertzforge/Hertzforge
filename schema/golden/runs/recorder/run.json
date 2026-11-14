@@ -1,0 +1,120 @@
+{
+  "test": "recorder",
+  "run_uid": "golden-recorder",
+  "run_id": "recorder-0001",
+  "title": "Golden Recorder",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "the golden run folder",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "4.2"
+  },
+  "metadata": [
+    {
+      "key": "run_number",
+      "label": "Run Number",
+      "value": "7"
+    },
+    {
+      "key": "sn",
+      "label": "SN",
+      "value": "0042"
+    }
+  ],
+  "source": "SIM",
+  "sim": {
+    "model": "resonator_bank",
+    "parameters": {
+      "sample_rate_hz": 1000.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 1
+    },
+    "seed": 1515852340,
+    "source": {
+      "stated": true,
+      "period_s": 2.0,
+      "rows": [
+        {
+          "kind": "markers",
+          "peak": 0.5,
+          "length_s": 0.01,
+          "at_s": 0.5,
+          "period_s": 2.0
+        },
+        {
+          "kind": "tone",
+          "freq_hz": 250.0,
+          "peak": 0.2
+        },
+        {
+          "kind": "tone",
+          "freq_hz": 433.0,
+          "peak": 0.1
+        },
+        {
+          "kind": "tone",
+          "freq_hz": 1000.0,
+          "peak": 0.15
+        }
+      ]
+    }
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 1000,
+    "fs_hz": 1000,
+    "block_frames": 64,
+    "batch_frames": 128,
+    "group_delay_frames": 0,
+    "analysis_fs_hz": 1000,
+    "df_hz": 3.90625,
+    "lines": 100
+  },
+  "build": {
+    "version": "0.0.0",
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false
+  },
+  "start": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "on"
+  },
+  "schema": "hertzforge-run/1",
+  "streams": [
+    {
+      "name": "rec_0001",
+      "kind": "recording",
+      "channels": [
+        1,
+        2
+      ]
+    }
+  ],
+  "results": [],
+  "complete": true
+}
