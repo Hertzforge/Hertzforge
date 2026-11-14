@@ -162,7 +162,26 @@ the analysis side converts them to SI.
 ## What a Random Run Saves
 
 From arm: `run.json`, `table.json`, `setup.json`, `law/law.json` (the built-in
-control law and its guards) and `log.jsonl`; `streams/inputs`, every enabled
-input as read from the station in table order, and `streams/drives`, every
-enabled drive as the device accepted it, in volts, unless `record.streams` is
-false; and at the end `end.json`. It writes no results yet.
+control law and its guards) and `log.jsonl`, and these files:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order (`kind` `inputs`) |
+| `streams/drives` | Every enabled drive as the device accepted it, in volts (`kind` `drives`) |
+| `results/reference` | The reference and its alarm and abort bands at 0 dB on the run's lines (`kind` `envelope`, kept as arrays) |
+| `results/identification_frf` | The system identification's complex transfer function, drive to control response (`kind` `frf`) |
+| `results/identification_coherence` | Its ordinary coherence (`kind` `coherence`) |
+| `results/control_psd` | Each control channel's spectrum and the composite (`kind` `psd`, one record per keeping) |
+| `results/response_psd` | Every enabled input's spectrum (`kind` `psd`, one record per keeping) |
+| `results/drive_psd` | The drive's spectrum (`kind` `psd`, one record per keeping) |
+| `end.json` | The end, as the run's state reports it |
+
+The spectra are kept from the last control loop before each level change and
+from the last loop of the run; each record's line says which (`why`), the level
+the loop ran at, the loop and the station frame. A run with a limit adds
+`results/limit_ch<n>` for each limited channel, its ceiling on the lines it
+covers (`kind` `limit`). With several control channels the identification is of
+their composite, written as `composite_frf` and `composite_coherence` and kept
+as arrays. With `record.streams` false there is no `streams/` folder. A run that
+ends before its system identification has no identification or spectra.
+

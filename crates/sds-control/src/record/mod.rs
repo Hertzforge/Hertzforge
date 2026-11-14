@@ -50,6 +50,9 @@ pub const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 /// streams already hold (the converted file needs about as much again): 512 MiB.
 pub const FREE_SPACE_FLOOR_BYTES: u64 = 512 * 1024 * 1024;
 
+/// Seconds of samples the streams' buffers hold by default.
+pub const STREAM_BUFFER_S: f64 = 4.0;
+
 /// How a record is written.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordOptions {
@@ -60,6 +63,10 @@ pub struct RecordOptions {
     /// A pause before each write. Zero in use; a test sets it to show that a slow
     /// disk never reaches the run.
     pub write_delay: Duration,
+    /// Seconds of samples the streams' buffers hold between them: how far the
+    /// writer may fall behind before blocks are dropped. A simulator run unpaced
+    /// goes many times faster than real time and needs more.
+    pub stream_buffer_s: f64,
 }
 
 impl Default for RecordOptions {
@@ -68,6 +75,7 @@ impl Default for RecordOptions {
             flush_interval: FLUSH_INTERVAL,
             free_space_floor_bytes: FREE_SPACE_FLOOR_BYTES,
             write_delay: Duration::ZERO,
+            stream_buffer_s: STREAM_BUFFER_S,
         }
     }
 }

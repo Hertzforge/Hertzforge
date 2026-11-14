@@ -290,6 +290,9 @@ pub struct RandomService {
 
     // --- sysID artifacts -----------------------------------------------------------
     h_mag2: Vec<f64>,
+    /// The identification's complex FRF, kept for the run's record only: control
+    /// uses `h_mag2`, derived from the same estimate.
+    h_complex: Vec<(f64, f64)>,
     coherence: Vec<f64>,
     band_coherence: f64,
 
@@ -595,6 +598,7 @@ impl RandomService {
             display_target,
             reference_grms,
             h_mag2: vec![0.0; nbins],
+            h_complex: Vec::new(),
             coherence: vec![0.0; nbins],
             band_coherence: 0.0,
             law_factory: law::default_factory(),
@@ -951,6 +955,7 @@ impl RandomService {
             self.display_target = grid.display_target;
             let nbins = self.loop_cfg.nbins();
             self.h_mag2 = vec![0.0; nbins];
+            self.h_complex = Vec::new();
             self.coherence = vec![0.0; nbins];
         }
         if adoption.rate_changed() || adoption.guards_restored() {
@@ -1343,6 +1348,7 @@ impl RandomService {
             self.loop_cfg.nfft,
         );
         self.h_mag2 = h.iter().map(|&(re, im)| re * re + im * im).collect();
+        self.h_complex = h;
         if self.h_mag2.len() < nbins {
             self.h_mag2.resize(nbins, 0.0);
         }
@@ -3526,6 +3532,21 @@ impl RandomService {
     /// run). Companion to [`Self::coherence_curve`].
     pub fn frf_mag2(&self) -> &[f64] {
         &self.h_mag2
+    }
+
+    /// The complex FRF from the last sysID, drive to composite control response,
+    /// per bin (empty before one has run): `hertzforge_dsp::h_estimate_hv`'s
+    /// estimate, `|H| = sqrt(Gyy/Gxx)` with the phase of the cross spectrum, whose
+    /// phase is that of `Y/X` (a delay lags). [`Self::frf_mag2`] is its squared
+    /// magnitude. For the run's record; control reads `frf_mag2` only.
+    pub fn frf_complex(&self) -> &[(f64, f64)] {
+        &self.h_complex
+    }
+
+    /// The pipeline lag the last sysID measured between the drive and the
+    /// response, frames (0 before one has run, and when no lag was found).
+    pub fn sysid_lag_frames(&self) -> usize {
+        self.sysid_lag_frames
     }
 
     pub fn loop_fs_hz(&self) -> f64 {

@@ -1,5 +1,5 @@
 //! Every Random run leaves a run folder (docs/run-folder.md): the record written at
-//! arm, the log as it is made, the streams and the end, on the
+//! arm, the log as it is made, the streams, the results and the end, on the
 //! simulator through the protocol.
 //!
 //! Every run here is SIMULATED (`hertzforge-hal-sim` through the station factory);
@@ -82,12 +82,16 @@ async fn run_to_end(c: &mut Client, config: Value) -> (Value, PathBuf) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_random_run_leaves_a_complete_self_describing_folder() {
     let schema = Schema::load();
-    let svc = Service::with_options(options(
+    let mut o = options(
         no_driver(),
         0.0,
         Duration::from_secs(30),
         Duration::from_secs(5),
-    ));
+    );
+    // Unpaced, the simulator outruns any disk: buffers for the whole run, so no
+    // frame is dropped.
+    o.record.stream_buffer_s = 120.0;
+    let svc = Service::with_options(o);
     let addr = serve(svc).await;
     let mut c = Client::connect(addr).await;
     let config = short_config();
@@ -181,6 +185,24 @@ async fn a_random_run_leaves_a_complete_self_describing_folder() {
     assert_eq!(inputs["gaps"], json!([]));
     assert_eq!(drives["output_latency_frames"]["how"], "declared");
 
+    // Results: the reference, the identification and the spectra.
+    for name in [
+        "reference",
+        "identification_frf",
+        "identification_coherence",
+        "control_psd",
+        "response_psd",
+        "drive_psd",
+    ] {
+        assert!(
+            folder.join(format!("results/{name}.json")).is_file(),
+            "{name}"
+        );
+    }
+    let kept = read_lines(&folder.join("results/control_psd.jsonl"));
+    assert!(kept.len() >= 2, "{kept:?}");
+    assert_eq!(kept.last().unwrap()["why"], "end");
+
     let ended = read_json(&folder.join("end.json"));
     assert_eq!(ended["end"], end["end"]);
     assert_eq!(ended["run_uid"], run["run_uid"]);
@@ -248,6 +270,7 @@ async fn record_streams_false_writes_the_record_without_streams() {
     assert_eq!(run["recording"]["why"], "switched off in the setup");
     assert_eq!(run["streams"], json!([]));
     assert!(!folder.join("streams").exists());
+    assert!(folder.join("results/control_psd.json").is_file());
     let log = read_lines(&folder.join("log.jsonl"));
     assert!(log.iter().any(|e| e["kind"] == "record"), "{log:?}");
 }

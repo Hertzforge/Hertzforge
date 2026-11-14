@@ -19,7 +19,7 @@
 
 use super::backend::{Interruptible, ABORT, STOP};
 use super::config::{check_grid, Grid, WireConfig};
-use super::record as rec;
+use super::record::{self as rec, Spectra};
 use super::view::{
     Alarm, End, Inputs, LimitLines, LiveChannel, RecordRef, RunView, State, StationRef,
 };
@@ -303,6 +303,9 @@ struct Actor {
     drive_stream: Option<usize>,
     run_uid: String,
     utc_offset_s: Option<i64>,
+    /// The last control loop's spectra, kept at a level change and at the end.
+    last_spectra: Option<Spectra>,
+    spectra_kept: u64,
 }
 
 fn now_unix() -> f64 {
@@ -380,6 +383,8 @@ pub fn spawn(
             drive_stream: None,
             run_uid: String::new(),
             utc_offset_s: None,
+            last_spectra: None,
+            spectra_kept: 0,
         };
         a.run(rx);
     })
@@ -621,7 +626,7 @@ impl Actor {
         // inputs as read and the drive as the device accepted it. Their buffers are
         // made here, before anything runs.
         let buffers = if cfg.record_streams {
-            rec::tap_buffers(cfg.fs_hz)
+            rec::tap_buffers(cfg.fs_hz, self.plan.record.stream_buffer_s)
         } else {
             1
         };
@@ -784,6 +789,11 @@ impl Actor {
                 Some(json!({"stream": null, "failed": why})),
             );
         }
+        for (name, d, arrays) in std::iter::once(rec::reference_result(&lines))
+            .chain(limits.iter().map(|l| rec::limit_result(l, &table)))
+        {
+            record.put_result(&name, d, arrays, None);
+        }
         self.view.record = Some(RecordRef {
             folder: record.folder().display().to_string(),
             streams: streams_off.is_none(),
@@ -908,6 +918,25 @@ impl Actor {
             let curve = svc.coherence_curve();
             self.view.coherence =
                 (curve.len() >= hi && lo < hi).then(|| Arc::new(curve[lo..hi].to_vec()));
+            if let Some(r) = self.record.as_ref() {
+                for (name, d, arrays) in rec::identification_results(
+                    svc.frf_complex(),
+                    curve,
+                    svc.loop_config(),
+                    &self.table,
+                ) {
+                    r.put_result(&name, d, arrays, None);
+                }
+                if let Some(k) = self.drive_stream {
+                    let mut patch = serde_json::Map::new();
+                    patch.insert(
+                        "pipeline_lag_frames".into(),
+                        json!({"frames": svc.sysid_lag_frames(), "how": "measured",
+                               "by": "system identification: drive to control response"}),
+                    );
+                    r.patch_stream(k, patch);
+                }
+            }
         }
         self.set(State::Running, "coherence_gate");
         self.publish();
@@ -1229,6 +1258,28 @@ impl Actor {
             data.psd.push(psd_band);
             data.time.push(samples.unwrap_or_default());
         }
+        // The loop's spectra, kept for the record at a level change and at the end.
+        let drive_row = rec::drive_rows(&self.table).first().map(|c| c.index);
+        self.last_spectra = rep.final_composite_psd.as_ref().map(|c| Spectra {
+            level_db: self.view.drive_level_db.unwrap_or(st.current_level_db),
+            loop_index: self.view.loops,
+            first_hz: lo as f64 * df,
+            df_hz: df,
+            controls: controls
+                .iter()
+                .zip(rep.final_per_channel_psds.iter())
+                .map(|(i, l)| (*i, band(&l.psd)))
+                .collect(),
+            composite: band(&c.psd),
+            inputs: self
+                .view
+                .channels
+                .iter()
+                .zip(data.psd.iter())
+                .map(|(ch, p)| (ch.index, p.clone()))
+                .collect(),
+            drive: drive_row.zip(rep.final_drive_psd.as_ref().map(|d| band(&d.psd))),
+        });
         self.view.inputs = Some(Arc::new(data));
         let mut alarms = Vec::new();
         if st.alarm_active && rep.final_alarm_lines > 0 {
@@ -1490,12 +1541,30 @@ impl Actor {
         self.finish_record();
     }
 
+    /// Keep the last loop's spectra in the record, as the repeating results'
+    /// next record.
+    fn keep_spectra(&mut self, why: &str) {
+        let (Some(r), Some(s)) = (self.record.as_ref(), self.last_spectra.as_ref()) else {
+            return;
+        };
+        let frame = self.shared.station_frame.load(Ordering::Relaxed);
+        let line = json!({"index": self.spectra_kept, "why": why, "level_db": s.level_db,
+                          "loop": s.loop_index,
+                          "frame": if frame == NO_FRAME { Value::Null } else { Value::from(frame) },
+                          "at_unix": now_unix()});
+        for (name, d, arrays) in rec::spectra_results(s, &self.table) {
+            r.put_result(&name, d, arrays, Some(line.clone()));
+        }
+        self.spectra_kept += 1;
+    }
+
     /// End the record: the last spectra, `end.json` with the run's end as its
     /// state reports it, then `complete`.
     fn finish_record(&mut self) {
         if self.record.is_none() {
             return;
         }
+        self.keep_spectra("end");
         self.shared.detach_record();
         let Some(r) = self.record.take() else { return };
         let state = super::view::state_json(Some(&self.view));
@@ -1514,7 +1583,8 @@ impl Actor {
         );
         end.insert(
             "summary".into(),
-            json!({"loops": self.view.loops, "elapsed_s": self.ended_at}),
+            json!({"loops": self.view.loops, "spectra_kept": self.spectra_kept,
+                   "elapsed_s": self.ended_at}),
         );
         r.finish(end);
     }
@@ -1531,6 +1601,7 @@ impl Actor {
     /// Copy the controller's new log events into the run log.
     fn forward_log(&mut self, svc: &RandomService) {
         let events = svc.log().events();
+        let mut level_changed = false;
         for e in events.iter().skip(self.forwarded) {
             let entry: Option<(&'static str, String, Option<Value>)> = match &e.kind {
                 // The service logs the protocol's own state changes.
@@ -1571,16 +1642,19 @@ impl Actor {
                     Some(json!({"band_coherence": band_coherence, "floor": floor,
                                 "passed": passed})),
                 )),
-                EventKind::LevelChange { to_db, auto, .. } => Some((
-                    "level",
-                    format!(
-                        "level {} ({})",
-                        db(*to_db),
-                        if *auto { "schedule" } else { "operator" }
-                    ),
-                    Some(json!({"level_db": to_db,
+                EventKind::LevelChange { to_db, auto, .. } => {
+                    level_changed = true;
+                    Some((
+                        "level",
+                        format!(
+                            "level {} ({})",
+                            db(*to_db),
+                            if *auto { "schedule" } else { "operator" }
+                        ),
+                        Some(json!({"level_db": to_db,
                                     "by": if *auto { "schedule" } else { "operator" }})),
-                )),
+                    ))
+                }
                 EventKind::EnvelopeAlarm { lines, worst_db } => {
                     if self.alarm_was {
                         None
@@ -1618,6 +1692,10 @@ impl Actor {
         }
         self.forwarded = events.len();
         self.alarm_was = svc.status().alarm_active;
+        if level_changed {
+            // The spectra the loop ran at before the change.
+            self.keep_spectra("level");
+        }
     }
 }
 

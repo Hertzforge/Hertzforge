@@ -8,8 +8,9 @@
 //! channels' own units, as the table names them: the analysis side converts.
 
 use super::config::{Derived, Grid, WireConfig};
+use super::view::{LimitLines, Lines};
 use crate::protocol::num;
-use crate::record::{tap::TapLink, Begin, StreamSpec};
+use crate::record::{tap::TapLink, ArrayValues, Begin, ResultArray, StreamSpec};
 use crate::station::{self, class_name, source_of, StationPlan};
 use crate::table::{row_json, unit_name};
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
@@ -22,9 +23,6 @@ use std::path::PathBuf;
 
 /// Frames in one of a stream tap's buffers.
 pub const TAP_BLOCK_FRAMES: usize = 1024;
-/// Seconds of samples the tap's buffers hold between them: how far the writer may
-/// fall behind before blocks are dropped.
-pub const TAP_SECONDS: f64 = 4.0;
 
 /// The enabled inputs in the order the station acquires them: every enabled row
 /// that is not a drive, in table order.
@@ -45,9 +43,9 @@ pub fn drive_rows(table: &ChannelTable) -> Vec<&Channel> {
         .collect()
 }
 
-/// How many buffers a tap needs to hold [`TAP_SECONDS`] at `fs_hz`.
-pub fn tap_buffers(fs_hz: f64) -> usize {
-    ((TAP_SECONDS * fs_hz) / TAP_BLOCK_FRAMES as f64).ceil() as usize + 4
+/// How many buffers a tap needs to hold `seconds` of samples at `fs_hz`.
+pub fn tap_buffers(fs_hz: f64, seconds: f64) -> usize {
+    ((seconds.max(0.0) * fs_hz) / TAP_BLOCK_FRAMES as f64).ceil() as usize + 4
 }
 
 /// `"<unit>^2/Hz"`: a spectrum's unit for a channel in `unit`.
@@ -472,6 +470,278 @@ pub fn begin(f: &ArmFacts<'_>, root: PathBuf, links: (TapLink, TapLink)) -> Begi
     }
 }
 
+// ---- results ----------------------------------------------------------------------
+
+fn frequency_axis(first_hz: f64, df_hz: f64) -> Value {
+    json!({"kind": "frequency", "unit": "Hz", "start": first_hz, "step": df_hz})
+}
+
+fn f64s(name: &str, shape: Vec<usize>, unit: &str, values: Vec<f64>) -> ResultArray {
+    ResultArray {
+        name: name.into(),
+        shape,
+        unit: unit.into(),
+        values: ArrayValues::F64(values),
+    }
+}
+
+/// A result's description: its kind, abscissa and channels, and anything else.
+pub type Described = (String, Map<String, Value>, Vec<ResultArray>);
+
+fn described(kind: &str, abscissa: Value, channels: Value) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("kind".into(), Value::from(kind));
+    m.insert("abscissa".into(), abscissa);
+    m.insert("channels".into(), channels);
+    m
+}
+
+/// The reference and its alarm and abort bands at 0 dB on the run's lines.
+pub fn reference_result(lines: &Lines) -> Described {
+    let n = lines.freqs.len();
+    let unit = psd_unit("g");
+    let mut d = described(
+        "envelope",
+        json!({"kind": "frequency", "unit": "Hz", "array": "frequency"}),
+        json!({}),
+    );
+    d.insert(
+        "description".into(),
+        Value::from("the reference and its alarm and abort bands at 0 dB, on the run's lines"),
+    );
+    (
+        "reference".into(),
+        d,
+        vec![
+            f64s("frequency", vec![n], "Hz", lines.freqs.clone()),
+            f64s("reference", vec![n], &unit, lines.reference.clone()),
+            f64s("alarm_low", vec![n], &unit, lines.alarm_lo.clone()),
+            f64s("alarm_high", vec![n], &unit, lines.alarm_hi.clone()),
+            f64s("abort_low", vec![n], &unit, lines.abort_lo.clone()),
+            f64s("abort_high", vec![n], &unit, lines.abort_hi.clone()),
+        ],
+    )
+}
+
+/// One channel's limit ceiling on the lines it covers.
+pub fn limit_result(limit: &LimitLines, table: &ChannelTable) -> Described {
+    let n = limit.freqs.len();
+    let unit = table
+        .channels
+        .iter()
+        .find(|c| c.index == limit.channel)
+        .map_or_else(|| "g".to_owned(), |c| unit_name(&c.units));
+    let d = described(
+        "limit",
+        json!({"kind": "frequency", "unit": "Hz", "array": "frequency"}),
+        json!({"responses": [limit.channel]}),
+    );
+    (
+        format!("limit_ch{}", limit.channel),
+        d,
+        vec![
+            f64s("frequency", vec![n], "Hz", limit.freqs.clone()),
+            f64s("ceiling", vec![n], &psd_unit(&unit), limit.ceiling.clone()),
+        ],
+    )
+}
+
+/// A cross term from the controller's estimate to the file's convention,
+/// `conj(X) Y` (Bendat and Piersol; `docs/hforge-format.md`, "Conventions").
+///
+/// The identification's FRF comes from `hertzforge_dsp::frf::h_estimate_hv`,
+/// whose forward transform has the positive exponent and whose cross spectrum
+/// is `X conj(Y)` on those spectra: the two flips cancel, so its values ARE
+/// `conj(X) Y / |X|^2` in standard terms already, and a delay lags. This is the
+/// one place that says so; a change of either flip in the estimator must change
+/// it, and `a_delay_lags_in_the_recorded_frf` fails until it does.
+pub fn frf_to_file(h: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    h.to_vec()
+}
+
+/// The identification's transfer function (drive to control response) and its
+/// coherence, on the band's lines. The response is the composite of the control
+/// channels: with one control channel it is that channel; with several, the
+/// results name them all and keep the kind `composite_frf`, which the analysis
+/// side holds as arrays.
+pub fn identification_results(
+    h: &[(f64, f64)],
+    coherence: &[f64],
+    loop_cfg: &LoopConfig,
+    table: &ChannelTable,
+) -> Vec<Described> {
+    let (lo, hi) = loop_cfg.band_bins();
+    let hi = hi.min(h.len()).min(coherence.len());
+    if lo >= hi {
+        return Vec::new();
+    }
+    let n = hi - lo;
+    let df = loop_cfg.df();
+    let controls: Vec<&Channel> = table
+        .channels
+        .iter()
+        .filter(|c| c.enabled && c.role == ChannelRole::Control)
+        .collect();
+    let Some(drive) = drive_rows(table).into_iter().next() else {
+        return Vec::new();
+    };
+    let Some(first) = controls.first() else {
+        return Vec::new();
+    };
+    let single = controls.len() == 1;
+    let unit = format!("{}/{}", unit_name(&first.units), unit_name(&drive.units));
+    let indexes: Vec<u32> = controls.iter().map(|c| c.index).collect();
+    let channels = if single {
+        json!({"responses": indexes, "references": [drive.index]})
+    } else {
+        json!({"controls": indexes, "references": [drive.index]})
+    };
+    let axis = frequency_axis(lo as f64 * df, df);
+    let mut frf = described(
+        if single { "frf" } else { "composite_frf" },
+        axis.clone(),
+        channels.clone(),
+    );
+    frf.insert("convention".into(), Value::from("file"));
+    frf.insert(
+        "description".into(),
+        Value::from("system identification: drive to control response"),
+    );
+    let mut coh = described(
+        if single {
+            "coherence"
+        } else {
+            "composite_coherence"
+        },
+        axis,
+        channels,
+    );
+    coh.insert(
+        "description".into(),
+        Value::from("system identification: ordinary coherence, drive to control response"),
+    );
+    let shape = vec![1, 1, n];
+    vec![
+        (
+            "identification_frf".into(),
+            frf,
+            vec![ResultArray {
+                name: "values".into(),
+                shape: shape.clone(),
+                unit,
+                values: ArrayValues::C128(frf_to_file(&h[lo..hi])),
+            }],
+        ),
+        (
+            "identification_coherence".into(),
+            coh,
+            vec![f64s("values", shape, "", coherence[lo..hi].to_vec())],
+        ),
+    ]
+}
+
+/// The spectra of one control loop: what the record keeps at a level change and at
+/// the end.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spectra {
+    /// The level the loop ran at, dB.
+    pub level_db: f64,
+    pub loop_index: u64,
+    pub first_hz: f64,
+    pub df_hz: f64,
+    /// The control channels and each one's spectrum on the band's lines.
+    pub controls: Vec<(u32, Vec<f64>)>,
+    /// The composite control spectrum.
+    pub composite: Vec<f64>,
+    /// Every enabled input and its spectrum (`None`: not measured this loop).
+    pub inputs: Vec<(u32, Option<Vec<f64>>)>,
+    /// The drive channel and its spectrum.
+    pub drive: Option<(u32, Vec<f64>)>,
+}
+
+/// One record of each repeating spectrum result: `control_psd`, `response_psd`,
+/// `drive_psd`.
+pub fn spectra_results(s: &Spectra, table: &ChannelTable) -> Vec<Described> {
+    let unit_of = |ch: u32| {
+        table
+            .channels
+            .iter()
+            .find(|c| c.index == ch)
+            .map_or_else(String::new, |c| unit_name(&c.units))
+    };
+    let common = |units: Vec<String>| -> String {
+        match units.first() {
+            Some(u) if units.iter().all(|x| x == u) => psd_unit(u),
+            _ => String::new(),
+        }
+    };
+    let axis = frequency_axis(s.first_hz, s.df_hz);
+    let records = json!({"index": "record", "why": "level (the last loop before a level \
+                         change) or end (the last loop)", "level_db": "the level the loop ran at",
+                         "loop": "the control loop", "frame": "the station frame when it was kept"});
+    let mut out = Vec::new();
+    let n = s.composite.len();
+    if !s.controls.is_empty() {
+        let mut d = described(
+            "psd",
+            axis.clone(),
+            json!({"responses": s.controls.iter().map(|(i, _)| i).collect::<Vec<_>>()}),
+        );
+        d.insert("records".into(), records.clone());
+        let unit = common(s.controls.iter().map(|(i, _)| unit_of(*i)).collect());
+        let values: Vec<f64> = s
+            .controls
+            .iter()
+            .flat_map(|(_, p)| p.iter().copied())
+            .collect();
+        out.push((
+            "control_psd".to_owned(),
+            d,
+            vec![
+                f64s("values", vec![s.controls.len(), n], &unit, values),
+                f64s("composite", vec![n], &unit, s.composite.clone()),
+            ],
+        ));
+    }
+    if !s.inputs.is_empty() {
+        let mut d = described(
+            "psd",
+            axis.clone(),
+            json!({"responses": s.inputs.iter().map(|(i, _)| i).collect::<Vec<_>>()}),
+        );
+        d.insert("records".into(), records.clone());
+        let unit = common(s.inputs.iter().map(|(i, _)| unit_of(*i)).collect());
+        let values: Vec<f64> = s
+            .inputs
+            .iter()
+            .flat_map(|(_, p)| match p {
+                Some(p) if p.len() == n => p.clone(),
+                _ => vec![f64::NAN; n],
+            })
+            .collect();
+        out.push((
+            "response_psd".to_owned(),
+            d,
+            vec![f64s("values", vec![s.inputs.len(), n], &unit, values)],
+        ));
+    }
+    if let Some((ch, p)) = &s.drive {
+        let mut d = described("psd", axis, json!({"responses": [ch]}));
+        d.insert("records".into(), records);
+        out.push((
+            "drive_psd".to_owned(),
+            d,
+            vec![f64s(
+                "values",
+                vec![1, n],
+                &psd_unit(&unit_of(*ch)),
+                p.clone(),
+            )],
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,6 +753,72 @@ mod tests {
         assert_eq!(utc_stamp(1_794_591_005.7), "20261113-173005");
         // a leap day
         assert_eq!(utc_stamp(951_782_400.0), "20000229-000000");
+    }
+
+    /// The identification FRF is written in the file's convention: `conj(X) Y /
+    /// |X|^2` with the standard (negative-exponent) transform, so it is `Y/X` and a
+    /// delay lags. A known complex plant, a resonance behind a pure delay, is run
+    /// through the estimator the service uses and the conversion at the edge, and
+    /// compared with the plant's own transfer function line by line. Red if the
+    /// conversion conjugated (every phase reversed) or if the estimator's
+    /// convention changed without the conversion.
+    #[test]
+    fn a_delay_lags_in_the_recorded_frf() {
+        use std::f64::consts::PI;
+        let fs = 1024.0;
+        let nfft = 256;
+        let delay = 3usize;
+        // a two-pole resonance at 100 Hz, r = 0.97
+        let (r, w0) = (0.97f64, 2.0 * PI * 100.0 / fs);
+        let (a1, a2) = (-2.0 * r * w0.cos(), r * r);
+        let b0 = 1.0 + a1 + a2;
+        let n = 1 << 16;
+        let mut seed = 0x1234_5678_u64;
+        let x: Vec<f64> = (0..n)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                (seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+            })
+            .collect();
+        let mut y = vec![0.0; n];
+        for k in 0..n {
+            let xd = if k >= delay { x[k - delay] } else { 0.0 };
+            let y1 = if k >= 1 { y[k - 1] } else { 0.0 };
+            let y2 = if k >= 2 { y[k - 2] } else { 0.0 };
+            y[k] = b0 * xd - a1 * y1 - a2 * y2;
+        }
+        let (h, coh) = hertzforge_dsp::frf::h_estimate_hv_with_coherence(&x, &y, fs, nfft);
+        let h = frf_to_file(&h);
+        let mut checked = 0;
+        for k in 5..100 {
+            // the plant: b0 e^{-j w d} / (1 + a1 e^{-j w} + a2 e^{-2j w}), w = 2 pi k / nfft
+            let w = 2.0 * PI * k as f64 / nfft as f64;
+            let (dr, di) = (
+                1.0 + a1 * w.cos() + a2 * (2.0 * w).cos(),
+                -a1 * w.sin() - a2 * (2.0 * w).sin(),
+            );
+            let (nr, ni) = (
+                b0 * (w * delay as f64).cos(),
+                -b0 * (w * delay as f64).sin(),
+            );
+            let den = dr * dr + di * di;
+            let (tr, ti) = ((nr * dr + ni * di) / den, (ni * dr - nr * di) / den);
+            if coh[k] < 0.95 {
+                continue;
+            }
+            let (er, ei) = h[k];
+            let phase = (ei * tr - er * ti).atan2(er * tr + ei * ti);
+            assert!(phase.abs() < 0.15, "line {k}: phase off by {phase:.3} rad");
+            let ratio = (er.hypot(ei)) / tr.hypot(ti);
+            assert!(
+                (ratio - 1.0).abs() < 0.15,
+                "line {k}: magnitude ratio {ratio:.3}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 60, "only {checked} lines were coherent");
     }
 
     #[test]
