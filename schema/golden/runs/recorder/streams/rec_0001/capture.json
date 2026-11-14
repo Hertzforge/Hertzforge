@@ -1,7 +1,7 @@
 {
   "config": {
     "n_channels": 2,
-    "sample_rate_hz": 1024.0,
+    "sample_rate_hz": 1000.0,
     "decimation": 1,
     "ring_capacity": 512
   },
@@ -16,10 +16,10 @@
         "interface": "SingleEnded",
         "iepe_bias_v": null,
         "units": "AccelG",
-        "sensitivity_mv_per_eu": 1000.0,
-        "range_max": 5.0,
+        "sensitivity_mv_per_eu": 100.0,
+        "range_max": 0.5,
         "polarity": "Positive",
-        "description": "Triangle",
+        "description": "Markers",
         "role": "Control",
         "control_group": null,
         "abort": {
@@ -38,10 +38,10 @@
         "interface": "SingleEnded",
         "iepe_bias_v": null,
         "units": "AccelG",
-        "sensitivity_mv_per_eu": 1000.0,
-        "range_max": 5.0,
+        "sensitivity_mv_per_eu": 100.0,
+        "range_max": 0.5,
         "polarity": "Positive",
-        "description": "Ramp",
+        "description": "Tone",
         "role": "Monitor",
         "control_group": null,
         "abort": {
@@ -56,14 +56,14 @@
     "reference": null
   },
   "start_unix_secs": 1794240000,
-  "run_config_json": "",
-  "chunks_written": 1,
+  "run_config_json": "{\"native_rate_hz\":1000.0,\"analysis_decimation\":1,\"block_size\":256,\"window\":\"Hann\",\"overlap_pct\":50.0,\"averaging\":\"Linear\",\"average_count\":4}",
+  "chunks_written": 3,
   "chunks_dropped": 0,
-  "frames_written": 1024,
+  "frames_written": 300,
   "complete": true,
   "layout": {
     "interleave": "frame_interleaved",
-    "block_frames": 1024,
+    "block_frames": null,
     "channel_order": [
       1,
       2

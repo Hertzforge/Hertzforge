@@ -481,7 +481,8 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 			disk: null,
 			health: null,
 			stop: null,
-			end: null
+			end: null,
+			record: null
 		};
 	}
 
@@ -557,7 +558,8 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 			disk: diskOf(r),
 			health: on ? { ...r.health, pass_ms: { ...r.health.pass_ms } } : null,
 			stop: r.stop,
-			end: r.end
+			end: r.end,
+			record: r.folder ? { folder: r.folder, problem: null } : null
 		};
 	}
 
@@ -1131,7 +1133,7 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 		const frames = onDiskOf(r, x);
 		return {
 			name: x.name,
-			folder: `recordings/${x.name}`,
+			folder: `streams/${x.name}`,
 			trigger: x.trigger,
 			requested_fs_hz: x.requestedFs,
 			fs_hz: round(x.fs, 6),

@@ -151,7 +151,7 @@ def test_save_and_reopen_loses_nothing(converted, tmp_path):
 def _saved_by_the_guide():
     with open(os.path.join(ROOT, 'docs', 'run-folder.md'), encoding='utf-8') as f:
         text = f.read()
-    section = text.split('## What a Random Run Saves', 1)[1]
+    section = text.split('## What a Random Run Saves', 1)[1].split('\n## ', 1)[0]
     return re.findall(r'^\| `([^`]+)` \|', section, flags=re.MULTILINE)
 
 

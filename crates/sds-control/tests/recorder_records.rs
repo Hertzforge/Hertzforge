@@ -1,7 +1,8 @@
-//! The Recorder's run folder (schema/PROTOCOL.md, "Recorder Records"): made in the
-//! local data root under the run's name (the next free `<name>-<n>` when it is taken),
-//! holding run.json, log.jsonl, marks.jsonl, end.json and recordings/rec_NNNN, each
-//! file as the schema states it.
+//! The Recorder's run folder (schema/PROTOCOL.md, "Recorder Records";
+//! docs/run-folder.md): made in the local data root under the run's name (the next
+//! free `<name>-<n>` when it is taken), named in the state's `record.folder`, holding
+//! run.json, table.json, setup.json, log.jsonl, end.json and streams/rec_NNNN, each
+//! file as the schema and the run folder's reader state it.
 
 mod support;
 
@@ -77,28 +78,52 @@ async fn recorder_run_folder_holds_its_records() {
             folder.is_dir(),
             "{folder:?}: a taken name gets the next free one"
         );
-        schema.assert_valid(&read(&folder.join("run.json")), Some("recorderRunRecord"));
+        let state = c.ok("recorder.state", json!({})).await;
+        schema.assert_valid(&state, Some("recorderState"));
+        assert_eq!(
+            state["record"]["folder"].as_str(),
+            Some(folder.to_str().unwrap()),
+            "the state names the folder: {state}"
+        );
+        let run = read(&folder.join("run.json"));
+        assert_eq!(run["schema"], "hertzforge-run/1");
+        assert_eq!(run["test"], "recorder");
+        assert_eq!(run["source"], "SIM");
+        assert_eq!(run["complete"], true, "{run}");
+        assert_eq!(
+            run["streams"],
+            json!([{"name": "rec_0001", "kind": "recording", "channels": [1, 2]}])
+        );
+        let table = read(&folder.join("table.json"));
+        assert_eq!(table["rows"].as_array().unwrap().len(), 2);
+        let setup = read(&folder.join("setup.json"));
+        assert_eq!(setup["config"], cfg);
+        assert_eq!(setup["overload"]["fraction"], 0.9);
         let end = read(&folder.join("end.json"));
-        schema.assert_valid(&end, Some("recorderEndRecord"));
+        schema.assert_valid(&end["end"], Some("recorderEnd"));
         assert_eq!(end["end"]["outcome"], "operator_stop");
+        assert_eq!(end["rows"].as_array().unwrap().len(), 2);
+        assert_eq!(end["streams"]["rec_0001"]["frames"], 12_800);
+        let mut marks = Vec::new();
         for line in std::fs::read_to_string(folder.join("log.jsonl"))
             .unwrap()
             .lines()
         {
-            schema.assert_valid(&serde_json::from_str(line).unwrap(), Some("logEntry"));
+            let e: Value = serde_json::from_str(line).unwrap();
+            let wire: Value = json!({"seq": e["seq"], "at_unix": e["at_unix"],
+                                     "kind": e["kind"], "text": e["text"]});
+            schema.assert_valid(&wire, Some("logEntry"));
+            if e["kind"] == "mark" {
+                schema.assert_valid(&e["data"], Some("recorderMark"));
+                assert_eq!(e["frame"], e["data"]["station_frame"], "{e}");
+                marks.push(e["data"].clone());
+            }
         }
-        let marks: Vec<Value> = std::fs::read_to_string(folder.join("marks.jsonl"))
-            .unwrap()
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
         assert!(!marks.is_empty(), "the marker passes row 1's 0.4 g limit");
-        for m in &marks {
-            schema.assert_valid(m, Some("recorderMark"));
-        }
-        let rec = folder.join("recordings/rec_0001");
-        let side = read(&rec.join("recorder.json"));
-        schema.assert_valid(&side, Some("recorderSidecar"));
+        let rec = folder.join("streams/rec_0001");
+        let side = read(&rec.join("stream.json"));
+        schema.assert_valid(&side, Some("recorderStream"));
+        assert_eq!(side["kind"], "recording");
         assert_eq!(side["complete"], true);
         let bytes = std::fs::metadata(rec.join("telemetry.f32")).unwrap().len();
         assert_eq!(bytes, 12_800 * 2 * 4, "one second of two rows");

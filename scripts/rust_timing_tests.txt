@@ -348,6 +348,8 @@ sds-control  test:recorder_sim_run  recorder_sim_runs_exclude_each_other_and_shu
 sds-control  test:recorder_protocol  recorder_verbs_are_refused_by_name_in_every_state_and_mode
 sds-control  test:recorder_protocol  recorder_log_reaches_every_connection_and_names_the_folder
 sds-control  test:recorder_records  recorder_run_folder_holds_its_records
+sds-control  test:recorder_golden_run  todays_code_writes_the_golden_recorder_run_folder
+sds-control  test:recorder_golden_run  the_golden_recorder_run_repeats_exactly
 sds-control  test:mixed_law_record  an_imported_tone_law_needs_its_own_check_and_the_tones_record
 hertzforge-law-host  test:shock_mimo_host  mimo_shock_a_late_law_is_stopped_at_its_budget_and_stays_stopped
 hertzforge-mimo-shock-laws  test:law_files  mimo_shock_a_late_law_file_is_over_budget_for_the_core

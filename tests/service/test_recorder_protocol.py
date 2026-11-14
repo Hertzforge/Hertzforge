@@ -1,7 +1,7 @@
 """The Recorder messages against the schema: every Recorder golden validates as a message
 and as its own payload, the binary ones decode to their expected JSON, the schema refuses
 what the contract says is wrong, and the golden run folder reads as its records say
-(PROTOCOL.md, "Recorder")."""
+(PROTOCOL.md, "Recorder"; docs/run-folder.md)."""
 
 from __future__ import annotations
 
@@ -42,7 +42,8 @@ BINARY = {
     'event_recorder_data': ('data', 'recorderData'),
 }
 
-RUN = GOLDEN / 'recorder_run'
+#: the golden Recorder run folder, written by the control service's own test
+RUN = GOLDEN / 'runs' / 'recorder'
 
 
 def test_every_recorder_golden_is_checked_here():
@@ -183,27 +184,35 @@ def test_recorder_marks_and_subscriptions_refuse_what_the_contract_refuses(valid
 
 def test_recorder_golden_run_folder_reads_as_its_records_say(validate):
     run = json.loads((RUN / 'run.json').read_text(encoding='utf-8'))
-    validate(run, 'recorderRunRecord')
+    assert run['test'] == 'recorder' and run['schema'] == 'hertzforge-run/1'
+    validate(run['source'], 'source')
+    setup = json.loads((RUN / 'setup.json').read_text(encoding='utf-8'))
+    validate(setup['config'], 'recorderConfig')
+    validate(setup['derived'], 'recorderDerived')
     end = json.loads((RUN / 'end.json').read_text(encoding='utf-8'))
-    validate(end, 'recorderEndRecord')
+    validate(end['end'], 'recorderEnd')
     for line in (RUN / 'log.jsonl').read_text(encoding='utf-8').splitlines():
-        validate(json.loads(line), 'logEntry')
-    assert (RUN / 'marks.jsonl').read_text(encoding='utf-8') == ''
+        entry = json.loads(line)
+        # the wire's members, and a mark's facts as recorder.marks gives them
+        validate({k: entry[k] for k in ('seq', 'at_unix', 'kind', 'text')}, 'logEntry')
+        if 'data' in entry:
+            validate(entry['data'], 'recorderMark')
 
-    rec = RUN / 'recordings' / 'rec_0001'
-    side = json.loads((rec / 'recorder.json').read_text(encoding='utf-8'))
-    validate(side, 'recorderSidecar')
+    rec = RUN / 'streams' / 'rec_0001'
+    side = json.loads((rec / 'stream.json').read_text(encoding='utf-8'))
+    validate(side, 'recorderStream')
+    for mark in side['marks']:
+        validate(mark, 'recorderMark')
     cap = json.loads((rec / 'capture.json').read_text(encoding='utf-8'))
     raw = (rec / 'telemetry.f32').read_bytes()
     rows = len(side['rows'])
+    assert [c['index'] for c in side['channels']] == side['rows']
     # The file's size is the authority on its length.
-    assert len(raw) == 8192 == side['frames'] * rows * 4 == cap['frames_written'] * rows * 4
-    assert side['fs_hz'] == cap['config']['sample_rate_hz'] == run['fs_hz']
+    assert len(raw) == side['frames'] * rows * 4 == cap['frames_written'] * rows * 4
+    assert side['fs_hz'] == cap['config']['sample_rate_hz'] == run['grid']['fs_hz']
     assert side['complete'] and cap['complete'] and side['fault'] is None
-    values = struct.unpack(f'<{len(raw) // 4}f', raw)
-    # Every file frame sits at its stated station frame.
-    for k in range(side['frames']):
-        n = side['first_station_frame'] + k
-        assert values[k * rows] == 1.0 - abs((n % 64) - 32) / 16.0, k
-        assert values[k * rows + 1] == (n % 1024) / 1024.0 - 0.5, k
     assert side['trigger_station_frame'] - side['first_station_frame'] == side['pre_frames']
+    values = struct.unpack(f'<{len(raw) // 4}f', raw)
+    # The trigger: row 1 rises through the level at file frame pre_frames.
+    level = setup['config']['trigger']['level']
+    assert values[side['pre_frames'] * rows] >= level > values[(side['pre_frames'] - 1) * rows]

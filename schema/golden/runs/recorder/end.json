@@ -1,0 +1,39 @@
+{
+  "run_uid": "golden-recorder",
+  "run_id": "recorder-0001",
+  "end": {
+    "outcome": "operator_stop",
+    "message": "Stopped by Shell (controller): every recording is saved.",
+    "at_s": 2.0,
+    "recordings": 1
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 2000,
+  "rows": [
+    {
+      "index": 1,
+      "mean": 0.0,
+      "rms": 0.0,
+      "peak": 0.0,
+      "crest": 0.0,
+      "kurtosis": 0.0
+    },
+    {
+      "index": 2,
+      "mean": 0.0,
+      "rms": 0.0,
+      "peak": 0.0,
+      "crest": 0.0,
+      "kurtosis": 0.0
+    }
+  ],
+  "streams": {
+    "rec_0001": {
+      "frames": 300,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null,
+      "complete": true
+    }
+  }
+}

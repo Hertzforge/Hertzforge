@@ -7,7 +7,7 @@ publish = false
 
 # The Recorder's core: records a station's inputs and drives nothing. The
 # acquisition selection (acq.rs), the trigger and pre-window (trigger.rs), the
-# recording writer and reader for the telemetry.f32 / capture.json / recorder.json
+# recording writer and reader for the telemetry.f32 / capture.json / stream.json
 # layout (recording.rs), the record store seam and the record thread (store.rs,
 # record.rs), the analysis on hertzforge-dsp (analysis.rs), and the RecorderService
 # (service/): one engine for the run on the station factory's backend, the trigger,

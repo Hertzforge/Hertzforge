@@ -474,8 +474,8 @@ recorded in, one folder per run: `run.json` (the manifest, `schema`
 `streams/<name>/` (`telemetry.f32`, little-endian float32,
 frame-interleaved, in engineering units, and `stream.json`),
 `results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. The control
-service's Random module writes one for every run, as `docs/run-folder.md`
-describes; the other control modules do not yet.
+service's Random module and its Recorder write one for every run, as
+`docs/run-folder.md` describes; the other control modules do not yet.
 
 `hertzforge.io.run_convert.convert` (and `hertzforge convert-run
 FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default
@@ -528,8 +528,9 @@ twice its size on disk.
 
 *A proposal for the analysis maintainer, not part of any schema.* The
 run folder and its run record (above) are what the analysis side reads;
-the two converters that write this group (`mimo_run_convert`,
-`recorder_run_convert`) still do, and the reader refuses it. The
+the one converter that writes this group (`mimo_run_convert`) still
+does, and the reader refuses it. A Recorder run is a run folder and
+converts as one ("Run Folders and Their Conversion"). The
 control service records a multiple-output random run in its own folder
 while it runs, and `hertzforge.io.mimo_run_convert` turns that folder
 into a `.hforge` file at the end (or afterwards, for a run that did not

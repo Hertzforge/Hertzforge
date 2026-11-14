@@ -1,0 +1,44 @@
+{
+  "revision": 2,
+  "sha256": "695af1ae917c3862ad8ce671cd26765b28f6bd4aede410c06f6bc1b92836886a",
+  "rows": [
+    {
+      "index": 1,
+      "enabled": true,
+      "description": "Markers",
+      "role": "control",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 100,
+      "range_max": 0.5,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 2,
+      "enabled": true,
+      "description": "Tone",
+      "role": "monitor",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 100,
+      "range_max": 0.5,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    }
+  ]
+}
