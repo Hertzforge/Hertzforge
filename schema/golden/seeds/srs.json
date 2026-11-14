@@ -1,0 +1,288 @@
+{
+ "config": {
+  "title": "Seeded SRS",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "target": {
+   "kind": "breakpoints",
+   "points": [
+    [
+     200.0,
+     1.4999994901418936
+    ],
+    [
+     251.9842,
+     1.6836932081801634
+    ],
+    [
+     317.4802,
+     1.8898818658767267
+    ],
+    [
+     400.0,
+     2.121320736439049
+    ],
+    [
+     503.9684,
+     2.38110159942488
+    ],
+    [
+     634.9604,
+     2.67269658853941
+    ],
+    [
+     800.0,
+     3.0
+    ]
+   ]
+  },
+  "bands": {
+   "f_lo_hz": 200.0,
+   "f_hi_hz": 800.0,
+   "bands_per_octave": 3,
+   "q": 10.0
+  },
+  "acquisition": {
+   "fs_hz": 2048,
+   "ring_out_s": 0.02
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels_db": [
+    -6,
+    0
+   ],
+   "pulses": [
+    1,
+    1
+   ],
+   "advance": "count"
+  },
+  "spacing": {
+   "cooling_s": 0.05,
+   "settling_s": 0,
+   "compute_s": 0
+  },
+  "identification": {
+   "nfft": 256,
+   "review": false
+  },
+  "limits": {
+   "drive_vpk_ceiling": 5,
+   "drive_vpk_abort": 8
+  },
+  "envelope": {
+   "per_band": null,
+   "alarm_db": [
+    3.000001,
+    3.000002
+   ],
+   "abort_db": [
+    8.999997,
+    6.000003
+   ]
+  }
+ },
+ "channels": [
+  {
+   "index": 1,
+   "enabled": true,
+   "description": "Control",
+   "role": "control",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 1000,
+   "range_max": 10,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 2,
+   "enabled": true,
+   "description": "Monitor",
+   "role": "monitor",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 1000,
+   "range_max": 10,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 3,
+   "enabled": true,
+   "description": "Drive",
+   "role": "drive",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "V",
+   "sensitivity_mv_per_eu": 1000,
+   "range_max": 10,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  }
+ ],
+ "imports": [],
+ "base": {
+  "title": "Seeded SRS",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "target": {
+   "kind": "flat",
+   "accel_g": 2
+  },
+  "bands": {
+   "f_lo_hz": 200,
+   "f_hi_hz": 800,
+   "bands_per_octave": 3,
+   "q": 10
+  },
+  "acquisition": {
+   "fs_hz": 2048,
+   "ring_out_s": 0.02
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels_db": [
+    -6,
+    0
+   ],
+   "pulses": [
+    1,
+    1
+   ],
+   "advance": "count"
+  },
+  "spacing": {
+   "cooling_s": 0.05,
+   "settling_s": 0,
+   "compute_s": 0
+  },
+  "identification": {
+   "nfft": 256,
+   "review": false
+  },
+  "limits": {
+   "drive_vpk_ceiling": 5,
+   "drive_vpk_abort": 8
+  }
+ },
+ "answer": {
+  "module": "srs",
+  "sets": [
+   {
+    "path": "target",
+    "value": {
+     "kind": "breakpoints",
+     "points": [
+      [
+       200.0,
+       1.4999994901418936
+      ],
+      [
+       251.9842,
+       1.6836932081801634
+      ],
+      [
+       317.4802,
+       1.8898818658767267
+      ],
+      [
+       400.0,
+       2.121320736439049
+      ],
+      [
+       503.9684,
+       2.38110159942488
+      ],
+      [
+       634.9604,
+       2.67269658853941
+      ],
+      [
+       800.0,
+       3.0
+      ]
+     ]
+    }
+   },
+   {
+    "path": "bands.f_lo_hz",
+    "value": 200.0
+   },
+   {
+    "path": "bands.f_hi_hz",
+    "value": 800.0
+   },
+   {
+    "path": "bands.q",
+    "value": 10.0
+   },
+   {
+    "path": "envelope.per_band",
+    "value": null
+   },
+   {
+    "path": "envelope.alarm_db",
+    "value": [
+     3.000001,
+     3.000002
+    ]
+   }
+  ],
+  "protective": [
+   {
+    "path": "envelope.abort_db",
+    "value": [
+     8.999997,
+     6.000003
+    ],
+    "words": "The abort band, dB under and over the target"
+   }
+  ],
+  "imports": [],
+  "notes": [],
+  "origin": {
+   "kind": "seed",
+   "object": "Shock Spec",
+   "checksum": "a0a127ed7637fde7f86ddf101e63d154d21b706a1f9749b811079f3cc17c615f",
+   "fills": "the target and bands"
+  }
+ }
+}

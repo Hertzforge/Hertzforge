@@ -503,7 +503,8 @@ run folder's `table.json` holds them.
   `run_id`, and the record's `name` in the project when it had one;
 - `seed`: a part of it filled from an analysis object in the project,
   with the object's `name` as `object`, its SHA-256 as `checksum`, and
-  what it filled as `fills`.
+  what it filled as `fills`; `also` lists any second object it read
+  (`object` and `checksum`), as a Mixed Mode floor's tones.
 
 `origin_kind` repeats `origin.kind` so a browser of the file sees it.
 A run record's `setup.config` has the same form, so a setup opened from

@@ -520,6 +520,8 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.setups` | `{}` | `{"setups":[...],"runs":[...]}`: what a test's screen can open (Test Setups below) |
 | `project.save_setup` | `{"name","setup","replace"?}` | `{"name","project"}` |
 | `project.open_setup` | `{"name"}` | `{"setup"}`: a saved setup, or the setup a run record holds |
+| `project.seeds` | `{"module"}` | `{"seeds":[...]}`: the objects that could fill part of that module's setup (Seeds below) |
+| `project.seed` | `{"name","module","channel"?,"record"?,"units"?,"tones"?}` | `{"module","sets","protective","imports","notes","origin"}` |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
@@ -561,6 +563,32 @@ origin. Nothing here reaches the control service: the shell fills a test's draft
 answer, and the draft goes through that module's configure call and checks as one typed in.
 The shell refuses a setup for another module or another protocol before its draft is touched,
 and asks before opening one made with a different channel table.
+
+**Seeds.** An analysis object in the project can fill part of a test's setup, as the conversions
+in `hertzforge.io.setup_convert` read it: a `Specification` fills Random's `profile`; a
+`SineSweepSpecification` of one tone fills Sine's `profile` and `test`; a `ShockSpecification`
+fills SRS's `target`, `bands` and `envelope`; a `TransientSpecification` or `TimeHistory` record
+that is a classical pulse fills Classical Shock's `pulse`; a `TimeHistory` record fills TWR's
+`reference`; a floor `Specification` with its narrowbands, and the `SineSweepSpecification` of
+tones beside it in an object group, fill Mixed Mode's `parts`; a `Specification` with cross terms
+fills MIMO Random's `reference` (inline, in g²/Hz, in the controller's convention, at least 8 lines)
+and each control's `alarm_db` and `abort_db`, in the specification's channel order. `project.seeds` lists the objects
+of the kinds a module takes (`name`, `kind`, `fills`, `holds`, `channels`, and `tones` for Mixed
+Mode). `project.seed` answers what one fills: `sets`, each `{"path","value"}`, a dotted member of
+the configure request (a list member by its index) and the value put there whole, in order;
+`protective`, each `{"path","value","words"}`, an abort band or a ceiling the object gave, which
+the shell fills only once the operator has typed it; `imports`, each `{"method","params","set"}`,
+a request the shell sends the control service (`twr.reference.import`) whose stored reference's
+`sha256` is then put at `set`; `notes`; and `origin`, `{"kind":"seed","object","checksum","fills"}`
+(`checksum` the object's SHA-256; `also` names a second object read, each with its own).
+`channel` reads a specification at one channel where its channels differ, `record` picks a time
+history's record (default 0), `units` is the TWR control channel's unit (default `g`), and
+`tones` names a Mixed Mode floor's tones. An object of another kind, in another quantity, or of a
+shape the module cannot control to (cross terms on Random, several tones on Sine, a band that
+varies on an SRS target, a waveform that is no classical pulse) is refused (`refused`) with the
+reason; nothing is adapted. Nothing here reaches the control service: the shell lists every
+member a seed changes before the draft takes it, and the draft goes through that module's
+configure call and checks as one typed in.
 
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),

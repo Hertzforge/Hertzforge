@@ -1,0 +1,247 @@
+{
+ "config": {
+  "title": "Seeded Random",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "profile": {
+   "breakpoints": [
+    {
+     "freq_hz": 40.0,
+     "psd_g2_hz": 0.009999999560935518
+    },
+    {
+     "freq_hz": 80.0,
+     "psd_g2_hz": 0.020000003281155657
+    },
+    {
+     "freq_hz": 160.0,
+     "psd_g2_hz": 0.020000003281155657
+    },
+    {
+     "freq_hz": 200.0,
+     "psd_g2_hz": 0.015999998465639906
+    }
+   ],
+   "alarm_db": [
+    2.0,
+    2.000001
+   ],
+   "abort_db": [
+    4.0,
+    5.000001
+   ]
+  },
+  "acquisition": {
+   "fs_hz": 1280,
+   "n_pts": 64,
+   "n_avg": 2
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels": [
+    {
+     "db": -3,
+     "dwell_s": 0.25
+    },
+    {
+     "db": 0
+    }
+   ],
+   "full_level_s": 0.5
+  },
+  "control": {
+   "review_after_sysid": false,
+   "drive_ceiling_vrms": 20,
+   "level_ramp_s": 0.1,
+   "shutdown_ramp_s": 0.1,
+   "soft_start_db": 0,
+   "pretest": {
+    "averages": 1
+   }
+  },
+  "limits": [],
+  "feasibility": null
+ },
+ "channels": [
+  {
+   "index": 1,
+   "enabled": true,
+   "description": "Control",
+   "role": "control",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 100,
+   "range_max": 100,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 2,
+   "enabled": true,
+   "description": "Monitor",
+   "role": "monitor",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 100,
+   "range_max": 100,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 3,
+   "enabled": true,
+   "description": "Drive",
+   "role": "drive",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "V",
+   "sensitivity_mv_per_eu": 1000,
+   "range_max": 10,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  }
+ ],
+ "imports": [],
+ "base": {
+  "title": "Seeded Random",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "profile": {
+   "breakpoints": [
+    {
+     "freq_hz": 40,
+     "psd_g2_hz": 0.01
+    },
+    {
+     "freq_hz": 200,
+     "psd_g2_hz": 0.01
+    }
+   ],
+   "alarm_db": [
+    3,
+    3
+   ],
+   "abort_db": [
+    6,
+    6
+   ]
+  },
+  "acquisition": {
+   "fs_hz": 1280,
+   "n_pts": 64,
+   "n_avg": 2
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels": [
+    {
+     "db": -3,
+     "dwell_s": 0.25
+    },
+    {
+     "db": 0
+    }
+   ],
+   "full_level_s": 0.5
+  },
+  "control": {
+   "review_after_sysid": false,
+   "drive_ceiling_vrms": 20,
+   "level_ramp_s": 0.1,
+   "shutdown_ramp_s": 0.1,
+   "soft_start_db": 0,
+   "pretest": {
+    "averages": 1
+   }
+  },
+  "limits": [],
+  "feasibility": null
+ },
+ "answer": {
+  "module": "random",
+  "sets": [
+   {
+    "path": "profile.breakpoints",
+    "value": [
+     {
+      "freq_hz": 40.0,
+      "psd_g2_hz": 0.009999999560935518
+     },
+     {
+      "freq_hz": 80.0,
+      "psd_g2_hz": 0.020000003281155657
+     },
+     {
+      "freq_hz": 160.0,
+      "psd_g2_hz": 0.020000003281155657
+     },
+     {
+      "freq_hz": 200.0,
+      "psd_g2_hz": 0.015999998465639906
+     }
+    ]
+   },
+   {
+    "path": "profile.alarm_db",
+    "value": [
+     2.0,
+     2.000001
+    ]
+   }
+  ],
+  "protective": [
+   {
+    "path": "profile.abort_db",
+    "value": [
+     4.0,
+     5.000001
+    ],
+    "words": "The abort band, dB below and above the profile"
+   }
+  ],
+  "imports": [],
+  "notes": [],
+  "origin": {
+   "kind": "seed",
+   "object": "Floor Spec",
+   "checksum": "27933c8891e814634e70e2fa1ef90531774bb94622c498328ed18299601345e7",
+   "fills": "the profile"
+  }
+ }
+}

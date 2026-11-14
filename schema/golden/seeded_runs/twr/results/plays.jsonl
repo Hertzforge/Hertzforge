@@ -1,0 +1,9 @@
+{"index":0,"kind":"iteration","level_db":-6,"iteration":1,"gated":false,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":1,"kind":"iteration","level_db":-6,"iteration":2,"gated":false,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":2,"kind":"iteration","level_db":-6,"iteration":3,"gated":false,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":3,"kind":"iteration","level_db":-6,"iteration":4,"gated":true,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":4,"kind":"iteration","level_db":0,"iteration":1,"gated":false,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":5,"kind":"iteration","level_db":0,"iteration":2,"gated":false,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":6,"kind":"iteration","level_db":0,"iteration":3,"gated":false,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":7,"kind":"iteration","level_db":0,"iteration":4,"gated":true,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}
+{"index":8,"kind":"playback","level_db":0,"iteration":null,"gated":true,"outcome":"judged","trip":null,"frames_done":null,"shot":null,"frame":null}

@@ -121,6 +121,21 @@ and what it flows to. A seed fills a draft; it never arms anything, and the cont
 what it fills in as it checks a typed value. A seed records itself as the setup's origin: the
 object's name, its SHA-256 and what it filled (`docs/hforge-format.md`, `test_setup/`).
 
+The seeds today, each a conversion in `src/hertzforge/io/setup_convert.py` behind
+`project.seed`: a `Specification` fills a Random profile; a `SineSweepSpecification` of one tone
+fills a Sine profile and test; a `ShockSpecification` fills an SRS target and its bands; a
+transient specification or time history that is a classical pulse fills a Classical Shock pulse
+(no saved class holds a pulse itself); a time history fills a TWR reference; a floor
+`Specification` with its narrowbands, and the tones beside it in an object group, fill the Mixed
+Mode parts; a `Specification` with cross terms fills a MIMO Random reference (inline, in g²/Hz,
+through `reference_convert`, which makes the one conversion to the controller's convention) and
+its controls' bands. MIMO Random's rigid-body sensors are not seeded: they are the shell's
+builder input, not part of the setup the control service accepts. An abort band or a ceiling an object gives is
+filled only once the operator has typed it. `tests/service/test_seeds.py` proves each offered seed
+end to end: the seeded setup is the one the control service ran on the simulator
+(`crates/sds-control/tests/seeded_runs.rs`, its folders in `schema/golden/seeded_runs/`), and the
+converted run holds the source object within the stated tolerance.
+
 ## The Run Data Section
 
 The pull request template has a "Run data" section, after "Contracts touched". A pull request that

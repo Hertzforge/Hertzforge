@@ -1,0 +1,283 @@
+{
+ "config": {
+  "title": "Seeded Sine",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "profile": {
+   "rows": [
+    {
+     "freq_hz": 300.0,
+     "quantity": "accel_g",
+     "value": 0.3
+    },
+    {
+     "freq_hz": 320.0,
+     "quantity": "accel_g",
+     "value": 0.3
+    }
+   ],
+   "alarm_db": [
+    1.999999,
+    1.999999
+   ],
+   "abort_db": [
+    4.000002,
+    4.0
+   ]
+  },
+  "test": {
+   "kind": "sweep",
+   "band_hz": [
+    300.0,
+    320.0
+   ],
+   "rate": {
+    "law": "log",
+    "oct_per_min": 3.0
+   },
+   "start_hz": 300.0,
+   "direction": "up",
+   "end": {
+    "sweeps": 2
+   }
+  },
+  "acquisition": {
+   "fs_hz": 4096,
+   "tick_ms": 100
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels_db": [
+    -6,
+    0
+   ],
+   "per_level": {
+    "sweeps": 1
+   },
+   "full_level": {
+    "sweeps": 1
+   }
+  },
+  "identification": {
+   "review": false
+  },
+  "limits": {
+   "drive_vpk_ceiling": 5,
+   "drive_vpk_abort": 8
+  }
+ },
+ "channels": [
+  {
+   "index": 1,
+   "enabled": true,
+   "description": "Control",
+   "role": "control",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 100,
+   "range_max": 100,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 2,
+   "enabled": true,
+   "description": "Monitor",
+   "role": "monitor",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "g",
+   "sensitivity_mv_per_eu": 100,
+   "range_max": 100,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  },
+  {
+   "index": 3,
+   "enabled": true,
+   "description": "Drive",
+   "role": "drive",
+   "physical": null,
+   "interface": "single_ended",
+   "iepe_bias_v": null,
+   "units": "V",
+   "sensitivity_mv_per_eu": 1000,
+   "range_max": 10,
+   "polarity": "positive",
+   "control_group": null,
+   "abort": {
+    "accel_g": null,
+    "velocity_ips": null,
+    "displacement_mil": null
+   }
+  }
+ ],
+ "imports": [],
+ "base": {
+  "title": "Seeded Sine",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+   "document": "Example procedure",
+   "clause": "3.1"
+  },
+  "record": {
+   "streams": false
+  },
+  "profile": {
+   "rows": [
+    {
+     "freq_hz": 250,
+     "quantity": "accel_g",
+     "value": 0.2
+    },
+    {
+     "freq_hz": 350,
+     "quantity": "accel_g",
+     "value": 0.2
+    }
+   ],
+   "alarm_db": [
+    1.5,
+    1.5
+   ],
+   "abort_db": [
+    3,
+    3
+   ]
+  },
+  "test": {
+   "kind": "sweep",
+   "band_hz": [
+    250,
+    350
+   ],
+   "rate": {
+    "law": "log",
+    "oct_per_min": 1
+   },
+   "start_hz": 250,
+   "direction": "up",
+   "end": {
+    "sweeps": 2
+   }
+  },
+  "acquisition": {
+   "fs_hz": 4096,
+   "tick_ms": 100
+  },
+  "schedule": {
+   "mode": "auto",
+   "levels_db": [
+    -6,
+    0
+   ],
+   "per_level": {
+    "sweeps": 1
+   },
+   "full_level": {
+    "sweeps": 1
+   }
+  },
+  "identification": {
+   "review": false
+  },
+  "limits": {
+   "drive_vpk_ceiling": 5,
+   "drive_vpk_abort": 8
+  }
+ },
+ "answer": {
+  "module": "sine",
+  "sets": [
+   {
+    "path": "profile.rows",
+    "value": [
+     {
+      "freq_hz": 300.0,
+      "quantity": "accel_g",
+      "value": 0.3
+     },
+     {
+      "freq_hz": 320.0,
+      "quantity": "accel_g",
+      "value": 0.3
+     }
+    ]
+   },
+   {
+    "path": "profile.alarm_db",
+    "value": [
+     1.999999,
+     1.999999
+    ]
+   },
+   {
+    "path": "test.kind",
+    "value": "sweep"
+   },
+   {
+    "path": "test.band_hz",
+    "value": [
+     300.0,
+     320.0
+    ]
+   },
+   {
+    "path": "test.rate",
+    "value": {
+     "law": "log",
+     "oct_per_min": 3.0
+    }
+   },
+   {
+    "path": "test.start_hz",
+    "value": 300.0
+   },
+   {
+    "path": "test.direction",
+    "value": "up"
+   }
+  ],
+  "protective": [
+   {
+    "path": "profile.abort_db",
+    "value": [
+     4.000002,
+     4.0
+    ],
+    "words": "The abort band, dB below and above the profile"
+   }
+  ],
+  "imports": [],
+  "notes": [],
+  "origin": {
+   "kind": "seed",
+   "object": "Sweep Spec",
+   "checksum": "a1aae1715642294c86a9627032d52eff71098e06a51ff869647cd189ffba2036",
+   "fills": "the profile and test"
+  }
+ }
+}

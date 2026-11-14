@@ -52,6 +52,13 @@ export interface SetupHost {
 	table(): SetupTable;
 	/** The protocol the control service speaks, or null while it is not connected. */
 	protocol(): string | null;
+	/** What a seed is read with on this screen (the TWR control channel's unit). */
+	seedParams?(): Record<string, unknown>;
+	/**
+	 * Store what a seed needs on the control service (a TWR reference), as the screen stores a file
+	 * the operator picks; the value to put at the import's `set`, or null when it was not stored.
+	 */
+	importSeed?(imp: { method: string; params: Record<string, unknown> }): Promise<unknown>;
 }
 
 /** What every test store offers the bar beyond its draft. */
@@ -155,7 +162,16 @@ export function hostFor(app: AppState, module: SetupModule): SetupHost {
 		}
 		case 'twr': {
 			const s = app.twr;
-			return wireHost(module, s, protocol, (c) => fromTwrConfig(c as never, s.setup.facts), (d) => toTwrConfig(d, s.twrLaws.find((l) => l.id === d.law.id) ?? null));
+			return {
+				...wireHost(module, s, protocol, (c) => fromTwrConfig(c as never, s.setup.facts), (d) => toTwrConfig(d, s.twrLaws.find((l) => l.id === d.law.id) ?? null)),
+				// a seed's record is read in the control channel's unit, and stored as a pasted reference
+				seedParams: () => ({ units: s.unit }),
+				importSeed: async (imp) => {
+					if (imp.method !== 'twr.reference.import') return null;
+					const p = imp.params as { text: string; fs_hz?: number; units?: string; name?: string };
+					return (await s.importReference({ text: p.text }, { fs_hz: p.fs_hz, units: p.units, name: p.name })) ? { sha256: s.setup.reference?.sha256 ?? '' } : null;
+				}
+			};
 		}
 		case 'explorer': {
 			const s = app.explorer;
