@@ -488,10 +488,14 @@ the run ended and why.
 ## Records
 
 Every run writes a folder under the local data root (`Hertzforge_Data` in the home folder unless
-the data root is set elsewhere). It holds:
+the data root is set elsewhere), from arm. The folder is named `mimo_random_`, the time the run
+armed in seconds and the run's seed; when that name is taken, the run gets the next free one. It
+holds:
 
-- the raw sample stream, from which any loop's matrices can be recomputed,
-- the reference as the run used it, in the control space,
+- the raw sample stream of every input, from which any loop's matrices can be recomputed; the
+  drives are not streamed,
+- the reference as the run used it, in the control space, with its band both as line indexes
+  (`band`, the first line and one past the last) and in hertz (`band_hz`, the first and last line),
 - the identification set: the FRF, the multiple coherences, the condition numbers, and the noise,
   response and drive SDMs, with a hash of the setup they were measured on,
 - each loop's diagonal (every control's PSD and error, every drive's PSD) and summary (rms errors,
@@ -503,9 +507,9 @@ the data root is set elsewhere). It holds:
 - the report: the law, the identification summary, the gates and any override, each control's
   final error, each drive's rms and smallest cap, and how the run ended.
 
-The analysis package converts a run folder into a `.hforge` file with
-`hertzforge.io.mimo_run_convert.convert(folder, path)`. A run that did not finish converts what it
-wrote, and the file says it is incomplete.
+The run writes no `.hforge` file, and neither the control service nor the shell makes one. To
+make one from a run folder, call `hertzforge.io.mimo_run_convert.convert(folder, path)` from Python.
+A run that did not finish converts what it wrote, and the file says it is incomplete.
 
 ### Identification Reuse
 
