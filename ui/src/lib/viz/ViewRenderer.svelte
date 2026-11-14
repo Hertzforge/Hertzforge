@@ -35,6 +35,8 @@
 		overlay?: number | null;
 		/** The result the view belongs to: a playback `link` ties views within it only. */
 		scope?: string;
+		/** A Lin/Log choice on a flat plot's frequency axis, kept for the `scope`. */
+		scaleToggle?: boolean;
 		/** A draggable region released at new edges. */
 		onspan?: (region: number, x0: number, x1: number) => void;
 		/** An editable table's cell typed into; resolves to the refusal's words, or null. */
@@ -51,7 +53,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, onedit, onremove, onrows, onspan, onpick, onhandle, ongizmo }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, onedit, onremove, onrows, onspan, onpick, onhandle, ongizmo }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -60,7 +62,7 @@
 </script>
 
 {#if view.view === 'spectrum'}
-	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {onspan} {onhandle} />
+	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {scaleToggle} {onspan} {onhandle} />
 {:else if view.view === 'reading'}
 	<ReadingPane {view} {layout} {showTitle} />
 {:else if view.view === 'shape3d'}

@@ -148,9 +148,6 @@
 									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The flat plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>Flat</button>
 								</div>
 							{/if}
-							{#if offers.frequency}
-								<button class="btn ghost sm" class:on={a.prefs.log_frequency} aria-pressed={a.prefs.log_frequency} data-testid="read-logf" title="Decades on every frequency axis" onclick={() => a.setPref('log_frequency', !a.prefs.log_frequency)}>Log f</button>
-							{/if}
 							{#if offers.complex}
 								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
 									<option value="magnitude">Magnitude</option>
@@ -258,6 +255,7 @@
 										showTitle={!headed && (v.view === 'spectrum' || v.view === 'table')}
 										minHeight={240}
 										scope="selection"
+										scaleToggle
 										selected={v.view === 'matrix' && v.selects ? a.pair : null}
 										picks={v.view === 'matrix' && v.selects ? a.picks : []}
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}

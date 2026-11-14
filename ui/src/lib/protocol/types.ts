@@ -659,7 +659,6 @@ export interface Shown {
 	offers?: {
 		flat: boolean;
 		complex: boolean;
-		frequency: boolean;
 		projection: boolean;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
@@ -679,7 +678,6 @@ export interface Shown {
 /** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
 export interface ShowPrefs {
 	flat: boolean;
-	log_frequency: boolean;
 	component: 'magnitude' | 'real' | 'imag' | 'phase';
 	/** The frequency an operating shape or envelope is read at; null for the loudest line. Not kept. */
 	line?: number | null;
