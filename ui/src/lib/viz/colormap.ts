@@ -38,3 +38,14 @@ export function colormapGradient(direction = 'to right'): string {
 	const stops = STOPS.map(([r, g, b], i) => `rgb(${r} ${g} ${b}) ${((i / (STOPS.length - 1)) * 100).toFixed(1)}%`);
 	return `linear-gradient(${direction}, ${stops.join(', ')})`;
 }
+
+/** The colormap as `steps` RGBA bytes in sRGB, for a texture a shader looks colors up in. */
+export function colormapBytes(steps = 256): Uint8Array {
+	const out = new Uint8Array(steps * 4);
+	const rgb: [number, number, number] = [0, 0, 0];
+	for (let i = 0; i < steps; i++) {
+		colormap(i / (steps - 1), rgb);
+		out.set([Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255), 255], i * 4);
+	}
+	return out;
+}
