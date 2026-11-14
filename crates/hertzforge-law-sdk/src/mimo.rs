@@ -383,7 +383,9 @@ pub struct OwnedInputs {
     pub response_dof: f64,
     /// The plant estimate.
     pub frf: MatrixStack,
-    /// Multiple coherence, line-major.
+    /// Multiple coherence of each control on all drives, line-major: the
+    /// identification's while the plant estimate is held, the loop's own while
+    /// it is updated.
     pub multiple_coherence: Vec<f64>,
     /// Line spacing, Hz.
     pub df_hz: f64,

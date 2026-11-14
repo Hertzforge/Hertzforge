@@ -107,73 +107,77 @@ impl Estimate {
     }
 }
 
-/// The lag search's score at every lag `0..=max_lag`: for each control window `x`
-/// (all of one length `w`), `|sum_t x[t] * drive[t + max_lag - lag]|`, summed over
-/// the controls. `drive` holds the `w + max_lag` drive samples that end with the
-/// window, so lag `L` pairs the window with the drive `L` frames earlier.
-///
-/// Computed as cross-correlations through the workspace FFT, at the power of two
-/// at or above `w + max_lag` (no circular wrap reaches a scored lag). Two controls
-/// share each transform, as the real and imaginary parts of one signal: for real
-/// signals `X[N - m]` is `conj(X[m])`, so `Z[N - m] Y[m]` with `Z = X_a + j X_b`
-/// is `conj(X_a) Y + j conj(X_b) Y`, whose inverse is the two real
-/// cross-correlations side by side. Both identities hold whichever sign the
-/// forward transform uses.
-///
-/// The direct sum this replaced cost `(max_lag + 1) * controls * w` multiply-adds:
-/// 134 million at four controls and the full 4096-frame search, about 150 ms of
-/// host time spent between two segments while a DAQ card's 60 ms output buffer
-/// drained with nothing feeding it. Here it is five transforms of 16 384 points.
-pub fn lag_scores(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> Vec<f64> {
-    let mut acc = vec![0.0f64; max_lag + 1];
-    let w = controls.first().map(|c| c.len()).unwrap_or(0);
-    if w == 0 || drive.len() < w + max_lag {
-        return acc;
-    }
-    let n = fft::next_pow2(w + max_lag);
-    let mut y: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
-    for (d, &v) in y.iter_mut().zip(&drive[..w + max_lag]) {
-        d.0 = v;
-    }
-    fft::fft_in_place(&mut y);
-    let mut z: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
-    let mut prod: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
-    for pair in controls.chunks(2) {
-        z.iter_mut().for_each(|v| *v = (0.0, 0.0));
-        for (d, &v) in z.iter_mut().zip(pair[0].iter().take(w)) {
-            d.0 = v;
-        }
-        if let Some(b) = pair.get(1) {
-            for (d, &v) in z.iter_mut().zip(b.iter().take(w)) {
-                d.1 = v;
-            }
-        }
-        fft::fft_in_place(&mut z);
-        for (m, p) in prod.iter_mut().enumerate() {
-            let a = z[(n - m) % n];
-            let b = y[m];
-            *p = (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0);
-        }
-        // sum_t x[t] y[t + k] at k = max_lag - lag: control a real, b imaginary.
-        let r = fft::ifft(&prod);
-        for (lag, s) in acc.iter_mut().enumerate() {
-            let v = r[max_lag - lag];
-            *s += v.0.abs();
-            if pair.len() == 2 {
-                *s += v.1.abs();
-            }
-        }
-    }
-    acc
-}
+/// The lag search's window, log2 frames: 16 384, four times the service's longest
+/// lag.
+const LAG_WINDOW_LOG2: u32 = 14;
 
-/// The lag of the highest [`lag_scores`] score; the smaller lag on a tie, and 0
-/// when no score is above zero.
-pub fn best_lag(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> usize {
+/// The lag between a drive and the responses it causes, frames in `0..=max_lag`:
+/// the peak of the whitened cross-correlation of `drive` with each control,
+/// summed in power over the controls.
+///
+/// Every control record has one length `len` and ends with `drive` (the drive as
+/// played may begin earlier). The window is the last `n` frames of each, `n` the
+/// power of two at or below `len`, at most 16 384, Hann weighted. Only the lines of
+/// `band` (half-open, in lines of a `nfft`-point frame, mapped to `n` points) are
+/// kept, and each is divided by its magnitude, so every line in the band weighs
+/// alike and the peak falls at the response's onset, not where a lightly damped
+/// structure's ringing lines up with the drive. A line with no cross power (a
+/// silent drive or control) adds nothing.
+///
+/// `y(t) = x(t - d)` peaks at circular index `n - d` whichever sign the forward
+/// transform uses, so lag `d` reads index `(n - d) mod n`. The correlation is
+/// circular over `n`: a lag above `n / 2` is not told apart from a lead of
+/// `n - lag`. A response does not lead the drive that causes it, so the index is
+/// read as the lag. The Hann weighting leaves little of a lag near `n` to
+/// correlate, so the window should be several times the longest lag: the
+/// service's is four times it.
+///
+/// The smallest lag wins a tie, so no cross power at all gives 0.
+///
+/// Cost: one transform for the drive and two for each control, nine at four
+/// controls, at `n` points.
+pub fn whitened_lag(
+    controls: &[&[f64]],
+    drive: &[f64],
+    band: (usize, usize),
+    nfft: usize,
+    max_lag: usize,
+) -> usize {
+    let len = controls.first().map(|c| c.len()).unwrap_or(0);
+    if len == 0 || drive.len() < len || nfft == 0 {
+        return 0;
+    }
+    let n = 1usize << len.ilog2().min(LAG_WINDOW_LOG2);
+    let hann = window::hann(n);
+    let spectrum = |x: &[f64]| {
+        let mut z: Vec<(f64, f64)> = x.iter().zip(&hann).map(|(v, w)| (v * w, 0.0)).collect();
+        fft::fft_in_place(&mut z);
+        z
+    };
+    let d = spectrum(&drive[drive.len() - n..]);
+    let lo = band.0 * n / nfft;
+    let hi = (band.1 * n / nfft).min(n / 2);
+    let mut power = vec![0.0f64; n];
+    for r in controls {
+        let y = spectrum(&r[r.len() - n..]);
+        let mut c = vec![(0.0f64, 0.0f64); n];
+        for k in lo..hi {
+            let v = C64::new(y[k].0, y[k].1) * C64::new(d[k].0, -d[k].1);
+            let m = v.norm();
+            if m > 0.0 {
+                c[k] = (v.re / m, v.im / m);
+            }
+        }
+        fft::fft_in_place(&mut c);
+        for (p, v) in power.iter_mut().zip(&c) {
+            *p += v.0 * v.0 + v.1 * v.1;
+        }
+    }
     let mut best = (0usize, 0.0f64);
-    for (lag, &s) in lag_scores(controls, drive, max_lag).iter().enumerate() {
-        if s > best.1 {
-            best = (lag, s);
+    for lag in 0..=max_lag.min(n - 1) {
+        let p = power[(n - lag) % n];
+        if p > best.1 {
+            best = (lag, p);
         }
     }
     best.0
@@ -440,71 +444,208 @@ mod tests {
         (0..n).map(|_| r.next()).collect()
     }
 
-    /// The lag search as it was written before it used the FFT: the direct sum at
-    /// every lag.
-    fn direct_scores(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> Vec<f64> {
-        let w = controls[0].len();
-        (0..=max_lag)
-            .map(|lag| {
-                controls
-                    .iter()
-                    .map(|x| {
-                        (0..w)
-                            .map(|t| x[t] * drive[t + max_lag - lag])
-                            .sum::<f64>()
-                            .abs()
-                    })
-                    .sum()
-            })
-            .collect()
-    }
+    // ---- The lag search -------------------------------------------------------
+    //
+    // The station's shape: 12 800 Hz, a 1024-point frame, the band 25 to 2000 Hz
+    // (lines 2 to 160). The drive as played starts `PRE` frames before the
+    // response record, as the service's drive tail does, and the response record
+    // ends with it.
 
-    /// One to four controls that each see the drive through its own gain and sign,
-    /// `delay` frames late, in noise: the FFT search scores every lag as the direct
-    /// sum does and picks the same lag, the planted one. An odd count leaves one
-    /// control alone in its transform.
-    #[test]
-    fn the_fft_lag_search_scores_every_lag_as_the_direct_sum_does() {
-        for (w, max_lag, delay, seed, n_c) in [
-            (2048usize, 1024usize, 517usize, 1u64, 4usize),
-            (1500, 700, 0, 2, 3),
-            (1024, 1024, 1024, 3, 1),
-            (3000, 333, 211, 4, 2),
-        ] {
-            let drive = noise(w + max_lag, seed);
-            let gains = &[1.0, -0.6, 0.3, 2.0][..n_c];
-            let controls: Vec<Vec<f64>> = gains
-                .iter()
-                .enumerate()
-                .map(|(k, g)| {
-                    let n = noise(w, seed * 10 + k as u64);
-                    (0..w)
-                        .map(|t| g * drive[t + max_lag - delay] + 0.5 * n[t])
-                        .collect()
+    const FS: f64 = 12_800.0;
+    const NFFT: usize = 1024;
+    const BAND: (usize, usize) = (2, 160);
+    const PRE: usize = 4096;
+    const MAX_LAG: usize = 4096;
+
+    /// The lag search before c271b4cb (e7d9b34b), kept here as the reference the
+    /// resonant case is measured against: the raw cross-correlation's magnitude at
+    /// every lag, summed over the controls, through the FFT.
+    fn raw_lag_scores(controls: &[&[f64]], drive: &[f64], max_lag: usize) -> Vec<f64> {
+        let mut acc = vec![0.0f64; max_lag + 1];
+        let w = controls.first().map(|c| c.len()).unwrap_or(0);
+        if w == 0 || drive.len() < w + max_lag {
+            return acc;
+        }
+        let n = fft::next_pow2(w + max_lag);
+        let mut y: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
+        for (d, &v) in y.iter_mut().zip(&drive[..w + max_lag]) {
+            d.0 = v;
+        }
+        fft::fft_in_place(&mut y);
+        for x in controls {
+            let mut z: Vec<fft::Cplx> = vec![(0.0, 0.0); n];
+            for (d, &v) in z.iter_mut().zip(x.iter().take(w)) {
+                d.0 = v;
+            }
+            fft::fft_in_place(&mut z);
+            let prod: Vec<fft::Cplx> = (0..n)
+                .map(|m| {
+                    let a = z[(n - m) % n];
+                    let b = y[m];
+                    (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0)
                 })
                 .collect();
-            let views: Vec<&[f64]> = controls.iter().map(|c| c.as_slice()).collect();
-            let fast = lag_scores(&views, &drive, max_lag);
-            let slow = direct_scores(&views, &drive, max_lag);
-            let peak = slow.iter().cloned().fold(0.0, f64::max);
-            for (lag, (a, b)) in fast.iter().zip(&slow).enumerate() {
-                assert!(
-                    (a - b).abs() <= 1e-9 * peak,
-                    "w {w} lag {lag}: fft {a} direct {b} (peak {peak})"
-                );
+            let r = fft::ifft(&prod);
+            for (lag, s) in acc.iter_mut().enumerate() {
+                *s += r[max_lag - lag].0.abs();
             }
-            assert_eq!(best_lag(&views, &drive, max_lag), delay, "w {w}");
+        }
+        acc
+    }
+
+    /// Both searches over one record, sliced as `measure_lag` slices it (the raw
+    /// one as it did before c271b4cb): `(whitened, raw)`.
+    fn both_searches(controls: &[Vec<f64>], stream: &[f64]) -> (usize, usize) {
+        let len = controls[0].len();
+        let offset = stream.len() - len;
+        let max_lag = MAX_LAG.min(offset).min(len / 2);
+        let views: Vec<&[f64]> = controls.iter().map(|c| c.as_slice()).collect();
+        let whitened = whitened_lag(&views, stream, BAND, NFFT, max_lag);
+        let w = (len / 2).min(8192);
+        let start = len - w;
+        let windows: Vec<&[f64]> = controls.iter().map(|c| &c[start..start + w]).collect();
+        let scores = raw_lag_scores(&windows, &stream[offset + start - max_lag..], max_lag);
+        let mut raw = (0usize, 0.0f64);
+        for (lag, &s) in scores.iter().enumerate() {
+            if s > raw.1 {
+                raw = (lag, s);
+            }
+        }
+        (whitened, raw.0)
+    }
+
+    /// Unit-variance noise limited to `lo_hz..=hi_hz`, `n` frames.
+    fn band_noise(n: usize, seed: u64, lo_hz: f64, hi_hz: f64) -> Vec<f64> {
+        let m = fft::next_pow2(n);
+        let mut z: Vec<fft::Cplx> = noise(m, seed).into_iter().map(|v| (v, 0.0)).collect();
+        fft::fft_in_place(&mut z);
+        for (k, v) in z.iter_mut().enumerate() {
+            let f = k.min(m - k) as f64 * FS / m as f64;
+            if f < lo_hz || f > hi_hz {
+                *v = (0.0, 0.0);
+            }
+        }
+        let x: Vec<f64> = fft::ifft(&z).into_iter().take(n).map(|v| v.0).collect();
+        let rms = (x.iter().map(|v| v * v).sum::<f64>() / n as f64).sqrt();
+        x.into_iter().map(|v| v / rms).collect()
+    }
+
+    /// The stream `d` frames late, through `gain`, over the last `len` frames.
+    fn delayed(stream: &[f64], d: usize, gain: f64, len: usize) -> Vec<f64> {
+        let off = stream.len() - len;
+        (0..len).map(|t| gain * stream[off + t - d]).collect()
+    }
+
+    /// The stream `d` frames late through one lightly damped mode (two poles at
+    /// `f_hz`, quality `q`, unit gain at the first frame), over the last `len`.
+    fn ringing(stream: &[f64], d: usize, f_hz: f64, q: f64, len: usize) -> Vec<f64> {
+        let th = std::f64::consts::TAU * f_hz / FS;
+        let r = (-th / (2.0 * q)).exp();
+        let (a1, a2) = (2.0 * r * th.cos(), -r * r);
+        let mut y = vec![0.0f64; stream.len()];
+        for t in 0..stream.len() {
+            let x = if t >= d { stream[t - d] } else { 0.0 };
+            let y1 = if t >= 1 { y[t - 1] } else { 0.0 };
+            let y2 = if t >= 2 { y[t - 2] } else { 0.0 };
+            y[t] = x + a1 * y1 + a2 * y2;
+        }
+        y.split_off(stream.len() - len)
+    }
+
+    /// (a) A pure delay through a flat plant: four controls, each with its own gain
+    /// and sign, give the delay exactly, from none to near the longest the service
+    /// looks back. 553 frames is what the loopback bench reads at 12 800 Hz. The
+    /// shorter record takes a 4096-point window.
+    #[test]
+    fn a_pure_delay_through_a_flat_plant_gives_the_exact_lag() {
+        for (len, d) in [
+            (20_000usize, 0usize),
+            (20_000, 1),
+            (20_000, 41),
+            (20_000, 553),
+            (20_000, 4000),
+            (6_000, 553),
+        ] {
+            let stream = band_noise(PRE + len, 11, 25.0, 2000.0);
+            let controls: Vec<Vec<f64>> = [1.0, -0.6, 0.3, 2.0]
+                .iter()
+                .map(|&g| delayed(&stream, d, g, len))
+                .collect();
+            let (whitened, _) = both_searches(&controls, &stream);
+            assert_eq!(whitened, d, "len {len}");
         }
     }
 
-    /// No drive, no lag: an all-zero score keeps the search at 0, as before.
+    /// (b) A lightly damped plant (50 Hz at Q 100 and 140 Hz at Q 60, 273 frames
+    /// late): the raw correlation peaks where the ringing lines up with the drive,
+    /// hundreds of frames late; the whitened search lands on the onset. A mode's
+    /// two poles alone put its phase centre one frame early and bend the phase across
+    /// the resonance, so the whitened search is held to within two frames, under
+    /// 0.2 % of a 1024-point frame, which the FRF absorbs as phase.
     #[test]
-    fn a_silent_drive_scores_zero_everywhere_and_the_lag_stays_at_zero() {
-        let x = noise(512, 9);
-        let drive = vec![0.0; 512 + 100];
-        let s = lag_scores(&[&x], &drive, 100);
-        assert!(s.iter().all(|&v| v == 0.0));
-        assert_eq!(best_lag(&[&x], &drive, 100), 0);
+    fn a_ringing_plant_fools_the_raw_correlation_and_not_the_whitened_one() {
+        let (len, d) = (20_000usize, 273usize);
+        let stream = band_noise(PRE + len, 12, 25.0, 2000.0);
+        let controls = vec![
+            ringing(&stream, d, 50.0, 100.0, len),
+            ringing(&stream, d, 140.0, 60.0, len),
+        ];
+        let (whitened, raw) = both_searches(&controls, &stream);
+        assert!(raw.abs_diff(d) > 100, "raw search {raw}, true {d}");
+        assert!(
+            whitened.abs_diff(d) <= 2,
+            "whitened search {whitened}, true {d}"
+        );
+    }
+
+    /// (c) A band-limited drive and broadband measurement noise ten times the
+    /// response's RMS on each control (-20 dB): every in-band line weighs alike
+    /// however much of it is noise, and the lag still comes out exact. (The band
+    /// restriction itself is pinned by (a): searched over every line, the
+    /// out-of-band lines of a band-limited drive, which carry only rounding,
+    /// decide the peak, and (a) fails at a lag of 1.)
+    #[test]
+    fn broadband_noise_on_the_response_leaves_the_lag_exact() {
+        let (len, d) = (20_000usize, 553usize);
+        let stream = band_noise(PRE + len, 13, 25.0, 2000.0);
+        let controls: Vec<Vec<f64>> = (0..4u64)
+            .map(|k| {
+                let n = noise(len, 130 + k);
+                // `noise` is uniform on (-0.5, 0.5): RMS 1/sqrt(12).
+                let g = 10.0 * 12f64.sqrt();
+                delayed(&stream, d, 1.0, len)
+                    .iter()
+                    .zip(&n)
+                    .map(|(y, e)| y + g * e)
+                    .collect()
+            })
+            .collect();
+        let (whitened, _) = both_searches(&controls, &stream);
+        assert_eq!(whitened, d);
+    }
+
+    /// (d) Among the four controls one reads exactly zero and one only noise at
+    /// 1e-9 (a gauge that is off): each whitened line counts alike, so the silent
+    /// one adds nothing and the noisy one a floor, and the lag stays exact. With
+    /// every control silent, or the drive silent, there is no cross power and the
+    /// lag is 0, as before c271b4cb (whose `max_by` took the last of the equal
+    /// scores and returned the longest lag searched, 4096).
+    #[test]
+    fn a_silent_control_leaves_the_lag_and_no_cross_power_gives_zero() {
+        let (len, d) = (20_000usize, 553usize);
+        let stream = band_noise(PRE + len, 14, 25.0, 2000.0);
+        let controls = vec![
+            delayed(&stream, d, 1.0, len),
+            vec![0.0; len],
+            noise(len, 140).iter().map(|v| 1e-9 * v).collect(),
+            delayed(&stream, d, -0.4, len),
+        ];
+        assert_eq!(both_searches(&controls, &stream).0, d);
+
+        let silent = vec![vec![0.0; len]; 4];
+        assert_eq!(both_searches(&silent, &stream).0, 0);
+        let quiet = vec![0.0; PRE + len];
+        assert_eq!(both_searches(&controls, &quiet).0, 0);
     }
 
     /// The diagonal equals the workspace's own Welch PSD, and the cross spectrum
