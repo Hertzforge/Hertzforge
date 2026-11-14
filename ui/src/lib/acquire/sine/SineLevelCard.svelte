@@ -9,7 +9,7 @@
 	 */
 	import type { SineConfig, SineLiveHead, SineState } from '$lib/protocol/sine';
 	import { formatNumber } from '$lib/viz/format';
-	import { clock, db } from '../words';
+	import { clock, db, levelReadout } from '../words';
 	import { errorWords, hz, identificationWords, progressOf, sineLevelStatus, sineTripFacts, sweepWords, SINE_TRIP_WORDS } from './sineWords';
 
 	interface Props {
@@ -29,8 +29,9 @@
 	const unit = $derived(live?.channels.find((c) => c.role === 'control')?.unit ?? 'g');
 	const err = $derived(errorWords(live, unit));
 	const progress = $derived(progressOf(status));
-	const level = $derived(live?.level_db ?? null);
-	const commanded = $derived(live?.commanded_db ?? status?.level_db ?? null);
+	const shown = $derived(levelReadout(live?.level_db ?? null, live?.commanded_db ?? status?.level_db ?? null, status?.end));
+	const level = $derived(shown.level);
+	const commanded = $derived(shown.commanded);
 	const trip = $derived(status?.end?.trip ?? null);
 	const idWords = $derived(identificationWords(status?.identification ?? null));
 	const law = $derived(status?.law ?? null);
@@ -83,11 +84,15 @@
 	<dl class="nums">
 		<div>
 			<dt>Level</dt>
-			<dd class="num" data-testid="sine-level-words">{db(level ?? commanded)}{#if level !== null && commanded !== null && Math.abs(level - commanded) > 0.05}<span class="sub"> to {db(commanded)}</span>{/if}</dd>
+			<dd class="num" data-testid="sine-level-words" data-ended={shown.ended ? 'true' : 'false'}>{db(level ?? commanded)}{#if shown.ended}<span class="sub">{level === null ? ' never driven' : ' last level in force'}</span>{:else if level !== null && commanded !== null && Math.abs(level - commanded) > 0.05}<span class="sub"> to {db(commanded)}</span>{/if}</dd>
 		</div>
-		<div><dt>Drive</dt><dd class="num" data-testid="sine-drive">{live?.drive_vpk === null || live?.drive_vpk === undefined ? '-' : `${formatNumber(live.drive_vpk, 4)} V pk`}{#if live?.cola_vpk !== null && live?.cola_vpk !== undefined}<span class="sub">, reference {formatNumber(live.cola_vpk, 3)} V pk</span>{/if}</dd></div>
+		{#if shown.ended}
+			<div><dt>Drive</dt><dd class="num" data-testid="sine-drive">The run has ended</dd></div>
+		{:else}
+			<div><dt>Drive</dt><dd class="num" data-testid="sine-drive">{live?.drive_vpk === null || live?.drive_vpk === undefined ? '-' : `${formatNumber(live.drive_vpk, 4)} V pk`}{#if live?.cola_vpk !== null && live?.cola_vpk !== undefined}<span class="sub">, reference {formatNumber(live.cola_vpk, 3)} V pk</span>{/if}</dd></div>
+		{/if}
 	</dl>
-	{#if err}<p class="line err {errTone}" data-testid="sine-error-words">{err}</p>{/if}
+	{#if err && !shown.ended}<p class="line err {errTone}" data-testid="sine-error-words">{err}</p>{/if}
 
 	{#if progress !== null}
 		<div class="progress" data-testid="sine-progress" data-progress={progress.toFixed(3)}>
