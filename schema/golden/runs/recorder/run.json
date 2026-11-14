@@ -105,6 +105,10 @@
     "streams": "on"
   },
   "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "695af1ae917c3862ad8ce671cd26765b28f6bd4aede410c06f6bc1b92836886a"
+  },
   "streams": [
     {
       "name": "rec_0001",

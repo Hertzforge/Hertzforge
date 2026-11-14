@@ -151,6 +151,24 @@ class RunRecord:
         resolved = self.setup.get('resolved')
         return dict(resolved) if isinstance(resolved, Mapping) else {}
 
+    @property
+    def table_revision(self) -> int | None:
+        """The revision of the channel table the run used, as `run.json`
+        names it (`channel_table.revision`); None when the folder does not
+        say. It is never read from anywhere else."""
+        stamp = self.manifest.get('channel_table')
+        value = stamp.get('revision') if isinstance(stamp, Mapping) else None
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    @property
+    def table_sha256(self) -> str | None:
+        """The SHA-256 of the rows of the channel table the run used, as
+        `run.json` names it (`channel_table.sha256`): equal for two runs on
+        one table. None when the folder does not say."""
+        stamp = self.manifest.get('channel_table')
+        value = stamp.get('sha256') if isinstance(stamp, Mapping) else None
+        return value if isinstance(value, str) and value else None
+
     def describe(self) -> str:
         """A few words on the run: its test, its outcome and its log.
 

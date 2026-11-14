@@ -119,6 +119,14 @@ pub struct Begin {
     pub streams: Vec<StreamSpec>,
 }
 
+/// The table a run used, as `run.json` names it: the revision and the SHA-256 of
+/// the rows `table.json` holds. `None` for a table that names neither.
+pub fn table_stamp(table: &Value) -> Option<Value> {
+    let revision = table.get("revision").and_then(Value::as_u64)?;
+    let sha256 = table.get("sha256").and_then(Value::as_str)?;
+    Some(json!({"revision": revision, "sha256": sha256}))
+}
+
 /// Why a record could not be opened: the path and the reason.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenError {
@@ -568,6 +576,9 @@ impl Writer {
         }
         let mut manifest = begin.manifest;
         manifest.insert("schema".into(), Value::from(SCHEMA));
+        if let Some(stamp) = table_stamp(&begin.table) {
+            manifest.insert("channel_table".into(), stamp);
+        }
         manifest.insert(
             "streams".into(),
             Value::Array(
