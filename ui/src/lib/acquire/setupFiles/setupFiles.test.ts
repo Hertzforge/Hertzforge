@@ -332,7 +332,7 @@ describe('the origin the Arm verb shows', () => {
 		key = 'b';
 		expect(o.edited).toBe(true);
 		expect(o.words).toBe('Setup edited here, after opening run r-0007');
-		expect(originWords({ kind: 'seed', object: 'Spec 1', checksum: 'ab', fills: 'profile' }, false)).toBe('Setup profile seeded from "Spec 1"');
+		expect(originWords({ kind: 'seed', object: 'Spec 1', checksum: 'ab', fills: 'profile' }, false)).toBe('Setup with profile seeded from "Spec 1" (SHA-256 ab)');
 	});
 
 	it('is found from the store the run verbs are given, and kept across a reload', () => {
