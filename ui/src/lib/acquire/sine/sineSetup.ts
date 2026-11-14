@@ -165,7 +165,8 @@ export function defaultSineSetup(): SineDraft {
 		// Empty: the title follows the profile and the test (`sineTitle`) until the operator types one.
 		title: '',
 		profile: {
-			label: '1 g',
+			// Optional, and empty by default: a default name would outlive the rows it named.
+			label: '',
 			rows: [newRow(20, 'disp_pp_in', 0.0097), newRow(45, 'accel_g', 1), newRow(2000, 'accel_g', 1)],
 			alarm_db: [1.5, 1.5],
 			abort_db: [3, 3]

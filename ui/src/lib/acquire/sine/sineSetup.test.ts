@@ -264,4 +264,10 @@ describe('the Sine title', () => {
 		expect(fromSineConfig(toSineConfig(d, null)).title).toBe('Bracket survey');
 		expect(mergeSineSetup({ ...d, title: 'Sine 1 g, 20 to 2000 Hz' }).title).toBe('');
 	});
+
+	it('opens with no profile name, so none outlives the rows it named', () => {
+		const d = defaultSineSetup();
+		expect(d.profile.label).toBe('');
+		expect(toSineConfig(d, null).profile.label).toBeUndefined();
+	});
 });
