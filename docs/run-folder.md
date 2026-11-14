@@ -5,8 +5,8 @@ control service while the run goes, that needs no other file and no running
 service to be read. The analysis side converts it into an ordinary project file
 (`hertzforge convert-run FOLDER`, or open the folder or its `run.json`), so a
 finished run reaches every analysis tool with its channel table, its setup, its
-log and its measurements. Today the Random module writes one for every run; the
-other control modules do not yet.
+log and its measurements. Today the Random and Classical Shock modules write one
+for every run; the other control modules do not yet.
 
 The exact form is the reader's, `hertzforge.io.run_folder`; the conversion is
 `hertzforge.io.run_convert`, described in `docs/hforge-format.md` ("Run Folders
@@ -17,8 +17,10 @@ written by.
 
 Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
 `Hertzforge_Data` in the home folder. A Random run's folder is named
-`<YYYYMMDD-HHMMSS>_random_<run id>`, the time it armed in UTC. The run's state
-(`random.state`) names the folder from arm on (`record.folder`).
+`<YYYYMMDD-HHMMSS>_random_<run id>`, a Classical Shock run's
+`<YYYYMMDD-HHMMSS>_classical_shock_<run id>`, the time it armed in UTC. The
+run's state (`random.state`, `shock.state`) names the folder from arm on
+(`record.folder`).
 
 ## Layout
 
@@ -100,6 +102,15 @@ played and whether that is `declared` by the station or `measured`; a Random
 run adds `pipeline_lag_frames`, the drive-to-response lag its system
 identification measured. A gap is never padded: the samples after it follow on.
 
+A pulse module's stream is a run of shots, and its `stream.json` lists them in
+`shots`, in the order they were fired: each shot's `first_frame` (its place in
+the file) and `frames` (what the file holds of it), `first_station_frame`,
+`pre_frames` (the frames of the shot before its firing), `station_frame` (the
+station frame it fired at, the first plus `pre_frames`), its `level_db`, and
+`what` it was (`identification` or `pulse`) with its `pulse` (from 0) and
+`origin`. The marks travel in order with the samples, so a shot's place is the
+file's own, a gap included.
+
 ### `results/`
 
 A result is a set of named arrays: `<name>.json` describes it (`kind`,
@@ -158,6 +169,47 @@ the analysis side converts them to SI.
   way. The run goes on: recording never stops, stalls or aborts a control run.
 - **The end.** When `end.json` cannot be written, the folder keeps
   `complete: false`, and the reader says the run did not end cleanly.
+
+## What a Classical Shock Run Saves
+
+From arm: `run.json`, `table.json`, `setup.json` (the configuration as
+accepted; resolved, the nominal pulse with its shape, amplitude, duration,
+polarity, rise and fall and compensation, the tolerance standard and its bands,
+the level schedule and pulse counts, the spacing, the identification, the
+control settings and the controller's own, the limits and monitors, the SRS
+grid and the rates; the derived values; feasibility), `law/law.json` (the law's
+identity, parameters and guards) and `log.jsonl` (every state, level, pulse
+fired with its level and verdict, alarm, drive-limit action, trip, hold and
+operator action, each with its facts in `data`), and these files, each checked
+against the golden run folder (`schema/golden/runs/classical_shock/`) by
+`tests/test_shock_run_folder_golden.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order, a shot for the identification and one for each pulse (`kind` `inputs`) |
+| `streams/drives` | The drive as the device accepted it, in volts, shot for shot with the inputs (`kind` `drives`) |
+| `results/pulse_reference` | The nominal pulse at full level and its time-domain tolerance band, time from the main pulse's start (`kind` `pulse_reference`, kept as arrays) |
+| `results/srs_reference` | The nominal pulse's SRS at full level and its informational band (`kind` `srs_reference`) |
+| `results/identification_frf` | The identification's complex transfer function, drive to control response, on the correction band (`kind` `frf`) |
+| `results/identification_coherence` | Its ordinary coherence, and the lines the control trusts (`kind` `coherence`) |
+| `results/pulse_srs` | Each pulse's SRS, with the reference's at the level fired and its band (`kind` `srs`, one record per pulse measured) |
+| `results/pulses` | Each pulse as judged: its level, scheduled level, limit scale, drive peak, peak, peak ratio, velocity change and its ratio, peak velocity, peak-to-peak displacement, error, the three verdicts and the overall one, and its SRS bands (`kind` `pulse_results`, kept as arrays, one record per pulse) |
+| `end.json` | The end, as the run's state reports it |
+
+Each pulse's results are written when the pulse is judged, the last pulse of
+the run included; a record's line names the pulse, its level, its origin and
+the station frame. A run that ends before its identification has no
+identification and no pulses; one held by identification has its identification
+and no pulses. With `record.streams` false there is no `streams/` folder. The
+analysis side keeps the nominal pulse and its time-domain tolerance as the
+setup's `resolved.pulse` and `resolved.tolerance` and as the arrays of
+`pulse_reference` in the run record, since no analysis class holds a nominal
+pulse; the verdicts and kinematics of `pulses` are arrays there too.
+
+The golden folder is written by `cargo test -p sds-control --test
+classical_shock_golden_run` from a short run on the simulator, with fixed seeds,
+its wall times and build fields normalized; `scripts/make_golden_runs.sh`
+rewrites it.
 
 ## What a Random Run Saves
 

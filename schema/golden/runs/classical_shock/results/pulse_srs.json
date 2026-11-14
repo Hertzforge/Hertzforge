@@ -1,0 +1,72 @@
+{
+  "name": "pulse_srs",
+  "kind": "srs",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      1
+    ]
+  },
+  "q": 10,
+  "srs_kind": "maximax",
+  "description": "each pulse's SRS, and the reference's at the level fired with its band",
+  "records": {
+    "index": "record",
+    "pulse": "the pulse, from 0",
+    "level_db": "the level fired",
+    "origin": "ladder, train or gunfire",
+    "frame": "the station frame when it was kept"
+  },
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        1,
+        17
+      ],
+      "unit": "g",
+      "offset": 136
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "g",
+      "offset": 272
+    },
+    {
+      "name": "band_low",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "g",
+      "offset": 408
+    },
+    {
+      "name": "band_high",
+      "dtype": "f8",
+      "shape": [
+        17
+      ],
+      "unit": "g",
+      "offset": 544
+    }
+  ]
+}
