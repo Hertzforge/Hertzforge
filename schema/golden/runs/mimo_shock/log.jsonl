@@ -1,0 +1,14 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden MIMO Shock\" on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"station","text":"armed on sim at 4096 Hz (asked 4096 Hz), records of 64 samples, 4 drives, 4 controls","data":{"class":"sim","fs_hz":4096.0,"requested_fs_hz":4096.0,"record_len":64,"drives":4,"controls":4}}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"note","text":"started; identification at up to 1 V rms on every drive","data":{"action":"start","drive_vrms":1.0}}
+{"seq":5,"at_unix":1794240005.25,"frame":5632,"kind":"state","text":"sysid to waiting","data":{"from":"sysid","to":"waiting","state":"running"}}
+{"seq":6,"at_unix":1794240006.25,"frame":5632,"kind":"note","text":"seeded at -6 dB","data":{"seeded":true,"level_db":-6.0,"review":{"controls":[{"channel":1,"reachable":1,"floor_db":6.68,"reachable_ok":true,"predicted_peak_ratio":1.0006},{"channel":2,"reachable":1,"floor_db":6.68,"reachable_ok":true,"predicted_peak_ratio":1.0006},{"channel":3,"reachable":1,"floor_db":6.68,"reachable_ok":true,"predicted_peak_ratio":1.0006},{"channel":4,"reachable":1,"floor_db":6.68,"reachable_ok":true,"predicted_peak_ratio":1.0006}],"hold":null,"acknowledged":null}}}
+{"seq":7,"at_unix":1794240007.25,"frame":5632,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
+{"seq":8,"at_unix":1794240008.25,"frame":5824,"kind":"pulse","text":"pulse 1 at -6 dB: passed, worst over-test 0.07 dB","data":{"pulse":0,"level_db":-6.0,"scheduled_db":-6.0,"passed":true,"over_test_db":0.06601225383508866,"law":{"used":true,"miss":null},"warnings":[]}}
+{"seq":9,"at_unix":1794240009.25,"frame":5824,"kind":"state","text":"firing to waiting","data":{"from":"firing","to":"waiting","state":"running"}}
+{"seq":10,"at_unix":1794240010.25,"frame":5824,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
+{"seq":11,"at_unix":1794240011.25,"frame":6016,"kind":"pulse","text":"pulse 2 at 0 dB: passed, worst over-test 0.34 dB","data":{"pulse":1,"level_db":0.0,"scheduled_db":0.0,"passed":true,"over_test_db":0.3362879506598426,"law":{"used":true,"miss":null},"warnings":[]}}
+{"seq":12,"at_unix":1794240012.25,"frame":6016,"kind":"state","text":"firing to stopped","data":{"from":"firing","to":"stopped","state":"finished"}}
+{"seq":13,"at_unix":1794240013.25,"frame":6016,"kind":"state","text":"ended (completed): Every level passed.","data":{"outcome":"completed","by":null,"end":{"outcome":"completed","reason":"completed","message":"Every level passed.","at_s":30.0,"level_db":0,"pulse":1}}}

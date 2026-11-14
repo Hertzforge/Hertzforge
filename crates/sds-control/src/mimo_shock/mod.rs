@@ -6,6 +6,7 @@
 pub mod config;
 pub mod law_check;
 pub mod laws;
+pub mod record;
 pub mod run;
 pub mod subscribe;
 pub mod view;
@@ -208,6 +209,7 @@ pub fn configured_view(
         misses: 0,
         end: None,
         streaming: false,
+        record: None,
     }
 }
 

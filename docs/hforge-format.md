@@ -518,9 +518,9 @@ recorded in, one folder per run: `run.json` (the manifest, `schema`
 `hertzforge-run/1`), `table.json`, `setup.json`, `law/`, `log.jsonl`,
 `streams/<name>/` (`telemetry.f32`, little-endian float32,
 frame-interleaved, in engineering units, and `stream.json`),
-`results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. The control
-service's Random and Sine modules and its Recorder write one for every run, as
-`docs/run-folder.md` describes; the other control modules do not yet.
+`results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. Every control
+module of the control service writes one for every run, as
+`docs/run-folder.md` describes.
 
 `hertzforge.io.run_convert.convert` (and `hertzforge convert-run
 FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default
@@ -590,6 +590,16 @@ identification an `Frf`, a `MultipleCoherence` and spectral matrices, its loops 
 records, and the rest stays in the run record (`docs/run-folder.md`, "What a MIMO
 Random Run Saves"). The separate `run/` group a MIMO run was once converted into is
 retired, with its converter.
+
+## MIMO Shock Runs
+
+A MIMO Shock run is a run folder and converts as one ("Run Folders and Their
+Conversion"): its streams are time histories of one record per shot (the
+identification's `probe` and `estimate`, and each pulse), each control's target SRS
+a `ShockSpecification` and each pulse's SRS an `Srs` with a record per control and
+pulse, a waveform target a `TransientSpecification` of every control, its
+identification an `Frf` and a `MultipleCoherence`, and the rest stays in the run
+record (`docs/run-folder.md`, "What a MIMO Shock Run Saves").
 
 ## Reading One Without Hertzforge
 

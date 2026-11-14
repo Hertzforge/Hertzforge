@@ -1,0 +1,87 @@
+{
+  "kind": "inputs",
+  "fs_hz": 4096,
+  "channels": [
+    {
+      "index": 1,
+      "unit": "g",
+      "description": "Control 1"
+    },
+    {
+      "index": 2,
+      "unit": "g",
+      "description": "Control 2"
+    },
+    {
+      "index": 3,
+      "unit": "g",
+      "description": "Control 3"
+    },
+    {
+      "index": 4,
+      "unit": "g",
+      "description": "Control 4"
+    }
+  ],
+  "first_station_frame": 0,
+  "name": "inputs",
+  "frames": 320,
+  "gaps": [],
+  "complete": true,
+  "fault": null,
+  "shots": [
+    {
+      "first_station_frame": 0,
+      "first_frame": 0,
+      "frames": 80,
+      "what": "identification",
+      "pulse": null,
+      "step": "probe",
+      "drive_vrms": 0.1,
+      "level_db": null,
+      "pre_frames": 64,
+      "station_frame": 64,
+      "cut_from_frames": 384
+    },
+    {
+      "first_station_frame": 384,
+      "first_frame": 80,
+      "frames": 80,
+      "what": "identification",
+      "pulse": null,
+      "step": "estimate",
+      "drive_vrms": 0.0013353638384509731,
+      "level_db": null,
+      "pre_frames": 64,
+      "station_frame": 448,
+      "cut_from_frames": 5248
+    },
+    {
+      "first_station_frame": 5632,
+      "first_frame": 160,
+      "frames": 80,
+      "what": "pulse",
+      "pulse": 0,
+      "origin": "ladder",
+      "level_db": -6,
+      "scheduled_db": -6,
+      "pre_frames": 64,
+      "station_frame": 5696,
+      "cut_from_frames": 192
+    },
+    {
+      "first_station_frame": 5824,
+      "first_frame": 240,
+      "frames": 80,
+      "what": "pulse",
+      "pulse": 1,
+      "origin": "ladder",
+      "level_db": 0,
+      "scheduled_db": 0,
+      "pre_frames": 64,
+      "station_frame": 5888,
+      "cut_from_frames": 192
+    }
+  ],
+  "cut_from_frames": 6016
+}
