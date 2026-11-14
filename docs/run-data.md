@@ -96,13 +96,30 @@ its finished run opens in the analysis side with its channel table and setup. A 
 adds to a module's record says which items it adds; one that adds to the setup, the table or the
 results without recording them says "not recorded yet" and why.
 
+## A Setup Is a File
+
+Every test's setup screen has Save Setup, Open Setup and Open Setup From Run. A setup is saved
+into the open project as a `test_setup` object (`docs/hforge-format.md`): the test module, the
+configuration exactly as that module's configure request carries it, the protocol, the channel
+table it was made with, a title, notes and where it came from. A run's record holds the same
+configuration, so a run's setup opens the same way. The browser keeps only a cache of the draft.
+
+Opening a setup fills the draft and nothing else. A setup for another module or another protocol
+is refused before the draft is touched; one made with a different channel table, or one the draft
+cannot hold exactly, is opened only after the operator has seen every difference. The draft then
+goes through the same configure call and checks as one typed in, and the service's refusals are
+shown in its words. Beside Arm, the screen says where the setup came from (typed here, a saved
+setup by name, a run by its id) until the operator edits it. The origin is kept in the shell and
+in the saved setup; it does not reach a run's record.
+
 ## Seed, Do Not Retype
 
 Where an analysis object can supply a setup input (a profile from a specification, a channel table
 from a project, a reference from field data), the setup offers to take it. Where a result can arrive
 in the analysis side as an object, it does. A pull request that adds either says what it seeds from
 and what it flows to. A seed fills a draft; it never arms anything, and the control service checks
-what it fills in as it checks a typed value.
+what it fills in as it checks a typed value. A seed records itself as the setup's origin: the
+object's name, its SHA-256 and what it filled (`docs/hforge-format.md`, `test_setup/`).
 
 ## The Run Data Section
 
