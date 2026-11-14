@@ -252,7 +252,7 @@
 	</footer>
 	{:else}
 	<div class="run" id="aq-panel-live" data-testid="run-view">
-		<RunView {acq} {display} onpopout={popout} onoverride={() => (overrideOpen = true)} {abortKeys} />
+		<RunView {acq} {display} onpopout={popout} onoverride={() => (overrideOpen = true)} {abortKeys} opener={app.runOpen} />
 	</div>
 	{/if}
 </div>

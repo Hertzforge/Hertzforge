@@ -1,8 +1,9 @@
 /**
  * A Random run's record from the shell's side: the operator's fields in the setup draft and the
  * configuration, the size an hour of time histories takes, the recording line's words, the notice
- * while the record has a problem, and the refusal when it cannot be written. The run parts go
- * through the mock control service and the real client.
+ * while the record has a problem, the refusal when it cannot be written, and the finished run's
+ * way to its data on the analysis side. The run parts go through the mock control service and
+ * the real client.
  */
 import { describe, expect, it } from 'vitest';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
@@ -11,6 +12,7 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { RandomConfig } from '$lib/protocol/types';
 import { configKey, defaultSetup, fromConfig, localErrors, recordBytesPerHour, sizeWords, toConfig, type SetupDraft } from './setup';
 import { AcquireState } from './store.svelte';
+import { RunOpen, runOpenWords, workspaceForRun, type RunOpenHost } from './runOpen.svelte';
 import { folderName, LOG_WORDS, recordProblem, refusalTitle, toRefusal } from './words';
 
 const until = async (cond: () => boolean, ms = 8000) => {
@@ -230,5 +232,78 @@ describe('the run record on the mock service', () => {
 		await until(() => s.acq.run?.state === 'finished', 15000);
 		expect(s.acq.run?.end?.outcome).toBe('completed');
 		s.client.close();
+	});
+});
+
+describe('Open in Analysis', () => {
+	function host(answer: () => Promise<string[]>) {
+		const shown: { workspace: string; names: string[] }[] = [];
+		const brought: string[] = [];
+		const h: RunOpenHost = {
+			bring: (folder) => {
+				brought.push(folder);
+				return answer();
+			},
+			show: (workspace, names) => shown.push({ workspace, names })
+		};
+		return { h, shown, brought };
+	}
+
+	it('works, then opens the Random workspace with the run\'s objects, and shows it again without converting twice', async () => {
+		let release: (names: string[]) => void = () => {};
+		const { h, shown, brought } = host(() => new Promise((r) => (release = r)));
+		const o = new RunOpen(h);
+		expect(o.at('/d/run-1')).toBe('idle');
+		expect(runOpenWords('idle', null, [])).toEqual({ label: 'Open in Analysis', line: null });
+
+		const going = o.open('/d/run-1');
+		expect(o.at('/d/run-1')).toBe('working');
+		expect(runOpenWords('working', null, [])).toEqual({ label: 'Opening in Analysis', line: 'Converting the run folder for the analysis side.' });
+		expect(await o.open('/d/run-1')).toBe(false);
+		release(['Channel Table', 'inputs', 'drives', 'Specification', 'Run Record']);
+		expect(await going).toBe(true);
+		expect(o.at('/d/run-1')).toBe('done');
+		expect(shown).toEqual([{ workspace: 'random', names: ['Channel Table', 'inputs', 'drives', 'Specification', 'Run Record'] }]);
+		expect(runOpenWords('done', null, o.added)).toEqual({ label: 'Show in Analysis', line: 'Opened in Analysis: 5 objects from this run in the project.' });
+
+		expect(await o.open('/d/run-1')).toBe(true);
+		expect(brought).toEqual(['/d/run-1']);
+		expect(shown).toHaveLength(2);
+		// another run's folder starts again
+		expect(o.at('/d/run-2')).toBe('idle');
+	});
+
+	it("shows the analysis service's refusal in words, and can be asked again", async () => {
+		let fail = true;
+		const { h, shown } = host(async () => {
+			if (fail) throw new RequestError('refused', 'run.json in /d/run-1 is not a run manifest.', 'project.import', 'bad_file' as never);
+			return ['Run Record'];
+		});
+		const o = new RunOpen(h);
+		expect(await o.open('/d/run-1')).toBe(false);
+		expect(o.at('/d/run-1')).toBe('refused');
+		expect(o.refusal?.verb).toBe('Open in Analysis');
+		expect(runOpenWords('refused', o.refusal, [])).toEqual({ label: 'Open in Analysis', line: 'The run did not open in Analysis. run.json in /d/run-1 is not a run manifest.' });
+		expect(shown).toEqual([]);
+		const offline = toRefusal('Open in Analysis', new RequestError('disconnected', 'The analysis service is not connected.', 'project.import'));
+		expect(runOpenWords('refused', offline, []).line).toBe('Not Connected. The analysis service is not connected.');
+		fail = false;
+		expect(await o.open('/d/run-1')).toBe(true);
+		expect(o.at('/d/run-1')).toBe('done');
+	});
+
+	it('copies the folder path, and says so when the clipboard cannot be written', async () => {
+		const o = new RunOpen(host(async () => []).h);
+		const got: string[] = [];
+		expect(await o.copyPath('/d/run-1', { writeText: async (t) => void got.push(t) })).toBe(true);
+		expect(got).toEqual(['/d/run-1']);
+		expect(o.copy).toBe('copied');
+		expect(await o.copyPath('/d/run-1', { writeText: async () => Promise.reject(new Error('denied')) })).toBe(false);
+		expect(o.copy).toBe('failed');
+		expect(await o.copyPath('/d/run-1', undefined)).toBe(false);
+	});
+
+	it('opens a Random run in the Random workspace', () => {
+		expect(workspaceForRun('random')).toBe('random');
 	});
 });
