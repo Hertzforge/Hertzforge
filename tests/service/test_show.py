@@ -405,6 +405,12 @@ def test_a_matched_modes_object_draws_its_pairs_overlaid_beside_its_table(plate,
         assert [m['index'] for m in stage['overlays']] == [1, 2], 'its match in the second'
         assert stage['overlays'][0]['label'] == 'Set B mode 1'
         assert stage['overlay_phase'].shape == (2, 2)
+        # a pair picked in the tree is the one drawn and listed (Brandon, 2026-11-14)
+        one = shown(plate, name, records={name: [1]}, validate=validate)
+        stage, table = one['views']
+        assert [m['index'] for m in stage['modes']] == [3]
+        assert [m['index'] for m in stage['overlays']] == [2]
+        assert len(table['rows']) == 1 and one['note'] == 'pair 2 picked'
     finally:
         for gone in [n for n, o in project.items() if projects.kind_of(o) == 'matched_modes']:
             project.remove(gone)

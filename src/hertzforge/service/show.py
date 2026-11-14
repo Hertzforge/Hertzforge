@@ -337,19 +337,28 @@ def _alone(project: Any, name: str, picks: list[int],
         return [v.table(f'{name}: {environment}, {form} transformation', headers, rows)], notes
     if isinstance(obj, MatchedModes):
         # the pairs overlaid on the first set's geometry, each second-set mode over its
-        # first-set mode, and the table of pairs beside them (Brandon, 2026-11-14)
+        # first-set mode, and the table of pairs beside them (Brandon, 2026-11-14); pairs
+        # picked in the tree are the ones drawn and listed
         from .mode_pairs import matched_stage
 
+        picked = sorted({int(i) for i in picks if 0 <= int(i) < len(obj.pairs)})
         table = _run(project, 'project.table', object=name)
+        if picked and table and len(table[0]['rows']) == len(obj.pairs):
+            table[0]['rows'] = [table[0]['rows'][k] for k in picked]
+            if 'edit' in table[0]:
+                table[0]['edit']['rows'] = [k + 1 for k in picked]
+        notes = [f'pair {picked[0] + 1} picked' if len(picked) == 1 else
+                 f'{len(picked)} pairs picked'] if picked else []
+        pairs = [obj.pairs[k] for k in picked] if picked else list(obj.pairs)
         sets = [project.get(obj.first), project.get(obj.second)]
-        if not all(isinstance(found, ShapeSet) for found in sets) or not obj.pairs:
-            return table, []
+        if not all(isinstance(found, ShapeSet) for found in sets) or not pairs:
+            return table, notes
         geometry = _geometry_for(project, obj.first)
         if geometry is None:
-            return table, [f'{obj.first} is on no geometry, so the pairs are not drawn']
+            return table, [*notes, f'{obj.first} is on no geometry, so the pairs are not drawn']
         stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
-                              sets[0], sets[1], obj.pairs, obj.second)
-        return [stage, *table], []
+                              sets[0], sets[1], pairs, obj.second)
+        return [stage, *table], notes
     from hertzforge.core.photos import Photos
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
 
