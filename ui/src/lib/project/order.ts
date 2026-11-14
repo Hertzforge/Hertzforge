@@ -2,7 +2,10 @@
  * The tree's order: the linked objects first, group
  * by group (the Basis above the others, then the groups as the project lists them), each group's
  * members by kind, then every object in no group, by kind. A group's members sit together, so a
- * link bracket runs down consecutive rows and two brackets never nest (Brandon, 2026-11-04).
+ * link bracket runs down consecutive rows and two brackets never nest (Brandon, 2026-11-04). A
+ * Matched Modes object in no group comes right after the group of the first set it pairs, or of
+ * the second when the first is in none, so it sits beside the brackets its own is striped with
+ * (Brandon, 2026-11-14).
  */
 
 import type { ProjectSummary } from '$lib/protocol/types';
@@ -17,12 +20,20 @@ export function treeOrder(listed: Listed[], links: ProjectSummary['links'] | und
 	const groups = [...(links ?? [])].sort((a, b) => Number(b.role === 'Basis') - Number(a.role === 'Basis'));
 	const out: Listed[] = [];
 	const placed = new Set<string>();
+	const grouped = new Set(groups.flatMap((g) => g.members));
+	// each Matched Modes object in no group, by the group it follows: its first set's, else its second's
+	const follows = new Map<(typeof groups)[number], { o: Listed; i: number }[]>();
+	for (const m of listed.map((o, i) => ({ o, i }))) {
+		if (!m.o.between || grouped.has(m.o.name)) continue;
+		const home = groups.find((g) => g.members.includes(m.o.between![0])) ?? groups.find((g) => g.members.includes(m.o.between![1]));
+		if (home) follows.set(home, [...(follows.get(home) ?? []), m]);
+	}
 	for (const group of groups) {
 		const members = group.members
 			.map((name) => byName.get(name))
 			.filter((m): m is { o: Listed; i: number } => !!m && !placed.has(m.o.name))
 			.sort(byKind);
-		for (const m of members) {
+		for (const m of [...members, ...(follows.get(group) ?? []).filter((f) => !placed.has(f.o.name))]) {
 			placed.add(m.o.name);
 			out.push(m.o);
 		}

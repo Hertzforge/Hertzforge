@@ -541,7 +541,10 @@ import since the project was made or opened, as the line a script would make (`P
 the first line making the project. The shell shows it read-only along the bottom of the window, to be copied into a script; nothing is typed into it.
 
 **The tree.** Each object in the summary carries `holds`, a few words on what it contains, and
-`banded` when a PSD or a specification is on proportional bands, which changes its icon.
+`banded` when a PSD or a specification is on proportional bands, which changes its icon. A
+Matched Modes object carries `between`, the two shape sets it pairs (first, second): the tree lists
+it after the first set's group and marks its row with a short bracket striped in both sets' group
+colors.
 `project.children` answers what one object opens into, by
 `kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts), its element
 `families` (every family, each with the element `groups` holding elements of it and their counts),

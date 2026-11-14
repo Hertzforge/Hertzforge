@@ -542,6 +542,8 @@ export interface ProjectObject {
 	units_defined?: boolean;
 	/** A PSD or a specification on proportional bands, which changes its icon. */
 	banded?: boolean;
+	/** The two shape sets a Matched Modes object pairs, first and second: the tree sets it beside their groups. */
+	between?: [string, string];
 	/** A few words on what the object holds: its size, not its name. */
 	holds?: string;
 	/** Why the object does not fit what it answers to, and the records, modes or channels at fault. */
