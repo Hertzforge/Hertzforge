@@ -969,9 +969,11 @@ impl MimoLawInstance {
 /// A multiple-output law file built for one run, as the controller's
 /// [`MimoControlLaw`].
 ///
-/// Every call carries `budget` as its deadline: the run's own call budget, so
-/// the host stops a call that will not return when the controller would stop
-/// waiting for it. The boundary's error carries the host's message; the typed
+/// Every call carries a deadline: `iterate` the run's own call budget, and the
+/// first solve (`seed`) the run's seed budget, so the host stops a call that
+/// will not return when the controller would stop waiting for it. The two are
+/// the same unless [`Self::with_seed_budget`] sets the seed's apart. The
+/// boundary's error carries the host's message; the typed
 /// error behind it is [`Self::last_error`]. A call that traps, runs past its
 /// budget or breaches the memory cap leaves the instance unusable, and every
 /// later call fails with that same first error, so the controller's misses in
@@ -979,6 +981,7 @@ impl MimoLawInstance {
 pub struct WasmMimoLaw {
     instance: MimoLawInstance,
     budget: Duration,
+    seed_budget: Duration,
     last_error: Option<LawError>,
     poisoned_by: Option<LawError>,
 }
@@ -989,9 +992,17 @@ impl WasmMimoLaw {
         WasmMimoLaw {
             instance,
             budget,
+            seed_budget: budget,
             last_error: None,
             poisoned_by: None,
         }
+    }
+
+    /// Give the first solve (`seed`) `budget` as its deadline in place of the
+    /// call budget. The constructor and every `iterate` call keep theirs.
+    pub fn with_seed_budget(mut self, budget: Duration) -> Self {
+        self.seed_budget = budget;
+        self
     }
 
     /// Build `law` for a run with `params` and run it with `budget` as every
@@ -1010,9 +1021,14 @@ impl WasmMimoLaw {
         &self.instance
     }
 
-    /// Each call's deadline.
+    /// Each `iterate` call's deadline.
     pub fn budget(&self) -> Duration {
         self.budget
+    }
+
+    /// The first solve's deadline.
+    pub fn seed_budget(&self) -> Duration {
+        self.seed_budget
     }
 
     /// The host's typed account of the last call, when it failed: a trap, a
@@ -1061,7 +1077,7 @@ impl MimoControlLaw for WasmMimoLaw {
         &mut self,
         inputs: &MimoLoopInputs<'_>,
     ) -> Result<MimoLoopOutputs, hertzforge_sdm::law::LawError> {
-        let r = self.instance.seed(inputs, self.budget);
+        let r = self.instance.seed(inputs, self.seed_budget);
         self.finish(r)
     }
 

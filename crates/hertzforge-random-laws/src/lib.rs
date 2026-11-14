@@ -64,7 +64,7 @@ pub use check::{
 pub use choice::{ChoiceError, LawChoice};
 pub use hertzforge_mimo_laws::BuiltinMimo;
 pub use mimo::{
-    builtin_mimo_manifest, default_mimo_choice, BuiltinMimoFactory, MimoLawFactory,
+    builtin_mimo_manifest, default_mimo_choice, BuiltinMimoFactory, LawBudgets, MimoLawFactory,
     WasmMimoLawFactory, DEFAULT_MIMO_LAW_ID,
 };
 pub use mimo_check::{

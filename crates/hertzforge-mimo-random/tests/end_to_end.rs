@@ -10,12 +10,11 @@ use hertzforge_law_host::{LawIdentity, Param};
 use hertzforge_mimo_random::{
     MimoEventKind, MimoFaultReason, MimoQuantity, MimoRandomService, MimoState, MimoTripKind,
 };
-use hertzforge_random_laws::{ChoiceError, MimoLawFactory};
+use hertzforge_random_laws::{ChoiceError, LawBudgets, MimoLawFactory};
 use hertzforge_sdm::law::{
     LawError, MimoControlLaw, MimoInput, MimoLoopInputs, MimoLoopOutputs, MimoSetup, MimoShape,
 };
 use std::sync::Arc;
-use std::time::Duration;
 
 fn states(svc: &MimoRandomService) -> Vec<MimoState> {
     let mut v = vec![MimoState::Idle];
@@ -220,7 +219,7 @@ impl MimoLawFactory for FailingFactory {
     fn build(
         &self,
         s: &MimoSetup,
-        b: Duration,
+        b: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
         Ok(Box::new(Failing(self.0.build(s, b)?)))
     }

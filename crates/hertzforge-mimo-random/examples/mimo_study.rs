@@ -25,7 +25,7 @@ use hertzforge_module_abi::StationClass;
 use hertzforge_random::service::config::{LevelSchedule, RunMode};
 use hertzforge_random::service::law::LawClock;
 use hertzforge_random::LoopConfig;
-use hertzforge_random_laws::{ChoiceError, LawCatalog, LawChoice, MimoLawFactory};
+use hertzforge_random_laws::{ChoiceError, LawBudgets, LawCatalog, LawChoice, MimoLawFactory};
 use hertzforge_sdm::law::{MimoControlLaw, MimoSetup, Tolerances};
 use hertzforge_sdm::{HermitianStack, C64};
 use serde_json::{json, Value};
@@ -63,9 +63,9 @@ impl MimoLawFactory for Unhurried {
     fn build(
         &self,
         setup: &MimoSetup,
-        _budget: Duration,
+        _budgets: LawBudgets,
     ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
-        self.0.build(setup, LAW_FILE_DEADLINE)
+        self.0.build(setup, LawBudgets::same(LAW_FILE_DEADLINE))
     }
 }
 

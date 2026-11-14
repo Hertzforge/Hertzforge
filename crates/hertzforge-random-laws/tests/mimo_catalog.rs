@@ -11,7 +11,7 @@ use common::*;
 use hertzforge_law_host::{HostConfig, LawHost, Param, ParamValue};
 use hertzforge_random_laws::{
     builtin_mimo_manifest, default_mimo_choice, may_arm_on_hardware, ArmRefusal, BuiltinMimo,
-    CheckCase, CheckRecord, CheckStatus, ChoiceError, LawCatalog, LawChoice, LawWorld,
+    CheckCase, CheckRecord, CheckStatus, ChoiceError, LawBudgets, LawCatalog, LawChoice, LawWorld,
     DEFAULT_MIMO_LAW_ID,
 };
 use hertzforge_sdm::law::{MimoLoopInputs, MimoSetup, Tolerances};
@@ -173,12 +173,63 @@ fn each_built_in_mimo_manifest_equals_its_law_files() {
     }
 }
 
+/// Mutation: drop `with_seed_budget` in `WasmMimoLawFactory::build`. The first
+/// solve is then stopped at the call budget and the error names 50 ms.
+#[test]
+fn a_law_file_built_by_its_factory_gets_the_first_solves_budget() {
+    let scratch = Scratch::new("mimo-seed-budget");
+    let mut cat = open(scratch.path());
+    let small = Small::new();
+    let fixture = cat
+        .import(&law_file(MIMO_MISBEHAVE))
+        .expect("the MIMO fixture imports");
+    let f = cat
+        .resolve_mimo(
+            &LawChoice::new(
+                fixture.id.clone(),
+                vec![Param::new("mode", ParamValue::Choice("spin_seed".into()))],
+            ),
+            3,
+        )
+        .expect("the fixture resolves");
+    let budgets = LawBudgets {
+        call: Duration::from_millis(50),
+        seed: Duration::from_millis(300),
+    };
+    let mut law = f.build(&small.setup, budgets).expect("builds");
+    let response = small.setup.reference.clone();
+    let last = HermitianStack::zeros(16, 2);
+    let mut inputs = small.inputs(&response);
+    inputs.last_drive = Some(&last);
+    let e = law
+        .seed(&inputs)
+        .expect_err("a first solve that never returns is stopped");
+    assert!(e.0.contains("300.000 ms budget"), "{e}");
+
+    // A budget of no time at all is refused when the law is built.
+    for bad in [
+        LawBudgets {
+            call: Duration::ZERO,
+            seed: Duration::from_secs(1),
+        },
+        LawBudgets {
+            call: Duration::from_secs(1),
+            seed: Duration::ZERO,
+        },
+    ] {
+        assert!(matches!(
+            f.build(&small.setup, bad),
+            Err(ChoiceError::BadConfig(_))
+        ));
+    }
+}
+
 #[test]
 fn a_mimo_choice_resolves_to_a_factory_that_builds_a_running_law() {
     let scratch = Scratch::new("mimo-choice");
     let mut cat = open(scratch.path());
     let small = Small::new();
-    let budget = Duration::from_secs(5);
+    let budget = LawBudgets::same(Duration::from_secs(5));
 
     // The default law, natively.
     let f = cat

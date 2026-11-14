@@ -12,7 +12,14 @@
 //! the wall clock at the sample rate, the output buffer holds what a DAQ card's
 //! buffer holds at the bench's rate and block (two blocks of lookahead plus one,
 //! 768 frames at 12 800 Hz and a 256-frame block, 60 ms), and a buffer that ever
-//! runs dry stops generating and refuses every later write.
+//! runs dry stops generating and refuses every later write. A stop that finds the
+//! buffer already dry counts too: until that stop the card held its last sample.
+//!
+//! Identification ends with nothing to feed the output until the loop engages:
+//! the matrices are solved, the gate may hold for the operator, and the law's
+//! first solve may take seconds. The second test holds at the gate and gives the
+//! law a first solve of half a second, eight times the buffer: the station must
+//! be stopped (its controlled ramp to zero) for all of it, never left to run dry.
 //!
 //! Release builds only (a debug build's seams measure the build, not the module):
 //! `cargo test --release -p hertzforge-mimo-random --test output_seams`. Listed in
@@ -27,8 +34,13 @@ use hertzforge_hal::{
 };
 use hertzforge_hal_sim::plants::StandardPlant;
 use hertzforge_hal_sim::SimConfig;
+use hertzforge_law_host::{LawIdentity, Param};
 use hertzforge_mimo_random::{MimoRandomService, MimoState};
 use hertzforge_module_abi::StationClass;
+use hertzforge_random_laws::{ChoiceError, LawBudgets, MimoLawFactory};
+use hertzforge_sdm::law::{
+    LawError, MimoControlLaw, MimoInput, MimoLoopInputs, MimoLoopOutputs, MimoSetup, MimoShape,
+};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -46,6 +58,8 @@ struct Seen {
     /// When the output ran dry and stopped, if it did: the frames it had generated
     /// and the ms since the last accepted write. Kept across a stop.
     ran_dry: Option<(u64, f64)>,
+    /// Whether the station is generating: started and not stopped since.
+    generating: bool,
 }
 
 /// The simulator behind a real-time, non-regenerating output buffer.
@@ -143,9 +157,14 @@ impl Backend for RealTimeStation {
         self.inner.start()?;
         self.started = Some(Instant::now());
         self.read = 0;
+        self.seen.lock().unwrap().generating = true;
         Ok(())
     }
     fn stop(&mut self) -> Result<(), HalError> {
+        // A stop that comes after the buffer ran dry is not a controlled stop:
+        // the output sat on its last sample until now.
+        self.check(Instant::now());
+        self.seen.lock().unwrap().generating = false;
         self.reset();
         self.inner.stop()
     }
@@ -271,4 +290,108 @@ fn identification_keeps_a_real_time_output_fed_across_every_seam() {
         s.ran_dry
     );
     assert!(s.ran_dry.is_none(), "{:?}", s.ran_dry);
+}
+
+/// The default law, with a first solve that takes `first_solve` of real time.
+struct SlowFirstSolve {
+    inner: Box<dyn MimoControlLaw + Send>,
+    first_solve: Duration,
+    seen: Arc<Mutex<Seen>>,
+    /// Whether the station was generating when the first solve began.
+    generating_at_seed: Arc<Mutex<Option<bool>>>,
+}
+
+impl MimoControlLaw for SlowFirstSolve {
+    fn needs(&self) -> &[MimoInput] {
+        self.inner.needs()
+    }
+    fn shapes(&self) -> &[MimoShape] {
+        self.inner.shapes()
+    }
+    fn seed(&mut self, inputs: &MimoLoopInputs<'_>) -> Result<MimoLoopOutputs, LawError> {
+        *self.generating_at_seed.lock().unwrap() = Some(self.seen.lock().unwrap().generating);
+        std::thread::sleep(self.first_solve);
+        self.inner.seed(inputs)
+    }
+    fn iterate(&mut self, inputs: &MimoLoopInputs<'_>) -> Result<MimoLoopOutputs, LawError> {
+        self.inner.iterate(inputs)
+    }
+}
+
+struct SlowFirstSolveFactory {
+    inner: Arc<dyn MimoLawFactory>,
+    first_solve: Duration,
+    seen: Arc<Mutex<Seen>>,
+    generating_at_seed: Arc<Mutex<Option<bool>>>,
+}
+
+impl MimoLawFactory for SlowFirstSolveFactory {
+    fn identity(&self) -> LawIdentity {
+        self.inner.identity()
+    }
+    fn params(&self) -> &[Param] {
+        self.inner.params()
+    }
+    fn build(
+        &self,
+        setup: &MimoSetup,
+        budgets: LawBudgets,
+    ) -> Result<Box<dyn MimoControlLaw + Send>, ChoiceError> {
+        Ok(Box::new(SlowFirstSolve {
+            inner: self.inner.build(setup, budgets)?,
+            first_solve: self.first_solve,
+            seen: self.seen.clone(),
+            generating_at_seed: self.generating_at_seed.clone(),
+        }))
+    }
+}
+
+/// Mutation: remove the stop at the end of `run_identification`
+/// (`drive_discontinuity`). The station is then still generating when the first
+/// solve begins, and the stop at engage finds its buffer long dry.
+#[test]
+#[cfg_attr(debug_assertions, ignore)]
+fn the_output_is_stopped_from_the_end_of_identification_until_the_loop_engages() {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let generating_at_seed = Arc::new(Mutex::new(None));
+    let svc = bench_service(seen.clone());
+    let inner = hertzforge_mimo_random::law::builtin_factory(&svc.config().law, 4).unwrap();
+    let mut svc = svc.with_law_factory(Arc::new(SlowFirstSolveFactory {
+        inner,
+        first_solve: Duration::from_millis(500),
+        seen: seen.clone(),
+        generating_at_seed: generating_at_seed.clone(),
+    }));
+    svc.start().expect("feasibility and arm");
+    svc.run_noise_floor().expect("the noise floor");
+    svc.run_identification().expect("identification");
+    assert_eq!(svc.state(), MimoState::Gate, "{:?}", svc.trip());
+    assert!(
+        !seen.lock().unwrap().generating,
+        "the station is stopped when identification returns"
+    );
+    // The operator reads the gate.
+    std::thread::sleep(Duration::from_millis(200));
+    svc.proceed().expect("the first solve and the prediction");
+    assert_eq!(svc.state(), MimoState::Predict);
+    svc.proceed().expect("engage");
+    // The first control segment starts the station cold.
+    svc.loop_tick().expect("the first loop");
+    let s = seen.lock().unwrap().clone();
+    assert_eq!(
+        *generating_at_seed.lock().unwrap(),
+        Some(false),
+        "the first solve ran with the station stopped"
+    );
+    assert!(
+        s.ran_dry.is_none(),
+        "the output ran dry (frames generated, ms since the last write): {:?}",
+        s.ran_dry
+    );
+    assert!(
+        svc.trip().is_none() && svc.state().is_running(),
+        "the loop ended {:?} with trip {:?}",
+        svc.state(),
+        svc.trip()
+    );
 }
