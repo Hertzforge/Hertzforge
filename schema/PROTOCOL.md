@@ -897,6 +897,8 @@ connection ends, and a log another writer holds opens read-only, saying why.
 | `runlog.preview` | `{"form","values","axis"?,"target"?}` | `{"text"}` |
 | `runlog.write` | `{"form","values","text"?,"time"?,"taken","author","axis"?,"target"?}` | `{"log","said"}` |
 | `runlog.export` | `{"path","view","test"?}` | `{"path"}` |
+| `runlog.run_events` | `{"record"}` | `{"record","events"}` |
+| `runlog.accept_event` | `{"record","index","author","test"?,"run"?,"axis"?,"time"?}` | `{"log","entry"}` |
 
 `log` is the window's view: its `path`, `title`, `writable` and `read_only` (why it cannot be
 written), the `status` the strip reads (the current test, its axis, run, level and outcome, when
@@ -920,6 +922,8 @@ hold a deviation answers), with the predictions drawn for the connection's proje
 `time` against `taken`, every entry checked before any is written; a refusal says why. `said` is
 what the window says after (an abort's owed first minute, an unplanned notch's hold), or ''.
 
+`runlog.run_events` lists every event of the run record `record` in the connection's project as a proposed entry for the log, and how the run ended: each with its `index`, the entry `kind` and its `label`, the `fields` the event states, its `text` (ending with a marker naming the run and the event), the `time` the controller logged it (null when the record has none) and whether the open log holds it already (`accepted`). Nothing is written. `runlog.accept_event` writes event `index` into the open log as `author` confirms it, at the controller's time unless `time` is given (required for an event with none), in `test`, `run` and `axis` when given; the answer is the log and the new entry's id. It is refused with no log open for writing, without initials, and for an event the log holds already.
+
 `runlog.export` writes one view of the open log to `path`: `view` `text` (the log as it reads, every entry in the order written, corrections struck through and restated), `csv` (every entry as stored, corrections included, one row each) or `machine` (the trips and machine events for the lab's own machine log); `test` is a test number for that test alone, or `all` (the default) for the whole log. The view's extension is added when the path has none. The answer is the `path` written.
 
 **Reports.** The report on the connection's project, as the core writes it.
@@ -937,9 +941,12 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
-`transient`, `sine`, `sysid`, `mimo`, `model`, `specify`, `signals` or `empty`, and `name`
+`transient`, `sine`, `sysid`, `mimo`, `model`, `specify`, `signals`, `mixed_mode`, `explorer`,
+`recorder`, `mimo_shock`, `empty` or `run` (the template of the test the project's run record is a
+run of; refused when the project holds none, or runs of different tests), and `name`
 defaults to "Report". The Report module starts from the template of the module the person came
-from: Model's is `model`, Specify's `specify`, Signals' `signals`, and each test module's its own. `report.render`
+from: Model's is `model`, Specify's `specify`, Signals' `signals`, and each test module's its own;
+a project holding a run record starts from `run`, except from Model, Specify and Signals. `report.render`
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.views` gives the same report for the shell's own
