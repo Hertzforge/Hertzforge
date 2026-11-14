@@ -336,7 +336,20 @@ def _alone(project: Any, name: str, picks: list[int],
         headers, rows = transformation_table(obj, environment, form)
         return [v.table(f'{name}: {environment}, {form} transformation', headers, rows)], notes
     if isinstance(obj, MatchedModes):
-        return _run(project, 'project.table', object=name), []
+        # the pairs overlaid on the first set's geometry, each second-set mode over its
+        # first-set mode, and the table of pairs beside them (Brandon, 2026-11-14)
+        from .mode_pairs import matched_stage
+
+        table = _run(project, 'project.table', object=name)
+        sets = [project.get(obj.first), project.get(obj.second)]
+        if not all(isinstance(found, ShapeSet) for found in sets) or not obj.pairs:
+            return table, []
+        geometry = _geometry_for(project, obj.first)
+        if geometry is None:
+            return table, [f'{obj.first} is on no geometry, so the pairs are not drawn']
+        stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
+                              sets[0], sets[1], obj.pairs, obj.second)
+        return [stage, *table], []
     from hertzforge.core.photos import Photos
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
 
