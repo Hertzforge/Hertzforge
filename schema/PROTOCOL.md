@@ -1116,7 +1116,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 
 | Where | Errors | Warnings |
 |---|---|---|
-| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `reference_count_mismatch`, `drive_channel_present` |
+| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `drive_channel_present`, `unit_unknown`, `drive_not_in_volts`, `abort_not_in_g` |
 | Profile | `profile_empty`, `first_row_not_anchor`, `row_level_ambiguous`, `frequency_not_positive`, `frequency_not_ascending`, `psd_negative` | `alarm_wider_than_abort` |
 | Acquisition | `n_pts_not_power_of_two`, `band_above_grid`, `too_few_lines` | |
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
@@ -1272,8 +1272,40 @@ One table, held by the control service, used by every run.
 | `control_group` | integer from 0 with no gaps, or null | null |
 | `abort` | `{"accel_g","velocity_ips","displacement_mil"}`, each a limit or null | all null |
 
-Every row carries every field. A row's `abort` limits are absolute: a run aborts when that
+Every row carries every field above. A row's `abort` limits are absolute: a run aborts when that
 channel passes one, at any level.
+
+A row may also carry these members, each optional. The service writes one only when it holds
+something, keeps every one a client sends, and runs nothing from them: they are the columns the
+analysis side reads, carried with the row so a table that goes to a test and comes back loses none
+of them (`channel_table/` in `docs/hforge-format.md` names the same columns).
+
+| Member | Values | Absent means |
+|---|---|---|
+| `node` | integer from 0, the geometry node the channel is at | no node |
+| `direction` | text, the direction it measures along (`X+`) | none stated |
+| `channel_type` | text, the quantity it measures (`acceleration`, `force`, ...) | none stated |
+| `analysis_role` | `reference`, `response` or `monitor`: what the channel is to a frequency response, apart from its role in the loop | none stated |
+| `daq_range_v`, `sensor_range_v` | number above 0, volts: the input's range and the sensor's own full-scale output | none stated |
+| `serial_number`, `make`, `model` | text, the sensor's identity | none |
+| `triax_dof` | text, which leg of a triaxial sensor (`X`, `Y`, `Z`) | none |
+| `expiration` | text, `YYYY-MM-DD`, when the sensor's calibration runs out | none |
+| `analysis_tier` | `full`, `rotating` or `decimated:N` (N from 1): how much analysis the row gets per block. Only `full` is acted on in this build | `full` |
+| `limit` | boolean: the row is a limit channel, an input a test's limits are set on. A mark only; each test's limits stay in its setup | false |
+| `extra` | object of text by column name: any other column | none |
+
+A member of the wrong type is refused `bad_params`, naming it.
+
+**Units.** `units` names a unit and is never empty. The unit vocabulary is the names every part of
+the program reads as the same quantity: `g`, `in/s**2` (or `in/s^2`), `m/s**2` (or `m/s^2`),
+`mm/s**2`, `in/s`, `m/s`, `mm/s`, `mil`, `in`, `m`, `mm`, `lbf`, `N`, `kN`, `psi`, `Pa`, `kPa`,
+`MPa`, `V`, `mV`, `strain`, `microstrain`, `m/m`, `degC`, `degF`, `K` and `degR`. A unit outside it
+is held, kept exactly as written, and runs as written, with the warning `unit_unknown`.
+
+**What control needs of a unit.** A drive is written to the device in volts and the kinematic
+abort limits read a row's samples as acceleration in g, whatever the row says. An enabled drive row
+in another unit warns `drive_not_in_volts`, and a row with an abort limit in a unit other than `g`
+warns `abort_not_in_g`. Both are warnings: neither changes what the service accepts or how it runs.
 
 **IEPE is off unless a client turns it on for a row.** The service's starting table (one
 control input, one drive output, both unbound) and every row it creates are `single_ended`, and

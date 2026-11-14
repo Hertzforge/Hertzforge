@@ -903,8 +903,10 @@ export type ItemReason =
 	| 'mixed_timing_families'
 	| 'iepe_without_bias'
 	| 'bias_on_single_ended'
-	| 'reference_count_mismatch'
 	| 'drive_channel_present'
+	| 'unit_unknown'
+	| 'drive_not_in_volts'
+	| 'abort_not_in_g'
 	// profile
 	| 'profile_empty'
 	| 'first_row_not_anchor'
@@ -1103,6 +1105,33 @@ export interface ChannelRow {
 	polarity: 'positive' | 'negative';
 	control_group: number | null;
 	abort: ChannelAbortLimits;
+	// The analysis side's columns, carried with the row and never run from. Each is optional:
+	// the service writes one only when it holds something and keeps every one it is sent.
+	/** The geometry node the channel is at. */
+	node?: number | null;
+	/** The direction it measures along (`X+`). */
+	direction?: string;
+	/** The quantity it measures (`acceleration`, `force`, ...). */
+	channel_type?: string;
+	/** What the channel is to a frequency response, apart from its role in the loop. */
+	analysis_role?: 'reference' | 'response' | 'monitor' | '';
+	/** The input's range, volts. */
+	daq_range_v?: number | null;
+	/** The sensor's own full-scale output, volts. */
+	sensor_range_v?: number | null;
+	serial_number?: string;
+	make?: string;
+	model?: string;
+	/** Which leg of a triaxial sensor. */
+	triax_dof?: string;
+	/** When the sensor's calibration runs out, `YYYY-MM-DD`. */
+	expiration?: string;
+	/** `full`, `rotating` or `decimated:N`; absent is `full`. */
+	analysis_tier?: string;
+	/** The row is a limit channel. A mark only: each test's limits stay in its setup. */
+	limit?: boolean;
+	/** Any other column, by name. */
+	extra?: Record<string, string>;
 }
 
 export interface ChannelTable {

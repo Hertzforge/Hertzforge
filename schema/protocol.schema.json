@@ -992,8 +992,8 @@
                "control_group_gap", "reference_without_control", "unsupported_schema",
                "channel_unbound", "physical_channel_unknown", "physical_channel_wrong_direction",
                "physical_channel_shared", "mixed_timing_families",
-               "iepe_without_bias", "bias_on_single_ended", "reference_count_mismatch",
-               "drive_channel_present",
+               "iepe_without_bias", "bias_on_single_ended",
+               "drive_channel_present", "unit_unknown", "drive_not_in_volts", "abort_not_in_g",
                "profile_empty", "first_row_not_anchor", "row_level_ambiguous",
                "frequency_not_positive", "frequency_not_ascending", "psd_negative",
                "alarm_wider_than_abort",
@@ -1199,7 +1199,21 @@
             "velocity_ips": {"type": ["number", "null"], "exclusiveMinimum": 0},
             "displacement_mil": {"type": ["number", "null"], "exclusiveMinimum": 0}
           }
-        }
+        },
+        "node": {"type": ["integer", "null"], "minimum": 0},
+        "direction": {"type": "string"},
+        "channel_type": {"type": "string"},
+        "analysis_role": {"enum": ["reference", "response", "monitor", ""]},
+        "daq_range_v": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "sensor_range_v": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "serial_number": {"type": "string"},
+        "make": {"type": "string"},
+        "model": {"type": "string"},
+        "triax_dof": {"type": "string"},
+        "expiration": {"type": "string"},
+        "analysis_tier": {"type": "string", "pattern": "^(full|rotating|decimated:[1-9][0-9]*)$"},
+        "limit": {"type": "boolean"},
+        "extra": {"type": "object", "additionalProperties": {"type": "string"}}
       }
     },
     "channelTable": {
