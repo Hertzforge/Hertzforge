@@ -139,3 +139,30 @@ fn a_run_records_everything_and_it_reads_back_as_written() {
     }
     assert_eq!(other.state(), MimoState::NoiseFloor);
 }
+
+#[test]
+fn the_reference_record_states_its_band_in_hertz_beside_the_line_indexes() {
+    use hertzforge_mimo_random::records::{read_reference, write_reference};
+    let dir = std::env::temp_dir().join(format!("mimo-ref-band-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lines = 400;
+    let reference = hertzforge_sdm::HermitianStack::zeros(lines, 2);
+    let tol = hertzforge_sdm::law::Tolerances {
+        alarm_upper: vec![3.0; lines * 2],
+        alarm_lower: vec![-3.0; lines * 2],
+        abort_upper: vec![6.0; lines * 2],
+        abort_lower: vec![-6.0; lines * 2],
+    };
+    write_reference(&dir, &reference, &tol, (40, 376), 4.0, &[0, 1], "physical").unwrap();
+
+    let side: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("reference.json")).unwrap()).unwrap();
+    // `band` stays the half-open line range it always was.
+    assert_eq!(side["band"], serde_json::json!([40, 376]));
+    // `band_hz` is the first and last controlled line, in hertz.
+    assert_eq!(side["band_hz"], serde_json::json!([160.0, 1500.0]));
+    // The reader still gives the line range back.
+    let (_, _, band, df) = read_reference(&dir).unwrap();
+    assert_eq!((band, df), ((40, 376), 4.0));
+    let _ = std::fs::remove_dir_all(&dir);
+}

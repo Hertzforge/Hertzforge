@@ -1,22 +1,21 @@
-//! Capture seam: the disk-streaming boundary the engine writes raw frames through.
+//! Capture seam: the boundary the engine hands each raw block through.
 //!
-//! The engine does not know or care whether the sink is an HDF5/SWMR file, a socket, or
-//! a test vector. It hands whole blocks of raw, interleaved f32 frames plus the
-//! timebase metadata (epoch + starting frame index) so the writer can author the
-//! wrap/epoch/gap-aware index the capture layer requires.
+//! The engine hands whole blocks of raw, interleaved f32 frames plus the timebase
+//! metadata (epoch, starting frame index, and whether a gap precedes the block) to a
+//! [`CaptureSink`]. The implementations in this workspace are the in-memory
+//! [`VecCaptureSink`] and the test sinks; nothing behind this trait writes to disk.
 //!
-//! # TODO (deferred, documented on purpose)
+//! The recording a run keeps on disk is made elsewhere: a test service pushes samples
+//! to `hertzforge_capture::CaptureSink`, which writes a raw interleaved f32 stream
+//! (`telemetry.f32`) and a JSON sidecar (`capture.json`) on its own writer thread.
+//! There is no HDF5 writer. A MIMO Random run folder can be converted to a `.hforge`
+//! file afterwards, by the Python function `hertzforge.io.mimo_run_convert.convert`.
 //!
-//! The real writer lives in the `hertzforge-capture` crate: HDF5/SWMR, pre-allocated object
-//! graph committed before SWMR start, raw-on-ingest (compress only at export),
-//! Fletcher32, chunk size bounded by the at-risk window, MATLAB-column-major +
-//! netCDF-dimension-scale layout, and a crash/recovery path. That needs the native HDF5
-//! C library (evaluate `hdf5-metno`) and is NOT implemented here. This seam
-//! exists so the engine, the scheduler, and every safety test can run today with a pure
-//! in-memory [`VecCaptureSink`]; wiring `hertzforge-capture` behind this trait is a separate
-//! capture task. Backpressure policy (mark-gap-and-continue, never block, never
-//! silent-overwrite) is realized by the sink returning [`CaptureError::WouldBlock`],
-//! which the scheduler converts into a marked gap rather than stalling the RT thread.
+//! A sink that cannot take a block returns [`CaptureError::WouldBlock`]; the scheduler
+//! drops that block and goes on, never blocking the loop. The scheduler does not mark
+//! the dropped frames: they are left out of the run report's `frames_captured`, and a
+//! sink that needs to record the gap must do so itself. [`CaptureError::Fatal`] ends
+//! the run.
 
 use hertzforge_channel_table::ChannelTable;
 
@@ -37,8 +36,9 @@ pub struct BlockMeta {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaptureError {
-    /// The sink is full / disk is behind. Per the backpressure contract the scheduler
-    /// marks a gap and continues; it never blocks the RT thread on the writer.
+    /// The sink is full / disk is behind. The scheduler drops the block and continues,
+    /// without marking it (the block is left out of `frames_captured`); it never
+    /// blocks the RT thread on the writer.
     WouldBlock,
     /// A fatal writer error (disk full, file closed). The run should stop.
     Fatal(String),

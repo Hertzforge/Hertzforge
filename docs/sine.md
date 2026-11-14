@@ -168,10 +168,24 @@ identification predicts at the present frequency. Its prediction weight is live.
 
 ## Capture
 
-What the run records beyond its report: nothing, the entire test, only what is started and stopped
-by hand, or the first seconds at each level once it has settled there; how often to save; and the
-run folder's name under the program's local data folder. Fields kept with the run (a run number, an
-operator) are listed here.
+What the run records beyond its report: nothing (`off`, the default) or the entire test
+(`entire_test`); recording only what is started and stopped by hand, or the first seconds at each
+level, is refused when the setup is applied. Also here: how often to save a snapshot, and the run
+folder's name under the program's local data folder (`sine` unless named); when that name is
+taken, the run gets the next free one (`sine-2`, `sine-3`, ...). Fields kept with the run (a run
+number, an operator) are listed here.
+
+The entire test is recorded from the moment the tone starts until the run ends. The run folder
+holds:
+
+- the capture description (`capture.json`): the channel table, the station rate and the run's
+  settings. Its sample stream (`telemetry.f32`) is empty: a Sine run records no time history.
+- the control law's record (`law.json`) and one record per control tick (`law_ticks.bin`,
+  described by `law_ticks.json`): the tone's frequency, the target, the measured amplitude, the
+  drive in force, the law's output and what was applied.
+- with a save interval set, a snapshot of the run's state at each interval of test time
+  (`snapshot_<time>.json`): the frequency, level, target and measured amplitude, each channel's
+  tracked and broadband amplitude, the distortion and coherence.
 
 ## The Run
 

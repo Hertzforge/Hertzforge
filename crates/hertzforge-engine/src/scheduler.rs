@@ -757,7 +757,10 @@ impl Engine {
             };
             match sink.write_block(&self.in_scratch[..n_samples], meta) {
                 Ok(()) => frames_captured += n_frames as u64,
-                Err(CaptureError::WouldBlock) => { /* backpressure: mark gap, continue */ }
+                Err(CaptureError::WouldBlock) => {
+                    // Backpressure: the block is dropped and the loop goes on. Nothing is
+                    // marked here; the block is only left out of `frames_captured`.
+                }
                 Err(CaptureError::Fatal(m)) => break StopReason::CaptureFatal(m),
             }
 
