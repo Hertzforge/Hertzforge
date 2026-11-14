@@ -1336,11 +1336,26 @@
         "crest_factor": {"type": "number", "exclusiveMinimum": 0}
       }
     },
+    "runRecordRef": {
+      "type": "object", "required": ["folder", "streams", "problem"], "additionalProperties": false,
+      "properties": {
+        "folder": {"type": "string", "minLength": 1},
+        "streams": {"enum": ["on", "off"]},
+        "problem": {"type": ["string", "null"]}
+      }
+    },
     "randomConfig": {
       "type": "object", "required": ["title", "profile", "acquisition", "schedule"],
       "additionalProperties": false,
       "properties": {
         "title": {"type": "string"},
+        "operator": {"type": "string"},
+        "article": {"type": "string"},
+        "notes": {"type": "string"},
+        "specification": {"type": ["object", "null"], "additionalProperties": false,
+                          "properties": {"document": {"type": "string"}, "clause": {"type": "string"}}},
+        "record": {"type": ["object", "null"], "additionalProperties": false,
+                   "properties": {"streams": {"type": "boolean"}}},
         "profile": {"$ref": "#/$defs/profile"},
         "acquisition": {"$ref": "#/$defs/acquisition"},
         "schedule": {"$ref": "#/$defs/schedule"},
@@ -1522,7 +1537,8 @@
         "remaining_at_level_s": {"type": ["number", "null"], "minimum": 0},
         "alarm": {"type": "boolean"},
         "feasibility": {"$ref": "#/$defs/feasibilityVerdict"},
-        "end": {"$ref": "#/$defs/runEnd"}
+        "end": {"$ref": "#/$defs/runEnd"},
+        "record": {"$ref": "#/$defs/runRecordRef"}
       },
       "allOf": [
         {"if": {"properties": {"state": {"const": "finished"}}},

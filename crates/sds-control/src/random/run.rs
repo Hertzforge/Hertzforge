@@ -19,8 +19,13 @@
 
 use super::backend::{Interruptible, ABORT, STOP};
 use super::config::{check_grid, Grid, WireConfig};
-use super::view::{Alarm, End, Inputs, LimitLines, LiveChannel, RunView, State, StationRef};
+use super::record as rec;
+use super::view::{
+    Alarm, End, Inputs, LimitLines, LiveChannel, RecordRef, RunView, State, StationRef,
+};
 use crate::protocol::{num, ErrorCode, MethodError};
+use crate::record::tap::{self, Recording};
+use crate::record::{ProblemFn, RecordStatus, RunRecord};
 use crate::station::{self, class_name, NiScanner, StationPlan};
 use crate::table::{role_name, unit_name, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
@@ -80,6 +85,32 @@ pub struct RunShared {
     /// Told after every publish, with the run id and the view published, so every
     /// change of state reaches the service in order (none is folded into a later one).
     pub notify: tokio::sync::mpsc::UnboundedSender<Notice>,
+    /// The run's record from arm on: every log entry is appended to it as it is made.
+    pub record: Mutex<Option<crate::record::LogHandle>>,
+    /// The input frames the station has delivered since it started
+    /// ([`NO_FRAME`] before the first), for the record's entries.
+    pub station_frame: Arc<AtomicU64>,
+}
+
+/// [`RunShared::station_frame`] before the station has delivered a frame.
+pub const NO_FRAME: u64 = u64::MAX;
+
+impl RunShared {
+    /// What the service and the run thread share at configure.
+    pub fn new(initial: RunView, notify: tokio::sync::mpsc::UnboundedSender<Notice>) -> RunShared {
+        RunShared {
+            view: Mutex::new(Arc::new(initial)),
+            log: Mutex::new(Vec::new()),
+            signal: Arc::new(AtomicU8::new(0)),
+            ended_by: Mutex::new(None),
+            pending_stop: Mutex::new(None),
+            ramp: Mutex::new(None),
+            requested_level: Mutex::new(None),
+            notify,
+            record: Mutex::new(None),
+            station_frame: Arc::new(AtomicU64::new(NO_FRAME)),
+        }
+    }
 }
 
 impl RunShared {
@@ -101,17 +132,70 @@ impl RunShared {
     }
 
     pub fn add_log(&self, kind: &'static str, text: impl Into<String>) {
+        self.add_log_data(kind, text, None);
+    }
+
+    /// A log entry with structured facts for the record (`data`): the level of a
+    /// level change, the facts of an alarm, a trip or an overload, who acted.
+    pub fn add_log_data(&self, kind: &'static str, text: impl Into<String>, data: Option<Value>) {
         let mut log = match self.log.lock() {
             Ok(l) => l,
             Err(p) => p.into_inner(),
         };
         let seq = log.len() as u64;
-        log.push(LogEntry {
+        let entry = LogEntry {
             seq,
             at_unix: now_unix(),
             kind,
             text: text.into(),
-        });
+        };
+        // Appended in the order the entries are made: the hand-off never waits.
+        if let Ok(record) = self.record.lock() {
+            if let Some(r) = record.as_ref() {
+                r.append(self.record_entry(&entry, data));
+            }
+        }
+        log.push(entry);
+    }
+
+    /// An entry as the record holds it: the wire's members, the station frame
+    /// when the station has delivered one, and `data` when there is any.
+    pub fn record_entry(&self, e: &LogEntry, data: Option<Value>) -> Value {
+        let frame = self.station_frame.load(Ordering::Relaxed);
+        let mut v = json!({"seq": e.seq, "at_unix": e.at_unix,
+                           "frame": if frame == NO_FRAME { Value::Null } else { Value::from(frame) },
+                           "kind": e.kind, "text": e.text});
+        if let (Some(d), Value::Object(m)) = (data, &mut v) {
+            m.insert("data".into(), d);
+        }
+        v
+    }
+
+    /// Start appending the log to the run's record: the entries made so far first,
+    /// in order, then every later entry as it is made. Done under the log's lock, so
+    /// none is missed or written twice.
+    pub fn attach_record(&self, handle: crate::record::LogHandle) {
+        let log = match self.log.lock() {
+            Ok(l) => l,
+            Err(p) => p.into_inner(),
+        };
+        for e in log.iter() {
+            handle.append(self.record_entry(e, None));
+        }
+        if let Ok(mut r) = self.record.lock() {
+            *r = Some(handle);
+        }
+    }
+
+    /// Stop appending to the record (the run has ended).
+    pub fn detach_record(&self) {
+        let _log = match self.log.lock() {
+            Ok(l) => l,
+            Err(p) => p.into_inner(),
+        };
+        if let Ok(mut r) = self.record.lock() {
+            *r = None;
+        }
     }
 
     fn publish(&self, view: RunView) {
@@ -140,6 +224,10 @@ pub struct ArmContext {
     /// The service's local data directory: the hardware lock lives here.
     pub data_root: PathBuf,
     pub bind: String,
+    /// The table's revision, for the run's record.
+    pub revision: u64,
+    /// The devices of the last scan, for the record's models and serial numbers.
+    pub devices: Vec<hertzforge_hal::DiscoveredDevice>,
 }
 
 type Reply<T> = oneshot::Sender<Result<T, MethodError>>;
@@ -187,6 +275,8 @@ pub struct RunPlan {
     pub capture_root: Option<PathBuf>,
     /// The orphan timeout, for the safe stop's message.
     pub timeout_s: f64,
+    /// How the run's record is written.
+    pub record: crate::record::RecordOptions,
 }
 
 /// The run thread's state.
@@ -206,6 +296,13 @@ struct Actor {
     forwarded: usize,
     alarm_was: bool,
     sim_frames: Arc<AtomicU64>,
+    /// The run's record, from arm until the run ends.
+    record: Option<RunRecord>,
+    record_status: Option<Arc<RecordStatus>>,
+    /// The record's stream of the drive, when it has one.
+    drive_stream: Option<usize>,
+    run_uid: String,
+    utc_offset_s: Option<i64>,
 }
 
 fn now_unix() -> f64 {
@@ -278,6 +375,11 @@ pub fn spawn(
             forwarded: 0,
             alarm_was: false,
             sim_frames: Arc::new(AtomicU64::new(0)),
+            record: None,
+            record_status: None,
+            drive_stream: None,
+            run_uid: String::new(),
+            utc_offset_s: None,
         };
         a.run(rx);
     })
@@ -321,9 +423,15 @@ impl Actor {
         }
         self.svc = None;
         self.lock = None;
+        // The record keeps what it has, `complete: false`: the run did not end.
+        self.shared.detach_record();
+        self.record = None;
     }
 
     fn publish(&mut self) {
+        if let (Some(status), Some(r)) = (self.record_status.as_ref(), self.view.record.as_mut()) {
+            r.problem = status.problem();
+        }
         if let Some(t0) = self.started {
             self.view.elapsed_s = Some(self.ended_at.unwrap_or_else(|| t0.elapsed().as_secs_f64()));
         }
@@ -333,13 +441,14 @@ impl Actor {
     fn set(&mut self, state: State, phase: &'static str) {
         if self.view.state != state || self.view.phase != phase {
             if self.view.phase != phase {
-                self.shared.add_log(
+                self.shared.add_log_data(
                     "state",
                     format!(
                         "{} to {}",
                         self.view.phase.replace('_', " "),
                         phase.replace('_', " ")
                     ),
+                    Some(json!({"from": self.view.phase, "to": phase, "state": state.name()})),
                 );
             }
             self.view.state = state;
@@ -383,6 +492,11 @@ impl Actor {
             }
             Cmd::Abort { by, reply } => {
                 if self.view.state.is_live() {
+                    self.shared.add_log_data(
+                        "note",
+                        format!("abort requested by {by}"),
+                        Some(json!({"action": "abort", "by": by})),
+                    );
                     self.stopped_by = by;
                     self.end("operator_abort", "stopped", None, None);
                 }
@@ -422,13 +536,27 @@ impl Actor {
         self.view.live_level_db = Some(sysid);
         self.view.streaming = true;
         self.set(State::Running, "sysid");
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             format!(
                 "started; system identification at {} against the reference",
                 db(sysid)
             ),
+            Some(json!({"action": "start", "level_db": sysid})),
         );
+        if let Some(r) = self.record.as_ref() {
+            let frame = self.shared.station_frame.load(Ordering::Relaxed);
+            let mut patch = serde_json::Map::new();
+            patch.insert(
+                "start".into(),
+                rec::start_json(
+                    now_unix(),
+                    self.utc_offset_s,
+                    if frame == NO_FRAME { 0 } else { frame },
+                ),
+            );
+            r.patch_manifest(patch);
+        }
         Ok(())
     }
 
@@ -488,7 +616,32 @@ impl Actor {
         };
         let class = station.station;
         let provenance = station.provenance.clone();
-        let backend = Interruptible::wrap(station.backend, self.shared.signal.clone());
+        let caps = station.backend.caps();
+        // The streams are taken where the station's blocks pass (record::tap): the
+        // inputs as read and the drive as the device accepted it. Their buffers are
+        // made here, before anything runs.
+        let buffers = if cfg.record_streams {
+            rec::tap_buffers(cfg.fs_hz)
+        } else {
+            1
+        };
+        let (inputs_tap, inputs_link) = tap::pair(
+            rec::input_rows(&table).len(),
+            rec::TAP_BLOCK_FRAMES,
+            buffers,
+        );
+        let (drives_tap, drives_link) = tap::pair(
+            rec::drive_rows(&table).len(),
+            rec::TAP_BLOCK_FRAMES,
+            buffers,
+        );
+        let recorded = Recording::wrap(
+            station.backend,
+            inputs_tap,
+            drives_tap,
+            self.shared.station_frame.clone(),
+        );
+        let backend = Interruptible::wrap(recorded, self.shared.signal.clone());
         let mut svc = RandomService::new(
             built.test,
             table.clone(),
@@ -513,8 +666,11 @@ impl Actor {
             match &ack {
                 Some(a) => {
                     svc.arm_with_override(a).map_err(arm_refused)?;
-                    self.shared
-                        .add_log("override", format!("operator acknowledgement: {a}"));
+                    self.shared.add_log_data(
+                        "override",
+                        format!("operator acknowledgement: {a}"),
+                        Some(json!({"what": "feasibility_exceeded", "acknowledgement": a})),
+                    );
                 }
                 None => {
                     self.set(State::Blocked, "feasibility_blocked");
@@ -545,8 +701,100 @@ impl Actor {
         if let Some(item) = r.errors.first() {
             return Err(arm_refused(&item.message));
         }
-        self.view.lines = Some(Arc::new(super::view::lines_on(svc.loop_config(), cfg)));
-        self.view.limits = Arc::new(limit_lines(svc.loop_config(), cfg));
+        let lines = super::view::lines_on(svc.loop_config(), cfg);
+        let limits = limit_lines(svc.loop_config(), cfg);
+
+        // The run's record, before any sample: refused here, the arm is refused and
+        // the station released (nothing has been driven).
+        let armed_unix = now_unix();
+        self.utc_offset_s = rec::utc_offset_s();
+        self.run_uid = rec::run_uid(armed_unix, &self.plan.run_id);
+        let root = self
+            .plan
+            .capture_root
+            .clone()
+            .unwrap_or_else(hertzforge_capture::default_data_root);
+        let streams_off = if !cfg.record_streams {
+            Some("switched off in the setup".to_owned())
+        } else {
+            match hertzforge_capture::free_space_bytes_for(&root) {
+                Ok(free) if free < self.plan.record.free_space_floor_bytes => Some(format!(
+                    "the disk had {} MB free, under the {} MB kept free",
+                    free / 1_000_000,
+                    self.plan.record.free_space_floor_bytes / 1_000_000
+                )),
+                _ => None,
+            }
+        };
+        let (check, derived) = cfg.check(&table);
+        let derived = check.errors.is_empty().then_some(derived).flatten();
+        let law = json!({
+            "id": svc.law_name(), "name": svc.law_name(), "version": null, "sha256": null,
+            "builtin": true, "params": {},
+            "guards": serde_json::to_value(&svc.config().law_guards).unwrap_or(Value::Null),
+        });
+        let facts = rec::ArmFacts {
+            run_id: &self.plan.run_id,
+            run_uid: &self.run_uid,
+            cfg,
+            table: &table,
+            revision: ctx.revision,
+            plan: &ctx.station,
+            class,
+            provenance: &provenance,
+            devices: &ctx.devices,
+            caps: &caps,
+            loop_cfg: svc.loop_config(),
+            grid: &grid,
+            derived: derived.as_ref(),
+            feasibility: self.view.feasibility.as_ref(),
+            law,
+            armed_unix,
+            utc_offset_s: self.utc_offset_s,
+            streams_off: streams_off.clone(),
+            log: Vec::new(),
+        };
+        let begin = rec::begin(&facts, root, (inputs_link, drives_link));
+        let drive_stream = begin.streams.iter().position(|s| s.name == "drives");
+        let shared = self.shared.clone();
+        let problem: ProblemFn = Box::new(move |words: String, data: Value| {
+            shared.add_log_data("record", words.clone(), Some(data));
+            let mut v = (*shared.view()).clone();
+            if let Some(r) = v.record.as_mut() {
+                r.problem = Some(words);
+                shared.publish(v);
+            }
+        });
+        let record = RunRecord::open(begin, &self.plan.record, problem).map_err(|e| {
+            refuse(
+                "record_unwritable",
+                format!(
+                    "The run's record could not be written, so the run did not arm: {}                      ({}). Choose a data folder that can be written.",
+                    e.path.display(),
+                    e.reason
+                ),
+            )
+            .with_detail(json!({"path": e.path.display().to_string(), "reason": e.reason}))
+        })?;
+        self.shared.attach_record(record.log());
+        if let Some(why) = &streams_off {
+            self.shared.add_log_data(
+                "record",
+                format!("the run's streams are not recorded: {why}"),
+                Some(json!({"stream": null, "failed": why})),
+            );
+        }
+        self.view.record = Some(RecordRef {
+            folder: record.folder().display().to_string(),
+            streams: streams_off.is_none(),
+            problem: None,
+        });
+        self.record_status = Some(record.status());
+        self.drive_stream = drive_stream;
+        self.record = Some(record);
+
+        self.view.lines = Some(Arc::new(lines));
+        self.view.limits = Arc::new(limits);
         self.view.grid = grid.clone();
         self.view.clock = Some("shared");
         self.view.station = StationRef {
@@ -572,7 +820,7 @@ impl Actor {
         self.svc = Some(svc);
         self.lock = lock;
         self.set(State::Armed, "armed");
-        self.shared.add_log(
+        self.shared.add_log_data(
             "station",
             format!(
                 "armed on {} at {} Hz, {} Hz lines, {} in the band, shared clock",
@@ -580,6 +828,10 @@ impl Actor {
                 super::config::round(grid.fs_hz, 3),
                 super::config::round(grid.df_hz, 4),
                 grid.lines
+            ),
+            Some(
+                json!({"action": "arm", "class": class_name(class), "fs_hz": grid.fs_hz,
+                        "df_hz": grid.df_hz, "lines": grid.lines}),
             ),
         );
         Ok(())
@@ -797,7 +1049,8 @@ impl Actor {
         // over an operator stop that arrived during its ramp-down.
         if let (RunState::Stopped, Some(t)) = (svc.state(), law_fault_trip(svc)) {
             let (json, message) = trip_facts(&t, false);
-            self.shared.add_log("trip", message.clone());
+            self.shared
+                .add_log_data("trip", message.clone(), Some(json.clone()));
             self.end("law_fault", "stopped", Some(json), Some(message));
             return;
         }
@@ -808,7 +1061,8 @@ impl Actor {
                     Some(t) => {
                         let during_sysid = self.view.phase == "sysid";
                         let (json, message) = trip_facts(&t, during_sysid);
-                        self.shared.add_log("trip", message.clone());
+                        self.shared
+                            .add_log_data("trip", message.clone(), Some(json.clone()));
                         self.end("aborted", "aborted", Some(json), Some(message));
                     }
                     None => self.fault("the controller ended the run without a trip record"),
@@ -1009,9 +1263,10 @@ impl Actor {
             .ok_or_else(|| wrong_state(&self.view, "Proceeding"))?;
         svc.proceed_after_review()
             .map_err(|e| refuse("wrong_state", e.to_string()))?;
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             "the operator reviewed system identification and proceeded",
+            Some(json!({"action": "proceed"})),
         );
         self.forward_log_now();
         self.engaged();
@@ -1081,9 +1336,10 @@ impl Actor {
                 svc.set_run_mode(mode)
                     .map_err(|e| refuse("wrong_state", e.to_string()))?;
                 self.view.mode = mode;
-                self.shared.add_log(
+                self.shared.add_log_data(
                     "note",
                     format!("ladder mode {}", super::view::mode_name(mode)),
+                    Some(json!({"action": "mode", "mode": super::view::mode_name(mode)})),
                 );
                 self.forward_log_now();
                 if self.view.state == State::Running {
@@ -1100,7 +1356,7 @@ impl Actor {
         }
         self.stop_outcome = outcome;
         self.stopped_by = by;
-        self.shared.add_log(
+        self.shared.add_log_data(
             "note",
             if outcome == "safe_stop" && self.stopped_by == SHUTDOWN_BY {
                 "the control service is shutting down; stopping the run with its shutdown ramp"
@@ -1113,6 +1369,10 @@ impl Actor {
             } else {
                 format!("stop requested by {}", self.stopped_by)
             },
+            Some(
+                json!({"action": if outcome == "safe_stop" { "safe_stop" } else { "stop" },
+                        "by": self.stopped_by}),
+            ),
         );
         match self.view.state {
             State::Armed | State::Review => self.end(outcome, "stopped", None, None),
@@ -1221,8 +1481,42 @@ impl Actor {
         self.set(State::Finished, phase);
         self.view.live_level_db = None;
         self.view.drive_now_db = None;
-        self.shared.add_log("note", message);
+        self.shared.add_log_data(
+            "note",
+            message,
+            Some(json!({"outcome": outcome, "by": self.stopped_by})),
+        );
         self.publish();
+        self.finish_record();
+    }
+
+    /// End the record: the last spectra, `end.json` with the run's end as its
+    /// state reports it, then `complete`.
+    fn finish_record(&mut self) {
+        if self.record.is_none() {
+            return;
+        }
+        self.shared.detach_record();
+        let Some(r) = self.record.take() else { return };
+        let state = super::view::state_json(Some(&self.view));
+        let frame = self.shared.station_frame.load(Ordering::Relaxed);
+        let mut end = serde_json::Map::new();
+        end.insert("run_uid".into(), Value::from(self.run_uid.as_str()));
+        end.insert("end".into(), state["end"].clone());
+        end.insert("at_unix".into(), Value::from(now_unix()));
+        end.insert(
+            "station_frames".into(),
+            if frame == NO_FRAME {
+                Value::from(0)
+            } else {
+                Value::from(frame)
+            },
+        );
+        end.insert(
+            "summary".into(),
+            json!({"loops": self.view.loops, "elapsed_s": self.ended_at}),
+        );
+        r.finish(end);
     }
 
     // ---- the controller's log -----------------------------------------------------
@@ -1238,12 +1532,14 @@ impl Actor {
     fn forward_log(&mut self, svc: &RandomService) {
         let events = svc.log().events();
         for e in events.iter().skip(self.forwarded) {
-            let entry: Option<(&'static str, String)> = match &e.kind {
+            let entry: Option<(&'static str, String, Option<Value>)> = match &e.kind {
                 // The service logs the protocol's own state changes.
                 EventKind::StateChange { .. } => None,
-                EventKind::Feasibility { overall, .. } => {
-                    Some(("feasibility", format!("feasibility: {overall}")))
-                }
+                EventKind::Feasibility { overall, .. } => Some((
+                    "feasibility",
+                    format!("feasibility: {overall}"),
+                    Some(json!({"verdict": overall.to_string()})),
+                )),
                 EventKind::OverrideAck { .. } => None,
                 EventKind::StationAdopted {
                     requested_fs_hz,
@@ -1257,6 +1553,10 @@ impl Actor {
                         "the station programmed {actual_fs_hz} Hz for the {requested_fs_hz} Hz \
                          asked; {df_hz:.4} Hz lines, {control_lines} in the band"
                     ),
+                    Some(
+                        json!({"requested_fs_hz": requested_fs_hz, "fs_hz": actual_fs_hz,
+                                "df_hz": df_hz, "lines": control_lines}),
+                    ),
                 )),
                 EventKind::CoherenceGate {
                     band_coherence,
@@ -1268,6 +1568,8 @@ impl Actor {
                         "coherence gate {}: band coherence {band_coherence:.3}, floor {floor:.2}",
                         if *passed { "passed" } else { "held" }
                     ),
+                    Some(json!({"band_coherence": band_coherence, "floor": floor,
+                                "passed": passed})),
                 )),
                 EventKind::LevelChange { to_db, auto, .. } => Some((
                     "level",
@@ -1276,6 +1578,8 @@ impl Actor {
                         db(*to_db),
                         if *auto { "schedule" } else { "operator" }
                     ),
+                    Some(json!({"level_db": to_db,
+                                    "by": if *auto { "schedule" } else { "operator" }})),
                 )),
                 EventKind::EnvelopeAlarm { lines, worst_db } => {
                     if self.alarm_was {
@@ -1287,6 +1591,8 @@ impl Actor {
                                 "{lines} lines outside the alarm band, worst {}",
                                 db(finite_db(*worst_db))
                             ),
+                            Some(json!({"kind": "envelope", "lines": lines,
+                                        "worst_db": num(finite_db(*worst_db))})),
                         ))
                     }
                 }
@@ -1296,17 +1602,18 @@ impl Actor {
                         "channel {channel_index} reached the top of its range (90 % of its range \
                          in the run, or 98 % at the station)"
                     ),
+                    Some(json!({"channel": channel_index})),
                 )),
                 // The service logs the trip with its end message.
                 EventKind::Trip { .. } => None,
-                EventKind::Note { text } => Some(("note", text.clone())),
+                EventKind::Note { text } => Some(("note", text.clone(), None)),
                 EventKind::CaptureStart { run_dir, .. } => {
-                    Some(("note", format!("recording to {run_dir}")))
+                    Some(("note", format!("recording to {run_dir}"), None))
                 }
                 EventKind::CaptureStop { .. } | EventKind::Snapshot { .. } => None,
             };
-            if let Some((kind, text)) = entry {
-                self.shared.add_log(kind, text);
+            if let Some((kind, text, data)) = entry {
+                self.shared.add_log_data(kind, text, data);
             }
         }
         self.forwarded = events.len();

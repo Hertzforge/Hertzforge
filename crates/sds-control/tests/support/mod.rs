@@ -78,6 +78,7 @@ pub fn options(
         srs_engine: Some(server::simulated_srs_engine()),
         // TWR likewise (tests/twr_sim_run.rs sets its own).
         twr_engine: Some(server::simulated_twr_engine()),
+        record: Default::default(),
     }
 }
 

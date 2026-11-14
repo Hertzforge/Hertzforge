@@ -84,6 +84,22 @@ impl StationRef {
     }
 }
 
+/// The run's record, from arm on: its folder, whether it holds the streams, and
+/// the latest problem writing it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordRef {
+    pub folder: String,
+    pub streams: bool,
+    pub problem: Option<String>,
+}
+
+impl RecordRef {
+    fn to_json(&self) -> Value {
+        json!({"folder": self.folder, "streams": if self.streams { "on" } else { "off" },
+               "problem": self.problem})
+    }
+}
+
 /// How a run ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct End {
@@ -255,6 +271,8 @@ pub struct RunView {
     pub level_s: Option<f64>,
     /// `random.live` frames are due: from the start of system identification.
     pub streaming: bool,
+    /// The run's record, once it is armed.
+    pub record: Option<RecordRef>,
 }
 
 fn r(x: f64, d: i32) -> f64 {
@@ -318,6 +336,9 @@ pub fn state_json(v: Option<&RunView>) -> Value {
             })
         }),
     );
+    if let Some(r) = &v.record {
+        m.insert("record".into(), r.to_json());
+    }
     Value::Object(m)
 }
 
@@ -336,6 +357,7 @@ pub fn state_key(v: Option<&RunView>) -> String {
         s["feasibility"],
         s["clock"],
         s["grid"],
+        s["record"],
     ]))
     .unwrap_or_default()
 }

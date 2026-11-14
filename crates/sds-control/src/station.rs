@@ -443,6 +443,50 @@ impl StationPlan {
     }
 }
 
+/// The simulator a run arms on: the one place its plant, noise and seed are set.
+pub fn sim_spec(fs_hz: f64, plant: Option<&SimPlant>, outputs: Option<u32>) -> SimPlantSpec {
+    SimPlantSpec {
+        sample_rate_hz: fs_hz,
+        resonances: SIM_RESONANCES.to_vec(),
+        noise_level: 2e-4,
+        feedthrough: 0.35,
+        // A software plant advances input and output on one sample index;
+        // the arm gate requires the claim to be stated.
+        shared_clock: true,
+        seed: 0x5A5A_1234,
+        max_input_channels: SIM_INPUTS,
+        max_output_channels: outputs.unwrap_or(SIM_OUTPUTS),
+        plant: plant.cloned().unwrap_or_default(),
+        ..SimPlantSpec::default()
+    }
+}
+
+/// What a simulated run's record says of its plant: the model, its parameters and
+/// its seed.
+pub fn sim_identity(spec: &SimPlantSpec) -> Value {
+    let model = match &spec.plant {
+        SimPlant::Resonators => "resonator_bank".to_owned(),
+        other => format!("{other:?}")
+            .split(['(', ' ', '{'])
+            .next()
+            .unwrap_or("plant")
+            .to_ascii_lowercase(),
+    };
+    json!({
+        "model": model,
+        "parameters": {
+            "sample_rate_hz": spec.sample_rate_hz,
+            "resonances": spec.resonances.iter().map(|(f, q)| json!({"f_hz": f, "q": q})).collect::<Vec<_>>(),
+            "noise_level": spec.noise_level,
+            "feedthrough": spec.feedthrough,
+            "transport_delay_samples": spec.transport_delay_samples,
+            "inputs": spec.max_input_channels,
+            "outputs": spec.max_output_channels,
+        },
+        "seed": spec.seed,
+    })
+}
+
 /// Build the station a run arms on. The simulator through the factory; NI from a
 /// fresh scan through the factory's own classification. Never a simulator for NI.
 pub fn build(plan: &StationPlan, scanner: &dyn NiScanner) -> Result<StationBackend, MethodError> {
@@ -453,20 +497,7 @@ pub fn build(plan: &StationPlan, scanner: &dyn NiScanner) -> Result<StationBacke
             outputs,
         } => {
             let spec = StationSpec {
-                sim: SimPlantSpec {
-                    sample_rate_hz: *fs_hz,
-                    resonances: SIM_RESONANCES.to_vec(),
-                    noise_level: 2e-4,
-                    feedthrough: 0.35,
-                    // A software plant advances input and output on one sample index;
-                    // the arm gate requires the claim to be stated.
-                    shared_clock: true,
-                    seed: 0x5A5A_1234,
-                    max_input_channels: SIM_INPUTS,
-                    max_output_channels: outputs.unwrap_or(SIM_OUTPUTS),
-                    plant: plant.clone().unwrap_or_default(),
-                    ..SimPlantSpec::default()
-                },
+                sim: sim_spec(*fs_hz, plant.as_ref(), *outputs),
                 ..StationSpec::default()
             };
             hertzforge_station::try_build_station_backend(BackendKind::Sim, &spec)

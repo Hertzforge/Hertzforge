@@ -49,6 +49,7 @@ pub mod profiles;
 pub mod protocol;
 pub mod pulse;
 pub mod random;
+pub mod record;
 pub mod recorder;
 pub mod server;
 pub mod session;

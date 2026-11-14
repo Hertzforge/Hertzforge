@@ -156,6 +156,13 @@ sds-control  test:random_protocol  ni_selection_binding_and_arm_are_refused_by_n
 sds-control  test:random_protocol  driver_simulated_ni_is_never_hardware
 sds-control  test:random_protocol  each_screen_receives_only_the_plots_it_subscribed_to
 sds-control  test:random_protocol  full_level_waits_for_the_level_to_arrive
+sds-control  test:random_record  a_writer_stalled_on_every_write_leaves_the_loop_and_the_outcome_unchanged
+sds-control  test:random_record  a_random_run_leaves_a_complete_self_describing_folder
+sds-control  test:random_record  a_data_folder_that_cannot_be_written_refuses_the_arm
+sds-control  test:random_record  record_streams_false_writes_the_record_without_streams
+sds-control  test:random_record  below_the_free_space_floor_the_run_goes_on_without_streams
+sds-control  lib  record::tests::a_tap_never_waits_for_a_stalled_writer_and_keeps_the_gap_in_place
+sds-control  lib  record::tests::crossing_the_free_space_floor_stops_the_stream_and_tells_the_run
 
 # MIMO Random's soft start on the controller's service: the status is published on
 # a wall-clock cadence, so the first engaged level it shows depends on how many

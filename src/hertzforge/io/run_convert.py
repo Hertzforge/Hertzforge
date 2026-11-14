@@ -2,9 +2,9 @@
 
 `convert` reads a run folder (`hertzforge.io.run_folder`) and writes a
 `.hforge` project every analysis tool opens with `Project.open`, by
-default `<run name>.hforge` inside the folder. The control modules do
-not write run folders yet; this is the analysis side of that bridge,
-tested on folders written to the layout.
+default `<run name>.hforge` inside the folder. The control service's
+Random module writes a run folder for every run; the other control
+modules do not yet. This is the analysis side of that bridge.
 
 The project holds, in this order:
 

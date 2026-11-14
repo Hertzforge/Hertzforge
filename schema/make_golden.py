@@ -288,6 +288,8 @@ ABORTED_STATE = {
             'at_s': 131.2, 'level_db': 0,
             'trip': {'kind': 'envelope', 'abort_lines': 14, 'worst_db': 7.2,
                      'at_level_db': 0, 'at_loop': 212}},
+    'record': {'folder': '/home/operator/Hertzforge_Data/20261101-142233_random_r-0007',
+               'streams': 'on', 'problem': None},
 }
 
 SUBSCRIBE_PLOTS = [

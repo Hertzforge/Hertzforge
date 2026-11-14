@@ -4,6 +4,7 @@
 
 pub mod backend;
 pub mod config;
+pub mod record;
 pub mod run;
 pub mod subscribe;
 pub mod view;
