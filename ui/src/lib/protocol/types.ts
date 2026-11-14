@@ -971,6 +971,7 @@ export type ItemReason =
 	| 'law_param_unknown'
 	| 'law_param_invalid'
 	| 'backend_not_selected'
+	| 'plant_unknown'
 	| 'reference_invalid'
 	| 'reference_file'
 	| 'geometry'

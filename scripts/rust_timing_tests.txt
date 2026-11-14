@@ -213,6 +213,10 @@ sds-control  lib  record::tests::crossing_the_free_space_floor_stops_the_stream_
 # the parallel pass; it passes alone)
 sds-control  test:mimo_setup_fields  the_loop_soft_starts_below_the_first_rung_and_climbs_to_it
 
+# MIMO Random's setup check on the controller's service: a socket session against the
+# service, as every service test is
+sds-control  test:mimo_service  mimo_random_a_table_the_simulator_cannot_play_is_said_by_the_setup_check
+
 # Classical shock laws: the host's deadline on a classical law file, and a law
 # file call's time against its budget
 hertzforge-law-host  test:shock_classical_host  a_spinning_classical_law_is_stopped_within_a_tick_of_its_budget

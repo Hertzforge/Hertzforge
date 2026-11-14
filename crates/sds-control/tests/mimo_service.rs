@@ -610,3 +610,69 @@ async fn an_identification_set_is_saved_loaded_into_a_later_run_and_refused_on_a
         .await;
     assert_eq!(e["reason"], "bad_params");
 }
+
+/// On the simulator, a table that is not one of the sizes it plays is said by the
+/// setup's check, naming the sizes, before anything is armed; a table of a size it
+/// plays checks clean of it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_random_a_table_the_simulator_cannot_play_is_said_by_the_setup_check() {
+    let svc = Service::with_options(real_options(
+        0.0,
+        Duration::from_secs(600),
+        Duration::from_secs(5),
+    ));
+    let addr = serve(svc).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c).await;
+    let sizes = |v: &Value| -> Vec<String> {
+        v["validation"]["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|i| i["reason"] == "plant_unknown")
+            .map(|i| i["message"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let four = c
+        .ok(
+            "mimo_random.setup",
+            json!({"setup": setup(json!([{"db": 0}]), 10.0, true), "dry_run": true}),
+        )
+        .await;
+    assert!(sizes(&four).is_empty(), "{four}");
+    // Two controls and two drives: no standard plant has that size.
+    let rev = c.ok("channels.get", json!({})).await["revision"].clone();
+    c.ok(
+        "channels.set",
+        json!({"revision": rev, "channels": [row(1, "control", "Control 1"),
+                                              row(2, "control", "Control 2"),
+                                              row(5, "drive", "Shaker 1"),
+                                              row(6, "drive", "Shaker 2")]}),
+    )
+    .await;
+    let mut s = setup(json!([{"db": 0}]), 10.0, true);
+    s["channels"]["controls"] = json!([{"channel": 1, "alarm_db": [3, 3], "abort_db": [6, 6]},
+                                       {"channel": 2, "alarm_db": [3, 3], "abort_db": [6, 6]}]);
+    s["channels"]["drives"] = json!([{"channel": 5, "ceiling_vrms": 5, "abort_vrms": null},
+                                     {"channel": 6, "ceiling_vrms": 5, "abort_vrms": null}]);
+    let two = c
+        .ok("mimo_random.setup", json!({"setup": s, "dry_run": true}))
+        .await;
+    assert_eq!(two["validation"]["ok"], false, "{two}");
+    let said = sizes(&two);
+    assert_eq!(said.len(), 1, "{two}");
+    assert!(
+        said[0].contains("4 by 4, 12 by 6, 24 by 24 or 72 by 24")
+            && said[0].contains("2 inputs and 2 drives"),
+        "{}",
+        said[0]
+    );
+    let field = two["validation"]["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["reason"] == "plant_unknown")
+        .unwrap()["field"]
+        .clone();
+    assert_eq!(field, "setup.channels");
+}
