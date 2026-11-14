@@ -31,7 +31,7 @@ import type {
 	SineTest
 } from '$lib/protocol/sine';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { defaultRecord, shakerRecord, type FieldErrors, type RecordDraft } from '../setup';
+import { defaultRecord, followTitle, shakerRecord, titleNumber, type FieldErrors, type RecordDraft } from '../setup';
 import { runChannels } from '../shock/shockSetup';
 
 export { runChannels };
@@ -162,7 +162,8 @@ export function newLimitChannel(row: ChannelRow | undefined, band: readonly [num
 
 export function defaultSineSetup(): SineDraft {
 	return {
-		title: 'Sine 1 g, 20 to 2000 Hz',
+		// Empty: the title follows the profile and the test (`sineTitle`) until the operator types one.
+		title: '',
 		profile: {
 			label: '1 g',
 			rows: [newRow(20, 'disp_pp_in', 0.0097), newRow(45, 'accel_g', 1), newRow(2000, 'accel_g', 1)],
@@ -215,6 +216,27 @@ function mergeProfile(base: SineProfileDraft, saved: Partial<SineProfileDraft> |
 }
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
+/** The title the profile and the test give: "Sine 1 g, 20 to 2000 Hz", "Sine 2 g, dwell at 100 Hz". */
+export function sineTitle(d: SineDraft): string {
+	const g = Math.max(...d.profile.rows.filter((r) => r.quantity === 'accel_g').map((r) => r.value));
+	const level = Number.isFinite(g) ? ` ${titleNumber(g)} g` : '';
+	const t = d.test;
+	const [lo, hi] = t.band_hz;
+	const where =
+		t.kind === 'dwell'
+			? Number.isFinite(t.dwell.freq_hz) ? `, dwell at ${titleNumber(t.dwell.freq_hz)} Hz` : ''
+			: Number.isFinite(lo) && Number.isFinite(hi) ? `, ${titleNumber(lo)} to ${titleNumber(hi)} Hz` : '';
+	return `Sine${level}${where}`;
+}
+
+/** The title a configuration carries: the one typed, else the one the setup gives. */
+export function sineTitleOf(d: SineDraft): string {
+	return d.title.trim() || sineTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its profile. */
+const STALE_SINE_TITLES = ['Sine 1 g, 20 to 2000 Hz'];
+
 export function mergeSineSetup(saved: Partial<SineDraft> | null): SineDraft {
 	const base = defaultSineSetup();
 	if (!saved || typeof saved !== 'object') return base;
@@ -250,7 +272,7 @@ export function mergeSineSetup(saved: Partial<SineDraft> | null): SineDraft {
 	out.record = { ...base.record, ...(saved.record ?? {}) };
 	delete (out as Partial<SineDraft> & { capture?: unknown }).capture;
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, sineTitle, STALE_SINE_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -342,7 +364,7 @@ export function toSineConfig(d: SineDraft, law: LawEntry | null, rows?: ChannelR
 	const r = d.record;
 	const [document, clause] = [r.document.trim(), r.clause.trim()];
 	return {
-		title: d.title.trim(),
+		title: sineTitleOf(d),
 		profile: profileOf(d.profile),
 		test: testOf(d),
 		acquisition: { fs_hz: d.acquisition.fs_hz, tick_ms: d.acquisition.tick_ms },
@@ -390,6 +412,10 @@ export function toSineConfig(d: SineDraft, law: LawEntry | null, rows?: ChannelR
  * carry keeps the shell's.
  */
 export function fromSineConfig(c: SineConfig): SineDraft {
+	return followTitle(sineDraftOf(c), sineTitle);
+}
+
+function sineDraftOf(c: SineConfig): SineDraft {
 	const base = defaultSineSetup();
 	const t = c.test;
 	const test: SineDraft['test'] = structuredClone(base.test);
@@ -617,14 +643,13 @@ function profileErrors(out: FieldErrors, p: SineProfileDraft, at: string) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, a profile with too few rows, a drive ceiling
+ * Fields that hold no number, a profile with too few rows, a drive ceiling
  * or abort not given, a limit channel on a row the table does not enable as a non-control input, a
  * shaker record that does not read. Everything else, the profile's shape and its coverage of the
  * band included, is the service's to judge in the dry run.
  */
 export function localErrors(d: SineDraft, rows: ChannelRow[] = []): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	profileErrors(out, d.profile, 'profile');
 	const t = d.test;
 	if (t.kind === 'sweep' || t.kind === 'step') {

@@ -27,7 +27,7 @@ import type {
 import { MIXED_MAX_BANDS, MIXED_MAX_TONES } from '$lib/protocol/mixed';
 import type { SineDirection, SineDwellFor } from '$lib/protocol/sine';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { defaultControl, defaultRecord, newBreakpoint, shakerRecord, type BreakpointDraft, type ControlDraft, type FieldErrors, type LevelDraft, type RecordDraft } from '../setup';
+import { defaultControl, defaultRecord, followTitle, newBreakpoint, shakerRecord, type BreakpointDraft, type ControlDraft, type FieldErrors, type LevelDraft, type RecordDraft } from '../setup';
 import { newRow, profileDraftOf, profileOf, type SineProfileDraft } from '../sine/sineSetup';
 
 // ---------------------------------------------------------------------------------------------
@@ -212,7 +212,8 @@ export function newBand(id: string, n: number, freq = 250): MixedBandDraft {
 /** Random's qualification floor with one fixed tone: a sine-on-random ready to run on the simulator. */
 export function defaultMixedSetup(): MixedDraft {
 	return {
-		title: 'Sine on Random',
+		// Empty: the title follows the parts (`mixedTitle`) until the operator types one.
+		title: '',
 		floor: {
 			id: 'floor',
 			name: 'Floor',
@@ -257,6 +258,20 @@ function mergeSchedule(s: Partial<ScheduleDraft> | undefined, freq: number): Sch
 	return out;
 }
 
+/** The title the parts give: "Sine on Random", "Random on Random", "Sine and Random on Random". */
+export function mixedTitle(d: MixedDraft): string {
+	const parts = [d.tones.length ? 'Sine' : '', d.bands.length ? 'Random' : ''].filter(Boolean);
+	return parts.length ? `${parts.join(' and ')} on Random` : 'Random Floor';
+}
+
+/** The title a configuration carries: the one typed, else the one the parts give. */
+export function mixedTitleOf(d: MixedDraft): string {
+	return d.title.trim() || mixedTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its parts. */
+const STALE_MIXED_TITLES = ['Sine on Random'];
+
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
 export function mergeMixedSetup(saved: Partial<MixedDraft> | null): MixedDraft {
 	const base = defaultMixedSetup();
@@ -295,7 +310,7 @@ export function mergeMixedSetup(saved: Partial<MixedDraft> | null): MixedDraft {
 	out.record = { ...base.record, ...(saved.record ?? {}) };
 	delete (out as Partial<MixedDraft> & { capture?: unknown }).capture;
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, mixedTitle, STALE_MIXED_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -425,7 +440,7 @@ export function toMixedConfig(d: MixedDraft, laws: { floor: LawEntry | null; ton
 	const r = d.record;
 	const [document, clause] = [r.document.trim(), r.clause.trim()];
 	return {
-		title: d.title.trim(),
+		title: mixedTitleOf(d),
 		parts: partsOf(d),
 		exclusion_hz: d.exclusion_hz,
 		acquisition: { fs_hz: d.acquisition.fs_hz, n_pts: d.acquisition.n_pts, n_avg: d.acquisition.n_avg, tick_ms: d.acquisition.tick_ms },
@@ -484,6 +499,10 @@ export function toMixedConfig(d: MixedDraft, laws: { floor: LawEntry | null; ton
  * into the three tables, each in its order.
  */
 export function fromMixedConfig(c: MixedConfig): MixedDraft {
+	return followTitle(mixedDraftOf(c), mixedTitle);
+}
+
+function mixedDraftOf(c: MixedConfig): MixedDraft {
 	const base = defaultMixedSetup();
 	const floor = c.parts.find((p): p is MixedFloorPart => p.kind === 'floor');
 	const tones = c.parts.filter((p): p is MixedTonePart => p.kind === 'tone');
@@ -749,14 +768,13 @@ function windowErrors(out: FieldErrors, w: WindowDraft, at: string) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, an id that is not one, two parts of one id, a
+ * Fields that hold no number, an id that is not one, two parts of one id, a
  * follower with no part to follow, too many tones or bands, a drive ceiling or abort not given, a
  * shaker record that does not read. Everything else (the motion checks, the parts' spacing, the
  * profile's shape) is the service's to judge in the dry run.
  */
 export function localErrors(d: MixedDraft): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	d.floor.breakpoints.forEach((b, i) => {
 		const k = `profile.breakpoints.${i}`;
 		need(out, `${k}.freq_hz`, b.freq_hz);

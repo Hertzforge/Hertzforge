@@ -96,6 +96,28 @@ export interface SetupDraft {
 	record: RecordDraft;
 }
 
+/**
+ * A test's title that follows its setup: an empty draft title means "the title the setup gives",
+ * which the screen shows as the field's placeholder and the configuration carries, until the
+ * operator types one. A title a draft holds that is the one its setup gives (a saved setup, a
+ * run's, a cached draft) is taken back to following; so is `stale`, a default an older shell
+ * wrote into drafts.
+ */
+export function followTitle<D extends { title: string }>(d: D, auto: (d: D) => string, stale: string[] = []): D {
+	const t = d.title.trim();
+	return t && (t === auto(d) || stale.includes(t)) ? { ...d, title: '' } : d;
+}
+
+/** A number as a title says it: four significant digits at most, no trailing zeros. */
+export function titleNumber(v: number): string {
+	return String(Number(v.toPrecision(4)));
+}
+
+/** "Half-sine" as a title says it: "Half-Sine". */
+export function titleCase(words: string): string {
+	return words.replace(/(^|[ -])(\p{L})/gu, (_m, sep: string, c: string) => sep + c.toUpperCase());
+}
+
 export function defaultRecord(): RecordDraft {
 	return { operator: '', article: '', notes: '', document: '', clause: '', streams: true };
 }
