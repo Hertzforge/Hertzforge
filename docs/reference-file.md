@@ -3,8 +3,8 @@
 A multiple-output random test runs to a **reference**: the spectral density matrix (SDM) the
 controls are driven to, line by line, with the alarm and abort lines, the band, the names of the
 controls and a record of where it came from. The controller keeps it in its own file, written and
-read by the `hertzforge-reference` crate and written by the analysis service's converter
-(`hertzforge.io.reference_convert`). This page is the layout, so the file can be read without
+read by the `hertzforge-reference` crate and written by the analysis package's converter
+(`hertzforge.io.reference_convert`, a function called from Python). This page is the layout, so the file can be read without
 either.
 
 ## The Folder
@@ -161,8 +161,8 @@ channels in the test's order.
 ### A Specification `.mat` File
 
 The same variables with the axes transposed: `cpsd` channels by channels by lines, each limit
-channels by lines. MATLAB v5 and v7.3 files are read by the analysis service's converter, which
-writes the reference folder; channel names are read from a v5 file's `dof` or given to the
+channels by lines. MATLAB v5 and v7.3 files are read by the analysis package's converter
+(`reference_convert.from_mat`), which writes the reference folder; channel names are read from a v5 file's `dof` or given to the
 converter. The same matching rules apply. The convention differs: the analysis side takes a MATLAB
 file's cross terms as the form it stores itself, the Bendat and Piersol `conj(X) Y`, so the converter
 conjugates every cross term on the way to the controller by default and records that in the
@@ -170,7 +170,8 @@ provenance.
 
 ### A `.hforge` Specification
 
-A `.hforge` file holding a random specification is converted by the analysis service: its matrix
+A `.hforge` file holding a random specification is converted by the analysis package's converter
+(`reference_convert.from_hforge`): its matrix
 is formed as the specification writer forms it (pairs the specification does not hold are zero),
 its channel names become the labels, and the same rules apply.
 

@@ -9,7 +9,7 @@
 //! | `loops_diagonal.bin` / `.json` | per loop: every control's PSD and error, every drive's PSD | every loop |
 //! | `loops_summary.jsonl` | per loop: level, state, rms errors, drive rms, guards, timing | every loop |
 //! | `sdm_<loop>.bin` / `.json` | the full control response and drive spectral matrices | every `snapshot_every_s`, plus the first and last loop at full level |
-//! | `reference.bin` / `.json` | the reference in the control space, its tolerances, band and spacing | once |
+//! | `reference.bin` / `.json` | the reference in the control space, its tolerances, spacing, and band (`band` as half-open line indexes, `band_hz` as the first and last band line in Hz) | once |
 //! | `law.json`, `law_file.wasm` | the law: id, name, version, hash, parameter values, and the law file when it is one | at each seed |
 //! | `law_calls.bin` / `.jsonl` | every law call: its declared inputs packed, the loop index and the law's output (unchanged inputs carried forward) | every call |
 //! | `report.json` | the report data | at the end |
@@ -504,8 +504,17 @@ pub const LAW_CALLS_FORMAT: &str = "hertzforge-mimo-law-calls/1";
 /// The reference record's sidecar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReferenceSidecar {
+    /// The line spacing, Hz.
     pub df_hz: f64,
+    /// The controlled band as line indexes, half-open: lines `band[0]` up to
+    /// but not including `band[1]`.
     pub band: [usize; 2],
+    /// The same band in hertz: the frequencies of its first and last
+    /// controlled lines, both included (`band[0] * df_hz` and
+    /// `(band[1] - 1) * df_hz`). Absent from records written before it was
+    /// added.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band_hz: Option<[f64; 2]>,
     /// The control channels (table indexes) of a physical reference; for a
     /// virtual one, the channels the response transformation reads.
     pub controls: Vec<u32>,
@@ -535,6 +544,7 @@ pub fn write_reference(
     let side = ReferenceSidecar {
         df_hz,
         band: [band.0, band.1],
+        band_hz: Some(band_hz(band, df_hz)),
         controls: controls.to_vec(),
         space: space.into(),
         arrays: p.arrays,
@@ -542,6 +552,13 @@ pub fn write_reference(
     write_binary_record(dir, REFERENCE, &side, &p.bytes)
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// The band's first and last controlled line in hertz, both included, from
+/// the half-open line range `band` at spacing `df_hz`.
+pub fn band_hz(band: (usize, usize), df_hz: f64) -> [f64; 2] {
+    let last = band.1.saturating_sub(1).max(band.0);
+    [band.0 as f64 * df_hz, last as f64 * df_hz]
 }
 
 /// Read the reference record: the spectral matrix, tolerances, band and spacing.
