@@ -554,7 +554,7 @@ def test_a_long_entity_table_sends_a_page_and_the_rest_on_asking(validate):
         ('op.run', {'op': 'project.new_geometry', 'params': {}}),
         ('op.run', {'op': 'project.add_solid_plate', 'params': {'geometry': 'Geometry'}}),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Geometry', 'elements': 'quads', 'size': 0.02, 'keep': True}}),
+            'geometry': 'Geometry', 'elements': 'quads', 'size': 0.02}}),
         ('project.show', {'objects': ['Geometry'], 'part': {'kind': 'family', 'id': 'quads'}}),
         ('project.entity_rows', {'geometry': 'Geometry', 'kind': 'elements', 'family': 'quads',
                                  'start': PAGE_ROWS, 'count': 5}),

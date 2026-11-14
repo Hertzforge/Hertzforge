@@ -40,7 +40,7 @@ def test_an_operation_that_waits_to_be_told_says_which_param_tells_it(catalog):
     shell sends it false for Preview and true for Apply; it is a boolean of the operation's."""
     committing = {op['id']: op['commits'] for op in catalog['operations'] if 'commits' in op}
     assert committing == dict.fromkeys(
-        ('project.mesh_solids', 'project.mate_surfaces', 'project.merge_coincident_nodes',
+        ('project.mate_surfaces', 'project.merge_coincident_nodes',
          'project.tie_elements', 'project.align_meshes', 'project.plan_instrumentation',
          'project.generate_rigid_body_modes', 'project.rescale'), 'keep')
     for op in catalog['operations']:
