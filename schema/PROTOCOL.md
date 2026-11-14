@@ -796,11 +796,29 @@ whose `id`, `name`, `follows` and a tone's `profile` (its rows as `freq quantity
 by `;`) are text). `columns` names the
 table's columns and each row holds one value per column.
 
+A channel table may instead be sent as the control service's own rows: `channels`, a list of
+rows in `channels.get`'s spelling (every field, and any optional member), in place of `columns`
+and `rows`, with `environments`, its control loops by name (each `{"controls","drives",
+"response_transformation","reference_transformation"}`: channel numbers in the controller's
+order, and each transformation a list of rows or null). The analysis service maps the rows onto
+the channel table's columns (`hertzforge.io.run_convert`, the one mapping, used both ways), and
+`tables.load` of a channel table answers `channels` and `environments` beside `columns` and
+`rows`, so a client that keeps the control rows never maps a column itself. A row's optional
+members are the channel table's columns of the same name (`analysis_role` is `role`,
+`daq_range_v` and `sensor_range_v` the two ranges, `extra` the column `extra`, held as text); an
+`extra` entry the table holds a column for fills that column. A row read back has every member
+whose column holds something, and the analysis side fills a row with no `node` with its channel
+number (a node-only identity) and a blank `channel_type` from its unit. A `.hforge` file keeps the
+control loops; the text and workbook forms hold the rows only and answer `environments` empty.
+A loop's control channels are the table's control channels: a row a loop controls reads back as
+a control row.
+
 A channel table's columns are the channel table object's own (`channel`, `node`, `direction`,
 `role`, `control`, `channel_type`, `unit`, `sensitivity`, the two ranges, the sensor's identity,
 `comment`), then the controller's settings, an optional group present on a table converted to
 carry them: `enabled`, `drive`, `physical`, `iepe`, `iepe_bias`, `polarity`, `range_max`,
-`control_group`, `abort_accel_g`, `abort_velocity_ips` and `abort_displacement_mil`. A value is a whole number for `channel`, a whole number or `null` for
+`control_group`, `abort_accel_g`, `abort_velocity_ips`, `abort_displacement_mil`, `limit`,
+`analysis_tier` and `extra` (the row's other columns, a JSON object as text). A value is a whole number for `channel`, a whole number or `null` for
 `node` and `control_group`, a number or `null` for the measurements (`sensitivity`, the ranges,
 the bias, the abort limits), `true` or `false` for a flag, and text (`""` for blank) for the rest.
 A control channel row maps onto them so: its `index` is `channel`, `description` is `comment`,
@@ -813,9 +831,9 @@ of the channel table, the controller's included: a table without them is convert
 (every channel on, none a drive, each full scale from its clip level and sensitivity where both
 are stated), and `warnings` says so. A client that edits only some columns keeps the others'
 values for each row and sends them back with its own, so a table opened and saved keeps every
-column and row. A channel table's control loops (its environments, which a `.hforge` table can
-hold) are not among them: `tables.load` does not return them and `tables.save` does not write
-them, so a `.hforge` table that held them is saved without them. A table saved with the controller's columns among its columns is written converted;
+column and row. A channel table's control loops (its environments) travel as `environments`:
+`tables.load` returns them and `tables.save` writes them, so a `.hforge` table that held them is
+saved with them. A table saved with the controller's columns among its columns is written converted;
 one saved without them is written as the measurement's table alone.
 
 A breakpoint table's columns are its kind's: `freq_hz` and `psd_g2_hz`, `slope_db_oct` for a
@@ -830,8 +848,8 @@ and for a profile the bands, `alarm_below_db`, `alarm_above_db`, `abort_below_db
 `tables.save` writes the table to `path` in the form its suffix names: `.hforge` (a single-object
 file, `docs/hforge-format.md`), `.csv`, `.tsv` or `.txt` (tab-delimited) or `.xlsx`; a path with no
 suffix is given `.hforge`. A write is strict: a column that is not the kind's, a value the column
-cannot hold (a sensitivity of 0, a polarity that is not `positive` or `negative`, a channel number
-used twice) or a row of the wrong length is refused `bad_request`, naming the row and column, and
+cannot hold (a sensitivity of 0 on an enabled input, a polarity that is not `positive` or
+`negative`, a channel number used twice, a unit the analysis side cannot read) or a row of the wrong length is refused `bad_request`, naming the row and column, and
 nothing is written. The file is replaced in one step, so a failed save leaves it as it was. A
 channel table is written as the channel table object writes itself: `.hforge` as its
 `channel_table/` object and `.xlsx` as its workbook, and the text forms under the same headings.
@@ -1165,7 +1183,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 
 | Where | Errors | Warnings |
 |---|---|---|
-| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `reference_count_mismatch`, `drive_channel_present` |
+| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `drive_channel_present`, `unit_unknown`, `drive_not_in_volts`, `abort_not_in_g` |
 | Profile | `profile_empty`, `first_row_not_anchor`, `row_level_ambiguous`, `frequency_not_positive`, `frequency_not_ascending`, `psd_negative` | `alarm_wider_than_abort` |
 | Acquisition | `n_pts_not_power_of_two`, `band_above_grid`, `too_few_lines` | |
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
@@ -1321,8 +1339,55 @@ One table, held by the control service, used by every run.
 | `control_group` | integer from 0 with no gaps, or null | null |
 | `abort` | `{"accel_g","velocity_ips","displacement_mil"}`, each a limit or null | all null |
 
-Every row carries every field. A row's `abort` limits are absolute: a run aborts when that
+Every row carries every field above. A row's `abort` limits are absolute: a run aborts when that
 channel passes one, at any level.
+
+A row may also carry these members, each optional. The service writes one only when it holds
+something, keeps every one a client sends, and runs nothing from them: they are the columns the
+analysis side reads, carried with the row so a table that goes to a test and comes back loses none
+of them (`channel_table/` in `docs/hforge-format.md` names the same columns).
+
+| Member | Values | Absent means |
+|---|---|---|
+| `node` | integer from 0, the geometry node the channel is at | no node |
+| `direction` | text, the direction it measures along (`X+`) | none stated |
+| `channel_type` | text, the quantity it measures (`acceleration`, `force`, ...) | none stated |
+| `analysis_role` | `reference`, `response` or `monitor`: what the channel is to a frequency response, apart from its role in the loop | none stated |
+| `daq_range_v`, `sensor_range_v` | number above 0, volts: the input's range and the sensor's own full-scale output | none stated |
+| `serial_number`, `make`, `model` | text, the sensor's identity | none |
+| `triax_dof` | text, which leg of a triaxial sensor (`X`, `Y`, `Z`) | none |
+| `expiration` | text, `YYYY-MM-DD`, when the sensor's calibration runs out | none |
+| `analysis_tier` | `full`, `rotating` or `decimated:N` (N from 1): how much analysis the row gets per block. Only `full` is acted on in this build | `full` |
+| `limit` | boolean: the row is a limit channel, an input a test's limits are set on. A mark only; each test's limits stay in its setup | false |
+| `extra` | object of text by column name: any other column | none |
+
+A member of the wrong type is refused `bad_params`, naming it.
+
+**Units.** `units` names a unit and is never empty. The unit vocabulary is the names every part of
+the program reads as the same quantity: `g`, `in/s**2` (or `in/s^2`), `m/s**2` (or `m/s^2`),
+`mm/s**2`, `in/s`, `m/s`, `mm/s`, `mil`, `in`, `m`, `mm`, `lbf`, `N`, `kN`, `psi`, `Pa`, `kPa`,
+`MPa`, `V`, `mV`, `strain`, `microstrain`, `m/m`, `degC`, `degF`, `K` and `degR`. A unit outside it
+is held, kept exactly as written, and runs as written, with the warning `unit_unknown`.
+
+**One rule set.** The control service, the analysis side's channel table and the shell's mock
+service check a table by the same rules, and `schema/golden/channel_table_rules.json` holds them as
+cases that a test in each language reads:
+
+- **Channel numbers.** `index` (the analysis side's `channel`) is a whole number from 0, and no two
+  rows share one (`duplicate_index`).
+- **Sensitivity.** A number. It is not 0 on an enabled row that is not a drive
+  (`zero_sensitivity`); a disabled row and a drive row may hold any number, 0 included.
+- **IEPE bias.** A number or null; 0 is a number like any other. A bias on a `single_ended` row
+  (`bias_on_single_ended`) and none on an `iepe` row (`iepe_without_bias`) are warnings.
+- **Units.** Never empty. Every name in the unit vocabulary above is held by all three with no
+  finding. A unit outside it is held by the control service with the warning `unit_unknown`; a
+  table file holds it when the analysis side's unit reader reads it, and refuses it, naming the
+  row, when it does not.
+
+**What control needs of a unit.** A drive is written to the device in volts and the kinematic
+abort limits read a row's samples as acceleration in g, whatever the row says. An enabled drive row
+in another unit warns `drive_not_in_volts`, and a row with an abort limit in a unit other than `g`
+warns `abort_not_in_g`. Both are warnings: neither changes what the service accepts or how it runs.
 
 **IEPE is off unless a client turns it on for a row.** The service's starting table (one
 control input, one drive output, both unbound) and every row it creates are `single_ended`, and

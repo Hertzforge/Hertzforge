@@ -344,7 +344,12 @@ input) and `iepe_bias` (volts), `polarity` ('positive' or 'negative',
 blank for positive), `range_max` (the input's full scale in the
 channel's unit), `control_group`, and the abort limits `abort_accel_g`,
 `abort_velocity_ips` and `abort_displacement_mil`, blank where none is
-set. Their presence in `column_order` is the record that the table was
+set, then `limit` ('True' for a limit channel, a mark only; each test's
+limits stay in its setup), `analysis_tier` ('full', 'rotating' or
+'decimated:N', blank for full) and `extra` (any other column the control
+service carries for the row, a JSON object of text by column name, blank
+for none). A file written before the last three existed reads them
+blank. Their presence in `column_order` is the record that the table was
 converted to carry them; a table that never was has none of them and
 reads exactly as before. A channel's role in a control loop is read
 from three columns: a drive is `drive`, a control channel is `control`,

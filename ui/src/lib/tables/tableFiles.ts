@@ -6,6 +6,7 @@
  */
 
 import { chooseOpenFile, chooseSaveFile, type DialogFilter } from '$lib/project/files';
+import type { ChannelRow } from '$lib/protocol/types';
 
 export type TableKind = 'channels' | 'breakpoints';
 export type TableForm = 'hforge' | 'csv' | 'tsv' | 'xlsx';
@@ -29,12 +30,27 @@ export const TABLE_FORMATS: TableFormat[] = [
 	{ form: 'xlsx', label: 'Excel Workbook', suffix: '.xlsx', extensions: ['xlsx'] }
 ];
 
-/** What a table writes: its columns by name and its rows; a breakpoint table's units. */
+/** A channel table's control loop, as the analysis side holds it: channel numbers in the controller's order, and its transformations. */
+export interface ChannelEnvironment {
+	controls: number[];
+	drives: number[];
+	response_transformation: number[][] | null;
+	reference_transformation: number[][] | null;
+}
+
+/**
+ * What a table writes: its columns by name and its rows; a breakpoint table's units. A channel
+ * table is written as the control service's rows instead (`channels`) with its control loops, and
+ * the analysis service maps them onto the file's columns: the shell holds no second copy of that
+ * mapping.
+ */
 export interface TableData {
 	columns: string[];
 	rows: TableCell[][];
 	x_unit?: string;
 	y_unit?: string;
+	channels?: ChannelRow[];
+	environments?: Record<string, ChannelEnvironment>;
 }
 
 /** A table read from a file, with what the read left out or added. */
@@ -85,7 +101,7 @@ export const pathName = (path: string) => path.split(/[\\/]/).filter(Boolean).po
 
 /** Write a table to `path`, in the form its suffix names; the path written. */
 export async function saveTable(client: TableFileClient, kind: TableKind, tableKind: string | null, data: TableData, path: string): Promise<string> {
-	const params: Record<string, unknown> = { kind, path, columns: data.columns, rows: data.rows };
+	const params: Record<string, unknown> = data.channels ? { kind, path, channels: data.channels, environments: data.environments ?? {} } : { kind, path, columns: data.columns, rows: data.rows };
 	if (tableKind) params.table_kind = tableKind;
 	if (data.x_unit !== undefined) params.x_unit = data.x_unit;
 	if (data.y_unit !== undefined) params.y_unit = data.y_unit;

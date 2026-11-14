@@ -46,8 +46,7 @@ import { CONTROL_TOPICS as T } from '$lib/protocol/types';
 import { isLive, runActions, primaryAction, type ActionId, type ActionState, type RunContext, type SetupStatus } from './actions';
 import { byField, configKey, defaultSetup, errorCount, fromConfig, localErrors, mergeErrors, toConfig, type FieldErrors, type SetupDraft } from './setup';
 import { bindUnbound, bulkEdit, fitToHardware, hardwareKey, hardwareOf, materialize, moveOnto, nextIndex, newRow, rowFindings, sameRows, sizeTable, tableChanges, type Hardware, type RowEdit } from './table';
-import { channelFile, channelRowsFrom, renumbered, type ChannelExtras } from './channelFile';
-import type { TableData, TableFileClient } from '$lib/tables/tableFiles';
+import type { ChannelEnvironment, TableData, TableFileClient } from '$lib/tables/tableFiles';
 import { toRefusal, type Refusal } from './words';
 
 const LEASE_KEY = 'hertzforge.acquire.lease';
@@ -181,16 +180,17 @@ export class AcquireState {
 	tableChange = $state.raw<TableChange | null>(null);
 	/** Where the channel table's files are read and written; null when no analysis service is there. */
 	readonly tableFiles: TableFileClient | null;
-	/** The columns of each channel a file brought that the control table does not edit, by channel number. */
-	tableExtras = $state.raw<ChannelExtras>({});
-	/** The column order of the file last opened, kept for the next save. */
-	tableOrder = $state.raw<string[]>([]);
+	/**
+	 * The control loops (environments) of the file last opened, written back with the table. The
+	 * analysis columns travel in the rows themselves and are held by the control service.
+	 */
+	tableEnvironments = $state.raw<Record<string, ChannelEnvironment>>({});
 	/** The file the table was last opened from or saved to. */
 	tableFile = $state<string | null>(null);
 	/** The hardware the draft was last fitted to (`hardwareKey`); null until the service first says. */
 	private fittedFor: string | null = null;
-	/** The carried columns as they were when this screen last applied the table. */
-	private appliedExtras: { extras: ChannelExtras; order: string[] } = { extras: {}, order: [] };
+	/** The control loops as they were when this screen last applied the table. */
+	private appliedEnvironments: Record<string, ChannelEnvironment> = {};
 
 	// ---- setup ------------------------------------------------------------------------------
 	setup = $state<SetupDraft>(defaultSetup());
@@ -672,12 +672,7 @@ export class AcquireState {
 	}
 
 	removeRow(position: number) {
-		const [gone] = this.rows.splice(position, 1);
-		if (gone && !this.rows.some((r) => r.index === gone.index)) {
-			const kept = { ...this.tableExtras };
-			delete kept[gone.index];
-			this.tableExtras = kept;
-		}
+		this.rows.splice(position, 1);
 	}
 
 	/**
@@ -685,12 +680,7 @@ export class AcquireState {
 	 * Returns how many rows took it and how many could not (an output asked to be a control).
 	 */
 	editRows(positions: number[], edit: RowEdit): { changed: number; skipped: number } {
-		const before = this.sized;
 		const { rows, changed, skipped } = bulkEdit($state.snapshot(this.rows) as ChannelRow[], this.hardware, positions, edit);
-		if (edit.field === 'index' && changed) {
-			const was = before[positions[0]]?.row.index;
-			if (was !== undefined) this.tableExtras = renumbered(this.tableExtras, was, edit.value);
-		}
 		if (changed) this.rows = rows;
 		return { changed, skipped };
 	}
@@ -705,24 +695,24 @@ export class AcquireState {
 		this.rows = moveOnto($state.snapshot(this.rows) as ChannelRow[], this.hardware, position, key);
 	}
 
-	/** The table as a file holds it: every row shown, with the columns each channel's file brought. */
+	/**
+	 * The table as a file is written from it: every row shown, each with every member it carries
+	 * (the analysis columns included), and the control loops the file had. The analysis service
+	 * maps the rows onto the file's columns.
+	 */
 	tableData(): TableData {
-		return channelFile(
-			this.sized.map((s) => s.row),
-			this.tableExtras,
-			this.tableOrder
-		);
+		return { columns: [], rows: [], channels: structuredClone(this.sized.map((s) => $state.snapshot(s.row) as ChannelRow)), environments: this.tableEnvironments };
 	}
 
 	/**
-	 * A table read from a file in place of the draft. Its rows meet the hardware by their physical
-	 * channels; a row on a channel the station does not have is shown missing. Apply checks it.
+	 * A table read from a file in place of the draft: the control rows the analysis service read
+	 * it as. Its rows meet the hardware by their physical channels; a row on a channel the station
+	 * does not have is shown missing. Apply checks it.
 	 */
 	openTable(table: TableData, path: string | null = null) {
-		const { rows, extras, order } = channelRowsFrom(table);
-		this.rows = rows;
-		this.tableExtras = extras;
-		this.tableOrder = order;
+		if (!table.channels) throw new Error('The analysis service sent no channel rows for this file.');
+		this.rows = structuredClone($state.snapshot(table.channels) as ChannelRow[]);
+		this.tableEnvironments = table.environments ?? {};
 		if (path !== null) this.tableFile = path;
 	}
 
@@ -739,20 +729,19 @@ export class AcquireState {
 	discardTable() {
 		if (!this.server) return;
 		this.adoptTable(this.server);
-		this.restoreExtras();
+		this.restoreEnvironments();
 	}
 
 	/** Drop this screen's edits and load the service's table (after it changed underneath). */
 	takeServerTable() {
 		if (!this.server) return;
 		this.adoptTable(this.server);
-		this.restoreExtras();
+		this.restoreEnvironments();
 	}
 
-	/** The carried columns that go with the table this screen last applied, not with a file's edits since dropped. */
-	private restoreExtras() {
-		this.tableExtras = this.appliedExtras.extras;
-		this.tableOrder = this.appliedExtras.order;
+	/** The control loops that go with the table this screen last applied, not with a file since dropped. */
+	private restoreEnvironments() {
+		this.tableEnvironments = this.appliedEnvironments;
 	}
 
 	/** Keep this screen's edits, now based on the service's present revision. The operator has seen what changed. */
@@ -779,7 +768,7 @@ export class AcquireState {
 		this.server = { revision: res.revision, channels: rows, report: res.report };
 		this.tableCheck = res.report;
 		this.tableChange = null;
-		this.appliedExtras = { extras: this.tableExtras, order: this.tableOrder };
+		this.appliedEnvironments = this.tableEnvironments;
 		this.note = { tone: 'pass', text: `Channel table applied (revision ${res.revision}).` };
 		return true;
 	}

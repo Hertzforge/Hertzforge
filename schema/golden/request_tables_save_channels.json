@@ -1,0 +1,127 @@
+{
+ "type": "request",
+ "id": 12,
+ "method": "tables.save",
+ "params": {
+  "kind": "channels",
+  "path": "bench/channels.hforge",
+  "channels": [
+   {
+    "index": 1,
+    "enabled": true,
+    "description": "Row 1",
+    "role": "control",
+    "physical": {
+     "device": "cDAQ1Mod1",
+     "channel": "ai0"
+    },
+    "interface": "iepe",
+    "iepe_bias_v": 24,
+    "units": "g",
+    "sensitivity_mv_per_eu": 100,
+    "range_max": 100,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": 40,
+     "velocity_ips": null,
+     "displacement_mil": null
+    },
+    "node": 101,
+    "direction": "Z+",
+    "channel_type": "acceleration",
+    "analysis_role": "response",
+    "daq_range_v": 5,
+    "sensor_range_v": 4.5,
+    "serial_number": "0042",
+    "make": "Maker",
+    "model": "M-1",
+    "triax_dof": "Z",
+    "expiration": "2027-03-01",
+    "extra": {
+     "cable": "C-12"
+    }
+   },
+   {
+    "index": 2,
+    "enabled": true,
+    "description": "Row 2",
+    "role": "monitor",
+    "physical": null,
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "g",
+    "sensitivity_mv_per_eu": 100,
+    "range_max": 100,
+    "polarity": "negative",
+    "control_group": 0,
+    "abort": {
+     "accel_g": null,
+     "velocity_ips": null,
+     "displacement_mil": null
+    },
+    "node": 102,
+    "direction": "X-",
+    "channel_type": "acceleration",
+    "analysis_role": "monitor",
+    "limit": true,
+    "analysis_tier": "rotating"
+   },
+   {
+    "index": 3,
+    "enabled": true,
+    "description": "Row 3",
+    "role": "drive",
+    "physical": {
+     "device": "cDAQ1Mod2",
+     "channel": "ao0"
+    },
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "V",
+    "sensitivity_mv_per_eu": 1000,
+    "range_max": 10,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": null,
+     "velocity_ips": null,
+     "displacement_mil": null
+    },
+    "node": 3,
+    "channel_type": "voltage",
+    "analysis_role": "reference"
+   }
+  ],
+  "environments": {
+   "Random": {
+    "controls": [
+     1
+    ],
+    "drives": [
+     3
+    ],
+    "response_transformation": null,
+    "reference_transformation": null
+   },
+   "Shaped": {
+    "controls": [
+     1
+    ],
+    "drives": [
+     3
+    ],
+    "response_transformation": [
+     [
+      2.0
+     ]
+    ],
+    "reference_transformation": [
+     [
+      0.5
+     ]
+    ]
+   }
+  }
+ }
+}

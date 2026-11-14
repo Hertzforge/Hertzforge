@@ -129,12 +129,28 @@ def test_the_table_mapping_runs_both_ways():
     rows = rf.random_rows()
     back = run_convert.rows_from_channel_table(run_convert.channel_table_from_rows(rows))
     for given, read in zip(rows, back, strict=True):
-        assert {k: v for k, v in read.items() if k != 'extra'} == {
+        assert {k: v for k, v in read.items() if k not in run_convert.ANALYSIS_MEMBERS} == {
             k: v for k, v in given.items() if k != 'extra'}
-    assert back[0]['extra'] == {'node': '101', 'direction': 'Z+', 'serial_number': '00417',
-                                'model': 'A100', 'expiration': '2027-01-31'}
+    # analysis columns given under `extra` by the table's own names come back
+    # as the row's own members
+    assert {k: back[0][k] for k in ('node', 'direction', 'serial_number', 'model',
+                                    'expiration')} == {
+        'node': 101, 'direction': 'Z+', 'serial_number': '00417', 'model': 'A100',
+        'expiration': '2027-01-31'}
+    # and one the table has no column for is kept under `extra`, not dropped
+    assert back[0]['extra'] == {'mount': 'stud'}
     # a channel with no node carries its channel number as one
-    assert back[1]['extra'] == {'node': '2'}
+    assert back[1]['node'] == 2
+
+
+def test_every_optional_member_of_a_row_runs_both_ways():
+    import json
+    from pathlib import Path
+
+    golden = Path(__file__).resolve().parents[1] / 'schema' / 'golden'
+    rows = json.loads((golden / 'request_tables_save_channels.json').read_text())['params'][
+        'channels']
+    assert run_convert.rows_from_channel_table(run_convert.channel_table_from_rows(rows)) == rows
 
 
 def test_a_monitor_is_never_made_a_reference():

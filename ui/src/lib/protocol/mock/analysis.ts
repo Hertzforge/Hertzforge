@@ -17,6 +17,9 @@ interface StoredTable {
 	rows: Cell[][];
 	x_unit?: string;
 	y_unit?: string;
+	/** A channel table saved as the control service's rows, and its control loops. */
+	channels?: unknown[];
+	environments?: unknown;
 }
 
 const SUFFIXES = ['.hforge', '.csv', '.tsv', '.txt', '.xlsx'];
@@ -61,6 +64,11 @@ export function createAnalysisServer(): MockServer {
 				const path = tablePath(params.path);
 				const kind = String(params.kind);
 				if (kind !== 'channels' && kind !== 'breakpoints') throw new MockError('bad_request', 'tables.save "kind" is one of channels, breakpoints');
+				if (kind === 'channels' && Array.isArray(params.channels)) {
+					// The control rows as given: the real service maps them onto the file's columns and back.
+					files.set(path, { kind, table_kind: null, columns: [], rows: [], channels: structuredClone(params.channels), environments: structuredClone(params.environments ?? {}) });
+					return { path };
+				}
 				const columns = params.columns as string[];
 				const rows = params.rows as Cell[][];
 				if (!Array.isArray(columns) || !Array.isArray(rows) || rows.some((r) => !Array.isArray(r) || r.length !== columns.length)) {
