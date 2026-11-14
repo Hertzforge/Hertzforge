@@ -146,6 +146,7 @@
 				onMarkerDrag={dragCursor}
 				onPick={(x) => fit.move(x)}
 				onRange={(low, high) => (fit.range = [low, high])}
+				rangeOn={(series) => series.role === 'measured' && series.follows === undefined}
 			/>
 		</div>
 

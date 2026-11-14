@@ -75,6 +75,12 @@
 		 * `scope` (Brandon, 2026-11-14: it was the bar's Log f, a second control for the stage's).
 		 */
 		scaleToggle?: boolean;
+		/**
+		 * The series the y axis is ranged on, by index into `view.series`; every series shown when
+		 * absent. The fit ranges on the measured CMIFs, so a synthesis or a pending mode moving
+		 * under the cursor does not rescale the plot (Brandon, 2026-11-14).
+		 */
+		rangeOn?: (series: Series, index: number) => boolean;
 		/** Each series' look in place of its role's, by index into `view.series`. */
 		styles?: (SeriesOverride | undefined)[];
 		/** A legend entry pressed, by series index; with it the entries are buttons. */
@@ -129,6 +135,7 @@
 		readout = true,
 		copyButton = true,
 		scaleToggle = false,
+		rangeOn,
 		styles = [],
 		onlegend,
 		xFixed = null,
@@ -237,7 +244,7 @@
 	 * choosing another group keeps the axes where they were.
 	 */
 	function shownCols(cols: ArrayLike<number | null>[]): ArrayLike<number | null>[] {
-		return cols.filter((_, i) => styled[i]?.kept !== false);
+		return cols.filter((_, i) => styled[i]?.kept !== false && (!rangeOn || rangeOn(view.series[i], i)));
 	}
 
 	function finiteExtent(values: ArrayLike<number | null>[], positive: boolean): [number, number] | null {
