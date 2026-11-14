@@ -5,7 +5,7 @@
   "recordings": [
    {
     "name": "rec_0001",
-    "folder": "recordings/rec_0001",
+    "folder": "streams/rec_0001",
     "trigger": "level",
     "requested_fs_hz": 12800,
     "fs_hz": 12800,
@@ -31,7 +31,7 @@
    },
    {
     "name": "rec_0002",
-    "folder": "recordings/rec_0002",
+    "folder": "streams/rec_0002",
     "trigger": "level",
     "requested_fs_hz": 12800,
     "fs_hz": 12800,

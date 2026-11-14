@@ -5191,22 +5191,25 @@ def _recorder_state(**over) -> dict:
         'mode': 'level', 't_s': None, 'station_frames': None,
         'trigger': _recorder_trigger(False, 0, 0, None, 0, 5), 'recording': None,
         'recordings': 0, 'marks': 0, 'disk': _recorder_disk(RECORDER_FREE, 519045),
-        'health': None, 'stop': None, 'end': None,
+        'health': None, 'stop': None, 'end': None, 'record': None,
     }
     s.update(over)
     return s
 
 
+#: the run's record, as the state names it from start on
+RECORDER_RECORD = {'folder': '/home/operator/Hertzforge_Data/recorder', 'problem': None}
+
 RECORDER_STARTED = _recorder_state(
     state='running', phase='monitoring', grid=RECORDER_GRID_ACTUAL, clock='shared', t_s=0.04,
-    station_frames=512, health=_recorder_health(1, 1.2, 1.2, None))
+    station_frames=512, health=_recorder_health(1, 1.2, 1.2, None), record=RECORDER_RECORD)
 
 RECORDER_RUNNING = _recorder_state(
     run_id='recorder-0002', state='running', phase='recording', grid=RECORDER_GRID_ACTUAL,
     clock='shared', t_s=11.36, station_frames=145408,
     trigger=_recorder_trigger(False, 0, 2, 134422, 1, 3), recording=RECORDER_RECORDING,
     recordings=1, disk=_recorder_disk(107373363200, 519041),
-    health=_recorder_health(284, 1.2, 2.8, 3.9))
+    health=_recorder_health(284, 1.2, 2.8, 3.9), record=RECORDER_RECORD)
 
 RECORDER_ROWS = [
     {'index': 1, 'description': 'Table', 'role': 'control', 'unit': 'g', 'rms': 0.0221,
@@ -5321,7 +5324,7 @@ def _recorder_data_build() -> tuple[dict, dict]:
 
 
 def _recorder_listed(name, first, trigger_frame, frames, complete):
-    return {'name': name, 'folder': f'recordings/{name}', 'trigger': 'level',
+    return {'name': name, 'folder': f'streams/{name}', 'trigger': 'level',
             'requested_fs_hz': 12800, 'fs_hz': 12800, 'group_delay_frames': 38.44,
             'rows': [1, 2, 3, 4], 'first_station_frame': first,
             'trigger_station_frame': trigger_frame, 'pre_frames': 6400,
@@ -5414,137 +5417,6 @@ RECORDER_TEXT_GOLDENS = {
                                   'record it.'}]}},
     },
 }
-
-# --- the golden run folder: one manual recording, one second of two rows at 1024 Hz ---
-#
-# Row 1 is a triangle of period 64 frames from -1 to 1, row 2 a ramp over each 1024
-# frames from -0.5, both functions of the STATION frame and exact in binary, so a reader
-# can check that every file frame sits at its stated station frame.
-
-RECORDER_RUN_FS = 1024.0
-RECORDER_RUN_FIRST = 2048
-RECORDER_RUN_PRE = 256
-RECORDER_RUN_FRAMES = 1024
-RECORDER_RUN_TABLE_ROWS = [(1, 'Triangle', 'Control'), (2, 'Ramp', 'Monitor')]
-
-
-def _recorder_run_row(n: int) -> list:
-    tri = 1.0 - abs((n % 64) - 32) / 16.0
-    ramp = (n % 1024) / 1024.0 - 0.5
-    return [tri, ramp]
-
-
-def _recorder_channel(index, description, role):
-    return {'index': index, 'enabled': True, 'save': True, 'stream': False,
-            'interface': 'SingleEnded', 'iepe_bias_v': None, 'units': 'AccelG',
-            'sensitivity_mv_per_eu': 1000.0, 'range_max': 5.0, 'polarity': 'Positive',
-            'description': description, 'role': role, 'control_group': None,
-            'abort': {'accel_g': None, 'velocity_ips': None, 'displacement_mil': None},
-            'physical': None, 'analysis_tier': 'Full'}
-
-
-def _recorder_stats(values: list) -> dict:
-    n = len(values)
-    mean = sum(values) / n
-    rms = (sum(v * v for v in values) / n) ** 0.5
-    peak = max(abs(v) for v in values)
-    var = sum((v - mean) ** 2 for v in values) / n
-    kurt = (sum((v - mean) ** 4 for v in values) / n) / (var * var) if var > 0 else 0.0
-    return {'mean': round(mean, 6), 'rms': round(rms, 6), 'peak': round(peak, 6),
-            'crest': round(peak / rms, 6) if rms > 0 else 0.0, 'kurtosis': round(kurt, 6)}
-
-
-def write_recorder_run() -> None:
-    root = HERE / 'recorder_run'
-    rec = root / 'recordings' / 'rec_0001'
-    rec.mkdir(parents=True, exist_ok=True)
-    frames = [_recorder_run_row(RECORDER_RUN_FIRST + i) for i in range(RECORDER_RUN_FRAMES)]
-    flat = [v for f in frames for v in f]
-    (rec / 'telemetry.f32').write_bytes(struct.pack(f'<{len(flat)}f', *flat))
-    table = {'schema_version': 2,
-             'channels': [_recorder_channel(*r) for r in RECORDER_RUN_TABLE_ROWS],
-             'reference': None}
-    capture = {
-        'config': {'n_channels': 2, 'sample_rate_hz': RECORDER_RUN_FS, 'decimation': 1,
-                   'ring_capacity': 512},
-        'channel_table': table,
-        'start_unix_secs': 1794240000,
-        'run_config_json': '',
-        'chunks_written': 1, 'chunks_dropped': 0, 'frames_written': RECORDER_RUN_FRAMES,
-        'complete': True,
-        'layout': {'interleave': 'frame_interleaved', 'block_frames': RECORDER_RUN_FRAMES,
-                   'channel_order': [1, 2],
-                   'channel_order_source': 'channel_table_enabled_inputs'},
-        'flushes': 1, 'free_space_at_start_bytes': RECORDER_FREE,
-        'free_space_floor_bytes': RECORDER_FLOOR, 'fault': None,
-    }
-    (rec / 'capture.json').write_text(json.dumps(capture, indent=2) + '\n', encoding='utf-8')
-    sidecar = {
-        'complete': True, 'name': 'rec_0001', 'trigger': 'manual',
-        'requested_fs_hz': RECORDER_RUN_FS, 'fs_hz': RECORDER_RUN_FS,
-        'group_delay_frames': 0.0, 'rows': [1, 2], 'units': ['g', 'g'],
-        'first_station_frame': RECORDER_RUN_FIRST,
-        'trigger_station_frame': RECORDER_RUN_FIRST + RECORDER_RUN_PRE,
-        'pre_frames': RECORDER_RUN_PRE, 'pre_frames_asked': RECORDER_RUN_PRE,
-        'frames': RECORDER_RUN_FRAMES, 'gaps': [], 'marks': [], 'fault': None,
-    }
-    (rec / 'recorder.json').write_text(json.dumps(sidecar, indent=2) + '\n', encoding='utf-8')
-
-    config = {'title': 'Golden recording', 'acquisition': {'fs_hz': 1024},
-              'trigger': {'mode': 'manual', 'pre_s': 0.25},
-              'analysis': {'block': 256}, 'capture': {'run_name': 'recorder_run'}}
-    station_frames = 3072
-    run = {
-        'run_id': 'recorder-0004', 'title': config['title'], 'source': 'SIM',
-        'station': {'kind': 'sim', 'class': 'sim', 'devices': []}, 'config': config,
-        'requested_fs_hz': 1024, 'fs_hz': 1024, 'group_delay_frames': 0,
-        'outputs': 'none',
-        'rows': [{'index': 1, 'description': 'Triangle', 'role': 'control', 'unit': 'g',
-                  'range_max': 5},
-                 {'index': 2, 'description': 'Ramp', 'role': 'monitor', 'unit': 'g',
-                  'range_max': 5}],
-        'derived': {
-            'grid': {'fs_hz': 1024, 'block_frames': 64, 'batch_frames': 128,
-                     'group_delay_frames': 0, 'actual': True},
-            'outputs': 'none', 'rows': [1, 2],
-            'analysis': {'fs_hz': 1024, 'df_hz': 4, 'lines': 100, 'span_hz': 400,
-                         'block_s': 0.25, 'overlap_pct': 50, 'averages_s': 1.125},
-            'trigger': {'pre_frames': 256, 'record_frames': None, 'holdoff_frames': 0},
-            'disk': {'bytes_per_s': 8192, 'floor_bytes': RECORDER_FLOOR,
-                     'free_bytes': RECORDER_FREE,
-                     'seconds_above_floor': (RECORDER_FREE - RECORDER_FLOOR) // 8192}},
-        'overload': {'fraction': 0.9,
-                     'definition': "A row's overload indicator latches the first time a "
-                                   "sample's magnitude reaches 0.9 of the row's range_max, "
-                                   "and holds for the run."},
-    }
-    (root / 'run.json').write_text(json.dumps(run, indent=2) + '\n', encoding='utf-8')
-    log = [
-        (0, 'station', 'the station programmed 1024 Hz (asked 1024 Hz)'),
-        (1, 'note', 'records in recorder_run'),
-        (2, 'note', 'outputs: none'),
-        (3, 'state', 'running, monitoring'),
-        (4, 'recording', 'rec_0001 began at station frame 2304 (pre-window 256 frames)'),
-        (5, 'recording', 'rec_0001 saved: 1024 frames, 1.000 s, no gaps'),
-        (6, 'state', 'stop began: operator'),
-        (7, 'state', 'ended operator_stop: Stopped by golden: every recording is saved.'),
-    ]
-    (root / 'log.jsonl').write_text(''.join(
-        json.dumps({'seq': seq, 'at_unix': 1794240000.0 + seq, 'kind': kind, 'text': text},
-                   separators=(',', ':')) + '\n' for seq, kind, text in log), encoding='utf-8')
-    (root / 'marks.jsonl').write_text('', encoding='utf-8')
-    whole = [_recorder_run_row(n) for n in range(station_frames)]
-    end = {
-        'run_id': 'recorder-0004',
-        'end': {'outcome': 'operator_stop',
-                'message': 'Stopped by golden: every recording is saved.',
-                'at_s': station_frames / RECORDER_RUN_FS, 'recordings': 1},
-        'station_frames': station_frames,
-        'rows': [dict({'index': i + 1}, **_recorder_stats([f[i] for f in whole]))
-                 for i in range(2)],
-    }
-    (root / 'end.json').write_text(json.dumps(end, indent=2) + '\n', encoding='utf-8')
-
 
 # --- MIMO Shock (PROTOCOL.md, "MIMO Shock") ---
 #
@@ -6117,10 +5989,10 @@ def main() -> None:
     write('event_mimo_shock_pulse_spectrum', *_mshock_pulse_spectrum_build())
     write('event_mimo_shock_data', *_mshock_data_build())
 
-    # Recorder: the live frame, a subscription's data and the golden run folder
+    # Recorder: the live frame and a subscription's data (its golden run folder,
+    # schema/golden/runs/recorder/, is written by the control service's own test)
     write('event_recorder_live', *_recorder_live_build())
     write('event_recorder_data', *_recorder_data_build())
-    write_recorder_run()
 
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,

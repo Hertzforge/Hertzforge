@@ -114,6 +114,11 @@ export interface RecorderConfig {
 	capture?: RecorderCapture;
 	/** Random's fields; `label` is the key when absent. */
 	metadata?: { key: string; label?: string; value: string }[];
+	/** The operator's words for the run's record, as Random's. */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	specification?: { document?: string; clause?: string } | null;
 }
 
 export interface RecorderConfigureParams {
@@ -356,10 +361,19 @@ export interface RecorderState {
 	health: RecorderHealth | null;
 	stop: RecorderStopCause | null;
 	end: RecorderEnd | null;
+	/** The run's record from start on: its folder, and the latest problem writing it. */
+	record: RecorderRecordRef | null;
+}
+
+/** Where a Recorder run's record is (PROTOCOL.md, "Recorder Run State"). */
+export interface RecorderRecordRef {
+	folder: string;
+	problem: string | null;
 }
 
 /** The Recorder's log kinds: Random's and its own. */
-export type RecorderLogKind = LogKind | 'recording' | 'mark';
+/** `record`: a problem writing the run folder's own files. */
+export type RecorderLogKind = LogKind | 'recording' | 'mark' | 'record';
 
 export type RecorderLogEntry = Omit<LogEntry, 'kind'> & { kind: RecorderLogKind };
 
@@ -445,8 +459,10 @@ export interface RecorderMarksResult {
 	next: number;
 }
 
-/** A recording's `recorder.json` (PROTOCOL.md, "Recorder Records"). */
-export interface RecorderSidecar {
+/** A recording's `stream.json` (PROTOCOL.md, "Recorder Records"). */
+export interface RecorderStream {
+	kind: 'recording';
+	channels: { index: number; unit: string; description?: string }[];
 	complete: boolean;
 	name: string;
 	trigger: RecorderTriggerMode;

@@ -170,6 +170,11 @@ impl<V> Shared<V> {
     }
 
     pub fn add_log(&self, kind: &'static str, text: impl Into<String>) {
+        self.add_log_seq(kind, text);
+    }
+
+    /// [`Shared::add_log`], answering the entry's place in the log.
+    pub fn add_log_seq(&self, kind: &'static str, text: impl Into<String>) -> u64 {
         let mut log = lock(&self.log);
         let seq = log.len() as u64;
         log.push(LogEntry {
@@ -178,6 +183,7 @@ impl<V> Shared<V> {
             kind,
             text: text.into(),
         });
+        seq
     }
 
     pub fn log_since(&self, since: u64) -> (Vec<LogEntry>, u64) {

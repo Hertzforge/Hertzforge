@@ -288,7 +288,13 @@ pub fn begin(f: &ArmFacts<'_>, root: PathBuf, links: (TapLink, TapLink), log: Ve
     }
     manifest.insert(
         "station".into(),
-        rrec::station_value(f.plan, f.class, f.provenance, f.devices, f.caps),
+        rrec::station_member(
+            matches!(f.plan, StationPlan::Sim { .. }),
+            f.class,
+            f.provenance,
+            f.devices,
+            f.caps,
+        ),
     );
     manifest.insert(
         "grid".into(),

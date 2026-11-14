@@ -5,8 +5,8 @@ control service while the run goes, that needs no other file and no running
 service to be read. The analysis side converts it into an ordinary project file
 (`hertzforge convert-run FOLDER`, or open the folder or its `run.json`), so a
 finished run reaches every analysis tool with its channel table, its setup, its
-log and its measurements. Today the Random and Sine modules write one for every
-run; the other control modules do not yet.
+log and its measurements. Today the Random and Sine modules and the Recorder
+write one for every run; the other control modules do not yet.
 
 The exact form is the reader's, `hertzforge.io.run_folder`; the conversion is
 `hertzforge.io.run_convert`, described in `docs/hforge-format.md` ("Run Folders
@@ -18,8 +18,10 @@ written by.
 Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
 `Hertzforge_Data` in the home folder. A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_random_<run id>` and a Sine run's
-`<YYYYMMDD-HHMMSS>_sine_<run id>`, the time it armed in UTC. The run's state
-(`random.state`, `sine.state`) names the folder from arm on (`record.folder`).
+`<YYYYMMDD-HHMMSS>_sine_<run id>`, the time it armed in UTC. A Recorder run's
+folder is the plain name its setup gives (`capture.run_name`). The run's state
+names the folder from arm on (`random.state`, `sine.state` and
+`recorder.state`, `record.folder`).
 
 ## Layout
 
@@ -38,7 +40,8 @@ Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
 ### `run.json`
 
 The manifest: `schema` (`hertzforge-run/1`), `test`, `run_uid` (unique across
-restarts and machines: the time it armed and eight hexadecimal digits),
+restarts and machines: the time it armed, or a Recorder run started, and eight
+hexadecimal digits),
 `run_id` (the service's own id, which repeats after a restart), `title`,
 `operator`, `article`, `notes`, `specification` (`document`, `clause`, when
 given), `source` (`SIM` or `HARDWARE`, from the station's class, never absent),
@@ -51,6 +54,13 @@ programmed, the FFT length, averages, line spacing and lines), `build`
 `streams` and `results` (what the folder holds, each `name` and `kind`, a
 stream also its channels), `recording` (`streams` `on` or `off`, and `why` when
 off) and `complete`, false until the run has ended and `end.json` is written.
+
+A Recorder run's manifest has no `armed` (its `start` is when acquisition
+began), adds `metadata` (the fields its setup names, each `key`, `label` and
+`value`) and, on the simulator, `sim.source`, the signal its inputs carry in
+words. Its `grid` is the rate asked and programmed, the station's block and
+batch, the input group delay in frames, and the analysis rate, line spacing and
+lines. Its `streams` lists each recording as it begins.
 
 The station frame counts the input frames the station has delivered since it
 started; every stream and log entry is placed by it.
@@ -88,6 +98,12 @@ an operator took and who took it, what a `record` entry could not write. Every
 state change, level change, alarm, trip, overload, override and operator action
 is an entry.
 
+In a Recorder run's log, `frame` is the station frame when the run's thread
+passed the entry to the record (it does so ten times a second), not when the
+entry was made, and null for the entries made before the first batch; a mark's
+entry (`mark` or `overload`) has the mark's own station frame and the mark as its
+`data`.
+
 ### `streams/<name>/`
 
 `telemetry.f32`: little-endian float32, frame-interleaved, in engineering
@@ -102,6 +118,20 @@ run adds `pipeline_lag_frames`, the drive-to-response lag its system
 identification measured. A gap is never padded: the samples after it follow on.
 A golden folder whose streams were cut to their first frames says so with
 `cut_from_frames`, the frames the run recorded (`frames` is what the file holds).
+
+A stream of kind `recording` is one Recorder recording, `streams/rec_NNNN/`,
+numbered in the order they began. Its `stream.json` adds the recording's own
+facts: its `name` and `trigger` (`start`, `manual` or `level`),
+`requested_fs_hz`, `group_delay_frames`, `rows` and `units` (the channels'
+indexes and units again, in slot order), `trigger_station_frame` (time zero,
+the file frame `pre_frames`), `pre_frames` and `pre_frames_asked` (the
+pre-window held and asked), `marks` (each mark that fell inside it, as
+`recorder.marks` gives them), `t0_convention`, `n_channels`, `config` (the
+acquisition and analysis selection it was made at) and, once it is finalized,
+`writer` (the capture writer's ring, chunks written and dropped, flushes, and
+the free space at its start and the floor it kept). Its `frames` is 0 until it
+is finalized; the file is the authority on its length. Beside it,
+`capture.json` is the capture writer's own record of the same recording.
 
 ### `results/`
 
@@ -121,7 +151,10 @@ NaN, and each record's line says how many it holds (`points`, `calls`).
 `run_uid`, `end` exactly as the run's state reports it (`outcome`, `message`,
 `at_s`, `level_db`, `trip`), `at_unix`, `station_frames`, each stream's
 `frames`, `drops`, `gaps` and `fault`, and a closing summary. Written once;
-`run.json` is rewritten with `complete: true` after it.
+`run.json` is rewritten with `complete: true` after it. A Recorder run's adds
+`run_id`, `rows` (each recorded row's `index`, `mean`, `rms`, `peak`, `crest`
+and `kurtosis` over the whole run) and each recording's `complete`; its
+`station_frames` are the frames acquired.
 
 ## The Rules
 
@@ -141,6 +174,13 @@ NaN, and each record's line says how many it holds (`points`, `calls`).
   no buffer is free, the block is dropped, counted, and kept as a gap where it
   happened. Nothing on the control loop's thread touches a file, takes a lock a
   slow disk can hold, or waits.
+- **The Recorder's recordings are the exception that proves it.** The run
+  folder's own files are written by the record's writer thread as above; the
+  recordings under `streams/` are written by the Recorder's own record thread,
+  behind a queue of 2 s of frames, and the thread that reads the station hands
+  each batch to it without waiting. Where a control run drops a block and goes
+  on, the Recorder ends its run (`docs/recorder.md`, "What Ends a Run"): the
+  recording is what it is for.
 - **Self-describing.** Every array has a unit, every stream names its channels
   by table index, and SIM or HARDWARE is stated, never guessed.
 - **It grows by optional members.** A reader ignores members it does not know,
@@ -163,6 +203,15 @@ NaN, and each record's line says how many it holds (`points`, `calls`).
   way. The run goes on: recording never stops, stalls or aborts a control run.
 - **The end.** When `end.json` cannot be written, the folder keeps
   `complete: false`, and the reader says the run did not end cleanly.
+- **A Recorder run** refuses its start under its own free-space floor
+  (`not_enough_space`, before anything is made) and refuses it `arm_refused`,
+  naming the path and the reason, when the folder, `run.json`, `table.json`,
+  `setup.json` or `streams/` cannot be made. While it records, a recording
+  that cannot be written, the free space falling under the floor, or a disk so
+  far behind that a batch cannot be queued ends the run (`write_failed` or
+  `write_behind`), the recording finalized with what reached the disk and its
+  `fault` or its gap stated. A log line the record cannot write is a `record`
+  entry and the state's `record.problem`, and the run goes on.
 
 ## What a Random Run Saves
 
@@ -240,3 +289,32 @@ times, build fields and each law call's measured duration normalized, and its
 streams cut to their first 1024 frames (`cut_from_frames`): the identification's
 burst alone is 131 072 frames;
 `scripts/make_golden_runs.sh` rewrites it.
+
+## What a Recorder Run Saves
+
+From start: `run.json`, `table.json` (every row, enabled or not), `setup.json`
+(`config` as accepted; `resolved`, the acquisition at the programmed rate, the
+recorded rows with their ranges, the outputs (none), the trigger with its
+hysteresis and its frames, the analysis and the capture with its floor;
+`derived` at the programmed rate; and `overload`, the overload indicator's
+fraction and definition) and `log.jsonl`, and these, each checked against the
+golden run folder (`schema/golden/runs/recorder/`) by
+`tests/test_run_folder_golden_recorder.py`:
+
+| File | What |
+|---|---|
+| `streams/rec_NNNN` | One recording of every recorded row, in table order, at the programmed rate (`kind` `recording`): `telemetry.f32`, `stream.json` and `capture.json` |
+| `end.json` | The end, as the run's state reports it, each row's statistics over the run, and each recording's frames, gaps and fault |
+
+A Recorder run has no law and no results: its analysis is live only. Monitoring
+saves no samples, so a run that made no recording has no `streams/` entries. A
+recording's pre-window is its first `pre_frames` frames, before its trigger, and
+converts to negative time.
+
+The golden folder is written by `cargo test -p sds-control --test
+recorder_golden_run` from a short level-triggered run on the simulator, its wall
+times, build fields and what depends on when the stop arrived (the frames
+acquired, the rows' statistics) normalized; `scripts/make_golden_runs.sh`
+rewrites it. It holds no gap: a gap needs a disk that falls behind, which a test
+cannot make the same every time, so gaps are tested on the Recorder's writer and
+on the reader.

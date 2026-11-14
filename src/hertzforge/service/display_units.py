@@ -254,7 +254,7 @@ def lengths_in_words(text: str, name: str) -> str:
 
 
 def say_lengths(views: list[dict], name: str) -> None:
-    """The lengths in a reading's words and in a solids table's cells, in the system `name`."""
+    """The lengths in a reading's words and in a table's length cells, in the system `name`."""
     for view in views:
         if view.get('view') == 'reading':
             for row in view['rows']:
@@ -262,7 +262,7 @@ def say_lengths(views: list[dict], name: str) -> None:
                     row['value'] = lengths_in_words(row['value'], name)
         elif view.get('view') == 'table':
             spoken = [k for k, heading in enumerate(view['columns'])
-                      if heading in ('Dimensions', 'Center', 'Held')]
+                      if heading == 'Held']
             for row in view['rows']:
                 for k in spoken:
                     row[k] = lengths_in_words(row[k], name)

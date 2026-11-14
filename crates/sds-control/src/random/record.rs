@@ -166,14 +166,19 @@ pub fn start_json(unix: f64, utc_offset_s: Option<i64>, station_frame: u64) -> V
 }
 
 fn station_json(f: &ArmFacts<'_>) -> Value {
-    station_value(f.plan, f.class, f.provenance, f.devices, f.caps)
+    station_member(
+        matches!(f.plan, StationPlan::Sim { .. }),
+        f.class,
+        f.provenance,
+        f.devices,
+        f.caps,
+    )
 }
 
-/// The manifest's `station`: its kind and class, its label and backend, each
-/// device with its model and serial number, and the clock. Any module's record
-/// writes it this way.
-pub fn station_value(
-    plan: &StationPlan,
+/// The manifest's `station`: its kind and class, the station's label and backend,
+/// every device with its model and serial number, and its clock.
+pub fn station_member(
+    sim: bool,
     class: StationClass,
     provenance: &hertzforge_station::ProvenanceBasis,
     devices: &[DiscoveredDevice],
@@ -197,7 +202,7 @@ pub fn station_value(
         _ => "unknown",
     };
     json!({
-        "kind": if matches!(plan, StationPlan::Sim { .. }) { "sim" } else { "ni" },
+        "kind": if sim { "sim" } else { "ni" },
         "class": class_name(class),
         "label": provenance.station_label,
         "backend": provenance.backend_kind,

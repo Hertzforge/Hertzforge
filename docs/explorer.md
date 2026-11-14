@@ -194,7 +194,8 @@ shows the run and keeps Stop and Abort, and the steering stays on the main scree
 
 ## What the Run Records
 
-Each run writes its folder (the run folder's name, under the program's local data folder): the
+Each run writes its folder (the run folder's name, `explorer` unless named, under the program's
+local data folder; when that name is taken, the run gets the next free one, `explorer-2`, ...): the
 configuration with the station and the rates asked and adopted, every steering verb the run took
 with its station time, the frame it took effect at, what was asked and what was adopted, the survey
 line at the end, and how the run ended. No samples are recorded.

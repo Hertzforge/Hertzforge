@@ -143,7 +143,20 @@ On the manual ladder, a **train** fires a count of pulses at the present level, 
 between pulses apart (its first pulse too, from the pulse before it), and a **gunfire burst** fires
 rounds at a rate. Each fires the drive in force,
 with no law call inside it, and every pulse is judged. The capture can start when the run arms;
-fields kept with the run (a run number, an operator) are listed here.
+fields kept with the run (a run number, an operator) are listed here. With it on, the run folder
+goes under the program's local data folder with the run name given (`classical_shock` unless
+named); when that name is taken, the run gets the next free one (`classical_shock-2`, ...). It
+holds:
+
+- the control channel's record of each pulse, one after another at the station rate, with the
+  channel table and the run's settings beside it. Only the control channel is recorded; the other
+  inputs and the drive are not.
+- the control law's record (`law.json`) and every call made to it (`law_pulses.bin` and
+  `law_pulses.jsonl`): the response and drive it was given, the drive it returned, and the verdict
+  on the pulse before the call. A pulse's verdict is written with the call that follows it, so the
+  last pulse's verdict is not in these records.
+
+With capture off, nothing is written to disk.
 
 ## The Run
 

@@ -137,10 +137,14 @@ describe('the Recorder store', () => {
 		expect(recorder.status?.trigger).toBeNull();
 		await until(() => recorder.now?.phase === 'monitoring' && recorder.recordings.length === 1 && recorder.recordings[0].complete);
 		const r = recorder.recordings[0];
-		expect([r.frames, r.seconds, r.bytes, r.complete, r.gap_free, r.folder]).toEqual([25600, 2, 409600, true, true, 'recordings/rec_0001']);
+		expect([r.frames, r.seconds, r.bytes, r.complete, r.gap_free, r.folder]).toEqual([25600, 2, 409600, true, true, 'streams/rec_0001']);
 		expect(recorderCardStatus(recorder.now, recorder.cardSetup).text).toBe('Monitoring: nothing is being saved');
 		await until(() => !!recorder.folder);
 		expect(recorder.folder).toMatch(/Hertzforge_Data\/recorder$/);
+		// the folder is the state's, not a log line's: a line naming another changes nothing
+		expect(recorder.folder).toBe(recorder.status?.record?.folder);
+		recorder.log = [{ seq: 9999, at_unix: 0, kind: 'note', text: 'records in /elsewhere' }, ...recorder.log];
+		expect(recorder.folder).toBe(recorder.status?.record?.folder);
 		expect(recorder.log.map((e) => e.text)).toEqual(expect.arrayContaining(['the station programmed 12800 Hz (asked 12800 Hz)', 'outputs: none; drive row 2 not opened', 'rec_0001 began at station frame 0 (pre-window 0 frames)', 'rec_0001 saved: 25600 frames, 2.000 s, no gaps']));
 		await recorder.stop();
 		await until(() => recorder.status?.state === 'finished');

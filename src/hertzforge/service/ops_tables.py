@@ -145,14 +145,17 @@ def add_matches(project: Any, params: dict[str, Any]) -> list[dict]:
 def delete_matches(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.delete_matches`: take rows out of a Matched Modes object
     (`MatchedModes.delete_matches`), numbered from 1 as its table shows
-    them, '2, 4-5'."""
+    them, '2, 4-5'. Every row deletes the object, which cannot be empty
+    (Brandon, 2026-11-13)."""
     name = params['matched']
     matched = project[name]
     if not params['rows'].strip():
         raise refused('name the rows to delete, such as 2, 4-5')
     rows = chosen_records(params['rows'], matched.num_matches)
     if len(rows) == matched.num_matches:
-        raise refused('that is every row: delete the object instead')
+        project.remove(name)
+        return [v.reading(f'Deleted {name}', [
+            v.row('Deleted', f'{name}, with its last row', None, 'info')])]
     matched.delete_matches(rows)
     return [_table(project, name)]
 
@@ -203,7 +206,7 @@ OPERATIONS = (
     Operation(
         id='project.delete_matches', title='Delete Matches', workspace='modal',
         summary='Take rows out of a set of matched modes, numbered as its table shows them.',
-        params=(MATCHED, ROWS), outputs=('table',), run=delete_matches, edits=True),
+        params=(MATCHED, ROWS), outputs=('table', 'reading'), run=delete_matches, edits=True),
     Operation(
         id='project.shape_values', title='Shape Values', workspace='modal',
         summary='A shape set\'s values at a choice of DOFs: the shapes, or the response or '

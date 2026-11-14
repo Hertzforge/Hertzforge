@@ -2,17 +2,17 @@
 //! configuration checks to the golden derived values on the NI station at 12 800 Hz, a
 //! configuration with errors is refused as the golden error, the subscription parses to
 //! the golden result, the states are the view builders' own output, the live and data
-//! frames are the golden bytes, and the core's writer writes the golden recording's
-//! samples under the golden record's names.
+//! frames are the golden bytes. The golden run folder, `schema/golden/runs/recorder/`,
+//! has its own test (`recorder_golden_run.rs`).
 
 use hertzforge_channel_table::{ChannelRole, ChannelTable, Units};
-use hertzforge_recorder::store::{RecordStore, RecordingSpec, WriterStore};
-use hertzforge_recorder::{AcquisitionConfig, StationFacts, TriggerEvent};
 use sds_control::codec::{self, Arrays};
 use sds_control::explorer::view::StationRef;
 use sds_control::recorder::config::{self, CheckContext, RecorderStation};
 use sds_control::recorder::subscribe::{self, DataContext, FrfData, RowSpectrum};
-use sds_control::recorder::view::{self, Disk, Health, RecorderView, Recording, State, Trigger};
+use sds_control::recorder::view::{
+    self, Disk, Health, RecordRef, RecorderView, Recording, State, Trigger,
+};
 use sds_control::{protocol, table};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -191,6 +191,14 @@ fn health(batches: u64, last: f64, worst: f64, gap: Option<f64>) -> Health {
     }
 }
 
+/// The run's record, as the state names it from start on.
+fn record() -> RecordRef {
+    RecordRef {
+        folder: "/home/operator/Hertzforge_Data/recorder".into(),
+        problem: None,
+    }
+}
+
 fn running() -> RecorderView {
     let mut v = configured();
     v.run_id = "recorder-0002".into();
@@ -232,6 +240,7 @@ fn running() -> RecorderView {
         fault: None,
     });
     v.health = Some(health(284, 1.2, 2.8, Some(3.9)));
+    v.record = Some(record());
     let rows = [(0.0221, 0.5), (0.1414, 0.2), (0.0707, 0.1), (0.1061, 0.15)];
     for (r, (rms, peak)) in v.live_rows.iter_mut().zip(rows) {
         r.rms = Some(rms);
@@ -255,6 +264,7 @@ fn recorder_the_configured_started_and_running_states_are_the_golden_ones() {
     started.t_s = Some(0.04);
     started.station_frames = Some(512);
     started.health = Some(health(1, 1.2, 1.2, None));
+    started.record = Some(record());
     same(
         &view::state_json(Some(&started)),
         &read_json("response_recorder_start.json")["result"],
@@ -335,83 +345,4 @@ fn recorder_the_live_and_data_frames_are_the_golden_bytes() {
         &got,
         &read_bin("event_recorder_data.bin"),
     );
-}
-
-#[test]
-fn recorder_the_cores_writer_writes_the_golden_recording() {
-    // The golden run folder's one recording: one second of two rows at 1024 Hz, its
-    // first station frame 2048, a 256-frame pre-window, every value a function of its
-    // station frame.
-    let dir = golden("recorder_run/recordings/rec_0001");
-    let want_record: Value = read_json("recorder_run/recordings/rec_0001/recorder.json");
-    let want_bytes = std::fs::read(dir.join("telemetry.f32")).unwrap();
-    let row = |n: u64| -> [f32; 2] {
-        [
-            1.0 - ((n % 64) as f32 - 32.0).abs() / 16.0,
-            (n % 1024) as f32 / 1024.0 - 0.5,
-        ]
-    };
-    let mut t = table::Table::new().table;
-    t.channels = (1..=2u32)
-        .map(|i| {
-            let mut c = table::new_row(i);
-            c.role = if i == 1 {
-                ChannelRole::Control
-            } else {
-                ChannelRole::Monitor
-            };
-            c.units = Units::AccelG;
-            c.range_max = 5.0;
-            c
-        })
-        .collect();
-    let pre: Vec<f32> = (2048..2304u64).flat_map(row).collect();
-    let root = std::env::temp_dir().join(format!("recorder_golden_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).unwrap();
-    let mut store = WriterStore::default();
-    store
-        .start(RecordingSpec {
-            data_root: root.clone(),
-            name: "rec_0001".into(),
-            table: t,
-            acq: AcquisitionConfig {
-                native_rate_hz: 1024.0,
-                block_size: 256,
-                ..Default::default()
-            },
-            requested_fs_hz: 1024.0,
-            floor_bytes: 0,
-            pretrigger: Some(TriggerEvent {
-                trigger_frame_global: 2304,
-                pretrigger: pre,
-                pretrigger_frames: 256,
-            }),
-            station: StationFacts {
-                name: "rec_0001".into(),
-                trigger: "manual".into(),
-                group_delay_frames: 0.0,
-                first_station_frame: 2048,
-                pre_frames_asked: 256,
-            },
-        })
-        .unwrap();
-    let live: Vec<f32> = (2304..3072u64).flat_map(row).collect();
-    store.push(&live, 768);
-    store.finish().unwrap();
-    let got_bytes = std::fs::read(root.join("rec_0001/telemetry.f32")).unwrap();
-    let got_record: Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join("rec_0001/recorder.json")).unwrap(),
-    )
-    .unwrap();
-    let _ = std::fs::remove_dir_all(&root);
-    assert_eq!(got_bytes, want_bytes, "the samples byte for byte");
-    // Every field of the golden record, in the golden's order; the writer's own extra
-    // fields follow them (a reader ignores fields it does not know).
-    let got_keys: Vec<&String> = got_record.as_object().unwrap().keys().collect();
-    let want_keys: Vec<&String> = want_record.as_object().unwrap().keys().collect();
-    assert_eq!(&got_keys[..want_keys.len()], &want_keys[..]);
-    for k in want_keys {
-        same(&got_record[k], &want_record[k], k);
-    }
 }
