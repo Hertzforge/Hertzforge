@@ -258,8 +258,9 @@ pub struct RunRecorder {
 }
 
 impl RunRecorder {
-    /// Start the run's records under `data_root/name` with the raw stream of
-    /// `n_ch` inputs at `fs_hz`.
+    /// Start the run's records under `data_root/name` (or the first free
+    /// `name-<n>`; [`Self::run_dir`] says which) with the raw stream of `n_ch`
+    /// inputs at `fs_hz`.
     pub fn start(
         data_root: &Path,
         name: &str,

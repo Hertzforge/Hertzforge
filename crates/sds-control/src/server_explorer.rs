@@ -384,11 +384,7 @@ impl Service {
                 station: plan,
                 scanner: self.opts.scanner.clone(),
                 data_root: self.opts.data_root.clone(),
-                records_root: self
-                    .opts
-                    .capture_root
-                    .clone()
-                    .unwrap_or_else(|| self.opts.data_root.clone()),
+                records_root: self.opts.records_root(),
                 bind: self.opts.bind.clone(),
             };
             (run, ctx)

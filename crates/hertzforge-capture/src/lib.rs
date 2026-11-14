@@ -777,10 +777,12 @@ pub struct CaptureSink {
 }
 
 impl CaptureSink {
-    /// Start a capture under `data_root/<run_name>/` with the DEFAULT durability
-    /// settings. The `io::Result` signature is preserved for every pre-item-12 caller;
-    /// a preflight refusal arrives as an `io::Error` whose message names the free bytes
-    /// and the floor.
+    /// Start a capture in a new folder under `data_root` with the DEFAULT durability
+    /// settings. The folder is the first free one of `<run_name>`, `<run_name>-2`,
+    /// `<run_name>-3`, ... ([`claim_run_dir`]); [`CaptureSink::run_dir`] says which. The
+    /// `io::Result` signature is preserved for every pre-item-12 caller; a preflight
+    /// refusal arrives as an `io::Error` whose message names the free bytes and the
+    /// floor.
     pub fn start(
         data_root: &Path,
         run_name: &str,
@@ -799,7 +801,9 @@ impl CaptureSink {
         .map_err(io::Error::from)
     }
 
-    /// Start a capture with explicit durability settings.
+    /// Start a capture with explicit durability settings, in a new folder under
+    /// `data_root` claimed as [`CaptureSink::start`] claims it. A run never writes
+    /// into a folder another run already holds.
     ///
     /// Order of operations, and it matters: the free-space preflight runs BEFORE the
     /// run directory is created, so a refused capture leaves no half-made artifacts;
@@ -822,8 +826,53 @@ impl CaptureSink {
         let free_at_start = preflight_free_space(&probe, &cfg, &durability)?;
         let floor_bytes = durability.free_space_floor.bytes(&cfg);
 
-        let run_dir = data_root.join(run_name);
-        std::fs::create_dir_all(&run_dir)?;
+        let run_dir = claim_run_dir(data_root, run_name)?;
+        Self::start_claimed(
+            run_dir,
+            cfg,
+            channel_table,
+            run_config_json,
+            durability,
+            free_at_start,
+            floor_bytes,
+        )
+    }
+
+    /// Start a capture in `run_dir`, a folder the caller has already claimed for
+    /// this run (with [`claim_run_dir`] or [`claim_dir`]) and may already have
+    /// written its own records into. The stream and the sidecar go into it beside
+    /// them. Durability and the preflight are as [`CaptureSink::start_durable`].
+    pub fn start_durable_in(
+        run_dir: &Path,
+        cfg: CaptureConfig,
+        channel_table: ChannelTable,
+        run_config_json: String,
+        durability: DurabilityConfig,
+    ) -> Result<Self, CaptureStartError> {
+        let probe = nearest_existing(run_dir);
+        let free_at_start = preflight_free_space(&probe, &cfg, &durability)?;
+        let floor_bytes = durability.free_space_floor.bytes(&cfg);
+        std::fs::create_dir_all(run_dir)?;
+        Self::start_claimed(
+            run_dir.to_path_buf(),
+            cfg,
+            channel_table,
+            run_config_json,
+            durability,
+            free_at_start,
+            floor_bytes,
+        )
+    }
+
+    fn start_claimed(
+        run_dir: PathBuf,
+        cfg: CaptureConfig,
+        channel_table: ChannelTable,
+        run_config_json: String,
+        durability: DurabilityConfig,
+        free_at_start: Option<u64>,
+        floor_bytes: u64,
+    ) -> Result<Self, CaptureStartError> {
         let bin_path = run_dir.join(TELEMETRY_FILE);
         let file = std::fs::File::create(&bin_path)?;
 
@@ -1158,6 +1207,45 @@ fn f32_as_le_bytes(samples: &[f32]) -> &[u8] {
             std::mem::size_of_val(samples),
         )
     }
+}
+
+// =============================================================================
+// Run folders
+// =============================================================================
+
+/// The most suffixes [`claim_dir`] tries before it gives up.
+const MAX_CLAIM_SUFFIX: u32 = 10_000;
+
+/// Claim a new run folder under `root`: the first of `<name>`, `<name>-2`,
+/// `<name>-3`, ... that does not exist, created by this call. See [`claim_dir`].
+pub fn claim_run_dir(root: &Path, name: &str) -> io::Result<PathBuf> {
+    claim_dir(root, name, "-")
+}
+
+/// Claim a new folder under `root`: the first of `<name>`, `<name><sep>2`,
+/// `<name><sep>3`, ... that does not exist. `root` is made if it is missing; the
+/// folder itself is made with a call that fails when it already exists, so the
+/// folder returned is one this call created and no other claim, in this process
+/// or another, can be handed the same one. A run that finds its name taken gets
+/// the next free one; an earlier run's files are never written over.
+pub fn claim_dir(root: &Path, name: &str, sep: &str) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(root)?;
+    for n in 1..MAX_CLAIM_SUFFIX {
+        let p = if n == 1 {
+            root.join(name)
+        } else {
+            root.join(format!("{name}{sep}{n}"))
+        };
+        match std::fs::create_dir(&p) {
+            Ok(()) => return Ok(p),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("no free folder named {name} under {}", root.display()),
+    ))
 }
 
 // =============================================================================

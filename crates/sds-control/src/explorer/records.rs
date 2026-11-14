@@ -65,20 +65,12 @@ pub fn intent_json(i: &IntentRecord, fs_hz: f64) -> Value {
 }
 
 impl Records {
-    /// Make the run folder `name` under `root`, or the first free `name-<n>`.
+    /// Make the run folder `name` under `root`, or the first free `name-<n>`. The
+    /// folder is claimed by creating it, so a run never shares one with another.
     pub fn open(root: &Path, name: &str) -> Records {
-        let folder = (1..10_000u32).find_map(|n| {
-            let p = if n == 1 {
-                root.join(name)
-            } else {
-                root.join(format!("{name}-{n}"))
-            };
-            if p.exists() {
-                return None;
-            }
-            std::fs::create_dir_all(&p).ok().map(|_| p)
-        });
-        Records { folder }
+        Records {
+            folder: hertzforge_capture::claim_run_dir(root, name).ok(),
+        }
     }
 
     pub fn folder(&self) -> Option<&Path> {

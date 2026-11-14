@@ -135,10 +135,7 @@ impl Service {
 
     /// The local data root the run folders go under.
     fn recorder_root(&self) -> std::path::PathBuf {
-        self.opts
-            .capture_root
-            .clone()
-            .unwrap_or_else(|| self.opts.data_root.clone())
+        self.opts.records_root()
     }
 
     /// Parse and check `config` against the present table and station.

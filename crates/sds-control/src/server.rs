@@ -208,7 +208,7 @@ pub struct ServiceOptions {
     pub scanner: Arc<dyn NiScanner>,
     /// The local data directory: the NI hardware lock lives here.
     pub data_root: PathBuf,
-    /// The controller's capture root (`None`: its own local default).
+    /// Where run folders go (`None`: the data root); see [`ServiceOptions::records_root`].
     pub capture_root: Option<PathBuf>,
     /// Simulated seconds per wall second for `random.*` on the simulator.
     pub sim_speed: f64,
@@ -262,6 +262,17 @@ pub fn simulated_srs_engine() -> crate::srs::engine::EngineFactory {
 /// unless given it here.
 pub fn simulated_twr_engine() -> crate::twr::engine::EngineFactory {
     Arc::new(|ctx| Box::new(crate::twr::sim::SimulatedEngine::new(ctx.clone())))
+}
+
+impl ServiceOptions {
+    /// Where every module's run folders go: the capture root when one is given,
+    /// else the data root. Whether a run records at all is its own capture
+    /// setting; this only says where.
+    pub fn records_root(&self) -> PathBuf {
+        self.capture_root
+            .clone()
+            .unwrap_or_else(|| self.data_root.clone())
+    }
 }
 
 impl Default for ServiceOptions {
@@ -2315,7 +2326,7 @@ impl Service {
             run_id: run_id.clone(),
             config: cfg,
             sim_speed: self.opts.sim_speed,
-            capture_root: self.opts.capture_root.clone(),
+            capture_root: Some(self.opts.records_root()),
             timeout_s: self.opts.timeout.as_secs_f64(),
         };
         let (tx, rx) = std::sync::mpsc::channel();

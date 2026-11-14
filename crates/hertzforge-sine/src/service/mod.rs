@@ -3893,7 +3893,8 @@ impl SineService {
 
     // --- capture ----------------------------------------------------------------
 
-    /// Start streaming telemetry capture to `data_root/<run_name>/`.
+    /// Start streaming telemetry capture to `data_root/<run_name>/`, or the first
+    /// free `<run_name>-<n>`; the folder used is returned.
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, ServiceError> {
         if let Some(sink) = self.capture.as_ref() {
             return Ok(sink.run_dir().to_path_buf());

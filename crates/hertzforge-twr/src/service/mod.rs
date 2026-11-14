@@ -1888,23 +1888,47 @@ impl<P: ReferencePlayer> TwrService<P> {
 
     // ---- capture / snapshot ----
 
-    /// Start streaming achieved records to disk under `data_root`.
+    /// Start streaming achieved records to disk under `data_root`, in the
+    /// folder `capture.run_name` (or the first free `<run_name>-<n>`).
+    ///
+    /// The sidecar carries the player's channel table and the run's
+    /// configuration. The reference's samples are written once, beside the
+    /// stream, as the binary record `reference.bin` (little-endian `f64`, the
+    /// samples as imported) described by `reference.json`; the configuration
+    /// in the sidecar names that file and carries the reference's length,
+    /// rate, unit and content hash in place of the samples, so the sidecar
+    /// rewritten through the run stays small whatever the reference's length.
     pub fn start_capture(&mut self, data_root: &Path) -> Result<PathBuf, TwrError> {
         if self.capture.is_some() {
             return Err(TwrError::State("capture already running".into()));
         }
         let cfg = CaptureConfig::at_rate(1, self.player.fs_hz());
-        let run_json = serde_json::to_string(&self.config)
+        let table = self
+            .player
+            .channel_table()
+            .cloned()
+            .unwrap_or_else(hertzforge_channel_table::ChannelTable::new);
+        let (description, payload) = reference_record(&self.config.reference);
+        let mut run_config = serde_json::to_value(&self.config)
             .map_err(|e| TwrError::Config(format!("config serialize: {e}")))?;
+        run_config["reference"] = description.clone();
         let sink = CaptureSink::start(
             data_root,
             &self.config.capture.run_name,
             cfg,
-            hertzforge_channel_table::ChannelTable::new(),
-            run_json,
+            table,
+            run_config.to_string(),
         )
         .map_err(|e| TwrError::Play(format!("capture start: {e}")))?;
         let dir = sink.run_dir().to_path_buf();
+        if let Err(e) =
+            hertzforge_capture::write_binary_record(&dir, REFERENCE_RECORD, &description, &payload)
+        {
+            let _ = sink.finish();
+            return Err(TwrError::Play(format!(
+                "capture start: the reference could not be written: {e}"
+            )));
+        }
         self.capture = Some(sink);
         self.log("capture started");
         Ok(dir)
@@ -2350,6 +2374,42 @@ struct Played {
 struct StepRefused {
     kind: TripKind,
     error: TwrError,
+}
+
+/// The name of the run folder's reference record (`reference.bin` and
+/// `reference.json`).
+pub const REFERENCE_RECORD: &str = "reference";
+
+/// The format name in `reference.json`.
+pub const REFERENCE_FORMAT: &str = "hertzforge.twr.reference.v1";
+
+/// The reference's record: its description (what `reference.json` holds and
+/// what the capture sidecar's configuration carries in place of the samples)
+/// and its payload, the samples as little-endian `f64`.
+fn reference_record(r: &crate::reference::ReferenceWaveform) -> (serde_json::Value, Vec<u8>) {
+    let mut payload = Vec::with_capacity(8 * r.samples.len());
+    for v in &r.samples {
+        payload.extend_from_slice(&v.to_le_bytes());
+    }
+    let description = serde_json::json!({
+        "format": REFERENCE_FORMAT,
+        "file": format!("{REFERENCE_RECORD}.bin"),
+        "sample_type": "f64le",
+        "len": r.samples.len(),
+        "fs_hz": r.fs_hz,
+        "eu": r.eu,
+        "label": r.label,
+        "source": r.source,
+        "fnv1a64": format!("{:016x}", fnv1a64(&payload)),
+    });
+    (description, payload)
+}
+
+/// FNV-1a, 64 bits: the reference record's content hash.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 #[cfg(test)]

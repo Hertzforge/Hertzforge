@@ -2156,13 +2156,16 @@ impl SrsShockService {
 
     // --- capture + snapshots ---------------------------------------------
 
-    /// Start streaming pulse capture to `data_root/<run_name>/`. EveryPulse runs
+    /// Start streaming pulse capture to `data_root/<run_name>/` (or the first free
+    /// `<run_name>-<n>`; the folder used is returned). EveryPulse runs
     /// open one automatically at arm; Manual callers use this directly.
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, ServiceError> {
         if let Some(sink) = self.capture.as_ref() {
             return Ok(sink.run_dir().to_path_buf());
         }
-        let cfg = CaptureConfig::decimated(1);
+        // The rate the pushed samples are at: each pulse's record is at the
+        // adopted station rate, one sample a frame, with no decimation.
+        let cfg = CaptureConfig::at_rate(1, self.fs_hz());
         let settings_json =
             serde_json::to_string(&self.report_settings()).unwrap_or_else(|_| "{}".into());
         let sink = CaptureSink::start(
