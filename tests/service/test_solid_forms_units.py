@@ -133,13 +133,10 @@ def test_a_coordinate_systems_drag_is_still_sent_in_meters():
 
 
 def test_mesh_sizes_are_typed_in_the_display_system():
-    (_block, preview, kept) = answers(
+    (_block, kept) = answers(
         add_block(width_x=1.0, width_y=1.0, width_z=1.0),
-        ('op.run', {'op': 'project.mesh_solids', 'params': {'geometry': 'Part', 'size': 0.5}}),
-        ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Part', 'size': 0.5, 'keep': True}}))
+        ('op.run', {'op': 'project.mesh_solids', 'params': {'geometry': 'Part', 'size': 0.5}}))
     # half-inch bricks in an inch block: eight, so the size was taken as inches
-    assert rows(preview)['Bricks']['value'] == 'about 8'
     said = rows(kept)
     assert said['Bricks']['value'] == 8.0
     assert said['Shortest edge']['unit'] == 'in'
@@ -154,11 +151,8 @@ def test_piece_sizes_and_what_a_fold_says_are_in_the_display_system():
         ('op.run', {'op': 'project.mesh_solids', 'params': {'geometry': 'Part', 'size': 4.0}}),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
             'geometry': 'Part', 'size': 1.0, 'sizes': '1: 4, 2: 1'}}))
-    assert 'at 4 in the fit is likely to fold' in rows(size_alone)['Fit']['value']
-    assert 'at 4 in the fit is likely to fold' in rows(sized)['Fit']['value']
-    pieces = next(v for v in sized['result']['views'] if v.get('title') == 'Pieces')
-    assert pieces['columns'][3:5] == ['Size [in]', 'Likely size [in]']
-    assert [float(row[3]) for row in pieces['rows']] == pytest.approx([4.0, 1.0])
+    assert 'at 4 in the fit is likely to fold' in size_alone['error']['message']
+    assert 'at 4 in the fit is likely to fold' in sized['error']['message']
 
 
 def test_a_refusal_says_its_lengths_in_the_display_system():
@@ -166,7 +160,7 @@ def test_a_refusal_says_its_lengths_in_the_display_system():
     (_one, refusal) = answers(
         ('op.run', {'op': 'project.add_solid_sphere', 'params': sphere}),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Part', 'size': 4.0, 'keep': True}}))
+            'geometry': 'Part', 'size': 4.0}}))
     assert 'at 4 in the fit' in refusal['error']['message']
 
 
@@ -175,7 +169,7 @@ def test_a_mate_tolerance_is_typed_in_the_display_system():
     (_a, _b, _meshed, mated) = answers(
         add_block(**block), add_block(z=1.0, **block),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Part', 'size': 0.5, 'parts_apart': True, 'keep': True}}),
+            'geometry': 'Part', 'size': 0.5, 'parts_apart': True}}),
         ('op.run', {'op': 'project.mate_surfaces', 'params': {
             'geometry': 'Part', 'tolerance': 0.01}}))
     said = rows(mated)
@@ -254,7 +248,7 @@ def test_a_mate_stiffness_is_typed_and_said_in_the_display_system():
     (_a, _b, _meshed, mated, _si, shown) = answers(
         add_block(**block), add_block(z=1.0, **block),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Part', 'size': 0.5, 'parts_apart': True, 'keep': True}}),
+            'geometry': 'Part', 'size': 0.5, 'parts_apart': True}}),
         ('op.run', {'op': 'project.mate_surfaces', 'params': {
             'geometry': 'Part', 'tolerance': 0.01, 'normal': 'stiffness',
             'normal_stiffness': 1000.0, 'keep': True}}),
@@ -284,7 +278,7 @@ def test_a_mate_picked_opens_the_pane_on_its_stiffness_in_the_display_system():
     (*_made, picked) = answers(
         add_block(**block), add_block(z=1.0, **block),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Part', 'size': 0.5, 'parts_apart': True, 'keep': True}}),
+            'geometry': 'Part', 'size': 0.5, 'parts_apart': True}}),
         ('op.run', {'op': 'project.mate_surfaces', 'params': {
             'geometry': 'Part', 'normal': 'stiffness', 'normal_stiffness': 1000.0,
             'keep': True}}),

@@ -626,7 +626,7 @@ def test_a_group_with_no_shells_is_not_asked_for_a_thickness(plate):
     solid = projects.new({'title': 'x'})
     solid.project.new_geometry('Part', unit='m')
     for op_id, given in (('project.add_solid_block', {}),
-                         ('project.mesh_solids', {'size': 0.5, 'keep': True})):
+                         ('project.mesh_solids', {'size': 0.5})):
         OPS[op_id].run(solid.project, OPS[op_id].resolve(
             {'geometry': 'Part', **given}, objects={'Part': 'geometry'}, verbs={'Part': []}))
     hexes = row(table(solid, 'Part', part={'name': 'Part', 'kind': 'group', 'id': 1})[0],
