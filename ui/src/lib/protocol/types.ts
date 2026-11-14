@@ -225,6 +225,8 @@ export interface Shape3DView {
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
+	paired?: boolean;
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;
@@ -657,7 +659,6 @@ export interface Shown {
 	offers?: {
 		flat: boolean;
 		complex: boolean;
-		frequency: boolean;
 		projection: boolean;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
@@ -677,7 +678,6 @@ export interface Shown {
 /** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
 export interface ShowPrefs {
 	flat: boolean;
-	log_frequency: boolean;
 	component: 'magnitude' | 'real' | 'imag' | 'phase';
 	/** The frequency an operating shape or envelope is read at; null for the loudest line. Not kept. */
 	line?: number | null;

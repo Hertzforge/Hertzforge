@@ -148,9 +148,6 @@
 									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The flat plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>Flat</button>
 								</div>
 							{/if}
-							{#if offers.frequency}
-								<button class="btn ghost sm" class:on={a.prefs.log_frequency} aria-pressed={a.prefs.log_frequency} data-testid="read-logf" title="Decades on every frequency axis" onclick={() => a.setPref('log_frequency', !a.prefs.log_frequency)}>Log f</button>
-							{/if}
 							{#if offers.complex}
 								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
 									<option value="magnitude">Magnitude</option>
@@ -258,12 +255,13 @@
 										showTitle={!headed && (v.view === 'spectrum' || v.view === 'table')}
 										minHeight={240}
 										scope="selection"
+										scaleToggle
 										selected={v.view === 'matrix' && v.selects ? a.pair : null}
 										picks={v.view === 'matrix' && v.selects ? a.picks : []}
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
 										bars={v.view === 'matrix' && a.prefs.bars}
 										mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
-										overlay={v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
+										overlay={v.view === 'shape3d' && v.paired ? (a.prefs.overlay ? undefined : null) : v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
 										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
