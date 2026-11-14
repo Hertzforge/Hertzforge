@@ -1,6 +1,6 @@
 {
   "test": "srs",
-  "run_uid": "20261114-191820-4aad5d2d",
+  "run_uid": "20261114-213155-578d7c0d",
   "run_id": "srs-0001",
   "title": "Seeded SRS",
   "operator": "Operator",
@@ -37,11 +37,11 @@
     "dirty": null
   },
   "armed": {
-    "unix": 1794683900.752084,
+    "unix": 1794691915.119904,
     "utc_offset_s": -25200
   },
   "start": {
-    "unix": 1794683900.818039,
+    "unix": 1794691915.215551,
     "utc_offset_s": -25200,
     "station_frame": 0
   },

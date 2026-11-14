@@ -1,6 +1,6 @@
 {
   "test": "twr",
-  "run_uid": "20261114-191820-e2eec18c",
+  "run_uid": "20261114-213155-aea16d7d",
   "run_id": "twr-0001",
   "title": "Seeded TWR",
   "operator": "Operator",
@@ -37,11 +37,11 @@
     "dirty": null
   },
   "armed": {
-    "unix": 1794683900.752103,
+    "unix": 1794691915.119615,
     "utc_offset_s": -25200
   },
   "start": {
-    "unix": 1794683900.818453,
+    "unix": 1794691915.209665,
     "utc_offset_s": -25200,
     "station_frame": 0
   },

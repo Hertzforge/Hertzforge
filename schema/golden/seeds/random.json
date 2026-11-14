@@ -15,15 +15,15 @@
    "breakpoints": [
     {
      "freq_hz": 40.0,
-     "psd_g2_hz": 0.01
+     "psd_g2_hz": 0.010000000000000002
     },
     {
      "freq_hz": 80.0,
-     "psd_g2_hz": 0.02
+     "psd_g2_hz": 0.020000000000000004
     },
     {
      "freq_hz": 160.0,
-     "psd_g2_hz": 0.02
+     "psd_g2_hz": 0.020000000000000004
     },
     {
      "freq_hz": 200.0,
@@ -201,15 +201,15 @@
     "value": [
      {
       "freq_hz": 40.0,
-      "psd_g2_hz": 0.01
+      "psd_g2_hz": 0.010000000000000002
      },
      {
       "freq_hz": 80.0,
-      "psd_g2_hz": 0.02
+      "psd_g2_hz": 0.020000000000000004
      },
      {
       "freq_hz": 160.0,
-      "psd_g2_hz": 0.02
+      "psd_g2_hz": 0.020000000000000004
      },
      {
       "freq_hz": 200.0,
@@ -240,7 +240,7 @@
   "origin": {
    "kind": "seed",
    "object": "Floor Spec",
-   "checksum": "e816babfe3afd2e180939160b9bd94b0e239f0fe3d212b565e889acd6880e9da",
+   "checksum": "de61c54644f76a27d3f709c61680d9b08a69e3b6d85a1407d25dc1e060ef9846",
    "fills": "the profile"
   }
  }

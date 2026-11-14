@@ -12,7 +12,7 @@
       "streams": false
     },
     "reference": {
-      "sha256": "65a17f2eaf9aa86b293526687a043f20139429122d65fd09ee20401f645fab8d"
+      "sha256": "01aea0f6712188478c9b63b2a8d673c2522a94354ed55908c0a3bc29300b1913"
     },
     "prep": {
       "detrend": "none",
@@ -51,7 +51,7 @@
   "resolved": {
     "reference": {
       "name": "Field Record",
-      "sha256": "65a17f2eaf9aa86b293526687a043f20139429122d65fd09ee20401f645fab8d",
+      "sha256": "01aea0f6712188478c9b63b2a8d673c2522a94354ed55908c0a3bc29300b1913",
       "format": "text",
       "fs_hz": 2048,
       "samples": 160,
@@ -203,7 +203,7 @@
       "checks": []
     },
     "reference": {
-      "sha256": "65a17f2eaf9aa86b293526687a043f20139429122d65fd09ee20401f645fab8d",
+      "sha256": "01aea0f6712188478c9b63b2a8d673c2522a94354ed55908c0a3bc29300b1913",
       "name": "Field Record",
       "fs_hz": 2048,
       "units": "g",

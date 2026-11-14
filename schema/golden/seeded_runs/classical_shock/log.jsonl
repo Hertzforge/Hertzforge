@@ -1,15 +1,15 @@
-{"seq":0,"at_unix":1794683900.750939,"frame":null,"kind":"state","text":"configured \"Seeded Classical Shock\" on sim"}
-{"seq":1,"at_unix":1794683900.809198,"frame":null,"kind":"record","text":"the run's streams are not recorded: switched off in the setup","data":{"stream":null,"failed":"switched off in the setup"}}
-{"seq":2,"at_unix":1794683900.809304,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
-{"seq":3,"at_unix":1794683900.809312,"frame":null,"kind":"station","text":"armed on sim at 2048 Hz, records of 256 samples","data":{"class":"sim","fs_hz":2048.0,"record_len":256}}
-{"seq":4,"at_unix":1794683900.809318,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
-{"seq":5,"at_unix":1794683900.809324,"frame":null,"kind":"note","text":"started; identification at 0.05 V rms for 0.5 s","data":{"action":"start","drive_vrms":0.05,"duration_s":0.5}}
-{"seq":6,"at_unix":1794683900.809374,"frame":null,"kind":"state","text":"sysid to waiting","data":{"from":"sysid","to":"waiting","state":"running"}}
-{"seq":7,"at_unix":1794683900.809381,"frame":null,"kind":"note","text":"seeded; the predicted full-level drive is 0.04 V pk","data":{"seeded":true,"drive_vpk":0.03999997510773618,"drive_vpk_ceiling":2.0,"drive_vpk_abort":3.0}}
-{"seq":8,"at_unix":1794683900.809409,"frame":null,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
-{"seq":9,"at_unix":1794683900.809452,"frame":null,"kind":"pulse","text":"pulse 1 at -6 dB: 1 g, passed","data":{"pulse":0,"level_db":-6.0,"measured":true,"passed":true}}
-{"seq":10,"at_unix":1794683900.809511,"frame":null,"kind":"state","text":"firing to waiting","data":{"from":"firing","to":"waiting","state":"running"}}
-{"seq":11,"at_unix":1794683900.864702,"frame":null,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
-{"seq":12,"at_unix":1794683900.864786,"frame":null,"kind":"pulse","text":"pulse 2 at 0 dB: 1.996 g, passed","data":{"pulse":1,"level_db":0.0,"measured":true,"passed":true}}
-{"seq":13,"at_unix":1794683900.86483,"frame":null,"kind":"state","text":"firing to stopped","data":{"from":"firing","to":"stopped","state":"finished"}}
-{"seq":14,"at_unix":1794683900.864842,"frame":null,"kind":"state","text":"ended (completed): The schedule finished.","data":{"outcome":"completed","by":null,"end":{"outcome":"completed","message":"The schedule finished.","at_s":0.06,"level_db":0,"pulse":1,"trip":null}}}
+{"seq":0,"at_unix":1794691915.11855,"frame":null,"kind":"state","text":"configured \"Seeded Classical Shock\" on sim"}
+{"seq":1,"at_unix":1794691915.215248,"frame":null,"kind":"record","text":"the run's streams are not recorded: switched off in the setup","data":{"stream":null,"failed":"switched off in the setup"}}
+{"seq":2,"at_unix":1794691915.215331,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":3,"at_unix":1794691915.215339,"frame":null,"kind":"station","text":"armed on sim at 2048 Hz, records of 256 samples","data":{"class":"sim","fs_hz":2048.0,"record_len":256}}
+{"seq":4,"at_unix":1794691915.215346,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":5,"at_unix":1794691915.215353,"frame":null,"kind":"note","text":"started; identification at 0.05 V rms for 0.5 s","data":{"action":"start","drive_vrms":0.05,"duration_s":0.5}}
+{"seq":6,"at_unix":1794691915.215399,"frame":null,"kind":"state","text":"sysid to waiting","data":{"from":"sysid","to":"waiting","state":"running"}}
+{"seq":7,"at_unix":1794691915.215407,"frame":null,"kind":"note","text":"seeded; the predicted full-level drive is 0.04 V pk","data":{"seeded":true,"drive_vpk":0.0399999752,"drive_vpk_ceiling":2.0,"drive_vpk_abort":3.0}}
+{"seq":8,"at_unix":1794691915.215419,"frame":null,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
+{"seq":9,"at_unix":1794691915.215465,"frame":null,"kind":"pulse","text":"pulse 1 at -6 dB: 1 g, passed","data":{"pulse":0,"level_db":-6.0,"measured":true,"passed":true}}
+{"seq":10,"at_unix":1794691915.215544,"frame":null,"kind":"state","text":"firing to waiting","data":{"from":"firing","to":"waiting","state":"running"}}
+{"seq":11,"at_unix":1794691915.271559,"frame":null,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
+{"seq":12,"at_unix":1794691915.271607,"frame":null,"kind":"pulse","text":"pulse 2 at 0 dB: 1.996 g, passed","data":{"pulse":1,"level_db":0.0,"measured":true,"passed":true}}
+{"seq":13,"at_unix":1794691915.271642,"frame":null,"kind":"state","text":"firing to stopped","data":{"from":"firing","to":"stopped","state":"finished"}}
+{"seq":14,"at_unix":1794691915.271653,"frame":null,"kind":"state","text":"ended (completed): The schedule finished.","data":{"outcome":"completed","by":null,"end":{"outcome":"completed","message":"The schedule finished.","at_s":0.06,"level_db":0,"pulse":1,"trip":null}}}

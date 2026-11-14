@@ -1,6 +1,6 @@
 {
   "test": "random",
-  "run_uid": "20261114-191820-57a1b241",
+  "run_uid": "20261114-213155-c427ac5c",
   "run_id": "r-0001",
   "title": "Seeded Random",
   "operator": "Operator",
@@ -52,15 +52,15 @@
   },
   "build": {
     "version": "0.1.9",
-    "commit": "f27e7e2e",
+    "commit": "cb92500a",
     "dirty": true
   },
   "armed": {
-    "unix": 1794683900.749879,
+    "unix": 1794691915.118055,
     "utc_offset_s": -25200
   },
   "start": {
-    "unix": 1794683900.809307,
+    "unix": 1794691915.206412,
     "utc_offset_s": -25200,
     "station_frame": 0
   },

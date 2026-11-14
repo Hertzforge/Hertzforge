@@ -209,6 +209,10 @@ def _pulse(obj: Any, record: int, sets) -> list[str]:
                                    'acceleration')
     pulse, off = sc.pulse_of_waveform(np.asarray(obj.abscissa), obj.ordinate[record])
     for key, value in sc.shock_pulse(pulse).items():
+        # a reading of a waveform, to nine digits: the fit's last bits differ
+        # between platforms' math libraries, and a setup should not
+        if isinstance(value, float):
+            value = float(f'{value:.9g}')
         _put(sets, f'pulse.{key}', value)
     return [(f'read as a {pulse.describe("g", 1.0 / sc.G)}, within {100 * off:.2g}% of its '
             'peak at every sample')]
