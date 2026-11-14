@@ -8,6 +8,37 @@ None | protocol | operation descriptors | view types | run files | units
 
 (For any of these: schema, Python, Rust, TypeScript and golden frames are all in this pull request.)
 
+## Run data
+
+<!--
+Does this change a path listed in tools/run_data_paths.txt (a control module, the channel table,
+breakpoints, references, capture, the recorder, the control protocol, the shell's test screens and
+table files, or the run converters)? `python tools/check_drive_path.py --base origin/main` says,
+and CI checks this section (docs/run-data.md).
+
+If not, keep the first line below and delete the eight fields.
+If it does, delete the first line and fill in all eight, in plain words. "none" is an answer.
+- Adds to the setup / the table / the results / the timeline: the setup fields, channel table
+  columns, named results and event kinds this change adds.
+- Recorded in: for each, the file and field a finished run keeps it in, or "not recorded yet" and
+  why. Say only what the code does.
+- Seeds from: the analysis objects this can take its inputs from.
+- Flows to: the analysis objects this becomes.
+- Bridge test: "row added or updated", "row not possible yet" or "no run data touched", for the
+  acceptance row "the finished run opens in the analysis side with its channel table and setup".
+-->
+
+No run data touched.
+
+- Adds to the setup:
+- Adds to the table:
+- Adds to the results:
+- Adds to the timeline:
+- Recorded in:
+- Seeds from:
+- Flows to:
+- Bridge test:
+
 ## Test results
 
 Each command as run, its exit code, and its pass / fail / skip counts:

@@ -1,0 +1,92 @@
+# Run data: the code that decides what a test's setup, its channel table, a
+# run or its results hold, on the control side and at the seam where the
+# analysis side reads or writes them. docs/run-data.md says what a pull
+# request that touches one of these paths must carry, and
+# tools/check_drive_path.py checks it.
+#
+# Format: one path per line (a directory or a file, from the repository root,
+# with no trailing slash) and a short reason. A path covers everything under
+# it. A Markdown file may be narrowed to one section by its heading's anchor,
+# as GitHub writes it (docs/hforge-format.md#channel_table): the section is
+# touched when the diff changes a line under that heading. Comments start
+# with '#' at the start of a line or after a space.
+#
+# The list is scoped to the control side and the seam, so a change to the
+# analysis side alone is not asked for the section.
+
+[run data]
+
+# The control modules: each decides its setup, its run's timeline and results
+crates/hertzforge-random            Random: its setup, run state, results and capture
+crates/hertzforge-mimo-random       multiple-output Random: its setup, reference, identification and run records
+crates/hertzforge-sine              Sine: its setup, run state, results and capture
+crates/hertzforge-mixed             Mixed Mode: its parts, setup, run state and results
+crates/hertzforge-shock-common      classical shock: pulse records, ladders and the pulse store
+crates/hertzforge-shock-host        the shock firer: its setup, pulses and run state
+crates/hertzforge-mimo-shock        multiple-drive shock: its setup, pulses and verdicts
+crates/hertzforge-srs               SRS shock: its setup, pulses and results
+crates/hertzforge-twr               waveform replication: its reference, plays and results
+crates/hertzforge-explorer-host     Explorer: its setup, survey and records
+crates/hertzforge-recorder          the Recorder: what a recording holds on disk
+
+# What a run is recorded into, and what a setup is built from
+crates/hertzforge-capture           the run folder writer: telemetry, sidecars, snapshots
+crates/hertzforge-channel-table     the channel table: its columns, validation and file forms
+crates/hertzforge-breakpoints       profiles, limits and their files
+crates/hertzforge-reference         the multiple-output reference and its files
+crates/hertzforge-protocol          the control protocol's types: what a setup and a run state carry
+
+# The control service: how each module's setup is accepted and its run reported
+crates/sds-control/src/explorer     Explorer's setup, run and records on the wire
+crates/sds-control/src/mimo         multiple-output Random's setup, reference and run on the wire
+crates/sds-control/src/mimo_shock   multiple-drive shock's setup and run on the wire
+crates/sds-control/src/mixed        Mixed Mode's setup and run on the wire
+crates/sds-control/src/pulse        the pulse modules' run records
+crates/sds-control/src/random       Random's setup and run on the wire
+crates/sds-control/src/recorder     the Recorder's setup, run and records on the wire
+crates/sds-control/src/shock        classical shock's setup and run on the wire
+crates/sds-control/src/sine         Sine's setup and run on the wire
+crates/sds-control/src/srs          SRS shock's setup and run on the wire
+crates/sds-control/src/twr          waveform replication's setup and run on the wire
+crates/sds-control/src/server.rs    the methods that accept a Random setup and report its run
+crates/sds-control/src/server_explorer.rs  the Explorer methods
+crates/sds-control/src/server_mimo.rs      the multiple-output Random methods
+crates/sds-control/src/server_mimo_shock.rs  the multiple-drive shock methods
+crates/sds-control/src/server_mixed.rs     the Mixed Mode methods
+crates/sds-control/src/server_recorder.rs  the Recorder methods
+crates/sds-control/src/server_shock.rs     the classical shock methods
+crates/sds-control/src/server_srs.rs       the SRS shock methods
+crates/sds-control/src/server_twr.rs       the waveform replication methods
+crates/sds-control/src/sim.rs       a simulated Random run and what it reports
+crates/sds-control/src/station.rs   the station a run records: devices, rates, simulated or not
+crates/sds-control/src/table.rs     the channel table the control service holds
+crates/sds-control/src/profiles.rs  the built-in profiles a setup can start from
+crates/sds-control/src/laws.rs      the law catalog: a run's law identity and file
+crates/sds-control/src/protocol.rs  the control service's wire types
+
+# The protocol guide's control half
+schema/PROTOCOL.md#hardware-and-random-control  the channel table, Random setup, run state, run log and run files
+schema/PROTOCOL.md#mimo-random      the multiple-output Random setup, run state and report
+schema/PROTOCOL.md#classical-shock  the classical shock setup, run state and pulses
+schema/PROTOCOL.md#srs-shock        the SRS shock setup, run state and pulses
+schema/PROTOCOL.md#mimo-shock       the multiple-drive shock setup, run state and pulses
+schema/PROTOCOL.md#sine             the Sine setup and run state
+schema/PROTOCOL.md#mixed-mode       the Mixed Mode setup and run state
+schema/PROTOCOL.md#time-waveform-replication  the waveform replication reference, setup and plays
+schema/PROTOCOL.md#explorer         the Explorer setup, run state and records
+schema/PROTOCOL.md#recorder         the Recorder setup, recordings and records
+schema/PROTOCOL.md#control-laws     a run's law identity and parameters
+
+# The shell's test screens and table files
+ui/src/lib/acquire                  the test screens: setups as the operator builds them, results as shown
+ui/src/lib/tables                   the channel and breakpoint table files the shell reads and writes
+
+# The seam on the analysis side
+src/hertzforge/io/mimo_run_convert.py      turns a multiple-output Random run into analysis objects
+src/hertzforge/io/recorder_run_convert.py  turns a Recorder run into analysis objects
+src/hertzforge/io/tables.py                channel and breakpoint tables as files, for both sides
+src/hertzforge/io/reference_convert.py     writes the controller's reference file from a specification
+src/hertzforge/core/channel_table.py       the channel table both sides use
+docs/hforge-format.md#channel_table        how a channel table is stored in a project
+docs/hforge-format.md#breakpoint_table     how a profile's breakpoint table is stored in a project
+docs/hforge-format.md#run-a-mimo-random-run-proposal  how a run is stored in a project

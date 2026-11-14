@@ -55,6 +55,9 @@ time, so building and testing need no NI software installed.
   stops) is listed in `tools/drive_path.txt` and held to the rules in
   [`docs/drive-path.md`](docs/drive-path.md): its invariants, its safety tests, and the drive-path
   section a pull request that touches it carries.
+- A change to what a test's setup, its channel table, a run or its results hold says what a run
+  saves and where, by the rules in [`docs/run-data.md`](docs/run-data.md); the paths are listed in
+  `tools/run_data_paths.txt`.
 - A simulated run is always marked `source: "SIM"` and is never presented as a hardware result.
 - No employer, client, laboratory or partner names anywhere in the tree.
 - Dependencies are permissively licensed (MIT, BSD, Apache-2.0, ISC, Zlib; OFL-1.1 for bundled fonts;
@@ -109,6 +112,7 @@ node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 | [`docs/desktop-app.md`](docs/desktop-app.md) | The desktop app |
 | [`docs/documentation.md`](docs/documentation.md) | Documentation and typing conventions for contributors |
 | [`docs/drive-path.md`](docs/drive-path.md) | The drive path: its invariants, its safety tests, and what a pull request that touches it carries |
+| [`docs/run-data.md`](docs/run-data.md) | Run data: what a run's record holds, the rules a change to it follows, and the Run data section |
 
 ## License
 

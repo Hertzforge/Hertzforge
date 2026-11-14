@@ -1,4 +1,5 @@
-"""The drive path's checks (docs/drive-path.md), run on every CI run.
+"""The drive path's checks (docs/drive-path.md) and the run-data section
+check (docs/run-data.md), run on every CI run.
 
 The drive path is the code that can change what reaches an output channel,
 or whether and how a run stops. Two lists say what it is and what keeps it
@@ -28,6 +29,15 @@ On a pull request, against the base it would merge into:
    `[weakens safety]`. A test that moves to another file with its name and
    crate unchanged is not a removal. Edits inside a listed test's body are
    reported as warnings for the reviewer, never failures.
+5. **The run-data section.** When the diff touches a path in
+   `tools/run_data_paths.txt` (on the base's list or the head's), the
+   description carries the template's Run data section with its fields
+   filled in. A path there may name one section of a Markdown file
+   (`docs/hforge-format.md#channel_table`, by the heading's anchor); it is
+   touched when the diff changes a line under that heading.
+
+Every path in `tools/run_data_paths.txt` must exist, and an anchor must name
+a heading the file has.
 
     python tools/check_drive_path.py                          # the lists (1, 2)
     python tools/check_drive_path.py --event "$GITHUB_EVENT_PATH"
@@ -54,9 +64,11 @@ from collections.abc import Iterable, Mapping, Sequence
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DRIVE_PATH = 'tools/drive_path.txt'
 SAFETY_TESTS = 'tools/safety_tests.txt'
+RUN_DATA = 'tools/run_data_paths.txt'
 
 DRIVE = 'drive path'
 NOT_DRIVE = 'not drive path'
+RUN = 'run data'
 
 #: The folders whose every direct child must be classified.
 CLASSIFIED_PARENTS = ('crates', 'modules', 'laws', 'wit', 'abi', 'schema')
@@ -72,17 +84,34 @@ KINDS = frozenset({
     'authority', 'shutdown',
 })
 
-#: The pull request template's drive-path section: its heading, the line a
-#: pull request that touches no drive-path code keeps, and the four answers
-#: one that does gives.
-SECTION = 'Drive path and hardware'
-UNTOUCHED = 'No drive-path code touched.'
-ANSWERS = (
-    'What can now reach the drive',
-    'How it fails safe',
-    'What ran on the simulator',
-    'What ran on hardware',
-)
+
+
+@dataclasses.dataclass(frozen=True)
+class Section:
+    """A section of the pull request template that a change to listed paths
+    must fill in: its heading, the line a pull request that touches none of
+    those paths keeps, the answers one that does gives, what the paths hold
+    in words, and the guide that explains it."""
+    heading: str
+    untouched: str
+    answers: tuple[str, ...]
+    what: str
+    guide: str
+
+
+DRIVE_SECTION = Section(
+    'Drive path and hardware', 'No drive-path code touched.',
+    ('What can now reach the drive', 'How it fails safe', 'What ran on the simulator',
+     'What ran on hardware'),
+    'drive-path code', 'docs/drive-path.md')
+RUN_SECTION = Section(
+    'Run data', 'No run data touched.',
+    ('Adds to the setup', 'Adds to the table', 'Adds to the results', 'Adds to the timeline',
+     'Recorded in', 'Seeds from', 'Flows to', 'Bridge test'),
+    'run data', 'docs/run-data.md')
+SECTION = DRIVE_SECTION.heading
+UNTOUCHED = DRIVE_SECTION.untouched
+ANSWERS = DRIVE_SECTION.answers
 #: Answers that leave the question open.
 PLACEHOLDERS = frozenset({'', 'todo', 'tbd', 'n/a', 'na', '-', '...', '?', 'tba'})
 
@@ -131,31 +160,35 @@ class SafetyTest:
 
 
 def _lines(text: str) -> Iterable[tuple[int, str]]:
-    """Each line's number and its text with any comment and the line ending
-    taken off, skipping lines that hold nothing else."""
+    """Each line's number and its text with any comment (a `#` that starts
+    the line or follows a space) and the line ending taken off, skipping lines
+    that hold nothing else. A `#` inside a path names a heading."""
     for number, raw in enumerate(text.splitlines(), start=1):
-        line = raw.split('#', 1)[0].strip()
+        line = re.split(r'(?:^|\s)#', raw, maxsplit=1)[0].strip()
         if line:
             yield number, line
 
 
-def parse_drive_path(text: str, name: str = DRIVE_PATH) -> tuple[list[Listed], list[str]]:
-    """The entries of a drive-path list, and a finding for each line that
-    cannot be read."""
+def parse_drive_path(text: str, name: str = DRIVE_PATH,
+                     sections: Sequence[str] = (DRIVE, NOT_DRIVE)
+                     ) -> tuple[list[Listed], list[str]]:
+    """The entries of a path list (the drive-path list, or with `sections`
+    another one), and a finding for each line that cannot be read."""
     entries, findings = [], []
     section = None
+    names = ' or '.join(f'[{s}]' for s in sections)
     for number, line in _lines(text):
         header = re.fullmatch(r'\[(.+)\]', line)
         if header:
             section = header.group(1).strip()
-            if section not in (DRIVE, NOT_DRIVE):
+            if section not in sections:
                 findings.append(f'{name}:{number}: unknown section [{section}]; the sections '
-                                f'are [{DRIVE}] and [{NOT_DRIVE}]')
+                                f'are {names}')
                 section = None
             continue
         if section is None:
             findings.append(f'{name}:{number}: a path before any section; put it under '
-                            f'[{DRIVE}] or [{NOT_DRIVE}]')
+                            f'{names}')
             continue
         parts = line.split(None, 1)
         path = parts[0]
@@ -196,6 +229,62 @@ def parse_safety_tests(text: str, name: str = SAFETY_TESTS) -> tuple[list[Safety
         seen[entry.key] = number
         entries.append(entry)
     return entries, findings
+
+
+def parse_run_data(text: str, name: str = RUN_DATA) -> tuple[list[Listed], list[str]]:
+    """The entries of the run-data path list."""
+    return parse_drive_path(text, name, (RUN,))
+
+
+def split_anchor(path: str) -> tuple[str, str | None]:
+    """`docs/x.md#heading` as (`docs/x.md`, `heading`); a plain path with None."""
+    file, _, anchor = path.partition('#')
+    return file, anchor or None
+
+
+def slug(heading: str) -> str:
+    """A Markdown heading's anchor, as GitHub makes it: lower case, spaces as
+    hyphens, other punctuation but `-` and `_` dropped."""
+    text = heading.strip().lower()
+    return re.sub(r'[^\w\- ]', '', text).replace(' ', '-')
+
+
+def heading_ranges(text: str) -> dict[str, tuple[int, int]]:
+    """Each heading's anchor and the lines (first, last) its section spans,
+    up to the next heading of its level or above. Fenced code is skipped."""
+    found, fence = [], False
+    lines = text.splitlines()
+    for number, line in enumerate(lines, start=1):
+        if line.lstrip().startswith('```'):
+            fence = not fence
+        m = None if fence else re.match(r'(#{1,6})\s+(.*?)\s*#*\s*$', line)
+        if m:
+            found.append((number, len(m.group(1)), slug(m.group(2))))
+    ranges = {}
+    for k, (start, level, anchor) in enumerate(found):
+        end = next((n - 1 for n, lv, _ in found[k + 1:] if lv <= level), len(lines))
+        ranges.setdefault(anchor, (start, end))
+    return ranges
+
+
+def check_run_data_list(entries: Sequence[Listed], root: pathlib.Path = ROOT) -> list[str]:
+    """Every run-data path exists, every anchor names a heading of its file,
+    and no path is listed twice."""
+    findings, seen = [], {}
+    for entry in entries:
+        file, anchor = split_anchor(entry.path)
+        if entry.path in seen:
+            findings.append(f'{RUN_DATA}:{entry.line}: {entry.path} is already listed on line '
+                            f'{seen[entry.path]}')
+        seen[entry.path] = entry.line
+        if not (root / file).exists():
+            findings.append(f'{RUN_DATA}:{entry.line}: {file} does not exist; remove the line, '
+                            'or correct the path')
+        elif anchor is not None and anchor not in heading_ranges(
+                (root / file).read_text(encoding='utf-8')):
+            findings.append(f'{RUN_DATA}:{entry.line}: {file} has no heading whose anchor is '
+                            f'#{anchor}; correct the anchor')
+    return findings
 
 
 def covered(path: str, listed: Iterable[str]) -> bool:
@@ -699,22 +788,23 @@ def changed_paths(root: pathlib.Path, base: str) -> list[str]:
     return paths
 
 
-def section_text(body: str) -> str | None:
-    """The drive-path section of a pull request description, with HTML
-    comments taken out, or None when it has none."""
+def section_text(body: str, spec: Section = DRIVE_SECTION) -> str | None:
+    """A section of a pull request description, with HTML comments taken
+    out, or None when it has none."""
     body = re.sub(r'<!--.*?-->', '', body.replace('\r\n', '\n'), flags=re.DOTALL)
-    m = re.search(rf'^#{{2,3}}\s*{re.escape(SECTION)}\s*$(.*?)(?=^#{{1,3}}\s|\Z)', body,
+    m = re.search(rf'^#{{2,3}}\s*{re.escape(spec.heading)}\s*$(.*?)(?=^#{{1,3}}\s|\Z)', body,
                   flags=re.MULTILINE | re.DOTALL | re.IGNORECASE)
     return None if m is None else m.group(1)
 
 
-def answers(section: str) -> dict[str, str]:
-    """Each of the four answers in the section, as written."""
+def answers(section: str, labels: Sequence[str] = ANSWERS) -> dict[str, str]:
+    """Each answer in the section, as written, by its label."""
     found: dict[str, list[str]] = {}
     current = None
     for line in section.splitlines():
         plain = line.strip().lstrip('-*').strip().replace('**', '').replace('__', '')
-        label = next((a for a in ANSWERS if plain.lower().startswith(a.lower())), None)
+        plain = plain.replace('`', '') if plain.startswith('`') else plain
+        label = next((a for a in labels if plain.lower().startswith(a.lower())), None)
         if label is not None:
             current = label
             rest = plain[len(label):].lstrip(' ?').lstrip(':').strip()
@@ -724,32 +814,75 @@ def answers(section: str) -> dict[str, str]:
     return {label: ' '.join(' '.join(parts).split()) for label, parts in found.items()}
 
 
-def check_description(body: str, touched: Sequence[str]) -> list[str]:
-    """Rule 3: a pull request that touches the drive path carries the
-    section, filled in."""
+def check_description(body: str, touched: Sequence[str],
+                      spec: Section = DRIVE_SECTION) -> list[str]:
+    """Rules 3 and 5: a pull request that touches the listed paths carries
+    the section, filled in."""
     if not touched:
         return []
     shown = ', '.join(touched[:5]) + (f' and {len(touched) - 5} more' if len(touched) > 5
                                       else '')
-    section = section_text(body)
+    count = len(spec.answers)
+    section = section_text(body, spec)
     if section is None:
-        return [(f'This pull request changes drive-path code ({shown}), and its description '
-                 f'has no "## {SECTION}" section. Add the section from '
-                 '.github/pull_request_template.md and answer its four questions '
-                 '(docs/drive-path.md).')]
+        return [(f'This pull request changes {spec.what} ({shown}), and its description '
+                 f'has no "## {spec.heading}" section. Add the section from '
+                 f'.github/pull_request_template.md and answer its {count} questions '
+                 f'({spec.guide}).')]
     findings = []
-    if UNTOUCHED.lower().rstrip('.') in ' '.join(section.lower().split()):
-        findings.append(f'This pull request changes drive-path code ({shown}), but its '
-                        f'description says "{UNTOUCHED}" Replace that line with the four '
-                        'answers.')
-    given = answers(section)
-    for label in ANSWERS:
+    if spec.untouched.lower().rstrip('.') in ' '.join(section.lower().split()):
+        findings.append(f'This pull request changes {spec.what} ({shown}), but its '
+                        f'description says "{spec.untouched}" Replace that line with the '
+                        f'{count} answers.')
+    given = answers(section, spec.answers)
+    for label in spec.answers:
         value = given.get(label, '')
-        if value.lower().strip(' .') in PLACEHOLDERS:
-            findings.append(f'The "{SECTION}" section does not answer "{label}". This pull '
-                            f'request changes drive-path code ({shown}); answer it in a '
-                            'sentence or two (docs/drive-path.md).')
+        if value.lower().strip(' .') in PLACEHOLDERS or value.startswith('<'):
+            findings.append(f'The "{spec.heading}" section does not answer "{label}". This '
+                            f'pull request changes {spec.what} ({shown}); answer it in plain '
+                            f'words ({spec.guide}).')
     return findings
+
+
+def hunks(root: pathlib.Path, base: str, path: str,
+          head: str = 'HEAD') -> list[tuple[int, int, int, int]]:
+    """The diff's hunks in `path` as (old start, old count, new start, new count)."""
+    out = git(root, 'diff', '-U0', base, head, '--', path)
+    return [(int(m.group(1)), int(m.group(2) or 1), int(m.group(3)), int(m.group(4) or 1))
+            for m in re.finditer(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', out,
+                                 re.MULTILINE)]
+
+
+def run_data_touched(root: pathlib.Path, base: str, changed: Sequence[str],
+                     listed: Iterable[str], head: str = 'HEAD') -> list[str]:
+    """The changed paths under a run-data entry, a Markdown section counted
+    only when a hunk falls under its heading at the base or the head."""
+    plain = [p for p in listed if '#' not in p]
+    anchored: dict[str, set[str]] = {}
+    for p in listed:
+        file, anchor = split_anchor(p)
+        if anchor is not None:
+            anchored.setdefault(file, set()).add(anchor)
+    touched = []
+    for path in changed:
+        if covered(path, plain):
+            touched.append(path)
+        elif path in anchored:
+            before = heading_ranges(show(root, base, path) or '')
+            after = heading_ranges(show(root, head, path) or '')
+            spans = []
+            for anchor in sorted(anchored[path]):
+                for ranges, side in ((before, 0), (after, 1)):
+                    if anchor in ranges:
+                        spans.append((side, *ranges[anchor], anchor))
+            hit = set()
+            for old, old_n, new, new_n in hunks(root, base, path, head):
+                for side, first, last, anchor in spans:
+                    start, n = (old, old_n) if side == 0 else (new, new_n)
+                    if start <= last and start + max(n, 1) - 1 >= first:
+                        hit.add(anchor)
+            touched += [f'{path}#{anchor}' for anchor in sorted(hit)]
+    return touched
 
 
 def check_weakening(base_tests: Sequence[SafetyTest], head_tests: Sequence[SafetyTest],
@@ -826,7 +959,7 @@ class PullRequest:
 
 def check_pull_request(pr: PullRequest, root: pathlib.Path = ROOT,
                        source: Source | None = None) -> tuple[list[str], list[str]]:
-    """Rules 3 and 4: the findings, and the warnings for the reviewer."""
+    """Rules 3, 4 and 5: the findings, and the warnings for the reviewer."""
     base = git(root, 'merge-base', pr.base, 'HEAD').strip()
     changed = changed_paths(root, base)
     base_paths, _ = parse_drive_path(show(root, base, DRIVE_PATH) or '')
@@ -835,14 +968,19 @@ def check_pull_request(pr: PullRequest, root: pathlib.Path = ROOT,
     head_tests, _ = parse_safety_tests(show(root, 'HEAD', SAFETY_TESTS) or '')
     drive = {p.path for p in base_paths + head_paths if p.section == DRIVE}
     touched = [path for path in changed if covered(path, drive)]
+    run_paths = {p.path for text in (show(root, base, RUN_DATA), show(root, 'HEAD', RUN_DATA))
+                 for p in parse_run_data(text or '')[0]}
+    run_touched = run_data_touched(root, base, changed, run_paths)
     findings = (check_description(pr.body, touched)
                 + check_weakening(base_tests, head_tests, base_paths, head_paths, pr.title,
-                                  root))
+                                  root)
+                + check_description(pr.body, run_touched, RUN_SECTION))
     warnings = edited_tests(head_tests, changed, base, root, source)
-    if touched:
-        print(f'check_drive_path: this pull request touches the drive path: {", ".join(touched)}')
-    else:
-        print('check_drive_path: this pull request touches no drive-path path')
+    for what, hits in (('drive-path', touched), ('run-data', run_touched)):
+        if hits:
+            print(f'check_drive_path: this pull request touches {what} paths: {", ".join(hits)}')
+        else:
+            print(f'check_drive_path: this pull request touches no {what} path')
     return findings, warnings
 
 
@@ -883,7 +1021,15 @@ def main(argv: Sequence[str] = (), root: pathlib.Path = ROOT) -> int:
         if (root / DRIVE_PATH).is_file() else None
     tests_text = (root / SAFETY_TESTS).read_text(encoding='utf-8') \
         if (root / SAFETY_TESTS).is_file() else None
+    run_text = (root / RUN_DATA).read_text(encoding='utf-8') \
+        if (root / RUN_DATA).is_file() else None
     findings, warnings = [], []
+    run_paths: list[Listed] = []
+    if run_text is None:
+        findings.append(f'{RUN_DATA} must exist')
+    else:
+        run_paths, problems = parse_run_data(run_text)
+        findings += problems + check_run_data_list(run_paths, root)
     if paths_text is None or tests_text is None:
         findings.append(f'{DRIVE_PATH} and {SAFETY_TESTS} must both exist')
         paths, tests = [], []
@@ -917,7 +1063,8 @@ def main(argv: Sequence[str] = (), root: pathlib.Path = ROOT) -> int:
         _say('error', finding)
     drive = sum(p.section == DRIVE for p in paths)
     print(f'check_drive_path: {drive} drive-path paths, {len(paths) - drive} not, '
-          f'{len(tests)} safety tests, {len(findings)} findings, {len(warnings)} warnings')
+          f'{len(tests)} safety tests, {len(run_paths)} run-data paths, {len(findings)} findings, '
+          f'{len(warnings)} warnings')
     return 1 if findings else 0
 
 

@@ -272,9 +272,11 @@ jobs:
   # lists in tools/drive_path.txt, and every test in tools/safety_tests.txt present, not
   # ignored and compiled in. On a pull request also: a change to a drive-path path carries
   # the template's drive-path section, filled in, and a removed safety test or a path moved
-  # off the list is named in the title. The description is read through the API as it is
-  # now, so re-running this job after editing the description checks the edit (the event
-  # payload keeps the description the pull request had when the run started).
+  # off the list is named in the title; a change to a path in tools/run_data_paths.txt
+  # carries the Run data section, filled in (docs/run-data.md). The description is read
+  # through the API as it is now, so re-running this job after editing the description
+  # checks the edit (the event payload keeps the description the pull request had when the
+  # run started).
   drive-path:
     runs-on: ubuntu-latest
     timeout-minutes: 5

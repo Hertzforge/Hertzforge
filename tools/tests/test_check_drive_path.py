@@ -54,6 +54,61 @@ TEMPLATE = textwrap.dedent('''\
     ''')
 
 
+FORMAT = textwrap.dedent('''\
+    # The Format
+
+    ## `geometry/`
+
+    Points.
+
+    ## `run/`
+
+    A run.
+
+    ### Its Streams
+
+    Samples.
+
+    ## `shapes/`
+
+    Modes.
+    ''')
+
+RUN_FILLED = textwrap.dedent('''\
+    ## Run data
+
+    - Adds to the setup: none
+    - Adds to the table: none
+    - Adds to the results: `peak_level`, the highest level reached
+    - Adds to the timeline: none
+    - Recorded in: not recorded yet; the run folder has no results file
+    - Seeds from: none
+    - Flows to: none
+    - Bridge test: row not possible yet
+
+    ## Test results
+    ''')
+
+RUN_TEMPLATE = textwrap.dedent('''\
+    ## Run data
+
+    <!-- If not, keep the first line below. -->
+
+    No run data touched.
+
+    - Adds to the setup:
+    - Adds to the table:
+    - Adds to the results:
+    - Adds to the timeline:
+    - Recorded in:
+    - Seeds from:
+    - Flows to:
+    - Bridge test:
+
+    ## Test results
+    ''')
+
+
 def _write(root: pathlib.Path, files: dict[str, str]) -> None:
     for name, text in files.items():
         path = root / name
@@ -389,6 +444,9 @@ def repo(tmp_path, monkeypatch):
         **_crate('a', lib), **_crate('b', ''),
         cdp.DRIVE_PATH: '[drive path]\ncrates/a  it drives\n[not drive path]\ncrates/b  it reads\n',
         cdp.SAFETY_TESTS: 'a src/lib.rs holds_the_ceiling drive-ceiling the ceiling\n',
+        cdp.RUN_DATA: '[run data]\ncrates/a/src/setup.rs  a setup\ndocs/format.md#run  the run\n',
+        'crates/a/src/setup.rs': '// the setup\n',
+        'docs/format.md': FORMAT,
     })
     _git(tmp_path, 'init', '-q', '-b', 'main')
     _git(tmp_path, 'add', '.')
@@ -543,3 +601,111 @@ def test_main_with_a_base_reads_the_title_and_the_body_file(repo, tmp_path):
     assert cdp.main(['--base', 'main', '--title', 'A', '--body-file', str(body)],
                     root=repo) == 0
     assert cdp.main(['--base', 'main', '--title', 'A'], root=repo) == 1
+
+
+# ------------------------------------------------------- rule 5: run data
+
+def test_a_hash_inside_a_path_is_an_anchor_and_after_a_space_a_comment():
+    entries, findings = cdp.parse_run_data(
+        '# a comment\n[run data]\ndocs/f.md#run  the run  # a note\n')
+    assert findings == []
+    assert [(e.path, e.reason) for e in entries] == [('docs/f.md#run', 'the run')]
+
+
+def test_the_run_data_list_has_one_section():
+    _, findings = cdp.parse_run_data('[drive path]\ncrates/a r\n')
+    assert findings and 'the sections are [run data]' in findings[0]
+
+
+@pytest.mark.parametrize('heading, anchor', [
+    ('`channel_table/`', 'channel_table'),
+    ('`run/`, a MIMO Random Run (Proposal)', 'run-a-mimo-random-run-proposal'),
+    ('Hardware and Random Control', 'hardware-and-random-control'),
+])
+def test_a_heading_anchor_is_the_one_github_makes(heading, anchor):
+    assert cdp.slug(heading) == anchor
+
+
+def test_a_section_runs_to_the_next_heading_of_its_level_and_skips_code():
+    text = FORMAT.replace('Samples.', '```\n## not a heading\n```')
+    ranges = cdp.heading_ranges(text)
+    # the fence adds two lines; `shapes/` starts at line 17
+    assert ranges['run'] == (7, 16)
+    assert ranges['its-streams'] == (11, 16)
+    assert 'not-a-heading' not in ranges
+
+
+def test_a_run_data_list_that_names_what_exists_passes(tmp_path):
+    _write(tmp_path, {'docs/f.md': FORMAT, 'crates/a/src/x.rs': ''})
+    entries, _ = cdp.parse_run_data('[run data]\ncrates/a r\ndocs/f.md#run r\n')
+    assert cdp.check_run_data_list(entries, tmp_path) == []
+
+
+@pytest.mark.parametrize('lines, says', [
+    ('crates/gone r\n', 'crates/gone does not exist'),
+    ('docs/f.md#nowhere r\n', 'no heading whose anchor is #nowhere'),
+    ('docs/f.md#run r\ndocs/f.md#run again\n', 'already listed'),
+])
+def test_a_run_data_list_that_names_what_is_not_there_fails(tmp_path, lines, says):
+    _write(tmp_path, {'docs/f.md': FORMAT})
+    entries, _ = cdp.parse_run_data('[run data]\n' + lines)
+    findings = cdp.check_run_data_list(entries, tmp_path)
+    assert len(findings) == 1 and says in findings[0]
+
+
+def test_a_change_to_a_listed_run_data_path_with_no_section_fails(repo):
+    _commit(repo, {'crates/a/src/setup.rs': '// the setup, with a new field\n'})
+    findings, _ = _pr(repo, body=FILLED)
+    assert len(findings) == 1
+    assert 'changes run data (crates/a/src/setup.rs)' in findings[0]
+    assert 'has no "## Run data" section' in findings[0]
+
+
+def test_a_run_data_change_with_the_template_untouched_fails_on_each_field(repo):
+    _commit(repo, {'crates/a/src/setup.rs': '// the setup, with a new field\n'})
+    findings, _ = _pr(repo, body=FILLED + RUN_TEMPLATE)
+    assert len(findings) == 1 + len(cdp.RUN_SECTION.answers)
+    assert 'says "No run data touched."' in findings[0]
+    for label in cdp.RUN_SECTION.answers:
+        assert any(f'answer "{label}"' in f for f in findings)
+
+
+def test_a_run_data_change_with_a_placeholder_field_fails(repo):
+    _commit(repo, {'crates/a/src/setup.rs': '// the setup, with a new field\n'})
+    body = FILLED + RUN_FILLED.replace('row not possible yet', 'TBD')
+    findings, _ = _pr(repo, body=body)
+    assert len(findings) == 1 and '"Bridge test"' in findings[0]
+
+
+def test_a_run_data_change_with_the_section_filled_passes_and_none_is_an_answer(repo):
+    _commit(repo, {'crates/a/src/setup.rs': '// the setup, with a new field\n'})
+    assert _pr(repo, body=FILLED + RUN_FILLED) == ([], [])
+
+
+def test_an_edit_under_a_listed_heading_is_run_data(repo):
+    _commit(repo, {'docs/format.md': FORMAT.replace('Samples.', 'Samples, with units.')})
+    findings, _ = _pr(repo, body=TEMPLATE)
+    assert len(findings) == 1 and 'changes run data (docs/format.md#run)' in findings[0]
+    assert _pr(repo, body=RUN_FILLED) == ([], [])
+
+
+@pytest.mark.parametrize('old, new', [
+    ('Points.', 'Points, and lines.'),
+    ('Modes.', 'Modes and their damping.'),
+])
+def test_an_edit_under_another_heading_of_a_listed_file_is_not(repo, old, new):
+    _commit(repo, {'docs/format.md': FORMAT.replace(old, new)})
+    assert _pr(repo, body='') == ([], [])
+
+
+def test_a_section_removed_whole_is_still_run_data(repo):
+    _commit(repo, {'docs/format.md': FORMAT.replace('## `run/`\n\nA run.\n\n### Its Streams'
+                                                    '\n\nSamples.\n\n', '')})
+    findings, _ = _pr(repo, body='')
+    assert len(findings) == 1 and 'docs/format.md#run' in findings[0]
+
+
+def test_main_fails_without_the_run_data_list(repo, capsys):
+    (repo / cdp.RUN_DATA).unlink()
+    assert cdp.main([], root=repo) == 1
+    assert f'{cdp.RUN_DATA} must exist' in capsys.readouterr().out
