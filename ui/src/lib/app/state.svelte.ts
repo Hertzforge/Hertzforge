@@ -111,8 +111,6 @@ class AnalyzeState {
 	picking = $state<{ verb: string; kind: string; row: ActionRow; part?: string } | null>(null);
 	/** The row to run once the object it needed has joined the selection. */
 	private joined: string | null = null;
-	/** The fit about to begin by hand, when a coherence could weight it. */
-	fitWeighing = $state(false);
 	private showSeq = 0;
 	private actionSeq = 0;
 
@@ -315,7 +313,6 @@ class AnalyzeState {
 				if (row) this.followRow(row);
 				else this.closeForm();
 			}
-			this.fitWeighing = false;
 		} catch (err) {
 			if (seq === this.actionSeq) this.actions = null;
 			void err;
@@ -1648,7 +1645,6 @@ export class ProjectState {
 		const one = picked.length === 1 ? picked[0] : null;
 		const stale = picked.filter((n) => this.summary?.objects.find((o) => o.name === n)?.stale);
 		const kinds = picked.map((n) => this.summary?.objects.find((o) => o.name === n)?.kind);
-		const coherent = (this.summary?.objects ?? []).some((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence');
 		if (id === 'self.activate' && one) await this.activate(one);
 		else if (id === 'self.units' && one) await this.toggleUnits(one);
 		else if (id === 'self.recompute') await this.refresh(stale);
@@ -1659,10 +1655,7 @@ export class ProjectState {
 		else if (id === 'self.copy') await this.duplicate(picked);
 		else if (id === 'self.rename' && one) this.renaming = one;
 		else if (id === 'self.fit' || id === 'self.edit_fit') {
-			if (coherent) {
-				this.app.analyze.fitWeighing = true;
-				return;
-			}
+			// weighted by the coherence the service chooses, with nothing asked (Brandon, 2026-11-14)
 			await this.app.fit.start(picked[kinds.indexOf('frf')], id === 'self.edit_fit' ? picked[kinds.indexOf('shape_set')] : undefined);
 		}
 	}

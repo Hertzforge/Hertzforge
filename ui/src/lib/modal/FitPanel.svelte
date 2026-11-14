@@ -18,12 +18,46 @@
 	let { fit }: Props = $props();
 
 	const s = $derived(fit.state);
-	let description = $state('');
-	let heldPercent = $state('');
+	/**
+	 * The modes picked in the table: a click picks a row, Shift picks to it, Cmd (Ctrl elsewhere)
+	 * adds or takes one away, and Delete takes the picked back (Brandon, 2026-11-14).
+	 */
+	let picked = $state<number[]>([]);
+	let anchor: number | null = null;
 
 	async function confirm() {
-		if (await fit.confirm(description.trim() || undefined)) description = '';
+		await fit.confirm();
 	}
+
+	function pickRow(e: MouseEvent, i: number) {
+		if ((e.target as HTMLElement).closest('input, button')) return;
+		if (e.shiftKey && anchor !== null) {
+			const [a, b] = anchor < i ? [anchor, i] : [i, anchor];
+			picked = Array.from({ length: b - a + 1 }, (_, k) => a + k);
+			return;
+		}
+		if (e.metaKey || e.ctrlKey) picked = picked.includes(i) ? picked.filter((k) => k !== i) : [...picked, i].sort((x, y) => x - y);
+		else picked = [i];
+		anchor = i;
+	}
+
+	async function tableKey(e: KeyboardEvent) {
+		if ((e.target as HTMLElement).closest('input')) return;
+		if ((e.key === 'Delete' || e.key === 'Backspace') && picked.length && fit.busy === null) {
+			e.preventDefault();
+			const gone = picked;
+			picked = [];
+			anchor = null;
+			await fit.remove(gone);
+		} else if (e.key === 'Escape') picked = [];
+	}
+
+	// another set of modes (one confirmed, one taken back) is not the rows picked
+	$effect(() => {
+		void s?.modes.length;
+		picked = [];
+		anchor = null;
+	});
 
 	/** Where the half-power reading crosses, drawn beside the cursor. */
 	const crossings = $derived([s?.half_power?.low, s?.half_power?.high].filter((x): x is number => x !== null && x !== undefined));
@@ -89,10 +123,22 @@
 		if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
 	};
 
-	function hold(e: SubmitEvent) {
-		e.preventDefault();
-		const percent = Number(heldPercent);
-		if (Number.isFinite(percent) && percent > 0) void fit.holdDamping(percent / 100);
+	/** Where the cursor waits to be moved back into view, once the zoom or pan settles. */
+	let inView: ReturnType<typeof setTimeout> | undefined;
+
+	/**
+	 * The frequencies on screen are Find Mode's search band, and the cursor stays among them: a
+	 * zoom or pan that would leave it outside carries it to just inside the near edge, as the
+	 * earlier toolset's did, rather than suggesting a new place (Brandon, 2026-11-14).
+	 */
+	function keepCursorInView(low: number, high: number) {
+		fit.range = [low, high];
+		const at = s?.pending.frequency;
+		clearTimeout(inView);
+		if (at === undefined || at === null || !(high > low)) return;
+		const inset = (high - low) * 0.01;
+		const edge = at < low ? low + inset : at > high ? high - inset : null;
+		if (edge !== null) inView = setTimeout(() => void fit.move(edge), 120);
 	}
 </script>
 
@@ -122,17 +168,13 @@
 			<span>Cursor <b class="num">{formatFixed(s.pending.frequency, 4)}</b> Hz</span>
 			<span>Damping <b class="num" data-testid="fit-damping">{formatFixed((dragged ?? s.pending.damping) * 100, 3)}</b> %{s.pending.held || dragged !== null ? ' (held)' : ''}</span>
 			{#if s.preview}<span class="preview">Previewing the mode at {formatFixed(s.preview.frequency, 4)} Hz</span>{/if}
+			{#if s.coherence}<span data-testid="fit-weighted" title="Each channel at each line counts by its coherence, γ²/(1 − γ²): a noisy line pulls the fit less">Weighted by {s.coherence}</span>{/if}
 			{#if s.half_power}
 				{@const hp = s.half_power}
 				<span data-testid="fit-half-power" title={hp.notes.join('; ') || 'Q from the half-power width of the residual CMIF peak under the cursor'}>
 					Half-power {#if hp.q !== null && hp.damping !== null}Q <b class="num">{formatFixed(hp.q, 1)}</b>, <b class="num">{formatFixed(hp.damping * 100, 3)}</b> %{:else}not read{/if}
 				</span>
 			{/if}
-			<form class="hold" onsubmit={hold}>
-				<label for="fit-hold">Hold damping</label>
-				<input id="fit-hold" class="field mono" bind:value={heldPercent} placeholder="%" inputmode="decimal" />
-			</form>
-			<input class="field desc" aria-label="Description of the next mode" bind:value={description} placeholder="Description (optional)" />
 		</div>
 		{#if fit.busy}<p class="muted" role="status">{fit.busy}.</p>{/if}
 		{#if fit.error}<p class="error" role="alert" data-testid="fit-error">{fit.error}</p>{/if}
@@ -145,7 +187,7 @@
 				guides={crossings}
 				onMarkerDrag={dragCursor}
 				onPick={(x) => fit.move(x)}
-				onRange={(low, high) => (fit.range = [low, high])}
+				onRange={keepCursorInView}
 				rangeOn={(series) => series.role === 'measured' && series.follows === undefined}
 			/>
 		</div>
@@ -154,11 +196,12 @@
 			<div class="mac" data-testid="fit-mac"><ViewRenderer view={s.mac} /></div>
 		{/if}
 
-		<table class="modes" data-testid="fit-modes" aria-label="Confirmed modes">
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (the table takes Delete for its picked rows) -->
+		<table class="modes" data-testid="fit-modes" aria-label="Confirmed modes" tabindex="0" onkeydown={tableKey}>
 			<thead><tr><th>Mode</th><th>Frequency (Hz)</th><th>Damping (%)</th><th>Description</th><th></th></tr></thead>
 			<tbody>
 				{#each s.modes as md, i (`${i}:${md.frequency}:${md.damping}:${md.description}`)}
-					<tr data-testid="fit-mode-{i}">
+					<tr data-testid="fit-mode-{i}" class:on={picked.includes(i)} aria-selected={picked.includes(i)} onclick={(e) => pickRow(e, i)}>
 						<td class="num">{i + 1}</td>
 						<td class="num">{formatFixed(md.frequency, 5)}</td>
 						<td>
@@ -221,21 +264,6 @@
 		color: var(--text-2);
 	}
 
-	.hold {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-	}
-
-	.hold input {
-		width: 5em;
-	}
-
-	.desc {
-		flex: 1;
-		min-width: 10em;
-	}
-
 	/* a scrolling column: each part keeps its own height rather than shrinking under the next */
 	.fit > :global(*) {
 		flex-shrink: 0;
@@ -262,6 +290,22 @@
 
 	.modes td {
 		padding: 2px 6px 2px 0;
+	}
+
+	.modes:focus {
+		outline: none;
+	}
+
+	.modes tbody tr {
+		cursor: default;
+	}
+
+	.modes tbody tr.on {
+		background: var(--select-bg, var(--bg-3));
+	}
+
+	.modes:focus-within tbody tr.on {
+		box-shadow: inset 2px 0 0 var(--accent);
 	}
 
 	/* a row's damping and description are typed in place */

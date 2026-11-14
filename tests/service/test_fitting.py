@@ -242,6 +242,12 @@ def test_a_fit_weighted_by_coherence(validate):
     assert out['coherence'] == coherence
     with pytest.raises(ProtocolError, match='is not a coherence'):
         fitting.start(project, {'frf': frf, 'coherence': 'Time History'})
+    # nothing named: the project's own choice, as the earlier toolset weighted a fit with
+    # nothing asked (Brandon, 2026-11-14); empty is unweighted
+    chosen = fitting.start(project, {'frf': frf})
+    assert chosen.coherence == coherence and chosen.session.weights is not None
+    plain = fitting.start(project, {'frf': frf, 'coherence': ''})
+    assert plain.coherence is None and plain.session.weights is None
 
 
 def _through_the_server(*requests):
@@ -568,7 +574,7 @@ def test_coherence_keeps_a_noisy_channels_lines_from_being_offered_and_fit(seed)
     found = [mode['frequency'] for mode in weighted.modes]
     assert found == pytest.approx([20.0, 50.0, 90.0], abs=0.25)
     shapes = np.array([mode['shape'] for mode in weighted.modes])
-    plain_found = np.array([mode['frequency'] for mode in _fitted(project).modes])
+    plain_found = np.array([mode['frequency'] for mode in _fitted(project, coherence='').modes])
     off = np.abs(np.array(found) - [20.0, 50.0, 90.0]).max()
     assert off < 0.1 * np.abs(plain_found - [20.0, 50.0, 90.0]).max(), 'plain it chases the noise'
     good = [0, 1, 3]
@@ -585,7 +591,7 @@ def test_coherence_moves_a_noisy_channels_shape_toward_its_better_lines():
     gamma[2, bad] = 0.1
     project = _project_of(H=measured, C=MultipleCoherence(LINES, gamma, response_dof=DOFS))
     error = {}
-    for label, more in (('plain', {}), ('weighted', {'coherence': 'C'})):
+    for label, more in (('plain', {'coherence': ''}), ('weighted', {'coherence': 'C'})):
         fit = fitting.start(project, {'frf': 'H', **more})
         fitting.act(fit, 'fit.move', {'frequency': 50.0})
         fitting.act(fit, 'fit.confirm', {})
