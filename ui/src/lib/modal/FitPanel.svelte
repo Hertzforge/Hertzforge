@@ -1,10 +1,10 @@
 <script lang="ts">
 	/**
-	 * Fitting modes by hand: the bar reads left to right as
-	 * the loop does. Find Mode puts the cursor on the most prominent residual peak inside the
-	 * frequencies on screen (the zoom is the search band), Fit Mode previews the mode there so its
-	 * dashed synthesis can be judged against the measured CMIF, and Confirm Mode adds it. A click on
-	 * the plot moves the cursor; a drag zooms.
+	 * Fitting modes by hand: Find Mode puts the cursor on the most prominent residual peak inside
+	 * the frequencies on screen (the zoom is the search band), and Confirm Mode adds the mode there.
+	 * Wherever the cursor lands (Find Mode, a click on the plot, a drag of the cursor) the mode is
+	 * fitted there, its dashed synthesis to judge against the measured CMIF: there is no Fit Mode
+	 * to press, as the earlier toolset had none (Brandon, 2026-11-14).
 	 */
 	import type { FitState } from '$lib/app/state.svelte';
 	import { formatFixed } from '$lib/viz/format';
@@ -24,6 +24,16 @@
 	 */
 	let picked = $state<number[]>([]);
 	let anchor: number | null = null;
+
+	/** Find the next peak and fit the mode there. */
+	async function findMode() {
+		if (await fit.find()) await fit.fit();
+	}
+
+	/** Move the cursor where the plot was clicked and fit the mode there. */
+	async function moveTo(x: number) {
+		if (await fit.move(x)) await fit.fit();
+	}
 
 	async function confirm() {
 		await fit.confirm();
@@ -145,8 +155,7 @@
 {#if s}
 	<section class="fit" aria-label="Fit modes on {s.frf}" data-testid="fit-panel">
 		<div class="bar" role="toolbar" aria-label="Fit">
-			<button class="btn sm" data-testid="fit-find" onclick={() => fit.find()} disabled={fit.busy !== null}>Find Mode</button>
-			<button class="btn sm" data-testid="fit-fit" onclick={() => fit.fit()} disabled={fit.busy !== null}>Fit Mode</button>
+			<button class="btn sm" data-testid="fit-find" onclick={findMode} disabled={fit.busy !== null}>Find Mode</button>
 			<button class="btn primary sm" data-testid="fit-confirm" onclick={confirm} disabled={fit.busy !== null}>Confirm Mode</button>
 			<span class="sep"></span>
 			{#if s.modes.length}
@@ -186,7 +195,7 @@
 				marker={s.pending.frequency}
 				guides={crossings}
 				onMarkerDrag={dragCursor}
-				onPick={(x) => fit.move(x)}
+				onPick={moveTo}
 				onRange={keepCursorInView}
 				rangeOn={(series) => series.role === 'measured' && series.follows === undefined}
 			/>
@@ -219,7 +228,7 @@
 						</td>
 					</tr>
 				{:else}
-					<tr><td colspan="5" class="muted">No mode confirmed yet. Find Mode, Fit Mode, then Confirm Mode.</td></tr>
+					<tr><td colspan="5" class="muted">No mode confirmed yet. Find Mode, then Confirm Mode.</td></tr>
 				{/each}
 			</tbody>
 		</table>
