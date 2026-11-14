@@ -180,7 +180,18 @@ it notched and the worst prediction before and after.
 ## Capture
 
 The capture can start when the run arms; fields kept with the run (a run number, an operator) are
-listed here.
+listed here. With it on, the run folder goes under the program's local data folder and is named
+`srs_run_` and the time the run armed, in seconds (a run name given here is not used); when that
+name is taken, the run gets the next free one. It holds:
+
+- the control channel's record of each pulse, one after another at the station rate, with the
+  channel table and the run's settings beside it. Only the control channel is recorded; the limit
+  channels, the identification burst and the drive are not.
+- the control law's record (`law.json`) and every call made to it (`law_pulses.bin` and
+  `law_pulses.jsonl`): the pulse it followed, the target and measured spectra it was given, the
+  gains it returned and what was applied.
+
+With capture off, nothing is written to disk.
 
 ## The Run
 

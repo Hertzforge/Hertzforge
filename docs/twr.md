@@ -174,8 +174,25 @@ are the correction share, the growth limit, and a backoff for the first drive.
 ## Capture
 
 Whether capture starts with the run, and the run folder's name under the program's local data
-folder; each play's target, response and drive records go there either way. Fields kept with the run
-(a run number, an operator) are listed here.
+folder; when that name is taken, the run gets the next free one (`twr_run-2`, `twr_run-3`, ...).
+Fields kept with the run (a run number, an operator) are listed here.
+
+With capture on, recording starts after the identification and any review hold, before the first
+play, and the run folder holds:
+
+- the control channel's response to each play, one play after another at the station rate, with
+  the channel table and the run's settings beside it. Only the control channel is recorded; the
+  identification, the pads between plays, a play cut short and the drive are not.
+- the reference as imported (`reference.bin`, described by `reference.json`), written once.
+- the control law's record (`law.json`) and every call made to it (`law_calls.bin` and
+  `law_calls.jsonl`): the play it followed, that play's level and error, whether the call was used, and the drive
+  it returned. The law is called
+  after an iteration play that misses its gate, and after a playback play only when **Keep correcting
+  during playback** is on, and never while corrections are frozen, so a play that met its gate
+  leaves no call.
+
+With capture off, nothing is written to disk. The **Records** on the Plays page come from the
+control service's memory either way, and only for the most recent eight plays.
 
 ## The Run
 
@@ -220,8 +237,8 @@ The pages, each drawn from the control service's views:
   it met the gate, the drive and response peaks, how far its lag drifted from the identification's
   (shown as not yet measured until the alignment check has measured it), the law call that made its
   drive and the values the law reported. **Records** opens a play's target, response, error and drive
-  from the control service; the records of the most recent plays are held, and an older play keeps
-  its row. A play that a stop, an abort or the in-play envelope check cut short has no row; its frames
+  from the control service's memory; the records of the most recent eight plays are held, and an
+  older play keeps its row. A play that a stop, an abort or the in-play envelope check cut short has no row; its frames
   still count in station time, and the run's end names it.
 
 **Target**, **Drive**, **Envelope** (the response inside the alarm and abort bands) and **Scope** (the

@@ -80,8 +80,14 @@ The channel table is the one every test type shares. MIMO Shock reads its enable
   with the peak, in its own unit, that ends the run. A limit is watched, not controlled.
 
 On the simulator you may name the simulated structure the run is played on; its size must match
-the controls and drives. The capture switch writes every pulse, the identification and every law
-call to disk when the run ends.
+the controls and drives. The capture switch writes the run's records to disk when the run ends,
+however it ends; until then they are held in memory, and nothing is written while the run is going.
+They go under the program's local data folder, in a folder named by the run name (`mimo_shock`
+unless named) and the run's id, such as `mimo_shock_ms-0001`; the id counts again from 1 each time
+the control service starts, and when a name is taken the run gets the next free one. The
+folder holds the identified setup and the law (`setup.json`), every law call with what it was given
+and what it answered (`law_calls.jsonl`), and every pulse with its level, the drives as played and
+every input row (`pulses.jsonl`). With the switch off, nothing is written.
 
 ### Targets
 

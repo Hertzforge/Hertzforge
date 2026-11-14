@@ -108,7 +108,7 @@ node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 | [`docs/recorder.md`](docs/recorder.md) | Recorder: the station's inputs recorded, nothing driven |
 | [`docs/control-laws.md`](docs/control-laws.md), [`docs/control-law-spec.md`](docs/control-law-spec.md) | Writing a control law as a law file, and the interface it is written against |
 | [`docs/reference-file.md`](docs/reference-file.md), [`docs/reference-from-field-data.md`](docs/reference-from-field-data.md) | Reference files, and references from field data |
-| [`docs/hforge-format.md`](docs/hforge-format.md) | The `.hforge` run file |
+| [`docs/hforge-format.md`](docs/hforge-format.md) | The layout inside a `.hforge` file (projects, measurements, tables), for reading one without Hertzforge |
 | [`docs/desktop-app.md`](docs/desktop-app.md) | The desktop app |
 | [`docs/documentation.md`](docs/documentation.md) | Documentation and typing conventions for contributors |
 | [`docs/drive-path.md`](docs/drive-path.md) | The drive path: its invariants, its safety tests, and what a pull request that touches it carries |

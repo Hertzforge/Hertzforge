@@ -160,7 +160,21 @@ on, nothing plays until the operator proceeds.
 ## Capture
 
 What the run records beyond its report, the run folder's name under the local data folder, and the
-words kept with the run.
+words kept with the run. The run records nothing (`off`, the default) or the entire test
+(`entire_test`); recording only what is started and stopped by hand, or the first seconds at each
+level, is refused when the setup is applied. The folder is `mixed` unless named; when that name is
+taken, the run gets the next free one (`mixed-2`, ...).
+
+The entire test is recorded from engage, when the drive starts after the identification and any
+review hold, until the run ends; the identification is not recorded. The run folder holds:
+
+- the control channels at the run's rate, with the channel table and the run's settings beside it.
+  Only the control channels are recorded; the other inputs and the drive are not.
+- a description of the law records (`law.json`) and every call made to the floor's law and each
+  tone's law (`law_ticks.bin`): its time, the drive it was handed and the drive it returned, how
+  long it took, and whether it was used.
+
+A save interval can be given, but Mixed Mode saves no snapshots while it records.
 
 ## The Run
 
