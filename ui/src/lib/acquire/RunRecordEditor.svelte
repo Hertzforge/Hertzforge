@@ -12,8 +12,10 @@
 		acq: RecordHost;
 		/** What the record keeps beside the time histories, in words, for the line under the switch. */
 		kept?: string;
+		/** Whether the module offers to leave the time histories out; one that always keeps them hides the switch. */
+		streams?: boolean;
 	}
-	let { acq, kept = 'The setup, the channel table, the log and the spectra are still kept.' }: Props = $props();
+	let { acq, kept = 'The setup, the channel table, the log and the spectra are still kept.', streams = true }: Props = $props();
 
 	const r = $derived(acq.setup.record);
 	const locked = $derived(acq.locked);
@@ -53,6 +55,7 @@
 		</div>
 	</div>
 
+	{#if streams}
 	<div class="aq-group streams">
 		<h3>Recording</h3>
 		<label class="aq-switch" for="rec-streams">
@@ -73,6 +76,7 @@
 			{/if}
 		</p>
 	</div>
+	{/if}
 </section>
 
 <style>

@@ -28,14 +28,18 @@ const EXAMPLE: RecorderConfig = {
 	trigger: { mode: 'level', row: 1, level: 0.25, slope: 'rising', hysteresis: null, pre_s: 0.5, record_s: 1.0, count: 5, holdoff_s: 0 },
 	analysis: { block: 2048, window: 'hann', overlap_pct: null, averaging: 'linear', averages: 8, decimation: 1, frf: { reference: 2, response: 4 } },
 	capture: { run_name: 'recorder', keep_free_gb: 1 },
-	metadata: [{ key: 'run_number', label: 'Run Number', value: '4' }]
+	metadata: [{ key: 'run_number', label: 'Run Number', value: '4' }],
+	operator: 'A. Operator',
+	article: 'Bracket, serial 7',
+	notes: 'Second article',
+	specification: { document: 'Test procedure 12', clause: '4.2' }
 };
 
 describe('the Recorder setup draft', () => {
 	it('sends every Recorder wire field and reads each back unchanged', () => {
 		expect(toRecorderConfig(fromRecorderConfig(EXAMPLE))).toEqual(EXAMPLE);
 		const keys = (c: RecorderConfig) => ({ top: Object.keys(c).sort(), trigger: Object.keys(c.trigger ?? {}).sort(), analysis: Object.keys(c.analysis ?? {}).sort(), capture: Object.keys(c.capture ?? {}).sort() });
-		const level = { ...defaultRecorderSetup(), trigger: { ...defaultRecorderSetup().trigger, mode: 'level' as const, row: 1, level: 0.25, record_s: 1 } };
+		const level = { ...defaultRecorderSetup(), trigger: { ...defaultRecorderSetup().trigger, mode: 'level' as const, row: 1, level: 0.25, record_s: 1 }, record: { operator: 'A', article: 'B', notes: 'C', document: 'D', clause: '', streams: true } };
 		expect(keys(toRecorderConfig(level))).toEqual(keys(EXAMPLE));
 	});
 
@@ -61,7 +65,12 @@ describe('the Recorder setup draft', () => {
 			[(d) => (d.analysis.frf = null), (c) => (c.analysis!.frf = null)],
 			[(d) => (d.capture.run_name = 'fixture_b'), (c) => (c.capture!.run_name = 'fixture_b')],
 			[(d) => (d.capture.keep_free_gb = 20), (c) => (c.capture!.keep_free_gb = 20)],
-			[(d) => (d.metadata[0].value = '5'), (c) => (c.metadata![0].value = '5')]
+			[(d) => (d.metadata[0].value = '5'), (c) => (c.metadata![0].value = '5')],
+			[(d) => (d.record.operator = 'B. Operator'), (c) => (c.operator = 'B. Operator')],
+			[(d) => (d.record.article = 'Bracket, serial 8'), (c) => (c.article = 'Bracket, serial 8')],
+			[(d) => (d.record.notes = 'Third article'), (c) => (c.notes = 'Third article')],
+			[(d) => (d.record.document = 'Test procedure 13'), (c) => (c.specification = { document: 'Test procedure 13', clause: '4.2' })],
+			[(d) => (d.record.clause = '5.1'), (c) => (c.specification = { document: 'Test procedure 12', clause: '5.1' })]
 		];
 		for (const [edit, expected] of cases) {
 			const d = fromRecorderConfig(EXAMPLE);
@@ -98,6 +107,20 @@ describe('the Recorder setup draft', () => {
 		});
 	});
 
+	it("sends the Recorder run record's words trimmed and only when given, and never a streams switch", () => {
+		const d = defaultRecorderSetup();
+		expect(Object.keys(toRecorderConfig(d))).not.toContain('operator');
+		Object.assign(d.record, { operator: ' A. Operator ', article: ' Bracket ', notes: ' first ', document: ' ', clause: '' });
+		const wire = toRecorderConfig(d);
+		expect([wire.operator, wire.article, wire.notes]).toEqual(['A. Operator', 'Bracket', 'first']);
+		expect(wire).not.toHaveProperty('specification');
+		expect(wire).not.toHaveProperty('record');
+		d.record.streams = false;
+		expect(toRecorderConfig(d)).not.toHaveProperty('record');
+		expect(mergeRecorderSetup({ record: { operator: 'kept', streams: false } as never }).record).toEqual({ operator: 'kept', article: '', notes: '', document: '', clause: '', streams: true });
+		expect(mergeRecorderSetup({ title: 'saved before the record' }).record).toEqual(defaultRecorderSetup().record);
+	});
+
 	it('reads a Recorder draft back from storage, an emptied field kept empty, a missing part from the defaults', () => {
 		const d = defaultRecorderSetup();
 		d.trigger.pre_s = NaN;
@@ -127,6 +150,10 @@ describe('the Recorder setup draft', () => {
 			'analysis.frf': ['Choose both rows of the pair.'],
 			'capture.run_name': ['Name the run folder.']
 		});
+		const e = defaultRecorderSetup();
+		e.record.clause = '4.2';
+		expect(localErrors(e)).toEqual({ 'specification.document': ['Name the document this clause is from.'] });
+		for (const k of ['operator', 'article', 'notes', 'specification.document']) expect(recorderSectionOf(k)).toBe('capture');
 	});
 
 	it("lands each Recorder finding on its field and section: an item's field, a refusal's param, the table's own", () => {

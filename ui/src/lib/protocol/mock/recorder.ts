@@ -78,7 +78,7 @@ const LIVE: RecorderRunState[] = ['starting', 'running', 'stopping'];
 const MODES: RecorderTriggerMode[] = ['start', 'manual', 'level'];
 const WINDOWS: RecorderWindow[] = ['hann', 'flattop', 'rectangular', 'blackman_harris'];
 const AVERAGINGS = ['linear', 'exponential', 'peak_hold'];
-const CONFIG_KEYS = ['title', 'acquisition', 'trigger', 'analysis', 'capture', 'metadata'];
+const CONFIG_KEYS = ['title', 'acquisition', 'trigger', 'analysis', 'capture', 'metadata', 'operator', 'article', 'notes', 'specification'];
 const NESTED: Record<string, string[]> = {
 	acquisition: ['fs_hz'],
 	trigger: ['mode', 'row', 'level', 'slope', 'hysteresis', 'pre_s', 'record_s', 'count', 'holdoff_s'],
@@ -408,6 +408,11 @@ export function createRecorderMock(host: RecorderMockHost): RecorderMock {
 		if (cap.run_name !== undefined && typeof cap.run_name !== 'string') bad('config.capture.run_name', '"run_name" is text.');
 		if (cap.keep_free_gb !== undefined && !isNum(cap.keep_free_gb)) bad('config.capture.keep_free_gb', '"keep_free_gb" is a number of GiB.');
 		if (c.metadata !== undefined && !(Array.isArray(c.metadata) && c.metadata.every((m) => isObject(m) && typeof m.key === 'string' && typeof m.value === 'string'))) bad('config.metadata', '"metadata" is a list of {key, label, value}.');
+		for (const k of ['operator', 'article', 'notes']) if (c[k] !== undefined && c[k] !== null && typeof c[k] !== 'string') bad(`config.${k}`, `"${k}" is text.`);
+		if (c.specification !== undefined && c.specification !== null) {
+			if (!isObject(c.specification)) bad('config.specification', '"specification" is {document, clause}, or null.');
+			for (const k of Object.keys(c.specification as object)) if (k !== 'document' && k !== 'clause') bad(`config.specification.${k}`, `"specification" has no "${k}".`);
+		}
 	}
 
 	/** The table's findings, at configure and again at start. */

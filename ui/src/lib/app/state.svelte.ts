@@ -2043,6 +2043,7 @@ export class AppState {
 	readonly mimoRunOpen: RunOpen;
 	/** A finished TWR run's way to its data: the Transient Analysis workspace. */
 	readonly twrRunOpen: RunOpen;
+	readonly recorderRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2122,6 +2123,7 @@ export class AppState {
 		this.explorerRunOpen = new RunOpen(runHost, 'explorer');
 		this.mimoRunOpen = new RunOpen(runHost, 'mimo_random');
 		this.twrRunOpen = new RunOpen(runHost, 'twr');
+		this.recorderRunOpen = new RunOpen(runHost, 'recorder');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
