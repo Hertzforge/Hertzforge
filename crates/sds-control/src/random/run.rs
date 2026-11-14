@@ -1167,7 +1167,9 @@ impl Actor {
         self.view.reference_rms_g = Some(st.target_grms);
         self.view.control_rms_g = st.measured_grms;
         if self.view.state == State::Running {
-            self.view.phase = driving_phase(svc);
+            // through `set`, so the change of phase is a log entry like any other
+            let phase = driving_phase(svc);
+            self.set(State::Running, phase);
         }
     }
 

@@ -1,0 +1,35 @@
+{
+  "name": "response_psd",
+  "kind": "psd",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 40.0,
+    "step": 20.0
+  },
+  "channels": {
+    "responses": [
+      1,
+      2
+    ]
+  },
+  "records": {
+    "index": "record",
+    "why": "level (the last loop before a level change) or end (the last loop)",
+    "level_db": "the level the loop ran at",
+    "loop": "the control loop",
+    "frame": "the station frame when it was kept"
+  },
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        2,
+        9
+      ],
+      "unit": "g^2/Hz",
+      "offset": 0
+    }
+  ]
+}

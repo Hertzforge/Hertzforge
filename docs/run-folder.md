@@ -162,7 +162,9 @@ the analysis side converts them to SI.
 ## What a Random Run Saves
 
 From arm: `run.json`, `table.json`, `setup.json`, `law/law.json` (the built-in
-control law and its guards) and `log.jsonl`, and these files:
+control law and its guards) and `log.jsonl`, and these files, each checked
+against the golden run folder (`schema/golden/runs/random/`) by
+`tests/test_run_folder_golden.py`:
 
 | File | What |
 |---|---|
@@ -185,3 +187,6 @@ their composite, written as `composite_frf` and `composite_coherence` and kept
 as arrays. With `record.streams` false there is no `streams/` folder. A run that
 ends before its system identification has no identification or spectra.
 
+The golden folder is written by `cargo test -p sds-control --test
+random_golden_run` from a short run on the simulator, with fixed seeds, its wall
+times and build fields normalized; `scripts/make_golden_runs.sh` rewrites it.
