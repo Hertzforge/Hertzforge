@@ -513,8 +513,10 @@ pub(crate) struct Target {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Tradeoff {
     /// At the knee of drive power against residual over the grid, on a
-    /// subsample of the band's lines.
-    Auto,
+    /// subsample of the band's lines, among the trade-offs whose target keeps
+    /// on average at least `retained` of each specified autospectrum (each
+    /// control on each sampled line counted at most at its specification).
+    Auto { retained: f64 },
     /// This relative value.
     Fixed(f64),
 }
@@ -642,11 +644,21 @@ impl Lines {
 /// grid point minimizing their product is chosen, leaving out the points whose
 /// drive power or residual is above nine tenths of the largest (Coletti, Davis
 /// and Schultz, section 3.1, with the product in place of the sum of
-/// logarithms), and the points whose target leaves the specification's alarm
-/// lines on any sampled control and line: a test designed to alarm is not a
-/// choice. With no point left, the smallest trade-off, which reproduces the
-/// autospectra wherever the plant can.
-fn choose_tradeoff(lines: &Lines) -> Result<f64, LawError> {
+/// logarithms), the points whose target leaves the specification's alarm
+/// lines on any sampled control and line (a test designed to alarm is not a
+/// choice), and the points whose target keeps on average less than `retained`
+/// of the specified autospectra, each control on each sampled line counted as
+/// its target over its specification, at most 1. With no point left, the
+/// smallest trade-off, which reproduces the autospectra wherever the plant can.
+///
+/// The last rule bounds what the knee gives up when nothing else does. With no
+/// alarm lines, on a plant that cannot reproduce every autospectrum (48
+/// controls on 12 drives, a lightly damped plate), the knee of the product sat
+/// at a trade-off of 100, whose target kept 15 % of the specification: the run
+/// applied 35 lbf^2 and missed the specification by 21 dB in its bands. The
+/// knee's own rule (drop the top tenth of residual) left that point in, since
+/// the residual flattens as the target goes to zero.
+fn choose_tradeoff(lines: &Lines, retained: f64) -> Result<f64, LawError> {
     let nb = lines.scale.len();
     let nc = lines.nc;
     let stride = nb.div_ceil(SAMPLE_LINES).max(1);
@@ -654,6 +666,8 @@ fn choose_tradeoff(lines: &Lines) -> Result<f64, LawError> {
     let mut inp = vec![0.0; GRID.len()];
     let mut res = vec![0.0; GRID.len()];
     let mut inside = vec![true; GRID.len()];
+    let mut kept = vec![0.0; GRID.len()];
+    let mut counted = vec![0.0; GRID.len()];
     for &i in &sample {
         let mut warm: Option<Vec<f64>> = None;
         for (g, &rel) in GRID.iter().enumerate() {
@@ -661,6 +675,11 @@ fn choose_tradeoff(lines: &Lines) -> Result<f64, LawError> {
                 inp[g] += sol.trace;
                 res[g] += sol.residual;
                 for k in 0..nc {
+                    let y = lines.y[i * nc + k];
+                    if y > 0.0 {
+                        kept[g] += (sol.predicted[k] / y).min(1.0);
+                        counted[g] += 1.0;
+                    }
                     let (lo, hi) = lines.alarm[i * nc + k];
                     let p = sol.predicted[k];
                     if p < lo || p > hi {
@@ -678,7 +697,8 @@ fn choose_tradeoff(lines: &Lines) -> Result<f64, LawError> {
     let floor = 1e-12 * (inp_max + res_max);
     let mut best: Option<(f64, f64)> = None;
     for g in 0..GRID.len() {
-        if !inside[g] || inp[g] > 0.9 * inp_max || res[g] > 0.9 * res_max {
+        let gives_up = kept[g] < retained * counted[g];
+        if !inside[g] || gives_up || inp[g] > 0.9 * inp_max || res[g] > 0.9 * res_max {
             continue;
         }
         let score = (inp[g] + floor) * (res[g] + floor);
@@ -702,7 +722,7 @@ pub(crate) fn target(
     let lines = Lines::new(frf, reference, tolerances, band, weight)?;
     let rel = match tradeoff {
         Tradeoff::Fixed(v) => v,
-        Tradeoff::Auto => choose_tradeoff(&lines)?,
+        Tradeoff::Auto { retained } => choose_tradeoff(&lines, retained)?,
     };
     let nb = band.1 - band.0;
     // Every in-band line at `rel`, lines in parallel; each line's arithmetic is
