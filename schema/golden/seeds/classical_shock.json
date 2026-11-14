@@ -13,8 +13,8 @@
   },
   "pulse": {
    "shape": "half_sine",
-   "amplitude_g": 1.999998755386809,
-   "duration_ms": 10.99999824333702,
+   "amplitude_g": 1.999999,
+   "duration_ms": 11.0,
    "rise_frac": null,
    "fall_frac": null,
    "polarity": "positive"
@@ -199,11 +199,11 @@
    },
    {
     "path": "pulse.amplitude_g",
-    "value": 1.999998755386809
+    "value": 1.999999
    },
    {
     "path": "pulse.duration_ms",
-    "value": 10.99999824333702
+    "value": 11.0
    },
    {
     "path": "pulse.polarity",
@@ -221,12 +221,12 @@
   "protective": [],
   "imports": [],
   "notes": [
-   "read as a 2 g, 11 ms half-sine, within 6.3e-05% of its peak at every sample"
+   "read as a 2 g, 11 ms half-sine, within 7.7e-05% of its peak at every sample"
   ],
   "origin": {
    "kind": "seed",
    "object": "Pulse",
-   "checksum": "95c8e13f3e9f5421fbd3990e04d201b1cf7911f8b849bd12b6a1695298ec63f4",
+   "checksum": "75e48e4e40cd7bd966e190b1598a2519d35f023695e67da086438b4be93cfe65",
    "fills": "the pulse"
   }
  }

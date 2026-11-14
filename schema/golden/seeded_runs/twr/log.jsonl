@@ -1,46 +1,46 @@
-{"seq":0,"at_unix":1794683900.751178,"frame":null,"kind":"state","text":"configured \"Seeded TWR\" on sim"}
-{"seq":1,"at_unix":1794683900.818369,"frame":null,"kind":"record","text":"the run's streams are not recorded: switched off in the setup","data":{"stream":null,"failed":"switched off in the setup"}}
-{"seq":2,"at_unix":1794683900.818422,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
-{"seq":3,"at_unix":1794683900.818431,"frame":null,"kind":"station","text":"armed on sim at 2048 Hz, records of 256 samples","data":{"class":"sim","fs_hz":2048,"record_len":256,"section_start":32,"section_len":160}}
-{"seq":4,"at_unix":1794683900.81844,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
-{"seq":5,"at_unix":1794683900.818448,"frame":null,"kind":"note","text":"started; identification at 0.1 V rms for 0.5 s","data":{"action":"start","drive_vrms":0.1,"duration_s":0.5}}
-{"seq":6,"at_unix":1794683900.818475,"frame":null,"kind":"note","text":"the simulated station is armed"}
-{"seq":7,"at_unix":1794683900.818602,"frame":null,"kind":"state","text":"sysid to waiting","data":{"from":"sysid","to":"waiting","state":"running"}}
-{"seq":8,"at_unix":1794683900.818609,"frame":null,"kind":"note","text":"seeded; the drive in force peaks at 0.2831 V at -6 dB","data":{"seeded":true,"drive_vpk":0.2831,"level_db":-6}}
-{"seq":9,"at_unix":1794683900.818621,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":10,"at_unix":1794683900.818661,"frame":null,"kind":"note","text":"Play 0: 256 frames committed before start."}
-{"seq":11,"at_unix":1794683900.818699,"frame":null,"kind":"play","text":"play 0 (iteration at -6 dB): 25 % rms error, above the gate","data":{"play":0,"kind":"iteration","level_db":-6,"iteration":1,"rms_error_pct":25,"peak_error_pct":50,"spectral_error_db":1.25,"gated":false,"outcome":"judged","shot":null}}
-{"seq":12,"at_unix":1794683900.818716,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":13,"at_unix":1794683900.818727,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":14,"at_unix":1794683900.818752,"frame":null,"kind":"note","text":"Play 1: 256 frames committed before start."}
-{"seq":15,"at_unix":1794683900.818782,"frame":null,"kind":"play","text":"play 1 (iteration at -6 dB): 12.5 % rms error, above the gate","data":{"play":1,"kind":"iteration","level_db":-6,"iteration":2,"rms_error_pct":12.5,"peak_error_pct":25,"spectral_error_db":0.625,"gated":false,"outcome":"judged","shot":null}}
-{"seq":16,"at_unix":1794683900.818794,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":17,"at_unix":1794683900.818807,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":18,"at_unix":1794683900.818834,"frame":null,"kind":"note","text":"Play 2: 256 frames committed before start."}
-{"seq":19,"at_unix":1794683900.818863,"frame":null,"kind":"play","text":"play 2 (iteration at -6 dB): 6.25 % rms error, above the gate","data":{"play":2,"kind":"iteration","level_db":-6,"iteration":3,"rms_error_pct":6.25,"peak_error_pct":12.5,"spectral_error_db":0.3125,"gated":false,"outcome":"judged","shot":null}}
-{"seq":20,"at_unix":1794683900.818874,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":21,"at_unix":1794683900.818883,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":22,"at_unix":1794683900.818907,"frame":null,"kind":"note","text":"Play 3: 256 frames committed before start."}
-{"seq":23,"at_unix":1794683900.818937,"frame":null,"kind":"play","text":"play 3 (iteration at -6 dB): 3.125 % rms error, met the gate","data":{"play":3,"kind":"iteration","level_db":-6,"iteration":4,"rms_error_pct":3.125,"peak_error_pct":6.25,"spectral_error_db":0.15625,"gated":true,"outcome":"judged","shot":null}}
-{"seq":24,"at_unix":1794683900.818952,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":25,"at_unix":1794683900.818962,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":26,"at_unix":1794683900.818986,"frame":null,"kind":"note","text":"Play 4: 256 frames committed before start."}
-{"seq":27,"at_unix":1794683900.81902,"frame":null,"kind":"play","text":"play 4 (iteration at full level): 25 % rms error, above the gate","data":{"play":4,"kind":"iteration","level_db":0,"iteration":1,"rms_error_pct":25,"peak_error_pct":50,"spectral_error_db":1.25,"gated":false,"outcome":"judged","shot":null}}
-{"seq":28,"at_unix":1794683900.819031,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":29,"at_unix":1794683900.819041,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":30,"at_unix":1794683900.819075,"frame":null,"kind":"note","text":"Play 5: 256 frames committed before start."}
-{"seq":31,"at_unix":1794683900.8191,"frame":null,"kind":"play","text":"play 5 (iteration at full level): 12.5 % rms error, above the gate","data":{"play":5,"kind":"iteration","level_db":0,"iteration":2,"rms_error_pct":12.5,"peak_error_pct":25,"spectral_error_db":0.625,"gated":false,"outcome":"judged","shot":null}}
-{"seq":32,"at_unix":1794683900.819112,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":33,"at_unix":1794683900.819121,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":34,"at_unix":1794683900.819145,"frame":null,"kind":"note","text":"Play 6: 256 frames committed before start."}
-{"seq":35,"at_unix":1794683900.819169,"frame":null,"kind":"play","text":"play 6 (iteration at full level): 6.25 % rms error, above the gate","data":{"play":6,"kind":"iteration","level_db":0,"iteration":3,"rms_error_pct":6.25,"peak_error_pct":12.5,"spectral_error_db":0.3125,"gated":false,"outcome":"judged","shot":null}}
-{"seq":36,"at_unix":1794683900.819179,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":37,"at_unix":1794683900.819189,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
-{"seq":38,"at_unix":1794683900.819212,"frame":null,"kind":"note","text":"Play 7: 256 frames committed before start."}
-{"seq":39,"at_unix":1794683900.819244,"frame":null,"kind":"play","text":"play 7 (iteration at full level): 3.125 % rms error, met the gate","data":{"play":7,"kind":"iteration","level_db":0,"iteration":4,"rms_error_pct":3.125,"peak_error_pct":6.25,"spectral_error_db":0.15625,"gated":true,"outcome":"judged","shot":null}}
-{"seq":40,"at_unix":1794683900.819255,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
-{"seq":41,"at_unix":1794683900.819265,"frame":null,"kind":"state","text":"waiting to playing","data":{"from":"waiting","to":"playing","state":"running"}}
-{"seq":42,"at_unix":1794683900.81929,"frame":null,"kind":"note","text":"Play 8: 256 frames committed before start."}
-{"seq":43,"at_unix":1794683900.819315,"frame":null,"kind":"play","text":"play 8 (playback at full level): 2 % rms error, met the gate","data":{"play":8,"kind":"playback","level_db":0,"iteration":null,"rms_error_pct":2,"peak_error_pct":4,"spectral_error_db":0.1,"gated":true,"outcome":"judged","shot":null}}
-{"seq":44,"at_unix":1794683900.81933,"frame":null,"kind":"state","text":"playing to stopped","data":{"from":"playing","to":"stopped","state":"finished"}}
-{"seq":45,"at_unix":1794683900.819346,"frame":null,"kind":"state","text":"ended (completed): The playback schedule finished: 1 play at full level.","data":{"outcome":"completed","by":null,"end":{"outcome":"completed","message":"The playback schedule finished: 1 play at full level.","at_s":6.625,"level_db":0,"play":8,"frames_done":null,"trip":null}}}
+{"seq":0,"at_unix":1794692112.409993,"frame":null,"kind":"state","text":"configured \"Seeded TWR\" on sim"}
+{"seq":1,"at_unix":1794692112.487823,"frame":null,"kind":"record","text":"the run's streams are not recorded: switched off in the setup","data":{"stream":null,"failed":"switched off in the setup"}}
+{"seq":2,"at_unix":1794692112.487946,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":3,"at_unix":1794692112.487955,"frame":null,"kind":"station","text":"armed on sim at 2048 Hz, records of 256 samples","data":{"class":"sim","fs_hz":2048,"record_len":256,"section_start":32,"section_len":160}}
+{"seq":4,"at_unix":1794692112.487961,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":5,"at_unix":1794692112.48798,"frame":null,"kind":"note","text":"started; identification at 0.1 V rms for 0.5 s","data":{"action":"start","drive_vrms":0.1,"duration_s":0.5}}
+{"seq":6,"at_unix":1794692112.488004,"frame":null,"kind":"note","text":"the simulated station is armed"}
+{"seq":7,"at_unix":1794692112.48814,"frame":null,"kind":"state","text":"sysid to waiting","data":{"from":"sysid","to":"waiting","state":"running"}}
+{"seq":8,"at_unix":1794692112.488147,"frame":null,"kind":"note","text":"seeded; the drive in force peaks at 0.2831 V at -6 dB","data":{"seeded":true,"drive_vpk":0.2831,"level_db":-6}}
+{"seq":9,"at_unix":1794692112.48816,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":10,"at_unix":1794692112.488189,"frame":null,"kind":"note","text":"Play 0: 256 frames committed before start."}
+{"seq":11,"at_unix":1794692112.488224,"frame":null,"kind":"play","text":"play 0 (iteration at -6 dB): 25 % rms error, above the gate","data":{"play":0,"kind":"iteration","level_db":-6,"iteration":1,"rms_error_pct":25,"peak_error_pct":50,"spectral_error_db":1.25,"gated":false,"outcome":"judged","shot":null}}
+{"seq":12,"at_unix":1794692112.488243,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":13,"at_unix":1794692112.488254,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":14,"at_unix":1794692112.48828,"frame":null,"kind":"note","text":"Play 1: 256 frames committed before start."}
+{"seq":15,"at_unix":1794692112.488309,"frame":null,"kind":"play","text":"play 1 (iteration at -6 dB): 12.5 % rms error, above the gate","data":{"play":1,"kind":"iteration","level_db":-6,"iteration":2,"rms_error_pct":12.5,"peak_error_pct":25,"spectral_error_db":0.625,"gated":false,"outcome":"judged","shot":null}}
+{"seq":16,"at_unix":1794692112.488321,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":17,"at_unix":1794692112.488332,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":18,"at_unix":1794692112.488359,"frame":null,"kind":"note","text":"Play 2: 256 frames committed before start."}
+{"seq":19,"at_unix":1794692112.488389,"frame":null,"kind":"play","text":"play 2 (iteration at -6 dB): 6.25 % rms error, above the gate","data":{"play":2,"kind":"iteration","level_db":-6,"iteration":3,"rms_error_pct":6.25,"peak_error_pct":12.5,"spectral_error_db":0.3125,"gated":false,"outcome":"judged","shot":null}}
+{"seq":20,"at_unix":1794692112.488401,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":21,"at_unix":1794692112.488411,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":22,"at_unix":1794692112.48844,"frame":null,"kind":"note","text":"Play 3: 256 frames committed before start."}
+{"seq":23,"at_unix":1794692112.488468,"frame":null,"kind":"play","text":"play 3 (iteration at -6 dB): 3.125 % rms error, met the gate","data":{"play":3,"kind":"iteration","level_db":-6,"iteration":4,"rms_error_pct":3.125,"peak_error_pct":6.25,"spectral_error_db":0.15625,"gated":true,"outcome":"judged","shot":null}}
+{"seq":24,"at_unix":1794692112.488482,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":25,"at_unix":1794692112.488493,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":26,"at_unix":1794692112.488518,"frame":null,"kind":"note","text":"Play 4: 256 frames committed before start."}
+{"seq":27,"at_unix":1794692112.488542,"frame":null,"kind":"play","text":"play 4 (iteration at full level): 25 % rms error, above the gate","data":{"play":4,"kind":"iteration","level_db":0,"iteration":1,"rms_error_pct":25,"peak_error_pct":50,"spectral_error_db":1.25,"gated":false,"outcome":"judged","shot":null}}
+{"seq":28,"at_unix":1794692112.488555,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":29,"at_unix":1794692112.488564,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":30,"at_unix":1794692112.488588,"frame":null,"kind":"note","text":"Play 5: 256 frames committed before start."}
+{"seq":31,"at_unix":1794692112.488618,"frame":null,"kind":"play","text":"play 5 (iteration at full level): 12.5 % rms error, above the gate","data":{"play":5,"kind":"iteration","level_db":0,"iteration":2,"rms_error_pct":12.5,"peak_error_pct":25,"spectral_error_db":0.625,"gated":false,"outcome":"judged","shot":null}}
+{"seq":32,"at_unix":1794692112.488629,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":33,"at_unix":1794692112.488643,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":34,"at_unix":1794692112.488667,"frame":null,"kind":"note","text":"Play 6: 256 frames committed before start."}
+{"seq":35,"at_unix":1794692112.488692,"frame":null,"kind":"play","text":"play 6 (iteration at full level): 6.25 % rms error, above the gate","data":{"play":6,"kind":"iteration","level_db":0,"iteration":3,"rms_error_pct":6.25,"peak_error_pct":12.5,"spectral_error_db":0.3125,"gated":false,"outcome":"judged","shot":null}}
+{"seq":36,"at_unix":1794692112.488706,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":37,"at_unix":1794692112.488717,"frame":null,"kind":"state","text":"waiting to iterating","data":{"from":"waiting","to":"iterating","state":"running"}}
+{"seq":38,"at_unix":1794692112.488744,"frame":null,"kind":"note","text":"Play 7: 256 frames committed before start."}
+{"seq":39,"at_unix":1794692112.488778,"frame":null,"kind":"play","text":"play 7 (iteration at full level): 3.125 % rms error, met the gate","data":{"play":7,"kind":"iteration","level_db":0,"iteration":4,"rms_error_pct":3.125,"peak_error_pct":6.25,"spectral_error_db":0.15625,"gated":true,"outcome":"judged","shot":null}}
+{"seq":40,"at_unix":1794692112.488789,"frame":null,"kind":"state","text":"iterating to waiting","data":{"from":"iterating","to":"waiting","state":"running"}}
+{"seq":41,"at_unix":1794692112.488797,"frame":null,"kind":"state","text":"waiting to playing","data":{"from":"waiting","to":"playing","state":"running"}}
+{"seq":42,"at_unix":1794692112.488824,"frame":null,"kind":"note","text":"Play 8: 256 frames committed before start."}
+{"seq":43,"at_unix":1794692112.488851,"frame":null,"kind":"play","text":"play 8 (playback at full level): 2 % rms error, met the gate","data":{"play":8,"kind":"playback","level_db":0,"iteration":null,"rms_error_pct":2,"peak_error_pct":4,"spectral_error_db":0.1,"gated":true,"outcome":"judged","shot":null}}
+{"seq":44,"at_unix":1794692112.488864,"frame":null,"kind":"state","text":"playing to stopped","data":{"from":"playing","to":"stopped","state":"finished"}}
+{"seq":45,"at_unix":1794692112.488879,"frame":null,"kind":"state","text":"ended (completed): The playback schedule finished: 1 play at full level.","data":{"outcome":"completed","by":null,"end":{"outcome":"completed","message":"The playback schedule finished: 1 play at full level.","at_s":6.625,"level_db":0,"play":8,"frames_done":null,"trip":null}}}

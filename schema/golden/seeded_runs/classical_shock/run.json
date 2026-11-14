@@ -1,6 +1,6 @@
 {
   "test": "classical_shock",
-  "run_uid": "20261114-191820-5bc52530",
+  "run_uid": "20261114-213512-707f8b87",
   "run_id": "s-0001",
   "title": "Seeded Classical Shock",
   "operator": "Operator",
@@ -37,11 +37,11 @@
     "dirty": null
   },
   "armed": {
-    "unix": 1794683900.75163,
+    "unix": 1794692112.412148,
     "utc_offset_s": -25200
   },
   "start": {
-    "unix": 1794683900.809327,
+    "unix": 1794692112.493185,
     "utc_offset_s": -25200,
     "station_frame": 0
   },

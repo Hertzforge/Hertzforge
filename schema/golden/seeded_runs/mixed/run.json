@@ -1,6 +1,6 @@
 {
   "test": "mixed",
-  "run_uid": "20261114-192924-b7f74dbb",
+  "run_uid": "20261114-213512-d572fd8c",
   "run_id": "mixed-0001",
   "title": "Seeded Mixed Mode",
   "operator": "Operator",
@@ -52,15 +52,15 @@
   },
   "build": {
     "version": "0.1.9",
-    "commit": "c193e45f",
+    "commit": "10150d1f",
     "dirty": true
   },
   "armed": {
-    "unix": 1794684564.715792,
+    "unix": 1794692112.41114,
     "utc_offset_s": -25200
   },
   "start": {
-    "unix": 1794684564.741217,
+    "unix": 1794692112.520972,
     "utc_offset_s": -25200,
     "station_frame": 0
   },

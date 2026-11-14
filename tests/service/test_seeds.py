@@ -179,6 +179,55 @@ TABLES = {'random': _rows(), 'sine': _rows(), 'srs': _rows(1000, 10),
 
 # ---- the source objects, written as the analysis side writes them ----------------------------
 
+#: the significant digits a source's stored numbers are settled to
+SETTLED_DIGITS = 7
+
+
+def _settle(values):
+    """`values` with every number written to `SETTLED_DIGITS` significant
+    digits and read back. A source's samples come from `np.sin`, `np.exp`
+    and powers of ten, whose last bit differs between the platforms' math
+    libraries; the object's SHA-256 (the seed's origin) is of its bytes, so
+    the stored numbers must be the same bytes everywhere. Decimal formatting
+    is correctly rounded on every platform, and a last-bit difference does
+    not survive seven digits."""
+    a = np.asarray(values)
+
+    def fixed(x):
+        return np.array([float(f'{v:.{SETTLED_DIGITS - 1}e}') for v in np.ravel(x)]).reshape(
+            np.shape(x))
+
+    if np.iscomplexobj(a):
+        return fixed(a.real) + 1j * fixed(a.imag)
+    return fixed(a)
+
+
+#: the arrays settled, by whether the object is a time history
+_SETTLED_ARRAYS = {False: ('abscissa', 'ordinate', 'frequency', 'amplitude', 'phase',
+                           'segment_rate'),
+                   True: ('ordinate',)}
+
+
+def _settled(make):
+    """A source builder whose object stores only settled numbers (`_settle`)."""
+    import functools
+
+    @functools.wraps(make)
+    def build():
+        obj = make()
+        for o in [obj, *getattr(obj, 'tones', [])]:
+            # a time history's clock is k / rate, exact arithmetic that is the same
+            # everywhere, and rounding it would make its steps uneven
+            for name in _SETTLED_ARRAYS[isinstance(o, TimeHistory)]:
+                if isinstance(getattr(o, name, None), np.ndarray):
+                    setattr(o, name, _settle(getattr(o, name)))
+            for key, value in list(getattr(o, 'limits', {}).items()):
+                o.limits[key] = _settle(value)
+        return obj
+
+    return build
+
+@_settled
 def _random_spec():
     f = np.array([40.0, 80.0, 160.0, 200.0])
     level = np.array([0.01, 0.02, 0.02, 0.016]) * G ** 2
@@ -189,6 +238,7 @@ def _random_spec():
         abort_lower=level[np.newaxis] * 10 ** -0.4, abort_upper=level[np.newaxis] * 10 ** 0.5)
 
 
+@_settled
 def _sine_spec():
     amplitude = np.full((2, 1), 0.3 * G)
     tone = SineTone('Sweep', 0.0, [300.0, 320.0], amplitude, [LOG], [3.0],
@@ -198,6 +248,7 @@ def _sine_spec():
                                   ordinate_unit='m/s**2')
 
 
+@_settled
 def _srs_spec():
     return ShockSpecification.from_breakpoints(
         [200.0, 800.0], [1.5, 3.0], '1Z+', per_octave=3, q=10.0, ordinate_unit='g',
@@ -207,6 +258,7 @@ def _srs_spec():
 PULSE = ClassicalPulse('half-sine', 2.0 * G, 0.011)
 
 
+@_settled
 def _pulse_spec():
     time, values = sc.pulse_waveform(PULSE, 51200.0)
     return TransientSpecification(time, values[np.newaxis], response_dof=['1Z+'],
@@ -216,6 +268,7 @@ def _pulse_spec():
 TWR_FS = 2048.0
 
 
+@_settled
 def _twr_history():
     t = np.arange(160) / TWR_FS
 
@@ -227,6 +280,7 @@ def _twr_history():
                        ordinate_dim=['acceleration'], ordinate_unit=['m/s**2'])
 
 
+@_settled
 def _mixed_floor():
     from hertzforge.core.mixed_mode import Narrowband
 
@@ -243,6 +297,7 @@ def _mixed_floor():
     return floor
 
 
+@_settled
 def _mixed_tones():
     from hertzforge.core.mixed_mode import Tone
 
@@ -410,15 +465,20 @@ def test_the_run_was_accepted_with_the_seeded_setup(module, converted):
         if key == 'reference' and module == 'twr':
             # TWR's reference is the control service's store, by the SHA-256 it gave
             continue
-        if key == 'reference':
-            # MIMO Random's, as numbers, to the last bits the arithmetic leaves
-            took = accepted[key]
-            assert took['n'] == value['n'] and took['freqs_hz'] == value['freqs_hz']
-            for part in ('re', 'im'):
-                assert np.allclose(took[part], value[part], rtol=1e-12, atol=1e-15), part
-            continue
-        assert accepted.get(key) == json.loads(json.dumps(value)), key
+        assert _same(accepted.get(key), json.loads(json.dumps(value))), key
 
+
+def _same(a, b):
+    """Equal, numbers to 1e-12: the control service reads a JSON number to
+    within its last bit, and writes back what it read."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(
+            a, bool) and not isinstance(b, bool):
+        return bool(np.isclose(a, b, rtol=1e-12, atol=1e-300))
+    return a == b
 
 def _one(project, kind):
     found = [obj for _name, obj in project.items() if type(obj) is kind]
@@ -573,3 +633,16 @@ def test_the_verbs_answer_as_the_schema_says(validate):
         projects.seed(state, {'name': name, 'module': 'random', 'record': 'one'})
     with pytest.raises(ProtocolError):
         projects.seed(None, params)
+
+
+@pytest.mark.parametrize('module', [m for m in MODULES if m != 'mimo_random'])
+def test_a_source_stores_only_settled_numbers(module):
+    """Its SHA-256 is then the same on every platform: no last bit of a
+    platform's sin, exp or pow survives in it. (MIMO Random's source is read
+    from the golden run's files and mixed linearly, with no such function.)"""
+    obj = SOURCES[module][1]()
+    for o in [obj, *getattr(obj, 'tones', [])]:
+        arrays = [getattr(o, n) for n in _SETTLED_ARRAYS[isinstance(o, TimeHistory)]
+                  if isinstance(getattr(o, n, None), np.ndarray)]
+        for values in arrays + list(getattr(o, 'limits', {}).values()):
+            assert np.array_equal(_settle(values), values)
