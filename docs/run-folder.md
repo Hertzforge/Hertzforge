@@ -647,3 +647,18 @@ it measured, and the values of the survey's levels and of the spectra (their
 shapes, channels and units are kept). Its streams are cut to their first 256
 frames, before the first steer (`cut_from_frames`);
 `scripts/make_golden_runs.sh` rewrites it.
+
+## Reports and the Run Log
+
+A converted run's report reads its run record before anything else. The
+runs block takes the run's level from the level the controller logged, the
+chronology lists the run once with the holds, resumes and trips it logged
+and its outcome in the record's words, and under the table its operator,
+article, specification, level changes, alarms and counts; a report of a
+recorded run has a Run section of the same facts. Mixed Mode, Explorer, the
+Recorder and MIMO Shock have report templates of their own, and the MIMO
+Random report reads the condition numbers, the drive prediction and the
+drives' rms from the record. Data with no run record is reported as it was.
+The run's log is not written into a run log (`.hflog`): each entry is
+offered to the log keeper as a proposed entry, and only an accepted one is
+written (`hertzforge.core.run_log_events`).
