@@ -30,6 +30,10 @@ WHOLE_FILES = frozenset({
     'testdata/vdyn_corpus/schema3.vdyn',
 })
 
+#: built from the UI's sources, which are scanned themselves: its minifier names variables with
+#: two letters of its own choosing, and once it chose VD (2026-11-13), so only the name is
+#: looked for here, not the abbreviation
+MINIFIED = frozenset({'src/hertzforge/report/viewer.html'})
 #: path: the exact text in it that may hold the name
 ALLOWED = {
     'ACKNOWLEDGMENTS.md': ("- **Visual Dynamics**, Brandon Zwink's structural dynamics toolset",),
@@ -66,9 +70,9 @@ def _tracked() -> list[str]:
     return [name for name in out.stdout.decode('utf-8').split('\0') if name]
 
 
-def _hits(text: str) -> list[str]:
+def _hits(text: str, minified: bool = False) -> list[str]:
     """Each place `text` names the old product, with its line number."""
-    found = [*NAME.finditer(text), *ABBREVIATION.finditer(text)]
+    found = [*NAME.finditer(text), *(() if minified else ABBREVIATION.finditer(text))]
     return [f'{text.count(chr(10), 0, hit.start()) + 1}: {hit.group()!r}' for hit in found]
 
 
@@ -88,7 +92,7 @@ def test_the_name_is_only_where_it_is_allowed():
         for allowed in ALLOWED.get(name, ()):
             # blanked, keeping the line numbers of what follows
             text = text.replace(allowed, '\n' * allowed.count('\n'))
-        found += [f'{name}:{hit}' for hit in _hits(text)]
+        found += [f'{name}:{hit}' for hit in _hits(text, name in MINIFIED)]
     assert not found, 'the old name, outside the allowlist:\n' + '\n'.join(found)
 
 
@@ -116,3 +120,9 @@ def test_every_allowed_place_still_exists():
 ])
 def test_the_scan_sees_each_spelling(text, count):
     assert len(_hits(text)) == count
+
+
+def test_a_minified_bundle_is_scanned_for_the_name_but_not_its_two_letters():
+    assert _hits("var VD=Qe('<b>');", minified=True) == []
+    assert len(_hits("title='Visual Dynamics'", minified=True)) == 1
+    assert len(_hits('var VD=1;')) == 1
