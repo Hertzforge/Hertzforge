@@ -77,6 +77,19 @@ def test_the_tolerance_drops_far_nodes_until_loosened():
     assert report['dropped'] == []
 
 
+def test_the_report_names_each_matched_pair_and_the_unmatched():
+    """The pairing itself, by node id: 101 sits a millimeter from the
+    cube's corner 1, 102 a millimeter from corner 8, and 103 is far
+    outside the tolerance."""
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model(extra_node=True)
+    _projected, report = project_shapes(fem_shapes, fem_geometry,
+                                        test_shapes, test_geometry)
+    assert report['pairs'] == [(101, 1), (102, 8)]
+    assert report['unmatched'] == [103]
+    assert len(report['pairs']) == report['matched']
+
+
 def test_mismatched_unit_definitions_are_refused():
     fem_geometry, fem_shapes = _fem()
     test_geometry, test_shapes = _test_model()
