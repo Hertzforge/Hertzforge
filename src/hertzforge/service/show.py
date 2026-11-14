@@ -82,7 +82,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: how the window reads data, kept across selections: the stage or the flat plot,
 #: decades on the frequency axis, and the
 #: component of complex data
-PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
+PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
@@ -1035,8 +1035,8 @@ def _resynthesis(project: Any, frf_name: str, set_name: str, records: dict[str, 
 
 def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str, Any]:
     """Which of the bar's choices the selection can take: the stage or the
-    flat plot for a data object, a component for complex frequency data,
-    decades for anything on a frequency axis."""
+    flat plot for a data object, a component for complex frequency data.
+    A frequency axis is made linear or log on the plot itself."""
     from hertzforge.core.shapes import ShapeSet
 
     data = [project[name] for name in objects if _is_data(project[name])]
@@ -1089,17 +1089,7 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
         'flat': bool(data),
         'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'
                        and np.iscomplexobj(obj.ordinate) for obj in data),
-        'frequency': any(getattr(obj, 'abscissa_dim', '') == 'frequency' for obj in data),
     }
-
-
-def _decades(views: list[dict]) -> None:
-    """Every frequency axis in log."""
-    for view in views:
-        for key in ('x', 'z'):
-            axis = view.get(key)
-            if isinstance(axis, dict) and axis.get('unit') == 'Hz':
-                axis['scale'] = 'log'
 
 
 def show(project: Any, objects: list[str], records: dict[str, list[int]],
@@ -1134,8 +1124,6 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     except ProtocolError as error:
         raise refused(str(error)) from None
     notes += _marks(project, views, objects, prefs)
-    if prefs['log_frequency']:
-        _decades(views)
     if part and part.get('kind') and len(objects) == 1:
         from .ops_geometry import part_entities
         from .ops_solids import part_solids

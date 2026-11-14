@@ -257,7 +257,6 @@ class AnalyzeState {
 					part: partForService(selection),
 					prefs: {
 						flat: this.prefs.flat,
-						log_frequency: this.prefs.log_frequency,
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
@@ -1364,7 +1363,6 @@ const PREFS_KEY = 'hertzforge.show.prefs';
 function readPrefs(): ShowPrefs {
 	const prefs: ShowPrefs = {
 		flat: false,
-		log_frequency: false,
 		component: 'magnitude',
 		projection: false,
 		bars: true,
@@ -1381,7 +1379,6 @@ function readPrefs(): ShowPrefs {
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
-		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
 		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}

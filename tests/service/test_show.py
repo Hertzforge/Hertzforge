@@ -245,22 +245,22 @@ def test_the_bar_reads_data_flat_in_decades_and_by_component(plate, validate):
     stage = shown(plate, frf, validate=validate)
     assert stage['views'][0]['view'] == 'waterfall'
     def data_offers(out):
-        return {k: out['offers'][k] for k in ('flat', 'complex', 'frequency', 'projection')}
+        return {k: out['offers'][k] for k in ('flat', 'complex', 'projection')}
 
-    assert data_offers(stage) == {'flat': True, 'complex': True, 'frequency': True, 'projection': False}
+    assert data_offers(stage) == {'flat': True, 'complex': True, 'projection': False}
+    assert 'frequency' not in stage['offers'], 'a frequency axis is chosen on the plot (Brandon, 2026-11-14)'
     flat = shown(plate, frf, prefs={'flat': True}, validate=validate)
     (plot,) = flat['views']
     assert plot['view'] == 'spectrum' and len(plot['series']) == plate.project[frf].num_records
     assert plot['x']['scale'] != 'log'
-    decades = shown(plate, frf, prefs={'flat': True, 'log_frequency': True})
-    assert decades['views'][0]['x']['scale'] == 'log'
+    with pytest.raises(ProtocolError, match='"prefs"'):
+        projects.show(plate, {'objects': [frf], 'prefs': {'log_frequency': True}})
     phase = shown(plate, frf, prefs={'flat': True, 'component': 'phase'})
     assert 'phase' in phase['views'][0]['y']['label'].lower() or phase['views'][0]['y']['unit'] in ('°', 'deg', 'rad')
     time = shown(plate, history, validate=validate)
-    assert data_offers(time) == {'flat': True, 'complex': False, 'frequency': False,
-                                 'projection': False}
+    assert data_offers(time) == {'flat': True, 'complex': False, 'projection': False}
     assert data_offers(shown(plate, named(plate, 'geometry'))) == {'flat': False, 'complex': False,
-                                                                  'frequency': False, 'projection': False}
+                                                                  'projection': False}
     with pytest.raises(ProtocolError, match='"prefs"'):
         projects.show(plate, {'objects': [frf], 'prefs': {'stage': True}})
     with pytest.raises(ProtocolError, match='component'):

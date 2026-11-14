@@ -581,10 +581,11 @@ measurement beside its requirement gives the comparison's spectra, two PSDs over
 no joint reading shows each object on its own, and `note` says what was left out. The views come in the
 connection's display units, as an operation's do. `prefs` is how the window reads data, kept across
 selections: `flat` (the plot in place of the stage for a whole data
-object), `log_frequency` (decades on every frequency axis) and `component` (`magnitude`, `real`, `imag`
+object) and `component` (`magnitude`, `real`, `imag`
 or `phase` of complex data) and `line`, the frequency in Hz the stage's operating shape or envelope is
 read at (null for the loudest line); `offers` says which of them the selection can take (`flat` for a
-data object, `complex` for complex frequency data, `frequency` for anything on a frequency axis). A
+data object, `complex` for complex frequency data). A frequency axis is made linear or log on the
+plot itself, as the stage's is. A
 `shape3d` that reads at a line carries `cursor: "frequency"`, and its plot carries `link: "frequency"`,
 so the plot's cursor moves the line. A `waterfall` may say its opening `facing` (a coherence opens on
 the map, `top`). Several data objects of one type show on one stage, merged for the drawing; a CPSD
