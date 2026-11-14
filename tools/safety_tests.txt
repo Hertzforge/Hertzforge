@@ -414,6 +414,19 @@ hertzforge-backendd     src/core.rs                            every_drive_produ
 sds-control             tests/random_protocol.rs               ni_selection_binding_and_arm_are_refused_by_name_and_never_simulated  arm-gate  a hardware selection never silently becomes the simulator
 sds-control             tests/random_protocol.rs               driver_simulated_ni_is_never_hardware                     arm-gate       a driver-simulated device is never reported as hardware
 sds-control             src/twr/engine.rs                      a_station_that_cannot_run_at_the_asked_rate_is_refused_at_arm  arm-gate  a waveform station at the wrong rate is refused at arm
+sds-control             tests/table_restored.rs                random_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  Random refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                mimo_random_start_refuses_a_restored_table_until_it_is_applied  arm-gate  MIMO Random refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                classical_shock_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  classical shock refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                srs_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  SRS refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                mimo_shock_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  multiple-drive shock refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                sine_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  Sine refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                mixed_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  Mixed refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                twr_arm_refuses_a_restored_table_until_it_is_applied  arm-gate  waveform replication refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                explorer_start_refuses_a_restored_table_until_it_is_applied  arm-gate  Explorer refuses a restored table until it is applied
+sds-control             tests/table_restored.rs                recorder_start_refuses_a_restored_table_until_it_is_applied  arm-gate  the Recorder refuses a restored table until it is applied
+sds-control             src/table.rs                           channel_table_gate_refuses_a_restored_table_until_it_is_applied  arm-gate  the shared table gate refuses until applied
+sds-control             tests/table_restored.rs                kept_table_a_damaged_file_is_refused_and_named  checked-input  a damaged kept channel table is not used
+sds-control             src/table.rs                           channel_table_arm_numbers_are_unchanged_by_the_optional_members  checked-input  a kept and applied table arms with the same numbers
 
 # -------------------------------------------------------------- checked input
 hertzforge-channel-table src/lib.rs                            a_future_schema_is_refused_rather_than_truncated          checked-input  a channel table from a newer schema is refused

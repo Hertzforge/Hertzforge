@@ -47,7 +47,10 @@ These hold in every build, whoever changes what.
 6. **Anything read from a file that feeds a test is checked like a value typed in.** A reference,
    a test setup, a shaker record, a channel table or a control law is checked by the control
    service with the same checks as a value an operator enters, and the operator sees it before
-   arming. Control law files run only in the sandboxed law host.
+   arming. Control law files run only in the sandboxed law host. A channel table the service kept
+   across a restart, or took from a project or a file, is refused at every module's arm until the
+   operator applies it (`table_not_applied`, "Restored Tables" in `schema/PROTOCOL.md`); the one
+   check is `Table::arm_gate` in `crates/sds-control/src/table.rs`.
 7. **The loop thread does no unbounded work.** File reading, the network and anything else that
    can block stay off it.
 

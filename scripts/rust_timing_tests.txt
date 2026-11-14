@@ -425,3 +425,19 @@ sds-control  test:mixed_sim_run  a_band_switched_off_live_ramps_out_and_back
 hertzforge-mixed-laws  test:tone_law_file  a_tone_law_file_passes_the_mixed_check_from_the_role_s_start_values
 # The channel table through a loopback service: set, get and a second connection
 sds-control  test:channel_table_protocol  channel_table_analysis_columns_survive_set_get_and_a_new_connection
+# A restored channel table through a loopback service: refused at every module's arm until
+# applied, and the table the service keeps across a restart
+sds-control  test:table_restored  random_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  mimo_random_start_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  classical_shock_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  srs_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  mimo_shock_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  sine_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  mixed_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  twr_arm_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  explorer_start_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  recorder_start_refuses_a_restored_table_until_it_is_applied
+sds-control  test:table_restored  kept_table_a_restart_restores_it_whole_and_unapplied
+sds-control  test:table_restored  kept_table_a_damaged_file_is_refused_and_named
+sds-control  test:table_restored  kept_table_a_failed_write_is_reported_and_the_run_still_runs
+sds-control  test:table_restored  restored_table_source_and_apply_are_checked_by_name

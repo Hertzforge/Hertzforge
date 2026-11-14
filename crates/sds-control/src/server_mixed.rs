@@ -362,6 +362,7 @@ impl Service {
             if !(v.state == State::Configured || (v.state == State::Blocked && !start)) {
                 return Err(wrong_state(&v, if start { "Starting" } else { "Arming" }));
             }
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(

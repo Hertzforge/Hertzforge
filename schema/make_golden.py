@@ -230,6 +230,11 @@ def _row(index, description, role, physical, units, range_max, accel_abort=None)
             'abort': {'accel_g': accel_abort, 'velocity_ips': None, 'displacement_mil': None}}
 
 
+#: where the restored table in the golden frames came from, and when
+RESTORED = {'source': 'project', 'name': 'Bracket table', 'at_unix': 1794240000.25,
+            'at': '2026-11-09 16:00:00 UTC'}
+
+
 RANDOM_CONFIG = {
     'title': 'Qualification Random',
     'profile': {
@@ -410,6 +415,42 @@ TEXT_GOLDENS = {
                                       'already uses; channels are never shared'},
                       ],
                       'warnings': []}},
+    },
+    # a table taken from a project: restored, and refused at arm until it is applied
+    'request_channels_set_restored': {
+        'type': 'request', 'id': 10, 'method': 'channels.set',
+        'params': {'revision': 3, 'source': {'kind': 'project', 'name': 'Bracket table'},
+                   'channels': [
+                       _row(1, 'Control', 'control', None, 'g', 50, accel_abort=40),
+                       _row(2, 'Drive', 'drive', None, 'V', 10)]},
+    },
+    'response_channels_get_restored': {
+        'type': 'response', 'id': 11,
+        'result': {
+            'revision': 4,
+            'channels': [
+                _row(1, 'Control', 'control', None, 'g', 50, accel_abort=40),
+                _row(2, 'Drive', 'drive', None, 'V', 10),
+            ],
+            'report': {'errors': [], 'warnings': []},
+            'restored': RESTORED,
+        },
+    },
+    'response_error_table_not_applied': {
+        'type': 'response', 'id': 12,
+        'error': {'code': 'refused', 'reason': 'table_not_applied',
+                  'message': 'The channel table (revision 4) was restored from the project '
+                             f'table "Bracket table" at {RESTORED["at"]} and has not been '
+                             'applied; review it and apply it before arming.',
+                  'detail': {'revision': 4, 'restored': RESTORED}},
+    },
+    'request_channels_apply': {
+        'type': 'request', 'id': 13, 'method': 'channels.apply', 'params': {'revision': 4},
+    },
+    'response_channels_apply': {
+        'type': 'response', 'id': 13,
+        'result': {'revision': 4, 'applied': RESTORED,
+                   'report': {'errors': [], 'warnings': []}},
     },
     # a connection's own project: an import, its progress, and the summary back
     'request_project_import': {

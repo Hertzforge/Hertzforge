@@ -1,0 +1,57 @@
+{
+ "type": "response",
+ "id": 11,
+ "result": {
+  "revision": 4,
+  "channels": [
+   {
+    "index": 1,
+    "enabled": true,
+    "description": "Control",
+    "role": "control",
+    "physical": null,
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "g",
+    "sensitivity_mv_per_eu": 100,
+    "range_max": 50,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": 40,
+     "velocity_ips": null,
+     "displacement_mil": null
+    }
+   },
+   {
+    "index": 2,
+    "enabled": true,
+    "description": "Drive",
+    "role": "drive",
+    "physical": null,
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "V",
+    "sensitivity_mv_per_eu": 1000,
+    "range_max": 10,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": null,
+     "velocity_ips": null,
+     "displacement_mil": null
+    }
+   }
+  ],
+  "report": {
+   "errors": [],
+   "warnings": []
+  },
+  "restored": {
+   "source": "project",
+   "name": "Bracket table",
+   "at_unix": 1794240000.25,
+   "at": "2026-11-09 16:00:00 UTC"
+  }
+ }
+}

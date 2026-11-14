@@ -1078,7 +1078,7 @@
                "feasibility_exceeded", "override_not_needed", "arm_refused",
                "ni_driver_unavailable", "no_ni_devices", "scan_failed", "devices_absent",
                "mixed_simulated_and_real", "mixed_timing_families", "not_enough_channels",
-               "hardware_busy", "stale_revision", "table_invalid", "config_invalid",
+               "hardware_busy", "stale_revision", "table_invalid", "table_not_applied", "nothing_to_apply", "config_invalid",
                "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
                "catalog_unavailable", "law_unknown", "law_params_invalid", "law_check_unsupported",
                "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling", "not_a_sweep", "out_of_band", "adjust_refused", "reference_unreadable", "not_converged", "coherence_hold", "level_zero", "not_enough_space"]
@@ -1318,15 +1318,43 @@
       "properties": {
         "revision": {"type": "integer", "minimum": 0},
         "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
-        "report": {"$ref": "#/$defs/report"}
+        "report": {"$ref": "#/$defs/report"},
+        "restored": {"$ref": "#/$defs/restoredTable"},
+        "kept_problem": {"type": "string", "minLength": 1}
       }
+    },
+    "restoredTable": {
+      "type": "object", "required": ["source", "name", "at_unix", "at"], "additionalProperties": false,
+      "properties": {
+        "source": {"enum": ["kept", "project", "file"]},
+        "name": {"type": "string", "minLength": 1},
+        "at_unix": {"type": "number"},
+        "at": {"type": "string"}
+      }
+    },
+    "tableSource": {
+      "type": "object", "required": ["kind", "name"], "additionalProperties": false,
+      "properties": {"kind": {"enum": ["project", "file"]}, "name": {"type": "string", "minLength": 1}}
     },
     "channelsSetParams": {
       "type": "object", "required": ["revision", "channels"], "additionalProperties": false,
       "properties": {
         "revision": {"type": "integer", "minimum": 0},
         "channels": {"type": "array", "items": {"$ref": "#/$defs/channelRow"}},
-        "dry_run": {"type": "boolean"}
+        "dry_run": {"type": "boolean"},
+        "source": {"oneOf": [{"$ref": "#/$defs/tableSource"}, {"type": "null"}]}
+      }
+    },
+    "channelsApplyParams": {
+      "type": "object", "required": ["revision"], "additionalProperties": false,
+      "properties": {"revision": {"type": "integer", "minimum": 1}}
+    },
+    "channelsApplyResult": {
+      "type": "object", "required": ["revision", "applied", "report"], "additionalProperties": false,
+      "properties": {
+        "revision": {"type": "integer", "minimum": 1},
+        "applied": {"$ref": "#/$defs/restoredTable"},
+        "report": {"$ref": "#/$defs/report"}
       }
     },
     "channelsSetResult": {

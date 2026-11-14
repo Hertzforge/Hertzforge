@@ -14,7 +14,7 @@
 //! optional: written only when they hold something, read when present, and never
 //! used to run anything.
 
-use crate::protocol::{num, opt_num, MethodError};
+use crate::protocol::{num, opt_num, ErrorCode, MethodError};
 use crate::station::{channel_id, Selection};
 use hertzforge_channel_table::{
     AbortLimits, AnalysisColumns, AnalysisTier, Channel, ChannelRole, ChannelTable, Interface,
@@ -111,10 +111,92 @@ impl Report {
     }
 }
 
-/// The table and its revision.
+/// The table, its revision, and whether it waits for the operator to apply it.
 pub struct Table {
     pub revision: u64,
     pub table: ChannelTable,
+    /// Set while the table came from somewhere other than this session's own edits
+    /// (the table the service kept, a project, a file) and the operator has not
+    /// applied it: no run arms on it until then ([`Table::arm_gate`]).
+    pub restored: Option<Restored>,
+    /// Keeps the table across restarts (`None`: this service does not keep it).
+    pub keeper: Option<std::sync::Arc<crate::table_keep::Keeper>>,
+}
+
+/// Where a restored table came from and when (schema/PROTOCOL.md, "Restored Tables").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Restored {
+    /// `kept` (read at start from the data folder), `project` or `file`.
+    pub source: &'static str,
+    /// The project table's or the file's name; for a kept table, the kept file's name.
+    pub name: String,
+    /// Unix seconds: when a kept table was last written, otherwise when the service
+    /// took the table.
+    pub at_unix: f64,
+}
+
+impl Restored {
+    /// The source in words: "the project table \"Plate\"".
+    pub fn words(&self) -> String {
+        match self.source {
+            "kept" => format!("the table this service kept ({})", self.name),
+            "project" => format!("the project table \"{}\"", self.name),
+            _ => format!("the file \"{}\"", self.name),
+        }
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({"source": self.source, "name": self.name, "at_unix": num(self.at_unix),
+               "at": utc_words(self.at_unix)})
+    }
+}
+
+/// `unix` as `YYYY-MM-DD HH:MM:SS UTC`.
+pub fn utc_words(unix: f64) -> String {
+    let s = crate::random::record::utc_stamp(unix);
+    format!(
+        "{}-{}-{} {}:{}:{} UTC",
+        &s[0..4],
+        &s[4..6],
+        &s[6..8],
+        &s[9..11],
+        &s[11..13],
+        &s[13..15]
+    )
+}
+
+/// What a client may name as a table's source in `channels.set`: `project` or
+/// `file`, with a name. `None` when the request names none (a table typed or edited
+/// in this session).
+pub fn parse_source(
+    params: &Map<String, Value>,
+) -> Result<Option<(&'static str, String)>, MethodError> {
+    let Some(v) = params.get("source") else {
+        return Ok(None);
+    };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let bad = || {
+        MethodError::bad_params(
+            "source",
+            "\"source\" is {\"kind\": \"project\" or \"file\", \"name\": the table's or \
+             the file's name}.",
+        )
+    };
+    let o = v.as_object().ok_or_else(bad)?;
+    let kind = match o.get("kind").and_then(Value::as_str) {
+        Some("project") => "project",
+        Some("file") => "file",
+        _ => return Err(bad()),
+    };
+    let name = o
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .ok_or_else(bad)?;
+    Ok(Some((kind, name.to_owned())))
 }
 
 impl Default for Table {
@@ -138,15 +220,82 @@ impl Table {
         drive.range_max = 10.0;
         let mut table = ChannelTable::new();
         table.channels = vec![control, drive];
-        Table { revision: 1, table }
+        Table {
+            revision: 1,
+            table,
+            restored: None,
+            keeper: None,
+        }
     }
 
-    /// The `channels.get` result.
+    /// The `channels.get` result. `restored` is written only while the table waits
+    /// to be applied.
     pub fn get(&self, ctx: &StationContext<'_>) -> Value {
-        json!({
+        let mut v = json!({
             "revision": self.revision,
             "channels": self.table.channels.iter().map(row_json).collect::<Vec<_>>(),
             "report": validate(&self.table, ctx).to_json(),
+        });
+        if let Some(r) = &self.restored {
+            v["restored"] = r.to_json();
+        }
+        if let Some(p) = self.keeper.as_ref().and_then(|k| k.problem()) {
+            v["kept_problem"] = Value::from(p);
+        }
+        v
+    }
+
+    /// Hand the table as it is now to the keeper, if this service keeps it.
+    pub fn keep(&self, now_unix: f64) {
+        if let Some(k) = &self.keeper {
+            k.keep(&self.table, self.revision, now_unix);
+        }
+    }
+
+    /// The one check every test module's arm makes, beside its own checks of the
+    /// table: a restored table the operator has not applied does not arm.
+    pub fn arm_gate(&self) -> Result<(), MethodError> {
+        let Some(r) = &self.restored else {
+            return Ok(());
+        };
+        Err(MethodError::named(
+            ErrorCode::Refused,
+            "table_not_applied",
+            format!(
+                "The channel table (revision {}) was restored from {} at {} and has not been \
+                 applied; review it and apply it before arming.",
+                self.revision,
+                r.words(),
+                utc_words(r.at_unix)
+            ),
+        )
+        .with_detail(json!({"revision": self.revision, "restored": r.to_json()})))
+    }
+
+    /// The operator applies the restored table they were shown, at `revision`.
+    /// Answers where it had come from.
+    pub fn apply(&mut self, revision: u64) -> Result<Restored, MethodError> {
+        if revision != self.revision {
+            let current = self.revision;
+            return Err(MethodError::named(
+                ErrorCode::Refused,
+                "stale_revision",
+                format!(
+                    "The table changed since revision {revision} (it is now {current}); read it \
+                     again and review it before applying."
+                ),
+            )
+            .with_detail(json!({"current": current, "provided": revision})));
+        }
+        self.restored.take().ok_or_else(|| {
+            MethodError::named(
+                ErrorCode::Refused,
+                "nothing_to_apply",
+                format!(
+                    "The channel table (revision {revision}) is not a restored table; it is \
+                     already applied."
+                ),
+            )
         })
     }
 }
@@ -885,6 +1034,93 @@ mod tests {
             scan: &[],
         };
         assert_eq!(validate(&plain, &sim), validate(&carried, &sim));
+        // Kept across a restart, restored and then applied, the table arms with the
+        // same numbers: neither the kept file nor the gate changes a value.
+        let dir = std::env::temp_dir().join(format!(
+            "sds-control-arm-numbers-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            crate::table_keep::path(&dir),
+            crate::table_keep::contents(&carried, 5, 1_794_240_000.25),
+        )
+        .unwrap();
+        let kept = crate::table_keep::read(&dir, &sim).unwrap().unwrap();
+        assert_eq!(arm_numbers(&kept.table), arm_numbers(&plain));
+        let mut t = Table {
+            revision: kept.revision,
+            table: kept.table,
+            restored: Some(Restored {
+                source: "kept",
+                name: crate::table_keep::FILE.into(),
+                at_unix: kept.saved_unix,
+            }),
+            keeper: None,
+        };
+        t.apply(5).unwrap();
+        assert_eq!(arm_numbers(&t.table), arm_numbers(&plain));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn golden_frame(name: &str) -> Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(format!(
+                "{}/../../schema/golden/{name}.json",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// A table taken from a project is shown as restored, refused at arm in the
+    /// words of the golden refusal, and arms once applied at the revision shown.
+    ///
+    /// Falsified by making `arm_gate` answer `Ok(())` always: the first assertion
+    /// fails with "a restored table armed".
+    #[test]
+    fn channel_table_gate_refuses_a_restored_table_until_it_is_applied() {
+        let set = golden_frame("request_channels_set_restored");
+        let mut t = Table {
+            revision: 4,
+            table: parse_rows(&set["params"]["channels"]).unwrap(),
+            restored: Some(Restored {
+                source: "project",
+                name: "Bracket table".into(),
+                at_unix: 1_794_240_000.25,
+            }),
+            keeper: None,
+        };
+        let e = t.arm_gate().expect_err("a restored table armed");
+        let want = golden_frame("response_error_table_not_applied")["error"].clone();
+        assert_eq!(e.code, ErrorCode::Refused);
+        assert_eq!(Some(e.reason.unwrap()), want["reason"].as_str());
+        assert_eq!(e.message, want["message"].as_str().unwrap());
+        assert_eq!(*e.detail.unwrap(), want["detail"]);
+        let sim = StationContext {
+            selection: &Selection::Sim,
+            scan: &[],
+        };
+        let got = t.get(&sim);
+        let shown = golden_frame("response_channels_get_restored")["result"].clone();
+        assert_eq!(got["restored"], shown["restored"]);
+        assert_eq!(got["revision"], shown["revision"]);
+        // Applying names the revision the operator was shown.
+        assert_eq!(t.apply(3).unwrap_err().reason, Some("stale_revision"));
+        assert!(t.arm_gate().is_err(), "a stale apply applied");
+        let was = t.apply(4).unwrap();
+        assert_eq!(
+            was.to_json(),
+            golden_frame("response_channels_apply")["result"]["applied"]
+        );
+        t.arm_gate().expect("an applied table arms");
+        assert!(t.get(&sim).get("restored").is_none());
+        assert_eq!(t.apply(4).unwrap_err().reason, Some("nothing_to_apply"));
     }
 
     /// A unit outside the vocabulary, a drive not in volts and an abort limit on a

@@ -1145,8 +1145,10 @@ plain words: it never names a protocol method.
 | `not_enough_channels` | `refused` | The selected devices have fewer channels than the table uses | `want_inputs`, `want_outputs`, `have_inputs`, `have_outputs` |
 | `hardware_busy` | `refused` | Another program holds the NI hardware | `holder` |
 | `record_unwritable` | `refused` | `random.arm`, `random.start`, `sine.arm`, `sine.start`, `shock.arm`, `shock.start`, `srs.arm`, `srs.start`, `twr.arm`, `twr.start`, `mimo_random.start`, `explorer.start`, `mixed.arm` or `mixed.start`: the run's record (its folder, `run.json`, `table.json` or `setup.json`) cannot be written in the data folder; nothing is armed | `path`, `reason` |
-| `stale_revision` | `refused` | `channels.set` quoted a revision that is no longer current | `current`, `provided` |
+| `stale_revision` | `refused` | `channels.set` or `channels.apply` quoted a revision that is no longer current | `current`, `provided` |
 | `table_invalid` | `bad_request` | The channel table has errors | `errors`, `warnings` |
+| `table_not_applied` | `refused` | An arm, or a start that arms, met a restored table the operator has not applied ("Restored Tables") | `revision`, `restored` |
+| `nothing_to_apply` | `refused` | `channels.apply` on a table that is not restored | |
 | `config_invalid` | `bad_request` | The Random, classical shock, SRS shock, Sine, Mixed Mode, TWR, Explorer or Recorder configuration has errors (for Explorer and the Recorder, also at `explorer.start` or `recorder.start` when the table no longer carries the run) | `errors`, `warnings` |
 | `shaker_record_invalid` | `bad_request` | The feasibility shaker record does not parse | |
 | `setup_invalid` | `bad_request` | The MIMO setup has errors | the whole validation report |
@@ -1311,8 +1313,9 @@ One table, held by the control service, used by every run.
 
 | Method | Params | Result |
 |---|---|---|
-| `channels.get` | `{}` | `{"revision","channels":[row...],"report"}` |
-| `channels.set` | `{"revision","channels":[row...],"dry_run"}` (`dry_run` optional) | `{"revision","report"}` |
+| `channels.get` | `{}` | `{"revision","channels":[row...],"report","restored","kept_problem"}` (the last two only when they hold something) |
+| `channels.set` | `{"revision","channels":[row...],"dry_run","source"}` (`dry_run` and `source` optional) | `{"revision","report"}` |
+| `channels.apply` | `{"revision"}` | `{"revision","applied","report"}` |
 
 ```
 {"index":1,"enabled":true,"description":"Control","role":"control",
@@ -1407,6 +1410,55 @@ limits. A table with errors is refused `table_invalid` and not written; warnings
 `dry_run: true` checks the table and returns the report without writing; it needs no control and
 is never refused for the table's content. `channels.changed` (text event, to every connection
 after a write or a station change) carries the `channels.get` result.
+
+### Restored Tables
+
+A table sets the sensitivities, units, ranges, polarities and abort limits a run arms with, so a
+table that did not come from this session's own edits is not armed on until the operator has seen
+it and said so.
+
+**Where a restored table comes from.** Three places, each checked by the same row parser and
+validation as a table a client types in:
+
+- **`kept`: the table the service kept.** After every write the service keeps its table in the data
+  folder, beside the runs, as `channel_table.json`: every row in the spelling above, the revision,
+  the SHA-256 of the rows (as a run's `table.json` holds them) and when it was written. One thread of
+  its own writes it, atomically (a temporary file renamed over the old one); no run thread does any
+  of this work. At start the service reads it back. A file that cannot be read, is damaged (its rows
+  do not match the SHA-256 written with them), is of another format or version, or holds a table the
+  rule set refuses is not used: the service starts with its starting table and says why in
+  `kept_problem`, and never repairs or guesses at the file. A write that fails is also said in
+  `kept_problem` (cleared by the next write that succeeds); it refuses nothing and stops no run.
+- **`project`: a table taken from the open project,** sent by the shell with
+  `"source": {"kind": "project", "name": <the project table's name>}`.
+- **`file`: a table opened from a file,** sent with `"source": {"kind": "file", "name": <the file's
+  name>}`.
+
+A `channels.set` with no `source` (or `null`) is a table typed or edited in this session, and is
+applied as it is set. A `source` of another shape, another kind, or no name is refused
+`bad_params`.
+
+**Shown as restored.** While a restored table waits to be applied, `channels.get` and
+`channels.changed` carry `restored`: `{"source", "name", "at_unix", "at"}`, where `at_unix` is when
+the table was taken (for a kept table, when it was written), and `at` the same instant as
+`YYYY-MM-DD HH:MM:SS UTC`.
+
+**Refused at arm.** Every test module's arm, and every start that arms (`random.arm`,
+`random.start`, `mimo_random.start`, `shock.arm`, `shock.start`, `srs.arm`, `srs.start`,
+`mimo_shock.arm`, `mimo_shock.start`, `sine.arm`, `sine.start`, `mixed.arm`, `mixed.start`,
+`twr.arm`, `twr.start`, `explorer.start`, `recorder.start`), makes one shared check, before its own
+checks of the table: a restored table not yet applied is refused `table_not_applied` (code
+`refused`), naming its source and time, for example *The channel table (revision 4) was restored from
+the project table "Bracket table" at 2026-11-09 16:00:00 UTC and has not been applied; review it and
+apply it before arming.*, with `detail` `{"revision", "restored"}`. Configuring is not refused.
+
+**Applying.** `channels.apply` is the operator's own action: the shell shows the table (every row's
+channel, role, unit, sensitivity, range and polarity at least) and sends the revision it showed. It
+needs control and no live run. A revision that is not the current one is refused `stale_revision`;
+a table that is not restored is refused `nothing_to_apply`; a table with errors on the selected
+station is refused `table_invalid`. Applying changes no value and no revision; the service writes a
+line to its log naming the connection, the revision, the rows and where the table came from, and
+sends `channels.changed` without `restored`. The result's `applied` is the `restored` it cleared.
 
 ### Random Test Configuration
 
