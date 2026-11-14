@@ -51,6 +51,10 @@ time, so building and testing need no NI software installed.
 - Spectra are plotted the way they are calculated: a density per line is drawn flat across its bin,
   one df wide. The service that computed the data says how it is drawn.
 - The control loop and abort path never depend on the GUI, the network, or Python.
+- Code on the drive path (what can change what reaches an output channel, or whether and how a run
+  stops) is listed in `tools/drive_path.txt` and held to the rules in
+  [`docs/drive-path.md`](docs/drive-path.md): its invariants, its safety tests, and the drive-path
+  section a pull request that touches it carries.
 - A simulated run is always marked `source: "SIM"` and is never presented as a hardware result.
 - No employer, client, laboratory or partner names anywhere in the tree.
 - Dependencies are permissively licensed (MIT, BSD, Apache-2.0, ISC, Zlib; OFL-1.1 for bundled fonts;
@@ -104,6 +108,7 @@ node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 | [`docs/hforge-format.md`](docs/hforge-format.md) | The `.hforge` run file |
 | [`docs/desktop-app.md`](docs/desktop-app.md) | The desktop app |
 | [`docs/documentation.md`](docs/documentation.md) | Documentation and typing conventions for contributors |
+| [`docs/drive-path.md`](docs/drive-path.md) | The drive path: its invariants, its safety tests, and what a pull request that touches it carries |
 
 ## License
 
