@@ -457,8 +457,10 @@ async fn a_writer_stalled_on_every_write_leaves_the_sine_loop_and_the_outcome_un
         stalled["end"]["at_s"].as_f64().unwrap(),
     );
     assert!((a - b).abs() < 0.5, "ended at {a} s against {b} s");
+    // A run thread that waited a tenth of the writer's stall at each batch would be
+    // more than half a second slower here.
     assert!(
-        (free_wall - stalled_wall).abs() < 1.0,
+        (free_wall - stalled_wall).abs() < 0.35,
         "wall {free_wall} s against {stalled_wall} s"
     );
     // The stalled writer was still behind when the run ended.

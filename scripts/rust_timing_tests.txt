@@ -163,6 +163,13 @@ sds-control  test:random_record  record_streams_false_writes_the_record_without_
 sds-control  test:random_record  below_the_free_space_floor_the_run_goes_on_without_streams
 sds-control  test:random_golden_run  todays_code_writes_the_golden_random_run_folder
 sds-control  test:random_golden_run  the_golden_run_repeats_exactly
+sds-control  test:sine_record  a_writer_stalled_on_every_write_leaves_the_sine_loop_and_the_outcome_unchanged
+sds-control  test:sine_record  a_sine_run_leaves_a_complete_self_describing_folder
+sds-control  test:sine_record  a_data_folder_that_cannot_be_written_refuses_the_sine_arm
+sds-control  test:sine_record  sine_record_streams_false_writes_the_record_without_streams
+sds-control  test:sine_record  below_the_free_space_floor_the_sine_run_goes_on_without_streams
+sds-control  test:sine_golden_run  todays_code_writes_the_golden_sine_run_folder
+sds-control  test:sine_golden_run  the_golden_sine_run_repeats_exactly
 sds-control  lib  record::tests::a_tap_never_waits_for_a_stalled_writer_and_keeps_the_gap_in_place
 sds-control  lib  record::tests::crossing_the_free_space_floor_stops_the_stream_and_tells_the_run
 
