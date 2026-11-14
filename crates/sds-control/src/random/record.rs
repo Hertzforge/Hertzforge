@@ -166,48 +166,78 @@ pub fn start_json(unix: f64, utc_offset_s: Option<i64>, station_frame: u64) -> V
 }
 
 fn station_json(f: &ArmFacts<'_>) -> Value {
-    let devices: Vec<Value> = f
-        .provenance
+    station_value(f.plan, f.class, f.provenance, f.devices, f.caps)
+}
+
+/// The manifest's `station`: its kind and class, its label and backend, each
+/// device with its model and serial number, and the clock. Any module's record
+/// writes it this way.
+pub fn station_value(
+    plan: &StationPlan,
+    class: StationClass,
+    provenance: &hertzforge_station::ProvenanceBasis,
+    devices: &[DiscoveredDevice],
+    caps: &Caps,
+) -> Value {
+    let listed: Vec<Value> = provenance
         .device_ids
         .iter()
-        .zip(f.provenance.serials.iter())
+        .zip(provenance.serials.iter())
         .map(|(id, serial)| {
-            let model = f
-                .devices
+            let model = devices
                 .iter()
                 .find(|d| &d.id == id)
                 .map_or(Value::Null, |d| Value::from(d.product.as_str()));
             json!({"id": id, "model": model, "serial": serial})
         })
         .collect();
-    let clock = match f.caps.clock {
+    let clock = match caps.clock {
         hertzforge_hal::ClockDomain::Shared => "shared",
         hertzforge_hal::ClockDomain::Independent => "independent",
         _ => "unknown",
     };
     json!({
-        "kind": if matches!(f.plan, StationPlan::Sim { .. }) { "sim" } else { "ni" },
-        "class": class_name(f.class),
-        "label": f.provenance.station_label,
-        "backend": f.provenance.backend_kind,
-        "devices": devices,
+        "kind": if matches!(plan, StationPlan::Sim { .. }) { "sim" } else { "ni" },
+        "class": class_name(class),
+        "label": provenance.station_label,
+        "backend": provenance.backend_kind,
+        "devices": listed,
         "clock": clock,
     })
 }
 
 fn sim_json(f: &ArmFacts<'_>) -> Option<Value> {
-    match f.plan {
+    sim_value(f.plan, f.class)
+}
+
+/// The manifest's `sim` for a simulated run (the plant's model, its parameters
+/// and its seed); `None` for any other station.
+pub fn sim_value(plan: &StationPlan, class: StationClass) -> Option<Value> {
+    match plan {
         StationPlan::Sim {
             fs_hz,
             plant,
             outputs,
-        } if source_of(f.class) == "SIM" => Some(station::sim_identity(&station::sim_spec(
+        } if source_of(class) == "SIM" => Some(station::sim_identity(&station::sim_spec(
             *fs_hz,
             plant.as_ref(),
             *outputs,
         ))),
         _ => None,
     }
+}
+
+/// The manifest's `build`: the version, the commit and whether it was dirty.
+pub fn build_value(core_build: &str) -> Value {
+    json!({"version": env!("CARGO_PKG_VERSION"),
+           "commit": core_build.trim_end_matches("-dirty"),
+           "dirty": core_build.ends_with("-dirty")})
+}
+
+/// A stream's channel as `stream.json` lists it: its table index, its unit and
+/// its description.
+pub fn stream_channel_value(c: &Channel) -> Value {
+    stream_channel(c)
 }
 
 fn control_json(cfg: &WireConfig) -> Value {

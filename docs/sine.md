@@ -9,7 +9,7 @@ drive ceiling and an abort that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
 station and channels, the profile, the test, the schedule and identification, control, limits and
-capture, then the run itself. Sine shares its run bar, station panel, channel table and control-law
+the run's record, then the run itself. Sine shares its run bar, station panel, channel table and control-law
 panel with the other test types, and its level and ladder controls with Random.
 
 ## What the Test Does
@@ -166,12 +166,20 @@ identification predicts at the present frequency. Its prediction weight is live.
   against at arm. Without them, feasibility is not evaluated, the kinematic monitor is off, and the
   run says so.
 
-## Capture
+## Run Record
 
-What the run records beyond its report: nothing, the entire test, only what is started and stopped
-by hand, or the first seconds at each level once it has settled there; how often to save; and the
-run folder's name under the program's local data folder. Fields kept with the run (a run number, an
-operator) are listed here.
+Every run is recorded. From arm, the control service writes the run into a run folder of its own
+under the program's local data folder: the channel table, the setup as accepted and as resolved,
+the law, the log, the inputs and the drive as time histories, and the results the test is judged
+by: each input's tracked level and phase against frequency (against time in a dwell), the control
+point's target, measured amplitude and drive at every control call, the identification, and the
+profile's and the limit channels' lines. `docs/run-folder.md` says what is in the folder and how
+the analysis side opens it.
+
+This page takes who ran the test, on what article, the document and clause it is run to, notes,
+and whether the record keeps the time histories (they are most of a folder's size). Fields kept
+with the run's report (a run number, a serial number) are listed here too. A run whose record
+cannot be written in the data folder does not arm, and the screen says why.
 
 ## The Run
 

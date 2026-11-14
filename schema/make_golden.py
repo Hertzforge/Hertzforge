@@ -1862,8 +1862,9 @@ SINE_CONFIG = {
     'feasibility': {'shaker': SHOCK_SHAKER,
                     'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
                                        'fixturing': 10, 'test_article': 12}},
-    'capture': {'rule': 'off', 'first_s': None, 'level_settle_s': 1, 'periodic_save_s': None,
-                'run_name': 'sine'},
+    'operator': 'A. Operator', 'article': 'Bracket, serial 7', 'notes': 'first article',
+    'specification': {'document': 'Test procedure 12', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
                  {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
                  {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
@@ -1916,7 +1917,9 @@ SINE_RUNNING = _sine_state(
                     'lag_frames': 0, 'trusted_frac': 0.97, 'passed': True},
     law={'id': 'servo_blend', 'name': 'Servo blend', 'version': '0.1.0', 'sha256': None,
          'misses': 0, 'capped_ticks': 2, 'live': {'blend_w': 0.5}},
-    feasibility=SINE_FEASIBILITY)
+    feasibility=SINE_FEASIBILITY,
+    record={'folder': '/home/operator/Hertzforge_Data/20261101-142233_sine_sine-0003',
+            'streams': 'on', 'problem': None})
 
 #: The golden run's live numbers: a down sweep at -6 dB, three enabled inputs.
 SINE_CHANNELS = [
