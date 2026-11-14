@@ -2,9 +2,12 @@
 	/**
 	 * Where a run is recorded, for the Run card of any test type whose runs leave a run folder: from
 	 * arm on, "Recording to" (after the end, "Recorded in") with the folder's name, the full path
-	 * under it in small type, selectable, and a line when the time histories are not kept.
+	 * under it in small type, selectable, a line when the time histories are not kept, and Show Folder
+	 * and Copy Folder Path.
 	 */
 	import type { RunRecordRef } from '$lib/protocol/types';
+	import { getApp } from '$lib/app/state.svelte';
+	import RunFolderActions from './RunFolderActions.svelte';
 	import { folderName } from './words';
 
 	interface Props {
@@ -13,6 +16,7 @@
 		ended: boolean;
 	}
 	let { record, ended }: Props = $props();
+	const files = getApp().runFiles;
 </script>
 
 <div class="rec" data-testid="record-line" data-streams={record.streams}>
@@ -21,6 +25,7 @@
 		<p class="recname"><span class="k">{ended ? 'Recorded in' : 'Recording to'}</span><strong title={record.folder} data-testid="record-folder">{folderName(record.folder)}</strong></p>
 		<p class="path" title={record.folder} data-testid="record-path">{record.folder}</p>
 		{#if record.streams === 'off'}<p class="msg" data-testid="record-streams-off">Time histories are not kept for this run.</p>{/if}
+		<div class="acts"><RunFolderActions folder={record.folder} {files} /></div>
 	</div>
 </div>
 
@@ -66,6 +71,10 @@
 		color: var(--text-3);
 		word-break: break-all;
 		user-select: text;
+	}
+
+	.acts {
+		margin-top: 4px;
 	}
 
 	.msg {

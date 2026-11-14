@@ -17,7 +17,10 @@ written by.
 ## Where It Goes
 
 Under the service's data folder: the folder `HERTZFORGE_DATA_ROOT` names, or
-`Hertzforge_Data` in the home folder. A Random run's folder is named
+`Hertzforge_Data` in the home folder. The desktop app shows the folder in the
+Station panel and starts the control service with it; a folder chosen there
+takes effect at the services' next start (`docs/desktop-app.md`, "Run
+Folders"). A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_random_<run id>`, a MIMO Random run's
 `<YYYYMMDD-HHMMSS>_mimo_random_<run id>`, a Sine run's
 `<YYYYMMDD-HHMMSS>_sine_<run id>`, a Mixed Mode run's
@@ -228,6 +231,24 @@ and `kurtosis` over the whole run) and each recording's `complete`; its
   `write_behind`), the recording finalized with what reached the disk and its
   `fault` or its gap stated. A log line the record cannot write is a `record`
   entry and the state's `record.problem`, and the run goes on.
+
+## Opening, Showing and Deleting a Run
+
+- **Opening.** A run folder opens through its `run.json`: opened with the
+  desktop app from the file manager, or dropped on the window, it opens as Open
+  in Analysis does, converted first when it has no project file or the run
+  changed since.
+- **Showing.** Wherever the shell names a run (the Run card's recording line, a
+  finished run's end line, a run record picked in the project), Show Folder
+  opens the folder in the file manager (the desktop app) beside Copy Folder Path.
+- **Deleting.** Delete Run removes the run folder and its project file
+  together, after a confirmation that names both paths. The analysis service
+  deletes it (`runs.delete`, `hertzforge.io.data_folder`), the one place a run
+  is deleted, and refuses, deleting nothing, a folder outside the data folder
+  or the data folder itself, one reached through a link, one that is not a run
+  folder (no `run.json` of the run folder schema), one with a link inside it, a
+  run whose `run.json` does not say `complete: true` (still going, or did not
+  end cleanly), and a run whose project file is open.
 
 ## What a Classical Shock Run Saves
 

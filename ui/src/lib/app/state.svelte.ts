@@ -10,6 +10,7 @@ import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUns
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
 import { RunOpen } from '$lib/acquire/runOpen.svelte';
+import { RunFiles } from './runFiles.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
 import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
@@ -54,7 +55,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
-import { baseName, isProjectFile } from '$lib/project/files';
+import { baseName, confirmFirst, desktopRunFiles, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
@@ -2029,6 +2030,8 @@ export class AppState {
 	readonly acquire: AcquireState;
 	/** A finished Random run's way to its data on the analysis side. */
 	readonly runOpen: RunOpen;
+	/** Where runs are kept, and Show Folder, Copy Folder Path and Delete Run for any run named. */
+	readonly runFiles: RunFiles;
 	/** A finished classical shock run's way to its data: the Shock workspace. */
 	readonly shockRunOpen: RunOpen;
 	/** A finished SRS shock run's way to its data: the Shock workspace. */
@@ -2110,6 +2113,11 @@ export class AppState {
 			}
 		};
 		this.runOpen = new RunOpen(runHost);
+		this.runFiles = new RunFiles({
+			request: <R,>(method: string, params: Record<string, unknown>) => this.analysis.request<R>(method, params),
+			desktop: config.mock ? null : desktopRunFiles(),
+			confirm: confirmFirst
+		});
 		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
 		this.srsRunOpen = new RunOpen(runHost, 'srs');
 		this.sineRunOpen = new RunOpen(runHost, 'sine');

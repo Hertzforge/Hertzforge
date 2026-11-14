@@ -82,6 +82,122 @@ pub fn describe(random: &Value, sim: &Value) -> Option<String> {
     None
 }
 
+/// Each module's state, the states in which its run is live, and its name in words. A module
+/// the service does not answer for is taken as idle.
+const MODULE_STATES: [(&str, &[&str], &str); 10] = [
+    (
+        "random.state",
+        &["armed", "running", "review", "stopping"],
+        "A Random test",
+    ),
+    (
+        "mimo_random.status",
+        &["armed", "running", "review", "stopping"],
+        "A MIMO Random test",
+    ),
+    (
+        "sine.state",
+        &["armed", "running", "review", "stopping"],
+        "A Sine test",
+    ),
+    (
+        "mixed.state",
+        &["armed", "running", "review", "stopping"],
+        "A Mixed Mode test",
+    ),
+    (
+        "shock.state",
+        &["armed", "running", "review", "stopping"],
+        "A Classical Shock test",
+    ),
+    (
+        "srs.state",
+        &["armed", "running", "review", "stopping"],
+        "An SRS test",
+    ),
+    (
+        "twr.state",
+        &["armed", "running", "review", "held", "stopping"],
+        "A TWR test",
+    ),
+    (
+        "mimo_shock.state",
+        &["armed", "running", "review", "stopping"],
+        "A MIMO Shock test",
+    ),
+    (
+        "explorer.state",
+        &["starting", "running", "stopping"],
+        "An Explorer run",
+    ),
+    (
+        "recorder.state",
+        &["starting", "running", "stopping"],
+        "A Recorder run",
+    ),
+];
+
+/// A sentence naming a live run of any module, or a running simulation; `None` when nothing
+/// runs. An error means the service could not be asked. Read only, as `live_run`.
+pub fn live_any(port: u16) -> Result<Option<String>, String> {
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let stream = TcpStream::connect_timeout(&addr, CONNECT_WAIT).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(ANSWER_WAIT))
+        .map_err(|e| e.to_string())?;
+    let (mut ws, _) = tungstenite::client(format!("ws://127.0.0.1:{port}/"), stream)
+        .map_err(|e| e.to_string())?;
+    let methods: Vec<&str> = MODULE_STATES
+        .iter()
+        .map(|(m, _, _)| *m)
+        .chain(["sim.state"])
+        .collect();
+    for (id, method) in methods.iter().enumerate() {
+        let req = json!({"type": "request", "id": id, "method": method, "params": {}});
+        ws.send(Message::text(req.to_string()))
+            .map_err(|e| e.to_string())?;
+    }
+    let mut answers: Vec<Option<Value>> = vec![None; methods.len()];
+    let deadline = Instant::now() + ANSWER_WAIT;
+    while answers.iter().any(Option::is_none) {
+        if Instant::now() > deadline {
+            return Err("the control service did not answer".into());
+        }
+        let Message::Text(text) = ws.read().map_err(|e| e.to_string())? else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(text.as_str()) else {
+            continue;
+        };
+        if v["type"] != "response" {
+            continue;
+        }
+        if let Some(slot) = v["id"].as_u64().and_then(|i| answers.get_mut(i as usize)) {
+            // an error (a module this service does not have) answers as idle
+            *slot = Some(v.get("result").cloned().unwrap_or(Value::Null));
+        }
+    }
+    let _ = ws.close(None);
+    let answers: Vec<Value> = answers.into_iter().map(Option::unwrap_or_default).collect();
+    Ok(describe_any(&answers))
+}
+
+/// The live run in words, from the answers in `MODULE_STATES` order and then `sim.state`.
+pub fn describe_any(answers: &[Value]) -> Option<String> {
+    for ((_, live, name), answer) in MODULE_STATES.iter().zip(answers) {
+        // a state is the result's own, or (a MIMO Random status) one level down
+        let state = answer["state"]
+            .as_str()
+            .or_else(|| answer["state"]["state"].as_str())
+            .unwrap_or("");
+        if live.contains(&state) {
+            return Some(format!("{name} is live."));
+        }
+    }
+    let sim = answers.get(MODULE_STATES.len()).unwrap_or(&Value::Null);
+    (sim["state"] == "running").then(|| "A simulation is running.".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +221,31 @@ mod tests {
         }
         assert!(describe(&Value::Null, &json!({"state": "running"})).is_some());
         assert_eq!(describe(&Value::Null, &Value::Null), None);
+    }
+
+    #[test]
+    fn a_live_run_of_any_module_is_named() {
+        let idle = vec![json!({"state": "finished"}); MODULE_STATES.len() + 1];
+        assert_eq!(describe_any(&idle), None);
+        for (k, (_, live, name)) in MODULE_STATES.iter().enumerate() {
+            for state in live.iter() {
+                let mut answers = idle.clone();
+                answers[k] = json!({"state": state});
+                assert_eq!(
+                    describe_any(&answers).as_deref(),
+                    Some(format!("{name} is live.").as_str())
+                );
+            }
+        }
+        let mut nested = idle.clone();
+        nested[1] = json!({"state": {"state": "running"}});
+        assert!(describe_any(&nested).is_some());
+        let mut sim = idle.clone();
+        sim[MODULE_STATES.len()] = json!({"state": "running"});
+        assert_eq!(
+            describe_any(&sim).as_deref(),
+            Some("A simulation is running.")
+        );
+        assert_eq!(describe_any(&[]), None);
     }
 }
