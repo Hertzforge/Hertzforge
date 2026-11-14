@@ -267,6 +267,50 @@ jobs:
           pip install pytest
           python -m pytest tools -q
 
+  # The drive path's rules (docs/drive-path.md, tools/check_drive_path.py, with tests that
+  # plant each case and run in the `tree` job). On every run: every crate on one of the two
+  # lists in tools/drive_path.txt, and every test in tools/safety_tests.txt present, not
+  # ignored and compiled in. On a pull request also: a change to a drive-path path carries
+  # the template's drive-path section, filled in, and a removed safety test or a path moved
+  # off the list is named in the title; a change to a path in tools/run_data_paths.txt
+  # carries the Run data section, filled in (docs/run-data.md). The description is read
+  # through the API as it is now, so re-running this job after editing the description
+  # checks the edit (the event payload keeps the description the pull request had when the
+  # run started).
+  drive-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # the whole history, so the base a pull request merges into is here to diff against
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: The drive-path lists and the safety tests
+        if: github.event_name != 'pull_request'
+        run: python tools/check_drive_path.py
+      - name: The drive-path lists, the safety tests and this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          event="$GITHUB_EVENT_PATH"
+          if gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" > "$RUNNER_TEMP/now.json"; then
+            jq --slurpfile now "$RUNNER_TEMP/now.json" \
+              '.pull_request.title = $now[0].title | .pull_request.body = $now[0].body' \
+              "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/event.json"
+            event="$RUNNER_TEMP/event.json"
+          else
+            echo "::warning::The description could not be read as it is now; checking the one the event carried."
+          fi
+          python tools/check_drive_path.py --event "$event"
+
   # The head branch of a pull request is named for what it carries. Skipped outside pull requests, where there
   # is no head branch to name.
   branch:
