@@ -519,6 +519,8 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
+| `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
+| `runs.delete` | `{"folder","dry_run"?}` | `{"folder","project_file","project_file_exists","deleted"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
@@ -544,7 +546,8 @@ the first line making the project. The shell shows it read-only along the bottom
 `banded` when a PSD or a specification is on proportional bands, which changes its icon. A
 Matched Modes object carries `between`, the two shape sets it pairs (first, second): the tree lists
 it after the first set's group and marks its row with a short bracket striped in both sets' group
-colors.
+colors. A run record carries `run_folder`, the run folder it was converted from, while that folder is
+still there: the project was opened from its converted file, or the file was imported.
 `project.children` answers what one object opens into, by
 `kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts), its element
 `families` (every family, each with the element `groups` holding elements of it and their counts),
@@ -995,6 +998,20 @@ leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound 
 object the project has for it), `remove` (`at`), `move` (`from`, to before `to`), `text` (`at`,
 `value`), `field` (`at`, `field` `caption` or one of the block's `fields`, `value`), `title`,
 `marking` and `marking_color` (`value`).
+
+**Run folders.** `runs.data_folder` answers where the control service keeps its runs, resolved as
+it resolves them (`docs/run-folder.md`): `path`; `source`, `environment` when
+`HERTZFORGE_DATA_ROOT` names it and `default` otherwise (the desktop app starts both services with
+the variable set to the folder it keeps, so there it is `environment`); `exists`; and while it
+exists, `writable`, whether a file can be made in it now, with `reason` when not. `runs.delete`
+deletes a run's folder and its converted project file (`<run name>.hforge` inside it) and answers
+what went; with `dry_run` it makes every check, deletes nothing and answers what would go, which
+is what a confirmation names. It is refused (`refused`, the message saying why, nothing deleted)
+for a folder that is not inside the data folder or is the data folder itself, one reached through
+a link or junction, one that holds no `run.json` of the run folder schema, one with a link or
+junction anywhere inside it, a run whose `run.json` does not say `complete: true` (a live run, or
+one that did not end cleanly), and a run whose project file, or a file mapped from it, is open in
+the service; `not_found` when there is no such folder.
 
 **Control service**
 
