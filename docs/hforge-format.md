@@ -21,12 +21,14 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1, 2 or 3   (integer)
+    hertzforge_schema = 1, 2, 3 or 4   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
 object is stamped 2. Schema 3 adds the run record (`run_record/`,
 below), and only a file holding one, or referring to one, is stamped 3.
+Schema 4 adds the test setup (`test_setup/`, below), and only a file
+holding one, or referring to one, is stamped 4.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -52,7 +54,7 @@ every earlier file starts with the first release that is not an alpha.
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
-`predictions/`, `run_log_extract/` or `run_record/`. The loader recognizes the file by
+`predictions/`, `run_log_extract/`, `run_record/` or `test_setup/`. The loader recognizes the file by
 the group it finds.
 
 A breakpoint table file is a single-object file too, holding one of a
@@ -470,6 +472,44 @@ objects the run converts to (below), so nothing in the run folder is
 lost. `complete` is true for a run whose manifest says so and that has
 an end; `outcome` is the end's own (`completed`, `aborted`,
 `operator_stop`, and so on), '' when it has none.
+
+## `test_setup/`
+
+    test_setup/  attrs: module, protocol, title, origin_kind
+                 dsets (each one UTF-8 string):
+                   config   JSON: the configuration exactly as the
+                            module's configure request takes it
+                   table    JSON: the channel table it was made with,
+                            {"rows", "revision", "sha256"}, each when
+                            known; {} when not recorded
+                   origin   JSON: where it came from (below)
+                   notes    the operator's notes, plain text
+
+One test module's setup, saved so it can be opened again. `module` is
+the test it is for, by the name a run's manifest gives its test:
+`random`, `sine`, `mixed`, `classical_shock`, `srs`, `twr`, `explorer`,
+`recorder`, `mimo_random` or `mimo_shock`. `config` is what that
+module's configure request carries (`params.config`, or `params.setup`
+for `mimo_random.setup`), kept whole, members this reader does not know
+included. `protocol` is the protocol it was written under (`sds/1`).
+`table.rows` are channel rows in the control service's spelling, as a
+run folder's `table.json` holds them.
+
+`origin` says where the setup came from, by `kind`:
+
+- `typed`: typed on a test's screen;
+- `setup`: opened from a saved setup, with its `name`;
+- `run`: taken from a run's record, with the run's `run_uid` and
+  `run_id`, and the record's `name` in the project when it had one;
+- `seed`: a part of it filled from an analysis object in the project,
+  with the object's `name` as `object`, its SHA-256 as `checksum`, and
+  what it filled as `fills`.
+
+`origin_kind` repeats `origin.kind` so a browser of the file sees it.
+A run record's `setup.config` has the same form, so a setup opened from
+a run and a saved one are read the same way. Opening either fills a
+test's draft only: the draft is checked by the control service as one
+typed in, and nothing is armed by opening it.
 
 ## Run Folders and Their Conversion
 

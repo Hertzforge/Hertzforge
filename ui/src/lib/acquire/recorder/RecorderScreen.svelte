@@ -16,6 +16,7 @@
 	import RecorderSummary from './RecorderSummary.svelte';
 	import { RECORDER_SECTIONS, recorderRows, type RecorderSection } from './recorderSetup';
 	import { rateWords } from './recorderWords';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -67,13 +68,14 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="recorder" />
 	<RecorderSummary {recorder} onopen={(s: RecorderSection) => open(s)} />
 {/snippet}
 
 {#snippet station()}<StationPanel acq={recorder.acq} />{/snippet}
 
 {#snippet run()}
-	<RecorderRunView {recorder} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')} />
+	<RecorderRunView {recorder} {views} {station} {abortKeys} onpopout={(id) => app.openDisplayWindow(id, 'recorder')} opener={app.recorderRunOpen} />
 {/snippet}
 
 <PulseScreen

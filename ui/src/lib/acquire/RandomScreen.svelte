@@ -24,6 +24,7 @@
 	import StationPanel from '$lib/acquire/StationPanel.svelte';
 	import ScreenHeader from '$lib/acquire/screen/ScreenHeader.svelte';
 	import type { AcquireTab } from '$lib/acquire/store.svelte';
+	import SetupFileBar from '$lib/acquire/setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -206,6 +207,7 @@
 	</div>
 
 	<div class="body" bind:this={body} id="aq-panel-{acq.tab}" role="tabpanel" aria-labelledby="aq-tab-{acq.tab}" tabindex="-1">
+		<SetupFileBar {app} module="random" />
 		{#if acq.tab === 'station'}
 			<div class="stack">
 				<StationPanel {acq} />

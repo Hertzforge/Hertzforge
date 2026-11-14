@@ -6,6 +6,8 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ProjectTree from './ProjectTree.svelte';
+	import RunFolderActions from '$lib/acquire/RunFolderActions.svelte';
+	import { runRecordFolder } from './files';
 	import { canDragOut } from './files';
 
 	interface Props {
@@ -16,6 +18,8 @@
 	const p = $derived(app.project);
 	/** An unresolved reference whose drop waits on a second click. */
 	let confirming = $state<string | null>(null);
+	// one run record picked whose run folder is there: its folder's actions
+	const runFolder = $derived(runRecordFolder(p.summary?.objects ?? [], p.selection.objects));
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
 
 	// The project row dragged a few pixels starts the system's drag of a copy of the project, to
@@ -76,6 +80,12 @@
 			{#if p.summary.objects.length}
 				<ProjectTree {app} />
 			{/if}
+			{#if runFolder}
+				<div class="runfolder" data-testid="project-run-folder">
+					<p class="cdesc mono" title={runFolder}>{runFolder}</p>
+					<RunFolderActions folder={runFolder} files={app.runFiles} deletable />
+				</div>
+			{/if}
 			{#if p.summary.unresolved?.length}
 				<ul class="objects" aria-label="Unresolved references" data-testid="project-unresolved">
 					{#each p.summary.unresolved as u (u.name)}
@@ -133,6 +143,21 @@
 
 
 
+
+	.runfolder {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		margin: var(--sp-2) 0;
+	}
+
+	.runfolder .cdesc {
+		flex-basis: 100%;
+		font-size: var(--text-2xs);
+		color: var(--text-3);
+		word-break: break-all;
+		user-select: text;
+	}
 
 	.hint {
 		font-size: var(--text-xs);

@@ -153,6 +153,8 @@ export class MimoState {
 	refKey = $state('');
 	refBusy = $state(false);
 	rigid = $state.raw<MimoRigidResult | null>(null);
+	/** The reference a setup opened from the project or a run brought; not kept across a reload. */
+	openedReference = $state.raw<MimoReference | null>(null);
 	rigidKey = $state('');
 	/** The setup this screen applied: the run it made and the setup's key. */
 	held = $state.raw<{ runId: string | null; key: string } | null>(null);
@@ -298,9 +300,21 @@ export class MimoState {
 		return canonical({ m: 'bp', p: breakpointParams(d, this.labels) });
 	});
 
-	/** The reference for the setup, when the service's answer is for the draft as it stands. */
+	/** The reference for the setup, when the service's answer is for the draft as it stands, or
+	 * the one a setup opened from the project or a run brought (the `field` method). */
 	get reference(): MimoReference | null {
+		if (this.setup.reference.method === 'field' && this.openedReference) return this.openedReference;
 		return this.ref && this.refKey === this.refInputKey ? this.ref.reference : null;
+	}
+
+	/**
+	 * Fill the draft from a setup opened from the project or a run (`fromMimoSetup`). Only the
+	 * draft changes: it is checked by the service's dry run as a typed one is, and applied, armed or
+	 * started only by the operator.
+	 */
+	openSetup(draft: MimoDraft, reference: MimoReference): void {
+		this.setup = draft;
+		this.openedReference = reference;
 	}
 
 	readonly wire = $derived<MimoSetup | null>(

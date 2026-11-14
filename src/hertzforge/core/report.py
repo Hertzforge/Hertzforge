@@ -368,6 +368,7 @@ def binding_types() -> dict[str, type]:
     from .matches import MatchedModes
     from .photos import Photos
     from .prediction import Predictions
+    from .run_record import RunRecord
     from .shapes import ShapeSet
     from .sine import SineLevel, SineLevelSet, SineSweepSpecification
 
@@ -383,7 +384,7 @@ def binding_types() -> dict[str, type]:
             'Coherence': _CoherenceBase,
             'MultipleCoherence': MultipleCoherence,
             'ShapeSet': ShapeSet, 'MatchedModes': MatchedModes,
-            'Predictions': Predictions}
+            'Predictions': Predictions, 'RunRecord': RunRecord}
 
 
 def resolve_binding(value: str | None, objects: Mapping[str, Any],
@@ -1900,6 +1901,7 @@ def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
             'accelerometer clips, and the table is where that is '
             'caught.'},
         *front_matter(objects, object_groups, '@basis:TimeHistory'),
+        *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## The Events\n\n'
             'The measured transients ({{figure:Measured}}), with the '
@@ -2147,6 +2149,7 @@ def sine_template(objects: Mapping[str, Any],
             'channels are the ones the levels below are read from, '
             'and the table is where they are identified.'},
         *front_matter(objects, object_groups, '@basis:TimeHistory'),
+        *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## The Recording\n\n'
             'The measured time histories ({{figure:Measured}}). A '
@@ -2487,6 +2490,7 @@ def transient_template(objects: Mapping[str, Any],
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
         *front_matter(objects, object_groups, time),
+        *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## Specification\n\nThe waveform the controller was asked '
             'to reproduce at each control point '
@@ -3018,6 +3022,7 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
         *front_matter(objects, object_groups, time),
+        *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## Measured Data\n\nThe measured time histories, one '
             'figure per quantity, with the frames a PSD is averaged '
@@ -3147,9 +3152,23 @@ def _holds_cross_terms(name: str | None,
                for record in range(data.num_records))
 
 
+def _controlled_spectra(objects: Mapping[str, Any],
+                        object_groups: Sequence[Mapping[str, Any]] | None) -> str:
+    """The controlled spectra of a recorded MIMO Random run: the Psd
+    `control_spectra` in the object group of its run record; '' for a
+    project with no such run, which binds the first Psd as before."""
+    from ..report.run_records import record_of
+
+    name = _named(objects, 'control_spectra', 'Psd')
+    if not name:
+        return ''
+    record = record_of(objects, name, object_groups)
+    return name if record is not None and record.test == 'mimo_random' else ''
+
+
 def _matrix_refusal(objects: Mapping[str, Any],
-                    object_groups: Sequence[Mapping[str, Any]] | None
-                    ) -> str:
+                    object_groups: Sequence[Mapping[str, Any]] | None,
+                    measured_token: str = '@basis:Psd') -> str:
     """Why the control matrix cannot be judged against its
     specification as a matrix, or '' when it can be (and in an empty
     project, where the template itself is read): no control spectra,
@@ -3157,7 +3176,7 @@ def _matrix_refusal(objects: Mapping[str, Any],
     if not objects:
         return ''
     measured = _holds_cross_terms(
-        resolve_binding('@basis:Psd', objects, object_groups), objects)
+        resolve_binding(measured_token, objects, object_groups), objects)
     specified = _holds_cross_terms(
         resolve_binding('@basis:Specification', objects, object_groups),
         objects)
@@ -3172,6 +3191,33 @@ def _matrix_refusal(objects: Mapping[str, Any],
         return ('the specification holds no cross terms, so it asks for '
                 'no coherence or phase between any pair')
     return ''
+
+
+def _mimo_drive_blocks(predicted: bool, reported: bool,
+                       drive_spectra: str) -> list[dict[str, Any]]:
+    """The Drives section of a recorded MIMO Random run, from its run
+    record: the drive the law's seed asked for before the loop engaged,
+    the drives' spectra in force each loop, and what the drives played
+    over the run. Empty when the record holds none of them, and the
+    section is then owed."""
+    if not (predicted or reported or drive_spectra):
+        return []
+    text = '## Drives\n\n'
+    if predicted:
+        text += f'The drive prediction, from the run record: {_rec("drive_prediction")}. '
+    if drive_spectra:
+        text += ("Each drive's spectral density in force at each loop "
+                 '({{figure:Drive spectra}}). ')
+    if reported:
+        text += f'From the run record, {_rec("drive_rms")}.'
+    text += ('\n\nThe force, velocity and travel against the amplifier and shaker '
+             'limits are read with the Drive Prediction reading '
+             '(`core.drive_prediction.predict_drives`).')
+    blocks: list[dict[str, Any]] = [{'kind': 'text', 'text': text}]
+    if drive_spectra:
+        blocks.append({'kind': 'plot', 'source': drive_spectra, 'mode': 'curves',
+                       'record_caption': True, 'caption': 'Drive spectra'})
+    return blocks
 
 
 def mimo_template(objects: Mapping[str, Any],
@@ -3247,8 +3293,27 @@ def mimo_template(objects: Mapping[str, Any],
         return (f'The project holds no {" and no ".join(missing)} to read '
                 'it from.')
 
+    # a converted MIMO Random run holds several Psds (the identification's
+    # spectral matrices first, in the folder's order); the control matrix
+    # is the run's controlled spectra, `control_spectra`, so a recorded
+    # run binds that one by name, and any other project the first Psd
+    controlled = _controlled_spectra(objects, object_groups)
+    if controlled:
+        psd = controlled
     controls = control_channel_labels(objects, object_groups)
-    refusal = _matrix_refusal(objects, object_groups)
+    refusal = _matrix_refusal(objects, object_groups, psd)
+    # what the run record of a recorded run holds of the owed readings:
+    # the identification's condition numbers and the drives the law's
+    # seed asked for, the drives played and the control error at the end
+    record = _holds_record(objects, object_groups)
+    if record is not None and record.test != 'mimo_random':
+        record = None
+    conditioned = record is not None and 'condition' in record.arrays.get(
+        'identification', {})
+    predicted = record is not None and 'drive' in record.arrays.get('law_calls', {})
+    reported = record is not None and isinstance(
+        (record.end or {}).get('report'), Mapping)
+    drive_spectra = _named(objects, 'drive_spectra', 'Psd') if record is not None else ''
     specified = _holds_cross_terms(
         resolve_binding(spec, objects, object_groups), objects)
     if present(frf):
@@ -3264,10 +3329,14 @@ def mimo_template(objects: Mapping[str, Any],
                 "an inverse of the plant there, the controller's and the "
                 "drive prediction's alike, is mostly noise. The ratio of "
                 'the largest to the smallest is the condition number.\n\n'
-                f'**{OWED}:** the condition number at every line against '
-                'its limit, the effective rank, and the bands over the '
-                'limit, read with the Conditioning reading '
-                '(`Frf.conditioning`).'},
+                + (f'From the run record: {_rec("condition")}. The effective '
+                   'rank and the bands over the limit are read with the '
+                   'Conditioning reading (`Frf.conditioning`).'
+                   if conditioned else
+                   f'**{OWED}:** the condition number at every line against '
+                   'its limit, the effective rank, and the bands over the '
+                   'limit, read with the Conditioning reading '
+                   '(`Frf.conditioning`).')},
             {'kind': 'plot', 'source': frf, 'mode': 'cmif',
              'caption': 'Singular values of the FRF matrix (CMIF)'}]
     else:
@@ -3340,6 +3409,9 @@ def mimo_template(objects: Mapping[str, Any],
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
         *front_matter(objects, object_groups, time),
+        *([run_record_block(objects, object_groups,
+                            [('Control error', 'control_error')])]
+          if record is not None else []),
         _owed('Transformation',
               'the transformation from the control channels to the '
               'degrees of freedom controlled: its matrix, its '
@@ -3361,14 +3433,16 @@ def mimo_template(objects: Mapping[str, Any],
             'the spectra are averaged over'),
         realizability,
         *conditioning,
-        _owed('Drives',
+        *(drives_blocks if (drives_blocks := _mimo_drive_blocks(
+            predicted, reported, drive_spectra)) else [_owed(
+              'Drives',
               'the drives the specification asks for through the FRF, '
               "open loop: each drive's autospectrum, its rms and expected "
               'peak, and the drive, force, velocity and travel against the '
               'amplifier and shaker limits, with the first to run out and '
               'where, read with the Drive Prediction reading '
               '(`core.drive_prediction.predict_drives`).',
-              lacking((frf, 'FRF'), (spec, 'specification'))),
+              lacking((frf, 'FRF'), (spec, 'specification')))]),
         {'kind': 'text', 'text':
             '## Matrix Comparison\n\nThe diagonal of the control matrix '
             'against the diagonal of its specification, '
@@ -3567,9 +3641,348 @@ def signals_template(objects: Mapping[str, Any],
     ])
 
 
+# ---- the run record, and the tests that had no template -------------------
+#
+# A run the control service recorded arrives with its run record
+# (`core.run_record`): who ran it, on what, to which document, every
+# level, hold, alarm and trip, the outcome and the counts. The section
+# below reads it through live references (`{{@basis:RunRecord.field}}`,
+# answered by `report.run_records`), so the words fill themselves in
+# from whichever run the project holds and say plainly what the record
+# does not hold.
+
+#: the test each template is the report of; a test not here has none
+#: of its own
+TEST_TEMPLATES = {'random': 'random', 'mimo_random': 'mimo', 'sine': 'sine',
+                  'mixed': 'mixed_mode', 'classical_shock': 'shock', 'srs': 'shock',
+                  'twr': 'transient', 'mimo_shock': 'mimo_shock',
+                  'explorer': 'explorer', 'recorder': 'recorder'}
+
+#: the binding of the project's run record
+RUN_RECORD = '@basis:RunRecord'
+
+
+def _rec(field: str) -> str:
+    return _ref(RUN_RECORD, field)
+
+
+def _holds_record(objects: Mapping[str, Any],
+                  object_groups: Sequence[Mapping[str, Any]] | None) -> Any:
+    """The run record `RUN_RECORD` binds, or None."""
+    return objects.get(resolve_binding(RUN_RECORD, objects, object_groups) or '')
+
+
+def _recorded_run(objects: Mapping[str, Any],
+                  object_groups: Sequence[Mapping[str, Any]] | None
+                  ) -> list[dict[str, Any]]:
+    """The Run section, for a template that predates run records: present
+    only when the project holds one, so a report of data with no run
+    record is exactly what it was."""
+    if _holds_record(objects, object_groups) is None:
+        return []
+    return [run_record_block(objects, object_groups)]
+
+
+def run_record_block(objects: Mapping[str, Any],
+                     object_groups: Sequence[Mapping[str, Any]] | None,
+                     extra: Sequence[tuple[str, str]] = ()) -> dict[str, Any]:
+    """The Run section: what the control service's record says of the run,
+    each line a live reference to the run record, and `extra` (label,
+    field) lines a test adds. A project with no run record says so and
+    leaves the facts to the author; nothing is read in their place."""
+    if objects and _holds_record(objects, object_groups) is None:
+        return {'kind': 'text', 'text':
+                '## The Run\n\n**Not recorded:** the project holds no run record '
+                'of the control service, so who ran the test, on what article, '
+                'to which document, its levels, holds, trips and outcome are not '
+                'read here. They are for the author to enter.'}
+    lines = [('Test', 'test'), ('Run', 'run_id'), ('Source', 'source'),
+             ('Operator', 'operator'), ('Article', 'article'),
+             ('Specification', 'specification'), ('Started', 'start'),
+             ('Levels', 'levels'), ('Holds, resumes and trips', 'interruptions'),
+             ('Alarms', 'alarms'), ('Overloads', 'overloads'),
+             ('Counts', 'counts'), *extra, ('Outcome', 'outcome'),
+             ('What the record lacked', 'missing')]
+    return {'kind': 'text', 'text':
+            '## The Run\n\nAs the control service recorded it, in its run record. '
+            'A run on the simulator is labeled SIM; a fact the record does not '
+            'hold says so.\n\n'
+            + '\n'.join(f'- **{label}:** {_rec(field)}' for label, field in lines)}
+
+
+def _summary(objects: Mapping[str, Any],
+             object_groups: Sequence[Mapping[str, Any]] | None,
+             what: str) -> dict[str, Any]:
+    time = '@basis:TimeHistory'
+    recorded = _holds_record(objects, object_groups) is not None or not objects
+    text = f'## Test Summary\n\n{what}'
+    if recorded:
+        text += (f'\n\nTest: {_rec("test")}, on {_rec("source")}. Operator: '
+                 f'{_rec("operator")}. Article: {_rec("article")}. Specification: '
+                 f'{_rec("specification")}. It ended {_rec("outcome")}')
+    present = not objects or resolve_binding(time, objects, object_groups) in objects
+    if present:
+        text += (('.' if recorded else '') + f' The record holds '
+                 f'{_ref(time, "num_channels")} channels at '
+                 f'{_ref(time, "sample_rate")} over {_ref(time, "duration")}.')
+    elif recorded:
+        text += '.'
+    return {'kind': 'text', 'text': text}
+
+
+def _named(objects: Mapping[str, Any], name: str, cls_name: str) -> str:
+    """`name` when the project holds an object of that name and class
+    (a run's converted result keeps its folder's name), else ''."""
+    obj = objects.get(name)
+    return name if obj is not None and type(obj).__name__ == cls_name else ''
+
+
+def mixed_template(objects: Mapping[str, Any],
+                   object_groups: Sequence[Mapping[str, Any]] | None = None
+                   ) -> Report:
+    """A Mixed Mode report: the random floor, the tones and the
+    narrowbands on top of it, controlled together on one drive.
+
+    After the summary and the front matter, the run as its record has it,
+    the measured data, the floor's control spectra against the floor's
+    specification, the spectra with the tones taken out, the tones as
+    specified, each part's last level at the highest level the run
+    reached as the controller measured it (from the record's levels),
+    the identification, the drive, the data quality and the
+    conclusions. Sources bind symbolically, the residual and drive
+    spectra by the names the conversion gives them; the report is
+    passed through `prune_unbound`.
+    """
+    time, psd, spec = '@basis:TimeHistory', '@basis:Psd', '@basis:Specification'
+    residual = _named(objects, 'residual_psd', 'Psd') or (
+        'residual_psd' if not objects else '')
+    drive = _named(objects, 'drive_psd', 'Psd') or ('drive_psd' if not objects else '')
+    blocks: list[dict[str, Any]] = [
+        _summary(objects, object_groups,
+                 'A Mixed Mode vibration test was run: a random floor with sine '
+                 'tones and narrowbands on top of it, controlled together on one '
+                 'drive. This report documents the instrumentation, the run as the '
+                 'control service recorded it, the floor against its '
+                 'specification, each tone and narrowband as the controller '
+                 'measured it, and the checks on the data.'),
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups, time)},
+        *front_matter(objects, object_groups, time),
+        run_record_block(objects, object_groups, [('Parts', 'parts')]),
+        {'kind': 'text', 'text':
+            '## Measured Data\n\nThe measured time histories, one figure per '
+            'quantity ({{figure:Measured}}).'},
+        *time_data_blocks(time, objects, object_groups, 'Measured time histories',
+                          'Measured {quantity} time histories'),
+        {'kind': 'text', 'text':
+            '## The Floor\n\nThe floor\'s control spectra with the tones in, '
+            'against the floor\'s specification and its alarm and abort lines '
+            '({{figure:Floor against specification}}).'},
+        *_comparisons(psd, spec, 'Floor against specification', objects, object_groups),
+    ]
+    if residual:
+        blocks += [
+            {'kind': 'text', 'text':
+                '## The Floor Without the Tones\n\nEach control channel\'s spectrum '
+                'with each tracked tone taken out ({{figure:Floor with the tones '
+                'taken out}}): what the floor\'s own control judged.'},
+            {'kind': 'plot', 'source': residual, 'specification': spec, 'mode': 'curves',
+             'record_caption': True, 'caption': 'Floor with the tones taken out'}]
+    blocks += [
+        {'kind': 'text', 'text':
+            '## The Tones and Narrowbands\n\nEach part at the last point the '
+            'controller recorded at the highest level the run reached: '
+            f'{_rec("parts")}. A tone has no measured spectrum of its own to draw '
+            'against its specification here; its level is the controller\'s.'},
+        {'kind': 'text', 'text':
+            '## Identification\n\nThe transfer function the controller identified '
+            'from the drive to each control channel ({{figure:Identified transfer '
+            'function}}) and its coherence ({{figure:Identification coherence}}).'},
+        {'kind': 'plot', 'source': '@basis:Frf', 'mode': 'curves',
+         'caption': 'Identified transfer function'},
+        {'kind': 'plot', 'source': '@basis:Coherence', 'mode': 'curves',
+         'caption': 'Identification coherence'},
+    ]
+    if drive:
+        blocks += [
+            {'kind': 'text', 'text':
+                '## The Drive\n\nThe random part of the drive ({{figure:Random part '
+                'of the drive}}).'},
+            {'kind': 'plot', 'source': drive, 'mode': 'curves',
+             'caption': 'Random part of the drive'}]
+    blocks += [
+        {'kind': 'text', 'text':
+            '## Data Quality\n\nPearson kurtosis ({{figure:Pearson kurtosis}}): a '
+            'record carrying tones on a random floor does not read three, so the '
+            'figure is read against the run\'s own parts, not against a Gaussian '
+            'band.'},
+        kurtosis_block(),
+        {'kind': 'text', 'text':
+            '## Conclusions\n\nWhether the run met its specification is read off '
+            'the floor\'s comparison and each part\'s level together. The outcome '
+            f'above is the controller\'s: {_rec("outcome")}. What it means for the '
+            'test is the author\'s to say.'},
+    ]
+    return prune_unbound(Report('Mixed Mode Vibration Test Report', blocks),
+                         objects, object_groups)
+
+
+def explorer_template(objects: Mapping[str, Any],
+                      object_groups: Sequence[Mapping[str, Any]] | None = None
+                      ) -> Report:
+    """An Explorer run's report: a tone steered by hand, its survey and
+    what the run measured.
+
+    The survey line and the display spectra are magnitudes with no
+    phase, which no analysis class holds; they stay in the run record
+    and are given here in words from it, with their units. The streams
+    are drawn as time histories.
+    """
+    time = '@basis:TimeHistory'
+    return prune_unbound(Report('Explorer Run Report', [
+        _summary(objects, object_groups,
+                 'An Explorer run was made: a tone steered by hand to look at the '
+                 'article, with a survey of the control row\'s amplitude at each '
+                 'frequency the tone visited. This report documents the '
+                 'instrumentation, the run as the control service recorded it, '
+                 'the steering, the survey and the measured data.'),
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups, time)},
+        *front_matter(objects, object_groups, time),
+        run_record_block(objects, object_groups, [('Steering', 'steering')]),
+        {'kind': 'text', 'text':
+            '## The Survey\n\nThe control row\'s amplitude at the tone, peak, at each '
+            f'frequency the tone visited: {_rec("survey")}. The survey and the '
+            'display spectra are magnitudes with no phase; they are kept in the run '
+            'record and given here as recorded, not drawn as spectra.\n\n'
+            f'What the run measured: {_rec("measured")}.'},
+        {'kind': 'text', 'text':
+            '## Measured Data\n\nThe measured time histories, one figure per '
+            'quantity ({{figure:Measured}}).'},
+        *time_data_blocks(time, objects, object_groups, 'Measured time histories',
+                          'Measured {quantity} time histories', averaging=False),
+        {'kind': 'text', 'text':
+            '## Conclusions\n\nAn Explorer run has no specification and no '
+            f'verdict. It ended {_rec("outcome")}. What the survey shows of the '
+            'article is the author\'s to say.'},
+    ]), objects, object_groups)
+
+
+def recorder_template(objects: Mapping[str, Any],
+                      object_groups: Sequence[Mapping[str, Any]] | None = None
+                      ) -> Report:
+    """A Recorder run's report: what was recorded, when it triggered, and
+    what each row held over the run.
+
+    A Recorder run has no law and no results; its record holds its
+    recordings, each with its trigger and pre-window, the marks and
+    overloads in its log, and each row's statistics over the run. The
+    recordings are drawn as time histories, the pre-trigger samples at
+    negative times.
+    """
+    time = '@basis:TimeHistory'
+    return prune_unbound(Report('Recording Report', [
+        _summary(objects, object_groups,
+                 'A recording was made with the Recorder: the station\'s inputs '
+                 'acquired and saved, with no drive. This report documents the '
+                 'instrumentation, the run as the control service recorded it, '
+                 'each recording and the rows\' statistics over the run.'),
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups, time)},
+        *front_matter(objects, object_groups, time),
+        run_record_block(objects, object_groups),
+        {'kind': 'text', 'text':
+            f'## The Recordings\n\n{_rec("recordings")}.\n\nEach row over the whole '
+            f'run, as the run\'s end gives it: {_rec("row_statistics")}.'},
+        {'kind': 'text', 'text':
+            '## Recorded Data\n\nThe recorded time histories, time from the '
+            'trigger, the pre-window at negative times ({{figure:Recorded}}).'},
+        *time_data_blocks(time, objects, object_groups, 'Recorded time histories',
+                          'Recorded {quantity} time histories', averaging=False),
+        {'kind': 'text', 'text':
+            '## Conclusions\n\nA recording has no specification and no verdict. '
+            f'The run ended {_rec("outcome")}; overloads in its log: '
+            f'{_rec("overloads")}. What the recordings show is the author\'s to say.'},
+    ]), objects, object_groups)
+
+
+#: what the MIMO Shock report waits for, until its run record is written:
+#: the record's own facts per pulse and per control
+_MIMO_SHOCK_WAITS = (
+    'This section is bound to the run record of a MIMO Shock run, which the '
+    'control service does not write yet. Until it does, the project has no '
+    'record to read it from.')
+
+
+def mimo_shock_template(objects: Mapping[str, Any],
+                        object_groups: Sequence[Mapping[str, Any]] | None = None
+                        ) -> Report:
+    """A MIMO Shock report: one shock at a time on several shakers, each
+    control point judged against its own target.
+
+    The figures bind as the Classical Shock and SRS reports' do: the
+    measured transients, each control's shock response spectrum against
+    its specification and the deviation bars, and the identified plant's
+    singular values. The run section reads the run record through the
+    same live references every recorded test uses. The per-control
+    verdict grid, the delays between points and the ladder (pulses fired
+    and passed at each level) are written as owed and say they wait for
+    the module's run record; nothing is read in their place.
+    """
+    time, srs, spec = '@basis:TimeHistory', '@basis:Srs', '@basis:ShockSpecification'
+    recorded = _holds_record(objects, object_groups)
+    waits = '' if recorded is not None and recorded.test == 'mimo_shock' \
+        else f' {_MIMO_SHOCK_WAITS}'
+    return prune_unbound(Report('MIMO Shock Test Report', [
+        _summary(objects, object_groups,
+                 'A multiple-input shock test was run: one shock at a time on '
+                 'several shakers at once, each control point judged against its '
+                 'own pulse or shock response spectrum. This report documents the '
+                 'instrumentation, the run, the transients, each control against '
+                 'its target and the plant the drives were built through.'),
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups, time)},
+        *front_matter(objects, object_groups, time),
+        run_record_block(objects, object_groups, [('Pulses', 'pulses')]),
+        {'kind': 'text', 'text':
+            '## The Events\n\nThe measured transients ({{figure:Measured}}), every '
+            'control and monitor channel, each pulse in turn.'},
+        *time_data_blocks(time, objects, object_groups, 'Measured shock transients',
+                          'Measured {quantity} shock transients'),
+        {'kind': 'text', 'text':
+            '## Each Control Against Its Target\n\nEach control\'s measured shock '
+            'response spectrum against its own specification ({{figure:Measured '
+            'shock response spectra}}), and the deviation by channel '
+            '({{figure:SRS deviation}}). A classical pulse target is judged in time '
+            'by the controller; it has no analysis object to draw here.'},
+        {'kind': 'plot', 'source': srs, 'mode': 'curves', 'specification': spec,
+         'record_caption': True,
+         'caption': 'Measured shock response spectra against the specification'},
+        {'kind': 'bars', 'mode': 'srs', 'source': spec, 'measured': srs,
+         'caption': 'SRS deviation by channel'},
+        _owed('Verdicts',
+              'every control on every pulse with its verdict, its signed error in '
+              'dB and the delay of its peak, and the verdict mode the ladder was '
+              'fed.' + waits),
+        _owed('The Level Ladder',
+              'each level with the pulses fired and passed at it, and the level '
+              'the run ended at.' + waits),
+        {'kind': 'text', 'text':
+            '## The Plant\n\nThe singular values of the identified transfer function '
+            'matrix ({{figure:Singular values of the identified plant}}): where the '
+            'smallest falls far under the largest, the drives reach the controls in '
+            'nearly the same proportions and an inverse of the plant there is '
+            'mostly noise.'},
+        {'kind': 'plot', 'source': '@basis:Frf', 'mode': 'cmif',
+         'caption': 'Singular values of the identified plant (CMIF)'},
+        {'kind': 'text', 'text':
+            '## Conclusions\n\nWhether the run met its targets is read control by '
+            'control off the comparison above and the verdicts. A control not '
+            'judged is not a control passed.'},
+    ]), objects, object_groups)
+
+
 TEMPLATE_BUILDERS = {'modal': modal_template, 'random': random_template,
                      'shock': shock_template, 'transient': transient_template,
                      'sine': sine_template,
                      'sysid': sysid_template, 'mimo': mimo_template,
                      'model': model_template, 'specify': specify_template,
-                     'signals': signals_template}
+                     'signals': signals_template, 'mixed_mode': mixed_template,
+                     'explorer': explorer_template, 'recorder': recorder_template,
+                     'mimo_shock': mimo_shock_template}

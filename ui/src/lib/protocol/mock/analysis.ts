@@ -55,6 +55,11 @@ export function createAnalysisServer(): MockServer {
 		hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: '0.1.0-mock' },
 		methods: {
 			'catalog.list': (): Catalog => ({ operations: [] }),
+			// where runs are kept, as the service resolves it; the mock deletes nothing
+			'runs.data_folder': () => ({ path: '~/Hertzforge_Data', source: 'default', exists: true, writable: true }),
+			'runs.delete': (params) => {
+				throw new MockError('refused', `${String(params.folder)} is not inside the data folder ~/Hertzforge_Data; only a run in the data folder is deleted here`);
+			},
 			'tables.save': (params) => {
 				const path = tablePath(params.path);
 				const kind = String(params.kind);

@@ -516,9 +516,14 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.actions` | `{"objects","records"?,"part"?}` | `{"table"}` |
 | `project.journal` | `{}` | `{"lines"}` |
 | `project.define_units` | `{"name","units":[{"side","key","unit"}]}` | `{"converted":[record...],"project"}` |
+| `project.setups` | `{}` | `{"setups":[...],"runs":[...]}`: what a test's screen can open (Test Setups below) |
+| `project.save_setup` | `{"name","setup","replace"?}` | `{"name","project"}` |
+| `project.open_setup` | `{"name"}` | `{"setup"}`: a saved setup, or the setup a run record holds |
 | `tables.save` | `{"kind","table_kind"?,"columns","rows","path","x_unit"?,"y_unit"?}` | `{"path"}` |
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
+| `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
+| `runs.delete` | `{"folder","dry_run"?}` | `{"folder","project_file","project_file_exists","deleted"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
@@ -536,6 +541,26 @@ false, the operation answers with what it would do and changes nothing; run with
 it. The shell's form does not ask that param: its Preview button sends it false and Apply sends it
 true.
 
+**Test Setups.** A test's setup is an object in the project, of kind `test_setup`
+(`docs/hforge-format.md`): `{"module","protocol","config","table","title","notes","origin"}`.
+`module` is the test it is for, by the name a run's manifest gives its test (`random`, `sine`,
+`mixed`, `classical_shock`, `srs`, `twr`, `explorer`, `recorder`, `mimo_random`, `mimo_shock`);
+`config` is exactly what that module's configure request carries (`random.configure`'s
+`config`, `mimo_random.setup`'s `setup`, ...); `table` is the channel table it was made with
+(`rows`, `revision`, `sha256`, each when known); `origin` is where it came from, by `kind`:
+`typed`, `setup` (with the saved setup's `name`), `run` (with `run_uid`, `run_id` and the
+record's `name`) or `seed` (with the analysis object's name as `object`, its SHA-256 as
+`checksum`, and what it filled as `fills`). `project.setups` lists the saved setups (`name`,
+`module`, `title`, `protocol`, `origin`, `holds`) and the project's run records (`name`,
+`module`, `title`, `run_uid`, `run_id`, `outcome`, `source`, `has_config`, `holds`), and answers
+empty lists while no project is open. `project.save_setup` adds one under `name`; a name the
+project holds is refused unless `replace` is true and that object is a setup. `project.open_setup`
+answers a saved setup, or for a run record the setup its `setup.config` holds with the run as its
+origin. Nothing here reaches the control service: the shell fills a test's draft with the
+answer, and the draft goes through that module's configure call and checks as one typed in.
+The shell refuses a setup for another module or another protocol before its draft is touched,
+and asks before opening one made with a different channel table.
+
 **The console.** `project.journal` gives the session as Python: every verb, settings change and
 import since the project was made or opened, as the line a script would make (`Project.journal`),
 the first line making the project. The shell shows it read-only along the bottom of the window, to be copied into a script; nothing is typed into it.
@@ -544,7 +569,8 @@ the first line making the project. The shell shows it read-only along the bottom
 `banded` when a PSD or a specification is on proportional bands, which changes its icon. A
 Matched Modes object carries `between`, the two shape sets it pairs (first, second): the tree lists
 it after the first set's group and marks its row with a short bracket striped in both sets' group
-colors.
+colors. A run record carries `run_folder`, the run folder it was converted from, while that folder is
+still there: the project was opened from its converted file, or the file was imported.
 `project.children` answers what one object opens into, by
 `kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts), its element
 `families` (every family, each with the element `groups` holding elements of it and their counts),
@@ -915,6 +941,8 @@ connection ends, and a log another writer holds opens read-only, saying why.
 | `runlog.preview` | `{"form","values","axis"?,"target"?}` | `{"text"}` |
 | `runlog.write` | `{"form","values","text"?,"time"?,"taken","author","axis"?,"target"?}` | `{"log","said"}` |
 | `runlog.export` | `{"path","view","test"?}` | `{"path"}` |
+| `runlog.run_events` | `{"record"}` | `{"record","events"}` |
+| `runlog.accept_event` | `{"record","index","author","test"?,"run"?,"axis"?,"time"?}` | `{"log","entry"}` |
 
 `log` is the window's view: its `path`, `title`, `writable` and `read_only` (why it cannot be
 written), the `status` the strip reads (the current test, its axis, run, level and outcome, when
@@ -938,6 +966,8 @@ hold a deviation answers), with the predictions drawn for the connection's proje
 `time` against `taken`, every entry checked before any is written; a refusal says why. `said` is
 what the window says after (an abort's owed first minute, an unplanned notch's hold), or ''.
 
+`runlog.run_events` lists every event of the run record `record` in the connection's project as a proposed entry for the log, and how the run ended: each with its `index`, the entry `kind` and its `label`, the `fields` the event states, its `text` (ending with a marker naming the run and the event), the `time` the controller logged it (null when the record has none) and whether the open log holds it already (`accepted`). Nothing is written. `runlog.accept_event` writes event `index` into the open log as `author` confirms it, at the controller's time unless `time` is given (required for an event with none), in `test`, `run` and `axis` when given; the answer is the log and the new entry's id. It is refused with no log open for writing, without initials, and for an event the log holds already.
+
 `runlog.export` writes one view of the open log to `path`: `view` `text` (the log as it reads, every entry in the order written, corrections struck through and restated), `csv` (every entry as stored, corrections included, one row each) or `machine` (the trips and machine events for the lab's own machine log); `test` is a test number for that test alone, or `all` (the default) for the whole log. The view's extension is added when the path has none. The answer is the `path` written.
 
 **Reports.** The report on the connection's project, as the core writes it.
@@ -955,9 +985,12 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
-`transient`, `sine`, `sysid`, `mimo`, `model`, `specify`, `signals` or `empty`, and `name`
+`transient`, `sine`, `sysid`, `mimo`, `model`, `specify`, `signals`, `mixed_mode`, `explorer`,
+`recorder`, `mimo_shock`, `empty` or `run` (the template of the test the project's run record is a
+run of; refused when the project holds none, or runs of different tests), and `name`
 defaults to "Report". The Report module starts from the template of the module the person came
-from: Model's is `model`, Specify's `specify`, Signals' `signals`, and each test module's its own. `report.render`
+from: Model's is `model`, Specify's `specify`, Signals' `signals`, and each test module's its own;
+a project holding a run record starts from `run`, except from Model, Specify and Signals. `report.render`
 gives the report `name` as one HTML document, with its stylesheet, data and viewers inline and
 nothing loaded from a network, in the `light` or `dark` theme (the reader's own when left out); the
 shell shows it in a sandboxed frame. `report.views` gives the same report for the shell's own
@@ -1013,6 +1046,20 @@ leaves selected: `insert` (`kind`, one of `insert`'s, at `at` or the end, bound 
 object the project has for it), `remove` (`at`), `move` (`from`, to before `to`), `text` (`at`,
 `value`), `field` (`at`, `field` `caption` or one of the block's `fields`, `value`), `title`,
 `marking` and `marking_color` (`value`).
+
+**Run folders.** `runs.data_folder` answers where the control service keeps its runs, resolved as
+it resolves them (`docs/run-folder.md`): `path`; `source`, `environment` when
+`HERTZFORGE_DATA_ROOT` names it and `default` otherwise (the desktop app starts both services with
+the variable set to the folder it keeps, so there it is `environment`); `exists`; and while it
+exists, `writable`, whether a file can be made in it now, with `reason` when not. `runs.delete`
+deletes a run's folder and its converted project file (`<run name>.hforge` inside it) and answers
+what went; with `dry_run` it makes every check, deletes nothing and answers what would go, which
+is what a confirmation names. It is refused (`refused`, the message saying why, nothing deleted)
+for a folder that is not inside the data folder or is the data folder itself, one reached through
+a link or junction, one that holds no `run.json` of the run folder schema, one with a link or
+junction anywhere inside it, a run whose `run.json` does not say `complete: true` (a live run, or
+one that did not end cleanly), and a run whose project file, or a file mapped from it, is open in
+the service; `not_found` when there is no such folder.
 
 **Control service**
 
