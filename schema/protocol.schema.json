@@ -727,7 +727,7 @@
     },
     "fitResult": {
       "type": "object", "required": ["fit"],
-      "properties": {"fit": {"$ref": "#/$defs/fitState"}}
+      "properties": {"fit": {"$ref": "#/$defs/fitState"}, "project": {"$ref": "#/$defs/project"}}
     },
     "fitPublishResult": {
       "type": "object", "required": ["name", "project", "fit"],

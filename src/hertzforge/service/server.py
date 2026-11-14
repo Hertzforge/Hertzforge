@@ -589,6 +589,11 @@ class Connection:
                     'fit.residual': ('show',)}
             _only(params, keys.get(method, ()), method)
             await call(fitting.act, fit, method, params)
+            if method in fitting.SAVES and await call(fitting.save, project, fit):
+                # kept in the project as it goes: the tree shows the set as modes are confirmed
+                self.project.modified = True
+                return {'fit': await call(self.fit_state, fit),
+                        'project': projects.summary(self.project)}
             return {'fit': await call(self.fit_state, fit)}
 
     async def serve(self) -> None:

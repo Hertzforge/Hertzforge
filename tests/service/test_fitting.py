@@ -112,7 +112,9 @@ def test_a_fit_runs_over_the_socket_and_ends_with_its_project(validate):
         ('fit.start', {'frf': 'FRF'}),
         ('fit.fit', {}),
         ('fit.confirm', {}),
-        ('fit.publish', {'name': 'Plate Modes'}),
+        ('fit.confirm', {}),
+        ('fit.delete', {'modes': [1]}),
+        ('fit.delete', {'modes': [0]}),
         ('project.new', {}),
         ('fit.find', {}),
         ('fit.end', {}),
@@ -122,14 +124,21 @@ def test_a_fit_runs_over_the_socket_and_ends_with_its_project(validate):
     started = results[2]['result']
     validate(frames.to_wire(started)[0], 'fitResult')
     assert started['fit']['view']['series'][0]['name'] == 'CMIF 1'
-    assert results[4]['result']['fit']['modes']
-    published = results[5]['result']
-    validate(frames.to_wire(published)[0], 'fitPublishResult')
-    assert published['name'] == 'Plate Modes'
-    assert 'Plate Modes' in [o['name'] for o in published['project']['objects']]
-    assert published['project']['modified']
-    assert 'needs a fit under way' in results[7]['error']['message']
-    assert results[8]['result'] == {}
+    assert 'project' not in started and 'project' not in results[3]['result']
+    # kept in the project as modes are confirmed, with no Publish (Brandon, 2026-11-14)
+    confirmed = results[4]['result']
+    validate(frames.to_wire(confirmed)[0], 'fitResult')
+    assert confirmed['fit']['modes'] and confirmed['fit']['shapes'] == 'FRF Modes'
+    assert 'FRF Modes' in [o['name'] for o in confirmed['project']['objects']]
+    assert confirmed['project']['modified']
+    assert len(results[5]['result']['fit']['modes']) == 2
+    assert 'FRF Modes' in [o['name'] for o in results[6]['result']['project']['objects']]
+    # the set the fit added goes with its last mode
+    emptied = results[7]['result']
+    assert 'FRF Modes' not in [o['name'] for o in emptied['project']['objects']]
+    assert emptied['fit']['shapes'] is None
+    assert 'needs a fit under way' in results[9]['error']['message']
+    assert results[10]['result'] == {}
 
 
 def test_a_fit_ends_when_its_frf_leaves_the_project():

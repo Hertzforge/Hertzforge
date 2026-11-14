@@ -1085,8 +1085,10 @@ export class FitState {
 		if (!quiet) this.busy = doing;
 		this.error = null;
 		try {
-			const res = await this.app.analysis.request<{ fit: FitStateView }>(method, params, { timeoutMs: RUN_TIMEOUT_MS });
+			const res = await this.app.analysis.request<{ fit: FitStateView; project?: ProjectSummary }>(method, params, { timeoutMs: RUN_TIMEOUT_MS });
 			this.state = res.fit;
+			// the fit is kept in the project as it goes: the tree shows the set as modes are confirmed
+			if (res.project) this.app.project.apply(res.project);
 			return true;
 		} catch (err) {
 			this.error = message(err);

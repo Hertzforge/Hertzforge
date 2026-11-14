@@ -151,9 +151,6 @@
 			<span class="sep"></span>
 			{#if s.modes.length}
 				<button class="btn ghost sm" data-testid="fit-refine" onclick={() => fit.refine()} disabled={fit.busy !== null}>Refine</button>
-				<button class="btn ghost sm" data-testid="fit-publish" onclick={() => fit.publish()} disabled={fit.busy !== null}>
-					{s.shapes ? `Publish to ${s.shapes}` : 'Publish'}
-				</button>
 			{/if}
 			{#if s.modes.length}
 				<label class="toggle" title="Draw the residual's own CMIF: what is left after the confirmed modes, the curve Find Mode hunts">
@@ -161,7 +158,10 @@
 					Residual
 				</label>
 			{/if}
-			<button class="btn ghost sm" data-testid="fit-end" onclick={() => fit.end()}>End Fit</button>
+			{#if s.shapes}
+				<!-- kept in the project as modes are confirmed: nothing to publish, and leaving loses nothing -->
+				<span class="saved" data-testid="fit-saved" title="Saved in the project as each mode is confirmed, deleted or edited; select anything in the tree to leave the fit">Saved to {s.shapes}</span>
+			{/if}
 		</div>
 
 		<div class="readout" data-testid="fit-pending">
@@ -258,6 +258,12 @@
 	.readout b {
 		color: var(--text-1);
 		font-weight: normal;
+	}
+
+	.saved {
+		margin-left: auto;
+		font-size: var(--text-xs);
+		color: var(--text-3);
 	}
 
 	.preview {
