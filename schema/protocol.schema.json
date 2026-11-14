@@ -915,6 +915,88 @@
         "path": {"type": "string"}
       }
     },
+    "testSetupOrigin": {
+      "type": "object", "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["typed", "setup", "run", "seed"]},
+        "name": {"type": "string"},
+        "run_uid": {"type": "string"},
+        "run_id": {"type": "string"},
+        "object": {"type": "string"},
+        "checksum": {"type": "string"},
+        "fills": {"type": "string"}
+      }
+    },
+    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock"]},
+    "testSetup": {
+      "type": "object", "required": ["module", "protocol", "config", "table", "title", "notes", "origin"],
+      "properties": {
+        "module": {"$ref": "#/$defs/testSetupModule"},
+        "protocol": {"type": "string"},
+        "config": {"type": "object"},
+        "table": {
+          "type": "object",
+          "properties": {
+            "rows": {"type": "array", "items": {"type": "object"}},
+            "revision": {"type": "integer"},
+            "sha256": {"type": "string"}
+          }
+        },
+        "title": {"type": "string"},
+        "notes": {"type": "string"},
+        "origin": {"$ref": "#/$defs/testSetupOrigin"}
+      }
+    },
+    "projectSetupsResult": {
+      "type": "object", "required": ["setups", "runs"],
+      "properties": {
+        "setups": {"type": "array", "items": {
+          "type": "object", "required": ["name", "module", "title", "protocol", "origin", "holds"],
+          "properties": {
+            "name": {"type": "string"},
+            "module": {"$ref": "#/$defs/testSetupModule"},
+            "title": {"type": "string"},
+            "protocol": {"type": "string"},
+            "origin": {"$ref": "#/$defs/testSetupOrigin"},
+            "holds": {"type": "string"}
+          }
+        }},
+        "runs": {"type": "array", "items": {
+          "type": "object", "required": ["name", "module", "title", "run_uid", "run_id", "outcome", "has_config", "holds"],
+          "properties": {
+            "name": {"type": "string"},
+            "module": {"type": "string"},
+            "title": {"type": "string"},
+            "run_uid": {"type": "string"},
+            "run_id": {"type": "string"},
+            "outcome": {"type": "string"},
+            "source": {"type": ["string", "null"]},
+            "has_config": {"type": "boolean"},
+            "holds": {"type": "string"}
+          }
+        }}
+      }
+    },
+    "projectSaveSetupParams": {
+      "type": "object", "required": ["name", "setup"], "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "setup": {"type": "object", "required": ["module", "config"]},
+        "replace": {"type": "boolean"}
+      }
+    },
+    "projectSaveSetupResult": {
+      "type": "object", "required": ["name", "project"],
+      "properties": {"name": {"type": "string"}, "project": {"$ref": "#/$defs/project"}}
+    },
+    "projectOpenSetupParams": {
+      "type": "object", "required": ["name"], "additionalProperties": false,
+      "properties": {"name": {"type": "string", "minLength": 1}}
+    },
+    "projectOpenSetupResult": {
+      "type": "object", "required": ["setup"],
+      "properties": {"setup": {"$ref": "#/$defs/testSetup"}}
+    },
     "tableFileKind": {"enum": ["channels", "breakpoints"]},
     "tableCell": {"type": ["number", "string", "boolean", "null"]},
     "tablesSaveParams": {
