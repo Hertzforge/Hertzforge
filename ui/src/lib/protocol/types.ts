@@ -916,6 +916,7 @@ export type ItemReason =
 	| 'duplicate_index'
 	| 'no_channel_enabled'
 	| 'zero_sensitivity'
+	| 'negative_sensitivity'
 	| 'non_positive_range'
 	| 'control_group_gap'
 	| 'reference_without_control'

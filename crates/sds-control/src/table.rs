@@ -698,6 +698,9 @@ pub fn validate(table: &ChannelTable, ctx: &StationContext<'_>) -> Report {
             TableError::DuplicateIndex(i) => Item::channel("duplicate_index", Some(i), message),
             TableError::EmptyEnabled => Item::channel("no_channel_enabled", None, message),
             TableError::ZeroSensitivity(i) => Item::channel("zero_sensitivity", Some(i), message),
+            TableError::NegativeSensitivity { index, .. } => {
+                Item::channel("negative_sensitivity", Some(index), message)
+            }
             TableError::NonPositiveRange(i) => {
                 Item::channel("non_positive_range", Some(i), message)
             }

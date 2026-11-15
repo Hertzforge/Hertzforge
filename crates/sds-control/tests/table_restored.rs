@@ -618,3 +618,66 @@ async fn project_table_rows_survive_restore_apply_and_a_restart() {
     assert_eq!(got["channels"], rows, "after a restart");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Decided by the project's owner: a negative sensitivity is refused, polarity being
+/// the row's own column. Every way a table reaches the service refuses it with the
+/// row, the column and the value in the words: typed in this session, taken from a
+/// project, opened from a file, and the kept table read at start (which is not used,
+/// and `kept_problem` says why). Nothing is written, so nothing can be armed on.
+///
+/// Falsified by dropping the `NegativeSensitivity` check in the channel table's
+/// `validate_report`: the first `channels.set` is not refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn negative_sensitivity_is_refused_from_every_source_and_at_start() {
+    let mut rows = three();
+    rows[1]["sensitivity_mv_per_eu"] = json!(-100);
+    let addr = serve(Service::with_options(opts())).await;
+    let mut c = Client::connect(addr).await;
+    claim(&mut c).await;
+    for source in [
+        Value::Null,
+        json!({"kind": "project", "name": "Bracket table"}),
+        json!({"kind": "file", "name": "bench.csv"}),
+    ] {
+        let e = c
+            .refused(
+                "channels.set",
+                json!({"revision": 1, "channels": rows.clone(), "source": source}),
+            )
+            .await;
+        assert_eq!(e["reason"], "table_invalid", "{source}: {e}");
+        let item = &e["detail"]["errors"][0];
+        assert_eq!(item["reason"], "negative_sensitivity", "{source}: {e}");
+        assert_eq!(item["channel"], 2, "{source}: {e}");
+        let words = item["message"].as_str().unwrap();
+        assert!(
+            words.contains("channel 2")
+                && words.contains("sensitivity_mv_per_eu")
+                && words.contains("-100"),
+            "{source}: {words}"
+        );
+    }
+    let got = c.ok("channels.get", json!({})).await;
+    assert_eq!(got["revision"], 1, "a refused table was written");
+
+    let root = scratch("negative");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut table = sds_control::table::Table::new().table;
+    table.channels[0].sensitivity_mv_per_eu = -100.0;
+    std::fs::write(
+        table_keep::path(&root),
+        table_keep::contents(&table, 6, 1.0),
+    )
+    .unwrap();
+    let addr = serve(Service::with_options(keeping(&root))).await;
+    let mut c = Client::connect(addr).await;
+    let got = c.ok("channels.get", json!({})).await;
+    assert_eq!(got["revision"], 1, "a kept negative sensitivity was used");
+    assert!(got.get("restored").is_none(), "{got}");
+    let why = got["kept_problem"].as_str().unwrap();
+    assert!(
+        why.contains("negative") && why.contains("-100"),
+        "the kept problem names the value: {why}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
