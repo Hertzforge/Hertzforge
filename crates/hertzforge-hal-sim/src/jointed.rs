@@ -44,14 +44,16 @@
 //!
 //! ```text
 //!   f_m    = f0_m (1 - drop min(1, r)^drop_exponent + rise min(rise_cap, r)^rise_exponent)
-//!   zeta_m = zeta0_m (1 + damping_gain r^damping_exponent)       (at most MAX_DAMPING)
+//!   zeta_m = zeta0_m (1 + damping_gain min(damping_cap, r)^damping_exponent)
+//!                                                                (at most MAX_DAMPING)
 //! ```
 //!
 //! At the reference amplitude the frequency factor is `1 - drop + rise` (with a
 //! `rise_cap` of at least 1; a cap under 1, allowed, stops the rise below it). The drop stops
 //! growing at the reference amplitude, as the joint law's does;
-//! the rise stops at `rise_cap` times it; the damping keeps rising up to
-//! [`MAX_DAMPING`]. A `rise_exponent` of 2 is a cubic stiffness: a Duffing spring's
+//! the rise stops at `rise_cap` times it; the damping stops at `damping_cap` times it
+//! (and never passes [`MAX_DAMPING`]). Without that cap a mode driven several times past
+//! its reference would take many times its intended damping. A `rise_exponent` of 2 is a cubic stiffness: a Duffing spring's
 //! backbone frequency rises with the square of the amplitude while the rise is small.
 //!
 //! A mode with no rule of its own follows the structure-wide [`JointLaw`]
@@ -237,6 +239,9 @@ pub struct LevelRule {
     pub damping_gain: f64,
     /// The exponent on the amplitude ratio in the damping rise, above zero.
     pub damping_exponent: f64,
+    /// The amplitude ratio above which the damping stops growing, above zero and
+    /// finite (it may be under 1). The structure-wide [`JointLaw`] has no such cap.
+    pub damping_cap: f64,
 }
 
 impl LevelRule {
@@ -251,6 +256,7 @@ impl LevelRule {
             rise_cap: 1.0,
             damping_gain: 0.0,
             damping_exponent: 1.0,
+            damping_cap: 1.0,
         }
     }
 
@@ -265,14 +271,17 @@ impl LevelRule {
         }
     }
 
-    /// The rule a [`JointLaw`] gives a mode: its drop and damping, no rise. (The plant
-    /// steps a mode that follows the law by the law itself; this is for comparison.)
+    /// The rule a [`JointLaw`] gives a mode: its drop and damping, no rise, and a
+    /// damping cap of `f64::MAX` (the law has none, and `min(f64::MAX, r)` is `r` for every
+    /// finite `r`, so the numbers are the law's to the bit). The plant steps a mode that
+    /// follows the law by the law itself; this is for comparison.
     pub fn from_joint(j: &JointLaw) -> Self {
         LevelRule {
             drop: j.delta,
             drop_exponent: j.freq_exponent,
             damping_gain: j.damping_gain,
             damping_exponent: j.damping_exponent,
+            damping_cap: f64::MAX,
             ..LevelRule::linear()
         }
     }
@@ -288,13 +297,16 @@ impl LevelRule {
     }
 
     /// The damping ratio at amplitude ratio `r` of a mode whose small-signal damping
-    /// is `zeta0`. A rule with no damping gain leaves it at `zeta0` at any amplitude
-    /// (even where `r^damping_exponent` overflows).
+    /// is `zeta0`: `zeta0 (1 + damping_gain min(damping_cap, r)^damping_exponent)`, at
+    /// most [`MAX_DAMPING`]. A rule with no damping gain leaves it at `zeta0` at any
+    /// amplitude.
     pub fn damping(&self, zeta0: f64, r: f64) -> f64 {
         if r <= 0.0 || self.damping_gain == 0.0 {
             zeta0
         } else {
-            (zeta0 * (1.0 + self.damping_gain * r.powf(self.damping_exponent))).min(MAX_DAMPING)
+            (zeta0
+                * (1.0 + self.damping_gain * r.min(self.damping_cap).powf(self.damping_exponent)))
+            .min(MAX_DAMPING)
         }
     }
 
@@ -322,6 +334,12 @@ impl LevelRule {
             return Err(format!(
                 "damping_gain {} is negative or not finite",
                 self.damping_gain
+            ));
+        }
+        if !(self.damping_cap.is_finite() && self.damping_cap > 0.0) {
+            return Err(format!(
+                "damping_cap {} is not positive and finite",
+                self.damping_cap
             ));
         }
         for (what, v) in [

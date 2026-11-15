@@ -263,6 +263,7 @@ fn level_rule_shape() {
         rise_cap: 2.0,
         damping_gain: 0.5,
         damping_exponent: 1.0,
+        damping_cap: 3.0,
     };
     assert_eq!(l.frequency_factor(0.0), 1.0);
     for r in [0.0, 0.3, 1.0, 1.7, 2.0, 50.0] {
@@ -275,7 +276,12 @@ fn level_rule_shape() {
     assert!((l.max_frequency_factor() - 1.2).abs() < 1e-15);
     assert_eq!(l.damping(0.01, 0.0), 0.01);
     assert!((l.damping(0.01, 1.0) - 0.015).abs() < 1e-15);
-    assert_eq!(l.damping(0.01, 1e12), MAX_DAMPING);
+    assert_eq!(l.damping(0.01, 1e12), l.damping(0.01, 3.0));
+    let big = LevelRule {
+        damping_cap: 1e15,
+        ..l
+    };
+    assert_eq!(big.damping(0.01, 1e12), MAX_DAMPING);
     // No damping gain: no damping change, however far past the reference.
     assert_eq!(LevelRule::hardening(0.05, 2.0).damping(0.01, 1e300), 0.01);
     // The rule of a joint law gives the law's numbers.
@@ -300,6 +306,7 @@ fn level_rule_bad_fields_and_the_frequency_bound_are_refused() {
         rise_cap: 2.0,
         damping_gain: 0.5,
         damping_exponent: 1.0,
+        damping_cap: 3.0,
     };
     assert!(base.validate().is_ok());
     let bad: Vec<(&str, LevelRule)> = vec![
@@ -379,6 +386,34 @@ fn level_rule_bad_fields_and_the_frequency_bound_are_refused() {
             "damping_exponent",
             LevelRule {
                 damping_exponent: 0.0,
+                ..base
+            },
+        ),
+        (
+            "damping_cap",
+            LevelRule {
+                damping_cap: 0.0,
+                ..base
+            },
+        ),
+        (
+            "damping_cap",
+            LevelRule {
+                damping_cap: -1.0,
+                ..base
+            },
+        ),
+        (
+            "damping_cap",
+            LevelRule {
+                damping_cap: f64::INFINITY,
+                ..base
+            },
+        ),
+        (
+            "damping_cap",
+            LevelRule {
+                damping_cap: f64::NAN,
                 ..base
             },
         ),
@@ -736,6 +771,67 @@ fn level_rule_cap_below_one() {
     let (f, r) = relay_dwell(&p, 0.75);
     assert!(r > 0.5, "dwelt past the cap: r = {r}");
     assert!((f / f_small - top).abs() < 5e-4);
+}
+
+/// The damping as the spec writes it, apart from the code under test.
+fn spec_damping(l: &LevelRule, zeta0: f64, r: f64) -> f64 {
+    if r <= 0.0 {
+        return zeta0;
+    }
+    (zeta0 * (1.0 + l.damping_gain * r.min(l.damping_cap).powf(l.damping_exponent)))
+        .min(MAX_DAMPING)
+}
+
+/// The damping cap: a mode's own damping stops growing at `damping_cap` (above 1 and
+/// below it), measured from the plant's response; the structure-wide joint law keeps
+/// growing as before. In the relay dwell the mode's amplitude is set by its damping
+/// (`A = 2 F / (pi zeta w^2)` for a square-wave force of `F` at resonance), so the
+/// damping is read back from the amplitude at each force.
+#[test]
+fn level_rule_damping_cap() {
+    let base = LevelRule {
+        damping_gain: 2.0,
+        damping_exponent: 1.0,
+        ..LevelRule::linear()
+    };
+    for cap in [2.0, 0.5] {
+        let rule = LevelRule {
+            damping_cap: cap,
+            ..base
+        };
+        assert!(rule.validate().is_ok());
+        for r in [0.1, 0.5, 1.0, 2.0, 5.0, 1e6] {
+            assert_eq!(rule.damping(0.002, r), spec_damping(&rule, 0.002, r));
+        }
+        assert_eq!(rule.damping(0.002, cap), rule.damping(0.002, 50.0 * cap));
+        assert!(rule.damping(0.002, 0.5 * cap) < rule.damping(0.002, cap));
+        // Measured: past the cap the damping holds at its capped value.
+        let p = one(200.0, 0.002, Some(rule));
+        let zeta_at = |force: f64| {
+            let (f, r) = relay_dwell(&p, force);
+            let a = r * p.modes[0].reference_amplitude;
+            (
+                r,
+                2.0 * force / (std::f64::consts::PI * a * (TAU * f).powi(2)),
+            )
+        };
+        let want = spec_damping(&rule, 0.002, 10.0 * cap);
+        for force in [3.0 * cap, 10.0 * cap] {
+            let (r, z) = zeta_at(force);
+            println!(
+                "damping cap {cap}: force {force} V, r = {r:.3}, zeta {z:.5}, capped {want:.5}"
+            );
+            assert!(r > cap, "dwelt past the cap: r = {r}");
+            assert!((z / want - 1.0).abs() < 0.03, "zeta {z} against {want}");
+        }
+    }
+    // The structure-wide law has no cap: its damping keeps growing past the reference.
+    let j = JointLaw {
+        damping_exponent: 1.0,
+        ..JointLaw::new(0.0, 2.0)
+    };
+    assert!(j.damping(0.002, 10.0) > j.damping(0.002, 2.0));
+    assert!(j.damping(0.002, 2.0) > j.damping(0.002, 1.0));
 }
 
 /// The linear plant drops every rule; `single_mode` keeps the mode's own.
