@@ -1,5 +1,7 @@
-//! The jointed modal plant: a cross-coupled modal structure whose resonances fall and
-//! whose damping rises with amplitude, seen through a delay per output.
+//! The jointed modal plant: a cross-coupled modal structure whose resonances move and
+//! whose damping rises with amplitude, seen through a delay per output. A mode may
+//! soften (its frequency falls with amplitude, as a bolted joint does), harden (its
+//! frequency rises, as a stiffening spring does), or both.
 //!
 //! # The model
 //!
@@ -22,28 +24,55 @@
 //! [`crate::ModeResponse::Acceleration`] shape); the `residual` is the structure's mass
 //! line below its first mode.
 //!
-//! # The joint
+//! # The envelope
 //!
-//! With a [`JointLaw`], each mode keeps a running amplitude envelope `A_m`: a peak
-//! follower, decaying by `exp(-1)` in `decay_cycles` periods of the mode's small-signal
+//! A level-dependent mode keeps a running amplitude envelope `A_m`: a peak follower,
+//! decaying by `exp(-1)` in `decay_cycles` periods of the mode's small-signal
 //! frequency, of the mode's amplitude `sqrt(q_m^2 + (q_m' / w_m)^2)`. That amplitude is
 //! the peak displacement of the mode's present motion (its energy over its stiffness),
 //! so it is steady through a cycle of steady motion: a follower of `|q_m|` alone dips
 //! between peaks, and the stiffness it then modulates twice a cycle pumps the mode,
 //! taking away much of its damping. In a free decay the amplitude falls slower than
-//! the follower can, so the envelope tracks it and the frequency glides back up as the
-//! motion dies. With `r = A_m / reference_amplitude_m`, each sample's frequency and
-//! damping are
+//! the follower can, so the envelope tracks it and the frequency glides back as the
+//! motion dies. `decay_cycles` is structure-wide: the [`JointLaw`]'s when the plant has
+//! one, else three cycles.
+//!
+//! # The level rule
+//!
+//! With `r = A_m / reference_amplitude_m`, a mode's frequency and damping each sample
+//! follow its own [`LevelRule`] when it has one (`JointedMode::level`):
+//!
+//! ```text
+//!   f_m    = f0_m (1 - drop min(1, r)^drop_exponent + rise min(rise_cap, r)^rise_exponent)
+//!   zeta_m = zeta0_m (1 + damping_gain r^damping_exponent)       (at most MAX_DAMPING)
+//! ```
+//!
+//! At the reference amplitude the frequency factor is `1 - drop + rise` (with a
+//! `rise_cap` of at least 1; a cap under 1, allowed, stops the rise below it). The drop stops
+//! growing at the reference amplitude, as the joint law's does;
+//! the rise stops at `rise_cap` times it; the damping keeps rising up to
+//! [`MAX_DAMPING`]. A `rise_exponent` of 2 is a cubic stiffness: a Duffing spring's
+//! backbone frequency rises with the square of the amplitude while the rise is small.
+//!
+//! A mode with no rule of its own follows the structure-wide [`JointLaw`]
 //!
 //! ```text
 //!   f_m    = f0_m (1 - delta min(1, r)^freq_exponent)
 //!   zeta_m = zeta0_m (1 + damping_gain r^damping_exponent)       (at most MAX_DAMPING)
 //! ```
 //!
-//! so at the reference amplitude the mode has dropped by `delta` and its damping is
-//! `1 + damping_gain` times its small-signal damping. The frequency stops falling at
-//! the reference amplitude; the damping keeps rising (a joint slips more the harder it
-//! is pushed) up to [`MAX_DAMPING`].
+//! exactly as before modes could carry their own (the same arithmetic, so the same
+//! samples to the bit), and a mode with neither is linear.
+//!
+//! # The highest frequency
+//!
+//! A mode can reach at most `f0 (1 + rise rise_cap^rise_exponent)`
+//! ([`LevelRule::max_frequency_factor`], [`JointedPlant::highest_frequencies_hz`]). The
+//! step below is exact at any frequency, so it cannot go unstable however high the
+//! frequency goes; but a mode at or above the Nyquist frequency is sampled as its alias
+//! and is no longer the mode it was stated to be. So [`JointedPlant::validate`] refuses
+//! a plant one of whose modes can reach the Nyquist frequency, `fs / 2`, and says what
+//! the bound is ([`JointedPlant::frequency_bound_hz`]).
 //!
 //! # The step, and why it is stable at any amplitude
 //!
@@ -53,11 +82,15 @@
 //! adds no phase). With the parameters held, that step is the true motion of a damped
 //! oscillator over one period, which never gains energy, for any frequency and any
 //! damping up to [`MAX_DAMPING`]; nothing in it can overflow the way an explicit
-//! integrator does past its step limit. The parameters move only through the envelope:
-//! the frequency falls as the envelope rises (which takes energy out) and rises back no
-//! faster than the envelope's decay, several periods, so the slow modulation cannot
-//! pump the mode. The tests drive every standard plant on every drive with random,
-//! repeated pulses, and sines at its first mode's shifted resonance and at twice it, at
+//! integrator does past its step limit. The parameters move only through the envelope.
+//! A softening mode's frequency falls as the envelope rises (which takes energy out) and
+//! rises back no faster than the envelope's decay, several periods. A hardening mode's
+//! frequency rises with the envelope, which puts energy in, but only while the envelope
+//! climbs toward its cap: the mode's energy at a given amplitude grows at most by the
+//! square of `max_frequency_factor`, and the frequency falls back, taking energy out,
+//! no faster than the envelope decays. Neither slow modulation can pump the mode: the
+//! envelope is steady through a cycle of steady motion. The tests drive every standard
+//! plant on every drive with random, repeated pulses, and sines at its first mode's shifted resonance and at twice it, at
 //! the full drive range (10 V) and at a hundred thousand times it, and check the
 //! response against the bound of its small-signal modes.
 //!
@@ -159,6 +192,163 @@ impl JointLaw {
     }
 }
 
+/// How one mode changes with its amplitude: a drop term (softening) and a rise term
+/// (hardening) on its frequency, and a damping rise (see the module docs). The field
+/// names are the level rule's contract with the case and structure files.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LevelRule {
+    /// The fractional frequency drop at and above the reference amplitude, `0 <= drop < 1`.
+    pub drop: f64,
+    /// The exponent on the amplitude ratio in the drop, above zero.
+    pub drop_exponent: f64,
+    /// The fractional frequency rise at the reference amplitude, at least zero.
+    pub rise: f64,
+    /// The exponent on the amplitude ratio in the rise, above zero (2 for a cubic
+    /// stiffness).
+    pub rise_exponent: f64,
+    /// The amplitude ratio above which the rise stops growing, above zero and finite. It
+    /// may be under 1: the reference amplitude is shared with the drop, and full level
+    /// can sit below it.
+    pub rise_cap: f64,
+    /// The damping at the reference amplitude is `1 + damping_gain` times the
+    /// small-signal damping, at least zero.
+    pub damping_gain: f64,
+    /// The exponent on the amplitude ratio in the damping rise, above zero.
+    pub damping_exponent: f64,
+}
+
+impl LevelRule {
+    /// A rule with no drop, no rise and no damping change: the mode is linear. Set the
+    /// terms wanted on top of it.
+    pub fn linear() -> Self {
+        LevelRule {
+            drop: 0.0,
+            drop_exponent: 1.0,
+            rise: 0.0,
+            rise_exponent: 2.0,
+            rise_cap: 1.0,
+            damping_gain: 0.0,
+            damping_exponent: 1.0,
+        }
+    }
+
+    /// A hardening rule: frequency up by `rise` at the reference amplitude as its
+    /// square (a cubic stiffness), growing to `rise_cap` times the reference amplitude,
+    /// no drop and no damping change.
+    pub fn hardening(rise: f64, rise_cap: f64) -> Self {
+        LevelRule {
+            rise,
+            rise_cap,
+            ..LevelRule::linear()
+        }
+    }
+
+    /// The rule a [`JointLaw`] gives a mode: its drop and damping, no rise. (The plant
+    /// steps a mode that follows the law by the law itself; this is for comparison.)
+    pub fn from_joint(j: &JointLaw) -> Self {
+        LevelRule {
+            drop: j.delta,
+            drop_exponent: j.freq_exponent,
+            damping_gain: j.damping_gain,
+            damping_exponent: j.damping_exponent,
+            ..LevelRule::linear()
+        }
+    }
+
+    /// The frequency over its small-signal value at amplitude ratio `r`.
+    pub fn frequency_factor(&self, r: f64) -> f64 {
+        if r <= 0.0 {
+            1.0
+        } else {
+            1.0 - self.drop * r.min(1.0).powf(self.drop_exponent)
+                + self.rise * r.min(self.rise_cap).powf(self.rise_exponent)
+        }
+    }
+
+    /// The damping ratio at amplitude ratio `r` of a mode whose small-signal damping
+    /// is `zeta0`. A rule with no damping gain leaves it at `zeta0` at any amplitude
+    /// (even where `r^damping_exponent` overflows).
+    pub fn damping(&self, zeta0: f64, r: f64) -> f64 {
+        if r <= 0.0 || self.damping_gain == 0.0 {
+            zeta0
+        } else {
+            (zeta0 * (1.0 + self.damping_gain * r.powf(self.damping_exponent))).min(MAX_DAMPING)
+        }
+    }
+
+    /// The largest frequency factor the rule can give, at any amplitude:
+    /// `1 + rise rise_cap^rise_exponent` (the drop only lowers it).
+    pub fn max_frequency_factor(&self) -> f64 {
+        1.0 + self.rise * self.rise_cap.powf(self.rise_exponent)
+    }
+
+    /// Check every field; the message names the field and its allowed range.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.drop.is_finite() && (0.0..1.0).contains(&self.drop)) {
+            return Err(format!("drop {} is not in [0, 1)", self.drop));
+        }
+        if !(self.rise.is_finite() && self.rise >= 0.0) {
+            return Err(format!("rise {} is negative or not finite", self.rise));
+        }
+        if !(self.rise_cap.is_finite() && self.rise_cap > 0.0) {
+            return Err(format!(
+                "rise_cap {} is not positive and finite",
+                self.rise_cap
+            ));
+        }
+        if !(self.damping_gain.is_finite() && self.damping_gain >= 0.0) {
+            return Err(format!(
+                "damping_gain {} is negative or not finite",
+                self.damping_gain
+            ));
+        }
+        for (what, v) in [
+            ("drop_exponent", self.drop_exponent),
+            ("rise_exponent", self.rise_exponent),
+            ("damping_exponent", self.damping_exponent),
+        ] {
+            if !(v.is_finite() && v > 0.0) {
+                return Err(format!("{what} {v} is not positive and finite"));
+            }
+        }
+        if !self.max_frequency_factor().is_finite() {
+            return Err(format!(
+                "rise {} with rise_cap {} and rise_exponent {} gives no finite highest frequency",
+                self.rise, self.rise_cap, self.rise_exponent
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The rule a mode follows: its own, the structure's joint law, or none.
+#[derive(Debug, Clone, Copy)]
+enum ModeRule {
+    Linear,
+    Joint(JointLaw),
+    Level(LevelRule),
+}
+
+impl ModeRule {
+    fn of(m: &JointedMode, joint: Option<JointLaw>) -> Self {
+        match (m.level, joint) {
+            (Some(l), _) => ModeRule::Level(l),
+            (None, Some(j)) => ModeRule::Joint(j),
+            (None, None) => ModeRule::Linear,
+        }
+    }
+
+    /// Angular frequency and damping at amplitude ratio `r` of a mode at `w0`, `zeta0`.
+    #[inline]
+    fn params(&self, w0: f64, zeta0: f64, r: f64) -> (f64, f64) {
+        match self {
+            ModeRule::Linear => (w0, zeta0),
+            ModeRule::Joint(j) => (w0 * j.frequency_factor(r), j.damping(zeta0, r)),
+            ModeRule::Level(l) => (w0 * l.frequency_factor(r), l.damping(zeta0, r)),
+        }
+    }
+}
+
 /// One mode of a [`JointedPlant`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct JointedMode {
@@ -170,8 +360,12 @@ pub struct JointedMode {
     pub input_shape: Vec<f64>,
     /// How each output sees the mode's acceleration, `n_inputs` long.
     pub output_shape: Vec<f64>,
-    /// The modal displacement amplitude at which the joint law reaches its full drop.
+    /// The modal displacement amplitude at which the joint law reaches its full drop
+    /// (and a level rule its stated drop and rise).
     pub reference_amplitude: f64,
+    /// The mode's own level rule, or `None` to follow the plant's joint law (linear
+    /// when the plant has none).
+    pub level: Option<LevelRule>,
 }
 
 /// A cross-coupled modal plant with level-dependent modes and a delay per output.
@@ -183,7 +377,9 @@ pub struct JointedPlant {
     /// Drives (columns of the FRF).
     pub n_drives: usize,
     pub modes: Vec<JointedMode>,
-    /// The amplitude law, or `None` for a linear plant.
+    /// The structure-wide amplitude law for every mode without a level rule of its
+    /// own, or `None` (those modes are then linear). Its `decay_cycles` sets every
+    /// mode's envelope.
     pub joint: Option<JointLaw>,
     /// Added to every FRF element.
     pub feedthrough: f64,
@@ -231,16 +427,39 @@ impl JointedPlant {
         }
     }
 
-    /// The same plant with no joint law: what it is at a vanishing level.
+    /// The same plant with no joint law and no level rules: what it is at a vanishing
+    /// level.
     pub fn linear(&self) -> JointedPlant {
-        JointedPlant {
+        let mut p = JointedPlant {
             joint: None,
             ..self.clone()
-        }
+        };
+        p.modes.iter_mut().for_each(|m| m.level = None);
+        p
+    }
+
+    /// Whether any mode changes with amplitude.
+    pub fn is_level_dependent(&self) -> bool {
+        self.joint.is_some() || self.modes.iter().any(|m| m.level.is_some())
+    }
+
+    /// The highest frequency each mode can reach at any amplitude, Hz: `f0 (1 + rise
+    /// rise_cap^rise_exponent)` under its own rule, `f0` under the joint law or none.
+    pub fn highest_frequencies_hz(&self) -> Vec<f64> {
+        self.modes
+            .iter()
+            .map(|m| m.f_hz * m.level.map_or(1.0, |l| l.max_frequency_factor()))
+            .collect()
+    }
+
+    /// The bound every mode's highest frequency must stay under at `fs_hz`: the Nyquist
+    /// frequency (see the module docs).
+    pub fn frequency_bound_hz(fs_hz: f64) -> f64 {
+        0.5 * fs_hz
     }
 
     /// Mode `k` alone, one drive to one output with unit shapes, its own reference
-    /// amplitude and this plant's law, no residual and no delays: the mode as a
+    /// amplitude, its own level rule and this plant's law, no residual and no delays: the mode as a
     /// single-degree-of-freedom article, for measuring what the law does to it.
     pub fn single_mode(&self, k: usize) -> JointedPlant {
         let m = &self.modes[k];
@@ -316,6 +535,25 @@ impl JointedPlant {
         }
         if let Some(j) = &self.joint {
             j.validate()?;
+        }
+        let bound = Self::frequency_bound_hz(fs_hz);
+        for (k, (m, top)) in self
+            .modes
+            .iter()
+            .zip(self.highest_frequencies_hz())
+            .enumerate()
+        {
+            let Some(l) = &m.level else { continue };
+            l.validate()
+                .map_err(|e| format!("mode {k}'s level rule: {e}"))?;
+            if top >= bound {
+                return Err(format!(
+                    "mode {k} at {} Hz can rise to {top} Hz (f0 (1 + rise rise_cap^rise_exponent)), \
+                     at or above the bound of {bound} Hz (the Nyquist frequency at {fs_hz} Hz); \
+                     lower its rise or rise_cap, or raise the sample rate",
+                    m.f_hz
+                ));
+            }
         }
         if !(self.output_delays_s.is_empty() || self.output_delays_s.len() == self.n_inputs) {
             return Err(format!(
@@ -513,12 +751,9 @@ impl JointedPlant {
     /// A mode's angular frequency and damping at envelope `a`.
     fn params(&self, m: &JointedMode, a: f64) -> (f64, f64) {
         let w0 = TAU * m.f_hz;
-        match &self.joint {
-            None => (w0, m.zeta),
-            Some(j) => {
-                let r = a / m.reference_amplitude;
-                (w0 * j.frequency_factor(r), j.damping(m.zeta, r))
-            }
+        match ModeRule::of(m, self.joint) {
+            ModeRule::Linear => (w0, m.zeta),
+            rule => rule.params(w0, m.zeta, a / m.reference_amplitude),
         }
     }
 }
@@ -698,6 +933,7 @@ struct ModeState {
     stepped_at: f64,
     step: ModeStep,
     peak: f64,
+    rule: ModeRule,
 }
 
 /// A running jointed plant (crate-private; built by the backend at `configure`).
@@ -710,7 +946,6 @@ pub(crate) struct JointedRun {
     /// `n_modes x n_out`, row-major.
     psi: Vec<f64>,
     modes: Vec<ModeState>,
-    joint: Option<JointLaw>,
     residual: Vec<(usize, usize, f64)>,
     feedthrough: f64,
     delays: Vec<DelayLine>,
@@ -749,6 +984,7 @@ impl JointedRun {
                     stepped_at: 0.0,
                     step: ModeStep::new(w0, m.zeta, dt),
                     peak: 0.0,
+                    rule: ModeRule::of(m, p.joint),
                 }
             })
             .collect();
@@ -769,7 +1005,6 @@ impl JointedRun {
             phi,
             psi,
             modes,
-            joint: p.joint,
             residual,
             feedthrough: p.feedthrough,
             delays: (0..p.n_drives)
@@ -799,16 +1034,10 @@ impl JointedRun {
         }
         let (nd, no) = (self.n_drive, self.n_out);
         for (m, st) in self.modes.iter_mut().enumerate() {
-            if let Some(j) = &self.joint {
-                if st.envelope != st.stepped_at {
-                    let r = st.envelope / st.a_ref;
-                    st.step = ModeStep::new(
-                        st.w0 * j.frequency_factor(r),
-                        j.damping(st.zeta0, r),
-                        self.dt,
-                    );
-                    st.stepped_at = st.envelope;
-                }
+            if !matches!(st.rule, ModeRule::Linear) && st.envelope != st.stepped_at {
+                let (w, z) = st.rule.params(st.w0, st.zeta0, st.envelope / st.a_ref);
+                st.step = ModeStep::new(w, z, self.dt);
+                st.stepped_at = st.envelope;
             }
             let u: f64 = self.phi[m * nd..(m + 1) * nd]
                 .iter()

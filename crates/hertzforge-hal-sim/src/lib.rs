@@ -26,8 +26,8 @@
 //! - **[`PlantModel::Frf`].** Plays any FRF matrix (a measured one, say) by block
 //!   convolution.
 //! - **[`PlantModel::Jointed`].** A cross-coupled modal plant whose modes fall in
-//!   frequency and rise in damping with their own amplitude, as a bolted structure's do,
-//!   with a delay per output ([`jointed`]). Its `analytic_frf` is the small-signal FRF.
+//!   frequency (as a bolted structure's do) or rise (as a stiffening spring's do), each
+//!   by its own rule, and rise in damping with their own amplitude, with a delay per output ([`jointed`]). Its `analytic_frf` is the small-signal FRF.
 //! - **Noise floor.** Additive Gaussian noise from a deterministic xorshift PRNG
 //!   ([`Xorshift64`]) seeded from config, so tests are reproducible.
 //! - **Exact truth.** [`PlantModel::analytic_frf`] is the complex FRF of the discretized
@@ -72,7 +72,7 @@ pub mod plant;
 pub mod plants;
 
 pub use hertzforge_sdm::{MatrixStack, C64};
-pub use jointed::{JointLaw, JointedMode, JointedPlant, Simulated, Stepper};
+pub use jointed::{JointLaw, JointedMode, JointedPlant, LevelRule, Simulated, Stepper};
 pub use plant::{
     Discretization, FrfPlant, FrfTaps, ModalPlant, ModalSoftening, Mode, ModeResponse, PlantModel,
     ResonatorBank, DEFAULT_FEEDTHROUGH, DEFAULT_FRF_BLOCK_FRAMES, DEFAULT_FRF_MAX_TAPS,

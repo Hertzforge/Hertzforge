@@ -376,6 +376,7 @@ fn one_mode(f_hz: f64, zeta: f64, joint: Option<JointLaw>) -> JointedPlant {
                 input_shape: vec![1.0],
                 output_shape: vec![1.0],
                 reference_amplitude: 1e-4,
+                level: None,
             }],
         )
     }
@@ -407,6 +408,7 @@ fn mimo_shock_plant_analytic_frf_is_what_the_backend_plays() {
                     input_shape: vec![1.0, 0.4, -0.3],
                     output_shape: vec![0.9, -0.5],
                     reference_amplitude: 1.0,
+                    level: None,
                 },
                 JointedMode {
                     f_hz: 1300.0,
@@ -414,6 +416,7 @@ fn mimo_shock_plant_analytic_frf_is_what_the_backend_plays() {
                     input_shape: vec![-0.2, 1.0, 0.6],
                     output_shape: vec![0.3, 1.1],
                     reference_amplitude: 1.0,
+                    level: None,
                 },
             ],
         )

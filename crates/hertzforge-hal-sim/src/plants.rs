@@ -862,6 +862,7 @@ fn shock_structure(l: &ShockLayout, reference_velocity: f64) -> JointedPlant {
                 .map(|p| plate_shape(k, p[0], p[1]))
                 .collect(),
             reference_amplitude: reference_velocity / (std::f64::consts::TAU * f_hz),
+            level: None,
         })
         .collect();
     // The mass line: each control moves most with the drive nearest it.
