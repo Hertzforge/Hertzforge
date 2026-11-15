@@ -87,6 +87,39 @@
 //!   drive's PSD moves by more than the per-loop cap from the law's previous
 //!   drive, so the law never asks for more than the cap (the controller applies
 //!   its own cap regardless).
+//!
+//! # Safeguards added here, against wind-up
+//!
+//! The source's safeguards bound a diagonal's step and the drive's step, but
+//! not where the factor goes over many loops. A source the plant does not
+//! answer in, a direction the plant estimate holds and the structure does not
+//! (an estimate identified through noise keeps its weak singular values on the
+//! noise floor, above any fixed truncation), keeps a positive error loop after
+//! loop, and the first form adds `E_kj / Z_jj` to its row each time: the
+//! cross terms are clamped by nothing, and the second form acts only on a
+//! channel above its reference. Measured on a 48 by 12 lightly damped plate
+//! identified through noise: the drive rose from 8e4 to 1e8 lbf^2 in 45
+//! loops, nearly all of it in rows whose target has no pivot of its own and
+//! in sources whose response was below 1 % of what they commanded, while the
+//! open-loop drive gave 1.22 dB. Two rules stop it, both arithmetic only:
+//!
+//! - **Answer hold.** A source whose measured response is below `ANSWER_MIN`
+//!   (-15 dB) of what its row commands, `(T G_yy T^H)_kk < ANSWER_MIN (Z Z^H)_kk`,
+//!   does not answer its drive, and no element of its row may grow that loop
+//!   (each may still shrink). A law does not raise the drive where the
+//!   response does not follow it. This is the measured form of the source's
+//!   rank rule: a direction the plant does not carry gets no more drive.
+//! - **Command bound.** No row commands more than `COMMAND_MAX` (+10 dB) of
+//!   its source's target, `(Z Z^H)_kk <= COMMAND_MAX G_t,kk` (or more than it
+//!   commanded the loop before, where a factor carried over an FRF update is
+//!   already above it). It bounds the drive at about ten times the seed's
+//!   whatever the response does, and leaves 10 dB for the plant's error in
+//!   any one direction.
+//!
+//! On the plate the two rules hold the drive at 2.5e5 lbf^2 and the band error
+//! at 1.46 dB; the bound does most of the work there, and the hold alone at
+//! -10 dB gave 1.49 dB at 3.4e5. A higher hold threshold was not taken: the
+//! loop must still climb to a plant 10 dB less sensitive than its estimate.
 
 use crate::support::{
     band_hermitian, gram_packed, inverse_diagnostics, largest_change_db, matmul_adj_into,
@@ -104,6 +137,13 @@ const FLOOR_TOL: f64 = 1e-4;
 /// How many times the drive-cap search halves the step before holding the
 /// line's factor where it was.
 const HALVINGS: usize = 30;
+/// A source answers its drive when its measured response, in the loop's
+/// coordinates, is at least this fraction of what its row of the factor
+/// commands (-15 dB). On an exact plant the two are equal; a plant 10 dB less
+/// sensitive than its estimate still answers, and the loop climbs to it.
+const ANSWER_MIN: f64 = 0.03;
+/// No source commands more than this multiple of its target (+10 dB).
+const COMMAND_MAX: f64 = 10.0;
 
 /// The closed loop's settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -526,9 +566,43 @@ impl FactorLoop {
                     }
                 }
 
+                // The answer hold: a source whose measured response is below
+                // `ANSWER_MIN` of what its row of `Z` commands does not answer its
+                // drive, and no element of its row may grow this loop. Without it the
+                // first form raises such a row every loop by `E_kj / Z_jj`, with
+                // nothing to stop it: the diagonal clamp bounds only diagonals, and
+                // the second form acts only on a channel above its reference.
+                for k in 0..q {
+                    let commanded: f64 = (0..=k).map(|t| zl[k * q + t].norm_sqr()).sum();
+                    if commanded <= 0.0 || measured[k * q + k].re >= ANSWER_MIN * commanded {
+                        continue;
+                    }
+                    for t in 0..=k {
+                        let z0 = zl[k * q + t];
+                        if (z0 + delta[k * q + t] * e).norm() > z0.norm() {
+                            delta[k * q + t] = ZERO;
+                        }
+                    }
+                }
+
                 // The update, with the floor.
                 for idx in 0..q * q {
                     znew[idx] = zl[idx] + delta[idx] * e;
+                }
+                // The command bound: no row of `Z` commands more than
+                // `COMMAND_MAX` times its source's target, `(Z Z^H)_kk <= COMMAND_MAX
+                // G_t,kk`, or more than it commanded last loop where that was already
+                // above it (a factor carried over an FRF update).
+                for k in 0..q {
+                    let old: f64 = (0..=k).map(|t| zl[k * q + t].norm_sqr()).sum();
+                    let new: f64 = (0..=k).map(|t| znew[k * q + t].norm_sqr()).sum();
+                    let limit = (COMMAND_MAX * gt[k * q + k].re).max(old);
+                    if new > limit {
+                        let c = (limit / new).sqrt();
+                        for t in 0..=k {
+                            znew[k * q + t] *= c;
+                        }
+                    }
                 }
                 for j in 0..q {
                     if !pivot[j] {

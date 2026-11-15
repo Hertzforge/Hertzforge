@@ -162,6 +162,7 @@ fn non_default(law: BuiltinMimo) -> (Given, OnePercent) {
             vec![
                 ("tradeoff", choice("fixed")),
                 ("tradeoff_value", num(0.1)),
+                ("shortfall_db", num(1.0)),
                 ("residual", choice("absolute")),
                 ("convergence", num(0.7)),
             ],
