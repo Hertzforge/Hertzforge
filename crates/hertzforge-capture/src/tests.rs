@@ -810,3 +810,95 @@ fn indexed_records_append_lines_and_read_back_every_chunk() {
     assert_eq!(read_indexed_record(&dir, "calls").unwrap().len(), 4);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// =====================================================================================
+// Run folders: a run never writes over another
+// =====================================================================================
+
+/// One capture of `frames` frames of `value` on one channel under `name`; its folder.
+fn one_run(dir: &Path, name: &str, value: f32, frames: usize, settings: &str) -> PathBuf {
+    let cfg = CaptureConfig::at_rate(1, 1000.0);
+    let sink =
+        CaptureSink::start_durable(dir, name, cfg, table_n(1), settings.into(), fast(20)).unwrap();
+    for _ in 0..frames {
+        assert!(sink.push(&[value], 1));
+    }
+    let run_dir = sink.run_dir().to_path_buf();
+    sink.finish().unwrap();
+    run_dir
+}
+
+#[test]
+fn a_second_capture_under_one_name_leaves_the_first_whole() {
+    let dir = tmp("same-name");
+    let first = one_run(&dir, "sine", 1.0, 8, "{\"run\":1}");
+    let second = one_run(&dir, "sine", 2.0, 3, "{\"run\":2}");
+    assert_eq!(first, dir.join("sine"));
+    assert_eq!(second, dir.join("sine-2"));
+    // Both runs are whole: their own samples and their own sidecar.
+    let bytes = std::fs::read(first.join(TELEMETRY_FILE)).unwrap();
+    assert_eq!(bytes.len(), 8 * 4);
+    assert!(bytes
+        .chunks(4)
+        .all(|b| f32::from_le_bytes(b.try_into().unwrap()) == 1.0));
+    let side = read_sidecar(&first);
+    assert_eq!(side.frames_written, 8);
+    assert_eq!(side.run_config_json, "{\"run\":1}");
+    assert!(side.complete);
+    let bytes = std::fs::read(second.join(TELEMETRY_FILE)).unwrap();
+    assert_eq!(bytes.len(), 3 * 4);
+    assert!(bytes
+        .chunks(4)
+        .all(|b| f32::from_le_bytes(b.try_into().unwrap()) == 2.0));
+    assert_eq!(read_sidecar(&second).run_config_json, "{\"run\":2}");
+    // A third takes the next free name.
+    assert_eq!(one_run(&dir, "sine", 3.0, 1, "{}"), dir.join("sine-3"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn claims_of_one_name_made_at_the_same_moment_get_different_folders() {
+    let dir = tmp("claim-race");
+    std::fs::create_dir_all(&dir).unwrap();
+    let n = 16;
+    let gate = Arc::new(std::sync::Barrier::new(n));
+    let claims: Vec<_> = (0..n)
+        .map(|_| {
+            let (dir, gate) = (dir.clone(), gate.clone());
+            std::thread::spawn(move || {
+                gate.wait();
+                claim_run_dir(&dir, "run").unwrap()
+            })
+        })
+        .collect();
+    let mut got: Vec<PathBuf> = claims.into_iter().map(|h| h.join().unwrap()).collect();
+    got.sort();
+    got.dedup();
+    assert_eq!(got.len(), n, "two claims were handed one folder: {got:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_capture_in_a_claimed_folder_keeps_what_is_already_there() {
+    let dir = tmp("claimed");
+    let run_dir = claim_dir(&dir, "rec_0001", "_").unwrap();
+    std::fs::write(run_dir.join("own.json"), "{}").unwrap();
+    assert_eq!(
+        claim_dir(&dir, "rec_0001", "_").unwrap(),
+        dir.join("rec_0001_2")
+    );
+    let sink = CaptureSink::start_durable_in(
+        &run_dir,
+        CaptureConfig::at_rate(1, 1000.0),
+        table_n(1),
+        "{}".into(),
+        fast(20),
+    )
+    .unwrap();
+    assert_eq!(sink.run_dir(), run_dir);
+    sink.push(&[1.0], 1);
+    sink.finish().unwrap();
+    assert!(run_dir.join("own.json").exists());
+    assert_eq!(read_sidecar(&run_dir).frames_written, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}

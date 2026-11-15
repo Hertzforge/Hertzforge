@@ -13,11 +13,12 @@
 	import type { ProjectChildren, ProjectObject, SolidRow } from '$lib/protocol/types';
 	import type { Modifiers } from './selection';
 	import { tick } from 'svelte';
-	import { spans } from './brackets';
+	import { spans, ticks } from './brackets';
 	import { landsBefore, reordered, treeOrder } from './order';
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 	import { partIsPicked } from './selection';
+	import { canDragOut } from './files';
 
 	interface Props {
 		app: AppState;
@@ -39,6 +40,11 @@
 
 	function mods(e: MouseEvent) {
 		return { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey };
+	}
+
+	/** A list of sub-items as a grid one column wide, so Shift picks the run between two of them as it does a grid's block. */
+	function column(indices: number[]): number[][] {
+		return indices.map((i) => [i]);
 	}
 
 	/** Picking the object a combination in the action table needs: the tree answers that, and nothing else. */
@@ -161,12 +167,30 @@
 		if (e.button !== 0 || p.renaming === o.name) return;
 		dragFrom = { name: o.name, x: e.clientX, y: e.clientY, id: e.pointerId };
 	}
+	/** Objects dragged out of the window, while the button stays down: their files are being written. */
+	let outHeld = false;
+	/** Whether the pointer has reached the window's edge, where a drag in the tree becomes a drag out of it. */
+	function atEdge(e: PointerEvent): boolean {
+		return e.clientX <= 1 || e.clientY <= 1 || e.clientX >= innerWidth - 2 || e.clientY >= innerHeight - 2;
+	}
 	function dragMove(e: PointerEvent) {
 		if (!dragFrom) return;
 		if (!dragging) {
 			if (Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < 6) return;
 			dragging = p.isSelected(dragFrom.name) ? [...p.selection.objects] : [dragFrom.name];
 			(e.currentTarget as HTMLElement).setPointerCapture?.(dragFrom.id);
+		}
+		if (atEdge(e) && canDragOut()) {
+			// out of the window: each object saved where it is let go (Brandon, 2026-11-11)
+			const names = dragging;
+			(e.currentTarget as HTMLElement).releasePointerCapture?.(dragFrom.id);
+			dragging = null;
+			dropOn = null;
+			dropOut = false;
+			dragFrom = null;
+			outHeld = true;
+			void p.dragOut({ names }, () => outHeld).finally(() => (outHeld = false));
+			return;
 		}
 		const row = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-testid^="object-"]');
 		const name = row?.dataset.testid?.slice('object-'.length) ?? null;
@@ -179,6 +203,7 @@
 		return (treeBox.closest('aside') ?? treeBox).contains(document.elementFromPoint(e.clientX, e.clientY));
 	}
 	function dragUp(e: PointerEvent) {
+		outHeld = false;
 		const moving = dragging;
 		const target = dropOn;
 		const inside = overBlank(e);
@@ -239,6 +264,8 @@
 
 	/** The link brackets: each group's members as rows, and where those rows sit, measured after each render. */
 	const painted = $derived(spans(p.summary?.links, order));
+	/** The striped brackets on Matched Modes rows, in the colors of both sets' groups. */
+	const striped = $derived(ticks(p.summary?.links, p.summary?.objects ?? []));
 	let treeBox = $state<HTMLDivElement | null>(null);
 	const rowBoxes = new Map<string, HTMLDivElement>();
 	let centers = $state<Record<string, number>>({});
@@ -269,7 +296,7 @@
 	}
 	$effect(() => {
 		// rows move when objects, open rows or their children change
-		void [p.summary, p.expanded, p.children, painted];
+		void [p.summary, p.expanded, p.children, painted, striped];
 		void tick().then(measure);
 	});
 	$effect(() => {
@@ -318,8 +345,8 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (the keys and the pointer act on the rows inside) -->
-<div class="tree" class:bracketed={painted.length > 0} class:dragging={!!dragging} class:place-end={place === null} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
-	{#if painted.length}
+<div class="tree" class:bracketed={painted.length > 0 || striped.length > 0} class:dragging={!!dragging} class:place-end={place === null} class:picking={!!picking} role="tree" tabindex="-1" aria-label="Project objects" data-testid="project-tree" bind:this={treeBox} onkeydown={treeKey} onpointermove={dragMove} onpointerup={dragUp} onpointercancel={() => { dragging = null; dropOn = null; dragFrom = null; }}>
+	{#if painted.length || striped.length}
 		<svg class="gutter" width="14" height={treeHeight} aria-hidden="true" data-testid="link-brackets">
 			{#each painted as span (span.rows.join('\u0000'))}
 				{@const ys = span.rows.map((r) => centers[r]).filter((y) => y !== undefined)}
@@ -334,6 +361,18 @@
 					{#if span.name && bottom - top > 40}
 						<text x={x - 1} y={bottom - 4} transform="rotate(-90 {x - 1} {bottom - 4})" fill={span.color} font-size="8" textLength={Math.min(bottom - top - 8, span.name.length * 5)} lengthAdjust="spacingAndGlyphs">{span.name}</text>
 					{/if}
+				{/if}
+			{/each}
+			{#each striped as t (t.row)}
+				{@const y = centers[t.row]}
+				{#if y !== undefined}
+					<!-- a short bracket on its one row, each color a dash in turn, so it reads as both groups' -->
+					<g stroke-width="2" stroke-linecap="butt" data-matched={t.row}>
+						{#each t.colors as color, k (k)}
+							<line x1="3" y1={y - 7} x2="3" y2={y + 7} stroke={color} stroke-dasharray={t.colors.length > 1 ? '3.5 3.5' : undefined} stroke-dashoffset={k * 3.5} />
+							<line x1="3" y1={y} x2="7" y2={y} stroke={color} stroke-dasharray={t.colors.length > 1 ? '2 2' : undefined} stroke-dashoffset={k * 2} />
+						{/each}
+					</g>
 				{/if}
 			{/each}
 		</svg>
@@ -472,7 +511,7 @@
 					</div>
 				{:else if kids.kind === 'modes'}
 					{#each kids.modes as mode (mode.index)}
-						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, mode.index - 1)}>
+						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e), column(kids.modes.map((m) => m.index - 1)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, mode.index - 1)}>
 							<Glyph name="mode" of="child" parent="shape_set" size={14} />
 							<span class="label mono">M{mode.index}</span>
 							<span class="num">{mode.frequency.toPrecision(5)} Hz</span>
@@ -482,14 +521,14 @@
 					{/each}
 				{:else if kids.kind === 'channels'}
 					{#each kids.channels as channel, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="channel-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="channel-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.channels.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
 							<Glyph name={channel.quantity} of="record" parent="channel_table" size={14} />
 							<span class="label mono">{channel.dof || `channel ${i + 1}`}</span>
 						</div>
 					{/each}
 				{:else if kids.kind === 'photos'}
 					{#each kids.photos as photo, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="photo-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} ondblclick={() => startPartRename(o.name, i, photo)} onkeydown={(e) => { if (e.key === 'Enter') p.clickRecord(o.name, i); else if (e.key === 'F2') { e.stopPropagation(); startPartRename(o.name, i, photo); } }}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="photo-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.photos.map((_, k) => k)))} ondblclick={() => startPartRename(o.name, i, photo)} onkeydown={(e) => { if (e.key === 'Enter') p.clickRecord(o.name, i); else if (e.key === 'F2') { e.stopPropagation(); startPartRename(o.name, i, photo); } }}>
 							<Glyph name="photos" size={14} />
 							{#if p.renamingPart?.name === o.name && p.renamingPart.index === i}
 								<input
@@ -514,7 +553,7 @@
 					{/each}
 				{:else if kids.kind === 'matches'}
 					{#each kids.matches as match, i (i)}
-						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="match-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="match-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.matches.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
 							<Glyph name="mode" of="child" parent="matched_modes" size={14} />
 							<span class="label mono">M{match.first} to M{match.second}</span>
 							<span class="num dim">MAC {match.mac.toFixed(3)}</span>

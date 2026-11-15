@@ -1,0 +1,53 @@
+{
+  "name": "pulse_reference",
+  "kind": "pulse_reference",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "responses": [
+      1
+    ]
+  },
+  "description": "the nominal pulse at full level and its tolerance band (NaN outside the judged window), time from the main pulse's start",
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        231
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        231
+      ],
+      "unit": "g",
+      "offset": 1848
+    },
+    {
+      "name": "band_low",
+      "dtype": "f8",
+      "shape": [
+        231
+      ],
+      "unit": "g",
+      "offset": 3696
+    },
+    {
+      "name": "band_high",
+      "dtype": "f8",
+      "shape": [
+        231
+      ],
+      "unit": "g",
+      "offset": 5544
+    }
+  ]
+}

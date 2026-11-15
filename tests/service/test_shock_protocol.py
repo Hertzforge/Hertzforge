@@ -42,6 +42,7 @@ def test_every_shock_golden_is_checked_here():
     # The Rust, TypeScript and Python suites read the same files in schema/golden/.
     names = {p.name.split('.')[0] for p in GOLDEN.iterdir()
              if 'shock' in p.name and 'shock_srs' not in p.name
+             and 'mimo_shock' not in p.name and 'shock_mimo' not in p.name
              and not p.name.endswith('.expected.json')}
     assert names == set(TEXT) | set(BINARY), sorted(names ^ (set(TEXT) | set(BINARY)))
 
@@ -116,7 +117,8 @@ def test_a_configuration_carries_every_field_and_the_drive_limits_are_required(v
     config = _text('request_shock_configure')['params']['config']
     assert set(config) == {'title', 'pulse', 'standard', 'acquisition', 'schedule', 'spacing',
                            'identification', 'control', 'limits', 'feasibility', 'train',
-                           'gunfire', 'capture', 'metadata'}
+                           'gunfire', 'operator', 'article', 'notes', 'specification',
+                           'record', 'metadata'}
     for missing in ('drive_vpk_ceiling', 'drive_vpk_abort'):
         bad = copy.deepcopy(config)
         del bad['limits'][missing]

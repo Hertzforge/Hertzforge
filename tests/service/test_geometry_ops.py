@@ -174,10 +174,9 @@ def test_a_field_is_set_and_an_inconsistent_edit_is_put_back(project, validate):
 
 
 def test_deleting_keeps_measured_nodes_and_the_last_system(project, validate):
-    view, table, reading = run(project, 'project.delete_entities', kind='nodes', ids='102')
-    wire_views([view, table, reading], validate)
-    counts = {row['label']: row['value'] for row in reading['rows']}
-    assert counts == {'Nodes': 1.0, 'Elements': 2.0}
+    view, table = run(project, 'project.delete_entities', kind='nodes', ids='102')
+    wire_views([view, table], validate)
+    assert table['title'].endswith('removed 1 node, 2 elements'), 'said once, in the title'
     assert len(table['rows']) == 168
     with pytest.raises(ProtocolError, match='measured at node 101'):
         run(project, 'project.delete_entities', kind='nodes', ids='101')
@@ -185,10 +184,9 @@ def test_deleting_keeps_measured_nodes_and_the_last_system(project, validate):
         run(project, 'project.delete_entities', kind='coordinate_systems', ids='1')
     with pytest.raises(ProtocolError, match='no element 9999'):
         run(project, 'project.delete_entities', kind='elements', ids='9999')
-    _view, table, reading = run(project, 'project.delete_entities', kind='elements',
-                                ids='3-12')
+    _view, table = run(project, 'project.delete_entities', kind='elements', ids='3-12')
     # the rest of the first row of quads: their own nodes go, the measured stay
-    assert {row['label']: row['value'] for row in reading['rows']}['Elements'] == 10.0
+    assert 'removed 10 elements' in table['title']
     assert {101, 104, 110, 113} <= set(project['Geometry'].node_id.tolist())
 
 
@@ -224,8 +222,12 @@ def test_dof_arrows_mark_a_tables_references_pointing_in(project, validate):
     assert [row['DOF'] for row in cells(table)] == ['101Z+', '110Z+', '1304Z+', '1310Z+']
     assert all(row['Arrow'].startswith('in') for row in cells(table))
     geometry = project['Geometry']
-    # a shaft and two barbs each, the shaft ending on the node
-    assert len(view['nodes']) == geometry.num_nodes + 4 * 4 and len(view['lines']) == 12
+    from hertzforge.service.mesh import drawn_mesh
+
+    edges = len(drawn_mesh(geometry)[2])
+    # a shaft and two barbs each, the shaft ending on the node, after the elements' edges
+    assert len(view['nodes']) == geometry.num_nodes + 4 * 4
+    assert len(view['lines']) == edges + 12
     tip = view['nodes'][geometry.num_nodes + 1]
     assert tip == pytest.approx(geometry.node_xyz[0])
     _view, table = run(project, 'project.dof_arrows', source='Time History',
@@ -396,7 +398,8 @@ def test_an_entity_table_is_edited_cell_by_cell(validate):
     project = state.project
     ops = {op.id: op for op in OPERATIONS}
     _drawn, table = ops['project.view_entities'].run(project, {'geometry': 'Geometry',
-                                                               'kind': 'nodes'})
+                                                               'kind': 'nodes', 'family': '',
+                                                               'groups': ''})
     validate(table, 'tableView')
     assert table['edit']['op'] == 'project.set_entity_cell'
     assert table['edit']['columns'][1] == 'x'
@@ -473,22 +476,43 @@ def _picked(project, part, validate):
     return views
 
 
-def test_a_part_picked_shows_its_entities_table(project, validate):
-    drawn, nodes = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
+def _edited(project, part, validate):
+    """The part's Edit, as its row in the action table runs it."""
+    from hertzforge.service.action_table import action_table
+
+    rows = action_table(project, ['Geometry'], {}, part)['columns'][0]['rows']
+    row = next(row for row in rows if row['verb'] == 'Edit')
+    assert row['id'] == 'project.view_entities' and row['ready']
+    assert {'kind', 'family', 'groups'} <= set(row['omit']), 'the pick says them all'
+    assert {'geometry', 'kind', 'family', 'groups'} <= set(row['fill']), 'so it opens at once'
+    views = run(project, row['id'], **row['fill'])
+    wire_views(views, validate)
+    return views
+
+
+def test_a_part_picked_is_drawn_and_its_edit_holds_its_table(project, validate):
+    """Brandon, 2026-11-13: the table is editing's, not the plot's."""
+    for part in ('nodes', 'coordinate_systems'):
+        (drawn,) = _picked(project, {'kind': 'part', 'id': part}, validate)
+        assert drawn['view'] == 'shape3d' and 'pick' not in drawn
+        assert ('frames' in drawn) is (part == 'coordinate_systems')
+    drawn, nodes = _edited(project, {'kind': 'part', 'id': 'nodes'}, validate)
     assert drawn['view'] == 'shape3d' and drawn['pick']['op'] == 'project.add_node'
     assert len(nodes['rows']) == len(project['Geometry'].node_id)
     # Delete takes a row by its id, the first column
     assert nodes['edit']['remove'] == {
         'op': 'project.delete_entities', 'params': {'geometry': 'Geometry', 'kind': 'nodes'},
         'column': 0}
-    _drawn, systems = _picked(project, {'kind': 'part', 'id': 'coordinate_systems'}, validate)
-    assert systems['title'] == 'Coordinate systems of Geometry'
+    drawn, systems = _edited(project, {'kind': 'part', 'id': 'coordinate_systems'}, validate)
+    assert systems['title'] == 'Coordinate systems of Geometry' and 'frames' in drawn
 
 
 def test_a_family_or_group_shows_its_own_elements_only(project, validate):
     geometry = project['Geometry']
     run(project, 'project.add_element', family='beams', nodes='101 102')
-    drawn, beams = _picked(project, {'kind': 'family', 'id': 'beams'}, validate)
+    (plot,) = _picked(project, {'kind': 'family', 'id': 'beams'}, validate)
+    assert plot['view'] == 'shape3d'
+    drawn, beams = _edited(project, {'kind': 'family', 'id': 'beams'}, validate)
     assert len(beams['rows']) == 1
     assert drawn['pick']['params']['family'] == 'beams'
     # its edit says the family, so its row 1 is the beam, not the geometry's first element
@@ -499,13 +523,15 @@ def test_a_family_or_group_shows_its_own_elements_only(project, validate):
     assert [int(n) for n in geometry.elem_conn[beam]] == [102, 103]
     assert len(edited[-1]['rows']) == 1, 'the family\'s table again'
     group = int(geometry.group_id[0])
-    _drawn, groups, elements = _picked(project, {'kind': 'group', 'id': group}, validate)
+    (plot,) = _picked(project, {'kind': 'group', 'id': group}, validate)
+    assert plot['view'] == 'shape3d'
+    _drawn, groups, elements = _edited(project, {'kind': 'group', 'id': group}, validate)
     assert [row[0] for row in groups['rows']] == [str(group)]
     assert len(elements['rows']) == int(np.sum(np.asarray(geometry.elem_group) == group))
 
 
 def test_delete_in_a_parts_table_takes_its_rows(project, validate):
-    _drawn, nodes = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
+    _drawn, nodes = _edited(project, {'kind': 'part', 'id': 'nodes'}, validate)
     remove = nodes['edit']['remove']
     before = len(project['Geometry'].node_id)
     run(project, 'project.add_node', x=1.0, y=1.0, z=1.0)
@@ -527,11 +553,10 @@ def test_the_solids_row_or_a_solid_shows_the_solids(validate):
     for part in ({'kind': 'solids', 'id': 0}, {'kind': 'solid', 'id': 1}):
         views = show.show(project, ['Geometry'], {}, part)['views']
         wire_views(views, validate)
-        drawn, table = views
+        (drawn,) = views
         # the block drawn before it is meshed: lit in the bodies when it is the one picked
         lit = part['kind'] == 'solid'
         assert len(drawn['bodies']['triangles'] if lit else drawn['triangles']) == 12
-        assert table['title'] == 'Solids of Geometry' and table['rows'][0][0] == '1'
         # a solid picked carries the gimbal, whose drag moves it; the row as a whole does not
         assert ('gizmo' in drawn) is (part['kind'] == 'solid')
     assert drawn['gizmo']['slide']['op'] == 'project.move_solids'
@@ -551,8 +576,9 @@ def test_a_long_entity_table_sends_a_page_and_the_rest_on_asking(validate):
         ('op.run', {'op': 'project.new_geometry', 'params': {}}),
         ('op.run', {'op': 'project.add_solid_plate', 'params': {'geometry': 'Geometry'}}),
         ('op.run', {'op': 'project.mesh_solids', 'params': {
-            'geometry': 'Geometry', 'elements': 'quads', 'size': 0.02, 'keep': True}}),
-        ('project.show', {'objects': ['Geometry'], 'part': {'kind': 'family', 'id': 'quads'}}),
+            'geometry': 'Geometry', 'elements': 'quads', 'size': 0.02}}),
+        ('op.run', {'op': 'project.view_entities', 'params': {
+            'geometry': 'Geometry', 'kind': 'elements', 'family': 'quads'}}),
         ('project.entity_rows', {'geometry': 'Geometry', 'kind': 'elements', 'family': 'quads',
                                  'start': PAGE_ROWS, 'count': 5}),
         ('project.entity_rows', {'geometry': 'Geometry', 'kind': 'elements', 'start': 0,

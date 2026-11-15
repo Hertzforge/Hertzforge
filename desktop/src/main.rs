@@ -17,6 +17,7 @@
 #[cfg(target_os = "macos")]
 mod pasted_files;
 mod probe;
+mod run_files;
 mod save_file;
 #[cfg(target_os = "macos")]
 mod save_panel;
@@ -42,8 +43,8 @@ const QUIT_ID: &str = "quit";
 const UPDATE_ID: &str = "check-for-updates";
 
 /// The app's state once the services have started.
-struct Running {
-    services: Arc<Services>,
+pub(crate) struct Running {
+    pub(crate) services: Arc<Services>,
 }
 
 /// Where the quit stands.
@@ -149,7 +150,9 @@ fn startup(app: AppHandle) {
             .unwrap_or_else(|| Layout::installed(exe.parent().unwrap_or(&exe), &res, logs)),
         _ => return fail(&app, "The app's own folders could not be found."),
     };
-    let services = match Services::start(&layout) {
+    let (data_root, source) = app.state::<run_files::DataFolder>().for_start();
+    log(&app).say(&format!("data folder {} ({source:?})", data_root.display()));
+    let services = match Services::start(&layout, &data_root) {
         Ok(s) => Arc::new(s),
         Err(e) => return fail(&app, &e),
     };
@@ -323,6 +326,18 @@ fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
 }
 
+/// Files the operating system asked the app to open: queued for the shell, which takes them
+/// (`opened_files`) when it starts and each time it is told more have come.
+#[cfg(target_os = "macos")]
+fn opened(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+    log(app).say(&format!("asked to open {paths:?}"));
+    app.state::<run_files::Opened>().push(paths);
+    let _ = tauri::Emitter::emit(app, "opened-files", ());
+}
+
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -331,9 +346,18 @@ fn main() {
         // tauri.conf.json, installs it, and the process plugin relaunches.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_drag::init())
         .manage(AppLog::new())
         .manage(Quit::default())
+        .manage(run_files::Opened::default())
         .setup(|app| {
+            app.manage(run_files::DataFolder::new(app.path().app_config_dir().ok()));
+            // on Windows and Linux a file opened from the file manager is an argument
+            app.state::<run_files::Opened>()
+                .push(run_files::launch_paths(
+                    std::env::args().skip(1),
+                    from_launch,
+                ));
             #[cfg(target_os = "macos")]
             app.set_menu(menu(app.handle())?)?;
             let handle = app.handle().clone();
@@ -363,7 +387,11 @@ fn main() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         pasted_files::pasted_files,
         save_panel::save_with_file_types,
-        save_file::save_file
+        save_file::save_file,
+        run_files::data_folder,
+        run_files::set_data_folder,
+        run_files::show_folder,
+        run_files::opened_files
     ]);
     #[cfg(all(target_os = "macos", feature = "e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -371,16 +399,30 @@ fn main() {
         e2e::e2e_quit,
         pasted_files::pasted_files,
         save_panel::save_with_file_types,
-        save_file::save_file
+        save_file::save_file,
+        run_files::data_folder,
+        run_files::set_data_folder,
+        run_files::show_folder,
+        run_files::opened_files
     ]);
     #[cfg(all(not(target_os = "macos"), feature = "e2e"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         e2e::e2e_log,
         e2e::e2e_quit,
-        save_file::save_file
+        save_file::save_file,
+        run_files::data_folder,
+        run_files::set_data_folder,
+        run_files::show_folder,
+        run_files::opened_files
     ]);
     #[cfg(all(not(target_os = "macos"), not(feature = "e2e")))]
-    let builder = builder.invoke_handler(tauri::generate_handler![save_file::save_file]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        save_file::save_file,
+        run_files::data_folder,
+        run_files::set_data_folder,
+        run_files::show_folder,
+        run_files::opened_files
+    ]);
     let app = builder
         .build(tauri::generate_context!())
         .expect("the app could not be built");
@@ -393,6 +435,16 @@ fn main() {
         // Ended without the quit (the operating system ending the app): close the
         // services' inputs so each stops by itself, the control service with its
         // controlled stop.
+        // a file opened from the Finder, the app running or not
+        #[cfg(target_os = "macos")]
+        RunEvent::Opened { urls } => {
+            let paths = urls
+                .iter()
+                .filter_map(|u| u.to_file_path().ok())
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            opened(app, paths);
+        }
         RunEvent::Exit => {
             if let Some(r) = app.try_state::<Running>() {
                 r.services.control.close_input();

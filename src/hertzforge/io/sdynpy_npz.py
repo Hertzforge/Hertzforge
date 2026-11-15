@@ -134,7 +134,9 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     records no units either way, so the reader has to be told what they
     are. Each node's coordinates are written in the coordinate system it
     is defined in, its `def_cs`, as `load` reads them. Drawn lines
-    are written as tracelines, one row per run, and not as elements.
+    are written as tracelines, one row per line with a 0 between its
+    runs, and not as elements. A drawn line through a node numbered 0
+    cannot be written, because the layout reads that 0 as a break.
     """
     from .exporters import geometry_values
 
@@ -157,16 +159,22 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     cs['cs_type'] = geometry.cs_type
     cs['matrix'] = matrices
 
-    # a drawn line goes out as the layout's traceline, one row per run
-    # under its block's id, and not as elements as well
+    # a drawn line goes out as the layout's traceline under its block's
+    # id, its runs joined by the layout's 0 pen-up into one row, and not
+    # as elements as well. One row per run (until 2026-11-12) gave
+    # sdynpy several tracelines sharing one id.
     drawn = geometry.drawn_lines()
-    runs = [(line, chain) for line in drawn for chain in line['chains']]
-    traceline = np.zeros(len(runs), dtype=TRACELINE_DTYPE)
-    traceline['id'] = [line['group'] for line, _c in runs]
-    traceline['color'] = [line['color'] for line, _c in runs]
-    traceline['description'] = [str(line['name'])[:40] for line, _c in runs]
+    if any(0 in chain for line in drawn for chain in line['chains']):
+        raise ValueError('a drawn line runs through node 0, which the sdynpy '
+                         'layout reads as a break in the line')
+    traceline = np.zeros(len(drawn), dtype=TRACELINE_DTYPE)
+    traceline['id'] = [line['group'] for line in drawn]
+    traceline['color'] = [line['color'] for line in drawn]
+    traceline['description'] = [str(line['name'])[:40] for line in drawn]
     traceline['connectivity'] = _connectivity(
-        [np.asarray(chain, dtype=np.int64) for _l, chain in runs])
+        [np.asarray([n for i, chain in enumerate(line['chains'])
+                     for n in ([0] if i else []) + list(chain)], dtype=np.int64)
+         for line in drawn])
     drawn_blocks = {line['group'] for line in drawn}
     kept = [i for i, b in enumerate(geometry.elem_group)
             if int(b) not in drawn_blocks]

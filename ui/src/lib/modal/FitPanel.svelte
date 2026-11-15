@@ -34,14 +34,45 @@
 	const DAMPING_BOTTOM = 0.1;
 	let dragged = $state<number | null>(null);
 
-	/** The cursor dragged: across moves it, up and down holds a damping. Nothing is asked of the service until the release. */
-	async function dragCursor(x: number, fraction: number, moved: { x: boolean; y: boolean }, done: boolean) {
+	/** How long the cursor rests before the mode is fitted where it is, as the earlier toolset waited. */
+	const SETTLE_MS = 220;
+	/** The newest place the drag has reached and not yet sent; one request is out at a time. */
+	let queued: { x?: number; damping?: number } | null = null;
+	let sending = false;
+	let settle: ReturnType<typeof setTimeout> | undefined;
+
+	async function send() {
+		if (sending || !queued) return;
+		sending = true;
+		const next = queued;
+		queued = null;
+		if (next.x !== undefined) await fit.move(next.x, true);
+		if (next.damping !== undefined) await fit.holdDamping(next.damping, true);
+		sending = false;
+		void send();
+	}
+
+	/** Fit the mode where the cursor came to rest, once what the drag sent has landed. */
+	async function fitWhereResting() {
+		while (sending || queued) await new Promise((r) => setTimeout(r, 30));
+		await fit.fit(true);
+	}
+
+	/**
+	 * The cursor dragged: across moves it, up and down holds a damping, sent as it goes so the
+	 * pending mode follows the hand, and the mode is fitted when the cursor rests (Brandon,
+	 * 2026-11-14: the earlier toolset's cursor; the fit waited for the release before).
+	 */
+	function dragCursor(x: number, fraction: number, moved: { x: boolean; y: boolean }, done: boolean) {
 		const damping = DAMPING_TOP * (DAMPING_BOTTOM / DAMPING_TOP) ** fraction;
 		if (moved.y) dragged = damping;
-		if (!done) return;
-		if (moved.x) await fit.move(x);
-		if (moved.y) await fit.holdDamping(damping);
-		dragged = null;
+		if (moved.x || moved.y) {
+			queued = { ...queued, ...(moved.x ? { x } : {}), ...(moved.y ? { damping } : {}) };
+			void send();
+			clearTimeout(settle);
+			settle = setTimeout(() => void fitWhereResting(), done ? 0 : SETTLE_MS);
+		}
+		if (done) dragged = null;
 	}
 
 	/** A damping typed into a mode's row, in percent; refused words come back from the service. */
@@ -115,6 +146,7 @@
 				onMarkerDrag={dragCursor}
 				onPick={(x) => fit.move(x)}
 				onRange={(low, high) => (fit.range = [low, high])}
+				rangeOn={(series) => series.role === 'measured' && series.follows === undefined}
 			/>
 		</div>
 

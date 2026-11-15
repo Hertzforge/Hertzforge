@@ -218,12 +218,12 @@ fn recorder_records_at_the_rate_the_station_programmed() {
     svc.stop_monitor().unwrap();
     let name = svc.recordings_list(None)[0].name.clone();
     let dir = root.join(name);
-    let rec = json_at(&dir.join("recorder.json"));
-    assert_eq!(rec["fs_hz"], serde_json::json!(fs), "recorder.json: {rec}");
+    let rec = json_at(&dir.join("stream.json"));
+    assert_eq!(rec["fs_hz"], serde_json::json!(fs), "stream.json: {rec}");
     assert_eq!(
         rec["requested_fs_hz"],
         serde_json::json!(8192.0),
-        "recorder.json: {rec}"
+        "stream.json: {rec}"
     );
     let cap = json_at(&dir.join("capture.json"));
     assert_eq!(cap["config"]["sample_rate_hz"], serde_json::json!(fs));
@@ -547,7 +547,7 @@ fn recorder_the_free_space_floor_ends_the_run_and_says_so() {
     let said = logged(&svc, "floor");
     svc.stop_monitor().unwrap();
     let dir = root.join("rec_0001");
-    let sidecar = std::fs::read_to_string(dir.join("recorder.json")).unwrap_or_default();
+    let sidecar = std::fs::read_to_string(dir.join("stream.json")).unwrap_or_default();
     let bytes = std::fs::metadata(dir.join("telemetry.f32"))
         .map(|m| m.len())
         .unwrap_or(0);
@@ -759,7 +759,7 @@ fn recorder_recordings_carry_station_frames() {
         svc.pump().unwrap();
     }
     svc.stop_monitor().unwrap();
-    let rec = json_at(&root.join("rec_0001").join("recorder.json"));
+    let rec = json_at(&root.join("rec_0001").join("stream.json"));
     assert_eq!(rec["trigger_station_frame"], 5000, "{rec}");
     assert_eq!(rec["first_station_frame"], 5000 - pre, "{rec}");
     assert_eq!(rec["pre_frames"], pre, "{rec}");
@@ -792,7 +792,7 @@ fn recorder_recordings_carry_station_frames() {
     svc.record_now().unwrap();
     svc.pump_frames(1024).unwrap();
     svc.stop_monitor().unwrap();
-    let rec = json_at(&root.join("rec_0001").join("recorder.json"));
+    let rec = json_at(&root.join("rec_0001").join("stream.json"));
     assert_eq!(rec["trigger"], "manual", "{rec}");
     assert_eq!(rec["trigger_station_frame"], 3072, "{rec}");
     assert_eq!(rec["pre_frames"], 1024, "{rec}");
@@ -876,7 +876,7 @@ fn recorder_holdoff_counts_station_time_from_the_trigger() {
     svc.stop_monitor().unwrap();
     let mut spans = Vec::new();
     for name in ["rec_0001", "rec_0002", "rec_0003"] {
-        let rec = json_at(&root.join(name).join("recorder.json"));
+        let rec = json_at(&root.join(name).join("stream.json"));
         let first = rec["first_station_frame"]
             .as_u64()
             .expect("first station frame");
@@ -987,7 +987,7 @@ fn recorder_a_limit_crossing_is_marked_and_recording_goes_on() {
         1,
         "the row's overload indicator latches once"
     );
-    let rec = json_at(&root.join("rec_0001").join("recorder.json"));
+    let rec = json_at(&root.join("rec_0001").join("stream.json"));
     assert_eq!(
         rec["marks"].as_array().unwrap().len(),
         4,

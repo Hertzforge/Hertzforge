@@ -59,6 +59,7 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
     'filter_data': (_HISTORY, ''),
     'truncate_data': (_HISTORY, ''),
     'resample': (_HISTORY, ''),
+    'rescale': (_HISTORY, ''),
     'detect_shocks': (_HISTORY, ''),
     'compute_spectra': (_HISTORY, ''),
     'compute_psds': (_HISTORY, ''),
@@ -89,6 +90,10 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 
 #: the rows that read a geometry's nodes, off until it has some
+#: operations whose blank records are every record, so that a row with none picked runs at
+#: once: CMIF plots the whole FRF (Brandon, 2026-11-14)
+EVERY_RECORD = frozenset(('project.cmif',))
+
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
 
 #: an object param that takes this many types takes anything: it says nothing
@@ -126,6 +131,13 @@ def _cross_terms(project: Any, name: str) -> str:
 
     data = project[name]
     return 'It needs cross terms' if isinstance(data, Psd) and data.reference_dof is None else ''
+
+
+def _fittable(project: Any, name: str) -> str:
+    """Why Fit Modes, which fits every record, cannot fit this FRF (`fit_refusal`)."""
+    from hertzforge.core.modal_fit import fit_refusal
+
+    return fit_refusal(project[name])
 
 
 def _solids(project: Any, name: str) -> str:
@@ -171,6 +183,7 @@ WHEN: dict[str, tuple[str, Callable[[Any, str], str]]] = {
     'project.remove_shock': ('history', _shocks_to_unmark),
     'project.truncate_data': ('source', _span),
     'project.sensors': ('table', _sensors_placed),
+    'project.fit_modes': ('frf', _fittable),
 }
 
 #: why the core (`Project.selection_verbs`) turns down a pair, where the verb's own reason
@@ -347,10 +360,12 @@ def _fit_refusal(project: Any, names: list[str], records: dict[str, list[int]]) 
 
 
 def _fit_rows(kinds: list[str], reason: str = '') -> list[dict[str, Any]]:
-    """The fitting screen's way in, which is not an operation: an FRF to fit by
-    hand, or an FRF with the shape set to go on editing."""
+    """The fitting screen's way in, which is not an operation: an FRF to fit, or an
+    FRF with the shape set to go on editing. Every fit is made on the fitting screen,
+    one mode at a time; the band fit (`project.fit_modes`) is not offered (Brandon,
+    2026-11-14)."""
     if kinds == ['frf']:
-        return [_row('self.fit', 'Fit by Hand', 'self', reason, modules=['modal'])]
+        return [_row('self.fit', 'Fit Modes', 'self', reason, modules=['modal'])]
     if sorted(kinds) == ['frf', 'shape_set']:
         return [_row('self.edit_fit', 'Edit Fit', 'self', reason, modules=['modal'])]
     return []
@@ -403,6 +418,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         picks = [records.get(name, []) for name in fill.values()]
         if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
             fill['records'] = _runs(next(r for r in picks if r))
+        elif op.id in EVERY_RECORD:
+            # nothing picked is every record: the row runs at once, with no form
+            fill['records'] = ''
         if where in ('mate', 'solid', 'group') and part:
             # what is picked in the tree is what the row acts on
             picked = verbs.picked_ids(part)
@@ -428,6 +446,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 (where, f'{where}s', 'family')) if key in fill]
             if picked_fields:
                 more['omit'] = picked_fields
+        if op.id == 'project.view_entities':
+            # a part's Edit opens its own table (Brandon, 2026-11-13)
+            fill['kind'] = {'part:nodes': 'nodes', 'part:coordinate_systems': 'coordinate_systems',
+                            'family': 'elements', 'group': 'groups'}[where]
+            # every field filled, so the row opens the table at once rather than a form
+            fill.setdefault('family', '')
+            fill.setdefault('groups', '')
+            more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'kind', 'family',
+                                               'groups']))
         if op.id == 'project.mesh_solids' and where == 'solid':
             # the solids picked, all at one size: the size they are likely to hold at,
             # as shells when every one is flat
@@ -442,6 +469,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             more['instant'] = True
         if op.id == 'project.save_as':
             more['formats'] = export_formats(project[fill['object']])
+        if op.id == 'project.mate_surfaces':
+            # one pane makes a mate from the groups picked and edits the mate picked
+            # (Brandon, 2026-11-11)
+            if where == 'mate':
+                fill.update(_mate_fill(project[fill['geometry']], int(fill['mate'])))
+                more['omit'] = [*more.get('omit', []), 'groups', 'tolerance', 'patch']
+                rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
+                continue
+            more['omit'] = [*more.get('omit', []), 'mate']
         rows.append(_op_row(op, fill=fill, **more))
     if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:
         edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)
@@ -485,6 +521,25 @@ def _solid_edit_row(project: Any, geometry: str, solid_id: Any,
                   live=True)
     row['verb'] = 'Edit'
     return row
+
+
+def _mate_fill(geometry: Any, mate_id: int) -> dict[str, str]:
+    """Mate Surfaces opened on a kept mate: its name and how it holds, each stiffness in
+    the display units."""
+    from hertzforge.core import mates
+
+    from . import display_units
+
+    try:
+        mated = mates.find(geometry, mate_id)
+    except ValueError:
+        return {}
+    fill = {'name': mated.name, 'normal': mated.normal_mode, 'shear': mated.shear_mode}
+    scale = display_units.words_in('force/length')[1]
+    for side in ('normal', 'shear'):
+        if getattr(mated, f'{side}_mode') == 'stiffness':
+            fill[f'{side}_stiffness'] = f'{getattr(mated, f"{side}_stiffness") * scale:.6g}'
+    return fill
 
 
 def _mesh_fill(project: Any, geometry: str, ids: list[Any]) -> dict[str, str]:

@@ -6,6 +6,9 @@
 	import type { AppState } from '$lib/app/state.svelte';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ProjectTree from './ProjectTree.svelte';
+	import RunFolderActions from '$lib/acquire/RunFolderActions.svelte';
+	import { runRecordFolder } from './files';
+	import { canDragOut } from './files';
 
 	interface Props {
 		app: AppState;
@@ -15,7 +18,29 @@
 	const p = $derived(app.project);
 	/** An unresolved reference whose drop waits on a second click. */
 	let confirming = $state<string | null>(null);
+	// one run record picked whose run folder is there: its folder's actions
+	const runFolder = $derived(runRecordFolder(p.summary?.objects ?? [], p.selection.objects));
 	const fraction = $derived(p.progress && p.progress.total > 0 ? p.progress.done / p.progress.total : null);
+
+	// The project row dragged a few pixels starts the system's drag of a copy of the project, to
+	// drop in a folder and save it there (Brandon, 2026-11-11). In the desktop app only.
+	let pressed: { x: number; y: number } | null = null;
+	let holding = false;
+	function projectDown(e: PointerEvent) {
+		if (e.button !== 0 || !canDragOut()) return;
+		pressed = { x: e.clientX, y: e.clientY };
+		holding = true;
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+	function projectMove(e: PointerEvent) {
+		if (!pressed || Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) < 6) return;
+		pressed = null;
+		void p.dragOut({ project: true }, () => holding).finally(() => (holding = false));
+	}
+	function projectUp() {
+		pressed = null;
+		holding = false;
+	}
 </script>
 
 <section class="project" aria-labelledby="project-title" data-testid="project-panel">
@@ -44,7 +69,7 @@
 
 	{#if p.summary}
 		<!-- the project itself, picked: nothing in the tree, and the action table offers the project's acts (Save, Open, Import) -->
-		<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title="The project: Save, Open, Import and the acts that take no object" onclick={() => p.clearSelection()}>
+		<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Drag it to a folder to save a copy there.' : 'The project: Save, Open, Import and the acts that take no object'} onclick={() => p.clearSelection()} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
 			<span class="ctitle">
 				{p.summary.title}
 				{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
@@ -54,6 +79,12 @@
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
 			{#if p.summary.objects.length}
 				<ProjectTree {app} />
+			{/if}
+			{#if runFolder}
+				<div class="runfolder" data-testid="project-run-folder">
+					<p class="cdesc mono" title={runFolder}>{runFolder}</p>
+					<RunFolderActions folder={runFolder} files={app.runFiles} deletable />
+				</div>
 			{/if}
 			{#if p.summary.unresolved?.length}
 				<ul class="objects" aria-label="Unresolved references" data-testid="project-unresolved">
@@ -112,6 +143,21 @@
 
 
 
+
+	.runfolder {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		margin: var(--sp-2) 0;
+	}
+
+	.runfolder .cdesc {
+		flex-basis: 100%;
+		font-size: var(--text-2xs);
+		color: var(--text-3);
+		word-break: break-all;
+		user-select: text;
+	}
 
 	.hint {
 		font-size: var(--text-xs);

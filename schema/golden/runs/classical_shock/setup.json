@@ -1,0 +1,232 @@
+{
+  "config": {
+    "title": "Golden Classical Shock",
+    "operator": "Operator",
+    "article": "Bracket",
+    "notes": "the golden run folder",
+    "specification": {
+      "document": "Example procedure",
+      "clause": "4.2"
+    },
+    "pulse": {
+      "shape": "half_sine",
+      "amplitude_g": 1,
+      "duration_ms": 11
+    },
+    "acquisition": {
+      "fs_hz": 2048,
+      "srs": {
+        "f_lo_hz": 20,
+        "f_hi_hz": 800,
+        "bands_per_octave": 3,
+        "band_tol_db": 3
+      }
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels_db": [
+        -6,
+        0
+      ],
+      "pulses": [
+        1,
+        1
+      ],
+      "advance": "count"
+    },
+    "spacing": {
+      "cooling_s": 0.05,
+      "settling_s": 0,
+      "compute_s": 0
+    },
+    "identification": {
+      "duration_s": 0.5,
+      "nfft": 512,
+      "band_hz": [
+        4,
+        800
+      ],
+      "review": false
+    },
+    "control": {
+      "band_hz": [
+        4,
+        800
+      ]
+    },
+    "limits": {
+      "drive_vpk_ceiling": 2,
+      "drive_vpk_abort": 3
+    }
+  },
+  "resolved": {
+    "pulse": {
+      "shape": "half_sine",
+      "amplitude_g": 1,
+      "duration_ms": 11,
+      "polarity": "positive",
+      "rise_frac": null,
+      "fall_frac": null,
+      "compensation": {
+        "shape": "rectangular",
+        "pre_frac": 4,
+        "post_frac": 4,
+        "symmetric": true
+      },
+      "unit": "g"
+    },
+    "tolerance": {
+      "standard": "mil_std_810_516",
+      "amplitude_frac_of_peak": 0.15,
+      "velocity_change_frac": 0.1,
+      "window_pre_frac": 0.4,
+      "window_post_frac": 0.4,
+      "tolerance_abort": "full_level",
+      "overshoot_abort": 0.3,
+      "srs_band_db": 3
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels_db": [
+        -6,
+        0
+      ],
+      "pulses": [
+        1,
+        1
+      ],
+      "start_db": -6,
+      "advance": "count",
+      "max_pulses_per_level": 5,
+      "max_pulses": 100
+    },
+    "spacing": {
+      "cooling_s": 0.05,
+      "settling_s": 0,
+      "compute_s": 0,
+      "spacing_s": 0.05
+    },
+    "identification": {
+      "drive_vrms": 0.05,
+      "duration_s": 0.5,
+      "nfft": 512,
+      "band_hz": [
+        4,
+        800
+      ],
+      "min_mean_coherence": 0.8,
+      "review": false
+    },
+    "control": {
+      "law": {
+        "id": "fd_correct",
+        "params": {}
+      },
+      "band_hz": [
+        4,
+        800
+      ],
+      "coherence_floor": 0.9,
+      "tikhonov_floor": 0.01,
+      "ref_floor_db": 50,
+      "min_band_energy": 0.9,
+      "law_budget": 0.25,
+      "law_misses": 3,
+      "max_peak_rise_db": 10,
+      "max_bin_rise_db": 10,
+      "first_drive_ratio": 2,
+      "divergence_pulses": 3,
+      "controller": {
+        "sysid": {
+          "excitation": "Random",
+          "drive_rms": 0.05,
+          "duration_s": 0.5,
+          "nfft": 512,
+          "f_lo_hz": 4.0,
+          "f_hi_hz": 800.0,
+          "min_mean_coherence": 0.8
+        },
+        "band_lo_hz": 4.0,
+        "band_hi_hz": 800.0,
+        "inverse": {
+          "tikhonov_beta_floor": 0.01,
+          "coherence_floor": 0.9
+        },
+        "ref_floor_db": 50.0,
+        "min_band_energy": 0.9,
+        "review_hold": false,
+        "guards": {
+          "budget_fraction": 0.25,
+          "max_misses": 3,
+          "max_pulses": 100
+        },
+        "max_peak_rise_db": 10.0,
+        "max_bin_rise_db": 10.0,
+        "first_drive_ratio": 2.0,
+        "drive_vpk_ceiling": 2.0,
+        "drive_vpk_abort": 3.0,
+        "overshoot_abort": null,
+        "tolerance_abort": "full_level",
+        "divergence_pulses": 3,
+        "polarity": "positive"
+      }
+    },
+    "limits": {
+      "drive_vpk_ceiling": 2,
+      "drive_vpk_abort": 3,
+      "peak_accel_g": null,
+      "monitors": []
+    },
+    "srs": {
+      "f_lo_hz": 20,
+      "f_hi_hz": 800,
+      "bands_per_octave": 3,
+      "band_tol_db": 3,
+      "q": 10,
+      "kind": "maximax",
+      "pvss": false
+    },
+    "train": {
+      "count": 1,
+      "spacing_s": 0
+    },
+    "gunfire": null,
+    "acquisition": {
+      "requested_fs_hz": 2048,
+      "fs_hz": 2048,
+      "record_len": 256
+    },
+    "control_channel": 1,
+    "drive_channel": 3
+  },
+  "derived": {
+    "grid": {
+      "fs_hz": 2048,
+      "record_len": 256,
+      "actual": false
+    },
+    "reference": {
+      "peak_g": 1,
+      "velocity_change_ips": 2.6359,
+      "displacement_pk_pk_in": 0.034261,
+      "main_start": 104,
+      "main_len": 23
+    },
+    "quiet_window": {
+      "worst_frac": 0.0764,
+      "limit_frac": 0.15,
+      "inside": true
+    },
+    "spacing_s": 0.05,
+    "call_budget_s": 0.0125,
+    "feasibility": {
+      "verdict": "not_evaluated",
+      "message": "No shaker was given, so the pulse was not checked against shaker ratings."
+    }
+  },
+  "feasibility": {
+    "inputs": null,
+    "verdict": "not_evaluated",
+    "message": "The shaker record lacks the ratings to check this pulse against."
+  }
+}

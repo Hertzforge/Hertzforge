@@ -22,6 +22,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
         LawWorld::ShockSrs => "shock_srs",
         LawWorld::Sine => "sine",
         LawWorld::Twr => "twr",
+        LawWorld::ShockMimo => "shock_mimo",
     }
 }
 
@@ -173,20 +174,27 @@ fn entry_json_common(e: &CatalogEntry) -> Value {
 }
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
-/// first, then multiple-output Random, then classical shock, then SRS shock, then
-/// Sine, then TWR).
+/// first, then multiple-output Random, then MIMO Shock, then classical shock, then
+/// SRS shock, then Sine, then TWR).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
     for w in [
         LawWorld::Single,
         LawWorld::Mimo,
+        LawWorld::ShockMimo,
         LawWorld::ShockClassical,
         LawWorld::ShockSrs,
         LawWorld::Sine,
         LawWorld::Twr,
     ] {
         if world.is_none_or(|x| x == w) {
-            laws.extend(catalog.entries_for(w).iter().map(entry_json));
+            if w == LawWorld::ShockMimo {
+                // The built-ins first, then the imported files, each with the
+                // target kinds it accepts.
+                laws.extend(crate::mimo_shock::laws::list(catalog));
+            } else {
+                laws.extend(catalog.entries_for(w).iter().map(entry_json));
+            }
         }
     }
     json!({
@@ -208,10 +216,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         Some("shock_srs") => Ok(Some(LawWorld::ShockSrs)),
         Some("sine") => Ok(Some(LawWorld::Sine)),
         Some("twr") => Ok(Some(LawWorld::Twr)),
+        Some("shock_mimo") => Ok(Some(LawWorld::ShockMimo)),
         Some(_) => Err(MethodError::bad_params(
             "world",
             "\"world\" is \"single\", \"mimo\", \"shock_classical\", \"shock_srs\", \
-             \"sine\" or \"twr\", or absent for every world",
+             \"sine\", \"twr\" or \"shock_mimo\", or absent for every world",
         )),
     }
 }
@@ -303,6 +312,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Err("Sine"),
             LawWorld::Twr => Err("TWR"),
+            LawWorld::ShockMimo => Err("MIMO Shock"),
         },
         params: e.manifest.params.clone(),
     }
@@ -350,6 +360,7 @@ pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockSrs => Ok(()),
             LawWorld::Sine => Err("Sine"),
             LawWorld::Twr => Err("TWR"),
+            LawWorld::ShockMimo => Err("MIMO Shock"),
         },
         params: e.manifest.params.clone(),
     }
@@ -398,6 +409,7 @@ pub fn sine_facts(e: &CatalogEntry) -> crate::sine::config::LawFacts {
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Ok(()),
             LawWorld::Twr => Err("TWR"),
+            LawWorld::ShockMimo => Err("MIMO Shock"),
         },
         params: e.manifest.params.clone(),
         live: e.live.clone(),
@@ -436,6 +448,7 @@ pub fn twr_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::ShockSrs => Err("SRS shock"),
             LawWorld::Sine => Err("Sine"),
             LawWorld::Twr => Ok(()),
+            LawWorld::ShockMimo => Err("MIMO Shock"),
         },
         params: e.manifest.params.clone(),
     }
@@ -480,6 +493,7 @@ fn world_words(world: LawWorld) -> &'static str {
         LawWorld::ShockSrs => "SRS shock",
         LawWorld::Sine => "Sine",
         LawWorld::Twr => "TWR",
+        LawWorld::ShockMimo => "MIMO Shock",
     }
 }
 
@@ -559,4 +573,29 @@ pub fn mixed_lookup(
     }
     (want == LawWorld::Sine && id == SINE_BUILTIN_ID)
         .then(|| mixed_role_facts(&builtin_sine_entry(), want, Ok(())))
+}
+
+#[cfg(test)]
+mod mimo_shock_tests {
+    use super::*;
+
+    #[test]
+    fn mimo_shock_the_world_is_named_and_parsed() {
+        assert_eq!(world_name(LawWorld::ShockMimo), "shock_mimo");
+        assert_eq!(
+            world_name(LawWorld::ShockMimo),
+            LawWorld::ShockMimo.as_str()
+        );
+        let mut p = Map::new();
+        p.insert("world".into(), json!("shock_mimo"));
+        assert_eq!(parse_world(&p).unwrap(), Some(LawWorld::ShockMimo));
+        p.insert("world".into(), json!("mimo_shock"));
+        let e = parse_world(&p).unwrap_err();
+        assert!(format!("{e:?}").contains("shock_mimo"), "{e:?}");
+    }
+
+    #[test]
+    fn mimo_shock_laws_are_refused_by_every_single_output_world() {
+        assert_eq!(world_words(LawWorld::ShockMimo), "MIMO Shock");
+    }
 }

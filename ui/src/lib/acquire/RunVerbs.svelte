@@ -11,6 +11,9 @@
 	import Icon from '$lib/shell/Icon.svelte';
 	import type { Snippet } from 'svelte';
 	import type { ActionId, RunBarHost } from './actions';
+	import SetupOriginNote from './setupFiles/SetupOriginNote.svelte';
+	import RestoredTable from './RestoredTable.svelte';
+	import { acquireTable } from './store.svelte';
 	import { db } from './words';
 
 	interface Props {
@@ -62,6 +65,8 @@
 	}
 
 	const shown = (id: ActionId) => a[id].visible && !omit.includes(id);
+	/** The window's channel table: a restored one is said beside Arm, with Review and Apply. */
+	const tableState = acquireTable();
 </script>
 
 <div class="actions" class:card={layout === 'card'} class:compact>
@@ -88,6 +93,8 @@
 		{@render verb('proceed', 'Proceed', 'play', () => acq.proceed(), 'act-proceed')}
 		{@render verb('reset', 'New Run', 'reset', () => acq.reset(), 'act-reset')}
 	</div>
+	<SetupOriginNote host={acq} />
+	{#if tableState}<RestoredTable acq={tableState} compact />{/if}
 
 	{#if verbs}{@render verbs()}{/if}
 

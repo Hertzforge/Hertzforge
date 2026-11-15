@@ -159,7 +159,11 @@ def test_a_verb_that_cannot_run_says_why(plate):
 
 def test_an_frf_starts_a_fit_in_modal_only(plate):
     first = table(plate, named(plate, 'frf'))[0]
-    assert row(first, 'Fit by Hand')['modules'] == ['modal']
+    # one Fit Modes, the fitting screen: the band fit is not offered (Brandon, 2026-11-14)
+    fit = row(first, 'Fit Modes')
+    assert fit['id'] == 'self.fit' and fit['modules'] == ['modal']
+    assert [r['id'] for r in first['rows']].count('self.fit') == 1
+    assert 'project.fit_modes' not in [r['id'] for r in first['rows']]
     edit = row(column(table(plate, named(plate, 'frf')), 'frf', 'shape_set'), 'Edit Fit')
     assert edit['modules'] == ['modal']
 
@@ -376,7 +380,10 @@ def test_a_mate_picked_in_the_tree_fills_the_rows_that_act_on_it(plate, validate
     found = project.mate_surfaces('Part')
     picked = {'name': 'Part', 'kind': 'mate', 'id': found[0]}
     (current, *_rest) = table(plate, 'Part', part=picked, validate=validate)
-    assert row(current, 'Edit Sides')['fill']['mate'] == str(found[0])
+    edit = row(current, 'Edit')
+    assert edit['id'] == 'project.mate_surfaces' and edit['fill']['mate'] == str(found[0])
+    assert edit['fill']['name'] == 'base on lid' and edit['fill']['normal'] == 'rigid'
+    assert {'groups', 'tolerance', 'patch'} <= set(edit['omit'])
     assert row(current, 'Delete Mates')['fill']['mates'] == str(found[0])
 
 
@@ -623,10 +630,17 @@ def test_a_group_with_no_shells_is_not_asked_for_a_thickness(plate):
     solid = projects.new({'title': 'x'})
     solid.project.new_geometry('Part', unit='m')
     for op_id, given in (('project.add_solid_block', {}),
-                         ('project.mesh_solids', {'size': 0.5, 'keep': True})):
+                         ('project.mesh_solids', {'size': 0.5})):
         OPS[op_id].run(solid.project, OPS[op_id].resolve(
             {'geometry': 'Part', **given}, objects={'Part': 'geometry'}, verbs={'Part': []}))
     hexes = row(table(solid, 'Part', part={'name': 'Part', 'kind': 'group', 'id': 1})[0],
                 'Set Properties')
     # nor for the groups: the ones picked in the tree are the ones it sets
     assert hexes['omit'] == ['groups', 'thickness'] and hexes['fill']['groups'] == '1'
+
+
+def test_cmif_plots_the_whole_frf_with_no_form(plate):
+    """Nothing picked is every record, so the row runs at once (Brandon, 2026-11-14)."""
+    frf = named(plate, 'frf')
+    cmif = next(r for r in table(plate, frf)[0]['rows'] if r['id'] == 'project.cmif')
+    assert cmif['ready'] and cmif['fill']['records'] == '' and cmif['fill']['frf'] == frf

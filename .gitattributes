@@ -1,3 +1,7 @@
 # the report viewer is a build output checked byte for byte against the UI's build (ci.yml): never
 # converted to CRLF on checkout
 src/hertzforge/report/viewer.html -text
+# a golden run folder's samples and result values are little-endian numbers, compared
+# value by value: never converted on checkout
+schema/golden/runs/**/*.f32 binary
+schema/golden/runs/**/*.bin binary

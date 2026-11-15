@@ -61,17 +61,19 @@ impl Service {
     fn new_driver(&self, ctx: &StartContext) -> Box<dyn crate::mimo::driver::MimoRunDriver> {
         match &self.opts.mimo_driver {
             Some(f) => f(ctx),
-            None => Box::new(crate::mimo::adapter::ServiceDriver::new(
-                crate::mimo::adapter::AdapterOptions {
+            None => Box::new(
+                crate::mimo::adapter::ServiceDriver::new(crate::mimo::adapter::AdapterOptions {
                     data_root: self.opts.data_root.clone(),
-                    capture_root: self.opts.capture_root.clone(),
+                    capture_root: Some(self.opts.records_root()),
                     sim_speed: self.opts.sim_speed,
                     scanner: self.opts.scanner.clone(),
                     bind: self.opts.bind.clone(),
                     catalog: Some(self.catalog.clone()),
                     law_factory: None,
-                },
-            )),
+                    record: self.opts.record.clone(),
+                })
+                .on_station(ctx),
+            ),
         }
     }
 
@@ -128,6 +130,9 @@ impl Service {
             kind,
             table: Some(table_now),
             ni_devices,
+            run_id: String::new(),
+            revision: 0,
+            devices: Vec::new(),
         };
         let parsed = Arc::new(parsed);
         let mut driver = self.new_driver(&ctx);
@@ -278,6 +283,7 @@ impl Service {
                     "A simulation is running; stop it first.",
                 ));
             }
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(
@@ -293,6 +299,9 @@ impl Service {
                 },
                 table: Some(inner.table.table.clone()),
                 ni_devices: ni_devices(inner.stations.selected()),
+                run_id: run.id.clone(),
+                revision: inner.table.revision,
+                devices: inner.stations.devices().to_vec(),
             };
             (run, ctx)
         };

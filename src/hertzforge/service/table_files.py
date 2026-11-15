@@ -22,7 +22,8 @@ from .protocol import bad_request, not_found, refused
 TABLE_METHODS = ('tables.save', 'tables.load')
 
 #: the params each takes
-PARAMS = {'tables.save': ('kind', 'table_kind', 'columns', 'rows', 'path', 'x_unit', 'y_unit'),
+PARAMS = {'tables.save': ('kind', 'table_kind', 'columns', 'rows', 'path', 'x_unit', 'y_unit',
+                          'channels', 'environments'),
           'tables.load': ('path', 'kind', 'table_kind', 'x_unit', 'y_unit')}
 
 
@@ -56,6 +57,8 @@ def request(method: str, params: Any) -> dict[str, Any]:
                            'warnings': table.warnings}
     if table.kind == 'breakpoints':
         out.update(x_unit=table.x_unit, y_unit=table.y_unit)
+    else:
+        out.update(channels=table.channels, environments=table.environments)
     return out
 
 
@@ -85,9 +88,23 @@ def _units(params: Mapping[str, Any], kind: str, method: str) -> tuple[str | Non
 
 
 def _table(params: Mapping[str, Any], kind: str, table_kind: str | None) -> tables.Table:
+    if kind != 'channels' and ('channels' in params or 'environments' in params):
+        raise bad_request('tables.save: "channels" and "environments" are a channel table\'s')
+    environments = params.get('environments')
+    if environments is not None and not isinstance(environments, Mapping):
+        raise bad_request('tables.save "environments" is an object of control loops by name')
+    if 'channels' in params:
+        if 'columns' in params or 'rows' in params:
+            raise bad_request('tables.save takes a channel table as "channels" or as '
+                              '"columns" and "rows", not both')
+        if not isinstance(params['channels'], list):
+            raise bad_request('tables.save "channels" is a list of channel rows')
+        return tables.Table(kind, [], [], channels=list(params['channels']),
+                            environments=environments)
     columns, rows = params.get('columns'), params.get('rows')
     if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
         raise bad_request('tables.save "columns" is a list of column names')
     if not isinstance(rows, list) or not all(isinstance(r, list) for r in rows):
         raise bad_request('tables.save "rows" is a list of rows, each a list of values')
-    return tables.Table(kind, columns, rows, table_kind, *_units(params, kind, 'tables.save'))
+    return tables.Table(kind, columns, rows, table_kind, *_units(params, kind, 'tables.save'),
+                        environments=environments)

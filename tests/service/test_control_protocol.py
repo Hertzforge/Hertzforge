@@ -28,6 +28,11 @@ PAYLOADS = {
     'event_random_log': ('data', 'randomLogEvent'),
     'response_error_controller_held': ('error', None),
     'response_error_table_invalid': ('error.detail', 'report'),
+    'request_channels_set_restored': ('params', 'channelsSetParams'),
+    'response_channels_get_restored': ('result', 'channelTable'),
+    'response_error_table_not_applied': ('error.detail.restored', 'restoredTable'),
+    'request_channels_apply': ('params', 'channelsApplyParams'),
+    'response_channels_apply': ('result', 'channelsApplyResult'),
 }
 
 
@@ -149,6 +154,27 @@ def test_channel_rows_carry_every_field(validate):
     _refused(validate, {**row, 'interface': 'icp'}, 'channelRow')
 
 
+#: a channel row's optional members, each with a value it holds and one it refuses
+OPTIONAL_ROW_MEMBERS = {
+    'node': (101, -1), 'direction': ('Z+', 3), 'channel_type': ('acceleration', None),
+    'analysis_role': ('response', 'drive'), 'daq_range_v': (5.0, 0),
+    'sensor_range_v': (None, -1), 'serial_number': ('0042', 42), 'make': ('Maker', None),
+    'model': ('M-1', None), 'triax_dof': ('Z', None), 'expiration': ('2027-03-01', None),
+    'analysis_tier': ('decimated:8', 'decimated:0'), 'limit': (True, 'yes'),
+    'extra': ({'bay': '3'}, {'bay': 3}),
+}
+
+
+def test_channel_rows_may_carry_the_analysis_columns(validate):
+    row = _text('response_channels_get')['result']['channels'][0]
+    full = {**row, **{k: good for k, (good, _bad) in OPTIONAL_ROW_MEMBERS.items()}}
+    validate(full, 'channelRow')
+    for member, (_good, bad) in OPTIONAL_ROW_MEMBERS.items():
+        validate({k: v for k, v in full.items() if k != member}, 'channelRow')
+        _refused(validate, {**full, member: bad}, 'channelRow')
+    _refused(validate, {**full, 'save': True}, 'channelRow')
+
+
 def test_finished_runs_say_how_they_ended(validate):
     state = _text('event_random_state')['data']
     _refused(validate, {**state, 'end': None}, 'randomState')
@@ -210,3 +236,23 @@ def test_live_views_come_in_their_stated_order(validate):
     control, drive, reading = live['views']
     _refused(validate, {**live, 'views': [reading, control, drive]}, 'randomLive')
     _refused(validate, {**live, 'views': [control, drive]}, 'randomLive')
+
+
+def test_a_table_source_is_a_project_or_a_file_with_a_name(validate):
+    params = _text('request_channels_set_restored')['params']
+    validate(params, 'channelsSetParams')
+    for source in ({'kind': 'kept', 'name': 'x'}, {'kind': 'project'},
+                   {'kind': 'file', 'name': ''}, 'bench.csv'):
+        _refused(validate, {**params, 'source': source}, 'channelsSetParams')
+    validate({**params, 'source': None}, 'channelsSetParams')
+
+
+def test_a_restored_table_names_where_it_came_from_and_when(validate):
+    restored = _text('response_channels_get_restored')['result']['restored']
+    assert restored['at'].endswith(' UTC')
+    for key in ('source', 'name', 'at_unix', 'at'):
+        _refused(validate, {k: v for k, v in restored.items() if k != key}, 'restoredTable')
+    _refused(validate, {**restored, 'source': 'guess'}, 'restoredTable')
+    error = _text('response_error_table_not_applied')['error']
+    assert error['reason'] == 'table_not_applied'
+    assert restored['name'] in error['message'] and restored['at'] in error['message']

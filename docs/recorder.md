@@ -18,9 +18,9 @@ other test types.
 2. **Monitoring.** The service reads the station in batches of two blocks (512 frames, 40 ms, at
    12,800 Hz on the NI station) and, between batches, shows every recorded row's rms, peak, time
    history and spectrum, and the FRF of one pair of rows when the setup names one.
-3. **Recording.** A recording is a folder of its own in the run folder: the samples of every
-   recorded row, at the rate the station runs at, and the recording's facts. Recordings are written
-   by the run's own record thread, never by the thread that reads the station.
+3. **Recording.** A recording is a stream of the run folder (`streams/rec_NNNN/`): the samples of
+   every recorded row, at the rate the station runs at, and the recording's facts. Recordings are
+   written by the run's own record thread, never by the thread that reads the station.
 4. **End.** The operator stops or aborts the run, or the run ends because it cannot write, the disk
    falls behind, the station fails, or nobody holds control. Every end finishes every recording with
    every frame acquired; nothing is discarded.
@@ -133,8 +133,8 @@ service's own numbers for the setup as it stands.
 - **Title:** the run's name.
 - **Run folder:** a plain name, under the program's local data folder (the folder named by
   `HERTZFORGE_DATA_ROOT`, else `Hertzforge_Data` in your home folder). A name already taken gets the
-  first free `<name>-<n>`, so no run writes over another. The run's log names the folder at start, and
-  the card names it at the end.
+  first free `<name>-<n>`, so no run writes over another. The run's state names the folder from start
+  on (`record.folder`), the run's log names it at start, and the card names it at the end.
 - **Keep free on the data volume:** the free space the run leaves, in GiB, at least 1. With a timed
   length the floor is also at least twice one recording's bytes. A start with less free space than
   the floor is refused, naming both numbers, and makes nothing.
@@ -238,38 +238,57 @@ log.
 
 ## What a Recording Holds
 
-The run folder:
+The run folder is a run folder like a Random run's (`docs/run-folder.md`, "What a Recorder Run
+Saves"), and the analysis side opens it: **Open** or **Import** the folder, or
+`hertzforge convert-run FOLDER`, gives a project with the channel table, each recording as a time
+history and the run record.
 
 ```
 <run folder>/run.json
+             table.json
+             setup.json
              log.jsonl
-             marks.jsonl
              end.json
-             recordings/rec_0001/telemetry.f32
-                                 capture.json
-                                 recorder.json
+             streams/rec_0001/telemetry.f32
+                              stream.json
+                              capture.json
 ```
 
-- `run.json`, written at start: the configuration as sent, the station, the rate asked and the rate
-  programmed, the group delay, the outputs ("none"), each recorded row (its index, description, role,
-  unit and range) in column order, the service's derived numbers at the programmed rate, and the
-  overload indicator's definition.
-- `log.jsonl` and `marks.jsonl`: a line for every log entry and every mark.
-- `end.json`, written when the run finishes: how it ended, the frames acquired, and each recorded
-  row's mean, rms, peak, crest factor and kurtosis over the whole run.
-- `recordings/rec_NNNN/`, numbered from `rec_0001` in the order they began:
+- `run.json`, written at start: the run's identity, its title, operator, article, notes and
+  specification, the fields kept with the run, the source (simulator or hardware), the station with
+  its devices and serial numbers, the rate asked and the rate programmed with the block, the batch
+  and the group delay, the build, the start with its offset from UTC, each recording as it begins,
+  and whether the run has ended.
+- `table.json`: every row of the channel table the run started with.
+- `setup.json`: the configuration as sent, what the service made of it (the rate programmed, each
+  recorded row with its range, the outputs ("none"), the trigger with its hysteresis and its frames,
+  the analysis, the floor), the derived numbers at the programmed rate, and the overload
+  indicator's definition.
+- `log.jsonl`: a line for every log entry, with the station frame when it was written to the record
+  (ten times a second); a mark's line has the mark's own station frame and holds the mark (its row,
+  its value, its limit or level and its recording).
+- `end.json`, written when the run finishes: how it ended, the frames acquired, each recorded row's
+  mean, rms, peak, crest factor and kurtosis over the whole run, and each recording's frames, gaps
+  and fault.
+- `streams/rec_NNNN/`, numbered from `rec_0001` in the order they began:
   - `telemetry.f32`: no header; little-endian 32-bit floats, one frame after another, each frame one
     value per recorded row in the run's row order, in the row's unit, at the rate the station
     programmed. The file's size is the authority on its length: its frames are its size over 4 times
     the rows.
+  - `stream.json`: the recording's facts: its name and trigger mode, the rate asked and programmed,
+    the group delay, the rows and their units, its first station frame and its trigger's, the
+    pre-window held and asked, the frames written, every gap (where in the file and how many frames),
+    the marks inside it, any fault, what the writer did (its chunks, flushes and floor), and
+    `complete`.
   - `capture.json`: the writer's own record: the channel table at capture time, the programmed rate,
     the frames written, the chunks dropped, the flushes, the free-space floor, whether it is complete
     and any fault.
-  - `recorder.json`: the recording's facts: its name and trigger mode, the rate asked and programmed,
-    the group delay, the rows and their units, its first station frame and its trigger's, the
-    pre-window held and asked, the frames written, every gap (where in the file and how many frames),
-    the marks inside it, any fault, and `complete`.
+
+In the analysis side a recording's time is measured from its trigger, so its pre-window is at
+negative time, and a gap is never padded: the samples after it follow on, and the history says where
+each gap was and how many frames it lost.
 
 At 12,800 Hz four rows write 204,800 bytes a second, about 737 MB an hour. The record thread flushes
 and syncs the data every 5 s, so a crash of the computer or the service loses at most the last 5 s. A
-recording found with `complete` false was cut short that way; its file holds what reached the disk.
+recording found with `complete` false was cut short that way; its file holds what reached the disk,
+and a run folder whose `run.json` says `complete` false did not end cleanly.

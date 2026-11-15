@@ -12,6 +12,7 @@ Each `*.bin` is one binary frame exactly as it crosses the socket. Each
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 import struct
 
@@ -229,6 +230,11 @@ def _row(index, description, role, physical, units, range_max, accel_abort=None)
             'abort': {'accel_g': accel_abort, 'velocity_ips': None, 'displacement_mil': None}}
 
 
+#: where the restored table in the golden frames came from, and when
+RESTORED = {'source': 'project', 'name': 'Bracket table', 'at_unix': 1794240000.25,
+            'at': '2026-11-09 16:00:00 UTC'}
+
+
 RANDOM_CONFIG = {
     'title': 'Qualification Random',
     'profile': {
@@ -287,6 +293,8 @@ ABORTED_STATE = {
             'at_s': 131.2, 'level_db': 0,
             'trip': {'kind': 'envelope', 'abort_lines': 14, 'worst_db': 7.2,
                      'at_level_db': 0, 'at_loop': 212}},
+    'record': {'folder': '/home/operator/Hertzforge_Data/20261101-142233_random_r-0007',
+               'streams': 'on', 'problem': None},
 }
 
 SUBSCRIBE_PLOTS = [
@@ -408,6 +416,42 @@ TEXT_GOLDENS = {
                       ],
                       'warnings': []}},
     },
+    # a table taken from a project: restored, and refused at arm until it is applied
+    'request_channels_set_restored': {
+        'type': 'request', 'id': 10, 'method': 'channels.set',
+        'params': {'revision': 3, 'source': {'kind': 'project', 'name': 'Bracket table'},
+                   'channels': [
+                       _row(1, 'Control', 'control', None, 'g', 50, accel_abort=40),
+                       _row(2, 'Drive', 'drive', None, 'V', 10)]},
+    },
+    'response_channels_get_restored': {
+        'type': 'response', 'id': 11,
+        'result': {
+            'revision': 4,
+            'channels': [
+                _row(1, 'Control', 'control', None, 'g', 50, accel_abort=40),
+                _row(2, 'Drive', 'drive', None, 'V', 10),
+            ],
+            'report': {'errors': [], 'warnings': []},
+            'restored': RESTORED,
+        },
+    },
+    'response_error_table_not_applied': {
+        'type': 'response', 'id': 12,
+        'error': {'code': 'refused', 'reason': 'table_not_applied',
+                  'message': 'The channel table (revision 4) was restored from the project '
+                             f'table "Bracket table" at {RESTORED["at"]} and has not been '
+                             'applied; review it and apply it before arming.',
+                  'detail': {'revision': 4, 'restored': RESTORED}},
+    },
+    'request_channels_apply': {
+        'type': 'request', 'id': 13, 'method': 'channels.apply', 'params': {'revision': 4},
+    },
+    'response_channels_apply': {
+        'type': 'response', 'id': 13,
+        'result': {'revision': 4, 'applied': RESTORED,
+                   'report': {'errors': [], 'warnings': []}},
+    },
     # a connection's own project: an import, its progress, and the summary back
     'request_project_import': {
         'type': 'request', 'id': 31, 'method': 'project.import',
@@ -507,6 +551,9 @@ MIMO_IM = [0.0, 0.016, 0.0] * 8
 
 MIMO_SETUP = {
     'title': 'Two-Axis Random',
+    'operator': 'A. Operator', 'article': 'Bracket, serial 7', 'notes': 'first article',
+    'specification': {'document': 'Test procedure 12', 'clause': '4.2'},
+    'record': {'streams': True},
     'channels': {
         'controls': [{'channel': 1, 'alarm_db': [3, 3], 'abort_db': [6, 6]},
                      {'channel': 2, 'alarm_db': [3, 3], 'abort_db': [6, 6]}],
@@ -545,6 +592,7 @@ def _mimo_state(**over) -> dict:
         'remaining_at_level_s': None, 'loop': 0, 'alarm': False, 'control_error_db': [],
         'gates': None, 'caps': [], 'drive_rms_v': [], 'law': MIMO_LAW_REF, 'faults': [],
         'override': None, 'overrides': [], 'prediction': None, 'excluded': [], 'end': None,
+        'record': None,
     }
     state.update(over)
     return state
@@ -579,7 +627,9 @@ MIMO_RUNNING = _mimo_state(
                 'has_achievable': False, 'unreachable_db': [0, 0], 'drive_accel': [1.25, 1.1],
                 'accel_control': [0, 1],
                 'feasibility': [{'verdict': 'pass', 'message': ''},
-                                {'verdict': 'not_evaluated', 'message': 'no shaker record'}]})
+                                {'verdict': 'not_evaluated', 'message': 'no shaker record'}]},
+    record={'folder': '/data/runs/20261113-140000_mimo_random_m-0003', 'streams': 'on',
+            'problem': None})
 
 LAW_PINV_CLOSED = {'id': 'pinv_closed',
      'world': 'mimo',
@@ -1025,7 +1075,9 @@ SHOCK_CONFIG = {
                     'residual_velocity_ips': 0.1, 'residual_disp_in': 0.001},
     'train': {'count': 5, 'spacing_s': 6},
     'gunfire': {'rounds_per_min': 30, 'rounds': 3},
-    'capture': {'auto_start': False, 'run_name': 'classical_shock'},
+    'operator': 'Operator', 'article': 'Bracket', 'notes': '',
+    'specification': {'document': 'Example procedure', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
                  {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
                  {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
@@ -1432,7 +1484,9 @@ SRS_CONFIG = {
                     'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
                                        'fixturing': 10, 'test_article': 12},
                     'residual_velocity_ips': 0.1, 'residual_disp_in': 0.001},
-    'capture': {'auto_start': False, 'run_name': 'srs_shock'},
+    'operator': 'Operator', 'article': 'Bracket', 'notes': '',
+    'specification': {'document': 'Example procedure', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
                  {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
                  {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
@@ -1859,8 +1913,9 @@ SINE_CONFIG = {
     'feasibility': {'shaker': SHOCK_SHAKER,
                     'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
                                        'fixturing': 10, 'test_article': 12}},
-    'capture': {'rule': 'off', 'first_s': None, 'level_settle_s': 1, 'periodic_save_s': None,
-                'run_name': 'sine'},
+    'operator': 'A. Operator', 'article': 'Bracket, serial 7', 'notes': 'first article',
+    'specification': {'document': 'Test procedure 12', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'},
                  {'key': 'test_article', 'label': 'Test Article', 'value': 'Bracket'},
                  {'key': 'serial_number', 'label': 'SN', 'value': '0042'},
@@ -1913,7 +1968,9 @@ SINE_RUNNING = _sine_state(
                     'lag_frames': 0, 'trusted_frac': 0.97, 'passed': True},
     law={'id': 'servo_blend', 'name': 'Servo blend', 'version': '0.1.0', 'sha256': None,
          'misses': 0, 'capped_ticks': 2, 'live': {'blend_w': 0.5}},
-    feasibility=SINE_FEASIBILITY)
+    feasibility=SINE_FEASIBILITY,
+    record={'folder': '/home/operator/Hertzforge_Data/20261101-142233_sine_sine-0003',
+            'streams': 'on', 'problem': None})
 
 #: The golden run's live numbers: a down sweep at -6 dB, three enabled inputs.
 SINE_CHANNELS = [
@@ -2311,7 +2368,9 @@ TWR_CONFIG = {
                'divergence_plays': 3, 'divergence_rise_frac': 0.1},
     'feasibility': {'peak_accel': None, 'peak_velocity_ips': None, 'disp_pkpk_in': 1.0,
                     'kinematics_hp_hz': 5},
-    'capture': {'auto_start': False, 'run_name': 'twr_run'},
+    'operator': 'Operator', 'article': 'Bracket', 'notes': '',
+    'specification': {'document': 'Example procedure', 'clause': '4.2'},
+    'record': {'streams': True},
     'metadata': TWR_METADATA,
 }
 
@@ -2506,8 +2565,11 @@ MIXED_CONFIG = {
                     'moving_mass_lb': {'armature': 45, 'slip_table': 0, 'drive_adapter': 3,
                                        'fixturing': 10, 'test_article': 12},
                     'crest_factor': 3},
-    'capture': {'rule': 'off', 'first_s': None, 'level_settle_s': 1, 'periodic_save_s': None,
-                'run_name': 'mixed'},
+    'operator': 'A. Operator',
+    'article': 'Rotor housing, serial 4',
+    'notes': 'first article',
+    'specification': {'document': 'Test procedure 12', 'clause': '4.3'},
+    'record': {'streams': True},
     'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '7'}],
 }
 
@@ -3299,7 +3361,10 @@ MIXED_BUILT_TEXT = {'response_mixed_configure': {'type': 'response',
                                 'feasibility': {'verdict': 'pass',
                                                 'message': "The test is within the shaker's "
                                                            'ratings.'},
-                                'end': None}},
+                                'end': None,
+                                'record': {'folder': '/home/operator/Hertzforge_Data/'
+                                                     '20261101-142233_mixed_mixed-0002',
+                                           'streams': 'on', 'problem': None}}},
  'response_error_mixed_config_invalid': {'type': 'response',
                                          'id': 92,
                                          'error': {'code': 'bad_request',
@@ -4891,6 +4956,11 @@ EXPLORER_CONFIG = {
     'display': {'nfft': 4096},
     'capture': {'run_name': 'explorer'},
     'metadata': EXPLORER_METADATA,
+    'operator': 'A. Operator',
+    'article': 'Bracket, SN 0042',
+    'notes': '',
+    'specification': {'document': 'Test procedure', 'clause': '4.2'},
+    'record': {'streams': True},
 }
 
 EXPLORER_STATION = {'kind': 'ni', 'class': 'ni_real',
@@ -4924,21 +4994,25 @@ def _explorer_state(**over) -> dict:
         'grid': EXPLORER_GRID, 'clock': None, 'band_hz': [20, 2000], 'max_drive_vpk': 0.5,
         'slew': EXPLORER_SLEW, 'pipeline_frames': 1063, 't_s': None, 'frequency_hz': None,
         'target_hz': None, 'drive_vpk': None, 'target_vpk': None, 'sweep': None,
-        'health': None, 'stall': None, 'stop': None, 'end': None,
+        'health': None, 'stall': None, 'stop': None, 'end': None, 'record': None,
     }
     s.update(over)
     return s
 
 
+#: The run's record, from start on (`explorer.state.record`).
+EXPLORER_RECORD = {'folder': '/home/operator/Hertzforge_Data/explorer', 'streams': 'on',
+                   'problem': None}
+
 EXPLORER_STARTED = _explorer_state(
     state='running', phase='quiet', grid=EXPLORER_GRID_ACTUAL, clock='shared', t_s=0.04,
     frequency_hz=250, target_hz=250, drive_vpk=0, target_vpk=0,
-    health=_explorer_health(2, 0.38, 1.2, 1.2, None))
+    health=_explorer_health(2, 0.38, 1.2, 1.2, None), record=EXPLORER_RECORD)
 
 EXPLORER_RUNNING = _explorer_state(
     run_id='explorer-0002', state='running', phase='steady', grid=EXPLORER_GRID_ACTUAL,
     clock='shared', t_s=41.38, frequency_hz=250, target_hz=250, drive_vpk=0.2, target_vpk=0.2,
-    health=_explorer_health(2069, 0.41, 1.9, 3.4, 4.1))
+    health=_explorer_health(2069, 0.41, 1.9, 3.4, 4.1), record=EXPLORER_RECORD)
 
 EXPLORER_HEAD = {
     'run_id': 'explorer-0002', 'source': 'HARDWARE', 'class': 'ni_real', 'state': 'running',
@@ -5185,22 +5259,25 @@ def _recorder_state(**over) -> dict:
         'mode': 'level', 't_s': None, 'station_frames': None,
         'trigger': _recorder_trigger(False, 0, 0, None, 0, 5), 'recording': None,
         'recordings': 0, 'marks': 0, 'disk': _recorder_disk(RECORDER_FREE, 519045),
-        'health': None, 'stop': None, 'end': None,
+        'health': None, 'stop': None, 'end': None, 'record': None,
     }
     s.update(over)
     return s
 
 
+#: the run's record, as the state names it from start on
+RECORDER_RECORD = {'folder': '/home/operator/Hertzforge_Data/recorder', 'problem': None}
+
 RECORDER_STARTED = _recorder_state(
     state='running', phase='monitoring', grid=RECORDER_GRID_ACTUAL, clock='shared', t_s=0.04,
-    station_frames=512, health=_recorder_health(1, 1.2, 1.2, None))
+    station_frames=512, health=_recorder_health(1, 1.2, 1.2, None), record=RECORDER_RECORD)
 
 RECORDER_RUNNING = _recorder_state(
     run_id='recorder-0002', state='running', phase='recording', grid=RECORDER_GRID_ACTUAL,
     clock='shared', t_s=11.36, station_frames=145408,
     trigger=_recorder_trigger(False, 0, 2, 134422, 1, 3), recording=RECORDER_RECORDING,
     recordings=1, disk=_recorder_disk(107373363200, 519041),
-    health=_recorder_health(284, 1.2, 2.8, 3.9))
+    health=_recorder_health(284, 1.2, 2.8, 3.9), record=RECORDER_RECORD)
 
 RECORDER_ROWS = [
     {'index': 1, 'description': 'Table', 'role': 'control', 'unit': 'g', 'rms': 0.0221,
@@ -5315,7 +5392,7 @@ def _recorder_data_build() -> tuple[dict, dict]:
 
 
 def _recorder_listed(name, first, trigger_frame, frames, complete):
-    return {'name': name, 'folder': f'recordings/{name}', 'trigger': 'level',
+    return {'name': name, 'folder': f'streams/{name}', 'trigger': 'level',
             'requested_fs_hz': 12800, 'fs_hz': 12800, 'group_delay_frames': 38.44,
             'rows': [1, 2, 3, 4], 'first_station_frame': first,
             'trigger_station_frame': trigger_frame, 'pre_frames': 6400,
@@ -5407,137 +5484,436 @@ RECORDER_TEXT_GOLDENS = {
                        'message': 'Row 5 is a drive row; a Recorder run does not open or '
                                   'record it.'}]}},
     },
+    'response_error_recorder_record_unwritable': {
+        'type': 'response', 'id': 110,
+        'error': {'code': 'refused', 'reason': 'record_unwritable',
+                  'message': "The run's record could not be written, so the run did not start: "
+                             '/home/operator/Hertzforge_Data/recorder (Permission denied (os '
+                             'error 13)). Choose a data folder that can be written.',
+                  'detail': {'path': '/home/operator/Hertzforge_Data/recorder',
+                             'reason': 'Permission denied (os error 13)'}},
+    },
 }
 
-# --- the golden run folder: one manual recording, one second of two rows at 1024 Hz ---
+# --- MIMO Shock (PROTOCOL.md, "MIMO Shock") ---
 #
-# Row 1 is a triangle of period 64 frames from -1 to 1, row 2 a ramp over each 1024
-# frames from -0.5, both functions of the STATION frame and exact in binary, so a reader
-# can check that every file frame sits at its stated station frame.
+# The configuration goldens are the contract's examples with every field given; the
+# configure response's `derived` is what the control service computes for the
+# classical one (the Rust golden test recomputes it). The binary goldens carry short
+# records whose values are exact in binary, laid out as the service's view builders
+# lay them out. File names say `mimo_shock`, never the single-output families' own
+# words alone, so their name filters pass them by.
 
-RECORDER_RUN_FS = 1024.0
-RECORDER_RUN_FIRST = 2048
-RECORDER_RUN_PRE = 256
-RECORDER_RUN_FRAMES = 1024
-RECORDER_RUN_TABLE_ROWS = [(1, 'Triangle', 'Control'), (2, 'Ramp', 'Monitor')]
-
-
-def _recorder_run_row(n: int) -> list:
-    tri = 1.0 - abs((n % 64) - 32) / 16.0
-    ramp = (n % 1024) / 1024.0 - 0.5
-    return [tri, ramp]
+def _mshock_pulse(amplitude, polarity):
+    return {'shape': 'half_sine', 'amplitude_g': amplitude, 'duration_ms': 11,
+            'polarity': polarity, 'rise_frac': None, 'fall_frac': None,
+            'compensation': {'shape': 'rectangular', 'pre_frac': 4, 'post_frac': 4,
+                             'symmetric': True}}
 
 
-def _recorder_channel(index, description, role):
-    return {'index': index, 'enabled': True, 'save': True, 'stream': False,
-            'interface': 'SingleEnded', 'iepe_bias_v': None, 'units': 'AccelG',
-            'sensitivity_mv_per_eu': 1000.0, 'range_max': 5.0, 'polarity': 'Positive',
-            'description': description, 'role': role, 'control_group': None,
-            'abort': {'accel_g': None, 'velocity_ips': None, 'displacement_mil': None},
-            'physical': None, 'analysis_tier': 'Full'}
+MSHOCK_CONTROLS = [1, 2, 3, 4]
+MSHOCK_DRIVES = [5, 6, 7, 8]
+
+MSHOCK_CHANNELS = {
+    'controls': [{'channel': c} for c in MSHOCK_CONTROLS],
+    'drives': [{'channel': d, 'ceiling_vpk': 4, 'abort_vpk': 6} for d in MSHOCK_DRIVES],
+    'limits': [],
+}
+
+MSHOCK_COMMON = {
+    'timing': {'mode': 'free', 'window_s': 0.002, 'delays_s': None},
+    'acquisition': {'fs_hz': 12800, 'record_len': 8192, 'band_hz': [2, 2500], 'lead_s': 0.05},
+    'schedule': {'mode': 'auto', 'levels_db': [-12, -9, -6, -3, -1.5, 0],
+                 'max_pulses_per_level': 3, 'full_level_pulses': 3},
+    'spacing': {'cooling_s': 1, 'settling_s': 0.5, 'compute_s': 0.25},
+    'identification': {'drive_vrms': 0.05, 'frames': 64, 'coherence_floor': 0.5, 'review': True},
+}
+
+MSHOCK_CONTROL = {
+    'law_budget': 0.25, 'law_misses': 3, 'max_pulses': 100, 'max_growth_db': 6,
+    'max_band_growth_db': 10, 'divergence_pulses': 3, 'divergence_drive_ratio': 1.3,
+    'first_drive_ratio': 2, 'abort_db': None, 'scaled_aborts': True, 'max_velocity_ips': None,
+    'max_displacement_in': None,
+}
+
+MSHOCK_CONFIG = {
+    'title': 'Four-Drive Half-Sine',
+    'channels': MSHOCK_CHANNELS,
+    'target': {'kind': 'waveform', 'standard': 'mil_std_810_516',
+               'pulses': [_mshock_pulse(20, 'positive'), _mshock_pulse(18, 'negative'),
+                          _mshock_pulse(20, 'positive'), _mshock_pulse(18, 'negative')]},
+    **MSHOCK_COMMON,
+    'verdict': 'all',
+    'control': {'law': {'id': 'inverse', 'params': {}}, **MSHOCK_CONTROL},
+    'simulator': {'plant': 'shock-linear-4x4'},
+    'operator': 'Operator', 'article': 'Bracket', 'notes': '',
+    'specification': {'document': 'Example procedure', 'clause': '4.2'},
+    'record': {'streams': True},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '3'}],
+}
 
 
-def _recorder_stats(values: list) -> dict:
-    n = len(values)
-    mean = sum(values) / n
-    rms = (sum(v * v for v in values) / n) ** 0.5
-    peak = max(abs(v) for v in values)
-    var = sum((v - mean) ** 2 for v in values) / n
-    kurt = (sum((v - mean) ** 4 for v in values) / n) / (var * var) if var > 0 else 0.0
-    return {'mean': round(mean, 6), 'rms': round(rms, 6), 'peak': round(peak, 6),
-            'crest': round(peak / rms, 6) if rms > 0 else 0.0, 'kurtosis': round(kurt, 6)}
+def _mshock_spectrum_control(flat_g, polarity):
+    return {'target': {'kind': 'breakpoints',
+                       'points': [[50, flat_g / 6], [300, flat_g], [2500, flat_g]]},
+            'synthesis': {'engine': 'wavsyn', 'components': None, 'max_iters': 50,
+                          'tol_db': 1.5, 'max_gain_db_per_iter': 3},
+            'polarity': polarity}
 
 
-def write_recorder_run() -> None:
-    root = HERE / 'recorder_run'
-    rec = root / 'recordings' / 'rec_0001'
-    rec.mkdir(parents=True, exist_ok=True)
-    frames = [_recorder_run_row(RECORDER_RUN_FIRST + i) for i in range(RECORDER_RUN_FRAMES)]
-    flat = [v for f in frames for v in f]
-    (rec / 'telemetry.f32').write_bytes(struct.pack(f'<{len(flat)}f', *flat))
-    table = {'schema_version': 2,
-             'channels': [_recorder_channel(*r) for r in RECORDER_RUN_TABLE_ROWS],
-             'reference': None}
-    capture = {
-        'config': {'n_channels': 2, 'sample_rate_hz': RECORDER_RUN_FS, 'decimation': 1,
-                   'ring_capacity': 512},
-        'channel_table': table,
-        'start_unix_secs': 1794240000,
-        'run_config_json': '',
-        'chunks_written': 1, 'chunks_dropped': 0, 'frames_written': RECORDER_RUN_FRAMES,
-        'complete': True,
-        'layout': {'interleave': 'frame_interleaved', 'block_frames': RECORDER_RUN_FRAMES,
-                   'channel_order': [1, 2],
-                   'channel_order_source': 'channel_table_enabled_inputs'},
-        'flushes': 1, 'free_space_at_start_bytes': RECORDER_FREE,
-        'free_space_floor_bytes': RECORDER_FLOOR, 'fault': None,
+MSHOCK_CONFIG_SPECTRUM = {
+    'title': 'Four-Drive Spectrum',
+    'channels': MSHOCK_CHANNELS,
+    'target': {'kind': 'srs',
+               'bands': {'f_lo_hz': 50, 'f_hi_hz': 2000, 'bands_per_octave': 3, 'q': 10},
+               'tolerance_db': [-3, 3],
+               'controls': [_mshock_spectrum_control(24, 'positive'),
+                            _mshock_spectrum_control(24, 'negative'),
+                            _mshock_spectrum_control(24, 'positive'),
+                            _mshock_spectrum_control(24, 'negative')]},
+    **MSHOCK_COMMON,
+    'acquisition': {'fs_hz': 12800, 'record_len': 16384, 'band_hz': [5, 2500], 'lead_s': 0.05},
+    'verdict': 'global',
+    'control': {'law': {'id': 'shape', 'params': {'max_step_db': 6}}, **MSHOCK_CONTROL},
+    'simulator': {'plant': 'shock-jointed-4x4-moderate'},
+    'operator': '', 'article': '', 'notes': '', 'specification': None,
+    'record': {'streams': False},
+    'metadata': [],
+}
+
+MSHOCK_DERIVED = {
+    'grid': {'fs_hz': 12800, 'record_len': 8192, 'lines': 4097, 'actual': False},
+    'controls': [{'channel': 1, 'peak': 20}, {'channel': 2, 'peak': 18},
+                 {'channel': 3, 'peak': 20}, {'channel': 4, 'peak': 18}],
+    'spacing_s': 1, 'call_budget_s': 0.25,
+}
+
+MSHOCK_LEVELS = [-12, -9, -6, -3, -1.5, 0]
+MSHOCK_STATION = {'kind': 'sim', 'class': 'sim', 'devices': [], 'plant': 'shock-linear-4x4'}
+MSHOCK_LAW = {'id': 'inverse', 'name': 'inverse', 'version': '0.1.0', 'sha256': None,
+              'params': {'lambda_rel': 0.001, 'gain': 1, 'watchdog': True, 'refresh': False,
+                         'refresh_mu': 0.5, 'align': False, 'align_max_ms': 2,
+                         'model': 'frozen', 'modes': 0, 'track_from_identification': False,
+                         'predicted_step': False},
+              'misses': 0}
+
+
+def _mshock_state(**over) -> dict:
+    s = {
+        'run_id': 'ms-0001', 'state': 'configured', 'phase': 'idle',
+        'title': MSHOCK_CONFIG['title'], 'source': 'SIM', 'station': MSHOCK_STATION,
+        'grid': MSHOCK_DERIVED['grid'], 'clock': None, 'target': 'waveform', 'timing': 'free',
+        'verdict': 'all', 'scaled_aborts': True, 'notice': None, 'mode': 'auto',
+        'levels_db': MSHOCK_LEVELS, 'level_db': None,
+        'rung': None, 'pulses': {'fired': 0, 'passed': 0, 'at_level': 0, 'of_level': 0},
+        'next_pulse_s': None, 'elapsed_s': None, 'identification': None, 'review': None,
+        'last_pulse': None, 'law': MSHOCK_LAW, 'end': None,
     }
-    (rec / 'capture.json').write_text(json.dumps(capture, indent=2) + '\n', encoding='utf-8')
-    sidecar = {
-        'complete': True, 'name': 'rec_0001', 'trigger': 'manual',
-        'requested_fs_hz': RECORDER_RUN_FS, 'fs_hz': RECORDER_RUN_FS,
-        'group_delay_frames': 0.0, 'rows': [1, 2], 'units': ['g', 'g'],
-        'first_station_frame': RECORDER_RUN_FIRST,
-        'trigger_station_frame': RECORDER_RUN_FIRST + RECORDER_RUN_PRE,
-        'pre_frames': RECORDER_RUN_PRE, 'pre_frames_asked': RECORDER_RUN_PRE,
-        'frames': RECORDER_RUN_FRAMES, 'gaps': [], 'marks': [], 'fault': None,
-    }
-    (rec / 'recorder.json').write_text(json.dumps(sidecar, indent=2) + '\n', encoding='utf-8')
+    s.update(over)
+    return s
 
-    config = {'title': 'Golden recording', 'acquisition': {'fs_hz': 1024},
-              'trigger': {'mode': 'manual', 'pre_s': 0.25},
-              'analysis': {'block': 256}, 'capture': {'run_name': 'recorder_run'}}
-    station_frames = 3072
-    run = {
-        'run_id': 'recorder-0004', 'title': config['title'], 'source': 'SIM',
-        'station': {'kind': 'sim', 'class': 'sim', 'devices': []}, 'config': config,
-        'requested_fs_hz': 1024, 'fs_hz': 1024, 'group_delay_frames': 0,
-        'outputs': 'none',
-        'rows': [{'index': 1, 'description': 'Triangle', 'role': 'control', 'unit': 'g',
-                  'range_max': 5},
-                 {'index': 2, 'description': 'Ramp', 'role': 'monitor', 'unit': 'g',
-                  'range_max': 5}],
-        'derived': {
-            'grid': {'fs_hz': 1024, 'block_frames': 64, 'batch_frames': 128,
-                     'group_delay_frames': 0, 'actual': True},
-            'outputs': 'none', 'rows': [1, 2],
-            'analysis': {'fs_hz': 1024, 'df_hz': 4, 'lines': 100, 'span_hz': 400,
-                         'block_s': 0.25, 'overlap_pct': 50, 'averages_s': 1.125},
-            'trigger': {'pre_frames': 256, 'record_frames': None, 'holdoff_frames': 0},
-            'disk': {'bytes_per_s': 8192, 'floor_bytes': RECORDER_FLOOR,
-                     'free_bytes': RECORDER_FREE,
-                     'seconds_above_floor': (RECORDER_FREE - RECORDER_FLOOR) // 8192}},
-        'overload': {'fraction': 0.9,
-                     'definition': "A row's overload indicator latches the first time a "
-                                   "sample's magnitude reaches 0.9 of the row's range_max, "
-                                   "and holds for the run."},
-    }
-    (root / 'run.json').write_text(json.dumps(run, indent=2) + '\n', encoding='utf-8')
-    log = [
-        (0, 'station', 'the station programmed 1024 Hz (asked 1024 Hz)'),
-        (1, 'note', 'records in recorder_run'),
-        (2, 'note', 'outputs: none'),
-        (3, 'state', 'running, monitoring'),
-        (4, 'recording', 'rec_0001 began at station frame 2304 (pre-window 256 frames)'),
-        (5, 'recording', 'rec_0001 saved: 1024 frames, 1.000 s, no gaps'),
-        (6, 'state', 'stop began: operator'),
-        (7, 'state', 'ended operator_stop: Stopped by golden: every recording is saved.'),
+
+MSHOCK_IDENT = {
+    'realizations': 64, 'drive_vrms': [0.05, 0.05, 0.05, 0.05],
+    'drive_vpk': [0.18, 0.18, 0.18, 0.18], 'coherence_mean': [0.998, 0.997, 0.998, 0.996],
+    'coverage': [0.999, 0.999, 0.998, 0.999], 'trusted_lines': 1596, 'band_lines': 1596,
+    'condition_max': 3.1, 'coherence_floor': 0.5, 'passed': True,
+}
+
+MSHOCK_REVIEW = {
+    'controls': [{'channel': c, 'reachable': 0.9998, 'floor_db': -31.2, 'reachable_ok': True,
+                  'predicted_peak_ratio': 1.01} for c in MSHOCK_CONTROLS],
+    'hold': None, 'acknowledged': None,
+}
+
+#: The 6 x 3 plant at review: two controls cannot reach their targets.
+MSHOCK_REVIEW_HELD = {
+    'controls': [
+        {'channel': 1, 'reachable': 0.97, 'floor_db': 4.2, 'reachable_ok': False,
+         'predicted_peak_ratio': None},
+        {'channel': 2, 'reachable': 0.99, 'floor_db': 1.8, 'reachable_ok': True,
+         'predicted_peak_ratio': None},
+        {'channel': 3, 'reachable': 0.91, 'floor_db': 12.6, 'reachable_ok': False,
+         'predicted_peak_ratio': None},
+    ],
+    'hold': {'reason': 'unreachable_target',
+             'message': 'Controls 1 and 3 cannot reach their targets: their best reachable '
+                        'responses are 4.2 and 12.6 dB from them, outside the tolerance. '
+                        'Proceed with an acknowledgement, or judge the run by the global '
+                        'verdict.'},
+    'acknowledged': None,
+}
+
+
+#: The default classical abort line, dB (twice the MIL-STD-810 amplitude
+#: tolerance), and the level of the golden rows built with it.
+MSHOCK_LINE_DB = 2.28
+MSHOCK_ROW_LEVEL = -6
+
+
+def _mshock_control_row(channel, passed, reasons, error_db, over, delay, peak, ratio,
+                        srs=None, duration=None):
+    return {'channel': channel, 'passed': passed, 'reasons': reasons, 'error_db': error_db,
+            'over_test_db': over, 'delay_s': delay, 'peak': peak, 'peak_ratio': ratio,
+            'scaled_margin_db': round(20 * math.log10(ratio) - MSHOCK_LINE_DB, 2),
+            'absolute_margin_db': round(20 * math.log10(ratio) - MSHOCK_LINE_DB + MSHOCK_ROW_LEVEL, 2),
+            'timing_ok': 'timing' not in reasons, 'polarity_ok': 'polarity' not in reasons,
+            'duration_ratio': duration, 'duration_ok': 'duration' not in reasons,
+            'energy_db': 0.21, 'rms_duration_ratio': 1.01, 'velocity_ips': 12.1,
+            'displacement_pk_pk_in': 0.18, 'predicted_peak_ratio': 0.99, 'srs': srs}
+
+
+#: A waveform run's fifth pulse: -6 dB, control 2 out of tolerance.
+MSHOCK_ROW = {
+    'index': 4, 'scheduled_db': -6, 'level_db': -6, 'passed': False, 'at_s': 11.25,
+    'drives': [{'channel': d, 'vpk': 0.29, 'limit_scale': 1} for d in MSHOCK_DRIVES],
+    'controls': [
+        _mshock_control_row(1, True, [], -21.4, -0.1, 0.0003, 10.0, 0.998),
+        _mshock_control_row(2, False, ['tolerance'], -12.5, 1.3, 0.0004, 10.3, 1.16),
+        _mshock_control_row(3, True, [], -22.0, -0.05, 0.0002, 10.0, 0.999),
+        _mshock_control_row(4, True, [], -20.9, 0.08, 0.0003, 9.1, 1.01),
+    ],
+    'over_test_db': 1.3, 'global_srs_error_db': None, 'arrival_spread_s': 0.0002,
+    'warnings': [], 'step_note': None,
+    'law': {'used': True, 'miss': None, 'call_ms': 3.1, 'delays_s': None,
+            'values': [{'key': 'drive_rms_full_level', 'value': 0.5},
+                       {'key': 'waveform_error', 'value': 0.125}]},
+}
+
+MSHOCK_RUNNING = _mshock_state(
+    run_id='ms-0002', state='running', phase='waiting',
+    grid={'fs_hz': 12800, 'record_len': 8192, 'lines': 4097, 'actual': True}, clock='shared',
+    level_db=-6, rung=2, pulses={'fired': 5, 'passed': 3, 'at_level': 2, 'of_level': 3},
+    next_pulse_s=0.6, elapsed_s=14.2, identification=MSHOCK_IDENT, review=MSHOCK_REVIEW,
+    last_pulse=MSHOCK_ROW,
+    record={'folder': '/data/runs/20261114-140000_mimo_shock_ms-0002', 'streams': 'on',
+            'problem': None})
+
+MSHOCK_REVIEW_STATE = _mshock_state(
+    run_id='ms-0003', state='review', phase='awaiting_review', title='Six Controls, Three Drives',
+    station={**MSHOCK_STATION, 'plant': 'shock-jointed-6x3'},
+    grid={'fs_hz': 12800, 'record_len': 16384, 'lines': 8193, 'actual': True}, clock='shared',
+    target='srs', elapsed_s=3.5,
+    identification={**MSHOCK_IDENT, 'drive_vrms': [0.05, 0.05, 0.05],
+                    'drive_vpk': [0.18, 0.18, 0.18], 'coherence_mean': [0.998, 0.997, 0.998],
+                    'coverage': [0.999, 0.999, 0.998], 'trusted_lines': 3192,
+                    'band_lines': 3192, 'condition_max': 7.5},
+    review=MSHOCK_REVIEW_HELD,
+    law={'id': 'shape', 'name': 'shape', 'version': '0.1.0', 'sha256': None,
+         'params': {'lambda_rel': 0.001, 'max_step_db': 6, 'delay_relax': 0.5,
+                    'delay_bound_ms': 2, 'anchor': 'target', 'refresh': False, 'refresh_mu': 1,
+                    'seed_timing': 'zero'}, 'misses': 0})
+
+#: The live frame between pulses.
+MSHOCK_LIVE = {
+    'run_id': 'ms-0002', 'source': 'SIM', 'state': 'running', 'phase': 'waiting', 'mode': 'auto',
+    'level_db': -6, 'rung': 2, 'pulses': {'fired': 5, 'passed': 3, 'at_level': 2, 'of_level': 3},
+    'next_pulse_s': 0.6,
+}
+
+#: Eight samples at 1 kHz from the record's start.
+MSHOCK_FS = 1000.0
+MSHOCK_TARGET = [0.0, -0.5, 0.0, 7.5, 10.0, 7.5, 0.0, -0.5]
+MSHOCK_TOL_HI = [1.5, 1.0, 1.5, 9.0, 11.5, 9.0, 1.5, 1.0]
+MSHOCK_TOL_LO = [-1.5, -2.0, -1.5, 6.0, 8.5, 6.0, -1.5, -2.0]
+MSHOCK_MEASURED = [0.0, -0.25, 0.25, 7.25, 9.75, 7.75, 0.25, -0.5]
+MSHOCK_DRIVE = [0.0, -0.0125, 0.0, 0.1875, 0.25, 0.1875, 0.0, -0.0125]
+MSHOCK_SRS_F = [100.0, 200.0, 400.0]
+MSHOCK_SRS_TARGET = [12.5, 15.0, 11.0]
+MSHOCK_SRS_HI = [17.5, 21.0, 15.5]
+MSHOCK_SRS_LO = [9.0, 10.5, 7.75]
+MSHOCK_SRS_MEAS = [12.25, 15.5, 10.5]
+
+
+def _mshock_times(n: int) -> list:
+    return [i / MSHOCK_FS for i in range(n)]
+
+
+def _with_channel(view: dict, channel: int) -> dict:
+    return {**view, 'channel': channel}
+
+
+def _mshock_pulse_view(a: _Arr, channel: int, band=True) -> dict:
+    t = _mshock_times(len(MSHOCK_TARGET))
+    series = [a.series('Target', 'reference', t, MSHOCK_TARGET)]
+    if band:
+        series.append(a.series('Tolerance high', 'tolerance', t, MSHOCK_TOL_HI))
+        series.append(a.series('Tolerance low', 'tolerance', t, MSHOCK_TOL_LO))
+    series.append(a.series('Measured', 'measured', t, MSHOCK_MEASURED))
+    return _with_channel(_spectrum(f'Pulse {channel}', _TIME, _axis('Acceleration', 'g', 'linear'),
+                                   series, 'time'), channel)
+
+
+def _mshock_srs_view(a: _Arr, channel: int) -> dict:
+    f = MSHOCK_SRS_F
+    return _with_channel(_spectrum(
+        f'SRS {channel}', _axis('Natural frequency', 'Hz', 'log'),
+        _axis('Peak acceleration', 'g', 'log'),
+        [a.series('Target', 'reference', f, MSHOCK_SRS_TARGET),
+         a.series('Tolerance high', 'tolerance', f, MSHOCK_SRS_HI),
+         a.series('Tolerance low', 'tolerance', f, MSHOCK_SRS_LO),
+         a.series('Measured', 'measured', f, MSHOCK_SRS_MEAS)], 'frequency'), channel)
+
+
+def _mshock_drives_view(a: _Arr, drives) -> dict:
+    t = _mshock_times(len(MSHOCK_DRIVE))
+    return _spectrum('Drives', _TIME, _axis('Drive', 'V', 'linear'),
+                     [a.series(f'Drive {d}', 'drive', t, MSHOCK_DRIVE) for d in drives], 'time')
+
+
+MSHOCK_VERDICTS_TABLE = {
+    'view': 'table', 'title': 'Verdicts',
+    'columns': ['Control', 'Passed', 'Failed on', 'Error (dB)', 'Over-test (dB)', 'Delay (ms)',
+                'Peak ratio'],
+    'rows': [['1', 'pass', '', '-21.4', '-0.1', '0.3', '0.998'],
+             ['2', 'fail', 'tolerance', '-12.5', '1.3', '0.4', '1.16'],
+             ['3', 'pass', '', '-22', '-0.05', '0.2', '0.999'],
+             ['4', 'pass', '', '-20.9', '0.08', '0.3', '1.01']],
+}
+
+MSHOCK_LADDER_TABLE = {
+    'view': 'table', 'title': 'Ladder',
+    'columns': ['Level (dB)', 'Fired', 'Passed', 'Now'],
+    'rows': [['-12', '1', '1', ''], ['-9', '2', '1', ''], ['-6', '2', '1', 'in force'],
+             ['-3', '0', '0', ''], ['-1.5', '0', '0', ''], ['0', '0', '0', '']],
+}
+
+MSHOCK_LAW_READING = {'view': 'reading', 'title': 'Law', 'rows': [
+    {'label': 'Drive rms at full level', 'value': 0.5, 'unit': 'V', 'status': 'info'},
+    {'label': 'Waveform error', 'value': 0.125, 'unit': None, 'status': 'info'},
+]}
+
+MSHOCK_RUN_READING = {'view': 'reading', 'title': 'Run', 'rows': [
+    {'label': 'Level', 'value': -6.0, 'unit': 'dB', 'status': 'info'},
+    {'label': 'Pulses fired', 'value': 5.0, 'unit': None, 'status': 'info'},
+    {'label': 'Pulses passed', 'value': 3.0, 'unit': None, 'status': 'info'},
+    {'label': 'Last over-test', 'value': 1.3, 'unit': 'dB', 'status': 'fail'},
+    {'label': 'Next pulse', 'value': 0.6, 'unit': 's', 'status': 'info'},
+]}
+
+MSHOCK_SUBSCRIBE_PLOTS = [
+    {'id': 'p1', 'quantity': 'pulse', 'points': 1024, 'channel': 1},
+    {'id': 'drives', 'quantity': 'drives', 'points': 1024},
+    {'id': 'verdicts', 'quantity': 'verdicts'},
+    {'id': 'ladder', 'quantity': 'ladder'},
+    {'id': 'law', 'quantity': 'law'},
+    {'id': 'run', 'quantity': 'readings'},
+]
+MSHOCK_QUANTITIES = ['pulse', 'srs', 'drives', 'verdicts', 'ladder', 'identification', 'review',
+                     'law', 'readings', 'pulses']
+
+
+def _mshock_pulse_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = [_mshock_pulse_view(a, c) for c in MSHOCK_CONTROLS]
+    views.append(_mshock_drives_view(a, MSHOCK_DRIVES))
+    message = {'type': 'event', 'topic': 'mimo_shock.pulse', 'seq': 211,
+               'data': {'run_id': 'ms-0002', 'pulse': MSHOCK_ROW, 'views': views}}
+    return message, a.arrays
+
+
+#: An SRS target's pulse views: Pulse (no band) then SRS per control, then Drives.
+def _mshock_pulse_spectrum_build() -> tuple[dict, dict]:
+    a = _Arr()
+    views = []
+    for c in [1, 2]:
+        views.append(_mshock_pulse_view(a, c, band=False))
+        views.append(_mshock_srs_view(a, c))
+    views.append(_mshock_drives_view(a, [5, 6]))
+    row = {**MSHOCK_ROW, 'index': 0, 'scheduled_db': -12, 'level_db': -12, 'passed': True,
+           'drives': MSHOCK_ROW['drives'][:2],
+           'controls': [
+               _mshock_control_row(1, True, [], 1.1, 0.4, 0.0003, 3.1, 1.02,
+                                   {'worst_err_db': 1.1, 'worst_band_hz': 400, 'bands': 3,
+                                    'passed_bands': 3}, 1.04),
+               _mshock_control_row(2, False, ['polarity'], 0.9, -0.9, 0.0004, 3.0, 0.99,
+                                   {'worst_err_db': -0.9, 'worst_band_hz': 200, 'bands': 3,
+                                    'passed_bands': 3}, 0.97)],
+           'over_test_db': 0.4, 'global_srs_error_db': 0.75, 'arrival_spread_s': 0.0001,
+           'warnings': ['control 2\'s rms duration is 1.15 times its target\'s'],
+           'law': {'used': True, 'miss': None, 'call_ms': 2.5, 'delays_s': [0.0003, 0.0004],
+                   'values': [{'key': 'weight', 'value': 0.5}]}}
+    message = {'type': 'event', 'topic': 'mimo_shock.pulse', 'seq': 212,
+               'data': {'run_id': 'ms-0004', 'pulse': row, 'views': views}}
+    return message, a.arrays
+
+
+def _mshock_data_build() -> tuple[dict, dict]:
+    a = _Arr()
+    plots = [
+        {'id': 'p1', 'quantity': 'pulse', 'views': [_mshock_pulse_view(a, 1)]},
+        {'id': 'drives', 'quantity': 'drives', 'views': [_mshock_drives_view(a, MSHOCK_DRIVES)]},
+        {'id': 'verdicts', 'quantity': 'verdicts', 'views': [MSHOCK_VERDICTS_TABLE]},
+        {'id': 'ladder', 'quantity': 'ladder', 'views': [MSHOCK_LADDER_TABLE]},
+        {'id': 'law', 'quantity': 'law', 'views': [MSHOCK_LAW_READING]},
+        {'id': 'run', 'quantity': 'readings', 'views': [MSHOCK_RUN_READING]},
     ]
-    (root / 'log.jsonl').write_text(''.join(
-        json.dumps({'seq': seq, 'at_unix': 1794240000.0 + seq, 'kind': kind, 'text': text},
-                   separators=(',', ':')) + '\n' for seq, kind, text in log), encoding='utf-8')
-    (root / 'marks.jsonl').write_text('', encoding='utf-8')
-    whole = [_recorder_run_row(n) for n in range(station_frames)]
-    end = {
-        'run_id': 'recorder-0004',
-        'end': {'outcome': 'operator_stop',
-                'message': 'Stopped by golden: every recording is saved.',
-                'at_s': station_frames / RECORDER_RUN_FS, 'recordings': 1},
-        'station_frames': station_frames,
-        'rows': [dict({'index': i + 1}, **_recorder_stats([f[i] for f in whole]))
-                 for i in range(2)],
-    }
-    (root / 'end.json').write_text(json.dumps(end, indent=2) + '\n', encoding='utf-8')
+    data = {**MSHOCK_LIVE, 'plots': plots}
+    message = {'type': 'event', 'topic': 'mimo_shock.data', 'seq': 213, 'data': data}
+    return message, a.arrays
+
+
+MSHOCK_TEXT_GOLDENS = {
+    'request_mimo_shock_configure': {
+        'type': 'request', 'id': 71, 'method': 'mimo_shock.configure',
+        'params': {'config': MSHOCK_CONFIG},
+    },
+    'request_mimo_shock_configure_spectrum': {
+        'type': 'request', 'id': 72, 'method': 'mimo_shock.configure',
+        'params': {'config': MSHOCK_CONFIG_SPECTRUM, 'dry_run': True},
+    },
+    'response_mimo_shock_configure': {
+        'type': 'response', 'id': 71,
+        'result': {'state': _mshock_state(), 'derived': MSHOCK_DERIVED, 'warnings': []},
+    },
+    'event_mimo_shock_state': {
+        'type': 'event', 'topic': 'mimo_shock.state', 'seq': 210, 'data': MSHOCK_RUNNING,
+    },
+    'event_mimo_shock_state_unscaled': {
+        'type': 'event', 'topic': 'mimo_shock.state', 'seq': 230,
+        'data': {**MSHOCK_RUNNING, 'run_id': 'ms-0005', 'scaled_aborts': False,
+                 'notice': 'Level-scaled aborts are off: a pulse over its level\'s abort line '
+                           'is flagged and judged failing, and only the full-level (absolute) '
+                           'lines end the run.'},
+    },
+    'event_mimo_shock_state_review': {
+        'type': 'event', 'topic': 'mimo_shock.state', 'seq': 220, 'data': MSHOCK_REVIEW_STATE,
+    },
+    'request_mimo_shock_proceed': {
+        'type': 'request', 'id': 73, 'method': 'mimo_shock.proceed',
+        'params': {'acknowledge': 'Controls 1 and 3 are known to be short; run it.'},
+    },
+    'response_error_mimo_shock_unreachable': {
+        'type': 'response', 'id': 74,
+        'error': {'code': 'refused', 'reason': 'unreachable_target',
+                  'message': MSHOCK_REVIEW_HELD['hold']['message'],
+                  'detail': {'controls': MSHOCK_REVIEW_HELD['controls']}},
+    },
+    'request_mimo_shock_subscribe': {
+        'type': 'request', 'id': 75, 'method': 'mimo_shock.subscribe',
+        'params': {'rate_hz': 2, 'plots': MSHOCK_SUBSCRIBE_PLOTS},
+    },
+    'response_mimo_shock_subscribe': {
+        'type': 'response', 'id': 75,
+        'result': {'default': False, 'rate_hz': 2, 'plots': MSHOCK_SUBSCRIBE_PLOTS,
+                   'quantities': MSHOCK_QUANTITIES},
+    },
+    'request_mimo_shock_fire': {
+        'type': 'request', 'id': 76, 'method': 'mimo_shock.fire', 'params': {},
+    },
+    'response_error_mimo_shock_config_invalid': {
+        'type': 'response', 'id': 77,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 2 errors.',
+                  'detail': {'errors': [
+                      {'reason': 'targets_length_mismatch', 'field': 'target.pulses',
+                       'message': '3 targets for 4 controls; give one target per control.'},
+                      {'reason': 'verdict_needs_srs', 'field': 'verdict',
+                       'message': 'The global verdict judges an SRS target; this target is a '
+                                  'waveform.'}],
+                      'warnings': []}},
+    },
+}
 
 
 def main() -> None:
@@ -5688,15 +6064,22 @@ def main() -> None:
     write('event_explorer_live', *_explorer_live_build())
     write('event_explorer_data', *_explorer_data_build())
 
-    # Recorder: the live frame, a subscription's data and the golden run folder
+    # MIMO Shock: the live frame (no arrays), a pulse of each target kind, a subscription's data
+    write('event_mimo_shock_live', {'type': 'event', 'topic': 'mimo_shock.live', 'seq': 209,
+                                    'data': MSHOCK_LIVE}, {})
+    write('event_mimo_shock_pulse', *_mshock_pulse_build())
+    write('event_mimo_shock_pulse_spectrum', *_mshock_pulse_spectrum_build())
+    write('event_mimo_shock_data', *_mshock_data_build())
+
+    # Recorder: the live frame and a subscription's data (its golden run folder,
+    # schema/golden/runs/recorder/, is written by the control service's own test)
     write('event_recorder_live', *_recorder_live_build())
     write('event_recorder_data', *_recorder_data_build())
-    write_recorder_run()
 
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,
                           **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
-                          **RECORDER_TEXT_GOLDENS}.items():
+                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

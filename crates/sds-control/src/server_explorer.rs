@@ -336,6 +336,7 @@ impl Service {
                 || inner.mixed_live()
                 || inner.twr_live()
                 || inner.recorder_live()
+                || inner.mimo_shock_live()
             {
                 inner.run_active()?;
             }
@@ -346,6 +347,7 @@ impl Service {
                     "A simulation is running; stop it first.",
                 ));
             }
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(
@@ -364,8 +366,9 @@ impl Service {
                 return Err(config::config_invalid(&r));
             }
             let fs_hz = run.wire.fs();
+            let (revision, devices) = (inner.table.revision, inner.stations.devices().to_vec());
             let plan = match inner.stations.selected() {
-                Selection::Sim => StationPlan::Sim { fs_hz },
+                Selection::Sim => StationPlan::sim(fs_hz),
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);
@@ -383,12 +386,11 @@ impl Service {
                 station: plan,
                 scanner: self.opts.scanner.clone(),
                 data_root: self.opts.data_root.clone(),
-                records_root: self
-                    .opts
-                    .capture_root
-                    .clone()
-                    .unwrap_or_else(|| self.opts.data_root.clone()),
+                records_root: self.opts.records_root(),
                 bind: self.opts.bind.clone(),
+                revision,
+                devices,
+                record: self.opts.record.clone(),
             };
             (run, ctx)
         };

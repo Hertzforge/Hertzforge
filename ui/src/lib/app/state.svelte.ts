@@ -6,13 +6,17 @@
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
 import { pairsText, togglePick } from '$lib/viz/macBars';
-import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles } from '$lib/project/files';
+import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
+import { RunOpen } from '$lib/acquire/runOpen.svelte';
+import { RunFiles } from './runFiles.svelte';
 import { MimoState } from '$lib/acquire/mimo/mimoStore.svelte';
 import { MimoViewsState } from '$lib/acquire/mimo/views/mimoViews.svelte';
 import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
 import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
+import { MimoShockStore } from '$lib/acquire/mimoshock/msStore.svelte';
+import { MsViewsState } from '$lib/acquire/mimoshock/msViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
@@ -50,8 +54,8 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, Project
 	TableEdit,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
-import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, validateAll, withDisplayLengths, withObjects, withSettings, type ParamValues } from '$lib/forms/params';
-import { baseName, isProjectFile } from '$lib/project/files';
+import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
+import { baseName, confirmFirst, desktopRunFiles, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
@@ -71,6 +75,10 @@ class AnalyzeState {
 	values = $state<Record<string, ParamValues>>({});
 	triedRun = $state(false);
 	running = $state(false);
+	/** How far the running operation has got (`op.progress`): a total of -1 is a stage that cannot count itself. */
+	opProgress = $state<{ done: number; total: number } | null>(null);
+	/** Cancel was asked of the running operation, which stops at its next report. */
+	cancelling = $state(false);
 	runError = $state<string | null>(null);
 	/** What the tree's selection shows, in place of a result run by hand; null with nothing selected. */
 	shown = $state.raw<Shown | null>(null);
@@ -108,7 +116,12 @@ class AnalyzeState {
 	private showSeq = 0;
 	private actionSeq = 0;
 
-	constructor(private readonly app: AppState) {}
+	constructor(private readonly app: AppState) {
+		app.analysis.on('op.progress', (data) => {
+			const d = data as unknown as { op: string; done: number; total: number };
+			if (this.running && d.op === this.opId) this.opProgress = { done: d.done, total: d.total };
+		});
+	}
 
 	/** Tools follow the data: only the operations with an object in the project to run on. */
 	get tools(): OperationDescriptor[] {
@@ -127,7 +140,8 @@ class AnalyzeState {
 
 	/** An operation's params as the form shows them: object params list the project's objects. */
 	paramsOf(op: OperationDescriptor): ParamDescriptor[] {
-		const params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		let params = withObjects(op.params, this.app.project.summary?.objects ?? []);
+		if (op.params.some((p) => p.quantity) && !this.undefinedGeometry(op)) params = withDisplayQuantities(params, this.app.units.quantities);
 		const length = this.app.units.length;
 		if (!length || !op.params.some((p) => p.length)) return params;
 		return withDisplayLengths(params, this.undefinedGeometry(op) ? null : length.unit);
@@ -139,11 +153,16 @@ class AnalyzeState {
 		return this.app.project.summary?.objects.find((o) => o.name === name)?.units_defined === false;
 	}
 
-	/** The display system changed: each form holds the same lengths, in the new unit. */
-	lengthsChanged(ratio: number): void {
+	/**
+	 * The display system changed: each form holds the same lengths, and the same amount of each
+	 * quantity, in the new units (`ratio` and `ratios`: the old unit in the new).
+	 */
+	unitsChanged(ratio: number | null, ratios: Record<string, number>): void {
 		const next = { ...this.values };
 		for (const op of this.app.catalog?.operations ?? []) {
-			if (next[op.id] && op.params.some((p) => p.length) && !this.undefinedGeometry(op)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+			if (!next[op.id] || this.undefinedGeometry(op)) continue;
+			if (ratio !== null && op.params.some((p) => p.length)) next[op.id] = rescaled(op.params, next[op.id], ratio);
+			if (op.params.some((p) => p.quantity)) next[op.id] = rescaledQuantities(op.params, next[op.id], ratios);
 		}
 		this.values = next;
 	}
@@ -164,6 +183,7 @@ class AnalyzeState {
 		const values = this.currentValues;
 		return this.params
 			.filter((p) => !p.shown_with || values[p.shown_with[0]] === p.shown_with[1])
+			.filter((p) => p.name !== this.op?.commits)
 			.filter((p) => !p.in_view && !(p.options_from && row?.fill && p.name in row.fill) && !(row?.live && p.name === 'solid') && !row?.omit?.includes(p.name))
 			.map((p) => (p.name === 'format' && row?.formats ? { ...p, options: row.formats.map(({ value, label }) => ({ value, label })) } : p));
 	}
@@ -238,7 +258,6 @@ class AnalyzeState {
 					part: partForService(selection),
 					prefs: {
 						flat: this.prefs.flat,
-						log_frequency: this.prefs.log_frequency,
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
@@ -289,10 +308,11 @@ class AnalyzeState {
 				if (row?.ready && current) void this.perform(row, current);
 				return;
 			}
-			// an open form follows the selection while the selection can still take it
+			// an open form follows the selection while the selection can still take it; only
+			// what the selection now fills differently is filled again, so a value typed stays
 			if (this.formOpen) {
 				const row = current?.rows.find((r) => r.id === this.opId && r.ready);
-				if (row) this.openRow(row);
+				if (row) this.followRow(row);
 				else this.closeForm();
 			}
 			this.fitWeighing = false;
@@ -373,6 +393,14 @@ class AnalyzeState {
 		if (formats && !formats.some((f) => f.value === this.currentValues.format)) {
 			this.pickAction({ id: row.id, fill: { format: formats[0].value } });
 		}
+	}
+
+	/** The open form's row as the actions now give it: the fields it fills differently from before are filled. */
+	private followRow(row: ActionRow): void {
+		const was = this.formRow?.id === row.id ? (this.formRow.fill ?? {}) : {};
+		const fill = Object.fromEntries(Object.entries(row.fill ?? {}).filter(([key, text]) => was[key] !== text));
+		this.pickAction({ id: row.id, fill });
+		this.formRow = row;
 	}
 
 	/** Export in the desktop app: the native save window says where and in which format. */
@@ -668,13 +696,21 @@ class AnalyzeState {
 		this.triedRun = false;
 	}
 
-	async run(): Promise<void> {
+	/**
+	 * Apply the form. An operation that `commits` is sent its go-ahead param: false for Preview,
+	 * which only shows what it would do, true for Apply, which does it.
+	 */
+	async run(preview = false): Promise<void> {
 		const op = this.op;
 		if (!op || !this.onProject || this.running) return;
+		if (preview && !op.commits) return;
 		this.triedRun = true;
 		if (Object.keys(this.errors).length) return;
 		const params = { ...this.currentValues };
+		if (op.commits) params[op.commits] = !preview;
 		this.running = true;
+		this.opProgress = null;
+		this.cancelling = false;
 		this.runError = null;
 		// what is typed now is run, so its preview must not land on top of the answer
 		this.stopPreview();
@@ -690,7 +726,7 @@ class AnalyzeState {
 				this.app.project.clickObject(added[0], order);
 				this.closeForm();
 			} else if (res.views.length) {
-				this.reading = { title: this.formTitle, views: res.views };
+				this.reading = { title: preview ? `${this.formTitle}, preview` : this.formTitle, views: res.views };
 				this.readingId = op.id;
 			} else {
 				this.closeForm();
@@ -700,6 +736,20 @@ class AnalyzeState {
 			this.runError = message(err);
 		} finally {
 			this.running = false;
+			this.opProgress = null;
+			this.cancelling = false;
+		}
+	}
+
+	/** Stop the running operation at its next report of progress (`op.cancel`). */
+	async cancel(): Promise<void> {
+		if (!this.running || this.cancelling) return;
+		this.cancelling = true;
+		try {
+			await this.app.analysis.request('op.cancel', {});
+		} catch (err) {
+			this.runError = message(err);
+			this.cancelling = false;
 		}
 	}
 
@@ -969,16 +1019,17 @@ export class FitState {
 		return this.step('Finding a mode', 'fit.find', this.range ? { low: this.range[0], high: this.range[1] } : {});
 	}
 
-	move(frequency: number): Promise<boolean> {
-		return this.step('Moving the cursor', 'fit.move', { frequency });
+	/** `quiet` while a drag sends: no busy line flickering under the hand. */
+	move(frequency: number, quiet = false): Promise<boolean> {
+		return this.step('Moving the cursor', 'fit.move', { frequency }, quiet);
 	}
 
-	holdDamping(damping: number): Promise<boolean> {
-		return this.step('Holding the damping', 'fit.damping', { damping });
+	holdDamping(damping: number, quiet = false): Promise<boolean> {
+		return this.step('Holding the damping', 'fit.damping', { damping }, quiet);
 	}
 
-	fit(): Promise<boolean> {
-		return this.step('Fitting the mode', 'fit.fit', {});
+	fit(quiet = false): Promise<boolean> {
+		return this.step('Fitting the mode', 'fit.fit', {}, quiet);
 	}
 
 	confirm(description?: string): Promise<boolean> {
@@ -1033,8 +1084,8 @@ export class FitState {
 		}
 	}
 
-	private async step(doing: string, method: string, params: Record<string, unknown>): Promise<boolean> {
-		this.busy = doing;
+	private async step(doing: string, method: string, params: Record<string, unknown>, quiet = false): Promise<boolean> {
+		if (!quiet) this.busy = doing;
 		this.error = null;
 		try {
 			const res = await this.app.analysis.request<{ fit: FitStateView }>(method, params, { timeoutMs: RUN_TIMEOUT_MS });
@@ -1044,7 +1095,7 @@ export class FitState {
 			this.error = message(err);
 			return false;
 		} finally {
-			this.busy = null;
+			if (!quiet) this.busy = null;
 		}
 	}
 }
@@ -1233,9 +1284,14 @@ export class ReportState {
 }
 
 /** A unit system's length unit, and what takes it to meters. */
-interface LengthUnit {
-	unit: string;
-	to_si: number;
+type LengthUnit = DisplayUnit;
+
+/** What `units.system` answers. */
+interface UnitsAnswer {
+	name: string;
+	systems: string[];
+	length?: LengthUnit;
+	quantities?: Record<string, DisplayUnit>;
 }
 
 /** Where the chosen unit system is kept between launches. */
@@ -1251,6 +1307,8 @@ export class UnitsState {
 	systems = $state<string[]>([]);
 	/** The system's length unit, and what takes it to meters: what a solid's form is typed in. */
 	length = $state.raw<LengthUnit | null>(null);
+	/** The system's unit for each quantity a param is typed in (`force/length`), and what takes it to SI. */
+	quantities = $state.raw<Record<string, DisplayUnit>>({});
 
 	constructor(private readonly app: AppState) {}
 
@@ -1266,16 +1324,12 @@ export class UnitsState {
 	async sync(): Promise<void> {
 		const wanted = this.stored();
 		try {
-			const res = await this.app.analysis.request<{ name: string; systems: string[]; length?: LengthUnit }>('units.system', {});
+			const res = await this.app.analysis.request<UnitsAnswer>('units.system', {});
 			this.systems = res.systems;
-			if (wanted && wanted !== res.name && res.systems.includes(wanted)) {
-				const set = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name: wanted });
-				this.name = set.name;
-				this.length = set.length ?? null;
-			} else {
-				this.name = res.name;
-				this.length = res.length ?? null;
-			}
+			const set = wanted && wanted !== res.name && res.systems.includes(wanted) ? await this.app.analysis.request<UnitsAnswer>('units.system', { name: wanted }) : res;
+			this.name = set.name;
+			this.length = set.length ?? null;
+			this.quantities = set.quantities ?? {};
 		} catch {
 			// an older service without units: its own SI stands
 		}
@@ -1283,11 +1337,15 @@ export class UnitsState {
 
 	async choose(name: string): Promise<void> {
 		if (name === this.name) return;
-		const res = await this.app.analysis.request<{ name: string; length?: LengthUnit }>('units.system', { name });
+		const res = await this.app.analysis.request<UnitsAnswer>('units.system', { name });
 		this.name = res.name;
 		const before = this.length;
+		const beforeQuantities = this.quantities;
 		this.length = res.length ?? null;
-		if (before && this.length) this.app.analyze.lengthsChanged(before.to_si / this.length.to_si);
+		this.quantities = res.quantities ?? {};
+		const ratios: Record<string, number> = {};
+		for (const [q, now] of Object.entries(this.quantities)) if (beforeQuantities[q]) ratios[q] = beforeQuantities[q].to_si / now.to_si;
+		this.app.analyze.unitsChanged(before && this.length ? before.to_si / this.length.to_si : null, ratios);
 		try {
 			localStorage.setItem(UNITS_KEY, res.name);
 		} catch {
@@ -1307,7 +1365,6 @@ const PREFS_KEY = 'hertzforge.show.prefs';
 function readPrefs(): ShowPrefs {
 	const prefs: ShowPrefs = {
 		flat: false,
-		log_frequency: false,
 		component: 'magnitude',
 		projection: false,
 		bars: true,
@@ -1324,7 +1381,6 @@ function readPrefs(): ShowPrefs {
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
-		if (typeof kept.log_frequency === 'boolean') prefs.log_frequency = kept.log_frequency;
 		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
@@ -1470,6 +1526,37 @@ export class ProjectState {
 	async open(path: string): Promise<boolean> {
 		if (this.summary?.modified && !(await askToReplace(this.summary.title, baseName(path)))) return false;
 		return this.call(`Opening ${baseName(path)}`, 'project.open', { path });
+	}
+
+	/**
+	 * A control run's folder into the analysis side: opened as the project when the project holds
+	 * nothing yet, otherwise imported into it. The service converts the folder; the objects it
+	 * brought are selected in the tree. Resolves with their names; a refusal is passed on.
+	 */
+	async takeRun(path: string): Promise<string[]> {
+		const s = this.summary;
+		const fresh = !s || (!s.file && s.objects.length === 0);
+		this.busy = `Opening ${baseName(path)}`;
+		this.progress = null;
+		this.error = null;
+		try {
+			let added: string[];
+			if (fresh) {
+				const res = await this.app.analysis.request<{ project: ProjectSummary }>('project.open', { path }, { timeoutMs: FILE_TIMEOUT_MS });
+				this.apply(res.project);
+				added = res.project.objects.map((o) => o.name);
+			} else {
+				const res = await this.app.analysis.request<{ added: string[]; project: ProjectSummary }>('project.import', { path }, { timeoutMs: FILE_TIMEOUT_MS });
+				this.apply(res.project);
+				added = res.added;
+			}
+			const names = added.filter((n) => this.summary?.objects.some((o) => o.name === n));
+			this.selected({ objects: names, records: {}, part: null, anchor: names[0] ?? null });
+			return names;
+		} finally {
+			this.busy = null;
+			this.progress = null;
+		}
 	}
 
 	importFile(path: string, units?: Record<string, string>): Promise<boolean> {
@@ -1635,6 +1722,24 @@ export class ProjectState {
 	}
 
 	/**
+	 * The project, or objects, dragged out of the window (Brandon, 2026-11-11: dragging the project
+	 * out saves it): the service writes a copy, and the system's drag of it starts if the button
+	 * is still held once it is written, so a drag let go meanwhile drops nothing. The project
+	 * keeps its own file and its unsaved changes. False when nothing was dragged.
+	 */
+	async dragOut(what: { project: true } | { names: string[] }, stillHeld: () => boolean): Promise<boolean> {
+		const label = 'project' in what ? `${this.summary?.title ?? 'Project'}.hforge` : what.names.length === 1 ? `${what.names[0]}.hforge` : `${what.names.length} objects`;
+		try {
+			const res = await this.app.analysis.request<{ paths: string[] }>('project.drag_out', what, { timeoutMs: RUN_TIMEOUT_MS });
+			if (!stillHeld()) return false;
+			return await startDragOut(res.paths, label);
+		} catch (err) {
+			this.error = `Dragging out ${label}: ${message(err)}`;
+			return false;
+		}
+	}
+
+	/**
 	 * Objects dragged onto `target` join its group and leave their own;
 	 * dragged onto nothing (`target` null) they leave their groups.
 	 */
@@ -1693,6 +1798,36 @@ export class ProjectState {
 		const parts: Record<string, number[]> = {};
 		for (const [name, picks] of Object.entries(this.selection.records)) if (picks.length) parts[name] = picks;
 		return parts;
+	}
+
+	/** How many parts an open object holds, as its row lists them; null when it is not open. */
+	partCount(name: string): number | null {
+		const kids = this.children[name];
+		if (!kids) return null;
+		switch (kids.kind) {
+			case 'grid':
+				return new Set(kids.cells.flat().filter((i) => i >= 0)).size;
+			case 'modes':
+				return kids.modes.length;
+			case 'channels':
+				return kids.channels.length;
+			case 'photos':
+				return kids.photos.length;
+			case 'matches':
+				return kids.matches.length;
+			default:
+				return null;
+		}
+	}
+
+	/**
+	 * The picked parts as the confirmation says them: "3 of A", or "all of B" when every part of
+	 * B is picked, which deletes B itself (Brandon, 2026-11-13).
+	 */
+	partsSaid(parts: Record<string, number[]>): string {
+		return Object.entries(parts)
+			.map(([name, picks]) => (picks.length === this.partCount(name) ? `all of ${name}` : `${picks.length} of ${name}`))
+			.join(', ');
 	}
 
 	/**
@@ -1801,7 +1936,7 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// a study keeps the window; any other workspace goes to Signals, the recordings' module
+				// a study keeps the window; any other workspace goes to Signal Processing, the recordings' module
 				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
 				this.app.analyze.selectProject();
 			}
@@ -1891,6 +2026,27 @@ export class AppState {
 	readonly console: ConsoleState;
 	readonly sim: SimState;
 	readonly acquire: AcquireState;
+	/** A finished Random run's way to its data on the analysis side. */
+	readonly runOpen: RunOpen;
+	/** Where runs are kept, and Show Folder, Copy Folder Path and Delete Run for any run named. */
+	readonly runFiles: RunFiles;
+	/** A finished classical shock run's way to its data: the Shock workspace. */
+	readonly shockRunOpen: RunOpen;
+	/** A finished SRS shock run's way to its data: the Shock workspace. */
+	readonly srsRunOpen: RunOpen;
+	/** A finished MIMO Shock run's way to its data: the Shock workspace. */
+	readonly mimoShockRunOpen: RunOpen;
+	/** A finished Sine run's way to its data on the analysis side. */
+	readonly sineRunOpen: RunOpen;
+	/** A finished Mixed Mode run's way to its data on the analysis side. */
+	readonly mixedRunOpen: RunOpen;
+	/** A finished Explorer run's way to its data: its time histories, in the Signals workspace. */
+	readonly explorerRunOpen: RunOpen;
+	/** A finished MIMO Random run's way to its data: the Random workspace. */
+	readonly mimoRunOpen: RunOpen;
+	/** A finished TWR run's way to its data: the Transient Analysis workspace. */
+	readonly twrRunOpen: RunOpen;
+	readonly recorderRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -1903,6 +2059,10 @@ export class AppState {
 	readonly shock: ShockStore;
 	/** The classical shock run's pages and this window's subscription. */
 	readonly shockViews: ShockViewsState;
+	/** MIMO Shock's setup and run; the station and table are the Acquire store's. */
+	readonly mimoShock: MimoShockStore;
+	/** The MIMO Shock run's pages and this window's subscription. */
+	readonly mimoShockViews: MsViewsState;
 	/** SRS shock's setup and run; the station and table are the Acquire store's. */
 	readonly srs: SrsStore;
 	/** The SRS shock run's pages and this window's subscription. */
@@ -1945,9 +2105,32 @@ export class AppState {
 		this.console = new ConsoleState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
-		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
+		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis, onProject: (summary) => this.project.apply(summary) });
+		const runHost = {
+			bring: (folder: string) => this.project.takeRun(folder),
+			show: (workspace: Workspace) => {
+				this.go(workspace);
+				this.analyze.selectProject();
+			}
+		};
+		this.runOpen = new RunOpen(runHost);
+		this.runFiles = new RunFiles({
+			request: <R,>(method: string, params: Record<string, unknown>) => this.analysis.request<R>(method, params),
+			desktop: config.mock ? null : desktopRunFiles(),
+			confirm: confirmFirst
+		});
+		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
+		this.srsRunOpen = new RunOpen(runHost, 'srs');
+		this.mimoShockRunOpen = new RunOpen(runHost, 'mimo_shock');
+		this.sineRunOpen = new RunOpen(runHost, 'sine');
+		this.mixedRunOpen = new RunOpen(runHost, 'mixed');
+		this.explorerRunOpen = new RunOpen(runHost, 'explorer');
+		this.mimoRunOpen = new RunOpen(runHost, 'mimo_random');
+		this.twrRunOpen = new RunOpen(runHost, 'twr');
+		this.recorderRunOpen = new RunOpen(runHost, 'recorder');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mixed = new MixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -1977,6 +2160,16 @@ export class AppState {
 				page: shockPopout ? config.page : null
 			},
 			this.shock
+		);
+		const mimoShockPopout = config.popout && config.popoutTest === 'mimo_shock';
+		this.mimoShockViews = new MsViewsState(
+			this.control,
+			{
+				setupTitle: () => this.mimoShock.status?.title ?? (config.popout ? null : this.mimoShock.setup.title),
+				showing: () => mimoShockPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_shock' && this.mimoShock.step === 'run'),
+				page: mimoShockPopout ? config.page : null
+			},
+			this.mimoShock
 		);
 		const srsPopout = config.popout && config.popoutTest === 'srs';
 		this.srsViews = new SrsViewsState(
@@ -2045,7 +2238,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -2067,6 +2260,7 @@ export class AppState {
 		const twr = this.config.popoutTest === 'twr';
 		const explorer = this.config.popoutTest === 'explorer';
 		const recorder = this.config.popoutTest === 'recorder';
+		const mimoShock = this.config.popoutTest === 'mimo_shock';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -2111,6 +2305,11 @@ export class AppState {
 					if (this.control.status === 'open') void this.recorder.sync();
 				});
 			}
+			if (mimoShock) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mimoShock.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
@@ -2120,13 +2319,14 @@ export class AppState {
 		else if (twr) this.twrViews.watch();
 		else if (explorer) this.explorerViews.watch();
 		else if (recorder) this.recorderViews.watch();
+		else if (mimoShock) this.mimoShockViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2163,6 +2363,8 @@ export class AppState {
 		if (onExplorer || this.explorer.isLive) return this.explorer.source;
 		const onRecorder = this.workspace === 'acquire' && this.tests.screen === 'recorder';
 		if (onRecorder || this.recorder.isLive) return this.recorder.source;
+		const onMimoShock = this.workspace === 'acquire' && this.tests.screen === 'mimo_shock';
+		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
 		return null;
 	}
 
@@ -2216,6 +2418,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.recorder.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mimoShock.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -2230,6 +2435,7 @@ export class AppState {
 		this.twr.watch();
 		this.explorer.watch();
 		this.recorder.watch();
+		this.mimoShock.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
@@ -2240,6 +2446,7 @@ export class AppState {
 		this.twrViews.watch();
 		this.explorerViews.watch();
 		this.recorderViews.watch();
+		this.mimoShockViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

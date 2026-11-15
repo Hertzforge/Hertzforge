@@ -16,6 +16,7 @@ import numpy as np
 from . import display_units
 from . import views as v
 from .descriptors import Operation, Option, Param
+from .op_progress import hook
 from .ops_project import COMPONENT
 from .ops_sine_shock import _record
 from .ops_specify import (
@@ -311,7 +312,7 @@ def partial_coherence(project: Any, params: dict[str, Any]) -> list[dict]:
     coherence = project[name]
     record = _record(coherence, params['record'], name)
     try:
-        reading = project.read_partial_coherence(name)
+        reading = project.read_partial_coherence(name, progress=hook())
     except ValueError as error:
         raise refused(str(error)) from None
     k = _coherence_channel(project, name, record, reading)
@@ -398,7 +399,7 @@ def rigid_body_residual(project: Any, params: dict[str, Any]) -> list[dict]:
 
     name = params['density']
     try:
-        reading = project.read_transformation(name)
+        reading = project.read_transformation(name, progress=hook())
     except ValueError as error:
         raise refused(str(error)) from None
     t = reading.transformation
@@ -473,7 +474,7 @@ def field_limit(project: Any, params: dict[str, Any]) -> list[dict]:
     if not records:
         raise refused(f'{name} has no records to take a limit over')
     try:
-        fit = project.field_limit(name, records, **limit_settings(params))
+        fit = project.field_limit(name, records, **limit_settings(params), progress=hook())
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     limit = fit.limit
@@ -648,10 +649,10 @@ def cmif(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.drive_points`: only the records of an FRF set whose
-    response and reference are one DOF, its drive points, or the
-    autospectra of a cross-spectral matrix, drawn."""
+    response and reference are one node and axis, either sign, its
+    drive points, or the autospectra of a cross-spectral matrix, drawn."""
     import hertzforge as hz
-    from hertzforge.core.data import Psd, autospectrum
+    from hertzforge.core.data import Psd, autospectrum, same_axis
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
 
     from .waterfalls import axes
@@ -661,14 +662,15 @@ def drive_points(project: Any, params: dict[str, Any]) -> list[dict]:
     what = 'autospectra' if isinstance(data, Psd) else 'drive points'
     if data.reference_dof is None:
         raise refused(f'{name} has no references: every record is an autospectrum')
-    # a drive point of an FRF is a ratio of two quantities at one DOF; in a
-    # density, the same two are a cross term
+    # a drive point of an FRF is a ratio of two quantities at one node and
+    # axis, the accelerometer often mounted opposite the force (206X- over
+    # 206X+); in a density, the same two are a cross term
     records = [i for i in range(data.num_records)
                if (autospectrum(data, i) if isinstance(data, Psd)
-                   else data.response_dof[i] == data.reference_dof[i])]
+                   else same_axis(data.response_dof[i], data.reference_dof[i]))]
     if not records:
         raise refused(f'{name} has no {what}: no record has its response and reference '
-                      'at one DOF')
+                      'at one node and axis')
     arrays = waterfall_arrays(data, records, unit_system=hz.SI, exponents=False,
                               component=params['component'])
     lines = []
@@ -740,7 +742,7 @@ OPERATIONS = (
         params=(FRF, RECORDS), outputs=('spectrum',), run=cmif),
     Operation(
         id='project.drive_points', title='Drive Points', workspace='modal',
-        summary='Only the FRFs whose response and reference are one DOF, or the '
-                'autospectra of a cross-spectral matrix.',
+        summary='Only the drive-point FRFs, response and reference at one node and '
+                'axis, either sign, or the autospectra of a cross-spectral matrix.',
         params=(DIAGONAL, COMPONENT), outputs=('spectrum',), run=drive_points),
 )

@@ -1,7 +1,7 @@
 /**
  * The Mixed Mode draft against the wire: PROTOCOL.md's own combined configuration read into the
  * draft and written back field for field (every part kind, every schedule kind, both amplitude and
- * both width forms, the laws and their guards, limits, capture); every wire field the draft writes
+ * both width forms, the laws and their guards, limits, the run record); every wire field the draft writes
  * is one the configuration names; the editor's own findings; where a service finding lands; and an
  * edit made to several rows at once.
  */
@@ -19,6 +19,7 @@ import {
 	mixedByKey,
 	mixedItemKey,
 	mixedSectionOf,
+	newBand,
 	newTone,
 	partsOf,
 	scheduleDraftOf,
@@ -64,7 +65,7 @@ describe('the draft and the wire', () => {
 		expect(sorted(back.schedule)).toEqual(sorted(c.schedule));
 		expect(back.limits.drive_vpk_ceiling).toBe(4);
 		expect(back.limits.channels).toEqual(c.limits.channels);
-		expect(sorted(back.capture)).toEqual(sorted(c.capture));
+		expect([back.operator, back.article, back.notes, back.specification, back.record]).toEqual([c.operator, c.article, c.notes, c.specification, c.record]);
 		expect(back.metadata).toEqual(c.metadata);
 	});
 
@@ -175,5 +176,23 @@ describe('several rows at once', () => {
 		expect(d.tones.every((t) => Number.isNaN(t.amplitude.g))).toBe(true);
 		expect(copyField(d.tones, [0, 1], 0, 'id')).toBe(0);
 		expect(d.tones.map((t) => t.id)).toEqual(['t1', 't2', 't3']);
+	});
+});
+
+describe('the Mixed Mode title', () => {
+	it('follows the parts until the operator types one', () => {
+		const d = defaultMixedSetup();
+		const laws = { floor: null, tones: null };
+		expect(toMixedConfig(d, laws).title).toBe('Sine on Random');
+		d.tones = [];
+		d.bands = [newBand('b1', 1)];
+		expect(toMixedConfig(d, laws).title).toBe('Random on Random');
+		d.tones = defaultMixedSetup().tones;
+		expect(toMixedConfig(d, laws).title).toBe('Sine and Random on Random');
+		d.title = 'Rotor survey';
+		expect(toMixedConfig(d, laws).title).toBe('Rotor survey');
+		expect(fromMixedConfig(toMixedConfig(defaultMixedSetup(), laws)).title).toBe('');
+		expect(fromMixedConfig(toMixedConfig(d, laws)).title).toBe('Rotor survey');
+		expect(mergeMixedSetup({ ...d, title: 'Sine on Random' }).title).toBe('');
 	});
 });

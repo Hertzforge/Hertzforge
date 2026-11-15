@@ -1,6 +1,7 @@
 """The ``hertzforge`` command: ``hertzforge --version`` prints the version,
 ``hertzforge serve`` starts the analysis service, ``hertzforge check-solver``
-says which sparse solver this installation factors with."""
+says which sparse solver this installation factors with, and ``hertzforge
+convert-run FOLDER [-o OUTPUT]`` converts a run folder into a project file."""
 
 import argparse
 
@@ -30,7 +31,31 @@ def main(argv: list[str] | None = None) -> int:
                         help="check that the sparse modal solve uses the solver this "
                              "machine should: Accelerate on a Mac, PARDISO on x86-64 "
                              "Windows and Linux; exit 1 when it does not")
+    # a run folder into a project file, as a process of its own, so a
+    # large run converts without holding up anything else
+    convert = commands.add_parser(
+        "convert-run",
+        help="convert a run folder into a .hforge project file "
+             "(<run name>.hforge inside the folder unless -o names another)")
+    convert.add_argument("folder", help="the run folder, or the run.json inside it")
+    convert.add_argument("-o", "--output", help="the project file to write")
     args, rest = parser.parse_known_args(argv)
+    if args.command == "convert-run":
+        if rest:
+            parser.error(f"unrecognized arguments: {' '.join(rest)}")
+        from hertzforge.io.run_convert import convert as convert_run
+        from hertzforge.io.run_folder import RunFolderError
+
+        try:
+            done = convert_run(args.folder, args.output)
+        except (RunFolderError, OSError) as error:
+            print(f"hertzforge convert-run: {error}")
+            return 1
+        print(f"wrote {done.path}: {len(done.objects)} objects "
+              f"({', '.join(done.objects)})")
+        for lack in done.lacked:
+            print(f"the run lacked: {lack}")
+        return 0
     if args.command == "serve":
         from hertzforge.service.__main__ import main as serve
 

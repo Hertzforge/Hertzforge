@@ -2,6 +2,7 @@
 //! started with test options, and the schema checker.
 #![allow(dead_code)]
 
+pub mod golden_runs;
 pub mod schema;
 
 use futures_util::{SinkExt, StreamExt};
@@ -46,12 +47,19 @@ pub fn options(
     heartbeat: Duration,
 ) -> ServiceOptions {
     let dir = std::env::temp_dir().join(format!(
-        "sds-control-test-{}-{}",
+        "sds-control-test-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        // the clock alone repeats: macOS reads it to the microsecond, and two
+        // tests running at once could share a folder and delete it under each other
+        {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        }
     ));
     ServiceOptions {
         heartbeat,
@@ -71,6 +79,8 @@ pub fn options(
         srs_engine: Some(server::simulated_srs_engine()),
         // TWR likewise (tests/twr_sim_run.rs sets its own).
         twr_engine: Some(server::simulated_twr_engine()),
+        record: Default::default(),
+        keep_table: false,
     }
 }
 

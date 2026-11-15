@@ -77,6 +77,11 @@ class Param:
     #: system: the service takes it to meters before the operation runs, and the shell shows
     #: the system's length unit for `unit`, and for '[m]' in the label
     length: bool = False
+    #: a number of this dimension ('force/length' for a stiffness) typed in the connection's
+    #: display system: the service takes it to SI before the operation runs, and the shell
+    #: shows the system's unit for `unit` and its default in that unit (`units.system`'s
+    #: `quantities`)
+    quantity: str | None = None
     #: a request the panel asks for this field's value, with the form's values, when the
     #: button beside it is pressed (Mesh's element size, detected for the parts and the
     #: element type chosen): `{'value'}` comes back, in the display units
@@ -137,6 +142,8 @@ class Param:
             out['setting'] = self.setting
         if self.length:
             out['length'] = True
+        if self.quantity is not None:
+            out['quantity'] = self.quantity
         if self.suggest is not None:
             out['suggest'] = self.suggest
         if self.shown_with is not None:
@@ -240,6 +247,10 @@ class Operation:
     #: the form can show this while it is typed: `op.run` with `preview` runs it on a
     #: copy of its geometry, so nothing in the project changes
     previews: bool = False
+    #: the boolean param that says go ahead, for an operation that shows what it would do
+    #: until told to (Mesh Solids, Merge Coincident Nodes): the form does not ask it, and sets
+    #: it false for its Preview button and true for Apply (Brandon, 2026-11-11)
+    commits: str | None = None
     #: its readings and refusals say lengths in words, '0.2 m', which go to the display system
     says_lengths: bool = False
 
@@ -253,6 +264,8 @@ class Operation:
         out['modules'] = list(modules_of(self))
         if self.previews:
             out['previews'] = True
+        if self.commits:
+            out['commits'] = self.commits
         return out
 
     def resolve(self, given: Any, objects: Mapping[str, str] | None = None,

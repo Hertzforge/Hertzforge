@@ -27,6 +27,7 @@ import type {
 	Alarm,
 	BandDb,
 	ChannelRow,
+	RestoredTable,
 	ChannelsSetParams,
 	ClockDomain,
 	ControlParams,
@@ -53,6 +54,7 @@ import type {
 	ReadingRow,
 	RefusalReason,
 	ReportItem,
+	RunRecordRef,
 	RunState,
 	SessionState,
 	SimProfile,
@@ -67,7 +69,7 @@ import type {
 	ValidationReport,
 	View
 } from '../types';
-import { MockConnection, MockError, type MockServer } from './socket';
+import { MockConnection, MockError, type MockMethod, type MockServer } from './socket';
 import { createShockMock } from './shock';
 import { createSrsMock } from './srs';
 import { createSineMock } from './sine';
@@ -75,6 +77,7 @@ import { createMixedMock } from './mixed';
 import { createTwrMock } from './twr';
 import { createExplorerMock } from './explorer';
 import { createRecorderMock } from './recorder';
+import { createMimoShockMock } from './mimoShock';
 import { binEdges } from './bins';
 import {
 	breakpointArrays,
@@ -109,6 +112,12 @@ export interface ControlServerOptions {
 	coherence?: number;
 	/** The Recorder's data volume, free bytes (default 100 GiB); null when it cannot be read. */
 	recorderFreeBytes?: number | null;
+	/** A MIMO Shock run's second level ends on an absolute abort line. */
+	mimoShockAbsoluteAbort?: boolean;
+	/** Where a Random or Sine run's folder is made (default `~/Hertzforge_Data`). */
+	dataRoot?: string;
+	/** A Random, Sine, classical shock, SRS shock, MIMO Shock, TWR or Explorer run's record: refused at arm or start (`unwritable`), or a stream stops while it runs (`problem`). */
+	record?: 'unwritable' | 'problem';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -349,12 +358,29 @@ function plantT2(f: number): number {
 // ---------------------------------------------------------------------------------------------
 // Validation (the item reasons of PROTOCOL.md, "Refusals")
 
-interface Selection {
+export interface Selection {
 	kind: 'sim' | 'ni';
 	devices: string[];
 }
 
-function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[]): ValidationReport {
+/** The channel table's unit vocabulary (PROTOCOL.md, "Channel Table"): every name all three sides read as one quantity. */
+export const UNIT_VOCABULARY = [
+	'g', 'in/s**2', 'm/s**2', 'mm/s**2', 'in/s', 'm/s', 'mm/s', 'mil', 'in', 'm', 'mm', 'lbf', 'N', 'kN', 'psi', 'Pa', 'kPa', 'MPa', 'V', 'mV',
+	'strain', 'microstrain', 'm/m', 'degC', 'degF', 'K', 'degR', 'in/s^2', 'm/s^2'
+];
+
+const hasAbort = (r: ChannelRow) => r.abort.accel_g !== null || r.abort.velocity_ips !== null || r.abort.displacement_mil !== null;
+
+/** The row whose shape `channels.set` refuses `bad_params`, by the parameter it names; null when every row is well formed. */
+export function badRowParam(rows: ChannelRow[]): string | null {
+	for (const [i, r] of rows.entries()) {
+		if (!Number.isInteger(r.index) || r.index < 0) return `channels[${i}].index`;
+		if (typeof r.units !== 'string' || r.units === '') return `channels[${i}].units`;
+	}
+	return null;
+}
+
+export function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[]): ValidationReport {
 	const errors: ReportItem[] = [];
 	const warnings: ReportItem[] = [];
 	const seen = new Set<number>();
@@ -374,6 +400,15 @@ function validateTable(rows: ChannelRow[], selection: Selection, scan: NiDevice[
 				if (r.sensitivity_mv_per_eu === 0) errors.push(item('zero_sensitivity', `channel ${r.index} has zero sensitivity`, { channel: r.index }));
 				if (!(r.range_max > 0)) errors.push(item('non_positive_range', `channel ${r.index} has non-positive range`, { channel: r.index }));
 			}
+		}
+		if (!UNIT_VOCABULARY.includes(r.units)) {
+			warnings.push(item('unit_unknown', `channel ${r.index}'s unit is not one the program knows the quantity of; it runs in it as written`, { channel: r.index }));
+		}
+		if (r.enabled && r.role === 'drive' && r.units !== 'V') {
+			warnings.push(item('drive_not_in_volts', `channel ${r.index} is a drive whose unit is not V; a drive is written in volts`, { channel: r.index }));
+		}
+		if (hasAbort(r) && r.units !== 'g') {
+			warnings.push(item('abort_not_in_g', `channel ${r.index} has an abort limit and its unit is not g; the abort limits read it as g`, { channel: r.index }));
 		}
 		if (r.interface === 'iepe' && r.iepe_bias_v === null) {
 			warnings.push(item('iepe_without_bias', `channel ${r.index} is IEPE but has no bias voltage set`, { channel: r.index }));
@@ -649,6 +684,15 @@ interface RandomRun {
 	driveRms: number | null;
 	channelRms: Map<number, number>;
 	timer: ReturnType<typeof setInterval> | null;
+	/** The run's record, from arm on. */
+	record: RunRecordRef | null;
+}
+
+/** A run folder's name: the time it armed in UTC, the test and the run's id. */
+export function runFolderName(at: Date, runId: string, test = 'random'): string {
+	const p = (n: number) => String(n).padStart(2, '0');
+	const stamp = `${at.getUTCFullYear()}${p(at.getUTCMonth() + 1)}${p(at.getUTCDate())}-${p(at.getUTCHours())}${p(at.getUTCMinutes())}${p(at.getUTCSeconds())}`;
+	return `${stamp}_${test}_${runId}`;
 }
 
 const LIVE_STATES: RandomRunState[] = ['armed', 'running', 'review', 'stopping'];
@@ -789,7 +833,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const isLive = () => random !== null && LIVE_STATES.includes(random.state);
 	/** A run of any test type is live (the seat's countdown runs for every one). */
-	const anyLive = () => isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive();
+	const anyLive = () => isLive() || mimoShock.isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive();
 	const orphanS = () => (seatDeadline !== null && anyLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
@@ -825,6 +869,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			twr.seatExpired();
 			explorer.seatExpired();
 			recorder.seatExpired();
+			mimoShock.seatExpired();
 		}
 		sessionChanged();
 	}
@@ -861,9 +906,13 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
+		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'classical_shock')}`,
+		record: options.record,
 		feasibilityExceeds: options.feasibilityExceeds ?? false
 	});
 	const srs = createSrsMock({
+		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'srs')}`,
+		record: options.record,
 		speed,
 		timeoutS,
 		own,
@@ -895,7 +944,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
-		feasibilityExceeds: options.feasibilityExceeds ?? false
+		feasibilityExceeds: options.feasibilityExceeds ?? false,
+		dataRoot: options.dataRoot,
+		record: options.record,
+		folderName: runFolderName
 	});
 	const twr = createTwrMock({
 		speed,
@@ -912,6 +964,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
+		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'twr')}`,
+		record: options.record,
 		feasibilityExceeds: options.feasibilityExceeds ?? false
 	});
 
@@ -930,7 +984,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
 		},
 		clientName,
-		feasibilityExceeds: options.feasibilityExceeds ?? false
+		feasibilityExceeds: options.feasibilityExceeds ?? false,
+		record: options.record
 	});
 
 	const recorder = createRecorderMock({
@@ -967,7 +1022,29 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		},
 		clientName,
 		feasibilityExceeds: options.feasibilityExceeds ?? false,
-		toneLaws: () => sine.laws()
+		toneLaws: () => sine.laws(),
+		dataRoot: options.dataRoot,
+		record: options.record,
+		folderName: runFolderName
+	});
+	// ---- MIMO Shock, on the same run slot and seat ----------------------------------------------
+	const mimoShock = createMimoShockMock({
+		speed,
+		timeoutS,
+		own,
+		hasController: () => !!seat?.conn,
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
+		broadcast: (topic, data) => broadcast(topic, data),
+		rows: () => rows,
+		station: () => {
+			const sel = selected();
+			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
+			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
+		},
+		clientName,
+		absoluteAbort: options.mimoShockAbsoluteAbort ?? false,
+		record: options.record,
+		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'mimo_shock')}`
 	});
 
 	// ---- stations and the channel table -------------------------------------------------------
@@ -976,6 +1053,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	const scannedAt = Math.floor(Date.now() / 1000);
 	let revision = 1;
 	let rows: ChannelRow[] = [newRow(1, 'Control', 'control', 'g'), newRow(2, 'Drive', 'drive', 'V')];
+	/** Set while the table came from a project or a file and the operator has not applied it. */
+	let restored: RestoredTable | null = null;
 
 	const niClass = (): StationClass => (niReal ? 'ni_real' : 'ni_simulated');
 	const simStation: SimStation = { kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: SIM_INPUTS, outputs: SIM_OUTPUTS, clock: 'shared' };
@@ -1014,7 +1093,35 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const stationList = (): StationList => ({ stations: [simStation, niStation()], selected: selected() });
 	const tableReport = () => validateTable(rows, selection, scan);
-	const channelsResult = () => ({ revision, channels: structuredClone(rows), report: tableReport() });
+	const channelsResult = () => ({ revision, channels: structuredClone(rows), report: tableReport(), ...(restored ? { restored: { ...restored } } : {}) });
+
+	const utcWords = (unix: number) => `${new Date(Math.floor(unix) * 1000).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+	const sourceWords = (r: RestoredTable) => (r.source === 'kept' ? `the table this service kept (${r.name})` : r.source === 'project' ? `the project table "${r.name}"` : `the file "${r.name}"`);
+
+	/** The one check every arm, and every start that arms, makes, as the service's `Table::arm_gate`. */
+	function tableGate() {
+		if (!restored) return;
+		refuse('refused', 'table_not_applied', `The channel table (revision ${revision}) was restored from ${sourceWords(restored)} at ${restored.at} and has not been applied; review it and apply it before arming.`, {
+			revision,
+			restored: { ...restored }
+		});
+	}
+
+	/** The arms and the starts that arm, each held behind the one table check. */
+	const GATED = ['random.arm', 'random.start', 'shock.arm', 'shock.start', 'srs.arm', 'srs.start', 'sine.arm', 'sine.start', 'mixed.arm', 'mixed.start', 'twr.arm', 'twr.start', 'explorer.start', 'recorder.start', 'mimo_shock.arm', 'mimo_shock.start'];
+	function gated(methods: Record<string, MockMethod>): Record<string, MockMethod> {
+		const out: Record<string, MockMethod> = { ...methods };
+		for (const name of GATED) {
+			const handler = out[name];
+			if (!handler) continue;
+			out[name] = (params, conn) => {
+				own(conn);
+				tableGate();
+				return handler(params, conn);
+			};
+		}
+		return out;
+	}
 
 	// ---- the Random run -----------------------------------------------------------------------
 	let random: RandomRun | null = null;
@@ -1098,14 +1205,15 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			remaining_at_level_s: timing.remaining,
 			alarm: r.alarmLines > 0 || r.overload.size > 0,
 			feasibility: r.feasibility,
-			end: r.end
+			end: r.end,
+			...(r.record ? { record: { ...r.record } } : {})
 		};
 	}
 
 	/** Send `random.state` when anything the run bar shows has changed. */
 	function stateChanged(force = false) {
 		const state = stateOf(random);
-		const key = JSON.stringify([state.run_id, state.state, state.phase, state.mode, state.level_db, state.alarm, state.end, state.feasibility, state.clock]);
+		const key = JSON.stringify([state.run_id, state.state, state.phase, state.mode, state.level_db, state.alarm, state.end, state.feasibility, state.clock, state.record]);
 		if (!force && key === lastStateKey) return;
 		lastStateKey = key;
 		broadcast('random.state', state as unknown as Record<string, unknown>);
@@ -1178,8 +1286,23 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			controlRms: null,
 			driveRms: null,
 			channelRms: new Map(),
-			timer: null
+			timer: null,
+			record: null
 		};
+	}
+
+	/** Claim the run's folder at arm, or refuse the arm as the service does when it cannot be written. */
+	function claimRecord(r: RandomRun) {
+		if (r.record) return;
+		const root = options.dataRoot ?? '~/Hertzforge_Data';
+		const folder = `${root.replace(/[\\/]+$/, '')}/${runFolderName(new Date(), r.id)}`;
+		if (options.record === 'unwritable') {
+			const reason = 'Permission denied';
+			refuse('refused', 'record_unwritable', `The run's record could not be written, so the run did not arm: ${folder} (${reason}). Choose a data folder that can be written.`, { path: folder, reason });
+		}
+		const streams = r.config.record?.streams === false ? 'off' : 'on';
+		r.record = { folder, streams, problem: null };
+		if (streams === 'off') addLog('record', 'the time histories are not recorded: switched off in the setup');
 	}
 
 	/** Feasibility, the station's actual rate and grid, and the arm gate. Nothing is driven. */
@@ -1219,6 +1342,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		if (grid.lines < MIN_LINES) {
 			refuse('refused', 'arm_refused', `arm refused: the station configured ${grid.fs_hz} Hz, which leaves ${grid.lines} control lines in the band (minimum ${MIN_LINES}).`);
 		}
+		claimRecord(r);
 		r.grid = grid;
 		r.clock = 'shared';
 		r.lines = buildLines(r);
@@ -1435,6 +1559,11 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				break;
 			case 'engaged':
 			case 'full_level': {
+				if (options.record === 'problem' && r.record && r.record.streams === 'on' && r.record.problem === null && r.engagedT >= 2) {
+					const problem = 'the inputs stream stopped: no space left on the disk';
+					r.record = { ...r.record, problem };
+					addLog('record', problem);
+				}
 				r.engagedT += dt;
 				r.atLevelT += dt;
 				walk(r, dt);
@@ -1731,7 +1860,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function notWhileShock(what: string) {
-		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId();
+		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId() ?? mimoShock.liveId();
 		if (id) refuse('refused', 'run_active', `Run ${id} is live; stop it before ${what}.`, { run_id: id });
 	}
 
@@ -1763,6 +1892,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			twr.detach(c);
 			explorer.detach(c);
 			recorder.detach(c);
+			mimoShock.detach(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1772,7 +1902,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				sessionChanged();
 			}
 		},
-		methods: {
+		methods: gated({
 			...shock.methods,
 			...srs.methods,
 			...sine.methods,
@@ -1780,6 +1910,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			...twr.methods,
 			...explorer.methods,
 			...recorder.methods,
+			...mimoShock.methods,
 			// The law catalog holds both shock worlds, Sine's and TWR's: each lists its own, and a law
 			// file goes to the world it implements (the mock tells an SRS, a Sine or a TWR law file by
 			// its name).
@@ -1788,7 +1919,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const classical = (shock.methods['laws.list'](params, conn) as { laws: unknown[] }).laws;
 				const all = world === undefined || world === null;
 				return {
-					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : [])],
+					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : []), ...(all || world === 'shock_mimo' ? mimoShock.laws() : [])],
 					problems: []
 				};
 			},
@@ -1889,6 +2020,12 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				if (!Array.isArray(p.channels) || typeof p.revision !== 'number') {
 					refuse('bad_request', 'bad_params', 'A table edit names the revision it was made from and carries its rows.', { param: Array.isArray(p.channels) ? 'revision' : 'channels' });
 				}
+				const bad = badRowParam(p.channels);
+				if (bad) refuse('bad_request', 'bad_params', `A channel row is not well formed at ${bad}.`, { param: bad });
+				const source = p.source ?? null;
+				if (source !== null && (typeof source !== 'object' || (source.kind !== 'project' && source.kind !== 'file') || typeof source.name !== 'string' || !source.name.trim())) {
+					refuse('bad_request', 'bad_params', '"source" is {"kind": "project" or "file", "name": the table\'s or the file\'s name}.', { param: 'source' });
+				}
 				const report = validateTable(p.channels, selection, scan);
 				if (p.dry_run) return { revision, report };
 				own(conn);
@@ -1904,8 +2041,25 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				}
 				rows = structuredClone(p.channels);
 				revision += 1;
+				const now = Date.now() / 1000;
+				restored = source ? { source: source.kind, name: source.name.trim(), at_unix: now, at: utcWords(now) } : null;
 				broadcast('channels.changed', channelsResult());
 				return { revision, report };
+			},
+			'channels.apply': (params, conn) => {
+				if (typeof params.revision !== 'number') refuse('bad_request', 'bad_params', 'Applying a table names the revision the operator was shown.', { param: 'revision' });
+				own(conn);
+				notWhileLive('applying the channel table');
+				if (params.revision !== revision) {
+					refuse('refused', 'stale_revision', `The table changed since revision ${String(params.revision)} (it is now ${revision}); read it again and review it before applying.`, { current: revision, provided: params.revision });
+				}
+				if (!restored) refuse('refused', 'nothing_to_apply', `The channel table (revision ${revision}) is not a restored table; it is already applied.`);
+				const report = tableReport();
+				if (report.errors.length > 0) refuse('bad_request', 'table_invalid', `The channel table has ${report.errors.length} error(s), so it cannot be applied.`, { ...report });
+				const applied = { ...(restored as RestoredTable) };
+				restored = null;
+				broadcast('channels.changed', channelsResult());
+				return { revision, applied, report };
 			},
 
 			// ---- Random -------------------------------------------------------------------------
@@ -2081,6 +2235,6 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const since = typeof params.since === 'number' ? Math.max(0, Math.floor(params.since)) : 0;
 				return { entries: log.slice(since), next: log.length };
 			}
-		}
+		})
 	};
 }

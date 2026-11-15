@@ -16,6 +16,8 @@
 	import TableFileMenu from '$lib/tables/TableFileMenu.svelte';
 	import { pathName, type FileResult } from '$lib/tables/tableFiles';
 	import Findings from './Findings.svelte';
+	import RestoredTable from './RestoredTable.svelte';
+	import TableHome from './TableHome.svelte';
 	import NumberField from './NumberField.svelte';
 	import type { AcquireState } from './store.svelte';
 	import { STATUS_WORDS, freeChannels, physicalKey, rolesFor, type RowCell, type RowEdit, type RowFinding } from './table';
@@ -151,6 +153,9 @@
 			</button>
 		</div>
 	{/if}
+
+	<RestoredTable {acq} />
+	<TableHome {acq} />
 
 	{#if acq.tableChange}
 		{@const ch = acq.tableChange}

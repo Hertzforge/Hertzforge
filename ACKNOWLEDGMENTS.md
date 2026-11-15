@@ -51,7 +51,8 @@ Not people, but worth naming: Hertzforge is written against a body of work it do
 and could not replace. The dependencies it ships with, and what their licenses ask in return, are
 in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md); this is the shorter list of what shaped it.
 Papers are cited by author, title and venue. The control laws and the reference tools of MIMO
-Random were written from these papers, and their code comments cite them the same way.
+Random and MIMO Shock were written from these papers, and their code comments cite them the same
+way.
 
 - **Bendat and Piersol**, *Random Data: Analysis and Measurement Procedures*. The spectral
   conventions follow it. Where the controller holds the complex conjugate of its cross-spectral
@@ -110,6 +111,35 @@ Random were written from these papers, and their code comments cite them the sam
 - **N. J. Higham**, "Computing a Nearest Symmetric Positive Semidefinite Matrix", Linear Algebra and
   its Applications, 1988: the nearest realizable matrix, the mathematics under the reference
   repair.
+- **Fisher**, "Computer-Controlled Multiple-Actuator Shaker Offers Versatile Test Capabilities",
+  report, 1977, OSTI 7328357, and **Rader and Berry**, "Experimental Investigation
+  of Launch Vehicle Transient Input Simulation in Payload Tests", NASA CR-145349, 1979: open-loop
+  transient control with several exciters, a measured system inverted to reproduce a waveform at
+  several points at once, where MIMO Shock's classical method starts.
+- **R. Schultz**, "Explorations in Multiple-Input Shaker Shock Testing", 2019, and **R. Schultz and
+  S. Carter**, "A MIMO Time Waveform Replication Control Implementation", 2022, both conference
+  papers of Sandia National Laboratories: the regularized inverse of the identified system on each
+  spectral line, the zero padding that keeps a pulse from wrapping around its record, and filtering
+  the target into the band the identification can be trusted in.
+- **Coleman, Smallwood and Skousen**, "Response Limited Shaker Shock Testing", 2016, a conference
+  paper of Sandia National Laboratories: the published one-exciter SRS correction, which updates
+  only the magnitude of the estimated system from the ratio of the measured SRS to the target,
+  leaves its phase alone, keeps the weight under one and rises in 3 dB steps. The default SRS law,
+  `shape`, is its form for several exciters.
+- **Owens, Hatonen and Daley**, "Robust Gradient-Based Discrete-Time Iterative Learning Control
+  Algorithms", University of Sheffield research report, 2006: the convergence condition of iterative
+  learning control under model error, behind the convergence checks the laws are held to and the
+  correction gain kept under one.
+- **B. Gustavsen and A. Semlyen**, "Rational Approximation of Frequency Domain Responses by Vector
+  Fitting", IEEE Transactions on Power Delivery, 1999, with Gustavsen's relaxed form, and **G. H.
+  Golub and V. Pereyra**, "The Differentiation of Pseudo-Inverses and Nonlinear Least Squares
+  Problems Whose Variables Separate", SIAM Journal on Numerical Analysis, 1973: the modal fit of the
+  identified system that the laws' tracked model option starts from.
+- **MIL-STD-810H**, Method 516.8 (Shock) and Method 527.2 (Multi-Exciter Test), and **IEC
+  60068-2-27**, *Environmental testing, Part 2-27: Tests, Test Ea and guidance: Shock*: the
+  classical pulses and their tolerances, the SRS tolerance and the effective duration window each
+  control point is judged by, and the energy-weighted global SRS error MIMO Shock shows beside its
+  verdict.
 - **Rattlesnake**, the open-source MIMO vibration controller by Sandia National Laboratories (its
   packaging names Daniel P. Rohe as author), for showing what an open MIMO controller should do.
   Credited as a source, not an affiliation. Nothing of its code is in Hertzforge: Rattlesnake is

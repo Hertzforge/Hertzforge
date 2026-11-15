@@ -99,7 +99,7 @@ impl ChannelTable {
                 "{func_type:>10}{idx:>10}  RESP dir {response_dir}  {refflag}  units={units}\n",
                 idx = c.index,
                 refflag = if is_reference { "REF" } else { "RESP-ONLY" },
-                units = super::units_str(&c.units),
+                units = c.units.name(),
             ));
             // Records 7-11 + ordinate data: not yet implemented.
             out.push_str(TODO_MARKER);

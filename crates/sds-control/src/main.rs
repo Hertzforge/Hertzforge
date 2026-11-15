@@ -216,6 +216,8 @@ async fn main() {
     ));
     let options = server::ServiceOptions {
         bind: format!("ws://{local}/"),
+        // The service keeps its last channel table across restarts.
+        keep_table: true,
         ..server::ServiceOptions::default()
     };
     let service = server::Service::with_options(options);

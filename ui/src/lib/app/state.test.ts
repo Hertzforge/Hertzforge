@@ -203,3 +203,260 @@ describe('a drag in a reading', () => {
 		expect(a.reading!.views[0]).toEqual(before);
 	});
 });
+
+describe('a form with a Preview button', () => {
+	// Brandon, 2026-11-11: a Mesh tickbox meant "the preview until ticked"; Apply should mean do it.
+	const meshSolids = {
+		id: 'project.mesh_solids',
+		title: 'Mesh Solids',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		commits: 'keep',
+		outputs: ['reading'],
+		params: [geometry, { name: 'size', label: 'Size', type: 'number', default: 0.01 }, { name: 'keep', label: 'Mesh', type: 'boolean', default: false }]
+	} as unknown as OperationDescriptor;
+
+	function withMesh() {
+		const made = make();
+		made.app.catalog = { operations: [addBlock, editSolid, meshSolids] } as never;
+		return made;
+	}
+
+	it('does not ask the go-ahead param', async () => {
+		const { a } = withMesh();
+		await a.perform(row(meshSolids), column);
+		expect(a.formParams.map((p) => p.name)).toEqual(['size']);
+	});
+
+	it('Preview sends it false and Apply sends it true', async () => {
+		const { a, runs } = withMesh();
+		await a.perform(row(meshSolids), column);
+		await a.run(true);
+		expect(runs.at(-1)?.params?.keep).toBe(false);
+		expect(a.reading?.title).toBe('Mesh Solids, preview');
+		await a.run();
+		expect(runs.at(-1)?.params?.keep).toBe(true);
+		expect(runs.at(-1)?.preview).toBeUndefined();
+	});
+
+	it('Preview does nothing on a form without one', async () => {
+		const { a, runs } = withMesh();
+		await a.perform(row(addBlock), column);
+		const before = runs.length;
+		await a.run(true);
+		expect(runs.length).toBe(before);
+	});
+});
+
+describe('a long operation', () => {
+	// Brandon, 2026-11-11: a solve that takes a while shows how far it has got and can be stopped
+	const solve = {
+		id: 'project.solve_modes',
+		title: 'Solve Modes',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		outputs: ['reading'],
+		params: [geometry, { name: 'num_modes', label: 'Modes', type: 'integer', default: 20 }]
+	} as unknown as OperationDescriptor;
+
+	function slowly() {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const sent: string[] = [];
+		let finish: (value: unknown) => void = () => {};
+		const request = vi.fn((method: string) => {
+			sent.push(method);
+			if (method === 'op.run') return new Promise((resolve) => (finish = resolve));
+			if (method === 'op.cancel') return Promise.resolve({ op: solve.id });
+			if (method === 'project.actions') return Promise.resolve({ table: { columns: [{ kinds: ['geometry'], current: true, rows: [] }] } });
+			return Promise.resolve({});
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		const handlers = (app.analysis as unknown as { handlers: Map<string, Set<(data: unknown) => void>> }).handlers;
+		const emit = (data: unknown) => handlers.get('op.progress')?.forEach((h) => h(data));
+		app.catalog = { operations: [solve] } as never;
+		app.project.summary = summary;
+		return { a: app.analyze, sent, emit, finish: () => finish({ views: [{ view: 'reading', title: 'done', rows: [] }] }) };
+	}
+
+	it('follows its progress while it runs and forgets it after', async () => {
+		const { a, emit, finish } = slowly();
+		await a.perform(row(solve), column);
+		const running = a.run();
+		await Promise.resolve();
+		emit({ op: solve.id, done: 0, total: -1 });
+		expect(a.opProgress).toEqual({ done: 0, total: -1 });
+		emit({ op: 'project.other', done: 5, total: 10 });
+		expect(a.opProgress, 'another operation\'s progress is not ours').toEqual({ done: 0, total: -1 });
+		emit({ op: solve.id, done: 3, total: 10 });
+		expect(a.opProgress).toEqual({ done: 3, total: 10 });
+		finish();
+		await running;
+		expect(a.opProgress).toBeNull();
+	});
+
+	it('Cancel asks the service once, and only while it runs', async () => {
+		const { a, sent, finish } = slowly();
+		await a.perform(row(solve), column);
+		await a.cancel();
+		expect(sent).not.toContain('op.cancel');
+		const running = a.run();
+		await Promise.resolve();
+		await a.cancel();
+		await a.cancel();
+		expect(sent.filter((m) => m === 'op.cancel')).toHaveLength(1);
+		expect(a.cancelling).toBe(true);
+		finish();
+		await running;
+		expect(a.cancelling).toBe(false);
+	});
+});
+
+describe('a value typed into an open form', () => {
+	// Brandon, 2026-11-11: a mesh size typed, then Preview, then Apply meshed at the detected size
+	const mesh = {
+		id: 'project.mesh_solids',
+		title: 'Mesh',
+		workspace: 'geometry',
+		modules: ['geometry'],
+		outputs: ['reading'],
+		commits: 'keep',
+		params: [geometry, { name: 'size', label: 'Element size', type: 'number', default: 0 }, { name: 'apart', label: 'Apart', type: 'boolean', default: false }, { name: 'keep', label: 'Mesh', type: 'boolean', default: false }]
+	} as unknown as OperationDescriptor;
+
+	function meshing() {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const runs: Sent[] = [];
+		const detected = { size: '0.01' };
+		const request = vi.fn(async (method: string, params: Sent) => {
+			if (method === 'op.run') {
+				runs.push(params);
+				return { views: [{ view: 'reading', title: 'r', rows: [] }], project: summary };
+			}
+			if (method === 'project.actions') {
+				const rows = [{ id: mesh.id, verb: 'Mesh', kind: 'run', ready: true, fill: { geometry: 'G', size: detected.size } }];
+				return { table: { columns: [{ kinds: ['geometry'], current: true, rows }] } };
+			}
+			if (method === 'project.show') return { title: 'shown', views: [], note: '' };
+			return {};
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		Object.defineProperty(app.analysis, 'isOpen', { get: () => true });
+		app.catalog = { operations: [mesh] } as never;
+		app.project.summary = summary;
+		return { a: app.analyze, runs, detected };
+	}
+
+	const opened = (detected: { size: string }) =>
+		({ id: mesh.id, verb: 'Mesh', kind: 'run', ready: true, fill: { geometry: 'G', size: detected.size } }) as unknown as ActionRow;
+
+	it('stays through a Preview and the reload after it, and is what Apply sends', async () => {
+		const { a, runs, detected } = meshing();
+		await a.perform(opened(detected), column);
+		expect(a.formOpen).toBe(true);
+		expect(a.currentValues.size).toBe(0.01);
+		a.values = { ...a.values, [mesh.id]: { ...a.currentValues, size: 0.005 } };
+		await a.run(true);
+		await a.loadActions();
+		expect(a.currentValues.size, 'the detected size must not come back over the typed one').toBe(0.005);
+		await a.run();
+		expect(runs.map((r) => [r.params?.size, r.params?.keep])).toEqual([[0.005, false], [0.005, true]]);
+	});
+
+	it('follows the selection when what it would be filled with changes', async () => {
+		const { a, detected } = meshing();
+		await a.perform(opened(detected), column);
+		a.values = { ...a.values, [mesh.id]: { ...a.currentValues, size: 0.005 } };
+		detected.size = '0.02';
+		await a.loadActions();
+		expect(a.currentValues.size).toBe(0.02);
+	});
+});
+
+describe('a finished run opened in Analysis', () => {
+	const runObjects = ['Channel Table', 'inputs', 'drives', 'Specification', 'Run Record'].map((name) => ({ name, kind: 'time_history', records: 1, groups: ['run'], verbs: [] }));
+	function runApp(start: ProjectSummary | null) {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1'));
+		const sent: [string, Record<string, unknown>][] = [];
+		const answers = { refuse: '' };
+		const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+			if (method === 'project.open' || method === 'project.import') {
+				sent.push([method, params]);
+				if (answers.refuse) throw new RequestError('refused', answers.refuse, method);
+				const before = method === 'project.import' ? (app.project.summary?.objects ?? []) : [];
+				return { added: runObjects.map((o) => o.name), project: { ...summary, title: 'run', file: null, objects: [...before, ...runObjects] } };
+			}
+			if (method === 'project.actions') return { table: { columns: [] } };
+			return {};
+		});
+		(app.analysis as unknown as { request: unknown }).request = request;
+		app.project.summary = start;
+		app.workspace = 'acquire';
+		return { app, sent, answers };
+	}
+
+	it('opens the folder as the project when the project holds nothing, and shows the Random workspace', async () => {
+		const { app, sent } = runApp({ ...summary, objects: [], active_geometry: null } as unknown as ProjectSummary);
+		expect(await app.runOpen.open('/data/20261113-180000_random_r-0001')).toBe(true);
+		expect(sent).toEqual([['project.open', { path: '/data/20261113-180000_random_r-0001' }]]);
+		expect(app.workspace).toBe('random');
+		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
+		expect(app.project.busy).toBeNull();
+	});
+
+	it('imports it into a project that holds objects, keeping them', async () => {
+		const { app, sent } = runApp(summary);
+		expect(await app.runOpen.open('/data/run')).toBe(true);
+		expect(sent.map(([m]) => m)).toEqual(['project.import']);
+		expect(app.project.summary?.objects.map((o) => o.name)).toEqual(['G', 'H', ...runObjects.map((o) => o.name)]);
+		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
+		expect(app.workspace).toBe('random');
+	});
+
+	it('stays on the run screen and says why when the analysis service refuses', async () => {
+		const { app, answers } = runApp(summary);
+		answers.refuse = 'The folder has no run.json.';
+		expect(await app.runOpen.open('/data/run')).toBe(false);
+		expect(app.workspace).toBe('acquire');
+		expect(app.runOpen.status).toBe('refused');
+		expect(app.runOpen.refusal?.message).toBe('The folder has no run.json.');
+		expect(app.project.busy).toBeNull();
+	});
+});
+
+describe('deleting parts', () => {
+	it('says "all of" an object whose every part is picked, which deletes the object', () => {
+		const { app } = make();
+		app.project.children = {
+			Run: { kind: 'grid', rows: [], columns: [], cells: [[0, 1], [2, -1]], icons: [], undefined: [] },
+			Modes: { kind: 'modes', modes: [{ index: 0, frequency: 10, damping: 0.01, description: '' }] }
+		} as never;
+		expect(app.project.partsSaid({ Run: [0, 2] })).toBe('2 of Run');
+		expect(app.project.partsSaid({ Run: [0, 1, 2], Modes: [0] })).toBe('all of Run, all of Modes');
+		expect(app.project.partsSaid({ Closed: [0] }), 'an object not open is counted as picked').toBe('1 of Closed');
+	});
+});
+
+describe('the fit cursor dragged', () => {
+	it('sends where it is quietly, with no busy line under the hand, and a button press still says so', async () => {
+		// the pending mode follows the cursor as it is dragged (Brandon, 2026-11-14)
+		const { app } = make();
+		const seen: (string | null)[] = [];
+		let release!: () => void;
+		(app.analysis as unknown as { request: unknown }).request = vi.fn(
+			(method: string) =>
+				new Promise((resolve) => {
+					release = () => resolve({ fit: { method } });
+				})
+		);
+		const quiet = app.fit.move(440, true);
+		seen.push(app.fit.busy);
+		release();
+		expect(await quiet).toBe(true);
+		const pressed = app.fit.fit();
+		seen.push(app.fit.busy);
+		release();
+		await pressed;
+		expect(seen).toEqual([null, 'Fitting the mode']);
+		expect(app.fit.busy).toBeNull();
+	});
+});

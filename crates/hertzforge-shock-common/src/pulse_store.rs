@@ -278,3 +278,53 @@ pub fn capture_pulse(sink: &CaptureSink, record: &PulseRecord, n_channels: usize
     let frames = samples.len();
     sink.push(&samples, frames)
 }
+
+/// Why [`capture_pulse_rows`] refused a pulse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureRowsError {
+    /// No rows were given.
+    NoRows,
+    /// Row `row` is `len` frames where row 0 is `want`.
+    UnequalRows { row: usize, len: usize, want: usize },
+}
+
+impl std::fmt::Display for CaptureRowsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CaptureRowsError::NoRows => f.write_str("a pulse capture needs at least one row"),
+            CaptureRowsError::UnequalRows { row, len, want } => write!(
+                f,
+                "row {row} of the pulse capture is {len} frames where row 0 is {want}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CaptureRowsError {}
+
+/// Stream one pulse's `rows` (one time history per channel, every row the same
+/// length) to the run's capture sink as interleaved f32 frames, `rows.len()`
+/// samples a frame in row order. The sink must have been started with
+/// `n_channels == rows.len()`. A single row writes exactly what [`capture_pulse`]
+/// writes for the same time history.
+///
+/// Returns the sink's `push` result (true = queued, false = dropped), or the
+/// refusal when the rows are empty or of unequal length (nothing is pushed).
+pub fn capture_pulse_rows(sink: &CaptureSink, rows: &[&[f64]]) -> Result<bool, CaptureRowsError> {
+    let want = rows.first().ok_or(CaptureRowsError::NoRows)?.len();
+    if let Some((row, r)) = rows.iter().enumerate().find(|(_, r)| r.len() != want) {
+        return Err(CaptureRowsError::UnequalRows {
+            row,
+            len: r.len(),
+            want,
+        });
+    }
+    let n = rows.len();
+    let mut samples = vec![0.0f32; want * n];
+    for (c, r) in rows.iter().enumerate() {
+        for (f, &v) in r.iter().enumerate() {
+            samples[f * n + c] = v as f32;
+        }
+    }
+    Ok(sink.push(&samples, want))
+}

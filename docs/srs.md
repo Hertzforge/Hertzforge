@@ -177,10 +177,20 @@ reads under the target is held there on purpose: it still alarms, but it does no
 passing. A band over the target, or outside the abort band, still does. Once planned, the notch shows here and on the run: how many bands
 it notched and the worst prediction before and after.
 
-## Capture
+## The Run Record
 
-The capture can start when the run arms; fields kept with the run (a run number, an operator) are
-listed here.
+Fields kept with the run (a run number, an operator) are listed here. Every run is recorded in a
+run folder from the moment it arms, as a Random run is (`docs/run-folder.md`, "What an SRS Run
+Saves"). The **Run Record** panel takes the operator, the test article, the specification document
+and clause, and notes, and whether the folder keeps the time histories: every enabled input and the
+drive, a shot for identification and one for each pulse. With them off, the setup, the table, the
+log, the target with its envelope, the synthesis, the identification and every pulse's results are
+still kept. A run whose folder cannot be written does not arm, and says which folder and why. Once
+armed, the run card names the folder; when recording has a problem the card says so and the run
+goes on. A finished run's end line offers **Open in Analysis**, which converts the folder and opens
+its data in the Shock workspace (each pulse's time history and SRS, the target and its alarm and
+abort bands, the identification), and **Copy Folder Path**. The run has no capture of its own any
+more: the run folder is the one record.
 
 ## The Run
 

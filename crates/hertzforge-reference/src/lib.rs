@@ -244,13 +244,15 @@ pub enum Method {
     RigidBody,
     /// The NumPy `.npz` specification file.
     SpecificationNpz,
-    /// The MATLAB `.mat` specification file (converted by the analysis service).
+    /// The MATLAB `.mat` specification file, converted beforehand by the Python
+    /// function `hertzforge.io.reference_convert.from_mat` (no service verb does it).
     SpecificationMat,
     /// The plain CSV layout.
     Csv,
-    /// A `.hforge` file (converted by the analysis service).
+    /// A `.hforge` file, converted beforehand by the Python function
+    /// `hertzforge.io.reference_convert.from_hforge` (no service verb does it).
     Hforge,
-    /// Derived from field or flight records (the analysis service).
+    /// Derived from field or flight records.
     FieldData,
     /// Assembled directly from matrices.
     Direct,

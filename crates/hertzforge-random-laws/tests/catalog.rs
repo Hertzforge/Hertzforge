@@ -708,3 +708,30 @@ fn a_further_check_record_lives_beside_the_law_and_leaves_its_own_check_alone() 
         CheckStatus::Unreadable(_)
     ));
 }
+
+#[test]
+fn mimo_shock_the_world_is_named_and_its_law_files_are_listed_under_it() {
+    assert_eq!(LawWorld::ShockMimo.as_str(), "shock_mimo");
+    assert_eq!(LawWorld::ShockMimo.test_type(), "MIMO Shock");
+    let scratch = Scratch::new("catalog-shock-mimo");
+    let mut cat = open(scratch.path());
+    assert!(cat.entries_for(LawWorld::ShockMimo).is_empty());
+    let id = cat
+        .import(&law_file("hertzforge_law_mimo_shock_paired"))
+        .unwrap()
+        .id;
+    let listed = cat.entries_for(LawWorld::ShockMimo);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, id);
+    assert_eq!(listed[0].world, LawWorld::ShockMimo);
+    assert_eq!(listed[0].manifest.name, "paired");
+    assert!(!listed[0].builtin);
+    assert!(cat.shock_mimo_law(&id).is_some());
+    // Listed under its own world only.
+    assert!(cat
+        .entries_for(LawWorld::ShockSrs)
+        .iter()
+        .all(|e| e.id != id));
+    assert!(cat.srs_law(&id).is_none());
+    assert_eq!(wasm_files(cat.laws_dir()).len(), 1);
+}

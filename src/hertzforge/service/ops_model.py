@@ -184,18 +184,12 @@ def merge_coincident_nodes(project: Any, params: dict[str, Any]) -> list[dict]:
     out = _left_out(params, places)
     exclude = [node for spot in every if spot[0] in out for node in spot]
     if params['keep']:
-        before = len(geometry.node_id)
         try:
             project.merge_coincident_nodes(name, tolerance=tolerance, groups=groups,
                                            exclude=exclude or None)
         except ValueError as error:
             raise refused(str(error)) from None
-        after = len(geometry.node_id)
-        return [v.reading(f'Coincident nodes of {name}', [
-            v.row('Nodes before', float(before), '', 'info'),
-            v.row('Nodes merged away', float(before - after), '', 'info'),
-            v.row('Places left out', float(len(out)), '', 'info'),
-            v.row('Nodes now', float(after), '', 'info')])]
+        return view_geometry(project, params)
     rows = [v.row('Places', float(len(places)), '', 'info'),
             v.row('Left out', _id_text(out) or 'none', None, 'info')]
     fold = geometry.merge_folds(tolerance, groups, exclude or None)
@@ -239,14 +233,14 @@ def merge_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
 def delete_element_groups(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.delete_element_groups`: element groups deleted with their
     elements and the nodes only they used, except nodes where data in the
-    project is measured or solved (`Project.delete_element_groups`)."""
+    project is measured or solved (`Project.delete_element_groups`). Every
+    group may go: a geometry with none is still a geometry, its solids left to
+    mesh again (Brandon, 2026-11-13)."""
     name = params['geometry']
     geometry = project[name]
     if not params['groups'].strip():
         raise refused('name the element groups to delete, such as 2, 4')
     chosen = _groups(geometry, params['groups'])
-    if len(chosen) == len(geometry.groups.ids):
-        raise refused('that is every element group: delete the geometry instead')
     try:
         project.delete_element_groups(name, chosen)
     except ValueError as error:
@@ -361,13 +355,10 @@ def tie_elements(project: Any, params: dict[str, Any]) -> list[dict]:
             raise refused(f'the geometry has no element group {to!r}; a second patch of '
                           'elements has its own field')
     try:
-        found = project.tie_elements(name, patch, target)
+        project.tie_elements(name, patch, target)
     except (ValueError, KeyError) as error:
         raise refused(str(error).strip("'")) from None
-    return [v.reading(f'Tie on {name}', [
-        v.row('Links added', float(found['links']), '', 'info'),
-        v.row('Nodes already shared', float(found['shared']), '', 'info'),
-        v.row('Links in group', str(found['group']), None, 'info')])]
+    return view_geometry(project, params)
 
 
 def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -385,15 +376,10 @@ def align_meshes(project: Any, params: dict[str, Any]) -> list[dict]:
     exclude = sorted(out) or None
     if params['keep']:
         try:
-            found = project.align_meshes(name, reach, groups, exclude)
+            project.align_meshes(name, reach, groups, exclude)
         except ValueError as error:
             raise refused(str(error)) from None
-        farthest = (v.row('Farthest move', float(found['farthest']) * 1000.0, 'mm', 'info')
-                    if geometry.units_defined
-                    else v.row('Farthest move', float(found['farthest']), None, 'info'))
-        return [v.reading(f'Aligned meshes of {name}', [
-            v.row('Nodes moved', float(found['moved']), '', 'info'),
-            v.row('Moves left out', float(len(out)), '', 'info'), farthest])]
+        return view_geometry(project, params)
     moves = [move for move in every if int(move[0]) not in out]
     rows = [v.row('Moves', float(len(every)), '', 'info'),
             v.row('Left out', _id_text(out) or 'none', None, 'info')]
@@ -430,7 +416,7 @@ OPERATIONS = (
                 'left in merged into one node; tolerance 0 for the core\'s own.',
         params=(GEOMETRY, GROUPS, TOLERANCE, LEFT_OUT, TOGGLE, MERGE_KEEP),
         outputs=('reading', 'shape3d'),
-        run=merge_coincident_nodes, edits=True, edits_when=_kept),
+        run=merge_coincident_nodes, edits=True, edits_when=_kept, commits='keep'),
     Operation(
         id='project.element_groups', title='Element Groups', workspace='geometry',
         summary='A geometry\'s element groups: each one\'s name, what its elements are, '
@@ -454,7 +440,7 @@ OPERATIONS = (
                 'nearest node of an element group or a second patch.',
         params=(GEOMETRY, ELEMENTS, TIE_TO, TIE_SECOND, TIE_SIDE, TIE_ADD, TIE_DROP, TIE_KEEP),
         outputs=('reading', 'shape3d'), run=tie_elements,
-        edits=True, edits_when=_kept),
+        edits=True, edits_when=_kept, commits='keep'),
     Operation(
         id='project.align_meshes', title='Align Meshes', workspace='geometry',
         summary='Where parts meshed apart meet, every move of a coarser node onto a finer '
@@ -462,5 +448,5 @@ OPERATIONS = (
                 'half the coarsest spacing.',
         params=(GEOMETRY, GROUPS, REACH, LEFT_OUT, TOGGLE, ALIGN_KEEP),
         outputs=('reading', 'shape3d'), run=align_meshes,
-        edits=True, edits_when=_kept),
+        edits=True, edits_when=_kept, commits='keep'),
 )

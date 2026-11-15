@@ -104,7 +104,7 @@ fn read_json(p: &Path) -> Value {
 
 /// A recording's samples: `(rows, interleaved values)`.
 fn samples(dir: &Path) -> (usize, Vec<f32>) {
-    let rec = read_json(&dir.join("recorder.json"));
+    let rec = read_json(&dir.join("stream.json"));
     let rows = rec["rows"].as_array().unwrap().len();
     let raw = std::fs::read(dir.join("telemetry.f32")).unwrap();
     let v = raw
@@ -114,8 +114,14 @@ fn samples(dir: &Path) -> (usize, Vec<f32>) {
     (rows, v)
 }
 
-/// The folder a run names in its log ("records in <path>").
+/// The folder the run's state names (`record.folder`), which its log names at start
+/// too ("records in <path>").
 async fn records_folder(c: &mut Client) -> PathBuf {
+    let state = c.ok("recorder.state", json!({})).await;
+    let folder = state["record"]["folder"]
+        .as_str()
+        .expect("the state names the run folder")
+        .to_owned();
     let log = c.ok("recorder.log", json!({})).await;
     let line = log["entries"]
         .as_array()
@@ -128,7 +134,8 @@ async fn records_folder(c: &mut Client) -> PathBuf {
                 .map(str::to_owned)
         })
         .expect("the log names the run folder");
-    PathBuf::from(line)
+    assert_eq!(line, folder, "the log and the state name one folder");
+    PathBuf::from(folder)
 }
 
 /// A least-squares fit of `a sin(2 pi f t) + b cos(2 pi f t) + c` at a known `f`: the

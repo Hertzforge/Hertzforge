@@ -1,9 +1,12 @@
 //! Brandon Zwink's band-average MIMO random-vibration control law.
 //!
 //! The law solves the inverse in fractional-octave space: for each band it finds
-//! one flat-within-band correlated drive CPSD whose band-averaged response
+//! one drive CPSD matrix, flat within the band, whose band-averaged response
 //! matches the band-averaged specification, through the band cross-power
-//! sensitivity `C[p, i, j, b] = < H[p, i] conj(H[p, j]) >_b`. Because the FRF is
+//! sensitivity `C[p, i, j, b] = < H[p, i] conj(H[p, j]) >_b`. The drive matrix
+//! is fitted whole, cross terms and all (`L L^H`, so it stays realizable), so
+//! the drives come out fully correlated, uncorrelated or partly correlated as
+//! the fit needs; with FRF updates a diagonal load adds an uncorrelated part. Because the FRF is
 //! averaged over each band before it is inverted, identification noise is not
 //! amplified. The threshold kappa is chosen per band by a sweep at the first
 //! solve and frozen. The rest is feedback and protection: gain correction, FRF

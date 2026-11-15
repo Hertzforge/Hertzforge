@@ -24,6 +24,7 @@ from . import views as v
 from .descriptors import Operation, Option, Param
 from .mesh import drawn_mesh
 from .mode_pairs import paired, translations
+from .op_progress import hook
 from .ops_model import _family, _groups
 from .ops_project import _shape_view
 from .parsing import parse_id_runs, parse_optional_picks
@@ -264,7 +265,8 @@ def plan_instrumentation(project: Any, params: dict[str, Any]) -> list[dict]:
                 added = project.plan_instrumentation(
                     source, triaxial, uniaxial, modes=modes,
                     groups=None if every_group else groups, surfaces=kept, edge_angle=angle,
-                    axes=list(axes), name=base, edge_distance=distance, unit='m')
+                    axes=list(axes), name=base, edge_distance=distance, unit='m',
+                    progress=hook())
             except ValueError as error:
                 raise refused(str(error)) from None
         rows.append(v.row('Kept', f'{added["geometry"]}, {added["channels"]} and '
@@ -496,12 +498,13 @@ OPERATIONS = (
     Operation(
         id='project.plan_instrumentation', title='Plan Instrumentation', workspace='modal',
         summary='Choose accelerometers on a finite element model by Effective Independence, '
-                'tri-axial ones first, and read how well they tell the modes apart; Keep adds '
-                'the geometry, channel table and shapes. Surfaces are left out or put back by '
+                'tri-axial ones first, and read how well they tell the modes apart; Apply adds '
+                'the geometry, channel table and shapes, Preview only reads them. Surfaces are left out or put back by '
                 'their number in the surfaces table.',
         params=(PLANNED, MODES, TRIAXIAL, UNIAXIAL, UNIAXIAL_ALONG, GROUPS, LEAVE_OUT,
                 PUT_BACK, EDGE_ANGLE, EDGE_DISTANCE, PLAN_NAME, KEEP),
-        outputs=('shape3d', 'reading', 'matrix', 'table'), run=plan_instrumentation),
+        outputs=('shape3d', 'reading', 'matrix', 'table'), run=plan_instrumentation,
+        commits='keep'),
     Operation(
         id='project.export_state_space', title='Export State-Space Model', workspace='modal',
         summary='A shape set at a channel table\'s channels as the modal state-space model '

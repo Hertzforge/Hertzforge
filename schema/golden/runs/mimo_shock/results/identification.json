@@ -1,0 +1,73 @@
+{
+  "name": "identification",
+  "kind": "mimo_shock_identification",
+  "abscissa": {
+    "kind": "none"
+  },
+  "channels": {
+    "controls": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "drives": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "identification: the rms and peak each drive played in the shot, each control's band-mean multiple coherence, the share of its target's energy on trusted lines and its peak response",
+  "realizations": 40,
+  "trusted_lines": 21,
+  "max_condition": 3.9848591822145636,
+  "df_hz": 64,
+  "arrays": [
+    {
+      "name": "drive_rms",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "V",
+      "offset": 0
+    },
+    {
+      "name": "drive_peak",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "V",
+      "offset": 32
+    },
+    {
+      "name": "mean_coherence",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 64
+    },
+    {
+      "name": "coverage",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 96
+    },
+    {
+      "name": "response_peak",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "g",
+      "offset": 128
+    }
+  ]
+}

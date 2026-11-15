@@ -67,6 +67,10 @@
    "batch_gap_ms": null
   },
   "stop": null,
-  "end": null
+  "end": null,
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/recorder",
+   "problem": null
+  }
  }
 }

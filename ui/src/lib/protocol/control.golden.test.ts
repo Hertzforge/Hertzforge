@@ -55,7 +55,12 @@ const TEXT = [
 	'request_random_subscribe',
 	'response_random_subscribe',
 	'response_error_controller_held',
-	'response_error_table_invalid'
+	'response_error_table_invalid',
+	'request_channels_set_restored',
+	'response_channels_get_restored',
+	'response_error_table_not_applied',
+	'request_channels_apply',
+	'response_channels_apply'
 ];
 
 describe('random.live golden', () => {
@@ -243,7 +248,8 @@ describe('control text goldens', () => {
 				at_s: 131.2,
 				level_db: 0,
 				trip: { kind: 'envelope', abort_lines: 14, worst_db: 7.2, at_level_db: 0, at_loop: 212 }
-			}
+			},
+			record: { folder: '/home/operator/Hertzforge_Data/20261101-142233_random_r-0007', streams: 'on', problem: null }
 		};
 		expect((decodeFrame(readFileSync(golden('event_random_state.json'), 'utf-8')) as unknown as Event<RandomState>).data).toEqual(state);
 	});

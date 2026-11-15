@@ -172,6 +172,10 @@ impl LawCatalog {
                     id: choice.id.clone(),
                     law_is_for: "TWR",
                 }),
+                Some(AnyLaw::ShockMimo(_)) => Err(ChoiceError::WrongTestType {
+                    id: choice.id.clone(),
+                    law_is_for: "MIMO Shock",
+                }),
                 None => Err(ChoiceError::UnknownLaw(choice.id.clone())),
             },
         }

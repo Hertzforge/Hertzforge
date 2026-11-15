@@ -1,0 +1,93 @@
+{
+  "test": "sine",
+  "run_uid": "20261114-213512-975c10c1",
+  "run_id": "sine-0001",
+  "title": "Seeded Sine",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "a seeded setup",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "3.1"
+  },
+  "source": "SIM",
+  "sim": {
+    "model": "resonator_bank",
+    "parameters": {
+      "sample_rate_hz": 4096.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 1
+    },
+    "seed": 1515852340
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 4096,
+    "fs_hz": 4096,
+    "tick_frames": 410,
+    "tick_s": 0.10009765625
+  },
+  "build": {
+    "version": "0.1.9",
+    "commit": "10150d1f",
+    "dirty": true
+  },
+  "armed": {
+    "unix": 1794692112.410727,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794692112.523719,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "off",
+    "why": "switched off in the setup"
+  },
+  "schema": "hertzforge-run/1",
+  "streams": [],
+  "results": [
+    {
+      "name": "reference",
+      "kind": "envelope"
+    },
+    {
+      "name": "identification_frf",
+      "kind": "frf"
+    },
+    {
+      "name": "identification_coherence",
+      "kind": "coherence"
+    },
+    {
+      "name": "channel_levels",
+      "kind": "sine_levels"
+    },
+    {
+      "name": "control_trace",
+      "kind": "sine_control"
+    }
+  ],
+  "complete": true
+}

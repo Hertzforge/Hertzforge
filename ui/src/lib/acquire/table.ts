@@ -155,7 +155,21 @@ const FIELD_WORDS: Record<keyof ChannelRow, string> = {
 	range_max: 'range',
 	polarity: 'polarity',
 	control_group: 'control group',
-	abort: 'abort limits'
+	abort: 'abort limits',
+	node: 'node',
+	direction: 'direction',
+	channel_type: 'channel type',
+	analysis_role: 'analysis role',
+	daq_range_v: 'DAQ range',
+	sensor_range_v: 'sensor range',
+	serial_number: 'serial number',
+	make: 'make',
+	model: 'model',
+	triax_dof: 'triax DOF',
+	expiration: 'calibration expiration',
+	analysis_tier: 'analysis tier',
+	limit: 'limit mark',
+	extra: 'other columns'
 };
 
 /** What differs between two revisions of the table, in words, one line per channel. */

@@ -14,7 +14,7 @@ use hertzforge_breakpoints::{
 };
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_random::service::config::{
-    ControlChannel, LevelSchedule, LimitKind, LimitProfile, RandomTestConfig, RunMode,
+    ControlChannel, LevelSchedule, LimitKind, LimitProfile, MetaField, RandomTestConfig, RunMode,
 };
 use hertzforge_random::{CompositeMode, LoopConfig, MIN_CONTROL_LINES};
 use serde_json::{json, Map, Value};
@@ -127,6 +127,14 @@ pub struct WireConfig {
     pub control: Control,
     pub limits: Vec<WireLimit>,
     pub feasibility: Option<WireFeasibility>,
+    /// The operator's words for the run's record: who ran it, on what, and notes.
+    pub operator: String,
+    pub article: String,
+    pub notes: String,
+    /// The document and clause the test is run to, when given.
+    pub specification: Option<(String, String)>,
+    /// Whether the run's record holds its streams (`record.streams`, default true).
+    pub record_streams: bool,
     /// The configuration as accepted, kept with the run.
     pub raw: Value,
 }
@@ -573,6 +581,26 @@ pub fn parse(config: &Value) -> Result<WireConfig, MethodError> {
         }
     };
 
+    let words =
+        |k: &str| -> Result<String, MethodError> { Ok(c.opt_str(k)?.unwrap_or("").to_owned()) };
+    let (operator, article, notes) = (words("operator")?, words("article")?, words("notes")?);
+    let specification = match c.get("specification") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let o = Obj::of(v, "config.specification")?;
+            Some((
+                o.opt_str("document")?.unwrap_or("").to_owned(),
+                o.opt_str("clause")?.unwrap_or("").to_owned(),
+            ))
+        }
+    };
+    let record_streams = match c.get("record") {
+        None | Some(Value::Null) => true,
+        Some(v) => Obj::of(v, "config.record")?
+            .opt_bool("streams")?
+            .unwrap_or(true),
+    };
+
     Ok(WireConfig {
         title,
         rows,
@@ -587,6 +615,11 @@ pub fn parse(config: &Value) -> Result<WireConfig, MethodError> {
         control,
         limits,
         feasibility,
+        operator,
+        article,
+        notes,
+        specification,
+        record_streams,
         raw: config.clone(),
     })
 }
@@ -1056,7 +1089,28 @@ impl WireConfig {
         t.soft_start_db = c.soft_start_db;
         t.soft_start_relax_db = c.soft_start_relax_db;
         t.control_dof = c.control_dof;
-        t.metadata = Vec::new();
+        // The operator's words travel with the controller's configuration too, so its
+        // own report carries them.
+        for field in t.metadata.iter_mut() {
+            match field.key.as_str() {
+                "operator" => field.value = self.operator.clone(),
+                "test_article" => field.value = self.article.clone(),
+                _ => {}
+            }
+        }
+        if !self.notes.is_empty() {
+            t.metadata
+                .push(MetaField::new("notes", "Notes", self.notes.clone()));
+        }
+        if let Some((document, clause)) = &self.specification {
+            t.metadata.push(MetaField::new(
+                "specification",
+                "Specification",
+                document.clone(),
+            ));
+            t.metadata
+                .push(MetaField::new("clause", "Clause", clause.clone()));
+        }
         if let Some(f) = &self.feasibility {
             t.shaker = Some(f.shaker.clone());
             t.moving_mass = f.moving_mass;

@@ -68,6 +68,21 @@ export interface FeasibilityDraft {
 	crest_factor: number;
 }
 
+/**
+ * The run's record: the operator's words kept in the run folder (who ran it, on what, to which
+ * document and clause, and notes), and whether the folder keeps the time histories. None of them
+ * changes how the run drives.
+ */
+export interface RecordDraft {
+	operator: string;
+	article: string;
+	notes: string;
+	document: string;
+	clause: string;
+	/** Keep every enabled input and the drive as time histories. */
+	streams: boolean;
+}
+
 export interface SetupDraft {
 	title: string;
 	breakpoints: BreakpointDraft[];
@@ -78,6 +93,33 @@ export interface SetupDraft {
 	control: ControlDraft;
 	limits: LimitProfile[];
 	feasibility: FeasibilityDraft;
+	record: RecordDraft;
+}
+
+/**
+ * A test's title that follows its setup: an empty draft title means "the title the setup gives",
+ * which the screen shows as the field's placeholder and the configuration carries, until the
+ * operator types one. A title a draft holds that is the one its setup gives (a saved setup, a
+ * run's, a cached draft) is taken back to following; so is `stale`, a default an older shell
+ * wrote into drafts.
+ */
+export function followTitle<D extends { title: string }>(d: D, auto: (d: D) => string, stale: string[] = []): D {
+	const t = d.title.trim();
+	return t && (t === auto(d) || stale.includes(t)) ? { ...d, title: '' } : d;
+}
+
+/** A number as a title says it: four significant digits at most, no trailing zeros. */
+export function titleNumber(v: number): string {
+	return String(Number(v.toPrecision(4)));
+}
+
+/** "Half-sine" as a title says it: "Half-Sine". */
+export function titleCase(words: string): string {
+	return words.replace(/(^|[ -])(\p{L})/gu, (_m, sep: string, c: string) => sep + c.toUpperCase());
+}
+
+export function defaultRecord(): RecordDraft {
+	return { operator: '', article: '', notes: '', document: '', clause: '', streams: true };
 }
 
 /** The protocol's control defaults (PROTOCOL.md, "Random Test Configuration"). */
@@ -138,7 +180,8 @@ export function defaultSetup(): SetupDraft {
 			shaker_source: null,
 			moving_mass_lb: { armature: 0, slip_table: 0, drive_adapter: 0, fixturing: 0, test_article: 0 },
 			crest_factor: 3
-		}
+		},
+		record: defaultRecord()
 	};
 }
 
@@ -189,8 +232,15 @@ export function toConfig(d: SetupDraft): RandomConfig {
 	};
 	const f = d.feasibility;
 	const shaker = f.enabled ? shakerRecord(f.shaker_text) : null;
+	const r = d.record;
+	const [document, clause] = [r.document.trim(), r.clause.trim()];
 	return {
 		title: d.title.trim(),
+		operator: r.operator.trim(),
+		article: r.article.trim(),
+		notes: r.notes.trim(),
+		specification: document || clause ? { document, clause } : null,
+		record: { streams: r.streams },
 		profile: { breakpoints, alarm_db: [d.alarm_db[0], d.alarm_db[1]], abort_db: [d.abort_db[0], d.abort_db[1]] },
 		acquisition: { fs_hz: d.acquisition.fs_hz, n_pts: d.acquisition.n_pts, n_avg: d.acquisition.n_avg },
 		schedule: {
@@ -264,7 +314,15 @@ export function fromConfig(config: RandomConfig): SetupDraft {
 					moving_mass_lb: { ...config.feasibility.moving_mass_lb },
 					crest_factor: config.feasibility.crest_factor ?? 3
 				}
-			: base.feasibility
+			: base.feasibility,
+		record: {
+			operator: config.operator ?? '',
+			article: config.article ?? '',
+			notes: config.notes ?? '',
+			document: config.specification?.document ?? '',
+			clause: config.specification?.clause ?? '',
+			streams: config.record?.streams ?? true
+		}
 	};
 }
 
@@ -397,7 +455,34 @@ export function localErrors(d: SetupDraft): FieldErrors {
 		for (const [k, v] of Object.entries(f.moving_mass_lb)) needNumber(out, `feasibility.moving_mass_lb.${k}`, v);
 		needNumber(out, 'feasibility.crest_factor', f.crest_factor);
 	}
+	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
+}
+
+/** Bytes in one float32 sample of one channel, as a run folder's streams hold them. */
+const SAMPLE_BYTES = 4;
+
+/**
+ * What an hour of time histories takes on disk: every enabled input and drive, at the sample
+ * rate, four bytes a sample. Null when the rate holds no number.
+ */
+export function recordBytesPerHour(channels: number, fs_hz: number): number | null {
+	if (!Number.isFinite(fs_hz) || fs_hz <= 0 || !Number.isFinite(channels) || channels < 0) return null;
+	return channels * fs_hz * SAMPLE_BYTES * 3600;
+}
+
+/** A size in words: "830 MB", "1.18 GB". Decimal units, three figures. */
+export function sizeWords(bytes: number): string {
+	const units: [number, string][] = [
+		[1e12, 'TB'],
+		[1e9, 'GB'],
+		[1e6, 'MB'],
+		[1e3, 'kB']
+	];
+	for (const [scale, unit] of units) {
+		if (bytes >= scale) return `${Number((bytes / scale).toPrecision(3))} ${unit}`;
+	}
+	return `${Math.round(bytes)} bytes`;
 }
 
 export function errorCount(map: FieldErrors): number {
@@ -421,6 +506,17 @@ export interface ProfileHost {
 	fieldErrors: FieldErrors;
 	fieldWarnings: FieldErrors;
 	readonly tableFiles?: TableFileClient | null;
+}
+
+/** What the run record editor reads and edits: the record fields, the sample rate, and the channels a stream would hold. */
+export interface RecordHost {
+	setup: { record: RecordDraft };
+	locked: boolean;
+	fieldErrors: FieldErrors;
+	/** Enabled inputs plus drives in the channel table being edited. */
+	readonly recordChannels: number;
+	/** The sample rate the run asks for, Hz. */
+	readonly recordRateHz: number;
 }
 
 /** What the schedule editor reads and edits: the level schedule and the findings on it. */

@@ -147,6 +147,12 @@ pub struct WireRecorder {
     pub run_name: String,
     pub keep_free_gb: f64,
     pub metadata: Vec<MetaField>,
+    /// The operator's words for the run's record, as Random's: who ran it, on what,
+    /// notes, and the specification it was run to.
+    pub operator: String,
+    pub article: String,
+    pub notes: String,
+    pub specification: Option<(String, String)>,
     /// The configuration as sent, for `recorder.config` and `recorder.reset`.
     pub raw: Value,
 }
@@ -438,6 +444,10 @@ pub fn parse(config: &Value) -> Result<WireRecorder, MethodError> {
             "analysis",
             "capture",
             "metadata",
+            "operator",
+            "article",
+            "notes",
+            "specification",
         ],
     )?;
     let title = c.opt_str("title")?.unwrap_or("").to_owned();
@@ -486,6 +496,20 @@ pub fn parse(config: &Value) -> Result<WireRecorder, MethodError> {
         }
     };
 
+    let words =
+        |k: &str| -> Result<String, MethodError> { Ok(c.opt_str(k)?.unwrap_or("").to_owned()) };
+    let (operator, article, notes) = (words("operator")?, words("article")?, words("notes")?);
+    let specification = match c.opt_obj("specification")? {
+        None => None,
+        Some(o) => {
+            only(&o, &["document", "clause"])?;
+            Some((
+                o.opt_str("document")?.unwrap_or("").to_owned(),
+                o.opt_str("clause")?.unwrap_or("").to_owned(),
+            ))
+        }
+    };
+
     Ok(WireRecorder {
         title,
         fs_hz,
@@ -494,6 +518,10 @@ pub fn parse(config: &Value) -> Result<WireRecorder, MethodError> {
         run_name,
         keep_free_gb,
         metadata,
+        operator,
+        article,
+        notes,
+        specification,
         raw: config.clone(),
     })
 }

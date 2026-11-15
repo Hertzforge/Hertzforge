@@ -1,12 +1,15 @@
 <script lang="ts">
 	/**
-	 * What the run keeps and where: the run's name, the run folder's name under the local data
+	 * What the run keeps and where: the shared Run Record panel (who runs the test, on what, to which
+	 * document and clause, and notes; the Recorder always keeps its recordings, so it has no switch
+	 * for them), the run's name, the run folder's name under the local data
 	 * folder, the free space the run leaves on the data volume, and the words kept with the run. The
 	 * service writes each recording's samples and facts into the run folder, and the run's
 	 * configuration, log, marks and end beside them.
 	 */
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
+	import RunRecordEditor from '../RunRecordEditor.svelte';
 	import type { RecorderStore } from './recorderStore.svelte';
 
 	interface Props {
@@ -20,6 +23,8 @@
 	const errs = (k: string) => E[k] ?? [];
 </script>
 
+<div class="stack" data-testid="recorder-record">
+<RunRecordEditor acq={recorder} streams={false} />
 <section class="aq-panel narrow" aria-labelledby="rc-cap" data-testid="recorder-capture">
 	<div class="aq-head"><h2 id="rc-cap">Run Records</h2></div>
 	<p class="aq-lead aq-small lead">Each recording is a folder of its own in the run folder: its samples (every recorded row, at the rate the station ran at) and its facts. Beside them the run keeps its configuration, its log, its marks and how it ended. Monitoring saves nothing.</p>
@@ -60,8 +65,16 @@
 		<Findings items={errs('metadata').map((message) => ({ level: 'error' as const, message }))} />
 	</div>
 </section>
+</div>
 
 <style>
+	.stack {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sp-3);
+		max-width: 860px;
+	}
+
 	.narrow {
 		max-width: 860px;
 	}

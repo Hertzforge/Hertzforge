@@ -1,0 +1,139 @@
+{
+  "test": "mimo_shock",
+  "run_uid": "golden-mimo-shock",
+  "run_id": "ms-0001",
+  "title": "Golden MIMO Shock",
+  "operator": "Operator",
+  "article": "Bracket",
+  "notes": "the golden run folder",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "4.2"
+  },
+  "source": "SIM",
+  "sim": {
+    "model": "shock",
+    "parameters": {
+      "sample_rate_hz": 51200.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 4
+    },
+    "seed": 1515852340,
+    "plant": "shock-linear-4x4"
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 4096,
+    "fs_hz": 4096,
+    "record_len": 64,
+    "lines": 33,
+    "df_hz": 64
+  },
+  "build": {
+    "version": "0.0.0",
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false
+  },
+  "armed": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "on"
+  },
+  "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "9fd35549f4f4b5423f253eef1e96bbddddb971a9ce21ed1cbaeb9152acf34491"
+  },
+  "streams": [
+    {
+      "name": "inputs",
+      "kind": "inputs",
+      "channels": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "drives",
+      "kind": "drives",
+      "channels": [
+        5,
+        6,
+        7,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "name": "srs_reference",
+      "kind": "srs_reference"
+    },
+    {
+      "name": "synthesis",
+      "kind": "mimo_shock_synthesis"
+    },
+    {
+      "name": "identification_frf",
+      "kind": "frf"
+    },
+    {
+      "name": "identification_coherence",
+      "kind": "coherence"
+    },
+    {
+      "name": "identification",
+      "kind": "mimo_shock_identification"
+    },
+    {
+      "name": "law_calls",
+      "kind": "mimo_shock_law_calls"
+    },
+    {
+      "name": "seed",
+      "kind": "mimo_shock_seed"
+    },
+    {
+      "name": "pulse_srs",
+      "kind": "srs"
+    },
+    {
+      "name": "pulse_drives",
+      "kind": "mimo_shock_drives"
+    },
+    {
+      "name": "pulses",
+      "kind": "pulse_results"
+    }
+  ],
+  "complete": true
+}

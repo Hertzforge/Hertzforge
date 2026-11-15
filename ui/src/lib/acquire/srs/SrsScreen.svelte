@@ -14,7 +14,7 @@
 	import PulseScreen from '../pulse/PulseScreen.svelte';
 	import ShockSchedule from '../shock/ShockSchedule.svelte';
 	import { clock } from '../words';
-	import SrsCapture from './SrsCapture.svelte';
+	import SrsRecord from './SrsRecord.svelte';
 	import SrsControl from './SrsControl.svelte';
 	import SrsEnvelope from './SrsEnvelope.svelte';
 	import SrsIdentification from './SrsIdentification.svelte';
@@ -25,6 +25,7 @@
 	import SrsSynthesis from './SrsSynthesis.svelte';
 	import SrsTarget from './SrsTarget.svelte';
 	import { runChannels, SRS_SECTIONS, type SrsSection } from './srsSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -92,18 +93,19 @@
 	{:else if section === 'limit_channels'}
 		<SrsLimitChannels {srs} />
 	{:else}
-		<SrsCapture {srs} />
+		<SrsRecord {srs} />
 	{/if}
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="srs" />
 	<SrsSummary {srs} onopen={(s: SrsSection) => open(s)} />
 {/snippet}
 
 {#snippet station()}<StationPanel acq={srs.acq} />{/snippet}
 
 {#snippet run()}
-	<SrsRunView {srs} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'srs')} />
+	<SrsRunView {srs} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'srs')} opener={app.srsRunOpen} />
 {/snippet}
 
 <PulseScreen

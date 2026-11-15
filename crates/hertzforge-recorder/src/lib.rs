@@ -11,7 +11,7 @@
 //! * [`recording`] - [`RecordingWriter`] puts a recording onto the capture crate's
 //!   writer thread ([`CaptureSink`](hertzforge_capture::CaptureSink)), in chunks of
 //!   about 100 ms, with position-accurate gap records, and writes the recording's own
-//!   record (`recorder.json`) before any frame and again when it ends.
+//!   record (`stream.json`) before any frame and again when it ends.
 //!   [`RecordingReader`] reads a recording back and takes its length from the file,
 //!   never from a record.
 //! * [`store`] - [`RecordStore`], the seam between the service and the writer, with
@@ -31,7 +31,7 @@
 //! * `telemetry.f32` - no header; little-endian f32 frames, one value per recorded row.
 //! * `capture.json` - the writer's record ([`CaptureSidecar`](hertzforge_capture::CaptureSidecar)),
 //!   written before any frame with `complete: false` and finalized at the end.
-//! * `recorder.json` - the recording's record ([`RecorderSidecar`]): its rows, rates,
+//! * `stream.json` - the recording's record ([`RecorderSidecar`]): its rows, rates,
 //!   station frames, pre-window, gaps, marks and fault, `complete: false` until the
 //!   recording ends.
 

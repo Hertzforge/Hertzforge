@@ -66,8 +66,8 @@ fn bit_exact_round_trip_with_pretrigger_and_trigger_t0() {
     };
     let mut writer = RecordingWriter::start(&root, "burst01", &acq, table(2), Some(event)).unwrap();
 
-    // The PROVISIONAL recorder.json exists before any data is finalized.
-    let provisional_text = std::fs::read_to_string(writer.run_dir().join("recorder.json")).unwrap();
+    // The PROVISIONAL stream.json exists before any data is finalized.
+    let provisional_text = std::fs::read_to_string(writer.run_dir().join("stream.json")).unwrap();
     let provisional: RecorderSidecar = serde_json::from_str(&provisional_text).unwrap();
     assert!(!provisional.complete);
     assert_eq!(provisional.pre_frames, 40);
@@ -149,7 +149,7 @@ fn free_run_uses_start_t0() {
 #[test]
 fn crash_recovery_from_provisional_sidecar_without_capture_json() {
     // Construct the aftermath of a mid-run death by hand: telemetry.f32 plus
-    // the PROVISIONAL recorder.json, NO capture.json.
+    // the PROVISIONAL stream.json, NO capture.json.
     let root = temp_root("crash");
     let run_dir = root.join("deadrun");
     std::fs::create_dir_all(&run_dir).unwrap();
@@ -163,6 +163,7 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
     std::fs::write(run_dir.join("telemetry.f32"), &bytes).unwrap();
 
     let provisional = RecorderSidecar {
+        kind: "recording".to_string(),
         complete: false,
         name: "recovered".to_string(),
         trigger: "start".to_string(),
@@ -171,6 +172,7 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
         group_delay_frames: 0.0,
         rows: vec![1, 2, 3],
         units: vec!["g".to_string(); 3],
+        channels: Vec::new(),
         first_station_frame: 0,
         trigger_station_frame: 0,
         pre_frames: 0,
@@ -179,12 +181,13 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
         gaps: Vec::new(),
         marks: Vec::new(),
         fault: None,
+        writer: None,
         t0_convention: "start".to_string(),
         n_channels: 3,
         config: acq_at(2048.0),
     };
     std::fs::write(
-        run_dir.join("recorder.json"),
+        run_dir.join("stream.json"),
         serde_json::to_string_pretty(&provisional).unwrap(),
     )
     .unwrap();
@@ -194,8 +197,8 @@ fn crash_recovery_from_provisional_sidecar_without_capture_json() {
     assert!(info.recovered, "missing capture.json must flag recovery");
     assert!(!info.clean);
     assert_eq!(info.status, "recovered (unclean)");
-    assert_eq!(info.n_channels, 3, "channels recovered from recorder.json");
-    assert_eq!(info.rate_hz, 2048.0, "rate recovered from recorder.json");
+    assert_eq!(info.n_channels, 3, "channels recovered from stream.json");
+    assert_eq!(info.rate_hz, 2048.0, "rate recovered from stream.json");
     assert_eq!(info.frames, 10, "frames recovered from the file size");
     assert!(info.metadata_mismatch.is_none());
 
@@ -359,7 +362,7 @@ fn run_names_are_sanitized_and_collisions_get_numeric_suffixes() {
     assert_ne!(s1.run_dir, s2.run_dir);
     assert_ne!(s2.run_dir, s3.run_dir);
     for s in [&s1, &s2, &s3] {
-        assert!(s.run_dir.join("recorder.json").exists());
+        assert!(s.run_dir.join("stream.json").exists());
         assert!(s.run_dir.join("capture.json").exists());
     }
 

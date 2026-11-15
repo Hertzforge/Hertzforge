@@ -82,7 +82,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: how the window reads data, kept across selections: the stage or the flat plot,
 #: decades on the frequency axis, and the
 #: component of complex data
-PREFS = {'flat': False, 'log_frequency': False, 'component': 'magnitude', 'line': None,
+PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
@@ -336,7 +336,29 @@ def _alone(project: Any, name: str, picks: list[int],
         headers, rows = transformation_table(obj, environment, form)
         return [v.table(f'{name}: {environment}, {form} transformation', headers, rows)], notes
     if isinstance(obj, MatchedModes):
-        return _run(project, 'project.table', object=name), []
+        # the pairs overlaid on the first set's geometry, each second-set mode over its
+        # first-set mode, and the table of pairs beside them (Brandon, 2026-11-14); pairs
+        # picked in the tree are the ones drawn and listed
+        from .mode_pairs import matched_stage
+
+        picked = sorted({int(i) for i in picks if 0 <= int(i) < len(obj.pairs)})
+        table = _run(project, 'project.table', object=name)
+        if picked and table and len(table[0]['rows']) == len(obj.pairs):
+            table[0]['rows'] = [table[0]['rows'][k] for k in picked]
+            if 'edit' in table[0]:
+                table[0]['edit']['rows'] = [k + 1 for k in picked]
+        notes = [f'pair {picked[0] + 1} picked' if len(picked) == 1 else
+                 f'{len(picked)} pairs picked'] if picked else []
+        pairs = [obj.pairs[k] for k in picked] if picked else list(obj.pairs)
+        sets = [project.get(obj.first), project.get(obj.second)]
+        if not all(isinstance(found, ShapeSet) for found in sets) or not pairs:
+            return table, notes
+        geometry = _geometry_for(project, obj.first)
+        if geometry is None:
+            return table, [*notes, f'{obj.first} is on no geometry, so the pairs are not drawn']
+        stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
+                              sets[0], sets[1], pairs, obj.second)
+        return [stage, *table], notes
     from hertzforge.core.photos import Photos
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
 
@@ -353,9 +375,18 @@ def _alone(project: Any, name: str, picks: list[int],
     if _is_data(obj):
         prefs = {**PREFS, **(prefs or {})}
         component = prefs['component']
-        if picks:
+        if picks and prefs['flat']:
             return _run(project, 'project.plot', data=name, records=_runs(picks),
                         component=component), []
+        if picks:
+            from .waterfalls import waterfall_view
+
+            # the sub-items picked on the stage, as the whole object is: 3D is the choice
+            # the bar shows, picks or none (Brandon, 2026-11-14)
+            view = waterfall_view(name, obj, component=component,
+                                  records=sorted(set(picks)))
+            _faced([view], obj)
+            return [view], []
         if prefs['flat']:
             # the flat plot draws every record
             return _run(project, 'project.plot', data=name,
@@ -1013,8 +1044,8 @@ def _resynthesis(project: Any, frf_name: str, set_name: str, records: dict[str, 
 
 def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str, Any]:
     """Which of the bar's choices the selection can take: the stage or the
-    flat plot for a data object, a component for complex frequency data,
-    decades for anything on a frequency axis."""
+    flat plot for a data object, a component for complex frequency data.
+    A frequency axis is made linear or log on the plot itself."""
     from hertzforge.core.shapes import ShapeSet
 
     data = [project[name] for name in objects if _is_data(project[name])]
@@ -1067,17 +1098,7 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
         'flat': bool(data),
         'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'
                        and np.iscomplexobj(obj.ordinate) for obj in data),
-        'frequency': any(getattr(obj, 'abscissa_dim', '') == 'frequency' for obj in data),
     }
-
-
-def _decades(views: list[dict]) -> None:
-    """Every frequency axis in log."""
-    for view in views:
-        for key in ('x', 'z'):
-            axis = view.get(key)
-            if isinstance(axis, dict) and axis.get('unit') == 'Hz':
-                axis['scale'] = 'log'
 
 
 def show(project: Any, objects: list[str], records: dict[str, list[int]],
@@ -1112,8 +1133,6 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     except ProtocolError as error:
         raise refused(str(error)) from None
     notes += _marks(project, views, objects, prefs)
-    if prefs['log_frequency']:
-        _decades(views)
     if part and part.get('kind') and len(objects) == 1:
         from .ops_geometry import part_entities
         from .ops_solids import part_solids

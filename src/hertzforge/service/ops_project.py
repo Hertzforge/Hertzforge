@@ -16,9 +16,10 @@ from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .mode_pairs import translations
+from .op_progress import hook
 from .parsing import parse_picks
 from .protocol import refused
-from .waterfalls import COMPONENTS, QUANTITY, axes, waterfall_view
+from .waterfalls import COMPONENTS, QUANTITY, axes, unit_text, waterfall_view
 
 #: the data objects a waterfall draws, by kind
 DATA_KINDS = ('time_history', 'psd', 'frf', 'coherence', 'multiple_coherence',
@@ -131,10 +132,15 @@ def _verb(verb: str, **fixed: Any) -> Any:
     other params as its keywords, and draws what it added. A param named
     in `fixed` is converted first: `fixed[name](value)`."""
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
+        import inspect
+
         keywords = {name: fixed.get(name, lambda value: value)(value)
                     for name, value in params.items() if name != 'source'}
-        return _derived(project, lambda: getattr(project, verb)(
-            params['source'], **keywords))
+        call = getattr(project, verb)
+        # a verb that reports its progress reports the operation's (`op_progress`)
+        if 'progress' in inspect.signature(call).parameters:
+            keywords['progress'] = hook()
+        return _derived(project, lambda: call(params['source'], **keywords))
     return run
 
 
@@ -184,7 +190,8 @@ def extract_sine(project: Any, params: dict[str, Any]) -> list[dict]:
     sine-level set added per tone. The project's one specification when
     none is picked."""
     try:
-        added = project.extract_sine(params['source'], params['specification'] or None)
+        added = project.extract_sine(params['source'], params['specification'] or None,
+                                    progress=hook())
     except ValueError as error:
         raise refused(str(error)) from None
     from .show import _sine
@@ -393,7 +400,7 @@ def solve_modes(project: Any, params: dict[str, Any]) -> list[dict]:
     else:
         limit = {'num_modes': params['num_modes']}
     return _added_shapes(project, lambda: project.solve_modes(
-        params['source'], damping=params['damping'] / 100.0, **limit))
+        params['source'], damping=params['damping'] / 100.0, **limit, progress=hook()))
 
 
 def expand(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -533,7 +540,7 @@ MODAL_VERB_OPERATIONS = (
                 'inertia about it when asked.',
         params=(_source('generate_rigid_body_modes', 'Geometry'), *RIGID_POINT,
                 RIGID_NORMALIZE, RIGID_MASS, *RIGID_INERTIA, RIGID_KEEP),
-        outputs=('shape3d', 'reading'), run=rigid_body_modes),
+        outputs=('shape3d', 'reading'), run=rigid_body_modes, commits='keep'),
     Operation(
         id='project.solve_modes', title='Solve Modes', workspace='geometry',
         summary='The normal modes of a geometry whose element groups have properties: a '
@@ -550,6 +557,73 @@ MODAL_VERB_OPERATIONS = (
         params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
         outputs=('shape3d', 'reading'), run=onto_basis),
 )
+
+
+RESCALE_BY = Param('by', 'Given as', 'enum', default='factor', options=(
+    Option('factor', 'Factor'), Option('sensitivities', 'Sensitivities')))
+RESCALE_FACTOR = Param('factor', 'Factor', 'number', default=1.0, step=0.1,
+                       shown_with=('by', 'factor'))
+RECORDED = Param('recorded', 'Recorded with', 'number', default=100.0, min=0.0, step=1.0,
+                 unit='mV/unit', shown_with=('by', 'sensitivities'))
+CORRECT = Param('correct', 'Correct', 'number', default=100.0, min=0.0, step=1.0,
+                unit='mV/unit', shown_with=('by', 'sensitivities'))
+RESCALE_KEEP = Param('keep', 'Add the rescaled record (else the preview)', 'boolean',
+                     default=False)
+#: the picked records a rescale preview draws, each as recorded and rescaled
+RESCALE_DRAWN = 8
+
+
+def _largest(rows: np.ndarray) -> float:
+    finite = np.abs(rows[np.isfinite(rows)])
+    return float(finite.max()) if finite.size else 0.0
+
+
+def rescale(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.rescale`: some or all of a time history's records times a
+    factor, typed or the recorded sensitivity over the correct one
+    (`Project.rescale`). Without `keep`, the picked records drawn as
+    recorded and rescaled, the rescaled dashed in each one's colour, and
+    the factor, how many records it applies to and the largest value
+    before and after; with it, `<name> Rescaled` added."""
+    from hertzforge.core.rescale import sensitivity_factor
+    from hertzforge.decimate import peak_decimate
+
+    name = params['source']
+    history = project[name]
+    text = params['records'].strip()
+    records = parse_picks(text, history.num_records, 'record') if text else None
+    try:
+        factor = (sensitivity_factor(params['recorded'], params['correct'])
+                  if params['by'] == 'sensitivities' else float(params['factor']))
+        if params['keep']:
+            return _derived(project, lambda: project.rescale(name, factor, records=records))
+        made = history.rescale(factor, records)
+    except (ValueError, TypeError) as error:
+        raise refused(str(error)) from None
+    picked = sorted(set(records)) if records is not None else list(range(history.num_records))
+    dim = str(history.ordinate_dim[picked[0]])
+    alike = [i for i in picked if str(history.ordinate_dim[i]) == dim]
+    unit = unit_text(dim)
+    drawn = alike[:RESCALE_DRAWN]
+    lines = []
+    for i in drawn:
+        label = history.record_label(i)
+        lines.append(v.series(label, 'measured', *peak_decimate(
+            history.abscissa, history.ordinate[i].real, 4000)))
+        lines.append(v.series(f'{label} rescaled', 'measured', *peak_decimate(
+            made.abscissa, made.ordinate[i].real, 4000), follows=len(lines) - 1))
+    title = f'{name}: {len(drawn)} of {len(picked)} picked records as recorded and rescaled'
+    if len(alike) < len(picked):
+        title += f' ({len(picked) - len(alike)} of another quantity left out)'
+    before = _largest(history.ordinate[alike].real)
+    after = _largest(made.ordinate[alike].real)
+    rows = [v.row('Factor', factor, '', 'info'),
+            v.row('Records', f'{len(picked)} of {history.num_records}', None, 'info'),
+            v.row('Largest, as recorded', before, unit, 'info'),
+            v.row('Largest, rescaled', after, unit, 'info')]
+    return [v.spectrum(title, v.axis('Time', 's', 'linear'), v.axis('Amplitude', unit, 'linear'),
+                       lines, link='time'),
+            v.reading(f'Rescale of {name}', rows)]
 
 
 VERB_OPERATIONS = (
@@ -570,6 +644,14 @@ VERB_OPERATIONS = (
              'The time history at a lower sample rate, a whole division of '
              'its own, through a zero-phase anti-alias filter.',
              (RATE, ANTI_ALIAS)),
+    Operation(
+        id='project.rescale', title='Rescale', workspace='signals',
+        summary='The picked records of a time history, or all of them, times a factor, typed '
+                '(negative flips the sign) or the sensitivity recorded with over the correct '
+                'one, previewed as recorded and rescaled. The channel table is not changed.',
+        params=(_source('rescale'), RESCALE_BY, RESCALE_FACTOR, RECORDED, CORRECT, RECORDS,
+                RESCALE_KEEP),
+        outputs=('spectrum', 'reading', 'waterfall'), run=rescale, commits='keep'),
     Operation(
         id='project.compute_spectra', title='Compute Spectra', workspace='signals',
         summary='Raw linear spectra: each capture of a time history transformed whole, with '

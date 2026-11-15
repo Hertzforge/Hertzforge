@@ -29,6 +29,16 @@ export function db(v: number | null | undefined, digits = 1): string {
 	return `${sign}${s} dB`;
 }
 
+/**
+ * The level a run's readout shows. While the run lives, the level the drive is at and the level
+ * commanded. Once it has ended, the last level in force (the end's) and nothing commanded: the last
+ * frame and state hold the stop ramp's tail, which is never shown as the run's level.
+ */
+export function levelReadout(level: number | null, commanded: number | null, end: { level_db: number | null } | null | undefined): { level: number | null; commanded: number | null; ended: boolean } {
+	if (end) return { level: end.level_db, commanded: null, ended: true };
+	return { level, commanded, ended: false };
+}
+
 /** Run clock: "42.0 s" under a minute, "12:05" from a minute, "1:02:05" from an hour. */
 export function clock(seconds: number | null | undefined): string {
 	if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '-';
@@ -216,8 +226,29 @@ export const LOG_WORDS: Record<LogKind, string> = {
 	trip: 'Trip',
 	note: 'Note',
 	pulse: 'Pulse',
-	law: 'Control Law'
+	law: 'Control Law',
+	record: 'Recording'
 };
+
+// ---------------------------------------------------------------------------------------------
+// The run's record
+
+/** The last part of a folder's path, whichever separator the service's machine uses. */
+export function folderName(path: string): string {
+	const parts = path.split(/[\\/]+/).filter(Boolean);
+	return parts.at(-1) ?? path;
+}
+
+/**
+ * The notice while the run's record has a problem: the run goes on. Once the run has ended, what
+ * went wrong stays said, in the past. Null when there is no problem.
+ */
+export function recordProblem(record: { problem: string | null } | null | undefined, ended = false): { title: string; text: string } | null {
+	const problem = record?.problem?.trim();
+	if (!problem) return null;
+	const said = `${problem.replace(/^./, (c) => c.toUpperCase())}${/[.!?]$/.test(problem) ? '' : '.'}`;
+	return ended ? { title: 'Recording Had a Problem', text: said } : { title: 'Recording Has a Problem', text: `The run goes on. ${said}` };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Refusals
@@ -245,6 +276,8 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	hardware_busy: 'The Hardware Is In Use',
 	stale_revision: 'The Channel Table Changed',
 	table_invalid: 'The Channel Table Has Errors',
+	table_not_applied: 'The Channel Table Is Not Applied',
+	nothing_to_apply: 'The Channel Table Is Already Applied',
 	config_invalid: 'The Setup Has Errors',
 	shaker_record_invalid: 'The Shaker Record Does Not Read',
 	setup_invalid: 'The Setup Has Errors',
@@ -258,7 +291,8 @@ const REFUSAL_TITLES: Record<RefusalReason, string> = {
 	law_check_running: 'A Law Check Is Already Running',
 	law_check_not_recorded: 'The Check Was Not Recorded',
 	law_not_checked: 'The Law Has Not Passed Its Check',
-	shutting_down: 'The Control Service Is Shutting Down'
+	shutting_down: 'The Control Service Is Shutting Down',
+	record_unwritable: "The Run's Record Cannot Be Written"
 };
 
 /** Refusals of one test type's own methods (classical shock's, Sine's, TWR's, Explorer's), beside the shared ones. */
@@ -379,6 +413,10 @@ export function refusalFacts(reason: string | null | undefined, detail: Record<s
 			break;
 		case 'out_of_band':
 			if (Array.isArray(detail.band_hz)) out.push(`Band: ${String(detail.band_hz[0])} to ${String(detail.band_hz[1])} Hz`);
+			break;
+		case 'record_unwritable':
+			if (has('path')) out.push(`Path: ${String(detail.path)}`);
+			if (has('reason')) out.push(`Reason: ${String(detail.reason)}`);
 			break;
 		case 'adjust_refused':
 			if (has('key')) out.push(`Parameter: ${String(detail.key)}`);

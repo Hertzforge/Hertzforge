@@ -250,6 +250,8 @@ impl Service {
                 .unwrap_or_else(engine::service_engine_factory),
             sim_speed: self.opts.sim_speed,
             timeout_s: self.opts.timeout.as_secs_f64(),
+            derived: derived.to_json(),
+            record: self.opts.record.clone(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         trun::spawn(plan, initial.clone(), shared.clone(), data.clone(), rx)
@@ -342,8 +344,9 @@ impl Service {
 
     /// What a run arms on now: the table, the selected station and its law.
     async fn twr_arm_context(&self, run: &TwrRun) -> Result<ArmContext, MethodError> {
-        let (tbl, station_plan, hardware) = {
+        let (tbl, station_plan, hardware, revision, devices) = {
             let inner = self.inner.lock().await;
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(
@@ -353,7 +356,7 @@ impl Service {
             }
             let fs_hz = run.prepared.grid.fs_hz;
             let (plan, hardware) = match inner.stations.selected() {
-                Selection::Sim => (StationPlan::Sim { fs_hz }, false),
+                Selection::Sim => (StationPlan::sim(fs_hz), false),
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);
@@ -368,7 +371,13 @@ impl Service {
                     )
                 }
             };
-            (inner.table.table.clone(), plan, hardware)
+            (
+                inner.table.table.clone(),
+                plan,
+                hardware,
+                inner.table.revision,
+                inner.stations.devices().to_vec(),
+            )
         };
         let id = run.wire.law.id.clone();
         let wire = run.wire.clone();
@@ -436,11 +445,13 @@ impl Service {
             station: station_plan,
             scanner: self.opts.scanner.clone(),
             data_root: self.opts.data_root.clone(),
-            capture_root: self.opts.capture_root.clone(),
+            records_root: self.opts.records_root(),
             bind: self.opts.bind.clone(),
             stored: run.stored.clone(),
             facts,
             law,
+            revision,
+            devices,
         })
     }
 
@@ -485,6 +496,7 @@ impl Service {
                 || inner.mixed_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
+                || inner.mimo_shock_live()
             {
                 inner.run_active()?;
             }

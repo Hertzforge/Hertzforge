@@ -26,7 +26,7 @@ import type {
 	ShockStandardName
 } from '$lib/protocol/shock';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { shakerRecord, type FieldErrors } from '../setup';
+import { defaultRecord, followTitle, shakerRecord, titleCase, titleNumber, type FieldErrors, type RecordDraft } from '../setup';
 
 // ---------------------------------------------------------------------------------------------
 // The draft
@@ -108,7 +108,8 @@ export interface ShockDraft {
 	};
 	train: { count: number; spacing_s: number };
 	gunfire: { enabled: boolean; rounds_per_min: number; rounds: number };
-	capture: { auto_start: boolean; run_name: string };
+	/** The run's record: the operator's words and whether the folder keeps the time histories (Random's). */
+	record: RecordDraft;
 	metadata: { key: string; label: string; value: string }[];
 }
 
@@ -136,7 +137,8 @@ export const STANDARDS: { id: ShockStandardName; label: string; amplitude: numbe
 
 export function defaultShockSetup(): ShockDraft {
 	return {
-		title: 'Half-Sine 20 g 11 ms',
+		// Empty: the title follows the pulse (`shockTitle`) until the operator types one.
+		title: '',
 		pulse: {
 			shape: 'half_sine',
 			amplitude_g: 20,
@@ -188,12 +190,28 @@ export function defaultShockSetup(): ShockDraft {
 		},
 		train: { count: 5, spacing_s: 6 },
 		gunfire: { enabled: false, rounds_per_min: 30, rounds: 3 },
-		capture: { auto_start: false, run_name: 'classical_shock' },
+		record: defaultRecord(),
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
 }
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
+/** The title the pulse gives: "Half-Sine 20 g 11 ms". */
+export function shockTitle(d: ShockDraft): string {
+	const p = d.pulse;
+	const shape = titleCase(SHAPES.find((x) => x.id === p.shape)?.label ?? 'Pulse');
+	if (!Number.isFinite(p.amplitude_g) || !Number.isFinite(p.duration_ms)) return shape;
+	return `${shape} ${titleNumber(p.amplitude_g)} g ${titleNumber(p.duration_ms)} ms`;
+}
+
+/** The title a configuration carries: the one typed, else the one the pulse gives. */
+export function shockTitleOf(d: ShockDraft): string {
+	return d.title.trim() || shockTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its pulse. */
+const STALE_SHOCK_TITLES = ['Half-Sine 20 g 11 ms'];
+
 export function mergeShockSetup(saved: Partial<ShockDraft> | null): ShockDraft {
 	const base = defaultShockSetup();
 	if (!saved || typeof saved !== 'object') return base;
@@ -215,9 +233,11 @@ export function mergeShockSetup(saved: Partial<ShockDraft> | null): ShockDraft {
 	out.feasibility.moving_mass_lb = { ...base.feasibility.moving_mass_lb, ...(saved.feasibility?.moving_mass_lb ?? {}) };
 	out.train = { ...base.train, ...(saved.train ?? {}) };
 	out.gunfire = { ...base.gunfire, ...(saved.gunfire ?? {}) };
-	out.capture = { ...base.capture, ...(saved.capture ?? {}) };
+	// A draft saved before the run's record took the capture's place has a capture and no record.
+	delete (out as Partial<ShockDraft> & { capture?: unknown }).capture;
+	out.record = { ...base.record, ...(saved.record ?? {}) };
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, shockTitle, STALE_SHOCK_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -229,7 +249,7 @@ export function toShockConfig(d: ShockDraft, law: LawEntry | null): ShockConfig 
 	const f = d.feasibility;
 	const shaker = f.enabled ? shakerRecord(f.shaker_text) : null;
 	return {
-		title: d.title.trim(),
+		title: shockTitleOf(d),
 		pulse: {
 			shape: d.pulse.shape,
 			amplitude_g: d.pulse.amplitude_g,
@@ -268,7 +288,11 @@ export function toShockConfig(d: ShockDraft, law: LawEntry | null): ShockConfig 
 				: null,
 		train: { ...d.train },
 		gunfire: d.gunfire.enabled ? { rounds_per_min: d.gunfire.rounds_per_min, rounds: d.gunfire.rounds } : null,
-		capture: { ...d.capture },
+		operator: d.record.operator.trim(),
+		article: d.record.article.trim(),
+		notes: d.record.notes.trim(),
+		specification: d.record.document.trim() || d.record.clause.trim() ? { document: d.record.document.trim(), clause: d.record.clause.trim() } : null,
+		record: { streams: d.record.streams },
 		metadata: d.metadata.map((m) => ({ ...m }))
 	};
 }
@@ -279,6 +303,10 @@ export function toShockConfig(d: ShockDraft, law: LawEntry | null): ShockConfig 
  * and the shell's where it does not; one pulse count for every level is spread over the levels.
  */
 export function fromShockConfig(c: ShockConfig): ShockDraft {
+	return followTitle(shockDraftOf(c), shockTitle);
+}
+
+function shockDraftOf(c: ShockConfig): ShockDraft {
 	const base = defaultShockSetup();
 	const levels = c.schedule.levels_db.map((db, i) => ({ db, pulses: c.schedule.pulses.length === 1 ? c.schedule.pulses[0] : (c.schedule.pulses[i] ?? NaN) }));
 	const comp = c.pulse.compensation;
@@ -341,7 +369,14 @@ export function fromShockConfig(c: ShockConfig): ShockDraft {
 			: base.feasibility,
 		train: c.train ? { ...c.train } : { count: 1, spacing_s: base.train.spacing_s },
 		gunfire: c.gunfire ? { enabled: true, ...c.gunfire } : { ...base.gunfire, enabled: false },
-		capture: { ...base.capture, ...(c.capture ?? {}) },
+		record: {
+			operator: c.operator ?? '',
+			article: c.article ?? '',
+			notes: c.notes ?? '',
+			document: c.specification?.document ?? '',
+			clause: c.specification?.clause ?? '',
+			streams: c.record?.streams ?? true
+		},
 		metadata: (c.metadata ?? []).map((m) => ({ ...m }))
 	};
 }
@@ -387,7 +422,7 @@ export const SHOCK_SECTIONS: { id: ShockSection; label: string }[] = [
 	{ id: 'identification', label: 'Identification' },
 	{ id: 'control', label: 'Control' },
 	{ id: 'limits', label: 'Limits' },
-	{ id: 'trains', label: 'Trains & Capture' }
+	{ id: 'trains', label: 'Trains & Record' }
 ];
 
 /**
@@ -431,7 +466,7 @@ export function shockSectionOf(key: string): ShockSection {
 	if (/^identification(\.|$)/.test(key)) return 'identification';
 	if (/^(law|control)(\.|$)/.test(key)) return 'control';
 	if (/^(limits|feasibility)(\.|$)/.test(key)) return 'limits';
-	if (/^(train|gunfire|capture|metadata)(\.|$)/.test(key)) return 'trains';
+	if (/^(train|gunfire|metadata|operator|article|notes|specification|record)(\.|$)/.test(key)) return 'trains';
 	return 'pulse';
 }
 
@@ -455,13 +490,12 @@ function needOptional(map: FieldErrors, key: string, v: number | null) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, a drive ceiling or abort not given (or the
+ * Fields that hold no number, a drive ceiling or abort not given (or the
  * abort not above the ceiling), a shaker record that does not read. Everything else, the pulse's
  * physics included, is the service's to judge in the dry run.
  */
 export function localErrors(d: ShockDraft, rows: ChannelRow[] = []): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	const p = d.pulse;
 	need(out, 'pulse.amplitude_g', p.amplitude_g);
 	need(out, 'pulse.duration_ms', p.duration_ms);
@@ -515,7 +549,7 @@ export function localErrors(d: ShockDraft, rows: ChannelRow[] = []): FieldErrors
 		need(out, 'gunfire.rounds_per_min', d.gunfire.rounds_per_min);
 		need(out, 'gunfire.rounds', d.gunfire.rounds, true);
 	}
-	if (d.capture.auto_start && !d.capture.run_name.trim()) add(out, 'capture.run_name', 'Name the capture, or turn auto start off.');
+	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
 }
 

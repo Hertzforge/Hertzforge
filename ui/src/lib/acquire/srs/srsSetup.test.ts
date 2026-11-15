@@ -79,7 +79,11 @@ const FULL: SrsConfig = {
 		residual_velocity_ips: 0.2,
 		residual_disp_in: 0.002
 	},
-	capture: { auto_start: true, run_name: 'srs_run_7' },
+	operator: 'A. Tester',
+	article: 'Bracket, unit 3',
+	notes: 'Second axis.',
+	specification: { document: 'Test Method 516', clause: '4.2' },
+	record: { streams: false },
 	metadata: [{ key: 'run_number', label: 'Run Number', value: '7' }]
 };
 
@@ -233,8 +237,27 @@ describe("where the service's findings land", () => {
 	});
 
 	it('in the section that edits it', () => {
-		const sections = ['bands.q', 'target.points', 'acquisition.fs_hz', 'synthesis.components', 'envelope.per_band', 'spacing.cooling_s', 'identification.max_vpk', 'law.params.x', 'control.max_gain_rise_db', 'limits.kinematic.accel_g', 'feasibility.shaker', 'limit_channels.channels.0.frf', 'metadata', 'station.channels'].map(srsSectionOf);
-		expect(sections).toEqual(['target', 'target', 'synthesis', 'synthesis', 'envelope', 'schedule', 'identification', 'control', 'control', 'limits', 'limits', 'limit_channels', 'capture', 'station']);
+		const sections = ['bands.q', 'target.points', 'acquisition.fs_hz', 'synthesis.components', 'envelope.per_band', 'spacing.cooling_s', 'identification.max_vpk', 'law.params.x', 'control.max_gain_rise_db', 'limits.kinematic.accel_g', 'feasibility.shaker', 'limit_channels.channels.0.frf', 'metadata', 'specification.document', 'record.streams', 'station.channels'].map(srsSectionOf);
+		expect(sections).toEqual(['target', 'target', 'synthesis', 'synthesis', 'envelope', 'schedule', 'identification', 'control', 'control', 'limits', 'limits', 'limit_channels', 'record', 'record', 'record', 'station']);
+	});
+
+	it("takes the run's record as Random's: the words trimmed, a specification when either part is given, the switch, and no capture", () => {
+		const d = fromSrsConfig(FULL);
+		expect(d.record).toEqual({ operator: 'A. Tester', article: 'Bracket, unit 3', notes: 'Second axis.', document: 'Test Method 516', clause: '4.2', streams: false });
+		d.record = { operator: '  J. Operator ', article: '', notes: ' ', document: '', clause: '', streams: true };
+		const c = toSrsConfig(d, LAW);
+		expect([c.operator, c.article, c.notes, c.specification, c.record]).toEqual(['J. Operator', '', '', null, { streams: true }]);
+		expect('capture' in c).toBe(false);
+		// a clause names its document
+		d.record.clause = '4.2';
+		expect(localErrors(d)['specification.document']).toEqual(['Name the document this clause is from.']);
+	});
+
+	it('reads a draft saved with the old capture as one with the run record, time histories on', () => {
+		const old = JSON.stringify({ ...defaultSrsSetup(), record: undefined, capture: { auto_start: true, run_name: 'old' } });
+		const d = loadSrsSetup(old);
+		expect(d.record).toEqual(defaultSrsSetup().record);
+		expect('capture' in d).toBe(false);
 	});
 });
 
@@ -244,5 +267,22 @@ describe('the per-band lists and the band grid', () => {
 		expect(fitToBands([1, 2, 3], 2, () => 0)).toEqual([1, 2]);
 		const same = [1, 2];
 		expect(fitToBands(same, 2, () => 0)).toBe(same);
+	});
+});
+
+describe('the SRS title', () => {
+	it('follows the target and the bands until the operator types one', () => {
+		const d = defaultSrsSetup();
+		expect(toSrsConfig(d, null).title).toBe('SRS 100 g, 100 to 2000 Hz');
+		d.target.points = [{ freq_hz: 100, accel_g: 0.4 }, { freq_hz: 1000, accel_g: 1 }, { freq_hz: 2500, accel_g: 1 }];
+		expect(toSrsConfig(d, null).title).toBe('SRS 1 g, 100 to 2000 Hz');
+		d.target = { kind: 'flat', accel_g: 30, points: d.target.points };
+		d.bands.f_hi_hz = 5000;
+		expect(toSrsConfig(d, null).title).toBe('SRS 30 g, 100 to 5000 Hz');
+		d.title = 'Separation shock';
+		expect(toSrsConfig(d, null).title).toBe('Separation shock');
+		expect(fromSrsConfig(toSrsConfig(defaultSrsSetup(), null)).title).toBe('');
+		expect(fromSrsConfig(toSrsConfig(d, null)).title).toBe('Separation shock');
+		expect(mergeSrsSetup({ ...d, title: 'SRS 100 g, 100 to 2000 Hz' }).title).toBe('');
 	});
 });

@@ -6,11 +6,14 @@
  */
 
 import type { ServiceClient } from '$lib/protocol/client.svelte';
-import type { FormSpec, RunLogView } from './types';
+import type { FormSpec, RunEvent, RunLogView, RunRecordRow } from './types';
 
 const INITIALS_KEY = 'hertzforge.runlog.initials';
 const SHOWN_KEY = 'hertzforge.runlog.shown';
 const WIDTH_KEY = 'hertzforge.runlog.width';
+
+/** What the proposed entries say when this connection's project holds no run record. */
+export const NO_RUNS = "This window's project holds no run record. Open the project that holds the run here (Whole Window shows the workspace), then Refresh.";
 
 /** How long typing rests before a live form is read again, in ms. */
 const PREVIEW_REST_MS = 120;
@@ -86,6 +89,18 @@ export class RunLogState {
 	/** Where the last export went. */
 	exported = $state<string | null>(null);
 	private timer: ReturnType<typeof setTimeout> | null = null;
+
+	/** The run records of the project this connection holds, to offer their events from. */
+	runs = $state.raw<RunRecordRow[]>([]);
+	/** The run record picked, by name, and its events proposed as entries. */
+	record = $state<string | null>(null);
+	events = $state.raw<RunEvent[]>([]);
+	/** The time typed for an event the record has no time for, by its index. */
+	eventTimes = $state<Record<number, string>>({});
+	/** What the proposed entries say under them. */
+	eventsMessage = $state('');
+	/** The event being written. */
+	accepting = $state<number | null>(null);
 
 	constructor(private readonly analysis: ServiceClient) {}
 
@@ -267,6 +282,73 @@ export class RunLogState {
 		} catch (err) {
 			typing.busy = false;
 			typing.message = words(err);
+		}
+	}
+
+	/** The project's run records (`project.setups`); none while this connection holds no project. */
+	async loadRuns(): Promise<void> {
+		try {
+			const res = await this.call<{ runs?: RunRecordRow[] }>('project.setups');
+			this.runs = res.runs ?? [];
+			if (this.record !== null && !this.runs.some((r) => r.name === this.record)) {
+				this.record = null;
+				this.events = [];
+			}
+			this.eventsMessage = this.runs.length ? '' : NO_RUNS;
+		} catch (err) {
+			this.eventsMessage = words(err);
+		}
+	}
+
+	/** Pick a run record and list its events as proposed entries (`runlog.run_events`); nothing is written. */
+	async pickRecord(name: string | null): Promise<void> {
+		this.record = name || null;
+		this.events = [];
+		this.eventTimes = {};
+		if (!this.record) return;
+		try {
+			const res = await this.call<{ record: string; events: RunEvent[] }>('runlog.run_events', { record: this.record });
+			if (this.record !== res.record) return;
+			this.events = res.events;
+			this.eventsMessage = res.events.length ? '' : 'This run record holds no events.';
+		} catch (err) {
+			this.eventsMessage = words(err);
+		}
+	}
+
+	/**
+	 * Write one proposed entry into the open log, as the keeper confirms it with their initials
+	 * (`runlog.accept_event`): at the controller's time, or the time typed for an event the record
+	 * has none for. Nothing is written without this.
+	 */
+	async acceptEvent(event: RunEvent): Promise<void> {
+		if (!this.record || event.accepted || this.accepting !== null) return;
+		const author = this.initials.trim();
+		if (!author) {
+			this.eventsMessage = 'Type your initials first: every entry records its author.';
+			return;
+		}
+		const time = event.time === null ? (this.eventTimes[event.index] ?? '').trim() : '';
+		if (event.time === null && !time) {
+			this.eventsMessage = 'The record has no time for this event: type when it happened.';
+			return;
+		}
+		this.accepting = event.index;
+		try {
+			const res = await this.call<{ log: RunLogView; entry: number }>('runlog.accept_event', {
+				record: this.record,
+				index: event.index,
+				author,
+				axis: this.axis.trim(),
+				...(time ? { time } : {})
+			});
+			this.events = this.events.map((e) => (e.index === event.index ? { ...e, accepted: true } : e));
+			this.eventsMessage = `Written as entry #${res.entry}.`;
+			this.show(res.log);
+		} catch (err) {
+			this.eventsMessage = words(err);
+		} finally {
+			this.accepting = null;
 		}
 	}
 

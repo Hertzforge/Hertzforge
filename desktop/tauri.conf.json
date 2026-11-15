@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Hertzforge",
-  "version": "0.1.4",
+  "version": "0.1.9",
   "identifier": "org.hertzforge.app",
   "build": {
     "frontendDist": "../ui/build",
@@ -38,6 +38,17 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["hforge"],
+        "name": "Hertzforge Project",
+        "description": "Hertzforge project",
+        "role": "Editor",
+        "rank": "Owner",
+        "mimeType": "application/x-hertzforge",
+        "exportedType": { "identifier": "org.hertzforge.project", "conformsTo": ["public.data"] }
+      }
     ],
     "license": "MIT",
     "resources": {

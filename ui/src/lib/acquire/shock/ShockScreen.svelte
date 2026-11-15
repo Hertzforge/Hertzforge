@@ -23,6 +23,7 @@
 	import ShockSummary from './ShockSummary.svelte';
 	import ShockTrains from './ShockTrains.svelte';
 	import { runChannels, SHOCK_SECTIONS, type ShockSection } from './shockSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -91,13 +92,14 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="classical_shock" />
 	<ShockSummary {shock} onopen={(s: ShockSection) => open(s)} />
 {/snippet}
 
 {#snippet station()}<StationPanel acq={shock.acq} />{/snippet}
 
 {#snippet run()}
-	<ShockRunView {shock} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'shock')} />
+	<ShockRunView {shock} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'shock')} opener={app.shockRunOpen} />
 {/snippet}
 
 <PulseScreen

@@ -157,7 +157,22 @@ pub struct RecorderView {
     pub health: Option<Health>,
     pub stop: Option<&'static str>,
     pub end: Option<End>,
+    /// The run's folder from start on, and the latest problem writing its record.
+    pub record: Option<RecordRef>,
     pub live_rows: Vec<LiveRow>,
+}
+
+/// Where a run's record is, as the state names it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordRef {
+    pub folder: String,
+    pub problem: Option<String>,
+}
+
+impl RecordRef {
+    pub fn to_json(&self) -> Value {
+        json!({"folder": self.folder, "problem": self.problem})
+    }
 }
 
 /// The recorded rows as the live frame lists them, before anything is read.
@@ -235,6 +250,7 @@ pub fn configured_view(
         health: None,
         stop: None,
         end: None,
+        record: None,
         live_rows: table_rows(table),
     }
 }
@@ -323,7 +339,7 @@ pub fn state_json(v: Option<&RecorderView>) -> Value {
             "source": null, "station": null, "grid": null, "clock": null, "outputs": "none",
             "rows": null, "mode": null, "t_s": null, "station_frames": null,
             "trigger": null, "recording": null, "recordings": 0, "marks": 0, "disk": null,
-            "health": null, "stop": null, "end": null,
+            "health": null, "stop": null, "end": null, "record": null,
         });
     };
     let mut m = Map::new();
@@ -351,6 +367,10 @@ pub fn state_json(v: Option<&RecorderView>) -> Value {
         "end".into(),
         v.end.as_ref().map_or(Value::Null, End::to_json),
     );
+    m.insert(
+        "record".into(),
+        v.record.as_ref().map_or(Value::Null, RecordRef::to_json),
+    );
     Value::Object(m)
 }
 
@@ -360,12 +380,13 @@ pub fn state_key(v: Option<&RecorderView>) -> String {
     match v {
         None => "unconfigured".into(),
         Some(v) => format!(
-            "{}|{}|{}|{:?}|{:?}",
+            "{}|{}|{}|{:?}|{:?}|{:?}",
             v.run_id,
             v.state.name(),
             v.phase,
             v.stop,
-            v.end.as_ref().map(|e| (e.outcome, e.message.clone()))
+            v.end.as_ref().map(|e| (e.outcome, e.message.clone())),
+            v.record.as_ref().map(|r| (&r.folder, &r.problem))
         ),
     }
 }

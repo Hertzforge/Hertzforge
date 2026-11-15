@@ -1,0 +1,65 @@
+{
+  "name": "srs_reference",
+  "kind": "srs_reference",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "description": "each control's target SRS at full level on the natural frequencies, with the band it passes in (band)",
+  "q": 10,
+  "srs_kind": "maximax",
+  "tolerance_db": [
+    -9,
+    9
+  ],
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        3
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "band_low",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 24
+    },
+    {
+      "name": "band_high",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 120
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        4,
+        3
+      ],
+      "unit": "g",
+      "offset": 216
+    }
+  ]
+}

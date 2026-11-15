@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** Each scope's choice of a linear or log frequency axis, kept as the selection changes. */
+	const keptLogX = new Map<string, boolean>();
+</script>
+
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
 	/**
@@ -65,6 +70,17 @@
 		readout?: boolean;
 		/** The Copy Image button above the plot. */
 		copyButton?: boolean;
+		/**
+		 * A Lin/Log choice for a frequency axis above the plot, as the 3D stage has, kept for the
+		 * `scope` (Brandon, 2026-11-14: it was the bar's Log f, a second control for the stage's).
+		 */
+		scaleToggle?: boolean;
+		/**
+		 * The series the y axis is ranged on, by index into `view.series`; every series shown when
+		 * absent. The fit ranges on the measured CMIFs, so a synthesis or a pending mode moving
+		 * under the cursor does not rescale the plot (Brandon, 2026-11-14).
+		 */
+		rangeOn?: (series: Series, index: number) => boolean;
 		/** Each series' look in place of its role's, by index into `view.series`. */
 		styles?: (SeriesOverride | undefined)[];
 		/** A legend entry pressed, by series index; with it the entries are buttons. */
@@ -118,6 +134,8 @@
 		legendCorner = 'top-right',
 		readout = true,
 		copyButton = true,
+		scaleToggle = false,
+		rangeOn,
 		styles = [],
 		onlegend,
 		xFixed = null,
@@ -175,7 +193,14 @@
 	const shownGroup = $derived(view.groups?.length ? view.groups[Math.min(group, view.groups.length - 1)] : null);
 	const inGroup = (i: number) => !shownGroup || shownGroup.series.includes(i);
 
-	const logX = $derived(view.x.scale === 'log');
+	/** The frequency axis chosen on the plot, or null to take the view's scale. */
+	let logXChoice = $state<boolean | null>(untrack(() => (scope ? (keptLogX.get(scope) ?? null) : null)));
+	const choosesX = $derived(scaleToggle && view.x.unit === 'Hz');
+	const logX = $derived(choosesX && logXChoice !== null ? logXChoice : view.x.scale === 'log');
+	function setLogX(log: boolean) {
+		logXChoice = log;
+		if (scope) keptLogX.set(scope, log);
+	}
 	const logY = $derived(view.y.scale === 'log');
 
 	/**
@@ -211,7 +236,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey]);
+		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey, logX]);
 	}
 
 	/**
@@ -219,7 +244,7 @@
 	 * choosing another group keeps the axes where they were.
 	 */
 	function shownCols(cols: ArrayLike<number | null>[]): ArrayLike<number | null>[] {
-		return cols.filter((_, i) => styled[i]?.kept !== false);
+		return cols.filter((_, i) => styled[i]?.kept !== false && (!rangeOn || rangeOn(view.series[i], i)));
 	}
 
 	function finiteExtent(values: ArrayLike<number | null>[], positive: boolean): [number, number] | null {
@@ -452,20 +477,29 @@
 		playLine.addEventListener('pointerdown', startDrag);
 		plot.over.appendChild(playLine);
 		placePlayLine();
-		markerLine = document.createElement('div');
-		markerLine.className = 'marker';
-		if (onMarkerDrag) {
-			const grip = document.createElement('div');
-			grip.className = 'marker-grip';
-			grip.title = 'Drag across to move the cursor, up and down to set the damping';
-			// the line's own drag, not the plot's zoom
-			grip.addEventListener('mousedown', (e) => e.stopPropagation());
-			grip.addEventListener('click', (e) => e.stopPropagation());
-			grip.addEventListener('pointerdown', startMarkerDrag);
-			markerLine.appendChild(grip);
+		// a rebuild mid-drag (a reply adding the pending mode's curve) keeps the line in hand where
+		// the drag has it, and the drag goes on
+		if (markerLine && markerHeld) {
+			plot.over.appendChild(markerLine);
+		} else {
+			markerLine = document.createElement('div');
+			markerLine.className = 'marker';
+			if (onMarkerDrag) {
+				// a thing to grab, solid and red as the earlier toolset drew it: at a dashed pixel
+				// it read as a grid line (Brandon, 2026-11-14)
+				markerLine.classList.add('draggable');
+				const grip = document.createElement('div');
+				grip.className = 'marker-grip';
+				grip.title = 'Drag across to move the cursor, up and down to set the damping';
+				// the line's own drag, not the plot's zoom
+				grip.addEventListener('mousedown', (e) => e.stopPropagation());
+				grip.addEventListener('click', (e) => e.stopPropagation());
+				grip.addEventListener('pointerdown', startMarkerDrag);
+				markerLine.appendChild(grip);
+			}
+			plot.over.appendChild(markerLine);
+			placeMarker();
 		}
-		plot.over.appendChild(markerLine);
-		placeMarker();
 		guideEls = [];
 		placeGuides();
 		regionEls = (view.regions ?? []).map((r, k) => {
@@ -745,13 +779,15 @@
 		e.stopPropagation();
 		const fromX = e.clientX;
 		const fromY = e.clientY;
-		const grip = e.currentTarget as HTMLElement;
-		grip.setPointerCapture?.(e.pointerId);
+		// followed on the window: a rebuild under the drag does not end it
+		const grip = window;
+		markerHeld = true;
 		const report = (ev: PointerEvent, done: boolean) => {
 			if (!plot || !markerLine) return;
-			const box = plot.over.getBoundingClientRect();
+			const box = (markerLine.parentElement ?? plot.over).getBoundingClientRect();
 			const left = Math.min(box.width, Math.max(0, ev.clientX - box.left));
-			const moved = { x: Math.abs(ev.clientX - fromX) > 3, y: Math.abs(ev.clientY - fromY) > 3 };
+			// no dead band: any movement up or down is the damping (Brandon, 2026-11-14, to try)
+			const moved = { x: ev.clientX !== fromX, y: ev.clientY !== fromY };
 			if (moved.x) markerLine.style.left = `${left}px`;
 			const fraction = Math.min(1, Math.max(0, (ev.clientY - box.top) / box.height));
 			onMarkerDrag?.(plot.posToVal(left, 'x'), fraction, moved, done);
@@ -764,10 +800,12 @@
 		};
 		const up = (ev: PointerEvent) => {
 			stop();
+			markerHeld = false;
 			report(ev, true);
 		};
 		const cancel = () => {
 			stop();
+			markerHeld = false;
 			placeMarker();
 			onMarkerDrag?.(marker ?? 0, 0, { x: false, y: false }, true);
 		};
@@ -877,8 +915,11 @@
 	}
 
 	/** Put the marker line at `marker`, or hide it when there is none or it is off the plot. */
+	/** The marker held by a drag, which a reply arriving mid-drag must not pull back. */
+	let markerHeld = false;
+
 	function placeMarker() {
-		if (!plot || !markerLine) return;
+		if (!plot || !markerLine || markerHeld) return;
 		const left = marker === null ? -1 : plot.valToPos(marker, 'x');
 		const inside = left >= 0 && left <= plot.over.clientWidth;
 		markerLine.style.display = inside ? '' : 'none';
@@ -1029,6 +1070,7 @@
 		// Track the view, the theme and the look; rebuild or update in place.
 		void view;
 		void theme.version;
+		void logX;
 		void yFixed;
 		void optionsKey;
 		// a caller that holds the zoom lets go of y: range on the data, not on the range let go of
@@ -1120,7 +1162,7 @@
 	/** The marks' readout sits in a top corner the legend does not take. */
 	const marksCorner = $derived<Corner>(legend === 'inside' && legendCorner === 'top-left' ? 'top-right' : 'top-left');
 
-	const showHead = $derived(showTitle || copyButton || (legend === 'outside' && readout) || !!view.groups?.length);
+	const showHead = $derived(showTitle || copyButton || choosesX || (legend === 'outside' && readout) || !!view.groups?.length);
 
 	/** A note being dragged: where it is, as fractions of the plot area. */
 	let dragNote = $state<{ id: string; fx: number; fy: number } | null>(null);
@@ -1206,6 +1248,13 @@
 				<span class="group-readout" data-status={r.status}>{r.label}: <b>{r.text}</b> <span class="word">{r.status}</span></span>
 			{/each}
 		</span>
+		{/if}
+		{#if choosesX}
+		<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
+			<span class="lbl">{view.x.label}</span>
+			<button role="radio" aria-checked={!logX} class:on={!logX} data-testid="spectrum-x-linear" title="Linear frequency axis" onclick={() => setLogX(false)}>Lin</button>
+			<button role="radio" aria-checked={logX} class:on={logX} data-testid="spectrum-x-log" title="Log frequency axis" onclick={() => setLogX(true)}>Log</button>
+		</div>
 		{/if}
 		{#if copyButton}
 		<button class="btn ghost sm copyimg" data-testid="spectrum-copy-image" onclick={copyImage} title="Copy the plot as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1299,8 +1348,43 @@
 		min-width: 0;
 	}
 
+	.seg {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		align-self: center;
+		padding: 2px;
+		background: var(--bg-2);
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-md);
+	}
+
+	.seg .lbl {
+		padding: 0 var(--sp-2) 0 var(--sp-1);
+		font-size: var(--text-xs);
+		color: var(--text-3);
+	}
+
+	.seg button {
+		height: 20px;
+		padding: 0 var(--sp-2);
+		font-size: var(--text-xs);
+		color: var(--text-2);
+		background: transparent;
+		border: 0;
+		border-radius: 4px;
+	}
+
+	.seg button.on {
+		color: var(--text-1);
+		background: var(--bg-4);
+		box-shadow: inset 0 0 0 1px var(--line-3);
+	}
+
 	.head {
 		display: flex;
+		flex: none;
+		flex-wrap: wrap;
 		align-items: baseline;
 		gap: var(--sp-3);
 		padding: 0 var(--sp-1) var(--sp-1);
@@ -1500,6 +1584,11 @@
 		width: 0;
 		border-left: 1px dashed var(--text-2);
 		pointer-events: none;
+	}
+
+	.plot :global(.marker.draggable) {
+		margin-left: -1.5px;
+		border-left: 3px solid #e5534b;
 	}
 
 	.plot :global(.u-cursor-x) {

@@ -29,7 +29,18 @@ from typing import Any
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from . import display_units, fitting, frames, projects, reports, run_logs, table_files, verbs
+from . import (
+    display_units,
+    fitting,
+    frames,
+    op_progress,
+    projects,
+    reports,
+    run_files,
+    run_logs,
+    table_files,
+    verbs,
+)
 from .descriptors import Operation, json_type
 from .protocol import ProtocolError, bad_request, hello, not_found, refused
 
@@ -54,11 +65,15 @@ OPERATIONS: tuple[Operation, ...] = _operations()
 
 #: the requests on a connection's own project
 PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.save',
+                   'project.drag_out',
                    'project.rename', 'project.remove', 'project.delete_parts', 'project.activate',
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
                    'project.mesh_size', 'project.journal',
-                   'project.show', 'project.actions')
+                   'project.show', 'project.actions',
+                   'project.setups', 'project.save_setup', 'project.open_setup',
+                   'project.channel_table', 'project.put_channel_table',
+                   'project.seeds', 'project.seed')
 
 #: the largest frame a client may send; requests are small
 MAX_INCOMING = 16 * 2**20
@@ -238,6 +253,9 @@ class Connection:
         self.run_log: run_logs.Keeper = run_logs.Keeper()
         self.run_log_lock: asyncio.Lock = asyncio.Lock()
         self.tasks: set[asyncio.Task] = set()
+        #: the operation running on the project, which `op.cancel` stops, and whether it was asked to
+        self.running_op: str | None = None
+        self.cancel_asked: bool = False
         self.sending: asyncio.Lock = asyncio.Lock()
         self._seq = itertools.count(1)
 
@@ -273,6 +291,35 @@ class Connection:
                 self.event('project.progress', data), loop)
         return report
 
+    def op_progress(self, op_id: str) -> Callable[[int, int], None]:
+        """A (done, total) callable for an operation on a worker thread: it sends
+        `op.progress` events, at most one per PROGRESS_INTERVAL_S but always when the stage or
+        its total changes and at the end, and raises `Cancelled` once `op.cancel` is asked."""
+        from hertzforge.core.progress import Cancelled
+
+        loop = asyncio.get_running_loop()
+        last = [-PROGRESS_INTERVAL_S, None]
+
+        def report(done: int, total: int) -> None:
+            if self.cancel_asked:
+                raise Cancelled(f'{op_id} was cancelled')
+            now = time.monotonic()
+            if (now - last[0] < PROGRESS_INTERVAL_S and total == last[1]
+                    and (total < 0 or done < total)):
+                return
+            last[0], last[1] = now, total
+            data = {'op': op_id, 'done': int(done), 'total': int(total)}
+            asyncio.run_coroutine_threadsafe(self.event('op.progress', data), loop)
+        return report
+
+    def cancel_op(self, params: Any) -> dict[str, Any]:
+        """`op.cancel`: stop the operation running on the project at its next report of
+        progress. Answers which operation that is, or null when none is running."""
+        _only(params, (), 'op.cancel')
+        if self.running_op is not None:
+            self.cancel_asked = True
+        return {'op': self.running_op}
+
     async def project_request(self, method: str,
                               params: Any) -> dict[str, Any]:
         """Answer one `project.*` request on this connection's project, after
@@ -306,6 +353,29 @@ class Connection:
                  'project.activate': (projects.activate, ('geometry',)),
                  'project.duplicate': (projects.duplicate, ('names',)),
                  'project.refresh': (projects.refresh, ('names',))}
+        if method == 'project.setups':
+            _only(params, (), method)
+            return await call(projects.setups, self.project, params)
+        if method == 'project.save_setup':
+            _only(params, ('name', 'setup', 'replace'), method)
+            name = await call(projects.save_setup, self.project, params)
+            return {'name': name, 'project': projects.summary(self.project)}
+        if method == 'project.channel_table':
+            _only(params, ('name',), method)
+            return await call(projects.channel_table, self.project, params)
+        if method == 'project.put_channel_table':
+            _only(params, ('name', 'channels', 'environments', 'replace'), method)
+            name = await call(projects.put_channel_table, self.project, params)
+            return {'name': name, 'project': projects.summary(self.project)}
+        if method == 'project.open_setup':
+            _only(params, ('name',), method)
+            return {'setup': await call(projects.open_setup, self.project, params)}
+        if method == 'project.seeds':
+            _only(params, ('module',), method)
+            return await call(projects.seeds, self.project, params)
+        if method == 'project.seed':
+            _only(params, ('name', 'module', 'channel', 'record', 'units', 'tones'), method)
+            return await call(projects.seed, self.project, params)
         if method == 'project.journal':
             _only(params, (), method)
             return await call(projects.journal, self.project, params)
@@ -354,6 +424,9 @@ class Connection:
             _only(params, keys, method)
             await call(edit, self.project, params)
             return {'project': projects.summary(self.project)}
+        if method == 'project.drag_out':
+            _only(params, ('project', 'names'), method)
+            return {'paths': await call(projects.drag_out, self.project, params)}
         _only(params, ('path', 'compress'), method)
         written = await call(projects.save, self.project, params)
         return {'path': written, 'project': projects.summary(self.project)}
@@ -373,7 +446,7 @@ class Connection:
                 verbs={name: projects.verbs_of(project, name) for name in project})
             if op.id == 'project.save_as' and values['units'] == 'display':
                 values['units'] = self.units
-            if any(param.length for param in op.params):
+            if any(param.length or param.quantity for param in op.params):
                 values = display_units.typed_lengths(op.params, values, self.units,
                                                      project[values['geometry']])
             if params.get('preview') and not op.previews:
@@ -382,18 +455,29 @@ class Connection:
                 scratch = _preview_copy(project, values['geometry'])
                 return {'views': _said_as_preview(await self._ran(op, scratch, values), self.units)}
             before, journaled = list(project), len(project.journal)
-            views = await self._ran(op, project, values)
+            self.running_op, self.cancel_asked = op.id, False
+            try:
+                views = await self._ran(op, project, values, self.op_progress(op.id))
+            finally:
+                self.running_op, self.cancel_asked = None, False
             if (op.edits and (op.edits_when is None or op.edits_when(values))
                     or list(project) != before or len(project.journal) != journaled):
                 state.modified = True
             display_units.convert(views, self.units)
             return {'views': views, 'project': projects.summary(state)}
 
-    async def _ran(self, op: Operation, project: Any, values: dict[str, Any]) -> list[dict]:
-        """The operation's views, with what it says of lengths in words in the display system."""
+    async def _ran(self, op: Operation, project: Any, values: dict[str, Any],
+                   report: Callable[[int, int], None] | None = None) -> list[dict]:
+        """The operation's views, with what it says of lengths in words in the display system;
+        `report` its progress (`op_progress`), which an operation's verb reports to."""
+        from hertzforge.core.progress import Cancelled
+
         try:
-            views = await self.service.in_worker(display_units.running_in, self.units, op.run,
+            views = await self.service.in_worker(op_progress.running_with, report,
+                                                 display_units.running_in, self.units, op.run,
                                                  project, values)
+        except Cancelled:
+            raise refused(f'{op.title} was cancelled; the project is as it was') from None
         except ProtocolError as error:
             if op.says_lengths:
                 error.message = display_units.lengths_in_words(error.message, self.units)
@@ -463,7 +547,11 @@ class Connection:
                                   f'{", ".join(display_units.systems())}')
             self.units = name
         return {'name': self.units, 'systems': display_units.systems(),
-                'length': display_units.length_of(self.units)}
+                'length': display_units.length_of(self.units),
+                'quantities': display_units.quantities_of(
+                    self.units, {p.quantity for op in self.service.operations.values()
+                                 for p in op.params
+                                 if p.quantity})}
 
     async def fit_request(self, method: str, params: Any) -> dict[str, Any]:
         """Answer one `fit.*` request: a step of the mode fit on this
@@ -549,6 +637,9 @@ class Connection:
                 frame = frames.encode_text(
                     {'type': 'response', 'id': ident,
                      'result': self.service.catalog_list()})
+            elif method == 'op.cancel':
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': self.cancel_op(params)})
             elif method == 'op.run':
                 result = await self.project_op(params)
                 frame = await self.service.in_worker(
@@ -582,6 +673,14 @@ class Connection:
                                                           method, params, project, self.system)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in run_files.RUN_METHODS:
+                async with self.project_lock:
+                    held = ([self.project.project.file]
+                            if self.project is not None and self.project.project.file else [])
+                    result = await self.service.in_worker(run_files.request, method, params,
+                                                          held)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in table_files.TABLE_METHODS:
                 result = await self.service.in_worker(table_files.request, method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
@@ -599,7 +698,8 @@ class Connection:
                     f'{", ".join(PROJECT_METHODS)}, '
                     f'{", ".join(fitting.FIT_METHODS)}, '
                     f'{", ".join(run_logs.RUN_LOG_METHODS)}, '
-                    f'{", ".join(table_files.TABLE_METHODS)} and '
+                    f'{", ".join(table_files.TABLE_METHODS)}, '
+                    f'{", ".join(run_files.RUN_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
             frame = _error(ident, error.code, error.message)

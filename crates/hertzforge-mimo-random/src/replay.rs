@@ -160,12 +160,19 @@ impl LawSource {
                 Some(r) => r.clone(),
                 None => {
                     let r = std::env::temp_dir().join(format!(
-                        "hertzforge-replay-{}-{}",
+                        "hertzforge-replay-{}-{}-{}",
                         std::process::id(),
                         std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_nanos())
-                            .unwrap_or(0)
+                            .unwrap_or(0),
+                        // the clock alone repeats: macOS reads it to the microsecond, and two
+                        // replays at once could share a folder and delete it under each other
+                        {
+                            use std::sync::atomic::{AtomicUsize, Ordering};
+                            static NEXT: AtomicUsize = AtomicUsize::new(0);
+                            NEXT.fetch_add(1, Ordering::Relaxed)
+                        }
                     ));
                     self.remove_scratch = true;
                     self.scratch = Some(r.clone());

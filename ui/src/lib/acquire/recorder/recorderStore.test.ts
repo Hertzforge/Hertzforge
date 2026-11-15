@@ -16,6 +16,7 @@ import { mockSocketFactory } from '$lib/protocol/mock/socket';
 import type { RecorderData, RecorderLive, RecorderState } from '$lib/protocol/recorder';
 import { ExplorerStore } from '../explorer/explorerStore.svelte';
 import { AcquireState } from '../store.svelte';
+import { workspaceForRun } from '../runOpen.svelte';
 import { RecorderStore } from './recorderStore.svelte';
 import { RecorderViewsState } from './recorderViews.svelte';
 import { recorderCardStatus } from './recorderWords';
@@ -137,10 +138,14 @@ describe('the Recorder store', () => {
 		expect(recorder.status?.trigger).toBeNull();
 		await until(() => recorder.now?.phase === 'monitoring' && recorder.recordings.length === 1 && recorder.recordings[0].complete);
 		const r = recorder.recordings[0];
-		expect([r.frames, r.seconds, r.bytes, r.complete, r.gap_free, r.folder]).toEqual([25600, 2, 409600, true, true, 'recordings/rec_0001']);
+		expect([r.frames, r.seconds, r.bytes, r.complete, r.gap_free, r.folder]).toEqual([25600, 2, 409600, true, true, 'streams/rec_0001']);
 		expect(recorderCardStatus(recorder.now, recorder.cardSetup).text).toBe('Monitoring: nothing is being saved');
 		await until(() => !!recorder.folder);
 		expect(recorder.folder).toMatch(/Hertzforge_Data\/recorder$/);
+		// the folder is the state's, not a log line's: a line naming another changes nothing
+		expect(recorder.folder).toBe(recorder.status?.record?.folder);
+		recorder.log = [{ seq: 9999, at_unix: 0, kind: 'note', text: 'records in /elsewhere' }, ...recorder.log];
+		expect(recorder.folder).toBe(recorder.status?.record?.folder);
 		expect(recorder.log.map((e) => e.text)).toEqual(expect.arrayContaining(['the station programmed 12800 Hz (asked 12800 Hz)', 'outputs: none; drive row 2 not opened', 'rec_0001 began at station frame 0 (pre-window 0 frames)', 'rec_0001 saved: 25600 frames, 2.000 s, no gaps']));
 		await recorder.stop();
 		await until(() => recorder.status?.state === 'finished');
@@ -409,6 +414,19 @@ describe('the Recorder store', () => {
 		await recorder.abort();
 	}, 15000);
 
+	it('names the Recorder run folder on the run head from start on, kept after the end, and opens a finished run in the Signals workspace', async () => {
+		const { recorder } = await screen();
+		Object.assign(recorder.setup.trigger, { mode: 'start', record_s: 0.5 });
+		expect(recorder.run?.record ?? null).toBeNull();
+		await running(recorder);
+		await until(() => !!recorder.folder);
+		expect(recorder.run?.record).toEqual({ folder: recorder.folder, streams: 'on', problem: null });
+		await recorder.stop();
+		await until(() => recorder.status?.state === 'finished');
+		expect(recorder.run?.record?.folder).toMatch(/\/recorder$/);
+		expect(workspaceForRun('recorder')).toBe('signals');
+	}, 15000);
+
 	it('round-trips every Recorder setup field through what the service holds', async () => {
 		const { recorder } = await screen();
 		level(recorder, null, 2);
@@ -419,8 +437,11 @@ describe('the Recorder store', () => {
 		recorder.setup.analysis = { block: 4096, window: 'flattop', overlap_pct: 60, averaging: 'exponential', averages: 16, decimation: 2, frf: { reference: 3, response: 4 } };
 		recorder.setup.capture = { run_name: 'fixture_a', keep_free_gb: 2 };
 		recorder.setup.metadata = [{ key: 'run_number', label: 'Run Number', value: '3' }];
+		recorder.setup.record = { operator: 'A. Operator', article: 'Bracket, serial 7', notes: 'first article', document: 'Test procedure 12', clause: '4.2', streams: true };
 		expect(await recorder.apply()).toBe(true);
 		await until(() => recorder.served?.config?.title === 'Fixture A');
+		const held = recorder.served!.config!;
+		expect([held.operator, held.article, held.notes, held.specification]).toEqual(['A. Operator', 'Bracket, serial 7', 'first article', { document: 'Test procedure 12', clause: '4.2' }]);
 		const wire = structuredClone(recorder.wire);
 		recorder.setup = { ...recorder.setup, title: 'changed' };
 		expect(recorder.setupStatus).toBe('changed');
