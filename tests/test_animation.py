@@ -87,3 +87,44 @@ def test_a_geometry_with_its_own_view_opens_in_it(plate):
         plate['Geometry'].view = None
     assert view['home']['up'] == pytest.approx([0, 1, 0])
     assert view['home']['eye'] == pytest.approx([1, 0.55, 1.2])
+
+
+def test_the_page_opens_see_through_and_from_the_camera_asked(plate):
+    """Brandon, 2026-11-14: the fridge's surface translucent, set with no window open."""
+    held = read_viewer(animation_page(plate, 'Geometry', shapes='Shape Set', opacity=0.3,
+                                      eye=(1, 0.55, 1.2), up=(0, 1, 0)))['animation']['view']
+    assert held['opacity'] == pytest.approx(0.3)
+    assert held['home'] == {'eye': [1.0, 0.55, 1.2], 'up': [0.0, 1.0, 0.0]}
+    top = read_viewer(animation_page(plate, 'Geometry', shapes='Shape Set', view='top'))
+    assert top['animation']['view']['home'] == {'eye': [0.0, 0.0, 1.0], 'up': [0.0, 1.0, 0.0]}
+    solid = read_viewer(animation_page(plate, 'Geometry', shapes='Shape Set'))['animation']['view']
+    assert 'opacity' not in solid and 'home' not in solid
+
+
+@pytest.mark.parametrize(('options', 'said'), [
+    ({'opacity': 0}, 'above 0 and at most 1'),
+    ({'opacity': 1.5}, 'above 0 and at most 1'),
+    ({'view': 'sideways'}, 'one of iso'),
+    ({'up': (0, 1, 0)}, 'up is given with an eye'),
+    ({'eye': (0, 0, 0)}, 'direction to look from'),
+    ({'eye': (0, 0, 1), 'up': (0, 0, 2)}, 'up'),
+    ({'eye': (1, 0)}, 'three numbers'),
+])
+def test_an_opening_the_page_cannot_have_is_refused(plate, options, said):
+    with pytest.raises(AnimationError, match=said):
+        animation_page(plate, 'Geometry', shapes='Shape Set', **options)
+
+
+def test_the_command_takes_the_opacity_and_the_camera(plate, tmp_path, capsys):
+    path = tmp_path / 'plate.hforge'
+    plate.save(path)
+    out = tmp_path / 'plate.html'
+    assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry',
+                 '--shapes', 'Shape Set', '--opacity', '0.4', '--eye', '1,1,0',
+                 '--up', '0,0,1']) == 0
+    view = read_viewer(out.read_text(encoding='utf-8'))['animation']['view']
+    assert view['opacity'] == pytest.approx(0.4) and view['home']['eye'] == [1.0, 1.0, 0.0]
+    capsys.readouterr()
+    assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry',
+                 '--shapes', 'Shape Set', '--eye', 'up']) == 1
+    assert 'three numbers' in capsys.readouterr().out

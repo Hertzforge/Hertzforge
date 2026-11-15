@@ -56,6 +56,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="the mode the page opens at, from 1, when there is no --data")
     export.add_argument("--scale", type=float, default=1.0,
                         help="the amplitude the page opens at, times the app's own (default 1)")
+    export.add_argument("--opacity", type=float, default=1.0,
+                        help="how solid the surface opens, above 0 to 1 (default 1, solid)")
+    export.add_argument("--view", default="iso",
+                        help="the view the page opens looking from: iso (the geometry's own), "
+                             "front, back, left, right, top or bottom (default iso)")
+    export.add_argument("--eye", help="X,Y,Z: the direction from the model to the camera the "
+                                      "page opens with, in place of --view")
+    export.add_argument("--up", help="X,Y,Z: which way is up with --eye (default 0,0,1)")
     export.add_argument("--theme", choices=("dark", "light"),
                         help="the app's dark or light look (default: the reader's own)")
     export.add_argument("--title", help="the page's title (default: the view's)")
@@ -96,6 +104,16 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _xyz(text: str | None) -> tuple[float, ...] | None:
+    """`X,Y,Z` as numbers; ValueError, in words, when it is not."""
+    if text is None:
+        return None
+    try:
+        return tuple(float(part) for part in text.split(","))
+    except ValueError:
+        raise ValueError(f"a direction is three numbers, as 1,0,0, not {text!r}") from None
+
+
 def _export_animation(args: argparse.Namespace) -> int:
     """`hertzforge export-animation`: the project opened and the animation's page written."""
     from hertzforge.animation import AnimationError, export_animation
@@ -104,8 +122,9 @@ def _export_animation(args: argparse.Namespace) -> int:
     try:
         project = Project.open(args.project)
         out = export_animation(project, args.output, args.geometry, args.data, args.shapes,
-                               mode=args.mode, scale=args.scale, theme=args.theme,
-                               title=args.title)
+                               mode=args.mode, scale=args.scale, opacity=args.opacity,
+                               view=args.view, eye=_xyz(args.eye), up=_xyz(args.up),
+                               theme=args.theme, title=args.title)
     except (AnimationError, OSError, ValueError) as error:
         print(f"hertzforge export-animation: {error}")
         return 1

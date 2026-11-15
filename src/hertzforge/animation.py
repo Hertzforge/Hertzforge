@@ -15,9 +15,60 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+#: the views an animation can open looking from, as (eye, up): the direction from the model's
+#: centre to the camera, and which way is up, in the global frame. 'iso' is the geometry's own
+#: view (`Geometry.view`), or the app's opening view when it has none.
+VIEWS: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]] | None] = {
+    'iso': None,
+    'front': ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+    'back': ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+    'left': ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    'right': ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    'top': ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
+    'bottom': ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+}
+
 
 class AnimationError(RuntimeError):
     """An animation that cannot be exported, in words for the person exporting it."""
+
+
+def opening_camera(view: str = 'iso', eye: Sequence[float] | None = None,
+                   up: Sequence[float] | None = None) -> dict[str, list[float]] | None:
+    """The camera an animation opens with, as a `shape3d` view's `home` ({'eye', 'up'}): `eye`
+    and `up` (Z when not given) when `eye` is given, else the named view's from `VIEWS`. None
+    for 'iso', which keeps the geometry's own view."""
+    from .core.geometry import View
+
+    if eye is None:
+        if up is not None:
+            raise AnimationError('up is given with an eye')
+        if view not in VIEWS:
+            raise AnimationError(f'the view is one of {", ".join(VIEWS)}, not {view!r}')
+        if VIEWS[view] is None:
+            return None
+        eye, up = VIEWS[view]
+    up = (0.0, 0.0, 1.0) if up is None else up
+    if len(eye) != 3 or len(up) != 3:
+        raise AnimationError('the eye and up are three numbers each, as 1,0,0')
+    try:
+        View(eye, up)
+    except ValueError as error:
+        raise AnimationError(str(error)) from None
+    return {'eye': [float(v) for v in eye], 'up': [float(v) for v in up]}
+
+
+def staged(view: dict[str, Any], opacity: float = 1.0, camera: dict[str, list[float]] | None = None
+           ) -> dict[str, Any]:
+    """`view` opening at `opacity` (1 solid, down to above 0) and from `camera` (`opening_camera`;
+    its own when None)."""
+    if not 0 < opacity <= 1:
+        raise AnimationError(f'the opacity is above 0 and at most 1, not {opacity}')
+    if opacity < 1:
+        view['opacity'] = float(opacity)
+    if camera is not None:
+        view['home'] = camera
+    return view
 
 
 def animation_view(project: Any, geometry: str, data: str | None = None,
@@ -46,11 +97,13 @@ def animation_view(project: Any, geometry: str, data: str | None = None,
 
 def animation_page(project: Any, geometry: str, data: str | None = None,
                    shapes: str | None = None, records: Sequence[int] = (), mode: int = 1,
-                   scale: float = 1.0, theme: str | None = None,
-                   title: str | None = None) -> str:
+                   scale: float = 1.0, opacity: float = 1.0, view: str = 'iso',
+                   eye: Sequence[float] | None = None, up: Sequence[float] | None = None,
+                   theme: str | None = None, title: str | None = None) -> str:
     """The animation as one self-contained HTML page: it opens playing, at mode `mode` (from 1)
-    when there is no motion, at `scale` times the app's amplitude, in the `light` or `dark`
-    theme (the reader's own when None), titled `title` (the view's own when None)."""
+    when there is no motion, at `scale` times the app's amplitude, the surface at `opacity`,
+    looking from the named `view` or from `eye` with `up` (`opening_camera`), in the `light` or
+    `dark` theme (the reader's own when None), titled `title` (the view's own when None)."""
     from .report.viewer import DATA, THEMES, TITLE, viewer_page
     from .service import frames
 
@@ -58,20 +111,21 @@ def animation_page(project: Any, geometry: str, data: str | None = None,
         raise AnimationError(f'the theme is light or dark, not {theme!r}')
     if scale < 0:
         raise AnimationError(f'the scale is 0 or more, not {scale}')
-    view = animation_view(project, geometry, data, shapes, records)
+    camera = opening_camera(view, eye, up)
+    shown = staged(animation_view(project, geometry, data, shapes, records), opacity, camera)
     setup: dict[str, Any] = {'scale': float(scale)}
-    if view.get('motion') is None:
-        if not 1 <= mode <= len(view['modes']):
-            raise AnimationError(f'{shapes or data} has modes 1 to {len(view["modes"])}; '
+    if shown.get('motion') is None:
+        if not 1 <= mode <= len(shown['modes']):
+            raise AnimationError(f'{shapes or data} has modes 1 to {len(shown["modes"])}; '
                                  f'not {mode}')
         setup['mode'] = mode - 1
     frame = frames.pack({'type': 'response', 'id': 0,
-                         'result': {'animation': {'view': view, 'setup': setup}}})
+                         'result': {'animation': {'view': shown, 'setup': setup}}})
     encoded = frame.encode('utf-8') if isinstance(frame, str) else frame
     page = viewer_page()
     if TITLE not in page or DATA not in page:
         raise AnimationError('the report viewer holds no place for data; build it again')
-    page = page.replace(TITLE, html.escape(title or str(view.get('title') or geometry)), 1)
+    page = page.replace(TITLE, html.escape(title or str(shown.get('title') or geometry)), 1)
     page = page.replace(DATA, base64.b64encode(encoded).decode('ascii'), 1)
     if theme is not None:
         page = page.replace('<html lang="en">', f'<html lang="en" data-theme="{theme}">', 1)
