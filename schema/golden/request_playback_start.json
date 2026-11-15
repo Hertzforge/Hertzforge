@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 132,
+ "method": "playback.start",
+ "params": {}
+}

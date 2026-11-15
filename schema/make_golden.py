@@ -5916,6 +5916,85 @@ MSHOCK_TEXT_GOLDENS = {
 }
 
 
+
+# ---- Playback ---------------------------------------------------------------------
+
+PLAYBACK_SHA = 'c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954'
+PLAYBACK_CONFIG = {
+    'title': 'Golden Playback',
+    'drive': {'folder': '/home/operator/Hertzforge_Data/drives/burst', 'sha256': PLAYBACK_SHA},
+    'map': [2], 'level_db': -6, 'ceiling_v': 1, 'pre_roll_s': 0.125, 'post_roll_s': 0.125,
+    'capture': {'run_name': 'playback'},
+    'operator': 'A. Operator', 'article': 'Bracket, SN 0042', 'notes': '',
+    'specification': {'document': 'Test procedure', 'clause': '4.2'},
+    'record': {'streams': True},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '3'}],
+}
+
+#: `playback.state` while the file plays: halfway through the golden burst.
+PLAYBACK_RUNNING = {
+    'run_id': 'playback-0002', 'state': 'running', 'phase': 'playing',
+    'title': 'Golden Playback', 'source': 'SIM', 'class': 'sim', 'fs_hz': 2048,
+    'drive': {'samples': 1024, 'duration_s': 0.5, 'sha256': PLAYBACK_SHA, 'map': [2]},
+    'level_db': -6, 'ceiling_v': 1,
+    'rolls': {'pre_frames': 256, 'post_frames': 256},
+    'progress': {'played': 512, 'samples': 1024, 'played_s': 0.25, 'fraction': 0.5,
+                 'elapsed_s': 0.375, 'buffered_s': 0.25},
+    'inputs': [{'index': 1, 'role': 'input', 'unit': 'g', 'description': 'Control'}],
+    'drives': [{'index': 2, 'role': 'drive', 'unit': 'V', 'description': 'Drive'}],
+    'overloads': [{'channel': 1, 'overload': False}],
+    'record': {'folder': '/home/operator/Hertzforge_Data/playback', 'streams': 'on',
+               'problem': None},
+    'end': None,
+}
+
+PLAYBACK_LIVE_INPUT = [0.0, 0.25, -0.5, 0.125, 0.0625, -0.25]
+PLAYBACK_LIVE_DRIVE = [0.0, 0.125, -0.25, 0.0625, 0.03125, -0.125]
+
+
+def _playback_live_build() -> tuple[dict, dict]:
+    data = {
+        'run_id': 'playback-0002', 'state': 'running', 'phase': 'playing',
+        'progress': PLAYBACK_RUNNING['progress'],
+        'time': {'rate_hz': 2048, 't0_s': 0.125, 'channels': [
+            {'index': 1, 'role': 'input', 'unit': 'g', 'values': {'$array': 'c0'}},
+            {'index': 2, 'role': 'drive', 'unit': 'V', 'values': {'$array': 'c1'}},
+        ]},
+    }
+    arrays = {'c0': ('f32', [len(PLAYBACK_LIVE_INPUT)], PLAYBACK_LIVE_INPUT),
+              'c1': ('f32', [len(PLAYBACK_LIVE_DRIVE)], PLAYBACK_LIVE_DRIVE)}
+    return {'type': 'event', 'topic': 'playback.live', 'seq': 301, 'data': data}, arrays
+
+
+PLAYBACK_TEXT_GOLDENS = {
+    'request_playback_configure': {
+        'type': 'request', 'id': 131, 'method': 'playback.configure',
+        'params': {'config': PLAYBACK_CONFIG},
+    },
+    'request_playback_start': {
+        'type': 'request', 'id': 132, 'method': 'playback.start', 'params': {},
+    },
+    'request_playback_log': {
+        'type': 'request', 'id': 133, 'method': 'playback.log', 'params': {'since': 4},
+    },
+    'event_playback_state': {
+        'type': 'event', 'topic': 'playback.state', 'seq': 300, 'data': PLAYBACK_RUNNING,
+    },
+    'response_error_playback_config_invalid': {
+        'type': 'response', 'id': 134,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 1 error: Drive file channel 0 (drive) peaks '
+                             'at 2.000000 V, 1.002374 V at -6 dB, over the drive ceiling of '
+                             '1 V.',
+                  'detail': {'errors': [
+                      {'reason': 'peak_over_ceiling', 'field': 'level_db',
+                       'message': 'Drive file channel 0 (drive) peaks at 2.000000 V, 1.002374 V '
+                                  'at -6 dB, over the drive ceiling of 1 V.'}],
+                      'warnings': []}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -6076,10 +6155,15 @@ def main() -> None:
     write('event_recorder_live', *_recorder_live_build())
     write('event_recorder_data', *_recorder_data_build())
 
+    # Playback: the live frame (its golden run folder, schema/golden/runs/playback/, is
+    # written by the control service's own test)
+    write('event_playback_live', *_playback_live_build())
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,
                           **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
-                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS}.items():
+                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS,
+                          **PLAYBACK_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

@@ -1,0 +1,41 @@
+{
+ "type": "request",
+ "id": 131,
+ "method": "playback.configure",
+ "params": {
+  "config": {
+   "title": "Golden Playback",
+   "drive": {
+    "folder": "/home/operator/Hertzforge_Data/drives/burst",
+    "sha256": "c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954"
+   },
+   "map": [
+    2
+   ],
+   "level_db": -6,
+   "ceiling_v": 1,
+   "pre_roll_s": 0.125,
+   "post_roll_s": 0.125,
+   "capture": {
+    "run_name": "playback"
+   },
+   "operator": "A. Operator",
+   "article": "Bracket, SN 0042",
+   "notes": "",
+   "specification": {
+    "document": "Test procedure",
+    "clause": "4.2"
+   },
+   "record": {
+    "streams": true
+   },
+   "metadata": [
+    {
+     "key": "run_number",
+     "label": "Run Number",
+     "value": "3"
+    }
+   ]
+  }
+ }
+}

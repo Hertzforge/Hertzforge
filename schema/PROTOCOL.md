@@ -5952,6 +5952,198 @@ sample, and null for the rest.
 A plot is empty (`views` empty) until there is something to draw: `time` until the first batch,
 `spectrum` and `frf` until the first average, `frf` without a pair always.
 
+## Playback
+
+Playback plays a drive file the operator made: volts at each drive output, one file channel per
+drive, of any length, recorded with every enabled input and every drive as played. Nothing closes
+a loop and nothing is analysed: the run plays the file as it is, scaled by the level, and its run
+folder carries the inputs and drives to the analysis side. The control service reads one format
+for it, the native drive file (`docs/drive-file.md`): a folder with `drive.bin` (the magic
+`HFDRV01\0`, then little-endian float32 samples interleaved by sample) and its sidecar
+`drive.json`. Every other format is converted into one on the analysis side. The file is named by
+its full path on the computer that runs the test, never uploaded. The run is one test like any
+other: a Playback run and any other module's run, or a `sim.start` run, exclude each other, each
+refused `run_active` while another is live. **Any connected screen may stop or abort**
+(`playback.stop`, `playback.abort`); `playback.configure` (other than a dry run), `start`,
+`reset` and `clear` need control; everything that only reads is open to every connection. While
+the service is shutting down, `playback.start` is refused `shutting_down`; `stop` and `abort` are
+not.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `playback.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","check","derived","warnings"}`; a dry run `{"errors","warnings","check","derived"}` |
+| `playback.config` | `{}` | any | `{"run_id","config","check","derived"}` |
+| `playback.start` | `{}` | `configured` | state, once the pre-roll runs |
+| `playback.stop` | `{}` | any | state |
+| `playback.abort` | `{}` | any | state |
+| `playback.reset` | `{}` | any but live | state |
+| `playback.clear` | `{}` | any but live | state |
+| `playback.state` | `{}` | any | state |
+| `playback.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+
+"state" is the `playback.state` object below. A run is live while it is starting, running or
+stopping. `playback.configure` replaces a run that is not live; `playback.reset` configures the
+present run's configuration again (the file is checked again); `playback.clear` forgets it
+(`unconfigured`). While a run is live both are refused `run_active`. `playback.start` on a run
+already started is refused `wrong_state`, on one that has ended `run_finished`, and with nothing
+configured `not_configured`.
+
+### Playback Configuration
+
+```
+{"title":"Bracket, road profile",
+ "drive":{"folder":"/home/operator/Hertzforge_Data/drives/road","sha256":"c7bf34a8...a8954"},
+ "map":[3,4],"level_db":-12,"ceiling_v":1.0,"pre_roll_s":0.5,"post_roll_s":2,
+ "capture":{"run_name":"playback"},
+ "operator":"A. Operator","article":"Bracket, SN 0042","notes":"",
+ "specification":{"document":"Test procedure","clause":"4.2"},
+ "record":{"streams":true},
+ "metadata":[{"key":"run_number","label":"Run Number","value":"3"}]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `drive.folder` | (required) | The native drive folder, its full path on this computer (a `drive.json` or `drive.bin` inside it is taken as the folder) |
+| `drive.sha256` | (required) | The SHA-256 of `drive.bin` the setup was made with, 64 hexadecimal digits: a file whose sidecar states another is refused `drive_pin_mismatch` |
+| `map` | (required) | The drive row (table `index`) each file channel plays on, in file order: one per channel, each an enabled drive row, none twice. Enabled drive rows no channel maps to play 0 V |
+| `level_db` | -12 | The level, -40 to 0 dB: every sample is multiplied by 10^(level/20) |
+| `ceiling_v` | (required) | The drive ceiling, volts: above 0, at most 10 and at most each mapped row's `range_max`. Each channel's peak at the level must be within it, and every sample played is judged against it |
+| `pre_roll_s`, `post_roll_s` | 0.5, 2 | Seconds recorded at zero drive before and after the file, 0 to 60 each |
+| `capture.run_name` | `playback` | The run folder's name under the local data root, a plain name |
+| `operator`, `article`, `notes`, `specification`, `metadata` | empty | Random's: for the run's record |
+| `record.streams` | true | Whether the run's record keeps its time histories |
+
+The **response aborts** are the channel table's own abort limits (`abort.accel_g`,
+`abort.velocity_ips`, `abort.displacement_mil` of each enabled input row), read on every sample:
+a breach takes the drive to zero at once. An input overload on a row with abort limits does the
+same. Playback adds no column and no setup field for them. The run's rate is the file's: the
+station is asked for it, and a station that programs another is refused `rate_mismatch` at start,
+naming both rates and the nearest rate the station offers (the one it programmed). A file is
+never resampled.
+
+A configuration whose shape is wrong is refused `bad_params` naming the field
+(`config.drive.sha256`); its content errors `config_invalid`, with the items (`reason`, `field`,
+`message`) and the check report in `detail.check` when the file was read. Each item's message
+names the channel and the numbers. Item reasons: `drive_unreadable`, `drive_format`,
+`drive_version`, `drive_unit` (a channel not in `V`), `drive_size` (`drive.bin` not
+`8 + 4 x channels x samples` bytes), `drive_magic`, `drive_hash_mismatch` (the samples are not the
+ones the sidecar states), `drive_pin_mismatch`, `drive_not_finite`, `ends_not_zero`,
+`map_length`, `map_missing_row`, `map_repeated_row`, `too_many_drives`, `rate_mismatch`,
+`peak_over_ceiling`, `ceiling_over_range`, `out_of_range`, `no_input_channel`,
+`no_drive_channel`; no warnings.
+
+### The Drive File's Check
+
+The control service checks the file on configure, on a worker thread, in one streaming pass whose
+memory does not grow with the file: the layout, the SHA-256 of `drive.bin` against its sidecar and
+the setup, every value finite, and per channel its peak, its first and last samples, and its
+velocity and displacement with the drive taken as an acceleration, integrated with the pure
+trapezoidal integrator and no high-pass (the shock compensation gate's). The ends pass when the
+first and last samples are within 0.5 % of the channel's peak, the velocity's end value within
+1 % of its peak magnitude and the displacement's end value within 1 % of its peak magnitude. An
+all-zero channel passes with a note. The tolerances are fixed. The check takes the drive as an
+acceleration; it cannot know the table's motion without a model of the shaker and its amplifier,
+so stroke is not checked. At start the file's SHA-256 is computed again (worker thread); a file
+changed since its check is refused `drive_changed` and nothing is driven.
+
+`check`, the report:
+
+```
+{"pass":true,"sha256":"c7bf...","rate_hz":2048,"samples":1024,"duration_s":0.5,
+ "level_db":-6,"ceiling_v":1,
+ "tolerances":{"ends_fraction_of_peak":0.005,"velocity_fraction_of_peak":0.01,
+               "displacement_fraction_of_peak":0.01,"integrator":"..."},
+ "channels":[{"channel":0,"name":"drive","peak_v":0.4,"start_v":0,"end_v":-0.0001,
+              "velocity_v_s":{"end":1.2e-9,"peak":0.0013},
+              "displacement_v_s2":{"end":-3.1e-9,"peak":4.1e-6},
+              "pass":true,"faults":[],"note":null,"drive_row":2,"played_peak_v":0.2005}],
+ "refusals":[],"limits":"...",
+ "previews":[{"channel":0,"drive_v":{"t_s":[...],"min":[...],"max":[...]},
+              "velocity_v_s":{...},"displacement_v_s2":{...}}]}
+```
+
+Velocity is in V s and displacement in V s², the drive's own units integrated. A fault is
+`{"reason","value","allowed","text"}`, its reason `start_not_zero`, `end_not_zero`,
+`velocity_not_zero` or `displacement_not_zero`. A refusal is `{"reason","message","detail"}`.
+`previews` holds each channel's envelopes (each bucket's minimum and maximum, at most 200
+buckets) of the drive, its velocity and its displacement. `derived`:
+`{"fs_hz","block_frames","samples","channels","duration_s","pre_roll_frames","post_roll_frames",
+"total_s","gain","stop":{"depth_db","ramp_s"},"read_ahead_s"}`.
+
+### Running a Playback Test
+
+- **`playback.start`** passes the table's arm gate, checks the table still carries the run as it
+  was checked (`table_changed` when its drive rows moved), computes the file's SHA-256 again,
+  opens the run's record (`record_unwritable` when it cannot), reads the file ahead into a
+  bounded buffer (at least 2 s, or the whole file) on the run's reader thread, opens the station
+  at the file's rate, passes the arm gate and starts the clock at zero drive. It answers once the
+  pre-roll runs (`running`, `pre_roll`). A start refused ends the run `arm_refused` with the
+  reason in its message.
+- The run plays the pre-roll at zero, the file at the level (`playing`), then the post-roll at
+  zero (`post_roll`), and ends `completed`.
+- **Streaming.** The reader thread feeds the loop through a ring the loop pops without waiting.
+  The ring running empty before the file's end is an underrun: the drive goes to zero at once
+  and the run ends `drive_underrun`. The length of a file is limited only by the disk.
+- **`playback.stop`**: the controlled stop, 40 dB down over 3 s multiplying the streamed drive,
+  then zero; the run ends `stopped` once the zeros have played. During a roll the drive is
+  already zero and the run ends at once.
+- **`playback.abort`**: the drive goes to zero at once with the emergency stop (`aborted`).
+- The run also ends with the emergency stop, the drive at zero at once, on a response abort
+  (`response_abort`, with the `trip`), a sample over the ceiling (`drive_ceiling`), an input
+  overload on a limited row (`input_overload`), the reader's failure (`reader_failed`), a loop
+  fault (`loop_faulted`) or a panic on the loop thread (`loop_panicked`).
+- Each run is one play at one level.
+
+### Playback Run State
+
+```
+{"run_id":"playback-0002","state":"running","phase":"playing","title":"Golden Playback",
+ "source":"SIM","class":"sim","fs_hz":2048,
+ "drive":{"samples":1024,"duration_s":0.5,"sha256":"c7bf...","map":[2]},
+ "level_db":-6,"ceiling_v":1,"rolls":{"pre_frames":256,"post_frames":256},
+ "progress":{"played":512,"samples":1024,"played_s":0.25,"fraction":0.5,"elapsed_s":0.375,
+             "buffered_s":0.25},
+ "inputs":[{"index":1,"role":"input","unit":"g","description":"Control"}],
+ "drives":[{"index":2,"role":"drive","unit":"V","description":"Drive"}],
+ "overloads":[{"channel":1,"overload":false}],
+ "record":{"folder":"/home/operator/Hertzforge_Data/playback","streams":"on","problem":null},
+ "end":null}
+```
+
+`state`: `unconfigured` (the object is then `{"run_id":null,"state":"unconfigured"}`),
+`configured`, `starting`, `running`, `stopping` or `finished`. `phase`: `idle`,
+`reading_ahead`, `pre_roll`, `playing`, `post_roll`, `done`, `stopping`, `stopped`, `zeroed`
+(the drive went to zero at once) or `refused` (the start was refused). `progress`: the file
+samples played, of `samples`, in seconds and as a fraction; the station time since the clock
+started (`elapsed_s`); the read-ahead held (`buffered_s`). `end`, once finished:
+`{"outcome","message","at_s","played","emergency_stop","trip"}`, `at_s` station seconds from the
+clock's start, `trip` `{"channel","axis","value","limit"}` for a response abort.
+`playback.state` is sent when anything but `progress` changes; `playback.log` with each run's
+new log entries (`{"run_id","entries"}`, each `{"seq","at_unix","kind","text"}`).
+
+### Playback Display
+
+`playback.live` goes to every connection ten times a second from start until the run has
+finished, then once more: a binary frame
+
+```
+{"run_id":"playback-0002","state":"running","phase":"playing","progress":{...},
+ "time":{"rate_hz":2048,"t0_s":0.125,
+         "channels":[{"index":1,"role":"input","unit":"g","values":{"$array":"c0"}},
+                     {"index":2,"role":"drive","unit":"V","values":{"$array":"c1"}}]}}
+```
+
+`time` holds the last 1024 display points of every input and every drive, inputs first in table
+order then drives: float32, one point every `fs / rate_hz` frames (about 2000 points a second),
+the first at `t0_s` station seconds. There are no spectra and no analysis.
+
+### Playback Records
+
+Each run writes its folder `capture.run_name` under the local data root, a name already taken
+getting the first free `<name>-<n>`. The state names it from start on (`record.folder`). What the
+folder holds is "What a Playback Run Saves" in `docs/run-folder.md`.
+
 ## Control Laws
 
 The control laws an operator can choose, for single-output and MIMO Random, for classical and
