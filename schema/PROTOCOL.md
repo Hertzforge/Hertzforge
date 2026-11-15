@@ -388,6 +388,11 @@ shows one `image` a photo, the picked ones when some are picked, stacked.
 A `shape3d` built from a geometry carries `node_ids`, the drawn nodes' ids (u32, one per node), so
 the view can caption the node under the pointer, coincident nodes listed together.
 
+A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
+`{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
+screen. The view opens looking from there, and Reset View returns there; without it the view
+opens from the front right with Z up. Every view is fitted to what the model projects.
+
 A table may carry `"edit":{"op","params","columns","choices"?}`: its cells are typed into in place. `columns`
 gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
 operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),

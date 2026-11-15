@@ -73,3 +73,17 @@ def test_the_command_writes_the_page_or_says_why_not(plate, tmp_path, capsys):
     assert main(['export-animation', str(tmp_path / 'none.hforge'), '-o', str(out),
                  '--geometry', 'Geometry']) == 1
     assert 'hertzforge export-animation:' in capsys.readouterr().out
+
+
+def test_a_geometry_with_its_own_view_opens_in_it(plate):
+    """Brandon, 2026-11-14: the fridge, built with Y up, opened lying on its side."""
+    from hertzforge.core.geometry import View
+
+    assert 'home' not in animation_view(plate, 'Geometry', shapes='Shape Set')
+    plate['Geometry'].view = View(eye=(1, 0.55, 1.2), up=(0, 1, 0))
+    try:
+        view = animation_view(plate, 'Geometry', shapes='Shape Set')
+    finally:
+        plate['Geometry'].view = None
+    assert view['home']['up'] == pytest.approx([0, 1, 0])
+    assert view['home']['eye'] == pytest.approx([1, 0.55, 1.2])

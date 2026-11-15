@@ -212,6 +212,8 @@ export interface Shape3DView {
 	motion?: Motion;
 	/** The drawn nodes' ids, for the hover captions; absent on a view that is not a geometry's. */
 	node_ids?: Uint32Array;
+	/** The way the view opens looking from: `eye` the direction from the model to the camera, `up` the way up on screen (the geometry's own view); from the front right, Z up, when absent. */
+	home?: { eye: number[]; up: number[] };
 	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
 	cursor?: 'frequency';
 	/** Static line work over the model in its own coordinates: DOF arrows. */

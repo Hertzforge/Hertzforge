@@ -138,6 +138,19 @@ def _table_on(project: Any, geometry_name: str) -> tuple[str, Any] | None:
     return None
 
 
+def _home(project: Any, views: list[dict], objects: list[str]) -> None:
+    """The stage geometry's own view (`Geometry.view`) as `home` on every `shape3d` the
+    selection shows, so a model built with Y up opens upright; none when it has no view."""
+    stages = [view for view in views if view.get('view') == 'shape3d' and 'home' not in view]
+    name = _stage_geometry(project, objects) if stages else None
+    own = getattr(project[name], 'view', None) if name is not None else None
+    if own is None:
+        return
+    home = {'eye': [float(v) for v in own.eye], 'up': [float(v) for v in own.up]}
+    for view in stages:
+        view['home'] = home
+
+
 def _stage_geometry(project: Any, objects: list[str]) -> str | None:
     """The geometry the selection's stage is drawn on: the geometry
     selected, else the first object's."""
@@ -1133,6 +1146,7 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     except ProtocolError as error:
         raise refused(str(error)) from None
     notes += _marks(project, views, objects, prefs)
+    _home(project, views, objects)
     if part and part.get('kind') and len(objects) == 1:
         from .ops_geometry import part_entities
         from .ops_solids import part_solids
