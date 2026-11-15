@@ -8,7 +8,7 @@
     "world": "mimo",
     "builtin": true,
     "name": "pseudo-inverse, closed loop",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "author": "Hertzforge",
     "summary": "Starts from the regularized pseudo-inverse drive, then each loop corrects a lower-triangular factor of the reference from the measured error (Smallwood's coupling-matrix correction), autospectra first in channel order, each factor diagonal and each drive PSD held to a per-loop limit, the sources held to the plant's rank. Every drive is positive semi-definite by construction.",
     "sha256": null,
@@ -127,6 +127,13 @@
       "label": "Clamped factor diagonals",
       "unit": "",
       "help": "Diagonal elements of the reference factor whose correction this loop was held to the per-loop limit, over all lines.",
+      "layout": "scalar"
+     },
+     {
+      "key": "held_rows",
+      "label": "Held factor rows",
+      "unit": "",
+      "help": "Rows of the reference factor held this loop against wind-up, over all lines: a source whose response is below -15 dB of what its row commands, kept from growing, or a row brought down to 10 dB over its target. Rows held loop after loop are directions the FRF estimate holds and the structure does not follow.",
       "layout": "scalar"
      }
     ],

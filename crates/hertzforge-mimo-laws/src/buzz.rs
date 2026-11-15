@@ -27,8 +27,8 @@ use crate::factor::{FactorLoop, LoopSettings};
 use crate::pinv::ALL_SHAPES;
 use crate::spec::{LawSpec, ParamDecl, ParamKindDecl, ParamVal};
 use crate::support::{
-    convergence_param, diag_clamped, diag_condition, diag_correction, diag_kept, InverseRule,
-    Weighting,
+    convergence_param, diag_clamped, diag_condition, diag_correction, diag_held, diag_kept,
+    InverseRule, Weighting,
 };
 use crate::BuiltinMimoLaw;
 use hertzforge_sdm::law::{
@@ -185,7 +185,7 @@ impl BuiltinMimoLaw for BuzzMatchedLaw {
     fn spec() -> LawSpec {
         LawSpec {
             name: "buzz-test matched",
-            version: "1.0.0",
+            version: "1.1.0",
             author: "Hertzforge",
             summary: "Keeps the specified autospectra and takes each pair's coherence and \
                       phase from the identification response, the structure's own response to \
@@ -213,6 +213,7 @@ impl BuiltinMimoLaw for BuzzMatchedLaw {
                 diag_kept(),
                 diag_correction(),
                 diag_clamped(),
+                diag_held(),
             ],
             shapes: ALL_SHAPES.to_vec(),
             needs: NEEDS.to_vec(),

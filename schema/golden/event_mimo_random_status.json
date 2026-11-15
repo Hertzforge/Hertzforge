@@ -96,7 +96,7 @@
   "law": {
    "id": "pinv_closed",
    "name": "pseudo-inverse, closed loop",
-   "version": "1.0.0",
+   "version": "1.1.0",
    "sha256": null
   },
   "faults": [],
@@ -107,7 +107,7 @@
    "law": {
     "id": "pinv_closed",
     "name": "pseudo-inverse, closed loop",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "sha256": null
    },
    "drive_rms_v": [

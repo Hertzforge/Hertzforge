@@ -120,6 +120,11 @@
 //! at 1.46 dB; the bound does most of the work there, and the hold alone at
 //! -10 dB gave 1.49 dB at 3.4e5. A higher hold threshold was not taken: the
 //! loop must still climb to a plant 10 dB less sensitive than its estimate.
+//!
+//! Each loop counts the rows the two rules acted on, over all lines (a row the
+//! hold kept from growing, or the bound scaled down, counted once): the
+//! `held_rows` diagnostic. A run that stops converging with rows held has an
+//! FRF estimate the structure does not follow in those directions.
 
 use crate::support::{
     band_hermitian, gram_packed, inverse_diagnostics, largest_change_db, matmul_adj_into,
@@ -167,6 +172,9 @@ pub(crate) struct Step {
     pub kept: Vec<f64>,
     pub correction_db: f64,
     pub clamped: usize,
+    /// Rows of the factor the answer hold or the command bound acted on this
+    /// loop, over all lines, each counted once.
+    pub held: usize,
 }
 
 /// The coordinates of one line: `q` sources, `A` (drives by `q`), `T` (`q` by
@@ -451,6 +459,7 @@ impl FactorLoop {
             kept,
             correction_db: 0.0,
             clamped: 0,
+            held: 0,
         })
     }
 
@@ -479,6 +488,8 @@ impl FactorLoop {
         // lines are corrected over threads; each line's arithmetic is unchanged.
         let counts = over_line_chunks(&mut self.z, nc * nc, nb, |first, chunk| {
             let mut clamped = 0usize;
+            let mut held = 0usize;
+            let mut row_held = vec![false; nc];
             let mut measured = vec![ZERO; nc * nc];
             let mut err = vec![ZERO; nc * nc];
             let mut delta = vec![ZERO; nc * nc];
@@ -572,6 +583,7 @@ impl FactorLoop {
                 // first form raises such a row every loop by `E_kj / Z_jj`, with
                 // nothing to stop it: the diagonal clamp bounds only diagonals, and
                 // the second form acts only on a channel above its reference.
+                row_held[..q].fill(false);
                 for k in 0..q {
                     let commanded: f64 = (0..=k).map(|t| zl[k * q + t].norm_sqr()).sum();
                     if commanded <= 0.0 || measured[k * q + k].re >= ANSWER_MIN * commanded {
@@ -581,6 +593,7 @@ impl FactorLoop {
                         let z0 = zl[k * q + t];
                         if (z0 + delta[k * q + t] * e).norm() > z0.norm() {
                             delta[k * q + t] = ZERO;
+                            row_held[k] = true;
                         }
                     }
                 }
@@ -602,8 +615,10 @@ impl FactorLoop {
                         for t in 0..=k {
                             znew[k * q + t] *= c;
                         }
+                        row_held[k] = true;
                     }
                 }
+                held += row_held[..q].iter().filter(|h| **h).count();
                 for j in 0..q {
                     if !pivot[j] {
                         continue;
@@ -653,9 +668,11 @@ impl FactorLoop {
                     zl.copy_from_slice(&ztry[..q * q]);
                 }
             }
-            clamped
+            (clamped, held)
         });
-        let clamped: usize = counts.into_iter().sum();
+        let (clamped, held) = counts
+            .into_iter()
+            .fold((0, 0), |(c, h), (dc, dh)| (c + dc, h + dh));
         let (drive, condition, kept) = self.drive(frf)?;
         let correction_db = largest_change_db(&last, &drive, self.band);
         self.last = Some(drive.clone());
@@ -665,14 +682,16 @@ impl FactorLoop {
             kept,
             correction_db,
             clamped,
+            held,
         })
     }
 }
 
 impl Step {
     /// The loop's outputs: the drive and the diagnostics `condition`, `kept`,
-    /// `correction_db` and, when `clamped` is declared, `clamped`.
-    pub fn outputs(self, with_clamped: bool) -> hertzforge_sdm::law::MimoLoopOutputs {
+    /// `correction_db` and, for a closed loop (`closed`), `clamped` and
+    /// `held_rows`.
+    pub fn outputs(self, closed: bool) -> hertzforge_sdm::law::MimoLoopOutputs {
         use hertzforge_sdm::law::{DiagnosticData, DiagnosticValue};
         let value = |key: &str, data| DiagnosticValue {
             key: key.into(),
@@ -683,11 +702,12 @@ impl Step {
             value("kept", DiagnosticData::PerLine(self.kept)),
             value("correction_db", DiagnosticData::Scalar(self.correction_db)),
         ];
-        if with_clamped {
+        if closed {
             diagnostics.push(value(
                 "clamped",
                 DiagnosticData::Scalar(self.clamped as f64),
             ));
+            diagnostics.push(value("held_rows", DiagnosticData::Scalar(self.held as f64)));
         }
         hertzforge_sdm::law::MimoLoopOutputs {
             drive: self.drive,

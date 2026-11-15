@@ -2083,7 +2083,7 @@ every connection as the `mimo_random.validate` text event (`{"run_id","validatio
  "reference":{"source":"inline","lines":8,"n":2,"band_hz":[100,143.75],"min_eigenvalue_ratio":0,
               "rank_min":2,"rank_max":2,"repaired_lines":0},
  "feasibility":[{"channel":3,"ceiling_vrms":2,"verdict":"not_evaluated","predicted_vrms":null,"message":"..."}],
- "law":{"id":"pinv_closed","name":"pseudo-inverse, closed loop","version":"1.0.0","sha256":null,"admitted":true}}
+ "law":{"id":"pinv_closed","name":"pseudo-inverse, closed loop","version":"1.1.0","sha256":null,"admitted":true}}
 ```
 
 - `ok` is true exactly when `errors` is empty. Items are the table's `{"reason","message"}` with
@@ -2122,7 +2122,7 @@ alarm, faults or prediction.
  "remaining_at_level_s":5.5,"loop":14,"alarm":false,"control_error_db":[0.42,-0.31],
  "gates":{"coherence_min":0.962,"coherence_floor":0.5,"condition_max":12.5,"condition_limit":1000,"passed":true},
  "caps":[1,0.875],"drive_rms_v":[0.412,0.388],
- "law":{"id":"pinv_closed","name":"pseudo-inverse, closed loop","version":"1.0.0","sha256":null},
+ "law":{"id":"pinv_closed","name":"pseudo-inverse, closed loop","version":"1.1.0","sha256":null},
  "faults":[],"override":null,"prediction":{...},"end":null,
  "record":{"folder":"/home/operator/Hertzforge_Data/20261113-140000_mimo_random_m-0003",
            "streams":"on","problem":null}}

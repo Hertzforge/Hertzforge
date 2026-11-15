@@ -21,8 +21,8 @@ use crate::factor::{FactorLoop, LoopSettings};
 use crate::pinv::ALL_SHAPES;
 use crate::spec::{LawSpec, ParamDecl, ParamKindDecl, ParamVal};
 use crate::support::{
-    convergence_param, diag_clamped, diag_condition, diag_correction, diag_kept, InverseRule,
-    ShapeSelection,
+    convergence_param, diag_clamped, diag_condition, diag_correction, diag_held, diag_kept,
+    InverseRule, ShapeSelection,
 };
 use crate::BuiltinMimoLaw;
 use hertzforge_sdm::law::{
@@ -143,7 +143,7 @@ impl BuiltinMimoLaw for ShapeConstrainedLaw {
     fn spec() -> LawSpec {
         LawSpec {
             name: "shape-constrained (SVD)",
-            version: "1.0.0",
+            version: "1.1.0",
             author: "Hertzforge",
             summary: "Holds the drive on each line to the m directions the plant responds to \
                       most (its leading right singular vectors), so the drive stays where the \
@@ -207,6 +207,7 @@ impl BuiltinMimoLaw for ShapeConstrainedLaw {
                 diag_kept(),
                 diag_correction(),
                 diag_clamped(),
+                diag_held(),
             ],
             shapes: ALL_SHAPES.to_vec(),
             needs: Vec::new(),
