@@ -201,29 +201,36 @@ fn print_convergence_trajectory() {
     }
 }
 
-/// The mean, over the in-band lines and controls, of the target's
-/// autospectrum over the specified one, each counted at most at 1.
-fn mean_kept(run: &Run, nc: usize) -> f64 {
+/// For each control, the mean over the in-band lines of the target's
+/// autospectrum over the specified one, each line counted at most at 1.
+fn kept_by_control(run: &Run, nc: usize) -> Vec<f64> {
     let ratio = per_control_line(run, 0, "target_ratio");
-    let (mut sum, mut n) = (0.0, 0.0);
-    for line in BAND.0..BAND.1 {
-        for c in 0..nc {
-            sum += ratio[line * nc + c].min(1.0);
-            n += 1.0;
-        }
-    }
-    sum / n
+    (0..nc)
+        .map(|c| {
+            let sum: f64 = (BAND.0..BAND.1)
+                .map(|line| ratio[line * nc + c].min(1.0))
+                .sum();
+            sum / (BAND.1 - BAND.0) as f64
+        })
+        .collect()
 }
 
-#[test]
-fn with_no_alarm_lines_the_automatic_trade_off_keeps_the_autospectra() {
-    // 24 controls on 6 drives with singular values spread over 300 to 1, a
-    // reference the plant cannot reach, and no alarm lines: the reduced form of
-    // a 48 x 12 lightly damped plate, where the knee alone kept 15 % of the
-    // specification. With the default largest shortfall of 3 dB the target
-    // keeps at least half of each autospectrum on average.
+fn least(v: &[f64]) -> f64 {
+    v.iter().copied().fold(f64::INFINITY, f64::min)
+}
+
+fn mean(v: &[f64]) -> f64 {
+    v.iter().sum::<f64>() / v.len() as f64
+}
+
+/// 24 controls on 6 drives with singular values spread over 300 to 1, a
+/// reference the structure cannot reach, and no alarm lines: the reduced form
+/// of a 48 x 12 lightly damped plate, where the knee alone kept 15 % of the
+/// specification.
+fn unreachable_24_by_6() -> (Synthetic, usize) {
     let (nc, nd) = (24, 6);
-    let plant = plant_with_singular_values(41, nc, nd, LINES, &[1.0, 0.3, 0.1, 0.03, 0.01, 3e-3]);
+    let structure =
+        plant_with_singular_values(41, nc, nd, LINES, &[1.0, 0.3, 0.1, 0.03, 0.01, 3e-3]);
     let mut rng = Rng::new(41);
     let mut reference = hertzforge_sdm::HermitianStack::zeros(LINES, nc);
     for line in BAND.0..BAND.1 {
@@ -234,21 +241,118 @@ fn with_no_alarm_lines_the_automatic_trade_off_keeps_the_autospectra() {
             }
         }
     }
-    let s = run_on(41, plant.clone(), plant, reference, BAND, 0.01);
+    (
+        run_on(41, structure.clone(), structure, reference, BAND, 0.01),
+        nc,
+    )
+}
+
+/// Six controls on three drives with one of them (control 0) harder to reach
+/// than the rest by `weak` (its row of the FRF scaled): a gauge near a node.
+/// Every control is asked for the same autospectrum, uncorrelated, and there
+/// are no alarm lines.
+fn one_control_hard_to_reach(weak: f64) -> (Synthetic, usize) {
+    let (nc, nd) = (6, 3);
+    let mut structure = plant_with_singular_values(43, nc, nd, LINES, &[1.0, 0.7, 0.5]);
+    for line in 0..LINES {
+        for d in 0..nd {
+            let v = structure.get(line, 0, d);
+            structure.set(line, 0, d, v * weak);
+        }
+    }
+    let mut reference = hertzforge_sdm::HermitianStack::zeros(LINES, nc);
+    for line in BAND.0..BAND.1 {
+        for c in 0..nc {
+            reference.set(line, c, c, hertzforge_sdm::C64::new(1e-2, 0.0));
+        }
+    }
+    (
+        run_on(43, structure.clone(), structure, reference, BAND, 0.01),
+        nc,
+    )
+}
+
+/// The tightest automatic rule there is: with no alarm lines, every control
+/// keeps at least half of its autospectrum on average over the band. Measured
+/// here: the least control keeps 0.59 and the mean is 0.65, at a trade-off of
+/// 1, where the knee alone went to 10 and kept 0.35 of the least control.
+#[test]
+fn with_no_alarm_lines_the_automatic_trade_off_keeps_every_controls_autospectrum() {
+    let (s, nc) = unreachable_24_by_6();
     let mut law = MinimumDriveLaw::with_params(&s.setup, &[]).expect("law");
     let run = closed_loop(&mut law, &s, 0);
-    let kept = mean_kept(&run, nc);
+    let kept = kept_by_control(&run, nc);
     let tradeoff = run.scalar(0, "tradeoff");
-    println!("automatic trade-off {tradeoff:e}: the target keeps {kept:.3} of the autospectra");
-    assert!(kept >= 0.5, "trade-off {tradeoff:e} keeps {kept:.3}");
-    // The bound is the parameter's: at 20 dB it lets the knee give up more.
+    println!(
+        "automatic trade-off {tradeoff:e}: the least control keeps {:.3}, the mean {:.3}",
+        least(&kept),
+        mean(&kept)
+    );
+    assert!(
+        least(&kept) >= 0.5,
+        "trade-off {tradeoff:e}: a control keeps {:.3}",
+        least(&kept)
+    );
+    // The floor is the parameter's: at 20 dB it lets the knee give up more.
     let mut loose =
         MinimumDriveLaw::with_params(&s.setup, &[("shortfall_db", ParamVal::Number(20.0))])
             .expect("law");
-    let loose = closed_loop(&mut loose, &s, 0);
-    println!(
-        "at 20 dB: trade-off {:e}, keeps {:.3}",
-        loose.scalar(0, "tradeoff"),
-        mean_kept(&loose, nc)
+    let loose = kept_by_control(&closed_loop(&mut loose, &s, 0), nc);
+    assert!(
+        least(&loose) < 0.5,
+        "at 20 dB a control still keeps {:.3}",
+        least(&loose)
     );
+}
+
+/// Mutation: in `pareto::choose_tradeoff`, judge the mean over the controls in
+/// place of each control. The knee then goes to a trade-off of 1, where the
+/// five easy controls keep the mean at 0.84 and the hard one keeps 0.35.
+#[test]
+fn no_control_is_given_up_for_the_others() {
+    // Control 0 is twice as hard to reach as the other five.
+    let (s, nc) = one_control_hard_to_reach(0.5);
+    let mut law = MinimumDriveLaw::with_params(&s.setup, &[]).expect("law");
+    let kept = kept_by_control(&closed_loop(&mut law, &s, 0), nc);
+    assert!(
+        least(&kept) >= 0.5,
+        "the hard control keeps {:.3} of its autospectrum (the mean is {:.3})",
+        kept[0],
+        mean(&kept)
+    );
+    // What the floor is for: with it out of the way (20 dB) the knee gives the
+    // hard control up while the mean over the controls still looks well.
+    let mut loose =
+        MinimumDriveLaw::with_params(&s.setup, &[("shortfall_db", ParamVal::Number(20.0))])
+            .expect("law");
+    let loose = kept_by_control(&closed_loop(&mut loose, &s, 0), nc);
+    assert!(
+        loose[0] < 0.5 && mean(&loose) >= 0.5,
+        "the hard control keeps {:.3}, the mean {:.3}",
+        loose[0],
+        mean(&loose)
+    );
+}
+
+/// A control the structure cannot bring within the floor at any trade-off
+/// (four times as hard to reach: it keeps 0.20 at best) does not stop the
+/// law: with no trade-off left it takes the smallest, which reproduces the
+/// autospectra wherever the structure can, and `target_ratio` says what that
+/// control keeps.
+///
+/// Mutation: with no trade-off left, take the knee anyway. The hard control
+/// then keeps 0.07.
+#[test]
+fn where_no_trade_off_meets_the_floor_the_law_takes_the_exact_control_end() {
+    let (s, nc) = one_control_hard_to_reach(0.25);
+    let mut law = MinimumDriveLaw::with_params(&s.setup, &[]).expect("law");
+    let run = closed_loop(&mut law, &s, 0);
+    let kept = kept_by_control(&run, nc);
+    assert_eq!(run.scalar(0, "tradeoff"), 1e-6, "the smallest trade-off");
+    assert!(
+        kept[0] > 0.15 && kept[0] < 0.5,
+        "the hard control keeps {:.3}",
+        kept[0]
+    );
+    assert!(kept[1..].iter().all(|k| *k > 0.9), "{kept:?}");
 }

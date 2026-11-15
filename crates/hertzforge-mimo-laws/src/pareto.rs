@@ -513,9 +513,10 @@ pub(crate) struct Target {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Tradeoff {
     /// At the knee of drive power against residual over the grid, on a
-    /// subsample of the band's lines, among the trade-offs whose target keeps
-    /// on average at least `retained` of each specified autospectrum (each
-    /// control on each sampled line counted at most at its specification).
+    /// subsample of the band's lines, among the trade-offs whose target keeps,
+    /// for every control, at least `retained` of its specified autospectrum on
+    /// average over the sampled lines (each line counted at most at its
+    /// specification).
     Auto { retained: f64 },
     /// This relative value.
     Fixed(f64),
@@ -646,18 +647,26 @@ impl Lines {
 /// and Schultz, section 3.1, with the product in place of the sum of
 /// logarithms), the points whose target leaves the specification's alarm
 /// lines on any sampled control and line (a test designed to alarm is not a
-/// choice), and the points whose target keeps on average less than `retained`
-/// of the specified autospectra, each control on each sampled line counted as
-/// its target over its specification, at most 1. With no point left, the
-/// smallest trade-off, which reproduces the autospectra wherever the plant can.
+/// choice), and the points whose target leaves any control with less than
+/// `retained` of its specified autospectrum on average over the sampled lines,
+/// each line counted as its target over its specification, at most 1. With no
+/// point left, the smallest trade-off, which reproduces the autospectra
+/// wherever the structure can.
 ///
 /// The last rule bounds what the knee gives up when nothing else does. With no
-/// alarm lines, on a plant that cannot reproduce every autospectrum (48
+/// alarm lines, on a structure that cannot reproduce every autospectrum (48
 /// controls on 12 drives, a lightly damped plate), the knee of the product sat
 /// at a trade-off of 100, whose target kept 15 % of the specification: the run
 /// applied 35 lbf^2 and missed the specification by 21 dB in its bands. The
 /// knee's own rule (drop the top tenth of residual) left that point in, since
 /// the residual flattens as the target goes to zero.
+///
+/// The rule is a floor for each control, not an average over them. An average
+/// over the controls is met with half of them at the specification and the
+/// other half given up, which is a test that did not test those controls. It
+/// is each control's average over the band, not a floor on each line: one line
+/// the structure cannot reach (an antiresonance at a control) would otherwise
+/// rule out every trade-off, and a line is what the alarm lines are for.
 fn choose_tradeoff(lines: &Lines, retained: f64) -> Result<f64, LawError> {
     let nb = lines.scale.len();
     let nc = lines.nc;
@@ -666,8 +675,10 @@ fn choose_tradeoff(lines: &Lines, retained: f64) -> Result<f64, LawError> {
     let mut inp = vec![0.0; GRID.len()];
     let mut res = vec![0.0; GRID.len()];
     let mut inside = vec![true; GRID.len()];
-    let mut kept = vec![0.0; GRID.len()];
-    let mut counted = vec![0.0; GRID.len()];
+    // Per grid point and control: the sum over the sampled lines of the target
+    // over the specification (at most 1 a line), and the lines counted.
+    let mut kept = vec![0.0; GRID.len() * nc];
+    let mut counted = vec![0.0; GRID.len() * nc];
     for &i in &sample {
         let mut warm: Option<Vec<f64>> = None;
         for (g, &rel) in GRID.iter().enumerate() {
@@ -677,8 +688,8 @@ fn choose_tradeoff(lines: &Lines, retained: f64) -> Result<f64, LawError> {
                 for k in 0..nc {
                     let y = lines.y[i * nc + k];
                     if y > 0.0 {
-                        kept[g] += (sol.predicted[k] / y).min(1.0);
-                        counted[g] += 1.0;
+                        kept[g * nc + k] += (sol.predicted[k] / y).min(1.0);
+                        counted[g * nc + k] += 1.0;
                     }
                     let (lo, hi) = lines.alarm[i * nc + k];
                     let p = sol.predicted[k];
@@ -697,7 +708,8 @@ fn choose_tradeoff(lines: &Lines, retained: f64) -> Result<f64, LawError> {
     let floor = 1e-12 * (inp_max + res_max);
     let mut best: Option<(f64, f64)> = None;
     for g in 0..GRID.len() {
-        let gives_up = kept[g] < retained * counted[g];
+        // A control whose band average falls under the floor is given up.
+        let gives_up = (0..nc).any(|k| kept[g * nc + k] < retained * counted[g * nc + k]);
         if !inside[g] || gives_up || inp[g] > 0.9 * inp_max || res[g] > 0.9 * res_max {
             continue;
         }

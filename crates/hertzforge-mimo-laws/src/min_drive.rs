@@ -21,9 +21,10 @@
 //! target's autospectra sit below the specification where the plant pays most
 //! for them, by a ratio the `target_ratio` diagnostic reports per control per
 //! line, and the core judges the run against the specification's alarm and
-//! abort lines as it does for every law. The automatic trade-off gives up no
-//! more than `shortfall_db` on average (3 dB by default) and stays inside the
-//! alarm lines, so with none it is still "the least drive that keeps the
+//! abort lines as it does for every law. The automatic trade-off lets no
+//! control's autospectrum sit more than `shortfall_db` below its specification
+//! on average over the band (3 dB by default) and stays inside the alarm
+//! lines, so with none it is still "the least drive that keeps the
 //! autospectra".
 
 use crate::factor::{FactorLoop, LoopSettings};
@@ -47,8 +48,8 @@ pub struct MinimumDriveConfig {
     pub tradeoff: String,
     /// The relative trade-off when `fixed`.
     pub tradeoff_value: f64,
-    /// With `auto`: the most the target's autospectra may sit below the
-    /// specification on average, dB.
+    /// With `auto`: the most any one control's target autospectrum may sit
+    /// below its specification on average over the band, dB.
     pub shortfall_db: f64,
     /// `relative` or `absolute`.
     pub residual: String,
@@ -223,8 +224,8 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
                       and Schultz; Smallwood's minimum input trace at the exact-control end), \
                       and the plant's predicted response to it as the target. The trade-off is \
                       picked at the knee of drive against residual among the trade-offs whose \
-                      target stays inside the alarm lines and gives up no more than the \
-                      shortfall on average, or set. Then the default law's \
+                      target stays inside the alarm lines and leaves no control more than \
+                      the largest shortfall under its specification, or set. Then the default law's \
                       closed loop on that target.",
             params: vec![
                 ParamDecl {
@@ -258,11 +259,13 @@ impl BuiltinMimoLaw for MinimumDriveLaw {
                 ParamDecl {
                     key: "shortfall_db",
                     label: "Largest shortfall",
-                    help: "With an automatic trade-off: the most the target's autospectra may \
-                           sit below the specification, on average over the band's controls \
-                           and lines, each counted at most at its specification. It bounds \
-                           what the trade-off gives up where the alarm lines do not; 0 \
-                           accepts only a target that reproduces every autospectrum.",
+                    help: "With an automatic trade-off: the most any one control's target \
+                           autospectrum may sit below its specification, on average over the \
+                           band's lines, each line counted at most at its specification. It \
+                           is a floor for every control, so no control is given up for the \
+                           others, and it bounds what the trade-off gives up where the alarm \
+                           lines do not; 0 accepts only a target that reproduces every \
+                           autospectrum.",
                     kind: ParamKindDecl::Number {
                         unit: "dB",
                         min: 0.0,
