@@ -1,9 +1,11 @@
 """The ``hertzforge`` command: ``hertzforge --version`` prints the version,
 ``hertzforge serve`` starts the analysis service, ``hertzforge check-solver``
 says which sparse solver this installation factors with, ``hertzforge
-convert-run FOLDER [-o OUTPUT]`` converts a run folder into a project file, and
+convert-run FOLDER [-o OUTPUT]`` converts a run folder into a project file,
 ``hertzforge export-animation PROJECT -o PAGE --geometry NAME ...`` writes a geometry's
-animation as one page that plays offline (`hertzforge.animation`)."""
+animation as one page that plays offline (`hertzforge.animation`), and ``hertzforge record
+PROJECT -o VIDEO --geometry NAME ...`` records it to an MP4 with no window open
+(`hertzforge.record`)."""
 
 import argparse
 
@@ -67,6 +69,40 @@ def main(argv: list[str] | None = None) -> int:
     export.add_argument("--theme", choices=("dark", "light"),
                         help="the app's dark or light look (default: the reader's own)")
     export.add_argument("--title", help="the page's title (default: the view's)")
+    record = commands.add_parser(
+        "record",
+        help="record a geometry's animation, as the app's 3-D view plays it, to an MP4 "
+             "with no window open (needs Chrome and ffmpeg)")
+    record.add_argument("project", help="the project file (.hforge)")
+    record.add_argument("-o", "--output", required=True, help="the video to write (.mp4)")
+    record.add_argument("--geometry", required=True, help="the geometry drawn")
+    record.add_argument("--data", help="data played on it: measured motion, or modal "
+                                       "coordinates through --shapes")
+    record.add_argument("--shapes", help="the shape set: its modes alone, or the one --data's "
+                                         "modal coordinates are of")
+    record.add_argument("--mode", type=int, default=1,
+                        help="the mode played, from 1, when there is no --data (default 1)")
+    record.add_argument("--size", default="1920x1080", help="WIDTHxHEIGHT in pixels "
+                                                            "(default 1920x1080)")
+    record.add_argument("--fps", type=float, default=30.0, help="frames per second (default 30)")
+    record.add_argument("--speed", type=float,
+                        help="the fraction of real time --data plays at (default 1: real time)")
+    record.add_argument("--seconds", type=float,
+                        help="the video's length in seconds, in place of --speed or --cycles")
+    record.add_argument("--cycles", type=float, default=3.0,
+                        help="cycles a mode swings (default 3)")
+    record.add_argument("--scale", type=float, default=1.0,
+                        help="times the app's own amplitude (default 1)")
+    record.add_argument("--opacity", type=float, default=1.0,
+                        help="how solid the surface is drawn, above 0 to 1 (default 1, solid)")
+    record.add_argument("--view", default="iso",
+                        help="iso (the geometry's own view), front, back, left, right, top or "
+                             "bottom (default iso)")
+    record.add_argument("--eye", help="X,Y,Z: the direction from the model to the camera, in "
+                                      "place of --view")
+    record.add_argument("--up", help="X,Y,Z: which way is up with --eye (default 0,0,1)")
+    record.add_argument("--theme", default="dark", choices=("dark", "light"),
+                        help="the app's dark or light look (default dark)")
     args, rest = parser.parse_known_args(argv)
     if args.command == "convert-run":
         if rest:
@@ -88,6 +124,10 @@ def main(argv: list[str] | None = None) -> int:
         if rest:
             parser.error(f"unrecognized arguments: {' '.join(rest)}")
         return _export_animation(args)
+    if args.command == "record":
+        if rest:
+            parser.error(f"unrecognized arguments: {' '.join(rest)}")
+        return _record(args)
     if args.command == "serve":
         from hertzforge.service.__main__ import main as serve
 
@@ -129,6 +169,48 @@ def _export_animation(args: argparse.Namespace) -> int:
         print(f"hertzforge export-animation: {error}")
         return 1
     print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)")
+    return 0
+
+
+def _record(args: argparse.Namespace) -> int:
+    """`hertzforge record`: the project opened, the animation drawn frame by frame in headless
+    Chrome and written by ffmpeg."""
+    import sys
+
+    from hertzforge.project import Project
+    from hertzforge.record import RecordError, Recording, record
+
+    try:
+        width, height = (int(part) for part in args.size.lower().split("x"))
+    except ValueError:
+        print(f"hertzforge record: the size is WIDTHxHEIGHT, as 1920x1080, not {args.size!r}")
+        return 1
+    try:
+        eye, up = _xyz(args.eye), _xyz(args.up)
+    except ValueError as error:
+        print(f"hertzforge record: {error}")
+        return 1
+    recording = Recording(
+        geometry=args.geometry, data=args.data, shapes=args.shapes, mode=args.mode,
+        width=width, height=height, fps=args.fps, speed=args.speed, seconds=args.seconds,
+        cycles=args.cycles, scale=args.scale, opacity=args.opacity, view=args.view,
+        eye=eye, up=up, theme=args.theme)
+    try:
+        project = Project.open(args.project)
+    except (OSError, ValueError) as error:
+        print(f"hertzforge record: {error}")
+        return 1
+
+    def said(done: int, every: int) -> None:
+        if done == every or done % 30 == 0:
+            print(f"\rframe {done} of {every}", end="", file=sys.stderr, flush=True)
+
+    try:
+        out = record(project, recording, args.output, progress=said)
+    except RecordError as error:
+        print(f"\nhertzforge record: {error}")
+        return 1
+    print(f"\nwrote {out}")
     return 0
 
 

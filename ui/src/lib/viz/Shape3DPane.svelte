@@ -1074,19 +1074,40 @@
 		const dt = Math.min(0.1, (now - lastTime) / 1000);
 		lastTime = now;
 		const moved = controls.update();
+		if (motion) {
+			if (playing && samples) position = (position + advance(samples, dt, SPEEDS[speedIndex])) % samples;
+		} else if (playing) {
+			phase = (phase + dt / CYCLE_S) % 1;
+			dirty = true;
+		}
+		deflect();
+		if (!dirty && !moved) {
+			fpsWindowStart = now;
+			frames = 0;
+			return;
+		}
+		dirty = false;
+		renderer.render(scene, camera);
+		updateTriad();
+		updateAxes();
+		frames++;
+		if (now - fpsWindowStart >= 500) {
+			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
+			frames = 0;
+			fpsWindowStart = now;
+		}
+	}
+
+	/** The deflection and its colors at the playback position or phase now, into the uniforms. */
+	function deflect() {
 		let re: number;
 		let im: number;
 		if (motion) {
-			if (playing && samples) position = (position + advance(samples, dt, SPEEDS[speedIndex])) % samples;
 			const k = Math.floor(position);
 			if (k !== shownSample) showSample(k);
 			re = peak / maxMag;
 			im = 0;
 		} else {
-			if (playing) {
-				phase = (phase + dt / CYCLE_S) % 1;
-				dirty = true;
-			}
 			// Re(shape exp(i (theta - pi/2))): a real shape starts at rest and swings as sin(theta)
 			const scale = peak / maxMag;
 			const theta = 2 * Math.PI * phase;
@@ -1105,21 +1126,48 @@
 			uniforms.uPeak.value = peak || 1;
 			dirty = true;
 		}
-		if (!dirty && !moved) {
-			fpsWindowStart = now;
-			frames = 0;
-			return;
-		}
-		dirty = false;
+	}
+
+	/**
+	 * A recording made frame by frame with no window (`hertzforge record`): the frames `width` by
+	 * `height` pixels, the amplitude `scale` times the pane's own, the camera looking along `eye`
+	 * at the model's centre with `up` up (the pane's own view when absent), the mode `modeAt` for a
+	 * shape set, playback paused, and the plot's own background painted in as Record paints it.
+	 */
+	export function recordSetup(o: { width: number; height: number; scale?: number; modeAt?: number }) {
+		if (!renderer) throw new Error('the 3-D view is not drawn yet');
+		playing = false;
+		resizeObs?.disconnect();
+		renderer.setPixelRatio(1);
+		renderer.setSize(o.width, o.height, false);
+		camera.aspect = o.width / o.height;
+		camera.updateProjectionMatrix();
+		if (o.scale !== undefined) amplitude = o.scale;
+		if (o.modeAt !== undefined) mode = Math.min(Math.max(0, o.modeAt), view.modes.length - 1);
+		// the view's own opening camera (`home`), fitted to the video's frame
+		resetView();
+		renderer.setClearColor(plotBackground(renderer.domElement), 1);
+		dirty = true;
+	}
+
+	/** What a recording steps through: the samples of measured motion, or a mode's cycle. */
+	export function recordInfo(): { motion: boolean; samples: number; start: number; step: number; unit: string } {
+		return motion
+			? { motion: true, samples, start: motion.start, step: motion.step, unit: motion.unit }
+			: { motion: false, samples: 0, start: 0, step: 0, unit: '' };
+	}
+
+	/**
+	 * One frame of a recording as a PNG data URL: measured motion at sample `at` (taken down to a
+	 * whole sample, as playback shows it), or a mode at `at` of its cycle.
+	 */
+	export function recordFrame(at: number): string {
+		if (!renderer) throw new Error('the 3-D view is not drawn yet');
+		if (motion) position = Math.min(Math.max(0, at), Math.max(0, samples - 1));
+		else phase = ((at % 1) + 1) % 1;
+		deflect();
 		renderer.render(scene, camera);
-		updateTriad();
-		updateAxes();
-		frames++;
-		if (now - fpsWindowStart >= 500) {
-			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
-			frames = 0;
-			fpsWindowStart = now;
-		}
+		return renderer.domElement.toDataURL('image/png');
 	}
 
 	onMount(init);
