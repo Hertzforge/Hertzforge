@@ -325,3 +325,81 @@ fn the_drive_ceiling_holds_on_every_sample() {
     );
     assert_eq!(s.after_estop_peak, 0.0);
 }
+
+/// A station whose read panics once the file is playing.
+struct Panics {
+    inner: Box<dyn hertzforge_hal::Backend>,
+    reads: u64,
+    after: u64,
+    estops: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl hertzforge_hal::Backend for Panics {
+    fn caps(&self) -> hertzforge_hal::Caps {
+        self.inner.caps()
+    }
+    fn open(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.open()
+    }
+    fn close(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.close()
+    }
+    fn configure(
+        &mut self,
+        t: &hertzforge_channel_table::ChannelTable,
+        a: &hertzforge_hal::AcquisitionConfig,
+    ) -> Result<hertzforge_hal::ConfiguredActual, hertzforge_hal::HalError> {
+        self.inner.configure(t, a)
+    }
+    fn arm(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.arm()
+    }
+    fn start(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.start()
+    }
+    fn stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.inner.stop()
+    }
+    fn read_input(
+        &mut self,
+        out: &mut [f32],
+    ) -> Result<hertzforge_hal::InputRead, hertzforge_hal::HalError> {
+        self.reads += 1;
+        if self.reads == self.after {
+            panic!("a read that panics");
+        }
+        self.inner.read_input(out)
+    }
+    fn write_drive(&mut self, d: &[f32]) -> Result<usize, hertzforge_hal::HalError> {
+        self.inner.write_drive(d)
+    }
+    fn poll_status(&mut self) -> hertzforge_hal::BackendStatus {
+        self.inner.poll_status()
+    }
+    fn emergency_stop(&mut self) -> Result<(), hertzforge_hal::HalError> {
+        self.estops
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.emergency_stop()
+    }
+}
+
+#[test]
+fn a_panic_on_the_loop_thread_ends_in_the_emergency_stop() {
+    let fs = 4096.0;
+    let dir = temp("panic");
+    let folder = write(&dir, fs, &[burst(fs, 2.0, 100.0, 0.5)]);
+    let t = table(1, 1, None);
+    let drive = checked(&folder, &t, setup(vec![2], 0.0, 1.0));
+    let estops = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let backend = Box::new(Panics {
+        inner: wire(fs, 1, 1),
+        reads: 0,
+        after: 40,
+        estops: estops.clone(),
+    });
+    let h = PlaybackHost::start(drive, t, backend, SIM, unpaced()).unwrap();
+    let end = wait_end(&h, Duration::from_secs(30));
+    assert_eq!(end.outcome, "loop_panicked", "{}", end.message);
+    assert!(end.emergency_stop);
+    assert_eq!(estops.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

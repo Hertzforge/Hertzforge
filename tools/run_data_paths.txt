@@ -27,6 +27,7 @@ crates/hertzforge-mimo-shock        multiple-drive shock: its setup, pulses and 
 crates/hertzforge-srs               SRS shock: its setup, pulses and results
 crates/hertzforge-twr               waveform replication: its reference, plays and results
 crates/hertzforge-explorer-host     Explorer: its setup, survey and records
+crates/hertzforge-playback          Playback: the drive file, its check report and the run outcome
 crates/hertzforge-recorder          the Recorder: what a recording holds on disk
 
 # What a run is recorded into, and what a setup is built from
@@ -38,6 +39,7 @@ crates/hertzforge-protocol          the control protocol's types: what a setup a
 
 # The control service: how each module's setup is accepted and its run reported
 crates/sds-control/src/explorer     Explorer's setup, run and records on the wire
+crates/sds-control/src/playback     Playback's setup, check, run and records on the wire
 crates/sds-control/src/mimo         multiple-output Random's setup, reference and run on the wire
 crates/sds-control/src/mimo_shock   multiple-drive shock's setup and run on the wire
 crates/sds-control/src/mixed        Mixed Mode's setup and run on the wire
@@ -54,6 +56,7 @@ crates/sds-control/src/server_explorer.rs  the Explorer methods
 crates/sds-control/src/server_mimo.rs      the multiple-output Random methods
 crates/sds-control/src/server_mimo_shock.rs  the multiple-drive shock methods
 crates/sds-control/src/server_mixed.rs     the Mixed Mode methods
+crates/sds-control/src/server_playback.rs  the Playback methods
 crates/sds-control/src/server_recorder.rs  the Recorder methods
 crates/sds-control/src/server_shock.rs     the classical shock methods
 crates/sds-control/src/server_srs.rs       the SRS shock methods
@@ -76,6 +79,7 @@ schema/PROTOCOL.md#mixed-mode       the Mixed Mode setup and run state
 schema/PROTOCOL.md#time-waveform-replication  the waveform replication reference, setup and plays
 schema/PROTOCOL.md#explorer         the Explorer setup, run state and records
 schema/PROTOCOL.md#recorder         the Recorder setup, recordings and records
+schema/PROTOCOL.md#playback         the Playback setup, check report, run state and records
 schema/PROTOCOL.md#control-laws     a run's law identity and parameters
 
 # The shell's test screens and table files

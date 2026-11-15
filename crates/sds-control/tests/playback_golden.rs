@@ -113,7 +113,11 @@ fn the_golden_configuration_parses() {
 #[test]
 fn the_state_is_the_golden_state() {
     let golden = read_json("event_playback_state.json");
-    same(&run::state_json(Some(&running_view())), &golden["data"], "state");
+    same(
+        &run::state_json(Some(&running_view())),
+        &golden["data"],
+        "state",
+    );
     assert_eq!(
         run::state_json(None),
         serde_json::json!({"run_id": null, "state": "unconfigured"})
@@ -186,6 +190,10 @@ fn a_peak_over_the_ceiling_is_refused_as_the_golden_error() {
     };
     let e = config::config_invalid(&report, None);
     let got = protocol::error_response(134, &e);
-    same(&got, &read_json("response_error_playback_config_invalid.json"), "error");
+    same(
+        &got,
+        &read_json("response_error_playback_config_invalid.json"),
+        "error",
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

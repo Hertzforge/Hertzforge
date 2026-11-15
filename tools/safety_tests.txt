@@ -471,3 +471,21 @@ sds-control             tests/shock_protocol.rs                shutdown_refuses_
 sds-control             tests/srs_protocol.rs                  shutdown_refuses_the_drive_verbs_and_safe_stops_the_run   shutdown       a shutting-down SRS run safe stops
 sds-control             tests/twr_protocol.rs                  shutdown_refuses_the_twr_verbs_and_safe_stops_the_run     shutdown       a shutting-down waveform run safe stops
 sds-control             tests/mimo_shock_protocol.rs           mimo_shock_auto_refuses_the_manual_fire_and_shutdown_refuses_the_drive  shutdown  a shutting-down multiple-drive shock run refuses drive commands
+
+# ---------------------------------------------------------------- Playback
+hertzforge-playback     tests/check.rs                         refuses_an_unchecked_or_changed_file                      checked-input  Playback refuses a file not checked as it is, a pin that is not its hash, and samples changed under the sidecar
+hertzforge-playback     tests/check.rs                         refuses_a_malformed_file                                  checked-input  Playback refuses a drive file of the wrong size, unit or with a value that is not a number
+hertzforge-playback     tests/check.rs                         refuses_ends_not_at_zero                                  checked-input  Playback refuses a drive whose acceleration, velocity or displacement does not end at zero
+hertzforge-playback     tests/check.rs                         the_zero_ends_check_agrees_with_the_shock_gates_integrator  checked-input  the zero-ends check integrates exactly as the shock compensation gate
+hertzforge-playback     tests/check.rs                         refuses_a_map_to_a_missing_or_repeated_drive_row          checked-input  Playback refuses a file channel mapped to a missing or repeated drive row
+hertzforge-playback     tests/check.rs                         refuses_a_rate_mismatch_naming_both_rates                 checked-input  Playback refuses a file at another rate than the station's, naming both
+hertzforge-playback     tests/check.rs                         refuses_a_peak_over_the_ceiling                           drive-ceiling  Playback refuses a file whose peak at the level is over the ceiling
+hertzforge-playback     tests/run.rs                           the_drive_ceiling_holds_on_every_sample                   drive-ceiling  a Playback sample over the ceiling zeroes the drive and ends in the emergency stop
+hertzforge-playback     tests/run.rs                           refuses_a_rate_the_station_does_not_run_the_file_at       arm-gate       a station that programs another rate is refused before anything is driven
+hertzforge-playback     tests/run.rs                           a_response_abort_zeroes_the_drive_at_once                 watchdog       a Playback response past its table abort limit takes the drive to zero at once
+hertzforge-playback     tests/run.rs                           an_underrun_aborts_to_zero                                underrun       the Playback read-ahead running dry takes the drive to zero and ends in the emergency stop
+hertzforge-playback     tests/run.rs                           a_stop_ramps_the_streamed_drive_down                      stop-ramp      a Playback stop ramps the streamed drive down, never a step
+hertzforge-playback     tests/run.rs                           a_reader_thread_failure_ends_in_the_emergency_stop        run-thread-failure  a failure of the Playback reader thread ends in the emergency stop
+hertzforge-playback     tests/run.rs                           a_panic_on_the_loop_thread_ends_in_the_emergency_stop     run-thread-failure  a panic on the Playback loop thread ends in the emergency stop
+sds-control             tests/playback_sim_run.rs              the_service_refuses_what_its_checks_refuse                checked-input  the control service refuses an unchecked, failing or changed drive file before anything is driven
+sds-control             tests/playback_sim_run.rs              a_stop_ramps_and_an_abort_zeroes                          abort-to-zero  a Playback abort through the service zeroes the drive with the emergency stop; a stop ramps

@@ -127,7 +127,8 @@ async fn golden_run() -> PathBuf {
     assert_eq!(end["end"]["outcome"], "completed", "{end}");
     let rec = PathBuf::from(end["record"]["folder"].as_str().unwrap());
     let t0 = Instant::now();
-    while !(rec.join("end.json").is_file() && read_json(&rec.join("run.json"))["complete"] == true) {
+    while !(rec.join("end.json").is_file() && read_json(&rec.join("run.json"))["complete"] == true)
+    {
         assert!(t0.elapsed() < Duration::from_secs(30), "{rec:?}");
         c.pump(Duration::from_millis(20)).await;
     }
@@ -198,7 +199,10 @@ fn normalized(folder: &Path, golden: bool) -> BTreeMap<String, Vec<u8>> {
                     } else if !v["frame"].is_null() {
                         set(&mut v, &["frame"], json!(STATION_FRAMES));
                     }
-                    if v["text"].as_str().is_some_and(|t| t.starts_with("records in ")) {
+                    if v["text"]
+                        .as_str()
+                        .is_some_and(|t| t.starts_with("records in "))
+                    {
                         set(&mut v, &["text"], json!("records in golden_playback"));
                     }
                     text.extend(serde_json::to_vec(&v).unwrap());
@@ -238,12 +242,18 @@ async fn todays_code_writes_the_golden_playback_run_folder() {
         .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
         .collect();
     let top = drive.iter().fold(0f32, |m, x| m.max(x.abs()));
-    assert!((f64::from(top) - 0.4 * 10f64.powf(-0.3)).abs() < 1e-4, "the drive's peak is {top}");
+    assert!(
+        (f64::from(top) - 0.4 * 10f64.powf(-0.3)).abs() < 1e-4,
+        "the drive's peak is {top}"
+    );
     assert!(drive[..256].iter().all(|x| *x == 0.0));
     assert_eq!(*drive.last().unwrap(), 0.0);
     let got = normalized(&folder, false);
     let total: usize = got.values().map(Vec::len).sum();
-    assert!(total <= MOST_BYTES, "the golden folder holds {total} bytes, over {MOST_BYTES}");
+    assert!(
+        total <= MOST_BYTES,
+        "the golden folder holds {total} bytes, over {MOST_BYTES}"
+    );
     if std::env::var_os("HERTZFORGE_WRITE_GOLDEN_RUNS").is_some() {
         write_golden(&golden_dir(), &got);
         println!("wrote {} ({total} bytes)", golden_dir().display());
