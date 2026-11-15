@@ -1,0 +1,98 @@
+{
+  "run_uid": "golden-playback",
+  "run_id": "playback-0001",
+  "end": {
+    "outcome": "completed",
+    "message": "the file played to its end and the post-roll was recorded",
+    "at_s": 0.8125,
+    "played": 1024,
+    "emergency_stop": false,
+    "trip": null
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 4096,
+  "played": {
+    "samples": 1024,
+    "of": 1024
+  },
+  "state": {
+    "run_id": "playback-0001",
+    "state": "finished",
+    "phase": "done",
+    "title": "Golden Playback",
+    "source": "SIM",
+    "class": "sim",
+    "fs_hz": 2048,
+    "drive": {
+      "samples": 1024,
+      "duration_s": 0.5,
+      "sha256": "c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954",
+      "map": [
+        2
+      ]
+    },
+    "level_db": -6,
+    "ceiling_v": 1,
+    "rolls": {
+      "pre_frames": 256,
+      "post_frames": 256
+    },
+    "progress": {
+      "played": 1024,
+      "samples": 1024,
+      "played_s": 0.5,
+      "fraction": 1,
+      "elapsed_s": 0.813,
+      "buffered_s": 0.0
+    },
+    "inputs": [
+      {
+        "index": 1,
+        "role": "input",
+        "unit": "g",
+        "description": "Control"
+      }
+    ],
+    "drives": [
+      {
+        "index": 2,
+        "role": "drive",
+        "unit": "V",
+        "description": "Drive"
+      }
+    ],
+    "overloads": [
+      {
+        "channel": 1,
+        "overload": false
+      }
+    ],
+    "record": {
+      "folder": "golden_playback",
+      "streams": "on",
+      "problem": null
+    },
+    "end": {
+      "outcome": "completed",
+      "message": "the file played to its end and the post-roll was recorded",
+      "at_s": 0.8125,
+      "played": 1024,
+      "emergency_stop": false,
+      "trip": null
+    }
+  },
+  "streams": {
+    "inputs": {
+      "frames": 1536,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    },
+    "drives": {
+      "frames": 1536,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    }
+  }
+}
