@@ -12,6 +12,7 @@ import type { ReportPageData } from '$lib/protocol/types';
 import { readReport } from './read';
 import ReportViewer from './ReportViewer.svelte';
 import AnimationStage, { type AnimationSetup } from './AnimationStage.svelte';
+import RecordStage, { type RecordSetup } from './RecordStage.svelte';
 import type { Shape3DView } from '$lib/protocol/types';
 
 const target = document.getElementById('report');
@@ -25,6 +26,9 @@ if (target) {
 	}
 	// an animation in place of a report (`hertzforge export-animation`): one 3-D view, playing
 	const animation = (page as unknown as { animation?: { view: Shape3DView; setup: AnimationSetup } } | null)?.animation;
+	// a recording in place of a report (`hertzforge record`): one 3-D view, drawn frame by frame
+	const record = (page as unknown as { record?: { view: Shape3DView; setup: RecordSetup } } | null)?.record;
 	if (animation) mount(AnimationStage, { target, props: { view: animation.view, setup: animation.setup } });
+	else if (record) mount(RecordStage, { target, props: { view: record.view, setup: record.setup } });
 	else mount(ReportViewer, { target, props: { page, error } });
 }
