@@ -10,7 +10,7 @@
 //! | [`PlantModel::Resonators`] | The single-path bank: a sum of resonators, feedthrough and transport delay, driven by the FIRST drive row and read identically by every measurement input (noise included). The default, unchanged from the original plant | any x any |
 //! | [`PlantModel::Modal`] | A cross-coupled modal plant: each mode is one second-order resonator driven by the inner product of its input shape with the drive frame, seen by input `i` through its output shape. Independent noise per input | fixed by the model |
 //! | [`PlantModel::Frf`] | Plays any FRF matrix by partitioned overlap-save block convolution. Independent noise per input | fixed by the stack |
-//! | [`PlantModel::Jointed`] | A cross-coupled modal plant whose modes fall in frequency and rise in damping with their own amplitude, with a delay per output ([`crate::jointed`]). Independent noise per input | fixed by the model |
+//! | [`PlantModel::Jointed`] | A cross-coupled modal plant whose modes fall or rise in frequency (each by its own rule) and rise in damping with their own amplitude, with a delay per output ([`crate::jointed`]). Independent noise per input | fixed by the model |
 //!
 //! Every model gives its exact frequency response ([`PlantModel::analytic_frf`]): the
 //! complex FRF of the discretized plant the backend actually steps, transport delay and
