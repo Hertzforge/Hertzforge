@@ -35,7 +35,6 @@
 	const more = $derived(table ? moreIn(table, only) : []);
 	const picked = $derived(p.selection.objects);
 	const one = $derived(picked.length === 1 ? picked[0] : null);
-	const coherences = $derived((p.summary?.objects ?? []).filter((o) => o.kind === 'coherence' || o.kind === 'multiple_coherence').map((o) => o.name));
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 	const part = $derived(p.selection.part);
@@ -88,7 +87,6 @@
 		return kind === 'group' ? 'element group' : kind.replace(/^part:/, '').replace(/_/g, ' ');
 	}
 
-	let weight = $state('');
 	let groupName = $state('');
 	$effect(() => {
 		if (p.namingGroup) {
@@ -108,13 +106,6 @@
 		return !(row.kind === 'default' && column.current && !a.reading && !a.shapeView);
 	}
 
-	function beginFit() {
-		const kinds = picked.map((n) => p.summary?.objects.find((o) => o.name === n)?.kind);
-		const frf = picked[kinds.indexOf('frf')];
-		const shapes = kinds.includes('shape_set') ? picked[kinds.indexOf('shape_set')] : undefined;
-		a.fitWeighing = false;
-		void app.fit.start(frf, shapes, weight || undefined);
-	}
 
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape' && a.picking) {
@@ -186,22 +177,6 @@
 			<h2>Units of {p.units.name}</h2>
 		</div>
 		<div class="pane"><UnitsEditor project={p} tables={p.units} /></div>
-	{:else if a.fitWeighing}
-		<div class="phead">
-			<button class="btn ghost icon sm" aria-label="Back to the table" title="Back to the table" onclick={() => (a.fitWeighing = false)}><Icon name="chevron" size={13} /></button>
-			<h2>Fit by hand</h2>
-		</div>
-		<div class="pane">
-			<label class="weigh">
-				Weight each residual by
-				<select class="field sm" data-testid="fit-weight" bind:value={weight}>
-					<option value="">No weighting</option>
-					{#each coherences as name (name)}<option value={name}>{name}</option>{/each}
-				</select>
-			</label>
-			<button class="btn primary run" data-testid="fit-begin" onclick={beginFit}>Begin</button>
-			{#if app.fit.error && !app.fit.state}<p class="error" role="alert">{app.fit.error}</p>{/if}
-		</div>
 	{:else if a.formOpen && a.op}
 		<section class="pane form" aria-labelledby="op-title">
 			<div class="phead">
@@ -422,13 +397,6 @@
 		gap: 2px;
 		color: var(--text-4);
 		font-size: var(--text-2xs);
-	}
-	.weigh {
-		display: flex;
-		flex-direction: column;
-		gap: var(--sp-1);
-		margin-bottom: var(--sp-3);
-		color: var(--text-2);
 	}
 	.wrap {
 		position: relative;
