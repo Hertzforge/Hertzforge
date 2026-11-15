@@ -4,6 +4,7 @@
 	 * what the selection shows. A module (`only`) differs in which verbs the table offers. An act's
 	 * result joins the tree; a reading takes the view until its default row is clicked.
 	 */
+	import type { Snippet } from 'svelte';
 	import { foldKey, type AppState } from '$lib/app/state.svelte';
 	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
@@ -28,8 +29,10 @@
 		app: AppState;
 		/** The module shown: its operations, and those every module offers. */
 		only: Workspace;
+		/** Shown in place of the action table and the reading, beside the tree: the fitting screen. */
+		replacing?: Snippet;
 	}
-	let { app, only }: Props = $props();
+	let { app, only, replacing }: Props = $props();
 
 	const a = $derived(app.analyze);
 
@@ -91,7 +94,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="analyze" style="--table-width: {tableAway || !a.onProject ? 0 : tableWidth}px">
+<div class="analyze" style="--table-width: {replacing || tableAway || !a.onProject ? 0 : tableWidth}px">
 	<aside class="side" aria-label="The project">
 		<ProjectPanel {app} />
 		{#if !app.catalog}
@@ -104,6 +107,9 @@
 		{/if}
 	</aside>
 
+	{#if replacing}
+		<main class="shown replacing">{@render replacing()}</main>
+	{:else}
 	{#if a.onProject && !tableAway}
 		<aside class="actions" aria-label="What the selection can do">
 			<div class="tablehead">
@@ -291,6 +297,7 @@
 			</div>
 		{/if}
 	</main>
+	{/if}
 </div>
 
 <style>

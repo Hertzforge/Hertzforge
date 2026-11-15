@@ -934,10 +934,10 @@ project, and opening or starting another project ends it.
 | `fit.move` | `{"frequency"}` | `{"fit"}` |
 | `fit.damping` | `{"damping"}` | `{"fit"}` |
 | `fit.fit` | `{}` | `{"fit"}` |
-| `fit.confirm` | `{"description"?}` | `{"fit"}` |
-| `fit.refine` | `{}` | `{"fit"}` |
-| `fit.delete` | `{"modes"}` | `{"fit"}` |
-| `fit.edit` | `{"mode","damping"?,"description"?}` | `{"fit"}` |
+| `fit.confirm` | `{"description"?}` | `{"fit","project"?}` |
+| `fit.refine` | `{}` | `{"fit","project"?}` |
+| `fit.delete` | `{"modes"}` | `{"fit","project"?}` |
+| `fit.edit` | `{"mode","damping"?,"description"?}` | `{"fit","project"?}` |
 | `fit.residual` | `{"show"}` | `{"fit"}` |
 | `fit.publish` | `{"name"?}` | `{"name","project","fit"}` |
 | `fit.end` | `{}` | `{}` |
@@ -962,7 +962,10 @@ response at each line by γ²/(1-γ²) in the frequency and damping search, the 
 and `fit.find` reads the residual CMIF with each response at its median weight (`ModalFitSession`).
 `fit.publish` adds the confirmed modes to the project as a shape set named `name` (default
 "<frf> Modes"), or replaces the set the fit was started from; later publishes replace the set
-published. The journal holds the `Project.fit_modes(at=...)` line that replays it. A step the core refuses is refused in its words; a fit whose FRF has left the project
+published. The fit is kept in the project as it goes: after each `fit.confirm`, `fit.refine`,
+`fit.delete` and `fit.edit` it is published so, and the answer carries the `project` summary; a set
+the fit added is removed again when its last mode is taken back. Nothing waits on `fit.publish`,
+and `fit.end` loses nothing. The journal holds the `Project.fit_modes(at=...)` line that replays it. A step the core refuses is refused in its words; a fit whose FRF has left the project
 ends.
 
 `fit` is `{"frf","shapes","pending":{"frequency","damping","held"},"preview","modes":[...],"view"}`.

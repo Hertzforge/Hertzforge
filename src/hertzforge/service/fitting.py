@@ -53,6 +53,8 @@ class Fit:
     coherence: str | None = None
     #: whether the view draws the residual's own CMIF
     residual: bool = False
+    #: whether the fit added `shapes` to the project, rather than starting from it
+    created: bool = False
 
 
 def _number(params: Mapping[str, Any], key: str, method: str) -> float:
@@ -244,8 +246,31 @@ def publish(project: Any, fit: Fit, params: Mapping[str, Any]) -> str:
         except ValueError:
             pass
     fit.shapes = added
+    fit.created = True
     _journal(project, fit)
     return added
+
+
+#: the steps that change the confirmed modes, after each of which the fit is saved
+SAVES = ('fit.confirm', 'fit.refine', 'fit.delete', 'fit.edit')
+
+
+def save(project: Any, fit: Fit) -> bool:
+    """The fit kept in the project as it goes, as the earlier toolset kept it: the confirmed
+    modes published after each change (`publish`), so nothing waits on a Publish and leaving
+    the fit loses nothing (Brandon, 2026-11-14). A set the fit added goes again when its last
+    mode is taken back; a set it was started from keeps what it had. Whether the project
+    changed."""
+    if fit.session.modes:
+        publish(project, fit, {})
+        return True
+    if fit.created and fit.shapes is not None and fit.shapes in project:
+        with project.journal_as(None):
+            project.remove(fit.shapes)
+        fit.shapes = None
+        fit.created = False
+        return True
+    return False
 
 
 def _journal(project: Any, fit: Fit) -> None:
