@@ -533,6 +533,9 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
 | `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
+| `drive.inspect` | `{"path"}` or `{"objects"}` | `{"source","signals":[signal...],"rate_hz","notes"}` |
+| `drive.convert` | `{"path"` or `"objects","selections","rate_hz"?,"out"?,"fix_ends"?,"taper_s"?}` | `{"folder","drive","notes","fixed"?}` |
+| `drive.fix_ends` | `{"folder","taper_s"?,"out"?}` | `{"folder","drive","from","taper_s","taper_samples","channels"}` |
 | `runs.delete` | `{"folder","dry_run"?,"not_live"?}` | `{"folder","project_file","project_file_exists","complete","deleted"}` |
 | `fit.*` | see Fitting modes below | |
 
@@ -1121,6 +1124,46 @@ into the folder; the analysis service cannot see the control service's runs, so 
 and refuses without it. `complete` says whether `run.json` says the run ended cleanly; a client asks
 a dry run with `not_live: true` to learn it, deletes nothing so, and asks the control service before
 it confirms and again before it deletes. Every other refusal is the same with `not_live`.
+
+**Drive files.** A Playback test plays a drive the operator made, and the control service reads it
+from one form only, the native drive folder (`docs/drive-file.md`). These three requests write that
+folder from any form the analysis side reads; they only read and write files, and never drive a
+station or arm a test. A file is named by its `path` on the computer that runs the test; nothing is
+uploaded. `objects`, names in the connection's open project, reads its time histories instead (a
+seed), each record a signal.
+
+`drive.inspect` answers what the source holds: `source` (`path`, null for objects, and `format`:
+`delimited`, `mat5`, `mat73`, `npy`, `npz`, `hdf5`, `hforge`, `unv`, `xlsx`, `wav` or `project`),
+`signals` (each `key`, the name a selection gives it; `name`; `samples`; `rate_hz`, the rate the
+file states, or null; `unit`, the unit the file states, or null; `where`, its place in the file in
+words; and `problem`, why it cannot be a drive, or null), `rate_hz` (the one rate every signal
+states, or null) and `notes` (what the readers noted, in words).
+
+`drive.convert` writes the `selections`, in drive order (each a `key`, or `{"signal","name"}` to
+name the channel), to a new folder: `out` when given, refused when it exists; otherwise a free name
+from the source's name under `drives/` in the data folder (`runs.data_folder`). `rate_hz` is needed
+when the file states none, and must agree with a rate it states. It answers the `folder`, the
+`drive` (the folder's `drive.json` whole) and `notes` (among them, each drive whose unit the file
+does not state, taken as volts). With `fix_ends` true it also fixes the new folder's ends into a
+second new folder, answered as `fixed`, as `drive.fix_ends` answers.
+
+`drive.fix_ends` writes a copy of the drive `folder` whose ends are at rest, the original untouched:
+a half-cosine taper at each end (`taper_s`, by default 1 % of the record, at least 10 ms and at most
+1 s), then `a sin(pi t / T) + b sin(2 pi t / T)` subtracted so the record, integrated as an
+acceleration with a plain trapezoid, ends with zero velocity and zero displacement. The new folder
+is `out`, or `<folder>-fixed` beside it. It answers `folder`, `drive` (the new `drive.json`, whose
+last `fixes` entry records the fix), `from` (the original's `folder` and `sha256`), `taper_s`,
+`taper_samples`, and per channel its `name`, `a`, `b`, `rms_before`, `rms_after`, and `before` and
+`after`: `start`, `end` and `peak` in volts, `velocity_end` and `velocity_peak` in volt seconds,
+`displacement_end` and `displacement_peak` in volt seconds squared.
+
+Each refusal is `refused` with its reason by name: a selection the source does not hold, or one
+chosen twice; drives of unequal length; rates that differ, or a stated rate that disagrees with
+`rate_hz`; no rate; a time column that does not step evenly; a unit that is not a voltage; a value
+that is not finite or too large for 32-bit floating point; a NumPy array of Python objects (never
+unpickled); a folder that exists. `not_found` is a file or an object that is not there;
+`bad_request` is params of the wrong shape. Golden frames: `request_drive_*`, `response_drive_*`
+and `response_error_drive_refused`.
 
 **Control service**
 

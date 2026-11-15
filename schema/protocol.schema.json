@@ -1120,6 +1120,141 @@
         "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
+    "driveSignal": {
+      "type": "object", "required": ["key", "name", "samples", "rate_hz", "unit", "where", "problem"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "samples": {"type": "integer", "minimum": 0},
+        "rate_hz": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "unit": {"type": ["string", "null"]},
+        "where": {"type": "string"},
+        "problem": {"type": ["string", "null"]}
+      }
+    },
+    "driveSelection": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "object", "required": ["signal"], "additionalProperties": false,
+         "properties": {"signal": {"type": "string", "minLength": 1},
+                        "name": {"type": ["string", "null"]}}}
+      ]
+    },
+    "driveSidecar": {
+      "type": "object",
+      "required": ["format", "version", "rate_hz", "samples", "channels", "sha256", "source", "fixes", "tool", "created_utc"],
+      "properties": {
+        "format": {"const": "hertzforge-drive"},
+        "version": {"const": 1},
+        "rate_hz": {"type": "number", "exclusiveMinimum": 0},
+        "samples": {"type": "integer", "minimum": 2},
+        "channels": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "required": ["name", "unit", "source"],
+          "properties": {"name": {"type": "string"}, "unit": {"const": "V"},
+                         "source": {"type": "string"}}}},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source": {
+          "type": "object", "required": ["path", "sha256", "format", "selections"],
+          "properties": {
+            "path": {"type": ["string", "null"]},
+            "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+            "format": {"type": "string"},
+            "selections": {"type": "array", "items": {
+              "type": "object", "required": ["signal", "name"],
+              "properties": {"signal": {"type": "string"}, "name": {"type": "string"}}}}
+          }
+        },
+        "fixes": {"type": "array", "items": {"$ref": "#/$defs/driveFixRecord"}},
+        "tool": {"type": "string"},
+        "created_utc": {"type": "string"}
+      }
+    },
+    "driveFixRecord": {
+      "type": "object", "required": ["kind", "from", "taper_s", "taper_samples", "channels"],
+      "properties": {
+        "kind": {"const": "fix_ends"},
+        "from": {"type": "object", "required": ["folder", "sha256"],
+                 "properties": {"folder": {"type": "string"}, "sha256": {"type": "string"}}},
+        "taper_s": {"type": "number", "minimum": 0},
+        "taper_samples": {"type": "integer", "minimum": 0},
+        "correction": {"type": "string"},
+        "channels": {"type": "array", "items": {
+          "type": "object", "required": ["name", "a", "b", "rms_before", "rms_after"],
+          "properties": {"name": {"type": "string"}, "a": {"type": "number"},
+                         "b": {"type": "number"}, "rms_before": {"type": "number"},
+                         "rms_after": {"type": "number"}}}}
+      }
+    },
+    "driveEnds": {
+      "type": "object",
+      "required": ["start", "end", "peak", "velocity_end", "velocity_peak", "displacement_end", "displacement_peak"],
+      "additionalProperties": {"type": "number"}
+    },
+    "driveInspectParams": {
+      "type": "object", "additionalProperties": false,
+      "oneOf": [{"required": ["path"]}, {"required": ["objects"]}],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "objects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "driveInspectResult": {
+      "type": "object", "required": ["source", "signals", "rate_hz", "notes"],
+      "properties": {
+        "source": {"type": "object", "required": ["path", "format"],
+                   "properties": {"path": {"type": ["string", "null"]}, "format": {"type": "string"}}},
+        "signals": {"type": "array", "items": {"$ref": "#/$defs/driveSignal"}},
+        "rate_hz": {"type": ["number", "null"]},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "driveConvertParams": {
+      "type": "object", "required": ["selections"], "additionalProperties": false,
+      "oneOf": [{"required": ["path"]}, {"required": ["objects"]}],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "objects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "selections": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/driveSelection"}},
+        "rate_hz": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "out": {"type": ["string", "null"]},
+        "fix_ends": {"type": "boolean"},
+        "taper_s": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "driveConvertResult": {
+      "type": "object", "required": ["folder", "drive", "notes"],
+      "properties": {
+        "folder": {"type": "string"},
+        "drive": {"$ref": "#/$defs/driveSidecar"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "fixed": {"$ref": "#/$defs/driveFixEndsResult"}
+      }
+    },
+    "driveFixEndsParams": {
+      "type": "object", "required": ["folder"], "additionalProperties": false,
+      "properties": {
+        "folder": {"type": "string", "minLength": 1},
+        "taper_s": {"type": ["number", "null"], "minimum": 0},
+        "out": {"type": ["string", "null"]}
+      }
+    },
+    "driveFixEndsResult": {
+      "type": "object", "required": ["folder", "drive", "from", "taper_s", "taper_samples", "channels"],
+      "properties": {
+        "folder": {"type": "string"},
+        "drive": {"$ref": "#/$defs/driveSidecar"},
+        "from": {"type": "object", "required": ["folder", "sha256"]},
+        "taper_s": {"type": "number", "minimum": 0},
+        "taper_samples": {"type": "integer", "minimum": 0},
+        "channels": {"type": "array", "items": {
+          "type": "object", "required": ["name", "a", "b", "rms_before", "rms_after", "before", "after"],
+          "properties": {"name": {"type": "string"}, "a": {"type": "number"}, "b": {"type": "number"},
+                         "rms_before": {"type": "number"}, "rms_after": {"type": "number"},
+                         "before": {"$ref": "#/$defs/driveEnds"},
+                         "after": {"$ref": "#/$defs/driveEnds"}}}}
+      }
+    },
     "catalog": {
       "type": "object", "required": ["operations"],
       "properties": {

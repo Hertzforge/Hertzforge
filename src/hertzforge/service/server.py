@@ -31,6 +31,7 @@ from websockets.exceptions import ConnectionClosed
 
 from . import (
     display_units,
+    drive_files,
     fitting,
     frames,
     op_progress,
@@ -690,6 +691,18 @@ class Connection:
                 result = await self.service.in_worker(table_files.request, method, params)
                 frame = frames.encode_text({'type': 'response', 'id': ident,
                                             'result': result})
+            elif method in drive_files.DRIVE_METHODS:
+                # a file by its path needs nothing of the connection; the open
+                # project's objects are read under its lock
+                if drive_files.needs_project(params):
+                    async with self.project_lock:
+                        project = self.project.project if self.project is not None else None
+                        result = await self.service.in_worker(drive_files.request, method,
+                                                              params, project)
+                else:
+                    result = await self.service.in_worker(drive_files.request, method, params)
+                frame = frames.encode_text({'type': 'response', 'id': ident,
+                                            'result': result})
             elif method in fitting.FIT_METHODS:
                 result = await self.fit_request(method, params)
                 frame = await self.service.in_worker(
@@ -704,6 +717,7 @@ class Connection:
                     f'{", ".join(fitting.FIT_METHODS)}, '
                     f'{", ".join(run_logs.RUN_LOG_METHODS)}, '
                     f'{", ".join(table_files.TABLE_METHODS)}, '
+                    f'{", ".join(drive_files.DRIVE_METHODS)}, '
                     f'{", ".join(run_files.RUN_METHODS)} and '
                     f'{", ".join(reports.REPORT_METHODS)}.')
         except ProtocolError as error:
