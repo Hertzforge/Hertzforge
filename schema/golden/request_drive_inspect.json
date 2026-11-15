@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 61,
+ "method": "drive.inspect",
+ "params": {
+  "path": "/Users/someone/tests/bracket/drive.csv"
+ }
+}

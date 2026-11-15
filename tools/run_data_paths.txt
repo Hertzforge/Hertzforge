@@ -93,11 +93,13 @@ src/hertzforge/core/run_record.py         the control service's record of a run,
 src/hertzforge/core/test_setup.py         a test's setup, as a project holds it and a test screen opens it
 src/hertzforge/io/tables.py                channel and breakpoint tables as files, for both sides
 src/hertzforge/io/reference_convert.py     writes the controller's reference file from a specification
+src/hertzforge/io/drive_convert.py         writes Playback's drive file from any form the analysis side reads
 src/hertzforge/io/setup_convert.py         the one mapping between each control table kind and its analysis object
 src/hertzforge/io/seeds.py                 what an analysis object fills of a test's setup, and its origin
 src/hertzforge/core/channel_table.py       the channel table both sides use
 docs/hforge-format.md#channel_table        how a channel table is stored in a project
 docs/run-folder.md                         the run folder: what a control run leaves on disk
+docs/drive-file.md                         the drive file Playback plays: its layout and its provenance
 docs/hforge-format.md#breakpoint_table     how a profile's breakpoint table is stored in a project
 docs/hforge-format.md#test_setup           how a test's setup is stored in a project
 docs/hforge-format.md#mimo-random-runs   how a MIMO Random run reaches a project

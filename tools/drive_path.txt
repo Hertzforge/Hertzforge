@@ -110,5 +110,6 @@ schema/protocol.schema.json         the suite's protocol schema, for both servic
 schema/PROTOCOL.md                  the suite's protocol, for both services; its control part reaches the drive path through the Rust crates
 schema/golden                       test frames every codec is checked against
 schema/make_golden.py               writes the test frames
+schema/make_golden_drive.py         writes the golden drive folder; the control service checks every drive file again before it arms
 src/hertzforge                      the analysis service and the Python package; it has no route to a drive
 ui                                  the shell: a client of the control service, never the only protection (invariant 4)

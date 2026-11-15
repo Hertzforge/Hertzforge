@@ -5917,6 +5917,101 @@ MSHOCK_TEXT_GOLDENS = {
 
 
 
+# Playback's drive files, by path on the analysis service: what a file holds,
+# the chosen signals written as a native drive folder (the golden folder
+# schema/golden/drive/basic/, which this conversion reproduces byte for byte),
+# its ends fixed into a new folder, and a refusal by name
+_DRIVE_CSV = '/Users/someone/tests/bracket/drive.csv'
+_DRIVE_FOLDER = '/Users/someone/Hertzforge_Data/drives/drive'
+_DRIVE_SHA256 = '1619d91c144e2974932b0b6ba6ed43da0e8a68ce03bee6c67b625aad653750fa'
+_DRIVE_SIDECAR = {
+    'format': 'hertzforge-drive', 'version': 1, 'rate_hz': 1000.0, 'samples': 401,
+    'channels': [{'name': 'Drive 1', 'unit': 'V', 'source': 'column:2'},
+                 {'name': 'Drive 2', 'unit': 'V', 'source': 'column:3'}],
+    'sha256': _DRIVE_SHA256,
+    'source': {'path': _DRIVE_CSV,
+               'sha256': '08877c766433531155806dc91f8f69e27cb49110d6a8f0950b0b331601011594',
+               'format': 'delimited',
+               'selections': [{'signal': 'column:2', 'name': 'Drive 1'},
+                              {'signal': 'column:3', 'name': 'Drive 2'}]},
+    'fixes': [], 'tool': 'hertzforge 0.0.0', 'created_utc': '2026-11-15T00:00:00Z'}
+_DRIVE_FIXED_CHANNELS = [
+    {'name': 'Drive 1', 'a': -1.21115e-05, 'b': 6.23811e-19, 'rms_before': 0.216236,
+     'rms_after': 0.216236,
+     'before': {'start': 0.0, 'end': 0.0, 'peak': 0.5, 'velocity_end': 2.09664e-10,
+                'velocity_peak': 0.00395868, 'displacement_end': 4.19328e-11,
+                'displacement_peak': 3.31033e-05},
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.500012, 'velocity_end': 9.77829e-15,
+               'velocity_peak': 0.00395884, 'displacement_end': 1.95565e-15,
+               'displacement_peak': 3.3292e-05}},
+    {'name': 'Drive 2', 'a': 6.41709e-07, 'b': -3.52732e-18, 'rms_before': 0.108118,
+     'rms_after': 0.108118,
+     'before': {'start': 0.0, 'end': 0.0, 'peak': 0.25, 'velocity_end': -2.54349e-11,
+                'velocity_peak': 0.000788997, 'displacement_end': -5.08699e-12,
+                'displacement_peak': 2.51054e-06},
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.249999, 'velocity_end': 4.32236e-12,
+               'velocity_peak': 0.000788993, 'displacement_end': 8.64471e-13,
+               'displacement_peak': 2.5015e-06}}]
+DRIVE_TEXT_GOLDENS = {
+    'request_drive_inspect': {
+        'type': 'request', 'id': 61, 'method': 'drive.inspect', 'params': {'path': _DRIVE_CSV},
+    },
+    'response_drive_inspect': {
+        'type': 'response', 'id': 61,
+        'result': {
+            'source': {'path': _DRIVE_CSV, 'format': 'delimited'},
+            'signals': [
+                {'key': 'column:2', 'name': 'Drive 1', 'samples': 401, 'rate_hz': 1000.0,
+                 'unit': 'V', 'where': 'column 2', 'problem': None},
+                {'key': 'column:3', 'name': 'Drive 2', 'samples': 401, 'rate_hz': 1000.0,
+                 'unit': 'V', 'where': 'column 3', 'problem': None}],
+            'rate_hz': 1000.0, 'notes': []},
+    },
+    'request_drive_convert': {
+        'type': 'request', 'id': 62, 'method': 'drive.convert',
+        'params': {'path': _DRIVE_CSV, 'selections': ['column:2', 'column:3']},
+    },
+    'response_drive_convert': {
+        'type': 'response', 'id': 62,
+        'result': {'folder': _DRIVE_FOLDER, 'drive': _DRIVE_SIDECAR, 'notes': []},
+    },
+    'request_drive_fix_ends': {
+        'type': 'request', 'id': 63, 'method': 'drive.fix_ends',
+        'params': {'folder': _DRIVE_FOLDER},
+    },
+    'response_drive_fix_ends': {
+        'type': 'response', 'id': 63,
+        'result': {
+            'folder': _DRIVE_FOLDER + '-fixed',
+            'drive': {**_DRIVE_SIDECAR, 'sha256': (
+                'd60a66177a8b5c03e0603f4cfade80c0a80866e31d2540352840dc09d74c35cd'),
+                'fixes': [{
+                    'kind': 'fix_ends', 'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
+                    'taper_s': 0.01, 'taper_samples': 10,
+                    'correction': ('c(t) = a sin(pi t / T) + b sin(2 pi t / T), '
+                                   'T = (samples - 1) / rate_hz'),
+                    'channels': [{k: c[k] for k in ('name', 'a', 'b', 'rms_before',
+                                                    'rms_after')}
+                                 for c in _DRIVE_FIXED_CHANNELS]}]},
+            'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
+            'taper_s': 0.01, 'taper_samples': 10, 'channels': _DRIVE_FIXED_CHANNELS},
+    },
+    'request_drive_convert_unequal': {
+        'type': 'request', 'id': 64, 'method': 'drive.convert',
+        'params': {'path': '/Users/someone/tests/bracket/drives.npz',
+                   'selections': ['array:a', {'signal': 'array:b', 'name': 'Shaker 2'}],
+                   'rate_hz': 1000.0},
+    },
+    'response_error_drive_refused': {
+        'type': 'response', 'id': 64,
+        'error': {'code': 'refused',
+                  'message': ('the drives differ in length (a has 401, Shaker 2 has 397 '
+                              'samples); every drive plays the same number of samples')},
+    },
+}
+
+
+
 # ---- Playback ---------------------------------------------------------------------
 
 PLAYBACK_SHA = 'c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954'
@@ -6163,7 +6258,7 @@ def main() -> None:
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,
                           **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
                           **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS,
-                          **PLAYBACK_TEXT_GOLDENS}.items():
+                          **PLAYBACK_TEXT_GOLDENS, **DRIVE_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 
