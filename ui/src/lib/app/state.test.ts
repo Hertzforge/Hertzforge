@@ -435,3 +435,28 @@ describe('deleting parts', () => {
 		expect(app.project.partsSaid({ Closed: [0] }), 'an object not open is counted as picked').toBe('1 of Closed');
 	});
 });
+
+describe('the fit cursor dragged', () => {
+	it('sends where it is quietly, with no busy line under the hand, and a button press still says so', async () => {
+		// the pending mode follows the cursor as it is dragged (Brandon, 2026-11-14)
+		const { app } = make();
+		const seen: (string | null)[] = [];
+		let release!: () => void;
+		(app.analysis as unknown as { request: unknown }).request = vi.fn(
+			(method: string) =>
+				new Promise((resolve) => {
+					release = () => resolve({ fit: { method } });
+				})
+		);
+		const quiet = app.fit.move(440, true);
+		seen.push(app.fit.busy);
+		release();
+		expect(await quiet).toBe(true);
+		const pressed = app.fit.fit();
+		seen.push(app.fit.busy);
+		release();
+		await pressed;
+		expect(seen).toEqual([null, 'Fitting the mode']);
+		expect(app.fit.busy).toBeNull();
+	});
+});
