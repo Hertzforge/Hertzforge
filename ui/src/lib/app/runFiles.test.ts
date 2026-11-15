@@ -71,6 +71,99 @@ describe('Delete Run', () => {
 		expect(deleteLine('refused', files.refusal)).toMatch(/^The run was not deleted\. the run in .* is not complete/);
 	});
 
+	describe('a run that did not end cleanly', () => {
+		// Decided by the project's owner: a run that did not end cleanly can be deleted from the app,
+		// once the control service, asked then, reports no live run recording into its folder.
+		const UNCLEAN = { ...PLAN, complete: false };
+		function unclean(states: Record<string, unknown> | 'unreachable' | null, after?: Record<string, unknown>) {
+			const calls: { method: string; params: Record<string, unknown> }[] = [];
+			const asked: string[] = [];
+			let asks = 0;
+			const h: RunFilesHost = {
+				request: async <R,>(method: string, params: Record<string, unknown>): Promise<R> => {
+					calls.push({ method, params });
+					return { ...UNCLEAN, deleted: params.dry_run !== true } as R;
+				},
+				desktop: null,
+				confirm: async (text) => {
+					asked.push(text);
+					return true;
+				}
+			};
+			if (states !== null) {
+				h.control = async (method: string) => {
+					if (states === 'unreachable') throw new RequestError('offline', 'The control service is not connected.', method);
+					if (method === 'random.state') asks++;
+					const now = asks > 1 && after ? after : states;
+					if (!(method in now)) throw new RequestError('unknown_method', `no ${method}`, method);
+					return now[method];
+				};
+			}
+			return { h, calls, asked };
+		}
+		const IDLE = { 'random.state': { state: 'finished', record: { folder: FOLDER } }, 'sine.state': { state: 'idle' } };
+
+		it('is deleted when the control service reports no live run, after a question that says its record may be partial', async () => {
+			const { h, calls, asked } = unclean(IDLE);
+			const files = new RunFiles(h);
+			expect(await files.deleteRun(FOLDER)).toBe(true);
+			expect(calls.map((c) => [c.params.dry_run ?? false, c.params.not_live ?? false])).toEqual([
+				[true, true],
+				[false, true]
+			]);
+			expect(asked[0]).toContain(PLAN.folder);
+			expect(asked[0]).toContain(PLAN.project_file);
+			expect(asked[0]).toContain('This run did not end cleanly: its record may be partial.');
+			expect(files.at(FOLDER)).toBe('done');
+		});
+
+		it('a run that ended cleanly is asked about without that line, and without the control service', async () => {
+			expect(deleteQuestion(PLAN)).not.toContain('did not end cleanly');
+			const { h, calls } = host();
+			expect(await new RunFiles(h).deleteRun(FOLDER)).toBe(true);
+			expect(calls[1].params.not_live).toBeUndefined();
+		});
+
+		it('is refused when the control service cannot be asked, before any question', async () => {
+			for (const states of ['unreachable', null] as const) {
+				const { h, calls, asked } = unclean(states);
+				const files = new RunFiles(h);
+				expect(await files.deleteRun(FOLDER)).toBe(false);
+				expect(asked).toEqual([]);
+				expect(calls.filter((c) => c.params.dry_run !== true)).toEqual([]);
+				expect(files.at(FOLDER)).toBe('refused');
+				expect(files.refusal).toContain('the control service could not be asked whether it is still going');
+			}
+		});
+
+		it('is refused when it is the record of a live run, or a live run has not said where it records', async () => {
+			for (const [record, words] of [
+				[{ folder: `${FOLDER}/` }, 'is the record of a Random test that is live now'],
+				[{ folder: '/elsewhere/20261114-120000_random_7' }, 'is the record of a Random test that is live now'],
+				[null, 'a Random test is live without saying which folder it records into']
+			] as const) {
+				const { h, calls, asked } = unclean({ ...IDLE, 'random.state': { state: 'running', record } });
+				const files = new RunFiles(h);
+				expect(await files.deleteRun(FOLDER)).toBe(false);
+				expect(asked).toEqual([]);
+				expect(calls.filter((c) => c.params.dry_run !== true)).toEqual([]);
+				expect(files.refusal).toContain(words);
+			}
+			// another live run's folder does not hold this one back
+			const { h } = unclean({ ...IDLE, 'random.state': { state: 'running', record: { folder: '/data/Hertzforge_Data/20261114-130000_random_8' } } });
+			expect(await new RunFiles(h).deleteRun(FOLDER)).toBe(true);
+		});
+
+		it('is asked about again just before the delete, and refused when its run went live meanwhile', async () => {
+			const { h, calls, asked } = unclean(IDLE, { ...IDLE, 'random.state': { state: 'armed', record: { folder: FOLDER } } });
+			const files = new RunFiles(h);
+			expect(await files.deleteRun(FOLDER)).toBe(false);
+			expect(asked).toHaveLength(1);
+			expect(calls.filter((c) => c.params.dry_run !== true)).toEqual([]);
+			expect(files.refusal).toContain('that is live now');
+		});
+	});
+
 	it('says a refusal at the delete itself', async () => {
 		const { h } = host({ refuseAt: 'delete' });
 		const files = new RunFiles(h);

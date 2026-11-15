@@ -372,6 +372,11 @@ export const UNIT_VOCABULARY = [
 const hasAbort = (r: ChannelRow) => r.abort.accel_g !== null || r.abort.velocity_ips !== null || r.abort.displacement_mil !== null;
 
 /** The row whose shape `channels.set` refuses `bad_params`, by the parameter it names; null when every row is well formed. */
+/** The words refusing a negative sensitivity on an enabled row: the row, the column and the value. */
+export function negativeSensitivity(index: number, value: number): string {
+	return `channel ${index}'s sensitivity_mv_per_eu is ${value}, which is negative; a sensitivity is never negative on an enabled row, and a channel read inverted says so in its polarity column`;
+}
+
 export function badRowParam(rows: ChannelRow[]): string | null {
 	for (const [i, r] of rows.entries()) {
 		if (!Number.isInteger(r.index) || r.index < 0) return `channels[${i}].index`;
@@ -394,6 +399,7 @@ export function validateTable(rows: ChannelRow[], selection: Selection, scan: Ni
 		if (r.role === 'reference') reference++;
 		if (r.enabled) {
 			anyEnabled = true;
+			if (r.sensitivity_mv_per_eu < 0) errors.push(item('negative_sensitivity', negativeSensitivity(r.index, r.sensitivity_mv_per_eu), { channel: r.index }));
 			if (r.role === 'drive') {
 				warnings.push(item('drive_channel_present', `channel ${r.index} is a drive output (sensitivity/range are advisory)`, { channel: r.index }));
 			} else {

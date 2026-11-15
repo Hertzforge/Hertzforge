@@ -210,6 +210,17 @@ describe('channel table', () => {
 		const dry = await c.request<ChannelsSetResult>('channels.set', { revision: 1, channels: broken, dry_run: true });
 		expect([dry.revision, dry.report.errors.length]).toEqual([1, 1]);
 
+		// decided by the project's owner: a negative sensitivity is refused, the row, the column and
+		// the value in the words; polarity is the row's own column. Falsified by dropping the check.
+		const inverted = rows.map((r) => (r.index === 1 ? { ...r, sensitivity_mv_per_eu: -100 } : r));
+		const negative = await refusal(c.request('channels.set', { revision: 1, channels: inverted }));
+		expect(negative.reason).toBe('table_invalid');
+		const said = negative.detail?.errors as { reason: string; channel: number; message: string }[];
+		expect(said.map((e) => [e.reason, e.channel])).toEqual([['negative_sensitivity', 1]]);
+		expect(said[0].message).toContain('channel 1');
+		expect(said[0].message).toContain('sensitivity_mv_per_eu');
+		expect(said[0].message).toContain('-100');
+
 		const monitor = { ...rows[0], index: 3, role: 'monitor' as const, description: 'Fixture corner' };
 		const written = await c.request<ChannelsSetResult>('channels.set', { revision: 1, channels: [...rows, monitor] });
 		expect(written.revision).toBe(2);

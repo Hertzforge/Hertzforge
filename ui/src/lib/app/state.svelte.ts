@@ -1019,16 +1019,17 @@ export class FitState {
 		return this.step('Finding a mode', 'fit.find', this.range ? { low: this.range[0], high: this.range[1] } : {});
 	}
 
-	move(frequency: number): Promise<boolean> {
-		return this.step('Moving the cursor', 'fit.move', { frequency });
+	/** `quiet` while a drag sends: no busy line flickering under the hand. */
+	move(frequency: number, quiet = false): Promise<boolean> {
+		return this.step('Moving the cursor', 'fit.move', { frequency }, quiet);
 	}
 
-	holdDamping(damping: number): Promise<boolean> {
-		return this.step('Holding the damping', 'fit.damping', { damping });
+	holdDamping(damping: number, quiet = false): Promise<boolean> {
+		return this.step('Holding the damping', 'fit.damping', { damping }, quiet);
 	}
 
-	fit(): Promise<boolean> {
-		return this.step('Fitting the mode', 'fit.fit', {});
+	fit(quiet = false): Promise<boolean> {
+		return this.step('Fitting the mode', 'fit.fit', {}, quiet);
 	}
 
 	confirm(description?: string): Promise<boolean> {
@@ -1083,8 +1084,8 @@ export class FitState {
 		}
 	}
 
-	private async step(doing: string, method: string, params: Record<string, unknown>): Promise<boolean> {
-		this.busy = doing;
+	private async step(doing: string, method: string, params: Record<string, unknown>, quiet = false): Promise<boolean> {
+		if (!quiet) this.busy = doing;
 		this.error = null;
 		try {
 			const res = await this.app.analysis.request<{ fit: FitStateView }>(method, params, { timeoutMs: RUN_TIMEOUT_MS });
@@ -1094,7 +1095,7 @@ export class FitState {
 			this.error = message(err);
 			return false;
 		} finally {
-			this.busy = null;
+			if (!quiet) this.busy = null;
 		}
 	}
 }
@@ -2115,6 +2116,7 @@ export class AppState {
 		this.runOpen = new RunOpen(runHost);
 		this.runFiles = new RunFiles({
 			request: <R,>(method: string, params: Record<string, unknown>) => this.analysis.request<R>(method, params),
+			control: (method: string, params: Record<string, unknown>) => this.control.request(method, params),
 			desktop: config.mock ? null : desktopRunFiles(),
 			confirm: confirmFirst
 		});

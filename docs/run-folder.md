@@ -254,7 +254,14 @@ and `kurtosis` over the whole run) and each recording's `complete`; its
   or the data folder itself, one reached through a link, one that is not a run
   folder (no `run.json` of the run folder schema), one with a link inside it, a
   run whose `run.json` does not say `complete: true` (still going, or did not
-  end cleanly), and a run whose project file is open.
+  end cleanly) unless the caller says it has established that the run is not
+  live (`not_live`), and a run whose project file is open. The shell
+  establishes it from the control service, asked just before the question and
+  again just before the delete: a run that did not end cleanly is not deleted
+  while its folder is the record of a run the control service reports as live,
+  while a live run has not said which folder it records into, or while the
+  control service cannot be asked. Its confirmation says that the run did not
+  end cleanly and that its record may be partial, beside the two paths.
 
 ## What a Classical Shock Run Saves
 
