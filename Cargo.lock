@@ -2553,6 +2553,7 @@ dependencies = [
  "hertzforge-mixed",
  "hertzforge-mixed-laws",
  "hertzforge-module-abi",
+ "hertzforge-playback",
  "hertzforge-random",
  "hertzforge-random-laws",
  "hertzforge-recorder",
