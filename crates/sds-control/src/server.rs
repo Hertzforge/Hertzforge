@@ -144,7 +144,7 @@ const DRIVE_METHODS: [&str; 56] = [
 
 /// The methods this service serves, for the unknown-method message.
 const METHODS: &str = "session.state, session.claim, session.release, station.list, \
-    station.select, channels.get, channels.set, random.configure, random.arm, random.start, \
+    station.select, channels.get, channels.set, channels.apply, random.configure, random.arm, random.start, \
     random.proceed, random.level, random.mode, random.stop, random.abort, random.reset, \
     random.clear, random.state, random.config, random.log, random.subscribe, mimo_random.setup, \
     mimo_random.validate, mimo_random.start, mimo_random.proceed, mimo_random.override, \
@@ -232,6 +232,10 @@ pub struct ServiceOptions {
     pub twr_engine: Option<crate::twr::engine::EngineFactory>,
     /// How a run's record is written (`docs/run-folder.md`).
     pub record: crate::record::RecordOptions,
+    /// Whether the service keeps its channel table in the data root across restarts
+    /// (`crate::table_keep`). The service itself does; the default is off, so a
+    /// service made in a test reads no table it did not write.
+    pub keep_table: bool,
 }
 
 /// The simulated MIMO driver ([`crate::mimo::sim::SimulatedMimoDriver`]) at `speed`
@@ -292,6 +296,7 @@ impl Default for ServiceOptions {
             srs_engine: None,
             twr_engine: None,
             record: crate::record::RecordOptions::default(),
+            keep_table: false,
         }
     }
 }
@@ -794,6 +799,50 @@ impl Service {
         Service::with_options(ServiceOptions::default())
     }
 
+    /// The table the service starts with: the one it kept, restored and waiting to
+    /// be applied, when it keeps one and the file passes the service's checks;
+    /// otherwise the starting table, with the reason the file was not used.
+    fn starting_table(opts: &ServiceOptions, stations: &Stations) -> Table {
+        let mut table = Table::new();
+        if !opts.keep_table {
+            return table;
+        }
+        let ctx = StationContext {
+            selection: stations.selected(),
+            scan: stations.devices(),
+        };
+        let problem = match crate::table_keep::read(&opts.data_root, &ctx) {
+            Ok(None) => None,
+            Ok(Some(kept)) => {
+                table.revision = kept.revision;
+                table.table = kept.table;
+                table.restored = Some(table::Restored {
+                    source: "kept",
+                    name: crate::table_keep::FILE.into(),
+                    at_unix: kept.saved_unix,
+                });
+                eprintln!(
+                    "sds-control: restored the channel table it kept (revision {}, written {}); \
+                     it arms nothing until the operator applies it",
+                    table.revision,
+                    table::utc_words(kept.saved_unix)
+                );
+                None
+            }
+            Err(why) => {
+                eprintln!("sds-control: {why}; starting with the starting table");
+                Some(format!(
+                    "{why}; the service started with its starting table."
+                ))
+            }
+        };
+        table.keeper = Some(Arc::new(crate::table_keep::Keeper::new(
+            opts.data_root.clone(),
+            problem,
+        )));
+        table
+    }
+
     pub fn with_options(opts: ServiceOptions) -> Arc<Service> {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let (notify, notices) = mpsc::unbounded_channel();
@@ -805,11 +854,13 @@ impl Service {
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
+        let stations = Stations::new(opts.scanner.clone());
+        let table = Self::starting_table(&opts, &stations);
         Arc::new(Service {
             inner: Mutex::new(Inner {
                 session: Session::new(opts.heartbeat, opts.timeout),
-                stations: Stations::new(opts.scanner.clone()),
-                table: Table::new(),
+                stations,
+                table,
                 random: None,
                 runs: 0,
                 mimo: None,
@@ -1768,6 +1819,7 @@ impl Service {
                 Ok(inner.table.get(&inner.ctx()))
             }
             "channels.set" => self.channels_set(conn, params).await,
+            "channels.apply" => self.channels_apply(conn, params).await,
 
             "random.arm" => self.random_arm(conn, params, false).await,
             "random.start" => self.random_arm(conn, params, true).await,
@@ -2151,6 +2203,7 @@ impl Service {
             .get("channels")
             .ok_or_else(|| MethodError::bad_params("channels", "A table edit carries its rows."))?;
         let table = table::parse_rows(channels)?;
+        let source = table::parse_source(params)?;
         let dry_run = protocol::param_bool(params, "dry_run")?.unwrap_or(false);
         let mut inner = self.inner.lock().await;
         let report = table::validate(&table, &inner.ctx());
@@ -2174,10 +2227,58 @@ impl Service {
         if !report.errors.is_empty() {
             return Err(table_invalid(&report, "so it was not written"));
         }
+        let now = unix_ms() as f64 / 1000.0;
         inner.table.table = table;
         inner.table.revision += 1;
+        // A table from a project or a file is restored until the operator applies
+        // it; one typed or edited in this session is applied as it is set.
+        inner.table.restored = source.map(|(kind, name)| table::Restored {
+            source: kind,
+            name,
+            at_unix: now,
+        });
+        inner.table.keep(now);
         self.emit("channels.changed", inner.table.get(&inner.ctx()));
         Ok(json!({"revision": inner.table.revision, "report": report.to_json()}))
+    }
+
+    /// `channels.apply`: the operator applies the restored table they were shown.
+    async fn channels_apply(
+        &self,
+        conn: &Conn,
+        params: &Map<String, Value>,
+    ) -> Result<Value, MethodError> {
+        let revision = params
+            .get("revision")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                MethodError::bad_params(
+                    "revision",
+                    "Applying a table names the revision the operator was shown.",
+                )
+            })?;
+        let mut inner = self.inner.lock().await;
+        inner.session.require_controller(conn.id)?;
+        inner.run_active()?;
+        let report = table::validate(&inner.table.table, &inner.ctx());
+        if !report.errors.is_empty() {
+            return Err(table_invalid(&report, "so it cannot be applied"));
+        }
+        let was = inner.table.apply(revision)?;
+        eprintln!(
+            "sds-control: {} applied the channel table (revision {}, {} rows) restored from {} \
+             at {}",
+            conn.peer,
+            inner.table.revision,
+            inner.table.table.channels.len(),
+            was.words(),
+            table::utc_words(was.at_unix)
+        );
+        self.emit("channels.changed", inner.table.get(&inner.ctx()));
+        Ok(
+            json!({"revision": inner.table.revision, "applied": was.to_json(),
+                  "report": report.to_json()}),
+        )
     }
 
     // ---- Random -------------------------------------------------------------------
@@ -2366,6 +2467,7 @@ impl Service {
 
     /// What a run arms on now: the current table and the selected station.
     fn arm_context(&self, inner: &Inner, run: &RandomRun) -> Result<ArmContext, MethodError> {
+        inner.table.arm_gate()?;
         let report = table::validate(&inner.table.table, &inner.ctx());
         if !report.errors.is_empty() {
             return Err(table_invalid(

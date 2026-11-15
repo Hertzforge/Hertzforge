@@ -78,6 +78,10 @@
     "streams": "on"
   },
   "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "f9fbecbb59781c85767e4da0f91ab248aa04e5048c1cbb128632d5b175f2800b"
+  },
   "streams": [
     {
       "name": "inputs",

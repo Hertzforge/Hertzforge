@@ -283,6 +283,7 @@ impl Service {
                     "A simulation is running; stop it first.",
                 ));
             }
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(

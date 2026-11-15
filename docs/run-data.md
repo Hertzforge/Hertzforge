@@ -112,6 +112,20 @@ shown in its words. Beside Arm, the screen says where the setup came from (typed
 setup by name, a run by its id) until the operator edits it. The origin is kept in the shell and
 in the saved setup; it does not reach a run's record.
 
+## The Channel Table's Home
+
+The project is where a channel table lives; the control service holds the one a run arms with.
+Acquire's channel table has Use the Project's Channel Table and Send Table to Project
+(`project.channel_table` and `project.put_channel_table` in `schema/PROTOCOL.md`). Both go through
+the one mapping, in Python, carry every analysis column and the table's control loops, and show the
+operator every row that would change before anything is taken. A table taken from the project, or
+opened from a file, reaches the control service with its source and is checked there as a typed
+table is; the service holds it restored, and no module arms on it until the operator has reviewed
+its rows and applied it ("Restored Tables" in `schema/PROTOCOL.md`). The service keeps its last
+table in the data folder beside the runs and restores it at start the same way. A run's `run.json`
+names the table it used by revision and SHA-256 (`channel_table`, `docs/run-folder.md`), and the
+run record carries both.
+
 ## Seed, Do Not Retype
 
 Where an analysis object can supply a setup input (a profile from a specification, a channel table

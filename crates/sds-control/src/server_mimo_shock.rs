@@ -254,6 +254,7 @@ impl Service {
         let w = run.wire.clone();
         let (tbl, station_plan, hardware, revision, devices) = {
             let inner = self.inner.lock().await;
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(

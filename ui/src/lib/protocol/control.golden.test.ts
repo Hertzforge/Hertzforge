@@ -55,7 +55,12 @@ const TEXT = [
 	'request_random_subscribe',
 	'response_random_subscribe',
 	'response_error_controller_held',
-	'response_error_table_invalid'
+	'response_error_table_invalid',
+	'request_channels_set_restored',
+	'response_channels_get_restored',
+	'response_error_table_not_applied',
+	'request_channels_apply',
+	'response_channels_apply'
 ];
 
 describe('random.live golden', () => {

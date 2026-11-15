@@ -72,6 +72,7 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.sav
                    'project.mesh_size', 'project.journal',
                    'project.show', 'project.actions',
                    'project.setups', 'project.save_setup', 'project.open_setup',
+                   'project.channel_table', 'project.put_channel_table',
                    'project.seeds', 'project.seed')
 
 #: the largest frame a client may send; requests are small
@@ -358,6 +359,13 @@ class Connection:
         if method == 'project.save_setup':
             _only(params, ('name', 'setup', 'replace'), method)
             name = await call(projects.save_setup, self.project, params)
+            return {'name': name, 'project': projects.summary(self.project)}
+        if method == 'project.channel_table':
+            _only(params, ('name',), method)
+            return await call(projects.channel_table, self.project, params)
+        if method == 'project.put_channel_table':
+            _only(params, ('name', 'channels', 'environments', 'replace'), method)
+            name = await call(projects.put_channel_table, self.project, params)
             return {'name': name, 'project': projects.summary(self.project)}
         if method == 'project.open_setup':
             _only(params, ('name',), method)

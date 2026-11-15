@@ -27,6 +27,7 @@ import type {
 	Alarm,
 	BandDb,
 	ChannelRow,
+	RestoredTable,
 	ChannelsSetParams,
 	ClockDomain,
 	ControlParams,
@@ -68,7 +69,7 @@ import type {
 	ValidationReport,
 	View
 } from '../types';
-import { MockConnection, MockError, type MockServer } from './socket';
+import { MockConnection, MockError, type MockMethod, type MockServer } from './socket';
 import { createShockMock } from './shock';
 import { createSrsMock } from './srs';
 import { createSineMock } from './sine';
@@ -1052,6 +1053,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	const scannedAt = Math.floor(Date.now() / 1000);
 	let revision = 1;
 	let rows: ChannelRow[] = [newRow(1, 'Control', 'control', 'g'), newRow(2, 'Drive', 'drive', 'V')];
+	/** Set while the table came from a project or a file and the operator has not applied it. */
+	let restored: RestoredTable | null = null;
 
 	const niClass = (): StationClass => (niReal ? 'ni_real' : 'ni_simulated');
 	const simStation: SimStation = { kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: SIM_INPUTS, outputs: SIM_OUTPUTS, clock: 'shared' };
@@ -1090,7 +1093,35 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const stationList = (): StationList => ({ stations: [simStation, niStation()], selected: selected() });
 	const tableReport = () => validateTable(rows, selection, scan);
-	const channelsResult = () => ({ revision, channels: structuredClone(rows), report: tableReport() });
+	const channelsResult = () => ({ revision, channels: structuredClone(rows), report: tableReport(), ...(restored ? { restored: { ...restored } } : {}) });
+
+	const utcWords = (unix: number) => `${new Date(Math.floor(unix) * 1000).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+	const sourceWords = (r: RestoredTable) => (r.source === 'kept' ? `the table this service kept (${r.name})` : r.source === 'project' ? `the project table "${r.name}"` : `the file "${r.name}"`);
+
+	/** The one check every arm, and every start that arms, makes, as the service's `Table::arm_gate`. */
+	function tableGate() {
+		if (!restored) return;
+		refuse('refused', 'table_not_applied', `The channel table (revision ${revision}) was restored from ${sourceWords(restored)} at ${restored.at} and has not been applied; review it and apply it before arming.`, {
+			revision,
+			restored: { ...restored }
+		});
+	}
+
+	/** The arms and the starts that arm, each held behind the one table check. */
+	const GATED = ['random.arm', 'random.start', 'shock.arm', 'shock.start', 'srs.arm', 'srs.start', 'sine.arm', 'sine.start', 'mixed.arm', 'mixed.start', 'twr.arm', 'twr.start', 'explorer.start', 'recorder.start', 'mimo_shock.arm', 'mimo_shock.start'];
+	function gated(methods: Record<string, MockMethod>): Record<string, MockMethod> {
+		const out: Record<string, MockMethod> = { ...methods };
+		for (const name of GATED) {
+			const handler = out[name];
+			if (!handler) continue;
+			out[name] = (params, conn) => {
+				own(conn);
+				tableGate();
+				return handler(params, conn);
+			};
+		}
+		return out;
+	}
 
 	// ---- the Random run -----------------------------------------------------------------------
 	let random: RandomRun | null = null;
@@ -1871,7 +1902,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				sessionChanged();
 			}
 		},
-		methods: {
+		methods: gated({
 			...shock.methods,
 			...srs.methods,
 			...sine.methods,
@@ -1991,6 +2022,10 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				}
 				const bad = badRowParam(p.channels);
 				if (bad) refuse('bad_request', 'bad_params', `A channel row is not well formed at ${bad}.`, { param: bad });
+				const source = p.source ?? null;
+				if (source !== null && (typeof source !== 'object' || (source.kind !== 'project' && source.kind !== 'file') || typeof source.name !== 'string' || !source.name.trim())) {
+					refuse('bad_request', 'bad_params', '"source" is {"kind": "project" or "file", "name": the table\'s or the file\'s name}.', { param: 'source' });
+				}
 				const report = validateTable(p.channels, selection, scan);
 				if (p.dry_run) return { revision, report };
 				own(conn);
@@ -2006,8 +2041,25 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				}
 				rows = structuredClone(p.channels);
 				revision += 1;
+				const now = Date.now() / 1000;
+				restored = source ? { source: source.kind, name: source.name.trim(), at_unix: now, at: utcWords(now) } : null;
 				broadcast('channels.changed', channelsResult());
 				return { revision, report };
+			},
+			'channels.apply': (params, conn) => {
+				if (typeof params.revision !== 'number') refuse('bad_request', 'bad_params', 'Applying a table names the revision the operator was shown.', { param: 'revision' });
+				own(conn);
+				notWhileLive('applying the channel table');
+				if (params.revision !== revision) {
+					refuse('refused', 'stale_revision', `The table changed since revision ${String(params.revision)} (it is now ${revision}); read it again and review it before applying.`, { current: revision, provided: params.revision });
+				}
+				if (!restored) refuse('refused', 'nothing_to_apply', `The channel table (revision ${revision}) is not a restored table; it is already applied.`);
+				const report = tableReport();
+				if (report.errors.length > 0) refuse('bad_request', 'table_invalid', `The channel table has ${report.errors.length} error(s), so it cannot be applied.`, { ...report });
+				const applied = { ...(restored as RestoredTable) };
+				restored = null;
+				broadcast('channels.changed', channelsResult());
+				return { revision, applied, report };
 			},
 
 			// ---- Random -------------------------------------------------------------------------
@@ -2183,6 +2235,6 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const since = typeof params.since === 'number' ? Math.max(0, Math.floor(params.since)) : 0;
 				return { entries: log.slice(since), next: log.length };
 			}
-		}
+		})
 	};
 }

@@ -48,6 +48,8 @@ import { byField, configKey, defaultSetup, errorCount, fromConfig, localErrors, 
 import { bindUnbound, bulkEdit, fitToHardware, hardwareKey, hardwareOf, materialize, moveOnto, nextIndex, newRow, rowFindings, sameRows, sizeTable, tableChanges, type Hardware, type RowEdit } from './table';
 import type { ChannelEnvironment, TableData, TableFileClient } from '$lib/tables/tableFiles';
 import { toRefusal, type Refusal } from './words';
+import type { ChannelsApplyResult, ProjectChannelTable, ProjectSummary, RestoredTable, TableSource } from '$lib/protocol/types';
+import { fileSource, whatChanges } from './tableHome';
 
 const LEASE_KEY = 'hertzforge.acquire.lease';
 const SETUP_KEY = 'hertzforge.acquire.setup.v1';
@@ -94,6 +96,37 @@ export interface AcquireOptions {
 	drafts?: boolean;
 	/** The analysis service, which reads and writes the channel table's files. */
 	tables?: TableFileClient | null;
+	/** Told the project's summary after a table is sent to the project. */
+	onProject?: (summary: ProjectSummary) => void;
+}
+
+/** A table on its way between the project and the control service, shown before it is taken. */
+export interface TableHomeReview {
+	/** `use`: the project's table to the service; `send`: the service's table to the project. */
+	direction: 'use' | 'send';
+	/** The project table's name. */
+	name: string;
+	/** The rows that would be taken. */
+	rows: ChannelRow[];
+	/** The control loops that go with them. */
+	environments: Record<string, ChannelEnvironment>;
+	/** What would change, one line per channel. */
+	changes: string[];
+	/** The project's channel tables, when it holds several. */
+	tables: string[];
+	/** The analysis side's words about the table read. */
+	warnings: string[];
+	/** The control service's check of the rows (`use` only): its errors refuse the table. */
+	report: ValidationReport | null;
+	/** `send`: the project already holds a table by this name, and sending replaces it. */
+	replaces: boolean;
+}
+
+let latestAcquire: AcquireState | null = null;
+
+/** The window's channel table state, for the notes beside every test's Arm. */
+export function acquireTable(): AcquireState | null {
+	return latestAcquire;
 }
 
 function storageOf(kind: 'sessionStorage' | 'localStorage'): Storage | null {
@@ -187,6 +220,17 @@ export class AcquireState {
 	tableEnvironments = $state.raw<Record<string, ChannelEnvironment>>({});
 	/** The file the table was last opened from or saved to. */
 	tableFile = $state<string | null>(null);
+	/**
+	 * Where the draft came from when it was read from a file or the project: it is sent with that
+	 * source, and the service holds it restored until the operator applies it. Null for a table
+	 * typed here.
+	 */
+	draftSource = $state.raw<TableSource | null>(null);
+	/** A table between the project and the service, shown before it is taken. */
+	homeReview = $state.raw<TableHomeReview | null>(null);
+	/** Why the last move between the project and the service did not happen, in the service's words. */
+	homeProblem = $state<string | null>(null);
+	private readonly onProject: ((summary: ProjectSummary) => void) | null;
 	/** The hardware the draft was last fitted to (`hardwareKey`); null until the service first says. */
 	private fittedFor: string | null = null;
 	/** The control loops as they were when this screen last applied the table. */
@@ -254,6 +298,8 @@ export class AcquireState {
 		this.checkDelayMs = options.checkDelayMs ?? 250;
 		this.drafts = options.drafts ?? true;
 		this.tableFiles = options.tables ?? null;
+		this.onProject = options.onProject ?? null;
+		latestAcquire = this;
 		this.lease = read(this.sessionStore, LEASE_KEY);
 		this.setup = loadSetup(this.localStore);
 		this.baseKey = read(this.localStore, BASE_KEY) ?? configKey(toConfig(defaultSetup()));
@@ -343,6 +389,16 @@ export class AcquireState {
 	/** The sample rate the run asks for, for the size its streams take. */
 	get recordRateHz(): number {
 		return this.setup.acquisition.fs_hz;
+	}
+
+	/** The service's table came from the kept file, a project or a file and is not applied. */
+	get restored(): RestoredTable | null {
+		return this.server?.restored ?? null;
+	}
+
+	/** Why the service did not use, or could not write, the table it keeps across restarts. */
+	get keptProblem(): string | null {
+		return this.server?.kept_problem ?? null;
 	}
 
 	get tableErrorCount(): number {
@@ -714,6 +770,7 @@ export class AcquireState {
 		this.rows = structuredClone($state.snapshot(table.channels) as ChannelRow[]);
 		this.tableEnvironments = table.environments ?? {};
 		if (path !== null) this.tableFile = path;
+		this.draftSource = fileSource(path ?? 'a table file');
 	}
 
 	/** Bind the unbound rows to the selected devices' free channels, in order. */
@@ -730,6 +787,7 @@ export class AcquireState {
 		if (!this.server) return;
 		this.adoptTable(this.server);
 		this.restoreEnvironments();
+		this.draftSource = null;
 	}
 
 	/** Drop this screen's edits and load the service's table (after it changed underneath). */
@@ -737,6 +795,7 @@ export class AcquireState {
 		if (!this.server) return;
 		this.adoptTable(this.server);
 		this.restoreEnvironments();
+		this.draftSource = null;
 	}
 
 	/** The control loops that go with the table this screen last applied, not with a file since dropped. */
@@ -756,7 +815,8 @@ export class AcquireState {
 
 	async applyTable(): Promise<boolean> {
 		const rows = $state.snapshot(this.rows) as ChannelRow[];
-		const res = await this.act<ChannelsSetResult>('Apply Table', 'channels.set', { revision: this.base, channels: rows });
+		const source = this.draftSource;
+		const res = await this.act<ChannelsSetResult>('Apply Table', 'channels.set', { revision: this.base, channels: rows, ...(source ? { source } : {}) });
 		if (!res) {
 			const r = this.refusal;
 			if (r?.reason === 'stale_revision') await this.showServerChange();
@@ -769,8 +829,149 @@ export class AcquireState {
 		this.tableCheck = res.report;
 		this.tableChange = null;
 		this.appliedEnvironments = this.tableEnvironments;
-		this.note = { tone: 'pass', text: `Channel table applied (revision ${res.revision}).` };
+		this.draftSource = null;
+		this.note = source
+			? { tone: 'warn', text: `Channel table sent (revision ${res.revision}). It came from ${source.kind === 'project' ? 'the project' : 'a file'}, so it is restored until you review and apply it; no run arms on it before then.` }
+			: { tone: 'pass', text: `Channel table applied (revision ${res.revision}).` };
+		// the service's own word on what it now holds, restored or not
+		void this.showServerTable();
 		return true;
+	}
+
+	private async showServerTable() {
+		try {
+			const t = await this.control.request<ChannelTable>('channels.get');
+			if (t.revision === this.base) this.server = t;
+		} catch {
+			/* the next channels.changed says the same */
+		}
+	}
+
+	/**
+	 * The operator applies the restored table they reviewed, at the revision shown. Applying
+	 * changes no value; it lets runs arm on the table.
+	 */
+	async applyRestored(): Promise<boolean> {
+		const t = this.server;
+		if (!t?.restored) return false;
+		const res = await this.act<ChannelsApplyResult>('Apply Restored Table', 'channels.apply', { revision: t.revision });
+		if (!res) {
+			if (this.refusal?.reason === 'stale_revision') await this.showServerChange();
+			return false;
+		}
+		this.server = { ...t, restored: undefined, report: res.report };
+		this.note = { tone: 'pass', text: `Channel table revision ${res.revision} applied; runs may arm on it.` };
+		return true;
+	}
+
+	// ---- the project as the table's home ---------------------------------------------------
+
+	private async projectTable(name: string | null): Promise<ProjectChannelTable> {
+		if (!this.tableFiles) throw new Error('No analysis service is connected, so there is no project to read.');
+		return this.tableFiles.request<ProjectChannelTable>('project.channel_table', name ? { name } : {});
+	}
+
+	/** Read the project's channel table and show what taking it would change; nothing is taken yet. */
+	async reviewProjectTable(name: string | null = null): Promise<boolean> {
+		this.homeProblem = null;
+		this.homeReview = null;
+		try {
+			const t = await this.projectTable(name);
+			const rows = t.channels;
+			const check = await this.control.request<ChannelsSetResult>('channels.set', { revision: this.base, channels: rows, dry_run: true });
+			this.homeReview = {
+				direction: 'use',
+				name: t.name,
+				rows,
+				environments: t.environments as Record<string, ChannelEnvironment>,
+				changes: whatChanges(this.server?.channels ?? null, rows),
+				tables: t.tables,
+				warnings: t.warnings,
+				report: check.report,
+				replaces: false
+			};
+			return true;
+		} catch (err) {
+			this.homeProblem = `The project's channel table was not read: ${toRefusal('Use the Project\'s Channel Table', err).message}`;
+			return false;
+		}
+	}
+
+	/**
+	 * Take the reviewed project table: it replaces the draft and is sent with the project as its
+	 * source, so the service holds it restored until the operator applies it.
+	 */
+	async takeProjectTable(): Promise<boolean> {
+		const r = this.homeReview;
+		if (!r || r.direction !== 'use') return false;
+		if (r.report && r.report.errors.length > 0) {
+			this.homeProblem = `The control service refuses this table: ${r.report.errors.map((e) => e.message).join('; ')}`;
+			return false;
+		}
+		this.rows = structuredClone(r.rows);
+		this.tableEnvironments = r.environments;
+		this.draftSource = { kind: 'project', name: r.name };
+		this.homeReview = null;
+		const ok = await this.applyTable();
+		if (!ok && this.refusal) this.homeProblem = this.refusal.message;
+		return ok;
+	}
+
+	/** Show what sending the service's table to the project would change; nothing is sent yet. */
+	async reviewSendToProject(name: string | null = null): Promise<boolean> {
+		this.homeProblem = null;
+		this.homeReview = null;
+		const t = this.server;
+		if (!t) return false;
+		let present: ProjectChannelTable | null = null;
+		try {
+			present = await this.projectTable(name);
+		} catch (err) {
+			const r = toRefusal('Send Table to Project', err);
+			if (r.code !== 'not_found') {
+				this.homeProblem = `The project's channel table was not read: ${r.message}`;
+				return false;
+			}
+		}
+		const target = present?.name ?? name ?? 'Channel Table';
+		this.homeReview = {
+			direction: 'send',
+			name: target,
+			rows: structuredClone(t.channels),
+			environments: (present?.environments as Record<string, ChannelEnvironment> | undefined) ?? this.tableEnvironments,
+			changes: whatChanges(present?.channels ?? null, t.channels),
+			tables: present?.tables ?? [],
+			warnings: present?.warnings ?? [],
+			report: null,
+			replaces: present !== null
+		};
+		return true;
+	}
+
+	/** Send the reviewed table, every analysis column with it, to the project. */
+	async sendToProject(): Promise<boolean> {
+		const r = this.homeReview;
+		if (!r || r.direction !== 'send' || !this.tableFiles) return false;
+		try {
+			const res = await this.tableFiles.request<{ name: string; project: ProjectSummary }>('project.put_channel_table', {
+				name: r.name,
+				channels: r.rows,
+				environments: r.environments,
+				...(r.replaces ? { replace: true } : {})
+			});
+			if (res.project) this.onProject?.(res.project);
+			this.homeReview = null;
+			this.note = { tone: 'pass', text: `The channel table is in the project as "${res.name}". Save the project to keep it.` };
+			return true;
+		} catch (err) {
+			this.homeProblem = `The table was not sent to the project: ${toRefusal('Send Table to Project', err).message}`;
+			return false;
+		}
+	}
+
+	cancelHome() {
+		this.homeReview = null;
+		this.homeProblem = null;
 	}
 
 	/** Read the table again and show what changed; never retried on the operator's behalf. */

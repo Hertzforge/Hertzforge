@@ -2104,7 +2104,7 @@ export class AppState {
 		this.console = new ConsoleState(this);
 		this.sim = new SimState(this);
 		// A display window observes: it never takes the main window's lease or edits a setup.
-		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis });
+		this.acquire = new AcquireState(this.control, config.popout ? { session: null, local: null, drafts: false } : { tables: this.analysis, onProject: (summary) => this.project.apply(summary) });
 		const runHost = {
 			bring: (folder: string) => this.project.takeRun(folder),
 			show: (workspace: Workspace) => {

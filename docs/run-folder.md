@@ -65,7 +65,11 @@ programmed, the FFT length, averages, line spacing and lines), `build`
 `utc_offset_s`, and `start.station_frame`, the station frame at that instant),
 `streams` and `results` (what the folder holds, each `name` and `kind`, a
 stream also its channels), `recording` (`streams` `on` or `off`, and `why` when
-off) and `complete`, false until the run has ended and `end.json` is written.
+off), `channel_table` (the table the run used: its `revision` and `sha256`, the
+same two `table.json` holds, so a run names its table without opening that
+file; absent from folders written before it) and `complete`, false until the
+run has ended and `end.json` is written. The converter carries `channel_table`
+into the run record (`RunRecord.table_revision`, `RunRecord.table_sha256`).
 
 A Recorder run's manifest has no `armed` (its `start` is when acquisition
 began), adds `metadata` (the fields its setup names, each `key`, `label` and

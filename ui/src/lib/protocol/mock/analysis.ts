@@ -51,6 +51,8 @@ const tableKindWords = (k: string) => TABLE_KIND_WORDS[k] ?? `a ${k.replace(/_/g
 
 export function createAnalysisServer(): MockServer {
 	const files = new Map<string, StoredTable>();
+	/** The project's channel tables by name, as the control service's rows and their control loops. */
+	const projectTables = new Map<string, { channels: unknown[]; environments: unknown }>();
 	return {
 		hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: '0.1.0-mock' },
 		methods: {
@@ -79,6 +81,25 @@ export function createAnalysisServer(): MockServer {
 				if (typeof params.y_unit === 'string') stored.y_unit = params.y_unit;
 				files.set(path, stored);
 				return { path };
+			},
+			// the project as the channel table's home: kept in memory, the rows as given
+			'project.channel_table': (params) => {
+				const names = [...projectTables.keys()];
+				const name = typeof params.name === 'string' ? params.name : names.length === 1 ? names[0] : null;
+				if (name === null && names.length > 1) throw new MockError('refused', `the project holds ${names.length} channel tables (${names.join(', ')}); name one`);
+				if (name === null) throw new MockError('not_found', 'the project holds no channel table');
+				const held = projectTables.get(name);
+				if (!held) throw new MockError('not_found', `the project has no object named '${name}'`);
+				return { name, channels: structuredClone(held.channels), tables: names, environments: structuredClone(held.environments), warnings: [] };
+			},
+			'project.put_channel_table': (params) => {
+				const name = typeof params.name === 'string' ? params.name.trim() : '';
+				if (!name) throw new MockError('bad_request', 'project.put_channel_table needs "name", an object\'s name');
+				if (!Array.isArray(params.channels)) throw new MockError('bad_request', "project.put_channel_table: a channel table's \"channels\" is a list of rows");
+				if (projectTables.has(name) && params.replace !== true) throw new MockError('refused', `the project already holds an object named '${name}'; choose another name or replace a channel table`);
+				const environments = params.environments ?? projectTables.get(name)?.environments ?? {};
+				projectTables.set(name, { channels: structuredClone(params.channels), environments: structuredClone(environments) });
+				return { name, project: { title: 'Mock Project', file: null, modified: true, objects: [] } };
 			},
 			'tables.load': (params) => {
 				const path = tablePath(params.path);
