@@ -227,6 +227,7 @@
         }},
         "modes": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "node_ids": {"$ref": "#/$defs/arrayRef"},
+        "home": {"type": "object", "required": ["eye", "up"], "properties": {"eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "up": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}}},
         "cursor": {"const": "frequency"},
         "marks": {
           "type": "object", "required": ["nodes", "lines"],

@@ -66,7 +66,11 @@ def _number(params: Mapping[str, Any], key: str, method: str) -> float:
 def start(project: Any, params: Mapping[str, Any]) -> Fit:
     """`fit.start`: a session on the FRF `frf`, on the `records` picked when
     given, from the shape set `shapes` when given (Edit Fit), on the records
-    that set holds."""
+    that set holds. Its least squares is weighted by the coherence `coherence`
+    names, or else by the one the project chooses (`Project.fit_coherence`),
+    with nothing to choose, as the earlier toolset weighted a fit (Brandon,
+    2026-11-14); none when no coherence covers the fit's responses, or when
+    `coherence` is empty."""
     from hertzforge.core.data import Frf
     from hertzforge.core.modal_fit import ModalFitSession, adoptable_records, fit_refusal
     from hertzforge.core.shapes import ShapeSet
@@ -89,8 +93,11 @@ def start(project: Any, params: Mapping[str, Any]) -> Fit:
         raise refused(f'{name} has records 0 to {project[name].num_records - 1}; '
                       f'not {records!r}')
     coherence = params.get('coherence')
-    if coherence is not None and (not isinstance(coherence, str) or coherence not in project
-                                  or kind_of(project[coherence]) not in COHERENCES):
+    unweighted = coherence == ''
+    if unweighted:
+        coherence = None
+    elif coherence is not None and (not isinstance(coherence, str) or coherence not in project
+                                    or kind_of(project[coherence]) not in COHERENCES):
         raise refused(f'{coherence!r} is not a coherence in the project')
     try:
         if shapes is not None:
@@ -100,8 +107,12 @@ def start(project: Any, params: Mapping[str, Any]) -> Fit:
             if why:
                 raise refused(why)
             records = adoptable_records(project[name], project[shapes], records)
+        if coherence is None and not unweighted:
+            coherence = project.fit_coherence(name, records)
         session = ModalFitSession(project[name], records=records, coherence=None if coherence is None
                                   else project[coherence])
+        if session.weights is None:
+            coherence = None
         if shapes is not None:
             session.adopt(project[shapes])
     except ValueError as error:
