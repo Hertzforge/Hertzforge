@@ -33,7 +33,8 @@ REQUESTS = {'random': ('request_random_configure', 'randomConfigureParams'),
             'explorer': ('request_explorer_configure', 'explorerConfigureParams'),
             'recorder': ('request_recorder_configure', 'recorderConfigureParams'),
             'mimo_random': ('request_mimo_random_setup', 'mimoSetupParams'),
-            'mimo_shock': ('request_mimo_shock_configure', 'mimoShockConfigureParams')}
+            'mimo_shock': ('request_mimo_shock_configure', 'mimoShockConfigureParams'),
+            'playback': ('request_playback_configure', 'playbackConfigureParams')}
 
 #: the golden run folders, by the module each ran
 GOLDEN_RUNS = sorted(p.name for p in RUNS.iterdir() if (p / 'setup.json').exists())

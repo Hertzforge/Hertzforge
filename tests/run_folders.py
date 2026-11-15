@@ -426,3 +426,86 @@ def unfinished_run(folder: str, frames: int = 2048) -> str:
     with open(os.path.join(folder, 'log.jsonl'), 'ab') as f:
         f.write(b'{"seq": 6, "at_unix": 17942')
     return folder
+
+
+#: a Playback run's drive folder, as its setup names it
+PLAYBACK_DRIVE = {'folder': '/home/someone/Hertzforge_Data/drives/sweep',
+                  'sha256': 'd' * 64}
+
+
+def playback_run(folder: str, pre: int = 512, play: int = 2048, post: int = 1024) -> str:
+    """A Playback run, as `docs/run-folder.md` lays a run out: two inputs
+    and two drives as continuous streams over the pre-roll, the play and
+    the post-roll; the drive file named in the setup with its pinned
+    SHA-256 and sidecar; the check report (`playback_check`, per drive
+    row, with envelopes) and the outcome (`playback_outcome`, words only)
+    as results; and a log of the run's events."""
+    rows = [row(1, 'monitor', description='Table top', extra={'node': '1', 'direction': 'Z+'}),
+            row(2, 'monitor', description='Fixture', extra={'node': '2', 'direction': 'X+'}),
+            row(3, 'drive', 'V', description='Shaker 1',
+                physical={'device': 'Dev1', 'channel': 'ao0'}),
+            row(4, 'drive', 'V', description='Shaker 2',
+                physical={'device': 'Dev1', 'channel': 'ao1'}),
+            row(5, 'monitor', enabled=False, description='Spare', physical=None)]
+    sidecar = {'format': 'hertzforge-drive', 'version': 1, 'rate_hz': FS, 'samples': play,
+               'channels': [{'name': 'Drive 1', 'unit': 'V', 'source': 'column:2'},
+                            {'name': 'Drive 2', 'unit': 'V', 'source': 'column:3'}],
+               'sha256': PLAYBACK_DRIVE['sha256'],
+               'source': {'path': '/home/someone/tests/sweep.csv', 'sha256': 'e' * 64,
+                          'format': 'delimited',
+                          'selections': [{'signal': 'column:2', 'name': 'Drive 1'},
+                                         {'signal': 'column:3', 'name': 'Drive 2'}]},
+               'fixes': [], 'tool': 'hertzforge 0.0.0', 'created_utc': '2026-11-15T00:00:00Z'}
+    config = {'title': 'Golden playback',
+              'drive': dict(PLAYBACK_DRIVE),
+              'map': [3, 4], 'level_db': -12.0, 'ceiling_v': 5.0, 'pre_roll_s': pre / FS,
+              'post_roll_s': post / FS, 'capture': {'run_name': 'playback'}}
+    setup = {'config': config,
+             'resolved': {'drive': sidecar, 'rate_hz': FS, 'level': 10 ** (-12 / 20)},
+             'derived': {'frames': pre + play + post}}
+    frames = pre + play + post
+    drive = np.zeros((frames, 2), dtype=np.float32)
+    drive[pre:pre + play] = _wave(play, 2) * np.float32(10 ** (-12 / 20))
+    first = 1000
+    common = {'fs_hz': FS, 'first_station_frame': first, 'frames': frames, 'gaps': [],
+              'complete': True, 'fault': None}
+    peaks = np.array([0.5, 0.75])
+    check = {'kind': 'playback_check', 'channels': [3, 4], 'passed': True,
+             'drive': dict(PLAYBACK_DRIVE),
+             'checks': [{'channel': 3, 'passed': True, 'reason': ''},
+                        {'channel': 4, 'passed': True, 'reason': ''}],
+             'tolerances': {'ends_of_peak': 0.005, 'velocity_of_peak': 0.01,
+                            'displacement_of_peak': 0.01},
+             'units': {'peak': 'V', 'start': 'V', 'end': 'V', 'velocity_end': 'V s',
+                       'velocity_peak': 'V s', 'displacement_end': 'V s^2',
+                       'displacement_peak': 'V s^2', 'envelope': 'V'}}
+    check_arrays = {'peak': peaks, 'start': np.zeros(2), 'end': np.zeros(2),
+                    'velocity_end': np.array([1e-9, -2e-9]),
+                    'velocity_peak': np.array([2e-3, 1.5e-3]),
+                    'displacement_end': np.array([3e-12, 1e-12]),
+                    'displacement_peak': np.array([1e-5, 4e-6]),
+                    'envelope': np.stack([np.stack([-peaks[c] * np.ones(16),
+                                                    peaks[c] * np.ones(16)]) for c in range(2)])}
+    outcome = {'kind': 'playback_outcome', 'samples_played': play, 'outcome': 'completed',
+               'reason': ''}
+    kinds = [('check', 'the drive file passed its check'), ('state', 'armed'),
+             ('state', 'pre-roll'), ('state', 'playing'), ('state', 'post-roll'),
+             ('state', 'completed')]
+    return write_run(
+        folder, _manifest('playback'), {'revision': 5, 'sha256': 'f' * 64, 'rows': rows},
+        setup,
+        streams={'inputs': ({'kind': 'inputs', 'channels': [{'index': 1, 'unit': 'g'},
+                                                            {'index': 2, 'unit': 'g'}],
+                             **common}, _wave(frames, 2, seed=0.3)),
+                 'drives': ({'kind': 'drives', 'channels': [{'index': 3, 'unit': 'V'},
+                                                            {'index': 4, 'unit': 'V'}],
+                             'output_latency_frames': 0, 'output_latency': 'declared',
+                             **common}, drive)},
+        results={'playback_check': (check, check_arrays, None),
+                 'playback_outcome': (outcome, {}, None)},
+        log=[{'seq': k, 'at_unix': START['unix'] + k, 'frame': first + 256 * k, 'kind': kind,
+              'text': text} for k, (kind, text) in enumerate(kinds)],
+        end={'run_uid': 'uid-playback-0001',
+             'end': {'outcome': 'completed', 'message': 'The drive played to its end.',
+                     'at_s': frames / FS},
+             'at_unix': START['unix'] + 6, 'station_frames': frames})
