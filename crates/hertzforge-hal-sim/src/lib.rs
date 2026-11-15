@@ -72,7 +72,9 @@ pub mod plant;
 pub mod plants;
 
 pub use hertzforge_sdm::{MatrixStack, C64};
-pub use jointed::{JointLaw, JointedMode, JointedPlant, LevelRule, Simulated, Stepper};
+pub use jointed::{
+    JointLaw, JointedMode, JointedPlant, JointedStep, LevelRule, Simulated, Stepper,
+};
 pub use plant::{
     Discretization, FrfPlant, FrfTaps, ModalPlant, ModalSoftening, Mode, ModeResponse, PlantModel,
     ResonatorBank, DEFAULT_FEEDTHROUGH, DEFAULT_FRF_BLOCK_FRAMES, DEFAULT_FRF_MAX_TAPS,

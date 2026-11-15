@@ -94,6 +94,28 @@
 //! the full drive range (10 V) and at a hundred thousand times it, and check the
 //! response against the bound of its small-signal modes.
 //!
+//! # The force between samples, and the equalized step
+//!
+//! The step above is exact for a modal force that goes linearly from one sample to the
+//! next. A drive given as samples of a band-limited signal is not that force: the
+//! linear interpolant of the samples has the samples' spectrum times
+//! `sinc^2(w dt / 2)`, so with [`JointedStep::TriangleHold`] (the default, and the only
+//! step before [`JointedStep::Equalized`] existed) every mode is driven a little less
+//! than the continuous model says, more so toward Nyquist: at 8192 Hz, about 0.4 dB at
+//! 1 kHz and 1.6 dB at 1.9 kHz on a mode's resonance. The direct part of a mode's
+//! acceleration (`u` in `q'' = u - 2 zeta w q' - w^2 q`) is not held, so the departure
+//! is that factor on the restoring part alone.
+//!
+//! [`JointedStep::Equalized`] puts a short linear-phase FIR on each drive ahead of the
+//! modal force, fitted to `1 / sinc^2` up to `band_hz` (and held so the low-frequency
+//! cancellation of a mode's acceleration below its resonance is kept), and delays the
+//! direct part, the residual and the feedthrough by the FIR's half length to match. The
+//! small-signal response is then the continuous model's times a pure delay of
+//! `half_taps` samples on every path ([`JointedPlant::step_delay_samples`]), within
+//! about 0.1 dB to `band_hz`; what is left is the images the hold folds back, which an
+//! equalizer cannot remove. The level rule, the envelope and the step itself are
+//! unchanged, and the FRFs below include the FIR and its delay exactly.
+//!
 //! # What its FRF means
 //!
 //! A level-dependent plant has no single FRF. [`crate::PlantModel::analytic_frf`] of a
@@ -321,6 +343,124 @@ impl LevelRule {
     }
 }
 
+/// How a jointed plant turns the sampled drive into its modes' force (see the module
+/// docs).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum JointedStep {
+    /// The force goes linearly between samples, as before the equalized step existed.
+    /// Earlier results were made with this; it stays the default.
+    #[default]
+    TriangleHold,
+    /// The force is the drive through a `2 half_taps + 1` tap FIR fitted to undo the
+    /// hold up to `band_hz`; every path is delayed `half_taps` samples.
+    Equalized {
+        /// The top of the band the FIR is fitted over, Hz (under the Nyquist frequency).
+        band_hz: f64,
+        /// Half the FIR's length less one, 1 to 16 (2 holds 0.1 dB to 2 kHz at 8192 Hz).
+        half_taps: usize,
+    },
+}
+
+impl JointedStep {
+    /// The equalized step a benchmark structure uses: fitted to `band_hz`, five taps.
+    pub fn equalized(band_hz: f64) -> Self {
+        JointedStep::Equalized {
+            band_hz,
+            half_taps: 2,
+        }
+    }
+
+    fn validate(&self, fs_hz: f64) -> Result<(), String> {
+        match *self {
+            JointedStep::TriangleHold => Ok(()),
+            JointedStep::Equalized { band_hz, half_taps } => {
+                if !(band_hz.is_finite() && band_hz > 0.0 && band_hz < 0.5 * fs_hz) {
+                    return Err(format!(
+                        "the equalized step's band {band_hz} Hz is not between 0 and the \
+                         Nyquist frequency of {fs_hz} Hz"
+                    ));
+                }
+                if !(1..=16).contains(&half_taps) {
+                    return Err(format!(
+                        "the equalized step's half_taps {half_taps} is not between 1 and 16"
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The FIR taps (`2 half_taps + 1`, symmetric) at `fs_hz`, or `None` for the hold.
+    fn taps(&self, fs_hz: f64) -> Option<Vec<f64>> {
+        match *self {
+            JointedStep::TriangleHold => None,
+            JointedStep::Equalized { band_hz, half_taps } => {
+                Some(equalizer_taps(band_hz / fs_hz, half_taps))
+            }
+        }
+    }
+}
+
+/// The symmetric FIR `c[0..=2D]` (centred at `D`) whose zero-phase response
+/// `G(w) = h0 + 2 sum h_k cos(k w)` makes `G(w) sinc^2(w / 2)` one: least squares, in
+/// relative error weighted by `1 / w^2` up to `band` (cycles per sample) so the
+/// cancellation of a mode's acceleration below its resonance is held, and by 0.01 above.
+/// Solved by Householder QR (the columns are nearly parallel at low frequency).
+#[allow(clippy::needless_range_loop)] // Householder QR reads as the textbook does.
+fn equalizer_taps(band: f64, d: usize) -> Vec<f64> {
+    let n_cols = d + 1;
+    let wb = TAU * band;
+    let (n_in, n_out) = (2000usize, 400usize);
+    let mut a: Vec<Vec<f64>> = Vec::with_capacity(n_in + n_out);
+    let mut b: Vec<f64> = Vec::with_capacity(n_in + n_out);
+    for k in 0..n_in + n_out {
+        let (w, wt) = if k < n_in {
+            let w = wb * (k + 1) as f64 / n_in as f64;
+            (w, 1.0 / (w * w))
+        } else {
+            let w = wb + (std::f64::consts::PI - wb) * (k - n_in + 1) as f64 / n_out as f64;
+            (w, 0.01)
+        };
+        let x = 0.5 * w;
+        let s = (x.sin() / x).powi(2);
+        let mut row = vec![s * wt];
+        row.extend((1..=d).map(|j| 2.0 * (j as f64 * w).cos() * s * wt));
+        a.push(row);
+        b.push(wt);
+    }
+    // Householder QR of a (rows x n_cols), applied to b as well.
+    let rows = a.len();
+    for c in 0..n_cols {
+        let norm = (c..rows).map(|r| a[r][c] * a[r][c]).sum::<f64>().sqrt();
+        let alpha = if a[c][c] > 0.0 { -norm } else { norm };
+        let mut v: Vec<f64> = (c..rows).map(|r| a[r][c]).collect();
+        v[0] -= alpha;
+        let vn = v.iter().map(|x| x * x).sum::<f64>();
+        if vn == 0.0 {
+            continue;
+        }
+        for cc in c..n_cols {
+            let dot: f64 = (c..rows).zip(&v).map(|(r, vi)| a[r][cc] * vi).sum();
+            let f = 2.0 * dot / vn;
+            for (r, vi) in (c..rows).zip(&v) {
+                a[r][cc] -= f * vi;
+            }
+        }
+        let dot: f64 = (c..rows).zip(&v).map(|(r, vi)| b[r] * vi).sum();
+        let f = 2.0 * dot / vn;
+        for (r, vi) in (c..rows).zip(&v) {
+            b[r] -= f * vi;
+        }
+    }
+    let mut h = vec![0.0; n_cols];
+    for c in (0..n_cols).rev() {
+        let s: f64 = (c + 1..n_cols).map(|k| a[c][k] * h[k]).sum();
+        h[c] = (b[c] - s) / a[c][c];
+    }
+    // Taps k = 0..=2d, centred at d.
+    (0..=2 * d).map(|k| h[k.abs_diff(d)]).collect()
+}
+
 /// The rule a mode follows: its own, the structure's joint law, or none.
 #[derive(Debug, Clone, Copy)]
 enum ModeRule {
@@ -390,6 +530,9 @@ pub struct JointedPlant {
     /// Each output's own delay, seconds (whole samples plus a fraction at the
     /// configured rate), or empty for none. At most [`MAX_OUTPUT_DELAY_S`].
     pub output_delays_s: Vec<f64>,
+    /// How the sampled drive becomes the modes' force: the triangle hold (default) or
+    /// the equalized step, which matches the continuous model at small signal.
+    pub step: JointedStep,
 }
 
 /// What [`JointedPlant::simulate`] returns.
@@ -424,6 +567,7 @@ impl JointedPlant {
             residual: Vec::new(),
             transport_delay_samples: 0,
             output_delays_s: Vec::new(),
+            step: JointedStep::TriangleHold,
         }
     }
 
@@ -450,6 +594,15 @@ impl JointedPlant {
             .iter()
             .map(|m| m.f_hz * m.level.map_or(1.0, |l| l.max_frequency_factor()))
             .collect()
+    }
+
+    /// The whole samples the step adds to every path (beyond the transport delay): 0 for
+    /// the triangle hold, `half_taps` for the equalized step.
+    pub fn step_delay_samples(&self) -> usize {
+        match self.step {
+            JointedStep::TriangleHold => 0,
+            JointedStep::Equalized { half_taps, .. } => half_taps,
+        }
     }
 
     /// The bound every mode's highest frequency must stay under at `fs_hz`: the Nyquist
@@ -536,6 +689,7 @@ impl JointedPlant {
         if let Some(j) = &self.joint {
             j.validate()?;
         }
+        self.step.validate(fs_hz)?;
         let bound = Self::frequency_bound_hz(fs_hz);
         for (k, (m, top)) in self
             .modes
@@ -603,13 +757,33 @@ impl JointedPlant {
         let (n_in, n_d) = (self.n_inputs, self.n_drives);
         let mut out = MatrixStack::zeros(freqs_hz.len(), n_in, n_d);
         let mut rm = vec![C64::new(0.0, 0.0); self.modes.len()];
+        let taps = self.step.taps(fs_hz);
+        let sd = self.step_delay_samples() as f64;
         for (k, &f) in freqs_hz.iter().enumerate() {
             let om = TAU * f / fs_hz;
             let z = C64::new(om.cos(), om.sin());
             for (r, s) in rm.iter_mut().zip(&steps) {
                 *r = s.response(z);
             }
-            let ph = -om * self.transport_delay_samples as f64;
+            let mut ph = -om * self.transport_delay_samples as f64;
+            if let Some(c) = &taps {
+                // The FIR on the modal force, the step delay on the direct part:
+                // r' e^{-j w D} = e^{-j w D} - FIR(w) (1 - r).
+                let g = c
+                    .iter()
+                    .enumerate()
+                    .fold(C64::new(0.0, 0.0), |acc, (n, &cn)| {
+                        let p = -om * n as f64;
+                        acc + C64::new(cn * p.cos(), cn * p.sin())
+                    });
+                // G e^{j w D} is the FIR's zero-phase response; the delay e^{-j w D} on
+                // every path goes with the transport delay.
+                let g0 = g * C64::new((om * sd).cos(), (om * sd).sin());
+                for r in rm.iter_mut() {
+                    *r = C64::new(1.0, 0.0) - g0 * (C64::new(1.0, 0.0) - *r);
+                }
+                ph -= om * sd;
+            }
             let dl = C64::new(ph.cos(), ph.sin());
             let line = out.line_mut(k);
             for i in 0..n_in {
@@ -919,6 +1093,56 @@ impl FracDelay {
 }
 
 #[derive(Debug, Clone)]
+struct Equalizer {
+    taps: Vec<f64>,
+    d: usize,
+    /// `n_drive` rings of `taps.len()` samples.
+    hist: Vec<f64>,
+    pos: usize,
+    /// The drive through the FIR, per drive.
+    forced: Vec<f64>,
+    /// The drive delayed `d` samples, per drive.
+    direct: Vec<f64>,
+}
+
+impl Equalizer {
+    fn new(taps: Vec<f64>, n_drive: usize) -> Self {
+        let n = taps.len();
+        Equalizer {
+            d: n / 2,
+            hist: vec![0.0; n * n_drive],
+            pos: 0,
+            forced: vec![0.0; n_drive],
+            direct: vec![0.0; n_drive],
+            taps,
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, delayed: &[f64]) {
+        let n = self.taps.len();
+        self.pos = (self.pos + n - 1) % n;
+        for (j, &x) in delayed.iter().enumerate() {
+            let ring = &mut self.hist[j * n..(j + 1) * n];
+            ring[self.pos] = x;
+            let mut acc = 0.0;
+            for (k, &c) in self.taps.iter().enumerate() {
+                acc += c * ring[(self.pos + k) % n];
+            }
+            self.forced[j] = acc;
+            self.direct[j] = ring[(self.pos + self.d) % n];
+        }
+    }
+
+    fn reset(&mut self) {
+        self.hist.fill(0.0);
+        self.forced.fill(0.0);
+        self.direct.fill(0.0);
+        self.pos = 0;
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ModeState {
     w0: f64,
     zeta0: f64,
@@ -950,6 +1174,9 @@ pub(crate) struct JointedRun {
     feedthrough: f64,
     delays: Vec<DelayLine>,
     delayed: Vec<f64>,
+    /// The equalized step: taps, each drive's history (newest first is `hist_pos`), and
+    /// this sample's equalized force and delayed direct drive per drive.
+    eq: Option<Equalizer>,
     clean: Vec<f64>,
     odelays: Vec<FracDelay>,
     rng: Xorshift64,
@@ -1011,6 +1238,7 @@ impl JointedRun {
                 .map(|_| DelayLine::new(p.transport_delay_samples))
                 .collect(),
             delayed: vec![0.0; p.n_drives],
+            eq: p.step.taps(fs_hz).map(|t| Equalizer::new(t, p.n_drives)),
             clean: vec![0.0; p.n_inputs],
             odelays: (0..p.n_inputs)
                 .map(|i| FracDelay::new(p.output_delay_samples(i, fs_hz)))
@@ -1028,10 +1256,17 @@ impl JointedRun {
             *d = line.process(x);
             sum += *d;
         }
+        if let Some(eq) = &mut self.eq {
+            eq.push(&self.delayed);
+            sum = eq.direct.iter().sum();
+        }
+        let direct = self.eq.as_ref().map_or(&self.delayed, |e| &e.direct);
+        let forced = self.eq.as_ref().map_or(&self.delayed, |e| &e.forced);
         self.clean.fill(self.feedthrough * sum);
         for &(i, j, v) in &self.residual {
-            self.clean[i] += v * self.delayed[j];
+            self.clean[i] += v * direct[j];
         }
+        let equalized = self.eq.is_some();
         let (nd, no) = (self.n_drive, self.n_out);
         for (m, st) in self.modes.iter_mut().enumerate() {
             if !matches!(st.rule, ModeRule::Linear) && st.envelope != st.stepped_at {
@@ -1039,12 +1274,15 @@ impl JointedRun {
                 st.step = ModeStep::new(w, z, self.dt);
                 st.stepped_at = st.envelope;
             }
-            let u: f64 = self.phi[m * nd..(m + 1) * nd]
-                .iter()
-                .zip(&self.delayed)
-                .map(|(a, b)| a * b)
-                .sum();
-            let a = st.step.advance(&mut st.q, &mut st.v, st.u_prev, u);
+            let shape = &self.phi[m * nd..(m + 1) * nd];
+            let u: f64 = shape.iter().zip(forced).map(|(a, b)| a * b).sum();
+            let mut a = st.step.advance(&mut st.q, &mut st.v, st.u_prev, u);
+            if equalized {
+                // The direct part of the acceleration is the delayed drive, not the
+                // equalized force.
+                let u_dir: f64 = shape.iter().zip(direct).map(|(a, b)| a * b).sum();
+                a += u_dir - u;
+            }
             st.u_prev = u;
             let amplitude = st.q.hypot(st.v / st.step.w);
             st.envelope = amplitude.max(st.envelope * st.decay);
@@ -1073,6 +1311,9 @@ impl JointedRun {
         }
         self.delays.iter_mut().for_each(DelayLine::reset);
         self.delayed.fill(0.0);
+        if let Some(eq) = &mut self.eq {
+            eq.reset();
+        }
         self.odelays.iter_mut().for_each(FracDelay::reset);
     }
 }

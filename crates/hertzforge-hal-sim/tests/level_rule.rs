@@ -8,7 +8,9 @@ use common::mag;
 use hertzforge_hal::{AcquisitionConfig, Backend};
 use hertzforge_hal_sim::jointed::MAX_DAMPING;
 use hertzforge_hal_sim::plants::ShockPlant;
-use hertzforge_hal_sim::{JointLaw, JointedMode, JointedPlant, LevelRule, PlantModel, SimConfig};
+use hertzforge_hal_sim::{
+    JointLaw, JointedMode, JointedPlant, LevelRule, PlantModel, SimConfig, C64,
+};
 use std::f64::consts::TAU;
 
 const FS: f64 = 12_800.0;
@@ -748,4 +750,192 @@ fn level_rule_linear_and_single_mode() {
     assert_eq!(p.single_mode(1).modes[0].level, p.modes[1].level);
     let f = p.modes_at_envelope(&[0.0, 1.5 * 5e-7, 0.0]);
     assert!((f[1].0 / 420.0 - 1.0675).abs() < 1e-12, "{:?}", f[1]);
+}
+
+// ---------------------------------------------------------------------------------------
+// The equalized step: the small-signal response against the continuous model.
+// ---------------------------------------------------------------------------------------
+
+const FS_BM: f64 = 8192.0;
+
+/// A cross-coupled structure of 30 modes, 25 Hz to 2 kHz, 4 outputs by 2 drives, a mass
+/// line, a three-sample transport delay.
+fn wide_structure(step: hertzforge_hal_sim::JointedStep) -> JointedPlant {
+    let mut s: u64 = 0xB16_B00B5;
+    let modes = (0..30)
+        .map(|k| {
+            let f_hz = 25.0 * (2000.0f64 / 25.0).powf(k as f64 / 29.0);
+            JointedMode {
+                f_hz,
+                zeta: 0.01 + 0.02 * (xorshift(&mut s) + 0.5),
+                input_shape: (0..2).map(|_| 2.0 * xorshift(&mut s)).collect(),
+                output_shape: (0..4).map(|_| 2.0 * xorshift(&mut s)).collect(),
+                reference_amplitude: 1e-4,
+                level: None,
+            }
+        })
+        .collect();
+    JointedPlant {
+        residual: (0..8).map(|_| 0.05 * xorshift(&mut s)).collect(),
+        transport_delay_samples: 3,
+        step,
+        ..JointedPlant::new(4, 2, modes)
+    }
+}
+
+/// The continuous modal model of a jointed plant at small signal: modes
+/// `-w^2 / (w0^2 - w^2 + 2 j zeta w0 w)`, residual, feedthrough, delayed `delay` samples.
+fn continuous(p: &JointedPlant, f: f64, i: usize, j: usize, delay: f64) -> C64 {
+    let w = TAU * f;
+    let mut h = C64::new(
+        p.feedthrough + p.residual.get(i * p.n_drives + j).copied().unwrap_or(0.0),
+        0.0,
+    );
+    for m in &p.modes {
+        let w0 = TAU * m.f_hz;
+        let r = C64::new(-w * w, 0.0) / C64::new(w0 * w0 - w * w, 2.0 * m.zeta * w0 * w);
+        h += r * (m.output_shape[i] * m.input_shape[j]);
+    }
+    let ph = -w * delay / FS_BM;
+    h * C64::new(ph.cos(), ph.sin())
+}
+
+/// `(median, 95th percentile, max)` of the dB error of every element on 20 to 2000 Hz
+/// (1 Hz lines), against the continuous model with the plant's whole delay; and the
+/// largest complex error over each element's peak.
+fn error_to_continuous(p: &JointedPlant, lo: f64, hi: f64) -> (f64, f64, f64, f64) {
+    let freqs: Vec<f64> = (0..=((hi - lo) as usize)).map(|k| lo + k as f64).collect();
+    let h = p.frf_at_envelope(&freqs, FS_BM, &vec![0.0; p.modes.len()]);
+    let delay = (p.transport_delay_samples + p.step_delay_samples()) as f64;
+    let (mut db, mut rel) = (Vec::new(), 0.0f64);
+    for i in 0..p.n_inputs {
+        for j in 0..p.n_drives {
+            let hc: Vec<C64> = freqs
+                .iter()
+                .map(|&f| continuous(p, f, i, j, delay))
+                .collect();
+            let peak = hc.iter().fold(0.0f64, |a, v| a.max(mag(*v)));
+            for (k, c) in hc.iter().enumerate() {
+                let d = h.get(k, i, j);
+                db.push((20.0 * (mag(d) / mag(*c)).log10()).abs());
+                rel = rel.max(mag(d - *c) / peak);
+            }
+        }
+    }
+    db.sort_by(f64::total_cmp);
+    let q = |p: f64| db[((db.len() - 1) as f64 * p).round() as usize];
+    (q(0.5), q(0.95), q(1.0), rel)
+}
+
+/// At small signal the equalized step is the continuous model, delayed: over 20 Hz to
+/// 2 kHz at 8192 Hz, every element of a 30-mode structure within 0.1 dB at the 95th
+/// percentile (0.02 dB median) and within 1 % of the element's peak as a complex error.
+/// The triangle hold, the default, keeps its departure (a median over 0.3 dB in 1 to
+/// 2 kHz).
+#[test]
+fn level_rule_equalized_step_matches_the_continuous_model() {
+    use hertzforge_hal_sim::JointedStep;
+    let hold = wide_structure(JointedStep::TriangleHold);
+    let eq = wide_structure(JointedStep::equalized(2000.0));
+    assert_eq!(eq.step_delay_samples(), 2);
+    for (name, p) in [("hold", &hold), ("equalized", &eq)] {
+        for (lo, hi) in [(20.0, 2000.0), (500.0, 1000.0), (1000.0, 2000.0)] {
+            let (med, p95, max, rel) = error_to_continuous(p, lo, hi);
+            println!(
+                "{name} {lo}-{hi} Hz: |dB| median {med:.4}, p95 {p95:.4}, max {max:.3}; \
+                 complex error {:.3} % of peak",
+                100.0 * rel
+            );
+        }
+    }
+    let (med, p95, _, rel) = error_to_continuous(&eq, 20.0, 2000.0);
+    assert!(med < 0.02 && p95 < 0.1 && rel < 0.01, "{med} {p95} {rel}");
+    let (med_hold, _, _, _) = error_to_continuous(&hold, 1000.0, 2000.0);
+    assert!(med_hold > 0.3, "the hold's departure: {med_hold}");
+}
+
+/// The equalized plant as stepped is the FRF it reports: a steady sine on each drive
+/// through `simulate` against `frf_at_envelope`, within 1e-4 of the element's size (what
+/// is left of the start transient after five seconds).
+#[test]
+fn level_rule_equalized_step_plays_its_frf() {
+    let p = wide_structure(hertzforge_hal_sim::JointedStep::equalized(2000.0));
+    let n = 6 * FS_BM as usize;
+    for f in [37.0, 433.0, 1210.0, 1990.0] {
+        let freqs = [f];
+        let h = p.frf_at_envelope(&freqs, FS_BM, &vec![0.0; p.modes.len()]);
+        for j in 0..p.n_drives {
+            let drives: Vec<Vec<f64>> = (0..p.n_drives)
+                .map(|jj| {
+                    (0..n)
+                        .map(|k| {
+                            if jj == j {
+                                (TAU * f * k as f64 / FS_BM).cos()
+                            } else {
+                                0.0
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            let s = p.simulate(FS_BM, &drives).unwrap();
+            for i in 0..p.n_inputs {
+                // The last second, by correlation with the drive's tone.
+                let (mut re, mut im) = (0.0, 0.0);
+                let m = FS_BM as usize;
+                for k in n - m..n {
+                    let (sn, cs) = (TAU * f * k as f64 / FS_BM).sin_cos();
+                    re += s.outputs[i][k] * cs;
+                    im -= s.outputs[i][k] * sn;
+                }
+                let got = C64::new(2.0 * re / m as f64, 2.0 * im / m as f64);
+                let want = h.get(0, i, j);
+                assert!(
+                    mag(got - want) < 1e-4 * mag(want).max(1e-3),
+                    "{f} Hz, {i} by {j}: played {got:?}, FRF {want:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The level rule is unchanged under the equalized step (a relay dwell of a hardening
+/// mode follows the spec's formula as with the hold), and bad step settings are refused.
+#[test]
+fn level_rule_equalized_step_keeps_the_rule() {
+    use hertzforge_hal_sim::JointedStep;
+    let rule = LevelRule::hardening(0.04, 2.0);
+    let mut p = one(200.0, 0.002, Some(rule));
+    p.step = JointedStep::equalized(2000.0);
+    let (f_small, _) = relay_dwell(&p, 1e-4);
+    for force in [0.35, 1.25] {
+        let (f, r) = relay_dwell(&p, force);
+        let want = spec_factor(&rule, r);
+        assert!(
+            (f / f_small - want).abs() < (0.1 * (want - 1.0)).max(5e-4),
+            "r = {r}: {} against {want}",
+            f / f_small
+        );
+    }
+    for bad in [
+        JointedStep::Equalized {
+            band_hz: 7000.0,
+            half_taps: 2,
+        },
+        JointedStep::Equalized {
+            band_hz: 0.0,
+            half_taps: 2,
+        },
+        JointedStep::Equalized {
+            band_hz: 2000.0,
+            half_taps: 0,
+        },
+        JointedStep::Equalized {
+            band_hz: 2000.0,
+            half_taps: 17,
+        },
+    ] {
+        p.step = bad;
+        assert!(p.validate(FS).is_err(), "{bad:?}");
+    }
 }
