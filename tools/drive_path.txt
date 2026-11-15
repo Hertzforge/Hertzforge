@@ -44,6 +44,7 @@ crates/hertzforge-mimo-shock        multiple-drive shock: growth caps, abort lin
 crates/hertzforge-srs               SRS shock: synthesized pulse, its ceiling and aborts
 crates/hertzforge-twr               time waveform replication: drive ceiling, envelope and divergence aborts
 crates/hertzforge-explorer-host     Explorer: stepped drive, its ceiling, watchdog and stop ramp
+crates/hertzforge-playback          Playback: a drive file played out, its checks, ceiling, underrun abort and stop ramp
 
 # Control laws: they compute the next drive
 crates/hertzforge-law-host          the sandbox law files run in, with their budgets and output checks

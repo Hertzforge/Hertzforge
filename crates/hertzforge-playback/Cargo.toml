@@ -1,0 +1,35 @@
+# hertzforge-playback - Playback, the open-loop multi-drive player of a drive file the
+# operator makes: the native drive file and its reader, the checks before arming, the
+# streaming source, the process step and the run host around the engine.
+#
+# This crate names no hardware backend. It is handed a finished station backend, and
+# the dependency firewall (`cargo deny check bans`) keeps a concrete backend out of it.
+
+[package]
+name = "hertzforge-playback"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# The channel table: the drive rows a file's channels go to and the abort limits.
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# The engine the run ticks: its watchdog reads the table's abort limits on every
+# sample, and its ring is the bounded buffer between the reader and the loop.
+hertzforge-engine = { path = "../hertzforge-engine" }
+# The abstract hal trait crate (never a concrete backend).
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The arm gate.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+serde_json.workspace = true
+# The drive file's SHA-256 (already in the tree for the law host, the references and TWR).
+sha2 = "0.10"
+
+[dev-dependencies]
+# DEV-ONLY: the zero-ends check is held to the shock compensation gate's own pure
+# integrator on a short record.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# DEV-ONLY, and it must stay that way: the run host's tests play files into the
+# simulator. The host takes a finished `Box<dyn Backend>` and never names a backend.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

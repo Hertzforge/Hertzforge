@@ -79,6 +79,7 @@ deny = [
     # Test fixtures only (dev-dependencies).
     "hertzforge-engine",
     "hertzforge-explorer-host",
+    "hertzforge-playback",
     "hertzforge-random",
     "hertzforge-random-laws",
     "hertzforge-shock-laws",
