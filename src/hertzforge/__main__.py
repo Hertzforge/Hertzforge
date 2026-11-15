@@ -1,7 +1,9 @@
 """The ``hertzforge`` command: ``hertzforge --version`` prints the version,
 ``hertzforge serve`` starts the analysis service, ``hertzforge check-solver``
-says which sparse solver this installation factors with, and ``hertzforge
-convert-run FOLDER [-o OUTPUT]`` converts a run folder into a project file."""
+says which sparse solver this installation factors with, ``hertzforge
+convert-run FOLDER [-o OUTPUT]`` converts a run folder into a project file, and
+``hertzforge export-animation PROJECT -o PAGE --geometry NAME ...`` writes a geometry's
+animation as one page that plays offline (`hertzforge.animation`)."""
 
 import argparse
 
@@ -39,6 +41,32 @@ def main(argv: list[str] | None = None) -> int:
              "(<run name>.hforge inside the folder unless -o names another)")
     convert.add_argument("folder", help="the run folder, or the run.json inside it")
     convert.add_argument("-o", "--output", help="the project file to write")
+    export = commands.add_parser(
+        "export-animation",
+        help="write a geometry's animation, drawn by the app's own 3-D view with its "
+             "controls, as one HTML page that plays offline (for an iframe in a presentation)")
+    export.add_argument("project", help="the project file (.hforge)")
+    export.add_argument("-o", "--output", required=True, help="the page to write (.html)")
+    export.add_argument("--geometry", required=True, help="the geometry drawn")
+    export.add_argument("--data", help="data played on it: measured motion, or modal "
+                                       "coordinates through --shapes")
+    export.add_argument("--shapes", help="the shape set: its modes alone, or the one --data's "
+                                         "modal coordinates are of")
+    export.add_argument("--mode", type=int, default=1,
+                        help="the mode the page opens at, from 1, when there is no --data")
+    export.add_argument("--scale", type=float, default=1.0,
+                        help="the amplitude the page opens at, times the app's own (default 1)")
+    export.add_argument("--opacity", type=float, default=1.0,
+                        help="how solid the surface opens, above 0 to 1 (default 1, solid)")
+    export.add_argument("--view", default="iso",
+                        help="the view the page opens looking from: iso (the geometry's own), "
+                             "front, back, left, right, top or bottom (default iso)")
+    export.add_argument("--eye", help="X,Y,Z: the direction from the model to the camera the "
+                                      "page opens with, in place of --view")
+    export.add_argument("--up", help="X,Y,Z: which way is up with --eye (default 0,0,1)")
+    export.add_argument("--theme", choices=("dark", "light"),
+                        help="the app's dark or light look (default: the reader's own)")
+    export.add_argument("--title", help="the page's title (default: the view's)")
     args, rest = parser.parse_known_args(argv)
     if args.command == "convert-run":
         if rest:
@@ -56,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         for lack in done.lacked:
             print(f"the run lacked: {lack}")
         return 0
+    if args.command == "export-animation":
+        if rest:
+            parser.error(f"unrecognized arguments: {' '.join(rest)}")
+        return _export_animation(args)
     if args.command == "serve":
         from hertzforge.service.__main__ import main as serve
 
@@ -69,6 +101,34 @@ def main(argv: list[str] | None = None) -> int:
     if rest:
         parser.error(f"unrecognized arguments: {' '.join(rest)}")
     parser.print_help()
+    return 0
+
+
+def _xyz(text: str | None) -> tuple[float, ...] | None:
+    """`X,Y,Z` as numbers; ValueError, in words, when it is not."""
+    if text is None:
+        return None
+    try:
+        return tuple(float(part) for part in text.split(","))
+    except ValueError:
+        raise ValueError(f"a direction is three numbers, as 1,0,0, not {text!r}") from None
+
+
+def _export_animation(args: argparse.Namespace) -> int:
+    """`hertzforge export-animation`: the project opened and the animation's page written."""
+    from hertzforge.animation import AnimationError, export_animation
+    from hertzforge.project import Project
+
+    try:
+        project = Project.open(args.project)
+        out = export_animation(project, args.output, args.geometry, args.data, args.shapes,
+                               mode=args.mode, scale=args.scale, opacity=args.opacity,
+                               view=args.view, eye=_xyz(args.eye), up=_xyz(args.up),
+                               theme=args.theme, title=args.title)
+    except (AnimationError, OSError, ValueError) as error:
+        print(f"hertzforge export-animation: {error}")
+        return 1
+    print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB)")
     return 0
 
 

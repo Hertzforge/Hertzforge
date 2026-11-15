@@ -32,7 +32,7 @@
 	 * release in one place places a point, picks a node, or leaves a surface out or puts it back, and
 	 * a drag still turns the view.
 	 */
-	import { onDestroy, onMount, type Snippet } from 'svelte';
+	import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
 	import {
 		AmbientLight,
 		BufferAttribute,
@@ -84,6 +84,7 @@
 	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
 	import { splitOnFaces } from './edges';
+	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
 
 	interface Props {
 		view: Shape3DView;
@@ -107,9 +108,11 @@
 		onpick?: (patch: Record<string, unknown>) => void;
 		/** A gizmo let go: the operation to run, with what the drag adds. */
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
+		/** The amplitude the view opens at, a multiple of the app's own (an exported animation's `--scale`). */
+		startAmplitude?: number;
 	}
 
-	let { view, mode = $bindable(0), overlay = undefined, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
+	let { view, mode = $bindable(0), overlay = undefined, colors = null, legend, scope, onpick, ongizmo, startAmplitude = 1 }: Props = $props();
 
 	// kept across the view each drag answers with
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
@@ -272,8 +275,8 @@
 
 	let playing = $state(true);
 	/** The deflection amplitude, a multiple of `AMP_UNIT`: the slider runs from 0 to `amplitudeMax`, which the field beside it sets. */
-	let amplitude = $state(1);
-	let amplitudeMax = $state(4);
+	let amplitude = $state(untrack(() => startAmplitude));
+	let amplitudeMax = $state(untrack(() => Math.max(4, 2 * startAmplitude)));
 	let wireframe = $state(false);
 	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
 	let opacity = $state(1);
@@ -472,14 +475,15 @@
 	let frames = 0;
 	let fpsWindowStart = 0;
 	let resizeObs: ResizeObserver | null = null;
-	let homeDistance = 1;
-	/** How far off the camera stands to frame the model: by the narrower of the two fields of
-	 * view, so a long block in a tall pane is not cut off at its ends. */
-	function fitDistance(): number {
-		const vertical = (camera.fov * Math.PI) / 180;
-		const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * (camera.aspect || 1));
-		const narrower = Math.min(vertical, horizontal);
-		return narrower >= vertical ? homeDistance : (Math.max(framedRadius, 1e-6) / Math.sin(narrower / 2)) * 0.9;
+	/** The box the model is framed by: the drawn nodes with the bodies and frames around them. */
+	let fitBox = new Box3();
+	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
+	function fitDistance(dir?: Vector3, up?: Vector3): number {
+		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
+	}
+	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
+	function homePose(): { dir: Vector3; up: Vector3 } {
+		return poseOf(view.home);
 	}
 	/** Playback position in samples, fractional so a slow speed still advances. */
 	let position = 0;
@@ -671,10 +675,10 @@
 
 	function resetView() {
 		if (!renderer) return;
-		const dir = new Vector3(0.55, -1.2, 0.58).normalize();
+		const { dir, up } = homePose();
 		controls.target.set(centre.x, centre.y, centre.z);
-		camera.position.copy(centre).addScaledVector(dir, fitDistance());
-		camera.up.set(0, 0, 1);
+		camera.position.copy(centre).addScaledVector(dir, fitDistance(dir, up));
+		camera.up.copy(up);
 		controls.update();
 		dirty = true;
 	}
@@ -701,7 +705,7 @@
 
 		scene = new Scene();
 		camera = new PerspectiveCamera(32, 1, 0.001, 1000);
-		camera.up.set(0, 0, 1);
+		camera.up.copy(homePose().up);
 
 		// Geometry: one position buffer shared by the surface, outline and ghosts.
 		geometry = new BufferGeometry();
@@ -731,15 +735,14 @@
 			for (const axis of frame.axes) box.expandByPoint(new Vector3().fromArray(axis).multiplyScalar(frame.length).add(new Vector3().fromArray(frame.origin)));
 			others.push(box);
 		}
+		fitBox = view.nodes.length ? new Box3().setFromBufferAttribute(position) : (others.shift() ?? new Box3(new Vector3(), new Vector3()));
 		if (others.length) {
-			const box = view.nodes.length ? new Box3().setFromBufferAttribute(position) : others.shift()!;
-			for (const other of others) box.union(other);
-			box.getBoundingSphere(sphere);
+			for (const other of others) fitBox.union(other);
+			fitBox.getBoundingSphere(sphere);
 		}
 		centre.copy(sphere.center);
 		const radius = Math.max(sphere.radius, 1e-6);
 		framedRadius = radius;
-		homeDistance = (radius / Math.sin((camera.fov * Math.PI) / 360)) * 0.82;
 		camera.near = radius / 100;
 		camera.far = radius * 100;
 		camera.updateProjectionMatrix();
