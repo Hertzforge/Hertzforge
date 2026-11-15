@@ -528,7 +528,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
 | `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
-| `runs.delete` | `{"folder","dry_run"?}` | `{"folder","project_file","project_file_exists","deleted"}` |
+| `runs.delete` | `{"folder","dry_run"?,"not_live"?}` | `{"folder","project_file","project_file_exists","complete","deleted"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
@@ -1106,8 +1106,13 @@ is what a confirmation names. It is refused (`refused`, the message saying why, 
 for a folder that is not inside the data folder or is the data folder itself, one reached through
 a link or junction, one that holds no `run.json` of the run folder schema, one with a link or
 junction anywhere inside it, a run whose `run.json` does not say `complete: true` (a live run, or
-one that did not end cleanly), and a run whose project file, or a file mapped from it, is open in
-the service; `not_found` when there is no such folder.
+one that did not end cleanly) unless `not_live` is true, and a run whose project file, or a file
+mapped from it, is open in the service; `not_found` when there is no such folder. `not_live: true`
+(default false) is the caller's word that it has asked the control service and no live run records
+into the folder; the analysis service cannot see the control service's runs, so it takes that word
+and refuses without it. `complete` says whether `run.json` says the run ended cleanly; a client asks
+a dry run with `not_live: true` to learn it, deletes nothing so, and asks the control service before
+it confirms and again before it deletes. Every other refusal is the same with `not_live`.
 
 **Control service**
 

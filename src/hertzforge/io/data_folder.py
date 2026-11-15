@@ -85,6 +85,9 @@ class RunDelete:
     project_file: str
     #: whether the run has been converted, so the file is there to delete
     project_file_exists: bool
+    #: whether its `run.json` says the run ended cleanly (`complete: true`);
+    #: false only when the caller established the run is not live
+    complete: bool = True
 
 
 def _is_link(path: str) -> bool:
@@ -121,7 +124,8 @@ def _links_inside(folder: str) -> str | None:
 
 
 def plan_delete(folder: str | os.PathLike, root: str | os.PathLike | None = None,
-                open_files: Iterable[str | os.PathLike] = ()) -> RunDelete:
+                open_files: Iterable[str | os.PathLike] = (),
+                not_live: bool = False) -> RunDelete:
     """What deleting the run in `folder` would remove, after every check
     `delete_run` makes; nothing is deleted.
 
@@ -134,6 +138,12 @@ def plan_delete(folder: str | os.PathLike, root: str | os.PathLike | None = None
     open_files : iterable of path-like
         Files open now (the open project's file, the files its arrays are
         mapped from): a run holding one is not deleted.
+    not_live : bool
+        True when the caller has established, from the control service, that
+        no live run is recording into `folder`: only then is a run whose
+        `run.json` does not say it is complete (one that did not end
+        cleanly) deleted. False, the default, refuses it, as a run that may
+        still be going.
 
     Returns
     -------
@@ -150,8 +160,8 @@ def plan_delete(folder: str | os.PathLike, root: str | os.PathLike | None = None
         when it holds no `run.json` of the run folder schema;
         `link_inside` when anything inside it is a link or a junction;
         `incomplete` when its `run.json` does not say the run is complete
-        (the run is still going, or did not end cleanly); `open` when a
-        file inside it is open.
+        (the run is still going, or did not end cleanly) and `not_live` is
+        not true; `open` when a file inside it is open.
     """
     named = os.path.abspath(os.path.expanduser(os.fspath(folder)))
     if os.path.basename(named) == run_folder.MANIFEST and not os.path.isdir(named):
@@ -199,28 +209,32 @@ def plan_delete(folder: str | os.PathLike, root: str | os.PathLike | None = None
         raise RunDeleteRefused(
             'link_inside', f'{inner} is a link; a run folder holds none, so this one is '
             'not deleted')
-    if manifest.get('complete') is not True:
+    complete = manifest.get('complete') is True
+    if not complete and not_live is not True:
         raise RunDeleteRefused(
             'incomplete',
-            f'the run in {named} is not complete: it is still going, or it did not end '
-            'cleanly, so it is not deleted')
+            f'the run in {named} is not complete: its {run_folder.MANIFEST} does not say it '
+            'ended cleanly, and it has not been established that no live run is recording '
+            'into it, so it is not deleted; a run that did not end cleanly is deleted once '
+            'the control service reports that it is not live')
     for path in open_files:
         held = os.path.realpath(os.fspath(path))
         if held == here or _inside(held, here) is not None:
             raise RunDeleteRefused(
                 'open', f'{held} is open; open another project first, then delete the run')
     project_file = os.path.join(here, os.path.basename(here) + '.hforge')
-    return RunDelete(here, project_file, os.path.isfile(project_file))
+    return RunDelete(here, project_file, os.path.isfile(project_file), complete)
 
 
 def delete_run(folder: str | os.PathLike, root: str | os.PathLike | None = None,
-               open_files: Iterable[str | os.PathLike] = ()) -> RunDelete:
+               open_files: Iterable[str | os.PathLike] = (),
+               not_live: bool = False) -> RunDelete:
     """Delete the run in `folder`: its folder, and the project file it was
     converted to inside it, after the checks of `plan_delete`.
 
     Parameters
     ----------
-    folder, root, open_files
+    folder, root, open_files, not_live
         As `plan_delete` takes them.
 
     Returns
@@ -236,7 +250,7 @@ def delete_run(folder: str | os.PathLike, root: str | os.PathLike | None = None,
         When the operating system refuses part of the delete; what it
         could not delete is left.
     """
-    plan = plan_delete(folder, root, open_files)
+    plan = plan_delete(folder, root, open_files, not_live)
     if plan.project_file_exists:
         os.remove(plan.project_file)
     shutil.rmtree(plan.folder)

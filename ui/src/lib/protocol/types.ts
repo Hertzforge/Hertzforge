@@ -578,6 +578,8 @@ export interface RunDeletePlan {
 	folder: string;
 	project_file: string;
 	project_file_exists: boolean;
+	/** Whether its `run.json` says the run ended cleanly; false only when asked with `not_live`. */
+	complete?: boolean;
 	deleted: boolean;
 }
 
