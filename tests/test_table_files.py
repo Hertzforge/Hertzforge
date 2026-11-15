@@ -456,6 +456,7 @@ def channel(columns, *rows):
     (channel(['channel'], [1], [1]), 'channel 1 is in the table twice'),
     (channel(['channel', 'enabled'], [1, 'yes']), "row 1, Enabled: 'yes' is not true or false"),
     (channel(['channel', 'sensitivity'], [1, 0]), 'an enabled input with a sensitivity of 0'),
+    (channel(['channel', 'sensitivity'], [1, -100]), 'channel 1, Sensitivity: -100 is negative'),
     (channel(['channel', 'range_max'], [1, float('nan')]), 'not a finite number'),
     (channel(['channel', 'polarity'], [1, 'reversed']), 'polarity is one of positive'),
     (channel(['channel', 'unit'], [1, 'wibbles per fortnight squared']), 'row 1, Unit'),

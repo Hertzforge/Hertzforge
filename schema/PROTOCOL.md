@@ -528,7 +528,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `tables.load` | `{"path","kind","table_kind"?,"x_unit"?,"y_unit"?}` | `{"kind","table_kind","columns","rows","warnings","x_unit"?,"y_unit"?}` |
 | `units.system` | `{"name"?}` | `{"name","systems","length":{"unit","to_si"},"quantities"}` |
 | `runs.data_folder` | `{}` | `{"path","source","exists","writable"?,"reason"?}` |
-| `runs.delete` | `{"folder","dry_run"?}` | `{"folder","project_file","project_file_exists","deleted"}` |
+| `runs.delete` | `{"folder","dry_run"?,"not_live"?}` | `{"folder","project_file","project_file_exists","complete","deleted"}` |
 | `fit.*` | see Fitting modes below | |
 
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
@@ -894,7 +894,7 @@ and for a profile the bands, `alarm_below_db`, `alarm_above_db`, `abort_below_db
 `tables.save` writes the table to `path` in the form its suffix names: `.hforge` (a single-object
 file, `docs/hforge-format.md`), `.csv`, `.tsv` or `.txt` (tab-delimited) or `.xlsx`; a path with no
 suffix is given `.hforge`. A write is strict: a column that is not the kind's, a value the column
-cannot hold (a sensitivity of 0 on an enabled input, a polarity that is not `positive` or
+cannot hold (a sensitivity of 0 on an enabled input or below 0 on an enabled row, a polarity that is not `positive` or
 `negative`, a channel number used twice, a unit the analysis side cannot read) or a row of the wrong length is refused `bad_request`, naming the row and column, and
 nothing is written. The file is replaced in one step, so a failed save leaves it as it was. A
 channel table is written as the channel table object writes itself: `.hforge` as its
@@ -1106,8 +1106,13 @@ is what a confirmation names. It is refused (`refused`, the message saying why, 
 for a folder that is not inside the data folder or is the data folder itself, one reached through
 a link or junction, one that holds no `run.json` of the run folder schema, one with a link or
 junction anywhere inside it, a run whose `run.json` does not say `complete: true` (a live run, or
-one that did not end cleanly), and a run whose project file, or a file mapped from it, is open in
-the service; `not_found` when there is no such folder.
+one that did not end cleanly) unless `not_live` is true, and a run whose project file, or a file
+mapped from it, is open in the service; `not_found` when there is no such folder. `not_live: true`
+(default false) is the caller's word that it has asked the control service and no live run records
+into the folder; the analysis service cannot see the control service's runs, so it takes that word
+and refuses without it. `complete` says whether `run.json` says the run ended cleanly; a client asks
+a dry run with `not_live: true` to learn it, deletes nothing so, and asks the control service before
+it confirms and again before it deletes. Every other refusal is the same with `not_live`.
 
 **Control service**
 
@@ -1231,7 +1236,7 @@ path such as `control.damping`) locates the problem. Item reasons:
 
 | Where | Errors | Warnings |
 |---|---|---|
-| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `drive_channel_present`, `unit_unknown`, `drive_not_in_volts`, `abort_not_in_g` |
+| Channel table | `duplicate_index`, `no_channel_enabled`, `zero_sensitivity`, `negative_sensitivity`, `non_positive_range`, `control_group_gap`, `reference_without_control`, `unsupported_schema`, and on an NI station `channel_unbound`, `physical_channel_unknown`, `physical_channel_wrong_direction`, `physical_channel_shared`, `mixed_timing_families` | `iepe_without_bias`, `bias_on_single_ended`, `drive_channel_present`, `unit_unknown`, `drive_not_in_volts`, `abort_not_in_g` |
 | Profile | `profile_empty`, `first_row_not_anchor`, `row_level_ambiguous`, `frequency_not_positive`, `frequency_not_ascending`, `psd_negative` | `alarm_wider_than_abort` |
 | Acquisition | `n_pts_not_power_of_two`, `band_above_grid`, `too_few_lines` | |
 | Schedule | `levels_empty`, `levels_not_ascending`, `dwell_missing` | |
@@ -1382,7 +1387,7 @@ One table, held by the control service, used by every run.
 | `interface` | `single_ended` or `iepe` | `single_ended` |
 | `iepe_bias_v` | number, or null | null |
 | `units` | `g`, `in/s`, `mil`, `lbf`, `V`, or another unit's name | `g` |
-| `sensitivity_mv_per_eu` | number, mV per engineering unit; not zero on an enabled input | 100 |
+| `sensitivity_mv_per_eu` | number, mV per engineering unit; not zero on an enabled input, never negative on an enabled row | 100 |
 | `range_max` | number above 0, full scale in the row's unit | 100 |
 | `polarity` | `positive` or `negative` | `positive` |
 | `control_group` | integer from 0 with no gaps, or null | null |
@@ -1425,8 +1430,12 @@ cases that a test in each language reads:
 - **Channel numbers.** `index` (the analysis side's `channel`) is a whole number from 0, and no two
   rows share one (`duplicate_index`).
 - **Sensitivity.** A number. It is not 0 on an enabled row that is not a drive
-  (`zero_sensitivity`); a disabled row and a drive row may hold any number, 0 included.
-- **IEPE bias.** A number or null; 0 is a number like any other. A bias on a `single_ended` row
+  (`zero_sensitivity`), and it is never below 0 on an enabled row of any role, a drive included
+  (`negative_sensitivity`, its words naming the row, the column and the value): a channel read
+  inverted says so in its own `polarity` column, never in the sign of its sensitivity. A disabled
+  row may hold any number, 0 and a negative included, and a drive row may hold 0.
+- **IEPE bias.** A number or null; 0 and a negative bias are numbers like any other, with no
+  finding. A bias on a `single_ended` row
   (`bias_on_single_ended`) and none on an `iepe` row (`iepe_without_bias`) are warnings.
 - **Units.** Never empty. Every name in the unit vocabulary above is held by all three with no
   finding. A unit outside it is held by the control service with the warning `unit_unknown`; a

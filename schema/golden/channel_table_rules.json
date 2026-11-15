@@ -401,6 +401,261 @@
    "table_file": "held"
   },
   {
+   "name": "a negative sensitivity on an enabled input",
+   "rule": "sensitivity",
+   "rows": [
+    {
+     "index": 1,
+     "enabled": true,
+     "description": "Row 1",
+     "role": "control",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": 100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 2,
+     "enabled": true,
+     "description": "Row 2",
+     "role": "drive",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "V",
+     "sensitivity_mv_per_eu": 1000,
+     "range_max": 10,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 3,
+     "enabled": true,
+     "description": "Row 3",
+     "role": "monitor",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": -100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    }
+   ],
+   "control": "table_invalid",
+   "errors": [
+    "negative_sensitivity"
+   ],
+   "warnings": [],
+   "table_file": "refused"
+  },
+  {
+   "name": "a negative sensitivity on a control row",
+   "rule": "sensitivity",
+   "rows": [
+    {
+     "index": 1,
+     "enabled": true,
+     "description": "Row 1",
+     "role": "control",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": -10.2,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 2,
+     "enabled": true,
+     "description": "Row 2",
+     "role": "drive",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "V",
+     "sensitivity_mv_per_eu": 1000,
+     "range_max": 10,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 3,
+     "enabled": true,
+     "description": "Row 3",
+     "role": "monitor",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": 100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    }
+   ],
+   "control": "table_invalid",
+   "errors": [
+    "negative_sensitivity"
+   ],
+   "warnings": [],
+   "table_file": "refused"
+  },
+  {
+   "name": "a negative sensitivity on a drive",
+   "rule": "sensitivity",
+   "rows": [
+    {
+     "index": 1,
+     "enabled": true,
+     "description": "Row 1",
+     "role": "control",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": 100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 2,
+     "enabled": true,
+     "description": "Row 2",
+     "role": "drive",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "V",
+     "sensitivity_mv_per_eu": -1000,
+     "range_max": 10,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    }
+   ],
+   "control": "table_invalid",
+   "errors": [
+    "negative_sensitivity"
+   ],
+   "warnings": [],
+   "table_file": "refused"
+  },
+  {
+   "name": "a negative sensitivity on a disabled row",
+   "rule": "sensitivity",
+   "rows": [
+    {
+     "index": 1,
+     "enabled": true,
+     "description": "Row 1",
+     "role": "control",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": 100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 2,
+     "enabled": true,
+     "description": "Row 2",
+     "role": "drive",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "V",
+     "sensitivity_mv_per_eu": 1000,
+     "range_max": 10,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 3,
+     "enabled": false,
+     "description": "Row 3",
+     "role": "monitor",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": -100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    }
+   ],
+   "control": "ok",
+   "errors": [],
+   "warnings": [],
+   "table_file": "held"
+  },
+  {
    "name": "an IEPE bias of 0",
    "rule": "iepe_bias",
    "rows": [
@@ -450,6 +705,73 @@
      "physical": null,
      "interface": "iepe",
      "iepe_bias_v": 0,
+     "units": "g",
+     "sensitivity_mv_per_eu": 100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    }
+   ],
+   "control": "ok",
+   "errors": [],
+   "warnings": [],
+   "table_file": "held"
+  },
+  {
+   "name": "a negative IEPE bias",
+   "rule": "iepe_bias",
+   "rows": [
+    {
+     "index": 1,
+     "enabled": true,
+     "description": "Row 1",
+     "role": "control",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "g",
+     "sensitivity_mv_per_eu": 100,
+     "range_max": 100,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 2,
+     "enabled": true,
+     "description": "Row 2",
+     "role": "drive",
+     "physical": null,
+     "interface": "single_ended",
+     "iepe_bias_v": null,
+     "units": "V",
+     "sensitivity_mv_per_eu": 1000,
+     "range_max": 10,
+     "polarity": "positive",
+     "control_group": null,
+     "abort": {
+      "accel_g": null,
+      "velocity_ips": null,
+      "displacement_mil": null
+     }
+    },
+    {
+     "index": 3,
+     "enabled": true,
+     "description": "Row 3",
+     "role": "monitor",
+     "physical": null,
+     "interface": "iepe",
+     "iepe_bias_v": -24,
      "units": "g",
      "sensitivity_mv_per_eu": 100,
      "range_max": 100,

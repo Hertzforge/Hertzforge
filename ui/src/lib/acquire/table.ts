@@ -97,6 +97,7 @@ export type RowCell =
 const CELL: Partial<Record<ReportItem['reason'], RowCell>> = {
 	duplicate_index: 'index',
 	zero_sensitivity: 'sensitivity_mv_per_eu',
+	negative_sensitivity: 'sensitivity_mv_per_eu',
 	non_positive_range: 'range_max',
 	channel_unbound: 'physical',
 	physical_channel_unknown: 'physical',

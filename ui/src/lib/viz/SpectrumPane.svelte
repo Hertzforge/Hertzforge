@@ -25,6 +25,7 @@
 	import { formatFixed, formatTick } from './format';
 	import { decadeStride, logRange, logTicks, mantissasFor } from './logTicks';
 	import { drawBox, drawMarker, haloText, markerSvgPath, type Area, type BoxRow } from './paneDraw';
+	import { axesAt, CLICK_PX, dragScale, panFractions, wheelScale } from './mouseModel';
 	import { markerIndices, minorSplits, panBy, TICK_SPACE, zoomAbout, type Corner, type GridMode, type LegendMode, type PaneMarks, type PaneNote, type SeriesOverride, type TickDensity, type ZoomChange } from './paneOptions';
 	import { MARKER_WORDS, seriesLooks, type MarkerShape } from './roles';
 	import { stepsPath } from './steps';
@@ -87,15 +88,11 @@
 		onlegend?: (index: number) => void;
 		/** An x range the caller holds; null lets the pane range itself. */
 		xFixed?: [number, number] | null;
-		/** Box zoom on y as well as x. */
-		zoomY?: boolean;
 		/**
-		 * Zooms (a box, the wheel, a double-click to reset) are reported and not applied: the
+		 * Zooms and pans (the mouse model, `mouseModel.ts`) are reported and not applied: the
 		 * caller holds the ranges through `xFixed` and `yFixed`.
 		 */
 		onZoom?: (change: ZoomChange) => void;
-		/** The wheel zooms x about the pointer; sideways, or with Shift, it pans. */
-		wheelZoom?: boolean;
 		/** Keep drawing the view as it was when this turned on. */
 		frozen?: boolean;
 		/** Cursor lines, marked points and the lines of their readout. */
@@ -139,9 +136,7 @@
 		styles = [],
 		onlegend,
 		xFixed = null,
-		zoomY = false,
 		onZoom,
-		wheelZoom = false,
 		frozen = false,
 		marks = null,
 		notes = [],
@@ -162,7 +157,6 @@
 	const view = $derived(frozenView ?? viewIn);
 
 	/** Zooms are taken in by the pane itself and not left to uPlot: y zooms, wheel zooms, or the caller holds the ranges. */
-	const ownZoom = $derived(zoomY || wheelZoom || onZoom !== undefined);
 	/** A y range zoomed to on the pane, when the pane holds its own zoom. */
 	let yZoom: [number, number] | null = null;
 
@@ -232,7 +226,7 @@
 	}
 
 	/** What, beyond the view, changes how the plot is built: a change rebuilds it. */
-	const optionsKey = $derived(JSON.stringify([styles, grid, xTicks, yTicks, xLabel, yLabel, envelope, zoomY, ownZoom, shownGroup?.label ?? null]));
+	const optionsKey = $derived(JSON.stringify([styles, grid, xTicks, yTicks, xLabel, yLabel, envelope, shownGroup?.label ?? null]));
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
@@ -333,6 +327,11 @@
 		const kept = !followX && plot && plot.scales.x.min != null && plot.scales.x.max != null && keptTitle === view.title
 			? { min: plot.scales.x.min, max: plot.scales.x.max }
 			: null;
+		if (keptTitle !== view.title) {
+			// another plot: what was zoomed by hand on the last one is not this one's
+			zoomed = false;
+			yZoom = null;
+		}
 		keptTitle = view.title;
 		destroyPlot();
 		const data = alignSeries(view.series, logX, logY);
@@ -358,10 +357,11 @@
 			cursor: {
 				y: false,
 				points: { show: false },
-				drag: ownZoom ? { x: true, y: zoomY, uni: zoomY ? 24 : undefined, setScale: false } : { x: true, y: false, setScale: true },
+				// the mouse is the pane's own (pyqtgraph's model, `mouseModel.ts`), not uPlot's box
+				drag: { x: false, y: false, setScale: false },
 				focus: { prox: -1 },
-				// a double-click resets the zoom the pane holds, or tells the caller to
-				bind: ownZoom ? { dblclick: () => () => (resetZoom(), null) } : undefined
+				// a double-click views all, as the menu's View All does
+				bind: { dblclick: () => () => (resetZoom(), null) }
 			},
 			scales: {
 				x: {
@@ -447,7 +447,6 @@
 						if (key === 'x' && onRange && u.scales.x.min != null && u.scales.x.max != null) onRange(u.scales.x.min, u.scales.x.max);
 					}
 				],
-				setSelect: [takeSelection],
 				setSize: [measureArea],
 				setCursor: [
 					(u) => {
@@ -525,7 +524,6 @@
 			if (!plot || !onPick || moved > 3) return;
 			onPick(plot.posToVal(e.clientX - plot.over.getBoundingClientRect().left, 'x'));
 		});
-		if (wheelZoom) plot.over.addEventListener('wheel', onWheel, { passive: false });
 		if (xFixed) plot.setScale('x', { min: xFixed[0], max: xFixed[1] });
 		else if (kept) plot.setScale('x', kept);
 		appliedX = xFixed;
@@ -596,42 +594,104 @@
 	}
 
 	function resetZoom() {
-		applyZoom({ x: null, y: zoomY ? null : undefined });
+		zoomed = false;
+		applyZoom({ x: null, y: null });
 	}
 
-	/** A box dragged on the plot: its x span, and its y span where y zooms too. */
-	function takeSelection(u: uPlot) {
-		if (!ownZoom) return;
-		// a copy: clearing the box below empties uPlot's own
-		const sel = { ...u.select };
-		const w = u.over.clientWidth;
-		const h = u.over.clientHeight;
-		const dx = sel.width > 1 && sel.width < w - 1;
-		const dy = zoomY && sel.height > 1 && sel.height < h - 1;
-		if (!dx && !dy) return;
-		u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
-		const x: [number, number] | undefined = dx ? [u.posToVal(sel.left, 'x'), u.posToVal(sel.left + sel.width, 'x')] : undefined;
-		const y: [number, number] | undefined = dy ? [u.posToVal(sel.top + sel.height, 'y'), u.posToVal(sel.top, 'y')] : undefined;
-		applyZoom({ x, y });
+	/** The ranges moved by hand since the last View All: the A at the corner shows while they are. */
+	let zoomed = $state(false);
+	/** The menu a right click opens, where it opened in the pane; null while closed. */
+	let menuAt = $state<{ left: number; top: number } | null>(null);
+	/** Presses that belong to the plot's own pieces: the cursor, a region or handle, the playback line, a note. */
+	const OWN_PRESSES = '.marker-grip, .region.drag, .band-handle, .playline, .inbox, .note, .autorange, .menu, button';
+
+	/** The plotting area on screen, which the mouse model measures from. */
+	function areaBox() {
+		return plot ? plot.over.getBoundingClientRect() : null;
 	}
 
-	/** The wheel: zoom x about the pointer, or pan it when the wheel turns sideways or with Shift. */
-	function onWheel(e: WheelEvent) {
+	/** A change of the axes in `axes` to these ranges, applied or handed to the caller. */
+	function moveBy(axes: { x: boolean; y: boolean }, x: (lo: number, hi: number) => [number, number], y: (lo: number, hi: number) => [number, number]) {
 		if (!plot) return;
-		const { min, max } = plot.scales.x;
-		if (min == null || max == null) return;
+		const change: ZoomChange = {};
+		const sx = plot.scales.x;
+		const sy = plot.scales.y;
+		if (axes.x && sx.min != null && sx.max != null) change.x = x(sx.min, sx.max);
+		if (axes.y && sy.min != null && sy.max != null) change.y = y(sy.min, sy.max);
+		if (change.x === undefined && change.y === undefined) return;
+		zoomed = true;
+		applyZoom(change);
+	}
+
+	/**
+	 * A press on the plot or an axis (pyqtgraph's ViewBox): a left or middle drag pans, a right drag
+	 * stretches each axis about the press, over an axis only that axis, and a right click with no
+	 * drag opens the menu. A left click with no drag is left to `onPick`.
+	 */
+	function onPress(e: PointerEvent) {
+		if (!plot || (e.target as HTMLElement | null)?.closest?.(OWN_PRESSES)) return;
+		menuAt = null;
+		const box = areaBox();
+		const axes = box && axesAt(e.clientX, e.clientY, box);
+		if (!box || !axes) return;
+		const scaling = e.button === 2;
+		if (e.button !== 0 && e.button !== 1 && !scaling) return;
+		if (scaling || e.button === 1) e.preventDefault();
+		const at = { x: plot.posToVal(e.clientX - box.left, 'x'), y: plot.posToVal(e.clientY - box.top, 'y') };
+		const from = { x: e.clientX, y: e.clientY };
+		let last = from;
+		let dragged = false;
+		const move = (ev: PointerEvent) => {
+			if (!dragged && Math.hypot(ev.clientX - from.x, ev.clientY - from.y) <= CLICK_PX) return;
+			dragged = true;
+			const dx = ev.clientX - last.x;
+			const dy = ev.clientY - last.y;
+			last = { x: ev.clientX, y: ev.clientY };
+			if (!dx && !dy) return;
+			if (scaling) {
+				const [fx, fy] = dragScale(dx, dy);
+				moveBy(axes, (lo, hi) => zoomAbout(lo, hi, at.x, fx, logX), (lo, hi) => zoomAbout(lo, hi, at.y, fy, logY));
+			} else {
+				const [px, py] = panFractions(dx, dy, box.width, box.height);
+				moveBy(axes, (lo, hi) => panBy(lo, hi, px, logX), (lo, hi) => panBy(lo, hi, py, logY));
+			}
+		};
+		const up = () => {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+			if (scaling && !dragged && plotEl) {
+				const host = plotEl.getBoundingClientRect();
+				menuAt = { left: from.x - host.left, top: from.y - host.top };
+			}
+		};
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', up);
+	}
+
+	/** The wheel zooms both axes about the pointer, or over an axis that axis alone; turned sideways, it pans x. */
+	function onWheel(e: WheelEvent) {
+		if (!plot || (e.target as HTMLElement | null)?.closest?.('.inbox, .menu')) return;
+		const box = areaBox();
+		const axes = box && axesAt(e.clientX, e.clientY, box);
+		if (!box || !axes) return;
 		e.preventDefault();
-		const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? plot.over.clientWidth : 1;
-		const sideways = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
-		const width = Math.max(1, plot.over.clientWidth);
-		if (sideways) {
-			const d = (e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX) * scale;
-			applyZoom({ x: panBy(min, max, d / width, logX) });
+		menuAt = null;
+		if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+			// a trackpad's sideways swipe, which a wheel does not have: across the x range
+			const d = (e.deltaMode === 1 ? 16 : 1) * e.deltaX;
+			moveBy({ x: axes.x, y: false }, (lo, hi) => panBy(lo, hi, d / box.width, logX), (lo, hi) => [lo, hi]);
 			return;
 		}
-		const at = plot.posToVal(e.clientX - plot.over.getBoundingClientRect().left, 'x');
-		const factor = Math.min(4, Math.max(0.25, Math.exp(e.deltaY * scale * 0.002)));
-		applyZoom({ x: zoomAbout(min, max, at, factor, logX) });
+		const at = { x: plot.posToVal(e.clientX - box.left, 'x'), y: plot.posToVal(e.clientY - box.top, 'y') };
+		const s = wheelScale(e.deltaY, e.deltaMode);
+		moveBy(axes, (lo, hi) => zoomAbout(lo, hi, at.x, s, logX), (lo, hi) => zoomAbout(lo, hi, at.y, s, logY));
+	}
+
+	function viewAll() {
+		menuAt = null;
+		resetZoom();
 	}
 
 	/** Lines between the major grid lines, fainter, when the grid has its minor lines. */
@@ -1061,6 +1121,20 @@
 	onMount(() => {
 		build();
 		document.fonts?.ready.then(() => plot?.redraw(false, true));
+		// the mouse model listens on the pane, axes and all, across rebuilds of the plot
+		plotEl.addEventListener('pointerdown', onPress);
+		plotEl.addEventListener('wheel', onWheel, { passive: false });
+		plotEl.addEventListener('contextmenu', (e) => e.preventDefault());
+		const closeMenu = (e: PointerEvent | KeyboardEvent) => {
+			if (!menuAt) return;
+			if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as HTMLElement | null)?.closest?.('.menu')) menuAt = null;
+		};
+		window.addEventListener('pointerdown', closeMenu, true);
+		window.addEventListener('keydown', closeMenu);
+		return () => {
+			window.removeEventListener('pointerdown', closeMenu, true);
+			window.removeEventListener('keydown', closeMenu);
+		};
 	});
 
 	/** The y range last held by the caller, so its release ranges y on the data again. */
@@ -1302,6 +1376,15 @@
 					{@const at = dragNote?.id === n.id ? dragNote : n}
 					<div class="note" class:movable={!!onnote} style:left="{at.fx * 100}%" style:top="{at.fy * 100}%" onpointerdown={(e) => startNote(e, n)} role="note" title={onnote ? 'Drag to move the note' : undefined}>{n.text}</div>
 				{/each}
+				{#if zoomed}
+					<!-- pyqtgraph's A: the ranges were moved by hand, and this views all again -->
+					<button class="autorange" data-testid="spectrum-view-all" title="View all (or double-click the plot)" onclick={viewAll}>A</button>
+				{/if}
+			</div>
+		{/if}
+		{#if menuAt}
+			<div class="menu" role="menu" data-testid="spectrum-menu" style:left="{menuAt.left}px" style:top="{menuAt.top}px">
+				<button role="menuitem" data-testid="spectrum-menu-view-all" onclick={viewAll}>View All</button>
 			</div>
 		{/if}
 	</div>
@@ -1643,6 +1726,56 @@
 		z-index: 2;
 		pointer-events: none;
 		container-type: size;
+	}
+
+	.autorange {
+		position: absolute;
+		left: 2px;
+		bottom: 2px;
+		width: 18px;
+		height: 18px;
+		padding: 0;
+		font-size: var(--text-2xs, 11px);
+		font-weight: 600;
+		color: var(--text-2);
+		background: var(--bg-2);
+		border: 1px solid var(--line-2);
+		border-radius: 4px;
+		pointer-events: auto;
+		cursor: pointer;
+	}
+
+	.autorange:hover {
+		color: var(--text-1);
+		background: var(--bg-3);
+	}
+
+	.menu {
+		position: absolute;
+		z-index: 5;
+		display: flex;
+		flex-direction: column;
+		min-width: 110px;
+		padding: 3px;
+		background: var(--bg-1);
+		border: 1px solid var(--line-3);
+		border-radius: var(--radius-md);
+		box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+	}
+
+	.menu button {
+		padding: 4px var(--sp-2);
+		font-size: var(--text-xs);
+		text-align: left;
+		color: var(--text-1);
+		background: transparent;
+		border: 0;
+		border-radius: 4px;
+		cursor: pointer;
+	}
+
+	.menu button:hover {
+		background: var(--bg-3);
 	}
 
 	.inbox {

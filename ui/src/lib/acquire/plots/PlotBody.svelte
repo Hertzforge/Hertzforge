@@ -334,9 +334,7 @@
 							onlegend={onspec ? (k) => toggleTrace(p.view.series[k].name) : undefined}
 							xFixed={link?.x ?? p.xFixed}
 							yFixed={p.yFixed}
-							zoomY
 							onZoom={onspec ? zoom : undefined}
-							wheelZoom={time}
 							{frozen}
 							marks={paneMarks(p.view, display, (k) => isShown(p.styles, k))}
 							notes={i === 0 ? display.notes : []}

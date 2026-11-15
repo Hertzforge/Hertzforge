@@ -2116,6 +2116,7 @@ export class AppState {
 		this.runOpen = new RunOpen(runHost);
 		this.runFiles = new RunFiles({
 			request: <R,>(method: string, params: Record<string, unknown>) => this.analysis.request<R>(method, params),
+			control: (method: string, params: Record<string, unknown>) => this.control.request(method, params),
 			desktop: config.mock ? null : desktopRunFiles(),
 			confirm: confirmFirst
 		});

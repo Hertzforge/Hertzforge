@@ -473,6 +473,13 @@ impl Default for ChannelTable {
 pub enum TableError {
     EmptyEnabled,
     ZeroSensitivity(u32),
+    /// An enabled row (of any role) whose sensitivity is below zero, with the value. A
+    /// channel read inverted says so in its own `polarity` column, never in the sign of its
+    /// sensitivity, so the sign is refused rather than folded into the conversion.
+    NegativeSensitivity {
+        index: u32,
+        value: f64,
+    },
     NonPositiveRange(u32),
     DuplicateIndex(u32),
     Parse(String),
@@ -498,6 +505,12 @@ impl fmt::Display for TableError {
         match self {
             TableError::EmptyEnabled => write!(f, "no channels are enabled"),
             TableError::ZeroSensitivity(i) => write!(f, "channel {i} has zero sensitivity"),
+            TableError::NegativeSensitivity { index, value } => write!(
+                f,
+                "channel {index}'s sensitivity_mv_per_eu is {value}, which is negative; a \
+                 sensitivity is never negative on an enabled row, and a channel read inverted \
+                 says so in its polarity column"
+            ),
             TableError::NonPositiveRange(i) => write!(f, "channel {i} has non-positive range"),
             TableError::DuplicateIndex(i) => write!(f, "duplicate channel index {i}"),
             TableError::Parse(s) => write!(f, "parse error: {s}"),
@@ -651,7 +664,8 @@ impl ChannelTable {
     /// 1. Channel indices are unique.
     /// 2. At least one channel is enabled.
     /// 3. Every enabled channel has nonzero sensitivity (the EU conversion divides by
-    ///    it) and a strictly positive range.
+    ///    it) and a strictly positive range; no enabled channel, a drive included, has a
+    ///    negative sensitivity (polarity is the row's own column).
     /// 4. `control_group` ids form the contiguous run `0..=max` with no gaps.
     /// 5. If any Reference-role channel exists, at least one Control-role channel
     ///    exists to close the MIMO loop (coherence).
@@ -697,6 +711,12 @@ impl ChannelTable {
             }
             if ch.enabled {
                 any_enabled = true;
+                if ch.sensitivity_mv_per_eu < 0.0 {
+                    report.errors.push(TableError::NegativeSensitivity {
+                        index: ch.index,
+                        value: ch.sensitivity_mv_per_eu,
+                    });
+                }
                 // Sensitivity is meaningful only for input channels; a drive output
                 // carries no sensor sensitivity. Gate the hard check to non-drive rows.
                 if ch.role != ChannelRole::Drive {
@@ -895,6 +915,40 @@ mod tests {
         c.sensitivity_mv_per_eu = 0.0;
         t.channels.push(c);
         assert_eq!(t.validate(), Err(TableError::ZeroSensitivity(1)));
+    }
+
+    /// Decided by the project's owner: a negative sensitivity on an enabled row is refused,
+    /// whatever its role; a disabled row holds any number. Falsified by dropping the
+    /// `NegativeSensitivity` check in `validate_report`: the table validates.
+    #[test]
+    fn channel_table_validate_refuses_a_negative_sensitivity_on_an_enabled_row() {
+        let mut t = ChannelTable::new();
+        let mut c = Channel::new(1);
+        c.sensitivity_mv_per_eu = -100.0;
+        t.channels.push(c.clone());
+        let e = t.validate().unwrap_err();
+        assert_eq!(
+            e,
+            TableError::NegativeSensitivity {
+                index: 1,
+                value: -100.0
+            }
+        );
+        let said = e.to_string();
+        assert!(said.contains("channel 1") && said.contains("sensitivity_mv_per_eu"));
+        assert!(said.contains("-100") && said.contains("polarity"), "{said}");
+        c.role = ChannelRole::Drive;
+        t.channels[0] = c.clone();
+        assert!(matches!(
+            t.validate(),
+            Err(TableError::NegativeSensitivity { index: 1, .. })
+        ));
+        c.enabled = false;
+        t.channels[0] = c;
+        let mut on = Channel::new(2);
+        on.sensitivity_mv_per_eu = 10.0;
+        t.channels.push(on);
+        assert_eq!(t.validate(), Ok(()));
     }
 
     #[test]

@@ -48,23 +48,30 @@ def data_folder() -> dict[str, Any]:
 def delete(params: Mapping[str, Any], open_files: Iterable[str]) -> dict[str, Any]:
     """`runs.delete`: the run folder `folder` names deleted with its
     converted project file; with `dry_run`, only what would be deleted,
-    after the same checks. A refusal says why in its message and deletes
-    nothing."""
+    after the same checks. A run that did not end cleanly is deleted only
+    with `not_live`, the caller's word that the control service reports no
+    live run recording into it. A refusal says why in its message and
+    deletes nothing."""
     from hertzforge.io import native
     from hertzforge.io.data_folder import RunDeleteRefused, delete_run, plan_delete
 
-    unknown = sorted(set(params) - {'folder', 'dry_run'})
+    unknown = sorted(set(params) - {'folder', 'dry_run', 'not_live'})
     if unknown:
-        raise bad_request(f'runs.delete takes "folder" and "dry_run", not {unknown}')
+        raise bad_request(f'runs.delete takes "folder", "dry_run" and "not_live", '
+                          f'not {unknown}')
     folder = params.get('folder')
     if not isinstance(folder, str) or not folder:
         raise bad_request('runs.delete needs "folder", the run folder\'s path')
     dry_run = params.get('dry_run', False)
     if not isinstance(dry_run, bool):
         raise bad_request('runs.delete "dry_run" is true or false')
+    not_live = params.get('not_live', False)
+    if not isinstance(not_live, bool):
+        raise bad_request('runs.delete "not_live" is true or false')
     held = [*open_files, *native.mapped_files()]
     try:
-        plan = (plan_delete if dry_run else delete_run)(folder, open_files=held)
+        plan = (plan_delete if dry_run else delete_run)(folder, open_files=held,
+                                                       not_live=not_live)
     except RunDeleteRefused as error:
         if error.code == 'not_found':
             raise not_found(error.message) from None
@@ -72,7 +79,8 @@ def delete(params: Mapping[str, Any], open_files: Iterable[str]) -> dict[str, An
     except OSError as error:
         raise ProtocolError('refused', f'the run was not wholly deleted: {error}') from None
     return {'folder': plan.folder, 'project_file': plan.project_file,
-            'project_file_exists': plan.project_file_exists, 'deleted': not dry_run}
+            'project_file_exists': plan.project_file_exists, 'complete': plan.complete,
+            'deleted': not dry_run}
 
 
 def request(method: str, params: Any, open_files: Iterable[str]) -> dict[str, Any]:

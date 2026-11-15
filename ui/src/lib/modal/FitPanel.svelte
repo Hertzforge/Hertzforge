@@ -180,7 +180,7 @@
 				{/each}
 			</tbody>
 		</table>
-		<p class="hint">Click the plot to move the cursor; drag to zoom, and Find Mode searches what is on screen.</p>
+		<p class="hint">Click the plot to move the cursor. Drag to pan; right-drag or the wheel zooms, over an axis that axis alone; double-click or A views all. Find Mode searches what is on screen.</p>
 	</section>
 {/if}
 
