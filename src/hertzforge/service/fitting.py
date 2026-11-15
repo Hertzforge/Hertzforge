@@ -3,8 +3,8 @@ fitting screen over the protocol (`fit.*`).
 
 One mode at a time, on the residual. Find Mode moves the cursor to the
 most prominent peak left in the residual CMIF inside the frequencies on
-screen, Fit Mode fits there without adding the mode so its synthesis can
-be judged, and Confirm Mode adds it; Refine fits every confirmed mode's
+screen, `fit.fit` fits wherever the cursor lands without adding the mode,
+so its synthesis can be judged, and Confirm Mode adds it; Refine fits every confirmed mode's
 residues again together, and Publish puts the fit in the project as a
 shape set. The session is the core's `ModalFitSession`, so a fit made
 here and one made in a script are the same fit. A session started from a
