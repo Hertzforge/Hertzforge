@@ -321,6 +321,7 @@ fn data_run() -> RunView {
         }]),
         level_s: Some(300.0),
         streaming: true,
+        record: None,
     }
 }
 
@@ -342,7 +343,12 @@ fn event_random_data() -> (Value, Arrays) {
 }
 
 /// The text goldens of the hardware and Random control messages.
-const CONTROL_TEXT: [&str; 24] = [
+const CONTROL_TEXT: [&str; 29] = [
+    "request_channels_set_restored",
+    "response_channels_get_restored",
+    "response_error_table_not_applied",
+    "request_channels_apply",
+    "response_channels_apply",
     "request_mimo_random_setup",
     "response_mimo_random_setup",
     "response_error_setup_invalid",

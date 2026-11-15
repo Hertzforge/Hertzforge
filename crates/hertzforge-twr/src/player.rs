@@ -168,6 +168,12 @@ pub trait ReferencePlayer {
     /// wrong speed with nothing refusing.
     fn set_reference_rate_hz(&mut self, _hz: f64) {}
 
+    /// The channel table the player plays and acquires with, for the run's
+    /// records. `None`: this player holds no table.
+    fn channel_table(&self) -> Option<&ChannelTable> {
+        None
+    }
+
     /// Where the drive→response alignment in force came from, where the path
     /// aligns at all. `None` means "this path does not align host-side" (a
     /// delegated path returns device-aligned records), and the service treats
@@ -1271,6 +1277,10 @@ fn measure_lag_xcorr(drive: &[f64], raw: &[f64], max_lag: usize) -> Option<(usiz
 impl<B: Backend> ReferencePlayer for BackendReferencePlayer<B> {
     fn path(&self) -> TwrPath {
         TwrPath::HostBackend
+    }
+
+    fn channel_table(&self) -> Option<&ChannelTable> {
+        Some(&self.table)
     }
 
     /// The rate the run asked ([`BackendReferencePlayer::with_requested_rate_hz`]),

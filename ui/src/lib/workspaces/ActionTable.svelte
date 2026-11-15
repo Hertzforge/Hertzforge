@@ -41,6 +41,18 @@
 	const part = $derived(p.selection.part);
 	/** The form applies as it goes (a solid's Edit): no Run. */
 	const liveForm = $derived(!!a.formRow?.live);
+	// an operation that takes a while shows how far it has got and offers Cancel; one that is
+	// over in a blink never flashes them (Brandon, 2026-11-11)
+	let slow = $state(false);
+	$effect(() => {
+		if (!a.running) {
+			slow = false;
+			return;
+		}
+		const timer = setTimeout(() => (slow = true), 400);
+		return () => clearTimeout(timer);
+	});
+	const share = $derived(a.opProgress && a.opProgress.total > 0 ? Math.min(1, a.opProgress.done / a.opProgress.total) : null);
 	const partIds = $derived(part ? (part.ids ?? [part.id]) : []);
 
 	function findSolid(rows: SolidRow[], id: string | number): SolidRow | undefined {
@@ -152,7 +164,7 @@
 				<span>Delete {gone.ids.length === 1 ? `${gone.words} ${gone.ids[0]}` : `${gone.ids.length} ${gone.words}s`} of {gone.name}?</span>
 				<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Delete</button>
 			{:else if parts.length}
-				<span>Delete {parts.map(([name, picks]) => `${picks.length} of ${name}`).join(', ')}?</span>
+				<span>Delete {p.partsSaid(p.pickedParts)}?</span>
 				<button class="btn ghost sm danger" data-testid="remove-confirm" onclick={() => p.removeSelected()}>Delete</button>
 			{:else}
 				<span>Remove {one ?? `${picked.length} objects`}?</span>
@@ -203,11 +215,23 @@
 				<p class="muted live" data-testid="form-live">Each change applies when you leave its field, or let go of the gimbal.</p>
 			{:else}
 			<div class="runrow">
+				{#if a.op.commits}
+					<button class="btn run" data-testid="preview-op" onclick={() => a.run(true)} disabled={a.running || !app.analysis.isOpen} title="Show what Apply would do, without changing the project">Preview</button>
+				{/if}
 				<button class="btn primary run" data-testid="run-op" onclick={() => a.run()} disabled={a.running || !app.analysis.isOpen}>
-					{#if a.running}Running{:else}<Icon name="play" size={13} /> Run{/if}
+					{#if a.running}Applying{:else}<Icon name="play" size={13} /> Apply{/if}
 				</button>
 				<span class="keys"><kbd>{isMac ? 'Cmd' : 'Ctrl'}</kbd><kbd>Enter</kbd></span>
 			</div>
+			{#if a.running && slow}
+				<div class="oprogress" data-testid="op-progress">
+					<span class="obar" class:busy={share === null} role="progressbar" aria-label="{a.formTitle} progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={share === null ? undefined : Math.round(share * 100)}>
+						<span style:width={share === null ? undefined : `${(share * 100).toFixed(1)}%`}></span>
+					</span>
+					<span class="onum">{share === null ? 'Working' : `${Math.round(share * 100)}%`}</span>
+					<button class="btn sm" data-testid="cancel-op" onclick={() => a.cancel()} disabled={a.cancelling} title="Stop it; the project is left as it was">{a.cancelling ? 'Cancelling' : 'Cancel'}</button>
+				</div>
+			{/if}
 			{/if}
 			{#if a.runError}<p class="error" role="alert">{a.runError}</p>{/if}
 		</section>
@@ -345,6 +369,53 @@
 		align-items: center;
 		gap: var(--sp-3);
 		margin-top: var(--sp-3);
+	}
+	.oprogress {
+		display: flex;
+		align-items: center;
+		gap: var(--sp-2);
+		margin-top: var(--sp-2);
+		font-size: var(--text-xs);
+		color: var(--text-2);
+	}
+	.obar {
+		position: relative;
+		flex: 1;
+		height: 4px;
+		background: var(--bg-3);
+		border-radius: 2px;
+		overflow: hidden;
+	}
+	.obar span {
+		display: block;
+		height: 100%;
+		background: var(--accent);
+	}
+	/* a stage that cannot count itself: a bar that moves until the next count */
+	.obar.busy span {
+		position: absolute;
+		width: 30%;
+		animation: obusy 1.2s ease-in-out infinite;
+	}
+	@keyframes obusy {
+		from {
+			left: -30%;
+		}
+		to {
+			left: 100%;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.obar.busy span {
+			animation: none;
+			left: 0;
+			width: 100%;
+			opacity: 0.5;
+		}
+	}
+	.onum {
+		min-width: 4.5em;
+		font-variant-numeric: tabular-nums;
 	}
 	.keys {
 		display: flex;

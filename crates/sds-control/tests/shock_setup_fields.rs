@@ -422,16 +422,28 @@ fn every_wire_field_reaches_the_controllers_configuration() {
             json!(5),
         ),
         (
-            "capture.auto_start",
-            json!(true),
-            |k| json!(k.capture.auto_start),
-            json!(true),
+            "operator",
+            json!("Tester"),
+            |k| json!(meta(k, "operator")),
+            json!("Tester"),
         ),
         (
-            "capture.run_name",
-            json!("bracket_x"),
-            |k| json!(k.capture.run_name),
-            json!("bracket_x"),
+            "article",
+            json!("Housing"),
+            |k| json!(meta(k, "test_article")),
+            json!("Housing"),
+        ),
+        (
+            "notes",
+            json!("bolted at four corners"),
+            |k| json!(meta(k, "notes")),
+            json!("bolted at four corners"),
+        ),
+        (
+            "specification",
+            json!({"document": "Procedure", "clause": "2.3"}),
+            |k| json!([meta(k, "specification"), meta(k, "clause")]),
+            json!(["Procedure", "2.3"]),
         ),
         (
             "metadata",
@@ -448,6 +460,37 @@ fn every_wire_field_reaches_the_controllers_configuration() {
             "{path} did not reach the controller's configuration"
         );
     }
+}
+
+fn meta(k: &ClassicalTestConfig, key: &str) -> Option<String> {
+    k.metadata
+        .iter()
+        .find(|m| m.key == key)
+        .map(|m| m.value.clone())
+}
+
+/// One way to record: a configuration that still asks for the module's own
+/// capture is refused at the field, and the controller's capture never starts,
+/// whatever the configuration. Red if `capture` were taken again, or if the
+/// controller were handed a capture that starts.
+#[test]
+fn a_capture_is_refused_and_the_controllers_capture_stays_off() {
+    let mut c = golden_config();
+    c["capture"] = json!({"auto_start": true, "run_name": "shock"});
+    let e = config::parse(&c).expect_err("a capture is refused");
+    assert_eq!(e.reason, Some("bad_params"), "{}", e.message);
+    assert_eq!(
+        e.detail.as_deref().map(|d| d["param"].clone()),
+        Some(json!("config.capture")),
+        "{}",
+        e.message
+    );
+    let mut c = golden_config();
+    c.as_object_mut().unwrap().remove("capture");
+    c["record"] = json!({"streams": false});
+    let w = config::parse(&c).unwrap();
+    assert!(!w.record_streams);
+    assert!(!built(&w).capture.auto_start);
 }
 
 #[test]
@@ -916,4 +959,38 @@ fn each_shape_error_is_bad_params_naming_the_field() {
     set(&mut c, "feasibility.shaker", json!({"name": 3}));
     let e = config::parse(&c).map(|_| ()).unwrap_err();
     assert_eq!(e.reason, Some("shaker_record_invalid"));
+}
+
+#[test]
+fn mimo_shock_classical_refuses_a_second_drive_row() {
+    // Single-output shock plays one drive record. With two enabled drive rows a station opens
+    // both as outputs and the one record would be split across them as interleaved frames.
+    let w = config::parse(&golden_config()).unwrap();
+    let mut t = table();
+    let mut second = table::new_row(5);
+    second.role = ChannelRole::Drive;
+    second.units = Units::VoltageV;
+    t.channels.push(second);
+    let (r, _) = w.check(&CheckContext {
+        table: &t,
+        law: &law,
+        timeout_s: 30.0,
+    });
+    assert!(
+        r.errors.iter().any(|i| i.reason == "extra_drive_channels"),
+        "{:?}",
+        r.errors
+    );
+    // A disabled second drive row is not refused.
+    t.channels.last_mut().unwrap().enabled = false;
+    let (r, _) = w.check(&CheckContext {
+        table: &t,
+        law: &law,
+        timeout_s: 30.0,
+    });
+    assert!(
+        !r.errors.iter().any(|i| i.reason == "extra_drive_channels"),
+        "{:?}",
+        r.errors
+    );
 }

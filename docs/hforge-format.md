@@ -21,11 +21,14 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1 or 2   (integer)
+    hertzforge_schema = 1, 2, 3 or 4   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
-object is stamped 2.
+object is stamped 2. Schema 3 adds the run record (`run_record/`,
+below), and only a file holding one, or referring to one, is stamped 3.
+Schema 4 adds the test setup (`test_setup/`, below), and only a file
+holding one, or referring to one, is stamped 4.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -38,6 +41,8 @@ opens it. The reader follows three rules:
   the file is never half loaded;
 - a file with neither this stamp nor the `.vdyn` stamp
   is refused as not a Hertzforge file, since every writer stamps;
+- an object of a kind the reader does not know is refused by its name
+  and kind, saying the file was written by a newer Hertzforge;
 - an older stamp always loads.
 
 While Hertzforge is an alpha this is a practice, not a promise: the
@@ -49,7 +54,7 @@ every earlier file starts with the first release that is not an alpha.
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
-`predictions/` or `run_log_extract/`. The loader recognizes the file by
+`predictions/`, `run_log_extract/`, `run_record/` or `test_setup/`. The loader recognizes the file by
 the group it finds.
 
 A breakpoint table file is a single-object file too, holding one of a
@@ -219,7 +224,10 @@ the function type alone cannot say which class to rebuild:
     attrs   function_type        UFF dataset 58 code
             data_class           the class name, e.g. 'Psd'
     dsets   abscissa             one shared axis
-            ordinate             records × points, real or complex
+            ordinate             records × points, real or complex;
+                                 float64, or float32 for a time
+                                 history converted from a control run,
+                                 the precision it was recorded at
             response_dof         strings, one per record
             ordinate_dim, comment, ordinate_unit, reference_unit,
             dimension_hint       strings, '' = undefined / not stated
@@ -336,7 +344,12 @@ input) and `iepe_bias` (volts), `polarity` ('positive' or 'negative',
 blank for positive), `range_max` (the input's full scale in the
 channel's unit), `control_group`, and the abort limits `abort_accel_g`,
 `abort_velocity_ips` and `abort_displacement_mil`, blank where none is
-set. Their presence in `column_order` is the record that the table was
+set, then `limit` ('True' for a limit channel, a mark only; each test's
+limits stay in its setup), `analysis_tier` ('full', 'rotating' or
+'decimated:N', blank for full) and `extra` (any other column the control
+service carries for the row, a JSON object of text by column name, blank
+for none). A file written before the last three existed reads them
+blank. Their presence in `column_order` is the record that the table was
 converted to carry them; a table that never was has none of them and
 reads exactly as before. A channel's role in a control loop is read
 from three columns: a drive is `drive`, a control channel is `control`,
@@ -426,61 +439,168 @@ offset), `log_size` the log file's size in bytes then, `after` and
 and of the test, and `problems` the lines before `upto` skipped as not
 entries.
 
-## `run/`, a MIMO Random Run (Proposal)
+## `run_record/`
 
-*A proposal for the analysis maintainer, not yet part of schema 1.* The
-control service records a multiple-output random run in its own folder
-while it runs, and `hertzforge.io.mimo_run_convert` turns that folder
-into a `.hforge` file at the end (or afterwards, for a run that did not
-finish). The run is one group at the root:
+    run_record/  attrs: test, run_uid, run_id, title, complete, outcome,
+                 source ('SIM' or 'HARDWARE', when the run said)
+                 dsets (each one UTF-8 string of JSON):
+                   manifest   the run folder's run.json, whole
+                   table      its table.json, whole: every channel row in
+                              the control service's spelling, with any
+                              column the channel table has none for
+                   setup      its setup.json: config as accepted,
+                              resolved, derived, feasibility, seeded_from
+                   streams    {stream: its stream.json}, gaps and shots
+                              included
+                   results    {result: its <name>.json}, with a repeating
+                              result's records under "records"
+                   missing    [what the folder lacked, in words]
+                   log        the run's log, JSON Lines, in order
+                   end        its end.json (absent for a run that did not
+                              end cleanly)
+                   law        its law/law.json (absent when no law ran)
+                 law_file     the law file's bytes, uint8; attr name
+                              (absent unless the law is a file)
+                 arrays/<k>/  one group per result no analysis class
+                              holds (and a mapped result's other arrays);
+                              attr result (its name); dsets <j>, each with
+                              attr name, the array as written, a
+                              repeating result's records first
 
-    run/              attrs: test ('mimo_random'), source ('SIM' or
-                      'HARDWARE'), run_folder, start_unix_secs,
-                      setup_hash, complete (false for a run that did
-                      not finish: what it wrote is kept, the rest left
-                      out)
-      settings        the run's settings, JSON text
-      report          the report data, JSON text (finished runs only)
-      reference/      sdm (the reference at full level), alarm_upper,
-                      alarm_lower, abort_upper, abort_lower (lines by
-                      controls, NaN where there is no line), controls
-                      (channel indexes); attrs df_hz, band, space
-      identification/ frf and g_rd (lines by responses by drives),
-                      g_cc, g_dd, noise (packed), coherence (lines by
-                      controls), condition (per line), drive_vrms;
-                      attrs setup_hash, level_db, frames, steps,
-                      lag_frames
-      loops/
-        diagonal/     loop_index, control_psd, control_error_db
-                      (loops by lines by controls, full level, NaN out
-                      of band), drive_psd (loops by lines by drives)
-        summary/      loop_index, level_db, state, law_misses, and
-                      json (each loop's whole summary line)
-        sdm/<loop>/   response_full_level, drive_full_level (packed);
-                      attrs loop_index, why (the first loop at full
-                      level, the cadence, the last loop at full level)
-      law/            attrs id, name, version, sha256, builtin,
-                      catalog_path (a law file only); params (one JSON
-                      string per parameter, `{"key","kind","value"}`),
-                      parameters (as the report prints them), file (a
-                      law file's bytes, uint8)
-        calls/        index (one JSON string per law call: seq, call
-                      'seed' or 'iterate', loop_index, response_dof,
-                      df_hz, band, outcome, diagnostics, the arrays it
-                      holds with their byte offsets, and the inputs
-                      carried from an earlier call), payload (the
-                      calls' arrays, little-endian float64, uint8);
-                      attrs format
+The control service's own record of one run, kept whole beside the
+objects the run converts to (below), so nothing in the run folder is
+lost. `complete` is true for a run whose manifest says so and that has
+an end; `outcome` is the end's own (`completed`, `aborted`,
+`operator_stop`, and so on), '' when it has none.
 
-Every spectral matrix is in the controller's convention,
-`G = E[X X^H]` per line, Hermitian, and stored packed: a dataset of
-lines by `n (n + 1) / 2` complex values, the upper triangle row by row
-(`G[0,0], G[0,1], ..., G[0,n-1], G[1,1], ...`), with attributes
-`packing`, `convention` and `n`. Phases are kept as recorded; a reader
-that holds the other convention conjugates at its edge. The law calls
-are what a replay of the run feeds the law (acceptance A11 of the MIMO
-design): the arrays in each call are the law's declared inputs and its
-output drive.
+## `test_setup/`
+
+    test_setup/  attrs: module, protocol, title, origin_kind
+                 dsets (each one UTF-8 string):
+                   config   JSON: the configuration exactly as the
+                            module's configure request takes it
+                   table    JSON: the channel table it was made with,
+                            {"rows", "revision", "sha256"}, each when
+                            known; {} when not recorded
+                   origin   JSON: where it came from (below)
+                   notes    the operator's notes, plain text
+
+One test module's setup, saved so it can be opened again. `module` is
+the test it is for, by the name a run's manifest gives its test:
+`random`, `sine`, `mixed`, `classical_shock`, `srs`, `twr`, `explorer`,
+`recorder`, `mimo_random` or `mimo_shock`. `config` is what that
+module's configure request carries (`params.config`, or `params.setup`
+for `mimo_random.setup`), kept whole, members this reader does not know
+included. `protocol` is the protocol it was written under (`sds/1`).
+`table.rows` are channel rows in the control service's spelling, as a
+run folder's `table.json` holds them.
+
+`origin` says where the setup came from, by `kind`:
+
+- `typed`: typed on a test's screen;
+- `setup`: opened from a saved setup, with its `name`;
+- `run`: taken from a run's record, with the run's `run_uid` and
+  `run_id`, and the record's `name` in the project when it had one;
+- `seed`: a part of it filled from an analysis object in the project,
+  with the object's `name` as `object`, its SHA-256 as `checksum`, and
+  what it filled as `fills`; `also` lists any second object it read
+  (`object` and `checksum`), as a Mixed Mode floor's tones.
+
+`origin_kind` repeats `origin.kind` so a browser of the file sees it.
+A run record's `setup.config` has the same form, so a setup opened from
+a run and a saved one are read the same way. Opening either fills a
+test's draft only: the draft is checked by the control service as one
+typed in, and nothing is armed by opening it.
+
+## Run Folders and Their Conversion
+
+A run folder (`hertzforge.io.run_folder`) is the layout a control run is
+recorded in, one folder per run: `run.json` (the manifest, `schema`
+`hertzforge-run/1`), `table.json`, `setup.json`, `law/`, `log.jsonl`,
+`streams/<name>/` (`telemetry.f32`, little-endian float32,
+frame-interleaved, in engineering units, and `stream.json`),
+`results/<name>.json`, `.bin` and `.jsonl`, and `end.json`. Every control
+module of the control service writes one for every run, as
+`docs/run-folder.md` describes.
+
+`hertzforge.io.run_convert.convert` (and `hertzforge convert-run
+FOLDER [-o OUTPUT]`) writes it as an ordinary project file, by default
+`<run name>.hforge` inside the folder. Opening or importing the folder,
+or its `run.json`, opens or imports that file, converting first when
+there is none or the manifest was written after it. The project holds,
+in this order, all in one object group named for the run:
+
+- `Channel Table`, a `channel_table/` with the controller's columns.
+  Each row maps so: `index` is `channel`, `description` is `comment`,
+  `units` is `unit`, `sensitivity_mv_per_eu` is `sensitivity`,
+  `physical` is `"<device>/<channel>"`, `interface` `iepe` sets `iepe`,
+  `iepe_bias_v` is `iepe_bias`, the three `abort` limits are the abort
+  columns, a `drive` row sets `drive` and a `control` row `control`; a
+  row's `extra` columns fill the table's columns by name. A channel with
+  no node has its channel number as its node.
+- One time history per stream, named for the stream: values in SI,
+  float32, each channel's declared unit kept, the run's source, its
+  roles (a drive is a reference), the averaging the setup names, and a
+  run identity whose run and start come from the controller. Time is
+  from the run's start frame, or for a recording from its trigger, so
+  its pre-trigger samples are at negative times. A gap is not padded:
+  the samples after it follow on, and every record's comment says where
+  it was and how many frames it lost. A stream of shots is one record
+  per shot (`block` 'shot k'), each shot's first sample at minus its
+  `pre_frames`, or one history per shot when the shots differ in
+  length or timing.
+- `Specification`, from a Random setup's resolved profile (each
+  breakpoint's `freq_hz` and `psd_g2_hz`, with `alarm_db` and `abort_db`
+  as `[below, above]` held from that breakpoint to the next) on the
+  enabled control channels, its bands as warning and abort limits. For a
+  Sine sweep or dwell, a `SineSweepSpecification` of one tone (`Tone 1`)
+  on the enabled control channels in m/s**2, its breakpoints the points
+  of `results/reference` (the profile as the service resolved it on the
+  run's band) and its alarm and abort bands as the tone's warning and
+  abort limits; a sweep's tone is one pass across the band in the
+  direction the run started, at its rate and law (`resolved.test`), a
+  dwell's holds its frequency for its dwell.
+- `Sine Levels`, a `SineLevelSet`, for a Sine sweep's or step test's
+  result of kind `sine_levels`: one `SineLevel` of `Tone 1` over the
+  result's channels, complex (`values` at `phase`), in SI, its lines the
+  points of the last pass at the highest level the run reached where
+  the tone moved, ascending in frequency, with the time each was read.
+  The result's arrays stay in the run record whole.
+- A `Psd` for a result of kind `psd` or `cpsd`, an `Frf` for `frf`, a
+  `Coherence` or `MultipleCoherence` for `coherence`, from the array
+  named `values` (records last on the frequency axis), in SI by the
+  channels' units. Cross terms are taken as written, already in this
+  format's convention. A result whose stated unit is not the one its
+  channels give, or of any other kind, is kept in the run record as
+  arrays. A repeating result is one record per line of its `.jsonl`
+  (`block` 'record k').
+- `Run Record`, the `run_record/` above.
+
+The file is written to a temporary name and renamed into place, with no
+timestamps and in a fixed order: a failed conversion leaves no file, and
+one folder converted twice gives the same bytes. A stream is copied a
+block of at most 16 MiB at a time, so a run larger than memory
+converts; opening the file reads a float32 stream into a float64 array,
+twice its size on disk.
+
+## MIMO Random Runs
+
+A MIMO Random run is a run folder and converts as one ("Run Folders and Their
+Conversion"): its reference becomes a `Specification` with its cross terms, its
+identification an `Frf`, a `MultipleCoherence` and spectral matrices, its loops `Psd`
+records, and the rest stays in the run record (`docs/run-folder.md`, "What a MIMO
+Random Run Saves"). The separate `run/` group a MIMO run was once converted into is
+retired, with its converter.
+
+## MIMO Shock Runs
+
+A MIMO Shock run is a run folder and converts as one ("Run Folders and Their
+Conversion"): its streams are time histories of one record per shot (the
+identification's `probe` and `estimate`, and each pulse), each control's target SRS
+a `ShockSpecification` and each pulse's SRS an `Srs` with a record per control and
+pulse, a waveform target a `TransientSpecification` of every control, its
+identification an `Frf` and a `MultipleCoherence`, and the rest stays in the run
+record (`docs/run-folder.md`, "What a MIMO Shock Run Saves").
 
 ## Reading One Without Hertzforge
 

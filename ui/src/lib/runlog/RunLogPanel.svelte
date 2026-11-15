@@ -277,6 +277,39 @@
 		</div>
 	{/if}
 
+	<details class="events" data-testid="runlog-events" ontoggle={(e) => e.currentTarget.open && void rl.loadRuns()}>
+		<summary>Entries Proposed From a Run</summary>
+		<p class="note">A recorded run's events, offered as entries. None is written until you accept it with your initials.</p>
+		<div class="eventbar">
+			<select class="field sm" aria-label="Run record" data-testid="runlog-events-record" value={rl.record ?? ''} onchange={(e) => rl.pickRecord(e.currentTarget.value)}>
+				<option value="">Pick a run record</option>
+				{#each rl.runs as r (r.name)}<option value={r.name}>{r.title || r.name} ({r.run_id}{r.outcome ? `, ${r.outcome}` : ''})</option>{/each}
+			</select>
+			<button class="btn ghost sm" data-testid="runlog-events-refresh" onclick={() => rl.loadRuns()} title="List the run records of this window's project again">Refresh</button>
+		</div>
+		{#if rl.events.length}
+			<ol class="proposed" data-testid="runlog-events-list">
+				{#each rl.events as ev (ev.index)}
+					<li data-testid="runlog-event-{ev.index}" data-accepted={ev.accepted ? 'true' : 'false'}>
+						<span class="kind">{ev.label}</span>
+						{#if ev.time !== null}
+							<span class="num">{ev.time.slice(11, 19)}</span>
+						{:else}
+							<input class="field sm" type="datetime-local" step="1" aria-label="When event {ev.index + 1} happened" value={rl.eventTimes[ev.index] ?? ''} oninput={(e) => (rl.eventTimes[ev.index] = e.currentTarget.value)} disabled={ev.accepted} />
+						{/if}
+						<span class="text">{ev.text}</span>
+						{#if ev.accepted}
+							<span class="tag" data-testid="runlog-event-{ev.index}-accepted">Accepted</span>
+						{:else}
+							<button class="btn sm" data-testid="runlog-event-{ev.index}-accept" disabled={!writable || !rl.initials.trim() || rl.accepting !== null} onclick={() => rl.acceptEvent(ev)} title={!writable ? 'Open a log for writing first' : !rl.initials.trim() ? 'Type your initials first' : 'Write this entry into the log, with your initials'}>Accept</button>
+						{/if}
+					</li>
+				{/each}
+			</ol>
+		{/if}
+		{#if rl.eventsMessage}<p class="formmsg" role="status" data-testid="runlog-events-message">{rl.eventsMessage}</p>{/if}
+	</details>
+
 	{#if typing}
 		{@const t = typing}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions (Enter writes the form from any box) -->
@@ -332,6 +365,55 @@
 </section>
 
 <style>
+	.events {
+		font-size: var(--rl-text);
+	}
+
+	.events summary {
+		cursor: pointer;
+		font-weight: var(--weight-strong);
+	}
+
+	.eventbar {
+		display: flex;
+		gap: var(--sp-2);
+		align-items: center;
+		margin: var(--sp-1) 0;
+	}
+
+	.proposed {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.proposed li {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--sp-2);
+		align-items: baseline;
+	}
+
+	.proposed .kind {
+		font-weight: var(--weight-strong);
+	}
+
+	.proposed .text {
+		flex: 1;
+		min-width: 12em;
+	}
+
+	.proposed .tag {
+		padding: 0 6px;
+		border: 1px solid var(--line-2);
+		border-radius: 8px;
+		text-transform: uppercase;
+		font-size: var(--text-2xs);
+	}
+
 	/* Larger than the rest of the shell: read from across the room where the keeper sits. */
 	.runlog {
 		--rl-text: calc(var(--text-sm) * 1.3);

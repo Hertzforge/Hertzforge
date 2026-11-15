@@ -352,10 +352,6 @@ def test_a_picture_imports_into_photos_renamed_and_deleted_by_index(tmp_path, va
         projects.rename(state, {'name': 'Photos', 'to': 'x', 'index': 5})
     assert error.value.code == 'not_found'
 
-    with pytest.raises(ProtocolError) as error:
-        projects.delete_parts(state, {'parts': {'Photos': [0, 1]}})
-    assert error.value.code == 'refused' and 'delete the object' in error.value.message
-    assert photos.num_photos == 2, 'a refused delete deletes nothing'
     projects.delete_parts(state, {'parts': {'Photos': [0]}})
     assert photos.names == ['instrumentation']
     lines = list(state.project.journal)
@@ -363,9 +359,13 @@ def test_a_picture_imports_into_photos_renamed_and_deleted_by_index(tmp_path, va
     assert any(line.startswith("project['Photos'].add_file(") for line in lines)
     assert "project['Photos'].rename(1, 'instrumentation')" in lines
     assert "project['Photos'].delete_photos([0])" in lines
+    # the last photo takes the object with it (Brandon, 2026-11-13: it was refused)
+    projects.delete_parts(state, {'parts': {'Photos': [0]}})
+    assert 'Photos' not in state.project
+    assert state.project.journal[-1] == "project.remove('Photos')"
 
 
-def test_parts_of_data_are_deleted_and_every_record_is_refused():
+def test_parts_of_data_are_deleted_and_every_record_deletes_the_object():
     state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
     history = next(name for name, obj in state.project.items()
                    if projects.kind_of(obj) == 'time_history')
@@ -374,14 +374,21 @@ def test_parts_of_data_are_deleted_and_every_record_is_refused():
     assert state.project[history].num_records == count - 2
     assert f"project['{history}'].delete_records([0, 2])" in state.project.journal
     with pytest.raises(ProtocolError) as error:
-        projects.delete_parts(state, {'parts': {history: list(range(count - 2))}})
-    assert error.value.code == 'refused'
-    with pytest.raises(ProtocolError) as error:
         projects.delete_parts(state, {'parts': {history: [count + 3]}})
     assert error.value.code == 'not_found'
     with pytest.raises(ProtocolError) as error:
         projects.delete_parts(state, {'parts': {}})
     assert error.value.code == 'bad_request'
+    table = next(name for name, obj in state.project.items()
+                 if projects.kind_of(obj) == 'channel_table')
+    with pytest.raises(ProtocolError) as error:
+        projects.delete_parts(state, {'parts': {history: list(range(count - 2)),
+                                                table: [10 ** 6]}})
+    assert error.value.code == 'not_found'
+    assert history in state.project, 'nothing is deleted when any part is refused'
+    projects.delete_parts(state, {'parts': {history: list(range(count - 2))}})
+    assert history not in state.project
+    assert state.project.journal[-1] == f"project.remove({history!r})"
 
 
 def test_the_journal_is_the_session_as_python(tmp_path):

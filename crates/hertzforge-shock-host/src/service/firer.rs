@@ -168,6 +168,34 @@ impl Default for FireControl<'_> {
     }
 }
 
+/// Every input row of one fired shot, de-interleaved.
+///
+/// Row `i` is input slot `i`: the enabled rows of the channel table that are not
+/// Drive rows, in table order (the backend's configure mapping). Every row is
+/// [`PulseRows::frames`] long and covers the whole record, quiet lead-in and
+/// lead-out included.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PulseRows {
+    /// Frames in every row: the drive record plus both quiet surrounds.
+    pub frames: usize,
+    /// Quiet frames before (and after) the drive record.
+    pub quiet_frames: usize,
+    /// The table index of each row.
+    pub channels: Vec<u32>,
+    /// The role of each row (Control, Monitor or Reference).
+    pub roles: Vec<ChannelRole>,
+    /// One measured record per input slot.
+    pub rows: Vec<Vec<f64>>,
+}
+
+impl PulseRows {
+    /// The row measured on table channel `index`, if it is an input of the shot.
+    pub fn row_of_channel(&self, index: u32) -> Option<&[f64]> {
+        let slot = self.channels.iter().position(|&c| c == index)?;
+        self.rows.get(slot).map(Vec::as_slice)
+    }
+}
+
 /// The fire-path seam (see the module docs).
 pub trait PulseFirer {
     /// Which drive path this firer drives - the ONE capability discriminant
@@ -302,6 +330,13 @@ pub struct BackendPulseFirer<B: Backend> {
     n_inputs: usize,
     /// The slot (within the input frame) of the first enabled Control channel.
     control_slot: usize,
+    /// Enabled Drive rows of the table: the width of a drive frame the backend
+    /// was configured for.
+    n_drives: usize,
+    /// The table index of each input slot, in slot order.
+    input_channels: Vec<u32>,
+    /// The role of each input slot, in slot order.
+    input_roles: Vec<ChannelRole>,
     /// Quiet frames driven before and after each pulse, at the ADOPTED rate.
     /// Set by the service at arm through [`PulseFirer::set_quiet_frames`].
     quiet_frames: usize,
@@ -311,6 +346,11 @@ pub struct BackendPulseFirer<B: Backend> {
     /// The block this firer REQUESTS at configure. `None` = derive it from the
     /// rate (`hertzforge_hal::default_block_frames`).
     requested_block: Option<usize>,
+    /// The rate this firer REQUESTS at configure. `None` (every single-output
+    /// path) = the station's caps rate, as before; a caller that runs at the
+    /// rate its operator asked for sets it with [`Self::with_requested_rate`].
+    /// What it actually runs at still comes from `ConfiguredActual`.
+    requested_rate_hz: Option<f64>,
     /// The rate the device ACTUALLY programmed, from `ConfiguredActual`. The
     /// adoption seam; `None` until `arm()` succeeds.
     actual_fs_hz: Option<f64>,
@@ -352,14 +392,20 @@ impl<B: Backend> BackendPulseFirer<B> {
             .validate()
             .map_err(|e| ServiceError::Fire(format!("channel table: {e}")))?;
         let mut n_inputs = 0usize;
+        let mut n_drives = 0usize;
         let mut control_slot = None;
+        let mut input_channels = Vec::new();
+        let mut input_roles = Vec::new();
         for ch in table.channels.iter().filter(|c| c.enabled) {
             if ch.role == ChannelRole::Drive {
+                n_drives += 1;
                 continue;
             }
             if ch.role == ChannelRole::Control && control_slot.is_none() {
                 control_slot = Some(n_inputs);
             }
+            input_channels.push(ch.index);
+            input_roles.push(ch.role);
             n_inputs += 1;
         }
         if n_inputs == 0 {
@@ -373,9 +419,13 @@ impl<B: Backend> BackendPulseFirer<B> {
             table,
             n_inputs,
             control_slot: control_slot.unwrap_or(0),
+            n_drives,
+            input_channels,
+            input_roles,
             quiet_frames: 0,
             block_frames: 1,
             requested_block: None,
+            requested_rate_hz: None,
             actual_fs_hz: None,
             in_scratch: Vec::new(),
             drive_scratch: Vec::new(),
@@ -400,6 +450,13 @@ impl<B: Backend> BackendPulseFirer<B> {
     /// actually runs still comes from `ConfiguredActual`.
     pub fn with_block_frames(mut self, frames: usize) -> Self {
         self.requested_block = Some(frames.max(1));
+        self
+    }
+
+    /// Request `fs_hz` at configure instead of the station's caps rate. The
+    /// rate the device programs is still adopted from `ConfiguredActual`.
+    pub fn with_requested_rate(mut self, fs_hz: f64) -> Self {
+        self.requested_rate_hz = Some(fs_hz);
         self
     }
 
@@ -449,7 +506,7 @@ impl<B: Backend> BackendPulseFirer<B> {
     /// (40 ms) late behind it. Before anything has been accepted, the space
     /// query is therefore ADVISORY ONLY and the authority is `write_drive`'s own
     /// accept count - the same asymmetry `write_drive` already documents.
-    fn commit_whole_record(&mut self) -> Result<usize, ServiceError> {
+    fn commit_whole_record(&mut self, n_drive: usize) -> Result<usize, ServiceError> {
         // Pre-start, DAQmx ERRORS (-200293) on a write larger than the free
         // buffer rather than accepting a prefix - measured on the chassis in
         // the rate assay, 2026-08-08. So each write is capped at the
@@ -460,7 +517,10 @@ impl<B: Backend> BackendPulseFirer<B> {
         // the buffer - shallow shoulders inside the +/-15% surround band make
         // the composite ~10x the main-pulse duration - so this is the normal
         // shape, not an edge case.
-        let total = self.drive_scratch.len();
+        // Frames, not samples: the record is `n_drive` samples a frame, and the
+        // backend's space and accept counts are frames.
+        let n_drive = n_drive.max(1);
+        let total = self.drive_scratch.len() / n_drive;
         let mut done = 0usize;
         let block = self.block_frames.max(1);
         let space_before = self.backend.output_space();
@@ -500,7 +560,7 @@ impl<B: Backend> BackendPulseFirer<B> {
             }
             let accepted = self
                 .backend
-                .write_drive(&self.drive_scratch[done..done + space])
+                .write_drive(&self.drive_scratch[done * n_drive..(done + space) * n_drive])
                 .map_err(hal_err)?;
             if accepted == 0 {
                 break;
@@ -516,6 +576,154 @@ impl<B: Backend> BackendPulseFirer<B> {
             );
         }
         Ok(done)
+    }
+}
+
+impl<B: Backend> BackendPulseFirer<B> {
+    /// Enabled Drive rows of the table: the frame width [`Self::fire_rows`] takes.
+    pub fn n_drives(&self) -> usize {
+        self.n_drives
+    }
+
+    /// Input slots (every enabled row that is not a Drive row), the rows
+    /// [`Self::fire_rows`] returns.
+    pub fn n_inputs(&self) -> usize {
+        self.n_inputs
+    }
+
+    /// Fire ONE pulse on every drive at once and return every input row.
+    ///
+    /// `drive` is interleaved, `n_drive` samples a frame in the table's Drive-row
+    /// order, at the adopted rate, in the units the backend takes. `n_drive` must
+    /// equal [`Self::n_drives`]: a record of another width would be split across
+    /// the outputs as interleaved frames of the wrong size, so it is refused before
+    /// anything is armed. The shot is the single-output shot, frame for frame: the
+    /// quiet lead-in and lead-out (silence on every drive), the cold arm, the
+    /// whole record committed before the clock runs, the `ready` and `started`
+    /// hooks, the block-wise play with its cancel flag, and the park.
+    pub fn fire_rows(
+        &mut self,
+        drive: &[f64],
+        n_drive: usize,
+        ctl: &mut FireControl<'_>,
+    ) -> Result<PulseRows, ServiceError> {
+        if n_drive == 0 || n_drive != self.n_drives {
+            return Err(ServiceError::Fire(format!(
+                "the drive record is {n_drive} drives wide; the channel table has {} \
+                 enabled drive rows",
+                self.n_drives
+            )));
+        }
+        if drive.is_empty() || !drive.len().is_multiple_of(n_drive) {
+            return Err(ServiceError::Fire(format!(
+                "the drive record holds {} samples, not a whole number of {n_drive}-drive \
+                 frames",
+                drive.len()
+            )));
+        }
+        self.shoot(drive, n_drive, ctl)
+    }
+
+    /// The shot both fires share: one record `n_drive` samples a frame (see
+    /// [`PulseFirer::fire`] for the order and why each step is where it is).
+    fn shoot(
+        &mut self,
+        drive: &[f64],
+        n_drive: usize,
+        ctl: &mut FireControl<'_>,
+    ) -> Result<PulseRows, ServiceError> {
+        let q = self.quiet_frames;
+        let n_inputs = self.n_inputs;
+        let n_drive = n_drive.max(1);
+
+        // THE RECORD: quiet lead-in, the pulse, quiet lead-out. This is what is
+        // measured, and its length is what the play loop must read back.
+        let record_frames = drive.len() / n_drive + 2 * q;
+        if record_frames == 0 {
+            return Err(ServiceError::Fire(
+                "the commanded pulse is empty; there is nothing to fire".into(),
+            ));
+        }
+        self.drive_scratch.clear();
+        self.drive_scratch.reserve(record_frames * n_drive);
+        self.drive_scratch.resize(q * n_drive, 0.0);
+        self.drive_scratch.extend(drive.iter().map(|&d| d as f32));
+        self.drive_scratch.resize(record_frames * n_drive, 0.0);
+
+        // Scratch is sized at arm; a firer used before arm has none.
+        if self.in_scratch.is_empty() {
+            self.in_scratch = vec![0.0f32; self.block_frames.max(1) * n_inputs];
+        }
+
+        // 1 + 2 + 3: cold task, the whole record in front of the clock, then
+        // release.
+        let armed_at = Instant::now();
+        self.backend.arm().map_err(hal_err)?;
+        let committed_at = Instant::now();
+        let committed = self.commit_whole_record(n_drive)?;
+        // Brought up: armed, the record committed, nothing started. The service
+        // waits out the time between pulses here (`FireControl::hooks`).
+        let prepared = Prepared {
+            arm_s: (committed_at - armed_at).as_secs_f64(),
+            commit_s: committed_at.elapsed().as_secs_f64(),
+        };
+        if let Some(hooks) = ctl.hooks.as_mut() {
+            if !hooks.ready(prepared) {
+                return Err(ServiceError::Withheld);
+            }
+        }
+        let start_at = Instant::now();
+        self.backend.start().map_err(hal_err)?;
+        // The clock is running, so the pulse has started (`FireControl::hooks`).
+        if let Some(hooks) = ctl.hooks.as_mut() {
+            hooks.started(start_at.elapsed().as_secs_f64());
+        }
+
+        // 4: play the record, reading back exactly `record_frames`.
+        let mut rows: Vec<Vec<f64>> = (0..n_inputs)
+            .map(|_| Vec::with_capacity(record_frames))
+            .collect();
+        let play = hertzforge_hal::BlockPlay::new(self.block_frames);
+        let total = record_frames;
+        let mut delivered = 0usize;
+        let cancel = ctl.cancel;
+        let observer = &mut ctl.observer;
+        let played = hertzforge_hal::play_block_wise(
+            &mut self.backend,
+            &self.drive_scratch,
+            n_drive,
+            n_inputs,
+            &mut self.in_scratch,
+            &play,
+            committed,
+            cancel,
+            |block, frames| {
+                for f in 0..frames {
+                    let frame = &block[f * n_inputs..(f + 1) * n_inputs];
+                    for (row, &v) in rows.iter_mut().zip(frame) {
+                        row.push(v as f64);
+                    }
+                }
+                delivered += frames;
+                if let Some(obs) = observer.as_mut() {
+                    obs(delivered, total);
+                }
+            },
+        )
+        .map_err(stream_err);
+
+        // 5: park. It runs on the cancel path too - a cancelled fire must not
+        // leave a started task behind it.
+        let stopped = self.backend.stop().map_err(hal_err);
+        played?;
+        stopped?;
+        Ok(PulseRows {
+            frames: record_frames,
+            quiet_frames: q,
+            channels: self.input_channels.clone(),
+            roles: self.input_roles.clone(),
+            rows,
+        })
     }
 }
 
@@ -551,7 +759,9 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
     /// nothing after 0 frames"). Parked tasks cannot do either.
     fn arm(&mut self) -> Result<(), ServiceError> {
         self.backend.open().map_err(hal_err)?;
-        let requested = self.backend.caps().sample_rate_hz;
+        let requested = self
+            .requested_rate_hz
+            .unwrap_or_else(|| self.backend.caps().sample_rate_hz);
         let want_block = self
             .requested_block
             .unwrap_or_else(|| hertzforge_hal::default_block_frames(requested));
@@ -667,87 +877,12 @@ impl<B: Backend> PulseFirer for BackendPulseFirer<B> {
         _commanded_db: f64,
         ctl: &mut FireControl<'_>,
     ) -> Result<Option<Vec<f64>>, ServiceError> {
-        let q = self.quiet_frames;
-        let n_inputs = self.n_inputs;
+        // One drive: the shared shot with a frame one sample wide, keeping the
+        // first Control slot. Every input slot is read either way; the values kept
+        // are the ones the single-output path has always kept.
         let control_slot = self.control_slot;
-
-        // THE RECORD: quiet lead-in, the pulse, quiet lead-out. This is what is
-        // measured, and its length is what the play loop must read back.
-        let record_frames = drive_g.len() + 2 * q;
-        if record_frames == 0 {
-            return Err(ServiceError::Fire(
-                "the commanded pulse is empty; there is nothing to fire".into(),
-            ));
-        }
-        self.drive_scratch.clear();
-        self.drive_scratch.reserve(record_frames);
-        self.drive_scratch.resize(q, 0.0);
-        self.drive_scratch.extend(drive_g.iter().map(|&d| d as f32));
-        self.drive_scratch.resize(record_frames, 0.0);
-
-        // Scratch is sized at arm; a firer used before arm has none.
-        if self.in_scratch.is_empty() {
-            self.in_scratch = vec![0.0f32; self.block_frames.max(1) * n_inputs];
-        }
-
-        // 1 + 2 + 3: cold task, the whole record in front of the clock, then
-        // release.
-        let armed_at = Instant::now();
-        self.backend.arm().map_err(hal_err)?;
-        let committed_at = Instant::now();
-        let committed = self.commit_whole_record()?;
-        // Brought up: armed, the record committed, nothing started. The service
-        // waits out the time between pulses here (`FireControl::hooks`).
-        let prepared = Prepared {
-            arm_s: (committed_at - armed_at).as_secs_f64(),
-            commit_s: committed_at.elapsed().as_secs_f64(),
-        };
-        if let Some(hooks) = ctl.hooks.as_mut() {
-            if !hooks.ready(prepared) {
-                return Err(ServiceError::Withheld);
-            }
-        }
-        let start_at = Instant::now();
-        self.backend.start().map_err(hal_err)?;
-        // The clock is running, so the pulse has started (`FireControl::hooks`).
-        if let Some(hooks) = ctl.hooks.as_mut() {
-            hooks.started(start_at.elapsed().as_secs_f64());
-        }
-
-        // 4: play the record, reading back exactly `record_frames`.
-        let mut measured = Vec::with_capacity(record_frames);
-        let play = hertzforge_hal::BlockPlay::new(self.block_frames);
-        let total = record_frames;
-        let mut delivered = 0usize;
-        let cancel = ctl.cancel;
-        let observer = &mut ctl.observer;
-        let played = hertzforge_hal::play_block_wise(
-            &mut self.backend,
-            &self.drive_scratch,
-            1,
-            n_inputs,
-            &mut self.in_scratch,
-            &play,
-            committed,
-            cancel,
-            |block, frames| {
-                for f in 0..frames {
-                    measured.push(block[f * n_inputs + control_slot] as f64);
-                }
-                delivered += frames;
-                if let Some(obs) = observer.as_mut() {
-                    obs(delivered, total);
-                }
-            },
-        )
-        .map_err(stream_err);
-
-        // 5: park. It runs on the cancel path too - a cancelled fire must not
-        // leave a started task behind it.
-        let stopped = self.backend.stop().map_err(hal_err);
-        played?;
-        stopped?;
-        Ok(Some(measured))
+        let mut shot = self.shoot(drive_g, 1, ctl)?;
+        Ok(Some(shot.rows.swap_remove(control_slot)))
     }
 
     fn take_warnings(&mut self) -> Vec<String> {

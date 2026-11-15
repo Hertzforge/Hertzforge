@@ -155,9 +155,15 @@
     "rounds_per_min": 30,
     "rounds": 3
    },
-   "capture": {
-    "auto_start": false,
-    "run_name": "classical_shock"
+   "operator": "Operator",
+   "article": "Bracket",
+   "notes": "",
+   "specification": {
+    "document": "Example procedure",
+    "clause": "4.2"
+   },
+   "record": {
+    "streams": true
    },
    "metadata": [
     {

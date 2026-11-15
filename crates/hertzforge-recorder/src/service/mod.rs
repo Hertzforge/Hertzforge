@@ -551,6 +551,13 @@ impl<B: Backend> RecorderService<B> {
         &self.data_root
     }
 
+    /// Set where the recordings are made: a caller that makes its run folder once the
+    /// station is up (its record states the rate the station programmed) names it
+    /// here, before the first recording begins.
+    pub fn set_data_root(&mut self, data_root: PathBuf) {
+        self.data_root = data_root;
+    }
+
     // ---------------------------------------------------------------------
     // State transitions
     // ---------------------------------------------------------------------

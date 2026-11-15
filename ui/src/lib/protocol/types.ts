@@ -225,11 +225,15 @@ export interface Shape3DView {
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
+	paired?: boolean;
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;
 	/** What a click in the view does. */
 	pick?: Pick3D;
+	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
+	opacity?: number;
 	gizmo?: Gizmo3D;
 	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
 	frames?: { origin: number[]; axes: number[][]; length: number }[];
@@ -279,6 +283,8 @@ export interface Pick3D {
 	param?: string;
 	/** nodes: how many of the last `ids` are left out, and drawn dim. */
 	off?: number;
+	/** nodes: a second set of places after the `ids` rows, drawn in their own color and not clicked: how many held, then how many not. */
+	others?: [number, number];
 	/** faces: each triangle's surface, -1 for none. */
 	faces?: Int32Array;
 	/** faces: the surfaces in use now. */
@@ -517,6 +523,8 @@ export interface ParamDescriptor {
 	in_view?: boolean;
 	/** A length, or a text of lengths, typed in the display system (`withDisplayLengths`). */
 	length?: boolean;
+	/** A number of this dimension ('force/length') typed in the display system (`withDisplayQuantities`). */
+	quantity?: string;
 	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
 	setting?: string;
 	/** A request for this field's value, asked with the form's values by a button beside it; `{value}` comes back in the display units. */
@@ -536,6 +544,8 @@ export interface ProjectObject {
 	units_defined?: boolean;
 	/** A PSD or a specification on proportional bands, which changes its icon. */
 	banded?: boolean;
+	/** The two shape sets a Matched Modes object pairs, first and second: the tree sets it beside their groups. */
+	between?: [string, string];
 	/** A few words on what the object holds: its size, not its name. */
 	holds?: string;
 	/** Why the object does not fit what it answers to, and the records, modes or channels at fault. */
@@ -547,6 +557,28 @@ export interface ProjectObject {
 	verbs?: string[];
 	/** A time history's analysis settings, each group present only when set; a report's features. */
 	settings?: Record<string, Record<string, number | string | boolean>>;
+	/** A run record's run folder, while it is there: for Show Folder and Delete Run. */
+	run_folder?: string;
+}
+
+/** `runs.data_folder`: where the control service keeps runs, as the analysis service resolves it. */
+export interface DataFolderInfo {
+	path: string;
+	/** `setting`: chosen in the desktop app; `environment`: `HERTZFORGE_DATA_ROOT`; `default`: in the home folder. */
+	source: 'setting' | 'environment' | 'default';
+	exists?: boolean;
+	/** Whether a run's record can be written there now; absent when the folder does not exist yet. */
+	writable?: boolean;
+	/** Why it cannot be written. */
+	reason?: string;
+}
+
+/** `runs.delete`: what deleting a run removes (with `dry_run`, would remove). */
+export interface RunDeletePlan {
+	folder: string;
+	project_file: string;
+	project_file_exists: boolean;
+	deleted: boolean;
 }
 
 /** The connection's own project, as `project.*` and project operations return it. */
@@ -627,7 +659,6 @@ export interface Shown {
 	offers?: {
 		flat: boolean;
 		complex: boolean;
-		frequency: boolean;
 		projection: boolean;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
 		shapes: boolean;
@@ -647,7 +678,6 @@ export interface Shown {
 /** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
 export interface ShowPrefs {
 	flat: boolean;
-	log_frequency: boolean;
 	component: 'magnitude' | 'real' | 'imag' | 'phase';
 	/** The frequency an operating shape or envelope is read at; null for the loudest line. Not kept. */
 	line?: number | null;
@@ -775,6 +805,8 @@ export interface OperationDescriptor {
 	outputs: ViewKind[];
 	/** The form shows this while it is typed: `op.run` with `preview`, on a copy. */
 	previews?: boolean;
+	/** The boolean param that says go ahead: the form does not ask it, Preview sends it false and Apply true. */
+	commits?: string;
 }
 
 export interface Catalog {
@@ -859,6 +891,8 @@ export type RefusalReason =
 	| 'hardware_busy'
 	| 'stale_revision'
 	| 'table_invalid'
+	| 'table_not_applied'
+	| 'nothing_to_apply'
 	| 'config_invalid'
 	| 'shaker_record_invalid'
 	// MIMO Random and the law catalog
@@ -873,7 +907,9 @@ export type RefusalReason =
 	| 'law_check_running'
 	| 'law_check_not_recorded'
 	| 'law_not_checked'
-	| 'shutting_down';
+	| 'shutting_down'
+	// a Random run's record
+	| 'record_unwritable';
 
 export type ItemReason =
 	// channel table
@@ -891,8 +927,10 @@ export type ItemReason =
 	| 'mixed_timing_families'
 	| 'iepe_without_bias'
 	| 'bias_on_single_ended'
-	| 'reference_count_mismatch'
 	| 'drive_channel_present'
+	| 'unit_unknown'
+	| 'drive_not_in_volts'
+	| 'abort_not_in_g'
 	// profile
 	| 'profile_empty'
 	| 'first_row_not_anchor'
@@ -937,6 +975,7 @@ export type ItemReason =
 	| 'law_param_unknown'
 	| 'law_param_invalid'
 	| 'backend_not_selected'
+	| 'plant_unknown'
 	| 'reference_invalid'
 	| 'reference_file'
 	| 'geometry'
@@ -1091,18 +1130,87 @@ export interface ChannelRow {
 	polarity: 'positive' | 'negative';
 	control_group: number | null;
 	abort: ChannelAbortLimits;
+	// The analysis side's columns, carried with the row and never run from. Each is optional:
+	// the service writes one only when it holds something and keeps every one it is sent.
+	/** The geometry node the channel is at. */
+	node?: number | null;
+	/** The direction it measures along (`X+`). */
+	direction?: string;
+	/** The quantity it measures (`acceleration`, `force`, ...). */
+	channel_type?: string;
+	/** What the channel is to a frequency response, apart from its role in the loop. */
+	analysis_role?: 'reference' | 'response' | 'monitor' | '';
+	/** The input's range, volts. */
+	daq_range_v?: number | null;
+	/** The sensor's own full-scale output, volts. */
+	sensor_range_v?: number | null;
+	serial_number?: string;
+	make?: string;
+	model?: string;
+	/** Which leg of a triaxial sensor. */
+	triax_dof?: string;
+	/** When the sensor's calibration runs out, `YYYY-MM-DD`. */
+	expiration?: string;
+	/** `full`, `rotating` or `decimated:N`; absent is `full`. */
+	analysis_tier?: string;
+	/** The row is a limit channel. A mark only: each test's limits stay in its setup. */
+	limit?: boolean;
+	/** Any other column, by name. */
+	extra?: Record<string, string>;
 }
 
 export interface ChannelTable {
 	revision: number;
 	channels: ChannelRow[];
 	report: ValidationReport;
+	/** Present while the table came from the kept file, a project or a file and is not applied: no run arms on it. */
+	restored?: RestoredTable;
+	/** Why the kept table was not used at start, or why the last keeping write failed. */
+	kept_problem?: string;
+}
+
+/** Where a restored table came from and when (PROTOCOL.md, "Restored Tables"). */
+export interface RestoredTable {
+	source: 'kept' | 'project' | 'file';
+	/** The project table's or the file's name; the kept file's name for a kept table. */
+	name: string;
+	/** When it was taken (a kept table: when it was written), unix seconds. */
+	at_unix: number;
+	/** The same instant as `YYYY-MM-DD HH:MM:SS UTC`. */
+	at: string;
+}
+
+/** What a client names as a table's source in `channels.set`. */
+export interface TableSource {
+	kind: 'project' | 'file';
+	name: string;
 }
 
 export interface ChannelsSetParams {
 	revision: number;
 	channels: ChannelRow[];
 	dry_run?: boolean;
+	/** A table from a project or a file arrives restored; none is a table typed or edited here. */
+	source?: TableSource | null;
+}
+
+export interface ChannelsApplyParams {
+	revision: number;
+}
+
+export interface ChannelsApplyResult {
+	revision: number;
+	applied: RestoredTable;
+	report: ValidationReport;
+}
+
+/** `project.channel_table`: a project table as the control service's rows. */
+export interface ProjectChannelTable {
+	name: string;
+	channels: ChannelRow[];
+	tables: string[];
+	environments: Record<string, unknown>;
+	warnings: string[];
 }
 
 export interface ChannelsSetResult {
@@ -1200,6 +1308,14 @@ export interface FeasibilityInputs {
 
 export interface RandomConfig {
 	title: string;
+	/** The operator's words, kept in the run's record. */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	/** The document and clause the test is run to. */
+	specification?: { document: string; clause: string } | null;
+	/** `streams: false` keeps the record without the inputs and drive streams. */
+	record?: { streams?: boolean } | null;
 	profile: RandomProfile;
 	acquisition: Acquisition;
 	schedule: Schedule;
@@ -1327,6 +1443,14 @@ export interface RandomState {
 	alarm: boolean;
 	feasibility: FeasibilityVerdict | null;
 	end: RunEnd | null;
+	/** The run's record, from arm on: its folder, whether it holds the streams, and the latest problem writing it. */
+	record?: RunRecordRef;
+}
+
+export interface RunRecordRef {
+	folder: string;
+	streams: 'on' | 'off';
+	problem: string | null;
 }
 
 export interface LiveChannel {
@@ -1412,7 +1536,7 @@ export interface RandomData extends RandomLiveHead {
 }
 
 /** `pulse` and `law` are classical shock's: a line per pulse fired, and the law's calls that were not used. */
-export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note' | 'pulse' | 'law';
+export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note' | 'pulse' | 'law' | 'record';
 
 export interface LogEntry {
 	seq: number;

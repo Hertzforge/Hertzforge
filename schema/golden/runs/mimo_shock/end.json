@@ -1,0 +1,38 @@
+{
+  "run_uid": "golden-mimo-shock",
+  "end": {
+    "outcome": "completed",
+    "reason": "completed",
+    "message": "Every level passed.",
+    "at_s": 30.0,
+    "level_db": 0,
+    "pulse": 1
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 6016,
+  "summary": {
+    "pulses_fired": 2,
+    "pulses_passed": 2,
+    "elapsed_s": 30.0,
+    "level_db": 0.0,
+    "law_calls": 2,
+    "law_misses": 0,
+    "shots": 4
+  },
+  "streams": {
+    "inputs": {
+      "frames": 320,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null,
+      "cut_from_frames": 6016
+    },
+    "drives": {
+      "frames": 320,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null,
+      "cut_from_frames": 6016
+    }
+  }
+}

@@ -8,9 +8,9 @@ is judged against, the playback schedule and every abort are the controller's, n
 drive is in volts throughout, held under a drive ceiling that the operator gives.
 
 This guide is written for the test engineer running the test. It follows the order of a run: the
-station and channels, the reference, identification, control, the schedule, limits and capture,
-then the run itself. TWR shares its run bar, station panel, channel table and control-law panel with
-the other test types.
+station and channels, the reference, identification, control, the schedule, limits and the run's
+record, then the run itself. TWR shares its run bar, station panel, channel table and control-law
+panel with the other test types.
 
 ## What the Test Does
 
@@ -171,11 +171,35 @@ are the correction share, the growth limit, and a backoff for the first drive.
   is blocked until the operator acknowledges it in words, which the run log keeps. A ceiling left off
   is not checked.
 
-## Capture
+## The Run's Record
 
-Whether capture starts with the run, and the run folder's name under the program's local data
-folder; each play's target, response and drive records go there either way. Fields kept with the run
-(a run number, an operator) are listed here.
+Every run is recorded in its run folder under the program's local data folder
+(`docs/run-folder.md`, "What a TWR Run Saves"); there is no separate capture to
+switch on. The Run Record panel takes who ran it, the article, notes and the
+document and clause it is run to, and whether the folder keeps the time
+histories. Fields kept with the run (a run number, a serial number) are listed
+here too, and travel in the controller's own report.
+
+From the moment the run arms, the folder holds the setup, the channel table,
+the law and the run's log. It then holds, written as the run goes:
+
+- every enabled input and the drive as played, as one shot for the
+  identification and one for every play: each play's record and the rest after
+  it, the play a protection ended the run on and one a stop cut short included,
+  as far as the station took them;
+- the reference as imported and the target it was prepared into at full level;
+- the identification's transfer function and coherence;
+- each play's level, its rms, peak and spectral error, whether it met the gate
+  and how it ended, written as the play is judged, the last play included;
+- every call of the control law and the drive it returned. The law is called
+  at the seed, after an iteration play that misses its gate, and after a
+  playback play only when **Keep correcting during playback** is on, and never
+  while corrections are frozen, so a play that met its gate leaves no call.
+
+With the time histories left out, the folder keeps everything but the shots.
+The **Records** on the Plays page come from the control service's memory, for
+the most recent eight plays; a finished run opens in Transient Analysis from
+the run card with **Open in Analysis**.
 
 ## The Run
 
@@ -220,8 +244,8 @@ The pages, each drawn from the control service's views:
   it met the gate, the drive and response peaks, how far its lag drifted from the identification's
   (shown as not yet measured until the alignment check has measured it), the law call that made its
   drive and the values the law reported. **Records** opens a play's target, response, error and drive
-  from the control service; the records of the most recent plays are held, and an older play keeps
-  its row. A play that a stop, an abort or the in-play envelope check cut short has no row; its frames
+  from the control service's memory; the records of the most recent eight plays are held, and an
+  older play keeps its row. A play that a stop, an abort or the in-play envelope check cut short has no row; its frames
   still count in station time, and the run's end names it.
 
 **Target**, **Drive**, **Envelope** (the response inside the alarm and abort bands) and **Scope** (the

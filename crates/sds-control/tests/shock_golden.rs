@@ -264,6 +264,7 @@ fn running() -> ShockView {
         end: None,
         fire: None,
         streaming: true,
+        record: None,
     }
 }
 

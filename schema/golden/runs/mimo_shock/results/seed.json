@@ -1,0 +1,54 @@
+{
+  "name": "seed",
+  "kind": "mimo_shock_seed",
+  "abscissa": {
+    "kind": "none"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "description": "before the first pulse: each control's reachable share of its target's energy, its floor (dB), whether its best reachable response passes its judge (1 pass, 0 fail), and the seed's predicted peak over its target's at the first level",
+  "arrays": [
+    {
+      "name": "reachable",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 0
+    },
+    {
+      "name": "floor",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "dB",
+      "offset": 32
+    },
+    {
+      "name": "reachable_ok",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 64
+    },
+    {
+      "name": "predicted_peak_ratio",
+      "dtype": "f8",
+      "shape": [
+        4
+      ],
+      "unit": "",
+      "offset": 96
+    }
+  ]
+}

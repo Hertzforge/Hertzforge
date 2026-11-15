@@ -51,8 +51,10 @@ from .core.photos import Photos
 from .core.prediction import Predictions
 from .core.report import Report
 from .core.run_log_extract import RunLogExtract
+from .core.run_record import RunRecord
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
+from .core.test_setup import TestSetup
 from .names import display_name
 from .report.features import FeatureSelection
 
@@ -84,7 +86,7 @@ ObjectGroup = dict[str, Any]
 TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
               _CoherenceBase, ShapeSet, MatchedModes, Predictions,
-              RunLogExtract, Report)
+              RunLogExtract, RunRecord, TestSetup, Report)
 
 
 def type_rank(obj: Any) -> int:
@@ -135,6 +137,8 @@ def describe(obj: Any) -> str:
         count = len(obj.entries)
         return (f'test {obj.test}, {obj.kind}, {count} '
                 f'entr{"y" if count == 1 else "ies"} to log entry #{obj.upto}')
+    elif isinstance(obj, (RunRecord, TestSetup)):
+        return obj.describe()
     elif isinstance(obj, Report):
         counts = [(obj.num_blocks, 'block')]
     else:
@@ -293,6 +297,8 @@ KINDS: tuple[tuple[str, str, type], ...] = (
     ('matches', 'match_sets', MatchedModes),
     ('predictions', 'prediction_sets', Predictions),
     ('run_log_extract', 'run_log_extracts', RunLogExtract),
+    ('run_record', 'run_records', RunRecord),
+    ('test_setup', 'test_setups', TestSetup),
     ('report', 'reports', Report),
 )
 
@@ -370,6 +376,10 @@ class Selection:
         prediction_sets: list[Predictions]
         run_log_extract: RunLogExtract
         run_log_extracts: list[RunLogExtract]
+        run_record: RunRecord
+        run_records: list[RunRecord]
+        test_setup: TestSetup
+        test_setups: list[TestSetup]
         report: Report
         reports: list[Report]
 
@@ -542,6 +552,10 @@ class Project(dict):
         prediction_sets: list[Predictions]
         run_log_extract: RunLogExtract
         run_log_extracts: list[RunLogExtract]
+        run_record: RunRecord
+        run_records: list[RunRecord]
+        test_setup: TestSetup
+        test_setups: list[TestSetup]
         report: Report
         reports: list[Report]
 
@@ -745,7 +759,8 @@ class Project(dict):
         """Import a file into this project and return the names added.
 
         The file can be anything hertzforge reads: a geometry, a
-        Rattlesnake run or a saved project. A saved project brings its
+        Rattlesnake run, a saved project, or a control run's folder,
+        imported as the project file it converts to. A saved project brings its
         object groups, which follow the objects even when a name clash
         renamed them, and when this project is empty it also brings its
         name, type and active geometry. When a reader returns several
@@ -776,9 +791,13 @@ class Project(dict):
             The names of every object added, in the order added.
         """
         from .io import import_file as read
-        from .io import project_type_of
+        from .io import project_type_of, run_convert, run_folder
         from .io.native import REFERENCE_FROM_BYTES, object_sizes
 
+        if run_folder.folder_of(path) is not None:
+            # a control run's folder is imported as the project file it
+            # converts to, so a large stream is held by reference to it
+            path = run_convert.converted(path)
         was_empty = not self
         result = read(str(path), **options)
         local = os.path.abspath(os.path.expanduser(str(path)))
@@ -3179,6 +3198,76 @@ class Project(dict):
                                 'anti_alias': bool(anti_alias),
                                 'order': order}))
 
+    def rescale(self, source: Any, factor: float | None = None, *,
+                recorded_sensitivity: float | None = None,
+                correct_sensitivity: float | None = None,
+                records: Sequence[int] | None = None) -> str:
+        """Multiply some or all of a time history's records by a factor
+        (Apply in Rescale) and add the result beside it.
+
+        The factor is given outright, or as the sensitivity the data was
+        recorded with and the correct one, in the same units, for a
+        record taken with the wrong sensitivity: the factor is then
+        recorded over correct (`core.rescale.sensitivity_factor`). The
+        records not picked are copied unchanged, and the result keeps
+        the source's clock, channels, averaging and shock windows, so it
+        stands in for the source in whatever was computed from it. The
+        channel table is not changed; a sensitivity wrong there as well
+        is corrected in the table.
+
+        Parameters
+        ----------
+        source : str or object
+            The time history, by name or as the object itself.
+        factor : float, optional
+            What the records are multiplied by; negative flips their
+            sign.
+        recorded_sensitivity, correct_sensitivity : float, optional
+            The sensitivity the data was recorded with and the correct
+            one, given together in place of `factor`.
+        records : sequence of int, optional
+            Which records, counting from zero; every record when omitted.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+
+        Raises
+        ------
+        ValueError
+            When neither or both of a factor and the two sensitivities
+            are given, a sensitivity is not above zero, the factor is
+            zero or not finite, or a record is not in the history.
+        TypeError
+            When the source is not a time history.
+        """
+        from .core.rescale import chosen_records, sensitivity_factor
+
+        # Brandon, 2026-11-12: data recorded with the wrong sensitivity
+        # had no way to be corrected. A verb rather than a rescale on
+        # editing the table's sensitivity, which can mean "recorded with
+        # this" or "the next test uses this", and only the first should
+        # touch the data.
+        pair = (recorded_sensitivity, correct_sensitivity)
+        if not ((factor is not None and pair == (None, None))
+                or (factor is None and None not in pair)):
+            raise ValueError('give a factor or two sensitivities, the one '
+                             'recorded with and the correct one')
+        if factor is None:
+            factor = sensitivity_factor(float(recorded_sensitivity),
+                                        float(correct_sensitivity))
+        source = self.name_of(source)
+        history = self[source]
+        if not isinstance(history, TimeHistory):
+            raise TypeError(f'{source!r} is not a time history')
+        made = history.rescale(float(factor), records)
+        kept = None if records is None else chosen_records(history, records)
+        return self._derive(source, made, f'{source} Rescaled',
+                            recipe=('rescale', {'factor': float(factor),
+                                                'records': kept}))
+
     def truncate_data(self, source: Any) -> str:
         """Cut a time history to its truncation span (Apply Truncation in
         the truncate view): every channel between start and stop, on the
@@ -3494,8 +3583,8 @@ class Project(dict):
         -------
         tuple of (ShapeSet, dict)
             The set to read, and the projection's report ('matched',
-            'total', 'worst', 'limit', 'dropped'), empty when the set's
-            own DOFs are read.
+            'total', 'worst', 'limit', 'dropped', 'pairs', 'unmatched'),
+            empty when the set's own DOFs are read.
         """
         from .core.correlate import project_shapes
 
@@ -8593,7 +8682,7 @@ class Project(dict):
         # the smoothing and the refinement the levels were read with
         'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
-        'resample': 'content',
+        'resample': 'content', 'rescale': 'content',
         # the settings and the nodes both: a moved node, or a turned
         # displacement system, changes the shapes as surely as a moved
         # reference point does
@@ -8908,15 +8997,23 @@ class Project(dict):
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
         """Read a project from a `.hforge`, an older `.vdyn`, a
-        `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file.
+        `.mat` or an ESCDF `.h5` (`.hdf5`, `.escdf`) file, or from a
+        control run's folder (or its `run.json`), which opens as the
+        `.hforge` file it converts to inside the folder, converted first
+        when there is none or the run has changed since
+        (`io.run_convert.converted`).
 
         The journal starts over with the one line that opens the file. A
         file holding a single object rather than a project raises
         SingleObjectFile, a ValueError.
         """
-        from .io import import_file, load
+        from .io import import_file, load, run_convert, run_folder
         from .io.escdf_objects import SUFFIXES
 
+        if run_folder.folder_of(path) is not None:
+            # a control run's folder opens as the project file it
+            # converts to, which is where the project saves
+            path = run_convert.converted(path)
         loaded = (import_file(str(path))
                   if str(path).endswith(('.mat', *SUFFIXES))
                   else load(str(path)))
@@ -9335,6 +9432,7 @@ _VERB_APPLIES: tuple = (
     ('filter_data', _is_time),
     ('truncate_data', _is_time),
     ('resample', _is_time),
+    ('rescale', _is_time),
     ('detect_shocks', _is_time),
     ('compute_spectra', _is_time),
     ('compute_psds', _is_time),
@@ -9627,7 +9725,8 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'make_realizable',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
-    'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'integrate',
+    'detect_shocks', 'filter_data', 'truncate_data', 'resample', 'rescale',
+    'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
     'plan_instrumentation',
@@ -9720,6 +9819,7 @@ _RECOMPUTE = {
     'truncate_data': lambda p, s, k: p[s].truncate(),
     'resample': lambda p, s, k: p[s].resample(
         k['rate'], anti_alias=k.get('anti_alias', True), order=k.get('order')),
+    'rescale': lambda p, s, k: p[s].rescale(k['factor'], k.get('records')),
     # `get` with the module default, so a recipe that recorded None
     # stays raw — None is a choice here, not an absence
     'integrate': lambda p, s, k: p[s].integrate(

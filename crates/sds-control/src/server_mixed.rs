@@ -247,8 +247,10 @@ impl Service {
             core: core.clone(),
             law: facts.clone(),
             sim_speed: self.opts.sim_speed,
-            capture_root: self.opts.capture_root.clone(),
+            capture_root: Some(self.opts.records_root()),
             timeout_s: self.opts.timeout.as_secs_f64(),
+            record: self.opts.record.clone(),
+            derived: derived.to_json(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         mrun::spawn(plan, initial.clone(), shared.clone(), rx)
@@ -339,7 +341,7 @@ impl Service {
                 }
             }
         }
-        let (run, plan, hardware, tbl) = {
+        let (run, plan, hardware, tbl, revision, devices) = {
             let inner = self.inner.lock().await;
             inner.session.require_controller(conn.id)?;
             let run = inner.mixed.clone().ok_or_else(not_configured)?;
@@ -360,6 +362,7 @@ impl Service {
             if !(v.state == State::Configured || (v.state == State::Blocked && !start)) {
                 return Err(wrong_state(&v, if start { "Starting" } else { "Arming" }));
             }
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(
@@ -369,7 +372,7 @@ impl Service {
             }
             let fs_hz = run.wire.fs_hz();
             let (plan, hardware) = match inner.stations.selected() {
-                Selection::Sim => (StationPlan::Sim { fs_hz }, false),
+                Selection::Sim => (StationPlan::sim(fs_hz), false),
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);
@@ -384,7 +387,14 @@ impl Service {
                     )
                 }
             };
-            (run, plan, hardware, inner.table.table.clone())
+            (
+                run,
+                plan,
+                hardware,
+                inner.table.table.clone(),
+                inner.table.revision,
+                inner.stations.devices().to_vec(),
+            )
         };
         Self::mixed_law_gate(&run.law, hardware)?;
         let choice = run.core.law.clone();
@@ -412,6 +422,8 @@ impl Service {
             data_root: self.opts.data_root.clone(),
             bind: self.opts.bind.clone(),
             laws,
+            revision,
+            devices,
         };
         if start {
             run.ask(|reply| Cmd::Start { ctx, reply }, ARM_WAIT).await?;

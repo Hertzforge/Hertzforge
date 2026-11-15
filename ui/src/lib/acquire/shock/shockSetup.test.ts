@@ -89,7 +89,11 @@ const FULL: ShockConfig = {
 	},
 	train: { count: 4, spacing_s: 8 },
 	gunfire: { rounds_per_min: 900, rounds: 12 },
-	capture: { auto_start: true, run_name: 'trap_run' },
+	operator: 'A. Tester',
+	article: 'Bracket, unit 3',
+	notes: 'Second axis.',
+	specification: { document: 'Test Method 516', clause: '4.2' },
+	record: { streams: false },
 	metadata: [
 		{ key: 'run_number', label: 'Run Number', value: '17' },
 		{ key: 'operator', label: 'Operator', value: 'A. Tester' }
@@ -135,6 +139,27 @@ describe('a configuration through the draft and back', () => {
 		expect(d.pulse.compensation).toEqual({ shape: 'rectangular', pre_frac: 4, post_frac: 4, symmetric: true });
 		expect(d.standard).toEqual({ name: 'mil_std_810_516', tolerance_abort: 'full_level', overshoot_abort: null });
 		expect(d.train.count).toBe(1);
+	});
+
+	it("takes the run's record as Random's: the words trimmed, a specification when either part is given, the switch, and no capture", () => {
+		const d = fromShockConfig(FULL);
+		expect(d.record).toEqual({ operator: 'A. Tester', article: 'Bracket, unit 3', notes: 'Second axis.', document: 'Test Method 516', clause: '4.2', streams: false });
+		d.record = { operator: '  J. Operator ', article: '', notes: ' ', document: '', clause: '', streams: true };
+		const c = toShockConfig(d, LAW);
+		expect([c.operator, c.article, c.notes, c.specification, c.record]).toEqual(['J. Operator', '', '', null, { streams: true }]);
+		expect('capture' in c).toBe(false);
+		// a clause names its document
+		d.record.clause = '4.2';
+		expect(localErrors(d)['specification.document']).toEqual(['Name the document this clause is from.']);
+		expect(shockSectionOf('specification.document')).toBe('trains');
+		expect(shockSectionOf('record.streams')).toBe('trains');
+	});
+
+	it('reads a draft saved with the old capture as one with the run record, time histories on', () => {
+		const old = JSON.stringify({ ...defaultShockSetup(), record: undefined, capture: { auto_start: true, run_name: 'old' } });
+		const d = loadShockSetup(old);
+		expect(d.record).toEqual(defaultShockSetup().record);
+		expect('capture' in d).toBe(false);
 	});
 
 	it('sends only the parameters the law declares', () => {
@@ -186,7 +211,8 @@ describe('what the editor names before anything is sent', () => {
 		d.feasibility.shaker_text = '{ not json';
 		d.title = ' ';
 		const e = localErrors(d, rows);
-		expect(Object.keys(e).sort()).toEqual(['feasibility.shaker', 'limits.monitors.0.channel', 'limits.monitors.1.channel', 'pulse.duration_ms', 'schedule.levels.1.pulses', 'title']);
+		// An empty title is not an error: the title follows the pulse.
+		expect(Object.keys(e).sort()).toEqual(['feasibility.shaker', 'limits.monitors.0.channel', 'limits.monitors.1.channel', 'pulse.duration_ms', 'schedule.levels.1.pulses']);
 	});
 
 	it('the trapezoid edges count only for a trapezoid, the post shoulder only when not symmetric', () => {
@@ -241,5 +267,24 @@ describe('the preview request', () => {
 		] as unknown as ChannelRow[];
 		const c = runChannels(rows);
 		expect([c.control?.index, c.drive?.index]).toEqual([5, 6]);
+	});
+});
+
+describe('the title', () => {
+	it('follows the pulse until the operator types one', () => {
+		const d = defaultShockSetup();
+		expect(toShockConfig(d, null).title).toBe('Half-Sine 20 g 11 ms');
+		d.pulse.amplitude_g = 1;
+		expect(toShockConfig(d, null).title).toBe('Half-Sine 1 g 11 ms');
+		d.pulse.shape = 'terminal_peak_sawtooth';
+		d.pulse.duration_ms = 6.5;
+		expect(toShockConfig(d, null).title).toBe('Terminal-Peak Sawtooth 1 g 6.5 ms');
+		d.title = 'Bracket drop';
+		expect(toShockConfig(d, null).title).toBe('Bracket drop');
+		// A configuration whose title is the one its pulse gives opens following; a typed one stays.
+		expect(fromShockConfig(toShockConfig(defaultShockSetup(), null)).title).toBe('');
+		expect(fromShockConfig(toShockConfig(d, null)).title).toBe('Bracket drop');
+		// A draft an older shell cached with its default follows its pulse again.
+		expect(mergeShockSetup({ ...d, title: 'Half-Sine 20 g 11 ms' }).title).toBe('');
 	});
 });

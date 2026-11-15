@@ -1,0 +1,24 @@
+{
+ "type": "response",
+ "id": 77,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 2 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "targets_length_mismatch",
+     "field": "target.pulses",
+     "message": "3 targets for 4 controls; give one target per control."
+    },
+    {
+     "reason": "verdict_needs_srs",
+     "field": "verdict",
+     "message": "The global verdict judges an SRS target; this target is a waveform."
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

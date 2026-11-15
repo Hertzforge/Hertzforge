@@ -43,7 +43,7 @@ import { lawParamErrors, lawsOfWorld, lawValues, type LawErrors } from '../law/l
 import { canonical } from '../mimo/mimoSetup';
 import { errorCount, mergeErrors, type FieldErrors, type ProfileHost, type ScheduleHost } from '../setup';
 import type { AcquireState } from '../store.svelte';
-import { toRefusal, type Refusal } from '../words';
+import { levelReadout, toRefusal, type Refusal } from '../words';
 import type { LiveParamState } from '../sine/sineVerbs';
 import {
 	defaultMixedSetup,
@@ -214,6 +214,16 @@ export class MixedStore {
 
 	get rows(): ChannelRow[] {
 		return this.acq.rows;
+	}
+
+	/** The channels a run's streams would hold: every enabled input and drive of the table being edited. */
+	get recordChannels(): number {
+		return this.rows.filter((r) => r.enabled).length;
+	}
+
+	/** The sample rate the run asks for, for the size its streams take. */
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz;
 	}
 
 	get isLive(): boolean {
@@ -406,10 +416,12 @@ export class MixedStore {
 			title: s.title,
 			mode: s.mode,
 			levels_db: s.levels_db,
-			level_db: s.level_db,
+			// Once the run has ended, the last level in force, never the stop ramp's tail.
+			level_db: levelReadout(s.level_db, null, s.end).level,
 			at_level_s: s.at_level_s,
 			remaining_at_level_s: s.remaining_at_level_s,
-			end: s.end as unknown as RunHead['end']
+			end: s.end as unknown as RunHead['end'],
+			record: s.record ?? null
 		};
 	}
 

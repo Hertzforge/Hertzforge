@@ -38,7 +38,7 @@ HIDDEN = frozenset(f'project.{name}' for name in (
 VERBS = {f'project.{name}': verb for name, verb in {
     'compute_psds': 'Compute PSDs', 'compute_frfs': 'Compute FRFs', 'fit_modes': 'Fit Modes',
     'integrate': 'Integrate', 'differentiate': 'Differentiate', 'filter_data': 'Apply Filter',
-    'truncate_data': 'Apply Truncation', 'resample': 'Resample',
+    'truncate_data': 'Apply Truncation', 'resample': 'Resample', 'rescale': 'Rescale',
     'compute_spectra': 'Compute Spectra', 'compute_cpsds': 'Compute CPSDs',
     'compute_srs': 'Compute SRS', 'compute_multiple_coherence': 'Compute Coherence',
     'compute_octave': 'Compute Octaves', 'make_realizable': 'Make Realizable',
@@ -63,7 +63,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'srs_synthesis': 'Synthesize', 'compute_modal_responses': 'Modal Responses', 'synthesize_modal_frfs': 'Modal FRFs',
     'sweep_rate': 'Sweep Rate', 'fatigue': 'Fatigue', 'drive_prediction': 'Predict Drive',
     'notch_prediction': 'Predict Notch', 'conditioning': 'Conditioning',
-    'realizability': 'Realizability', 'view_entities': 'Show Entities', 'add_node': 'Add Node',
+    'realizability': 'Realizability', 'view_entities': 'Edit', 'add_node': 'Add Node',
     'add_coordinate_system': 'Add System', 'add_element': 'Add Element',
     'add_element_group': 'Add Group', 'delete_entities': 'Delete Picks',
     'rotate_coordinate_system': 'Rotate', 'slide_coordinate_system': 'Slide',
@@ -104,7 +104,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'edit_solid': 'Edit Solid', 'move_solids': 'Move Part', 'copy_solids': 'Copy Solids',
     'reorder_solids': 'Reorder', 'combine_solids': 'Combine', 'separate_solids': 'Take Apart',
     'delete_solids': 'Delete Solids', 'pattern_solids': 'Pattern', 'mesh_solids': 'Mesh',
-    'mate_surfaces': 'Mate', 'edit_mated_surfaces': 'Edit Mates', 'edit_mate_sides': 'Edit Sides',
+    'mate_surfaces': 'Mate',
     'delete_mated_surfaces': 'Delete Mates', 'set_view': 'Set View', 'tone_readout': 'Tones',
     'transmissibility': 'Transmissibility', 'confidence_band': 'Confidence',
     'partial_coherence': 'Partial Coherence', 'rigid_body_residual': 'Rigid Residual',
@@ -158,8 +158,9 @@ PARTS = {f'project.{name}': part for name, part in {
     'group_properties': 'group',
     'merge_coincident_nodes': 'group',
     'align_meshes': 'group',
-    'mate_surfaces': 'group',
+    'mate_surfaces': ('group', 'mate'),
     'add_node': 'part:nodes',
+    'view_entities': ('part:nodes', 'part:coordinate_systems', 'family', 'group'),
     'add_coordinate_system': 'part:coordinate_systems',
     'rotate_coordinate_system': 'part:coordinate_systems',
     'slide_coordinate_system': 'part:coordinate_systems',
@@ -173,18 +174,18 @@ PARTS = {f'project.{name}': part for name, part in {
     'combine_solids': 'solid',
     'merge_element_groups': 'group',
     'delete_element_groups': 'group',
-    'edit_mated_surfaces': 'mate',
-    'edit_mate_sides': 'mate',
     'delete_mated_surfaces': 'mate',
 }.items()}
 
 #: operations kept off the action table, though they stay operations: a hole
 #: is a cylinder to subtract (Brandon, 2026-10-20); an object is placed in a
 #: group, and a solid among its siblings, by dragging it there in the tree; and
-#: a geometry's entities and solids are seen, and entities deleted, by picking
-#: their part in the tree, which shows their table (Brandon, 2026-11-10)
+#: a geometry's entities are deleted in their part's Edit table, and its solids seen by
+#: picking them (Brandon, 2026-11-10; Edit, not the plot, holds the table, 2026-11-13);
+#: and modes are fitted on the fitting screen alone, the band fit left to scripts and
+#: to recomputing what it made (2026-11-14)
 UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
-                       'project.view_entities', 'project.delete_entities', 'project.solids'})
+                       'project.delete_entities', 'project.solids', 'project.fit_modes'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',

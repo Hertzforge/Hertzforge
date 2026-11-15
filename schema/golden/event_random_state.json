@@ -59,6 +59,11 @@
     "at_level_db": 0,
     "at_loop": 212
    }
+  },
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/20261101-142233_random_r-0007",
+   "streams": "on",
+   "problem": null
   }
  }
 }

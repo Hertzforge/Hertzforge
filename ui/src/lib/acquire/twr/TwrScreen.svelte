@@ -22,6 +22,7 @@
 	import TwrSummary from './TwrSummary.svelte';
 	import { runChannels, TWR_SECTIONS, type TwrSetupSection } from './twrSetup';
 	import { playbackWords } from './twrWords';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -89,13 +90,14 @@
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="twr" />
 	<TwrSummary {twr} onopen={(s: TwrSetupSection) => open(s)} />
 {/snippet}
 
 {#snippet station()}<StationPanel acq={twr.acq} />{/snippet}
 
 {#snippet run()}
-	<TwrRunView {twr} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'twr')} />
+	<TwrRunView {twr} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'twr')} opener={app.twrRunOpen} />
 {/snippet}
 
 <PulseScreen

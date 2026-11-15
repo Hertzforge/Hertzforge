@@ -8,6 +8,7 @@ use crate::mimo::LoadedMimoLaw;
 use crate::mimo_bindings::RandomMimoPre;
 use crate::sandbox::{self, HostState, Sandbox};
 use crate::shock_classical::{LoadedClassicalLaw, ShockClassicalPre};
+use crate::shock_mimo::{LoadedShockMimoLaw, ShockMimoPre};
 use crate::shock_srs::{LoadedSrsLaw, ShockSrsPre};
 use crate::sine::{LoadedSineLaw, SineSinglePre};
 use crate::ticker::Ticker;
@@ -121,6 +122,8 @@ pub enum AnyLaw {
     Sine(LoadedSineLaw),
     /// A time waveform replication law (the `twr-single` world).
     Twr(LoadedTwrLaw),
+    /// A MIMO Shock law (the `shock-mimo` world).
+    ShockMimo(LoadedShockMimoLaw),
 }
 
 impl AnyLaw {
@@ -133,11 +136,13 @@ impl AnyLaw {
             AnyLaw::ShockSrs(l) => l.identity(),
             AnyLaw::Sine(l) => l.identity(),
             AnyLaw::Twr(l) => l.identity(),
+            AnyLaw::ShockMimo(l) => l.identity(),
         }
     }
 
     /// The world the file implements: `random-single`, `random-mimo`,
-    /// `shock-classical` or `shock-srs`.
+    /// `shock-classical`, `shock-srs`, `sine-single`, `twr-single` or
+    /// `shock-mimo`.
     pub fn world(&self) -> &'static str {
         match self {
             AnyLaw::Single(_) => crate::WORLD,
@@ -146,6 +151,7 @@ impl AnyLaw {
             AnyLaw::ShockSrs(_) => crate::SRS_WORLD,
             AnyLaw::Sine(_) => crate::SINE_WORLD,
             AnyLaw::Twr(_) => crate::TWR_WORLD,
+            AnyLaw::ShockMimo(_) => crate::SHOCK_MIMO_WORLD,
         }
     }
 }
@@ -290,14 +296,53 @@ impl LawHost {
             Ok(c) => return LoadedSineLaw::read(self, sha256, c).map(AnyLaw::Sine),
             Err(e) => chain(&e),
         };
-        match TwrSinglePre::new(pre) {
-            Ok(c) => LoadedTwrLaw::read(self, sha256, c).map(AnyLaw::Twr),
+        let twr_err = match TwrSinglePre::new(pre.clone()) {
+            Ok(c) => return LoadedTwrLaw::read(self, sha256, c).map(AnyLaw::Twr),
+            Err(e) => chain(&e),
+        };
+        match ShockMimoPre::new(pre) {
+            Ok(c) => LoadedShockMimoLaw::read(self, sha256, c).map(AnyLaw::ShockMimo),
             Err(e) => Err(LawError::NotALaw(format!(
                 "not a single-output law ({single_err}), not a multiple-output law ({mimo_err}), \
                  not a classical shock law ({classical_err}), not an SRS shock law ({srs_err}), \
-                 not a Sine law ({sine_err}) and not a time waveform replication law ({})",
+                 not a Sine law ({sine_err}), not a time waveform replication law \
+                 ({twr_err}) and not a MIMO Shock law ({})",
                 chain(&e)
             ))),
+        }
+    }
+
+    /// Compile a MIMO Shock law file and read its manifest: as [`Self::load`],
+    /// for the `shock-mimo` world. Fails with [`LawError::NotALaw`] when the
+    /// component is not a `shock-mimo` law (naming the world it is, when it is
+    /// another law), and [`LawError::ManifestInvalid`] when the manifest breaks
+    /// a rule (including no target kind, or more values than eight).
+    pub fn load_shock_mimo(&self, bytes: &[u8]) -> Result<LoadedShockMimoLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match ShockMimoPre::new(pre.clone()) {
+            Ok(c) => LoadedShockMimoLaw::read(self, sha256, c),
+            Err(e) => Err(LawError::NotALaw(
+                if RandomMimoPre::new(pre.clone()).is_ok() {
+                    "it is a multiple-output Random law, not a MIMO Shock law (the shock-mimo \
+                     world)"
+                        .into()
+                } else if ShockClassicalPre::new(pre.clone()).is_ok()
+                    || ShockSrsPre::new(pre.clone()).is_ok()
+                {
+                    "it is a single-output shock law, not a MIMO Shock law (the shock-mimo \
+                     world)"
+                        .into()
+                } else if RandomSinglePre::new(pre.clone()).is_ok()
+                    || SineSinglePre::new(pre.clone()).is_ok()
+                    || TwrSinglePre::new(pre).is_ok()
+                {
+                    "it is a law of another test type, not a MIMO Shock law (the shock-mimo \
+                     world)"
+                        .into()
+                } else {
+                    chain(&e)
+                },
+            )),
         }
     }
 

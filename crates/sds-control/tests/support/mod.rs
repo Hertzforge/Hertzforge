@@ -2,6 +2,7 @@
 //! started with test options, and the schema checker.
 #![allow(dead_code)]
 
+pub mod golden_runs;
 pub mod schema;
 
 use futures_util::{SinkExt, StreamExt};
@@ -78,6 +79,8 @@ pub fn options(
         srs_engine: Some(server::simulated_srs_engine()),
         // TWR likewise (tests/twr_sim_run.rs sets its own).
         twr_engine: Some(server::simulated_twr_engine()),
+        record: Default::default(),
+        keep_table: false,
     }
 }
 

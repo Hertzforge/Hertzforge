@@ -109,8 +109,9 @@ def test_deleting_matches_takes_out_the_rows_named(fitted):
     count = fitted['To Trim'].num_matches
     (view,) = run(fitted, 'project.delete_matches', matched='To Trim', rows='1')
     assert fitted['To Trim'].num_matches == len(view['rows']) == count - 1
-    with pytest.raises(ProtocolError, match='delete the object instead'):
-        run(fitted, 'project.delete_matches', matched='To Trim', rows=f'1-{count - 1}')
+    (said,) = run(fitted, 'project.delete_matches', matched='To Trim', rows=f'1-{count - 1}')
+    assert 'To Trim' not in fitted, 'the last rows take the object with them'
+    assert said['rows'][0]['value'] == 'To Trim, with its last row'
 
 
 def test_shape_values_in_each_form(fitted, validate):

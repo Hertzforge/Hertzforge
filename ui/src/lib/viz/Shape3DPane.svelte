@@ -39,8 +39,13 @@
 		BufferGeometry,
 		Color,
 		ConeGeometry,
+		DataTexture,
 		Group,
 		DirectionalLight,
+		LinearFilter,
+		RGBAFormat,
+		SRGBColorSpace,
+		UnsignedByteType,
 		DoubleSide,
 		LineBasicMaterial,
 		Box3,
@@ -62,25 +67,32 @@
 		WebGLRenderer,
 		type Material
 	} from 'three';
-	import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+	import { TrackballControls } from './trackball';
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
+	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+	import { wideLines } from './wideLines';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
 	import { along, labeledEdges, niceTicks, type Point } from './axes';
-	import { colormap, colormapGradient } from './colormap';
+	import { colormap, colormapBytes, colormapGradient } from './colormap';
 	import { coincidentGroups, nodeCaption } from './coincident';
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
 	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
+	import { splitOnFaces } from './edges';
 
 	interface Props {
 		view: Shape3DView;
 		/** Index into `view.modes`. */
 		mode?: number;
-		/** Index into `view.overlays`, drawn over the mode; none when null. */
+		/**
+		 * Index into `view.overlays`, drawn over the mode; none when null. A `paired` view draws the
+		 * overlay paired with the mode unless this is null (the Overlay toggle off).
+		 */
 		overlay?: number | null;
 		/**
 		 * Each node's own color, sRGB 0 to 1, f32 [N, 3], in place of the travel colormap: a view
@@ -97,7 +109,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, mode = $bindable(0), overlay = null, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
+	let { view, mode = $bindable(0), overlay = undefined, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
 
 	// kept across the view each drag answers with
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
@@ -204,6 +216,8 @@
 
 	/** Okabe-Ito orange: apart from every viridis color, and for every color vision. */
 	const OVERLAY_COLOR = 0xe69f00;
+	/** The elements' edges over the surface: dark, so they read on a gray or colored face in either theme. */
+	const EDGE_COLOR = 0x000000;
 
 	/** Seconds per animation cycle. Visual only; not the mode's period. */
 	const CYCLE_S = 1.6;
@@ -263,6 +277,13 @@
 	let wireframe = $state(false);
 	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
 	let opacity = $state(1);
+	/** The click a view's own opacity was taken for: a view that asks to be seen through (`opacity`) opens so, and the slider is the user's after. */
+	let seeThroughFor: string | null = null;
+	$effect.pre(() => {
+		const key = view.opacity === undefined ? null : (view.pick?.op ?? view.title);
+		if (key !== null && key !== seeThroughFor) opacity = view.opacity!;
+		seeThroughFor = key;
+	});
 	let ghost = $state(false);
 	/** Color by deflection, or one color for the surface (the colormap toggle). */
 	let colored = $state(true);
@@ -300,7 +321,18 @@
 	const motion = $derived(view.motion);
 	/** Whether anything moves: a geometry on its own has no play, amplitude, ghost or legend to offer. */
 	const moves = $derived(view.modes.length > 0 || !!motion);
-	const shown = $derived(overlay !== null && view.overlays ? view.overlays[overlay] : undefined);
+	/**
+	 * The overlay drawn: the one the matrix picked, or with `view.paired` the one paired with the
+	 * mode shown, as a Matched Modes object's pairs step together (Brandon, 2026-11-14).
+	 */
+	const overlaid = $derived(
+		view.paired && view.overlays?.length
+			? overlay === null
+				? null
+				: Math.min(Math.max(0, mode), view.overlays.length - 1)
+			: (overlay ?? null)
+	);
+	const shown = $derived(overlaid !== null && view.overlays ? view.overlays[overlaid] : undefined);
 	const samples = $derived(motion ? sampleCount(motion) : 0);
 	let speedIndex = $state(NORMAL_SPEED);
 	/** The sample shown, for the scrubber and the time readout. */
@@ -352,14 +384,18 @@
 	let scene: Scene;
 	let boundsBox: Box3Helper | null = null;
 	let camera: PerspectiveCamera;
-	let controls: OrbitControls;
+	let controls: TrackballControls;
 	let geometry: BufferGeometry;
 	let lineGeometry: BufferGeometry | null = null;
+	/** The lines that lie on a face (the elements' edges), drawn dark over the surface. */
+	let edgeGeometry: BufferGeometry | null = null;
 	let shapeAttr: BufferAttribute;
 	let shapeImagAttr: BufferAttribute;
 	let colorAttr: BufferAttribute;
 	let surface: Mesh;
-	let outline: LineSegments | null = null;
+	/** The tracelines and bar elements, the lines off the faces, drawn `LINE_WIDTH` wide. */
+	let outline: LineSegments2 | null = null;
+	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
 	/** The view's `marks`: DOF arrows and sensors, drawn still. */
@@ -396,11 +432,11 @@
 	let bodyShapeAttr: BufferAttribute | null = null;
 	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
-	let overlayLineGeometry: BufferGeometry | null = null;
 	let overlayAttr: BufferAttribute;
 	let overlayImagAttr: BufferAttribute;
 	let overlaySurface: Mesh | null = null;
-	let overlayOutline: LineSegments | null = null;
+	let overlayOutline: LineSegments2 | null = null;
+	let overlayEdges: LineSegments | null = null;
 	/** The surfaces not in use, drawn muted over the model, when clicks leave surfaces out. */
 	let mutedSurface: Mesh | null = null;
 	/** The nodes picked and the one under the cursor. */
@@ -408,9 +444,26 @@
 	/** Every node as a dot, while clicks place points or pick nodes, so a node with no element still shows. */
 	let dots: Points | null = null;
 	let leftOut: Points | null = null;
+	/** A second set of places, drawn in their own color and not clicked (`pick.others`): a mate's other side, held and not. */
+	let otherOn: Points | null = null;
+	let otherOff: Points | null = null;
 	let markGeometry: BufferGeometry | null = null;
 	const materials: Material[] = [];
-	const uniforms = { uRe: { value: 0 }, uIm: { value: 0 } };
+	/**
+	 * The deflection's two parts, and for the surface's colors: the largest travel at the scale
+	 * drawn (`uPeak`), the colormap as a texture (`uMap`), and whether to color by deflection at
+	 * all (`uScalar`). Each node's color is its offset at this instant over the largest any node
+	 * reaches, looked up per pixel, as the earlier toolset colored a mode: the whole colormap runs
+	 * across a face, not a blend of its corners' colors, and the colors swing with the shape
+	 * (Brandon, 2026-11-14).
+	 */
+	const uniforms = {
+		uRe: { value: 0 },
+		uIm: { value: 0 },
+		uPeak: { value: 1 },
+		uMap: { value: colormapTexture() },
+		uScalar: { value: 0 }
+	};
 	let maxMag = 1;
 	let raf = 0;
 	let phase = 0;
@@ -433,19 +486,47 @@
 	let shownSample = -1;
 	let moved = new Uint32Array(0);
 
-	/** Inject the deformation into a built-in material's vertex shader. */
-	function displaced<M extends Material>(material: M): M {
+	/** The colormap as a 256-step texture, read in sRGB so the shader gets linear colors. */
+	function colormapTexture(): DataTexture {
+		const texture = new DataTexture(colormapBytes(256), 256, 1, RGBAFormat, UnsignedByteType);
+		texture.colorSpace = SRGBColorSpace;
+		texture.magFilter = LinearFilter;
+		texture.minFilter = LinearFilter;
+		texture.needsUpdate = true;
+		return texture;
+	}
+
+	/**
+	 * Inject the deformation into a built-in material's vertex shader; with `scalar`, color the
+	 * fragments by the deflection at this instant (`uniforms`) in place of the vertex colors.
+	 */
+	function displaced<M extends Material>(material: M, scalar = false): M {
 		material.onBeforeCompile = (shader) => {
 			shader.uniforms.uRe = uniforms.uRe;
 			shader.uniforms.uIm = uniforms.uIm;
 			shader.vertexShader = shader.vertexShader
 				.replace(
 					'#include <common>',
-					'#include <common>\nattribute vec3 shape;\nattribute vec3 shapeImag;\nuniform float uRe;\nuniform float uIm;'
+					'#include <common>\nattribute vec3 shape;\nattribute vec3 shapeImag;\nuniform float uRe;\nuniform float uIm;' +
+						(scalar ? '\nuniform float uPeak;\nvarying float vTravel;' : '')
 				)
-				.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += shape * uRe + shapeImag * uIm;');
+				.replace(
+					'#include <begin_vertex>',
+					'#include <begin_vertex>\nvec3 offsetNow = shape * uRe + shapeImag * uIm;\ntransformed += offsetNow;' +
+						(scalar ? '\nvTravel = length(offsetNow) / uPeak;' : '')
+				);
+			if (!scalar) return;
+			shader.uniforms.uPeak = uniforms.uPeak;
+			shader.uniforms.uMap = uniforms.uMap;
+			shader.uniforms.uScalar = uniforms.uScalar;
+			shader.fragmentShader = shader.fragmentShader
+				.replace('#include <common>', '#include <common>\nuniform sampler2D uMap;\nuniform float uScalar;\nvarying float vTravel;')
+				.replace(
+					'#include <color_fragment>',
+					'#include <color_fragment>\nif (uScalar > 0.5) diffuseColor.rgb = texture2D(uMap, vec2(clamp(vTravel, 0.0, 1.0), 0.5)).rgb;'
+				);
 		};
-		material.customProgramCacheKey = () => 'sds-displaced';
+		material.customProgramCacheKey = () => (scalar ? 'sds-displaced-scalar' : 'sds-displaced');
 		materials.push(material);
 		return material;
 	}
@@ -524,10 +605,11 @@
 		const visible = !!o && !!current;
 		overlaySurface.visible = visible;
 		if (overlayOutline) overlayOutline.visible = visible;
+		if (overlayEdges) overlayEdges.visible = visible;
 		dirty = true;
 		if (!o || !current) return;
 		const columns = view.overlays!.length;
-		const phi = view.overlay_phase ? view.overlay_phase[Math.min(mode, view.modes.length - 1) * columns + overlay!] : 0;
+		const phi = view.overlay_phase ? view.overlay_phase[Math.min(mode, view.modes.length - 1) * columns + overlaid!] : 0;
 		alignedShape(o.shape, o.shape_imag, phi, maxMag, overlayAttr.array as Float32Array, overlayImagAttr.array as Float32Array);
 		overlayAttr.needsUpdate = true;
 		overlayImagAttr.needsUpdate = true;
@@ -577,10 +659,11 @@
 		const lineColor = new Color(cssVar('--text-2'));
 		(ghostSurface.material as MeshBasicMaterial).color = ghostColor;
 		if (ghostOutline) (ghostOutline.material as LineBasicMaterial).color = ghostColor;
-		if (outline) (outline.material as LineBasicMaterial).color = lineColor;
+		if (outline) (outline.material as LineMaterial).color = lineColor;
 		if (mutedSurface) (mutedSurface.material as MeshBasicMaterial).color = new Color(cssVar('--bg-4'));
 		if (marks) (marks.material as PointsMaterial).color = new Color(cssVar('--blue-2'));
-		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		// beside a second set of places, the ones a click picks wear the accent
+		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
 		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
@@ -665,9 +748,10 @@
 		boundsBox.visible = bounds;
 		scene.add(boundsBox);
 
+		// the faces a little back, so the elements' edges drawn on them win the depth test
 		surface = new Mesh(
 			geometry,
-			displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true }))
+			displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }), true)
 		);
 		surface.frustumCulled = false;
 		scene.add(surface);
@@ -698,15 +782,25 @@
 			overlaySurface.visible = false;
 			scene.add(overlaySurface);
 			if (view.lines && view.lines.length) {
-				overlayLineGeometry = new BufferGeometry();
-				overlayLineGeometry.setAttribute('position', position);
-				overlayLineGeometry.setAttribute('shape', overlayAttr);
-				overlayLineGeometry.setAttribute('shapeImag', overlayImagAttr);
-				overlayLineGeometry.setIndex(new BufferAttribute(view.lines, 1));
-				overlayOutline = new LineSegments(overlayLineGeometry, displaced(new LineBasicMaterial({ color: OVERLAY_COLOR })));
-				overlayOutline.frustumCulled = false;
-				overlayOutline.visible = false;
-				scene.add(overlayOutline);
+				// its tracelines and bars as wide as the mode's; the edges on its faces stay thin
+				const { onFaces, apart } = splitOnFaces(view.lines, view.triangles);
+				if (apart.length) {
+					overlayOutline = wideLines(apart, view.nodes, overlayAttr, overlayImagAttr, uniforms, { color: OVERLAY_COLOR });
+					materials.push(overlayOutline.material);
+					overlayOutline.visible = false;
+					scene.add(overlayOutline);
+				}
+				if (onFaces.length) {
+					const g = new BufferGeometry();
+					g.setAttribute('position', position);
+					g.setAttribute('shape', overlayAttr);
+					g.setAttribute('shapeImag', overlayImagAttr);
+					g.setIndex(new BufferAttribute(onFaces, 1));
+					overlayEdges = new LineSegments(g, displaced(new LineBasicMaterial({ color: OVERLAY_COLOR })));
+					overlayEdges.frustumCulled = false;
+					overlayEdges.visible = false;
+					scene.add(overlayEdges);
+				}
 			}
 		}
 
@@ -746,14 +840,30 @@
 		}
 
 		if (view.lines && view.lines.length) {
-			lineGeometry = new BufferGeometry();
-			lineGeometry.setAttribute('position', position);
-			lineGeometry.setAttribute('shape', shapeAttr);
-			lineGeometry.setAttribute('shapeImag', shapeImagAttr);
-			lineGeometry.setIndex(new BufferAttribute(view.lines, 1));
-			outline = new LineSegments(lineGeometry, displaced(new LineBasicMaterial({ transparent: true, opacity: 0.9 })));
-			outline.frustumCulled = false;
-			scene.add(outline);
+			// a line along a face's side is an element's edge, drawn dark on the surface as the
+			// earlier toolset drew them; a beam or a marker keeps the line color, which reads
+			// against the background (Brandon, 2026-11-11)
+			const { onFaces, apart } = splitOnFaces(view.lines, view.triangles);
+			const linked = (index: Uint32Array) => {
+				const g = new BufferGeometry();
+				g.setAttribute('position', position);
+				g.setAttribute('shape', shapeAttr);
+				g.setAttribute('shapeImag', shapeImagAttr);
+				g.setIndex(new BufferAttribute(index, 1));
+				return g;
+			};
+			lineGeometry = linked(view.lines);
+			if (apart.length) {
+				outline = wideLines(apart, view.nodes, shapeAttr, shapeImagAttr, uniforms, { transparent: true, opacity: 0.9 });
+				materials.push(outline.material);
+				scene.add(outline);
+			}
+			if (onFaces.length) {
+				edgeGeometry = linked(onFaces);
+				edges = new LineSegments(edgeGeometry, displaced(new LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.55 })));
+				edges.frustumCulled = false;
+				scene.add(edges);
+			}
 			ghostOutline = new LineSegments(
 				lineGeometry,
 				plain(new LineBasicMaterial({ transparent: true, opacity: 0.55, depthWrite: false }))
@@ -787,7 +897,8 @@
 			g.setDrawRange(0, (view.pick.ids?.length ?? view.nodes.length / 3) - off);
 			// marked places show through the model, since a seam runs inside a solid
 			const places = view.pick.off !== undefined;
-			dots = new Points(g, plain(new PointsMaterial({ size: places ? 7 : 4, sizeAttenuation: false, depthTest: !places })));
+			// marked places are drawn with the transparent layers, so render order alone puts them over a second set
+			dots = new Points(g, plain(new PointsMaterial({ size: places ? 7 : 4, sizeAttenuation: false, depthTest: !places, transparent: places })));
 			if (places) dots.renderOrder = 4;
 			dots.frustumCulled = false;
 			scene.add(dots);
@@ -801,6 +912,22 @@
 				leftOut.frustumCulled = false;
 				scene.add(leftOut);
 			}
+			const [held, notHeld] = view.pick.others ?? [0, 0];
+			const start = view.pick.ids?.length ?? 0;
+			const layer = (from: number, count: number, size: number, alpha: number): Points | null => {
+				if (!count) return null;
+				const g2 = new BufferGeometry();
+				g2.setAttribute('position', position);
+				g2.setDrawRange(from, count);
+				const points = new Points(g2, plain(new PointsMaterial({ color: OVERLAY_COLOR, size, sizeAttenuation: false, transparent: true, opacity: alpha, depthTest: false })));
+				// under the places a click picks, which sit on them where the two sides coincide
+				points.renderOrder = 3;
+				points.frustumCulled = false;
+				scene.add(points);
+				return points;
+			};
+			otherOn = layer(start, held, 9, 0.9);
+			otherOff = layer(start + held, notHeld, 8, 0.3);
 		}
 		if (view.pick?.target === 'nodes') {
 			markGeometry = new BufferGeometry();
@@ -818,10 +945,7 @@
 		camera.add(head);
 		scene.add(camera);
 
-		controls = new OrbitControls(camera, renderer.domElement);
-		controls.enableDamping = true;
-		controls.dampingFactor = 0.12;
-		controls.rotateSpeed = 0.8;
+		controls = new TrackballControls(camera, renderer.domElement);
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
@@ -971,6 +1095,13 @@
 			uniforms.uIm.value = im;
 			dirty = true;
 		}
+		// a node's color is its offset now over the farthest any node goes: `peak` at this scale
+		const byDeflection = colored && !colors && (!!motion || !!current) ? 1 : 0;
+		if (uniforms.uScalar.value !== byDeflection || uniforms.uPeak.value !== (peak || 1)) {
+			uniforms.uScalar.value = byDeflection;
+			uniforms.uPeak.value = peak || 1;
+			dirty = true;
+		}
 		if (!dirty && !moved) {
 			fpsWindowStart = now;
 			frames = 0;
@@ -1062,12 +1193,17 @@
 		controls.dispose();
 		geometry.dispose();
 		lineGeometry?.dispose();
+		edgeGeometry?.dispose();
+		outline?.geometry.dispose();
 		mutedSurface?.geometry.dispose();
 		dots?.geometry.dispose();
 		leftOut?.geometry.dispose();
+		otherOn?.geometry.dispose();
+		otherOff?.geometry.dispose();
 		markGeometry?.dispose();
 		overlayGeometry?.dispose();
-		overlayLineGeometry?.dispose();
+		overlayOutline?.geometry.dispose();
+		overlayEdges?.geometry.dispose();
 		for (const m of materials) m.dispose();
 		renderer.dispose();
 		renderer.forceContextLoss();
@@ -1367,8 +1503,9 @@
 
 		{#if current}
 			<div class="modetag">
-				{#if view.modes.length > 1 && !view.overlays}
-					<!-- a view shown outside a workspace with a mode table steps here; a MAC pair is chosen in its matrix -->
+				{#if view.modes.length > 1 && (!view.overlays || view.paired)}
+					<!-- a view shown outside a workspace with a mode table steps here, and paired modes step
+					     with their overlays; a MAC pair is chosen in its matrix -->
 					<span class="stepper">
 						<button class="btn icon sm" data-testid="shape3d-previous" disabled={mode <= 0} onclick={() => step(-1)} title="Previous mode (Up)" aria-label="Previous mode">
 							<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3.5L5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -1397,7 +1534,7 @@
 		{:else if moves && colored}
 		<div class="legend" aria-label="Color legend">
 			<div class="ltitle">
-				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Peak displacement (${display.unit})`}
+				{motion ? `${motion.quantity}${motion.value_unit ? ` (${motion.value_unit})` : ''}` : `Displacement (${display.unit})`}
 			</div>
 			<div class="bar" style:background={colormapGradient()}></div>
 			<div class="ticks num">

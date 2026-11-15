@@ -17,11 +17,11 @@ use hertzforge_sine::law::{LawGuards, MAX_STEP_DB_RANGE, MIN_TICK_S_BUILTIN, MIN
 use hertzforge_sine::service::config::TrackingLagVerdict;
 use hertzforge_sine::service::engine::SineProcessStep;
 use hertzforge_sine::{
-    BandwidthMode, BidirSweepConfig, CaptureConfig, CaptureRule, ColaConfig, ColaWaveform,
-    CompositeMode, CompressionPreset, ControlChannel, ControlSet, DwellFor, DwellPlan,
-    FeedforwardConfig, LadderConfig, LimitProfile, MetaField, NotchGovernorConfig, RstdConfig,
-    RstdDwellMode, RunMode, RungFor, SineMode, SineProfile, SineTestConfig, StepSine,
-    StepSineConfig, StepSpacing, SweepDirection, SweepRate, SweepTarget,
+    BandwidthMode, BidirSweepConfig, CaptureConfig, ColaConfig, ColaWaveform, CompositeMode,
+    CompressionPreset, ControlChannel, ControlSet, DwellFor, DwellPlan, FeedforwardConfig,
+    LadderConfig, LimitProfile, MetaField, NotchGovernorConfig, RstdConfig, RstdDwellMode, RunMode,
+    RungFor, SineMode, SineProfile, SineTestConfig, StepSine, StepSineConfig, StepSpacing,
+    SweepDirection, SweepRate, SweepTarget,
 };
 use serde_json::{json, Map, Value};
 
@@ -132,16 +132,6 @@ pub struct WireFeasibility {
     pub moving_mass: MovingMass,
 }
 
-/// The capture settings as sent.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WireCapture {
-    pub rule: &'static str,
-    pub first_s: Option<f64>,
-    pub level_settle_s: f64,
-    pub periodic_save_s: Option<f64>,
-    pub run_name: String,
-}
-
 /// A parsed Sine configuration, every default filled in.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WireSine {
@@ -178,8 +168,15 @@ pub struct WireSine {
     pub notch: NotchGovernorConfig,
     pub cola: ColaConfig,
     pub feasibility: Option<WireFeasibility>,
-    pub capture: WireCapture,
     pub metadata: Vec<WireMeta>,
+    /// The operator's words for the run's record: who ran it, on what, and notes.
+    pub operator: String,
+    pub article: String,
+    pub notes: String,
+    /// The document and clause the test is run to, when given.
+    pub specification: Option<(String, String)>,
+    /// Whether the run's record holds its streams (`record.streams`, default true).
+    pub record_streams: bool,
     /// The configuration as sent, for `sine.config` and `sine.reset`.
     pub raw: Value,
 }
@@ -464,12 +461,6 @@ const WAVEFORMS: [(&str, ColaWaveform); 3] = [
     ("square", ColaWaveform::Square),
     ("dc", ColaWaveform::DcRef),
 ];
-const CAPTURE_RULES: [(&str, &str); 4] = [
-    ("off", "off"),
-    ("entire_test", "entire_test"),
-    ("manual", "manual"),
-    ("first_seconds", "first_seconds"),
-];
 
 pub fn direction_name(d: SweepDirection) -> &'static str {
     match d {
@@ -746,22 +737,33 @@ pub fn parse(config: &Value) -> Result<WireSine, MethodError> {
         Some(o) => Some(parse_feasibility(&o)?),
     };
 
-    let cd = CaptureConfig::default();
-    let capture = match c.opt_obj("capture")? {
-        None => WireCapture {
-            rule: "off",
-            first_s: None,
-            level_settle_s: cd.level_settle_s,
-            periodic_save_s: None,
-            run_name: "sine".into(),
-        },
-        Some(o) => WireCapture {
-            rule: o.choice("rule", &CAPTURE_RULES, Some("off"))?,
-            first_s: o.opt_f64("first_s")?,
-            level_settle_s: o.f64_or("level_settle_s", cd.level_settle_s)?,
-            periodic_save_s: o.opt_f64("periodic_save_s")?,
-            run_name: o.opt_str("run_name")?.unwrap_or("sine").to_owned(),
-        },
+    // The module's own capture is gone: every run is recorded in its run folder.
+    if !matches!(c.m.get("capture"), None | Some(Value::Null)) {
+        return Err(bad(
+            "config.capture",
+            "Sine takes no \"capture\": every run is recorded in its run folder, and \
+             \"record.streams\" says whether the record keeps its time histories."
+                .to_owned(),
+        ));
+    }
+    let words =
+        |k: &str| -> Result<String, MethodError> { Ok(c.opt_str(k)?.unwrap_or("").to_owned()) };
+    let (operator, article, notes) = (words("operator")?, words("article")?, words("notes")?);
+    let specification = match c.m.get("specification") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let o = Obj::of(v, "config.specification")?;
+            Some((
+                o.opt_str("document")?.unwrap_or("").to_owned(),
+                o.opt_str("clause")?.unwrap_or("").to_owned(),
+            ))
+        }
+    };
+    let record_streams = match c.m.get("record") {
+        None | Some(Value::Null) => true,
+        Some(v) => Obj::of(v, "config.record")?
+            .opt_bool("streams")?
+            .unwrap_or(true),
     };
 
     let metadata = match c.array("metadata")? {
@@ -816,8 +818,12 @@ pub fn parse(config: &Value) -> Result<WireSine, MethodError> {
         notch,
         cola,
         feasibility,
-        capture,
         metadata,
+        operator,
+        article,
+        notes,
+        specification,
+        record_streams,
         raw: config.clone(),
     })
 }
@@ -867,10 +873,6 @@ pub fn field_words(field: &str) -> String {
         "smoothing_ticks" => "The notch's smoothing",
         "release_ramp_db_per_s" => "The notch's release rate",
         "volts_pk" => "The reference output's amplitude",
-        "first_s" => "The seconds captured at each level",
-        "level_settle_s" => "The settle time before a capture",
-        "periodic_save_s" => "The periodic save interval",
-        "run_name" => "The run folder's name",
         other => return format!("\"{other}\""),
     };
     words.to_owned()
@@ -1233,18 +1235,9 @@ impl WireSine {
             drive_vpk_abort: self.drive_vpk_abort,
             fault_debounce_ticks: u32::try_from(self.fault_debounce_ticks).unwrap_or(u32::MAX),
             kinematic_monitor: self.kinematic_monitor,
-            capture: CaptureConfig {
-                rule: match self.capture.rule {
-                    "entire_test" => CaptureRule::EntireTest,
-                    "manual" => CaptureRule::Manual,
-                    "first_seconds" => CaptureRule::AutoFirstSeconds {
-                        n_s: self.capture.first_s.unwrap_or(0.0),
-                    },
-                    _ => CaptureRule::Off,
-                },
-                level_settle_s: self.capture.level_settle_s,
-                periodic_save_s: self.capture.periodic_save_s,
-            },
+            // The run's record is the service's (`crate::record`); the
+            // controller's own capture stays off.
+            capture: CaptureConfig::default(),
             cola: self.cola,
             shaker,
             moving_mass,
@@ -1371,7 +1364,6 @@ impl WireSine {
         self.check_control(&mut r, ctx);
         self.check_limits(&mut r, ctx, band, band_ok);
         self.check_cola(&mut r, ctx);
-        self.check_capture(&mut r);
 
         // The controlled stop inside the service's own stop budget.
         let safe_stop_s = SineProcessStep::safe_stop_seconds(self.drive_vpk_ceiling.max(0.0));
@@ -1886,48 +1878,6 @@ impl WireSine {
                     if drives == 1 { "" } else { "s" },
                     ctx.station_outputs,
                     if ctx.station_outputs == 1 { "" } else { "s" }
-                ),
-            ));
-        }
-    }
-
-    fn check_capture(&self, r: &mut Report) {
-        let c = &self.capture;
-        // The controller records the whole test from engage; it has no verbs for a
-        // recording the operator starts and stops, and no first-seconds rule.
-        if matches!(c.rule, "manual" | "first_seconds") {
-            r.errors.push(Item::field(
-                "out_of_range",
-                "capture.rule",
-                format!(
-                    "Recording \"{}\" is not offered: the service records the entire test \
-                     (\"entire_test\") or nothing (\"off\").",
-                    c.rule
-                ),
-            ));
-        }
-        out_of_range(
-            r,
-            "capture.level_settle_s",
-            c.level_settle_s,
-            c.level_settle_s >= 0.0,
-            "it is 0 or more.",
-        );
-        if let Some(p) = c.periodic_save_s {
-            positive(r, "capture.periodic_save_s", p);
-        }
-        let plain = !c.run_name.is_empty()
-            && !c.run_name.contains(['/', '\\', ':'])
-            && c.run_name != "."
-            && c.run_name != "..";
-        if !plain {
-            r.errors.push(Item::field(
-                "out_of_range",
-                "capture.run_name",
-                format!(
-                    "The run folder's name is \"{}\"; it is a plain folder name, with no path in \
-                     it.",
-                    c.run_name
                 ),
             ));
         }

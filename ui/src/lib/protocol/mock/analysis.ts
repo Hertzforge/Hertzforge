@@ -17,6 +17,9 @@ interface StoredTable {
 	rows: Cell[][];
 	x_unit?: string;
 	y_unit?: string;
+	/** A channel table saved as the control service's rows, and its control loops. */
+	channels?: unknown[];
+	environments?: unknown;
 }
 
 const SUFFIXES = ['.hforge', '.csv', '.tsv', '.txt', '.xlsx'];
@@ -48,14 +51,26 @@ const tableKindWords = (k: string) => TABLE_KIND_WORDS[k] ?? `a ${k.replace(/_/g
 
 export function createAnalysisServer(): MockServer {
 	const files = new Map<string, StoredTable>();
+	/** The project's channel tables by name, as the control service's rows and their control loops. */
+	const projectTables = new Map<string, { channels: unknown[]; environments: unknown }>();
 	return {
 		hello: { type: 'hello', protocol: 'sds/1', service: 'analysis', version: '0.1.0-mock' },
 		methods: {
 			'catalog.list': (): Catalog => ({ operations: [] }),
+			// where runs are kept, as the service resolves it; the mock deletes nothing
+			'runs.data_folder': () => ({ path: '~/Hertzforge_Data', source: 'default', exists: true, writable: true }),
+			'runs.delete': (params) => {
+				throw new MockError('refused', `${String(params.folder)} is not inside the data folder ~/Hertzforge_Data; only a run in the data folder is deleted here`);
+			},
 			'tables.save': (params) => {
 				const path = tablePath(params.path);
 				const kind = String(params.kind);
 				if (kind !== 'channels' && kind !== 'breakpoints') throw new MockError('bad_request', 'tables.save "kind" is one of channels, breakpoints');
+				if (kind === 'channels' && Array.isArray(params.channels)) {
+					// The control rows as given: the real service maps them onto the file's columns and back.
+					files.set(path, { kind, table_kind: null, columns: [], rows: [], channels: structuredClone(params.channels), environments: structuredClone(params.environments ?? {}) });
+					return { path };
+				}
 				const columns = params.columns as string[];
 				const rows = params.rows as Cell[][];
 				if (!Array.isArray(columns) || !Array.isArray(rows) || rows.some((r) => !Array.isArray(r) || r.length !== columns.length)) {
@@ -66,6 +81,25 @@ export function createAnalysisServer(): MockServer {
 				if (typeof params.y_unit === 'string') stored.y_unit = params.y_unit;
 				files.set(path, stored);
 				return { path };
+			},
+			// the project as the channel table's home: kept in memory, the rows as given
+			'project.channel_table': (params) => {
+				const names = [...projectTables.keys()];
+				const name = typeof params.name === 'string' ? params.name : names.length === 1 ? names[0] : null;
+				if (name === null && names.length > 1) throw new MockError('refused', `the project holds ${names.length} channel tables (${names.join(', ')}); name one`);
+				if (name === null) throw new MockError('not_found', 'the project holds no channel table');
+				const held = projectTables.get(name);
+				if (!held) throw new MockError('not_found', `the project has no object named '${name}'`);
+				return { name, channels: structuredClone(held.channels), tables: names, environments: structuredClone(held.environments), warnings: [] };
+			},
+			'project.put_channel_table': (params) => {
+				const name = typeof params.name === 'string' ? params.name.trim() : '';
+				if (!name) throw new MockError('bad_request', 'project.put_channel_table needs "name", an object\'s name');
+				if (!Array.isArray(params.channels)) throw new MockError('bad_request', "project.put_channel_table: a channel table's \"channels\" is a list of rows");
+				if (projectTables.has(name) && params.replace !== true) throw new MockError('refused', `the project already holds an object named '${name}'; choose another name or replace a channel table`);
+				const environments = params.environments ?? projectTables.get(name)?.environments ?? {};
+				projectTables.set(name, { channels: structuredClone(params.channels), environments: structuredClone(environments) });
+				return { name, project: { title: 'Mock Project', file: null, modified: true, objects: [] } };
 			},
 			'tables.load': (params) => {
 				const path = tablePath(params.path);

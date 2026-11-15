@@ -1,0 +1,147 @@
+{
+  "config": {
+    "title": "Golden Recorder",
+    "operator": "Operator",
+    "article": "Bracket",
+    "notes": "the golden run folder",
+    "specification": {
+      "document": "Example procedure",
+      "clause": "4.2"
+    },
+    "acquisition": {
+      "fs_hz": 1000
+    },
+    "trigger": {
+      "mode": "level",
+      "row": 1,
+      "level": 0.25,
+      "slope": "rising",
+      "pre_s": 0.1,
+      "record_s": 0.2,
+      "count": 1,
+      "holdoff_s": 0
+    },
+    "analysis": {
+      "block": 256,
+      "window": "hann",
+      "averaging": "linear",
+      "averages": 4,
+      "decimation": 1,
+      "frf": {
+        "reference": 1,
+        "response": 2
+      }
+    },
+    "capture": {
+      "run_name": "golden_recorder",
+      "keep_free_gb": 1
+    },
+    "metadata": [
+      {
+        "key": "run_number",
+        "label": "Run Number",
+        "value": "7"
+      },
+      {
+        "key": "sn",
+        "label": "SN",
+        "value": "0042"
+      }
+    ]
+  },
+  "resolved": {
+    "acquisition": {
+      "requested_fs_hz": 1000,
+      "fs_hz": 1000,
+      "block_frames": 64,
+      "batch_frames": 128,
+      "group_delay_frames": 0
+    },
+    "outputs": "none",
+    "rows": [
+      {
+        "index": 1,
+        "description": "Markers",
+        "role": "control",
+        "unit": "g",
+        "range_max": 0.5
+      },
+      {
+        "index": 2,
+        "description": "Tone",
+        "role": "monitor",
+        "unit": "g",
+        "range_max": 0.5
+      }
+    ],
+    "trigger": {
+      "mode": "level",
+      "row": 1,
+      "level": 0.25,
+      "slope": "rising",
+      "hysteresis": 0.005,
+      "pre_s": 0.1,
+      "pre_frames": 100,
+      "record_s": 0.2,
+      "record_frames": 200,
+      "count": 1,
+      "holdoff_s": 0,
+      "holdoff_frames": 0
+    },
+    "analysis": {
+      "block": 256,
+      "window": "hann",
+      "overlap_pct": 50,
+      "averaging": "linear",
+      "averages": 4,
+      "decimation": 1,
+      "frf": {
+        "reference": 1,
+        "response": 2
+      }
+    },
+    "capture": {
+      "run_name": "golden_recorder",
+      "keep_free_gb": 1,
+      "floor_bytes": 1073741824
+    }
+  },
+  "derived": {
+    "grid": {
+      "fs_hz": 1000,
+      "block_frames": 64,
+      "batch_frames": 128,
+      "group_delay_frames": 0,
+      "actual": true
+    },
+    "outputs": "none",
+    "rows": [
+      1,
+      2
+    ],
+    "analysis": {
+      "fs_hz": 1000,
+      "df_hz": 3.90625,
+      "lines": 100,
+      "span_hz": 390.625,
+      "block_s": 0.256,
+      "overlap_pct": 50,
+      "averages_s": 0.64
+    },
+    "trigger": {
+      "pre_frames": 100,
+      "record_frames": 200,
+      "holdoff_frames": 0
+    },
+    "disk": {
+      "bytes_per_s": 8000,
+      "floor_bytes": 1073741824,
+      "free_bytes": 107374182400,
+      "seconds_above_floor": 13287555
+    }
+  },
+  "overload": {
+    "fraction": 0.9,
+    "definition": "A row's overload indicator latches the first time a sample's magnitude reaches 0.9 of the row's range_max, and holds for the run."
+  }
+}

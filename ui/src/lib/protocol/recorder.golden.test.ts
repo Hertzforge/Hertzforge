@@ -24,7 +24,7 @@ import {
 	type RecorderSubscribeParams,
 	type RecorderSubscribeResult
 } from './recorder';
-import { ServiceClient } from './client.svelte';
+import { RequestError, ServiceClient } from './client.svelte';
 import { createControlServer } from './mock/control';
 import { mockSocketFactory } from './mock/socket';
 import { AcquireState } from '$lib/acquire/store.svelte';
@@ -34,6 +34,7 @@ import type { PlotPanel } from '$lib/acquire/screen/screen.svelte';
 import { defaultRecorderSetup, fromRecorderConfig, recorderByKey, recorderSectionOf, toRecorderConfig } from '$lib/acquire/recorder/recorderSetup';
 import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { recorderCardStatus, RECORDER_OUTCOME_WORDS, savedWords } from '$lib/acquire/recorder/recorderWords';
+import { toRefusal } from '$lib/acquire/words';
 
 const DIR = fileURLToPath(new URL('../../../../schema/golden/', import.meta.url));
 const golden = (name: string) => `${DIR}${name}`;
@@ -49,7 +50,7 @@ const QUANTITIES: readonly RecorderLiveQuantity[] = RECORDER_QUANTITIES;
 /** The Run reading's rows, as PROTOCOL names them. */
 const RUN_ROWS = ['Rate', 'Asked', 'Group delay', 'Recording', 'Recorded', 'Backlog', 'Saved', 'Fires', 'Marks', 'Free above floor'];
 /** The state's fields, as PROTOCOL lists them. */
-const STATE_KEYS = ['clock', 'disk', 'end', 'grid', 'health', 'marks', 'mode', 'outputs', 'phase', 'recording', 'recordings', 'rows', 'run_id', 'source', 'state', 'station', 'station_frames', 'stop', 't_s', 'title', 'trigger'];
+const STATE_KEYS = ['clock', 'disk', 'end', 'grid', 'health', 'marks', 'mode', 'outputs', 'phase', 'record', 'recording', 'recordings', 'rows', 'run_id', 'source', 'state', 'station', 'station_frames', 'stop', 't_s', 'title', 'trigger'];
 const HEAD_KEYS = ['class', 'disk', 'grid', 'health', 'marks', 'phase', 'recording', 'recordings', 'rows', 'run_id', 'source', 'state', 'station_frames', 't_s', 'trigger'];
 const RECORDING_KEYS = ['bytes', 'complete', 'fault', 'first_station_frame', 'folder', 'frames', 'fs_hz', 'gap_free', 'gaps', 'group_delay_frames', 'marks', 'name', 'pre_frames', 'pre_frames_asked', 'requested_fs_hz', 'rows', 'seconds', 'trigger', 'trigger_station_frame'];
 const ITEM_REASONS = ['out_of_range', 'not_power_of_two', 'row_not_recorded', 'frf_same_row', 'no_input_channel'];
@@ -165,6 +166,17 @@ describe('Recorder goldens through the shell', () => {
 		}
 	});
 
+	it.skipIf(!has('response_error_recorder_record_unwritable.json'))('a data folder that cannot be written refuses the start as every module does, with the path and the reason', () => {
+		const err = readJson('response_error_recorder_record_unwritable.json') as ResponseErr;
+		expect([err.error.code, err.error.reason]).toEqual(['refused', 'record_unwritable']);
+		const r = toRefusal('Start', new RequestError('refused', err.error.message, 'recorder.start', err.error.reason, err.error.detail));
+		expect(r.title).toBe("The Run's Record Cannot Be Written");
+		expect(r.reason).toBe('record_unwritable');
+		const path = String(err.error.detail?.path);
+		expect(r.message).toContain(path);
+		expect(r.message).toContain(String(err.error.detail?.reason));
+	});
+
 	it.skipIf(!has('response_recorder_start.json'))('a Recorder start answers once acquisition runs, with the station figures', () => {
 		const s = (readJson('response_recorder_start.json') as ResponseOk<RecorderState>).result;
 		expect(s.state).toBe('running');
@@ -268,7 +280,7 @@ describe('Recorder goldens through the shell', () => {
 		expect(Object.keys(r).sort()).toEqual(['next', 'recordings']);
 		r.recordings.forEach((x, i) => {
 			expect(Object.keys(x).sort()).toEqual(RECORDING_KEYS);
-			expect(x.folder).toBe(`recordings/${x.name}`);
+			expect(x.folder).toBe(`streams/${x.name}`);
 			if (!x.complete) expect(i).toBe(r.recordings.length - 1);
 			if (x.complete) expect(savedWords(x)).toMatch(/^Saved rec_\d{4}: \d+\.\d\d s, /);
 		});

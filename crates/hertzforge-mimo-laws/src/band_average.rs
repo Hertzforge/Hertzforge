@@ -273,7 +273,7 @@ fn parameters() -> Vec<ParamDecl> {
         ParamDecl {
             key: "oct_order",
             label: "Bands per octave",
-            help: "The law solves one flat drive per band of this fractional octave.",
+            help: "The law solves one drive cross-spectral matrix, flat across the band, per band of this fractional octave.",
             kind: ParamKindDecl::Integer {
                 unit: "",
                 min: 1,
@@ -524,9 +524,11 @@ impl BuiltinMimoLaw for BandAverageLaw {
             name: "band average",
             version: "2026.11.10",
             author: "Brandon Zwink",
-            summary: "Solves the inverse in fractional-octave bands: one flat correlated drive \
-                      per band whose band-averaged response matches the band-averaged reference, \
-                      through the band cross-power sensitivity. Averaging the FRF over each band \
+            summary: "Solves the inverse in fractional-octave bands: for each band, one drive \
+                      cross-spectral matrix, flat across the band, whose band-averaged response \
+                      matches the band-averaged reference, through the band cross-power \
+                      sensitivity. How correlated the drives are comes out of the solve, so they \
+                      can be fully correlated, uncorrelated or partly correlated. Averaging the FRF over each band \
                       before the inverse keeps identification noise from being amplified. A \
                       threshold per band is chosen by a sweep at the first solve and held; gain \
                       correction and optional FRF updates then run on the measured response.",

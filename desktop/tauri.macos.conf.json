@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": [
+          "hforge"
+        ],
+        "name": "Hertzforge Project",
+        "description": "Hertzforge project",
+        "role": "Editor",
+        "rank": "Owner",
+        "mimeType": "application/x-hertzforge",
+        "exportedType": {
+          "identifier": "org.hertzforge.project",
+          "conformsTo": [
+            "public.data"
+          ]
+        }
+      },
+      {
+        "ext": [
+          "json"
+        ],
+        "contentTypes": [
+          "public.json"
+        ],
+        "name": "Hertzforge Run",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ]
+  }
+}

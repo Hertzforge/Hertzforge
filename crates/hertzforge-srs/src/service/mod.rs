@@ -200,6 +200,9 @@ struct PlayedFacts {
 struct MeasuredFrf {
     freqs_hz: Vec<f64>,
     mag: Vec<f64>,
+    /// The complex estimate `(re, im)` whose modulus is `mag`, kept for the run's
+    /// record; nothing in the control reads it.
+    h: Vec<(f64, f64)>,
     coherence: Vec<f64>,
     band_coherence: f64,
 }
@@ -944,6 +947,10 @@ impl SrsShockService {
             for m in control_frf.mag.iter_mut() {
                 *m *= s;
             }
+            for (re, im) in control_frf.h.iter_mut() {
+                *re *= s;
+                *im *= s;
+            }
             self.log.push(EventKind::Note {
                 text: format!(
                     "the identified gain is scaled {:+.1} dB before the seed",
@@ -1113,6 +1120,7 @@ impl SrsShockService {
         MeasuredFrf {
             freqs_hz: freqs,
             mag,
+            h,
             coherence: coh,
             band_coherence: if n > 0 { acc / n as f64 } else { 0.0 },
         }
@@ -2156,13 +2164,16 @@ impl SrsShockService {
 
     // --- capture + snapshots ---------------------------------------------
 
-    /// Start streaming pulse capture to `data_root/<run_name>/`. EveryPulse runs
+    /// Start streaming pulse capture to `data_root/<run_name>/` (or the first free
+    /// `<run_name>-<n>`; the folder used is returned). EveryPulse runs
     /// open one automatically at arm; Manual callers use this directly.
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, ServiceError> {
         if let Some(sink) = self.capture.as_ref() {
             return Ok(sink.run_dir().to_path_buf());
         }
-        let cfg = CaptureConfig::decimated(1);
+        // The rate the pushed samples are at: each pulse's record is at the
+        // adopted station rate, one sample a frame, with no decimation.
+        let cfg = CaptureConfig::at_rate(1, self.fs_hz());
         let settings_json =
             serde_json::to_string(&self.report_settings()).unwrap_or_else(|_| "{}".into());
         let sink = CaptureSink::start(

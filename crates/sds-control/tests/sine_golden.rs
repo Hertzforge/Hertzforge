@@ -308,6 +308,11 @@ fn running() -> SineView {
     );
     v.state = State::Running;
     v.phase = "engaged";
+    v.record = Some(sds_control::random::view::RecordRef {
+        folder: "/home/operator/Hertzforge_Data/20261101-142233_sine_sine-0003".into(),
+        streams: true,
+        problem: None,
+    });
     v.clock = Some("shared");
     v.level_db = Some(-6.0);
     v.rung = Some(1);

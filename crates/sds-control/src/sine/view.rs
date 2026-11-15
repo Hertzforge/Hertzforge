@@ -155,6 +155,8 @@ pub struct SineView {
     pub streaming: bool,
     /// The figures the views are drawn from, as of the last publish.
     pub figures: Option<Arc<Figures>>,
+    /// The run's record, once it is armed.
+    pub record: Option<crate::random::view::RecordRef>,
 }
 
 /// One input's curves on the figures' x.
@@ -278,7 +280,7 @@ pub fn state_json(v: Option<&SineView>) -> Value {
             "end": null,
         });
     };
-    json!({
+    let mut m = json!({
         "run_id": v.run_id,
         "state": v.state.name(),
         "phase": v.phase,
@@ -307,7 +309,11 @@ pub fn state_json(v: Option<&SineView>) -> Value {
             json!({"verdict": verdict, "message": message})
         }),
         "end": v.end.as_ref().map_or(Value::Null, end_json),
-    })
+    });
+    if let (Some(r), Value::Object(o)) = (&v.record, &mut m) {
+        o.insert("record".into(), r.to_json());
+    }
+    m
 }
 
 /// What `sine.state` events are sent on a change of.
@@ -315,7 +321,7 @@ pub fn state_key(v: Option<&SineView>) -> String {
     match v {
         None => "unconfigured".into(),
         Some(v) => format!(
-            "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{:?}",
+            "{}|{}|{}|{}|{:?}|{}|{}|{}|{}|{:?}|{}",
             v.run_id,
             v.state.name(),
             v.phase,
@@ -326,6 +332,7 @@ pub fn state_key(v: Option<&SineView>) -> String {
             v.notch,
             v.end.is_some(),
             v.rung,
+            v.record.as_ref().map_or(Value::Null, |r| r.to_json()),
         ),
     }
 }
@@ -864,6 +871,7 @@ pub fn configured_view(
         control_unit: "g".into(),
         streaming: false,
         figures: None,
+        record: None,
     }
 }
 

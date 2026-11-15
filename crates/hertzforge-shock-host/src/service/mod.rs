@@ -1945,7 +1945,8 @@ impl<F: PulseFirer> ClassicalShockService<F> {
 
     // --- capture + snapshot ---------------------------------------------------
 
-    /// Start the durable capture sink at `data_root/<run_name>/` (every
+    /// Start the durable capture sink at `data_root/<run_name>/`, or the first free
+    /// `<run_name>-<n>`, returning the folder used (every
     /// measured pulse's record is streamed to `telemetry.f32`).
     pub fn start_capture(&mut self, run_name: &str) -> Result<PathBuf, ServiceError> {
         if let Some(sink) = self.capture.as_ref() {

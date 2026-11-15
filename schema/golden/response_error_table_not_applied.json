@@ -1,0 +1,18 @@
+{
+ "type": "response",
+ "id": 12,
+ "error": {
+  "code": "refused",
+  "reason": "table_not_applied",
+  "message": "The channel table (revision 4) was restored from the project table \"Bracket table\" at 2026-11-09 16:00:00 UTC and has not been applied; review it and apply it before arming.",
+  "detail": {
+   "revision": 4,
+   "restored": {
+    "source": "project",
+    "name": "Bracket table",
+    "at_unix": 1794240000.25,
+    "at": "2026-11-09 16:00:00 UTC"
+   }
+  }
+ }
+}

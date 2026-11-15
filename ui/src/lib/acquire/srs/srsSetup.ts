@@ -21,7 +21,7 @@ import type { LawEntry } from '$lib/protocol/mimo';
 import type { ShockAdvance, ShockMonitor } from '$lib/protocol/shock';
 import type { SrsBandDb, SrsConfig, SrsDampedSineRow, SrsEngine, SrsExcitation, SrsPreviewParams, SrsSynthesis, SrsTarget, SrsWaveletRow } from '$lib/protocol/srs';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { shakerRecord, type FieldErrors } from '../setup';
+import { defaultRecord, followTitle, shakerRecord, titleNumber, type FieldErrors, type RecordDraft } from '../setup';
 import { newMonitor, runChannels, type ShockDraft } from '../shock/shockSetup';
 
 export { newMonitor, runChannels };
@@ -114,7 +114,8 @@ export interface SrsDraft {
 	};
 	limit_channels: { enabled: boolean; headroom_db: number; channels: SrsLimitChannelDraft[] };
 	feasibility: ShockDraft['feasibility'];
-	capture: { auto_start: boolean; run_name: string };
+	/** The run's record: the operator's words and whether the folder keeps the time histories (Random's). */
+	record: RecordDraft;
 	metadata: { key: string; label: string; value: string }[];
 }
 
@@ -149,7 +150,8 @@ export function newLimitChannel(row: ChannelRow | undefined): SrsLimitChannelDra
 
 export function defaultSrsSetup(): SrsDraft {
 	return {
-		title: 'SRS 100 g, 100 to 2000 Hz',
+		// Empty: the title follows the target and the bands (`srsTitle`) until the operator types one.
+		title: '',
 		target: {
 			kind: 'breakpoints',
 			accel_g: 100,
@@ -195,12 +197,30 @@ export function defaultSrsSetup(): SrsDraft {
 			residual_velocity_ips: 0.1,
 			residual_disp_in: 0.001
 		},
-		capture: { auto_start: false, run_name: 'srs_shock' },
+		record: defaultRecord(),
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
 }
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
+/** The title the target and the bands give: "SRS 100 g, 100 to 2000 Hz". */
+export function srsTitle(d: SrsDraft): string {
+	const t = d.target;
+	const g = t.kind === 'flat' ? t.accel_g : Math.max(...t.points.map((p) => p.accel_g));
+	const level = Number.isFinite(g) ? ` ${titleNumber(g)} g` : '';
+	const { f_lo_hz: lo, f_hi_hz: hi } = d.bands;
+	const band = Number.isFinite(lo) && Number.isFinite(hi) ? `, ${titleNumber(lo)} to ${titleNumber(hi)} Hz` : '';
+	return `SRS${level}${band}`;
+}
+
+/** The title a configuration carries: the one typed, else the one the setup gives. */
+export function srsTitleOf(d: SrsDraft): string {
+	return d.title.trim() || srsTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its target. */
+const STALE_SRS_TITLES = ['SRS 100 g, 100 to 2000 Hz'];
+
 export function mergeSrsSetup(saved: Partial<SrsDraft> | null): SrsDraft {
 	const base = defaultSrsSetup();
 	if (!saved || typeof saved !== 'object') return base;
@@ -227,9 +247,11 @@ export function mergeSrsSetup(saved: Partial<SrsDraft> | null): SrsDraft {
 	if (!Array.isArray(out.limit_channels.channels)) out.limit_channels.channels = [];
 	out.feasibility = { ...base.feasibility, ...(saved.feasibility ?? {}) };
 	out.feasibility.moving_mass_lb = { ...base.feasibility.moving_mass_lb, ...(saved.feasibility?.moving_mass_lb ?? {}) };
-	out.capture = { ...base.capture, ...(saved.capture ?? {}) };
+	// A draft saved before the run's record took the capture's place has a capture and no record.
+	delete (out as Partial<SrsDraft> & { capture?: unknown }).capture;
+	out.record = { ...base.record, ...(saved.record ?? {}) };
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, srsTitle, STALE_SRS_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -257,7 +279,7 @@ export function toSrsConfig(d: SrsDraft, law: LawEntry | null): SrsConfig {
 	const shaker = f.enabled ? shakerRecord(f.shaker_text) : null;
 	const lc = d.limit_channels;
 	return {
-		title: d.title.trim(),
+		title: srsTitleOf(d),
 		target: targetOf(d),
 		bands: bandsOf(d),
 		synthesis: synthesisOf(d),
@@ -300,7 +322,11 @@ export function toSrsConfig(d: SrsDraft, law: LawEntry | null): SrsConfig {
 			f.enabled && shaker
 				? { shaker, moving_mass_lb: { ...f.moving_mass_lb }, residual_velocity_ips: f.residual_velocity_ips, residual_disp_in: f.residual_disp_in }
 				: null,
-		capture: { ...d.capture },
+		operator: d.record.operator.trim(),
+		article: d.record.article.trim(),
+		notes: d.record.notes.trim(),
+		specification: d.record.document.trim() || d.record.clause.trim() ? { document: d.record.document.trim(), clause: d.record.clause.trim() } : null,
+		record: { streams: d.record.streams },
 		metadata: d.metadata.map((m) => ({ ...m }))
 	};
 }
@@ -311,6 +337,10 @@ export function toSrsConfig(d: SrsDraft, law: LawEntry | null): SrsConfig {
  * the shell's where it does not; one pulse count for every level is spread over the levels.
  */
 export function fromSrsConfig(c: SrsConfig): SrsDraft {
+	return followTitle(srsDraftOf(c), srsTitle);
+}
+
+function srsDraftOf(c: SrsConfig): SrsDraft {
 	const base = defaultSrsSetup();
 	const levels = c.schedule.levels_db.map((db, i) => ({ db, pulses: c.schedule.pulses.length === 1 ? c.schedule.pulses[0] : (c.schedule.pulses[i] ?? NaN) }));
 	const t = c.target;
@@ -386,7 +416,14 @@ export function fromSrsConfig(c: SrsConfig): SrsDraft {
 					residual_disp_in: c.feasibility.residual_disp_in ?? base.feasibility.residual_disp_in
 				}
 			: base.feasibility,
-		capture: { ...base.capture, ...(c.capture ?? {}) },
+		record: {
+			operator: c.operator ?? '',
+			article: c.article ?? '',
+			notes: c.notes ?? '',
+			document: c.specification?.document ?? '',
+			clause: c.specification?.clause ?? '',
+			streams: c.record?.streams ?? true
+		},
 		metadata: (c.metadata ?? []).map((m) => ({ ...m }))
 	};
 }
@@ -418,7 +455,7 @@ export function previewParams(d: SrsDraft): SrsPreviewParams | null {
 // Where a finding belongs
 
 /** The setup's sections, in the screen's order. */
-export type SrsSection = 'station' | 'target' | 'synthesis' | 'envelope' | 'schedule' | 'identification' | 'control' | 'limits' | 'limit_channels' | 'capture';
+export type SrsSection = 'station' | 'target' | 'synthesis' | 'envelope' | 'schedule' | 'identification' | 'control' | 'limits' | 'limit_channels' | 'record';
 
 export const SRS_SECTIONS: { id: SrsSection; label: string }[] = [
 	{ id: 'station', label: 'Station & Channels' },
@@ -430,7 +467,7 @@ export const SRS_SECTIONS: { id: SrsSection; label: string }[] = [
 	{ id: 'control', label: 'Control' },
 	{ id: 'limits', label: 'Limits' },
 	{ id: 'limit_channels', label: 'Limit Channels' },
-	{ id: 'capture', label: 'Capture' }
+	{ id: 'record', label: 'Run Record' }
 ];
 
 /**
@@ -483,7 +520,7 @@ export function srsSectionOf(key: string): SrsSection {
 	if (/^(law|control)(\.|$)/.test(key)) return 'control';
 	if (/^(limits|feasibility)(\.|$)/.test(key)) return 'limits';
 	if (/^limit_channels(\.|$)/.test(key)) return 'limit_channels';
-	if (/^(capture|metadata)(\.|$)/.test(key)) return 'capture';
+	if (/^(metadata|operator|article|notes|specification|record)(\.|$)/.test(key)) return 'record';
 	return 'target';
 }
 
@@ -511,14 +548,13 @@ function needPair(map: FieldErrors, key: string, v: readonly number[]) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, a table with too few rows, a drive ceiling or
+ * Fields that hold no number, a table with too few rows, a drive ceiling or
  * abort not given (or the abort not above the ceiling), a limit channel or monitor on a row the
  * table does not enable, a shaker record that does not read. Everything else, the synthesis and
  * the band grid included, is the service's to judge in the dry run.
  */
 export function localErrors(d: SrsDraft, rows: ChannelRow[] = []): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	if (d.target.kind === 'flat') need(out, 'target.accel_g', d.target.accel_g);
 	else {
 		if (d.target.points.length < 2) add(out, 'target.points', 'Give at least two points of the target.');
@@ -614,7 +650,7 @@ export function localErrors(d: SrsDraft, rows: ChannelRow[] = []): FieldErrors {
 		need(out, 'feasibility.residual_velocity_ips', f.residual_velocity_ips);
 		need(out, 'feasibility.residual_disp_in', f.residual_disp_in);
 	}
-	if (d.capture.auto_start && !d.capture.run_name.trim()) add(out, 'capture.run_name', 'Name the capture, or turn auto start off.');
+	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
 }
 

@@ -2,7 +2,7 @@
 	/**
 	 * The operator's screen for Mixed Mode, on the test screen's frame: Setup in sections with its
 	 * summary beside every one (the station and channels, the floor, the tones and narrowbands, the
-	 * schedule and identification, control, limits, capture), then Run with its pages of plots and the
+	 * schedule and identification, control, limits, run record), then Run with its pages of plots and the
 	 * control dock. The header carries parts time beside the run's state and level. The review hold
 	 * after identification brings the page with the identified gain forward, once per hold.
 	 */
@@ -17,7 +17,7 @@
 	import ProfileEditor from '../ProfileEditor.svelte';
 	import StationPanel from '../StationPanel.svelte';
 	import PulseScreen from '../pulse/PulseScreen.svelte';
-	import SineCapture from '../sine/SineCapture.svelte';
+	import MixedRecord from './MixedRecord.svelte';
 	import { runChannels } from '../sine/sineSetup';
 	import { clock } from '../words';
 	import MixedControl from './MixedControl.svelte';
@@ -26,7 +26,8 @@
 	import MixedRunView from './MixedRunView.svelte';
 	import MixedSchedule from './MixedSchedule.svelte';
 	import MixedSummary from './MixedSummary.svelte';
-	import { MIXED_SECTIONS, type MixedSection } from './mixedSetup';
+	import { MIXED_SECTIONS, mixedTitle, type MixedSection } from './mixedSetup';
+	import SetupFileBar from '../setupFiles/SetupFileBar.svelte';
 
 	interface Props {
 		app: AppState;
@@ -100,7 +101,7 @@
 		</div>
 	{:else if section === 'floor'}
 		<div class="stack">
-			<ProfileEditor acq={mixed.floorHost} heading="Floor" sub="The broadband random every other part plays over, at full level. Its band is the test's band." fileName="Floor Profile" />
+			<ProfileEditor acq={mixed.floorHost} heading="Floor" sub="The broadband random every other part plays over, at full level. Its band is the test's band." fileName="Floor Profile" titleHint={mixedTitle(mixed.setup)} />
 			<section class="aq-panel" aria-labelledby="mx-ref" data-testid="mixed-reference-preview">
 				<div class="aq-head"><h2 id="mx-ref">Reference</h2><span class="aq-sub">The floor and each narrowband where it starts, at full level, as the service computed it.</span></div>
 				{#if reference}<ViewRenderer view={reference} showTitle={false} minHeight={220} />{:else}<p class="aq-small aq-muted">{mixed.checking ? 'Checking the setup.' : 'Drawn once the setup checks clean.'}</p>{/if}
@@ -124,18 +125,19 @@
 	{:else if section === 'limits'}
 		<MixedLimits {mixed} />
 	{:else}
-		<SineCapture sine={mixed} />
+		<MixedRecord {mixed} />
 	{/if}
 {/snippet}
 
 {#snippet summary(open: (id: string) => void)}
+	<SetupFileBar {app} module="mixed" />
 	<MixedSummary {mixed} onopen={(s: MixedSection) => open(s)} />
 {/snippet}
 
 {#snippet station()}<StationPanel acq={mixed.acq} />{/snippet}
 
 {#snippet run()}
-	<MixedRunView {mixed} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'mixed')} />
+	<MixedRunView {mixed} {views} {station} {abortKeys} onoverride={() => (overrideOpen = true)} onpopout={(id) => app.openDisplayWindow(id, 'mixed')} opener={app.mixedRunOpen} />
 {/snippet}
 
 <PulseScreen

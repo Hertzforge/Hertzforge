@@ -11,7 +11,7 @@
 	import Findings from '../Findings.svelte';
 	import NumberField from '../NumberField.svelte';
 	import PointsTable from './PointsTable.svelte';
-	import { BANDS_PER_OCTAVE } from './srsSetup';
+	import { BANDS_PER_OCTAVE, srsTitle } from './srsSetup';
 	import type { SrsStore } from './srsStore.svelte';
 
 	interface Props {
@@ -49,7 +49,7 @@
 			<div class="aq-fields">
 				<div class="sel wide">
 					<label for="rt-name" class="lbl">Test title</label>
-					<input id="rt-name" class="field" bind:value={d.title} disabled={locked} aria-invalid={errs('title').length > 0} data-testid="srs-title" />
+					<input id="rt-name" class="field" bind:value={d.title} placeholder={srsTitle(d)} title="Follows the target and the bands until a title is typed" disabled={locked} aria-invalid={errs('title').length > 0} data-testid="srs-title" />
 					<Findings items={errs('title').map((message) => ({ level: 'error' as const, message }))} />
 				</div>
 				<div class="sel wide">

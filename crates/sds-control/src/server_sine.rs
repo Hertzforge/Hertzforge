@@ -236,8 +236,10 @@ impl Service {
             config: wire.clone(),
             law: facts.clone(),
             sim_speed: self.opts.sim_speed,
-            capture_root: self.opts.capture_root.clone(),
+            capture_root: Some(self.opts.records_root()),
             timeout_s: self.opts.timeout.as_secs_f64(),
+            record: self.opts.record.clone(),
+            derived: derived.to_json(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         srun::spawn(plan, initial.clone(), shared.clone(), rx)
@@ -322,8 +324,13 @@ impl Service {
 
     /// What a run arms on now: the table, the selected station and its law.
     async fn sine_arm_context(&self, run: &SineRun) -> Result<ArmContext, MethodError> {
+        let (revision, devices) = {
+            let inner = self.inner.lock().await;
+            (inner.table.revision, inner.stations.devices().to_vec())
+        };
         let (tbl, station_plan, hardware) = {
             let inner = self.inner.lock().await;
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(
@@ -333,7 +340,7 @@ impl Service {
             }
             let fs_hz = run.wire.fs_hz();
             let (plan, hardware) = match inner.stations.selected() {
-                Selection::Sim => (StationPlan::Sim { fs_hz }, false),
+                Selection::Sim => (StationPlan::sim(fs_hz), false),
                 Selection::Ni { devices } => {
                     let (inputs, outputs) =
                         hertzforge_station::physical_from_table(&inner.table.table);
@@ -387,6 +394,8 @@ impl Service {
             data_root: self.opts.data_root.clone(),
             bind: self.opts.bind.clone(),
             law,
+            revision,
+            devices,
         })
     }
 
@@ -431,6 +440,7 @@ impl Service {
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
+                || inner.mimo_shock_live()
             {
                 inner.run_active()?;
             }

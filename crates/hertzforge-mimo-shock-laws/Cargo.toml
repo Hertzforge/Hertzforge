@@ -1,0 +1,40 @@
+[package]
+name = "hertzforge-mimo-shock-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The choice of a MIMO Shock law: the built-in laws by name, law files by catalog
+# id or path through the law host, the facts the law picker shows, the law check's
+# cases and their requirements, and a side-by-side runner that shows two laws give
+# the same drives. It names no backend: a check case is run by a closure the caller
+# supplies.
+[dependencies]
+hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# MIMO Shock law files: the `shock-mimo` world and its contained instance.
+hertzforge-law-host = { path = "../hertzforge-law-host" }
+# The built-in laws' declarations (`shock_mimo::builtin`) and, through it, the laws'
+# mathematics, for the catalog entries and the native reference of the parity runs.
+hertzforge-law-sdk = { path = "../hertzforge-law-sdk" }
+# The catalog, check records and the arming rule, shared with every other world.
+hertzforge-random-laws = { path = "../hertzforge-random-laws" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The exact reference plant, for the parity bench (feature `reference-plant`
+# only; the controller never builds it).
+hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math", optional = true }
+
+[dev-dependencies]
+# The test setups' plant stacks.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+
+[features]
+# `parity::bench`: a scripted run on the law mathematics' exact reference plant,
+# used by the law files' parity tests and a contributor's first run of a new law.
+reference-plant = ["dep:hertzforge-mimo-shock-law-math", "hertzforge-mimo-shock-law-math/reference-plant"]
+
+[[example]]
+name = "try_mimo_shock_law"
+required-features = ["reference-plant"]

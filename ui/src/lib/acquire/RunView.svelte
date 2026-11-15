@@ -4,7 +4,9 @@
 	 * them, and the control dock with the run's cards. Run holds the verbs that apply now, and a
 	 * review hold or the run's end as one line with its button (the trip and its axis when a
 	 * protection stopped it). Level, Readings (the band's lines), Inputs (every input's rms with its
-	 * overload mark) and Log follow. Nothing here computes a number.
+	 * overload mark) and Log follow. From arm on, the Run card names the folder the run is recorded
+	 * in; a finished run's end line offers Open in Analysis and Copy Folder Path. Nothing here
+	 * computes a number.
 	 */
 	import { formatFixed } from '$lib/viz/format';
 	import StatusMark from '$lib/viz/StatusMark.svelte';
@@ -18,6 +20,9 @@
 	import RunVerbs from './RunVerbs.svelte';
 	import type { AcquireState } from './store.svelte';
 	import type { ActionId } from './actions';
+	import type { RunOpen } from './runOpen.svelte';
+	import RunOpenActions from './RunOpenActions.svelte';
+	import RunRecordLine from './RunRecordLine.svelte';
 	import { clock, db, LOG_WORDS, OUTCOME_WORDS, outcomeTone, overloadNote, RANGE_MEANING, TRIP_WORDS, tripFacts } from './words';
 
 	interface Props {
@@ -30,8 +35,10 @@
 		abortKeys: string;
 		/** A window on another monitor: the plots and the run's cards, with Stop and Abort the only verbs. */
 		compact?: boolean;
+		/** A finished run's way to its data on the analysis side; absent in a window that only watches. */
+		opener?: RunOpen | null;
 	}
-	let { acq, display, onpopout, onoverride = () => {}, abortKeys, compact = false }: Props = $props();
+	let { acq, display, onpopout, onoverride = () => {}, abortKeys, compact = false, opener = null }: Props = $props();
 
 	const run = $derived(acq.run);
 	const f = $derived(acq.frame);
@@ -56,6 +63,7 @@
 	/** Verbs the Run card draws as its hold and end lines, so not twice. */
 	const omit = $derived<ActionId[]>(['apply', ...(review ? (['proceed'] as const) : []), ...(end ? (['reset'] as const) : [])]);
 	const reset = $derived(acq.actions.reset);
+	const record = $derived(run?.record ?? null);
 
 	function empty(p: PlotPanel): string {
 		const data = display.plotData(p.id);
@@ -76,6 +84,7 @@
 		<div class="runcard">
 			<!-- The verbs first: Stop and Abort stay in view however short the card is. -->
 			<RunVerbs {acq} {onoverride} {abortKeys} {compact} layout="card" {omit} />
+			{#if record}<RunRecordLine {record} ended={!!end} />{/if}
 			{#if end}
 				<div class="line end {tone}" role={tone === 'fail' ? 'alert' : 'status'} data-testid="run-end" data-outcome={end.outcome}>
 					<span class="mk" aria-hidden="true">
@@ -104,6 +113,7 @@
 					{#if reset.visible && !compact}
 						<button class="btn" class:primary={reset.enabled} data-testid="act-reset" aria-disabled={!reset.enabled} class:off={!reset.enabled} title={reset.reason ?? 'A new run from the same setup.'} onclick={() => reset.enabled && acq.reset()}>New Run</button>
 					{/if}
+					{#if record && opener && !compact}<RunOpenActions {record} {opener} />{/if}
 				</div>
 			{/if}
 
@@ -311,6 +321,10 @@
 	.btn.off {
 		opacity: 0.45;
 		cursor: default;
+	}
+
+	.end {
+		flex-wrap: wrap;
 	}
 
 	.lines {

@@ -48,6 +48,7 @@ import {
 	mergeRecorderSetup,
 	RECORDER_SECTIONS,
 	recorderByKey,
+	recorderRows,
 	recorderSectionOf,
 	toRecorderConfig,
 	type RecorderDraft,
@@ -70,8 +71,6 @@ const SETUP_KEY = 'hertzforge.acquire.recorder.setup.v1';
 const HELD_KEY = 'hertzforge.acquire.recorder.held.v1';
 /** Most log entries kept on screen; the service keeps the full log with the run. */
 const LOG_LIMIT = 500;
-/** The log's words for the run folder at start. */
-const FOLDER_LINE = /^records in (.+)$/;
 
 function storageOf(name: 'localStorage'): Storage | null {
 	try {
@@ -226,6 +225,15 @@ export class RecorderStore {
 		return this.acq.rows;
 	}
 
+	/** The rows a run records (the Run Record panel's count; the Recorder opens no drive). */
+	get recordChannels(): number {
+		return recorderRows(this.rows).recorded.length;
+	}
+
+	get recordRateHz(): number {
+		return this.setup.acquisition.fs_hz;
+	}
+
 	get isLive(): boolean {
 		return recorderIsLive(this.status);
 	}
@@ -321,13 +329,9 @@ export class RecorderStore {
 		return s && l && l.run_id === s.run_id ? l : null;
 	}
 
-	/** The run folder, as the run's log names it at start. */
+	/** The run folder, as the run's state names it from start on. */
 	get folder(): string | null {
-		for (const e of this.log) {
-			const m = FOLDER_LINE.exec(e.text);
-			if (m) return m[1].trim();
-		}
-		return null;
+		return this.status?.record?.folder ?? null;
 	}
 
 	/** The last recording saved, or null. */
@@ -388,7 +392,10 @@ export class RecorderStore {
 			level_db: null,
 			at_level_s: null,
 			remaining_at_level_s: null,
-			end: s.end as unknown as RunHead['end']
+			end: s.end as unknown as RunHead['end'],
+			// The run folder, for the Run card's recording line and the end's actions; a Recorder run
+			// always keeps its recordings.
+			record: s.record ? { folder: s.record.folder, streams: 'on', problem: s.record.problem } : null
 		};
 	}
 

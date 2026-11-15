@@ -11,6 +11,7 @@ import type {
 	RandomRunState,
 	ReportItem,
 	RunEnd,
+	RunRecordRef,
 	Schedule,
 	StationRef,
 	View
@@ -131,6 +132,13 @@ export interface MimoSetup {
 	control?: MimoControl;
 	schedule: Schedule;
 	backend?: { kind: 'sim' | 'ni' } | null;
+	/** The operator's words for the run's record (its run folder). */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	specification?: { document: string; clause: string } | null;
+	/** `streams` false: the run's record keeps no time histories. */
+	record?: { streams: boolean } | null;
 }
 
 export interface MimoSetupParams {
@@ -302,6 +310,8 @@ export interface MimoStatus {
 	/** Control positions taken out of control at the gate (kept as monitors). */
 	excluded?: number[];
 	end: RunEnd | null;
+	/** The run's record from arm on: its folder, whether it keeps the streams, a problem writing it. */
+	record?: RunRecordRef | null;
 }
 
 export interface MimoReport {
@@ -327,7 +337,7 @@ export interface MimoReportResult {
 // --- the law catalog -----------------------------------------------------------------------
 
 /** Which test a law is for: single-output Random, MIMO Random, classical shock, SRS shock, Sine or TWR. */
-export type LawWorld = 'single' | 'mimo' | 'shock_classical' | 'shock_srs' | 'sine' | 'twr';
+export type LawWorld = 'single' | 'mimo' | 'shock_classical' | 'shock_srs' | 'sine' | 'twr' | 'shock_mimo';
 
 export type LawParam = { key: string; label: string; help: string } & (
 	| { kind: 'number' | 'per_channel'; unit: string; min: number; max: number; step: number; default: number }

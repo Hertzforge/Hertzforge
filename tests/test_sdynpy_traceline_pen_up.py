@@ -59,3 +59,26 @@ def test_the_project_imports_it_and_it_comes_back_the_same(tmp_path):
     geometry = next(iter(project.values()))
     sdynpy_npz.save(geometry, tmp_path / 'back.npz')
     assert _chains(sdynpy_npz.load(tmp_path / 'back.npz')) == [[[1, 2], [3, 4]]]
+
+
+def test_the_writer_joins_a_lines_runs_with_zeros_one_row_per_line(tmp_path):
+    """One row per run gave sdynpy several tracelines sharing an id; the
+    layout stores one row per line with 0 between its runs."""
+    geometry = sdynpy_npz.load(_file(tmp_path / 'g.npz', [0, 1, 2, 0, 0, 3, 4, 0], [2, 3]))
+    sdynpy_npz.save(geometry, tmp_path / 'back.npz')
+    with np.load(tmp_path / 'back.npz', allow_pickle=True) as raw:
+        rows = [[int(n) for n in c] for c in raw['traceline']['connectivity']]
+        ids = raw['traceline']['id'].tolist()
+    assert rows == [[1, 2, 0, 3, 4], [2, 3]]
+    assert len(set(ids)) == len(ids) == 2
+    assert _chains(sdynpy_npz.load(tmp_path / 'back.npz')) == [[[1, 2], [3, 4]], [[2, 3]]]
+
+
+def test_a_drawn_line_through_node_zero_is_not_written(tmp_path):
+    """The layout reads a 0 as a break, so the line would come back cut."""
+    from hertzforge.core.geometry import Geometry
+
+    geometry = Geometry(np.array([0, 1, 2]), np.eye(3))
+    geometry.attach_drawn_lines([('line', 1, [[0, 1, 2]])])
+    with pytest.raises(ValueError, match='node 0'):
+        sdynpy_npz.save(geometry, tmp_path / 'zero.npz')

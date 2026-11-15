@@ -13,6 +13,8 @@ Each field comes from somewhere, and says where (`RunIdentity.sources`):
 - the name of the file the record was imported from, and a Rattlesnake
   run's environment names (`read_name`): `Z_run07_-6dB_2026-10-11T111105`
   is axis Z, run 7, -6 dB, started 11:11:05 on 11 October 2026;
+- the control service's record of a run it ran (`io.run_convert`):
+  the run's identifier and the time it started;
 - what a person entered (`entered`), which stands over anything read;
 - the level the comparison with a specification already detects
   (`hertzforge.report.runs` reads it through
@@ -60,6 +62,8 @@ FIELD_NAMES = {'axis': 'axis', 'run': 'run number', 'level_db': 'level',
 FROM_NAME = 'file name'
 FROM_ENVIRONMENT = 'environment name'
 ENTERED = 'entered'
+#: the control service's own record of the run (`io.run_convert`)
+FROM_CONTROLLER = 'controller'
 
 #: the running RMS is averaged over this long, in seconds. Long enough
 #: that broadband random scatters by a few percent in mean square, short

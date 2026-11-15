@@ -157,7 +157,9 @@ def test_a_rattlesnake_run_states_each_input_range():
         'unit': var(['g', 'g', 'N']),
         'minimum_value': var(['-10', '-0.5', '']),
         'maximum_value': var(['10', '0.5', ''])})
-    table = _channel_table(SimpleNamespace(groups={'channels': channels}))[0]
+    # a file's root has variables too; this one names no environment
+    table = _channel_table(SimpleNamespace(groups={'channels': channels},
+                                           variables={}))[0]
     assert list(table.daq_ranges()[:2]) == [10.0, 0.5]
     assert np.isnan(table.daq_ranges()[2])
 
@@ -265,14 +267,14 @@ def test_a_node_is_a_non_negative_whole_number_or_nothing():
         table.set_cell('node', 0, '-3')
 
 
-def test_a_channel_number_is_positive_whole_and_never_blank():
+def test_a_channel_number_is_whole_from_zero_and_never_blank():
     """It is the join key: a channel without a number is not a channel,
     which is what separates it from a node nobody wrote down."""
     table = bare()
     with pytest.raises(ValueError, match='cannot be blank'):
         table.set_cell('channel', 0, '')
-    with pytest.raises(ValueError, match='must be positive'):
-        table.set_cell('channel', 0, '0')
+    with pytest.raises(ValueError, match='must be at least 0'):
+        table.set_cell('channel', 0, '-1')
     with pytest.raises(ValueError, match='whole number'):
         table.set_cell('channel', 0, '1.5')
     table.set_cell('channel', 0, '7.0')       # a spreadsheet's float

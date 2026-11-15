@@ -32,8 +32,16 @@ function recording(result: unknown) {
 }
 
 describe('table file goldens', () => {
-	it('are the seven this suite checks', () => {
-		expect(GOLDENS).toEqual(['request_tables_load', 'request_tables_load_gain', 'request_tables_save', 'request_tables_save_bound', 'response_tables_load', 'response_tables_load_gain', 'response_tables_save']);
+	it('are the eight this suite checks', () => {
+		expect(GOLDENS).toEqual(['request_tables_load', 'request_tables_load_gain', 'request_tables_save', 'request_tables_save_bound', 'request_tables_save_channels', 'response_tables_load', 'response_tables_load_gain', 'response_tables_save']);
+	});
+
+	it('saveTable sends a channel table as the control rows and their loops', async () => {
+		const request = JSON.parse(read('request_tables_save_channels'));
+		const { client, sent } = recording({ path: request.params.path });
+		const p = request.params;
+		await saveTable(client, 'channels', null, { columns: [], rows: [], channels: p.channels, environments: p.environments }, p.path);
+		expect(sent).toEqual([{ method: 'tables.save', params: p }]);
 	});
 
 	for (const name of GOLDENS) {

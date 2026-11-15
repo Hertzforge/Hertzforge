@@ -135,10 +135,7 @@ impl Service {
 
     /// The local data root the run folders go under.
     fn recorder_root(&self) -> std::path::PathBuf {
-        self.opts
-            .capture_root
-            .clone()
-            .unwrap_or_else(|| self.opts.data_root.clone())
+        self.opts.records_root()
     }
 
     /// Parse and check `config` against the present table and station.
@@ -297,6 +294,7 @@ impl Service {
                     "A simulation is running; stop it first.",
                 ));
             }
+            inner.table.arm_gate()?;
             let report = table::validate(&inner.table.table, &inner.ctx());
             if !report.errors.is_empty() {
                 return Err(super::table_invalid(
@@ -332,7 +330,7 @@ impl Service {
             }
             let fs_hz = run.wire.fs_hz;
             let plan = match inner.stations.selected() {
-                Selection::Sim => StationPlan::Sim { fs_hz },
+                Selection::Sim => StationPlan::sim(fs_hz),
                 Selection::Ni { devices } => {
                     let (inputs, _) = hertzforge_station::physical_from_table(&inner.table.table);
                     StationPlan::Ni {
@@ -345,11 +343,16 @@ impl Service {
                 }
             };
             run.mark_starting();
-            let signal = match self.recorder_signal.lock() {
+            let installed = match self.recorder_signal.lock() {
                 Ok(g) => g.clone(),
                 Err(p) => p.into_inner().clone(),
-            }
-            .unwrap_or_else(sim_signal::stated);
+            };
+            let signal_words = match &installed {
+                None => sim_signal::stated_json(),
+                Some(_) => json!({"stated": false,
+                                  "words": "a signal installed by a test, not the stated source"}),
+            };
+            let signal = installed.unwrap_or_else(sim_signal::stated);
             let ctx = StartContext {
                 table: inner.table.table.clone(),
                 station: plan,
@@ -358,6 +361,10 @@ impl Service {
                 records_root: self.recorder_root(),
                 bind: self.opts.bind.clone(),
                 signal: Some(signal),
+                signal_words: Some(signal_words),
+                revision: inner.table.revision,
+                devices: inner.stations.devices().to_vec(),
+                record: self.opts.record.clone(),
             };
             (run, ctx)
         };

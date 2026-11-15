@@ -27,7 +27,8 @@
 //!
 //! The sixth is Brandon Zwink's:
 //!
-//! - [`BandAverageLaw`]: one flat correlated drive per fractional-octave band
+//! - [`BandAverageLaw`]: one drive cross-spectral matrix per fractional-octave band, flat across
+//!   the band, the drives' correlation part of the solve
 //!   whose band-averaged response matches the band-averaged reference, then a
 //!   gain correction band by band. It controls band averages, not lines.
 //!

@@ -19,7 +19,6 @@
 import type { BandDb, ChannelRow, CompositeMode, LadderMode, ReportItem } from '$lib/protocol/types';
 import type { LawEntry } from '$lib/protocol/mimo';
 import type {
-	SineCaptureRule,
 	SineConfig,
 	SineDirection,
 	SineDwellFor,
@@ -32,7 +31,7 @@ import type {
 	SineTest
 } from '$lib/protocol/sine';
 import { lawWireParams, type LawDraft } from '../law/lawForm';
-import { shakerRecord, type FieldErrors } from '../setup';
+import { defaultRecord, followTitle, shakerRecord, titleNumber, type FieldErrors, type RecordDraft } from '../setup';
 import { runChannels } from '../shock/shockSetup';
 
 export { runChannels };
@@ -131,11 +130,15 @@ export interface SineDraft {
 		shaker_text: string;
 		moving_mass_lb: { armature: number; slip_table: number; drive_adapter: number; fixturing: number; test_article: number };
 	};
-	capture: { rule: SineCaptureRule; first_s: number; level_settle_s: number; periodic_save_s: number | null; run_name: string };
+	/** The run's record: the operator's words and whether the time histories are kept (Random's). */
+	record: RecordDraft;
 	metadata: { key: string; label: string; value: string }[];
 }
 
 export const DEFAULT_SINE_LAW = 'servo_blend';
+
+/** The rate a run asks for when the setup gives none, Hz (the service's own default). */
+export const SINE_DEFAULT_FS_HZ = 16384;
 
 export const QUANTITIES: { id: SineQuantity; label: string; unit: string }[] = [
 	{ id: 'accel_g', label: 'Acceleration', unit: 'g pk' },
@@ -144,13 +147,6 @@ export const QUANTITIES: { id: SineQuantity; label: string; unit: string }[] = [
 ];
 
 export const quantityUnit = (q: SineQuantity): string => QUANTITIES.find((x) => x.id === q)?.unit ?? '';
-
-export const CAPTURE_RULES: { id: SineCaptureRule; label: string; help: string }[] = [
-	{ id: 'off', label: 'Off', help: 'Nothing is recorded beyond the run report.' },
-	{ id: 'entire_test', label: 'Entire test', help: 'Everything from engage to the end.' },
-	{ id: 'manual', label: 'Manual', help: 'Only when you start and stop it.' },
-	{ id: 'first_seconds', label: 'First seconds at each level', help: 'A set number of seconds at each level, once it has settled there.' }
-];
 
 export function newRow(freq_hz = 100, quantity: SineQuantity = 'accel_g', value = 1): SineRowDraft {
 	return { freq_hz, quantity, value, own_bands: false, alarm_db: [1.5, 1.5], abort_db: [3, 3] };
@@ -166,9 +162,11 @@ export function newLimitChannel(row: ChannelRow | undefined, band: readonly [num
 
 export function defaultSineSetup(): SineDraft {
 	return {
-		title: 'Sine 1 g, 20 to 2000 Hz',
+		// Empty: the title follows the profile and the test (`sineTitle`) until the operator types one.
+		title: '',
 		profile: {
-			label: '1 g',
+			// Optional, and empty by default: a default name would outlive the rows it named.
+			label: '',
 			rows: [newRow(20, 'disp_pp_in', 0.0097), newRow(45, 'accel_g', 1), newRow(2000, 'accel_g', 1)],
 			alarm_db: [1.5, 1.5],
 			abort_db: [3, 3]
@@ -205,7 +203,7 @@ export function defaultSineSetup(): SineDraft {
 		},
 		cola: { enabled: false, volts_pk: 0.1, waveform: 'sine' },
 		feasibility: { enabled: false, shaker_text: '', moving_mass_lb: { armature: 0, slip_table: 0, drive_adapter: 0, fixturing: 0, test_article: 0 } },
-		capture: { rule: 'off', first_s: 10, level_settle_s: 1, periodic_save_s: null, run_name: 'sine' },
+		record: defaultRecord(),
 		metadata: [{ key: 'run_number', label: 'Run Number', value: '' }]
 	};
 }
@@ -219,6 +217,27 @@ function mergeProfile(base: SineProfileDraft, saved: Partial<SineProfileDraft> |
 }
 
 /** A draft read back from storage, every section filled from the defaults where it is missing. */
+/** The title the profile and the test give: "Sine 1 g, 20 to 2000 Hz", "Sine 2 g, dwell at 100 Hz". */
+export function sineTitle(d: SineDraft): string {
+	const g = Math.max(...d.profile.rows.filter((r) => r.quantity === 'accel_g').map((r) => r.value));
+	const level = Number.isFinite(g) ? ` ${titleNumber(g)} g` : '';
+	const t = d.test;
+	const [lo, hi] = t.band_hz;
+	const where =
+		t.kind === 'dwell'
+			? Number.isFinite(t.dwell.freq_hz) ? `, dwell at ${titleNumber(t.dwell.freq_hz)} Hz` : ''
+			: Number.isFinite(lo) && Number.isFinite(hi) ? `, ${titleNumber(lo)} to ${titleNumber(hi)} Hz` : '';
+	return `Sine${level}${where}`;
+}
+
+/** The title a configuration carries: the one typed, else the one the setup gives. */
+export function sineTitleOf(d: SineDraft): string {
+	return d.title.trim() || sineTitle(d);
+}
+
+/** The default an older shell wrote into every draft, whatever its profile. */
+const STALE_SINE_TITLES = ['Sine 1 g, 20 to 2000 Hz'];
+
 export function mergeSineSetup(saved: Partial<SineDraft> | null): SineDraft {
 	const base = defaultSineSetup();
 	if (!saved || typeof saved !== 'object') return base;
@@ -251,9 +270,10 @@ export function mergeSineSetup(saved: Partial<SineDraft> | null): SineDraft {
 	out.cola = { ...base.cola, ...(saved.cola ?? {}) };
 	out.feasibility = { ...base.feasibility, ...(saved.feasibility ?? {}) };
 	out.feasibility.moving_mass_lb = { ...base.feasibility.moving_mass_lb, ...(saved.feasibility?.moving_mass_lb ?? {}) };
-	out.capture = { ...base.capture, ...(saved.capture ?? {}) };
+	out.record = { ...base.record, ...(saved.record ?? {}) };
+	delete (out as Partial<SineDraft> & { capture?: unknown }).capture;
 	if (!Array.isArray(out.metadata)) out.metadata = base.metadata;
-	return out;
+	return followTitle(out, sineTitle, STALE_SINE_TITLES);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -342,9 +362,10 @@ export function toSineConfig(d: SineDraft, law: LawEntry | null, rows?: ChannelR
 	const weights = d.control.weights.filter((w) => !controlRows || controlRows.has(w.channel)).map((w) => ({ channel: w.channel, weight: w.weight }));
 	const c = d.control;
 	const tracking = c.tracking.kind === 'fixed' ? { kind: 'fixed' as const, hz: c.tracking.hz } : { kind: 'proportional' as const, pct: c.tracking.pct, max_hz: c.tracking.max_hz };
-	const capture = d.capture;
+	const r = d.record;
+	const [document, clause] = [r.document.trim(), r.clause.trim()];
 	return {
-		title: d.title.trim(),
+		title: sineTitleOf(d),
 		profile: profileOf(d.profile),
 		test: testOf(d),
 		acquisition: { fs_hz: d.acquisition.fs_hz, tick_ms: d.acquisition.tick_ms },
@@ -377,13 +398,11 @@ export function toSineConfig(d: SineDraft, law: LawEntry | null, rows?: ChannelR
 		},
 		cola: { ...d.cola },
 		feasibility: f.enabled && shaker ? { shaker, moving_mass_lb: { ...f.moving_mass_lb } } : null,
-		capture: {
-			rule: capture.rule,
-			first_s: capture.rule === 'first_seconds' ? capture.first_s : null,
-			level_settle_s: capture.level_settle_s,
-			periodic_save_s: capture.periodic_save_s,
-			run_name: capture.run_name.trim()
-		},
+		operator: r.operator.trim(),
+		article: r.article.trim(),
+		notes: r.notes.trim(),
+		specification: document || clause ? { document, clause } : null,
+		record: { streams: r.streams },
 		metadata: d.metadata.map((m) => (m.label ? { key: m.key, label: m.label, value: m.value } : { key: m.key, value: m.value }))
 	};
 }
@@ -394,6 +413,10 @@ export function toSineConfig(d: SineDraft, law: LawEntry | null, rows?: ChannelR
  * carry keeps the shell's.
  */
 export function fromSineConfig(c: SineConfig): SineDraft {
+	return followTitle(sineDraftOf(c), sineTitle);
+}
+
+function sineDraftOf(c: SineConfig): SineDraft {
 	const base = defaultSineSetup();
 	const t = c.test;
 	const test: SineDraft['test'] = structuredClone(base.test);
@@ -429,7 +452,6 @@ export function fromSineConfig(c: SineConfig): SineDraft {
 	const rung = (r: SineRungFor | undefined, fallback: SineDraft['schedule']['per_level']) => (!r ? { by: 'sweeps' as const, n: 1 } : 'sweeps' in r ? { by: 'sweeps' as const, n: r.sweeps } : 'seconds' in r ? { by: 'seconds' as const, n: r.seconds } : fallback);
 	const ctl = c.control ?? {};
 	const tr = ctl.tracking;
-	const cap = c.capture ?? {};
 	const lim = c.limits;
 	const wireId = { level_db: -20, gate_coherence: 0.5, trust_coherence: 0.5, trust_h_floor_frac: 0.05, review: true };
 	const wireControl = { law_budget: 0.25, law_misses: 3, max_step_db: 1, max_rise_db_per_s: 240, divergence_s: 1, fault_debounce_ticks: 50 };
@@ -473,12 +495,13 @@ export function fromSineConfig(c: SineConfig): SineDraft {
 		feasibility: c.feasibility
 			? { enabled: true, shaker_text: JSON.stringify(c.feasibility.shaker, null, 2), moving_mass_lb: { ...c.feasibility.moving_mass_lb } }
 			: base.feasibility,
-		capture: {
-			rule: cap.rule ?? 'off',
-			first_s: cap.first_s ?? base.capture.first_s,
-			level_settle_s: cap.level_settle_s ?? base.capture.level_settle_s,
-			periodic_save_s: cap.periodic_save_s ?? null,
-			run_name: cap.run_name ?? base.capture.run_name
+		record: {
+			operator: c.operator ?? '',
+			article: c.article ?? '',
+			notes: c.notes ?? '',
+			document: c.specification?.document ?? '',
+			clause: c.specification?.clause ?? '',
+			streams: c.record?.streams ?? true
 		},
 		metadata: (c.metadata ?? []).map((m) => ({ key: m.key, label: m.label ?? '', value: m.value }))
 	};
@@ -518,7 +541,7 @@ export const hasProfileText = (text: string): boolean => text.split(/\r?\n/).som
 // Where a finding belongs
 
 /** The setup's sections, in the screen's order. */
-export type SineSection = 'station' | 'profile' | 'test' | 'schedule' | 'control' | 'limits' | 'capture';
+export type SineSection = 'station' | 'profile' | 'test' | 'schedule' | 'control' | 'limits' | 'record';
 
 export const SINE_SECTIONS: { id: SineSection; label: string }[] = [
 	{ id: 'station', label: 'Station & Channels' },
@@ -527,7 +550,7 @@ export const SINE_SECTIONS: { id: SineSection; label: string }[] = [
 	{ id: 'schedule', label: 'Schedule' },
 	{ id: 'control', label: 'Control' },
 	{ id: 'limits', label: 'Limits' },
-	{ id: 'capture', label: 'Capture' }
+	{ id: 'record', label: 'Run Record' }
 ];
 
 /**
@@ -583,7 +606,7 @@ export function sineSectionOf(key: string): SineSection {
 	if (/^(schedule|identification)(\.|$)/.test(key)) return 'schedule';
 	if (/^(law|control|acquisition)(\.|$)/.test(key)) return 'control';
 	if (/^(limits|cola|feasibility)(\.|$)/.test(key)) return 'limits';
-	if (/^(capture|metadata)(\.|$)/.test(key)) return 'capture';
+	if (/^(operator|article|notes|specification|record|metadata)(\.|$)/.test(key)) return 'record';
 	return 'profile';
 }
 
@@ -621,14 +644,13 @@ function profileErrors(out: FieldErrors, p: SineProfileDraft, at: string) {
 }
 
 /**
- * Fields that hold no number, a title that is empty, a profile with too few rows, a drive ceiling
+ * Fields that hold no number, a profile with too few rows, a drive ceiling
  * or abort not given, a limit channel on a row the table does not enable as a non-control input, a
  * shaker record that does not read. Everything else, the profile's shape and its coverage of the
  * band included, is the service's to judge in the dry run.
  */
 export function localErrors(d: SineDraft, rows: ChannelRow[] = []): FieldErrors {
 	const out: FieldErrors = {};
-	if (!d.title.trim()) add(out, 'title', 'Give the test a title.');
 	profileErrors(out, d.profile, 'profile');
 	const t = d.test;
 	if (t.kind === 'sweep' || t.kind === 'step') {
@@ -691,10 +713,6 @@ export function localErrors(d: SineDraft, rows: ChannelRow[] = []): FieldErrors 
 		else if (!shakerRecord(f.shaker_text)) add(out, 'feasibility.shaker', 'The shaker record does not read as a record (JSON object).');
 		for (const [k, v] of Object.entries(f.moving_mass_lb)) need(out, `feasibility.moving_mass_lb.${k}`, v);
 	}
-	const cap = d.capture;
-	if (cap.rule === 'first_seconds') need(out, 'capture.first_s', cap.first_s);
-	need(out, 'capture.level_settle_s', cap.level_settle_s);
-	if (cap.periodic_save_s !== null) need(out, 'capture.periodic_save_s', cap.periodic_save_s);
-	if (cap.rule !== 'off' && !cap.run_name.trim()) add(out, 'capture.run_name', 'Name the run folder, or turn capture off.');
+	if (d.record.clause.trim() && !d.record.document.trim()) add(out, 'specification.document', 'Name the document this clause is from.');
 	return out;
 }

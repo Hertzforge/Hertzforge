@@ -8,6 +8,37 @@ None | protocol | operation descriptors | view types | run files | units
 
 (For any of these: schema, Python, Rust, TypeScript and golden frames are all in this pull request.)
 
+## Run data
+
+<!--
+Does this change a path listed in tools/run_data_paths.txt (a control module, the channel table,
+breakpoints, references, capture, the recorder, the control protocol, the shell's test screens and
+table files, or the run converters)? `python tools/check_drive_path.py --base origin/main` says,
+and CI checks this section (docs/run-data.md).
+
+If not, keep the first line below and delete the eight fields.
+If it does, delete the first line and fill in all eight, in plain words. "none" is an answer.
+- Adds to the setup / the table / the results / the timeline: the setup fields, channel table
+  columns, named results and event kinds this change adds.
+- Recorded in: for each, the file and field a finished run keeps it in, or "not recorded yet" and
+  why. Say only what the code does.
+- Seeds from: the analysis objects this can take its inputs from.
+- Flows to: the analysis objects this becomes.
+- Bridge test: "row added or updated", "row not possible yet" or "no run data touched", for the
+  acceptance row "the finished run opens in the analysis side with its channel table and setup".
+-->
+
+No run data touched.
+
+- Adds to the setup:
+- Adds to the table:
+- Adds to the results:
+- Adds to the timeline:
+- Recorded in:
+- Seeds from:
+- Flows to:
+- Bridge test:
+
 ## Test results
 
 Each command as run, its exit code, and its pass / fail / skip counts:
@@ -34,9 +65,36 @@ Each survivor, with one line: a gap now closed, or a change that cannot alter be
 
 Every view or guide figure that changes, with its image, and the platforms it was looked at on.
 
-## Hardware evidence (control changes only)
+## Drive path and hardware
 
-Chassis and modules, bench log, and the proof a declared capability rests on, or: "No hardware path touched."
+<!--
+Does this change a path listed under [drive path] in tools/drive_path.txt?
+`python tools/check_drive_path.py --base origin/main` says, and CI checks this section
+(docs/drive-path.md).
+
+If not, keep the first line below and delete the four answers.
+If it does, delete the first line and answer all four:
+- What can now reach the drive: what this change can put on an output channel, or change about
+  whether and how a run stops. "Nothing new" is an answer, if it is true.
+- How it fails safe: what happens when it goes wrong (a bad value, a late tick, a dead thread),
+  and the test that shows it.
+- What ran on the simulator: the runs, and what they showed.
+- What ran on hardware: the chassis and modules, the stated output limit, the bench log and the
+  proof a declared capability rests on, or "Not on hardware" (it then goes on the bench list
+  before a release).
+
+A pull request that removes, ignores or weakens a test in tools/safety_tests.txt, or loosens a
+limit, threshold, timeout or default on the drive path, carries "[weakens safety]" in its title
+and says why here. Name any new dependency on the drive path that has unsafe code or a native
+library.
+-->
+
+No drive-path code touched.
+
+- What can now reach the drive:
+- How it fails safe:
+- What ran on the simulator:
+- What ran on hardware:
 
 ## Names and licenses
 

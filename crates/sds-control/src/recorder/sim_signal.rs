@@ -66,6 +66,21 @@ pub fn source_value(frame: u64, column: usize, fs_hz: f64) -> f64 {
 /// A signal added to the station's inputs: `f(station frame, column, rate)`.
 pub type Signal = Arc<dyn Fn(u64, usize, f64) -> f64 + Send + Sync>;
 
+/// The stated source in words, for the record of a simulated run: each recorded row's
+/// part in column order (a fifth row and after repeating the four).
+pub fn stated_json() -> serde_json::Value {
+    let parts: Vec<serde_json::Value> = SOURCE
+        .iter()
+        .map(|p| match p {
+            Part::Markers => serde_json::json!({
+                "kind": "markers", "peak": MARKER_PEAK, "length_s": MARKER_S,
+                "at_s": MARKER_AT_S, "period_s": PERIOD_S}),
+            Part::Tone(f, a) => serde_json::json!({"kind": "tone", "freq_hz": f, "peak": a}),
+        })
+        .collect();
+    serde_json::json!({"stated": true, "period_s": PERIOD_S, "rows": parts})
+}
+
 /// The stated source as a [`Signal`].
 pub fn stated() -> Signal {
     Arc::new(source_value)
