@@ -52,6 +52,29 @@ def test_a_sensitivity_is_not_zero_on_an_enabled_input():
     assert table['sensitivity'][0] == '0'
 
 
+def test_a_sensitivity_is_never_negative_on_an_enabled_row():
+    # decided by the project's owner: polarity is the row's own column, so a
+    # negative sensitivity on an enabled row is refused, naming the row, the
+    # column and the value; a disabled row holds any number, as it holds 0.
+    # Falsified by letting a negative through (`< 0.0` read as `== 0.0`):
+    # set_cell takes -100 and rule_errors finds nothing.
+    table = _table()
+    with pytest.raises(ValueError, match=r'channel 1, Sensitivity: -100(\.0)? is negative'):
+        table.set_cell('sensitivity', 0, '-100')
+    table.add_controller_settings()
+    table.set_cell('drive', 1, 'True')
+    with pytest.raises(ValueError, match='Polarity column'):
+        table.set_cell('sensitivity', 1, '-1000')
+    table.set_cell('enabled', 0, 'False')
+    table.set_cell('sensitivity', 0, '-100')
+    assert float(table['sensitivity'][0]) == -100.0
+    assert table.rule_errors() == []
+    table.set_cell('enabled', 0, 'True')
+    assert table.rule_errors() == [(
+        'channel 1, Sensitivity: -100 is negative; a sensitivity is never negative on an '
+        'enabled row, and a channel read inverted says so in its Polarity column')]
+
+
 def test_a_new_type_withdraws_a_unit_of_another_kind_and_keeps_its_own():
     table = _table()
     table.set_cell('channel_type', 2, 'acceleration')

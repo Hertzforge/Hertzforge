@@ -7,7 +7,9 @@
  * service, which resolves it as the control service does, and is shown only. Showing a folder in
  * the file manager needs the desktop app. A run is deleted by the analysis service alone
  * (`runs.delete`), after a confirmation that names the folder and its project file; the shell
- * deletes nothing itself.
+ * deletes nothing itself. A run that did not end cleanly is deleted only when the control service,
+ * asked just then, reports no live run recording into its folder; while it cannot be asked, or when
+ * the folder is a live run's record, the run is not deleted.
  */
 
 import type { DataFolderInfo, RunDeletePlan } from '$lib/protocol/types';
@@ -36,6 +38,8 @@ export interface DesktopRunFiles {
 export interface RunFilesHost {
 	/** A request to the analysis service. */
 	request<R>(method: string, params: Record<string, unknown>): Promise<R>;
+	/** A request to the control service, which reads module states only here; absent when there is none to ask. */
+	control?(method: string, params: Record<string, unknown>): Promise<unknown>;
 	desktop: DesktopRunFiles | null;
 	/** Ask before deleting; true to go on. */
 	confirm(text: string, ok: string, title: string): Promise<boolean>;
@@ -51,12 +55,101 @@ function said(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-/** The confirmation of a delete: both paths, by name, and that it cannot be undone. */
-export function deleteQuestion(plan: Pick<RunDeletePlan, 'folder' | 'project_file' | 'project_file_exists'>): string {
+/** The confirmation of a delete: both paths, by name, that a run which did not end cleanly may hold a partial record, and that it cannot be undone. */
+export function deleteQuestion(plan: Pick<RunDeletePlan, 'folder' | 'project_file' | 'project_file_exists'> & { complete?: boolean }): string {
 	const file = plan.project_file_exists
 		? `and its project file, inside it:\n${plan.project_file}`
 		: `It has not been opened in Analysis, so it has no project file (${plan.project_file}).`;
-	return `Delete this run folder?\n${plan.folder}\n\n${file}\n\nBoth go from the disk. This cannot be undone.`;
+	const unclean =
+		plan.complete === false ? '\n\nThis run did not end cleanly: its record may be partial. The control service reports no live run recording into this folder.' : '';
+	return `Delete this run folder?\n${plan.folder}\n\n${file}${unclean}\n\nBoth go from the disk. This cannot be undone.`;
+}
+
+/**
+ * Each module's state request, the states in which its run is live, and its name in words: the
+ * modules the desktop app's read-only probe asks about. A module the service does not have is idle.
+ */
+export const MODULE_STATES: readonly (readonly [string, readonly string[], string])[] = [
+	['random.state', ['armed', 'running', 'review', 'stopping'], 'a Random test'],
+	['mimo_random.status', ['armed', 'running', 'review', 'stopping'], 'a MIMO Random test'],
+	['sine.state', ['armed', 'running', 'review', 'stopping'], 'a Sine test'],
+	['mixed.state', ['armed', 'running', 'review', 'stopping'], 'a Mixed Mode test'],
+	['shock.state', ['armed', 'running', 'review', 'stopping'], 'a Classical Shock test'],
+	['srs.state', ['armed', 'running', 'review', 'stopping'], 'an SRS test'],
+	['twr.state', ['armed', 'running', 'review', 'held', 'stopping'], 'a TWR test'],
+	['mimo_shock.state', ['armed', 'running', 'review', 'stopping'], 'a MIMO Shock test'],
+	['explorer.state', ['starting', 'running', 'stopping'], 'an Explorer run'],
+	['recorder.state', ['starting', 'running', 'stopping'], 'a Recorder run']
+];
+
+/** A run the control service reports as live, and the folder it records into (null when it has not said). */
+export interface LiveRun {
+	name: string;
+	folder: string | null;
+}
+
+/** The control service could not be asked which runs are live. */
+export class ControlUnreachable extends Error {}
+
+/**
+ * The runs live now, asked of the control service module by module. A module the service does not
+ * have (`unknown_method`) is idle; any other failure means the service could not be asked.
+ */
+export async function liveRuns(control: RunFilesHost['control']): Promise<LiveRun[]> {
+	if (!control) throw new ControlUnreachable('the control service is not connected');
+	const out: LiveRun[] = [];
+	for (const [method, live, name] of MODULE_STATES) {
+		let answer: unknown;
+		try {
+			answer = await control(method, {});
+		} catch (err) {
+			if (err instanceof RequestError && err.code === 'unknown_method') continue;
+			throw new ControlUnreachable(said(err));
+		}
+		const a = (answer ?? {}) as { state?: unknown; record?: { folder?: unknown } | null };
+		const nested = (typeof a.state === 'object' && a.state !== null ? a.state : {}) as { state?: unknown; record?: { folder?: unknown } | null };
+		const state = typeof a.state === 'string' ? a.state : typeof nested.state === 'string' ? nested.state : '';
+		if (!live.includes(state)) continue;
+		const folder = a.record?.folder ?? nested.record?.folder;
+		out.push({ name, folder: typeof folder === 'string' && folder !== '' ? folder : null });
+	}
+	return out;
+}
+
+/** A folder's path as compared here: forward slashes, no trailing separator, no `run.json`. */
+function pathKey(path: string): string {
+	return path.replace(/\\/g, '/').replace(/\/run\.json$/, '').replace(/\/+$/, '');
+}
+
+/** Whether two paths name one run folder: the same path, or the same run folder name (run folder names are unique in the data folder, so this errs toward refusing). */
+function sameRun(a: string, b: string): boolean {
+	const ka = pathKey(a);
+	const kb = pathKey(b);
+	const base = (k: string) => k.slice(k.lastIndexOf('/') + 1);
+	return ka === kb || ka.toLowerCase() === kb.toLowerCase() || base(ka) === base(kb);
+}
+
+/**
+ * Why a run that did not end cleanly is not deleted now, or null when the control service reports no
+ * live run recording into it: it is a live run's record, a live run has not said where it records, or
+ * the service could not be asked.
+ */
+export async function liveReason(control: RunFilesHost['control'], folders: string[]): Promise<string | null> {
+	let live: LiveRun[];
+	try {
+		live = await liveRuns(control);
+	} catch (err) {
+		return `This run did not end cleanly, and the control service could not be asked whether it is still going (${err instanceof Error ? err.message : String(err)}), so it is not deleted.`;
+	}
+	for (const run of live) {
+		if (run.folder === null) {
+			return `This run did not end cleanly, and ${run.name} is live without saying which folder it records into, so it is not deleted now; delete it once that run has ended.`;
+		}
+		if (folders.some((f) => sameRun(f, run.folder as string))) {
+			return `This run folder is the record of ${run.name} that is live now, so it is not deleted; delete it once that run has ended.`;
+		}
+	}
+	return null;
 }
 
 /** Where the data folder comes from, in words. */
@@ -172,14 +265,19 @@ export class RunFiles {
 		this.refusal = null;
 		this.status = 'asking';
 		try {
-			const plan = await this.host.request<RunDeletePlan>('runs.delete', { folder, dry_run: true });
+			// a dry run deletes nothing; `not_live` on it only lets its answer say whether the run ended cleanly
+			const plan = await this.host.request<RunDeletePlan>('runs.delete', { folder, dry_run: true, not_live: true });
 			if (this.folder !== folder) return false;
+			const unclean = plan.complete === false;
+			if (unclean && (await this.refuseLive(folder, plan.folder))) return false;
 			if (!(await this.host.confirm(deleteQuestion(plan), 'Delete Run', 'Delete Run?'))) {
 				this.status = 'idle';
 				return false;
 			}
+			// asked again just before the delete: a run may have started while the question was open
+			if (unclean && (await this.refuseLive(folder, plan.folder))) return false;
 			this.status = 'working';
-			await this.host.request<RunDeletePlan>('runs.delete', { folder });
+			await this.host.request<RunDeletePlan>('runs.delete', unclean ? { folder, not_live: true } : { folder });
 			this.deleted = [...this.deleted, folder];
 			this.status = 'done';
 			this.host.deleted?.(folder);
@@ -191,6 +289,17 @@ export class RunFiles {
 			}
 			return false;
 		}
+	}
+
+	/** For a run that did not end cleanly: refuse, saying why, unless the control service reports no live run recording into it. */
+	private async refuseLive(folder: string, real: string): Promise<boolean> {
+		const why = await liveReason(this.host.control?.bind(this.host), [folder, real]);
+		if (why === null) return false;
+		if (this.folder === folder) {
+			this.refusal = why;
+			this.status = 'refused';
+		}
+		return true;
 	}
 }
 

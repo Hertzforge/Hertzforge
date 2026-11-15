@@ -1152,7 +1152,7 @@
     },
     "itemReason": {
       "enum": ["no_floor", "too_many_floors", "unknown_part_kind", "duplicate_part_id", "part_out_of_band", "parts_too_close", "too_many_tones", "too_many_bands", "follow_unknown_part", "follow_self", "follow_loop", "schedule_unsupported", "not_power_of_two", "row_not_recorded", "frf_same_row",
-               "duplicate_index", "no_channel_enabled", "zero_sensitivity", "non_positive_range",
+               "duplicate_index", "no_channel_enabled", "zero_sensitivity", "negative_sensitivity", "non_positive_range",
                "control_group_gap", "reference_without_control", "unsupported_schema",
                "channel_unbound", "physical_channel_unknown", "physical_channel_wrong_direction",
                "physical_channel_shared", "mixed_timing_families",

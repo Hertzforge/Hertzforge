@@ -30,10 +30,10 @@ def _files(path):
                   for d, _s, fs in os.walk(path) for f in fs)
 
 
-def _refused(code, folder, root, open_files=()):
+def _refused(code, folder, root, open_files=(), not_live=False):
     before = _files(root)
     with pytest.raises(df.RunDeleteRefused) as caught:
-        df.delete_run(folder, root, open_files)
+        df.delete_run(folder, root, open_files, not_live=not_live)
     assert caught.value.code == code, caught.value.message
     assert _files(root) == before, 'a refusal deletes nothing'
     return caught.value.message
@@ -82,6 +82,50 @@ def test_refused_when_the_run_is_live_or_did_not_end(tmp_path):
     with open(os.path.join(folder, 'run.json'), 'w') as f:
         json.dump(manifest, f)
     _refused('incomplete', folder, root)
+
+
+def test_a_run_that_did_not_end_cleanly_is_deleted_when_the_caller_says_it_is_not_live(
+        tmp_path):
+    # decided by the project's owner: a crashed run can be deleted from the app.
+    # Refused by default, as a run that may still be going, in words that say
+    # so; deleted when the caller has established from the control service
+    # that no live run records into it. Falsified by ignoring `not_live`: the
+    # plan is refused 'incomplete'.
+    root = tmp_path / 'data'
+    crashed = rf.unfinished_run(str(root / 'crashed'))
+    said = _refused('incomplete', crashed, root)
+    assert 'does not say it ended cleanly' in said
+    assert 'not been established that no live run is recording into it' in said
+    plan = df.plan_delete(crashed, root, not_live=True)
+    assert (plan.folder, plan.complete) == (os.path.realpath(crashed), False)
+    assert os.path.isdir(crashed), 'a plan deletes nothing'
+    done = df.delete_run(crashed, root, not_live=True)
+    assert done.complete is False and not os.path.exists(crashed)
+    finished = _run(root)
+    assert df.plan_delete(finished, root, not_live=True).complete is True
+
+
+def test_not_live_changes_no_other_refusal(tmp_path):
+    root = tmp_path / 'data'
+    root.mkdir()
+    elsewhere = rf.unfinished_run(str(tmp_path / 'elsewhere'))
+    _refused('outside_data_folder', elsewhere, root, not_live=True)
+    _refused('outside_data_folder', root, root, not_live=True)
+    plain = root / 'notes'
+    plain.mkdir()
+    _refused('not_a_run_folder', plain, root, not_live=True)
+    crashed = rf.unfinished_run(str(root / 'crashed'))
+    held = os.path.join(crashed, 'run.json')
+    _refused('open', crashed, root, [held], not_live=True)
+    _refused('not_found', root / 'gone', root, not_live=True)
+    if hasattr(os, 'symlink'):
+        try:
+            os.symlink(str(tmp_path / 'elsewhere'), str(root / 'linked'))
+        except OSError:
+            return
+        _refused('link', root / 'linked', root, not_live=True)
+        os.symlink(str(tmp_path / 'elsewhere'), os.path.join(crashed, 'inner'))
+        _refused('link_inside', crashed, root, not_live=True)
 
 
 def test_refused_for_a_folder_that_is_not_a_run_folder(tmp_path):
@@ -170,7 +214,7 @@ def test_the_service_names_what_it_would_delete_then_deletes_it(tmp_path, monkey
     plan = run_files.request('runs.delete', {'folder': folder, 'dry_run': True}, [])
     assert plan == {'folder': os.path.realpath(folder),
                     'project_file': os.path.realpath(project_file),
-                    'project_file_exists': True, 'deleted': False}
+                    'project_file_exists': True, 'complete': True, 'deleted': False}
     with pytest.raises(ProtocolError) as caught:
         run_files.request('runs.delete', {'folder': folder}, [project_file])
     assert caught.value.code == 'refused'
@@ -182,6 +226,18 @@ def test_the_service_names_what_it_would_delete_then_deletes_it(tmp_path, monkey
     assert caught.value.code == 'bad_request'
     done = run_files.request('runs.delete', {'folder': folder}, [])
     assert done['deleted'] is True and not os.path.exists(folder)
+    crashed = rf.unfinished_run(str(root / 'crashed'))
+    with pytest.raises(ProtocolError) as caught:
+        run_files.request('runs.delete', {'folder': crashed, 'dry_run': True}, [])
+    assert caught.value.code == 'refused' and 'not complete' in caught.value.message
+    with pytest.raises(ProtocolError) as caught:
+        run_files.request('runs.delete', {'folder': crashed, 'not_live': 'yes'}, [])
+    assert caught.value.code == 'bad_request'
+    plan = run_files.request('runs.delete', {'folder': crashed, 'dry_run': True,
+                                             'not_live': True}, [])
+    assert (plan['complete'], plan['deleted']) == (False, False)
+    done = run_files.request('runs.delete', {'folder': crashed, 'not_live': True}, [])
+    assert done['deleted'] is True and not os.path.exists(crashed)
 
 
 def test_a_project_names_the_run_folder_of_each_run_record(tmp_path):

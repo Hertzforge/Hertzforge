@@ -319,6 +319,14 @@ def _same_matrix(a: np.ndarray | None, b: np.ndarray | None) -> bool:
     return a.shape == b.shape and bool(np.array_equal(a, b))
 
 
+def _negative_sensitivity(channel: object, value: str) -> str:
+    """The words refusing a negative sensitivity on an enabled row: the row,
+    the column and the value (schema/PROTOCOL.md, "Channel Table")."""
+    return (f'channel {channel}, Sensitivity: {value} is negative; a sensitivity is never '
+            'negative on an enabled row, and a channel read inverted says so in its '
+            'Polarity column')
+
+
 class ChannelTable:
     """Per-channel metadata, in one fixed set of typed columns.
 
@@ -656,8 +664,10 @@ class ChannelTable:
         """What the table breaks of the rules a row is checked by on both
         sides of the program, beyond what one cell can say (schema/PROTOCOL.md,
         "Channel Table"): a sensitivity of 0 on an enabled row that is not a
-        drive. A table without the controller's columns has every row on and
-        none a drive. Empty when it breaks none.
+        drive, and a negative sensitivity on any enabled row (a channel read
+        inverted says so in its polarity column). A table without the
+        controller's columns has every row on and none a drive. Empty when it
+        breaks none.
 
         Returns
         -------
@@ -667,12 +677,14 @@ class ChannelTable:
         found = []
         for r in range(self.num_channels):
             text = str(self['sensitivity'][r]).strip()
-            if not text or float(text) != 0.0:
+            if not text or float(text) > 0.0:
                 continue
             on = ('enabled' not in self.frame.columns
                   or str(self['enabled'][r]) != 'False')
             drive = 'drive' in self.frame.columns and str(self['drive'][r]) == 'True'
-            if on and not drive:
+            if on and float(text) < 0.0:
+                found.append(_negative_sensitivity(int(self['channel'][r]), text))
+            elif on and not drive:
                 found.append(f'channel {int(self["channel"][r])} is an enabled input with a '
                              'sensitivity of 0; only a disabled row or a drive may hold 0')
         return found
@@ -740,6 +752,12 @@ class ChannelTable:
         # pair"; force and voltage control are why it was not one.
         if name == 'unit' and coerced:
             self._agrees_with_type(row, str(coerced))
+        if name == 'sensitivity' and coerced != '' and float(coerced) < 0.0:
+            on = ('enabled' not in self.frame.columns
+                  or str(self.frame.loc[row, 'enabled']) != 'False')
+            if on:
+                raise ValueError(_negative_sensitivity(self.frame.loc[row, 'channel'],
+                                                       str(coerced)))
         if name == 'sensitivity' and coerced != '' and float(coerced) == 0.0:
             on = ('enabled' not in self.frame.columns
                   or str(self.frame.loc[row, 'enabled']) != 'False')
