@@ -32,7 +32,7 @@
 	 * release in one place places a point, picks a node, or leaves a surface out or puts it back, and
 	 * a drag still turns the view.
 	 */
-	import { onDestroy, onMount, type Snippet } from 'svelte';
+	import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
 	import {
 		AmbientLight,
 		BufferAttribute,
@@ -107,9 +107,11 @@
 		onpick?: (patch: Record<string, unknown>) => void;
 		/** A gizmo let go: the operation to run, with what the drag adds. */
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
+		/** The amplitude the view opens at, a multiple of the app's own (an exported animation's `--scale`). */
+		startAmplitude?: number;
 	}
 
-	let { view, mode = $bindable(0), overlay = undefined, colors = null, legend, scope, onpick, ongizmo }: Props = $props();
+	let { view, mode = $bindable(0), overlay = undefined, colors = null, legend, scope, onpick, ongizmo, startAmplitude = 1 }: Props = $props();
 
 	// kept across the view each drag answers with
 	let gizmoMode = $state<'translate' | 'rotate'>(lastGizmoMode);
@@ -272,8 +274,8 @@
 
 	let playing = $state(true);
 	/** The deflection amplitude, a multiple of `AMP_UNIT`: the slider runs from 0 to `amplitudeMax`, which the field beside it sets. */
-	let amplitude = $state(1);
-	let amplitudeMax = $state(4);
+	let amplitude = $state(untrack(() => startAmplitude));
+	let amplitudeMax = $state(untrack(() => Math.max(4, 2 * startAmplitude)));
 	let wireframe = $state(false);
 	/** The surface's opacity, 1 for solid: below it the surface is drawn translucent without writing depth, as the ghost is, so a brick model's inner faces show through without draw-order speckle. */
 	let opacity = $state(1);

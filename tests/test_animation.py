@@ -1,0 +1,75 @@
+"""A geometry's animation exported as one page that plays offline (`hertzforge
+export-animation`): the view the app shows for the selection, what the page opens at, and the
+command line."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+import hertzforge as hz
+from hertzforge.__main__ import main
+from hertzforge.animation import AnimationError, animation_page, animation_view, export_animation
+from hertzforge.report.viewer import read_viewer
+
+PLATE = Path(__file__).resolve().parent.parent / 'testdata' / 'plate'
+
+
+@pytest.fixture(scope='module')
+def plate():
+    project = hz.Project('plate')
+    project.import_file(str(PLATE / 'geometry.unv'))
+    project.import_file(str(PLATE / 'shapes.npy'))
+    return project
+
+
+def test_the_view_is_the_one_the_app_shows_for_the_selection(plate):
+    view = animation_view(plate, 'Geometry', shapes='Shape Set')
+    assert view['view'] == 'shape3d' and len(view['modes']) == plate['Shape Set'].num_shapes
+    with pytest.raises(AnimationError, match="no object named 'Nothing'"):
+        animation_view(plate, 'Geometry', shapes='Nothing')
+    with pytest.raises(AnimationError, match='show no animation'):
+        animation_view(plate, 'Geometry')
+
+
+def test_the_page_holds_the_animation_and_opens_where_it_was_asked(plate):
+    """Brandon, 2026-11-14: the fridge's kick, live in an iframe in his talk's slides."""
+    page = animation_page(plate, 'Geometry', shapes='Shape Set', mode=7, scale=2.5,
+                          theme='light', title='Plate <modes>')
+    assert '<html lang="en" data-theme="light">' in page
+    assert '<title>Plate &lt;modes&gt;</title>' in page
+    held = read_viewer(page)['animation']
+    assert held['view']['view'] == 'shape3d'
+    assert held['setup'] == {'scale': 2.5, 'mode': 6}
+    assert 'data-theme' not in animation_page(plate, 'Geometry', shapes='Shape Set')[:400]
+
+
+def test_what_the_page_cannot_open_at_is_refused(plate):
+    with pytest.raises(AnimationError, match='modes 1 to 22; not 40'):
+        animation_page(plate, 'Geometry', shapes='Shape Set', mode=40)
+    with pytest.raises(AnimationError, match='light or dark'):
+        animation_page(plate, 'Geometry', shapes='Shape Set', theme='blue')
+    with pytest.raises(AnimationError, match='0 or more'):
+        animation_page(plate, 'Geometry', shapes='Shape Set', scale=-1)
+
+
+def test_the_page_is_written_where_it_was_asked(plate, tmp_path):
+    out = export_animation(plate, tmp_path / 'plate.html', 'Geometry', shapes='Shape Set')
+    assert read_viewer(out.read_text(encoding='utf-8'))['animation']['setup'] == {
+        'scale': 1.0, 'mode': 0}
+
+
+def test_the_command_writes_the_page_or_says_why_not(plate, tmp_path, capsys):
+    path = tmp_path / 'plate.hforge'
+    plate.save(path)
+    out = tmp_path / 'plate.html'
+    assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry',
+                 '--shapes', 'Shape Set', '--mode', '3', '--theme', 'dark']) == 0
+    assert f'wrote {out}' in capsys.readouterr().out
+    assert read_viewer(out.read_text(encoding='utf-8'))['animation']['setup']['mode'] == 2
+    assert main(['export-animation', str(path), '-o', str(out), '--geometry', 'Geometry']) == 1
+    assert 'show no animation' in capsys.readouterr().out
+    assert main(['export-animation', str(tmp_path / 'none.hforge'), '-o', str(out),
+                 '--geometry', 'Geometry']) == 1
+    assert 'hertzforge export-animation:' in capsys.readouterr().out
