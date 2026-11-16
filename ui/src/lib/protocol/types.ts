@@ -239,6 +239,12 @@ export interface Shape3DView {
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/**
+	 * The mesh the overlays move when they are a second geometry's shapes, whose nodes follow the
+	 * first's in `nodes`; `triangles` and `lines` are then the first geometry's alone.
+	 */
+	overlay_triangles?: Uint32Array;
+	overlay_lines?: Uint32Array;
 	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
 	paired?: boolean;
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */

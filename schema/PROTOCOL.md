@@ -170,6 +170,11 @@ a complex one shows its traveling part. `label`, when present, names the shape i
 `overlays` and `overlay_phase` (optional) carry a second set of shapes on the same nodes, for a
 `matrix` view that `selects` this one (below). With `paired` (optional) overlay k goes with mode k
 and the shell draws it over that mode as the modes are stepped: a Matched Modes object's pairs.
+`overlay_triangles` (u32 [T,3]) and `overlay_lines` (u32 [L,2]) (optional, together) are the mesh
+the overlays move when they are a second geometry's shapes: `nodes` then holds the first geometry's
+nodes followed by the second's, `triangles` and `lines` are the first's mesh alone, and a mode
+moves no node of the second geometry nor an overlay one of the first. Two shape sets on two
+geometries are shown so, a model's modes on the model and a test's on the test geometry over it.
 
 `pick` (optional) says what a click in the view does. A click is a press and release in one place; a drag still turns the
 view. The shell runs `op` with `params` and what was clicked, and the views it answers with take

@@ -38,67 +38,84 @@ def translations(geometry: Any, dofs: Any, values: np.ndarray,
     return moved.reshape(*values.shape[:-1], len(kept), 3)
 
 
-def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
-           columns: Any, column_modes: Any) -> list[dict]:
-    """The MAC `matrix` and, with a `geometry`, the `shape3d`
-    view it `selects`: the row set's modes as `modes` and the column set's
-    as `overlays`, each a translation per survey node, with each pair's
-    `overlay_phase`, the angle that aligns the column mode with the row
-    mode (`core.shapes.alignment_phases`: a real mode is defined only up to
-    its sign, a complex one up to a rotation), as translations of the geometry's nodes. Without a geometry the
-    matrix comes alone."""
+def _stage(geometry: Any, title: str, rows: Any, row_modes: list[int], columns: Any,
+           column_modes: list[int], named: str, column_geometry: Any = None) -> dict:
+    """The `shape3d` of two sets of shapes: the row set's as `modes`, the column set's as
+    `overlays`, with each pair's `overlay_phase` (`core.shapes.alignment_phases`).
+
+    On one `geometry` both are translations of its nodes. With `column_geometry`, the
+    geometry the column set is on, each set moves its own: the scene's nodes are the first
+    geometry's followed by the second's, `triangles` and `lines` are the first's mesh and
+    `overlay_triangles` and `overlay_lines` the second's, so a model's modes are drawn on the
+    model and a test's on the test geometry laid over it (Brandon, 2026-11-16). A row mode
+    moves no node of the second geometry and a column mode none of the first."""
     from hertzforge.core.shapes import alignment_phases
 
-    if geometry is None:
-        return [matrix]
     drawn, triangles, lines = drawn_mesh(geometry)
-
-    row_modes, column_modes = [int(r) for r in row_modes], [int(c) for c in column_modes]
+    nodes = np.asarray(geometry.node_xyz, dtype=float)[drawn]
     moved = translations(geometry, rows.coordinate, rows.shape_matrix[row_modes], drawn)
+    extra: dict[str, Any] = {}
+    defined = geometry.units_defined
+    if column_geometry is None:
+        over = (moved if columns is rows and column_modes == row_modes else
+                translations(geometry, columns.coordinate, columns.shape_matrix[column_modes],
+                             drawn))
+    else:
+        there, its_triangles, its_lines = drawn_mesh(column_geometry)
+        over = translations(column_geometry, columns.coordinate,
+                            columns.shape_matrix[column_modes], there)
+        first, second = len(drawn), len(there)
+        # each set's shapes on its own nodes, at rest on the other's
+        moved = np.concatenate([moved, np.zeros((*moved.shape[:-2], second, 3), moved.dtype)],
+                               axis=-2)
+        over = np.concatenate([np.zeros((*over.shape[:-2], first, 3), over.dtype), over], axis=-2)
+        nodes = np.vstack([nodes, np.asarray(column_geometry.node_xyz, dtype=float)[there]])
+        defined = defined and column_geometry.units_defined
+        extra['overlay_triangles'] = (np.ascontiguousarray(its_triangles + first, np.uint32)
+                                      if its_triangles is not None and len(its_triangles)
+                                      else np.zeros((0, 3), np.uint32))
+        extra['overlay_lines'] = (np.ascontiguousarray(its_lines + first, np.uint32)
+                                  if its_lines is not None and len(its_lines)
+                                  else np.zeros((0, 2), np.uint32))
     modes = [v.mode(r + 1, float(rows.frequency[r]), float(rows.damping[r]), moved[k])
              for k, r in enumerate(row_modes)]
-    named = matrix['columns']['label']
-    moved = (moved if columns is rows and column_modes == row_modes else
-             translations(geometry, columns.coordinate, columns.shape_matrix[column_modes], drawn))
     overlays = [v.mode(c + 1, float(columns.frequency[c]),
                        float(columns.damping[c]) if columns.damping[c] > 0 else None,
-                       moved[k], label=f'{named} mode {c + 1}')
+                       over[k], label=f'{named} mode {c + 1}')
                 for k, c in enumerate(column_modes)]
     phase = alignment_phases(rows, row_modes, columns, column_modes).astype(np.float32)
+    return v.shape3d(title, 'm' if defined else 'undefined', nodes, modes,
+                     triangles=triangles, lines=lines, overlays=overlays,
+                     overlay_phase=phase, **extra)
+
+
+def paired(geometry: Any, matrix: dict, rows: Any, row_modes: Any,
+           columns: Any, column_modes: Any, column_geometry: Any = None) -> list[dict]:
+    """The MAC `matrix` and, with a `geometry`, the `shape3d`
+    view it `selects`: the row set's modes as `modes` and the column set's
+    as `overlays`, with each pair's `overlay_phase`, the angle that aligns the
+    column mode with the row mode (`core.shapes.alignment_phases`: a real mode is
+    defined only up to its sign, a complex one up to a rotation). Both are
+    translations of the geometry's nodes, or with `column_geometry` each set moves its
+    own geometry in one scene (`_stage`). Without a geometry the matrix comes alone."""
+    if geometry is None:
+        return [matrix]
+    row_modes, column_modes = [int(r) for r in row_modes], [int(c) for c in column_modes]
     matrix['selects'] = 'shape3d'
-    shape = v.shape3d(matrix['title'], 'm' if geometry.units_defined else 'undefined',
-                      np.asarray(geometry.node_xyz, dtype=float)[drawn], modes,
-                      triangles=triangles, lines=lines, overlays=overlays,
-                      overlay_phase=phase)
+    shape = _stage(geometry, matrix['title'], rows, row_modes, columns, column_modes,
+                   matrix['columns']['label'], column_geometry)
     return [matrix, shape]
 
 
-
-
 def matched_stage(geometry: Any, title: str, rows: Any, columns: Any, pairs: Any,
-                  second: str) -> dict:
-    """A Matched Modes object's pairs on `geometry`: the first set's mode of each pair as
+                  second: str, column_geometry: Any = None) -> dict:
+    """A Matched Modes object's pairs: the first set's mode of each pair as
     `modes`, the second set's as `overlays`, `paired` so the shell draws overlay k over mode k as
     it steps through them, each aligned by its pair's phase (`core.shapes.alignment_phases`).
+    On `geometry`, or with `column_geometry` each set on its own geometry (`_stage`).
     The pairs overlaid, where the earlier toolset showed only their table (Brandon,
     2026-11-14)."""
-    from hertzforge.core.shapes import alignment_phases
-
-    drawn, triangles, lines = drawn_mesh(geometry)
-    row_modes = [int(a) for a, _b in pairs]
-    column_modes = [int(b) for _a, b in pairs]
-    moved = translations(geometry, rows.coordinate, rows.shape_matrix[row_modes], drawn)
-    modes = [v.mode(r + 1, float(rows.frequency[r]), float(rows.damping[r]), moved[k])
-             for k, r in enumerate(row_modes)]
-    moved = translations(geometry, columns.coordinate, columns.shape_matrix[column_modes], drawn)
-    overlays = [v.mode(c + 1, float(columns.frequency[c]),
-                       float(columns.damping[c]) if columns.damping[c] > 0 else None,
-                       moved[k], label=f'{second} mode {c + 1}')
-                for k, c in enumerate(column_modes)]
-    phase = alignment_phases(rows, row_modes, columns, column_modes).astype(np.float32)
-    shape = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
-                      np.asarray(geometry.node_xyz, dtype=float)[drawn], modes,
-                      triangles=triangles, lines=lines, overlays=overlays,
-                      overlay_phase=phase)
+    shape = _stage(geometry, title, rows, [int(a) for a, _b in pairs], columns,
+                   [int(b) for _a, b in pairs], second, column_geometry)
     shape['paired'] = True
     return shape
