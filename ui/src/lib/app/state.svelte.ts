@@ -5,7 +5,7 @@
  */
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
-import { pairsText, togglePick } from '$lib/viz/macBars';
+import { bestCell, pairsText, togglePick } from '$lib/viz/macBars';
 import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
@@ -280,6 +280,11 @@ class AnalyzeState {
 			);
 			if (seq !== this.showSeq) return;
 			this.shown = res;
+			// two sets on two geometries: both are seen moving from the start, on the best pair;
+			// it is shown, not picked, so Add Matches keeps only what was clicked
+			const apart = res.views.some((v) => v.view === 'shape3d' && (v.overlay_triangles !== undefined || v.overlay_lines !== undefined));
+			const compared = res.views.find((v): v is MatrixView => v.view === 'matrix' && v.selects === 'shape3d');
+			if (apart && compared && !this.pair) this.pair = bestCell(compared.values, compared.columns.ticks.length);
 			// the views bring the averaging's frames themselves
 			this.averagingRegions = null;
 			this.showError = null;
