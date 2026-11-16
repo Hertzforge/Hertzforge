@@ -76,6 +76,33 @@ for _level, _y in (('upper', 4.5), ('lower', 3.5)):
         CONTROLS[f'left channel web, {_level}, x={_x:g}'] = ((_x, _y, 1.0), (0, 0, -1))
 
 
+#: the test geometry's trace lines through the accelerometer nodes, the same
+#: on the BARC's test geometry: the beam top's two rows, the rungs between
+#: them, and a loop down each channel's web
+COMPONENT_TRACES = [[101, 103, 105, 107], [102, 104, 106, 108], [101, 102], [103, 104],
+                    [105, 106], [107, 108], [107, 109, 111, 112, 110, 108], [109, 110],
+                    [101, 114, 116, 115, 113, 114]]
+#: the plate's outline through the side-face drives, and each corner's bottom
+#: drive joined to its two side drives
+PLATE_TRACES = [[202, 208, 207, 210, 211, 205, 204, 201, 202], [201, 203, 202],
+                [207, 209, 208], [210, 212, 211], [204, 206, 205]]
+
+
+def draw(geometry: Any, traces: dict[str, list[list[int]]]) -> None:
+    """Give a test geometry trace lines, an element group per entry of
+    `traces` ({name: [line of node ids, ...]}), and a point element at every
+    node, in the element group 'Nodes'. The app draws elements, not bare
+    nodes, so without them a test geometry shows nothing.
+    """
+    for color, (name, lines) in enumerate(traces.items(), start=1):
+        group = geometry.add_group(name)
+        for line in lines:
+            geometry.add_beams(line, group=group, color=color)
+    nodes = [int(n) for n in geometry.node_id]
+    group = geometry.add_group('Nodes')
+    geometry.add_elements([[n] for n in nodes], [161] * len(nodes), [group] * len(nodes))
+
+
 def drives() -> dict[str, tuple[tuple[float, float, float], str]]:
     """{label: (point, direction)} for the twelve forces, inches, each along its
     face's inward normal."""
@@ -198,7 +225,31 @@ def channels(model: Any) -> tuple[Any, Any]:
                for name in ('node', 'direction', 'role', 'control',
                             'channel_type', 'unit', 'triax_dof', 'comment')}
     columns['channel'] = list(range(1, len(rows) + 1))
-    return test_geometry(model, ids, fe_nodes, frames), ChannelTable(columns)
+    geometry = test_geometry(model, ids, fe_nodes, frames)
+    draw(geometry, {'Component': COMPONENT_TRACES, 'Plate': PLATE_TRACES})
+    return geometry, ChannelTable(columns)
+
+
+def with_drive_points(table: Any) -> Any:
+    """`table` with an accelerometer at every drive, on the force's node and
+    along its direction, appended after its own channels: what a modal test
+    needs to scale its fitted shapes to unit modal mass.
+
+    Returns
+    -------
+    ChannelTable
+    """
+    from hertzforge import ChannelTable
+
+    frame = table.frame
+    rows = [dict(zip(frame.columns, values)) for values in frame.itertuples(index=False)]
+    points = [dict(row, role='response', control='False', channel_type='acceleration',
+                   unit='g', triax_dof='', comment=f"driving point, {row['comment']}")
+              for row in rows if row['role'] == 'reference']
+    rows += points
+    columns = {name: [row[name] for row in rows] for name in frame.columns}
+    columns['channel'] = list(range(1, len(rows) + 1))
+    return ChannelTable(columns)
 
 
 def test_geometry(model: Any, ids: list[int], fe_nodes: list[int], frames: list) -> Any:
