@@ -672,6 +672,9 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
     if 'values_dofs' in prefs and prefs['values_dofs'] not in VALUES_CHOICES:
         raise bad_request('project.show "values_dofs" is all, control, reference, response or '
                           'monitor')
+    if 'arrow_role' in prefs and prefs['arrow_role'] not in VALUES_CHOICES:
+        raise bad_request('project.show "arrow_role" is all, control, reference, response or '
+                          'monitor')
     if 'values_form' in prefs and prefs['values_form'] not in VALUES_FORMS:
         raise bad_request('project.show "values_form" is shapes, response or reference')
     if prefs.get('environment') is not None and not isinstance(prefs['environment'], str):

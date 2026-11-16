@@ -18,6 +18,7 @@ extra nodes and lines of the mesh; a sensor's body is a solid of its own
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -106,19 +107,21 @@ def frames(geometry: Any, drawn: Any = None) -> list[dict[str, Any]]:
              'length': float(length)} for matrix in matrices]
 
 
-def _arrow(start: np.ndarray, end: np.ndarray, nodes: list, lines: list) -> None:
-    """A shaft from `start` to `end` and a head of two barbs at `end`."""
-    along = end - start
-    length = float(np.linalg.norm(along))
-    if not length > 0:
-        return
-    unit = along / length
-    side = np.cross(unit, (0.0, 0.0, 1.0) if abs(unit[2]) < 0.9 else (1.0, 0.0, 0.0))
-    side /= np.linalg.norm(side)
-    base = len(nodes)
-    nodes += [start, end, end - 0.25 * length * unit + 0.12 * length * side,
-              end - 0.25 * length * unit - 0.12 * length * side]
-    lines += [(base, base + 1), (base + 1, base + 2), (base + 1, base + 3)]
+def arrows(xyz: np.ndarray, drawn: Sequence[tuple[bool, tuple[int, np.ndarray, int]]],
+           length: float) -> dict[str, Any]:
+    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long. `drawn` is
+    (points in, (node row, direction, axis)) per arrow; an arrow pointing in ends on its
+    node, the others start there. `tails` f32 [A, 3] is where each starts, `directions`
+    f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
+    (0 X, 1 Y, 2 Z), which picks its color."""
+    tails = np.zeros((len(drawn), 3), dtype=np.float32)
+    directions = np.zeros((len(drawn), 3), dtype=np.float32)
+    axes = np.zeros(len(drawn), dtype=np.uint8)
+    for k, (into, (row, vector, axis)) in enumerate(drawn):
+        tails[k] = xyz[row] - length * vector if into else xyz[row]
+        directions[k] = vector
+        axes[k] = axis
+    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length)}
 
 
 # ---- tables -------------------------------------------------------------------------
@@ -939,10 +942,8 @@ def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.dof_arrows`: an arrow at each DOF on the geometry the
     source is linked with, along that axis of the node's displacement
     coordinate system (`drawing.viz.geometry.dof_arrow_vectors`), all
-    one length (`dof_arrow_length`); a force points in and ends on its node. The arrows are extra
-    nodes and lines of the mesh, a shaft and a head of two barbs, since
-    a `shape3d` has no markers, and their table lists each DOF and where
-    it points."""
+    one length (`dof_arrow_length`); a force points in and ends on its node. The arrows are
+    the view's `arrows`, and their table lists each DOF and where it points."""
     from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
 
     name = params['source']
@@ -954,29 +955,23 @@ def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
     drawn = [(dof, into, hit) for dof, into, hit in zip(dofs, incoming, found, strict=True)
              if hit is not None]
-    nodes: list = []
-    lines: list = []
+    view = _drawn(f'{home}, DOFs of {name}', geometry)
     if drawn:
         length = dof_arrow_length(xyz[[hit[0] for _d, _i, hit in drawn]], _extent(xyz))
-        for _dof, into, (row, vector, _axis) in drawn:
-            at = xyz[row]
-            if into:
-                _arrow(at - length * vector, at, nodes, lines)
-            else:
-                _arrow(at, at + length * vector, nodes, lines)
+        view['arrows'] = arrows(xyz, [(into, hit) for _d, into, hit in drawn], length)
     rows = []
     for dof, into, hit in zip(dofs, incoming, found, strict=True):
         if hit is None:
             rows.append([dof, '', 'not drawn: no such node or direction on ' + home])
             continue
-        row, vector, _axis = hit
+        _row, vector, _axis = hit
         rows.append([dof, ' '.join(f'{c:+.3f}' for c in vector),
                      'in, ending on the node' if into else 'out from the node'])
     missing = len(dofs) - len(drawn)
     title = (f'DOFs of {name} on {home}: {what}, {len(drawn)} arrow'
              f'{"s" * (len(drawn) != 1)}'
              + (f'; {missing} of {len(dofs)} have none' if missing else ''))
-    return [_drawn(f'{home}, DOFs of {name}', geometry, nodes, lines),
+    return [view,
             v.table(title, ['DOF', 'Direction (global)', 'Arrow'], rows)]
 
 

@@ -273,10 +273,11 @@ def _shape(view: dict, system: Any) -> None:
     if change is not None:
         view['nodes'] = _values(view['nodes'], change)
         view['unit'] = change[2]
-        marks = view.get('marks')
-        if marks is not None:
+        arrows = view.get('arrows')
+        if arrows is not None:
             # the arrows over the model, in its coordinates
-            marks['nodes'] = np.asarray(_values(marks['nodes'], change), dtype=np.float32)
+            arrows['tails'] = np.asarray(_values(arrows['tails'], change), dtype=np.float32)
+            arrows['length'] = float(arrows['length'] / change[0])
         bodies = view.get('bodies')
         if bodies is not None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)

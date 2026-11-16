@@ -17,6 +17,7 @@
 	const TABLE_VIEWS: Record<string, string> = { channels: 'Channels', response: 'Response transformation', reference: 'Reference transformation' };
 
 	/** Where a shape set's values are read. */
+	const ARROW_CHOICES: Record<string, string> = { all: 'All channels', control: 'Control channels', reference: 'References', response: 'Responses', monitor: 'Monitors' };
 	const VALUES_CHOICES: Record<string, string> = {
 		all: 'All DOFs',
 		control: 'Control channels',
@@ -216,7 +217,7 @@
 						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
 						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
-							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors))}
+							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors || (offers?.arrow_roles.length ?? 0) > 1))}
 							<div class="view pane {v.view}" data-testid="pane-{v.view}">
 								{#if headed && offers}
 									<!-- the pane's own header: its title and the controls that read this view; a lone view with nothing to set leaves its title to the frame -->
@@ -228,6 +229,14 @@
 										{#if v.view === 'shape3d'}
 											{#if offers.arrows}
 												<button class="btn ghost sm" class:on={a.prefs.arrows} aria-pressed={a.prefs.arrows} data-testid="read-arrows" title="Mark the measurement DOFs with arrows over the stage; a force points in" onclick={() => a.setPref('arrows', !a.prefs.arrows)}>DOF Arrows</button>
+											{/if}
+											<!-- a table picked with its geometry always has its arrows drawn, so only the choice shows -->
+											{#if offers.arrow_roles.length > 1 && (a.prefs.arrows || !offers.arrows)}
+												<select class="field sm" aria-label="Arrows drawn" data-testid="read-arrow-role" value={offers.arrow_roles.includes(a.prefs.arrow_role) ? a.prefs.arrow_role : 'all'} onchange={(e) => a.setPref('arrow_role', (e.currentTarget as HTMLSelectElement).value)} title="The channels whose DOF arrows are drawn: every channel of the table, its control channels, or the channels in one role">
+													{#each offers.arrow_roles as choice (choice)}
+														<option value={choice}>{ARROW_CHOICES[choice] ?? choice}</option>
+													{/each}
+												</select>
 											{/if}
 											{#if offers.sensors}
 												<button class="btn ghost sm" class:on={a.prefs.sensors} aria-pressed={a.prefs.sensors} data-testid="read-sensors" title="Draw the accelerometers and force transducers the channel table names, centered on their nodes" onclick={() => a.setPref('sensors', !a.prefs.sensors)}>Sensors</button>
@@ -630,6 +639,12 @@
 		font-weight: var(--weight-strong);
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	/* a choice in the header is as wide as its words, so the title keeps its room */
+	.phead select.field {
+		flex: none;
+		width: auto;
 	}
 
 	.phead .btn.on {

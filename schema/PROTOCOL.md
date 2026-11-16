@@ -678,8 +678,14 @@ values read at `prefs.values_dofs` (`all` or a channel choice of the table in it
 `offers.values_dofs`) in `prefs.values_form` (`shapes`, `response`, `reference`). An FRF beside a shape
 set shows the picked records with their resynthesis following dashed (`follows`). `prefs.arrows` and
 `prefs.sensors` (offered as `arrows` and `sensors`) put DOF arrows and the channel table's sensors over
-every stage. The arrows are `marks` on the `shape3d`: static line work, `nodes` f32 [M, 3] in the
-geometry's coordinates and `lines` u32 [L, 2] indexing them. The sensors are `bodies`: solids drawn
+every stage. The arrows are `arrows` on the `shape3d`, solids that stay put while the model moves:
+`tails` f32 [A, 3] where each starts, in the geometry's coordinates, `directions` f32 [A, 3] the
+unit vector it points along, `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which the shell
+colors it by as it colors the orientation axes, and `length`, one for all of them. A channel table
+picked with a geometry shows the geometry alone with the table's arrows always drawn, so `arrows` is
+not offered there. `prefs.arrow_role` (`all`, `control` or a role; `offers.arrow_roles` lists the
+ones the table holds) chooses the channels whose arrows are drawn, there and wherever the arrows of
+a table are on. The sensors are `bodies`: solids drawn
 from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's coordinates,
 `triangles` u32 [T, 3], `colors` u8 [P, 3] (sRGB) and `follow` u32 [P], the row of the view's
 `nodes` whose motion each point takes, so a body moves with its node (2^32 − 1 stays put).

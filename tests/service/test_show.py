@@ -472,17 +472,45 @@ def test_an_frf_beside_a_shape_set_shows_its_resynthesis(plate, validate):
         project.remove('Fit')
 
 
+def test_a_channel_table_on_a_geometry_is_the_geometry_with_arrows_by_role(plate, validate):
+    project = plate.project
+    geometry, table = named(plate, 'geometry'), named(plate, 'channel_table')
+    both = shown(plate, geometry, table, prefs={'sensors': False}, validate=validate)
+    (stage,) = both['views']
+    assert stage['view'] == 'shape3d', 'the stage alone, no table beside it'
+    assert len(stage['nodes']) == project[geometry].num_nodes
+    offers = both['offers']
+    assert offers['arrows'] is False, 'always drawn, so nothing to switch'
+    assert offers['arrow_roles'] == project[table].choices()
+    everything = len(stage['arrows']['axes'])
+    assert everything > 0 and f'{everything} DOF arrows' in both['note']
+    for role in offers['arrow_roles'][1:]:
+        some = shown(plate, table, geometry, prefs={'sensors': False, 'arrow_role': role},
+                     validate=validate)
+        count = len(some['views'][0]['arrows']['axes'])
+        assert 0 < count <= len(project[table].chosen(role)) and count < everything
+    with pytest.raises(ProtocolError, match='arrow_role'):
+        shown(plate, geometry, table, prefs={'arrow_role': 'loud'})
+
+
 def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
     project = plate.project
     geometry, history = named(plate, 'geometry'), named(plate, 'time_history')
     plain = shown(plate, geometry, history, validate=validate)
     assert plain['offers']['arrows'] is True and plain['offers']['sensors'] is False
-    assert 'marks' not in plain['views'][0]
+    assert 'arrows' not in plain['views'][0]
     marked = shown(plate, geometry, history, prefs={'arrows': True}, validate=validate)
     stage = marked['views'][0]
-    assert stage['view'] == 'shape3d' and stage['marks']['nodes'].shape[1] == 3
-    assert stage['marks']['lines'].dtype == np.uint32 and len(stage['marks']['lines']) > 0
+    assert stage['view'] == 'shape3d' and stage['arrows']['tails'].shape[1] == 3
+    assert stage['arrows']['axes'].dtype == np.uint8 and len(stage['arrows']['axes']) > 0
+    assert set(stage['arrows']['axes'].tolist()) <= {0, 1, 2} and stage['arrows']['length'] > 0
     assert 'DOF arrows' in marked['note']
+    roles = marked['offers']['arrow_roles']
+    assert roles[0] == 'all' and 'reference' in roles
+    some = shown(plate, geometry, history, prefs={'arrows': True, 'arrow_role': 'reference'},
+                 validate=validate)
+    assert 0 < len(some['views'][0]['arrows']['axes']) < len(stage['arrows']['axes'])
+    assert '(references)' in some['note']
     table_name = next(n for n, o in project.items() if projects.kind_of(o) == 'channel_table')
     table = project[table_name]
     was = table['model'][0]
@@ -492,7 +520,7 @@ def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
         assert offered['offers']['sensors'] is True
         with_sensors = shown(plate, geometry, history, prefs={'sensors': True, 'arrows': False},
                              validate=validate)
-        assert '1 sensors' in with_sensors['note'] and 'marks' not in with_sensors['views'][0]
+        assert '1 sensors' in with_sensors['note'] and 'arrows' not in with_sensors['views'][0]
         stage = with_sensors['views'][0]
         bodies = stage['bodies']
         assert bodies['triangles'].dtype == np.uint32 and len(bodies['triangles']) > 0

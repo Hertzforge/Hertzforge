@@ -84,7 +84,8 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: component of complex data
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'shape_view': None,
-         'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'sensors': True,
+         'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
+         'sensors': True,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
 TABLE_VIEWS = ('channels', 'response', 'reference')
@@ -187,18 +188,39 @@ def _values_view(project: Any, name: str, shapes: Any, prefs: dict[str, Any]
     return v.table(title, headers, rows), notes
 
 
-def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
-                ) -> tuple[list[str], list[bool]]:
+def _marked_table(project: Any, objects: list[str], geometry_name: str
+                  ) -> tuple[tuple[str, Any] | None, bool]:
+    """(the channel table whose channels are marked on the stage, whether it was picked
+    with the geometry): a table selected beside the geometry, linked with it or not, whose
+    arrows are then always drawn; else the table drawn on the geometry (`_table_on`)."""
+    from hertzforge.core.channel_table import ChannelTable
+
+    if len(objects) == 2 and geometry_name in objects:
+        other = objects[1] if objects[0] == geometry_name else objects[0]
+        if isinstance(project[other], ChannelTable):
+            return (other, project[other]), True
+    return _table_on(project, geometry_name), False
+
+
+def _arrow_role(table: Any, prefs: dict[str, Any]) -> str:
+    """The channel choice the arrows are drawn for: `prefs.arrow_role` while the table
+    holds such channels, else every channel."""
+    role = prefs.get('arrow_role', 'all')
+    return role if role in table.choices() else 'all'
+
+
+def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None,
+                role: str = 'all') -> tuple[list[str], list[bool]]:
     """The DOFs the arrows mark and whether each points in: the channel
-    table's channels, a force or a drive pointing in, else a lone shape
-    set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
+    table's channels in `role` (`ChannelTable.chosen`), a force or a drive pointing in,
+    else a lone shape set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
     from hertzforge.core.report import EXCITATION_QUANTITIES
     from hertzforge.core.shapes import ShapeSet
 
     if table is not None:
         _name, obj = table
         strings, types = obj.dof_strings(), obj.types()
-        rows = [i for i in range(len(strings))
+        rows = [i for i in obj.chosen(role)
                 if str(obj['node'][i]).strip() and str(obj['direction'][i]).strip()]
         return [strings[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows]
     if len(objects) == 1 and isinstance(project[objects[0]], ShapeSet):
@@ -211,42 +233,41 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None
 def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
            ) -> list[str]:
     """DOF arrows and sensors over every stage the selection shows, in the
-    geometry's coordinates: the arrows as static line work (`marks` on the
+    geometry's coordinates: the arrows as solids that stay put (`arrows` on the
     `shape3d`) as `project.dof_arrows` draws them, the sensors as solids
     that move with their nodes (`bodies`) as `project.sensors` draws
-    them. Returns the notes."""
+    them. A channel table picked with a geometry always has its arrows drawn, for
+    the channels `prefs.arrow_role` chooses. Returns the notes."""
     stages = [view for view in views if view.get('view') == 'shape3d']
-    if not stages or not (prefs['arrows'] or prefs['sensors']):
-        return []
-    geometry_name = _stage_geometry(project, objects)
+    geometry_name = _stage_geometry(project, objects) if stages else None
     if geometry_name is None:
+        return []
+    table, picked = _marked_table(project, objects, geometry_name)
+    if not (prefs['arrows'] or picked or prefs['sensors']):
         return []
     from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
     from hertzforge.drawing.viz.sensors import rows_of, sensor_bodies
 
-    from .ops_geometry import _arrow, _extent
+    from .ops_geometry import _extent, arrows
 
     geometry = project[geometry_name]
-    table = _table_on(project, geometry_name)
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
-    nodes: list = []
-    lines: list = []
     notes: list[str] = []
-    if prefs['arrows']:
-        dofs, into = _arrow_dofs(project, objects, table)
+    if prefs['arrows'] or picked:
+        role = _arrow_role(table[1], prefs) if table is not None else 'all'
+        dofs, into = _arrow_dofs(project, objects, table, role)
         into = into or [False] * len(dofs)
-        if dofs:
+        if dofs or picked:
             hits = dof_arrow_vectors(geometry, dofs)
             drawn = [(i, hit) for i, hit in zip(into, hits, strict=True) if hit is not None]
             if drawn:
                 length = dof_arrow_length(xyz[[hit[0] for _i, hit in drawn]], _extent(xyz))
-                for inward, (row, vector, _axis) in drawn:
-                    at = xyz[row]
-                    if inward:
-                        _arrow(at - length * vector, at, nodes, lines)
-                    else:
-                        _arrow(at, at + length * vector, nodes, lines)
-            said = f'{len(drawn)} DOF arrows'
+                for stage in stages:
+                    # each its own, since converting a stage's units writes into it
+                    stage['arrows'] = arrows(xyz, drawn, length)
+            said = f'{len(drawn)} DOF arrow{"s" * (len(drawn) != 1)}'
+            if role != 'all':
+                said += f' ({VALUES_CHOICES[role].lower()})'
             if len(drawn) < len(dofs):
                 said += f', {len(dofs) - len(drawn)} with no node or direction on {geometry_name}'
             notes.append(said)
@@ -261,12 +282,6 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
                 stage['bodies'] = sensor_bodies(
                     placed, geometry, rows_of(geometry.node_id if ids is None else ids))[0]
             notes.append(f'{len(placed)} sensors')
-    if nodes:
-        marks = {'nodes': np.asarray(nodes, dtype=np.float32).reshape(-1, 3),
-                 'lines': np.asarray(lines, dtype=np.uint32).reshape(-1, 2)}
-        for stage in stages:
-            # each its own, since converting a stage's units writes into it
-            stage['marks'] = dict(marks)
     return notes
 
 
@@ -953,7 +968,8 @@ def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
         if isinstance(obj, ShapeSet):
             return _run(project, 'project.mode_shapes', shapes=other, geometry=geometry), []
         if isinstance(obj, ChannelTable):
-            return _run(project, 'project.dof_arrows', source=other), []
+            # the geometry alone; `_marks` draws the table's arrows over it
+            return _run(project, 'project.view_geometry', geometry=geometry), []
         if isinstance(obj, TimeHistory):
             return (_modal_motion(project, geometry, other, picks)
                     or _motion(project, geometry, other, picks))
@@ -1077,7 +1093,8 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
     if len(objects) == 1 and isinstance(project[objects[0]], ChannelTable):
         loops, _environment, forms, _form = _table_views(project[objects[0]], prefs)
     stage = _stage_geometry(project, objects)
-    table = _table_on(project, stage) if stage is not None else None
+    table, picked = _marked_table(project, objects, stage) if stage is not None else (None, False)
+    marked = stage is not None and bool(_arrow_dofs(project, objects, table)[0])
     placed: list = []
     if table is not None:
         try:
@@ -1104,7 +1121,8 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
         'values_dofs': choices,
         'environments': loops,
         'table_views': forms,
-        'arrows': stage is not None and bool(_arrow_dofs(project, objects, table)[0]),
+        'arrows': marked and not picked,
+        'arrow_roles': table[1].choices() if table is not None and (marked or picked) else [],
         'sensors': bool(placed),
         'projection': (len(sets) == 2 and all(home is not None for home in homes)
                        and homes[0][1] is not homes[1][1]),

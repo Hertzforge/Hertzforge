@@ -41,6 +41,7 @@
 		ConeGeometry,
 		DataTexture,
 		Group,
+		InstancedMesh,
 		DirectionalLight,
 		LinearFilter,
 		RGBAFormat,
@@ -71,6 +72,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
+	import { arrowMesh, triadScene, TRIAD_HALF } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { wideLines } from './wideLines';
@@ -401,8 +403,10 @@
 	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
-	/** The view's `marks`: DOF arrows and sensors, drawn still. */
-	let markLines: LineSegments | null = null;
+	/** The view's `arrows`: a solid arrow at each DOF, in its axis's color, drawn still. */
+	let dofArrows: InstancedMesh | null = null;
+	/** The orientation axes, drawn in the corner of the canvas after the model. */
+	let orientation: ReturnType<typeof triadScene> | null = null;
 	/** The view's coordinate systems (`frames`), drawn as the gimbal is: X red, Y green, Z blue arrows. */
 	let frameGroup: Group | null = null;
 	function buildFrames() {
@@ -669,7 +673,6 @@
 		// beside a second set of places, the ones a click picks wear the accent
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
-		if (markLines) (markLines.material as LineBasicMaterial).color = new Color(cssVar('--text-1'));
 		dirty = true;
 	}
 
@@ -807,22 +810,12 @@
 			}
 		}
 
-		if (view.marks && view.marks.lines.length) {
-			// DOF arrows and sensor bodies: line work that stays put while the model moves
-			const g = new BufferGeometry();
-			const { nodes: mn, lines: ml } = view.marks;
-			const segs = new Float32Array(ml.length * 3);
-			for (let i = 0; i < ml.length; i++) {
-				const n = ml[i] * 3;
-				segs[i * 3] = mn[n];
-				segs[i * 3 + 1] = mn[n + 1];
-				segs[i * 3 + 2] = mn[n + 2];
-			}
-			g.setAttribute('position', new BufferAttribute(segs, 3));
-			markLines = new LineSegments(g, new LineBasicMaterial({ color: new Color(cssVar('--text-1')), transparent: true, opacity: 0.95 }));
-			markLines.frustumCulled = false;
-			scene.add(markLines);
+		if (view.arrows && view.arrows.axes.length) {
+			// DOF arrows: solids that stay put while the model moves, each in its axis's color
+			dofArrows = arrowMesh(view.arrows);
+			scene.add(dofArrows);
 		}
+		orientation = triadScene();
 
 		if (view.bodies && view.bodies.triangles.length) {
 			// sensor bodies: solids in their own colors, each point moving with its node
@@ -996,8 +989,35 @@
 		dirty = true;
 	}
 
+	/** The orientation axes as solid arrows, drawn into the canvas where their letters sit. */
+	function drawTriad() {
+		if (!triad || !orientation || !renderer) return;
+		const canvas = renderer.domElement.getBoundingClientRect();
+		const box = triad.getBoundingClientRect();
+		if (!canvas.width || !canvas.height || !box.width) return;
+		// the canvas may be drawn at another size than it shows at
+		const size = renderer.getSize(new Vector2());
+		const sx = size.x / canvas.width;
+		const sy = size.y / canvas.height;
+		const x = (box.left - canvas.left) * sx;
+		const y = (canvas.bottom - box.bottom) * sy;
+		orientation.look(camera.quaternion);
+		const auto = renderer.autoClear;
+		renderer.autoClear = false;
+		renderer.setViewport(x, y, box.width * sx, box.height * sy);
+		renderer.setScissor(x, y, box.width * sx, box.height * sy);
+		renderer.setScissorTest(true);
+		renderer.clearDepth();
+		renderer.render(orientation.scene, orientation.camera);
+		renderer.setScissorTest(false);
+		renderer.setViewport(0, 0, size.x, size.y);
+		renderer.autoClear = auto;
+	}
+
 	const tmp = new Vector3();
 	const inv = new Quaternion();
+	/** How far along an axis its letter sits, in the picture's 48 units. */
+	const LETTER = (24 / TRIAD_HALF) * 1.2;
 	function updateTriad() {
 		if (!triad) return;
 		inv.copy(camera.quaternion).invert();
@@ -1008,14 +1028,9 @@
 		];
 		for (const [name, v] of axes) {
 			tmp.copy(v).applyQuaternion(inv);
-			const line = triad.querySelector<SVGLineElement>(`line.${name}`);
 			const label = triad.querySelector<SVGTextElement>(`text.${name}`);
-			const x = 24 + tmp.x * 15;
-			const y = 24 - tmp.y * 15;
-			line?.setAttribute('x2', x.toFixed(1));
-			line?.setAttribute('y2', y.toFixed(1));
-			label?.setAttribute('x', (24 + tmp.x * 21).toFixed(1));
-			label?.setAttribute('y', (24 - tmp.y * 21 + 3.5).toFixed(1));
+			label?.setAttribute('x', (24 + tmp.x * LETTER).toFixed(1));
+			label?.setAttribute('y', (24 - tmp.y * LETTER + 3).toFixed(1));
 		}
 	}
 
@@ -1088,6 +1103,7 @@
 		}
 		dirty = false;
 		renderer.render(scene, camera);
+		drawTriad();
 		updateTriad();
 		updateAxes();
 		frames++;
@@ -1223,10 +1239,11 @@
 	});
 
 	onDestroy(() => {
-		if (markLines) {
-			markLines.geometry.dispose();
-			(markLines.material as Material).dispose();
+		if (dofArrows) {
+			dofArrows.geometry.dispose();
+			(dofArrows.material as Material).dispose();
 		}
+		orientation?.dispose();
 		bodies?.geometry.dispose();
 		frameGroup?.traverse((o) => {
 			if (o instanceof Mesh || o instanceof LineSegments) {
@@ -1595,18 +1612,8 @@
 		{/if}
 
 		<div class="corner">
-			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
-				<!-- the gimbal's colors and arrowheads: X red, Y green, Z blue -->
-				<defs>
-					{#each ['x', 'y', 'z'] as axis, k (axis)}
-						<marker id="triad-{axis}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
-							<path d="M0,0 L10,5 L0,10 z" fill={AXIS_HEX[k]} />
-						</marker>
-					{/each}
-				</defs>
-				<line class="x" x1="24" y1="24" x2="39" y2="24" stroke={AXIS_HEX[0]} marker-end="url(#triad-x)" />
-				<line class="y" x1="24" y1="24" x2="24" y2="9" stroke={AXIS_HEX[1]} marker-end="url(#triad-y)" />
-				<line class="z" x1="24" y1="24" x2="30" y2="30" stroke={AXIS_HEX[2]} marker-end="url(#triad-z)" />
+			<svg class="triad" bind:this={triad} viewBox="0 0 48 48" width="72" height="72" aria-hidden="true" data-testid="shape3d-triad">
+				<!-- the letters only: the arrows are solids drawn into the canvas behind them (`drawTriad`), in the gimbal's colors: X red, Y green, Z blue -->
 				<text class="x" x="45" y="27" fill={AXIS_HEX[0]}>X</text>
 				<text class="y" x="24" y="6" fill={AXIS_HEX[1]}>Y</text>
 				<text class="z" x="33" y="36" fill={AXIS_HEX[2]}>Z</text>
@@ -1920,14 +1927,9 @@
 		margin-right: -6px;
 	}
 
-	.triad line {
-		stroke-width: 1.6;
-		stroke-linecap: round;
-	}
-
 	.triad text {
 		font-family: var(--font-mono);
-		font-size: 8.5px;
+		font-size: 6.5px;
 		font-weight: 600;
 		text-anchor: middle;
 	}

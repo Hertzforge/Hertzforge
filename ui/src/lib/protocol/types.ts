@@ -216,8 +216,12 @@ export interface Shape3DView {
 	home?: { eye: number[]; up: number[] };
 	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
 	cursor?: 'frequency';
-	/** Static line work over the model in its own coordinates: DOF arrows. */
-	marks?: { nodes: Float32Array; lines: Uint32Array };
+	/**
+	 * DOF arrows over the model in its own coordinates, solids that stay put: `tails` [A, 3] where
+	 * each starts, `directions` [A, 3] the unit vector it points along, `axes` [A] the DOF's own
+	 * axis (0 X, 1 Y, 2 Z), which picks its color, and the one `length`.
+	 */
+	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number };
 	/**
 	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
 	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
@@ -669,6 +673,8 @@ export interface Shown {
 		values_dofs: string[];
 		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */
 		arrows: boolean;
+		/** The channel choices whose arrows can be drawn alone (`all` first); empty with no table's arrows to draw. */
+		arrow_roles: string[];
 		sensors: boolean;
 		/** A lone channel table: its control loops, and the views the picked one holds. */
 		environments: string[];
@@ -692,6 +698,8 @@ export interface ShowPrefs {
 	values_form: 'shapes' | 'response' | 'reference';
 	/** DOF arrows and the channel table's sensors over every stage. */
 	arrows: boolean;
+	/** The channels of the table whose arrows are drawn: `all`, `control` or a role. */
+	arrow_role: string;
 	sensors: boolean;
 	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
 	environment: string | null;
