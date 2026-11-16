@@ -877,7 +877,8 @@
 			};
 			lineGeometry = linked(view.lines);
 			if (apart.length) {
-				outline = wideLines(apart, view.nodes, shapeAttr, shapeImagAttr, uniforms, { transparent: true, opacity: 0.9 });
+				// colored by deflection as the faces are, so a geometry of tracelines alone shows a mode's colors
+				outline = wideLines(apart, view.nodes, shapeAttr, shapeImagAttr, uniforms, { transparent: true, opacity: 0.9, scalar: uniforms });
 				materials.push(outline.material);
 				scene.add(outline);
 			}

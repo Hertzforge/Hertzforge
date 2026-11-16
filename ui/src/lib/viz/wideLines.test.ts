@@ -50,3 +50,36 @@ describe('tracelines and bar elements', () => {
 		expect(ends()).toEqual([3, 0, 2]);
 	});
 });
+
+describe('tracelines colored by deflection', () => {
+	// the material's own shaders, as three hands them to onBeforeCompile
+	const compiled = (scalar: boolean) => {
+		const shape = new BufferAttribute(new Float32Array(9), 3);
+		const shapeImag = new BufferAttribute(new Float32Array(9), 3);
+		const held = { uPeak: { value: 1 }, uMap: { value: null }, uScalar: { value: 1 } };
+		const lines = wideLines(index, nodes, shape, shapeImag, uniforms, scalar ? { scalar: held } : {});
+		const material = lines.material;
+		const shader = { uniforms: {} as Record<string, unknown>, vertexShader: material.vertexShader, fragmentShader: material.fragmentShader };
+		material.onBeforeCompile(shader as never, undefined as never);
+		return { shader, held, key: material.customProgramCacheKey() };
+	};
+
+	it('look each end\'s travel up in the colormap, as the faces do', () => {
+		const { shader, held, key } = compiled(true);
+		expect(shader.uniforms.uMap).toBe(held.uMap);
+		expect(shader.uniforms.uPeak).toBe(held.uPeak);
+		expect(shader.uniforms.uScalar).toBe(held.uScalar);
+		expect(shader.vertexShader).toContain('vTravel = length( position.y < 0.5 ? shapeStart * uRe + shapeImagStart * uIm : shapeEnd * uRe + shapeImagEnd * uIm ) / uPeak;');
+		expect(shader.fragmentShader).toContain('if (uScalar > 0.5) diffuseColor.rgb = texture2D(uMap, vec2(clamp(vTravel, 0.0, 1.0), 0.5)).rgb;');
+		// still moved with the shape
+		expect(shader.vertexShader).toContain('instanceStart + shapeStart * uRe + shapeImagStart * uIm');
+		expect(key).toBe('sds-wide-displaced-scalar');
+	});
+
+	it('keep their one color when not asked to', () => {
+		const { shader, key } = compiled(false);
+		expect(shader.vertexShader).not.toContain('vTravel');
+		expect(shader.fragmentShader).not.toContain('uMap');
+		expect(key).toBe('sds-wide-displaced');
+	});
+});
