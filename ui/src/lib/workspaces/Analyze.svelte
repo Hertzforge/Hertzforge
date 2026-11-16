@@ -615,6 +615,8 @@
 	/* the view fills what its pane leaves; a basis of auto keeps a pane with no set height at its content's */
 	.pbody {
 		display: grid;
+		/* no wider than the pane, so a wide table scrolls sideways inside it instead of being cut off */
+		grid-template-columns: minmax(0, 1fr);
 		flex: 1 1 auto;
 		min-height: 0;
 	}

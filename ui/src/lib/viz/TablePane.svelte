@@ -338,7 +338,7 @@
 		</button>
 	</header>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div class="scroll" class:long bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
+	<div class="scroll" class:long class:typed={!!view.edit} bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
 		aria-label={onedit && view.edit ? `${view.title}, editable` : undefined} onkeydown={gridKey} onpaste={paste} data-testid="table-grid">
 		<table>
 			<thead>
@@ -444,8 +444,11 @@
 		color: var(--text-1);
 	}
 
-	/* a long table's rows are one line each, so where a row is follows from its number */
-	.long td {
+	/* a long table's rows are one line each, so where a row is follows from its number; so are the
+	   rows of a table typed into (a channel table), which scrolls sideways instead of wrapping a
+	   description into a tall row */
+	.long td,
+	.typed td {
 		white-space: nowrap;
 	}
 
