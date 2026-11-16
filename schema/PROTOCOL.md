@@ -557,7 +557,8 @@ true.
 **Test Setups.** A test's setup is an object in the project, of kind `test_setup`
 (`docs/hforge-format.md`): `{"module","protocol","config","table","title","notes","origin"}`.
 `module` is the test it is for, by the name a run's manifest gives its test (`random`, `sine`,
-`mixed`, `classical_shock`, `srs`, `twr`, `explorer`, `recorder`, `mimo_random`, `mimo_shock`);
+`mixed`, `classical_shock`, `srs`, `twr`, `explorer`, `recorder`, `mimo_random`, `mimo_shock`,
+`playback`);
 `config` is exactly what that module's configure request carries (`random.configure`'s
 `config`, `mimo_random.setup`'s `setup`, ...); `table` is the channel table it was made with
 (`rows`, `revision`, `sha256`, each when known); `origin` is where it came from, by `kind`:

@@ -28,11 +28,11 @@ run bar, station panel and channel table with the other test types.
 
 ## Opening the Test
 
-In Acquire & Control, choose **Explorer** from the test types. The screen has two steps, **Setup**
-and **Run**. The run bar (where the data comes from, the run's state, the station time, the tone's
-frequency and drive, any sweep, who holds control, and Stop and Abort once a run is live) stays in
-view on both. The summary beside every setup section says what the setup holds, what the control
-service worked out from it, and what is still missing.
+In Acquire & Control, choose **Explorer** from the test types, under Specialized. The screen has
+two steps, **Setup** and **Run**. The run bar (where the data comes from, the run's state, the
+station time, the tone's frequency and drive, any sweep, who holds control, and Stop and Abort once
+a run is live) stays in view on both. The summary beside every setup section says what the setup
+holds, what the control service worked out from it, and what is still missing.
 
 **Proceed to Run** applies the setup (with any channel table edits first) and shows the run.
 **Start** opens the station and starts the tone at 0 V, in one step.

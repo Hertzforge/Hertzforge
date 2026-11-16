@@ -19,9 +19,9 @@
 import type { ChannelRow } from '$lib/protocol/types';
 
 /** The test modules, by the name a run's manifest gives its test. */
-export type SetupModule = 'random' | 'sine' | 'mixed' | 'classical_shock' | 'srs' | 'twr' | 'explorer' | 'recorder' | 'mimo_random' | 'mimo_shock';
+export type SetupModule = 'random' | 'sine' | 'mixed' | 'classical_shock' | 'srs' | 'twr' | 'explorer' | 'recorder' | 'mimo_random' | 'mimo_shock' | 'playback';
 
-export const SETUP_MODULES: readonly SetupModule[] = ['random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer', 'recorder', 'mimo_random', 'mimo_shock'];
+export const SETUP_MODULES: readonly SetupModule[] = ['random', 'sine', 'mixed', 'classical_shock', 'srs', 'twr', 'explorer', 'recorder', 'mimo_random', 'mimo_shock', 'playback'];
 
 /** Each module's name on its screen. */
 export const MODULE_TITLES: Record<SetupModule, string> = {
@@ -34,7 +34,8 @@ export const MODULE_TITLES: Record<SetupModule, string> = {
 	explorer: 'Explorer',
 	recorder: 'Recorder',
 	mimo_random: 'MIMO Random',
-	mimo_shock: 'MIMO Shock'
+	mimo_shock: 'MIMO Shock',
+	playback: 'Playback'
 };
 
 /**

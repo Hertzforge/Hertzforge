@@ -19,6 +19,7 @@
 	import ExplorerScreen from '$lib/acquire/explorer/ExplorerScreen.svelte';
 	import { EXPLORER_STATE_WORDS } from '$lib/acquire/explorer/explorerWords';
 	import RecorderScreen from '$lib/acquire/recorder/RecorderScreen.svelte';
+	import PlaybackScreen from '$lib/acquire/playback/PlaybackScreen.svelte';
 	import { RECORDER_STATE_WORDS } from '$lib/acquire/recorder/recorderWords';
 	import TestTypeChooser from '$lib/acquire/TestTypeChooser.svelte';
 	import { STATE_WORDS } from '$lib/acquire/words';
@@ -76,6 +77,8 @@
 	<ExplorerScreen {app} />
 {:else if tests.screen === 'recorder'}
 	<RecorderScreen {app} />
+{:else if tests.screen === 'playback'}
+	<PlaybackScreen {app} />
 {:else}
 	<TestTypeChooser {tests} {liveWord} />
 {/if}
