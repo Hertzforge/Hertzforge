@@ -70,6 +70,9 @@ MODAL_NOISE = 1e-5
 #: and nothing driven above the burst's 4000 Hz
 FIT_BAND = (300.0, 3990.0)
 FIT_LIMIT = 10
+#: refined twice after the confirms: the poles of modes whose bands overlap are
+#: searched together, and once left the 1125 Hz mode's damping an eighth low
+FIT_REFINE = 2
 
 
 def _model(title: str, build: Callable[[], Any]) -> Any:
@@ -223,7 +226,8 @@ def rc_plate_modal_test() -> Any:
     out scaled to unit modal mass: Generate Signal (burst random at the drives),
     Compute Modal Responses and Expand through the modes at the test DOFs,
     white noise on every accelerometer (`MODAL_NOISE`), then H1 FRFs, multiple
-    coherence, the automatic fit, and the fit against the FE modes."""
+    coherence, the automatic fit with its poles refined, and the fit against the
+    FE modes."""
     import numpy as np
 
     from hertzforge.core.averaging import Averaging
@@ -255,7 +259,8 @@ def rc_plate_modal_test() -> Any:
     measured.ordinate = np.asarray(measured.ordinate, dtype=np.float32).astype(np.float64)
     frfs = project.compute_frfs(history, 'H1')
     project.compute_multiple_coherence(history)
-    modes = project.fit_modes(frfs, bounds=FIT_BAND, limit=FIT_LIMIT, name='Modal Test Modes')
+    modes = project.fit_modes(frfs, bounds=FIT_BAND, limit=FIT_LIMIT, refine=FIT_REFINE,
+                              name='Modal Test Modes')
     project.comparison_mac(shapes, modes)
     return project
 
