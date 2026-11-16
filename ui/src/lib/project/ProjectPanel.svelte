@@ -41,6 +41,13 @@
 		pressed = null;
 		holding = false;
 	}
+
+	/** Delete on the project row takes the project out of the tree: a new, empty one in its place, after asking when this one has unsaved changes. */
+	function projectKey(e: KeyboardEvent) {
+		if ((e.key !== 'Delete' && e.key !== 'Backspace') || p.busy !== null) return;
+		e.preventDefault();
+		void p.newProject();
+	}
 </script>
 
 <section class="project" aria-labelledby="project-title" data-testid="project-panel">
@@ -69,7 +76,7 @@
 
 	{#if p.summary}
 		<!-- the project itself, picked: nothing in the tree, and the action table offers the project's acts (Save, Open, Import) -->
-		<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Drag it to a folder to save a copy there.' : 'The project: Save, Open, Import and the acts that take no object'} onclick={() => p.clearSelection()} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
+		<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Delete starts a new, empty project.'} onclick={() => p.clearSelection()} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
 			<span class="ctitle">
 				{p.summary.title}
 				{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
