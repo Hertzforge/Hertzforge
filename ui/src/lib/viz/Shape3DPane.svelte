@@ -696,6 +696,9 @@
 		// beside a second set of places, the ones a click picks wear the accent
 		if (dots) (dots.material as PointsMaterial).color = new Color(cssVar(view.pick?.others ? '--accent' : '--text-2'));
 		if (leftOut) (leftOut.material as PointsMaterial).color = new Color(cssVar('--text-2'));
+		// the colormap starts further in on the dark theme: the shader's copy is made again
+		uniforms.uMap.value.dispose();
+		uniforms.uMap.value = colormapTexture();
 		dirty = true;
 	}
 
