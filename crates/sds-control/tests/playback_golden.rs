@@ -8,7 +8,9 @@ use hertzforge_playback::plan::{refusals, DriveRow, StationOffer};
 use hertzforge_playback::{check_file, DriveFile};
 use sds_control::codec;
 use sds_control::playback::config;
-use sds_control::playback::run::{self, Display, PlaybackHealth, PlaybackView, RecordRef, Row, State};
+use sds_control::playback::run::{
+    self, Display, PlaybackHealth, PlaybackView, RecordRef, Row, State,
+};
 use sds_control::protocol;
 use serde_json::Value;
 use std::collections::VecDeque;

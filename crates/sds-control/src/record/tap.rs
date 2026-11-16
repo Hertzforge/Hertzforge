@@ -302,8 +302,10 @@ impl Backend for Recording {
     fn write_drive(&mut self, drive: &[f32]) -> Result<usize, HalError> {
         let n = self.inner.write_drive(drive)?;
         let keep = match &self.drive_until {
-            Some(until) => (until.load(Ordering::Acquire).saturating_sub(self.drive_frames))
-                .min(n as u64) as usize,
+            Some(until) => (until
+                .load(Ordering::Acquire)
+                .saturating_sub(self.drive_frames))
+            .min(n as u64) as usize,
             None => n,
         };
         self.drives.push(drive, keep);

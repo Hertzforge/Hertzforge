@@ -187,7 +187,10 @@ async fn playback_runs_end_to_end_on_one_two_and_four_drives() {
         let h = &end["health"];
         assert!(h["engine_ticks"].as_u64().unwrap() > 0, "{h}");
         assert!(h["worst_tick_ms"].as_f64().unwrap() <= h["budget_ms"].as_f64().unwrap());
-        assert_eq!((h["health_faults"].as_u64(), h["ring_overruns"].as_u64()), (Some(0), Some(0)));
+        assert_eq!(
+            (h["health_faults"].as_u64(), h["ring_overruns"].as_u64()),
+            (Some(0), Some(0))
+        );
         let rec = PathBuf::from(end["record"]["folder"].as_str().unwrap());
         record_done(&mut c, &rec).await;
         let run = read(&rec.join("run.json"));
@@ -547,7 +550,11 @@ async fn a_stop_ramps_and_an_abort_zeroes() {
         let played = f32s(&rec.join("streams/drives/telemetry.f32"));
         if !abort {
             let ramp = played.iter().rposition(|x| *x != 0.0).unwrap();
-            assert!(played.len() - 1 - ramp >= 64, "{} zeros", played.len() - 1 - ramp);
+            assert!(
+                played.len() - 1 - ramp >= 64,
+                "{} zeros",
+                played.len() - 1 - ramp
+            );
             assert!(played[ramp].abs() > 0.0 && played[ramp].abs() < 0.02 * 0.5);
             let ins = f32s(&rec.join("streams/inputs/telemetry.f32"));
             assert!(ins.len() >= played.len(), "{} {}", ins.len(), played.len());

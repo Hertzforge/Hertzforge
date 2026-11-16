@@ -41,7 +41,8 @@ def _source_csv(tmp_path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     path = tmp_path / 'drive.csv'
-    path.write_text(module.source_text(), encoding='utf-8')
+    # bytes, not text: text mode on Windows writes CRLF, and the golden pins the file's SHA-256
+    path.write_bytes(module.source_text().encode('utf-8'))
     return path
 
 

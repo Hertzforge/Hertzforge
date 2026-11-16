@@ -309,8 +309,8 @@ fn the_golden_folder_fix_ends_wrote_passes_the_check() {
     // whose ends are not at rest (`python schema/make_golden_drive.py`). What the
     // converter writes, this service passes, and its ends are at rest far inside the
     // allowance.
-    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../schema/golden/drive/fixed");
+    let folder =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/golden/drive/fixed");
     let file = DriveFile::open(&folder).unwrap();
     let check = check_file(&file, None).unwrap();
     assert_eq!(check.channels.len(), 2);
@@ -319,7 +319,10 @@ fn the_golden_folder_fix_ends_wrote_passes_the_check() {
         assert!(c.pass(), "{}", c.words());
         assert_eq!((c.start_v, c.end_v), (0.0, 0.0));
         assert!(c.velocity_end.abs() <= 1e-6 * c.velocity_peak, "{c:?}");
-        assert!(c.displacement_end.abs() <= 1e-6 * c.displacement_peak, "{c:?}");
+        assert!(
+            c.displacement_end.abs() <= 1e-6 * c.displacement_peak,
+            "{c:?}"
+        );
     }
 }
 

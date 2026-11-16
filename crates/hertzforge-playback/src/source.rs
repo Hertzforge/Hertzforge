@@ -212,8 +212,8 @@ fn read_all<R: Read>(
         for f in piece.chunks_exact(width * sample) {
             for (k, b) in f.chunks_exact(sample).enumerate() {
                 // The drive path is f32: the one rounding, at the source's output.
-                frame[k] = f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
-                    as f32;
+                frame[k] =
+                    f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f32;
             }
             // Room for one more frame: what was pushed less what the loop took.
             while at - s.popped.load(Ordering::Acquire) >= capacity {
