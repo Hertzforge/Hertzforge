@@ -242,6 +242,8 @@ class AnalyzeState {
 			this.pair = null;
 			this.picks = [];
 			this.shapeView = null;
+			// each selection opens as it is: Projection is asked for again, not carried over
+			if (this.prefs.projection) this.prefs = { ...this.prefs, projection: false };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -1517,7 +1519,8 @@ function readPrefs(): ShowPrefs {
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
-		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
+		// Projection is not kept: left on, two sets on two geometries open drawn on one of them
+		for (const key of ['bars', 'overlay', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
