@@ -229,9 +229,12 @@
         "node_ids": {"$ref": "#/$defs/arrayRef"},
         "home": {"type": "object", "required": ["eye", "up"], "properties": {"eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "up": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}}},
         "cursor": {"const": "frequency"},
-        "marks": {
-          "type": "object", "required": ["nodes", "lines"],
-          "properties": {"nodes": {"$ref": "#/$defs/arrayRef"}, "lines": {"$ref": "#/$defs/arrayRef"}}
+        "arrows": {
+          "type": "object", "required": ["tails", "directions", "axes", "length"],
+          "properties": {
+            "tails": {"$ref": "#/$defs/arrayRef"}, "directions": {"$ref": "#/$defs/arrayRef"},
+            "axes": {"$ref": "#/$defs/arrayRef"}, "length": {"type": "number", "minimum": 0}
+          }
         },
         "bodies": {
           "type": "object", "required": ["nodes", "triangles", "colors", "follow"],
@@ -592,12 +595,13 @@
         "views": {"$ref": "#/$defs/views"},
         "note": {"type": "string"},
         "offers": {
-          "type": "object", "required": ["flat", "complex", "projection", "shapes", "values_dofs", "arrows", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
+          "type": "object", "required": ["flat", "complex", "projection", "shapes", "values_dofs", "arrows", "arrow_roles", "sensors", "environments", "table_views", "tones", "sine_readings"], "additionalProperties": false,
           "properties": {"flat": {"type": "boolean"}, "complex": {"type": "boolean"},
           "projection": {"type": "boolean"},
           "shapes": {"type": "boolean"},
           "values_dofs": {"type": "array", "items": {"type": "string"}},
           "arrows": {"type": "boolean"},
+          "arrow_roles": {"type": "array", "items": {"type": "string"}},
           "sensors": {"type": "boolean"},
           "environments": {"type": "array", "items": {"type": "string"}},
           "table_views": {"type": "array", "items": {"enum": ["channels", "response", "reference"]}},

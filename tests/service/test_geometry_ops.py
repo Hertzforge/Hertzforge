@@ -222,14 +222,13 @@ def test_dof_arrows_mark_a_tables_references_pointing_in(project, validate):
     assert [row['DOF'] for row in cells(table)] == ['101Z+', '110Z+', '1304Z+', '1310Z+']
     assert all(row['Arrow'].startswith('in') for row in cells(table))
     geometry = project['Geometry']
-    from hertzforge.service.mesh import drawn_mesh
-
-    edges = len(drawn_mesh(geometry)[2])
-    # a shaft and two barbs each, the shaft ending on the node, after the elements' edges
-    assert len(view['nodes']) == geometry.num_nodes + 4 * 4
-    assert len(view['lines']) == edges + 12
-    tip = view['nodes'][geometry.num_nodes + 1]
-    assert tip == pytest.approx(geometry.node_xyz[0])
+    # the model's own nodes and lines, and a solid arrow per DOF ending on its node
+    assert len(view['nodes']) == geometry.num_nodes
+    drawn = view['arrows']
+    assert drawn['tails'].shape == (4, 3) and drawn['directions'].dtype == np.float32
+    assert drawn['axes'].tolist() == [2, 2, 2, 2], 'each colored by its own axis'
+    tip = drawn['tails'][0] + drawn['length'] * drawn['directions'][0]
+    assert tip == pytest.approx(geometry.node_xyz[0], abs=1e-6)
     _view, table = run(project, 'project.dof_arrows', source='Time History',
                        measured='acceleration')
     assert len(table['rows']) == 8

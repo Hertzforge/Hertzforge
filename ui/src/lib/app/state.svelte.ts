@@ -263,6 +263,7 @@ class AnalyzeState {
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
 						arrows: this.prefs.arrows,
+						arrow_role: this.prefs.arrow_role,
 						sensors: this.prefs.sensors,
 						environment: this.prefs.environment,
 						table_view: this.prefs.table_view,
@@ -1371,6 +1372,7 @@ function readPrefs(): ShowPrefs {
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
+		arrow_role: 'all',
 		sensors: true,
 		environment: null,
 		table_view: 'channels',
@@ -1384,6 +1386,7 @@ function readPrefs(): ShowPrefs {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;
+		if (kept.arrow_role && ['all', 'control', 'reference', 'response', 'monitor'].includes(kept.arrow_role)) prefs.arrow_role = kept.arrow_role;
 		if (kept.component && ['magnitude', 'real', 'imag', 'phase'].includes(kept.component)) prefs.component = kept.component;
 	} catch {
 		// nothing kept, or no storage
