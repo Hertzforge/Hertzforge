@@ -20,7 +20,7 @@
      "source": "column:3"
     }
    ],
-   "sha256": "d60a66177a8b5c03e0603f4cfade80c0a80866e31d2540352840dc09d74c35cd",
+   "sha256": "b5cea183468e5b7fa1b59683ef00f773a0f45847f7ef2350aa3aa5c0df84d210",
    "source": {
     "path": "/Users/someone/tests/bracket/drive.csv",
     "sha256": "08877c766433531155806dc91f8f69e27cb49110d6a8f0950b0b331601011594",
@@ -41,7 +41,7 @@
      "kind": "fix_ends",
      "from": {
       "folder": "/Users/someone/Hertzforge_Data/drives/drive",
-      "sha256": "1619d91c144e2974932b0b6ba6ed43da0e8a68ce03bee6c67b625aad653750fa"
+      "sha256": "2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540"
      },
      "taper_s": 0.01,
      "taper_samples": 10,
@@ -49,15 +49,15 @@
      "channels": [
       {
        "name": "Drive 1",
-       "a": -1.21115e-05,
-       "b": 6.23811e-19,
+       "a": -1.21109e-05,
+       "b": 5.18104e-18,
        "rms_before": 0.216236,
        "rms_after": 0.216236
       },
       {
        "name": "Drive 2",
-       "a": 6.41709e-07,
-       "b": -3.52732e-18,
+       "a": 6.42086e-07,
+       "b": -6.40497e-18,
        "rms_before": 0.108118,
        "rms_after": 0.108118
       }
@@ -69,15 +69,15 @@
   },
   "from": {
    "folder": "/Users/someone/Hertzforge_Data/drives/drive",
-   "sha256": "1619d91c144e2974932b0b6ba6ed43da0e8a68ce03bee6c67b625aad653750fa"
+   "sha256": "2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540"
   },
   "taper_s": 0.01,
   "taper_samples": 10,
   "channels": [
    {
     "name": "Drive 1",
-    "a": -1.21115e-05,
-    "b": 6.23811e-19,
+    "a": -1.21109e-05,
+    "b": 5.18104e-18,
     "rms_before": 0.216236,
     "rms_after": 0.216236,
     "before": {
@@ -93,16 +93,16 @@
      "start": 0.0,
      "end": 0.0,
      "peak": 0.500012,
-     "velocity_end": 9.77829e-15,
+     "velocity_end": -5.75779e-19,
      "velocity_peak": 0.00395884,
-     "displacement_end": 1.95565e-15,
+     "displacement_end": -2.43797e-19,
      "displacement_peak": 3.3292e-05
     }
    },
    {
     "name": "Drive 2",
-    "a": 6.41709e-07,
-    "b": -3.52732e-18,
+    "a": 6.42086e-07,
+    "b": -6.40497e-18,
     "rms_before": 0.108118,
     "rms_after": 0.108118,
     "before": {
@@ -118,9 +118,9 @@
      "start": 0.0,
      "end": 0.0,
      "peak": 0.249999,
-     "velocity_end": 4.32236e-12,
+     "velocity_end": 2.55435e-19,
      "velocity_peak": 0.000788993,
-     "displacement_end": 8.64471e-13,
+     "displacement_end": 6.23621e-20,
      "displacement_peak": 2.5015e-06
     }
    }

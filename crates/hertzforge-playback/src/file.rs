@@ -1,8 +1,11 @@
 //! The native drive file (`docs/drive-file.md`): a folder holding `drive.bin` and its
 //! sidecar `drive.json`.
 //!
-//! `drive.bin` is the 8-byte magic [`MAGIC`], then little-endian `f32` samples
-//! interleaved by sample, `samples x channels`, in volts at the drive output.
+//! `drive.bin` is the 8-byte magic [`MAGIC`], then little-endian `f64` samples
+//! interleaved by sample, `samples x channels`, in volts at the drive output. The
+//! samples are stored in `f64` so the check integrates the values the converter
+//! wrote: `f32` rounding, integrated twice over a long record, can be as large as a
+//! high tone's whole displacement.
 //! `drive.json` says what the samples are: `format` (`hertzforge-drive`), `version`
 //! (1), `rate_hz`, `samples`, `channels` (each `name`, `unit` `V` and its `source`
 //! signal), the `sha256` of `drive.bin`, the `source` it was converted from, the
@@ -27,6 +30,8 @@ pub const FORMAT: &str = "hertzforge-drive";
 pub const VERSION: u64 = 1;
 /// The bytes before the first sample.
 pub const HEADER_BYTES: u64 = 8;
+/// The bytes of one sample: a little-endian `f64`.
+pub const SAMPLE_BYTES: u64 = 8;
 /// The samples file and the sidecar, inside the folder.
 pub const BIN_NAME: &str = "drive.bin";
 pub const JSON_NAME: &str = "drive.json";
@@ -204,7 +209,7 @@ impl DriveFile {
 
     /// The bytes `drive.bin` must hold: the magic and every sample.
     pub fn expected_bytes(&self) -> u64 {
-        HEADER_BYTES + 4 * self.channels.len() as u64 * self.samples
+        HEADER_BYTES + SAMPLE_BYTES * self.channels.len() as u64 * self.samples
     }
 
     /// The record's length, seconds.
@@ -224,7 +229,7 @@ impl DriveFile {
                 "drive_size",
                 format!(
                     "drive.bin holds {size} bytes; its sidecar's {} samples of {} channels need \
-                     {want} (8 of header, then 4 per sample).",
+                     {want} (8 of header, then 8 per sample).",
                     self.samples,
                     self.channels.len()
                 ),
@@ -284,12 +289,12 @@ pub fn write_folder(
     folder: &Path,
     rate_hz: f64,
     channels: &[&str],
-    samples: &[f32],
+    samples: &[f64],
     extra: serde_json::Map<String, Value>,
 ) -> io::Result<String> {
     std::fs::create_dir_all(folder)?;
     let width = channels.len().max(1);
-    let mut bytes = Vec::with_capacity(8 + samples.len() * 4);
+    let mut bytes = Vec::with_capacity(8 + samples.len() * 8);
     bytes.extend_from_slice(MAGIC);
     for s in samples {
         bytes.extend_from_slice(&s.to_le_bytes());

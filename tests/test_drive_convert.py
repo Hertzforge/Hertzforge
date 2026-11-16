@@ -17,6 +17,7 @@ from hertzforge.io import drive_convert as dc
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / 'schema' / 'golden' / 'drive' / 'basic'
+GOLDEN_FIXED = ROOT / 'schema' / 'golden' / 'drive' / 'fixed'
 N = 400
 RATE = 1000.0
 
@@ -28,8 +29,8 @@ def _data_root(tmp_path, monkeypatch):
 
 
 def _values(n: int = N, channels: int = 2) -> np.ndarray:
-    """`(n, channels)` values a float32, a decimal text and a double all
-    hold exactly: multiples of 1/4096."""
+    """`(n, channels)` values a decimal text and a double both hold
+    exactly: multiples of 1/4096."""
     t = np.arange(n) / RATE
     out = np.stack([np.sin(2 * np.pi * (11 + 7 * c) * t) * (0.9 - 0.3 * c)
                     for c in range(channels)], axis=1)
@@ -53,7 +54,7 @@ def _round_trip(source, selections, expected, *, rate=RATE, **kwargs):
     back = dc.read(done.folder)
     assert back.rate_hz == rate
     assert back.values.shape == expected.shape
-    np.testing.assert_array_equal(back.values, expected.astype(np.float32))
+    np.testing.assert_array_equal(back.values, expected)
     assert done.sidecar['sha256'] == hashlib.sha256(
         (pathlib.Path(done.folder) / 'drive.bin').read_bytes()).hexdigest()
     assert [c['unit'] for c in done.sidecar['channels']] == ['V'] * expected.shape[1]
@@ -76,7 +77,7 @@ def test_csv_with_a_time_column_and_volts_and_millivolts(tmp_path):
     done = dc.convert(path, ['column:3', 'column:2'])
     back = dc.read(done.folder)
     assert back.rate_hz == RATE and back.names == ['Drive B', 'Drive A']
-    np.testing.assert_array_equal(back.values[:, 1], values[:, 0].astype(np.float32))
+    np.testing.assert_array_equal(back.values[:, 1], values[:, 0])
     np.testing.assert_allclose(back.values[:, 0], values[:, 1], rtol=1e-6, atol=1e-9)
     side = done.sidecar
     assert side['format'] == 'hertzforge-drive' and side['version'] == 1
@@ -154,7 +155,7 @@ def test_hdf5_dataset_columns_units_and_rate(tmp_path):
     done = dc.convert(tmp_path / 'drive.h5', [s.key for s in found])
     back = dc.read(done.folder)
     np.testing.assert_allclose(back.values, values, rtol=1e-6, atol=1e-9)
-    np.testing.assert_array_equal(back.values[:, 0], values[:, 0].astype(np.float32))
+    np.testing.assert_array_equal(back.values[:, 0], values[:, 0])
 
 
 def _history(values, units='V'):
@@ -376,7 +377,7 @@ def test_fix_ends_puts_the_ends_at_rest_in_a_new_folder(tmp_path):
         v, d = dc._integrals(x, dt)
         assert abs(v[-1]) < 1e-6 * np.max(np.abs(v))
         assert abs(d[-1]) < 1e-6 * np.max(np.abs(d))
-        raw = dc._ends(values[:, c].astype(np.float32).astype(np.float64), dt)
+        raw = dc._ends(values[:, c], dt)
         assert abs(raw['velocity_end']) > 1e-2 * raw['velocity_peak']
     # 1 % of a 4 s record is 40 ms, 40 samples
     assert done['taper_samples'] == 40 and done['taper_s'] == 0.04
@@ -392,6 +393,24 @@ def test_fix_ends_puts_the_ends_at_rest_in_a_new_folder(tmp_path):
     assert summary['before']['start'] != 0
     with pytest.raises(ValueError, match='never written over'):
         dc.fix_ends(folder, out=done['folder'])
+
+
+def test_fix_ends_leaves_a_long_tone_at_rest_as_stored(tmp_path):
+    # 20 s of a 710 Hz tone at 12 800 Hz: its displacement drifts as made. What
+    # fix_ends writes, read back and integrated as the control service does, ends
+    # at rest to far inside the service's 1 %.
+    rate = 12_800.0
+    t = np.arange(int(20 * rate)) / rate
+    values = 0.5 * np.sin(2 * np.pi * 710.0 * t)[:, None]
+    folder = dc.write(values, rate, ['Tone'], source={'path': None, 'sha256': None,
+                                                      'format': 'test', 'selections': []})
+    raw = dc._ends(values[:, 0], 1.0 / rate)
+    assert abs(raw['displacement_end']) > 1e-2 * raw['displacement_peak']
+    done = dc.fix_ends(folder)
+    stored = dc.read(done['folder']).values[:, 0].astype(np.float64)
+    v, d = dc._integrals(stored, 1.0 / rate)
+    assert abs(v[-1]) <= 1e-6 * np.max(np.abs(v))
+    assert abs(d[-1]) <= 1e-6 * np.max(np.abs(d))
 
 
 def test_fix_ends_bounds_its_taper_and_leaves_a_zero_channel(tmp_path):
@@ -430,21 +449,21 @@ def test_the_golden_drive_folder_holds_its_known_values():
     side = json.loads((GOLDEN / 'drive.json').read_text(encoding='utf-8'))
     data = (GOLDEN / 'drive.bin').read_bytes()
     samples, width = side['samples'], len(side['channels'])
-    # the layout, read without the reader
+    # the layout, read without the reader: little-endian float64
     assert data[:8] == b'HFDRV01\x00'
-    assert len(data) == 8 + 4 * samples * width
+    assert len(data) == 8 + 8 * samples * width
     assert hashlib.sha256(data).hexdigest() == side['sha256']
-    values = np.array(struct.unpack(f'<{samples * width}f', data[8:])).reshape(samples, width)
+    values = np.array(struct.unpack(f'<{samples * width}d', data[8:])).reshape(samples, width)
     expected = _make_golden().known_values()
-    np.testing.assert_array_equal(values, expected.astype(np.float32))
+    np.testing.assert_array_equal(values, expected)
     back = dc.read(GOLDEN)
-    np.testing.assert_array_equal(back.values, values.astype(np.float32))
+    np.testing.assert_array_equal(back.values, values)
     assert (back.rate_hz, back.names) == (1000.0, ['Drive 1', 'Drive 2'])
     # it starts and ends at rest, so it passes the control service's check
     for c in range(width):
         ends = dc._ends(values[:, c], 1.0 / back.rate_hz)
         assert ends['start'] == 0.0 and ends['end'] == 0.0
-        # within float32 rounding: far inside the control service's 1 %
+        # within the values' float32 rounding: far inside the service's 1 %
         assert abs(ends['velocity_end']) < 1e-5 * ends['velocity_peak']
         assert abs(ends['displacement_end']) < 1e-5 * ends['displacement_peak']
 
@@ -455,3 +474,51 @@ def test_the_script_writes_the_golden_drive_folder_as_committed(tmp_path):
     assert sorted(p.name for p in out.iterdir()) == sorted(p.name for p in GOLDEN.iterdir())
     for name in ('drive.bin', 'drive.json'):
         assert (out / name).read_bytes() == (GOLDEN / name).read_bytes(), name
+
+
+def test_the_fixed_golden_folder_round_trips():
+    # written by fix_ends from a drive whose ends are not at rest; the control
+    # service's tests check that it passes the service's check
+    side = json.loads((GOLDEN_FIXED / 'drive.json').read_text(encoding='utf-8'))
+    data = (GOLDEN_FIXED / 'drive.bin').read_bytes()
+    samples, width = side['samples'], len(side['channels'])
+    assert len(data) == 8 + 8 * samples * width
+    values = np.array(struct.unpack(f'<{samples * width}d', data[8:])).reshape(samples, width)
+    back = dc.read(GOLDEN_FIXED)
+    np.testing.assert_array_equal(back.values, values)
+    assert side['fixes'][-1]['kind'] == 'fix_ends'
+    made = _make_golden()
+    rate = back.rate_hz
+    for c in range(width):
+        before = dc._ends(made.ends_values()[:, c], 1.0 / rate)
+        assert abs(before['start']) > 0.005 * before['peak']
+        after = dc._ends(values[:, c], 1.0 / rate)
+        assert after['start'] == 0.0 and after['end'] == 0.0
+        assert abs(after['velocity_end']) <= 1e-6 * after['velocity_peak']
+        assert abs(after['displacement_end']) <= 1e-6 * after['displacement_peak']
+    # written again from what was read, the samples are the same bytes
+    again = dc.write(back.values, rate, back.names, source=side['source'],
+                     fixes=side['fixes'], channel_sources=[c['source'] for c in side['channels']],
+                     created_utc=side['created_utc'], tool=side['tool'])
+    assert (pathlib.Path(again) / 'drive.bin').read_bytes() == data
+    assert json.loads((pathlib.Path(again) / 'drive.json').read_text(encoding='utf-8')) == side
+
+
+def test_the_script_writes_the_fixed_golden_folder(tmp_path):
+    out = tmp_path / 'fixed'
+    _make_golden().fixed(out)
+    side = json.loads((GOLDEN_FIXED / 'drive.json').read_text(encoding='utf-8'))
+    made = json.loads((out / 'drive.json').read_text(encoding='utf-8'))
+    # the correction is solved in float64 arithmetic, which may differ in its last
+    # place between platforms; on this one it is the committed folder exactly
+    for key in ('format', 'version', 'rate_hz', 'samples', 'channels', 'source', 'tool',
+                'created_utc'):
+        assert made[key] == side[key], key
+    ours, theirs = made['fixes'][-1], side['fixes'][-1]
+    assert ours['from'] == theirs['from']
+    assert (ours['taper_s'], ours['taper_samples']) == (theirs['taper_s'], theirs['taper_samples'])
+    for a, b in zip(ours['channels'], theirs['channels'], strict=True):
+        for key in ('a', 'b', 'rms_before', 'rms_after'):
+            assert a[key] == pytest.approx(b[key], rel=1e-9, abs=1e-15)
+    np.testing.assert_allclose(dc.read(out).values, dc.read(GOLDEN_FIXED).values,
+                               rtol=0, atol=1e-12)

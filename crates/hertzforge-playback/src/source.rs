@@ -1,6 +1,9 @@
 //! The streaming source: a reader thread fills a bounded ring from `drive.bin`, and the
 //! loop thread pops it without waiting.
 //!
+//! The file holds `f64` samples; the drive path is `f32`, so the reader rounds each
+//! sample to `f32` as it pushes it, and nothing before that point rounds.
+//!
 //! The ring is the engine's lock-free single-producer, single-consumer ring
 //! ([`hertzforge_engine::ring`]), made before the run and never grown. The reader
 //! thread is the only one that touches the file. It pushes a frame only when the ring
@@ -100,7 +103,7 @@ impl RingReader {
 
 impl DriveSource {
     /// Start the reader on `reader` (positioned at the first sample): `samples` frames of
-    /// `channels` little-endian `f32`s, into a ring of `capacity_frames`.
+    /// `channels` little-endian `f64`s, into a ring of `capacity_frames` (as `f32`).
     pub fn spawn<R: Read + Send + 'static>(
         reader: R,
         channels: usize,
@@ -192,12 +195,13 @@ fn read_all<R: Read>(
     s: &SourceShared,
 ) -> Result<(), String> {
     let width = channels.max(1);
-    let mut bytes = vec![0u8; READ_FRAMES * width * 4];
+    let sample = crate::file::SAMPLE_BYTES as usize;
+    let mut bytes = vec![0u8; READ_FRAMES * width * sample];
     let mut frame = vec![0f32; width];
     let mut at: u64 = 0;
     while at < samples {
         let n = ((samples - at) as usize).min(READ_FRAMES);
-        let piece = &mut bytes[..n * width * 4];
+        let piece = &mut bytes[..n * width * sample];
         if let Err(e) = reader.read_exact(piece) {
             return Err(if e.kind() == std::io::ErrorKind::UnexpectedEof {
                 format!("drive.bin ended before sample {samples}, near sample {at}")
@@ -205,9 +209,11 @@ fn read_all<R: Read>(
                 format!("drive.bin could not be read near sample {at}: {e}")
             });
         }
-        for f in piece.chunks_exact(width * 4) {
-            for (k, b) in f.chunks_exact(4).enumerate() {
-                frame[k] = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        for f in piece.chunks_exact(width * sample) {
+            for (k, b) in f.chunks_exact(sample).enumerate() {
+                // The drive path is f32: the one rounding, at the source's output.
+                frame[k] = f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+                    as f32;
             }
             // Room for one more frame: what was pushed less what the loop took.
             while at - s.popped.load(Ordering::Acquire) >= capacity {

@@ -58,7 +58,7 @@ fn running_view() -> PlaybackView {
         station_class: "sim",
         fs_hz: 2048.0,
         samples: 1024,
-        sha256: "c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954".into(),
+        sha256: "f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02".into(),
         level_db: -6.0,
         ceiling_v: 1.0,
         pre_roll_frames: 256,
@@ -152,15 +152,15 @@ fn a_peak_over_the_ceiling_is_refused_as_the_golden_error() {
     let folder = dir.join("drive");
     // a short burst, 2 V at its peak
     let n = 512usize;
-    let s: Vec<f32> = (0..n)
+    let s: Vec<f64> = (0..n)
         .map(|k| {
             let t = k as f64 / n as f64;
             let h = (std::f64::consts::PI * t).sin().powi(2);
-            (2.0 * h * (2.0 * std::f64::consts::PI * 8.0 * t).sin()) as f32
+            2.0 * h * (2.0 * std::f64::consts::PI * 8.0 * t).sin()
         })
         .collect();
-    let peak = s.iter().fold(0f32, |m, x| m.max(x.abs()));
-    let s: Vec<f32> = s.iter().map(|x| x * 2.0 / peak).collect();
+    let peak = s.iter().fold(0f64, |m, x| m.max(x.abs()));
+    let s: Vec<f64> = s.iter().map(|x| x * 2.0 / peak).collect();
     write_folder(&folder, 2048.0, &["drive"], &s, serde_json::Map::new()).unwrap();
     let file = DriveFile::open(&folder).unwrap();
     let check = check_file(&file, None).unwrap();

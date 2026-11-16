@@ -5923,7 +5923,7 @@ MSHOCK_TEXT_GOLDENS = {
 # its ends fixed into a new folder, and a refusal by name
 _DRIVE_CSV = '/Users/someone/tests/bracket/drive.csv'
 _DRIVE_FOLDER = '/Users/someone/Hertzforge_Data/drives/drive'
-_DRIVE_SHA256 = '1619d91c144e2974932b0b6ba6ed43da0e8a68ce03bee6c67b625aad653750fa'
+_DRIVE_SHA256 = '2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540'
 _DRIVE_SIDECAR = {
     'format': 'hertzforge-drive', 'version': 1, 'rate_hz': 1000.0, 'samples': 401,
     'channels': [{'name': 'Drive 1', 'unit': 'V', 'source': 'column:2'},
@@ -5936,21 +5936,21 @@ _DRIVE_SIDECAR = {
                               {'signal': 'column:3', 'name': 'Drive 2'}]},
     'fixes': [], 'tool': 'hertzforge 0.0.0', 'created_utc': '2026-11-15T00:00:00Z'}
 _DRIVE_FIXED_CHANNELS = [
-    {'name': 'Drive 1', 'a': -1.21115e-05, 'b': 6.23811e-19, 'rms_before': 0.216236,
+    {'name': 'Drive 1', 'a': -1.21109e-05, 'b': 5.18104e-18, 'rms_before': 0.216236,
      'rms_after': 0.216236,
      'before': {'start': 0.0, 'end': 0.0, 'peak': 0.5, 'velocity_end': 2.09664e-10,
                 'velocity_peak': 0.00395868, 'displacement_end': 4.19328e-11,
                 'displacement_peak': 3.31033e-05},
-     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.500012, 'velocity_end': 9.77829e-15,
-               'velocity_peak': 0.00395884, 'displacement_end': 1.95565e-15,
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.500012, 'velocity_end': -5.75779e-19,
+               'velocity_peak': 0.00395884, 'displacement_end': -2.43797e-19,
                'displacement_peak': 3.3292e-05}},
-    {'name': 'Drive 2', 'a': 6.41709e-07, 'b': -3.52732e-18, 'rms_before': 0.108118,
+    {'name': 'Drive 2', 'a': 6.42086e-07, 'b': -6.40497e-18, 'rms_before': 0.108118,
      'rms_after': 0.108118,
      'before': {'start': 0.0, 'end': 0.0, 'peak': 0.25, 'velocity_end': -2.54349e-11,
                 'velocity_peak': 0.000788997, 'displacement_end': -5.08699e-12,
                 'displacement_peak': 2.51054e-06},
-     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.249999, 'velocity_end': 4.32236e-12,
-               'velocity_peak': 0.000788993, 'displacement_end': 8.64471e-13,
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.249999, 'velocity_end': 2.55435e-19,
+               'velocity_peak': 0.000788993, 'displacement_end': 6.23621e-20,
                'displacement_peak': 2.5015e-06}}]
 DRIVE_TEXT_GOLDENS = {
     'request_drive_inspect': {
@@ -5984,7 +5984,7 @@ DRIVE_TEXT_GOLDENS = {
         'result': {
             'folder': _DRIVE_FOLDER + '-fixed',
             'drive': {**_DRIVE_SIDECAR, 'sha256': (
-                'd60a66177a8b5c03e0603f4cfade80c0a80866e31d2540352840dc09d74c35cd'),
+                'b5cea183468e5b7fa1b59683ef00f773a0f45847f7ef2350aa3aa5c0df84d210'),
                 'fixes': [{
                     'kind': 'fix_ends', 'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
                     'taper_s': 0.01, 'taper_samples': 10,
@@ -6014,7 +6014,7 @@ DRIVE_TEXT_GOLDENS = {
 
 # ---- Playback ---------------------------------------------------------------------
 
-PLAYBACK_SHA = 'c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954'
+PLAYBACK_SHA = 'f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02'
 PLAYBACK_CONFIG = {
     'title': 'Golden Playback',
     'drive': {'folder': '/home/operator/Hertzforge_Data/drives/burst', 'sha256': PLAYBACK_SHA},

@@ -160,7 +160,10 @@ pub fn refusals(
     }
     let gain = setup.gain();
     for c in &check.channels {
-        let played = c.peak_v * gain;
+        // The drive path plays f32: the peak as played is the file's peak rounded to f32,
+        // which may be above it. Judged on the larger, configure never passes a file
+        // whose first played peak trips the ceiling.
+        let played = c.peak_v.max(f64::from(c.peak_v as f32)) * gain;
         if played > setup.ceiling_v {
             out.push(FileError::new(
                 "peak_over_ceiling",

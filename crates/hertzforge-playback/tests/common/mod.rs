@@ -59,7 +59,7 @@ pub fn write(dir: &std::path::Path, fs: f64, channels: &[Vec<f64>]) -> PathBuf {
     let mut s = Vec::with_capacity(n * channels.len());
     for i in 0..n {
         for c in channels {
-            s.push(c[i] as f32);
+            s.push(c[i]);
         }
     }
     write_folder(&folder, fs, &names, &s, serde_json::Map::new()).unwrap();

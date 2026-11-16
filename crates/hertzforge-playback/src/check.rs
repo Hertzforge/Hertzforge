@@ -21,7 +21,7 @@
 //! The check knows only the drive signal. It cannot know the table's motion without a
 //! model of the shaker and its amplifier, so stroke is not checked.
 
-use crate::file::{hex, DriveFile, FileError};
+use crate::file::{hex, DriveFile, FileError, SAMPLE_BYTES};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::io::Read;
@@ -293,11 +293,12 @@ pub fn check_file(file: &DriveFile, pinned: Option<&str>) -> Result<FileCheck, F
             ],
         })
         .collect();
-    let mut buf = vec![0u8; PIECE_FRAMES * width * 4];
+    let sample = SAMPLE_BYTES as usize;
+    let mut buf = vec![0u8; PIECE_FRAMES * width * sample];
     let mut frame: u64 = 0;
     while frame < file.samples {
         let frames = ((file.samples - frame) as usize).min(PIECE_FRAMES);
-        let bytes = &mut buf[..frames * width * 4];
+        let bytes = &mut buf[..frames * width * sample];
         reader.read_exact(bytes).map_err(|e| {
             FileError::new(
                 "drive_unreadable",
@@ -310,8 +311,8 @@ pub fn check_file(file: &DriveFile, pinned: Option<&str>) -> Result<FileCheck, F
             )
         })?;
         hasher.update(&*bytes);
-        for (k, s) in bytes.chunks_exact(4).enumerate() {
-            let x = f64::from(f32::from_le_bytes([s[0], s[1], s[2], s[3]]));
+        for (k, s) in bytes.chunks_exact(sample).enumerate() {
+            let x = f64::from_le_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]);
             let ch = k % width;
             let at = frame + (k / width) as u64;
             if !x.is_finite() {

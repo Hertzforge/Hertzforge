@@ -29,10 +29,16 @@ folder with no `drive.json` is one whose writing did not finish, and is not a dr
 | Field | Type |
 |---|---|
 | Magic: the bytes `HFDRV01` and a zero byte | 8 bytes |
-| The samples, interleaved by sample: sample 0 of every channel in channel order, then sample 1, and so on | `samples x channels` little-endian IEEE 754 `f32` |
+| The samples, interleaved by sample: sample 0 of every channel in channel order, then sample 1, and so on | `samples x channels` little-endian IEEE 754 `f64` |
 
 Nothing else: no header beyond the magic, no padding, no trailer. The file is exactly
-`8 + 4 x channels x samples` bytes. Every value is a finite number, in volts at the drive output.
+`8 + 8 x channels x samples` bytes. Every value is a finite number, in volts at the drive output.
+
+The samples are `f64` so the control service checks the values the converter wrote. Rounded to
+`f32`, then integrated twice over a long record, the rounding alone can end a high tone's
+displacement as far from rest as the tone's whole displacement. The drive output plays `f32`: each
+sample is rounded to `f32` as it is read to play, and nowhere before, and the drive ceiling is
+judged on the peak so rounded when that is the larger.
 
 ## `drive.json`
 
@@ -80,7 +86,7 @@ taken as volts, and the conversion says so.
 **Refused,** each by name: a signal the file does not hold, or one chosen twice; drives of unequal
 length; signals whose rates differ, or a stated rate that disagrees with the rate given by more
 than one part in ten thousand; no rate at all; a time column that does not step evenly; a value
-that is not finite, or too large for `f32`; a folder that exists.
+that is not finite, or too large for the drive output's `f32`; a folder that exists.
 
 ## Fixing the Ends
 
@@ -97,7 +103,7 @@ For each channel of `samples` samples at `rate_hz`, with `T = (samples - 1) / ra
    of the record, at least 10 ms and at most 1 s; never more than half the record.
 2. `c(t) = a sin(pi t / T) + b sin(2 pi t / T)`, zero at both ends, is subtracted, with `a` and `b`
    solved so the corrected record's trapezoid velocity and displacement end at zero. They are
-   solved again on the record rounded to `f32`, so the file as written ends at rest.
+   solved once more on the corrected record exactly as it is written, so the file ends at rest.
 
 A channel that is zero throughout is left as it is. The fix is appended to `fixes`:
 
@@ -112,14 +118,23 @@ A channel that is zero throughout is left as it is. The fix is appended to `fixe
 A fix changes the drive the test plays. Look at the drive before and after before playing it: a
 long taper or a large correction changes what the test asks of the shaker.
 
-## The Golden Folder
+## The Golden Folders
 
 `schema/golden/drive/basic/` is a drive folder of two channels, 401 samples at 1000 samples per
 second, written by `python schema/make_golden_drive.py` with its `tool` and `created_utc` fixed.
-Channel `k` is `A_k cos(2 pi m_k (t - T/2) / T) sin(pi t / T)^2`, `T = 0.4 s`, rounded to `f32`:
-`Drive 1` with `A = 0.5 V`, `m = 8`, and `Drive 2` with `A = 0.25 V`, `m = 20`. Each starts and
-ends at zero, and its trapezoid velocity and displacement end at zero to `f32` rounding, so it
-passes the ends check. Its `source` names a CSV of the same values at a fixed path; converting that
-CSV (`drive.convert` of columns 2 and 3) writes the same `drive.bin`, byte for byte.
-`tests/test_drive_convert.py` reads it with and without the converter's reader, checks its values
-against the formula, and checks the script writes it unchanged.
+Channel `k` is `A_k cos(2 pi m_k (t - T/2) / T) sin(pi t / T)^2`, `T = 0.4 s`, rounded to `f32` so
+the bytes do not depend on the platform's sine, and stored as `f64`: `Drive 1` with `A = 0.5 V`,
+`m = 8`, and `Drive 2` with `A = 0.25 V`, `m = 20`. Each starts and ends at zero, and its
+trapezoid velocity and displacement end at zero to that rounding, so it passes the ends check. Its
+`source` names a CSV of the same values at a fixed path; converting that CSV (`drive.convert` of
+columns 2 and 3) writes the same `drive.bin`, byte for byte.
+
+`schema/golden/drive/fixed/` is what `fix_ends` writes from a drive whose ends are not at rest:
+two channels, 301 samples at 1000 samples per second, `Offset` (0.1 V plus a 0.4 V tone at 370 Hz)
+and `Cosine` (a 0.5 V cosine at 370 Hz), each starting and ending away from zero. The same script
+writes it, with the folder it was fixed from and the build fixed in its sidecar. The control
+service's tests check that it passes the service's check with its velocity and displacement ending
+within a millionth of their peaks.
+
+`tests/test_drive_convert.py` reads both with and without the converter's reader, checks `basic`
+against the formula and `fixed` against its ends, and checks the script writes them again.

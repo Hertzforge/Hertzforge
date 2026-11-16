@@ -132,7 +132,7 @@ fn an_underrun_aborts_to_zero() {
     // the prefill (2 s) and a little more at once, then a trickle far under the rate
     let reader = Slow {
         inner: drive.file.samples_reader().unwrap(),
-        fast: (2.5 * fs) as usize * 4,
+        fast: (2.5 * fs) as usize * 8,
         given: 0,
         pause: Duration::from_millis(20),
         fail_after: None,
@@ -157,7 +157,7 @@ fn a_reader_thread_failure_ends_in_the_emergency_stop() {
     let t = table(1, 1, None);
     let drive = checked(&folder, &t, setup(vec![2], 0.0, 1.0));
     // past the read-ahead, so the failure comes while the file plays
-    let fast = (6.0 * fs) as usize * 4;
+    let fast = (6.0 * fs) as usize * 8;
     let reader = Slow {
         inner: drive.file.samples_reader().unwrap(),
         fast,
@@ -289,7 +289,7 @@ fn a_long_file_streams_with_no_underrun() {
     drop(chans);
     assert_eq!(
         std::fs::metadata(folder.join("drive.bin")).unwrap().len(),
-        8 + 16 * n as u64
+        8 + 32 * n as u64
     );
     let t = table(4, 4, None);
     let drive = checked(&folder, &t, setup(vec![5, 6, 7, 8], -3.0, 1.0));

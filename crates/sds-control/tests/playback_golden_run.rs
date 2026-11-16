@@ -67,7 +67,9 @@ fn golden_drive(dir: &Path) -> (String, String) {
         })
         .collect();
     let m = a.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-    let s: Vec<f32> = a.iter().map(|x| (x * 0.4 / m) as f32).collect();
+    // Rounded to f32 (and stored as f64) so a sine that differs in its last place on
+    // another platform writes the same file.
+    let s: Vec<f64> = a.iter().map(|x| f64::from((x * 0.4 / m) as f32)).collect();
     let mut extra = serde_json::Map::new();
     extra.insert(
         "source".into(),

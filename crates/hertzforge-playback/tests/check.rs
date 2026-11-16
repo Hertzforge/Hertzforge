@@ -49,8 +49,7 @@ fn the_zero_ends_check_agrees_with_the_shock_gates_integrator() {
         let folder = write(&dir, fs, std::slice::from_ref(&signal));
         let file = DriveFile::open(&folder).unwrap();
         let c = check_file(&file, None).unwrap().channels.remove(0);
-        let as_f32: Vec<f64> = signal.iter().map(|x| f64::from(*x as f32)).collect();
-        let k = hertzforge_dsp::shock::pulse_kinematics(&as_f32, fs);
+        let k = hertzforge_dsp::shock::pulse_kinematics(&signal, fs);
         let g = hertzforge_dsp::integrate::G_TO_IN_S2;
         let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0) + 1e-12;
         assert!(
@@ -178,11 +177,11 @@ fn refuses_a_malformed_file() {
     // one sample short
     let bin = folder.join("drive.bin");
     let bytes = std::fs::read(&bin).unwrap();
-    std::fs::write(&bin, &bytes[..bytes.len() - 4]).unwrap();
+    std::fs::write(&bin, &bytes[..bytes.len() - 8]).unwrap();
     assert_eq!(DriveFile::open(&folder).unwrap_err().reason, "drive_size");
     // a non-finite value
-    let mut s = vec![0.0f32; 10];
-    s[7] = f32::NAN;
+    let mut s = vec![0.0f64; 10];
+    s[7] = f64::NAN;
     write_folder(&folder, 1000.0, &["a", "b"], &s, serde_json::Map::new()).unwrap();
     let e = check_file(&DriveFile::open(&folder).unwrap(), None).unwrap_err();
     assert_eq!(e.reason, "drive_not_finite");
@@ -286,4 +285,69 @@ fn refuses_a_rate_mismatch_naming_both_rates() {
         "{}",
         r[0].message
     );
+}
+
+#[test]
+fn a_minute_long_tone_of_whole_cycles_passes_the_ends_check() {
+    // 60 s at 12 800 Hz, 710 Hz under a whole-record window, made in f64: at rest at both
+    // ends. Stored in f32 its rounding, integrated twice over 768 000 samples, ends the
+    // displacement at about 15 % of its peak; stored as written it passes.
+    let fs = 12_800.0;
+    let dir = temp("long-tone");
+    let folder = write(&dir, fs, &[burst(fs, 60.0, 710.0, 0.5)]);
+    let file = DriveFile::open(&folder).unwrap();
+    assert_eq!(file.samples, 768_000);
+    let c = check_file(&file, None).unwrap().channels.remove(0);
+    assert!(c.pass(), "{}", c.words());
+    assert!(c.displacement_end.abs() <= 1e-3 * c.displacement_peak);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_golden_folder_fix_ends_wrote_passes_the_check() {
+    // `schema/golden/drive/fixed/`: written by the converter's `fix_ends` from a drive
+    // whose ends are not at rest (`python schema/make_golden_drive.py`). What the
+    // converter writes, this service passes, and its ends are at rest far inside the
+    // allowance.
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../schema/golden/drive/fixed");
+    let file = DriveFile::open(&folder).unwrap();
+    let check = check_file(&file, None).unwrap();
+    assert_eq!(check.channels.len(), 2);
+    assert_eq!(file.sidecar["fixes"][0]["kind"], "fix_ends");
+    for c in &check.channels {
+        assert!(c.pass(), "{}", c.words());
+        assert_eq!((c.start_v, c.end_v), (0.0, 0.0));
+        assert!(c.velocity_end.abs() <= 1e-6 * c.velocity_peak, "{c:?}");
+        assert!(c.displacement_end.abs() <= 1e-6 * c.displacement_peak, "{c:?}");
+    }
+}
+
+#[test]
+fn the_ceiling_is_judged_on_the_peak_as_the_drive_path_plays_it() {
+    // The file holds f64 and the drive path plays f32. A peak that fits the ceiling in
+    // f64 but rounds over it in f32 would pass configure and then trip the ceiling at
+    // the first sample played; configure refuses it instead.
+    let up = 0.5 + 0.75 * f64::from(f32::EPSILON) / 2.0;
+    assert!(f64::from(up as f32) > up);
+    let ceiling = (up + f64::from(up as f32)) / 2.0;
+    let dir = temp("rounds-up");
+    let mut signal = burst(1024.0, 1.0, 50.0, up);
+    let k = (0..signal.len())
+        .max_by(|a, b| signal[*a].abs().total_cmp(&signal[*b].abs()))
+        .unwrap();
+    signal[k] = up.copysign(signal[k]);
+    let folder = write(&dir, 1024.0, &[signal]);
+    let file = DriveFile::open(&folder).unwrap();
+    let check = check_file(&file, None).unwrap();
+    assert_eq!(check.channels[0].peak_v, up);
+    let t = table(1, 1, None);
+    let r = refusals(
+        &file,
+        &check,
+        &setup(vec![2], 0.0, ceiling),
+        &rows(&t),
+        &offer(None, 1),
+    );
+    assert_eq!(reasons(&r), vec!["peak_over_ceiling"], "{r:?}");
 }

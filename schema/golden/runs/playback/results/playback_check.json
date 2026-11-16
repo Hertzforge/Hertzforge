@@ -16,7 +16,7 @@
   ],
   "report": {
     "pass": true,
-    "sha256": "c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954",
+    "sha256": "f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02",
     "rate_hz": 2048.0,
     "samples": 1024,
     "duration_s": 0.5,

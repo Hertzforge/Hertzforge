@@ -1,7 +1,7 @@
 {"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Playback\" on sim"}
 {"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"check","text":"the drive file's check passed"}
 {"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"check","text":"the drive file is unchanged since its check"}
-{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"check","text":"the drive file's check passed, and the file is unchanged since","data":{"event":"check_passed","sha256":"c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954","pass":true}}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"check","text":"the drive file's check passed, and the file is unchanged since","data":{"event":"check_passed","sha256":"f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02","pass":true}}
 {"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"note","text":"records in golden_playback"}
 {"seq":5,"at_unix":1794240005.25,"frame":null,"kind":"state","text":"armed on HERTZFORGE-SIM: 2048 Hz, 1 drive, -6 dB, ceiling 1 V","data":{"event":"armed","fs_hz":2048,"level_db":-6}}
 {"seq":6,"at_unix":1794240006.25,"frame":4096,"kind":"state","text":"pre-roll: 0.125 s at zero drive","data":{"event":"pre_roll","generated_frame":0}}

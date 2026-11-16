@@ -48,7 +48,7 @@ fn temp(name: &str) -> PathBuf {
 
 /// Zero acceleration, velocity and displacement at both ends (the displacement
 /// `sin²(πt/T) sin(2πft)` differentiated twice), scaled to `peak` volts.
-pub fn burst(fs: f64, seconds: f64, f_hz: f64, peak: f64) -> Vec<f32> {
+pub fn burst(fs: f64, seconds: f64, f_hz: f64, peak: f64) -> Vec<f64> {
     let n = (fs * seconds).round() as usize;
     let t_len = n as f64 / fs;
     let w = 2.0 * std::f64::consts::PI * (f_hz * t_len).round().max(1.0) / t_len;
@@ -62,11 +62,11 @@ pub fn burst(fs: f64, seconds: f64, f_hz: f64, peak: f64) -> Vec<f32> {
         })
         .collect();
     let m = a.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-    a.iter().map(|x| (x * peak / m) as f32).collect()
+    a.iter().map(|x| x * peak / m).collect()
 }
 
 /// A drive folder of `chans` at `fs`: its path and SHA-256.
-fn drive(dir: &Path, fs: f64, chans: &[Vec<f32>]) -> (String, String) {
+fn drive(dir: &Path, fs: f64, chans: &[Vec<f64>]) -> (String, String) {
     let folder = dir.join("drive");
     let names: Vec<String> = (0..chans.len()).map(|k| format!("drive {k}")).collect();
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -157,7 +157,7 @@ async fn playback_runs_end_to_end_on_one_two_and_four_drives() {
     for (inputs, drives) in [(1u32, 1u32), (2, 2), (4, 4)] {
         let dir = temp(&format!("n{drives}"));
         let freqs = [60.0, 140.0, 260.0, 410.0];
-        let chans: Vec<Vec<f32>> = (0..drives as usize)
+        let chans: Vec<Vec<f64>> = (0..drives as usize)
             .map(|k| burst(fs, 1.0, freqs[k], 0.4))
             .collect();
         let (folder, sha) = drive(&dir, fs, &chans);
@@ -387,7 +387,7 @@ async fn a_long_file_streams_through_the_service() {
     // says so), to spare the disk 200 MB.
     let fs = 25_600.0;
     let dir = temp("long");
-    let chans: Vec<Vec<f32>> = [37.0, 91.0, 155.0, 233.0]
+    let chans: Vec<Vec<f64>> = [37.0, 91.0, 155.0, 233.0]
         .iter()
         .map(|f| burst(fs, 60.0, *f, 0.3))
         .collect();
@@ -415,8 +415,8 @@ async fn the_service_refuses_what_its_checks_refuse() {
     let fs = 4096.0;
     let dir = temp("refuse");
     // a sine of whole cycles: its displacement walks away
-    let sine: Vec<f32> = (0..4096)
-        .map(|k| (0.5 * (2.0 * std::f64::consts::PI * 32.0 * k as f64 / fs).sin()) as f32)
+    let sine: Vec<f64> = (0..4096)
+        .map(|k| 0.5 * (2.0 * std::f64::consts::PI * 32.0 * k as f64 / fs).sin())
         .collect();
     let (bad, bad_sha) = drive(&dir.join("bad"), fs, &[sine]);
     let (good, sha) = drive(&dir.join("good"), fs, &[burst(fs, 1.0, 80.0, 0.5)]);

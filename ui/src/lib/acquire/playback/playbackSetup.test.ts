@@ -8,7 +8,7 @@ import { defaultPlaybackSetup, fitMap, fromPlaybackConfig, localErrors, mergePla
 import { playbackBarActions, playbackPrimary, type PlaybackVerbContext } from './playbackVerbs';
 import { endsOnly, residual, verdict } from './playbackWords';
 
-const SHA = 'c7bf34a8e0068f902999239fcd548bb768c8bf17de58a8724f69a87fa24a8954';
+const SHA = 'f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02';
 const row = (index: number, role: ChannelRow['role'], enabled = true) => ({ index, role, enabled, description: `R${index}`, range_max: 10, units: role === 'drive' ? 'V' : 'g' }) as unknown as ChannelRow;
 
 describe('the Playback draft', () => {

@@ -6003,7 +6003,7 @@ drive, of any length, recorded with every enabled input and every drive as playe
 a loop and nothing is analysed: the run plays the file as it is, scaled by the level, and its run
 folder carries the inputs and drives to the analysis side. The control service reads one format
 for it, the native drive file (`docs/drive-file.md`): a folder with `drive.bin` (the magic
-`HFDRV01\0`, then little-endian float32 samples interleaved by sample) and its sidecar
+`HFDRV01\0`, then little-endian float64 samples interleaved by sample) and its sidecar
 `drive.json`. Every other format is converted into one on the analysis side. The file is named by
 its full path on the computer that runs the test, never uploaded. The run is one test like any
 other: a Playback run and any other module's run, or a `sim.start` run, exclude each other, each
@@ -6036,7 +6036,7 @@ configured `not_configured`.
 
 ```
 {"title":"Bracket, road profile",
- "drive":{"folder":"/home/operator/Hertzforge_Data/drives/road","sha256":"c7bf34a8...a8954"},
+ "drive":{"folder":"/home/operator/Hertzforge_Data/drives/road","sha256":"f6667977...19f02"},
  "map":[3,4],"level_db":-12,"ceiling_v":1.0,"pre_roll_s":0.5,"post_roll_s":2,
  "capture":{"run_name":"playback"},
  "operator":"A. Operator","article":"Bracket, SN 0042","notes":"",

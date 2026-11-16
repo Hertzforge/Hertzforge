@@ -34,8 +34,9 @@ the file states that disagrees with the rate given (by more than
 a time column whose step is not even; a unit that is not a voltage (V and
 mV, or any voltage unit, are converted to volts; a signal with no unit is
 taken as volts and the notes say so); a value that is not a finite number,
-or one too large for 32-bit floating point; a NumPy array of Python
-objects, which is never unpickled; an output folder that already exists.
+or one too large for the drive output's 32-bit floating point; a NumPy
+array of Python objects, which is never unpickled; an output folder that
+already exists.
 
 **Rates.** A rate taken from a file is kept to ten significant digits,
 so a time column's float rounding does not reach the drive file; a rate
@@ -77,8 +78,11 @@ FORMAT = 'hertzforge-drive'
 FORMAT_VERSION = 1
 #: the eight bytes `drive.bin` starts with
 MAGIC = b'HFDRV01\x00'
-#: the bytes of one sample
-SAMPLE_BYTES = 4
+#: the bytes of one sample: a little-endian float64, so the values the
+#: control service checks are the values written here
+SAMPLE_BYTES = 8
+#: a sample's type in `drive.bin`
+SAMPLE_DTYPE = '<f8'
 #: the unit every drive channel is written in
 UNIT = 'V'
 #: the folder under the data folder that drive folders are made in
@@ -160,7 +164,7 @@ class Inspection:
 
 @dataclass
 class DriveFile:
-    """A drive folder as read: `values` is `(samples, channels)` float32,
+    """A drive folder as read: `values` is `(samples, channels)` float64,
     volts, and `sidecar` is `drive.json` whole."""
 
     folder: str
@@ -786,7 +790,7 @@ def _write_folder(folder: str, chunks: Iterator[np.ndarray], samples: int,
         f.write(MAGIC)
         digest.update(MAGIC)
         for chunk in chunks:
-            data = np.ascontiguousarray(chunk, dtype='<f4')
+            data = np.ascontiguousarray(chunk, dtype=SAMPLE_DTYPE)
             if data.ndim != 2 or data.shape[1] != len(channels):
                 raise DriveFileError('a block of the drive is not samples by channels')
             raw = data.tobytes()
@@ -874,7 +878,7 @@ def _check_finite(block: np.ndarray, names: Sequence[str], start: int, rate: flo
         sample, channel = (int(v[0]) for v in np.nonzero(bad))
         value = block[sample, channel]
         what = ('is not a finite number' if not np.isfinite(value) else
-                'is too large for a drive file (32-bit floating point)')
+                'is too large for the drive output (32-bit floating point)')
         at = start + sample
         raise DriveFileError(f'{names[channel]}: sample {at + 1} (at {at / rate:.9g} s) is '
                              f'{float(value)!r}, which {what}')
@@ -1079,7 +1083,7 @@ def read(folder: str | os.PathLike) -> DriveFile:
     Returns
     -------
     DriveFile
-        Its values, `(samples, channels)` float32 volts, and its sidecar.
+        Its values, `(samples, channels)` float64 volts, and its sidecar.
 
     Raises
     ------
@@ -1101,7 +1105,7 @@ def read(folder: str | os.PathLike) -> DriveFile:
     if _file_sha256(binary) != sidecar['sha256']:
         raise DriveFileError(f'{binary} does not match the SHA-256 its sidecar records; '
                              'it changed after it was written')
-    values = np.fromfile(binary, dtype='<f4', offset=len(MAGIC)).reshape(samples, width)
+    values = np.fromfile(binary, dtype=SAMPLE_DTYPE, offset=len(MAGIC)).reshape(samples, width)
     if not np.all(np.isfinite(values)):
         sample, channel = (int(v[0]) for v in np.nonzero(~np.isfinite(values)))
         raise DriveFileError(f'{names[channel]}: sample {sample + 1} is not a finite number')
@@ -1159,21 +1163,22 @@ def taper_samples(samples: int, rate_hz: float, taper_s: float | None = None) ->
 
 def _fix(x: np.ndarray, dt: float, taper: int, shapes: np.ndarray,
          matrix: np.ndarray) -> tuple[np.ndarray, float, float]:
-    """One channel tapered and corrected, as float32, with `a` and `b`."""
+    """One channel tapered and corrected, as stored (float64), with `a`
+    and `b`."""
     y = x.copy()
     if taper > 0:
         w = 0.5 * (1.0 - np.cos(np.pi * np.arange(taper + 1) / taper))
         y[:taper + 1] *= w
         y[-taper - 1:] *= w[::-1]
     a = b = 0.0
-    out = y.astype(np.float32)
-    # solved on the record as it will be stored, then once more on the
-    # float32 rounding of it, so what is written ends at rest
-    for _pass in range(3):
-        v, d = _integrals(out.astype(np.float64), dt)
+    out = y
+    # solved on the tapered record, then once more on the corrected record
+    # exactly as it is stored, so what is written ends at rest
+    for _pass in range(2):
+        v, d = _integrals(out, dt)
         da, db = np.linalg.solve(matrix, [v[-1], d[-1]])
         a, b = a + float(da), b + float(db)
-        out = (y - a * shapes[0] - b * shapes[1]).astype(np.float32)
+        out = y - a * shapes[0] - b * shapes[1]
     return out, a, b
 
 
