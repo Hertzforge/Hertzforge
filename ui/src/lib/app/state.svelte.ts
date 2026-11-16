@@ -38,7 +38,7 @@ import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
 import { openerMock, shareMock } from '$lib/protocol/mock/shared';
 import { mockSocketFactory } from '$lib/protocol/mock/socket';
-import type { ActionColumn, ActionRow, Actions, ExportFormat, ShapeView, ProjectChildren, ShowPrefs, Shown,
+import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView, ProjectChildren, ShowPrefs, Shown,
 	Catalog,
 	DisplayEvent,
 	OperationDescriptor,
@@ -231,7 +231,7 @@ class AnalyzeState {
 	}
 
 	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
-	async showSelection(): Promise<void> {
+	async showSelection(redraw = false): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
 		this.reading = null;
@@ -243,7 +243,8 @@ class AnalyzeState {
 			this.picks = [];
 			this.shapeView = null;
 		}
-		void this.loadActions();
+		// a redraw of the same selection (the Averaging form typed into) offers what it did
+		if (!redraw) void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
 			this.shown = null;
 			this.showError = null;
@@ -270,19 +271,116 @@ class AnalyzeState {
 						environment: this.prefs.environment,
 						table_view: this.prefs.table_view,
 						tone: this.prefs.tone,
-						sine_reading: this.prefs.sine_reading
+						sine_reading: this.prefs.sine_reading,
+						averaging: this.averagingDraft
 					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (seq !== this.showSeq) return;
 			this.shown = res;
+			// the views bring the averaging's frames themselves
+			this.averagingRegions = null;
 			this.showError = null;
 		} catch (err) {
 			if (seq !== this.showSeq) return;
 			this.shown = null;
 			this.showError = message(err);
 		}
+	}
+
+	/**
+	 * What the Averaging form holds while it is open on the one time history selected, which the
+	 * service draws on that history's plot (`prefs.averaging`); null otherwise.
+	 */
+	get averagingDraft(): Record<string, unknown> | null {
+		const objects = this.app.project.selection.objects;
+		const values = this.currentValues;
+		if (!this.formOpen || this.opId !== 'project.set_averaging' || objects.length !== 1 || values.source !== objects[0]) return null;
+		const draft: Record<string, unknown> = {};
+		for (const key of ['frame_length', 'overlap', 'window', 'frames', 'start', 'detrend']) {
+			if (values[key] !== undefined && values[key] !== null && values[key] !== '') draft[key] = values[key];
+		}
+		return draft;
+	}
+
+	/**
+	 * The averaging's frames drawn over the views the selection already shows, in place of the
+	 * views' own regions: asked for alone as the form is typed into (`project.averaging`), so the
+	 * plot is not sent or built again. Null while the views' own regions stand.
+	 */
+	averagingRegions = $state.raw<Region[] | null>(null);
+	private averagingKey = 'null';
+	private averagingSeq = 0;
+	private averagingTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** The Averaging form opened, closed or typed into: once the typing rests, its frames are drawn again on the plot that is there. */
+	followAveraging(): void {
+		const draft = this.averagingDraft;
+		const key = JSON.stringify(draft);
+		if (key === this.averagingKey) return;
+		const opening = this.averagingKey === 'null';
+		this.averagingKey = key;
+		if (this.averagingTimer) clearTimeout(this.averagingTimer);
+		if (draft === null) {
+			// the form closed: its frames go
+			this.averagingSeq++;
+			if (this.shown) {
+				this.averagingRegions = [];
+				this.shown = { ...this.shown, note: '' };
+			}
+			return;
+		}
+		this.averagingTimer = setTimeout(() => void this.drawAveraging(), opening ? 0 : 250);
+	}
+
+	/** The frames of what the Averaging form holds, drawn over the plot that is there; the whole selection read when nothing is shown yet. */
+	async drawAveraging(): Promise<void> {
+		const draft = this.averagingDraft;
+		const name = this.app.project.selection.objects[0];
+		if (!draft || !name) return;
+		if (!this.shown) return this.showSelection(true);
+		const seq = ++this.averagingSeq;
+		try {
+			const res = await this.app.analysis.request<{ regions: Region[]; note: string }>('project.averaging', { name, averaging: draft });
+			if (seq !== this.averagingSeq || !this.shown) return;
+			this.averagingRegions = res.regions;
+			this.shown = { ...this.shown, note: res.note };
+		} catch (err) {
+			if (seq === this.averagingSeq) this.runError = message(err);
+		}
+	}
+
+	/** A draggable span on what the selection shows let go at new edges: its operation runs with them, and what it stored is drawn. */
+	async spanOnSelection(drag: { op: string; params: Record<string, unknown>; low: string; high?: string }, x0: number, x1: number): Promise<void> {
+		this.runError = null;
+		// a field being typed in keeps its own text; let go of it, so it shows what the drag stores
+		if (typeof document !== 'undefined' && document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+		} catch (err) {
+			this.runError = message(err);
+		}
+		// the form takes up what the drag stored, and its frames are drawn once: a drag that was
+		// refused goes back to where it was
+		this.followSource();
+		if (this.averagingDraft) {
+			this.averagingKey = JSON.stringify(this.averagingDraft);
+			if (this.averagingTimer) clearTimeout(this.averagingTimer);
+			const refused = this.runError;
+			await this.drawAveraging();
+			if (refused) this.runError = refused;
+		} else await this.showSelection();
+	}
+
+	/** The row of the action table that runs the operation `id` on the selection, when it offers one. */
+	private rowOf(id: string): ActionRow | null {
+		for (const column of this.actions?.table.columns ?? []) {
+			const row = column.current ? column.rows.find((r) => r.id === id) : undefined;
+			if (row) return row;
+		}
+		return null;
 	}
 
 	/** What the selection can take; the current tool stays when it still applies, else the first reading. */
@@ -721,10 +819,22 @@ class AnalyzeState {
 			// an act's result joins the tree and is selected; a reading
 			// takes the view until Back
 			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
+			const selected = this.app.project.selection.objects;
+			const onPlot = selected.length === 1 && params.source === selected[0] && !!this.shown;
 			if (added.length) {
 				const order = (res.project?.objects ?? []).map((o) => o.name);
 				this.app.project.clickObject(added[0], order);
 				this.closeForm();
+			} else if (!preview && onPlot && op.id === 'project.set_averaging') {
+				// the frames are on the history's own plot: it stays, with the form, and draws what was stored
+				this.followSource();
+				this.averagingKey = JSON.stringify(this.averagingDraft);
+				await this.drawAveraging();
+			} else if (!preview && onPlot && op.id === 'project.detect_averaging' && this.rowOf('project.set_averaging')) {
+				// what was found is shown where it can be seen and changed: the Averaging form, on the plot
+				this.openRow(this.rowOf('project.set_averaging')!);
+				this.formOpen = true;
+				this.followSource();
 			} else if (res.views.length) {
 				this.reading = { title: preview ? `${this.formTitle}, preview` : this.formTitle, views: res.views };
 				this.readingId = op.id;
