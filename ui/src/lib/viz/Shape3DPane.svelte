@@ -72,7 +72,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMesh, triadScene, TRIAD_HALF } from './arrows';
+	import { arrowMesh, labelPoints, triadScene, TRIAD_HALF } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { wideLines } from './wideLines';
@@ -295,6 +295,29 @@
 	/** The labeled axes about the model (the Plot axes): a box at the model's bounds, one edge per
 	 * axis ticked with values and titled with the unit. */
 	let bounds = $state(false);
+	/** Each DOF arrow's label written at its free end; kept across views and launches. */
+	const LABELS_KEY = 'hertzforge.shape3d.dofLabels';
+	let dofLabels = $state(readDofLabels());
+	function readDofLabels(): boolean {
+		try {
+			return localStorage.getItem(LABELS_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+	function toggleDofLabels() {
+		dofLabels = !dofLabels;
+		dirty = true;
+		try {
+			localStorage.setItem(LABELS_KEY, dofLabels ? '1' : '0');
+		} catch {
+			// no storage: the choice lasts as long as the pane
+		}
+	}
+	/** The DOF labels over the canvas, redrawn each frame the view moves. */
+	let labelsSvg: SVGSVGElement;
+	/** Where each label sits in the model: its arrow's free end, a little past it. */
+	let labelAt: Float32Array | null = null;
 	/** The node under the pointer, captioned when the view is not picking. */
 	let hovered = $state<number | null>(null);
 	let hoverPending = false;
@@ -814,6 +837,7 @@
 			// DOF arrows: solids that stay put while the model moves, each in its axis's color
 			dofArrows = arrowMesh(view.arrows);
 			scene.add(dofArrows);
+			labelAt = labelPoints(view.arrows);
 		}
 		orientation = triadScene();
 
@@ -1036,6 +1060,32 @@
 
 	const corner = new Vector3();
 	/** Place the box's ticks, values and titles on the picture, on the edge of each axis that lies outermost; nothing while the axes are off. */
+	/** Past this many arrows the labels are not written: they would cover the model. */
+	const LABEL_LIMIT = 600;
+	/** Write each DOF arrow's label at its free end; nothing while the labels are off. */
+	function updateLabels() {
+		if (!labelsSvg) return;
+		const labels = view.arrows?.labels;
+		if (!dofLabels || !labelAt || !labels || labels.length > LABEL_LIMIT) {
+			if (labelsSvg.firstChild) labelsSvg.replaceChildren();
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		labelsSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		let drawn = '';
+		for (let k = 0; k < labels.length; k++) {
+			corner.set(labelAt[3 * k], labelAt[3 * k + 1], labelAt[3 * k + 2]).project(camera);
+			if (corner.z < -1 || corner.z > 1) continue;
+			const x = ((corner.x + 1) / 2) * w;
+			const y = ((1 - corner.y) / 2) * h;
+			if (x < 0 || x > w || y < 0 || y > h) continue;
+			drawn += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${escapeText(labels[k])}</text>`;
+		}
+		labelsSvg.innerHTML = drawn;
+	}
+	const escapeText = (text: string) => text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+
 	function updateAxes() {
 		if (!axesSvg) return;
 		if (!bounds || !boundsBox) {
@@ -1106,6 +1156,7 @@
 		drawTriad();
 		updateTriad();
 		updateAxes();
+		updateLabels();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -1459,6 +1510,7 @@
 		onpointerleave={() => (hoverNode = null)}
 	>
 		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
+		<svg class="axes doflabels" bind:this={labelsSvg} data-testid="shape3d-dof-labels" aria-hidden="true"></svg>
 	</div>
 
 	{#if view.gizmo && ongizmo}
@@ -1532,6 +1584,9 @@
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
+			{#if view.arrows?.labels.length}
+				<button class="btn sm toggle" data-testid="shape3d-dof-labels-toggle" class:on={dofLabels} aria-pressed={dofLabels} onclick={toggleDofLabels} title="DOF labels: each arrow's DOF written at its free end">DOF Labels</button>
+			{/if}
 {#if moves}<button class="btn ghost sm copyimg" data-testid="shape3d-record" onclick={record} disabled={recording}
 				title="Record {RECORD_S.toFixed(1)} s of the animation as a video">{recording ? 'Recording' : 'Record'}</button>{/if}
 			<button class="btn ghost sm copyimg" data-testid="shape3d-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
@@ -1685,6 +1740,19 @@
 		font-family: var(--font-mono);
 		font-size: 11px;
 		fill: var(--text-2);
+	}
+
+	/* a DOF's label, outlined in the plot's background so it reads over the model */
+	.doflabels :global(text) {
+		fill: var(--text-1);
+		font-size: 11px;
+		font-weight: 600;
+		text-anchor: middle;
+		dominant-baseline: middle;
+		paint-order: stroke;
+		stroke: var(--bg-1);
+		stroke-width: 3px;
+		stroke-linejoin: round;
 	}
 
 	.axes :global(text.title) {
