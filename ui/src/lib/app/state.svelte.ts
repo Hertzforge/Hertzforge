@@ -311,6 +311,8 @@ class AnalyzeState {
 	 */
 	averagingRegions = $state.raw<Region[] | null>(null);
 	private averagingKey = 'null';
+	/** The form's values as last stored on the history, so a field left unchanged stores nothing. */
+	private averagingStored = '';
 	private averagingSeq = 0;
 	private averagingTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -320,6 +322,8 @@ class AnalyzeState {
 		const key = JSON.stringify(draft);
 		if (key === this.averagingKey) return;
 		const opening = this.averagingKey === 'null';
+		// the form opens on what the history holds
+		if (opening) this.averagingStored = JSON.stringify(this.currentValues);
 		this.averagingKey = key;
 		if (this.averagingTimer) clearTimeout(this.averagingTimer);
 		if (draft === null) {
@@ -358,7 +362,8 @@ class AnalyzeState {
 		if (typeof document !== 'undefined' && document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
 		try {
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
+			// the plot is the same records: only the frames over it are drawn again, below
+			if (res.project) this.app.project.apply(res.project, !this.averagingDraft);
 		} catch (err) {
 			this.runError = message(err);
 		}
@@ -367,11 +372,12 @@ class AnalyzeState {
 		this.followSource();
 		if (this.averagingDraft) {
 			this.averagingKey = JSON.stringify(this.averagingDraft);
+			if (!this.runError) this.averagingStored = JSON.stringify(this.currentValues);
 			if (this.averagingTimer) clearTimeout(this.averagingTimer);
 			const refused = this.runError;
 			await this.drawAveraging();
 			if (refused) this.runError = refused;
-		} else await this.showSelection();
+		}
 	}
 
 	/** The row of the action table that runs the operation `id` on the selection, when it offers one. */
@@ -544,6 +550,14 @@ class AnalyzeState {
 
 	/** A form that applies as it goes (`live`): what it holds now is run, and it is filled again from what the change left. */
 	async applyLive(): Promise<void> {
+		if (this.opId === 'project.set_averaging') {
+			// the averaging is stored as it stands, and drawn on the plot that is there
+			const now = JSON.stringify(this.currentValues);
+			if (now === this.averagingStored) return;
+			await this.run();
+			if (!this.runError && !Object.keys(this.errors).length) this.averagingStored = JSON.stringify(this.currentValues);
+			return;
+		}
 		await this.run();
 		await this.loadActions();
 	}
@@ -815,7 +829,9 @@ class AnalyzeState {
 		try {
 			const before = new Set(this.app.project.summary?.objects.map((o) => o.name) ?? []);
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: op.id, params }, { timeoutMs: RUN_TIMEOUT_MS });
-			if (res.project) this.app.project.apply(res.project);
+			// an averaging stored from the history's own plot leaves the plot as it is: only its frames are drawn again
+			const sameplot = !preview && op.id === 'project.set_averaging' && !!this.shown && this.app.project.selection.objects.length === 1 && params.source === this.app.project.selection.objects[0];
+			if (res.project) this.app.project.apply(res.project, !sameplot);
 			// an act's result joins the tree and is selected; a reading
 			// takes the view until Back
 			const added = (res.project?.objects ?? []).map((o) => o.name).filter((n) => !before.has(n));
@@ -1541,7 +1557,7 @@ export class ProjectState {
 	}
 
 	/** A new summary from the service: the tree and Analyze's object choices follow. */
-	apply(summary: ProjectSummary): void {
+	apply(summary: ProjectSummary, show = true): void {
 		this.summary = summary;
 		if (this.units && !summary.objects.some((o) => o.name === this.units?.name)) this.units = null;
 		const names = summary.objects.map((o) => o.name);
@@ -1555,7 +1571,8 @@ export class ProjectState {
 		this.children = children;
 		for (const name of kept) void this.loadChildren(name);
 		this.app.analyze.projectChanged();
-		void this.app.analyze.showSelection();
+		// a change that leaves what is shown as it was (an averaging stored) does not read it again
+		if (show) void this.app.analyze.showSelection();
 		void this.app.console.sync();
 	}
 

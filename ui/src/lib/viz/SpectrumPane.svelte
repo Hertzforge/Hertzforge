@@ -20,7 +20,7 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { Series, SpectrumView, SpectrumHandle } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
-	import { draggedSpan, framesText, previewFrames, railShare, windowGlyph, windowGradient, type DragPart } from './frames';
+	import { glyphBox, windowStrips, draggedSpan, framesText, previewFrames, railShare, windowGlyph, windowGradient, type DragPart } from './frames';
 	import type { Region } from '$lib/protocol/types';
 	import { alignSeries, valueAt } from './align';
 	import { cursors, playheadGroup, playheads } from './cursor';
@@ -325,7 +325,20 @@
 	/** The plot, axes and curves, as an image on the clipboard. */
 	async function copyImage() {
 		if (!plot) return;
-		copiedImage = await copyCanvas(plot.ctx.canvas, plotBackground(plotEl), undefined, view.title);
+		// the regions are elements over the canvas: they are painted onto a copy of it
+		let source = plot.ctx.canvas;
+		if (drawnRegions.length) {
+			const copy = document.createElement('canvas');
+			copy.width = source.width;
+			copy.height = source.height;
+			const ctx = copy.getContext('2d');
+			if (ctx) {
+				ctx.drawImage(source, 0, 0);
+				paintRegions(ctx, { left: plot.bbox.left, top: plot.bbox.top, width: plot.bbox.width, height: plot.bbox.height }, devicePixelRatio || 1);
+				source = copy;
+			}
+		}
+		copiedImage = await copyCanvas(source, plotBackground(plotEl), undefined, view.title);
 		if (copiedImage) setTimeout(() => (copiedImage = null), 1500);
 	}
 
@@ -1046,6 +1059,9 @@
 		window.addEventListener('pointerup', up);
 	}
 
+	/** The span being dragged, kept on the plot apart from the regions drawn under it. */
+	let heldRegion: HTMLDivElement | null = null;
+
 	/**
 	 * Draw `list` as the plot's regions, in place of the ones drawn. `held` is a span being dragged:
 	 * it stays as it is, and the draggable regions of `list` are left out.
@@ -1053,6 +1069,9 @@
 	function drawRegions(list: Region[], held: HTMLDivElement | null = null) {
 		if (!plot) return;
 		for (const el of regionEls) if (el !== held) el.remove();
+		// a span that was held through a drag is no longer among the regions drawn: it goes too
+		if (heldRegion !== held) heldRegion?.remove();
+		heldRegion = held;
 		regionEls = [];
 		drawnRegions = [];
 		list.forEach((r, k) => {
@@ -1239,6 +1258,66 @@
 	}
 
 	/**
+	 * The regions painted on an image of the plot as they are drawn on screen, where they are
+	 * elements over the canvas: a frame shaded by its window with the window on the rail, a cut
+	 * shaded, a span's two edges.
+	 */
+	function paintRegions(ctx: CanvasRenderingContext2D, box: Area, r: number) {
+		if (!plot || !drawnRegions.length) return;
+		const edge = cssVar('--region-frame-edge');
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(box.left, box.top, box.width, box.height);
+		ctx.clip();
+		const line = (x: number, width: number, alpha: number) => {
+			ctx.globalAlpha = alpha;
+			ctx.fillStyle = edge;
+			ctx.fillRect(x - (width * r) / 2, box.top, width * r, box.height);
+		};
+		for (const region of drawnRegions) {
+			const a = plot.valToPos(region.x0, 'x', true);
+			const b = plot.valToPos(region.x1, 'x', true);
+			if (!(b > a) || b < box.left || a > box.left + box.width) continue;
+			if (region.window?.length) {
+				for (const band of windowStrips(region.window)) {
+					ctx.globalAlpha = band.alpha;
+					ctx.fillStyle = edge;
+					// whole pixels, so neighboring strips neither overlap nor leave a seam
+					const from = Math.round(a + (b - a) * band.from);
+					ctx.fillRect(from, box.top, Math.round(a + (b - a) * band.to) - from, box.height);
+				}
+				line(a, 1, 0.45);
+				// its window in its slot on the rail
+				const slot = glyphBox(region.level ?? 0, region.rows ?? 1);
+				const top = box.top + slot.top * box.height;
+				const tall = slot.height * box.height;
+				const last = region.window.length - 1;
+				ctx.beginPath();
+				ctx.moveTo(a, top + tall);
+				region.window.forEach((w, k) => ctx.lineTo(a + ((b - a) * k) / Math.max(1, last), top + tall * (1 - Math.min(1, Math.max(0, w)))));
+				ctx.lineTo(b, top + tall);
+				ctx.closePath();
+				ctx.globalAlpha = 0.43;
+				ctx.fillStyle = edge;
+				ctx.fill();
+				ctx.globalAlpha = 1;
+				ctx.strokeStyle = edge;
+				ctx.lineWidth = 1.25 * r;
+				ctx.stroke();
+			} else if (region.kind === 'span') {
+				line(a, 1.5, 1);
+				line(b, 1.5, 1);
+			} else {
+				ctx.globalAlpha = 1;
+				ctx.fillStyle = cssVar(region.kind === 'cut' ? '--region-cut' : '--region-frame');
+				ctx.fillRect(a, box.top, b - a, box.height);
+				if (region.kind === 'frame') line(a, 1, 1);
+			}
+		}
+		ctx.restore();
+	}
+
+	/**
 	 * The plot as an image: the axes and curves with the marks drawn on them, and the legend, the
 	 * marks' readout and the notes drawn over it as they sit on screen (an outside legend is
 	 * drawn inside, in its corner). Null before the plot is drawn.
@@ -1256,6 +1335,7 @@
 		ctx.drawImage(src, 0, 0);
 		const r = devicePixelRatio || 1;
 		const box: Area = { left: plot.bbox.left, top: plot.bbox.top, width: plot.bbox.width, height: plot.bbox.height };
+		paintRegions(ctx, box, r);
 		const colors = { ink: cssVar('--text-1'), muted: cssVar('--text-2'), fill: plotBackground(plotEl), edge: cssVar('--line-2') };
 		const font = `${Math.round(11 * r)}px ${cssVar('--font-ui')}`;
 		if (legend !== 'off') {

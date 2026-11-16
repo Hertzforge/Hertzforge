@@ -88,6 +88,8 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 
 #: the operations on the project row that run at once, asking nothing (Brandon, 2026-11-10)
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
+#: forms with no Apply: each change is stored as it is made, and drawn where it is seen
+LIVE = frozenset({'project.set_averaging'})
 
 #: the rows that read a geometry's nodes, off until it has some
 #: operations whose blank records are every record, so that a row with none picked runs at
@@ -478,6 +480,8 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                 rows.append({**_op_row(op, fill=fill, **more), 'verb': 'Edit'})
                 continue
             more['omit'] = [*more.get('omit', []), 'mate']
+        if op.id in LIVE:
+            more['live'] = True
         rows.append(_op_row(op, fill=fill, **more))
     if where == 'solid' and part and len(verbs.picked_ids(part)) == 1:
         edit = _solid_edit_row(project, names[0], part['id'], OPERATIONS)

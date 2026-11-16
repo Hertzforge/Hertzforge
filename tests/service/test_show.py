@@ -493,6 +493,14 @@ def test_a_channel_table_on_a_geometry_is_the_geometry_with_arrows_by_role(plate
         shown(plate, geometry, table, prefs={'arrow_role': 'loud'})
 
 
+def test_the_averaging_form_has_no_apply_and_is_alone_in_that(plate):
+    history = named(plate, 'time_history')
+    table = projects.actions(plate, {'objects': [history]})['table']
+    rows = [row for column in table['columns'] for row in column['rows']]
+    live = {row['id'] for row in rows if row.get('live')}
+    assert live == {'project.set_averaging'}
+
+
 def test_the_averaging_form_draws_its_frames_on_the_history(plate, validate):
     project = plate.project
     history = named(plate, 'time_history')
