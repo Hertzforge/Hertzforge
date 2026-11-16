@@ -316,6 +316,8 @@ class AnalyzeState {
 	/** A draggable span on what the selection shows let go at new edges: its operation runs with them, and the selection is read again. */
 	async spanOnSelection(drag: { op: string; params: Record<string, unknown>; low: string; high?: string }, x0: number, x1: number): Promise<void> {
 		this.runError = null;
+		// a field being typed in keeps its own text; let go of it, so it shows what the drag stores
+		if (typeof document !== 'undefined' && document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
 		try {
 			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, { timeoutMs: RUN_TIMEOUT_MS });
 			if (res.project) this.app.project.apply(res.project);

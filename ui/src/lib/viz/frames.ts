@@ -63,3 +63,28 @@ export function wallGlyph(window: number[], level: number, rows: number, a: numb
 	edges.push(a, depth, base, b, depth, base);
 	return { faces, edges };
 }
+
+/**
+ * A frame's shading on the stage, between stage x `a` and `b`: strips across the floor and up the
+ * back wall, with the opacity at each corner the window's weight there (`alphas`, one per vertex),
+ * so the stage is shaded as the flat plot is and overlapping frames add.
+ */
+export function windowBands(window: number[], a: number, b: number, depth: number, height: number): { faces: number[]; alphas: number[] } {
+	const faces: number[] = [];
+	const alphas: number[] = [];
+	if (window.length < 2 || !(b > a)) return { faces, alphas };
+	const last = window.length - 1;
+	const weight = (k: number) => BAND_PEAK * Math.min(1, Math.max(0, window[k]));
+	for (let k = 0; k < last; k++) {
+		const x0 = a + ((b - a) * k) / last;
+		const x1 = a + ((b - a) * (k + 1)) / last;
+		const w0 = weight(k);
+		const w1 = weight(k + 1);
+		// the floor, then the wall
+		faces.push(x0, 0, 0, x1, 0, 0, x1, depth, 0, x0, 0, 0, x1, depth, 0, x0, depth, 0);
+		alphas.push(w0, w1, w1, w0, w1, w0);
+		faces.push(x0, depth, 0, x1, depth, 0, x1, depth, height, x0, depth, 0, x1, depth, height, x0, depth, height);
+		alphas.push(w0, w1, w1, w0, w1, w0);
+	}
+	return { faces, alphas };
+}

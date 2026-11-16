@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { glyphBox, slotHeight, wallGlyph, windowGradient, windowPath } from './frames';
+import { BAND_PEAK, glyphBox, slotHeight, wallGlyph, windowBands, windowGradient, windowPath } from './frames';
 
 describe('averaging frames on a plot', () => {
 	it('gives each row a slot, thinner once the rows outgrow the rail', () => {
@@ -33,5 +33,17 @@ describe('averaging frames on a plot', () => {
 		expect(peak).toBeCloseTo(0.5 * (1 - box.top));
 		expect(edges.filter((_, i) => i % 3 === 1).every((y) => y === 0.9)).toBe(true);
 		expect(wallGlyph([1], 0, 1, 0, 1, 0.9, 0.5).faces).toEqual([]);
+	});
+
+	it('shades the stage by the window: each strip of the floor and the wall as dark as the window is there', () => {
+		const { faces, alphas } = windowBands([0, 1, 0], 0.4, 0.8, 0.9, 0.5);
+		// two strips, each a quad on the floor and a quad on the wall
+		expect(faces.length).toBe(2 * 2 * 18);
+		expect(alphas.length).toBe(faces.length / 3);
+		expect(Math.max(...alphas)).toBeCloseTo(BAND_PEAK);
+		expect(Math.min(...alphas)).toBe(0);
+		// every corner at the middle of the frame carries the peak, every corner at its ends none
+		alphas.forEach((alpha, v) => expect(alpha).toBeCloseTo(Math.abs(faces[3 * v] - 0.6) < 1e-9 ? BAND_PEAK : 0));
+		expect(windowBands([1], 0, 1, 0.9, 0.5).faces).toEqual([]);
 	});
 });

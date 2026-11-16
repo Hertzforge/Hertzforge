@@ -42,6 +42,9 @@ DETREND = Param('detrend', 'Detrend', 'enum', default='none', setting='averaging
 #: the dragged span of every frame, seconds on the record's clock
 SPAN_START = Param('start', 'Span from', 'number', default=0.0, unit='s', step=0.1)
 SPAN_STOP = Param('stop', 'Span to', 'number', default=1.0, unit='s', step=0.1)
+#: where the span ended before the drag, which tells a left edge dragged from a slide;
+#: negative when not known
+SPAN_WAS = Param('was_stop', 'Span ended at', 'number', default=-1.0, unit='s', step=0.1)
 
 PASS = Param('kind', 'Filter', 'enum', default='low-pass', setting='filtering.kind',
              options=(Option('low-pass', 'Low-pass'), Option('high-pass', 'High-pass'),
@@ -164,7 +167,7 @@ def span_region(name: str, averaging: Any, rate: float, origin: float) -> dict:
     bounds = averaging.frame_bounds(rate, origin)
     held = {'source': name, 'frame_length': int(averaging.frame_length),
             'overlap': float(averaging.overlap), 'window': averaging.window,
-            'detrend': averaging.detrend}
+            'detrend': averaging.detrend, 'was_stop': float(bounds[-1][1])}
     return v.region(bounds[0][0], bounds[-1][1], 'span',
                     'Drag to slide the frames; drag an edge for more or fewer',
                     v.dragging('project.drag_averaging', held, 'start', 'stop'))
@@ -247,19 +250,26 @@ def set_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def spanned(averaging: Any, rate: float, origin: float, samples: int,
-            start: float, stop: float) -> Any:
+            start: float, stop: float, was_stop: float | None = None) -> Any:
     """`averaging` moved to the span `start` to `stop`, seconds on the record's
-    clock: it starts where the span does and has as many whole frames as the
-    span holds, at least one. A span slid past the end of the record is slid
-    back until its frames fit, and one dragged longer than the record keeps the
-    frames that fit."""
+    clock, with as many whole frames as the span holds, at least one. It starts
+    where the span does, unless the span still ends at `was_stop`, where it
+    ended before the drag: then its left edge was the one dragged, so the end
+    stays and whole frames are added or removed at the start. A span slid past
+    the end of the record is slid back until its frames fit, and one dragged
+    longer than the record keeps the frames that fit."""
     from dataclasses import replace
 
     n, hop = int(averaging.frame_length), int(averaging.hop)
     first = max(round((float(start) - origin) * rate), 0)
-    length = round((float(stop) - origin) * rate) - first
+    last = round((float(stop) - origin) * rate)
+    length = last - first
     # a slid span comes back a sample short or long of its frames; that is not a frame lost
     frames = 1 + max(length - n + min(2, hop - 1), 0) // hop
+    if was_stop is not None and abs(float(stop) - float(was_stop)) * rate < 1.5:
+        # the left edge dragged: the frames end where they did
+        frames = max(min(frames, 1 + max(last - n, 0) // hop), 1)
+        first = max(last - n - (frames - 1) * hop, 0)
     moved = replace(averaging, start=first / rate, frames=frames, start_set=True)
     if not moved.fits(samples, rate):
         first = min(first, max(samples - moved.span, 0))
@@ -272,7 +282,8 @@ def spanned(averaging: Any, rate: float, origin: float, samples: int,
 def drag_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.drag_averaging`: a history's frames after their span was
     dragged on its plot to `start` and `stop`, seconds on the record's clock
-    (`spanned`), with the frame length, overlap, window and detrend the plot drew."""
+    (`spanned`), with the frame length, overlap, window and detrend the plot drew.
+    A span that still ends at `was_stop` had its left edge dragged."""
     from hertzforge.core.averaging import Averaging
 
     name = params['source']
@@ -284,7 +295,8 @@ def drag_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     rate = _rate(history)
     moved = spanned(drawn, rate, float(history.abscissa[0]),
-                    len(history.abscissa), params['start'], params['stop'])
+                    len(history.abscissa), params['start'], params['stop'],
+                    params['was_stop'] if params['was_stop'] >= 0 else None)
     if not moved.fits(len(history.abscissa), rate):
         raise refused(f'{name} is shorter than one frame of {moved.frame_length} samples')
     history.averaging = moved
@@ -387,7 +399,7 @@ OPERATIONS = (
         id='project.drag_averaging', title='Drag Averaging', workspace='signals', everywhere=True,
         summary='A time history\'s frames after their span was dragged on its plot: '
                 'slid along the record, or made more or fewer.',
-        params=(HISTORY, FRAME, OVERLAP, WINDOW, DETREND, SPAN_START, SPAN_STOP),
+        params=(HISTORY, FRAME, OVERLAP, WINDOW, DETREND, SPAN_START, SPAN_STOP, SPAN_WAS),
         outputs=('reading',), run=drag_averaging,
         edits=True),
     Operation(

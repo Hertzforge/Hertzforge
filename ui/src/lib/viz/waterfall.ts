@@ -323,3 +323,18 @@ export function regionMarks(a: number, b: number): { faces: number[]; edges: num
 	for (const x of [lo, hi]) edges.push(x, 0, 0, x, Y, 0, x, Y, 0, x, Y, Z);
 	return { faces, edges };
 }
+
+/** Which part of a draggable region a handle moves: its low edge, the whole of it, or its high edge. */
+export type HandlePart = 'low' | 'move' | 'high';
+
+/**
+ * The handles a draggable region is moved by on the stage, along the floor's front edge between
+ * stage x `a` and `b`: one at each end when the span has two edges to drag, and one in the middle
+ * that slides the whole of it. The rest of the stage stays the camera's.
+ */
+export function regionHandles(a: number, b: number, two: boolean): { part: HandlePart; at: [number, number, number] }[] {
+	const lo = Math.min(a, b);
+	const hi = Math.max(a, b);
+	const middle: { part: HandlePart; at: [number, number, number] } = { part: 'move', at: [(lo + hi) / 2, 0, 0] };
+	return two ? [{ part: 'low', at: [lo, 0, 0] }, middle, { part: 'high', at: [hi, 0, 0] }] : [middle];
+}

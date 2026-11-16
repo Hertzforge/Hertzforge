@@ -94,8 +94,8 @@ discards; a `span` draws its edges alone. `label` is said when the span is hover
 `low` and the new x1 as `high`, and the answer's views take the result's place. They are not listed in the legend; the
 result's reading says what they are. A frame with `window` (its weights from 0 to 1, evenly spaced
 from x0 to x1) has that window drawn in a slot on a rail along the top of the plot, on the back wall
-of a stage, and its shading follows the window, so the shading is the weight each part of the record
-carries; `level` is the frame's row on the rail, of `rows`, since frames that overlap cannot share a
+of a stage, and its shading follows the window on the plot and on the stage's floor and wall alike,
+so the shading is the weight each part of the record carries; `level` is the frame's row on the rail, of `rows`, since frames that overlap cannot share a
 row (one row at no overlap, two at a half, four at three quarters).
 
 `handles` (optional) are points dragged up and down on the plot, each at `x` on the curve of
@@ -702,9 +702,13 @@ and row, then a `span` over all of them. The shell sends it while the Averaging 
 history: an object holding what the form holds (`frame_length`, `overlap`, `window`, `frames`,
 `start`, `detrend`; a field left out is the history's own), so the frames follow the typing and
 nothing is stored; null draws none. The span's drag runs `project.drag_averaging` with the frame,
-overlap, window and detrend drawn and the span's new edges as `start` and `stop`, seconds on the
-record's clock: the middle dragged slides the frames, an edge dragged adds or removes whole frames,
-at least one, and frames slid past the end of the record stop at its end. That stores the averaging,
+overlap, window and detrend drawn, `was_stop` (where the span ended before the drag) and the span's
+new edges as `start` and `stop`, seconds on the record's clock: the middle dragged slides the
+frames, and an edge dragged adds or removes whole frames at that end, at least one, the other end
+staying where it was (a span that still ends at `was_stop` had its left edge dragged). Frames slid
+past the end of the record stop at its end. On a stage a draggable region is moved by handles on the
+floor's front edge, one at each end and one in the middle, and a press anywhere else turns the view;
+on a flat plot the span itself is pressed. That stores the averaging,
 and the shell reads the selection again. A lone channel table shows typed into, its cells
 edited with the widgets `edit.kinds` names (a flag by a check box, a choice from its list, a date in a
 date field, a unit from a shortlist); `prefs.environment` picks the loop whose control channels the

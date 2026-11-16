@@ -17,8 +17,7 @@ import {
 	surfaceIndex,
 	unfraction,
 	wallTriangles,
-	zoneTriangles
-} from './waterfall';
+	zoneTriangles, regionHandles } from './waterfall';
 
 describe('segmentIndex', () => {
 	const offsets = [0, 4, 8];
@@ -198,5 +197,18 @@ describe('regions on the stage', () => {
 		expect(edges).toHaveLength(24);
 		expect(regionMarks(-1, -0.5).faces).toHaveLength(0);
 		expect(Math.max(...regionMarks(1, 9).faces.filter((_v, i) => i % 3 === 0))).toBeCloseTo(STAGE.x);
+	});
+});
+
+describe('the handles of a draggable region', () => {
+	it('puts one at each end and one in the middle, on the floor in front', () => {
+		const handles = regionHandles(1.2, 0.4, true);
+		expect(handles.map((h) => h.part)).toEqual(['low', 'move', 'high']);
+		expect(handles.map((h) => h.at[0])).toEqual([0.4, 0.8, 1.2]);
+		expect(handles.every((h) => h.at[1] === 0 && h.at[2] === 0)).toBe(true);
+	});
+
+	it('gives a span that only slides its middle handle alone', () => {
+		expect(regionHandles(0.4, 1.2, false)).toEqual([{ part: 'move', at: [0.8, 0, 0] }]);
 	});
 });
