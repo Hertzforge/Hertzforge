@@ -6154,6 +6154,7 @@ buckets) of the drive, its velocity and its displacement. `derived`:
  "inputs":[{"index":1,"role":"input","unit":"g","description":"Control"}],
  "drives":[{"index":2,"role":"drive","unit":"V","description":"Drive"}],
  "overloads":[{"channel":1,"overload":false}],
+ "health":{"engine_ticks":6,"worst_tick_ms":0.25,"budget_ms":62.5,"health_faults":0,"ring_overruns":0},
  "record":{"folder":"/home/operator/Hertzforge_Data/playback","streams":"on","problem":null},
  "end":null}
 ```
@@ -6163,10 +6164,12 @@ buckets) of the drive, its velocity and its displacement. `derived`:
 `reading_ahead`, `pre_roll`, `playing`, `post_roll`, `done`, `stopping`, `stopped`, `zeroed`
 (the drive went to zero at once) or `refused` (the start was refused). `progress`: the file
 samples played, of `samples`, in seconds and as a fraction; the station time since the clock
-started (`elapsed_s`); the read-ahead held (`buffered_s`). `end`, once finished:
+started (`elapsed_s`); the read-ahead held (`buffered_s`). `health`, null until the loop has
+ticked: the control loop's ticks, its worst tick's compute time against the tick's budget
+(milliseconds), its scheduling faults and its raw ring's overruns. `end`, once finished:
 `{"outcome","message","at_s","played","emergency_stop","trip"}`, `at_s` station seconds from the
 clock's start, `trip` `{"channel","axis","value","limit"}` for a response abort.
-`playback.state` is sent when anything but `progress` changes; `playback.log` with each run's
+`playback.state` is sent when anything but `progress` and `health` changes; `playback.log` with each run's
 new log entries (`{"run_id","entries"}`, each `{"seq","at_unix","kind","text"}`).
 
 ### Playback Display

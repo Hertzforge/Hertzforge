@@ -8,7 +8,7 @@
 
 use super::config::WirePlayback;
 use super::records::{self, StartFacts};
-use crate::protocol::{num, ErrorCode, MethodError};
+use crate::protocol::{num, opt_num, ErrorCode, MethodError};
 use crate::pulse::rails::{now_unix, Shared};
 use crate::random::record as rrec;
 use crate::record::tap::{self, Recording};
@@ -103,6 +103,38 @@ pub struct Row {
     pub description: String,
 }
 
+/// The loop's health, as the engine keeps it: in the state, and so in the record's
+/// `end.json`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaybackHealth {
+    pub engine_ticks: u64,
+    /// The worst compute time of a tick, against the tick's budget.
+    pub worst_tick_ms: Option<f64>,
+    pub budget_ms: Option<f64>,
+    pub health_faults: u64,
+    pub ring_overruns: u64,
+}
+
+impl PlaybackHealth {
+    /// The run host's copy of the engine's health, once the run has ticked.
+    pub fn from_status(st: &hertzforge_playback::HostStatus) -> Option<PlaybackHealth> {
+        let ms = |d: Duration| d.as_secs_f64() * 1e3;
+        st.health.as_ref().map(|h| PlaybackHealth {
+            engine_ticks: h.ticks,
+            worst_tick_ms: (h.ticks > 0).then(|| ms(h.worst_compute)),
+            budget_ms: (!h.compute_budget.is_zero()).then(|| ms(h.compute_budget)),
+            health_faults: h.health_faults,
+            ring_overruns: h.ring_overruns as u64,
+        })
+    }
+
+    fn to_json(&self) -> Value {
+        json!({"engine_ticks": self.engine_ticks, "worst_tick_ms": opt_num(self.worst_tick_ms),
+               "budget_ms": opt_num(self.budget_ms), "health_faults": self.health_faults,
+               "ring_overruns": self.ring_overruns})
+    }
+}
+
 /// What `playback.state` shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlaybackView {
@@ -127,6 +159,8 @@ pub struct PlaybackView {
     /// Each file channel's drive row.
     pub map: Vec<u32>,
     pub overloads: Vec<bool>,
+    /// The loop's health once the run has ticked.
+    pub health: Option<PlaybackHealth>,
     pub record: Option<RecordRef>,
     pub end: Option<End>,
 }
@@ -177,6 +211,7 @@ pub fn configured_view(
             .collect(),
         map: w.map.clone(),
         overloads: vec![false; rrec::input_rows(table).len()],
+        health: None,
         record: None,
         end: None,
     }
@@ -215,6 +250,7 @@ pub fn state_json(v: Option<&PlaybackView>) -> Value {
         "drives": rows_json(&v.drives),
         "overloads": v.inputs.iter().zip(&v.overloads)
             .map(|(r, o)| json!({"channel": r.index, "overload": o})).collect::<Vec<_>>(),
+        "health": v.health.as_ref().map_or(Value::Null, PlaybackHealth::to_json),
         "record": v.record.as_ref().map_or(Value::Null, |r| json!({"folder": r.folder,
             "streams": if r.streams { "on" } else { "off" }, "problem": r.problem})),
         "end": v.end.as_ref().map_or(Value::Null, End::to_json),
@@ -239,6 +275,7 @@ pub fn state_key(v: Option<&PlaybackView>) -> String {
             let mut s = state_json(Some(v));
             if let Value::Object(m) = &mut s {
                 m.remove("progress");
+                m.remove("health");
             }
             s.to_string()
         }
@@ -743,6 +780,9 @@ impl PlaybackRun {
             v.played = st.played;
             v.generated = st.generated;
             v.buffered_frames = st.buffered;
+            if let Some(h) = PlaybackHealth::from_status(&st) {
+                v.health = Some(h);
+            }
             if !st.overloads.is_empty() {
                 for (k, (now, was)) in st.overloads.iter().zip(prev.overloads.iter()).enumerate() {
                     if *now && !*was {

@@ -24,7 +24,7 @@ const PLAYBACK = readdirSync(DIR).filter((f) => /(^|_)playback(_|\.)/.test(f) &&
 const TEXT = PLAYBACK.filter((f) => f.endsWith('.json') && !f.endsWith('.expected.json')).sort();
 const BIN = PLAYBACK.filter((f) => f.endsWith('.bin')).sort();
 /** The state's fields, as PROTOCOL lists them. */
-const STATE_KEYS = ['ceiling_v', 'class', 'drive', 'drives', 'end', 'fs_hz', 'inputs', 'level_db', 'overloads', 'phase', 'progress', 'record', 'rolls', 'run_id', 'source', 'state', 'title'];
+const STATE_KEYS = ['ceiling_v', 'class', 'drive', 'drives', 'end', 'fs_hz', 'health', 'inputs', 'level_db', 'overloads', 'phase', 'progress', 'record', 'rolls', 'run_id', 'source', 'state', 'title'];
 
 type Expected = { dtype: Dtype; shape: number[]; values: number[] };
 const isExpected = (v: unknown): v is Expected => typeof v === 'object' && v !== null && 'dtype' in v && 'values' in v;

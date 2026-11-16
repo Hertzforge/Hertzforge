@@ -67,6 +67,13 @@
         "overload": false
       }
     ],
+    "health": {
+      "engine_ticks": 24,
+      "worst_tick_ms": 0.0,
+      "budget_ms": 1000,
+      "health_faults": 0,
+      "ring_overruns": 0
+    },
     "record": {
       "folder": "golden_playback",
       "streams": "on",

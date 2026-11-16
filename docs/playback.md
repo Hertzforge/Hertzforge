@@ -224,7 +224,7 @@ start. It holds:
 | `streams/drives` | Every drive as the device accepted it, in volts, frame for frame with the inputs: the pre-roll's zeros, the file at the level, then the post-roll, or a stop ramp and a block of zeros after it. The zeros the station plays after that, while the inputs come back, are not recorded | **drives**, a time history |
 | `results/playback_check` | The check report, and per channel its numbers and its drive, velocity and displacement envelopes | Part of the **Run Record**, as named arrays |
 | `results/playback_outcome` | How the run ended, the samples of the file played and the frames generated | Part of the **Run Record** |
-| `end.json` | The end, the samples played of the file's, and the run's last state | Part of the **Run Record** |
+| `end.json` | The end, the samples played of the file's, and the run's last state, with the control loop's health: its ticks, its worst tick's compute time against the tick's budget, its scheduling faults and ring overruns | Part of the **Run Record** |
 
 With **Record time histories** off there is no `streams/` folder; the rest is always kept.
 

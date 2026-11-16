@@ -8,7 +8,7 @@ use hertzforge_playback::plan::{refusals, DriveRow, StationOffer};
 use hertzforge_playback::{check_file, DriveFile};
 use sds_control::codec;
 use sds_control::playback::config;
-use sds_control::playback::run::{self, Display, PlaybackView, RecordRef, Row, State};
+use sds_control::playback::run::{self, Display, PlaybackHealth, PlaybackView, RecordRef, Row, State};
 use sds_control::protocol;
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -80,6 +80,13 @@ fn running_view() -> PlaybackView {
         }],
         map: vec![2],
         overloads: vec![false],
+        health: Some(PlaybackHealth {
+            engine_ticks: 6,
+            worst_tick_ms: Some(0.25),
+            budget_ms: Some(62.5),
+            health_faults: 0,
+            ring_overruns: 0,
+        }),
         record: Some(RecordRef {
             folder: "/home/operator/Hertzforge_Data/playback".into(),
             streams: true,

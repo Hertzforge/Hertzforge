@@ -54,6 +54,13 @@
     "overload": false
    }
   ],
+  "health": {
+   "engine_ticks": 6,
+   "worst_tick_ms": 0.25,
+   "budget_ms": 62.5,
+   "health_faults": 0,
+   "ring_overruns": 0
+  },
   "record": {
    "folder": "/home/operator/Hertzforge_Data/playback",
    "streams": "on",

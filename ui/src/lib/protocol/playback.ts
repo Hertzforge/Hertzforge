@@ -187,8 +187,18 @@ export interface PlaybackRun {
 	inputs: PlaybackRow[];
 	drives: PlaybackRow[];
 	overloads: { channel: number; overload: boolean }[];
+	/** The loop's health once the run has ticked: ticks, the worst tick's compute time against its budget, scheduling faults and ring overruns. */
+	health: PlaybackHealth | null;
 	record: RunRecordRef | null;
 	end: PlaybackEnd | null;
+}
+
+export interface PlaybackHealth {
+	engine_ticks: number;
+	worst_tick_ms: number | null;
+	budget_ms: number | null;
+	health_faults: number;
+	ring_overruns: number;
 }
 
 export type PlaybackState = { run_id: null; state: 'unconfigured' } | PlaybackRun;

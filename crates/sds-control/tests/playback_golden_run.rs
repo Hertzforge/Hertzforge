@@ -3,7 +3,8 @@
 //! eighth of a second of pre-roll and of post-roll, played to its end. The simulator's
 //! seed is fixed and the drive file is made the same way every time; what follows the
 //! wall clock is normalized: the wall times, the run's unique identity, the build
-//! fields, the folders' paths, the station frames and the read-ahead's fill. The drive
+//! fields, the folders' paths, the station frames, the read-ahead's fill and the worst
+//! tick's compute time. The drive
 //! stream is whole at [`CUT_FRAMES`] frames: the pre-roll (the station's lead-in zeros
 //! first), the burst and the post-roll. The input stream runs on past it by the
 //! station's input delay and is cut to the same frames (`cut_from_frames`).
@@ -141,6 +142,9 @@ async fn golden_run() -> PathBuf {
 fn normalize_state(v: &mut Value) {
     set(v, &["record", "folder"], json!("golden_playback"));
     set(v, &["progress", "buffered_s"], json!(0.0));
+    // the worst tick is wall time
+    assert!(v["health"]["worst_tick_ms"].as_f64().is_some(), "{v}");
+    set(v, &["health", "worst_tick_ms"], json!(0.0));
 }
 
 fn normalized(folder: &Path, golden: bool) -> BTreeMap<String, Vec<u8>> {

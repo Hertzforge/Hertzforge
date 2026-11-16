@@ -778,7 +778,7 @@ and `derived`. Then these, each checked against the golden run folder
 | `streams/drives` | Every drive as the device accepted it, in volts, in table order (`kind` `drives`), frame for frame with the inputs: the pre-roll's zeros (the station's lead-in first), the file at the level from the pre-roll's last frame, then the post-roll, or the stop ramp and one station block of zeros after it. A completed run's drives are the pre-roll, the file and the post-roll exactly; the zeros played after them, while the inputs come back, are not recorded |
 | `results/playback_check` | The check report (`kind` `drive_check`, the report whole in its description) and, per file channel, its peak, start, end, velocity and displacement end values and peaks, and the envelopes of the drive, the velocity and the displacement (each bucket's minimum and maximum), in V, V s and V s² |
 | `results/playback_outcome` | How the run ended (`kind` `playback_outcome`): `ended` (`completed`, `stopped` or `aborted`), the `outcome` and its reason in words, whether the emergency stop was issued and a response abort's trip; arrays `played` (file samples), `played_s` and `generated` (frames from the station's first, the rolls included) |
-| `end.json` | The end, as the run's state reports it, the samples played of the file's, and the state itself |
+| `end.json` | The end, as the run's state reports it, the samples played of the file's, and the state itself, with the loop's `health` (`engine_ticks`, `worst_tick_ms` against `budget_ms`, `health_faults`, `ring_overruns`) |
 
 The log has an entry for the check (`check`, `data.event` `check_passed`),
 the arm (`state`, `armed`), each phase as it begins with the generated frame

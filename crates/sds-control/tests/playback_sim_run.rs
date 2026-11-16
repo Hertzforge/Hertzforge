@@ -183,6 +183,11 @@ async fn playback_runs_end_to_end_on_one_two_and_four_drives() {
         let end = finished(&mut c, Duration::from_secs(60)).await;
         assert_eq!(end["end"]["outcome"], "completed", "{end}");
         assert_eq!(end["end"]["played"], 4096);
+        // the loop's health: its ticks, the worst tick against its budget, no fault
+        let h = &end["health"];
+        assert!(h["engine_ticks"].as_u64().unwrap() > 0, "{h}");
+        assert!(h["worst_tick_ms"].as_f64().unwrap() <= h["budget_ms"].as_f64().unwrap());
+        assert_eq!((h["health_faults"].as_u64(), h["ring_overruns"].as_u64()), (Some(0), Some(0)));
         let rec = PathBuf::from(end["record"]["folder"].as_str().unwrap());
         record_done(&mut c, &rec).await;
         let run = read(&rec.join("run.json"));

@@ -6038,6 +6038,8 @@ PLAYBACK_RUNNING = {
     'inputs': [{'index': 1, 'role': 'input', 'unit': 'g', 'description': 'Control'}],
     'drives': [{'index': 2, 'role': 'drive', 'unit': 'V', 'description': 'Drive'}],
     'overloads': [{'channel': 1, 'overload': False}],
+    'health': {'engine_ticks': 6, 'worst_tick_ms': 0.25, 'budget_ms': 62.5, 'health_faults': 0,
+               'ring_overruns': 0},
     'record': {'folder': '/home/operator/Hertzforge_Data/playback', 'streams': 'on',
                'problem': None},
     'end': None,
