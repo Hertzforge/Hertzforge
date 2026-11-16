@@ -160,6 +160,9 @@
         "x1": {"type": "number"},
         "kind": {"enum": ["frame", "cut", "span"]},
         "label": {"type": "string"},
+        "window": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}},
+        "level": {"type": "integer", "minimum": 0},
+        "rows": {"type": "integer", "minimum": 1},
         "drag": {
           "type": "object", "required": ["op", "params", "low"], "additionalProperties": false,
           "properties": {

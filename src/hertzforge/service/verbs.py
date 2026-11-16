@@ -30,6 +30,7 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     # typed into a table
     'set_entity', 'set_entity_cell', 'set_channel_cell', 'describe_mode',
     # dragged on the plot
+    'drag_averaging',
     'set_band_edge',
     # the table's own rows
     'link', 'unlink', 'set_basis', 'name_object_group',

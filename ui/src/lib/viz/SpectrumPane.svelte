@@ -20,6 +20,7 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { Series, SpectrumView, SpectrumHandle } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { windowGlyph, windowGradient } from './frames';
 	import { alignSeries, valueAt } from './align';
 	import { cursors, playheadGroup, playheads } from './cursor';
 	import { formatFixed, formatTick } from './format';
@@ -505,6 +506,13 @@
 			const el = document.createElement('div');
 			el.className = `region ${r.kind}`;
 			if (r.label) el.title = r.label;
+			if (r.window?.length) {
+				// the shading follows the window, so it shows the weight each part of the record carries;
+				// where two frames overlap their shadings add
+				el.classList.add('windowed');
+				el.style.background = windowGradient(r.window);
+				el.insertAdjacentHTML('beforeend', windowGlyph(r.window, r.level ?? 0, r.rows ?? 1));
+			}
 			if (r.drag && onspan) {
 				// dragged in the top layer, so the press is the span's and not a zoom
 				el.classList.add('drag');
@@ -1620,6 +1628,26 @@
 	.plot :global(.region.frame) {
 		background: var(--region-frame);
 		border-left: 1px solid var(--region-frame-edge);
+	}
+
+	/* a windowed frame's shading is its window's gradient, set on the element */
+	.plot :global(.region.frame.windowed) {
+		border-left-color: color-mix(in srgb, var(--region-frame-edge) 45%, transparent);
+	}
+
+	/* a frame's window in its slot on the rail along the top */
+	.plot :global(.region .glyph) {
+		position: absolute;
+		left: 0;
+		width: 100%;
+		overflow: visible;
+	}
+
+	.plot :global(.region .glyph path) {
+		fill: color-mix(in srgb, var(--region-frame-edge) 43%, transparent);
+		stroke: var(--region-frame-edge);
+		stroke-width: 1.25;
+		vector-effect: non-scaling-stroke;
 	}
 
 	.plot :global(.region.cut) {

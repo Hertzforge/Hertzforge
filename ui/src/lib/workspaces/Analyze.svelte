@@ -74,6 +74,8 @@
 	// a settings form opens on what its source object holds, and follows it when the source changes
 	$effect(() => a.followSource());
 	$effect(() => a.followPreview());
+	// the Averaging form's frames are drawn on the history it is open on
+	$effect(() => a.followAveraging());
 
 	// a stage that reads at a line follows the frequency cursor of the plot beside it
 	$effect(() => {
@@ -281,6 +283,7 @@
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
 										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
 										ongizmo={v.view === 'shape3d' && v.gizmo ? (act, patch) => a.dragOnSelection(act, patch) : undefined}
+										onspan={(v.view === 'spectrum' || v.view === 'waterfall') && v.regions?.some((r) => r.drag) ? (k, x0, x1) => { const drag = v.regions?.[k]?.drag; if (drag) void a.spanOnSelection(drag, x0, x1); } : undefined}
 									/>
 								</div>
 								{/if}

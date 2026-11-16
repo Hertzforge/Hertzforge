@@ -40,8 +40,10 @@ def test_the_descriptors_validate_and_open_on_settings(validate):
     for op in OPERATIONS:
         validate(op.to_json(), 'operation')
         assert op.edits
+        # a drag's span is where the pointer let go, not a setting to open on
         assert all('setting' in p.to_json() for p in op.params
-                   if p.name not in ('source', 'record'))
+                   if p.name not in ('source', 'record')
+                   and not (op.id == 'project.drag_averaging' and p.name in ('start', 'stop')))
 
 
 def test_averaging_set_is_stored_read_back_and_listed(state, validate):
@@ -52,10 +54,15 @@ def test_averaging_set_is_stored_read_back_and_listed(state, validate):
     rate = project['Time History'].sample_rate
     *frames, span = trace['regions']
     assert [r['kind'] for r in frames] == ['frame'] * 4
-    # the span over every frame slides them: the averaging again with the new start
-    assert span['kind'] == 'span' and span['drag']['op'] == 'project.set_averaging'
-    assert span['drag']['low'] == 'start' and 'high' not in span['drag']
-    assert span['drag']['params']['frame_length'] == 2048
+    # the span over every frame is dragged: its middle slides them, an edge adds or removes
+    assert span['kind'] == 'span' and span['drag'] == {
+        'op': 'project.drag_averaging', 'low': 'start', 'high': 'stop',
+        'params': {'source': 'Time History', 'frame_length': 2048, 'overlap': 0.5,
+                   'window': 'flattop', 'detrend': 'none'}}
+    # each frame carries its window and its row: at half overlap they alternate between two
+    assert [r['level'] for r in frames] == [0, 1, 0, 1] and {r['rows'] for r in frames} == {2}
+    window = frames[0]['window']
+    assert len(window) == 33 and max(window) == 1.0 and abs(window[0]) < 0.01
     assert frames[0]['x0'] == pytest.approx(0.5, abs=1 / rate)
     assert frames[1]['x0'] - frames[0]['x0'] == pytest.approx(1024 / rate)
     assert frames[0]['label'].startswith('Frame 1, ')
@@ -140,8 +147,30 @@ def test_a_dragged_frame_span_slides_the_frames_and_keeps_the_rest(state):
     project = state.project
     trace, _ = run(project, 'project.set_averaging', frame_length=2048, overlap=0.5,
                    window='flattop', frames=4, start=0.5)
-    drag = trace['regions'][-1]['drag']
-    run(project, drag['op'], **{**drag['params'], drag['low']: 1.0})
-    averaging = project['Time History'].averaging
-    assert averaging.start == pytest.approx(1.0)
+    span = trace['regions'][-1]
+    drag = span['drag']
+    history = project['Time History']
+    rate = history.sample_rate
+    hop = 1024 / rate
+
+    def dragged(x0, x1):
+        run(project, drag['op'], **{**drag['params'], drag['low']: x0, drag['high']: x1})
+        return history.averaging
+
+    # the middle dragged: the same frames, half a second on
+    averaging = dragged(span['x0'] + 0.5, span['x1'] + 0.5)
+    assert averaging.start == pytest.approx(1.0, abs=1 / rate)
     assert (averaging.frame_length, averaging.window, averaging.frames) == (2048, 'flattop', 4)
+    assert averaging.overlap == 0.5 and averaging.start_set
+    # the right edge dragged out two and a half hops: two more whole frames
+    low = 1.0 + float(history.abscissa[0])
+    averaging = dragged(low, low + (2048 + 3 * 1024) / rate + 2.5 * hop)
+    assert averaging.frames == 6 and averaging.start == pytest.approx(1.0, abs=1 / rate)
+    # an edge dragged in past one frame leaves one
+    assert dragged(low, low + 0.2 * hop).frames == 1
+    # slid past the end of the record, the frames stop at its end
+    end = float(history.abscissa[-1])
+    averaging = dragged(end, end + 2048 / rate)
+    assert averaging.frames == 1 and averaging.fits(len(history.abscissa), rate)
+    assert averaging.stop(rate, float(history.abscissa[0])) == pytest.approx(end, abs=2 / rate)
+    assert settings(state)['averaging']['frames'] == 1

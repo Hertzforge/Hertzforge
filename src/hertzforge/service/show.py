@@ -86,6 +86,7 @@ PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
          'sensors': True,
+         'averaging': None,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
 
 TABLE_VIEWS = ('channels', 'response', 'reference')
@@ -283,6 +284,50 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
                     placed, geometry, rows_of(geometry.node_id if ids is None else ids))[0]
             notes.append(f'{len(placed)} sensors')
     return notes
+
+
+#: what `prefs.averaging` may hold: the Averaging form's fields
+AVERAGING_FIELDS = ('frame_length', 'overlap', 'window', 'frames', 'start', 'detrend')
+
+
+def _averaging(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
+               ) -> list[str]:
+    """The averaging drawn on a lone time history's own plot, the stage or
+    the flat one, while its form is open: `prefs.averaging` holds what the
+    form holds, typed or stored, and the frames come as `regions`
+    (`ops_settings.averaging_regions`): each frame with its window and its
+    row, then the span that drags them. Returns the notes."""
+    from hertzforge.core.averaging import Averaging
+    from hertzforge.core.data import TimeHistory
+
+    from .ops_settings import averaging_regions
+
+    draft = prefs.get('averaging')
+    if draft is None or len(objects) != 1 or not isinstance(project[objects[0]], TimeHistory):
+        return []
+    name = objects[0]
+    history = project[name]
+    held = history.averaging
+    stored = {} if held is None else {field: getattr(held, field) for field in AVERAGING_FIELDS}
+    fields = {'frame_length': 4096, 'overlap': 0.5, 'window': 'hann', 'frames': 1,
+              'start': 0.0, 'detrend': 'none', **stored, **draft}
+    try:
+        averaging = Averaging(int(fields['frame_length']), float(fields['overlap']),
+                              fields['window'], int(fields['frames']), float(fields['start']),
+                              fields['detrend'], start_set=True)
+        rate = float(history.sample_rate)
+    except (TypeError, ValueError) as error:
+        return [f'averaging not drawn: {error}']
+    regions = averaging_regions(name, history, averaging)
+    for view in views:
+        if view.get('view') in ('spectrum', 'waterfall'):
+            view['regions'] = [dict(region) for region in regions]
+    most = averaging.most_frames(len(history.abscissa), rate)
+    said = (f'{averaging.frames} frame{"s" * (averaging.frames != 1)} of '
+            f'{averaging.frame_length / rate:g} s')
+    if averaging.frames > most:
+        said += f'; only {most} fit from {averaging.start:g} s'
+    return [said]
 
 
 def _alone(project: Any, name: str, picks: list[int],
@@ -1164,6 +1209,7 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     except ProtocolError as error:
         raise refused(str(error)) from None
     notes += _marks(project, views, objects, prefs)
+    notes += _averaging(project, views, objects, prefs)
     _home(project, views, objects)
     if part and part.get('kind') and len(objects) == 1:
         from .ops_geometry import part_entities

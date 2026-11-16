@@ -229,7 +229,7 @@ class AnalyzeState {
 	}
 
 	/** The tree's selection changed: ask the service what it shows, dropping answers overtaken by later picks. */
-	async showSelection(): Promise<void> {
+	async showSelection(redraw = false): Promise<void> {
 		const selection = this.app.project.selection;
 		const seq = ++this.showSeq;
 		this.reading = null;
@@ -241,7 +241,8 @@ class AnalyzeState {
 			this.picks = [];
 			this.shapeView = null;
 		}
-		void this.loadActions();
+		// a redraw of the same selection (the Averaging form typed into) offers what it did
+		if (!redraw) void this.loadActions();
 		if (!selection.objects.length || !this.app.project.summary) {
 			this.shown = null;
 			this.showError = null;
@@ -268,7 +269,8 @@ class AnalyzeState {
 						environment: this.prefs.environment,
 						table_view: this.prefs.table_view,
 						tone: this.prefs.tone,
-						sine_reading: this.prefs.sine_reading
+						sine_reading: this.prefs.sine_reading,
+						averaging: this.averagingDraft
 					}
 				},
 				{ timeoutMs: RUN_TIMEOUT_MS }
@@ -281,6 +283,51 @@ class AnalyzeState {
 			this.shown = null;
 			this.showError = message(err);
 		}
+	}
+
+	/**
+	 * What the Averaging form holds while it is open on the one time history selected, which the
+	 * service draws on that history's plot (`prefs.averaging`); null otherwise.
+	 */
+	get averagingDraft(): Record<string, unknown> | null {
+		const objects = this.app.project.selection.objects;
+		const values = this.currentValues;
+		if (!this.formOpen || this.opId !== 'project.set_averaging' || objects.length !== 1 || values.source !== objects[0]) return null;
+		const draft: Record<string, unknown> = {};
+		for (const key of ['frame_length', 'overlap', 'window', 'frames', 'start', 'detrend']) {
+			if (values[key] !== undefined && values[key] !== null && values[key] !== '') draft[key] = values[key];
+		}
+		return draft;
+	}
+
+	private averagingKey = 'null';
+	private averagingTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** The Averaging form opened, closed or typed into: once the typing rests, the plot is drawn again with what it holds. */
+	followAveraging(): void {
+		const key = JSON.stringify(this.averagingDraft);
+		if (key === this.averagingKey) return;
+		const opening = this.averagingKey === 'null' || key === 'null';
+		this.averagingKey = key;
+		if (this.averagingTimer) clearTimeout(this.averagingTimer);
+		this.averagingTimer = setTimeout(() => void this.showSelection(true), opening ? 0 : 300);
+	}
+
+	/** A draggable span on what the selection shows let go at new edges: its operation runs with them, and the selection is read again. */
+	async spanOnSelection(drag: { op: string; params: Record<string, unknown>; low: string; high?: string }, x0: number, x1: number): Promise<void> {
+		this.runError = null;
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: drag.op, params: { ...drag.params, [drag.low]: x0, ...(drag.high ? { [drag.high]: x1 } : {}) } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+		} catch (err) {
+			this.runError = message(err);
+		}
+		// the form takes up what the drag stored, and the plot is drawn once with it: a drag that
+		// was refused goes back to where it was
+		this.followSource();
+		this.averagingKey = JSON.stringify(this.averagingDraft);
+		if (this.averagingTimer) clearTimeout(this.averagingTimer);
+		await this.showSelection();
 	}
 
 	/** What the selection can take; the current tool stays when it still applies, else the first reading. */

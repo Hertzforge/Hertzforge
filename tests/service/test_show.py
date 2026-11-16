@@ -493,6 +493,36 @@ def test_a_channel_table_on_a_geometry_is_the_geometry_with_arrows_by_role(plate
         shown(plate, geometry, table, prefs={'arrow_role': 'loud'})
 
 
+def test_the_averaging_form_draws_its_frames_on_the_history(plate, validate):
+    project = plate.project
+    history = named(plate, 'time_history')
+    rate = project[history].sample_rate
+    plain = shown(plate, history, validate=validate)
+    assert 'regions' not in plain['views'][0], 'nothing drawn while the form is closed'
+    draft = {'frame_length': 2048, 'overlap': 0.75, 'window': 'hann', 'frames': 5, 'start': 0.25}
+    for flat, kind in ((False, 'waterfall'), (True, 'spectrum')):
+        out = shown(plate, history, prefs={'averaging': draft, 'flat': flat}, validate=validate)
+        (view,) = out['views']
+        assert view['view'] == kind
+        *frames, span = view['regions']
+        assert [r['kind'] for r in frames] == ['frame'] * 5 and span['kind'] == 'span'
+        # at three quarters overlap four frames are up at once, each on a row of its own
+        assert [r['level'] for r in frames] == [0, 1, 2, 3, 0] and frames[0]['rows'] == 4
+        assert frames[1]['x0'] - frames[0]['x0'] == pytest.approx(512 / rate)
+        assert span['x0'] == frames[0]['x0'] and span['x1'] == frames[-1]['x1']
+        assert span['drag']['op'] == 'project.drag_averaging' and span['drag']['high'] == 'stop'
+        assert f'5 frames of {2048 / rate:g} s' in out['note']
+    # what was typed is drawn, not stored
+    held = project[history].averaging
+    assert held is None or (held.frame_length, held.frames) != (2048, 5)
+    many = shown(plate, history, prefs={'averaging': {'frame_length': 2048, 'frames': 10 ** 6}})
+    assert 'fit from' in many['note']
+    bad = shown(plate, history, prefs={'averaging': {'overlap': 2.0}})
+    assert 'averaging not drawn' in bad['note'] and 'regions' not in bad['views'][0]
+    with pytest.raises(ProtocolError, match='"averaging"'):
+        shown(plate, history, prefs={'averaging': {'span': [0, 1]}})
+
+
 def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
     project = plate.project
     geometry, history = named(plate, 'geometry'), named(plate, 'time_history')

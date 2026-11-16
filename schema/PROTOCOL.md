@@ -92,7 +92,11 @@ discards; a `span` draws its edges alone. `label` is said when the span is hover
 `"drag":{"op","params","low","high"?}` is moved on the plot: its middle slides it and, with
 `high`, an edge moves that edge. On release the shell runs `op` with `params`, the new x0 as
 `low` and the new x1 as `high`, and the answer's views take the result's place. They are not listed in the legend; the
-result's reading says what they are.
+result's reading says what they are. A frame with `window` (its weights from 0 to 1, evenly spaced
+from x0 to x1) has that window drawn in a slot on a rail along the top of the plot, on the back wall
+of a stage, and its shading follows the window, so the shading is the weight each part of the record
+carries; `level` is the frame's row on the rail, of `rows`, since frames that overlap cannot share a
+row (one row at no overlap, two at a half, four at three quarters).
 
 `handles` (optional) are points dragged up and down on the plot, each at `x` on the curve of
 `series`, `decibels` from its target and said as `label`. On release the shell runs `op` with
@@ -689,7 +693,16 @@ a table are on. The sensors are `bodies`: solids drawn
 from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's coordinates,
 `triangles` u32 [T, 3], `colors` u8 [P, 3] (sRGB) and `follow` u32 [P], the row of the view's
 `nodes` whose motion each point takes, so a body moves with its node (2^32 − 1 stays put).
-`project.sensors` draws its view's sensors the same way. A lone channel table shows typed into, its cells
+`project.sensors` draws its view's sensors the same way. `prefs.averaging` draws an averaging on a
+lone time history's own view, the stage or the flat plot, as `regions`: each frame with its window
+and row, then a `span` over all of them. The shell sends it while the Averaging form is open on that
+history: an object holding what the form holds (`frame_length`, `overlap`, `window`, `frames`,
+`start`, `detrend`; a field left out is the history's own), so the frames follow the typing and
+nothing is stored; null draws none. The span's drag runs `project.drag_averaging` with the frame,
+overlap, window and detrend drawn and the span's new edges as `start` and `stop`, seconds on the
+record's clock: the middle dragged slides the frames, an edge dragged adds or removes whole frames,
+at least one, and frames slid past the end of the record stop at its end. That stores the averaging,
+and the shell reads the selection again. A lone channel table shows typed into, its cells
 edited with the widgets `edit.kinds` names (a flag by a check box, a choice from its list, a date in a
 date field, a unit from a shortlist); `prefs.environment` picks the loop whose control channels the
 Control column shows (`offers.environments`) and `prefs.table_view` the table or one of that loop's

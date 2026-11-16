@@ -56,6 +56,7 @@
 	import type { ParamValues } from '$lib/forms/params';
 	import type { Role, WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
+	import { wallGlyph } from './frames';
 	import { colormap, colormapGradient } from './colormap';
 	import { formatCount, formatNumber, formatTick, withUnit } from './format';
 	import { ROLE_STYLES } from './roles';
@@ -352,9 +353,17 @@
 		const edges: number[] = [];
 		regions.forEach((r, k) => {
 			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
-			const m = regionMarks(fraction(x0, xRange, logX) * STAGE.x, fraction(x1, xRange, logX) * STAGE.x);
+			const a = fraction(x0, xRange, logX) * STAGE.x;
+			const b = fraction(x1, xRange, logX) * STAGE.x;
+			const m = regionMarks(a, b);
 			faces.push(...m.faces);
 			edges.push(...m.edges);
+			// a frame's window on the back wall, when the whole frame is on the stage
+			if (r.window?.length && a >= 0 && b <= STAGE.x) {
+				const g = wallGlyph(r.window, r.level ?? 0, r.rows ?? 1, a, b, STAGE.y, STAGE.z);
+				faces.push(...g.faces);
+				edges.push(...g.edges);
+			}
 		});
 		const f = new BufferGeometry();
 		f.setAttribute('position', new BufferAttribute(new Float32Array(faces), 3));
