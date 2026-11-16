@@ -44,6 +44,7 @@ crates/hertzforge-mimo-shock        multiple-drive shock: growth caps, abort lin
 crates/hertzforge-srs               SRS shock: synthesized pulse, its ceiling and aborts
 crates/hertzforge-twr               time waveform replication: drive ceiling, envelope and divergence aborts
 crates/hertzforge-explorer-host     Explorer: stepped drive, its ceiling, watchdog and stop ramp
+crates/hertzforge-playback          Playback: a drive file played out, its checks, ceiling, underrun abort and stop ramp
 
 # Control laws: they compute the next drive
 crates/hertzforge-law-host          the sandbox law files run in, with their budgets and output checks
@@ -109,5 +110,6 @@ schema/protocol.schema.json         the suite's protocol schema, for both servic
 schema/PROTOCOL.md                  the suite's protocol, for both services; its control part reaches the drive path through the Rust crates
 schema/golden                       test frames every codec is checked against
 schema/make_golden.py               writes the test frames
+schema/make_golden_drive.py         writes the golden drive folder; the control service checks every drive file again before it arms
 src/hertzforge                      the analysis service and the Python package; it has no route to a drive
 ui                                  the shell: a client of the control service, never the only protection (invariant 4)

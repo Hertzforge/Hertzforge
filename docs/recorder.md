@@ -27,7 +27,7 @@ other test types.
 
 ## Opening the Test
 
-In Acquire & Control, choose **Recorder** from the test types, under Data Acquisition. The screen has
+In Acquire & Control, choose **Recorder** from the test types, under Specialized. The screen has
 two steps, **Setup** and **Run**. The run bar (where the data comes from, the run's state, the station
 time, the rate, the recording in progress, the recordings saved, who holds control, and Stop and Abort
 once a run is live) stays in view on both. The summary beside every setup section says what the setup

@@ -57,6 +57,8 @@ mod sine_methods;
 
 #[path = "server_explorer.rs"]
 mod explorer_methods;
+#[path = "server_playback.rs"]
+mod playback_methods;
 #[path = "server_recorder.rs"]
 mod recorder_methods;
 #[path = "server_twr.rs"]
@@ -83,7 +85,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 56] = [
+const DRIVE_METHODS: [&str; 57] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -133,6 +135,7 @@ const DRIVE_METHODS: [&str; 56] = [
     "explorer.start",
     "explorer.steer",
     "explorer.sweep",
+    "playback.start",
     "recorder.start",
     "recorder.arm",
     "recorder.record",
@@ -177,7 +180,9 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     explorer.subscribe, recorder.configure, recorder.config, recorder.start, recorder.arm, \
     recorder.disarm, recorder.record, recorder.cut, recorder.stop, recorder.abort, \
     recorder.recordings, recorder.marks, recorder.reset, recorder.clear, recorder.state, \
-    recorder.log, recorder.subscribe, laws.list, laws.import, laws.check, sim.profiles, \
+    recorder.log, recorder.subscribe, playback.configure, playback.config, \
+    playback.start, playback.stop, playback.abort, playback.reset, playback.clear, \
+    playback.state, playback.log, laws.list, laws.import, laws.check, sim.profiles, \
     sim.start, sim.stop and sim.state";
 
 /// Refuse to serve anywhere but loopback. `localhost` and any loopback address pass.
@@ -455,6 +460,12 @@ struct Inner {
     recorder_runs: u64,
     recorder_state_key: String,
     recorder_log_sent: (String, u64),
+    /// The Playback configuration and its run, beside the others, and what of it has
+    /// been sent.
+    playback: Option<Arc<crate::playback::run::PlaybackRun>>,
+    playback_runs: u64,
+    playback_state_key: String,
+    playback_log_sent: (String, u64),
     sim: SimSlot,
     /// The last `random.state` sent, and how much of the current run's log.
     state_key: String,
@@ -514,6 +525,12 @@ impl Inner {
             .is_some_and(|s| s.view().state.is_live())
     }
 
+    fn playback_live(&self) -> bool {
+        self.playback
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     /// Any run live, Random, MIMO, classical shock, SRS shock, Sine or TWR: what
     /// the session's orphan clock guards.
     fn any_live(&self) -> bool {
@@ -527,6 +544,7 @@ impl Inner {
             || self.twr_live()
             || self.explorer_live()
             || self.recorder_live()
+            || self.playback_live()
     }
 
     fn sim_running(&self) -> bool {
@@ -660,6 +678,21 @@ impl Inner {
                 .with_detail(json!({"run_id": s.id})));
             }
         }
+        if let Some(s) = &self.playback {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "Playback run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
         if let Some(s) = &self.recorder {
             let v = s.view();
             if v.state.is_live() {
@@ -767,6 +800,16 @@ pub struct Service {
             >,
         >,
     >,
+    /// Playback runs' publishes, in order.
+    playback_notify:
+        mpsc::UnboundedSender<crate::pulse::rails::Notice<crate::playback::run::PlaybackView>>,
+    playback_notices: std::sync::Mutex<
+        Option<
+            mpsc::UnboundedReceiver<
+                crate::pulse::rails::Notice<crate::playback::run::PlaybackView>,
+            >,
+        >,
+    >,
     /// The signal a Recorder run on the simulator carries (the stated source unless a
     /// test installs another).
     recorder_signal: recorder_methods::SignalSlot,
@@ -854,6 +897,7 @@ impl Service {
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
         let (recorder_notify, recorder_notices) = mpsc::unbounded_channel();
+        let (playback_notify, playback_notices) = mpsc::unbounded_channel();
         let stations = Stations::new(opts.scanner.clone());
         let table = Self::starting_table(&opts, &stations);
         Arc::new(Service {
@@ -905,6 +949,10 @@ impl Service {
                 recorder_runs: 0,
                 recorder_state_key: String::new(),
                 recorder_log_sent: (String::new(), 0),
+                playback: None,
+                playback_runs: 0,
+                playback_state_key: String::new(),
+                playback_log_sent: (String::new(), 0),
                 sim: SimSlot::default(),
                 state_key: String::new(),
                 log_sent: (String::new(), 0),
@@ -943,6 +991,8 @@ impl Service {
             recorder_notify,
             recorder_notices: std::sync::Mutex::new(Some(recorder_notices)),
             recorder_signal: std::sync::Mutex::new(None),
+            playback_notify,
+            playback_notices: std::sync::Mutex::new(Some(playback_notices)),
             catalog: Arc::new(std::sync::Mutex::new(None)),
             closing: AtomicBool::new(false),
             drive_gate: tokio::sync::RwLock::new(()),
@@ -1162,6 +1212,15 @@ impl Service {
                 }
             });
         }
+        let playback_notices = self.playback_notices.lock().ok().and_then(|mut n| n.take());
+        if let Some(mut notices) = playback_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, view)) = notices.recv().await {
+                    svc.playback_changed(&run_id, &view).await;
+                }
+            });
+        }
         let recorder_notices = self.recorder_notices.lock().ok().and_then(|mut n| n.take());
         if let Some(mut notices) = recorder_notices {
             let svc = self.clone();
@@ -1245,8 +1304,12 @@ impl Service {
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
             let recorder = inner.recorder.clone().filter(|s| s.view().state.is_live());
+            let playback = inner.playback.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = playback {
+                playback_methods::stop_playback(&s, "the service (nobody held control)".into());
+            }
             if let Some(s) = recorder {
                 recorder_methods::stop_recorder(
                     &s,
@@ -1352,6 +1415,33 @@ impl Service {
                 while s.view().state.is_live() {
                     if asked.elapsed() > patience {
                         mixed_methods::stop_mixed(&s, None, rrun::SHUTDOWN_BY.into(), true).await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
+        let playback = self.inner.lock().await.playback.clone();
+        // A Playback run takes its controlled stop, the shared ramp. Should it still be
+        // live well after, it is aborted.
+        let playback_said = match playback.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                playback_methods::stop_playback(&s, rrun::SHUTDOWN_BY.into());
+                let asked = Instant::now();
+                let patience = playback_methods::wait_for(&s);
+                let mut aborted = false;
+                while s.view().state.is_live() {
+                    if !aborted && asked.elapsed() > patience {
+                        aborted = true;
+                        playback_methods::abort_playback(&s, rrun::SHUTDOWN_BY.into());
+                    }
+                    if asked.elapsed() > patience + Duration::from_secs(5) {
                         break;
                     }
                     tokio::time::sleep(SHUTDOWN_POLL).await;
@@ -1576,7 +1666,8 @@ impl Service {
                 .or(mixed_said)
                 .or(twr_said)
                 .or(explorer_said)
-                .or(recorder_said);
+                .or(recorder_said)
+                .or(playback_said);
         };
         let ramp_s = rconfig::parse(&run.config)
             .map_or(rconfig::Control::default().shutdown_ramp_s, |c| {
@@ -1947,6 +2038,15 @@ impl Service {
             "explorer.state" => Ok(self.explorer_state_now().await),
             "explorer.log" => self.explorer_log(params).await,
             "explorer.subscribe" => self.explorer_subscribe(conn, params).await,
+            "playback.configure" => self.playback_configure(conn, params).await,
+            "playback.config" => Ok(self.playback_config().await),
+            "playback.start" => self.playback_start(conn).await,
+            "playback.stop" => self.playback_end(conn, false).await,
+            "playback.abort" => self.playback_end(conn, true).await,
+            "playback.reset" => self.playback_reset(conn).await,
+            "playback.clear" => self.playback_clear(conn).await,
+            "playback.state" => Ok(self.playback_state_now().await),
+            "playback.log" => self.playback_log(params).await,
             "recorder.configure" => self.recorder_configure(conn, params).await,
             "recorder.config" => Ok(self.recorder_config().await),
             "recorder.start" => self.recorder_start(conn, params).await,
@@ -2543,6 +2643,8 @@ impl Service {
                 || inner.twr_live()
                 || inner.explorer_live()
                 || inner.recorder_live()
+                || inner.playback_live()
+                || inner.playback_live()
                 || inner.mimo_shock_live()
             {
                 inner.run_active()?;
@@ -2825,6 +2927,7 @@ impl Service {
             || inner.twr_live()
             || inner.explorer_live()
             || inner.recorder_live()
+            || inner.playback_live()
             || inner.mimo_shock_live()
         {
             inner.run_active()?;

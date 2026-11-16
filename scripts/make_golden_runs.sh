@@ -33,3 +33,5 @@ HERTZFORGE_WRITE_GOLDEN_RUNS=1 cargo test --locked -p sds-control --test twr_gol
   -- --exact todays_code_writes_the_golden_twr_run_folder --nocapture </dev/null
 HERTZFORGE_WRITE_GOLDEN_RUNS=1 cargo test --locked -p sds-control --test mimo_shock_golden_run \
   -- --exact todays_code_writes_the_golden_mimo_shock_run_folder --nocapture </dev/null
+HERTZFORGE_WRITE_GOLDEN_RUNS=1 cargo test --locked -p sds-control --test playback_golden_run \
+  -- --exact todays_code_writes_the_golden_playback_run_folder --nocapture </dev/null

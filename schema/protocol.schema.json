@@ -949,7 +949,7 @@
         "fills": {"type": "string"}
       }
     },
-    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock"]},
+    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock", "playback"]},
     "testSetup": {
       "type": "object", "required": ["module", "protocol", "config", "table", "title", "notes", "origin"],
       "properties": {
@@ -1140,6 +1140,141 @@
         "environments": {"type": "object", "additionalProperties": {"$ref": "#/$defs/channelEnvironment"}}
       }
     },
+    "driveSignal": {
+      "type": "object", "required": ["key", "name", "samples", "rate_hz", "unit", "where", "problem"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "samples": {"type": "integer", "minimum": 0},
+        "rate_hz": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "unit": {"type": ["string", "null"]},
+        "where": {"type": "string"},
+        "problem": {"type": ["string", "null"]}
+      }
+    },
+    "driveSelection": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "object", "required": ["signal"], "additionalProperties": false,
+         "properties": {"signal": {"type": "string", "minLength": 1},
+                        "name": {"type": ["string", "null"]}}}
+      ]
+    },
+    "driveSidecar": {
+      "type": "object",
+      "required": ["format", "version", "rate_hz", "samples", "channels", "sha256", "source", "fixes", "tool", "created_utc"],
+      "properties": {
+        "format": {"const": "hertzforge-drive"},
+        "version": {"const": 1},
+        "rate_hz": {"type": "number", "exclusiveMinimum": 0},
+        "samples": {"type": "integer", "minimum": 2},
+        "channels": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "required": ["name", "unit", "source"],
+          "properties": {"name": {"type": "string"}, "unit": {"const": "V"},
+                         "source": {"type": "string"}}}},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source": {
+          "type": "object", "required": ["path", "sha256", "format", "selections"],
+          "properties": {
+            "path": {"type": ["string", "null"]},
+            "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+            "format": {"type": "string"},
+            "selections": {"type": "array", "items": {
+              "type": "object", "required": ["signal", "name"],
+              "properties": {"signal": {"type": "string"}, "name": {"type": "string"}}}}
+          }
+        },
+        "fixes": {"type": "array", "items": {"$ref": "#/$defs/driveFixRecord"}},
+        "tool": {"type": "string"},
+        "created_utc": {"type": "string"}
+      }
+    },
+    "driveFixRecord": {
+      "type": "object", "required": ["kind", "from", "taper_s", "taper_samples", "channels"],
+      "properties": {
+        "kind": {"const": "fix_ends"},
+        "from": {"type": "object", "required": ["folder", "sha256"],
+                 "properties": {"folder": {"type": "string"}, "sha256": {"type": "string"}}},
+        "taper_s": {"type": "number", "minimum": 0},
+        "taper_samples": {"type": "integer", "minimum": 0},
+        "correction": {"type": "string"},
+        "channels": {"type": "array", "items": {
+          "type": "object", "required": ["name", "a", "b", "rms_before", "rms_after"],
+          "properties": {"name": {"type": "string"}, "a": {"type": "number"},
+                         "b": {"type": "number"}, "rms_before": {"type": "number"},
+                         "rms_after": {"type": "number"}}}}
+      }
+    },
+    "driveEnds": {
+      "type": "object",
+      "required": ["start", "end", "peak", "velocity_end", "velocity_peak", "displacement_end", "displacement_peak"],
+      "additionalProperties": {"type": "number"}
+    },
+    "driveInspectParams": {
+      "type": "object", "additionalProperties": false,
+      "oneOf": [{"required": ["path"]}, {"required": ["objects"]}],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "objects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "driveInspectResult": {
+      "type": "object", "required": ["source", "signals", "rate_hz", "notes"],
+      "properties": {
+        "source": {"type": "object", "required": ["path", "format"],
+                   "properties": {"path": {"type": ["string", "null"]}, "format": {"type": "string"}}},
+        "signals": {"type": "array", "items": {"$ref": "#/$defs/driveSignal"}},
+        "rate_hz": {"type": ["number", "null"]},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "driveConvertParams": {
+      "type": "object", "required": ["selections"], "additionalProperties": false,
+      "oneOf": [{"required": ["path"]}, {"required": ["objects"]}],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "objects": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "selections": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/driveSelection"}},
+        "rate_hz": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "out": {"type": ["string", "null"]},
+        "fix_ends": {"type": "boolean"},
+        "taper_s": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "driveConvertResult": {
+      "type": "object", "required": ["folder", "drive", "notes"],
+      "properties": {
+        "folder": {"type": "string"},
+        "drive": {"$ref": "#/$defs/driveSidecar"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "fixed": {"$ref": "#/$defs/driveFixEndsResult"}
+      }
+    },
+    "driveFixEndsParams": {
+      "type": "object", "required": ["folder"], "additionalProperties": false,
+      "properties": {
+        "folder": {"type": "string", "minLength": 1},
+        "taper_s": {"type": ["number", "null"], "minimum": 0},
+        "out": {"type": ["string", "null"]}
+      }
+    },
+    "driveFixEndsResult": {
+      "type": "object", "required": ["folder", "drive", "from", "taper_s", "taper_samples", "channels"],
+      "properties": {
+        "folder": {"type": "string"},
+        "drive": {"$ref": "#/$defs/driveSidecar"},
+        "from": {"type": "object", "required": ["folder", "sha256"]},
+        "taper_s": {"type": "number", "minimum": 0},
+        "taper_samples": {"type": "integer", "minimum": 0},
+        "channels": {"type": "array", "items": {
+          "type": "object", "required": ["name", "a", "b", "rms_before", "rms_after", "before", "after"],
+          "properties": {"name": {"type": "string"}, "a": {"type": "number"}, "b": {"type": "number"},
+                         "rms_before": {"type": "number"}, "rms_after": {"type": "number"},
+                         "before": {"$ref": "#/$defs/driveEnds"},
+                         "after": {"$ref": "#/$defs/driveEnds"}}}}
+      }
+    },
     "catalog": {
       "type": "object", "required": ["operations"],
       "properties": {
@@ -1169,7 +1304,8 @@
                "hardware_busy", "stale_revision", "table_invalid", "table_not_applied", "nothing_to_apply", "config_invalid",
                "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
                "catalog_unavailable", "law_unknown", "law_params_invalid", "law_check_unsupported",
-               "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling", "not_a_sweep", "out_of_band", "adjust_refused", "reference_unreadable", "not_converged", "coherence_hold", "level_zero", "not_enough_space", "record_unwritable"]
+               "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling", "not_a_sweep", "out_of_band", "adjust_refused", "reference_unreadable", "not_converged", "coherence_hold", "level_zero", "not_enough_space", "record_unwritable",
+               "drive_changed", "drive_unreadable", "rate_mismatch", "table_changed"]
     },
     "itemReason": {
       "enum": ["no_floor", "too_many_floors", "unknown_part_kind", "duplicate_part_id", "part_out_of_band", "parts_too_close", "too_many_tones", "too_many_bands", "follow_unknown_part", "follow_self", "follow_loop", "schedule_unsupported", "not_power_of_two", "row_not_recorded", "frf_same_row",
@@ -1197,7 +1333,8 @@
                "geometry", "transform_rank", "transform_condition", "tolerance", "pulses_length_mismatch", "record_too_long", "spacing_below_floor", "quiet_window_exceeded",
                "bands_empty", "target_not_covering", "target_not_ascending",
                "per_band_length_mismatch", "components_engine_mismatch", "component_invalid",
-               "limit_no_frf", "target_file", "table_file", "synthesis_not_converged", "profile_too_short", "value_not_positive", "quantity_ambiguous", "profile_not_covering", "start_not_a_level", "end_before_full_level", "tick_out_of_range", "abort_below_ceiling", "limit_on_control_channel", "cola_needs_two_outputs", "safe_stop_budget", "tracking_lag", "profile_file", "join_discontinuity", "units_column_ignored", "reference_unknown", "reference_changed", "units_mismatch", "rate_mismatch", "section_outside_reference", "band_outside_identification", "highpass_above_band", "identification_too_short", "reference_resampled", "ceiling_over_range", "extra_drive_channels", "no_input_channel", "controls_out_of_range", "drives_out_of_range", "targets_length_mismatch", "delays_length_mismatch", "target_invalid", "verdict_needs_srs", "plant_unknown", "law_wrong_target"]
+               "limit_no_frf", "target_file", "table_file", "synthesis_not_converged", "profile_too_short", "value_not_positive", "quantity_ambiguous", "profile_not_covering", "start_not_a_level", "end_before_full_level", "tick_out_of_range", "abort_below_ceiling", "limit_on_control_channel", "cola_needs_two_outputs", "safe_stop_budget", "tracking_lag", "profile_file", "join_discontinuity", "units_column_ignored", "reference_unknown", "reference_changed", "units_mismatch", "rate_mismatch", "section_outside_reference", "band_outside_identification", "highpass_above_band", "identification_too_short", "reference_resampled", "ceiling_over_range", "extra_drive_channels", "no_input_channel", "controls_out_of_range", "drives_out_of_range", "targets_length_mismatch", "delays_length_mismatch", "target_invalid", "verdict_needs_srs", "plant_unknown", "law_wrong_target",
+               "drive_unreadable", "drive_format", "drive_version", "drive_unit", "drive_size", "drive_magic", "drive_hash_mismatch", "drive_pin_mismatch", "drive_not_finite", "ends_not_zero", "map_length", "map_missing_row", "map_repeated_row", "too_many_drives", "peak_over_ceiling", "drive_changed", "drive_unchecked"]
     },
     "reportItem": {
       "type": "object", "required": ["reason", "message"], "additionalProperties": false,
@@ -11256,6 +11393,38 @@
     "recorderDataPlot": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 64}, "quantity": {"$ref": "#/$defs/recorderQuantity"}, "channels": {"type": ["array", "null"], "items": {"type": "integer", "minimum": 0}}, "first_frame": {"type": ["integer", "null"], "minimum": 0}, "views": {"$ref": "#/$defs/views"}}, "required": ["id", "quantity", "channels", "first_frame", "views"]},
     "recorderData": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "source": {"$ref": "#/$defs/source"}, "class": {"$ref": "#/$defs/stationClass"}, "state": {"enum": ["running", "stopping", "finished"]}, "phase": {"$ref": "#/$defs/recorderPhase"}, "t_s": {"type": ["number", "null"], "minimum": 0}, "station_frames": {"type": ["integer", "null"], "minimum": 0}, "grid": {"$ref": "#/$defs/recorderLiveGrid"}, "rows": {"type": "array", "items": {"$ref": "#/$defs/recorderLiveRow"}}, "trigger": {"oneOf": [{"$ref": "#/$defs/recorderTrigger"}, {"type": "null"}]}, "recording": {"oneOf": [{"$ref": "#/$defs/recorderRecordingNow"}, {"type": "null"}]}, "recordings": {"type": "integer", "minimum": 0}, "marks": {"type": "integer", "minimum": 0}, "disk": {"oneOf": [{"$ref": "#/$defs/recorderDisk"}, {"type": "null"}]}, "health": {"oneOf": [{"$ref": "#/$defs/recorderHealth"}, {"type": "null"}]}, "plots": {"type": "array", "items": {"$ref": "#/$defs/recorderDataPlot"}}}, "required": ["run_id", "source", "class", "state", "phase", "t_s", "station_frames", "grid", "rows", "trigger", "recording", "recordings", "marks", "disk", "health", "plots"]},
     "recorderStream": {"type": "object", "required": ["kind", "channels", "complete", "name", "trigger", "requested_fs_hz", "fs_hz", "group_delay_frames", "rows", "units", "first_station_frame", "trigger_station_frame", "pre_frames", "pre_frames_asked", "frames", "gaps", "marks", "fault"], "properties": {"kind": {"const": "recording"}, "channels": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["index", "unit"], "properties": {"index": {"type": "integer", "minimum": 0}, "unit": {"type": "string", "minLength": 1}, "description": {"type": "string"}}}}, "complete": {"type": "boolean"}, "name": {"type": "string", "minLength": 1}, "trigger": {"$ref": "#/$defs/recorderMode"}, "requested_fs_hz": {"type": "number", "exclusiveMinimum": 0}, "fs_hz": {"type": "number", "exclusiveMinimum": 0}, "group_delay_frames": {"type": "number", "minimum": 0}, "rows": {"type": "array", "items": {"type": "integer", "minimum": 0}}, "units": {"type": "array", "items": {"type": "string", "minLength": 1}}, "first_station_frame": {"type": "integer", "minimum": 0}, "trigger_station_frame": {"type": "integer", "minimum": 0}, "pre_frames": {"type": "integer", "minimum": 0}, "pre_frames_asked": {"type": "integer", "minimum": 0}, "frames": {"type": "integer", "minimum": 0}, "gaps": {"type": "array", "items": {"$ref": "#/$defs/recorderGap"}}, "marks": {"type": "array", "items": {"$ref": "#/$defs/recorderMark"}}, "fault": {"type": ["string", "null"]}}},
+    "playbackConfig": {"type": "object", "additionalProperties": false, "properties": {"title": {"type": "string"}, "drive": {"type": "object", "additionalProperties": false, "properties": {"folder": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}}, "required": ["folder", "sha256"]}, "map": {"type": "array", "items": {"type": "integer", "minimum": 0}}, "level_db": {"type": "number"}, "ceiling_v": {"type": "number"}, "pre_roll_s": {"type": "number"}, "post_roll_s": {"type": "number"}, "capture": {"type": "object", "additionalProperties": false, "properties": {"run_name": {"type": "string"}}, "required": []}, "metadata": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"key": {"type": "string", "minLength": 1}, "label": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}}, "operator": {"type": "string"}, "article": {"type": "string"}, "notes": {"type": "string"}, "specification": {"type": ["object", "null"], "additionalProperties": false, "properties": {"document": {"type": "string"}, "clause": {"type": "string"}}}, "record": {"type": ["object", "null"], "additionalProperties": false, "properties": {"streams": {"type": "boolean"}}}}, "required": ["drive", "map", "ceiling_v"]},
+    "playbackConfigureParams": {"type": "object", "additionalProperties": false, "properties": {"config": {"$ref": "#/$defs/playbackConfig"}, "dry_run": {"type": "boolean"}}, "required": ["config"]},
+    "playbackDerived": {"type": "object", "additionalProperties": false, "properties": {"fs_hz": {"type": "number", "exclusiveMinimum": 0}, "block_frames": {"type": "integer", "minimum": 1}, "samples": {"type": "integer", "minimum": 0}, "channels": {"type": "integer", "minimum": 0}, "duration_s": {"type": "number", "minimum": 0}, "pre_roll_frames": {"type": "integer", "minimum": 0}, "post_roll_frames": {"type": "integer", "minimum": 0}, "total_s": {"type": "number", "minimum": 0}, "gain": {"type": "number", "minimum": 0}, "stop": {"type": "object", "additionalProperties": false, "properties": {"depth_db": {"type": "number", "minimum": 0}, "ramp_s": {"type": "number", "minimum": 0}}, "required": ["depth_db", "ramp_s"]}, "read_ahead_s": {"type": "number", "minimum": 0}}, "required": ["fs_hz", "block_frames", "samples", "channels", "duration_s", "pre_roll_frames", "post_roll_frames", "total_s", "gain", "stop", "read_ahead_s"]},
+    "playbackFault": {"type": "object", "additionalProperties": false, "properties": {"reason": {"enum": ["start_not_zero", "end_not_zero", "velocity_not_zero", "displacement_not_zero"]}, "value": {"type": "number"}, "allowed": {"type": "number", "minimum": 0}, "text": {"type": "string", "minLength": 1}}, "required": ["reason", "value", "allowed", "text"]},
+    "playbackCheckChannel": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "name": {"type": "string"}, "peak_v": {"type": "number", "minimum": 0}, "start_v": {"type": "number"}, "end_v": {"type": "number"}, "velocity_v_s": {"type": "object", "additionalProperties": false, "properties": {"end": {"type": "number"}, "peak": {"type": "number", "minimum": 0}}, "required": ["end", "peak"]}, "displacement_v_s2": {"type": "object", "additionalProperties": false, "properties": {"end": {"type": "number"}, "peak": {"type": "number", "minimum": 0}}, "required": ["end", "peak"]}, "pass": {"type": "boolean"}, "faults": {"type": "array", "items": {"$ref": "#/$defs/playbackFault"}}, "note": {"type": ["string", "null"]}, "drive_row": {"type": ["integer", "null"], "minimum": 0}, "played_peak_v": {"type": "number", "minimum": 0}}, "required": ["channel", "name", "peak_v", "start_v", "end_v", "velocity_v_s", "displacement_v_s2", "pass", "faults", "note", "drive_row", "played_peak_v"]},
+    "playbackRefusal": {"type": "object", "additionalProperties": false, "properties": {"reason": {"$ref": "#/$defs/itemReason"}, "message": {"type": "string", "minLength": 1}, "detail": {"type": ["object", "null"]}}, "required": ["reason", "message", "detail"]},
+    "playbackEnvelope": {"type": "object", "additionalProperties": false, "properties": {"t_s": {"type": "array", "items": {"type": "number"}}, "min": {"type": "array", "items": {"type": "number"}}, "max": {"type": "array", "items": {"type": "number"}}}, "required": ["t_s", "min", "max"]},
+    "playbackPreview": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "drive_v": {"$ref": "#/$defs/playbackEnvelope"}, "velocity_v_s": {"$ref": "#/$defs/playbackEnvelope"}, "displacement_v_s2": {"$ref": "#/$defs/playbackEnvelope"}}, "required": ["channel", "drive_v", "velocity_v_s", "displacement_v_s2"]},
+    "playbackCheckReport": {"type": "object", "additionalProperties": false, "properties": {"pass": {"type": "boolean"}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}, "rate_hz": {"type": "number", "exclusiveMinimum": 0}, "samples": {"type": "integer", "minimum": 0}, "duration_s": {"type": "number", "minimum": 0}, "level_db": {"type": "number"}, "ceiling_v": {"type": "number"}, "tolerances": {"type": "object", "additionalProperties": false, "properties": {"ends_fraction_of_peak": {"type": "number", "exclusiveMinimum": 0}, "velocity_fraction_of_peak": {"type": "number", "exclusiveMinimum": 0}, "displacement_fraction_of_peak": {"type": "number", "exclusiveMinimum": 0}, "integrator": {"type": "string", "minLength": 1}}, "required": ["ends_fraction_of_peak", "velocity_fraction_of_peak", "displacement_fraction_of_peak", "integrator"]}, "channels": {"type": "array", "items": {"$ref": "#/$defs/playbackCheckChannel"}}, "refusals": {"type": "array", "items": {"$ref": "#/$defs/playbackRefusal"}}, "limits": {"type": "string", "minLength": 1}, "previews": {"type": "array", "items": {"$ref": "#/$defs/playbackPreview"}}}, "required": ["pass", "sha256", "rate_hz", "samples", "duration_s", "level_db", "ceiling_v", "tolerances", "channels", "refusals", "limits"]},
+    "playbackCheckUnread": {"type": "object", "additionalProperties": false, "properties": {"pass": {"const": false}, "refusals": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/playbackRefusal"}}}, "required": ["pass", "refusals"]},
+    "playbackCheck": {"oneOf": [{"$ref": "#/$defs/playbackCheckReport"}, {"$ref": "#/$defs/playbackCheckUnread"}]},
+    "playbackRunState": {"enum": ["unconfigured", "configured", "starting", "running", "stopping", "finished"]},
+    "playbackPhase": {"enum": ["idle", "reading_ahead", "pre_roll", "playing", "post_roll", "done", "stopping", "stopped", "zeroed", "refused"]},
+    "playbackOutcome": {"enum": ["completed", "stopped", "aborted", "response_abort", "drive_ceiling", "input_overload", "drive_underrun", "reader_failed", "loop_faulted", "loop_panicked", "arm_refused"]},
+    "playbackTrip": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "axis": {"type": "string", "minLength": 1}, "value": {"type": "number"}, "limit": {"type": "number"}}, "required": ["channel", "axis", "value", "limit"]},
+    "playbackEnd": {"type": "object", "additionalProperties": false, "properties": {"outcome": {"$ref": "#/$defs/playbackOutcome"}, "message": {"type": "string", "minLength": 1}, "at_s": {"type": ["number", "null"], "minimum": 0}, "played": {"type": "integer", "minimum": 0}, "emergency_stop": {"type": "boolean"}, "trip": {"oneOf": [{"$ref": "#/$defs/playbackTrip"}, {"type": "null"}]}}, "required": ["outcome", "message", "at_s", "played", "emergency_stop", "trip"]},
+    "playbackHealth": {"type": "object", "additionalProperties": false, "properties": {"engine_ticks": {"type": "integer", "minimum": 0}, "worst_tick_ms": {"type": ["number", "null"], "minimum": 0}, "budget_ms": {"type": ["number", "null"], "minimum": 0}, "health_faults": {"type": "integer", "minimum": 0}, "ring_overruns": {"type": "integer", "minimum": 0}}, "required": ["engine_ticks", "worst_tick_ms", "budget_ms", "health_faults", "ring_overruns"]},
+    "playbackProgress": {"type": "object", "additionalProperties": false, "properties": {"played": {"type": "integer", "minimum": 0}, "samples": {"type": "integer", "minimum": 0}, "played_s": {"type": "number", "minimum": 0}, "fraction": {"type": "number", "minimum": 0, "maximum": 1}, "elapsed_s": {"type": "number", "minimum": 0}, "buffered_s": {"type": "number", "minimum": 0}}, "required": ["played", "samples", "played_s", "fraction", "elapsed_s", "buffered_s"]},
+    "playbackRow": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["input", "drive"]}, "unit": {"type": "string", "minLength": 1}, "description": {"type": "string"}}, "required": ["index", "role", "unit", "description"]},
+    "playbackRun": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "state": {"enum": ["configured", "starting", "running", "stopping", "finished"]}, "phase": {"$ref": "#/$defs/playbackPhase"}, "title": {"type": "string"}, "source": {"$ref": "#/$defs/source"}, "class": {"$ref": "#/$defs/stationClass"}, "fs_hz": {"type": "number", "exclusiveMinimum": 0}, "drive": {"type": "object", "additionalProperties": false, "properties": {"samples": {"type": "integer", "minimum": 0}, "duration_s": {"type": "number", "minimum": 0}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}, "map": {"type": "array", "items": {"type": "integer", "minimum": 0}}}, "required": ["samples", "duration_s", "sha256", "map"]}, "level_db": {"type": "number"}, "ceiling_v": {"type": "number"}, "rolls": {"type": "object", "additionalProperties": false, "properties": {"pre_frames": {"type": "integer", "minimum": 0}, "post_frames": {"type": "integer", "minimum": 0}}, "required": ["pre_frames", "post_frames"]}, "progress": {"$ref": "#/$defs/playbackProgress"}, "inputs": {"type": "array", "items": {"$ref": "#/$defs/playbackRow"}}, "drives": {"type": "array", "items": {"$ref": "#/$defs/playbackRow"}}, "overloads": {"type": "array", "items": {"type": "object", "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 0}, "overload": {"type": "boolean"}}, "required": ["channel", "overload"]}}, "health": {"oneOf": [{"$ref": "#/$defs/playbackHealth"}, {"type": "null"}]}, "record": {"oneOf": [{"$ref": "#/$defs/runRecordRef"}, {"type": "null"}]}, "end": {"oneOf": [{"$ref": "#/$defs/playbackEnd"}, {"type": "null"}]}}, "required": ["run_id", "state", "phase", "title", "source", "class", "fs_hz", "drive", "level_db", "ceiling_v", "rolls", "progress", "inputs", "drives", "overloads", "health", "record", "end"]},
+    "playbackState": {"oneOf": [{"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "null"}, "state": {"const": "unconfigured"}}, "required": ["run_id", "state"]}, {"$ref": "#/$defs/playbackRun"}]},
+    "playbackConfigureResult": {"type": "object", "additionalProperties": false, "properties": {"state": {"$ref": "#/$defs/playbackState"}, "check": {"$ref": "#/$defs/playbackCheck"}, "derived": {"$ref": "#/$defs/playbackDerived"}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}}, "required": ["state", "check", "derived", "warnings"]},
+    "playbackDryRunResult": {"type": "object", "additionalProperties": false, "properties": {"errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "check": {"$ref": "#/$defs/playbackCheck"}, "derived": {"oneOf": [{"$ref": "#/$defs/playbackDerived"}, {"type": "null"}]}}, "required": ["errors", "warnings", "check", "derived"]},
+    "playbackConfigResult": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": ["string", "null"]}, "config": {"oneOf": [{"$ref": "#/$defs/playbackConfig"}, {"type": "null"}]}, "check": {"oneOf": [{"$ref": "#/$defs/playbackCheck"}, {"type": "null"}]}, "derived": {"oneOf": [{"$ref": "#/$defs/playbackDerived"}, {"type": "null"}]}}, "required": ["run_id", "config", "check", "derived"]},
+    "playbackInvalidDetail": {"type": "object", "additionalProperties": false, "properties": {"errors": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "warnings": {"type": "array", "items": {"$ref": "#/$defs/reportItem"}}, "check": {"$ref": "#/$defs/playbackCheck"}}, "required": ["errors", "warnings"]},
+    "playbackEmptyParams": {"type": "object", "additionalProperties": false, "properties": {}, "required": []},
+    "playbackLogParams": {"type": "object", "additionalProperties": false, "properties": {"since": {"type": "integer", "minimum": 0}}, "required": []},
+    "playbackLogEntry": {"type": "object", "additionalProperties": false, "properties": {"seq": {"type": "integer", "minimum": 0}, "at_unix": {"type": "number"}, "kind": {"enum": ["state", "check", "note", "record", "operator", "overload", "trip", "underrun", "abort", "outcome"]}, "text": {"type": "string"}}, "required": ["seq", "at_unix", "kind", "text"]},
+    "playbackLogResult": {"type": "object", "additionalProperties": false, "properties": {"entries": {"type": "array", "items": {"$ref": "#/$defs/playbackLogEntry"}}, "next": {"type": "integer", "minimum": 0}}, "required": ["entries", "next"]},
+    "playbackLogEvent": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "entries": {"type": "array", "items": {"$ref": "#/$defs/playbackLogEntry"}}}, "required": ["run_id", "entries"]},
+    "playbackLiveChannel": {"type": "object", "additionalProperties": false, "properties": {"index": {"type": "integer", "minimum": 0}, "role": {"enum": ["input", "drive"]}, "unit": {"type": "string", "minLength": 1}, "values": {"$ref": "#/$defs/arrayRef"}}, "required": ["index", "role", "unit", "values"]},
+    "playbackLive": {"type": "object", "additionalProperties": false, "properties": {"run_id": {"type": "string", "minLength": 1}, "state": {"enum": ["starting", "running", "stopping", "finished"]}, "phase": {"$ref": "#/$defs/playbackPhase"}, "progress": {"$ref": "#/$defs/playbackProgress"}, "time": {"type": "object", "additionalProperties": false, "properties": {"rate_hz": {"type": "number", "exclusiveMinimum": 0}, "t0_s": {"type": "number", "minimum": 0}, "channels": {"type": "array", "items": {"$ref": "#/$defs/playbackLiveChannel"}}}, "required": ["rate_hz", "t0_s", "channels"]}}, "required": ["run_id", "state", "phase", "progress", "time"]},
     "mixedWindow": {"type": "object", "additionalProperties": false, "properties": {"on_s": {"type": "number", "minimum": 0}, "off_s": {"type": ["number", "null"]}}, "required": []},
     "mixedSchedule": {"type": "object", "required": ["kind"], "properties": {"kind": {"enum": ["fixed", "sweep", "follow", "segments"]}, "freq_hz": {"type": "number"}, "end": {"type": ["object", "null"]}, "band_hz": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "rate": {"$ref": "#/$defs/sineRate"}, "start_hz": {"type": ["number", "null"]}, "direction": {"enum": ["up", "down", null]}, "of": {"type": "string", "minLength": 1}, "ratio": {"type": "number"}}, "allOf": [{"if": {"properties": {"kind": {"const": "fixed"}}}, "then": {"required": ["freq_hz"]}}, {"if": {"properties": {"kind": {"const": "sweep"}}}, "then": {"required": ["band_hz", "rate"]}}, {"if": {"properties": {"kind": {"const": "follow"}}}, "then": {"required": ["of", "ratio"]}}]},
     "mixedPart": {"type": "object", "required": ["id", "kind"], "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$"}, "name": {"type": ["string", "null"]}, "kind": {"type": "string", "minLength": 1}, "enabled": {"type": "boolean"}, "window": {"$ref": "#/$defs/mixedWindow"}, "breakpoints": {"type": "array"}, "schedule": {"$ref": "#/$defs/mixedSchedule"}, "amplitude_g": {"type": ["number", "null"]}, "profile": {"oneOf": [{"$ref": "#/$defs/sineProfile"}, {"type": "null"}]}, "level_g2_hz": {"type": "number"}, "width_hz": {"type": ["number", "null"]}, "width_share": {"type": ["number", "null"]}, "alarm_db": {"oneOf": [{"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, {"type": "null"}]}, "abort_db": {"oneOf": [{"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, {"type": "null"}]}}, "allOf": [{"if": {"properties": {"kind": {"const": "floor"}}}, "then": {"required": ["breakpoints"]}}, {"if": {"properties": {"kind": {"const": "tone"}}}, "then": {"required": ["schedule"]}}, {"if": {"properties": {"kind": {"const": "narrowband"}}}, "then": {"required": ["schedule", "level_g2_hz"]}}]},

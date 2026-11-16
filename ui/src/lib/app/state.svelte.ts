@@ -30,6 +30,8 @@ import { ExplorerStore } from '$lib/acquire/explorer/explorerStore.svelte';
 import { ExplorerViewsState } from '$lib/acquire/explorer/explorerViews.svelte';
 import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { RecorderViewsState } from '$lib/acquire/recorder/recorderViews.svelte';
+import { PlaybackStore } from '$lib/acquire/playback/playbackStore.svelte';
+import { PlaybackViewsState } from '$lib/acquire/playback/playbackViews.svelte';
 import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
@@ -2155,6 +2157,8 @@ export class AppState {
 	/** A finished TWR run's way to its data: the Transient Analysis workspace. */
 	readonly twrRunOpen: RunOpen;
 	readonly recorderRunOpen: RunOpen;
+	/** A finished Playback run's way to its data: its inputs and drives, in the Signals workspace. */
+	readonly playbackRunOpen: RunOpen;
 	/** MIMO Random's setup and run; the station and table are the Acquire store's. */
 	readonly mimo: MimoState;
 	/** Acquire & Control's test types and which screen it shows. */
@@ -2195,6 +2199,10 @@ export class AppState {
 	readonly recorder: RecorderStore;
 	/** The Recorder run's pages and this window's subscription. */
 	readonly recorderViews: RecorderViewsState;
+	/** Playback's setup, drive file and run; the station and table are the Acquire store's. */
+	readonly playback: PlaybackStore;
+	/** The Playback run's pages, drawn from its live frames. */
+	readonly playbackViews: PlaybackViewsState;
 	/** The workspace rail is minimized, for the plots to have the screen (kept for the session). */
 	railCollapsed = $state(false);
 	private windows = 0;
@@ -2237,6 +2245,7 @@ export class AppState {
 		this.mimoRunOpen = new RunOpen(runHost, 'mimo_random');
 		this.twrRunOpen = new RunOpen(runHost, 'twr');
 		this.recorderRunOpen = new RunOpen(runHost, 'recorder');
+		this.playbackRunOpen = new RunOpen(runHost, 'playback');
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -2246,6 +2255,7 @@ export class AppState {
 		this.twr = new TwrStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.playback = new PlaybackStore(this.acquire, config.popout ? { local: null, drafts: false } : { analysis: this.analysis, objects: () => this.project.summary?.objects ?? [] });
 		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			// The layout belongs to the setup the service holds, else to the one being edited here.
@@ -2321,6 +2331,11 @@ export class AppState {
 			setupTitle: () => this.recorder.status?.title ?? (config.popout ? null : this.recorder.setup.title),
 			showing: () => recorderPopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'recorder' && this.recorder.step === 'run'),
 			page: recorderPopout ? config.page : null
+		});
+		this.playbackViews = new PlaybackViewsState(this.control, {
+			setupTitle: () => this.playback.now?.title ?? (config.popout ? null : this.playback.setup.title),
+			showing: () => !config.popout && this.workspace === 'acquire' && this.tests.screen === 'playback' && this.playback.step === 'run',
+			runId: () => this.playback.now?.run_id ?? null
 		});
 		this.railCollapsed = readSession(RAIL_KEY) === '1';
 	}
@@ -2435,7 +2450,7 @@ export class AppState {
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2474,6 +2489,8 @@ export class AppState {
 		if (onRecorder || this.recorder.isLive) return this.recorder.source;
 		const onMimoShock = this.workspace === 'acquire' && this.tests.screen === 'mimo_shock';
 		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
+		const onPlayback = this.workspace === 'acquire' && this.tests.screen === 'playback';
+		if (onPlayback || this.playback.isLive) return this.playback.source;
 		return null;
 	}
 
@@ -2530,6 +2547,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.mimoShock.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.playback.sync();
+			});
+			$effect(() => {
 				const ws = this.workspace;
 				if (location.hash !== `#${ws}`) history.replaceState(null, '', `#${ws}`);
 			});
@@ -2545,6 +2565,7 @@ export class AppState {
 		this.explorer.watch();
 		this.recorder.watch();
 		this.mimoShock.watch();
+		this.playback.watch();
 		this.tests.watch();
 		this.display.watch();
 		this.mimoViews.watch();
@@ -2556,6 +2577,7 @@ export class AppState {
 		this.explorerViews.watch();
 		this.recorderViews.watch();
 		this.mimoShockViews.watch();
+		this.playbackViews.watch();
 		this.analysis.connect();
 		this.control.connect();
 	}

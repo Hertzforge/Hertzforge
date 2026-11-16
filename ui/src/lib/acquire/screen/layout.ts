@@ -69,6 +69,8 @@ export const CARD_WORDS: Record<string, string> = {
 	recording: 'Recording',
 	recordings: 'Recordings',
 	recmarks: 'Marks',
+	play: 'Play',
+	checked: 'Drive Check',
 	parts: 'Parts'
 };
 

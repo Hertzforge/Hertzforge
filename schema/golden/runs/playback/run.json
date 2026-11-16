@@ -1,0 +1,106 @@
+{
+  "test": "playback",
+  "run_uid": "golden-playback",
+  "run_id": "playback-0001",
+  "title": "Golden Playback",
+  "operator": "A. Operator",
+  "article": "Bracket, SN 0042",
+  "notes": "",
+  "specification": {
+    "document": "Test procedure",
+    "clause": "4.2"
+  },
+  "metadata": [
+    {
+      "key": "run_number",
+      "label": "Run Number",
+      "value": "3"
+    }
+  ],
+  "source": "SIM",
+  "sim": {
+    "model": "resonator_bank",
+    "parameters": {
+      "sample_rate_hz": 2048.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 1
+    },
+    "seed": 1515852340
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 2048,
+    "fs_hz": 2048,
+    "block_frames": 64,
+    "rule": "the drive file's own rate: a station that programs another is refused"
+  },
+  "build": {
+    "version": "0.0.0",
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false
+  },
+  "armed": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "on"
+  },
+  "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "3c7152eecf247ffaa739e279e6c5113d41f7b5b161441b659931e3374abed8f9"
+  },
+  "streams": [
+    {
+      "name": "inputs",
+      "kind": "inputs",
+      "channels": [
+        1
+      ]
+    },
+    {
+      "name": "drives",
+      "kind": "drives",
+      "channels": [
+        2
+      ]
+    }
+  ],
+  "results": [
+    {
+      "name": "playback_check",
+      "kind": "drive_check"
+    },
+    {
+      "name": "playback_outcome",
+      "kind": "playback_outcome"
+    }
+  ],
+  "complete": true
+}

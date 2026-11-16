@@ -1377,6 +1377,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-playback"
+version = "0.1.10"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "hertzforge-protocol"
 version = "0.1.10"
 dependencies = [
@@ -2539,6 +2553,7 @@ dependencies = [
  "hertzforge-mixed",
  "hertzforge-mixed-laws",
  "hertzforge-module-abi",
+ "hertzforge-playback",
  "hertzforge-random",
  "hertzforge-random-laws",
  "hertzforge-recorder",

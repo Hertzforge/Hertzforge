@@ -7,7 +7,7 @@ service to be read. The analysis side converts it into an ordinary project file
 finished run reaches every analysis tool with its channel table, its setup, its
 log and its measurements. Every control module writes one for every run: the
 Random, MIMO Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock
-and TWR modules, Explorer and the Recorder.
+and TWR modules, Explorer, Playback and the Recorder.
 
 The exact form is the reader's, `hertzforge.io.run_folder`; the conversion is
 `hertzforge.io.run_convert`, described in `docs/hforge-format.md` ("Run Folders
@@ -29,11 +29,11 @@ Folders"). A Random run's folder is named
 `<YYYYMMDD-HHMMSS>_srs_<run id>`, a MIMO Shock run's
 `<YYYYMMDD-HHMMSS>_mimo_shock_<run id>` and a TWR run's
 `<YYYYMMDD-HHMMSS>_twr_<run id>`, the time it armed in UTC. A Recorder run's
-folder, and an Explorer run's, is the plain name its setup gives
-(`capture.run_name`). The run's state names the folder from arm on
+folder, an Explorer run's and a Playback run's, is the plain name its setup
+gives (`capture.run_name`). The run's state names the folder from arm on
 (`random.state`, `mimo_random.status`, `sine.state`, `mixed.state`, `shock.state`,
-`srs.state`, `mimo_shock.state`, `twr.state`, `explorer.state` and
-`recorder.state`, `record.folder`).
+`srs.state`, `mimo_shock.state`, `twr.state`, `explorer.state`,
+`playback.state` and `recorder.state`, `record.folder`).
 
 ## Layout
 
@@ -750,6 +750,54 @@ station frames (of the log, of the intents, of the end), the run's health, what
 it measured, and the values of the survey's levels and of the spectra (their
 shapes, channels and units are kept). Its streams are cut to their first 256
 frames, before the first steer (`cut_from_frames`);
+`scripts/make_golden_runs.sh` rewrites it.
+
+## What a Playback Run Saves
+
+From start, before the station is opened: `run.json` (with the run's
+`metadata`; its `grid` is the drive file's own rate, which the station must
+program or the start is refused), `table.json`, `setup.json` and `log.jsonl`.
+`setup.json` holds `config` as accepted; `resolved`: `control`, the words "open
+loop, no control law" (the file is played as it is, scaled by the level, and
+nothing is corrected from the response), the drive file (its folder, its
+SHA-256, its rate, samples and channels, each with the drive row it plays on,
+and its sidecar `drive.json` whole, with the source it was converted from and
+the fixes made to it), the map, the level and its gain, the ceiling, the
+pre-roll and post-roll, the stop (40 dB over 3 s, then zero), the inputs and
+the drives, every abort in force (the ceiling, each row's abort limits from the
+channel table, the input overload, the underrun and the reader's failure) and
+the folder's name; `check`, the check report the run was configured with (each
+channel's peak, start and end values, its velocity and displacement taken as an
+acceleration with their end values and peaks, pass or fail with the reason);
+and `derived`. Then these, each checked against the golden run folder
+(`schema/golden/runs/playback/`) by `tests/test_run_folder_golden_playback.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order (`kind` `inputs`), from the station's first frame until past the drive's last recorded frame by the station's input delay |
+| `streams/drives` | Every drive as the device accepted it, in volts, in table order (`kind` `drives`), frame for frame with the inputs: the pre-roll's zeros (the station's lead-in first), the file at the level from the pre-roll's last frame, then the post-roll, or the stop ramp and one station block of zeros after it. A completed run's drives are the pre-roll, the file and the post-roll exactly; the zeros played after them, while the inputs come back, are not recorded |
+| `results/playback_check` | The check report (`kind` `drive_check`, the report whole in its description) and, per file channel, its peak, start, end, velocity and displacement end values and peaks, and the envelopes of the drive, the velocity and the displacement (each bucket's minimum and maximum), in V, V s and V s² |
+| `results/playback_outcome` | How the run ended (`kind` `playback_outcome`): `ended` (`completed`, `stopped` or `aborted`), the `outcome` and its reason in words, whether the emergency stop was issued and a response abort's trip; arrays `played` (file samples), `played_s` and `generated` (frames from the station's first, the rolls included) |
+| `end.json` | The end, as the run's state reports it, the samples played of the file's, and the state itself, with the loop's `health` (`engine_ticks`, `worst_tick_ms` against `budget_ms`, `health_faults`, `ring_overruns`) |
+
+The log has an entry for the check (`check`, `data.event` `check_passed`),
+the arm (`state`, `armed`), each phase as it begins with the generated frame
+it began at (`pre_roll`, `playing`, `post_roll`, `post_roll_done`, `stop`,
+`stopped`, `zeroed`), an operator's stop or abort and who asked
+(`operator`), a trip (`trip`), an underrun (`underrun`), an abort (`abort`),
+an overload (`overload`) and the outcome (`outcome`). A start refused (the
+file changed since its check, a rate the station does not run, the station or
+the record refusing) is a `state` entry, beside a `check` entry when the file or
+its rate refused it, and ends the run `arm_refused`. With `record.streams` false there is no `streams/` folder.
+Playback has no law.
+
+The golden folder is written by `cargo test -p sds-control --test
+playback_golden_run` from a short run on the simulator (one input, one drive,
+2048 Hz): a half-second burst at -6 dB with an eighth of a second of pre-roll
+and of post-roll, played to its end. What follows the wall clock is
+normalized: the wall times, the build fields, the folders' paths, the station
+frames and the read-ahead's fill. Its drive stream is whole, 1536 frames; its
+input stream is cut to the same 1536 frames (`cut_from_frames`);
 `scripts/make_golden_runs.sh` rewrites it.
 
 ## Reports and the Run Log

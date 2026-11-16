@@ -1917,6 +1917,14 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			...explorer.methods,
 			...recorder.methods,
 			...mimoShock.methods,
+			// Playback reads a drive folder from the disk of the computer that runs the test: the
+			// mock has none, so it holds no run and checks no drive.
+			'playback.state': () => ({ run_id: null, state: 'unconfigured' }),
+			'playback.config': () => ({ run_id: null, config: null, check: null, derived: null }),
+			'playback.log': () => ({ entries: [], next: 0 }),
+			'playback.configure': () => {
+				throw new MockError('refused', 'This demonstration service reads no drive files: connect the control service to check and play one.');
+			},
 			// The law catalog holds both shock worlds, Sine's and TWR's: each lists its own, and a law
 			// file goes to the world it implements (the mock tells an SRS, a Sine or a TWR law file by
 			// its name).

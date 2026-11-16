@@ -1,0 +1,181 @@
+{
+  "name": "playback_check",
+  "kind": "drive_check",
+  "abscissa": {
+    "name": "bucket_start_s",
+    "unit": "s",
+    "step": 0.0029296875,
+    "samples_per_bucket": 6
+  },
+  "channels": [
+    {
+      "file_channel": 0,
+      "name": "drive",
+      "drive_row": 2
+    }
+  ],
+  "report": {
+    "pass": true,
+    "sha256": "f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02",
+    "rate_hz": 2048.0,
+    "samples": 1024,
+    "duration_s": 0.5,
+    "level_db": -6.0,
+    "ceiling_v": 1.0,
+    "tolerances": {
+      "ends_fraction_of_peak": 0.005,
+      "velocity_fraction_of_peak": 0.01,
+      "displacement_fraction_of_peak": 0.01,
+      "integrator": "pure trapezoidal, no high-pass, the drive taken as an acceleration"
+    },
+    "channels": [
+      {
+        "channel": 0,
+        "name": "drive",
+        "peak_v": 0.4000000059604645,
+        "start_v": 0.0,
+        "end_v": -0.00014544639270752668,
+        "velocity_v_s": {
+          "end": 3.550937321961101e-8,
+          "peak": 0.0012716698140486926
+        },
+        "displacement_v_s2": {
+          "end": -3.0225346774048756e-9,
+          "peak": 4.034896119954265e-6
+        },
+        "pass": true,
+        "faults": [],
+        "note": null,
+        "drive_row": 2,
+        "played_peak_v": 0.2004748964382176
+      }
+    ],
+    "refusals": [],
+    "limits": "The check takes the drive signal as an acceleration. It cannot know the table's motion without a model of the shaker and its amplifier, so stroke is not checked."
+  },
+  "arrays": [
+    {
+      "name": "peak",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V",
+      "offset": 0
+    },
+    {
+      "name": "start",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V",
+      "offset": 8
+    },
+    {
+      "name": "end",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V",
+      "offset": 16
+    },
+    {
+      "name": "velocity_end",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V s",
+      "offset": 24
+    },
+    {
+      "name": "velocity_peak",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V s",
+      "offset": 32
+    },
+    {
+      "name": "displacement_end",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V s^2",
+      "offset": 40
+    },
+    {
+      "name": "displacement_peak",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "V s^2",
+      "offset": 48
+    },
+    {
+      "name": "drive_min",
+      "dtype": "f8",
+      "shape": [
+        1,
+        171
+      ],
+      "unit": "V",
+      "offset": 56
+    },
+    {
+      "name": "drive_max",
+      "dtype": "f8",
+      "shape": [
+        1,
+        171
+      ],
+      "unit": "V",
+      "offset": 1424
+    },
+    {
+      "name": "velocity_min",
+      "dtype": "f8",
+      "shape": [
+        1,
+        171
+      ],
+      "unit": "V s",
+      "offset": 2792
+    },
+    {
+      "name": "velocity_max",
+      "dtype": "f8",
+      "shape": [
+        1,
+        171
+      ],
+      "unit": "V s",
+      "offset": 4160
+    },
+    {
+      "name": "displacement_min",
+      "dtype": "f8",
+      "shape": [
+        1,
+        171
+      ],
+      "unit": "V s^2",
+      "offset": 5528
+    },
+    {
+      "name": "displacement_max",
+      "dtype": "f8",
+      "shape": [
+        1,
+        171
+      ],
+      "unit": "V s^2",
+      "offset": 6896
+    }
+  ]
+}
