@@ -210,10 +210,23 @@ def _arrow_role(table: Any, prefs: dict[str, Any]) -> str:
     return role if role in table.choices() else 'all'
 
 
+def _picked_channels(objects: list[str], records: dict[str, list[int]],
+                     table: tuple[str, Any] | None) -> list[int] | None:
+    """The rows of the channels picked inside a selected channel table, or None when
+    the table is whole: only their arrows are drawn."""
+    if table is None or table[0] not in objects:
+        return None
+    rows = sorted({int(i) for i in records.get(table[0], [])
+                   if 0 <= int(i) < table[1].num_channels})
+    return rows or None
+
+
 def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None,
-                role: str = 'all') -> tuple[list[str], list[bool]]:
+                role: str = 'all', only: list[int] | None = None
+                ) -> tuple[list[str], list[bool]]:
     """The DOFs the arrows mark and whether each points in: the channel
-    table's channels in `role` (`ChannelTable.chosen`), a force or a drive pointing in,
+    table's channels in `role` (`ChannelTable.chosen`), or the rows `only` when channels
+    are picked inside it, a force or a drive pointing in,
     else a lone shape set's DOFs when it has no more than `ARROW_DOF_LIMIT` of them."""
     from hertzforge.core.report import EXCITATION_QUANTITIES
     from hertzforge.core.shapes import ShapeSet
@@ -221,7 +234,7 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None,
     if table is not None:
         _name, obj = table
         strings, types = obj.dof_strings(), obj.types()
-        rows = [i for i in obj.chosen(role)
+        rows = [i for i in (obj.chosen(role) if only is None else only)
                 if str(obj['node'][i]).strip() and str(obj['direction'][i]).strip()]
         return [strings[i] for i in rows], [types[i] in EXCITATION_QUANTITIES for i in rows]
     if len(objects) == 1 and isinstance(project[objects[0]], ShapeSet):
@@ -231,14 +244,15 @@ def _arrow_dofs(project: Any, objects: list[str], table: tuple[str, Any] | None,
     return [], []
 
 
-def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
-           ) -> list[str]:
+def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any],
+           records: dict[str, list[int]] | None = None) -> list[str]:
     """DOF arrows and sensors over every stage the selection shows, in the
     geometry's coordinates: the arrows as solids that stay put (`arrows` on the
     `shape3d`) as `project.dof_arrows` draws them, the sensors as solids
     that move with their nodes (`bodies`) as `project.sensors` draws
     them. A channel table picked with a geometry always has its arrows drawn, for
-    the channels `prefs.arrow_role` chooses. Returns the notes."""
+    the channels `prefs.arrow_role` chooses, or for the channels picked inside the table
+    when some are. Returns the notes."""
     stages = [view for view in views if view.get('view') == 'shape3d']
     geometry_name = _stage_geometry(project, objects) if stages else None
     if geometry_name is None:
@@ -255,19 +269,23 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
     notes: list[str] = []
     if prefs['arrows'] or picked:
-        role = _arrow_role(table[1], prefs) if table is not None else 'all'
-        dofs, into = _arrow_dofs(project, objects, table, role)
+        only = _picked_channels(objects, records or {}, table)
+        role = _arrow_role(table[1], prefs) if table is not None and only is None else 'all'
+        dofs, into = _arrow_dofs(project, objects, table, role, only)
         into = into or [False] * len(dofs)
         if dofs or picked:
             hits = dof_arrow_vectors(geometry, dofs)
             drawn = [(i, hit) for i, hit in zip(into, hits, strict=True) if hit is not None]
+            labels = [dof for dof, hit in zip(dofs, hits, strict=True) if hit is not None]
             if drawn:
                 length = dof_arrow_length(xyz[[hit[0] for _i, hit in drawn]], _extent(xyz))
                 for stage in stages:
                     # each its own, since converting a stage's units writes into it
-                    stage['arrows'] = arrows(xyz, drawn, length)
+                    stage['arrows'] = arrows(xyz, drawn, length, labels)
             said = f'{len(drawn)} DOF arrow{"s" * (len(drawn) != 1)}'
-            if role != 'all':
+            if only is not None:
+                said += f' ({len(only)} channel{"s" * (len(only) != 1)} picked)'
+            elif role != 'all':
                 said += f' ({VALUES_CHOICES[role].lower()})'
             if len(drawn) < len(dofs):
                 said += f', {len(dofs) - len(drawn)} with no node or direction on {geometry_name}'
@@ -1116,7 +1134,8 @@ def _resynthesis(project: Any, frf_name: str, set_name: str, records: dict[str, 
     return [view], [note]
 
 
-def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str, Any]:
+def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
+            records: dict[str, list[int]] | None = None) -> dict[str, Any]:
     """Which of the bar's choices the selection can take: the stage or the
     flat plot for a data object, a component for complex frequency data.
     A frequency axis is made linear or log on the plot itself."""
@@ -1167,7 +1186,9 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any]) -> dict[str
         'environments': loops,
         'table_views': forms,
         'arrows': marked and not picked,
-        'arrow_roles': table[1].choices() if table is not None and (marked or picked) else [],
+        # channels picked inside the table are the choice, so no role is offered
+        'arrow_roles': (table[1].choices() if table is not None and (marked or picked)
+                        and _picked_channels(objects, records or {}, table) is None else []),
         'sensors': bool(placed),
         'projection': (len(sets) == 2 and all(home is not None for home in homes)
                        and homes[0][1] is not homes[1][1]),
@@ -1208,7 +1229,7 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
                 notes.append('each object on its own')
     except ProtocolError as error:
         raise refused(str(error)) from None
-    notes += _marks(project, views, objects, prefs)
+    notes += _marks(project, views, objects, prefs, records)
     notes += _averaging(project, views, objects, prefs)
     _home(project, views, objects)
     if part and part.get('kind') and len(objects) == 1:
@@ -1227,4 +1248,4 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
             notes.append(f'{part["kind"]} {part.get("id", "")} picked; the whole geometry is drawn'.strip())
     title = ' and '.join(objects) if len(objects) <= 3 else f'{objects[0]} and {len(objects) - 1} more'
     return {'title': title, 'views': views, 'note': '; '.join(n for n in notes if n),
-            'offers': _offers(project, objects, prefs)}
+            'offers': _offers(project, objects, prefs, records)}

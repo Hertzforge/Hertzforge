@@ -521,6 +521,24 @@ def test_the_averaging_form_draws_its_frames_on_the_history(plate, validate):
     assert 'averaging not drawn' in bad['note'] and 'regions' not in bad['views'][0]
     with pytest.raises(ProtocolError, match='"averaging"'):
         shown(plate, history, prefs={'averaging': {'span': [0, 1]}})
+def test_channels_picked_in_a_table_are_the_only_arrows_on_its_geometry(plate, validate):
+    project = plate.project
+    geometry, table = named(plate, 'geometry'), named(plate, 'channel_table')
+    dofs = project[table].dof_strings()
+    whole = shown(plate, geometry, table, prefs={'sensors': False}, validate=validate)
+    drawn = whole['views'][0]['arrows']
+    assert drawn['labels'] == [dof for dof in dofs if dof in drawn['labels']], 'in table order'
+    assert len(drawn['labels']) == len(drawn['axes']) == len(drawn['inward'])
+    assert drawn['inward'].dtype == np.uint8
+    rows = [project[table].chosen('reference')[0], project[table].chosen('response')[0]]
+    some = shown(plate, table, geometry, records={table: rows},
+                 prefs={'sensors': False, 'arrow_role': 'response'}, validate=validate)
+    picked = some['views'][0]['arrows']
+    assert picked['labels'] == [dofs[i] for i in sorted(rows)], 'the picked ones, whatever the role'
+    assert sorted(picked['inward'].tolist()) == [0, 1], 'the reference points in'
+    assert '2 DOF arrows (2 channels picked)' in some['note']
+    assert some['offers']['arrow_roles'] == [], 'the pick is the choice'
+    assert len(some['views']) == 1
 
 
 def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):

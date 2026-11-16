@@ -108,12 +108,14 @@ def frames(geometry: Any, drawn: Any = None) -> list[dict[str, Any]]:
 
 
 def arrows(xyz: np.ndarray, drawn: Sequence[tuple[bool, tuple[int, np.ndarray, int]]],
-           length: float) -> dict[str, Any]:
+           length: float, labels: Sequence[str]) -> dict[str, Any]:
     """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long. `drawn` is
     (points in, (node row, direction, axis)) per arrow; an arrow pointing in ends on its
     node, the others start there. `tails` f32 [A, 3] is where each starts, `directions`
     f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
-    (0 X, 1 Y, 2 Z), which picks its color."""
+    (0 X, 1 Y, 2 Z), which picks its color. `labels` names each arrow's DOF and `inward`
+    u8 [A] is 1 for an arrow that points in, so a label can sit at the end away from the
+    node."""
     tails = np.zeros((len(drawn), 3), dtype=np.float32)
     directions = np.zeros((len(drawn), 3), dtype=np.float32)
     axes = np.zeros(len(drawn), dtype=np.uint8)
@@ -121,7 +123,9 @@ def arrows(xyz: np.ndarray, drawn: Sequence[tuple[bool, tuple[int, np.ndarray, i
         tails[k] = xyz[row] - length * vector if into else xyz[row]
         directions[k] = vector
         axes[k] = axis
-    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length)}
+    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length),
+            'labels': [str(label) for label in labels],
+            'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
 
 
 # ---- tables -------------------------------------------------------------------------
@@ -958,7 +962,8 @@ def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
     view = _drawn(f'{home}, DOFs of {name}', geometry)
     if drawn:
         length = dof_arrow_length(xyz[[hit[0] for _d, _i, hit in drawn]], _extent(xyz))
-        view['arrows'] = arrows(xyz, [(into, hit) for _d, into, hit in drawn], length)
+        view['arrows'] = arrows(xyz, [(into, hit) for _d, into, hit in drawn], length,
+                                [dof for dof, _i, _h in drawn])
     rows = []
     for dof, into, hit in zip(dofs, incoming, found, strict=True):
         if hit is None:

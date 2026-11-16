@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Color, Vector3 } from 'three';
-import { arrowGeometry, arrowMatrices, arrowMesh } from './arrows';
+import { arrowGeometry, arrowMatrices, arrowMesh, labelPoints } from './arrows';
 import { AXIS_COLORS } from './pick';
 
 describe('solid arrows', () => {
@@ -30,5 +30,10 @@ describe('solid arrows', () => {
 			mesh.getColorAt(k, color);
 			expect(color.getHex()).toBe(hex);
 		});
+	});
+
+	it('labels an arrow past its free end: the head of one pointing out, the tail of one pointing in', () => {
+		const at = labelPoints({ tails: [0, 0, 0, 0, 0, 2], directions: [1, 0, 0, 0, 0, -1], inward: [0, 1], length: 2 }, 0.25);
+		expect(Array.from(at)).toEqual([2.5, 0, 0, 0, 0, 2.5]);
 	});
 });

@@ -110,3 +110,16 @@ export function triadScene(): { scene: Scene; camera: OrthographicCamera; look: 
 		}
 	};
 }
+
+/**
+ * Where each arrow's label sits: a little past its free end, which is the head of an arrow that
+ * points out and the tail of one that points in and ends on its node.
+ */
+export function labelPoints(arrows: { tails: ArrayLike<number>; directions: ArrayLike<number>; inward: ArrayLike<number>; length: number }, past = 0.18): Float32Array {
+	const out = new Float32Array(arrows.tails.length);
+	for (let k = 0; k < arrows.tails.length / 3; k++) {
+		const reach = arrows.inward[k] ? -past * arrows.length : (1 + past) * arrows.length;
+		for (let c = 0; c < 3; c++) out[3 * k + c] = arrows.tails[3 * k + c] + reach * arrows.directions[3 * k + c];
+	}
+	return out;
+}

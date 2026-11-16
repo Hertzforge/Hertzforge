@@ -233,10 +233,11 @@
         "home": {"type": "object", "required": ["eye", "up"], "properties": {"eye": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}, "up": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}}},
         "cursor": {"const": "frequency"},
         "arrows": {
-          "type": "object", "required": ["tails", "directions", "axes", "length"],
+          "type": "object", "required": ["tails", "directions", "axes", "length", "labels", "inward"],
           "properties": {
             "tails": {"$ref": "#/$defs/arrayRef"}, "directions": {"$ref": "#/$defs/arrayRef"},
-            "axes": {"$ref": "#/$defs/arrayRef"}, "length": {"type": "number", "minimum": 0}
+            "axes": {"$ref": "#/$defs/arrayRef"}, "length": {"type": "number", "minimum": 0},
+            "labels": {"type": "array", "items": {"type": "string"}}, "inward": {"$ref": "#/$defs/arrayRef"}
           }
         },
         "bodies": {

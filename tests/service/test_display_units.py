@@ -105,7 +105,8 @@ def _plate(unit):
     view['pick'] = v.picking('project.add_node', {'geometry': 'Plate'}, 'point', 'place')
     view['arrows'] = {'tails': np.array([[0.0, 0.0, 0.0254]], dtype=np.float32),
                       'directions': np.array([[0.0, 0.0, 1.0]], dtype=np.float32),
-                      'axes': np.array([2], dtype=np.uint8), 'length': 0.0508}
+                      'axes': np.array([2], dtype=np.uint8), 'length': 0.0508,
+                      'labels': ['1Z+'], 'inward': np.array([0], dtype=np.uint8)}
     return view
 
 

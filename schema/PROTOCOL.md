@@ -685,11 +685,14 @@ set shows the picked records with their resynthesis following dashed (`follows`)
 every stage. The arrows are `arrows` on the `shape3d`, solids that stay put while the model moves:
 `tails` f32 [A, 3] where each starts, in the geometry's coordinates, `directions` f32 [A, 3] the
 unit vector it points along, `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which the shell
-colors it by as it colors the orientation axes, and `length`, one for all of them. A channel table
+colors it by as it colors the orientation axes, `length`, one for all of them, `labels`, each
+arrow's DOF, which the shell writes at the arrow's free end when asked, and `inward` u8 [A], 1 for
+an arrow that points in and ends on its node. A channel table
 picked with a geometry shows the geometry alone with the table's arrows always drawn, so `arrows` is
 not offered there. `prefs.arrow_role` (`all`, `control` or a role; `offers.arrow_roles` lists the
 ones the table holds) chooses the channels whose arrows are drawn, there and wherever the arrows of
-a table are on. The sensors are `bodies`: solids drawn
+a table are on. Channels picked inside the table (`records`) are the choice instead: only their
+arrows are drawn and no role is offered. The sensors are `bodies`: solids drawn
 from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's coordinates,
 `triangles` u32 [T, 3], `colors` u8 [P, 3] (sRGB) and `follow` u32 [P], the row of the view's
 `nodes` whose motion each point takes, so a body moves with its node (2^32 − 1 stays put).
