@@ -976,7 +976,8 @@ def load_channel_table(group: h5py.Group) -> ChannelTable:
 def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
     """Write a shape set into `group`: frequencies, damping, shape matrix
     and modal mass as datasets with its strings, mass unit and unscaled
-    flag; modal damping only when the set has it."""
+    flag; modal damping and the reference-only DOFs only when the set has
+    them."""
     group.attrs['mass_unit'] = shapes.mass_unit or ''
     group.attrs['unscaled'] = bool(getattr(shapes, 'unscaled', False))
     group.create_dataset('frequency', data=shapes.frequency)
@@ -990,6 +991,8 @@ def save_shapes(shapes: ShapeSet, group: h5py.Group) -> None:
     _write_strings(group, 'coordinate', shapes.coordinate)
     _write_strings(group, 'comment', shapes.comment)
     _write_strings(group, 'description', shapes.description)
+    if getattr(shapes, 'reference_only', None):
+        _write_strings(group, 'reference_only', shapes.reference_only)
 
 
 def load_shapes(group: h5py.Group) -> ShapeSet:
@@ -1009,6 +1012,8 @@ def load_shapes(group: h5py.Group) -> ShapeSet:
         unscaled=bool(group.attrs['unscaled']),
         modal_damping=(group['modal_damping'][()]
                        if 'modal_damping' in group else None),
+        reference_only=(_read_strings(group, 'reference_only')
+                        if 'reference_only' in group else None),
     )
 
 

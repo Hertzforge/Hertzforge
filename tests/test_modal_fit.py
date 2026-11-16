@@ -677,9 +677,10 @@ def test_refine_all_stops_close_modes_borrowing():
     """Sequential peeling fits the first of a close pair on data still
     containing the second, so its residues absorb a piece of the
     neighbor — the pair's *sum* tracks the measurement while each
-    shape is contaminated. Refine holds the poles and re-fits every
-    mode's residues in one least squares with all the terms present,
-    and the shapes come back to the truth."""
+    shape is contaminated. Refine re-fits every mode's residues in one
+    least squares with all the terms present, and the shapes come back to
+    the truth. The poles given here are the true ones, and a joint search
+    of them finds nothing better, so they stay exactly where they were."""
     frf, truth = _two_close_modes()
     session = ModalFitSession(frf)
     for f_r, zeta, _phi in truth:
@@ -697,7 +698,7 @@ def test_refine_all_stops_close_modes_borrowing():
              for mode, (_f, _z, phi) in zip(session.modes, truth)]
     assert all(late >= early for early, late in zip(before, after))
     assert min(after) > 0.9999, 'both shapes recover the truth'
-    # the poles were the user's and stayed exactly put
+    # the poles were right and stayed exactly put
     assert [mode['frequency'] for mode in session.modes] == [50.0, 53.0]
     assert [mode['damping'] for mode in session.modes] == [0.02, 0.02]
 

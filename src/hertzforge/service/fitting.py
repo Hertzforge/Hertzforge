@@ -177,7 +177,7 @@ def delete(session: Any, indices: list[int]) -> None:
     """`fit.delete`: confirmed modes taken back: each leaves the modes and the replay list, and the
     preview, fitted against a residual that is gone, is dropped."""
     for k in sorted(set(indices), reverse=True):
-        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        pick = session.pick(k)
         if pick in session.confirmed:
             session.confirmed.remove(pick)
         del session.modes[k]
@@ -210,9 +210,10 @@ def edit(session: Any, params: Mapping[str, Any]) -> None:
         raise bad_request('fit.edit needs "damping" or "description"')
     if damping is not None:
         value = _damping(params, 'fit.edit')
-        pick = (float(session.modes[k]['frequency']), float(session.modes[k]['damping']))
+        pick = session.pick(k)
         if pick in session.confirmed:
             session.confirmed[session.confirmed.index(pick)] = (pick[0], value)
+        session.modes[k]['pick'] = (pick[0], value)
         session.modes[k]['damping'] = value
     if description is not None:
         if not isinstance(description, str):

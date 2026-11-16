@@ -5731,8 +5731,10 @@ class Project(dict):
             interactive session is replayed. `bounds` and `limit` are
             ignored when picks are given.
         refine : int, default 0
-            How many times to run the joint residue refinement after the
-            confirms (the screen's Refine All).
+            How many times to refine the fit after the confirms (the
+            screen's Refine): modes whose half-power bands overlap get
+            their poles searched together and their residues fitted
+            together (`ModalFitSession.refine_residues`).
         records : sequence of int, optional
             Fit these records only; the screen fits the records picked
             in the tree. Every record when omitted.
