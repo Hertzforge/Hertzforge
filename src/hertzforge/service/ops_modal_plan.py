@@ -461,7 +461,10 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     (`core.correlate.project_shapes`), their MAC after projection
     (`core.shapes.cross_mac`, as `Project.comparison_mac` reads it), and
     the pair a cell picks drawn on the basis geometry, the projected
-    mode over the basis mode: Animate the Projection.
+    mode over the basis mode: Animate the Projection. Which set is
+    projected is `core.correlate.projection_order`'s to say: the set
+    with nodes measured in fewer than three directions is the basis,
+    whichever was named first.
     Nothing is added."""
     from hertzforge.core.correlate import project_shapes
     from hertzforge.core.shapes import cross_mac
@@ -475,23 +478,36 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
     if home[1] is theirs[1]:
         raise refused(f'{first} and {second} are both on {home[0]}, so there is nothing to '
                       'project; MAC overlays them there')
-    rows = project[first]
+    from hertzforge.core.correlate import projection_order
+
+    # which is projected is decided by what the sets measure, not by the order they are
+    # named in: the one with nodes measured in fewer than three directions is projected onto
+    flipped, why = projection_order(project[first], project[second])
     try:
-        projected, report = project_shapes(project[second], theirs[1], rows, home[1],
-                                           tolerance=params['tolerance'] / 100.0)
-        values = cross_mac(rows, projected)
+        if flipped:
+            columns = project[second]
+            rows, report = project_shapes(project[first], home[1], columns, theirs[1],
+                                          tolerance=params['tolerance'] / 100.0)
+        else:
+            rows = project[first]
+            columns, report = project_shapes(project[second], theirs[1], rows, home[1],
+                                             tolerance=params['tolerance'] / 100.0)
+        values = cross_mac(rows, columns)
     except ValueError as error:
         raise refused(str(error)) from None
+    moved, onto, basis = (first, second, theirs) if flipped else (second, first, home)
 
     def axis(name: str, shapes: Any) -> dict:
         return {'label': name, 'ticks': [f'{f:.1f} Hz' for f in shapes.frequency]}
 
-    matrix = v.matrix(f'MAC of {first} Against {second} on {home[0]}', axis(first, rows),
-                      axis(f'{second}, projected', projected), values, 'MAC', (0.0, 1.0))
-    views = paired(home[1], matrix, rows, range(rows.num_shapes), projected,
-                   range(projected.num_shapes))
-    return [*views, v.reading(f'{second} projected onto {first}',
-                              _report_rows(report, home[1].units_defined))]
+    matrix = v.matrix(f'MAC of {first} Against {second} on {basis[0]}',
+                      axis(f'{first}, projected' if flipped else first, rows),
+                      axis(second if flipped else f'{second}, projected', columns),
+                      values, 'MAC', (0.0, 1.0))
+    views = paired(basis[1], matrix, rows, range(rows.num_shapes), columns,
+                   range(columns.num_shapes))
+    return [*views, v.reading(f'{moved} projected onto {onto}: {why}',
+                              _report_rows(report, basis[1].units_defined))]
 
 
 OPERATIONS = (

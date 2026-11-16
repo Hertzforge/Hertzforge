@@ -51,10 +51,10 @@ def _stage(geometry: Any, title: str, rows: Any, row_modes: list[int], columns: 
     model and a test's on the test geometry laid over it (Brandon, 2026-11-16). A row mode
     moves no node of the second geometry and a column mode none of the first.
 
-    `compared` is the column set as it is compared with the row set
-    (`Project.comparison_shapes`): sets on two geometries share no DOF, so the angle that
-    aligns a pair is read from the column set projected onto the row set's DOFs, and the
-    two then move together and not half a cycle apart."""
+    `compared` is the two sets as they are compared (`Project.compared_sets`): sets on
+    two geometries share no DOF, so the angle that aligns a pair is read from them with one
+    projected onto the other's DOFs, and the two then move together and not half a cycle
+    apart."""
     from hertzforge.core.shapes import alignment_phases
 
     drawn, triangles, lines = drawn_mesh(geometry)
@@ -89,8 +89,8 @@ def _stage(geometry: Any, title: str, rows: Any, row_modes: list[int], columns: 
                        float(columns.damping[c]) if columns.damping[c] > 0 else None,
                        over[k], label=f'{named} mode {c + 1}')
                 for k, c in enumerate(column_modes)]
-    phase = alignment_phases(rows, row_modes, columns if compared is None else compared,
-                             column_modes).astype(np.float32)
+    ours, theirs = (rows, columns) if compared is None else compared
+    phase = alignment_phases(ours, row_modes, theirs, column_modes).astype(np.float32)
     return v.shape3d(title, 'm' if defined else 'undefined', nodes, modes,
                      triangles=triangles, lines=lines, overlays=overlays,
                      overlay_phase=phase, **extra)

@@ -251,8 +251,13 @@ def test_the_projection_overlays_a_set_from_another_geometry(plate, validate):
     assert np.allclose(np.asarray(matrix['values']), plate.comparison_mac(basis, shapes),
                        atol=1e-6)
     assert len(shape['overlays']) == plate[shapes].num_shapes
-    assert len(shape['nodes']) == plate[f'{MODEL} Plan Geometry'].num_nodes
-    assert reading['rows'][0]['value'] == '8 of 8'
+    # the fitted set is measured along one axis at its nodes, so the plan's three-axis
+    # shapes are the ones projected, onto it, and the pair is drawn on its geometry
+    assert matrix['rows']['label'] == f'{basis}, projected'
+    assert len(shape['nodes']) == plate.geometry_for(shapes)[1].num_nodes
+    assert reading['title'].startswith(f'{basis} projected onto {shapes}: it has ')
+    # of the fitted set's ten measured nodes, four have a plan node within the limit
+    assert reading['rows'][0]['value'] == '4 of 10'
     with pytest.raises(ProtocolError, match='both on Geometry') as error:
         run(plate, 'project.projection_overlay', first=MODEL, second=shapes)
     assert error.value.code == 'refused'

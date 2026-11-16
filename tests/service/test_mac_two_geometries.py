@@ -133,11 +133,11 @@ def test_a_pair_on_two_geometries_is_aligned_by_the_projected_shapes(state):
                 np.asarray(stage['overlay_phase']).reshape(rows, columns))
 
     values, phase = phases()
-    compared = project.comparison_shapes(first, second)
-    ours, theirs, signs = shared_columns(project[first], compared)
+    ours_set, compared, _said = project.compared_sets(first, second)
+    ours, theirs, signs = shared_columns(ours_set, compared)
     assert ours, 'the projection is on the first set\'s DOFs'
     # every pair whose shapes have something in common is turned to move together
-    inner = (np.conj(np.asarray(project[first].shape_matrix)[:, ours])
+    inner = (np.conj(np.asarray(ours_set.shape_matrix)[:, ours])
              @ (np.asarray(compared.shape_matrix)[:, theirs] * signs).T)
     related = np.abs(inner) > 1e-9 * np.abs(inner).max()
     assert related.any() and values.shape == inner.shape
@@ -152,3 +152,33 @@ def test_a_pair_on_two_geometries_is_aligned_by_the_projected_shapes(state):
         project[second] = held
     apart = np.abs(np.angle(np.exp(1j * (turned - phase))))
     assert np.allclose(apart[related], np.pi, atol=1e-5)
+
+
+def test_the_projection_goes_onto_the_uniaxial_set_whichever_is_picked_first(state, validate):
+    """The test set has nodes measured along one axis, so the model is projected onto it
+    in either selection order: the MAC is the same, turned, and the note says which way."""
+    from hertzforge.service.mesh import drawn_mesh
+
+    forward = shown(state, 'FEM Shapes', 'Test Shapes', validate=validate)
+    back = shown(state, 'Test Shapes', 'FEM Shapes', validate=validate)
+    for out in (forward, back):
+        assert 'FEM Shapes projected onto Test Shapes: it has 2 nodes measured' in out['note']
+    rows, columns = len(forward['views'][1]['modes']), len(forward['views'][1]['overlays'])
+    assert np.allclose(np.asarray(forward['views'][0]['values']).reshape(rows, columns),
+                       np.asarray(back['views'][0]['values']).reshape(columns, rows).T,
+                       atol=1e-6)
+    # Projection animates it on the geometry projected onto: the test's, both ways
+    project = state.project
+    test_nodes = len(drawn_mesh(project['Test Geometry'])[0])
+    first = shown(state, 'FEM Shapes', 'Test Shapes', prefs={'projection': True},
+                  validate=validate)
+    matrix, stage = first['views'][:2]
+    assert matrix['rows']['label'] == 'FEM Shapes, projected'
+    assert matrix['columns']['label'] == 'Test Shapes'
+    assert len(stage['nodes']) == test_nodes and 'on Test Geometry' in matrix['title']
+    second = shown(state, 'Test Shapes', 'FEM Shapes', prefs={'projection': True},
+                   validate=validate)
+    matrix, stage = second['views'][:2]
+    assert matrix['rows']['label'] == 'Test Shapes'
+    assert matrix['columns']['label'] == 'FEM Shapes, projected'
+    assert len(stage['nodes']) == test_nodes

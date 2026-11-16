@@ -684,8 +684,12 @@ on a geometry shows its principal shape, or the shape relative to one reference 
 grid is picked. Two shape sets (with or without a geometry in the selection) show their MAC and, on a
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
-`projection` when the two sets are on different geometries) animates the second set projected onto the
-first's geometry; `project.add_matches` keeps picked squares as matched modes. A lone shape set shows
+`projection` when the two sets are on different geometries) animates the projection on the geometry
+projected onto. Which set is projected is decided by what the sets measure and not by their order: the
+set with nodes measured in fewer than three translation directions is the one projected onto, since it
+has no whole motion to sample; with none or with some in both, the set with more DOFs is projected onto
+the one with fewer. The MAC, the matches and each pair's alignment are read after that projection, and
+the note says which way it went; `project.add_matches` keeps picked squares as matched modes. A lone shape set shows
 one view at a time, named by `prefs.shape_view` (`offers.shapes`): `animate` (its modes on its geometry,
 and the default), `table`, `mac` (with the stage its squares animate) or `values`, the
 values read at `prefs.values_dofs` (`all` or a channel choice of the table in its group, listed in

@@ -463,7 +463,7 @@ def _alone(project: Any, name: str, picks: list[int],
         other = project.geometry_for(obj.second)
         apart = other is not None and other[1] is not project[geometry]
         try:
-            compared = project.comparison_shapes(obj.first, obj.second) if apart else None
+            compared = project.compared_sets(obj.first, obj.second)[:2] if apart else None
         except ValueError:
             compared = None
         stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
@@ -744,10 +744,11 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
         from hertzforge.core.shapes import cross_mac
 
         try:
-            # the second set as it is compared: projected onto the first's DOFs when the
-            # two are on two geometries, for the MAC and for each pair's alignment
-            compared = columns if first == second else project.comparison_shapes(first, second)
-            values = rows.auto_mac() if first == second else cross_mac(rows, compared)
+            # the two sets as they are compared: one projected onto the other's DOFs when
+            # they are on two geometries, for the MAC and for each pair's alignment
+            ours, theirs, said = ((rows, columns, '') if first == second
+                                  else project.compared_sets(first, second))
+            values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
         except ValueError as error:
             raise refused(str(error)) from None
 
@@ -762,8 +763,8 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             # each set on its own geometry, the second's laid over the first's
             views = paired(homes[0][1], matrix, rows, range(rows.num_shapes), columns,
                            range(columns.num_shapes), column_geometry=homes[1][1],
-                           compared=compared)
-            notes.append(f'the MAC after projecting {second} onto {first}; {first} drawn on '
+                           compared=(ours, theirs))
+            notes.append(f'the MAC with {said}; {first} drawn on '
                          f'{homes[0][0]} and {second} on {homes[1][0]}, Projection animates '
                          'the projection')
         else:
