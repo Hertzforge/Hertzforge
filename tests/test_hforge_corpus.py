@@ -297,3 +297,25 @@ def test_schema4_holds_test_setups():
     assert taken.origin == {'kind': 'run', 'run_uid': record.run_uid,
                             'run_id': record.run_id, 'name': 'Run Record'}
     assert taken.table['rows'] == record.table['rows']
+
+
+def test_schema5_holds_scans():
+    """The schema 5 file is the schema 4 project plus two scans: probed
+    points in two features, in millimeters and so held in meters, and a
+    bare cloud whose unit was never declared."""
+    from hertzforge.core.scan import Scan
+
+    held = native.load(os.path.join(CORPUS, 'schema5.hforge'))
+    older = native.load(os.path.join(CORPUS, 'schema4.hforge'))
+    with h5py.File(os.path.join(CORPUS, 'schema5.hforge')) as f:
+        assert f.attrs[native.STAMP] == native.SCAN_SCHEMA
+    assert list(held)[:len(older)] == list(older)
+    probed, cloud = held['Probed Scan'], held['Cloud Scan']
+    assert isinstance(probed, Scan) and isinstance(cloud, Scan)
+    assert probed.length_unit == 'mm' and probed.features == ['31_1', '31_2']
+    assert probed.feature_of.tolist() == [0, 0, 0, 1, 1, 1, -1]
+    np.testing.assert_allclose(probed.points[2], [0.010, 0.002, 0.009])
+    np.testing.assert_allclose(probed.deviation[:2], [1e-6, -2e-6])
+    assert probed.properties == {'Coordinate System': 'world', 'Data Alignments': 'original'}
+    assert cloud.length_unit is None and not cloud.features and cloud.deviation is None
+    np.testing.assert_allclose(cloud.points[1], [3.0, 2.0, 1.25])

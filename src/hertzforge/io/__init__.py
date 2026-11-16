@@ -30,6 +30,7 @@ from . import (
     nastran,
     native,
     photo_files,
+    point_files,
     punch,
     rattlesnake,
     rattlesnake_sine,
@@ -384,6 +385,13 @@ register_importer('matlab', 'MATLAB file, the project layout (.mat)',
                   matlab.sniff, matlab.load)
 register_importer('escdf', 'Engineering Sciences Common Data Format (.h5)',
                   escdf_objects.sniff, escdf_objects.load)
+register_importer('measured_points',
+                  'Measuring arm feature points table (.csv)',
+                  point_files.sniff_table, point_files.load_table)
+# ahead of delimited text, which reads any columns of numbers: three
+# numbers a row whose first does not rise are points in space
+register_importer('points', 'Points in space, x y z (.txt/.csv/.xyz)',
+                  point_files.sniff_points, point_files.load_points)
 # last on purpose: a text file another importer recognizes by its
 # content is that importer's, and only numbers in columns are left here
 register_importer('delimited',

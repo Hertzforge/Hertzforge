@@ -21,14 +21,16 @@ moves across by opening it and saving it.
 
 Every file stamps one root attribute:
 
-    hertzforge_schema = 1, 2, 3 or 4   (integer)
+    hertzforge_schema = 1, 2, 3, 4 or 5   (integer)
 
 Schema 1 holds everything `.vdyn` schema 3 held. Schema 2 adds objects
 held by reference to another file (below), and only a file with such an
 object is stamped 2. Schema 3 adds the run record (`run_record/`,
 below), and only a file holding one, or referring to one, is stamped 3.
 Schema 4 adds the test setup (`test_setup/`, below), and only a file
-holding one, or referring to one, is stamped 4.
+holding one, or referring to one, is stamped 4. Schema 5 adds the scan
+(`scan/`, below), and only a file holding one, or referring to one, is
+stamped 5.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -54,7 +56,7 @@ every earlier file starts with the first release that is not an alpha.
 A single object saved on its own is one group at the root, named for
 its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/`, `sine_levels/`,
-`predictions/`, `run_log_extract/`, `run_record/` or `test_setup/`. The loader recognizes the file by
+`predictions/`, `run_log_extract/`, `run_record/`, `test_setup/` or `scan/`. The loader recognizes the file by
 the group it finds.
 
 A breakpoint table file is a single-object file too, holding one of a
@@ -513,6 +515,27 @@ A run record's `setup.config` has the same form, so a setup opened from
 a run and a saved one are read the same way. Opening either fills a
 test's draft only: the draft is checked by the control service as one
 typed in, and nothing is armed by opening it.
+
+## `scan/`
+
+    scan/  attrs: length_unit ('' while not declared)
+           dsets:
+             points      float64 [3, N]: a row each for x, y and z
+             features    UTF-8 strings [F]: each feature's name   (optional)
+             feature_of  int32 [N]: the row in `features` a point
+                         belongs to, -1 for none                   (optional)
+             deviation   float64 [N]: how far the measuring software
+                         found each point from the surface it fit  (optional)
+             properties  one UTF-8 string, JSON: the header rows of
+                         the file it was read from                 (optional)
+
+Points measured on the part with a coordinate measuring arm: probed,
+feature by feature, or scanned with a laser as a cloud with no
+features. `points` and `deviation` are in meters when `length_unit` is
+set and as the file gave them when it is '', the way a geometry's node
+coordinates are held. The points are stored one row per axis so a
+compressed save chunks along the points. `features` and `feature_of`
+are written together, and only for a scan that has features.
 
 ## Run Folders and Their Conversion
 

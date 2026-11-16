@@ -99,6 +99,8 @@ PRELOAD = (
     'hertzforge.deform',
     # what showing a selection reaches, imported inside the core at first use
     'hertzforge.service.show',
+    # a scan drawn as points
+    'hertzforge.service.scans',
     # the table a selection answers with
     'hertzforge.service.action_table',
     'hertzforge.core.merge',

@@ -252,6 +252,13 @@
             "colors": {"$ref": "#/$defs/arrayRef"}, "follow": {"$ref": "#/$defs/arrayRef"}
           }
         },
+        "points": {"type": "array", "items": {
+          "type": "object", "required": ["xyz", "colors", "size"],
+          "properties": {
+            "xyz": {"$ref": "#/$defs/arrayRef"}, "colors": {"$ref": "#/$defs/arrayRef"},
+            "size": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }},
         "overlays": {"type": "array", "items": {"$ref": "#/$defs/mode"}},
         "overlay_phase": {"$ref": "#/$defs/arrayRef"},
         "paired": {"type": "boolean"},

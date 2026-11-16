@@ -707,7 +707,13 @@ arrows are drawn and no role is offered. The sensors are `bodies`: solids drawn
 from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's coordinates,
 `triangles` u32 [T, 3], `colors` u8 [P, 3] (sRGB) and `follow` u32 [P], the row of the view's
 `nodes` whose motion each point takes, so a body moves with its node (2^32 − 1 stays put).
-`project.sensors` draws its view's sensors the same way. `prefs.averaging` draws an averaging on a
+`project.sensors` draws its view's sensors the same way. A scan selected (`kind` `scan`: points measured on the
+part, by probe or by laser) shows a `shape3d` whose `points` are its points: a list of layers, each
+`xyz` f32 [P, 3] in the view's coordinates, `colors` u8 [P, 3] (sRGB) and `size`, a point's width on
+screen in pixels. The points stay put and are framed with the model. A scan with features is colored
+by feature and one without by height along the axis it spans least; a scan of more than 500,000
+points is drawn every nth point, which the note says. Scans selected together are layers of one view,
+and one geometry selected with them is drawn under them; `nodes` is empty when there is no geometry. `prefs.averaging` draws an averaging on a
 lone time history's own view, the stage or the flat plot, as `regions`: each frame with its window
 and row, then a `span` over all of them. The shell sends it while the Averaging form is open on that
 history: an object holding what the form holds (`frame_length`, `overlap`, `window`, `frames`,
@@ -822,7 +828,7 @@ its source, in place and under its own name; an empty list refreshes every stale
 first. Each answers with the project. A `.png`, `.jpg` or `.jpeg` path is a photo: it is added to the project's Photos object,
 made on first use, and `added` names that object.
 
-Units a file did not state are declared by channel, not by record. `project.units` gives an object's tables: a geometry's one row (`side`
+Units a file did not state are declared by channel, not by record. `project.units` gives an object's tables: a geometry's or a scan's one row (`side`
 `object`, key `length`), a shape set's (key `mass`), and a data object's channels, one row per
 (DOF, quantity), since a drive point's accelerometer and load cell share a DOF and are two
 channels. An FRF has a `response` and a `reference` table; a cross-spectral matrix and every other
