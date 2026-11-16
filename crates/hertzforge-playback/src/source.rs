@@ -177,11 +177,24 @@ impl DriveSource {
     }
 }
 
+/// How long a dropped source waits for its reader to see the cancel before leaving it.
+const READER_JOIN_WAIT: Duration = Duration::from_secs(1);
+
 impl Drop for DriveSource {
+    /// Cancels the reader and waits a bounded time for it. A reader held inside one
+    /// read (a stalled disk or share) is left to finish that read and exit on its own:
+    /// the run it fed has ended, the drive is already zero, and its end must not wait
+    /// on the disk.
     fn drop(&mut self) {
         self.shared.cancel.store(true, Ordering::Release);
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            let began = Instant::now();
+            while !t.is_finished() && began.elapsed() < READER_JOIN_WAIT {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if t.is_finished() {
+                let _ = t.join();
+            }
         }
     }
 }
@@ -202,12 +215,23 @@ fn read_all<R: Read>(
     while at < samples {
         let n = ((samples - at) as usize).min(READ_FRAMES);
         let piece = &mut bytes[..n * width * sample];
-        if let Err(e) = reader.read_exact(piece) {
-            return Err(if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                format!("drive.bin ended before sample {samples}, near sample {at}")
-            } else {
-                format!("drive.bin could not be read near sample {at}: {e}")
-            });
+        // One read at a time, not `read_exact`: a slow source fills a piece over many
+        // reads, and a cancelled run must not wait for the whole piece.
+        let mut filled = 0;
+        while filled < piece.len() {
+            if s.cancel.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            match reader.read(&mut piece[filled..]) {
+                Ok(0) => {
+                    return Err(format!(
+                        "drive.bin ended before sample {samples}, near sample {at}"
+                    ))
+                }
+                Ok(k) => filled += k,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(format!("drive.bin could not be read near sample {at}: {e}")),
+            }
         }
         for f in piece.chunks_exact(width * sample) {
             for (k, b) in f.chunks_exact(sample).enumerate() {

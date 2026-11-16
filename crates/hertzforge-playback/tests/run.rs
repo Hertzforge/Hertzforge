@@ -164,6 +164,32 @@ fn an_underrun_aborts_to_zero() {
 }
 
 #[test]
+fn a_reader_stalled_inside_a_read_does_not_hold_up_the_end() {
+    let fs = 2048.0;
+    let dir = temp("stalled");
+    let folder = write(&dir, fs, &[burst(fs, 10.0, 50.0, 0.5)]);
+    let t = table(1, 1, None);
+    let drive = checked(&folder, &t, setup(vec![2], 0.0, 1.0));
+    // the prefill and a little more, then one read that does not return for 20 s
+    let reader = Slow {
+        inner: drive.file.samples_reader().unwrap(),
+        fast: (2.5 * fs) as usize * 8,
+        given: 0,
+        pause: Duration::from_secs(20),
+        fail_after: None,
+    };
+    let (backend, seen) = spy(wire(fs, 1, 1), 1, false);
+    let h =
+        PlaybackHost::start_with_reader(drive, Box::new(reader), t, backend, SIM, paced()).unwrap();
+    let end = wait_end(&h, Duration::from_secs(10));
+    assert_eq!(end.outcome, "drive_underrun", "{}", end.message);
+    assert!(end.emergency_stop);
+    let s = seen.lock().unwrap();
+    assert_eq!(s.estops.len(), 1);
+    assert_eq!(s.after_estop_peak, 0.0);
+}
+
+#[test]
 fn a_reader_thread_failure_ends_in_the_emergency_stop() {
     let fs = 2048.0;
     let dir = temp("readerfail");
