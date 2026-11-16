@@ -683,6 +683,8 @@ export interface Shown {
 		arrows: boolean;
 		/** The channel choices whose arrows can be drawn alone (`all` first); empty with no table's arrows to draw. */
 		arrow_roles: string[];
+		/** The force references modal FRFs shown on a geometry can be driven at (`prefs.drive`). */
+		drives: string[];
 		sensors: boolean;
 		/** A lone channel table: its control loops, and the views the picked one holds. */
 		environments: string[];
@@ -708,6 +710,8 @@ export interface ShowPrefs {
 	arrows: boolean;
 	/** The channels of the table whose arrows are drawn: `all`, `control` or a role. */
 	arrow_role: string;
+	/** The force reference modal FRFs are driven at; null for the table's first. */
+	drive: string | null;
 	sensors: boolean;
 	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
 	environment: string | null;

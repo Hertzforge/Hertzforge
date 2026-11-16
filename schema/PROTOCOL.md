@@ -696,7 +696,13 @@ an arrow that points in and ends on its node. A channel table
 picked with a geometry shows the geometry alone with the table's arrows always drawn, so `arrows` is
 not offered there. `prefs.arrow_role` (`all`, `control` or a role; `offers.arrow_roles` lists the
 ones the table holds) chooses the channels whose arrows are drawn, there and wherever the arrows of
-a table are on. Channels picked inside the table (`records`) are the choice instead: only their
+a table are on. Modal FRFs (whole, or the records picked: the modes kept), a channel table with a
+reference channel measuring force and a geometry show the operating deflection shape of a force at
+that reference: at the cursor's line each mode's shape scaled by its modal FRF and its shape value
+at the drive, summed, at every DOF the modal FRFs' shape set has on the geometry, with one arrow at
+the force. `offers.drives` lists the table's force references and `prefs.drive` picks one (the
+first when null or not among them); the shape set the modal FRFs are of may be selected with them.
+Channels picked inside the table (`records`) are the choice instead: only their
 arrows are drawn and no role is offered. The sensors are `bodies`: solids drawn
 from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's coordinates,
 `triangles` u32 [T, 3], `colors` u8 [P, 3] (sRGB) and `follow` u32 [P], the row of the view's

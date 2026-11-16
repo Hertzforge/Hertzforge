@@ -698,6 +698,8 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
                                   and not set(drawn) - set(showing.AVERAGING_FIELDS)):
         raise bad_request('project.show "averaging" is null or holds '
                           + ', '.join(showing.AVERAGING_FIELDS))
+    if prefs.get('drive') is not None and not isinstance(prefs['drive'], str):
+        raise bad_request('project.show "drive" is a DOF or null')
     if 'arrow_role' in prefs and prefs['arrow_role'] not in VALUES_CHOICES:
         raise bad_request('project.show "arrow_role" is all, control, reference, response or '
                           'monitor')

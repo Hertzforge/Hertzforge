@@ -82,6 +82,11 @@ def test_an_frf_on_a_geometry_is_its_operating_shape_at_the_loudest_line(plate, 
     assert mode['label'].startswith('ODS at') and 'shape_imag' in mode
     assert mode['frequency_hz'] > 0 and np.abs(mode['shape']).max() > 0
     assert curves['view'] == 'spectrum'
+    # a line is drawn at full scale with its fullest deflection at phase zero: the real
+    # part is the larger one, and the two together reach 1 at the DOF that moves most
+    real, imag = np.asarray(mode['shape']), np.asarray(mode['shape_imag'])
+    assert np.abs(real).max() > np.abs(imag).max()
+    assert np.hypot(real, imag).max() == pytest.approx(1.0, abs=1e-5)
 
 
 def test_a_shape_set_shows_on_its_geometry_or_as_its_table_and_mac(plate, validate):

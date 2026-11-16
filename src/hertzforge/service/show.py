@@ -85,6 +85,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
+         'drive': None,
          'sensors': True,
          'averaging': None,
          'environment': None, 'table_view': 'channels', 'tone': None, 'sine_reading': 'curves'}
@@ -280,8 +281,10 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
             if drawn:
                 length = dof_arrow_length(xyz[[hit[0] for _i, hit in drawn]], _extent(xyz))
                 for stage in stages:
-                    # each its own, since converting a stage's units writes into it
-                    stage['arrows'] = arrows(xyz, drawn, length, labels)
+                    # each its own, since converting a stage's units writes into it; a
+                    # stage that draws a force of its own keeps that arrow alone
+                    if 'arrows' not in stage:
+                        stage['arrows'] = arrows(xyz, drawn, length, labels)
             said = f'{len(drawn)} DOF arrow{"s" * (len(drawn) != 1)}'
             if only is not None:
                 said += f' ({len(only)} channel{"s" * (len(only) != 1)} picked)'
@@ -899,6 +902,145 @@ def _motion(project: Any, geometry_name: str, data_name: str, picks: list[int]
     return [stage, plot], notes
 
 
+def _swept(deflection: Any) -> np.ndarray:
+    """A swept pattern as one complex shape, nodes × 3: its offsets at phase zero and a
+    quarter turn on. `offsets` answers in one buffer it writes again on every call, so
+    the first answer is copied before the second is asked for; read in one expression,
+    both were the quarter-turn offsets and the pattern at phase zero was lost."""
+    at_zero = deflection.offsets(0.0).copy()
+    return at_zero - 1j * deflection.offsets(np.pi / 2)
+
+
+def _modal_frf_records(data: Any, picks: list[int]) -> list[int] | None:
+    """The records of modal FRFs a selection reads, every one when none is picked; None
+    when `data` is not an FRF or a record read is not a mode against a mode."""
+    from hertzforge.core.data import Frf
+    from hertzforge.core.validate import modal_coordinate
+
+    if not isinstance(data, Frf) or data.reference_dof is None:
+        return None
+    records = list(picks) or list(range(int(data.num_records)))
+    if not records or any(modal_coordinate(data.response_dof[i]) is None
+                          or modal_coordinate(data.reference_dof[i]) is None for i in records):
+        return None
+    return records
+
+
+def _driven_selection(project: Any, objects: list[str], records: dict[str, list[int]]
+                      ) -> tuple[str, str, str, list[int]] | None:
+    """(geometry, modal FRFs, channel table, the records read) when the selection is one
+    geometry, modal FRFs and one channel table, with or without the shape set the modal
+    FRFs are of: what shows the response to a force at the table's force reference. None
+    for anything else."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.data import Frf
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    def only(cls: Any) -> str | None:
+        found = [name for name in objects if isinstance(project[name], cls)]
+        return found[0] if len(found) == 1 else None
+
+    geometry, modal, table = only(Geometry), only(Frf), only(ChannelTable)
+    if not (geometry and modal and table) or len(objects) not in (3, 4):
+        return None
+    read = _modal_frf_records(project[modal], records.get(modal, []))
+    if read is None:
+        return None
+    if len(objects) == 4:
+        shapes = only(ShapeSet)
+        if shapes is None or shapes != project.modal_basis(modal, read):
+            return None
+    return geometry, modal, table, read
+
+
+def _driven(project: Any, objects: list[str], records: dict[str, list[int]],
+            prefs: dict[str, Any]) -> tuple[list[dict], list[str]] | None:
+    """Modal FRFs, a channel table with a force reference and a geometry: the operating
+    deflection shape of a force at that reference. At the line the cursor asks for, each
+    mode's shape scaled by its modal FRF and its shape value at the drive, summed
+    (`Project.driven_modes`), at every DOF the shape set has on the geometry, so no FRF
+    is made for any of them (`deform.ModalOdsDeflection`). The records picked are the
+    modes included: without the rigid-body modes, displacement at 0 Hz is the elastic
+    static deflection. `prefs.drive` picks among several force references. None for any
+    other selection."""
+    from hertzforge.deform import modal_ods_deflection
+    from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+
+    from .ops_geometry import _extent, arrows
+
+    chosen = _driven_selection(project, objects, records)
+    if chosen is None:
+        return None
+    geometry_name, modal, table, read = chosen
+    points = project.drive_points(table)
+    if not points:
+        return [], [(f'{table} has no reference channel measuring force: the response of '
+                    f'{modal} to a force needs one')]
+    drive = prefs.get('drive') if prefs.get('drive') in points else points[0]
+    geometry, data = project[geometry_name], project[modal]
+    picked = records.get(modal) or None
+    try:
+        basis, driven = project.driven_modes(modal, drive, table=table, records=picked)
+        deflection = modal_ods_deflection(geometry, project[basis], driven)
+    except (TypeError, ValueError) as refusal:
+        return [], [f'{modal}: {refusal}']
+    if not len(deflection.rows):
+        return [], [f'{modal}: {basis} has no DOF on {geometry_name}']
+    if deflection.peak == 0.0:
+        return [], [f'{modal}: a force at {drive} moves none of its modes']
+    abscissa = np.asarray(data.abscissa, dtype=float)
+    if prefs.get('line') is not None:
+        line = int(np.argmin(np.abs(abscissa - float(prefs['line']))))
+    else:
+        line = deflection.strongest_line
+    deflection.line = line
+    frequency = float(abscissa[line])
+    drawn_rows, triangles, lines, drawn = _drawn_rows(geometry)
+    shape = np.zeros((drawn_rows.size, 3), dtype=complex)
+    at = drawn[deflection.rows]
+    kept = at >= 0
+    shape[at[kept]] = _swept(deflection)[kept]
+    label = f'ODS at {frequency:.4g} Hz'
+    count = len(driven.modes)
+    notes = [(f'the response to a force at {drive}: {count} mode shape{"s" * (count != 1)} of '
+             f'{basis} scaled by their modal FRFs and summed')]
+    if not deflection.line_defined:
+        # displacement at 0 Hz with a rigid-body mode among the modes is unbounded
+        label += ': no shape, a mode is unbounded here'
+        notes.append(f'no shape at {frequency:.4g} Hz: a mode is unbounded there')
+    if not np.all(kept):
+        notes.append(f'{int((~kept).sum())} moving nodes are not drawn')
+    title = f'{modal} on {geometry_name}'
+    stage = v.shape3d(title, 'm' if geometry.units_defined else 'undefined',
+                      np.asarray(geometry.node_xyz, dtype=float)[drawn_rows],
+                      [v.mode(1, frequency, None, shape, label=label)],
+                      triangles=triangles, lines=lines, normalization='unscaled',
+                      node_ids=np.asarray(geometry.node_id)[drawn_rows],
+                      cursor='frequency')
+    # the one arrow is the force: modal coordinates are at no node
+    xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
+    hit = dof_arrow_vectors(geometry, [drive])[0]
+    if hit is not None:
+        stage['arrows'] = arrows(xyz, [(True, hit)],
+                                 dof_arrow_length(xyz[[hit[0]]], _extent(xyz)), [drive])
+    else:
+        notes.append(f'{drive} is not a node of {geometry_name}: the force is not drawn')
+    curves = _run(project, 'project.plot', data=modal, records=_runs(read),
+                  component=prefs['component'])
+    for curve in curves:
+        if curve.get('view') == 'spectrum':
+            curve['link'] = 'frequency'
+    return [stage, *curves], notes
+
+
+def _drives(project: Any, objects: list[str], records: dict[str, list[int]] | None
+            ) -> list[str]:
+    """The force references a driven selection (`_driven`) can be driven at."""
+    chosen = _driven_selection(project, objects, records or {})
+    return project.drive_points(chosen[2]) if chosen is not None else []
+
+
 def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
              prefs: dict[str, Any] | None = None) -> tuple[list[dict], list[str]]:
     """Frequency data on a geometry: the operating deflection shape of
@@ -914,6 +1056,9 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
 
     prefs = {**PREFS, **(prefs or {})}
     geometry, data = project[geometry_name], project[data_name]
+    if _modal_frf_records(data, picks) is not None:
+        return [], [(f'{data_name}: its records are modal FRFs; select a channel table with a '
+                    'force reference too, to see the response to that force')]
     notes: list[str] = []
     flavor = 'ODS'
     envelope = False
@@ -957,7 +1102,7 @@ def _pattern(project: Any, geometry_name: str, data_name: str, picks: list[int],
         shape[at[kept]] = deflection.offsets(0.0)[kept]
         label = f'Envelope at {frequency:.4g} Hz'
     else:
-        shape[at[kept]] = (deflection.offsets(0.0) - 1j * deflection.offsets(np.pi / 2))[kept]
+        shape[at[kept]] = _swept(deflection)[kept]
         label = f'{flavor} at {frequency:.4g} Hz'
     if not np.all(kept):
         notes.append(f'{int((~kept).sum())} moving nodes are not drawn')
@@ -1154,6 +1299,7 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
     sets = [name for name in objects if isinstance(project[name], ShapeSet)]
     homes = [project.geometry_for(name) for name in sets]
     alone = len(objects) == 1 and len(sets) == 1
+    drives = _drives(project, objects, records)
     choices = ['all']
     if alone:
         found = project.channel_table_for(sets[0])
@@ -1194,9 +1340,13 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
         'values_dofs': choices,
         'environments': loops,
         'table_views': forms,
-        'arrows': marked and not picked,
+        # modal FRFs driven at a force draw that force alone
+        'arrows': marked and not picked and not drives,
+        # the force references modal FRFs can be driven at (`prefs.drive`)
+        'drives': drives,
         # channels picked inside the table are the choice, so no role is offered
         'arrow_roles': (table[1].choices() if table is not None and (marked or picked)
+                        and not drives
                         and _picked_channels(objects, records or {}, table) is None else []),
         'sensors': bool(placed),
         'projection': (len(sets) == 2 and all(home is not None for home in homes)
@@ -1221,6 +1371,8 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
                 views, notes = paired
         elif len(objects) == 3 and (played := _three_played(project, objects, records)):
             views, notes = played
+        elif (driven := _driven(project, objects, records, prefs)) is not None:
+            views, notes = driven
         elif len(objects) == 3:
             compared = _compared(project, objects, prefs)
             if compared is not None:

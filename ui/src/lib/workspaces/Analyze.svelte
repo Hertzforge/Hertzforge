@@ -219,7 +219,7 @@
 						style:--rows-wide={beside.length ? beside.map((v) => (v.view === 'table' ? 'auto' : 'minmax(0, 1fr)')).join(' ') : 'minmax(0, 1fr)'}
 						style:--rows-stacked={views.map((v) => (v.view === 'table' ? 'auto' : v.view === 'shape3d' ? 'minmax(440px, 1fr)' : 'minmax(360px, 1fr)')).join(' ')}>
 						{#each views as v, i (i)}
-							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors || (offers?.arrow_roles.length ?? 0) > 1))}
+							{@const headed = views.length > 1 || shapes || v.view === 'matrix' || (v.view === 'shape3d' && !!(offers?.arrows || offers?.sensors || (offers?.arrow_roles.length ?? 0) > 1 || (offers?.drives.length ?? 0) > 1))}
 							<div class="view pane {v.view}" data-testid="pane-{v.view}">
 								{#if headed && offers}
 									<!-- the pane's own header: its title and the controls that read this view; a lone view with nothing to set leaves its title to the frame -->
@@ -237,6 +237,13 @@
 												<select class="field sm" aria-label="Arrows drawn" data-testid="read-arrow-role" value={offers.arrow_roles.includes(a.prefs.arrow_role) ? a.prefs.arrow_role : 'all'} onchange={(e) => a.setPref('arrow_role', (e.currentTarget as HTMLSelectElement).value)} title="The channels whose DOF arrows are drawn: every channel of the table, its control channels, or the channels in one role">
 													{#each offers.arrow_roles as choice (choice)}
 														<option value={choice}>{ARROW_CHOICES[choice] ?? choice}</option>
+													{/each}
+												</select>
+											{/if}
+											{#if offers.drives.length > 1}
+												<select class="field sm" aria-label="Force at" data-testid="read-drive" value={a.prefs.drive && offers.drives.includes(a.prefs.drive) ? a.prefs.drive : offers.drives[0]} onchange={(e) => a.setPref('drive', (e.currentTarget as HTMLSelectElement).value)} title="Which of the channel table's force references the geometry is driven at">
+													{#each offers.drives as dof (dof)}
+														<option value={dof}>Force at {dof}</option>
 													{/each}
 												</select>
 											{/if}
