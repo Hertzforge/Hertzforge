@@ -770,7 +770,7 @@ the folder's name; `check`, the check report the run was configured with (each
 channel's peak, start and end values, its velocity and displacement taken as an
 acceleration with their end values and peaks, pass or fail with the reason);
 and `derived`. Then these, each checked against the golden run folder
-(`schema/golden/runs/playback/`):
+(`schema/golden/runs/playback/`) by `tests/test_run_folder_golden_playback.py`:
 
 | File | What |
 |---|---|

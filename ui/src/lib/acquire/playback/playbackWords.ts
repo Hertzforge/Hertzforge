@@ -83,10 +83,11 @@ export function residual(r: { end: number; peak: number }, unit: string): string
 	return `${sci(r.end, unit)} of ${sci(r.peak, unit)}${share}`;
 }
 
-/** A channel's verdict: Pass, or each fault's own words. */
-export function verdict(c: PlaybackCheckChannel): string {
+/** A channel's verdict: Pass, or each fault's own words, one after another. */
+export function verdict(c: Pick<PlaybackCheckChannel, 'pass' | 'note' | 'faults'>): string {
 	if (c.pass) return c.note ? `Pass: ${c.note}` : 'Pass';
-	return c.faults.map((f) => f.text).join(' ');
+	const text = c.faults.map((f) => f.text.trim().replace(/\.$/, '')).join('; ');
+	return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}.` : 'Refused.';
 }
 
 /** Whether a check's refusals are only about the ends, which Fix Ends can make good. */

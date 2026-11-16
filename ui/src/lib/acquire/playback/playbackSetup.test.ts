@@ -90,7 +90,8 @@ describe('the drive check in words', () => {
 	it('says a residual against its peak, a pass, each fault, and whether only the ends are refused', () => {
 		expect(residual({ end: 0.0001, peak: 0.01 }, 'V s')).toBe('1.00e-4 V s of 0.01 V s (1 % of peak)');
 		const c = { pass: false, note: null, faults: [{ text: 'The velocity ends at 5 % of its peak.' }, { text: 'The last sample is not zero.' }] };
-		expect(verdict(c as never)).toBe('The velocity ends at 5 % of its peak. The last sample is not zero.');
+		expect(verdict(c as never)).toBe('The velocity ends at 5 % of its peak; The last sample is not zero.');
+		expect(verdict({ pass: false, note: null, faults: [{ text: 'starts at 0.05 V, more than 0.0027 V from zero' }, { text: 'ends at 0.05 V' }] } as never)).toBe('Starts at 0.05 V, more than 0.0027 V from zero; ends at 0.05 V.');
 		expect(verdict({ pass: true, note: 'all zero', faults: [] } as never)).toBe('Pass: all zero');
 		expect(endsOnly([{ reason: 'ends_not_zero' }])).toBe(true);
 		expect(endsOnly([{ reason: 'ends_not_zero' }, { reason: 'peak_over_ceiling' }])).toBe(false);

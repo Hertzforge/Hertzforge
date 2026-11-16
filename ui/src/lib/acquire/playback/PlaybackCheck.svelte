@@ -42,7 +42,7 @@
 	}
 </script>
 
-<div class="stack" data-testid="playback-check" data-pass={report ? String(report.pass) : ''} data-fixable={String(fixable)}>
+<div class="stack" data-testid="playback-check" data-pass={report ? String(report.pass) : ''} data-fixable={String(fixable)} data-folder={playback.setup.drive.folder}>
 	<section class="aq-panel" aria-labelledby="pb-check">
 		<div class="aq-head">
 			<h2 id="pb-check">Drive Check</h2>
@@ -153,7 +153,7 @@
 	}
 
 	.verdict.fail {
-		color: var(--status-fail-text, var(--text-1));
+		color: var(--text-1);
 	}
 
 	.scroll {

@@ -5,7 +5,8 @@
  * subscribe to: each plot draws the channels it shows from the last frame. There are no spectra
  * and no analysis.
  *
- * The pages until the operator changes them: Time (the inputs and the drives, one plot each).
+ * The pages until the operator changes them: Time (the inputs and the drives, one plot each). A
+ * plot of the inputs may show chosen rows; the drives' plot shows every drive.
  */
 
 import type { PlotType } from '../plots/types';
@@ -27,7 +28,7 @@ export const PLAYBACK_PAGES: PulsePageSet<PlaybackPageKind, PlaybackQuantity> = 
 	defaultRate: 10,
 	maxPages: 12,
 	defaults: ['time'],
-	channelQuantities: ['inputs', 'drives'],
+	channelQuantities: ['inputs'],
 	channels: {}
 };
 
