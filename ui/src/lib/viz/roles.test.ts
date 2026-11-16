@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { theme } from '$lib/theme/theme.svelte';
 import { ROLE_STYLES, seriesLooks } from './roles';
 
 describe('series looks', () => {
@@ -41,7 +42,11 @@ describe('many measured curves', () => {
 		const looks = seriesLooks(series);
 		const colors = looks.map((l) => l.color);
 		expect(new Set(colors).size).toBe(5);
-		expect(colors[0]).toBe('rgb(68 1 84)');
+		// the first is the map's first color on the theme shown: the dark theme leaves its dark end out
+		expect(colors[0]).toBe('rgb(65 68 135)');
+		theme.resolved = 'light';
+		expect(seriesLooks(series)[0].color).toBe('rgb(68 1 84)');
+		theme.resolved = 'dark';
 	});
 
 	it('keeps the blue family for three or fewer, and a follower takes its measurement\'s color', () => {

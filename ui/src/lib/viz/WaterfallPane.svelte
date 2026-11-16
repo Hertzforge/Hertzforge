@@ -597,6 +597,12 @@
 		for (const [kind, mesh] of marks) (mesh.material as MeshBasicMaterial).color.set(cssVar(MARKS[kind].colorVar));
 		// the handles' faces are painted in the theme's color: the regions are built again
 		if (regionFaces) buildRegions();
+		// the colormap starts further in on the dark theme: the shader's copy is made again
+		if (uniforms.uMap.value) {
+			uniforms.uMap.value.dispose();
+			colorTexture = mapTexture();
+			uniforms.uMap.value = colorTexture;
+		}
 		dirty = true;
 	}
 
