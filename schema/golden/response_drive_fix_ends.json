@@ -1,0 +1,129 @@
+{
+ "type": "response",
+ "id": 63,
+ "result": {
+  "folder": "/Users/someone/Hertzforge_Data/drives/drive-fixed",
+  "drive": {
+   "format": "hertzforge-drive",
+   "version": 1,
+   "rate_hz": 1000.0,
+   "samples": 401,
+   "channels": [
+    {
+     "name": "Drive 1",
+     "unit": "V",
+     "source": "column:2"
+    },
+    {
+     "name": "Drive 2",
+     "unit": "V",
+     "source": "column:3"
+    }
+   ],
+   "sha256": "b5cea183468e5b7fa1b59683ef00f773a0f45847f7ef2350aa3aa5c0df84d210",
+   "source": {
+    "path": "/Users/someone/tests/bracket/drive.csv",
+    "sha256": "08877c766433531155806dc91f8f69e27cb49110d6a8f0950b0b331601011594",
+    "format": "delimited",
+    "selections": [
+     {
+      "signal": "column:2",
+      "name": "Drive 1"
+     },
+     {
+      "signal": "column:3",
+      "name": "Drive 2"
+     }
+    ]
+   },
+   "fixes": [
+    {
+     "kind": "fix_ends",
+     "from": {
+      "folder": "/Users/someone/Hertzforge_Data/drives/drive",
+      "sha256": "2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540"
+     },
+     "taper_s": 0.01,
+     "taper_samples": 10,
+     "correction": "c(t) = a sin(pi t / T) + b sin(2 pi t / T), T = (samples - 1) / rate_hz",
+     "channels": [
+      {
+       "name": "Drive 1",
+       "a": -1.21109e-05,
+       "b": 5.18104e-18,
+       "rms_before": 0.216236,
+       "rms_after": 0.216236
+      },
+      {
+       "name": "Drive 2",
+       "a": 6.42086e-07,
+       "b": -6.40497e-18,
+       "rms_before": 0.108118,
+       "rms_after": 0.108118
+      }
+     ]
+    }
+   ],
+   "tool": "hertzforge 0.0.0",
+   "created_utc": "2026-11-15T00:00:00Z"
+  },
+  "from": {
+   "folder": "/Users/someone/Hertzforge_Data/drives/drive",
+   "sha256": "2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540"
+  },
+  "taper_s": 0.01,
+  "taper_samples": 10,
+  "channels": [
+   {
+    "name": "Drive 1",
+    "a": -1.21109e-05,
+    "b": 5.18104e-18,
+    "rms_before": 0.216236,
+    "rms_after": 0.216236,
+    "before": {
+     "start": 0.0,
+     "end": 0.0,
+     "peak": 0.5,
+     "velocity_end": 2.09664e-10,
+     "velocity_peak": 0.00395868,
+     "displacement_end": 4.19328e-11,
+     "displacement_peak": 3.31033e-05
+    },
+    "after": {
+     "start": 0.0,
+     "end": 0.0,
+     "peak": 0.500012,
+     "velocity_end": -5.75779e-19,
+     "velocity_peak": 0.00395884,
+     "displacement_end": -2.43797e-19,
+     "displacement_peak": 3.3292e-05
+    }
+   },
+   {
+    "name": "Drive 2",
+    "a": 6.42086e-07,
+    "b": -6.40497e-18,
+    "rms_before": 0.108118,
+    "rms_after": 0.108118,
+    "before": {
+     "start": 0.0,
+     "end": 0.0,
+     "peak": 0.25,
+     "velocity_end": -2.54349e-11,
+     "velocity_peak": 0.000788997,
+     "displacement_end": -5.08699e-12,
+     "displacement_peak": 2.51054e-06
+    },
+    "after": {
+     "start": 0.0,
+     "end": 0.0,
+     "peak": 0.249999,
+     "velocity_end": 2.55435e-19,
+     "velocity_peak": 0.000788993,
+     "displacement_end": 6.23621e-20,
+     "displacement_peak": 2.5015e-06
+    }
+   }
+  ]
+ }
+}

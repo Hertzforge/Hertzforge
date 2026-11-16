@@ -5,7 +5,8 @@
 default `<run name>.hforge` inside the folder. Every control module of
 the control service writes a run folder for every run: Random, MIMO
 Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock, TWR,
-Explorer and the Recorder. This is the analysis side of that bridge.
+Explorer, the Recorder and Playback. This is the analysis side of that
+bridge.
 
 The project holds, in this order:
 
@@ -60,7 +61,11 @@ The project holds, in this order:
   law, the log, the end, each stream's and result's description, the
   arrays of results no analysis class holds (an Explorer run's survey
   line and amplitude spectra among them: magnitudes with no phase, kept
-  in the channels' units as written), and what the folder lacked.
+  in the channels' units as written; a Playback run's check of its drive
+  file, `playback_check`, and its outcome, `playback_outcome`, whose
+  drive file is named in the setup with its SHA-256 and sidecar), and
+  what the folder lacked. A Playback run has no specification: its
+  inputs and its drives as played are its time histories.
 
 All of them are linked in one object group named for the run. A gap in
 a stream is not padded: the samples after it follow on, and each record

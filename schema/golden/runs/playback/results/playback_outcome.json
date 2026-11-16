@@ -1,0 +1,43 @@
+{
+  "name": "playback_outcome",
+  "kind": "playback_outcome",
+  "abscissa": null,
+  "channels": [
+    2
+  ],
+  "ended": "completed",
+  "outcome": "completed",
+  "reason": "the file played to its end and the post-roll was recorded",
+  "samples": 1024,
+  "emergency_stop": false,
+  "trip": null,
+  "arrays": [
+    {
+      "name": "played",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "sample",
+      "offset": 0
+    },
+    {
+      "name": "played_s",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "s",
+      "offset": 8
+    },
+    {
+      "name": "generated",
+      "dtype": "f8",
+      "shape": [
+        1
+      ],
+      "unit": "sample",
+      "offset": 16
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+ "type": "event",
+ "topic": "playback.live",
+ "seq": 301,
+ "data": {
+  "run_id": "playback-0002",
+  "state": "running",
+  "phase": "playing",
+  "progress": {
+   "played": 512,
+   "samples": 1024,
+   "played_s": 0.25,
+   "fraction": 0.5,
+   "elapsed_s": 0.375,
+   "buffered_s": 0.25
+  },
+  "time": {
+   "rate_hz": 2048,
+   "t0_s": 0.125,
+   "channels": [
+    {
+     "index": 1,
+     "role": "input",
+     "unit": "g",
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       6
+      ],
+      "values": [
+       0.0,
+       0.25,
+       -0.5,
+       0.125,
+       0.0625,
+       -0.25
+      ]
+     }
+    },
+    {
+     "index": 2,
+     "role": "drive",
+     "unit": "V",
+     "values": {
+      "dtype": "f32",
+      "shape": [
+       6
+      ],
+      "values": [
+       0.0,
+       0.125,
+       -0.25,
+       0.0625,
+       0.03125,
+       -0.125
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

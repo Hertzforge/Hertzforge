@@ -5916,6 +5916,182 @@ MSHOCK_TEXT_GOLDENS = {
 }
 
 
+
+# Playback's drive files, by path on the analysis service: what a file holds,
+# the chosen signals written as a native drive folder (the golden folder
+# schema/golden/drive/basic/, which this conversion reproduces byte for byte),
+# its ends fixed into a new folder, and a refusal by name
+_DRIVE_CSV = '/Users/someone/tests/bracket/drive.csv'
+_DRIVE_FOLDER = '/Users/someone/Hertzforge_Data/drives/drive'
+_DRIVE_SHA256 = '2a29d5610d601b53e3cb03dc8b9c1f98236011e715d80c26e727b619fa8c0540'
+_DRIVE_SIDECAR = {
+    'format': 'hertzforge-drive', 'version': 1, 'rate_hz': 1000.0, 'samples': 401,
+    'channels': [{'name': 'Drive 1', 'unit': 'V', 'source': 'column:2'},
+                 {'name': 'Drive 2', 'unit': 'V', 'source': 'column:3'}],
+    'sha256': _DRIVE_SHA256,
+    'source': {'path': _DRIVE_CSV,
+               'sha256': '08877c766433531155806dc91f8f69e27cb49110d6a8f0950b0b331601011594',
+               'format': 'delimited',
+               'selections': [{'signal': 'column:2', 'name': 'Drive 1'},
+                              {'signal': 'column:3', 'name': 'Drive 2'}]},
+    'fixes': [], 'tool': 'hertzforge 0.0.0', 'created_utc': '2026-11-15T00:00:00Z'}
+_DRIVE_FIXED_CHANNELS = [
+    {'name': 'Drive 1', 'a': -1.21109e-05, 'b': 5.18104e-18, 'rms_before': 0.216236,
+     'rms_after': 0.216236,
+     'before': {'start': 0.0, 'end': 0.0, 'peak': 0.5, 'velocity_end': 2.09664e-10,
+                'velocity_peak': 0.00395868, 'displacement_end': 4.19328e-11,
+                'displacement_peak': 3.31033e-05},
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.500012, 'velocity_end': -5.75779e-19,
+               'velocity_peak': 0.00395884, 'displacement_end': -2.43797e-19,
+               'displacement_peak': 3.3292e-05}},
+    {'name': 'Drive 2', 'a': 6.42086e-07, 'b': -6.40497e-18, 'rms_before': 0.108118,
+     'rms_after': 0.108118,
+     'before': {'start': 0.0, 'end': 0.0, 'peak': 0.25, 'velocity_end': -2.54349e-11,
+                'velocity_peak': 0.000788997, 'displacement_end': -5.08699e-12,
+                'displacement_peak': 2.51054e-06},
+     'after': {'start': 0.0, 'end': 0.0, 'peak': 0.249999, 'velocity_end': 2.55435e-19,
+               'velocity_peak': 0.000788993, 'displacement_end': 6.23621e-20,
+               'displacement_peak': 2.5015e-06}}]
+DRIVE_TEXT_GOLDENS = {
+    'request_drive_inspect': {
+        'type': 'request', 'id': 61, 'method': 'drive.inspect', 'params': {'path': _DRIVE_CSV},
+    },
+    'response_drive_inspect': {
+        'type': 'response', 'id': 61,
+        'result': {
+            'source': {'path': _DRIVE_CSV, 'format': 'delimited'},
+            'signals': [
+                {'key': 'column:2', 'name': 'Drive 1', 'samples': 401, 'rate_hz': 1000.0,
+                 'unit': 'V', 'where': 'column 2', 'problem': None},
+                {'key': 'column:3', 'name': 'Drive 2', 'samples': 401, 'rate_hz': 1000.0,
+                 'unit': 'V', 'where': 'column 3', 'problem': None}],
+            'rate_hz': 1000.0, 'notes': []},
+    },
+    'request_drive_convert': {
+        'type': 'request', 'id': 62, 'method': 'drive.convert',
+        'params': {'path': _DRIVE_CSV, 'selections': ['column:2', 'column:3']},
+    },
+    'response_drive_convert': {
+        'type': 'response', 'id': 62,
+        'result': {'folder': _DRIVE_FOLDER, 'drive': _DRIVE_SIDECAR, 'notes': []},
+    },
+    'request_drive_fix_ends': {
+        'type': 'request', 'id': 63, 'method': 'drive.fix_ends',
+        'params': {'folder': _DRIVE_FOLDER},
+    },
+    'response_drive_fix_ends': {
+        'type': 'response', 'id': 63,
+        'result': {
+            'folder': _DRIVE_FOLDER + '-fixed',
+            'drive': {**_DRIVE_SIDECAR, 'sha256': (
+                'b5cea183468e5b7fa1b59683ef00f773a0f45847f7ef2350aa3aa5c0df84d210'),
+                'fixes': [{
+                    'kind': 'fix_ends', 'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
+                    'taper_s': 0.01, 'taper_samples': 10,
+                    'correction': ('c(t) = a sin(pi t / T) + b sin(2 pi t / T), '
+                                   'T = (samples - 1) / rate_hz'),
+                    'channels': [{k: c[k] for k in ('name', 'a', 'b', 'rms_before',
+                                                    'rms_after')}
+                                 for c in _DRIVE_FIXED_CHANNELS]}]},
+            'from': {'folder': _DRIVE_FOLDER, 'sha256': _DRIVE_SHA256},
+            'taper_s': 0.01, 'taper_samples': 10, 'channels': _DRIVE_FIXED_CHANNELS},
+    },
+    'request_drive_convert_unequal': {
+        'type': 'request', 'id': 64, 'method': 'drive.convert',
+        'params': {'path': '/Users/someone/tests/bracket/drives.npz',
+                   'selections': ['array:a', {'signal': 'array:b', 'name': 'Shaker 2'}],
+                   'rate_hz': 1000.0},
+    },
+    'response_error_drive_refused': {
+        'type': 'response', 'id': 64,
+        'error': {'code': 'refused',
+                  'message': ('the drives differ in length (a has 401, Shaker 2 has 397 '
+                              'samples); every drive plays the same number of samples')},
+    },
+}
+
+
+
+# ---- Playback ---------------------------------------------------------------------
+
+PLAYBACK_SHA = 'f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02'
+PLAYBACK_CONFIG = {
+    'title': 'Golden Playback',
+    'drive': {'folder': '/home/operator/Hertzforge_Data/drives/burst', 'sha256': PLAYBACK_SHA},
+    'map': [2], 'level_db': -6, 'ceiling_v': 1, 'pre_roll_s': 0.125, 'post_roll_s': 0.125,
+    'capture': {'run_name': 'playback'},
+    'operator': 'A. Operator', 'article': 'Bracket, SN 0042', 'notes': '',
+    'specification': {'document': 'Test procedure', 'clause': '4.2'},
+    'record': {'streams': True},
+    'metadata': [{'key': 'run_number', 'label': 'Run Number', 'value': '3'}],
+}
+
+#: `playback.state` while the file plays: halfway through the golden burst.
+PLAYBACK_RUNNING = {
+    'run_id': 'playback-0002', 'state': 'running', 'phase': 'playing',
+    'title': 'Golden Playback', 'source': 'SIM', 'class': 'sim', 'fs_hz': 2048,
+    'drive': {'samples': 1024, 'duration_s': 0.5, 'sha256': PLAYBACK_SHA, 'map': [2]},
+    'level_db': -6, 'ceiling_v': 1,
+    'rolls': {'pre_frames': 256, 'post_frames': 256},
+    'progress': {'played': 512, 'samples': 1024, 'played_s': 0.25, 'fraction': 0.5,
+                 'elapsed_s': 0.375, 'buffered_s': 0.25},
+    'inputs': [{'index': 1, 'role': 'input', 'unit': 'g', 'description': 'Control'}],
+    'drives': [{'index': 2, 'role': 'drive', 'unit': 'V', 'description': 'Drive'}],
+    'overloads': [{'channel': 1, 'overload': False}],
+    'health': {'engine_ticks': 6, 'worst_tick_ms': 0.25, 'budget_ms': 62.5, 'health_faults': 0,
+               'ring_overruns': 0},
+    'record': {'folder': '/home/operator/Hertzforge_Data/playback', 'streams': 'on',
+               'problem': None},
+    'end': None,
+}
+
+PLAYBACK_LIVE_INPUT = [0.0, 0.25, -0.5, 0.125, 0.0625, -0.25]
+PLAYBACK_LIVE_DRIVE = [0.0, 0.125, -0.25, 0.0625, 0.03125, -0.125]
+
+
+def _playback_live_build() -> tuple[dict, dict]:
+    data = {
+        'run_id': 'playback-0002', 'state': 'running', 'phase': 'playing',
+        'progress': PLAYBACK_RUNNING['progress'],
+        'time': {'rate_hz': 2048, 't0_s': 0.125, 'channels': [
+            {'index': 1, 'role': 'input', 'unit': 'g', 'values': {'$array': 'c0'}},
+            {'index': 2, 'role': 'drive', 'unit': 'V', 'values': {'$array': 'c1'}},
+        ]},
+    }
+    arrays = {'c0': ('f32', [len(PLAYBACK_LIVE_INPUT)], PLAYBACK_LIVE_INPUT),
+              'c1': ('f32', [len(PLAYBACK_LIVE_DRIVE)], PLAYBACK_LIVE_DRIVE)}
+    return {'type': 'event', 'topic': 'playback.live', 'seq': 301, 'data': data}, arrays
+
+
+PLAYBACK_TEXT_GOLDENS = {
+    'request_playback_configure': {
+        'type': 'request', 'id': 131, 'method': 'playback.configure',
+        'params': {'config': PLAYBACK_CONFIG},
+    },
+    'request_playback_start': {
+        'type': 'request', 'id': 132, 'method': 'playback.start', 'params': {},
+    },
+    'request_playback_log': {
+        'type': 'request', 'id': 133, 'method': 'playback.log', 'params': {'since': 4},
+    },
+    'event_playback_state': {
+        'type': 'event', 'topic': 'playback.state', 'seq': 300, 'data': PLAYBACK_RUNNING,
+    },
+    'response_error_playback_config_invalid': {
+        'type': 'response', 'id': 134,
+        'error': {'code': 'bad_request', 'reason': 'config_invalid',
+                  'message': 'The configuration has 1 error: Drive file channel 0 (drive) peaks '
+                             'at 2.000000 V, 1.002374 V at -6 dB, over the drive ceiling of '
+                             '1 V.',
+                  'detail': {'errors': [
+                      {'reason': 'peak_over_ceiling', 'field': 'level_db',
+                       'message': 'Drive file channel 0 (drive) peaks at 2.000000 V, 1.002374 V '
+                                  'at -6 dB, over the drive ceiling of 1 V.'}],
+                      'warnings': []}},
+    },
+}
+
+
 def main() -> None:
     HERE.mkdir(exist_ok=True)
 
@@ -6076,10 +6252,15 @@ def main() -> None:
     write('event_recorder_live', *_recorder_live_build())
     write('event_recorder_data', *_recorder_data_build())
 
+    # Playback: the live frame (its golden run folder, schema/golden/runs/playback/, is
+    # written by the control service's own test)
+    write('event_playback_live', *_playback_live_build())
+
     for name, message in {**TEXT_GOLDENS, **MIMO_TEXT_GOLDENS, **SHOCK_TEXT_GOLDENS,
                           **SRS_TEXT_GOLDENS, **SINE_TEXT_GOLDENS, **MIXED_TEXT_GOLDENS, **MIXED_BUILT_TEXT,
                           **TWR_TEXT_GOLDENS, **EXPLORER_TEXT_GOLDENS,
-                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS}.items():
+                          **RECORDER_TEXT_GOLDENS, **MSHOCK_TEXT_GOLDENS,
+                          **PLAYBACK_TEXT_GOLDENS, **DRIVE_TEXT_GOLDENS}.items():
         (HERE / f'{name}.json').write_text(
             json.dumps(message, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 

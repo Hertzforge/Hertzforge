@@ -79,6 +79,8 @@ hertzforge-twr-laws.workspace = true
 # finished station backend and names none, and holds the Sim only as a
 # dev-dependency (tests/forbidden_deps.rs).
 hertzforge-explorer-host.workspace = true
+# Playback (src/playback/): the drive file, its checks and the run host that plays it.
+hertzforge-playback.workspace = true
 # The Recorder (src/recorder/): the controller's acquisition and recording core, its
 # trigger, recording writer and reader, and analysis pass. It is handed a finished
 # station backend and names none, and holds the Sim only as a dev-dependency

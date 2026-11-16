@@ -118,6 +118,14 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // service is handed a finished `Box<dyn Backend>` by the station factory, and the
     // Sim is a dev-dependency only. It runs no control law.
     "hertzforge-explorer-host",
+    // Playback behind the wire's `playback.*` methods, reviewed 2026-11-15: the drive
+    // file, its checks before arming and the run host that plays it
+    // (`hertzforge-playback`, MIT, written here). Its `[dependencies]` are
+    // `hertzforge-channel-table`, `hertzforge-engine`, `hertzforge-hal`,
+    // `hertzforge-module-abi`, `serde_json` and `sha2`, and it names no backend: the
+    // run host is handed a finished `Box<dyn Backend>` by the station factory, and the
+    // Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-playback",
     // The Recorder behind the wire's `recorder.*` methods: the acquisition and recording
     // core (`hertzforge-recorder`, MIT, imported): its trigger, recording writer and
     // reader, analysis pass and run service. Its `[dependencies]` are
@@ -182,6 +190,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
 /// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
 /// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
 /// names no backend and reaches no hardware; it builds for WebAssembly.
+///
+/// `hertzforge-playback` was written here as well (2026-11-15): the drive file, its
+/// checks before arming and the run host that plays it. It names no backend; the run
+/// service hands it a finished station, and the Sim is a dev-dependency only.
 const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-automation",
     "hertzforge-backendd",
@@ -205,6 +217,7 @@ const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
     "hertzforge-mimo-shock",
     "hertzforge-mixed",
     "hertzforge-module-abi",
+    "hertzforge-playback",
     "hertzforge-protocol",
     "hertzforge-random",
     "hertzforge-recorder",

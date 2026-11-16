@@ -5,7 +5,7 @@ to reach the analysis side: one folder per run, valid at every moment,
 needing no other file and no running service to be read. Every control
 module of the control service writes one for every run: Random, MIMO
 Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock, TWR,
-Explorer and the Recorder (`docs/run-folder.md`).
+Explorer, the Recorder and Playback (`docs/run-folder.md`).
 `hertzforge.io.run_convert` turns a folder into an ordinary project
 file. Its members:
 

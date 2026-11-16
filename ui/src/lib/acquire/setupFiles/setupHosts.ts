@@ -19,6 +19,7 @@ import { fromSrsConfig, toSrsConfig } from '../srs/srsSetup';
 import { fromTwrConfig, toTwrConfig } from '../twr/twrSetup';
 import { fromExplorerConfig, toExplorerConfig } from '../explorer/explorerSetup';
 import { fromRecorderConfig, toRecorderConfig } from '../recorder/recorderSetup';
+import { fromPlaybackConfig, toPlaybackConfig } from '../playback/playbackSetup';
 import { fitChannels, fromMsConfig, toMsConfig } from '../mimoshock/msSetup';
 import { toWireSetup } from '../mimo/mimoSetup';
 import { fromMimoSetup } from '../mimo/mimoOpen';
@@ -192,6 +193,10 @@ export function hostFor(app: AppState, module: SetupModule): SetupHost {
 				// as the screen takes the service's setup: the draft fitted to the table's channels
 				(d) => void fitChannels(d, s.acq.rows)
 			);
+		}
+		case 'playback': {
+			const s = app.playback;
+			return wireHost(module, s, protocol, (c) => fromPlaybackConfig(c as never), (d) => toPlaybackConfig(d));
 		}
 		case 'mimo_random':
 			return mimoHost(app, protocol);

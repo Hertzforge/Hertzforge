@@ -106,6 +106,7 @@ node tools/e2e-sim/random_sim.mjs --shots <folder for screenshots>
 | [`docs/mimo-shock.md`](docs/mimo-shock.md) | MIMO Shock: classical pulses and SRS with several shakers |
 | [`docs/explorer.md`](docs/explorer.md) | Explorer: one sine tone steered by hand |
 | [`docs/recorder.md`](docs/recorder.md) | Recorder: the station's inputs recorded, nothing driven |
+| [`docs/playback.md`](docs/playback.md), [`docs/drive-file.md`](docs/drive-file.md) | Playback: a drive file you made, played open loop on every drive; and the drive folder's layout |
 | [`docs/control-laws.md`](docs/control-laws.md), [`docs/control-law-spec.md`](docs/control-law-spec.md) | Writing a control law as a law file, and the interface it is written against |
 | [`docs/reference-file.md`](docs/reference-file.md), [`docs/reference-from-field-data.md`](docs/reference-from-field-data.md) | Reference files, and references from field data |
 | [`docs/hforge-format.md`](docs/hforge-format.md) | The layout inside a `.hforge` file (projects, measurements, tables), for reading one without Hertzforge |

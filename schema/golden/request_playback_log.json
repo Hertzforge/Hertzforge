@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 133,
+ "method": "playback.log",
+ "params": {
+  "since": 4
+ }
+}

@@ -1,0 +1,71 @@
+{
+ "type": "event",
+ "topic": "playback.state",
+ "seq": 300,
+ "data": {
+  "run_id": "playback-0002",
+  "state": "running",
+  "phase": "playing",
+  "title": "Golden Playback",
+  "source": "SIM",
+  "class": "sim",
+  "fs_hz": 2048,
+  "drive": {
+   "samples": 1024,
+   "duration_s": 0.5,
+   "sha256": "f666797717864a172ae04b75aba761c0a6745264592de24a0241f9bd22819f02",
+   "map": [
+    2
+   ]
+  },
+  "level_db": -6,
+  "ceiling_v": 1,
+  "rolls": {
+   "pre_frames": 256,
+   "post_frames": 256
+  },
+  "progress": {
+   "played": 512,
+   "samples": 1024,
+   "played_s": 0.25,
+   "fraction": 0.5,
+   "elapsed_s": 0.375,
+   "buffered_s": 0.25
+  },
+  "inputs": [
+   {
+    "index": 1,
+    "role": "input",
+    "unit": "g",
+    "description": "Control"
+   }
+  ],
+  "drives": [
+   {
+    "index": 2,
+    "role": "drive",
+    "unit": "V",
+    "description": "Drive"
+   }
+  ],
+  "overloads": [
+   {
+    "channel": 1,
+    "overload": false
+   }
+  ],
+  "health": {
+   "engine_ticks": 6,
+   "worst_tick_ms": 0.25,
+   "budget_ms": 62.5,
+   "health_faults": 0,
+   "ring_overruns": 0
+  },
+  "record": {
+   "folder": "/home/operator/Hertzforge_Data/playback",
+   "streams": "on",
+   "problem": null
+  },
+  "end": null
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "type": "request",
+ "id": 62,
+ "method": "drive.convert",
+ "params": {
+  "path": "/Users/someone/tests/bracket/drive.csv",
+  "selections": [
+   "column:2",
+   "column:3"
+  ]
+ }
+}
