@@ -285,7 +285,21 @@
 	}
 
 	/* the pane fills its box: the rotated mode labels need room under the cells */
+	/* the plot takes the height the bar, the readout and what is under it leave, and never less than it needs */
+	.plot {
+		display: flex;
+		flex: 1 1 0;
+		flex-direction: column;
+		min-height: 360px;
+	}
+
+	.plot > :global(*) {
+		flex: 1 1 0;
+		min-height: 0;
+	}
+
 	.mac {
+		flex: none;
 		max-width: 460px;
 		height: 360px;
 	}

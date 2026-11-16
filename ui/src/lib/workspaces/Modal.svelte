@@ -41,8 +41,16 @@
 {/if}
 
 <style>
+	/* the fit screen takes the whole height of the frame, so its plot can */
 	.fitting {
+		display: flex;
+		flex: 1 1 0;
+		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
+	}
+
+	.fitting > :global(*) {
+		flex: 1 1 0;
 	}
 </style>
