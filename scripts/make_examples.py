@@ -180,9 +180,8 @@ def rc_plate_random_test() -> Any:
 
         cargo build --release -p hertzforge-mimo-random --example mimo_study
     """
-    sys.path.insert(0, str(STUDY))
-    import make_rc_plate
-    import run_study
+    sys.path.insert(0, str(ROOT))
+    from examples.rc_plate_band_average import make_rc_plate, run_study
 
     from hertzforge.core.averaging import Averaging
     from hertzforge.units import SYSTEMS
