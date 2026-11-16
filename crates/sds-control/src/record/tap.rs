@@ -11,7 +11,9 @@
 //!
 //! [`Recording`] only watches: every call goes to the station unchanged and its
 //! answer comes back unchanged, and no recording outcome can fail a call. Any other
-//! module's backend wrapper can feed the same taps.
+//! module's backend wrapper can feed the same taps. A run that knows where its drive
+//! record ends ([`Recording::wrap_until`]) has the drive frames past it played and not
+//! recorded: the zeros the station plays while the inputs come back.
 
 use super::Msg;
 use hertzforge_channel_table::ChannelTable;
@@ -219,6 +221,10 @@ pub struct Recording {
     drives: StreamTap,
     frames: u64,
     station_frame: Arc<AtomicU64>,
+    /// Drive frames the station has accepted.
+    drive_frames: u64,
+    /// The drive frame the drive record ends before, when the run sets it.
+    drive_until: Option<Arc<AtomicU64>>,
 }
 
 impl Recording {
@@ -230,12 +236,27 @@ impl Recording {
         drives: StreamTap,
         station_frame: Arc<AtomicU64>,
     ) -> Box<dyn Backend> {
+        Self::wrap_until(inner, inputs, drives, station_frame, None)
+    }
+
+    /// [`Recording::wrap`], with the drive recorded only before the frame
+    /// `drive_until` holds (`u64::MAX` until the run sets it): the frames the station
+    /// accepts from there on are played and not recorded.
+    pub fn wrap_until(
+        inner: Box<dyn Backend>,
+        inputs: StreamTap,
+        drives: StreamTap,
+        station_frame: Arc<AtomicU64>,
+        drive_until: Option<Arc<AtomicU64>>,
+    ) -> Box<dyn Backend> {
         Box::new(Recording {
             inner,
             inputs,
             drives,
             frames: 0,
             station_frame,
+            drive_frames: 0,
+            drive_until,
         })
     }
 }
@@ -280,7 +301,13 @@ impl Backend for Recording {
     }
     fn write_drive(&mut self, drive: &[f32]) -> Result<usize, HalError> {
         let n = self.inner.write_drive(drive)?;
-        self.drives.push(drive, n);
+        let keep = match &self.drive_until {
+            Some(until) => (until.load(Ordering::Acquire).saturating_sub(self.drive_frames))
+                .min(n as u64) as usize,
+            None => n,
+        };
+        self.drives.push(drive, keep);
+        self.drive_frames += n as u64;
         Ok(n)
     }
     fn output_space(&mut self) -> Option<usize> {

@@ -17,7 +17,9 @@
 //!   ceiling trip and the reader's failure, an input overload on a limited row, and an
 //!   engine stop other than a clean batch end each take the emergency stop at once.
 //!   The completed play and the controlled stop end with the station stopped once
-//!   the zeros the step wrote have played.
+//!   the record is whole: the station has taken every frame the record keeps of the
+//!   drive (through the post-roll, or a block of zeros past a stop ramp), and the
+//!   inputs have come back past the last of them by the station's input delay.
 //! * **The batch runs under `catch_unwind`.** A panic issues the emergency stop
 //!   before the run ends, so a drive is never left held at its last sample.
 
@@ -30,7 +32,7 @@ use hertzforge_engine::{
 };
 use hertzforge_hal::{AcquisitionConfig, Backend};
 use hertzforge_module_abi::StationClass;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -41,7 +43,7 @@ pub const TICKS_PER_BATCH: u64 = 2;
 const SIM_WATCHDOG_SUSTAIN_FRAMES: u32 = 16;
 /// The hardware watchdog debounce, seconds (as Explorer's).
 const WATCHDOG_SUSTAIN_SECONDS: f64 = 0.00025;
-/// Batches a stop waits, at most, for the zeros to play.
+/// Batches a completed or stopped run waits, at most, for its record to be whole.
 const ZERO_WAIT_BATCHES: u32 = 400;
 /// Display frames per second taken from the loop.
 pub const DISPLAY_HZ: f64 = 2000.0;
@@ -66,7 +68,7 @@ pub enum Pacing {
 }
 
 /// How a run is hosted.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct HostOptions {
     pub pacing: Pacing,
     /// Seconds of the file read ahead before the first sample (at least 2).
@@ -75,6 +77,9 @@ pub struct HostOptions {
     pub ring_s: f64,
     /// How long the prefill may take.
     pub prefill_wait: Duration,
+    /// Set to the frame the record of the drive ends before, when the step knows it
+    /// ([`crate::step::StepShared::record_until`]): for the record's drive tap.
+    pub record_until: Option<Arc<AtomicU64>>,
 }
 
 impl Default for HostOptions {
@@ -84,6 +89,7 @@ impl Default for HostOptions {
             prefill_s: 2.0,
             ring_s: 4.0,
             prefill_wait: Duration::from_secs(30),
+            record_until: None,
         }
     }
 }
@@ -140,6 +146,9 @@ pub struct HostStatus {
     pub samples: u64,
     pub pre_roll_frames: u64,
     pub post_roll_frames: u64,
+    /// The zeros the station played before the step's first frame, counted in the
+    /// pre-roll: the file starts at the larger of this and the pre-roll.
+    pub lead_in_frames: u64,
     pub frames_in: u64,
     /// Frames in the read-ahead ring.
     pub buffered: u64,
@@ -245,6 +254,34 @@ impl PlaybackHost {
             inputs + outputs,
         );
         let s = &drive.setup;
+        let mut ecfg = EngineConfig::with_block(inputs, outputs, &actual);
+        if station.is_hardware() {
+            ecfg.watchdog_sustain =
+                hertzforge_engine::watchdog_sustain_frames(WATCHDOG_SUSTAIN_SECONDS, fs);
+        } else {
+            ecfg.watchdog_sustain = SIM_WATCHDOG_SUSTAIN_FRAMES;
+            ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
+            ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
+        }
+        let mut engine = Engine::new(ecfg, &table, backend.as_ref());
+        // The engine's lookahead, primed with zeros, and the zeros it writes to the
+        // station before it starts: the lead-in, which the station plays before the step's
+        // first frame and the step counts in its pre-roll.
+        let primed = engine.health().output_queued as u64;
+        if let Err(e) = backend.arm() {
+            let _ = backend.close();
+            return Err(HostError::Arm(format!("arm: {e}")));
+        }
+        let prefilled = match engine.prefill_output(backend.as_mut()) {
+            Ok(n) => n as u64,
+            Err(r) => {
+                let _ = backend.emergency_stop();
+                return Err(HostError::Arm(format!(
+                    "the drive lead-in was refused: {r:?}"
+                )));
+            }
+        };
+        let lead_in = primed + prefilled;
         let (mut step, step_shared) = PlaybackStep::new(
             StepBuild {
                 out_channels: outputs,
@@ -257,31 +294,13 @@ impl PlaybackHost {
                 stop_ramp_frames: (STOP_RAMP_S * fs).round().max(1.0) as u64,
                 stop_ramp_depth_db: STOP_RAMP_DEPTH_DB,
                 display_every,
+                lead_in_frames: lead_in,
+                stop_tail_frames: actual.block_frames as u64,
             },
             ring_reader,
             Some(display_tx),
+            opts.record_until.clone(),
         );
-        let mut ecfg = EngineConfig::with_block(inputs, outputs, &actual);
-        if station.is_hardware() {
-            ecfg.watchdog_sustain =
-                hertzforge_engine::watchdog_sustain_frames(WATCHDOG_SUSTAIN_SECONDS, fs);
-        } else {
-            ecfg.watchdog_sustain = SIM_WATCHDOG_SUSTAIN_FRAMES;
-            ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
-            ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
-        }
-        let mut engine = Engine::new(ecfg, &table, backend.as_ref());
-        if let Err(e) = backend.arm() {
-            let _ = backend.close();
-            return Err(HostError::Arm(format!("arm: {e}")));
-        }
-        // The lead-in: the zeros the step generates at the start of its pre-roll.
-        if let Err(r) = engine.prefill_output(backend.as_mut()) {
-            let _ = backend.emergency_stop();
-            return Err(HostError::Arm(format!(
-                "the drive lead-in was refused: {r:?}"
-            )));
-        }
         if let Err(e) = backend.start() {
             let _ = backend.emergency_stop();
             return Err(HostError::Arm(format!("start: {e}")));
@@ -297,11 +316,12 @@ impl PlaybackHost {
                 block_frames: actual.block_frames,
                 lookahead_frames: lookahead,
                 group_delay_frames: actual.group_delay_frames,
-                generated: 0,
+                generated: lead_in,
                 played: 0,
                 samples: drive.file.samples,
                 pre_roll_frames: (s.pre_roll_s * fs).round() as u64,
                 post_roll_frames: (s.post_roll_s * fs).round() as u64,
+                lead_in_frames: lead_in,
                 frames_in: 0,
                 buffered: source.shared.pushed.load(Ordering::Acquire),
                 health: None,
@@ -426,10 +446,16 @@ impl Pump<'_> {
         });
     }
 
-    /// The zeros written from `quiet_from` on have played.
-    fn zeros_played(&self) -> bool {
-        let from = self.inner.step.quiet_from.load(Ordering::Acquire);
-        self.engine.health().frames_in >= from + self.group
+    /// The record is whole: the station has taken every generated frame before
+    /// `record_until` (those still queued or staged in the engine are not yet written),
+    /// and the inputs reach past the last of them by the input delay.
+    fn record_whole(&self) -> bool {
+        let st = &self.inner.step;
+        let until = st.record_until.load(Ordering::Acquire);
+        let h = self.engine.health();
+        let held = (h.output_queued + h.output_staged) as u64;
+        let written = st.generated.load(Ordering::Acquire).saturating_sub(held);
+        written >= until && h.frames_in >= until.saturating_add(self.group)
     }
 
     fn run(&mut self) {
@@ -559,7 +585,7 @@ impl Pump<'_> {
             }
             if phase == Phase::Done || phase == Phase::Stopped {
                 zero_wait += 1;
-                if self.zeros_played() || zero_wait > ZERO_WAIT_BATCHES {
+                if self.record_whole() || zero_wait > ZERO_WAIT_BATCHES {
                     let _ = self.backend.stop();
                     if phase == Phase::Done {
                         self.end(

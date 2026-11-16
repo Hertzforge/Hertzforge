@@ -204,11 +204,16 @@ async fn playback_runs_end_to_end_on_one_two_and_four_drives() {
                 "drive {k} peaks at {top}"
             );
         }
-        // every input recorded, and on the modal plant each answers
+        // the drive stream is the pre-roll, the file and the post-roll, every frame of
+        // each and nothing after; the inputs cover the same span and their delay
+        let (pre, post) = ((0.25 * fs) as usize, (0.5 * fs) as usize);
+        assert_eq!(played.len() / w, pre + 4096 + post, "drive frames");
+        assert!(played[(pre + 4096) * w..].iter().all(|x| *x == 0.0));
+        assert_eq!(d["frames"], (pre + 4096 + post) as u64);
         let ins = f32s(&rec.join("streams/inputs/telemetry.f32"));
         let wi = inputs as usize;
         assert!(
-            ins.len() / wi >= 4096 + 1024,
+            ins.len() / wi >= pre + 4096 + post,
             "{} input frames",
             ins.len() / wi
         );
@@ -532,10 +537,15 @@ async fn a_stop_ramps_and_an_abort_zeroes() {
         assert_eq!(end["end"]["emergency_stop"], abort);
         let rec = PathBuf::from(end["record"]["folder"].as_str().unwrap());
         record_done(&mut c, &rec).await;
-        // a stop's drive ramps to 0 V; an abort's ends where the emergency stop took it
+        // a stop's drive ramps to 0 V and the record holds the zeros after the ramp, with
+        // the inputs that answer them; an abort's ends where the emergency stop took it
         let played = f32s(&rec.join("streams/drives/telemetry.f32"));
         if !abort {
-            assert_eq!(*played.last().unwrap(), 0.0);
+            let ramp = played.iter().rposition(|x| *x != 0.0).unwrap();
+            assert!(played.len() - 1 - ramp >= 64, "{} zeros", played.len() - 1 - ramp);
+            assert!(played[ramp].abs() > 0.0 && played[ramp].abs() < 0.02 * 0.5);
+            let ins = f32s(&rec.join("streams/inputs/telemetry.f32"));
+            assert!(ins.len() >= played.len(), "{} {}", ins.len(), played.len());
         }
         let out = read(&rec.join("results/playback_outcome.json"));
         assert_eq!(out["ended"], if abort { "aborted" } else { "stopped" });

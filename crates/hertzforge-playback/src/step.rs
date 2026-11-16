@@ -8,6 +8,13 @@
 //! or an abort asked ([`StepShared::abort`]) zero the drive at once, in the same block.
 //! The run host answers each with the emergency stop between batches. The step does
 //! no file work, takes no lock and allocates nothing after it is built.
+//!
+//! The step counts frames as the station plays them: frame 0 is the first frame the
+//! station plays, so the zeros the station takes before the step's first frame (its
+//! lead-in) are the start of the pre-roll, and the file starts at the pre-roll's frame
+//! (or at the lead-in's end, when the pre-roll is shorter). When the drive is zero for
+//! good after the post-roll or a stop, the step says where the run's record of the
+//! drive ends ([`StepShared::record_until`]).
 
 use crate::source::RingReader;
 use hertzforge_engine::ProcessStep;
@@ -80,6 +87,10 @@ pub struct StepShared {
     pub quiet_from: AtomicU64,
     /// The generated frame the stop ramp began at.
     pub stop_from: AtomicU64,
+    /// The generated frame the record of the drive ends before: the post-roll's end, or
+    /// [`StepBuild::stop_tail_frames`] past a stop ramp's end. Set when the drive goes
+    /// zero for good after either; an abort leaves it unset.
+    pub record_until: AtomicU64,
     phase: AtomicU8,
 }
 
@@ -105,6 +116,11 @@ pub struct StepBuild {
     pub stop_ramp_depth_db: f64,
     /// Every this many frames a frame of inputs and drives goes to the display ring.
     pub display_every: u64,
+    /// The zeros the station plays before the step's first frame, counted in the
+    /// pre-roll.
+    pub lead_in_frames: u64,
+    /// The zeros the record of the drive keeps after a stop ramp ends.
+    pub stop_tail_frames: u64,
 }
 
 /// The step.
@@ -113,6 +129,7 @@ pub struct PlaybackStep {
     ring: RingReader,
     shared: Arc<StepShared>,
     display: Option<hertzforge_engine::ring::Producer>,
+    record_until: Option<Arc<AtomicU64>>,
     phase: Phase,
     pre_left: u64,
     post_left: u64,
@@ -125,25 +142,30 @@ pub struct PlaybackStep {
 }
 
 impl PlaybackStep {
+    /// `record_until`, when given, is set where [`StepShared::record_until`] is: the
+    /// record's drive tap reads it.
     pub fn new(
         b: StepBuild,
         ring: RingReader,
         display: Option<hertzforge_engine::ring::Producer>,
+        record_until: Option<Arc<AtomicU64>>,
     ) -> (PlaybackStep, Arc<StepShared>) {
         let shared = Arc::new(StepShared::default());
+        shared.record_until.store(u64::MAX, Ordering::Release);
         let width = b.slots.len();
         let out = b.out_channels.max(1);
         let shown = display.as_ref().map_or(0, |d| d.frame_len());
         let step = PlaybackStep {
-            pre_left: b.pre_roll_frames,
+            pre_left: b.pre_roll_frames.saturating_sub(b.lead_in_frames),
             post_left: b.post_roll_frames,
+            generated: b.lead_in_frames,
             b,
             ring,
             shared: shared.clone(),
             display,
+            record_until,
             phase: Phase::PreRoll,
             ramp_at: 0,
-            generated: 0,
             played: 0,
             frame: vec![0.0; width],
             out: vec![0.0; out],
@@ -158,6 +180,17 @@ impl PlaybackStep {
             self.shared
                 .quiet_from
                 .store(self.generated, Ordering::Release);
+            let until = match p {
+                Phase::Done => Some(self.generated),
+                Phase::Stopped => Some(self.generated + self.b.stop_tail_frames),
+                _ => None,
+            };
+            if let Some(u) = until {
+                self.shared.record_until.store(u, Ordering::Release);
+                if let Some(r) = &self.record_until {
+                    r.store(u, Ordering::Release);
+                }
+            }
         }
         self.shared.phase.store(p as u8, Ordering::Release);
     }

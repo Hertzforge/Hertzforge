@@ -19,7 +19,7 @@ use hertzforge_playback::{CheckedDrive, HostError, HostOptions, Pacing, Phase, P
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -478,11 +478,16 @@ impl PlaybackRun {
         );
         let class = built.station;
         let provenance = built.provenance.clone();
-        let backend = Recording::wrap(
+        // The drive record ends where the step says (the post-roll's end, or a block of
+        // zeros past a stop ramp); the zeros played after it, while the inputs come back,
+        // are not recorded.
+        let record_until = Arc::new(AtomicU64::new(u64::MAX));
+        let backend = Recording::wrap_until(
             built.backend,
             inputs_tap,
             drives_tap,
             self.shared.station_frame.clone(),
+            Some(record_until.clone()),
         );
         // The record, before the station is opened: refused here, nothing has driven.
         let started_unix = now_unix();
@@ -571,6 +576,7 @@ impl PlaybackRun {
         };
         let opts = HostOptions {
             pacing,
+            record_until: Some(record_until),
             ..HostOptions::default()
         };
         let host = match PlaybackHost::start(
@@ -824,7 +830,10 @@ impl PlaybackRun {
     /// A phase of the play, as a `state` entry with the generated frame it began at.
     fn log_phase(&self, p: Phase, st: &hertzforge_playback::HostStatus) {
         let fs = st.fs_hz.max(1.0);
-        let (pre, n, post) = (st.pre_roll_frames, st.samples, st.post_roll_frames);
+        let (n, post) = (st.samples, st.post_roll_frames);
+        // frames as the station plays them: the file starts at the pre-roll's end, or at
+        // the lead-in's when the pre-roll is shorter
+        let pre = st.pre_roll_frames.max(st.lead_in_frames);
         let (kind, words, frame): (&'static str, String, Option<u64>) = match p {
             Phase::PreRoll => (
                 "pre_roll",

@@ -157,7 +157,9 @@ fix is kept in the new folder's sidecar.
 - **Drive ceiling**, volts: above 0, at most 10 V and at most each mapped drive row's range. Each
   channel's peak at the level must be within it, and every sample played is judged against it.
 - **Pre-roll** and **post-roll**, 0 to 60 s each (defaults 0.5 s and 2 s): recorded at zero drive
-  before and after the file.
+  before and after the file. The pre-roll includes the zeros the station plays before anything
+  else (a few frames on the simulator, a few blocks on hardware); a pre-roll shorter than those
+  is as long as they are.
 
 **Response Aborts** lists each enabled input row's abort limits as the channel table holds them.
 
@@ -195,8 +197,9 @@ and **Copy Folder Path**. **New Run** plays the same setup again, after the same
 ## Stop, Abort and Protections
 
 - **Stop** is the controlled stop: the drive ramps down 40 dB over 3 s, multiplying the file as it
-  plays, then goes to zero; the run ends "Stopped by the Operator" once the zeros have played.
-  During a roll the drive is already zero and the run ends at once.
+  plays, then goes to zero; the run ends "Stopped by the Operator" once a block of zeros after the
+  ramp has played and the inputs have come back past it. During a roll the drive is already zero
+  and the run ends as soon as the inputs have come back.
 - **Abort** takes the drive to zero at once.
 - Any connected screen may stop or abort; everything else needs control.
 - These end the run with the drive at zero at once: an input row past one of its abort limits; an
@@ -217,8 +220,8 @@ start. It holds:
 | `table.json` | Every row of the channel table the run started with | **Channel Table** |
 | `setup.json` | The setup as accepted; what it resolved to: the drive folder, its SHA-256, its rate, samples and channels with the row each plays on, its sidecar whole (the file it came from and any fix), the level and its gain, the ceiling, the rolls, the stop and every abort in force; the check the run was set up with; and the derived numbers | Part of the **Run Record**, and the setup Open Setup From Run opens |
 | `log.jsonl` | The check, the arm, each phase as it began, a stop or abort and who asked, a trip, an underrun, an overload and the outcome | Part of the **Run Record** |
-| `streams/inputs` | Every enabled input as read, in table order and in each row's unit | **inputs**, a time history |
-| `streams/drives` | Every drive as the device accepted it, in volts: the pre-roll's zeros, the file at the level, any stop ramp, the post-roll | **drives**, a time history |
+| `streams/inputs` | Every enabled input as read, in table order and in each row's unit, from the station's first frame until past the drive's last recorded frame by the station's input delay | **inputs**, a time history |
+| `streams/drives` | Every drive as the device accepted it, in volts, frame for frame with the inputs: the pre-roll's zeros, the file at the level, then the post-roll, or a stop ramp and a block of zeros after it. The zeros the station plays after that, while the inputs come back, are not recorded | **drives**, a time history |
 | `results/playback_check` | The check report, and per channel its numbers and its drive, velocity and displacement envelopes | Part of the **Run Record**, as named arrays |
 | `results/playback_outcome` | How the run ended, the samples of the file played and the frames generated | Part of the **Run Record** |
 | `end.json` | The end, the samples played of the file's, and the run's last state | Part of the **Run Record** |

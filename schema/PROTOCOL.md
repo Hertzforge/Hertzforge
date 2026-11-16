@@ -6125,13 +6125,16 @@ buckets) of the drive, its velocity and its displacement. `derived`:
   pre-roll runs (`running`, `pre_roll`). A start refused ends the run `arm_refused` with the
   reason in its message.
 - The run plays the pre-roll at zero, the file at the level (`playing`), then the post-roll at
-  zero (`post_roll`), and ends `completed`.
+  zero (`post_roll`), and ends `completed` once the station has taken the post-roll's last frame
+  and the inputs have come back past it by the station's input delay. Frames are counted from the
+  station's first: the zeros it plays before anything else are the pre-roll's first.
 - **Streaming.** The reader thread feeds the loop through a ring the loop pops without waiting.
   The ring running empty before the file's end is an underrun: the drive goes to zero at once
   and the run ends `drive_underrun`. The length of a file is limited only by the disk.
 - **`playback.stop`**: the controlled stop, 40 dB down over 3 s multiplying the streamed drive,
-  then zero; the run ends `stopped` once the zeros have played. During a roll the drive is
-  already zero and the run ends at once.
+  then zero; the run ends `stopped` once a station block of zeros after the ramp has played and
+  the inputs have come back past it. During a roll the drive is already zero and the run ends as
+  soon as the inputs have come back.
 - **`playback.abort`**: the drive goes to zero at once with the emergency stop (`aborted`).
 - The run also ends with the emergency stop, the drive at zero at once, on a response abort
   (`response_abort`, with the `trip`), a sample over the ceiling (`drive_ceiling`), an input

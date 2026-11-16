@@ -4,7 +4,7 @@
   "end": {
     "outcome": "completed",
     "message": "the file played to its end and the post-roll was recorded",
-    "at_s": 0.8125,
+    "at_s": 0.75390625,
     "played": 1024,
     "emergency_stop": false,
     "trip": null
@@ -42,7 +42,7 @@
       "samples": 1024,
       "played_s": 0.5,
       "fraction": 1,
-      "elapsed_s": 0.813,
+      "elapsed_s": 0.754,
       "buffered_s": 0.0
     },
     "inputs": [
@@ -75,7 +75,7 @@
     "end": {
       "outcome": "completed",
       "message": "the file played to its end and the post-roll was recorded",
-      "at_s": 0.8125,
+      "at_s": 0.75390625,
       "played": 1024,
       "emergency_stop": false,
       "trip": null

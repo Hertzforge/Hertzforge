@@ -3,9 +3,10 @@
 //! eighth of a second of pre-roll and of post-roll, played to its end. The simulator's
 //! seed is fixed and the drive file is made the same way every time; what follows the
 //! wall clock is normalized: the wall times, the run's unique identity, the build
-//! fields, the folders' paths, the station frames and the read-ahead's fill. The
-//! streams are cut to their first [`CUT_FRAMES`] frames (`cut_from_frames`), which hold
-//! the lead-in, the pre-roll and the burst.
+//! fields, the folders' paths, the station frames and the read-ahead's fill. The drive
+//! stream is whole at [`CUT_FRAMES`] frames: the pre-roll (the station's lead-in zeros
+//! first), the burst and the post-roll. The input stream runs on past it by the
+//! station's input delay and is cut to the same frames (`cut_from_frames`).
 //!
 //! `scripts/make_golden_runs.sh` rewrites the folder (this test with
 //! `HERTZFORGE_WRITE_GOLDEN_RUNS=1`); otherwise the test only compares.
@@ -250,6 +251,7 @@ async fn todays_code_writes_the_golden_playback_run_folder() {
     );
     assert!(drive[..256].iter().all(|x| *x == 0.0));
     assert_eq!(*drive.last().unwrap(), 0.0);
+    assert_eq!(drive.len() as u64, CUT_FRAMES, "the drive stream's frames");
     let got = normalized(&folder, false);
     let total: usize = got.values().map(Vec::len).sum();
     assert!(
