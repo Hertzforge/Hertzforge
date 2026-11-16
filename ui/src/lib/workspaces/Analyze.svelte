@@ -165,9 +165,6 @@
 									<option value="phase">Phase</option>
 								</select>
 							{/if}
-							{#if a.shown?.views.some((v) => v.view === 'shape3d' && v.overlays?.length)}
-								<button class="btn ghost sm" class:on={a.prefs.overlay} aria-pressed={a.prefs.overlay} data-testid="read-overlay" title="Animate the picked pair of modes over each other, the second phase-aligned to the first" onclick={() => a.setPref('overlay', !a.prefs.overlay)}>Overlay</button>
-							{/if}
 							{#if offers.projection}
 								<button class="btn ghost sm" class:on={a.prefs.projection} aria-pressed={a.prefs.projection} data-testid="read-projection" title="Animate the other set projected onto the basis geometry, instead of both by DOF name" onclick={() => a.setPref('projection', !a.prefs.projection)}>Projection</button>
 							{/if}
@@ -285,7 +282,7 @@
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
 										bars={v.view === 'matrix' && a.prefs.bars}
 										mode={v.view === 'shape3d' && linked && a.pair ? a.pair.row : 0}
-										overlay={v.view === 'shape3d' && v.paired ? (a.prefs.overlay ? undefined : null) : v.view === 'shape3d' && linked && a.prefs.overlay && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
+										overlay={v.view === 'shape3d' && v.paired ? undefined : v.view === 'shape3d' && linked && a.pair && !(selfMac && a.pair.row === a.pair.column) ? a.pair.column : null}
 										onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editShownCell(i, v.edit!, row, column, value) : undefined}
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
 										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}

@@ -727,8 +727,6 @@ export interface ShowPrefs {
 	sine_reading: 'curves' | 'bars';
 	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
-	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
-	overlay: boolean;
 }
 
 /** `project.children`: what an object opens into in the tree, by what it is. */

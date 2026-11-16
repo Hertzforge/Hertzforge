@@ -634,7 +634,7 @@ class AnalyzeState {
 			// kept for this session only
 		}
 		// the shell's own choices redraw what is already here; the rest are the service's to answer
-		if (key !== 'bars' && key !== 'overlay') void this.showSelection();
+		if (key !== 'bars') void this.showSelection();
 	}
 
 	/** A MAC square clicked: picked alone, or toggled among the picks with the modifier; the last picked animates. */
@@ -1504,7 +1504,6 @@ function readPrefs(): ShowPrefs {
 		component: 'magnitude',
 		projection: false,
 		bars: true,
-		overlay: true,
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
@@ -1520,7 +1519,7 @@ function readPrefs(): ShowPrefs {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
 		// Projection is not kept: left on, two sets on two geometries open drawn on one of them
-		for (const key of ['bars', 'overlay', 'arrows', 'sensors'] as const) {
+		for (const key of ['bars', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;

@@ -746,8 +746,8 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
         try:
             # the two sets as they are compared: one projected onto the other's DOFs when
             # they are on two geometries, for the MAC and for each pair's alignment
-            ours, theirs, said = ((rows, columns, '') if first == second
-                                  else project.compared_sets(first, second))
+            ours, theirs, said, report = ((rows, columns, '', None) if first == second
+                                          else project.compared_sets(first, second))
             values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
         except ValueError as error:
             raise refused(str(error)) from None
@@ -767,6 +767,12 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             notes.append(f'the MAC with {said}; {first} drawn on '
                          f'{homes[0][0]} and {second} on {homes[1][0]}, Projection animates '
                          'the projection')
+            if report is not None:
+                # the projection behind the MAC is made whether or not it is animated: what
+                # it matched is shown with it, as beside the Projection view
+                from .ops_modal_plan import _report_rows
+                views.append(v.reading(said, _report_rows(
+                    report, homes[0][1].units_defined and homes[1][1].units_defined)))
         else:
             views = paired(None if geometry is None else project[geometry], matrix, rows,
                            range(rows.num_shapes), columns, range(columns.num_shapes))

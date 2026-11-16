@@ -56,7 +56,7 @@ def test_each_set_moves_its_own_geometry(state, validate, order):
     project = state.project
     first, second = order
     out = shown(state, first, second, validate=validate)
-    matrix, stage = out['views']
+    matrix, stage = out['views'][:2]
     assert matrix['selects'] == 'shape3d' and stage['view'] == 'shape3d'
     home = {name: project.geometry_for(name) for name in order}
     count = {name: len(drawn_mesh(home[name][1])[0]) for name in order}
@@ -85,6 +85,13 @@ def test_each_set_moves_its_own_geometry(state, validate, order):
         assert len(moving) and moving.min() >= count[first]
     assert f'{first} drawn on {home[first][0]} and {second} on {home[second][0]}' in out['note']
     assert out['offers']['projection'] is True
+    # the projection behind the MAC is made whether or not it is animated: what it matched
+    # is shown beside it
+    reading = out['views'][2]
+    assert reading['view'] == 'reading'
+    assert reading['title'].startswith('FEM Shapes projected onto Test Shapes: it has 2 nodes')
+    assert [row['label'] for row in reading['rows']] == ['Nodes matched', 'Worst distance',
+                                                         'Match limit', 'Dropped']
 
 
 def test_sets_on_one_geometry_share_its_nodes_as_before(state):
@@ -127,13 +134,13 @@ def test_a_pair_on_two_geometries_is_aligned_by_the_projected_shapes(state):
 
     def phases():
         out = shown(state, first, second)
-        matrix, stage = out['views']
+        matrix, stage = out['views'][:2]
         rows, columns = len(stage['modes']), len(stage['overlays'])
         return (np.asarray(matrix['values']).reshape(rows, columns),
                 np.asarray(stage['overlay_phase']).reshape(rows, columns))
 
     values, phase = phases()
-    ours_set, compared, _said = project.compared_sets(first, second)
+    ours_set, compared, _said, _report = project.compared_sets(first, second)
     ours, theirs, signs = shared_columns(ours_set, compared)
     assert ours, 'the projection is on the first set\'s DOFs'
     # every pair whose shapes have something in common is turned to move together

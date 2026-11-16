@@ -6137,11 +6137,11 @@ class Project(dict):
         """
         from .core.shapes import cross_mac
 
-        rows, columns, _said = self.compared_sets(first, second)
+        rows, columns, _said, _report = self.compared_sets(first, second)
         return cross_mac(rows, columns)
 
     def compared_sets(self, first: str, second: str, *, tolerance: float = 0.02
-                      ) -> tuple[ShapeSet, ShapeSet, str]:
+                      ) -> tuple[ShapeSet, ShapeSet, str, dict | None]:
         """Two shape sets as they are compared: on DOFs they share.
 
         Sets on one geometry are compared as they are. Sets on two
@@ -6164,25 +6164,28 @@ class Project(dict):
 
         Returns
         -------
-        tuple of (ShapeSet, ShapeSet, str)
+        tuple of (ShapeSet, ShapeSet, str, dict or None)
             The first set and the second, one of them projected when
-            they are on two geometries, and which was projected onto
-            which and why ('' on one geometry).
+            they are on two geometries; which was projected onto which
+            and why ('' on one geometry); and what the projection
+            matched (`core.correlate.project_shapes`' report, None on
+            one geometry).
         """
         from .core.correlate import project_shapes, projection_order
 
         first, second = self.name_of(first), self.name_of(second)
         home, theirs = self.geometry_for(first), self.geometry_for(second)
         if (home is None or theirs is None or home[1] is theirs[1]):
-            return self[first], self[second], ''
+            return self[first], self[second], '', None
         flipped, why = projection_order(self[first], self[second])
         if flipped:
-            projected, _report = project_shapes(self[first], home[1], self[second],
-                                                theirs[1], tolerance=tolerance)
-            return projected, self[second], f'{first} projected onto {second}: {why}'
-        projected, _report = project_shapes(self[second], theirs[1], self[first],
-                                            home[1], tolerance=tolerance)
-        return self[first], projected, f'{second} projected onto {first}: {why}'
+            projected, report = project_shapes(self[first], home[1], self[second],
+                                               theirs[1], tolerance=tolerance)
+            return (projected, self[second], f'{first} projected onto {second}: {why}',
+                    report)
+        projected, report = project_shapes(self[second], theirs[1], self[first],
+                                           home[1], tolerance=tolerance)
+        return self[first], projected, f'{second} projected onto {first}: {why}', report
 
     def merge(self, *names: str, name: str | None = None) -> str:
         """Combine compatible objects into one (Merge). The merged object

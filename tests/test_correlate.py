@@ -423,15 +423,15 @@ def test_the_mac_is_the_same_whichever_set_is_named_first():
     sampled, _report = project_shapes(project['FEM Shapes'], project['FEM Geometry'],
                                       project['Test Shapes'], project['Test Geometry'])
     assert np.allclose(back, cross_mac(project['Test Shapes'], sampled))
-    rows, columns, said = project.compared_sets('FEM Shapes', 'Test Shapes')
+    rows, columns, said, _report = project.compared_sets('FEM Shapes', 'Test Shapes')
     assert list(rows.coordinate) == list(project['Test Shapes'].coordinate)
     assert columns is project['Test Shapes']
     assert said.startswith('FEM Shapes projected onto Test Shapes: it has 2 nodes')
-    rows, columns, said = project.compared_sets('Test Shapes', 'FEM Shapes')
+    rows, columns, said, _report = project.compared_sets('Test Shapes', 'FEM Shapes')
     assert rows is project['Test Shapes']
     assert said.startswith('FEM Shapes projected onto Test Shapes')
     # on one geometry nothing is projected
-    assert project.compared_sets('FEM Shapes', 'FEM Shapes')[2] == ''
+    assert project.compared_sets('FEM Shapes', 'FEM Shapes')[2:] == ('', None)
 
 
 def test_projecting_a_uniaxial_set_onto_a_whole_one_is_refused():
