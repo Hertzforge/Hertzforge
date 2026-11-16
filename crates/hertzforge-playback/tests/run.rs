@@ -12,12 +12,26 @@ use std::time::{Duration, Instant};
 const SIM: StationClass = StationClass::HertzforgeSim;
 
 fn wait_end(h: &PlaybackHost, wait: Duration) -> hertzforge_playback::Outcome {
-    assert!(h.join(wait), "the run did not end in {wait:?}");
+    assert!(
+        h.join(wait),
+        "the run did not end in {wait:?}; status {:?}",
+        h.status()
+    );
     h.status().end.expect("an ended run has its outcome")
 }
 
 fn unpaced() -> HostOptions {
     HostOptions::default()
+}
+
+/// Four station seconds per wall second. A test whose verdict rests on the reader keeping
+/// up with the loop, or on the loop outrunning a slow reader, runs paced: an unpaced loop
+/// on a starved three-core runner outran a reader that was only waiting for a core.
+fn paced() -> HostOptions {
+    HostOptions {
+        pacing: Pacing::WallClock { speed: 4.0 },
+        ..HostOptions::default()
+    }
 }
 
 #[test]
@@ -138,8 +152,8 @@ fn an_underrun_aborts_to_zero() {
         fail_after: None,
     };
     let (backend, seen) = spy(wire(fs, 1, 1), 1, false);
-    let h = PlaybackHost::start_with_reader(drive, Box::new(reader), t, backend, SIM, unpaced())
-        .unwrap();
+    let h =
+        PlaybackHost::start_with_reader(drive, Box::new(reader), t, backend, SIM, paced()).unwrap();
     let end = wait_end(&h, Duration::from_secs(30));
     assert_eq!(end.outcome, "drive_underrun", "{}", end.message);
     assert!(end.emergency_stop);
@@ -166,8 +180,8 @@ fn a_reader_thread_failure_ends_in_the_emergency_stop() {
         fail_after: Some(fast),
     };
     let (backend, seen) = spy(wire(fs, 1, 1), 1, false);
-    let h = PlaybackHost::start_with_reader(drive, Box::new(reader), t, backend, SIM, unpaced())
-        .unwrap();
+    let h =
+        PlaybackHost::start_with_reader(drive, Box::new(reader), t, backend, SIM, paced()).unwrap();
     let end = wait_end(&h, Duration::from_secs(30));
     assert_eq!(end.outcome, "reader_failed", "{}", end.message);
     assert!(
