@@ -154,7 +154,7 @@
 							{#if offers.flat}
 								<div class="seg" role="radiogroup" aria-label="Stage or plot">
 									<button role="radio" aria-checked={!a.prefs.flat} class:on={!a.prefs.flat} data-testid="read-3d" title="The 3-D stage, every record at its own depth" onclick={() => a.prefs.flat && a.setPref('flat', false)}>3D</button>
-									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The flat plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>Flat</button>
+									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The 2-D plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>2D</button>
 								</div>
 							{/if}
 							{#if offers.complex}

@@ -30,6 +30,24 @@ export function windowGradient(window: number[]): string {
 	return `linear-gradient(to right, ${stops.join(', ')})`;
 }
 
+/**
+ * A frame's shading as strips for a canvas, which has no gradient of opacity alone: each from and
+ * to a fraction of the frame's width, at the opacity the window gives its middle.
+ */
+export function windowStrips(window: number[], perStep = 4): { from: number; to: number; alpha: number }[] {
+	const last = window.length - 1;
+	if (last < 1) return [];
+	const weight = (k: number) => BAND_PEAK * Math.min(1, Math.max(0, window[k]));
+	const out: { from: number; to: number; alpha: number }[] = [];
+	for (let k = 0; k < last; k++) {
+		for (let j = 0; j < perStep; j++) {
+			const middle = (j + 0.5) / perStep;
+			out.push({ from: (k + j / perStep) / last, to: (k + (j + 1) / perStep) / last, alpha: weight(k) + (weight(k + 1) - weight(k)) * middle });
+		}
+	}
+	return out;
+}
+
 /** The window as a closed path in a 100 by 100 box, its baseline along the bottom. */
 export function windowPath(window: number[]): string {
 	const last = Math.max(1, window.length - 1);

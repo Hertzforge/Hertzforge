@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BAND_PEAK, draggedSpan, framesText, glyphBox, previewFrames, railShare, slotHeight, wallGlyph, windowBands, windowGradient, windowPath } from './frames';
+import { windowStrips, BAND_PEAK, draggedSpan, framesText, glyphBox, previewFrames, railShare, slotHeight, wallGlyph, windowBands, windowGradient, windowPath } from './frames';
 
 describe('averaging frames on a plot', () => {
 	it('gives each row a slot, thinner once the rows outgrow the rail', () => {
@@ -98,5 +98,14 @@ describe('a span of frames being dragged', () => {
 		expect(railShare([{ x0: 0, x1: 1, kind: 'span' }])).toBe(0);
 		expect(railShare([{ x0: 0, x1: 1, kind: 'frame', window: [1, 1], level: 0, rows: 1 }])).toBeCloseTo(0.14);
 		expect(railShare([{ x0: 0, x1: 1, kind: 'frame', window: [1, 1], level: 0, rows: 4 }])).toBeCloseTo(0.39);
+	});
+});
+
+describe('a frame shaded on an image of the plot', () => {
+	it('is strips across the frame at the weight the window has in each', () => {
+		const strips = windowStrips([0, 1, 0], 2);
+		expect(strips.map((b) => [b.from, b.to])).toEqual([[0, 0.25], [0.25, 0.5], [0.5, 0.75], [0.75, 1]]);
+		expect(strips.map((b) => b.alpha / BAND_PEAK)).toEqual([0.25, 0.75, 0.75, 0.25]);
+		expect(windowStrips([1])).toEqual([]);
 	});
 });

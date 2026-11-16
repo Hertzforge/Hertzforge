@@ -763,7 +763,7 @@ geometry named Geometry (then Geometry (2) and on) in the display system's lengt
 `unit` names another, and the shell picks it; so is New Channel Table, named Channel Table. One solid picked offers its shape's Add as `Edit`, with
 `"live": true` and `fill` holding the solid's own values (lengths in the display units) and its id in
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
-it, and a live form is run each time a changed field is left, with no Apply button. Edit Solid stays for
+it, and a live form is run each time a changed field is left, with no Apply button. Averaging's row is live too: each change to its form is stored on the time history as it is made. Edit Solid stays for
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
 color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
