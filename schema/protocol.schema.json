@@ -163,6 +163,11 @@
         "window": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}},
         "level": {"type": "integer", "minimum": 0},
         "rows": {"type": "integer", "minimum": 1},
+        "snap": {
+          "type": "object", "required": ["frame", "hop", "low", "high"], "additionalProperties": false,
+          "properties": {"frame": {"type": "number", "exclusiveMinimum": 0}, "hop": {"type": "number", "exclusiveMinimum": 0},
+                         "low": {"type": "number"}, "high": {"type": "number"}}
+        },
         "drag": {
           "type": "object", "required": ["op", "params", "low"], "additionalProperties": false,
           "properties": {
@@ -591,6 +596,13 @@
          "required": ["matches"]},
         {"properties": {"kind": {"const": "none"}}, "additionalProperties": false}
       ]
+    },
+    "averagingDrawn": {
+      "type": "object", "required": ["regions", "note"], "additionalProperties": false,
+      "properties": {
+        "regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+        "note": {"type": "string"}
+      }
     },
     "shown": {
       "type": "object", "required": ["title", "views", "note"], "additionalProperties": false,

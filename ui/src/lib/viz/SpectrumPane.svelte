@@ -20,7 +20,8 @@
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { Series, SpectrumView, SpectrumHandle } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
-	import { windowGlyph, windowGradient } from './frames';
+	import { draggedSpan, framesText, previewFrames, railShare, windowGlyph, windowGradient, type DragPart } from './frames';
+	import type { Region } from '$lib/protocol/types';
 	import { alignSeries, valueAt } from './align';
 	import { cursors, playheadGroup, playheads } from './cursor';
 	import { formatFixed, formatTick } from './format';
@@ -50,8 +51,10 @@
 		scope?: string;
 		/** A click on the plot (not a drag), with the x it landed on: a cursor the caller places. */
 		onPick?: (x: number) => void;
-		/** A draggable region released at new edges: its index in `view.regions`, and the edges in x. */
+		/** A draggable region released at new edges: its index in the regions drawn, and the edges in x. */
 		onspan?: (region: number, x0: number, x1: number) => void;
+		/** Regions drawn in place of the view's own: they change without the plot being built again. */
+		regions?: Region[] | null;
 		/** The x range on screen, each time it changes: a zoom the caller reads as a band. */
 		onRange?: (low: number, high: number) => void;
 		/** An x to mark with a line, such as the cursor a fit is at; null for none. */
@@ -127,6 +130,7 @@
 		onMarkerDrag,
 		onhandle,
 		onspan,
+		regions = null,
 		grid = 'major',
 		legend = 'outside',
 		legendCorner = 'top-right',
@@ -156,6 +160,8 @@
 		else if (!untrack(() => frozenView)) frozenView = untrack(() => viewIn);
 	});
 	const view = $derived(frozenView ?? viewIn);
+	/** The regions drawn: the caller's when it gives some, else the view's own. */
+	const shownRegions = $derived(regions ?? view.regions ?? []);
 
 	/** Zooms are taken in by the pane itself and not left to uPlot: y zooms, wheel zooms, or the caller holds the ranges. */
 	/** A y range zoomed to on the pane, when the pane holds its own zoom. */
@@ -231,7 +237,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, v.regions ?? [], theme.version, optionsKey, logX]);
+		return JSON.stringify([v.x, v.y, xs, theme.version, optionsKey, logX]);
 	}
 
 	/**
@@ -274,7 +280,10 @@
 		if (yFixed) return yFixed;
 		if (yZoom) return yZoom;
 		const ext = finiteExtent(shownCols(cols), logY) ?? (logY ? [1e-4, 1] : [0, 1]);
-		const target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
+		let target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
+		// the windows of averaging frames stand on a rail along the top: the curves keep clear of it
+		const rail = logY ? 0 : railShare(shownRegions);
+		if (rail) target = [target[0], target[0] + (target[1] - target[0]) / (1 - rail)];
 		if (!live || !yRange) return target;
 		const [a, b] = yRange;
 		const inside = ext[0] >= a && ext[1] <= b;
@@ -319,6 +328,10 @@
 	let markerLine: HTMLDivElement | null = null;
 	/** The view's regions, shaded behind the curves, one element each. */
 	let regionEls: HTMLDivElement[] = [];
+	/** The regions `regionEls` draw, one for one: the ones shown, or the frames a drag would leave. */
+	let drawnRegions: Region[] = [];
+	/** The share of the plot's height the window rail had when the plot was built. */
+	let builtRail = 0;
 	/** Where a press on the plot began, to tell a click from a drag. */
 	let pressedAt: number | null = null;
 
@@ -502,27 +515,9 @@
 		}
 		guideEls = [];
 		placeGuides();
-		regionEls = (view.regions ?? []).map((r, k) => {
-			const el = document.createElement('div');
-			el.className = `region ${r.kind}`;
-			if (r.label) el.title = r.label;
-			if (r.window?.length) {
-				// the shading follows the window, so it shows the weight each part of the record carries;
-				// where two frames overlap their shadings add
-				el.classList.add('windowed');
-				el.style.background = windowGradient(r.window);
-				el.insertAdjacentHTML('beforeend', windowGlyph(r.window, r.level ?? 0, r.rows ?? 1));
-			}
-			if (r.drag && onspan) {
-				// dragged in the top layer, so the press is the span's and not a zoom
-				el.classList.add('drag');
-				el.addEventListener('mousedown', (e) => e.stopPropagation());
-				el.addEventListener('pointerdown', (e) => startSpan(e, k, el));
-				plot!.over.appendChild(el);
-			} else plot!.under.appendChild(el);
-			return el;
-		});
-		placeRegions();
+		regionEls = [];
+		builtRail = logY ? 0 : railShare(shownRegions);
+		drawRegions(shownRegions);
 		handleEls = [];
 		placeHandles();
 		plot.over.addEventListener('mousedown', (e) => (pressedAt = e.clientX));
@@ -1007,7 +1002,7 @@
 	 * edge. It follows the pointer and, on release, its new edges in x go to `onspan`.
 	 */
 	function startSpan(e: PointerEvent, k: number, el: HTMLDivElement) {
-		const region = view.regions?.[k];
+		const region = shownRegions[k];
 		if (!plot || !region?.drag || e.button !== 0) return;
 		e.preventDefault();
 		e.stopPropagation();
@@ -1015,33 +1010,76 @@
 		const b = plot.valToPos(region.x1, 'x');
 		const at = e.clientX - plot.over.getBoundingClientRect().left;
 		const two = !!region.drag.high;
-		const part = two && Math.abs(at - a) <= EDGE_PX ? 'low' : two && Math.abs(at - b) <= EDGE_PX ? 'high' : 'move';
+		const part: DragPart = two && Math.abs(at - a) <= EDGE_PX ? 'low' : two && Math.abs(at - b) <= EDGE_PX ? 'high' : 'move';
 		const x = e.clientX;
 		let left = a;
 		let right = b;
 		const move = (m: PointerEvent) => {
+			if (!plot) return;
 			const d = m.clientX - x;
 			if (part === 'move') [left, right] = [a + d, b + d];
 			else if (part === 'low') left = Math.min(a + d, right - 2);
 			else right = Math.max(b + d, left + 2);
 			el.style.left = `${left}px`;
 			el.style.width = `${right - left}px`;
+			if (region.snap) {
+				// the whole frames this would leave, drawn as it is dragged, and how many
+				const kept = draggedSpan(region.snap, part, region, plot.posToVal(left, 'x'), plot.posToVal(right, 'x'));
+				el.dataset.count = framesText(kept.count);
+				drawRegions(previewFrames(shownRegions, region.snap, kept), el);
+			}
 		};
 		const up = () => {
 			window.removeEventListener('pointermove', move);
 			window.removeEventListener('pointerup', up);
-			if (!plot || (left === a && right === b)) return placeRegions();
+			delete el.dataset.count;
+			if (!plot || (left === a && right === b)) return drawRegions(shownRegions);
+			// what was dragged to stays drawn until the answer's regions take its place
 			onspan?.(k, plot.posToVal(left, 'x'), plot.posToVal(right, 'x'));
 		};
 		window.addEventListener('pointermove', move);
 		window.addEventListener('pointerup', up);
 	}
 
+	/**
+	 * Draw `list` as the plot's regions, in place of the ones drawn. `held` is a span being dragged:
+	 * it stays as it is, and the draggable regions of `list` are left out.
+	 */
+	function drawRegions(list: Region[], held: HTMLDivElement | null = null) {
+		if (!plot) return;
+		for (const el of regionEls) if (el !== held) el.remove();
+		regionEls = [];
+		drawnRegions = [];
+		list.forEach((r, k) => {
+			if (held && r.drag) return;
+			const el = document.createElement('div');
+			el.className = `region ${r.kind}`;
+			if (r.label) el.title = r.label;
+			if (r.window?.length) {
+				// the shading follows the window, so it shows the weight each part of the record carries;
+				// where two frames overlap their shadings add
+				el.classList.add('windowed');
+				el.style.background = windowGradient(r.window);
+				el.insertAdjacentHTML('beforeend', windowGlyph(r.window, r.level ?? 0, r.rows ?? 1));
+			}
+			if (r.drag && onspan) {
+				// dragged in the top layer, so the press is the span's and not a zoom
+				el.classList.add('drag');
+				el.addEventListener('mousedown', (e) => e.stopPropagation());
+				el.addEventListener('pointerdown', (e) => startSpan(e, k, el));
+				plot!.over.appendChild(el);
+			} else plot!.under.appendChild(el);
+			regionEls.push(el);
+			drawnRegions.push(r);
+		});
+		placeRegions();
+	}
+
 	/** Shade each region over the part of it on the plot. */
 	function placeRegions() {
 		if (!plot) return;
 		const width = plot.under.clientWidth;
-		(view.regions ?? []).forEach((r, i) => {
+		drawnRegions.forEach((r, i) => {
 			const el = regionEls[i];
 			if (!el) return;
 			const a = Math.max(0, Math.min(width, plot!.valToPos(r.x0, 'x')));
@@ -1166,6 +1204,18 @@
 	$effect(() => {
 		void xFixed;
 		untrack(applyXFixed);
+	});
+
+	// the regions change without the plot being built again, unless the window rail needs other room
+	$effect(() => {
+		const list = shownRegions;
+		untrack(() => {
+			if (!plot) return;
+			if ((logY ? 0 : railShare(list)) !== builtRail) {
+				yRange = null;
+				build();
+			} else drawRegions(list);
+		});
 	});
 
 	const marksKey = $derived(marks ? JSON.stringify(marks) : '');
@@ -1662,6 +1712,23 @@
 	.plot :global(.region.drag) {
 		pointer-events: auto;
 		cursor: grab;
+	}
+
+	/* how many frames a drag would leave, said on the span while it is dragged */
+	.plot :global(.region.drag[data-count]::after) {
+		content: attr(data-count);
+		position: absolute;
+		left: 50%;
+		bottom: 10px;
+		translate: -50% 0;
+		padding: 2px 8px;
+		font-family: var(--font-mono);
+		font-size: var(--text-xs);
+		white-space: nowrap;
+		color: var(--text-1);
+		background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-sm, 4px);
 	}
 
 	.plot :global(.region.drag:hover) {

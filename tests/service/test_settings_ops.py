@@ -56,6 +56,10 @@ def test_averaging_set_is_stored_read_back_and_listed(state, validate):
     *frames, span = trace['regions']
     assert [r['kind'] for r in frames] == ['frame'] * 4
     # the span over every frame is dragged: its middle slides them, an edge adds or removes
+    history = project['Time History']
+    assert span['snap'] == pytest.approx({
+        'frame': 2048 / rate, 'hop': 1024 / rate, 'low': float(history.abscissa[0]),
+        'high': float(history.abscissa[0]) + len(history.abscissa) / rate})
     assert span['kind'] == 'span' and span['drag'] == {
         'op': 'project.drag_averaging', 'low': 'start', 'high': 'stop',
         'params': {'source': 'Time History', 'frame_length': 2048, 'overlap': 0.5,
@@ -135,8 +139,11 @@ def test_a_span_outside_the_record_is_refused(state):
 def test_many_frames_shade_as_one_span(state):
     trace, _reading = run(state.project, 'project.set_averaging', frame_length=64,
                           overlap=0.0, frames=300)
+    assert len(trace['regions']) == 301 and 'window' in trace['regions'][0], 'each still drawn'
+    trace, _reading = run(state.project, 'project.set_averaging', frame_length=64,
+                          overlap=0.0, frames=1200)
     span, _drag = trace['regions']
-    assert span['label'].startswith('300 frames')
+    assert span['label'].startswith('1200 frames') and 'window' not in span
 
 
 def test_the_record_drawn_on_must_be_in_the_history(state):

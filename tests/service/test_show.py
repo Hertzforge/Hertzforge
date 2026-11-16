@@ -541,6 +541,22 @@ def test_channels_picked_in_a_table_are_the_only_arrows_on_its_geometry(plate, v
     assert len(some['views']) == 1
 
 
+def test_the_frames_alone_are_asked_for_without_the_plot(plate, validate):
+    history, geometry = named(plate, 'time_history'), named(plate, 'geometry')
+    draft = {'frame_length': 2048, 'overlap': 0.5, 'window': 'hann', 'frames': 3, 'start': 0.25}
+    drawn = projects.averaging(plate, {'name': history, 'averaging': draft})
+    validate(drawn, 'averagingDrawn')
+    whole = shown(plate, history, prefs={'averaging': draft})
+    assert drawn['regions'] == whole['views'][0]['regions'], 'as the whole view draws them'
+    assert drawn['note'] == whole['note']
+    refused = projects.averaging(plate, {'name': history, 'averaging': {'overlap': 2.0}})
+    assert refused['regions'] == [] and 'averaging not drawn' in refused['note']
+    with pytest.raises(ProtocolError, match='not a time history'):
+        projects.averaging(plate, {'name': geometry})
+    with pytest.raises(ProtocolError, match='"averaging" holds'):
+        projects.averaging(plate, {'name': history, 'averaging': {'span': 1}})
+
+
 def test_dof_arrows_and_sensors_mark_every_stage(plate, validate):
     project = plate.project
     geometry, history = named(plate, 'geometry'), named(plate, 'time_history')

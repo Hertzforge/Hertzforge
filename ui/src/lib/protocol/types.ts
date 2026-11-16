@@ -150,6 +150,8 @@ export interface Region {
 	/** The frame's row on the rail, of `rows`: frames that overlap cannot share one. */
 	level?: number;
 	rows?: number;
+	/** A dragged span of frames: a frame's length and the step between frames, in x, and the record's ends, to draw the whole frames a drag would leave while it is dragged. */
+	snap?: { frame: number; hop: number; low: number; high: number };
 	/** Present when the span is dragged: `op` runs with `params`, the new x0 as `low`, x1 as `high`. */
 	drag?: { op: string; params: Record<string, unknown>; low: string; high?: string };
 }

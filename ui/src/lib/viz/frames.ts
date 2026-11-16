@@ -4,6 +4,8 @@
  * windows do not run through each other; the rail's proportions are the analysis core's.
  */
 
+import type { Region } from '$lib/protocol/types';
+
 /** The rail, in fractions of the plot's height: where it starts, a slot's height, the room all rows share, and the window's share of its slot. */
 export const RAIL = { top: 0.03, slot: 0.09, band: 0.34, glyph: 0.78 } as const;
 
@@ -87,4 +89,61 @@ export function windowBands(window: number[], a: number, b: number, depth: numbe
 		alphas.push(w0, w1, w1, w0, w1, w0);
 	}
 	return { faces, alphas };
+}
+
+/** Which part of a span is being dragged: its low edge, the whole of it, or its high edge. */
+export type DragPart = 'low' | 'move' | 'high';
+
+/** How many frames a span from `x0` to `x1` holds. */
+function framesIn(snap: NonNullable<Region['snap']>, x0: number, x1: number): number {
+	return Math.max(1, 1 + Math.floor((x1 - x0 - snap.frame) / snap.hop + 1e-6));
+}
+
+/**
+ * The whole frames a span being dragged would leave: where they start and end, and how many. The
+ * middle dragged keeps the count and stays on the record; an edge dragged adds or removes whole
+ * frames at that end, at least one, the other end staying where it was.
+ */
+export function draggedSpan(snap: NonNullable<Region['snap']>, part: DragPart, was: { x0: number; x1: number }, x0: number, x1: number): { x0: number; x1: number; count: number } {
+	const length = (count: number) => snap.frame + (count - 1) * snap.hop;
+	if (part === 'move') {
+		const count = framesIn(snap, was.x0, was.x1);
+		const start = Math.max(snap.low, Math.min(x0, snap.high - length(count)));
+		return { x0: start, x1: start + length(count), count };
+	}
+	if (part === 'high') {
+		const count = Math.min(framesIn(snap, was.x0, x1), framesIn(snap, was.x0, snap.high));
+		return { x0: was.x0, x1: was.x0 + length(count), count };
+	}
+	const count = Math.min(framesIn(snap, x0, was.x1), framesIn(snap, snap.low, was.x1));
+	return { x0: was.x1 - length(count), x1: was.x1, count };
+}
+
+/** Past this many frames a preview is one shaded span: a frame a pixel wide says nothing. */
+export const MOST_FRAMES_DRAWN = 1000;
+
+/**
+ * The frames a drag would leave, as regions to draw in place of the ones drawn before it: each
+ * with the window the frames have and its row among the frames it overlaps.
+ */
+export function previewFrames(regions: Region[], snap: NonNullable<Region['snap']>, span: { x0: number; count: number }): Region[] {
+	const like = regions.find((r) => r.kind === 'frame' && r.window?.length);
+	if (span.count > MOST_FRAMES_DRAWN || !like) return [{ x0: span.x0, x1: span.x0 + snap.frame + (span.count - 1) * snap.hop, kind: 'frame' }];
+	// frames a hop apart overlap the next few: each takes the row after the last
+	const rows = Math.min(span.count, Math.max(1, Math.ceil(snap.frame / snap.hop - 1e-9)));
+	return Array.from({ length: span.count }, (_, k) => {
+		const x0 = span.x0 + k * snap.hop;
+		return { x0, x1: x0 + snap.frame, kind: 'frame' as const, window: like.window, level: k % rows, rows };
+	});
+}
+
+/** How many frames, in words. */
+export function framesText(count: number): string {
+	return `${count} frame${count === 1 ? '' : 's'}`;
+}
+
+/** The share of a plot's height the rail takes, for the rows its regions have; 0 with no windows. */
+export function railShare(regions: Region[]): number {
+	const rows = Math.max(0, ...regions.filter((r) => r.window?.length).map((r) => r.rows ?? 1));
+	return rows ? RAIL.top + rows * slotHeight(rows) + 0.02 : 0;
 }

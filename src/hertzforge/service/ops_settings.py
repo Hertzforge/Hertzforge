@@ -20,7 +20,7 @@ HISTORY = Param('source', 'Time history', 'enum', options_from='objects:time_his
 #: the channel the setting is drawn on; not a setting itself
 SHOWN = Param('record', 'Drawn on record', 'integer', default=1, min=1, step=1)
 #: more frames than this are shaded as one span: a frame a few pixels wide says nothing
-MOST_FRAMES_SHADED = 200
+MOST_FRAMES_SHADED = 1000
 
 FRAME = Param('frame_length', 'Frame', 'integer', default=4096, unit='samples',
               min=2, step=1024, setting='averaging.frame_length')
@@ -158,7 +158,8 @@ def _trace(history: Any, name: str, record: int, regions: list[dict],
 WINDOW_POINTS = 33
 
 
-def span_region(name: str, averaging: Any, rate: float, origin: float) -> dict:
+def span_region(name: str, averaging: Any, rate: float, origin: float,
+                samples: int | None = None) -> dict:
     """The span of every frame, dragged on the plot: its middle slides the
     frames along the record and an edge adds or removes frames
     (`project.drag_averaging`, which keeps whole frames). The drag carries the
@@ -168,9 +169,12 @@ def span_region(name: str, averaging: Any, rate: float, origin: float) -> dict:
     held = {'source': name, 'frame_length': int(averaging.frame_length),
             'overlap': float(averaging.overlap), 'window': averaging.window,
             'detrend': averaging.detrend, 'was_stop': float(bounds[-1][1])}
+    snap = None if samples is None else {
+        'frame': averaging.frame_length / rate, 'hop': averaging.hop / rate,
+        'low': origin, 'high': origin + samples / rate}
     return v.region(bounds[0][0], bounds[-1][1], 'span',
                     'Drag to slide the frames; drag an edge for more or fewer',
-                    v.dragging('project.drag_averaging', held, 'start', 'stop'))
+                    v.dragging('project.drag_averaging', held, 'start', 'stop'), snap=snap)
 
 
 def frame_regions(averaging: Any, rate: float, origin: float) -> list[dict]:
@@ -204,7 +208,8 @@ def averaging_regions(name: str, history: Any, averaging: Any = None) -> list[di
     averaging = history.averaging if averaging is None else averaging
     rate = _rate(history)
     origin = float(history.abscissa[0])
-    return frame_regions(averaging, rate, origin) + [span_region(name, averaging, rate, origin)]
+    return frame_regions(averaging, rate, origin) + [
+        span_region(name, averaging, rate, origin, len(history.abscissa))]
 
 
 def _averaging_reading(name: str, history: Any) -> dict:

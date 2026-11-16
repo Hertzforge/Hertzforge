@@ -60,7 +60,8 @@
 	import type { ParamValues } from '$lib/forms/params';
 	import type { Role, WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
-	import { wallGlyph, windowBands } from './frames';
+	import { draggedSpan, framesText, previewFrames, wallGlyph, windowBands, type DragPart } from './frames';
+	import type { Region } from '$lib/protocol/types';
 	import { colormap, colormapGradient } from './colormap';
 	import { formatCount, formatNumber, formatTick, withUnit } from './format';
 	import { ROLE_STYLES } from './roles';
@@ -92,11 +93,15 @@
 		onparams?: (patch: ParamValues) => void;
 		/** A draggable region released at new edges: its index in `view.regions`, and the edges. */
 		onspan?: (region: number, x0: number, x1: number) => void;
+		/** Regions drawn in place of the view's own: they change without the stage being built again. */
+		regions?: Region[] | null;
 		/** The result the view belongs to: its stage reopens as it was left within it. */
 		scope?: string;
 	}
 
-	let { view, onparams, onspan, scope }: Props = $props();
+	let { view, onparams, onspan, scope, regions = null }: Props = $props();
+	/** The regions drawn: the caller's when it gives some, else the view's own. */
+	const shownRegions = $derived(regions ?? view.regions ?? []);
 	// read once: the pane is made again for each view it shows
 	const saved = untrack(() => (scope ? poses.get(scope) : undefined));
 
@@ -192,7 +197,9 @@
 	/** The dots a draggable region is moved by. */
 	let regionGrips: Points | null = null;
 	/** A region being dragged, with its edges as they stand. */
-	let draggingRegion: { k: number; x0: number; x1: number } | null = null;
+	let draggingRegion: { k: number; x0: number; x1: number; part: DragPart } | null = null;
+	/** How many frames the span being dragged would leave, said over the stage; null when none is dragged. */
+	let dragCount = $state<string | null>(null);
 	let frame: LineSegments | null = null;
 	let colorTexture: DataTexture;
 	const materials: Material[] = [];
@@ -356,7 +363,14 @@
 			(old.material as Material).dispose();
 		}
 		regionFaces = regionEdges = regionGrips = null;
-		const regions = view.regions ?? [];
+		// while a span of frames is dragged, the whole frames it would leave are drawn in place of the ones before
+		let regions = shownRegions;
+		const dragged = draggingRegion && shownRegions[draggingRegion.k];
+		if (draggingRegion && dragged?.snap) {
+			const kept = draggedSpan(dragged.snap, draggingRegion.part, dragged, draggingRegion.x0, draggingRegion.x1);
+			dragCount = framesText(kept.count);
+			regions = [...previewFrames(shownRegions, dragged.snap, kept), { ...dragged, x0: draggingRegion.x0, x1: draggingRegion.x1 }];
+		} else dragCount = null;
 		if (!regions.length) return;
 		const faces: number[] = [];
 		const alphas: number[] = [];
@@ -366,7 +380,7 @@
 			for (let v = 0; v < triangles.length / 3; v++) alphas.push(alpha);
 		};
 		regions.forEach((r, k) => {
-			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
+			const [x0, x1] = regions === shownRegions && draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
 			const a = fraction(x0, xRange, logX) * STAGE.x;
 			const b = fraction(x1, xRange, logX) * STAGE.x;
 			const m = regionMarks(a, b);
@@ -425,26 +439,26 @@
 	 * the span has two) moves that edge, and on release its new edges go to `onspan`.
 	 */
 	function onRegionPress(e: PointerEvent) {
-		if (!renderer || !onspan || e.button !== 0 || !view.regions?.length) return;
+		if (!renderer || !onspan || e.button !== 0 || !shownRegions.length) return;
 		const held = handleUnder(e);
 		const at = held && pointerOnStage(e);
 		if (!held || !at) return;
 		const { k, part } = held;
-		const r = view.regions[k];
+		const r = shownRegions[k];
 		e.preventDefault();
 		e.stopPropagation();
 		controls.enabled = false;
 		hover = null;
 		const start = at.x;
-		draggingRegion = { k, x0: r.x0, x1: r.x1 };
+		draggingRegion = { k, x0: r.x0, x1: r.x1, part };
 		const move = (m: PointerEvent) => {
 			const now = pointerOnStage(m);
 			if (!now || !draggingRegion) return;
 			if (part === 'move') {
 				const d = now.x - start;
-				draggingRegion = { k, x0: r.x0 + d, x1: r.x1 + d };
-			} else if (part === 'low') draggingRegion = { k, x0: Math.min(now.x, r.x1), x1: r.x1 };
-			else draggingRegion = { k, x0: r.x0, x1: Math.max(now.x, r.x0) };
+				draggingRegion = { k, x0: r.x0 + d, x1: r.x1 + d, part };
+			} else if (part === 'low') draggingRegion = { k, x0: Math.min(now.x, r.x1), x1: r.x1, part };
+			else draggingRegion = { k, x0: r.x0, x1: Math.max(now.x, r.x0), part };
 			buildRegions();
 		};
 		const up = () => {
@@ -453,7 +467,9 @@
 			controls.enabled = true;
 			const done = draggingRegion;
 			draggingRegion = null;
+			dragCount = null;
 			if (!done || (done.x0 === r.x0 && done.x1 === r.x1)) return buildRegions();
+			// what was dragged to stays drawn until the answer's regions take its place
 			onspan?.(k, done.x0, done.x1);
 		};
 		window.addEventListener('pointermove', move);
@@ -470,7 +486,7 @@
 	/** The handles of every draggable region, where they stand on the stage now. */
 	function handlesNow(): { k: number; part: HandlePart; at: [number, number, number] }[] {
 		const out: { k: number; part: HandlePart; at: [number, number, number] }[] = [];
-		(view.regions ?? []).forEach((r, k) => {
+		shownRegions.forEach((r, k) => {
 			if (!r.drag) return;
 			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
 			for (const h of regionHandles(fraction(x0, xRange, logX) * STAGE.x, fraction(x1, xRange, logX) * STAGE.x, !!r.drag.high)) {
@@ -768,6 +784,14 @@
 
 	onMount(init);
 
+	// the regions change without the stage being built again
+	$effect(() => {
+		void shownRegions;
+		untrack(() => {
+			if (renderer && !draggingRegion) buildRegions();
+		});
+	});
+
 	$effect(() => {
 		void logX;
 		void logZ;
@@ -914,11 +938,16 @@
 				<span class="tick rec low" data-at={recordAt(r)}>{depthLabels[r]}</span>
 			{/each}
 		{/if}
-		{#each view.regions ?? [] as r, i (i)}
-			{#if r.label}<span class="tick region" data-at="{((fraction(r.x0, xRange, logX) + fraction(r.x1, xRange, logX)) / 2) * STAGE.x},{STAGE.y},{STAGE.z * 1.04}">{r.label}</span>{/if}
+		{#each shownRegions as r, i (i)}
+			<!-- a frame with its window, and a span with handles, say what they are by how they are drawn -->
+			{#if r.label && !r.window && !r.drag}<span class="tick region" data-at="{((fraction(r.x0, xRange, logX) + fraction(r.x1, xRange, logX)) / 2) * STAGE.x},{STAGE.y},{STAGE.z * 1.04}">{r.label}</span>{/if}
 		{/each}
 		<span class="title" data-at="{STAGE.x / 2},-0.11,0">{withUnit(view.x.label, view.x.unit)}</span>
 	</div>
+
+	{#if dragCount}
+		<div class="dragcount num" data-testid="waterfall-drag-count">{dragCount}</div>
+	{/if}
 
 	{#if failure}
 		<div class="failure" role="alert">{failure}</div>
@@ -1242,5 +1271,21 @@
 		padding: var(--sp-6);
 		color: var(--text-2);
 		text-align: center;
+	}
+
+	/* how many frames a drag would leave, said over the stage while it is dragged */
+	.dragcount {
+		position: absolute;
+		top: 52px;
+		left: 50%;
+		translate: -50% 0;
+		padding: 2px 8px;
+		font-size: var(--text-xs);
+		white-space: nowrap;
+		color: var(--text-1);
+		background: color-mix(in srgb, var(--bg-1) 90%, transparent);
+		border: 1px solid var(--line-2);
+		border-radius: var(--radius-sm, 4px);
+		pointer-events: none;
 	}
 </style>

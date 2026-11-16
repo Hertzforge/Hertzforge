@@ -70,7 +70,7 @@ PROJECT_METHODS = ('project.new', 'project.open', 'project.import', 'project.sav
                    'project.duplicate', 'project.refresh',
                    'project.units', 'project.define_units', 'project.children', 'project.entity_rows',
                    'project.mesh_size', 'project.journal',
-                   'project.show', 'project.actions',
+                   'project.show', 'project.averaging', 'project.actions',
                    'project.setups', 'project.save_setup', 'project.open_setup',
                    'project.channel_table', 'project.put_channel_table',
                    'project.seeds', 'project.seed')
@@ -385,6 +385,9 @@ class Connection:
         if method == 'project.children':
             _only(params, ('name',), method)
             return await call(projects.children, self.project, params)
+        if method == 'project.averaging':
+            _only(params, ('name', 'averaging'), method)
+            return await call(projects.averaging, self.project, params)
         if method == 'project.mesh_size':
             # the whole form comes along; only these are read
             found = await call(projects.mesh_size, self.project, params)

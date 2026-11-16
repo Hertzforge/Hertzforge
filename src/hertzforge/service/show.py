@@ -308,22 +308,16 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
 AVERAGING_FIELDS = ('frame_length', 'overlap', 'window', 'frames', 'start', 'detrend')
 
 
-def _averaging(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
-               ) -> list[str]:
-    """The averaging drawn on a lone time history's own plot, the stage or
-    the flat one, while its form is open: `prefs.averaging` holds what the
-    form holds, typed or stored, and the frames come as `regions`
-    (`ops_settings.averaging_regions`): each frame with its window and its
-    row, then the span that drags them. Returns the notes."""
+def averaging_drawn(project: Any, name: str, draft: dict[str, Any]
+                    ) -> tuple[list[dict] | None, str]:
+    """(regions, note) for an averaging drawn on the time history `name`: what
+    `draft` holds of the Averaging form's fields, the history's own for the rest
+    (`ops_settings.averaging_regions`: each frame with its window and its row,
+    then the span that drags them). No regions, and why, when it cannot be drawn."""
     from hertzforge.core.averaging import Averaging
-    from hertzforge.core.data import TimeHistory
 
     from .ops_settings import averaging_regions
 
-    draft = prefs.get('averaging')
-    if draft is None or len(objects) != 1 or not isinstance(project[objects[0]], TimeHistory):
-        return []
-    name = objects[0]
     history = project[name]
     held = history.averaging
     stored = {} if held is None else {field: getattr(held, field) for field in AVERAGING_FIELDS}
@@ -335,16 +329,31 @@ def _averaging(project: Any, views: list[dict], objects: list[str], prefs: dict[
                               fields['detrend'], start_set=True)
         rate = float(history.sample_rate)
     except (TypeError, ValueError) as error:
-        return [f'averaging not drawn: {error}']
-    regions = averaging_regions(name, history, averaging)
-    for view in views:
-        if view.get('view') in ('spectrum', 'waterfall'):
-            view['regions'] = [dict(region) for region in regions]
+        return None, f'averaging not drawn: {error}'
     most = averaging.most_frames(len(history.abscissa), rate)
     said = (f'{averaging.frames} frame{"s" * (averaging.frames != 1)} of '
             f'{averaging.frame_length / rate:g} s')
     if averaging.frames > most:
         said += f'; only {most} fit from {averaging.start:g} s'
+    return averaging_regions(name, history, averaging), said
+
+
+def _averaging(project: Any, views: list[dict], objects: list[str], prefs: dict[str, Any]
+               ) -> list[str]:
+    """The averaging drawn on a lone time history's own plot, the stage or
+    the flat one, while its form is open: `prefs.averaging` holds what the
+    form holds, typed or stored, and the frames come as `regions`
+    (`averaging_drawn`). Returns the notes."""
+    from hertzforge.core.data import TimeHistory
+
+    draft = prefs.get('averaging')
+    if draft is None or len(objects) != 1 or not isinstance(project[objects[0]], TimeHistory):
+        return []
+    regions, said = averaging_drawn(project, objects[0], draft)
+    if regions is not None:
+        for view in views:
+            if view.get('view') in ('spectrum', 'waterfall'):
+                view['regions'] = [dict(region) for region in regions]
     return [said]
 
 

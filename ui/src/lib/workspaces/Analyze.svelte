@@ -283,7 +283,8 @@
 										onremove={v.view === 'table' && v.edit?.remove ? (ids) => a.removeShownRows(v.edit!.remove!, ids) : undefined}
 										onrows={v.view === 'table' && v.more ? (start, count) => a.moreRows(v.more!, start, count) : undefined}
 										ongizmo={v.view === 'shape3d' && v.gizmo ? (act, patch) => a.dragOnSelection(act, patch) : undefined}
-										onspan={(v.view === 'spectrum' || v.view === 'waterfall') && v.regions?.some((r) => r.drag) ? (k, x0, x1) => { const drag = v.regions?.[k]?.drag; if (drag) void a.spanOnSelection(drag, x0, x1); } : undefined}
+										regions={v.view === 'spectrum' || v.view === 'waterfall' ? a.averagingRegions : null}
+										onspan={v.view === 'spectrum' || v.view === 'waterfall' ? (k, x0, x1) => { const drag = (a.averagingRegions ?? v.regions)?.[k]?.drag; if (drag) void a.spanOnSelection(drag, x0, x1); } : undefined}
 									/>
 								</div>
 								{/if}

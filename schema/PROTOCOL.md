@@ -520,6 +520,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.refresh` | `{"names"}` | `{"project"}` |
 | `project.units` | `{"name"}` | `{"name","tables":[{"side","rows":[...]}]}` |
 | `project.children` | `{"name"}` | what the object holds (below) |
+| `project.averaging` | `{"name","averaging"?}` | `{"regions","note"}` |
 | `project.entity_rows` | `{"geometry","kind","family"?,"groups"?,"start","count"}` | `{"rows"}`: more of an entity table that sent its first rows (its `more`) |
 | `project.mesh_size` | `{"geometry","solids","elements"}` (a Mesh form's values) | `{"value"}`: the element size those solids are likely to hold at, in the display units |
 | `project.show` | `{"objects","records"?,"part"?,"prefs"?}` | `{"title","views","note","offers"}` |
@@ -708,8 +709,14 @@ frames, and an edge dragged adds or removes whole frames at that end, at least o
 staying where it was (a span that still ends at `was_stop` had its left edge dragged). Frames slid
 past the end of the record stop at its end. On a stage a draggable region is moved by handles on the
 floor's front edge, one at each end and one in the middle, and a press anywhere else turns the view;
-on a flat plot the span itself is pressed. That stores the averaging,
-and the shell reads the selection again. A lone channel table shows typed into, its cells
+on a flat plot the span itself is pressed. That stores the averaging.
+The span carries `snap`: a frame's length and the step between frames in seconds (`frame`, `hop`) and
+the record's ends (`low`, `high`), from which the shell draws the whole frames a drag would leave,
+and says how many, while the span is still being dragged. `project.averaging` answers the same
+`regions` and `note` for the time history `name` without its plot: `averaging` is what
+`prefs.averaging` is. The shell asks it as the form is typed into and after a drag, and draws those
+regions over the view it already has, so the plot itself is not sent again. More than 1,000 frames
+are one shaded span. A lone channel table shows typed into, its cells
 edited with the widgets `edit.kinds` names (a flag by a check box, a choice from its list, a date in a
 date field, a unit from a shortlist); `prefs.environment` picks the loop whose control channels the
 Control column shows (`offers.environments`) and `prefs.table_view` the table or one of that loop's

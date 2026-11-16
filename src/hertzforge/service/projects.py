@@ -635,6 +635,27 @@ def mesh_size(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str,
     return {'value': float(size), 'defined': state.project[name].units_defined}
 
 
+def averaging(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.averaging`: the regions that draw an averaging on a time history's
+    plot, without the plot (`show.averaging_drawn`): `averaging` holds what the
+    Averaging form holds, as `project.show`'s `prefs.averaging` does. The shell
+    asks this as the form is typed into, so only the frames are drawn again."""
+    from hertzforge.core.data import TimeHistory
+
+    from . import show as showing
+
+    state = _open(state, 'project.averaging')
+    name = _name(params, 'name', 'project.averaging')
+    if not isinstance(state.project[name], TimeHistory):
+        raise bad_request(f'{name} is not a time history')
+    drawn = params.get('averaging') or {}
+    if not isinstance(drawn, Mapping) or set(drawn) - set(showing.AVERAGING_FIELDS):
+        raise bad_request('project.averaging "averaging" holds '
+                          + ', '.join(showing.AVERAGING_FIELDS))
+    regions, note = showing.averaging_drawn(state.project, name, dict(drawn))
+    return {'regions': regions or [], 'note': note}
+
+
 def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
     """`project.show`: what a selection in the tree shows (`service.show`)."""
     from . import show as showing
