@@ -262,6 +262,7 @@ def test_the_example_project_is_the_band_average_studys_barc():
     assert [name for name, _obj in built.items()] == [
         'BARC', 'BARC Test Geometry', 'BARC Channels', 'BARC Force CPSD']
     assert len(built['BARC'].mates) == 4
+    assert list(built['BARC Test Geometry'].group_name) == ['Component', 'Box', 'Nodes']
     table = built['BARC Channels']
     roles = list(table['role'])
     assert roles.count('reference') == 12 and roles.count('response') == 48

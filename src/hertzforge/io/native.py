@@ -658,7 +658,7 @@ def _save_data_fields(data: DataArray, group: h5py.Group) -> None:
     if getattr(data, 'tone_exclusion', None) is not None:
         group.attrs['tone_exclusion'] = float(data.tone_exclusion)
     for name, values in getattr(data, 'limits', {}).items():
-        group.create_dataset(f'limit_{name}', data=values)
+        _write_array(group, f'limit_{name}', values)
     # how a time history is to be cut into frames, when something has
     # said — from the file it was imported from, or from the averaging
     # view. Five attributes rather than a group: it is five numbers.

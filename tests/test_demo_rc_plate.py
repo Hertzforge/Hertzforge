@@ -74,6 +74,32 @@ def test_the_channels_are_the_drives_and_the_accelerometers_in_their_frames(buil
                                     'role': 'Basis'}]
 
 
+def test_the_test_geometry_draws_its_traces_and_every_node(built):
+    """The app draws elements, not bare nodes: trace lines through the
+    component and around the plate, and a point at every channel location."""
+    geometry = built['RC Plate Test Geometry']
+    assert list(geometry.group_name) == ['Component', 'Plate', 'Nodes']
+    points = geometry.elements_in('Nodes')
+    assert sorted(int(geometry.elem_conn[int(np.flatnonzero(geometry.elem_id == e)[0])][0])
+                  for e in points) == sorted(geometry.node_id.tolist())
+    traced = {int(n) for name in ('Component', 'Plate') for e in geometry.elements_in(name)
+              for n in geometry.elem_conn[int(np.flatnonzero(geometry.elem_id == e)[0])]}
+    assert traced == set(geometry.node_id.tolist())
+
+
+def test_drive_points_add_an_accelerometer_at_every_force(built):
+    table = rc_plate.with_drive_points(built['RC Plate Channels'])
+    frame = table.frame
+    assert len(frame) == 72 and list(frame['channel']) == list(range(1, 73))
+    forces = frame[frame['role'] == 'reference']
+    points = frame.iloc[60:]
+    assert list(points['role']) == ['response'] * 12 and set(points['unit']) == {'g'}
+    assert set(points['control']) == {'False'}
+    # same node and direction as each force, in the forces' order
+    assert list(zip(points['node'], points['direction'])) == list(
+        zip(forces['node'], forces['direction']))
+
+
 def test_a_place_with_no_node_is_refused_in_words(built):
     with pytest.raises(ValueError, match='no node at'):
         rc_plate.node_at(built['RC Plate'], (0.01, 3.0, 0.0))
