@@ -69,19 +69,24 @@ export function wallGlyph(window: number[], level: number, rows: number, a: numb
 /**
  * A frame's shading on the stage, between stage x `a` and `b`: strips across the floor and up the
  * back wall, with the opacity at each corner the window's weight there (`alphas`, one per vertex),
- * so the stage is shaded as the flat plot is and overlapping frames add.
+ * so the stage is shaded as the flat plot is and overlapping frames add. A frame that runs past
+ * the stage, which ends at x `width`, is cut there, with the weight the window has at the cut.
  */
-export function windowBands(window: number[], a: number, b: number, depth: number, height: number): { faces: number[]; alphas: number[] } {
+export function windowBands(window: number[], a: number, b: number, depth: number, height: number, width = Infinity): { faces: number[]; alphas: number[] } {
 	const faces: number[] = [];
 	const alphas: number[] = [];
 	if (window.length < 2 || !(b > a)) return { faces, alphas };
 	const last = window.length - 1;
 	const weight = (k: number) => BAND_PEAK * Math.min(1, Math.max(0, window[k]));
 	for (let k = 0; k < last; k++) {
-		const x0 = a + ((b - a) * k) / last;
-		const x1 = a + ((b - a) * (k + 1)) / last;
-		const w0 = weight(k);
-		const w1 = weight(k + 1);
+		const from = a + ((b - a) * k) / last;
+		const to = a + ((b - a) * (k + 1)) / last;
+		const x0 = Math.max(0, from);
+		const x1 = Math.min(width, to);
+		if (!(x1 > x0)) continue;
+		const at = (x: number) => weight(k) + ((weight(k + 1) - weight(k)) * (x - from)) / (to - from);
+		const w0 = at(x0);
+		const w1 = at(x1);
 		// the floor, then the wall
 		faces.push(x0, 0, 0, x1, 0, 0, x1, depth, 0, x0, 0, 0, x1, depth, 0, x0, depth, 0);
 		alphas.push(w0, w1, w1, w0, w1, w0);

@@ -79,6 +79,7 @@
 		onStage,
 		regionHandles,
 		regionMarks,
+		handleStrokes,
 		type HandlePart,
 		stationOf,
 		surfaceIndex,
@@ -194,8 +195,8 @@
 	/** The regions' shading and edges, rebuilt on a scale change or as one is dragged. */
 	let regionFaces: Mesh | null = null;
 	let regionEdges: LineSegments | null = null;
-	/** The dots a draggable region is moved by. */
-	let regionGrips: Points | null = null;
+	/** The handles a draggable region is moved by, one set of points for each part. */
+	let regionGrips: Points[] = [];
 	/** A region being dragged, with its edges as they stand. */
 	let draggingRegion: { k: number; x0: number; x1: number; part: DragPart } | null = null;
 	/** How many frames the span being dragged would leave, said over the stage; null when none is dragged. */
@@ -355,14 +356,15 @@
 
 	/** Each region on the floor and the back wall, the one being dragged at its edges as they stand. */
 	function buildRegions() {
-		for (const old of [regionFaces, regionEdges, regionGrips]) {
+		for (const old of [regionFaces, regionEdges, ...regionGrips]) {
 			if (!old) continue;
 			scene.remove(old);
 			old.geometry.dispose();
 			(old.material as PointsMaterial).map?.dispose();
 			(old.material as Material).dispose();
 		}
-		regionFaces = regionEdges = regionGrips = null;
+		regionFaces = regionEdges = null;
+		regionGrips = [];
 		// while a span of frames is dragged, the whole frames it would leave are drawn in place of the ones before
 		let regions = shownRegions;
 		const dragged = draggingRegion && shownRegions[draggingRegion.k];
@@ -384,15 +386,24 @@
 			const a = fraction(x0, xRange, logX) * STAGE.x;
 			const b = fraction(x1, xRange, logX) * STAGE.x;
 			const m = regionMarks(a, b);
-			if (r.window?.length && a >= 0 && b <= STAGE.x) {
-				// a frame wholly on the stage is shaded by its window, as the flat plot shades it, so
-				// overlapping frames add; its window stands on the back wall
-				const bands = windowBands(r.window, a, b, STAGE.y, STAGE.z);
+			if (r.window?.length) {
+				// a frame is shaded by its window, as the flat plot shades it, so overlapping frames
+				// add, with a line where it starts and where it ends, across the floor and up the wall
+				const bands = windowBands(r.window, a, b, STAGE.y, STAGE.z, STAGE.x);
 				faces.push(...bands.faces);
 				alphas.push(...bands.alphas);
-				const g = wallGlyph(r.window, r.level ?? 0, r.rows ?? 1, a, b, STAGE.y, STAGE.z);
-				flat(g.faces, GLYPH_OPACITY);
-				edges.push(...g.edges);
+				for (const x of [a, b]) {
+					// a frame that ends a sample past the record still ends on the stage
+					if (x < -FRAME_SLACK || x > STAGE.x + FRAME_SLACK) continue;
+					const at = Math.max(0, Math.min(STAGE.x, x));
+					edges.push(at, 0, 0, at, STAGE.y, 0, at, STAGE.y, 0, at, STAGE.y, STAGE.z);
+				}
+				// its window stands on the back wall, when the whole of it is on the stage
+				if (a >= -FRAME_SLACK && b <= STAGE.x + FRAME_SLACK) {
+					const g = wallGlyph(r.window, r.level ?? 0, r.rows ?? 1, Math.max(0, a), Math.min(STAGE.x, b), STAGE.y, STAGE.z);
+					flat(g.faces, GLYPH_OPACITY);
+					edges.push(...g.edges);
+				}
 				return;
 			}
 			// a span is its edges alone, as on the flat plot: shading it would wash out its frames
@@ -412,14 +423,17 @@
 		regionEdges = new LineSegments(e, new LineBasicMaterial({ color: new Color(cssVar('--blue-2')), transparent: true, opacity: 0.9, depthTest: false }));
 		regionEdges.renderOrder = 2;
 		scene.add(regionFaces, regionEdges);
-		const grips = onspan ? handlesNow().flatMap((h) => h.at) : [];
-		if (grips.length) {
+		const handles = onspan ? handlesNow() : [];
+		for (const part of ['low', 'move', 'high'] as const) {
+			const at = handles.filter((h) => h.part === part).flatMap((h) => h.at);
+			if (!at.length) continue;
 			const g = new BufferGeometry();
-			g.setAttribute('position', new BufferAttribute(new Float32Array(grips), 3));
-			regionGrips = new Points(g, new PointsMaterial({ color: new Color(cssVar('--blue-2')), map: handleTexture(), size: 15 * renderer!.getPixelRatio(), sizeAttenuation: false, transparent: true, depthTest: false }));
-			regionGrips.renderOrder = 3;
-			regionGrips.frustumCulled = false;
-			scene.add(regionGrips);
+			g.setAttribute('position', new BufferAttribute(new Float32Array(at), 3));
+			const grips = new Points(g, new PointsMaterial({ map: handleTexture(part), size: HANDLE_SIZE * renderer!.getPixelRatio(), sizeAttenuation: false, transparent: true, depthTest: false }));
+			grips.renderOrder = 3;
+			grips.frustumCulled = false;
+			regionGrips.push(grips);
+			scene.add(grips);
 		}
 		dirty = true;
 	}
@@ -480,8 +494,11 @@
 	const REGION_OPACITY = 0.16;
 	const GLYPH_OPACITY = 0.3;
 
-	/** How near a handle, in pixels, a press takes it. */
-	const HANDLE_PX = 13;
+	/** How near a handle, in pixels, a press takes it, and how wide one is drawn. */
+	const HANDLE_PX = 14;
+	const HANDLE_SIZE = 22;
+	/** How far past the stage, in stage units, a frame's end still counts as on it. */
+	const FRAME_SLACK = 1e-3 * STAGE.x;
 
 	/** The handles of every draggable region, where they stand on the stage now. */
 	function handlesNow(): { k: number; part: HandlePart; at: [number, number, number] }[] {
@@ -490,7 +507,7 @@
 			if (!r.drag) return;
 			const [x0, x1] = draggingRegion?.k === k ? [draggingRegion.x0, draggingRegion.x1] : [r.x0, r.x1];
 			for (const h of regionHandles(fraction(x0, xRange, logX) * STAGE.x, fraction(x1, xRange, logX) * STAGE.x, !!r.drag.high)) {
-				if (h.at[0] >= 0 && h.at[0] <= STAGE.x) out.push({ k, ...h });
+				out.push({ k, ...h });
 			}
 		});
 		return out;
@@ -513,18 +530,30 @@
 		return best;
 	}
 
-	/** A round dot for the handles: white with a dark rim, tinted by the material. */
-	function handleTexture(): CanvasTexture {
-		const size = 64;
+	/**
+	 * A handle's face, which says what dragging it does: an arrow pointing left on the low end, one
+	 * pointing right on the high end, and three bars on the middle, which slides the whole span.
+	 */
+	function handleTexture(part: HandlePart): CanvasTexture {
+		const size = 96;
 		const canvas = document.createElement('canvas');
 		canvas.width = canvas.height = size;
 		const ctx = canvas.getContext('2d')!;
 		ctx.beginPath();
 		ctx.arc(size / 2, size / 2, size / 2 - 5, 0, 2 * Math.PI);
-		ctx.fillStyle = '#ffffff';
+		ctx.fillStyle = cssVar('--blue-2');
 		ctx.fill();
-		ctx.lineWidth = 6;
-		ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+		ctx.lineWidth = 5;
+		ctx.strokeStyle = '#ffffff';
+		ctx.stroke();
+		ctx.lineWidth = 9;
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
+		ctx.beginPath();
+		for (const [x0, y0, x1, y1] of handleStrokes(part)) {
+			ctx.moveTo(x0 * size, y0 * size);
+			ctx.lineTo(x1 * size, y1 * size);
+		}
 		ctx.stroke();
 		return new CanvasTexture(canvas);
 	}
@@ -566,7 +595,8 @@
 		frameMaterial.color = new Color(cssVar('--line-2'));
 		TONES.forEach((role, k) => uniforms.uTones.value[k].set(cssVar(ROLE_STYLES[role].colorVar)));
 		for (const [kind, mesh] of marks) (mesh.material as MeshBasicMaterial).color.set(cssVar(MARKS[kind].colorVar));
-		for (const r of [regionFaces, regionEdges, regionGrips]) if (r) (r.material as MeshBasicMaterial | LineBasicMaterial | PointsMaterial).color.set(cssVar('--blue-2'));
+		// the handles' faces are painted in the theme's color: the regions are built again
+		if (regionFaces) buildRegions();
 		dirty = true;
 	}
 
@@ -822,8 +852,8 @@
 		controls.dispose();
 		geometry.dispose();
 		frame?.geometry.dispose();
-		(regionGrips?.material as PointsMaterial | undefined)?.map?.dispose();
-		for (const mesh of [...marks.values(), regionFaces, regionEdges, regionGrips]) {
+		for (const grips of regionGrips) (grips.material as PointsMaterial).map?.dispose();
+		for (const mesh of [...marks.values(), regionFaces, regionEdges, ...regionGrips]) {
 			if (!mesh) continue;
 			mesh.geometry.dispose();
 			(mesh.material as Material).dispose();
