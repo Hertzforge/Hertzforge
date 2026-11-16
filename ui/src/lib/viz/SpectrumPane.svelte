@@ -1488,19 +1488,6 @@
 		{/if}
 	</div>
 	{/if}
-	{#if legend === 'outside'}
-	<ul class="legend" aria-label="Legend">
-		{#each legendEntries as e (e.index)}
-			<li class:off={!e.shown} title={legendLabel(e.series, e.styleWords, e.shown)} onmouseenter={() => focusSeries(e.index)} onmouseleave={() => focusSeries(null)}>
-				{#if onlegend}
-					<button class="entry" aria-pressed={e.shown} onclick={() => onlegend?.(e.index)}>{@render entry(e)}</button>
-				{:else}
-					{@render entry(e)}
-				{/if}
-			</li>
-		{/each}
-	</ul>
-	{/if}
 	<div class="plot" bind:this={plotEl} style:min-height="{minHeight}px">
 		{#if area}
 			<div class="area" style:left="{area.left}px" style:top="{area.top}px" style:width="{area.width}px" style:height="{area.height}px">
@@ -1541,6 +1528,20 @@
 			</div>
 		{/if}
 	</div>
+	<!-- under the plot, in a box of its own that scrolls: many records never push the plot away -->
+	{#if legend === 'outside'}
+	<ul class="legend" aria-label="Legend">
+		{#each legendEntries as e (e.index)}
+			<li class:off={!e.shown} title={legendLabel(e.series, e.styleWords, e.shown)} onmouseenter={() => focusSeries(e.index)} onmouseleave={() => focusSeries(null)}>
+				{#if onlegend}
+					<button class="entry" aria-pressed={e.shown} onclick={() => onlegend?.(e.index)}>{@render entry(e)}</button>
+				{:else}
+					{@render entry(e)}
+				{/if}
+			</li>
+		{/each}
+	</ul>
+	{/if}
 </div>
 
 <style>
@@ -1679,8 +1680,12 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 2px var(--sp-4);
+		flex: 0 1 auto;
+		min-height: 0;
+		max-height: 40%;
+		overflow-y: auto;
 		margin: 0;
-		padding: 0 var(--sp-1) var(--sp-2);
+		padding: var(--sp-2) var(--sp-1) 0;
 		list-style: none;
 		font-size: var(--text-xs);
 	}
