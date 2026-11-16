@@ -462,9 +462,13 @@ def _alone(project: Any, name: str, picks: list[int],
         # a second set on a geometry of its own is drawn there, laid over the first's
         other = project.geometry_for(obj.second)
         apart = other is not None and other[1] is not project[geometry]
+        try:
+            compared = project.comparison_shapes(obj.first, obj.second) if apart else None
+        except ValueError:
+            compared = None
         stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
                               sets[0], sets[1], pairs, obj.second,
-                              column_geometry=other[1] if apart else None)
+                              column_geometry=other[1] if apart else None, compared=compared)
         return [stage, *table], notes
     from hertzforge.core.photos import Photos
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
@@ -737,9 +741,13 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
         views = _run(project, 'project.projection_overlay', first=first, second=second,
                      tolerance=2.0)
     else:
+        from hertzforge.core.shapes import cross_mac
+
         try:
-            values = (rows.auto_mac() if first == second
-                      else project.comparison_mac(first, second))
+            # the second set as it is compared: projected onto the first's DOFs when the
+            # two are on two geometries, for the MAC and for each pair's alignment
+            compared = columns if first == second else project.comparison_shapes(first, second)
+            values = rows.auto_mac() if first == second else cross_mac(rows, compared)
         except ValueError as error:
             raise refused(str(error)) from None
 
@@ -753,7 +761,8 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
         if apart:
             # each set on its own geometry, the second's laid over the first's
             views = paired(homes[0][1], matrix, rows, range(rows.num_shapes), columns,
-                           range(columns.num_shapes), column_geometry=homes[1][1])
+                           range(columns.num_shapes), column_geometry=homes[1][1],
+                           compared=compared)
             notes.append(f'the MAC after projecting {second} onto {first}; {first} drawn on '
                          f'{homes[0][0]} and {second} on {homes[1][0]}, Projection animates '
                          'the projection')

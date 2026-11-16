@@ -114,3 +114,41 @@ def test_matched_modes_on_two_geometries_draw_each_on_its_own(state, validate):
         assert 'overlay_lines' in stage and 'overlay_triangles' in stage
     finally:
         project.remove(name)
+
+
+def test_a_pair_on_two_geometries_is_aligned_by_the_projected_shapes(state):
+    """Sets on two geometries share no DOF, so each pair's angle is read from the second
+    set projected onto the first's DOFs: with it the two move together, and a mode turned
+    over is turned back (Brandon, 2026-11-16: the pairs were not aligned)."""
+    from hertzforge.core.shapes import ShapeSet, shared_columns
+
+    project = state.project
+    first, second = 'FEM Shapes', 'Test Shapes'
+
+    def phases():
+        out = shown(state, first, second)
+        matrix, stage = out['views']
+        rows, columns = len(stage['modes']), len(stage['overlays'])
+        return (np.asarray(matrix['values']).reshape(rows, columns),
+                np.asarray(stage['overlay_phase']).reshape(rows, columns))
+
+    values, phase = phases()
+    compared = project.comparison_shapes(first, second)
+    ours, theirs, signs = shared_columns(project[first], compared)
+    assert ours, 'the projection is on the first set\'s DOFs'
+    # every pair whose shapes have something in common is turned to move together
+    inner = (np.conj(np.asarray(project[first].shape_matrix)[:, ours])
+             @ (np.asarray(compared.shape_matrix)[:, theirs] * signs).T)
+    related = np.abs(inner) > 1e-9 * np.abs(inner).max()
+    assert related.any() and values.shape == inner.shape
+    assert np.all((inner * np.exp(1j * phase)).real[related] > 0)
+    # the test's modes turned over: every angle moves half a turn
+    held = project[second]
+    project[second] = ShapeSet(held.frequency, held.damping, held.coordinate,
+                               -np.asarray(held.shape_matrix))
+    try:
+        _values, turned = phases()
+    finally:
+        project[second] = held
+    apart = np.abs(np.angle(np.exp(1j * (turned - phase))))
+    assert np.allclose(apart[related], np.pi, atol=1e-5)

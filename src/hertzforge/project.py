@@ -6126,16 +6126,39 @@ class Project(dict):
             The MAC matrix, with `first`'s shapes down the rows and
             `second`'s across the columns.
         """
-        from .core.correlate import project_shapes
         from .core.shapes import cross_mac
+
+        first = self.name_of(first)
+        return cross_mac(self[first], self.comparison_shapes(first, second))
+
+    def comparison_shapes(self, first: str, second: str) -> ShapeSet:
+        """The second of two shape sets as it is compared with the first:
+        itself when the two are on one geometry, and projected onto the
+        first set's DOFs when they are on two (`comparison_mac`). The MAC
+        and the angle that aligns a pair of their modes are both read from
+        it, since sets on two geometries share no DOF to be compared at.
+
+        Parameters
+        ----------
+        first : str
+            One shape set, by name.
+        second : str
+            The other shape set, by name.
+
+        Returns
+        -------
+        ShapeSet
+            The second set, or its projection onto the first's DOFs.
+        """
+        from .core.correlate import project_shapes
 
         first, second = self.name_of(first), self.name_of(second)
         home, theirs = self.geometry_for(first), self.geometry_for(second)
         if (home is None or theirs is None or home[1] is theirs[1]):
-            return cross_mac(self[first], self[second])
+            return self[second]
         projected, _report = project_shapes(self[second], theirs[1],
                                             self[first], home[1])
-        return cross_mac(self[first], projected)
+        return projected
 
     def merge(self, *names: str, name: str | None = None) -> str:
         """Combine compatible objects into one (Merge). The merged object
