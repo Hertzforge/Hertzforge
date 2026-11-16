@@ -3656,7 +3656,7 @@ def signals_template(objects: Mapping[str, Any],
 TEST_TEMPLATES = {'random': 'random', 'mimo_random': 'mimo', 'sine': 'sine',
                   'mixed': 'mixed_mode', 'classical_shock': 'shock', 'srs': 'shock',
                   'twr': 'transient', 'mimo_shock': 'mimo_shock',
-                  'explorer': 'explorer', 'recorder': 'recorder'}
+                  'explorer': 'explorer', 'recorder': 'recorder', 'playback': 'signals'}
 
 #: the binding of the project's run record
 RUN_RECORD = '@basis:RunRecord'

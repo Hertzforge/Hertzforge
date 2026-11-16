@@ -206,3 +206,15 @@ def test_the_playback_guide_maps_the_run_to_the_objects_it_becomes(converted):
                              flags=re.MULTILINE))
     named = {o.strip() for cell in objects for o in re.findall(r'\*\*([^*]+)\*\*', cell)}
     assert named == set(done.objects)
+
+
+def test_a_playback_run_builds_the_signals_report(converted):
+    """A Playback project picks the report the shell picks for it (the signals report), and
+    that report builds from the converted run."""
+    from hertzforge.core.report import TEMPLATE_BUILDERS, TEST_TEMPLATES
+
+    _folder, _done, project = converted
+    assert TEST_TEMPLATES['playback'] == 'signals'
+    report = TEMPLATE_BUILDERS[TEST_TEMPLATES[project['Run Record'].test]](
+        project, project.object_groups)
+    assert report is not None

@@ -59,7 +59,7 @@
 					<div><dt>Level</dt><dd class="num">{s.level_db} dB</dd></div>
 					<div><dt>Ceiling</dt><dd class="num">{volts(s.ceiling_v)}</dd></div>
 					<div><dt>Rate</dt><dd class="num">{s.fs_hz} Hz</dd></div>
-					<div><dt>Drives</dt><dd class="num">{s.drive.map.join(', ')}</dd></div>
+					<div><dt>Drive rows</dt><dd class="num">{s.drive.map.join(', ')}</dd></div>
 				</dl>
 				{#if s.overloads.some((o) => o.overload)}<p class="aq-small warn">Overload on {s.overloads.filter((o) => o.overload).map((o) => `row ${o.channel}`).join(', ')}.</p>{/if}
 			{/if}
