@@ -46,6 +46,20 @@ describe('averaging frames on a plot', () => {
 		alphas.forEach((alpha, v) => expect(alpha).toBeCloseTo(Math.abs(faces[3 * v] - 0.6) < 1e-9 ? BAND_PEAK : 0));
 		expect(windowBands([1], 0, 1, 0.9, 0.5).faces).toEqual([]);
 	});
+
+	it('cuts a frame that runs past the stage where the stage ends, at the weight the window has there', () => {
+		// a triangle window from -0.5 to 1.5 on a stage 1 wide: half of each slope shows
+		const { faces, alphas } = windowBands([0, 1, 0], -0.5, 1.5, 0.9, 0.5, 1);
+		const xs = faces.filter((_v, i) => i % 3 === 0);
+		expect(Math.min(...xs)).toBe(0);
+		expect(Math.max(...xs)).toBe(1);
+		alphas.forEach((alpha, v) => expect(alpha).toBeCloseTo(BAND_PEAK * (1 - Math.abs(faces[3 * v] - 0.5))));
+		// a frame a rounding error past the ends keeps its window: none at either end
+		const near = windowBands([0, 1, 0], -1e-9, 1 + 1e-9, 0.9, 0.5, 1);
+		expect(near.faces.length).toBe(2 * 2 * 18);
+		expect(Math.min(...near.alphas)).toBeCloseTo(0);
+		expect(windowBands([0, 1, 0], 2, 3, 0.9, 0.5, 1).faces).toEqual([]);
+	});
 });
 
 describe('a span of frames being dragged', () => {

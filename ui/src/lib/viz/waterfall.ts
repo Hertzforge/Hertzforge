@@ -330,11 +330,28 @@ export type HandlePart = 'low' | 'move' | 'high';
 /**
  * The handles a draggable region is moved by on the stage, along the floor's front edge between
  * stage x `a` and `b`: one at each end when the span has two edges to drag, and one in the middle
- * that slides the whole of it. The rest of the stage stays the camera's.
+ * that slides the whole of it. The rest of the stage stays the camera's. A span that runs past
+ * the stage keeps its handles on the part that shows; one wholly off it has none.
  */
 export function regionHandles(a: number, b: number, two: boolean): { part: HandlePart; at: [number, number, number] }[] {
-	const lo = Math.min(a, b);
-	const hi = Math.max(a, b);
+	if (Math.max(a, b) < 0 || Math.min(a, b) > STAGE.x) return [];
+	const lo = Math.max(0, Math.min(a, b));
+	const hi = Math.min(STAGE.x, Math.max(a, b));
 	const middle: { part: HandlePart; at: [number, number, number] } = { part: 'move', at: [(lo + hi) / 2, 0, 0] };
 	return two ? [{ part: 'low', at: [lo, 0, 0] }, middle, { part: 'high', at: [hi, 0, 0] }] : [middle];
+}
+
+/**
+ * The strokes of a handle's face, in fractions of its width, as [x0, y0, x1, y1]: an arrow pointing
+ * left on the low end, one pointing right on the high end, and three bars on the middle.
+ */
+export function handleStrokes(part: HandlePart): [number, number, number, number][] {
+	if (part === 'move') return [0.36, 0.5, 0.64].map((y) => [0.3, y, 0.7, y]);
+	const tip = part === 'low' ? 0.26 : 0.74;
+	const back = part === 'low' ? 0.47 : 0.53;
+	return [
+		[1 - tip, 0.5, tip, 0.5],
+		[back, 0.29, tip, 0.5],
+		[back, 0.71, tip, 0.5]
+	];
 }

@@ -17,7 +17,7 @@ import {
 	surfaceIndex,
 	unfraction,
 	wallTriangles,
-	zoneTriangles, regionHandles } from './waterfall';
+	zoneTriangles, regionHandles, handleStrokes } from './waterfall';
 
 describe('segmentIndex', () => {
 	const offsets = [0, 4, 8];
@@ -210,5 +210,25 @@ describe('the handles of a draggable region', () => {
 
 	it('gives a span that only slides its middle handle alone', () => {
 		expect(regionHandles(0.4, 1.2, false)).toEqual([{ part: 'move', at: [0.8, 0, 0] }]);
+	});
+
+	it('keeps the handles of a span that runs past the stage on the part that shows', () => {
+		// the whole record, ending a sample past the last one drawn
+		const whole = regionHandles(-1e-9, STAGE.x + 1e-5, true);
+		expect(whole.map((h) => h.at[0])).toEqual([0, STAGE.x / 2, STAGE.x]);
+		expect(regionHandles(-3, 0.5, true).map((h) => h.at[0])).toEqual([0, 0.25, 0.5]);
+		expect(regionHandles(-3, -1, true)).toEqual([]);
+		expect(regionHandles(STAGE.x + 1, STAGE.x + 2, true)).toEqual([]);
+	});
+
+	it('draws an arrow out of each end and three bars on the middle', () => {
+		const tipOf = (part: 'low' | 'high') => handleStrokes(part)[1][2];
+		expect(tipOf('low')).toBeLessThan(0.5);
+		expect(tipOf('high')).toBeGreaterThan(0.5);
+		// every stroke of an arrow ends on its tip
+		for (const part of ['low', 'high'] as const) expect(new Set(handleStrokes(part).map((s) => `${s[2]},${s[3]}`)).size).toBe(1);
+		const bars = handleStrokes('move');
+		expect(bars).toHaveLength(3);
+		expect(bars.every(([x0, y0, x1, y1]) => y0 === y1 && x0 < x1)).toBe(true);
 	});
 });

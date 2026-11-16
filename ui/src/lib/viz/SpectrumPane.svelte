@@ -162,6 +162,11 @@
 	const view = $derived(frozenView ?? viewIn);
 	/** The regions drawn: the caller's when it gives some, else the view's own. */
 	const shownRegions = $derived(regions ?? view.regions ?? []);
+	/**
+	 * While a span of frames is there to drag (the Averaging form is open) the pointer reads nothing:
+	 * a cursor line following it hides the edges it is reaching for.
+	 */
+	const quiet = $derived(shownRegions.some((r) => r.snap));
 
 	/** Zooms are taken in by the pane itself and not left to uPlot: y zooms, wheel zooms, or the caller holds the ranges. */
 	/** A y range zoomed to on the pane, when the pane holds its own zoom. */
@@ -465,7 +470,7 @@
 				setCursor: [
 					(u) => {
 						const left = u.cursor.left ?? -1;
-						if (left < 0) {
+						if (left < 0 || quiet) {
 							cursorIsLocal = false;
 							if (view.link) cursors.clear(view.link, paneId);
 							else cursorX = null;
@@ -1271,6 +1276,16 @@
 		destroyPlot();
 	});
 
+	// a cursor standing when the frames come to be dragged is taken away
+	$effect(() => {
+		if (!quiet) return;
+		untrack(() => {
+			cursorIsLocal = false;
+			if (view.link) cursors.clear(view.link, paneId);
+			else cursorX = null;
+		});
+	});
+
 	function readoutText(v: number | null): string {
 		return v === null ? '-' : formatFixed(v, 4);
 	}
@@ -1349,7 +1364,7 @@
 	{#if readout}<span class="val num">{readoutText(readouts[e.index])}</span>{/if}
 {/snippet}
 
-<div class="spectrum" class:live data-testid="view-spectrum">
+<div class="spectrum" class:live class:quiet data-testid="view-spectrum">
 	{#if showHead}
 	<div class="head">
 		{#if showTitle}
@@ -1767,6 +1782,12 @@
 	.plot :global(.marker.draggable) {
 		margin-left: -1.5px;
 		border-left: 3px solid #e5534b;
+	}
+
+	.spectrum.quiet .plot :global(.u-cursor-x),
+	.spectrum.quiet .plot :global(.u-cursor-y),
+	.spectrum.quiet .plot :global(.u-cursor-pt) {
+		display: none;
 	}
 
 	.plot :global(.u-cursor-x) {
