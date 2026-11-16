@@ -3605,6 +3605,105 @@ class Project(dict):
         return project_shapes(set_obj, self[theirs], target, self[home],
                               tolerance=tolerance)
 
+    def drive_points(self, table: Any) -> list[str]:
+        """The DOFs a channel table says a force is applied at: its
+        reference channels that measure force, in the table's order,
+        each DOF once.
+
+        Parameters
+        ----------
+        table : str or object
+            The channel table.
+
+        Returns
+        -------
+        list of str
+            The DOFs, such as '101Z+'.
+        """
+        channels = self[self.name_of(table)]
+        if not isinstance(channels, ChannelTable):
+            raise TypeError(f'{self.name_of(table)!r} is not a channel table')
+        return list(dict.fromkeys(
+            dof for dof, role, kind in zip(channels.dof_strings(),
+                                           channels.roles(), channels.types())
+            if dof and role == 'reference' and kind == 'force'))
+
+    def driven_modes(self, source: Any, drive: str | None = None, *,
+                     table: Any = None,
+                     records: Sequence[int] | None = None,
+                     tolerance: float = 0.02) -> tuple[str, Any]:
+        """Each modal coordinate's response to a unit force at one DOF,
+        from modal FRFs and the shape set they are of (`modal_basis`):
+        what the operating deflection shape of modal FRFs is made from
+        (`deform.modal_ods_deflection`).
+
+        Parameters
+        ----------
+        source : str or object
+            The modal FRFs.
+        drive : str, optional
+            The DOF the force is at. Left out, the one force reference
+            of `table`.
+        table : str or object, optional
+            A channel table. Its force reference is the drive when
+            `drive` is left out, and when the table and the shape set
+            are linked to different geometries the set is read at the
+            drive as `channel_shapes` reads it, at the nearest node.
+        records : sequence of int, optional
+            Which modal records; all of them when omitted. Leaving the
+            rigid-body modes' records out gives the elastic response.
+        tolerance : float, default 0.02
+            As `channel_shapes`.
+
+        Returns
+        -------
+        tuple of (str, DrivenModes)
+            The shape set's name, and the modal coordinates per unit
+            force (`core.modal_frf.DrivenModes`).
+
+        Raises
+        ------
+        TypeError, ValueError
+            If the source is not modal FRFs with a shape set behind
+            them, neither a drive nor a table is given, the table has
+            no force reference or more than one and no drive is named,
+            or the set does not cover the drive.
+        """
+        from .core.modal_frf import driven_modes
+
+        source = self.name_of(source)
+        basis, at_drive, dof = self._drive(source, drive, table, records,
+                                           tolerance)
+        return basis, driven_modes(self[source], at_drive, dof, records)
+
+    def _drive(self, source, drive, table, records, tolerance):
+        """(the modal FRFs' shape set by name, the set to read at the
+        drive, the drive DOF) for `driven_modes`."""
+        if not isinstance(self[source], Frf):
+            raise TypeError(f'{source!r} is not an FRF')
+        basis = self.modal_basis(source, records)
+        if basis is None:
+            raise ValueError(f'nothing says which shape set {source!r} is of')
+        at_drive = self[basis]
+        if table is not None:
+            table = self.name_of(table)
+            if drive is None:
+                points = self.drive_points(table)
+                if not points:
+                    raise ValueError(f'{table!r} has no reference channel '
+                                     'measuring force')
+                if len(points) > 1:
+                    raise ValueError(f'{table!r} has {len(points)} force '
+                                     f'references ({", ".join(points)}); '
+                                     'name one as drive=')
+                drive = points[0]
+            at_drive, _projection = self.channel_shapes(
+                basis, table, tolerance=tolerance)
+        if drive is None:
+            raise ValueError('give the DOF the force is at as drive=, or a '
+                             'channel table with a force reference as table=')
+        return basis, at_drive, drive
+
     def _transform_pair(self, source, shapes):
         from .core.sine import SineLevelSet
         from .core.transform import _cannot
