@@ -21,7 +21,7 @@ import pytest
 import hertzforge
 from hertzforge.core import sensors as placing
 from hertzforge.core.channel_table import ChannelTable
-from hertzforge.core.sensor_catalog import GENERIC, lookup, models_for
+from hertzforge.core.sensor_catalog import GENERIC, lookup, models_for, size_text, sized
 from hertzforge.drawing.viz import sensors as drawing
 
 C, S = np.cos(np.radians(30.0)), np.sin(np.radians(30.0))
@@ -469,3 +469,46 @@ def test_two_uniaxials_at_one_node_are_two_bodies_whatever_the_triax_column():
     assert np.allclose(at_206[0].frame[:, 2], [0, 1, 0])
     assert np.allclose(at_206[1].frame[:, 2], [-1, 0, 0])
     assert notes == []
+
+
+def test_a_size_written_as_the_model_is_a_body():
+    """A sensor the catalog does not hold, drawn at its size."""
+    cube = sized('Block 17.5 mm', 'triax')
+    assert (cube.shape, cube.size, cube.kind, cube.plug) == ('box', (17.5,) * 3, 'triax', (0.0, 0.0))
+    assert sized(' block  14x10 X 6mm ', 'uniaxial').size == (14.0, 10.0, 6.0)
+    can = sized('Cylinder 16 x 8 mm', 'uniaxial')
+    assert (can.shape, can.size, can.model) == ('puck', (16.0, 16.0, 8.0), 'Cylinder 16 x 8 mm')
+    assert sized('cylinder 16 mm', 'force').size == (16.0, 16.0, 16.0)
+    # what is not a size, or not a body that kind can be
+    for text, kind in (('356A02', 'triax'), ('Block 3 x 4 mm', 'triax'), ('Block 0 mm', 'triax'),
+                       ('Cylinder 1 x 2 x 3 mm', 'uniaxial'), ('Cylinder 16 mm', 'triax'),
+                       ('Block 5', 'triax'), ('Sphere 5 mm', 'uniaxial'), ('', 'triax')):
+        assert sized(text, kind) is None
+    assert lookup('Block 17.5 mm') is None
+    # written back as it is read
+    assert size_text('block', (17.5, 17.5, 17.5)) == 'Block 17.5 mm'
+    assert size_text('block', (14, 10, 6.127)) == 'Block 14 x 10 x 6.13 mm'
+    assert size_text('cylinder', (16.0, 16.0, 8.0)) == 'Cylinder 16 x 8 mm'
+    for text, kind in (('Block 17.5 mm', 'triax'), ('Cylinder 16 x 8 mm', 'uniaxial')):
+        body = sized(text, kind)
+        shape = 'cylinder' if body.shape == 'puck' else 'block'
+        assert size_text(shape, body.size) == text
+
+
+def test_a_sized_sensor_is_placed_and_drawn_at_its_size():
+    table = _table([*_triax(model='Block 17.5 mm'),
+                    (102, 'Z+', 'acceleration', 'Cylinder 16 x 8 mm', '')])
+    sensors, notes = placing.place(table, _geometry())
+    assert not notes
+    cube, can = sensors
+    assert (cube.entry.size, cube.generic, cube.model) == ((17.5,) * 3, False, 'Block 17.5 mm')
+    assert (can.entry.shape, can.entry.size, can.generic) == ('puck', (16.0, 16.0, 8.0), False)
+    points, _triangles, parts = drawing.body(cube.entry)
+    np.testing.assert_allclose(np.ptp(points, axis=0), 17.5, atol=0.5)
+    assert {'mark:X', 'mark:Y', 'mark:Z'} <= set(parts) and 'connector' not in parts
+    points, _triangles, parts = drawing.body(can.entry)
+    np.testing.assert_allclose(np.ptp(points, axis=0)[2], 8.0, atol=0.5)
+    assert 'mark:shaft' in parts
+    # a cylinder on a triax's rows is no body a triax can be: generic, and named
+    sensors, notes = placing.place(_table(_triax(model='Cylinder 16 mm')), _geometry())
+    assert sensors[0].generic and 'Cylinder 16 mm' in notes[0]

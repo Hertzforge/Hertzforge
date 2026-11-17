@@ -15,6 +15,11 @@ box its length with the round nose, its width and its height. The plug
 is the connector out of the connector face, the cable what is drawn
 beyond it, and a force transducer's studs stand out of both ends.
 
+A sensor the catalog does not hold is drawn at its size when the size is
+written where the model would be: ``Block 17.5 mm`` for a cube,
+``Block 14 x 10 x 6 mm`` for a box along x, y and z, ``Cylinder 16 x 8 mm``
+for a round body by its diameter and height (`sized`).
+
 The bodies are drawn only, centered on their node. Nothing here enters
 the finite element model, the mass properties or a mesh.
 """
@@ -29,6 +34,8 @@ the finite element model, the mass properties or a mesh.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 #: the kinds of sensor a body is drawn for
@@ -174,6 +181,78 @@ def lookup(model: str) -> SensorModel | None:
             if key.startswith(make) and _BY_MODEL.get(key[len(make):]):
                 return _BY_MODEL[key[len(make):]]
     return found
+
+
+#: a size written where a model would be: a shape, one to three numbers
+#: parted by x, and mm
+_SIZED = re.compile(r'(block|cylinder)\s+(\d+(?:\.\d+)?)'
+                    r'(?:\s*x\s*(\d+(?:\.\d+)?))?(?:\s*x\s*(\d+(?:\.\d+)?))?\s*mm')
+
+
+def sized(model: str, kind: str) -> SensorModel | None:
+    """The body a size written as a model describes, or None when the
+    text is not a size.
+
+    Parameters
+    ----------
+    model : str
+        ``Block 17.5 mm`` (a cube), ``Block 14 x 10 x 6 mm`` (a box
+        along x, y and z), ``Cylinder 16 x 8 mm`` (a diameter and a
+        height along z) or ``Cylinder 16 mm`` (as high as it is wide).
+        Case and spacing do not matter.
+    kind : str
+        One of `KINDS`: what the rows it is on measure.
+
+    Returns
+    -------
+    SensorModel or None
+        A plain body of that size with no connector, named as written.
+        None for a block given two numbers, a cylinder given three, a
+        size of zero, and a cylinder for a tri-axial accelerometer, whose
+        faces carry its letters.
+    """
+    found = _SIZED.fullmatch(' '.join(str(model).split()).lower())
+    if found is None:
+        return None
+    numbers = [float(text) for text in found.groups()[1:] if text is not None]
+    if min(numbers) <= 0:
+        return None
+    if found.group(1) == 'block' and len(numbers) != 2:
+        size = tuple(numbers) if len(numbers) == 3 else (numbers[0],) * 3
+        shape = 'box'
+    elif found.group(1) == 'cylinder' and len(numbers) != 3 and kind != 'triax':
+        size = (numbers[0], numbers[0], numbers[-1])
+        shape = 'puck'
+    else:
+        return None
+    return SensorModel(' '.join(str(model).split()), '', kind, shape,
+                       size, 0.0, '-x' if kind == 'triax' else '+x',  # type: ignore[arg-type]
+                       f'{GENERIC[kind].description}, sized')
+
+
+def size_text(shape: str, size: Sequence[float]) -> str:
+    """A size as `sized` reads it, to write where a model would be.
+
+    Parameters
+    ----------
+    shape : str
+        'block' or 'cylinder'.
+    size : sequence of 3 floats
+        Millimeters along x, y and z; a cylinder's diameter is its x.
+
+    Returns
+    -------
+    str
+        ``Block 17.5 mm``, ``Block 14 x 10 x 6 mm`` or
+        ``Cylinder 16 x 8 mm``, each number to a hundredth.
+    """
+    def number(value: float) -> str:
+        return f'{float(value):.2f}'.rstrip('0').rstrip('.')
+
+    x, y, z = (number(value) for value in size)
+    if shape == 'cylinder':
+        return f'Cylinder {x} x {z} mm'
+    return f'Block {x} mm' if x == y == z else f'Block {x} x {y} x {z} mm'
 
 
 def models_for(channel_type: str) -> list[SensorModel]:

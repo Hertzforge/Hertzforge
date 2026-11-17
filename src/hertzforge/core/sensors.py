@@ -39,7 +39,7 @@ from typing import Any
 
 import numpy as np
 
-from .sensor_catalog import GENERIC, MEASURES, SensorModel, lookup
+from .sensor_catalog import GENERIC, MEASURES, SensorModel, lookup, sized
 
 #: legs this far from perpendicular are a table error, not a sensor
 SQUARE_TOLERANCE = np.sin(np.radians(1.0))
@@ -147,7 +147,8 @@ def place(table: Any, geometry: Any) -> tuple[list[Sensor], list[str]]:
     for key, rows in groups.items():
         node, kind = key[0], key[2]
         model = str(models[rows[0]]).strip()
-        entry = lookup(model)
+        # a catalog model, else a size written where the model would be
+        entry = lookup(model) or sized(model, kind)
         if entry is not None and entry.kind != kind:
             notes.append(f'{model} is a {GENERIC[entry.kind].description}, '
                          f'on a {MEASURES[kind]} row at node {node}: drawn as '
