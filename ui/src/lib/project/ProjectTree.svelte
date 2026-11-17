@@ -257,6 +257,17 @@
 		p.renamingPart = null;
 		if (part && to && to !== current) await p.renamePart(part.name, part.index, to);
 	}
+	// an element group named on its row: a double-click, or F2 on it (Brandon, 2026-11-17)
+	function startGroupRename(name: string, id: number, current: string) {
+		p.renamingGroup = { name, id };
+		newName = current;
+	}
+	async function commitGroupRename(current: string) {
+		const group = p.renamingGroup;
+		const to = newName.trim();
+		p.renamingGroup = null;
+		if (group && to && to !== current) await p.renameGroup(group.name, group.id, to);
+	}
 	function focusAndSelect(node: HTMLInputElement) {
 		node.focus();
 		node.select();
@@ -432,9 +443,27 @@
 							<span class="label" class:dim={!family.count}>{family.label} ({family.count})</span>
 						</div>
 						{#each family.groups as group (group.id)}
-							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'group', group.id)}>
+							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} ondblclick={() => startGroupRename(o.name, group.id, group.label)} onkeydown={(e) => { if (e.key === 'Enter') clickSub(o.name, 'group', group.id); else if (e.key === 'F2') { e.stopPropagation(); startGroupRename(o.name, group.id, group.label); } }}>
 								<Glyph name="groups" of="child" parent="geometry" size={14} />
-								<span class="label">{group.label} ({group.count})</span>
+								{#if p.renamingGroup?.name === o.name && p.renamingGroup.id === group.id}
+									<input
+										class="field rename"
+										aria-label="New name for {group.label}"
+										data-testid="rename-group-field"
+										bind:value={newName}
+										use:focusAndSelect
+										onclick={(e) => e.stopPropagation()}
+										ondblclick={(e) => e.stopPropagation()}
+										onkeydown={(e) => {
+											e.stopPropagation();
+											if (e.key === 'Enter') void commitGroupRename(group.label);
+											if (e.key === 'Escape') p.renamingGroup = null;
+										}}
+										onblur={() => (p.renamingGroup = null)}
+									/>
+								{:else}
+									<span class="label">{group.label} ({group.count})</span>
+								{/if}
 							</div>
 						{/each}
 					{/each}

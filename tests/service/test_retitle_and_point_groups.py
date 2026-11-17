@@ -67,3 +67,25 @@ def test_the_points_of_the_groups_picked_are_drawn_over_the_rest():
     # a group of beams has no points to mark
     (frame,) = part_entities('G', geometry, {'kind': 'group', 'id': beams})
     assert len(frame['points']) == len(plain['points'])
+
+
+def test_an_element_group_is_renamed_from_the_tree():
+    held = projects.new({'title': 'Points'})
+    geometry, first, _second, _beams = _points()
+    held.project.add('Probed', geometry)
+    held.modified = False
+    projects.rename(held, {'name': 'Probed', 'to': '  Top Face ', 'group': first})
+    assert geometry.group_name[0] == 'Top Face' and held.modified
+    assert held.project.journal[-1].endswith(f".rename_group({first}, 'Top Face')")
+    kids = projects.children(held, {'name': 'Probed'})
+    labels = [group['label'] for family in kids['families'] for group in family['groups']]
+    assert 'Top Face' in labels and 'Face A' not in labels
+    # the same name again changes nothing
+    held.modified = False
+    projects.rename(held, {'name': 'Probed', 'to': 'Top Face', 'group': first})
+    assert not held.modified
+    with pytest.raises(ProtocolError, match='no element group 99'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'group': 99})
+    with pytest.raises(ProtocolError, match='element group\'s id'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'group': 'Face A'})
+    assert held.project.names == ['Probed']

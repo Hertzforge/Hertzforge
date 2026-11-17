@@ -537,7 +537,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.drag_out` | `{"project":true}` or `{"names"}` | `{"paths"}` |
 | `op.cancel` | `{}` | `{"op"}` |
 | `report.*` | see Reports below | |
-| `project.rename` | `{"name","to","index"?}` | `{"project"}` |
+| `project.rename` | `{"name","to","index"?,"group"?}` | `{"project"}` |
 | `project.retitle` | `{"title"}` | `{"project"}`: the project's own name; its file keeps its name until saved elsewhere |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.delete_parts` | `{"parts":{name:[index,...]}}` | `{"project"}` |
@@ -850,7 +850,7 @@ project came from; a `.vdyn` is opened but never written. `project.drag_out` wri
 empty one; it takes an optional `title` and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.
 With `index`, `project.rename` renames one photo of a Photos object instead (the photo at that
-index, from 0), and the report blocks that show it follow. `project.remove` takes `names`, a list,
+index, from 0), and the report blocks that show it follow. With `group`, it renames one element group of a geometry instead, by the group's id. `project.remove` takes `names`, a list,
 and removes them all or, when one is not in the project, none. `project.delete_parts` deletes
 sub-items picked in the tree, `parts` mapping an object's name to the indices picked: records of a
 data object, modes of a shape set, channels of a channel table, photos of a Photos object. Taking every item is refused ("delete the object

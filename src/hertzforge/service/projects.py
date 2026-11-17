@@ -409,7 +409,8 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.rename`: the object `name` called `to`, and every group,
     provenance record and report block that names it following
     (`Project.rename`); with `index`, one photo of a Photos object
-    renamed instead, the report blocks that show it following."""
+    renamed instead, the report blocks that show it following; with
+    `group`, one element group of a geometry, by its id."""
     state = _open(state, 'project.rename')
     old = _name(params, 'name', 'project.rename')
     new = _name(params, 'to', 'project.rename').strip()
@@ -417,12 +418,34 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         raise not_found(f'the project has no object named {old!r}')
     if params.get('index') is not None:
         return _rename_photo(state, old, params['index'], new)
+    if params.get('group') is not None:
+        return _rename_group(state, old, params['group'], new)
     if new == old:
         return
     try:
         state.project.rename(old, new)
     except ValueError as error:
         raise refused(str(error)) from None
+    state.modified = True
+
+
+def _rename_group(state: OpenProject, name: str, group: Any, new: str) -> None:
+    """One element group of a geometry renamed (`Geometry.rename_group`),
+    journaled as the call."""
+    from hertzforge.core.geometry import Geometry
+
+    geometry = state.project[name]
+    if not isinstance(geometry, Geometry):
+        raise refused(f'{name} is not a geometry; only a geometry has element groups')
+    if not isinstance(group, int) or isinstance(group, bool):
+        raise bad_request('project.rename "group" is an element group\'s id')
+    ids = [int(one) for one in geometry.group_id]
+    if group not in ids:
+        raise not_found(f'{name} has no element group {group}')
+    if geometry.group_name[ids.index(group)].strip() == new:
+        return
+    geometry.rename_group(group, new)
+    state.project.record_call(geometry, 'rename_group', group, new)
     state.modified = True
 
 
