@@ -729,7 +729,7 @@ fn build_reference(r: &Obj, base: &Path, grid: &Grid, h_controls: &MatrixStack) 
             for l in 0..n_lines {
                 for i in 0..n {
                     let d = data[(l * n + i) * n + i];
-                    if !(d.re >= 0.0) || d.im.abs() > 1e-9 * d.re.abs().max(1e-300) {
+                    if d.re.is_nan() || d.re < 0.0 || d.im.abs() > 1e-9 * d.re.abs().max(1e-300) {
                         die(format!(
                             "reference line {} control {i}: the diagonal is {d}, not real and non-negative",
                             lo + l
@@ -1591,9 +1591,9 @@ fn main() {
 
     // The channel table: every structure output an enabled input, the controls listed.
     let mut table = ChannelTable::new();
-    for i in 0..n_o {
+    for (i, role) in roles.iter().enumerate() {
         let mut c = Channel::new(1 + i as u32);
-        c.role = if roles[i] == "control" {
+        c.role = if role == "control" {
             ChannelRole::Control
         } else {
             ChannelRole::Monitor
@@ -1601,7 +1601,7 @@ fn main() {
         c.units = Units::AccelG;
         // A bookkeeping monitor (a stress or modal monitor, scaled far above the noise)
         // never latches the overload indicator.
-        c.range_max = if roles[i] == "monitor" { 1.0e30 } else { 1.0e6 };
+        c.range_max = if role == "monitor" { 1.0e30 } else { 1.0e6 };
         table.channels.push(c);
     }
     // Drive channel ids start at 101 as before, or past the last input on a structure with
