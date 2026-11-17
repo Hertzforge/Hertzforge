@@ -10,7 +10,9 @@ labelled with.
 The center is half the body's size back from each measured face, so it
 needs the size. That comes from the model: one named for the sensor, or
 the smallest tri-axial model in the catalog the measured points fit in.
-A sensor with neither takes a size given for it, or the measured one.
+A sensor with neither takes a size given for it, or the measured one,
+and that size is written where its model would be (`Block 17.5 mm`,
+`Cylinder 16 x 8 mm`), which is how the 3-D view draws it at that size.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import numpy as np
 from .channel_table import ChannelTable
 from .geometry import Geometry
 from .scan_fit import SensorFit
-from .sensor_catalog import CATALOG, SensorModel, lookup
+from .sensor_catalog import CATALOG, SensorModel, lookup, size_text, sized
 
 #: a block whose points reach this far past a model's side still takes
 #: that model, in millimeters: the reach is measured from a fitted corner
@@ -39,7 +41,8 @@ class Placed:
         sensor: The sensor's name in the features.
         node: Its node in the geometry.
         kind: 'triax' or 'uniaxial'.
-        model: The catalog model it was sized by, '' for none.
+        model: What its rows name as the model: the catalog model it
+            was sized by, or its size written as one.
         size: The body's size along its X, Y and Z, in millimeters.
         sized_by: Where the size came from: 'model' (named for it),
             'guess' (the catalog model the points fit in), 'given' or
@@ -84,13 +87,23 @@ def guess_model(fit: SensorFit, meters: float) -> SensorModel | None:
 
 def _size(fit: SensorFit, meters: float, model: str | None,
           given: Any) -> tuple[str, tuple[float, float, float], str, list[str]]:
-    """(model, size in mm, where it came from, notes) for one sensor."""
+    """(model, size in mm, where it came from, notes) for one sensor. A
+    sensor with no model named takes its size written as one
+    (`sensor_catalog.size_text`), so it is drawn at that size."""
     notes: list[str] = []
+    assert fit.extent is not None
+    measured = fit.extent * meters * 1e3
     if given is not None:
-        size = tuple(float(v) for v in np.broadcast_to(np.asarray(given, dtype=float), (3,)))
-        return (model or ''), size, 'given', notes                   # type: ignore[return-value]
+        numbers = np.asarray(given, dtype=float)
+        if fit.kind == 'uniaxial' and numbers.ndim == 0:
+            # a round body: the measured diameter and the height given
+            size, shape = (measured, measured, float(numbers)), 'cylinder'
+        else:
+            size = tuple(float(v) for v in np.broadcast_to(numbers, (3,)))
+            shape = 'block'
+        return (model or size_text(shape, size)), size, 'given', notes  # type: ignore[return-value]
     if model:
-        entry = lookup(model)
+        entry = lookup(model) or sized(model, fit.kind)
         if entry is None:
             raise ValueError(f'sensor {fit.sensor}: {model!r} is not in the sensor catalog; '
                              'give its size')
@@ -101,15 +114,14 @@ def _size(fit: SensorFit, meters: float, model: str | None,
     guessed = guess_model(fit, meters)
     if guessed is not None:
         return guessed.model, guessed.size, 'guess', notes
-    assert fit.extent is not None
-    measured = fit.extent * meters * 1e3
+    size = (measured, measured, measured)
     if fit.kind == 'triax':
         notes.append(f'sensor {fit.sensor}: no catalog model fits a block of {measured:.1f} mm '
                      'or more, so its side is taken as that, the least it can be')
-    else:
-        notes.append(f'sensor {fit.sensor}: its height is not measured and is taken as its '
-                     f'diameter, {measured:.1f} mm')
-    return '', (measured, measured, measured), 'measured', notes
+        return size_text('block', size), size, 'measured', notes
+    notes.append(f'sensor {fit.sensor}: its height is not measured and is taken as its '
+                 f'diameter, {measured:.1f} mm')
+    return size_text('cylinder', size), size, 'measured', notes
 
 
 def _node_ids(fits: Sequence[SensorFit], nodes: Mapping[str, int]) -> dict[str, int]:
