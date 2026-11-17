@@ -761,7 +761,7 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
         raise bad_request('project.show "line" is a frequency in Hz, or null')
     if prefs.get('shape_view') not in (None, 'animate', 'table', 'mac', 'values'):
         raise bad_request('project.show "shape_view" is animate, table, mac or values, or null')
-    for key in ('projection', 'arrows', 'sensors'):
+    for key in ('projection', 'arrows', 'sensors', 'limits'):
         if key in prefs and not isinstance(prefs[key], bool):
             raise bad_request(f'project.show "{key}" is true or false')
     from .show import TABLE_VIEWS, VALUES_CHOICES, VALUES_FORMS

@@ -51,6 +51,7 @@ def waterfall(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 RECORDS = Param('records', 'Records', 'string', default='')
+LIMITS = Param('limits', 'Warning and abort limits', 'boolean', default=True)
 
 #: the records a plot draws when none are named
 FIRST_RECORDS = 8
@@ -82,10 +83,41 @@ def plot(project: Any, params: dict[str, Any]) -> list[dict]:
     for record, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True):
         kept = np.isfinite(x) & np.isfinite(y)
         lines.append(v.series(data.record_label(record), 'measured', x[kept], y[kept]))
+    if params.get('limits', True) and params['component'] == 'magnitude':
+        lines += _limit_lines(data, arrays['drawn'])
     left = len(records) - len(arrays['drawn'])
     title = name if not left else f'{name} ({left} of another quantity left out)'
     return [v.spectrum(title, *axes(data, arrays['drawn'][0], params['component'], arrays),
                        lines)]
+
+
+def _limit_lines(data: Any, records: list[int]) -> list[dict]:
+    """The warning and abort limits of the records drawn, for an object that carries
+    them (a specification): each drawn the way the specification is, as the object its
+    `limit` returns, and named by its record when more than one is drawn. A record with
+    no limit (not a control channel) adds no curve."""
+    import hertzforge as hz
+    from hertzforge.drawing.viz.waterfall import waterfall_arrays
+
+    from .spec_lines import NAMES, ROLES
+
+    lines: list[dict] = []
+    if not getattr(data, 'limits', None):
+        return lines
+    for key in data.LIMITS:
+        limit = data.limit(key)
+        if limit is None:
+            continue
+        arrays = waterfall_arrays(limit, records, unit_system=hz.SI, exponents=False,
+                                  component='magnitude')
+        for record, (x, y) in zip(arrays['drawn'], arrays['curves'], strict=True):
+            kept = np.isfinite(x) & np.isfinite(y)
+            if not kept.any():
+                continue
+            name = (NAMES[key] if len(records) == 1
+                    else f'{data.record_label(record)}: {NAMES[key]}')
+            lines.append(v.series(name, ROLES[key], x[kept], y[kept]))
+    return lines
 
 
 def _derived(project: Any, call: Any) -> list[dict]:
@@ -711,7 +743,7 @@ OPERATIONS = (
         id='project.plot', title='Plot Records', workspace='signals', everywhere=True,
         summary='Chosen records of any data object as curves on one plot, '
                 'numbered from 1 as "1-3, 7"; the first eight when none are named.',
-        params=(DATA, RECORDS, COMPONENT), outputs=('spectrum',), run=plot),
+        params=(DATA, RECORDS, COMPONENT, LIMITS), outputs=('spectrum',), run=plot),
     Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='random',
         summary='PSDs from a time history\'s averages, added to the project.',

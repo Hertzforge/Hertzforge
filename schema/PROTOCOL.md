@@ -704,7 +704,7 @@ PSD's envelope), a channel table on a geometry marks its channels, two shape set
 measurement beside its requirement gives the comparison's spectra, two PSDs overlay. A selection with
 no joint reading shows each object on its own, and `note` says what was left out. The views come in the
 connection's display units, as an operation's do. `prefs` is how the window reads data, kept across
-selections: `flat` (the plot in place of the stage for a whole data
+selections: `limits` (the warning and abort limits of a specification drawn on its 2-D plot, each as the specification is drawn, role `tolerance` for a warning and `abort` for an abort; true when absent, offered as `limits` when a selected object carries any; `project.plot` takes the same as a param), `flat` (the plot in place of the stage for a whole data
 object) and `component` (`magnitude`, `real`, `imag`
 or `phase` of complex data) and `line`, the frequency in Hz the stage's operating shape or envelope is
 read at (null for the loudest line); `offers` says which of them the selection can take (`flat` for a

@@ -162,6 +162,9 @@
 									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The 2-D plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>2D</button>
 								</div>
 							{/if}
+							{#if offers.limits && a.prefs.flat}
+								<button class="btn ghost sm" class:on={a.prefs.limits} aria-pressed={a.prefs.limits} data-testid="read-limits" title="Draw the specification's warning and abort limits on the plot" onclick={() => a.setPref('limits', !a.prefs.limits)}>Limits</button>
+							{/if}
 							{#if offers.complex}
 								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
 									<option value="magnitude">Magnitude</option>

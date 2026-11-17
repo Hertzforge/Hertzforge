@@ -832,3 +832,41 @@ def test_modal_responses_with_no_set_to_name_say_what_to_select():
     three = projects.show(state, {'objects': ['Geometry', 'Responses', shapes], 'records': {},
                                   'prefs': {}})
     assert 'motion' in three['views'][0]
+
+
+def test_a_specifications_limits_are_drawn_on_its_plot_and_turned_off(validate):
+    f = np.array([20.0, 80.0, 350.0, 2000.0])
+    level = np.array([[0.01, 0.04, 0.04, 0.007], [0.02, 0.02, 0.02, 0.02]])
+    nothing = np.full(4, np.nan)
+    limits = {'warning_lower': np.array([level[0] * 0.7, nothing]),
+              'warning_upper': np.array([level[0] * 1.4, nothing]),
+              'abort_lower': np.array([level[0] * 0.5, nothing]),
+              'abort_upper': np.array([level[0] * 2.0, nothing])}
+    held = projects.new({'title': 'Limits'})
+    held.project.add('Spec', Specification(f, level, ['1X+', '2Y+'], ordinate_dim='acceleration',
+                                           ordinate_unit='g', **limits))
+    held.project.add('Plain', Psd(f, level, ['1X+', '2Y+'], ordinate_dim='acceleration',
+                                  ordinate_unit='g'))
+
+    def drawn(name, **prefs):
+        out = projects.show(held, {'objects': [name], 'records': {}, 'part': None,
+                                   'prefs': {'flat': True, **prefs}})
+        wire_views(out['views'], validate)
+        validate({**out, 'views': []}, 'shown')
+        return out, [(line['name'], line['role']) for line in out['views'][0]['series']]
+
+    out, lines = drawn('Spec')
+    assert out['offers']['limits'] is True
+    # the control channel's four limits after the records; the other record has none
+    assert lines == [('1X+', 'measured'), ('2Y+', 'measured'),
+                     ('1X+: Warning, lower', 'tolerance'), ('1X+: Warning, upper', 'tolerance'),
+                     ('1X+: Abort, lower', 'abort'), ('1X+: Abort, upper', 'abort')]
+    spec, upper = out['views'][0]['series'][0], out['views'][0]['series'][5]
+    # drawn as the specification is: the same points along the power law, twice as high
+    assert np.allclose(upper['x'], spec['x']) and np.allclose(upper['y'], 2.0 * spec['y'])
+    _out, off = drawn('Spec', limits=False)
+    assert off == [('1X+', 'measured'), ('2Y+', 'measured')]
+    plain, lines = drawn('Plain')
+    assert plain['offers']['limits'] is False and len(lines) == 2
+    with pytest.raises(ProtocolError, match='"limits"'):
+        drawn('Spec', limits='yes')
