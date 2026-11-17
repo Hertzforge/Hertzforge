@@ -303,6 +303,22 @@ The `zero drive` law (`laws/mimo-zero`) returns the zero drive and one diagnosti
 It is not for running a test; it is the smallest complete MIMO law, and the tests use it to prove
 the path a law file takes.
 
+### Running a built-in MIMO law on a benchmark problem
+
+Two examples of `sds-control` are the programs the Hertzforge Journal's benchmark study of these
+six laws used on the Open Benchmark Set, on the simulator only. `x4_runner` runs one built-in law,
+closed loop, through the MIMO Random run service on a structure given as data, and writes a run
+folder (the manifest, the loop log, the drive and response as played, the structure's frequency
+response) for the set's scorer:
+
+```
+cargo run --release -p sds-control --example x4_runner -- case.json --out run_folder
+```
+
+`obs_play` plays a drive record open loop through a jointed structure given as data and writes
+every output sample; the set's tests use it to hold its reference model to the simulator. Each
+file's header comment gives the case file's keys and how to build one from a problem of the set.
+
 ## Classical shock laws
 
 A classical shock law closes the loop between pulses. The controller identifies the system with
