@@ -36,6 +36,11 @@
 	let { app, only, replacing }: Props = $props();
 
 	const a = $derived(app.analyze);
+	/** What the selection plots, as a plot's choice of scales is kept: the kinds of its objects. */
+	const scaleOf = $derived.by(() => {
+		const kinds = new Map((app.project.summary?.objects ?? []).map((o) => [o.name, o.kind]));
+		return [...new Set(app.project.selection.objects.map((name) => kinds.get(name) ?? 'object'))].sort().join('+');
+	});
 
 	// the action column's width, dragged by its edge and remembered; put away, it waits in the frame's header
 	const TABLE_KEY = 'hertzforge.actionTable';
@@ -288,6 +293,7 @@
 										minHeight={240}
 										scope="selection"
 										scaleToggle
+										scaleOf={scaleOf}
 										selected={v.view === 'matrix' && v.selects ? a.pair : null}
 										picks={v.view === 'matrix' && v.selects ? a.picks : []}
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}

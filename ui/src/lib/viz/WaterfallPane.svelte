@@ -7,6 +7,7 @@
 
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
+	import { chooseScale, scaleChoice, scaleKey } from './plotScales.svelte';
 	/**
 	 * Waterfall view, drawn with three.js: every record a polyline at its own depth, colored by
 	 * level on the sequential colormap (viridis), the way the 3-D data view draws time
@@ -100,9 +101,11 @@
 		regions?: Region[] | null;
 		/** The result the view belongs to: its stage reopens as it was left within it. */
 		scope?: string;
+		/** What is plotted, as the choice of scales is kept: the kinds of the objects selected. */
+		scaleOf?: string;
 	}
 
-	let { view, onparams, onspan, scope, regions = null }: Props = $props();
+	let { view, onparams, onspan, scope, scaleOf, regions = null }: Props = $props();
 	/** The regions drawn: the caller's when it gives some, else the view's own. */
 	const shownRegions = $derived(regions ?? view.regions ?? []);
 	// read once: the pane is made again for each view it shows
@@ -132,6 +135,13 @@
 
 	let logX = $state(false);
 	let logZ = $state(false);
+	/** The scales are kept for what is plotted, the kinds of the objects selected, and not for the window. */
+	const scalesAt = $derived(scaleKey(scaleOf ?? scope, view.x.unit ?? ''));
+	function setLog(axis: 'x' | 'y', log: boolean) {
+		if (axis === 'x') logX = log;
+		else logZ = log;
+		chooseScale(scalesAt, axis, log);
+	}
 	let facing = $state<Facing>('perspective');
 	let failure = $state<string | null>(null);
 	/** The point under the cursor and where it stands on screen, or null. */
@@ -139,8 +149,10 @@
 
 	// The service says how each axis reads; the viewer may change it afterward.
 	$effect.pre(() => {
-		logX = saved?.logX ?? view.x.scale === 'log';
-		logZ = saved?.logZ ?? view.z.scale === 'log';
+		// what was chosen for this kind of object, in 3-D or on its 2-D plot; else the view's own
+		const kept = scaleChoice(scalesAt);
+		logX = kept.x ?? view.x.scale === 'log';
+		logZ = kept.y ?? view.z.scale === 'log';
 	});
 
 	const recordCount = $derived(view.records.length);
@@ -892,8 +904,8 @@
 		if (k === 'r') face('perspective');
 		else if (k === 't') face('top');
 		else if (k === 'f') face('front');
-		else if (k === 'x') logX = !logX;
-		else if (k === 'l') logZ = !logZ;
+		else if (k === 'x') setLog('x', !logX);
+		else if (k === 'l') setLog('y', !logZ);
 		else return;
 		e.preventDefault();
 	}
@@ -1013,13 +1025,13 @@
 			</div>
 			<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
 				<span class="lbl">{view.x.label}</span>
-				<button role="radio" data-testid="waterfall-x-linear" aria-checked={!logX} class:on={!logX} onclick={() => (logX = false)} title="Linear (X)">Lin</button>
-				<button role="radio" data-testid="waterfall-x-log" aria-checked={logX} class:on={logX} onclick={() => (logX = true)} title="Log (X)">Log</button>
+				<button role="radio" data-testid="waterfall-x-linear" aria-checked={!logX} class:on={!logX} onclick={() => setLog('x', false)} title="Linear (X)">Lin</button>
+				<button role="radio" data-testid="waterfall-x-log" aria-checked={logX} class:on={logX} onclick={() => setLog('x', true)} title="Log (X)">Log</button>
 			</div>
 			<div class="seg" role="radiogroup" aria-label="{view.z.label} scale">
 				<span class="lbl">{view.z.label}</span>
-				<button role="radio" data-testid="waterfall-z-linear" aria-checked={!logZ} class:on={!logZ} onclick={() => (logZ = false)} title="Linear (L)">Lin</button>
-				<button role="radio" data-testid="waterfall-z-log" aria-checked={logZ} class:on={logZ} onclick={() => (logZ = true)} title="Log (L)">Log</button>
+				<button role="radio" data-testid="waterfall-z-linear" aria-checked={!logZ} class:on={!logZ} onclick={() => setLog('y', false)} title="Linear (L)">Lin</button>
+				<button role="radio" data-testid="waterfall-z-log" aria-checked={logZ} class:on={logZ} onclick={() => setLog('y', true)} title="Log (L)">Log</button>
 			</div>
 			{#if view.quantities && onparams}
 				<div class="seg" role="radiogroup" aria-label="Quantity">
