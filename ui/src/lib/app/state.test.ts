@@ -460,3 +460,58 @@ describe('the fit cursor dragged', () => {
 		expect(app.fit.busy).toBeNull();
 	});
 });
+
+describe('the force of a modal FRF response moved', () => {
+	// each force's stage comes back at its own strongest line unless a line is asked for
+	const strongest: Record<string, number> = { '101Z+': 120, '505Z+': 310 };
+	beforeEach(() => void vi.useFakeTimers());
+	afterEach(() => void vi.useRealTimers());
+	function driven() {
+		const made = make();
+		const asked: { drive: string | null; line: number | null }[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: { prefs?: { drive: string | null; line: number | null } }) => {
+			if (method !== 'project.show') return { table: { columns: [] } };
+			const prefs = params.prefs!;
+			asked.push({ drive: prefs.drive, line: prefs.line });
+			const frequency_hz = prefs.line ?? strongest[prefs.drive ?? '101Z+'];
+			return { title: 'shown', note: '', views: [{ view: 'shape3d', cursor: 'frequency', modes: [{ frequency_hz }] }] };
+		});
+		made.app.project.selection = { objects: ['Modal FRFs', 'Two', 'Plate'], records: {} } as never;
+		return { ...made, asked };
+	}
+
+	it('keeps the line shown when the cursor was never moved', async () => {
+		const { a, asked } = driven();
+		a.setPref('drive', null);
+		await a.showSelection();
+		a.setPref('drive', '505Z+');
+		await rest();
+		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: 120 });
+		a.setPref('drive', '101Z+');
+		await rest();
+		expect(asked.at(-1)).toEqual({ drive: '101Z+', line: 120 });
+	});
+
+	it('keeps the line the cursor was put on', async () => {
+		const { a, asked } = driven();
+		await a.showSelection();
+		a.moveLine(0);
+		await rest();
+		a.setPref('drive', '505Z+');
+		await rest();
+		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: 0 });
+	});
+
+	it('starts a fresh selection at its strongest line again', async () => {
+		const { app, a, asked } = driven();
+		a.setPref('drive', null);
+		await a.showSelection();
+		a.setPref('drive', '505Z+');
+		await rest();
+		app.project.selection = { objects: ['Plate'], records: {} } as never;
+		await a.showSelection();
+		app.project.selection = { objects: ['Modal FRFs', 'Two', 'Plate'], records: {} } as never;
+		await a.showSelection();
+		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: null });
+	});
+});

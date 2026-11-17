@@ -71,6 +71,33 @@ export function arrowMesh(arrows: { tails: ArrayLike<number>; directions: ArrayL
 	return mesh;
 }
 
+/**
+ * How far each arrow has gone with its node: `out[3k..3k+3]` is `re` times the shape plus `im`
+ * times its imaginary part at row `follow[k]`, or zero for an arrow that stays put (2^32 − 1, or
+ * a row the shape does not have).
+ */
+export function riddenOffsets(follow: ArrayLike<number>, shape: ArrayLike<number>, shapeImag: ArrayLike<number>, re: number, im: number, out: Float32Array): Float32Array {
+	for (let k = 0; k < follow.length; k++) {
+		const r = follow[k];
+		const still = r === 0xffffffff || 3 * r + 2 >= shape.length;
+		for (let c = 0; c < 3; c++) out[3 * k + c] = still ? 0 : re * shape[3 * r + c] + im * shapeImag[3 * r + c];
+	}
+	return out;
+}
+
+/** Move each arrow of a mesh from where it rests by its offset. */
+export function moveArrows(mesh: InstancedMesh, rest: Matrix4[], offsets: ArrayLike<number>): void {
+	const matrix = new Matrix4();
+	rest.forEach((at, k) => {
+		matrix.copy(at);
+		matrix.elements[12] += offsets[3 * k];
+		matrix.elements[13] += offsets[3 * k + 1];
+		matrix.elements[14] += offsets[3 * k + 2];
+		mesh.setMatrixAt(k, matrix);
+	});
+	mesh.instanceMatrix.needsUpdate = true;
+}
+
 /** Half the width of the orientation axes' picture, in arrow lengths. */
 export const TRIAD_HALF = 1.38;
 

@@ -739,7 +739,9 @@ every stage. The arrows are `arrows` on the `shape3d`, solids that stay put whil
 unit vector it points along, `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which the shell
 colors it by as it colors the orientation axes, `length`, one for all of them, `labels`, each
 arrow's DOF, which the shell writes at the arrow's free end when asked, and `inward` u8 [A], 1 for
-an arrow that points in and ends on its node. A channel table
+an arrow that points in and ends on its node. With `follow` u32 [A] the arrows move instead: each
+takes the motion of that row of the view's `nodes`, as a body's points do (2^32 − 1 stays put), and
+its label goes with it. A channel table
 picked with a geometry shows the geometry alone with the table's arrows always drawn, so `arrows` is
 not offered there. `prefs.arrow_role` (`all`, `control` or a role; `offers.arrow_roles` lists the
 ones the table holds) chooses the channels whose arrows are drawn, there and wherever the arrows of
@@ -747,7 +749,9 @@ a table are on. Modal FRFs (whole, or the records picked: the modes kept), a cha
 reference channel measuring force and a geometry show the operating deflection shape of a force at
 that reference: at the cursor's line each mode's shape scaled by its modal FRF and its shape value
 at the drive, summed, at every DOF the modal FRFs' shape set has on the geometry, with one arrow at
-the force. `offers.drives` lists the table's force references and `prefs.drive` picks one (the
+the force. The drive is a DOF of the table's own geometry when the table is linked to one: the arrow
+points along that node's coordinate system and is drawn at the drawn node nearest its place, which
+it rides (`follow`); the DOF arrows of every other reading stay put. `offers.drives` lists the table's force references and `prefs.drive` picks one (the
 first when null or not among them); the shape set the modal FRFs are of may be selected with them.
 Channels picked inside the table (`records`) are the choice instead: only their
 arrows are drawn and no role is offered. The sensors are `bodies`: solids drawn
