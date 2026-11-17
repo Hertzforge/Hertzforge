@@ -870,3 +870,27 @@ def test_a_specifications_limits_are_drawn_on_its_plot_and_turned_off(validate):
     assert plain['offers']['limits'] is False and len(lines) == 2
     with pytest.raises(ProtocolError, match='"limits"'):
         drawn('Spec', limits='yes')
+
+
+def test_a_psd_is_drawn_flat_across_its_bins_on_the_2d_plot_too(validate):
+    f = np.arange(10.0, 210.0, 10.0)
+    level = np.vstack([np.linspace(0.01, 0.02, f.size), np.full(f.size, 0.03)])
+    held = projects.new({'title': 'Steps'})
+    held.project.add('Measured', Psd(f, level, ['1X+', '2Y+'], ordinate_dim='acceleration',
+                                     ordinate_unit='g'))
+    held.project.add('Response', Frf(f, level + 0j, ['1X+', '2Y+'], ['9Z+', '9Z+']))
+    out = projects.show(held, {'objects': ['Measured'], 'records': {}, 'part': None,
+                               'prefs': {'flat': True}})
+    wire_views(out['views'], validate)
+    plot = out['views'][0]
+    first = plot['series'][0]
+    # a value a bin and the bins' edges: the area drawn is the area the values stand for
+    assert first['shape'] == 'steps' and len(first['x']) == f.size
+    assert np.allclose(first['edges'], np.arange(5.0, 210.0, 10.0))
+    assert np.allclose(first['y'], level[0])
+    # and it opens on log frequency and log level
+    assert plot['x']['scale'] == 'log' and plot['y']['scale'] == 'log'
+    # a value at a frequency stays a line
+    other = projects.show(held, {'objects': ['Response'], 'records': {}, 'part': None,
+                                 'prefs': {'flat': True}})
+    assert all(line.get('shape', 'line') == 'line' for line in other['views'][0]['series'])
