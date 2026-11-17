@@ -257,6 +257,8 @@ export interface Shape3DView {
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;
+	/** The nodes of `node_ids` are marked by a click, with every view of the same `link` (a table's rows). */
+	marks?: { link: string };
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
@@ -472,6 +474,8 @@ export interface TableView {
 	 * system's row puts the arrows and rings on it).
 	 */
 	select?: { op: string; params: Record<string, unknown>; param: string; column: number };
+	/** The rows selected are marked, each by its cell in `column`, with every view of the same `link` (a 3-D view's nodes). */
+	marks?: { link: string; column: number };
 }
 
 /** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
@@ -750,7 +754,7 @@ export interface ShowPrefs {
 export type ProjectChildren =
 	| {
 			kind: 'geometry';
-			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number }[];
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[] }[];
 			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
 			solids: SolidRow[];
 			mates: { id: number; label: string }[];

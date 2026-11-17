@@ -65,6 +65,23 @@ def test_view_entities_lists_every_node_and_draws_them(project, validate):
     assert cells(table)[0]['Elements'] == '1-144'
 
 
+def test_the_node_table_and_its_view_mark_nodes_together(project, validate):
+    view, table = run(project, 'project.view_entities', kind='nodes')
+    wire_views([view, table], validate)
+    # one link on both, the table's rows by their ids and the view's nodes by `node_ids`
+    assert view['marks'] == {'link': 'nodes:Geometry'}
+    assert table['marks'] == {'link': 'nodes:Geometry', 'column': 0}
+    ids = [int(n) for n in project['Geometry'].node_id]
+    assert list(view['node_ids']) == ids == [int(row[0]) for row in table['rows']]
+    # the Nodes part picked in the tree marks with them; the other tables mark nothing
+    (drawn,) = _picked(project, {'kind': 'part', 'id': 'nodes'}, validate)
+    assert drawn['marks'] == view['marks'] and list(drawn['node_ids']) == ids
+    for kind in ('coordinate_systems', 'elements', 'groups'):
+        view, table = run(project, 'project.view_entities', kind=kind)
+        assert 'marks' not in view and 'marks' not in table
+        assert list(view['node_ids']) == ids, 'numbered whatever is edited'
+
+
 def test_a_node_is_added_at_typed_coordinates(project, validate):
     view, table = run(project, 'project.add_node', x=0.1, y=0.2, z=0.3)
     wire_views([view, table], validate)

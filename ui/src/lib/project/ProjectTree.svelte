@@ -18,6 +18,8 @@
 	import Glyph from './Glyph.svelte';
 	import { objectIcon, solidIcon } from './icons';
 	import { partIsPicked } from './selection';
+	import { mark, marked } from '$lib/viz/marks.svelte';
+	import { markedBy, markedRun } from '$lib/viz/pick';
 	import { canDragOut } from './files';
 
 	interface Props {
@@ -62,6 +64,28 @@
 			return;
 		}
 		p.clickPart(name, kind, id, m, ids);
+	}
+
+	/** The geometries whose Nodes row is opened onto its nodes. */
+	let nodesOpen = $state<string[]>([]);
+	/** Where a Shift run of node rows starts: the last one clicked without Shift. */
+	let nodeAnchor: number | null = null;
+	const nodeLink = (name: string) => `nodes:${name}`;
+
+	/**
+	 * A node's row clicked: the node is marked, in the 3-D view and the node table with it. Cmd
+	 * (Ctrl) puts it in or takes it out, Shift marks the run from the last one clicked. The
+	 * geometry's nodes are what is selected, unless they already are (their table may be open).
+	 */
+	function clickNode(name: string, id: number, m: Modifiers, order: number[]) {
+		if (picking) return;
+		if (!partPicked(name, 'part', 'nodes')) p.clickPart(name, 'part', 'nodes');
+		const link = nodeLink(name);
+		if (m.extend && nodeAnchor !== null) mark(link, markedRun(order, nodeAnchor, id));
+		else {
+			nodeAnchor = id;
+			mark(link, markedBy(marked(link), id, !!m.toggle), m.toggle ? undefined : order.indexOf(id));
+		}
 	}
 
 	function subCandidate(kind: string, id: string | number): boolean {
@@ -421,10 +445,30 @@
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}
 					{#each kids.parts as part (part.id)}
-						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
+						{@const lists = !!part.ids?.length}
+						{@const listed = lists && nodesOpen.includes(o.name)}
+						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} aria-expanded={lists ? listed : undefined} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
+							{#if lists}
+								<button class="twist inner" class:open={listed} aria-label={listed ? `Close the nodes of ${o.name}` : `List the nodes of ${o.name}`} tabindex="-1" data-testid="expand-nodes-{o.name}" onclick={(e) => { e.stopPropagation(); nodesOpen = listed ? nodesOpen.filter((n) => n !== o.name) : [...nodesOpen, o.name]; }}>
+									<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+								</button>
+							{/if}
 							<Glyph name={part.id} of="child" parent="geometry" empty={!part.count} size={14} />
 							<span class="label">{part.label} ({part.count})</span>
 						</div>
+						{#if listed && part.ids}
+							{@const ids = part.ids}
+							{@const on = new Set(marked(nodeLink(o.name)))}
+							<div class="nodelist" role="group" data-testid="nodes-{o.name}">
+								{#each ids as id (id)}
+									<div class="sub" class:picked={on.has(id)} style="--depth: 1" role="treeitem" aria-selected={on.has(id)} tabindex="-1" data-testid="node-{o.name}-{id}" onclick={(e) => clickNode(o.name, id, mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickNode(o.name, id, {}, ids)}>
+										<Glyph name="nodes" of="child" parent="geometry" size={14} />
+										<span class="label">Node {id}</span>
+									</div>
+								{/each}
+								{#if part.count > ids.length}<p class="note" style="padding-left: 22px">{part.count - ids.length} more not listed: they are in the nodes' table (Edit).</p>{/if}
+							</div>
+						{/if}
 					{/each}
 					{#each kids.families as family (family.id)}
 						<div class="sub" class:picked={partPicked(o.name, 'family', family.id)} role="treeitem" aria-selected={partPicked(o.name, 'family', family.id)} tabindex="-1" data-testid="family-{o.name}-{family.id}" onclick={() => clickSub(o.name, 'family', family.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'family', family.id)}>
@@ -769,6 +813,16 @@
 	.sub.picked {
 		background: var(--blue-weak);
 		box-shadow: inset 0 0 0 1px var(--blue-line);
+	}
+
+	.twist.inner {
+		margin-left: -2px;
+	}
+
+	/* a geometry's nodes, one a row: past its height the list scrolls rather than the tree */
+	.nodelist {
+		max-height: 260px;
+		overflow-y: auto;
 	}
 
 	.label {
