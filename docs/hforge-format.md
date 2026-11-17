@@ -424,6 +424,27 @@ A report's blocks may include one of kind `prediction`, naming the
 predictions (`source`) and the measurement (`measured`) with the level
 it was run at (`level`, dB relative to full level, or null).
 
+## `scan/`
+
+    scan/  attrs: length_unit ('' while not declared)
+           dsets:
+             points      float64 [3, N]: a row each for x, y and z
+             features    UTF-8 strings [F]: each feature's name   (optional)
+             feature_of  int32 [N]: the row in `features` a point
+                         belongs to, -1 for none                   (optional)
+             deviation   float64 [N]: how far the measuring software
+                         found each point from the surface it fit  (optional)
+             properties  one UTF-8 string, JSON: the header rows of
+                         the file it was read from                 (optional)
+
+Points measured on the part with a coordinate measuring arm: probed,
+feature by feature, or scanned with a laser as a cloud with no
+features. `points` and `deviation` are in meters when `length_unit` is
+set and as the file gave them when it is '', the way a geometry's node
+coordinates are held. The points are stored one row per axis so a
+compressed save chunks along the points. `features` and `feature_of`
+are written together, and only for a scan that has features.
+
 ## `run_log_extract/`
 
     run_log_extract/  attrs: path, test, upto, taken, log_size, after,
@@ -515,27 +536,6 @@ A run record's `setup.config` has the same form, so a setup opened from
 a run and a saved one are read the same way. Opening either fills a
 test's draft only: the draft is checked by the control service as one
 typed in, and nothing is armed by opening it.
-
-## `scan/`
-
-    scan/  attrs: length_unit ('' while not declared)
-           dsets:
-             points      float64 [3, N]: a row each for x, y and z
-             features    UTF-8 strings [F]: each feature's name   (optional)
-             feature_of  int32 [N]: the row in `features` a point
-                         belongs to, -1 for none                   (optional)
-             deviation   float64 [N]: how far the measuring software
-                         found each point from the surface it fit  (optional)
-             properties  one UTF-8 string, JSON: the header rows of
-                         the file it was read from                 (optional)
-
-Points measured on the part with a coordinate measuring arm: probed,
-feature by feature, or scanned with a laser as a cloud with no
-features. `points` and `deviation` are in meters when `length_unit` is
-set and as the file gave them when it is '', the way a geometry's node
-coordinates are held. The points are stored one row per axis so a
-compressed save chunks along the points. `features` and `feature_of`
-are written together, and only for a scan that has features.
 
 ## Run Folders and Their Conversion
 
