@@ -410,7 +410,9 @@ A table may carry `"edit":{"op","params","columns","choices"?}`: its cells are t
 gives each column's key, or null for a column that is read only. A cell typed into runs `op` (an
 operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and `value` (the text),
 and the first `table` view of the answer takes the table's place; a value the operation refuses
-leaves the cell as it was and the refusal is shown. Tab-separated text pasted into a cell sets
+leaves the cell as it was and the refusal is shown. In an operation's own result (Fit Sensors'
+table of sensors) the whole answer takes the result's place, every view of it, since a cell there
+changes more than its table. Tab-separated text pasted into a cell sets
 the block it covers, cell by cell. `rows`, when the table shows some of the object's rows, gives the
 row each shown row is, from 1. `remove` (`{"op","params","column"}`) says the rows are the entities
 themselves, as in a geometry's entity tables: Delete removes the selected rows rather than clearing

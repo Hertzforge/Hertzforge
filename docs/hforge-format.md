@@ -188,6 +188,11 @@ the project's `data_index`, as every imported file is.
                                    were typed (only when there are any)
             mates                  JSON, the mated surfaces (only when
                                    there are any)
+            sensor_choices         JSON, {sensor: {node, model, size,
+                                   length}}: what was chosen for each
+                                   accelerometer its measured points
+                                   locate, sizes in the coordinates'
+                                   unit (only when there are any)
             group_solids           JSON, {element group id: the solids it
                                    was meshed from} (only when there are
                                    any); a group absent is found by its name

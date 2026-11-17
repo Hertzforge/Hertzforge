@@ -605,4 +605,26 @@ def fit_sensors(features: Mapping[str, np.ndarray], meters: float | None = None
             fits.append(fit)
             continue
         fits.append(fit_uniaxial(sensor, held[CYLINDER_LABEL], held[tops[0]], tops[0], meters))
+    _name_exchanged_tops(fits)
     return fits, notes
+
+
+def _name_exchanged_tops(fits: Sequence[SensorFit]) -> None:
+    """Say so when a top that is not on its own cylinder is on another
+    sensor's: the two features were most likely named for each other's
+    sensor. Nothing is exchanged; the flag names the features to rename."""
+    off = [fit for fit in fits if fit.kind == 'uniaxial' and fit.cylinder is not None
+           and any('not on this cylinder' in flag.text for flag in fit.flags)]
+    for fit in off:
+        label, plane = next(iter(fit.planes.items()))
+        for other in off:
+            if other is fit or other.cylinder is None:
+                continue
+            away = float(np.linalg.norm(_radial(plane.point[np.newaxis], other.cylinder.point,
+                                                other.cylinder.axis)))
+            if away <= other.cylinder.radius:
+                theirs = next(iter(other.planes))
+                fit.flags.append(Flag('warn', f'its top is on sensor {other.sensor}\'s cylinder: '
+                                              f'{fit.sensor}_{label} and {other.sensor}_{theirs} '
+                                              'look exchanged'))
+                break

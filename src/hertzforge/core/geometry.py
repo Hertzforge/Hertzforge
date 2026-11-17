@@ -808,6 +808,11 @@ class Geometry:
         #: definitions the model builder makes links of, kept in step as
         #: nodes and element groups are renumbered, merged or deleted
         self.mates: list = []
+        #: what was chosen for each accelerometer its measured points locate
+        #: (`core.scan_sensors`), by the sensor's name: its 'node', its 'model',
+        #: and its 'size' and 'length' in the coordinates' unit. A sensor or a
+        #: key absent is left to what the fit and the catalog give
+        self.sensor_choices: dict[str, dict[str, Any]] = {}
         #: {element group id: the solids Mesh Solids meshed into it}: a part meshed again
         #: replaces this mesh, whatever the group or the solid has been renamed. An empty
         #: tuple is a mesh whose solids have gone; a group absent is one from no solid, or
@@ -1081,6 +1086,7 @@ class Geometry:
         raw_scale = (1.0 if self.length_unit is None
                      else 1.0 / si_transform(self.length_unit, 'length')[0])
         self.solids = [s.scaled(raw_scale * scale) for s in self.solids]
+        self._scale_sensor_choices(raw_scale * scale)
         self.length_unit = length_unit
         if self.from_deck:
             notes = implausible_materials(self.group_properties)
@@ -1100,6 +1106,7 @@ class Geometry:
                                           self.length_unit, 'length')
         self.solids = [s.scaled(1.0 / si_transform(self.length_unit, 'length')[0])
                        for s in self.solids]
+        self._scale_sensor_choices(1.0 / si_transform(self.length_unit, 'length')[0])
         if self.from_deck:
             self.group_properties = deck_to_si(
                 self.group_properties, self.length_unit, self.mass_unit,
@@ -1107,6 +1114,14 @@ class Geometry:
             self.mass_unit = None
         self.length_unit = None
         return self
+
+    def _scale_sensor_choices(self, scale: float) -> None:
+        """The sizes chosen for measured accelerometers follow the
+        coordinates when their unit is declared, corrected or removed."""
+        for choice in self.sensor_choices.values():
+            for key in ('size', 'length'):
+                if choice.get(key) is not None:
+                    choice[key] = float(choice[key]) * scale
 
     # ---- adding -------------------------------------------------------------
 

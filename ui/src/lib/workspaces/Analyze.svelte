@@ -137,7 +137,7 @@
 				<div class="svviews" class:several={a.reading.views.length > 1}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
-							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)} />
+							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editReadingCell(v.edit!, row, column, value) : undefined} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)} />
 						</div>
 					{/each}
 				</div>
@@ -527,6 +527,11 @@
 
 	.svviews.several .view.shape3d {
 		grid-column: 1 / -1;
+	}
+
+	/* an operation's views stacked in a narrow frame each take their own height and the frame scrolls: a table's rows scroll inside it, so its least height is its title, and the rows of several were laid over each other */
+	.svviews.several:not(.panes) {
+		grid-auto-rows: max-content;
 	}
 
 	@container (min-width: 900px) {

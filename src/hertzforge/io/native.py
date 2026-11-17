@@ -381,6 +381,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         import json
 
         group.attrs['mates'] = json.dumps([m.as_record() for m in mates])
+    # what was chosen for the accelerometers its measured points locate;
+    # absent when nothing was, so a file from before it reads back the same
+    choices = getattr(geom, 'sensor_choices', None) or {}
+    if choices:
+        import json
+
+        group.attrs['sensor_choices'] = json.dumps(choices)
     # which solids each element group was meshed from; absent when there are
     # none, so a file from before it reads back the same
     tied = getattr(geom, 'group_solids', None) or {}
@@ -556,6 +563,11 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
         geometry.mates = [MatedSet.from_record(r)
                           for r in json.loads(group.attrs['mates'])]
+    if 'sensor_choices' in group.attrs:
+        import json
+
+        geometry.sensor_choices = {str(sensor): dict(choice) for sensor, choice
+                                   in json.loads(group.attrs['sensor_choices']).items()}
     if 'group_solids' in group.attrs:
         import json
 

@@ -1915,10 +1915,79 @@ class Project(dict):
                          'was not judged')
         return fits, notes
 
-    def create_sensors(self, source: Any, models: Mapping[Any, str] | None = None,
-                       sizes: Mapping[Any, Any] | None = None,
-                       nodes: Mapping[Any, int] | None = None,
-                       name: str | None = None) -> dict[str, Any]:
+    def set_sensor(self, source: Any, sensor: Any, **chosen: Any) -> dict[str, Any]:
+        """Choose what a measured accelerometer is made as: its node, its
+        model, and its size. The choice is kept on the geometry holding
+        the measured points and is what `create_sensors` makes it from.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry holding the measured points.
+        sensor : str or int
+            The sensor's name, the part of its features' names before
+            the last underscore.
+        **chosen
+            Any of ``node`` (a whole number above 0), ``model`` (a
+            catalog model, a size written as one such as
+            ``'Block 17.5 mm'``, or any name), ``size`` (a cube's side,
+            or a round body's diameter) and ``length`` (a round body's
+            length), the last two in meters once the geometry's unit is
+            declared and in its own numbers before. None takes a choice
+            back, leaving it to the fit and the catalog. Naming a model
+            takes back a size and a length typed before it, so the
+            model's own are used.
+
+        Returns
+        -------
+        dict
+            What is now chosen for the sensor.
+
+        Raises
+        ------
+        TypeError
+            If the source is not a geometry.
+        ValueError
+            If the geometry holds no measured points, the sensor is not
+            among them, a choice is not one of the four, or a value is
+            not one its choice can hold.
+        """
+        from .core.scan_sensors import CHOICES
+
+        source = self.name_of(source)
+        fits, _notes = self.fit_sensors(source)
+        sensor = str(sensor).strip()
+        if sensor not in {fit.sensor for fit in fits}:
+            raise ValueError(f'{source!r} has no sensor {sensor} among its measured points')
+        stray = sorted(set(chosen) - set(CHOICES))
+        if stray:
+            raise ValueError(f'a sensor\'s {stray[0]} is not chosen; its '
+                             f'{", ".join(CHOICES)} are')
+        held = dict(self[source].sensor_choices.get(sensor, {}))
+        for key, value in chosen.items():
+            if value is None or (isinstance(value, str) and not value.strip()):
+                held.pop(key, None)
+            elif key == 'node':
+                if int(value) != float(value) or int(value) < 1:
+                    raise ValueError('a node is a whole number above 0')
+                held[key] = int(value)
+            elif key == 'model':
+                held[key] = str(value).strip()
+                if 'size' not in chosen:
+                    held.pop('size', None)
+                if 'length' not in chosen:
+                    held.pop('length', None)
+            else:
+                if not float(value) > 0:
+                    raise ValueError(f'a {key} is a length above 0')
+                held[key] = float(value)
+        if held:
+            self[source].sensor_choices[sensor] = held
+        else:
+            self[source].sensor_choices.pop(sensor, None)
+        return held
+
+    def create_sensors(self, source: Any, name: str | None = None) -> dict[str, Any]:
         """Make a geometry and a channel table of the accelerometers a
         geometry's measured points locate (`fit_sensors`,
         `core.scan_sensors.assemble`).
@@ -1932,25 +2001,16 @@ class Project(dict):
         made again when they change: call this again.
 
         The center is half the body's size back from each measured face.
-        The size is the model's when one is named, else that of the
-        smallest tri-axial catalog model the points fit in, else the size
-        given, else the measured one, which the notes say.
+        The node, model and size of each sensor are what `set_sensor`
+        chose for it; where nothing was chosen the size is that of the
+        smallest tri-axial catalog model the points fit in, else the
+        measured one, which the notes say.
 
         Parameters
         ----------
         source : str or object
             The geometry holding the measured points. Its length unit
             must be declared.
-        models : mapping, optional
-            A catalog model for a sensor, by the sensor's name
-            (``{34: '356A02'}``).
-        sizes : mapping, optional
-            A body size for a sensor in millimeters, one number for a
-            cube or three for X, Y and Z, used in place of a model's.
-            For a uni-axial accelerometer it is the height.
-        nodes : mapping, optional
-            A node number for a sensor. A sensor named with a whole
-            number is that node otherwise.
         name : str, optional
             What the results are named after; the source's name when
             omitted.
@@ -1966,9 +2026,8 @@ class Project(dict):
         TypeError
             If the source is not a geometry.
         ValueError
-            If it holds no measured points or has no length unit, no
-            accelerometer is located, a model is not in the catalog, or
-            two sensors would share a node.
+            If it holds no measured points or has no length unit, or no
+            accelerometer can be placed.
         """
         from .core.scan_sensors import assemble
 
@@ -1978,8 +2037,10 @@ class Project(dict):
         if not scan.units_defined:
             raise ValueError(f'{source!r} has no length unit; declare it before the '
                              'accelerometers are sized')
-        geometry, table, _placed, said = assemble(
-            fits, scan.length_unit, models=models, sizes=sizes, nodes=nodes)
+        known = {fit.sensor for fit in fits}
+        choices = {sensor: choice for sensor, choice in scan.sensor_choices.items()
+                   if sensor in known}
+        geometry, table, _placed, said = assemble(fits, scan.length_unit, choices=choices)
         base = name or f'{source} Sensors'
         added: dict[str, Any] = {'geometry': self.add(f'{base} Geometry', geometry),
                                  'channels': self.add(f'{base} Channels', table)}
@@ -10017,7 +10078,7 @@ _JOURNALED_VERBS = (
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
-    'plan_instrumentation', 'create_sensors',
+    'plan_instrumentation', 'create_sensors', 'set_sensor',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',

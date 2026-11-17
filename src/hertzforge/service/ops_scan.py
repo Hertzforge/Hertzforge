@@ -15,21 +15,22 @@ from hertzforge.core.scan_fit import (
     parse_feature,
     residuals,
 )
-from hertzforge.core.scan_sensors import assemble
+from hertzforge.core.scan_sensors import CHOICES, assemble, resolve
+from hertzforge.core.sensor_catalog import CATALOG
 from hertzforge.core.sensors import place
 from hertzforge.drawing.viz.sensors import sensor_bodies
 
 from . import views as v
-from .descriptors import Operation, Param
+from .descriptors import Operation, Option, Param
 from .ops_geometry import arrows
 from .protocol import refused
 
 MEASURED = Param('geometry', 'Measured points', 'enum', options_from='verb:create_sensors')
-MODELS = Param('models', 'Models (34=356A02, 12=Cylinder 16 x 9 mm; blank: guessed)', 'string',
-               default='')
-NODES = Param('nodes', 'Nodes (34=134; blank: the sensor\'s number)', 'string', default='')
-NAME = Param('name', 'Name (blank: the geometry\'s, with Sensors)', 'string', default='')
 KEEP = Param('keep', 'Create the geometry and channel table', 'boolean', default=False)
+ROW = Param('row', 'Row', 'integer', default=1, min=1, step=1)
+COLUMN = Param('column', 'Column', 'enum', default='model', options=tuple(
+    Option(key, key.title()) for key in CHOICES))
+VALUE = Param('value', 'Value', 'string', default='')
 
 #: the bodies are drawn this much under size, so the points measured on
 #: their faces show outside them
@@ -43,20 +44,6 @@ UNFITTED = (139, 148, 158)
 ON_SURFACE, AT_LIMIT, FAR = (63, 185, 80), (210, 153, 34), (248, 81, 73)
 
 
-def _pairs(text: str, what: str) -> dict[str, str]:
-    """'34=356A02, 12=Cylinder 16 x 9 mm' as {sensor: value}."""
-    out: dict[str, str] = {}
-    for part in text.replace(';', ',').split(','):
-        if not part.strip():
-            continue
-        sensor, mark, value = part.partition('=')
-        if not mark or not sensor.strip() or not value.strip():
-            raise refused(f'{what} are written sensor=value, parted by commas; '
-                          f'{part.strip()!r} is not')
-        out[sensor.strip()] = value.strip()
-    return out
-
-
 def _colors(distance: np.ndarray, limit: float) -> np.ndarray:
     """A color per point from how far it lies from its surface: green on
     it, amber at `limit`, red at twice `limit` and beyond."""
@@ -67,7 +54,7 @@ def _colors(distance: np.ndarray, limit: float) -> np.ndarray:
     return np.rint(stops[lower] * (1 - part) + stops[lower + 1] * part).astype(np.uint8)
 
 
-def _fit_row(fit: Any, placed: Any, scale: float) -> list[str]:
+def _fit_row(fit: Any, scale: float) -> list[str]:
     """One sensor's row of the fits table; `scale` takes its lengths to millimeters."""
     surfaces = [*fit.planes, *([CYLINDER_LABEL] if fit.cylinder is not None else [])]
     counts = [plane.count for plane in fit.planes.values()]
@@ -75,14 +62,39 @@ def _fit_row(fit: Any, placed: Any, scale: float) -> list[str]:
     if fit.cylinder is not None:
         counts.append(fit.cylinder.count)
         rms.append(fit.cylinder.rms)
-    return [fit.sensor, 'tri-axial' if fit.kind == 'triax' else 'uni-axial',
-            ', '.join(surfaces) or 'none fitted', str(sum(counts)),
+    return [fit.sensor, ', '.join(surfaces) or 'none fitted', str(sum(counts)),
             f'{max(rms) * scale:.4f}' if rms else '',
             f'{fit.moved:.2f}' if fit.frame is not None else '',
             f'{fit.extent * scale:.2f}' if fit.extent is not None else '',
-            placed.model if placed else '', str(placed.node) if placed else '',
-            ' '.join(str(c) for c in placed.channels) if placed else '',
             '; '.join(f'{flag.level}: {flag.text}' for flag in fit.flags)]
+
+
+def _length(value: float | None) -> str:
+    return '' if value is None else f'{value:.6g}'
+
+
+def _sensors_table(name: str, resolved: list, fits: dict, defined: bool) -> dict:
+    """The table of sensors, typed into: a node, a model from the catalog
+    or any name, and a size and a length, which go out in the display
+    system's length when the geometry's unit is declared."""
+    unit = ' [m]' if defined else ''
+    def fit_cell(one: Any) -> str:
+        # placed or why not, then what the fit warns of
+        warned = [flag.text for flag in fits[one.sensor].flags if flag.level == 'warn']
+        return '; '.join([one.problem or 'placed', *warned])
+
+    rows = [[one.sensor, '' if one.node is None else str(one.node), one.model, one.shape,
+             _length(one.size), _length(one.length), fit_cell(one)]
+            for one in resolved]
+    models = [entry.model for entry in CATALOG if entry.kind in ('triax', 'uniaxial', 'force')]
+    return v.table(
+        f'Sensors of {name}',
+        ['Sensor', 'Node', 'Model', 'Shape', f'Size{unit}', f'Length{unit}', 'Fit'], rows,
+        edit=v.editing('project.set_sensor', {'geometry': name},
+                       [None, 'node', 'model', None, 'size', 'length', None],
+                       choices={'model': models},
+                       kinds={'node': 'number', 'model': 'text', 'size': 'number',
+                              'length': 'number'}))
 
 
 def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -91,30 +103,29 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
     point colored by how far it lies from the surface fitted to it, each
     accelerometer's body where it would be placed, a little under size
     so the points on its faces show, and an arrow along each channel.
-    The table reads each fit. Create adds the geometry and the channel
-    table (`Project.create_sensors`); without it nothing changes."""
+    The first table is the sensors, typed into (`project.set_sensor`): a
+    node, a model, a size and a length each; the second reads each fit.
+    Create adds the geometry and the channel table
+    (`Project.create_sensors`); without it nothing changes."""
     name = params['geometry']
     scan = project[name]
     try:
         fits, notes = project.fit_sensors(name)
     except (TypeError, ValueError) as error:
         raise refused(str(error)) from None
-    models, nodes = _pairs(params['models'], 'models'), _pairs(params['nodes'], 'nodes')
-    try:
-        nodes_given = {sensor: int(value) for sensor, value in nodes.items()}
-    except ValueError:
-        raise refused('a node is a whole number') from None
     defined = scan.units_defined
     scale = 1e3 if defined else 1.0
-    made = None
-    problem = None if defined else (f'{name} has no length unit; declare it before the '
-                                    'accelerometers are sized')
-    if defined:
-        try:
-            made = assemble(fits, scan.length_unit, models=models, nodes=nodes_given)
-        except ValueError as error:
-            problem = str(error)
-    placed = {one.sensor: one for one in made[2]} if made else {}
+    known = {fit.sensor for fit in fits}
+    choices = {sensor: choice for sensor, choice in scan.sensor_choices.items()
+               if sensor in known}
+    resolved, said = resolve(fits, choices)
+    placed = [one for one in resolved if one.placed]
+    problem = None
+    if not defined:
+        problem = f'{name} has no length unit; declare it before the accelerometers are sized'
+    elif not placed:
+        problem = 'no accelerometer is located by its measured points'
+    made = None if problem else assemble(fits, scan.length_unit, choices=choices)
 
     # the points, each colored by its distance from its own surface
     xyz = np.asarray(scan.node_xyz, dtype=float)
@@ -134,37 +145,36 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
     view['points'] = [{'xyz': np.ascontiguousarray(xyz, np.float32), 'colors': colors,
                        'size': 5.0}]
     if made:
-        geometry, table, _placed, said = made
-        notes = [*notes, *said]
+        geometry, table, _all, _said = made
         sensors, _drawn_notes = place(table, geometry)
         bodies, _body_notes = sensor_bodies(sensors, geometry, lambda _node: None, UNDER_SIZE)
         if bodies is not None:
             view['bodies'] = bodies
         centers = np.asarray(geometry.node_xyz, dtype=float)
         drawn, labels = [], []
-        for row, one in enumerate(made[2]):
+        for row, one in enumerate(placed):
             frame = by_sensor[one.sensor].frame
             axes = (0, 1, 2) if one.kind == 'triax' else (
                 'XYZ'.index(by_sensor[one.sensor].direction[0]),)
             for axis in axes:
                 drawn.append((False, (row, frame[axis], axis)))
                 labels.append(f'{one.node}{"XYZ"[axis]}+')
-        length = 1.5e-3 * max(max(one.size) for one in made[2])
-        view['arrows'] = arrows(centers, drawn, length, labels)
+        view['arrows'] = arrows(centers, drawn, 1.5 * max(max(one.body) for one in placed),
+                                labels)
 
-    rows = [_fit_row(fit, placed.get(fit.sensor), scale) for fit in fits]
     unit = 'mm' if defined else 'file units'
     readings = [v.row('Sensors', f'{len(placed)} placed of {len(fits)} measured', None,
                       'pass' if fits and len(placed) == len(fits) else 'warn')]
     if problem:
         readings.append(v.row('Not placed', problem, None, 'warn'))
-    readings += [v.row('Note', note, None, 'warn') for note in notes]
+    readings += [v.row('Left out', f'sensor {one.sensor}: {one.problem}', None, 'warn')
+                 for one in resolved if one.problem]
+    readings += [v.row('Note', note, None, 'warn') for note in [*notes, *said]]
     if params['keep']:
         if not made:
             raise refused(problem or 'no accelerometer is located by its measured points')
         try:
-            added = project.create_sensors(name, models or None, None, nodes_given or None,
-                                           params['name'].strip() or None)
+            added = project.create_sensors(name)
         except (TypeError, ValueError) as error:
             raise refused(str(error)) from None
         readings.append(v.row('Created', f'{added["geometry"]} and {added["channels"]}', None,
@@ -172,12 +182,42 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
     else:
         readings.append(v.row('Not created', 'Apply adds the geometry and the channel table',
                               None, 'info'))
-    return [view,
+    return [view, _sensors_table(name, resolved, by_sensor, defined),
             v.table(f'Fits of {name}',
-                    ['Sensor', 'Kind', 'Surfaces', 'Points', f'Worst RMS [{unit}]',
-                     'Squared by [°]', f'Measured size [{unit}]', 'Model', 'Node', 'Channels',
-                     'Flags'], rows),
+                    ['Sensor', 'Surfaces', 'Points', f'Worst RMS [{unit}]', 'Squared by [°]',
+                     f'Measured size [{unit}]', 'Flags'],
+                    [_fit_row(fit, scale) for fit in fits]),
             v.reading(f'Sensors of {name}', readings)]
+
+
+def set_sensor(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_sensor`: one cell of the sensors table typed over, by
+    row (from 1) and column: a node, a model, a size or a length
+    (`Project.set_sensor`). An empty value takes the choice back. A
+    value its column cannot hold is refused and the cell is unchanged.
+    The preview is drawn again with it."""
+    name = params['geometry']
+    try:
+        fits, _notes = project.fit_sensors(name)
+    except (TypeError, ValueError) as error:
+        raise refused(str(error)) from None
+    if params['row'] > len(fits):
+        raise refused(f'{name} has {len(fits)} sensors; there is no row {params["row"]}')
+    sensor, column, text = fits[params['row'] - 1].sensor, params['column'], params['value'].strip()
+    value: Any = None
+    if text and column == 'model':
+        value = text
+    elif text:
+        try:
+            value = float(text)
+        except ValueError:
+            raise refused(f'a {column} is a number; {text!r} is not') from None
+        value = int(value) if column == 'node' and value == int(value) else value
+    try:
+        project.set_sensor(name, sensor, **{column: value})
+    except (TypeError, ValueError) as error:
+        raise refused(str(error)) from None
+    return create_sensors(project, {'geometry': name, 'keep': False})
 
 
 def _kept(params: dict[str, Any]) -> bool:
@@ -189,9 +229,15 @@ OPERATIONS = (
         id='project.create_sensors', title='Fit Sensors', workspace='geometry',
         summary='Accelerometers fitted to points measured on their faces with a measuring arm: '
                 'a plane to each face, a cylinder to each round side. Preview draws each body '
-                'on its points with its channels\' arrows and reads the fits; Apply adds the '
-                'test geometry and channel table. A model or a size (Block 17.5 mm, Cylinder '
-                '16 x 9 mm) may be named for a sensor.',
-        params=(MEASURED, MODELS, NODES, NAME, KEEP), outputs=('shape3d', 'table', 'reading'),
+                'on its points with its channels\' arrows and lists the sensors; type a node, '
+                'a model, a size or a length into the table and the preview is drawn again. '
+                'Apply adds the test geometry and channel table.',
+        params=(MEASURED, KEEP), outputs=('shape3d', 'table', 'reading'),
         run=create_sensors, edits_when=_kept, commits='keep'),
+    Operation(
+        id='project.set_sensor', title='Set Sensor', workspace='geometry',
+        summary='One cell of Fit Sensors\' table typed over: a sensor\'s node, model, size or '
+                'length. The table edits through it.',
+        params=(MEASURED, ROW, COLUMN, VALUE), outputs=('shape3d', 'table', 'reading'),
+        run=set_sensor, edits=True),
 )

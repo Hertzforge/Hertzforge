@@ -948,6 +948,31 @@ class AnalyzeState {
 			return message(err);
 		}
 	}
+
+	/**
+	 * A cell typed into a table of an operation's result (Fit Sensors' table of sensors): the
+	 * table's own operation runs with the cell, and what it answers with is the result drawn
+	 * again, every view of it, since the cell changes more than its table.
+	 */
+	async editReadingCell(edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			// the result stays up: applying the project would show the selection again in its place
+			if (res.project) this.app.project.apply(res.project, false);
+			const was = this.reading;
+			if (was && res.views.length) {
+				this.reading = { title: was.title, views: res.views };
+				if (was === this.previewDrawn) this.previewDrawn = this.reading;
+			}
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
 }
 
 const FOLDED_KEY = 'hertzforge.foldedTables';
