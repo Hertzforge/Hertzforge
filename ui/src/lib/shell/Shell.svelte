@@ -11,6 +11,7 @@
 	import Simulate from '$lib/workspaces/Simulate.svelte';
 	import CommandPalette from './CommandPalette.svelte';
 	import { listenForUpdateMenu } from './updates';
+	import UpdateProgress from './UpdateProgress.svelte';
 	import DisplayWindow from './DisplayWindow.svelte';
 	import Report from '$lib/workspaces/Report.svelte';
 	import Console from './Console.svelte';
@@ -185,6 +186,7 @@
 		{/if}
 	</div>
 	<CommandPalette {app} />
+	<UpdateProgress />
 </div>
 {/if}
 

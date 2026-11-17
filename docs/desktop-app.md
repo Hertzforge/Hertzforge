@@ -284,6 +284,8 @@ Check for Updates, in the shell's command palette, asks the Tauri updater: it re
 release's `latest.json`, says through a native dialog whether a newer version is published, and on
 Install downloads that release's `Hertzforge-macOS-<Arch>.app.tar.gz`, verifies it against the
 public key in `desktop/tauri.conf.json` (`plugins.updater.pubkey`), replaces the app and relaunches.
+From Install to the relaunch the shell shows a bar over the window: the megabytes downloaded of the
+archive's size, then installing, then relaunching.
 Only when asked, never at startup. The archive is the signed, stapled app
 the same run notarized, tarred after signing and signed again with the updater's key by
 `tauri signer sign`; `desktop/packaging/updater_manifest.py` writes the manifest beside it.
