@@ -1611,6 +1611,8 @@ export class ProjectState {
 	renaming = $state<string | null>(null);
 	/** The photo being renamed in place: its object and index, or null. */
 	renamingPart = $state<{ name: string; index: number } | null>(null);
+	/** The element group being renamed in place: its geometry and id, or null. */
+	renamingGroup = $state<{ name: string; id: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
 	/** The group being named from the action table: the member it is reached by, or null. */
@@ -1673,6 +1675,7 @@ export class ProjectState {
 		this.selection = next;
 		this.renaming = null;
 		this.renamingPart = null;
+		this.renamingGroup = null;
 		this.confirming = false;
 		this.namingGroup = null;
 		this.units = null;
@@ -2087,6 +2090,16 @@ export class ProjectState {
 	/** Rename one photo in place (`project.rename` with `index`). */
 	async renamePart(name: string, index: number, to: string): Promise<boolean> {
 		const ok = await this.call(`Renaming photo ${index + 1} of ${name}`, 'project.rename', { name, to, index }, false);
+		if (ok) {
+			if (this.expanded.has(name)) void this.loadChildren(name);
+			void this.app.analyze.showSelection();
+		}
+		return ok;
+	}
+
+	/** Rename one element group of a geometry in place (`project.rename` with `group`). */
+	async renameGroup(name: string, group: number, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming element group ${group} of ${name}`, 'project.rename', { name, to, group }, false);
 		if (ok) {
 			if (this.expanded.has(name)) void this.loadChildren(name);
 			void this.app.analyze.showSelection();
