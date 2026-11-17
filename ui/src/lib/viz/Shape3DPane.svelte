@@ -85,6 +85,7 @@
 	import { alignedShape, followed, nodeTravel } from './shape';
 	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
 	import { formatCount, formatFixed, formatNumber } from './format';
+	import { linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
 	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
 
@@ -366,17 +367,14 @@
 	/** The sample shown, for the scrubber and the time readout. */
 	let sample = $state(0);
 
-	/** Model diagonal, from the undeformed nodes. */
+	/** The lowest and highest coordinate along each axis of the undeformed nodes and of any point layers. */
+	function span(): { lo: number[]; hi: number[] } {
+		return pointSpan([view.nodes, ...(view.points ?? []).map((layer) => layer.xyz)]);
+	}
+
+	/** Model diagonal, from the undeformed nodes and any point layers. */
 	const diagonal = $derived.by(() => {
-		const n = view.nodes;
-		const lo = [Infinity, Infinity, Infinity];
-		const hi = [-Infinity, -Infinity, -Infinity];
-		for (let i = 0; i < n.length; i += 3) {
-			for (let k = 0; k < 3; k++) {
-				if (n[i + k] < lo[k]) lo[k] = n[i + k];
-				if (n[i + k] > hi[k]) hi[k] = n[i + k];
-			}
-		}
+		const { lo, hi } = span();
 		// no nodes (only bodies drawn) gives an infinite diagonal, and Infinity × 0 a NaN
 		// that puts every point nowhere
 		const across = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
@@ -386,18 +384,7 @@
 	const peak = $derived(amplitude * AMP_UNIT * diagonal);
 
 	/** The model's extents along each axis, for the bounds box and its labels. */
-	const extents = $derived.by(() => {
-		const n = view.nodes;
-		const lo = [Infinity, Infinity, Infinity];
-		const hi = [-Infinity, -Infinity, -Infinity];
-		for (let i = 0; i < n.length; i += 3) {
-			for (let k = 0; k < 3; k++) {
-				if (n[i + k] < lo[k]) lo[k] = n[i + k];
-				if (n[i + k] > hi[k]) hi[k] = n[i + k];
-			}
-		}
-		return { lo, hi };
-	});
+	const extents = $derived.by(() => span());
 
 	/** Display scaling of the model unit: meters shown as millimeters below one meter. */
 	const display = $derived.by(() => {
@@ -459,6 +446,10 @@
 
 	/** The view's `bodies`: sensor solids, each point taking its node's motion. */
 	let bodies: Mesh | null = null;
+	/** How many free points the view's layers hold, for the readout. */
+	const pointCount = $derived((view.points ?? []).reduce((sum, layer) => sum + layer.xyz.length / 3, 0));
+	/** The view's `points` layers: a scan's measured points, which stay put. */
+	let pointLayers: Points[] = [];
 	let bodyShapeAttr: BufferAttribute | null = null;
 	let bodyShapeImagAttr: BufferAttribute | null = null;
 	let overlayGeometry: BufferGeometry | null = null;
@@ -758,6 +749,10 @@
 			// bodies drawn in their own color (a solid being edited) are framed too, alone or not
 			others.push(new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3)));
 		}
+		for (const layer of view.points ?? []) {
+			// a scan's points are framed with the model, or alone when there is no model
+			if (layer.xyz.length) others.push(new Box3().setFromBufferAttribute(new BufferAttribute(layer.xyz, 3)));
+		}
 		for (const frame of view.frames ?? []) {
 			// a coordinate system's arrows, framed with the model
 			const box = new Box3().setFromCenterAndSize(new Vector3().fromArray(frame.origin), new Vector3(0, 0, 0));
@@ -765,7 +760,8 @@
 			others.push(box);
 		}
 		fitBox = view.nodes.length ? new Box3().setFromBufferAttribute(position) : (others.shift() ?? new Box3(new Vector3(), new Vector3()));
-		if (others.length) {
+		if (others.length || !view.nodes.length) {
+			// with no nodes the box is the first of the others, and the sphere is that box's
 			for (const other of others) fitBox.union(other);
 			fitBox.getBoundingSphere(sphere);
 		}
@@ -776,7 +772,8 @@
 		camera.far = radius * 100;
 		camera.updateProjectionMatrix();
 
-		boundsBox = new Box3Helper(new Box3().setFromBufferAttribute(position), 0x8b949e);
+		const { lo: spanLo, hi: spanHi } = span();
+		boundsBox = new Box3Helper(new Box3(new Vector3().fromArray(spanLo), new Vector3().fromArray(spanHi)), 0x8b949e);
 		boundsBox.visible = bounds;
 		scene.add(boundsBox);
 
@@ -865,6 +862,17 @@
 			bodies = new Mesh(g, displaced(new MeshLambertMaterial({ vertexColors: true, side: DoubleSide, flatShading: true })));
 			bodies.frustumCulled = false;
 			scene.add(bodies);
+		}
+
+		for (const layer of view.points ?? []) {
+			// a scan's points, each in its own color, at one size on screen however far away
+			const g = new BufferGeometry();
+			g.setAttribute('position', new BufferAttribute(layer.xyz, 3));
+			g.setAttribute('color', new BufferAttribute(linearColors(layer.colors), 3));
+			const cloud = new Points(g, plain(new PointsMaterial({ size: layer.size, sizeAttenuation: false, vertexColors: true })));
+			cloud.frustumCulled = false;
+			pointLayers.push(cloud);
+			scene.add(cloud);
 		}
 
 		if (view.lines && view.lines.length) {
@@ -1305,6 +1313,7 @@
 		}
 		orientation?.dispose();
 		bodies?.geometry.dispose();
+		for (const cloud of pointLayers) cloud.geometry.dispose();
 		frameGroup?.traverse((o) => {
 			if (o instanceof Mesh || o instanceof LineSegments) {
 				o.geometry.dispose();
@@ -1690,6 +1699,7 @@
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
+				{#if pointCount}<span data-testid="shape3d-points">{formatCount(pointCount)} points</span>{/if}
 			</div>
 		</div>
 	</div>

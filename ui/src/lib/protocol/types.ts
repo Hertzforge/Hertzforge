@@ -235,6 +235,12 @@ export interface Shape3DView {
 	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
 	 */
 	bodies?: { nodes: Float32Array; triangles: Uint32Array; colors: Uint8Array; follow: Uint32Array };
+	/**
+	 * Free points over the model in its own coordinates, in layers: a scan's measured points.
+	 * `xyz` f32 [P, 3], `colors` u8 [P, 3] each point's sRGB, `size` the point's width on screen
+	 * in pixels. They stay put and are framed with the model.
+	 */
+	points?: { xyz: Float32Array; colors: Uint8Array; size: number }[];
 	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
