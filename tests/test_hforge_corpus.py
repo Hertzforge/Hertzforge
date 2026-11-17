@@ -323,9 +323,10 @@ def test_schema5_scans_open_as_geometries():
     np.testing.assert_allclose(cloud.node_xyz[1], [3.0, 2.0, 1.25])
 
 
-def test_a_project_saved_now_is_never_stamped_for_scans(tmp_path):
-    """Measured points are a geometry, so a file holding them keeps the
-    base stamp and an older build opens it."""
+def test_a_project_saved_now_holds_measured_points_as_a_geometry(tmp_path):
+    """Measured points are a geometry, of an element type a build from
+    before them does not know, so the file is stamped for them and that
+    build says to update."""
     from hertzforge.io.point_files import points_geometry
 
     project = Project()
@@ -333,5 +334,6 @@ def test_a_project_saved_now_is_never_stamped_for_scans(tmp_path):
     path = tmp_path / 'probed.hforge'
     project.save(path)
     with h5py.File(path) as f:
-        assert f.attrs[native.STAMP] == native.BASE_SCHEMA
+        assert f.attrs[native.STAMP] == native.MEASURED_POINT_SCHEMA
+        assert 'scan' not in f
     np.testing.assert_allclose(Project.open(path)['Probed'].node_xyz, [[0.001, 0.002, 0.003]])

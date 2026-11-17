@@ -244,7 +244,8 @@ class AnalyzeState {
 			this.picks = [];
 			this.shapeView = null;
 			// each selection opens as it is: Projection is asked for again, not carried over
-			if (this.prefs.projection) this.prefs = { ...this.prefs, projection: false };
+			// and so is a loosened node match: one pair's tolerance is not the next pair's
+			if (this.prefs.projection || this.prefs.match_tolerance !== 2) this.prefs = { ...this.prefs, projection: false, match_tolerance: 2 };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -265,6 +266,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
+						match_tolerance: this.prefs.match_tolerance,
 						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
@@ -626,8 +628,19 @@ class AnalyzeState {
 		}, 150);
 	}
 
+	/** The frequency the stage that reads at the cursor's line is drawn at; null with no such stage. */
+	private shownLine(): number | null {
+		for (const view of this.shown?.views ?? []) {
+			if (view.view === 'shape3d' && view.cursor === 'frequency') return view.modes[0]?.frequency_hz ?? null;
+		}
+		return null;
+	}
+
 	/** One of the bar's choices changed: kept, and the selection read again. */
 	setPref<K extends keyof ShowPrefs>(key: K, value: ShowPrefs[K]): void {
+		// moving the force is the same question asked of another point: the line shown is kept,
+		// where a cursor never moved would leave each force at its own strongest line
+		if (key === 'drive' && this.line === null) this.line = this.shownLine();
 		this.prefs = { ...this.prefs, [key]: value };
 		try {
 			localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
@@ -1565,6 +1578,7 @@ function readPrefs(): ShowPrefs {
 		flat: false,
 		component: 'magnitude',
 		projection: false,
+		match_tolerance: 2,
 		bars: true,
 		values_dofs: 'all',
 		values_form: 'shapes',
@@ -1593,6 +1607,10 @@ function readPrefs(): ShowPrefs {
 	return prefs;
 }
 
+/** What is renamed on its own row under an object in the tree. */
+export type SubName = 'group' | 'solid' | 'mate' | 'mode' | 'channel';
+const SUB_WORDS = { group: 'element group', solid: 'solid', mate: 'mated surfaces', mode: 'mode' } as const;
+
 export class ProjectState {
 	summary = $state.raw<ProjectSummary | null>(null);
 	/** What is being done, in words ("Importing modal.nc4"), or null. */
@@ -1611,6 +1629,8 @@ export class ProjectState {
 	renaming = $state<string | null>(null);
 	/** The photo being renamed in place: its object and index, or null. */
 	renamingPart = $state<{ name: string; index: number } | null>(null);
+	/** The sub-item being renamed in place: its object, what it is and its id (a mode's number, a channel's row), or null. */
+	renamingSub = $state<{ name: string; kind: SubName; id: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
 	/** The group being named from the action table: the member it is reached by, or null. */
@@ -1673,6 +1693,7 @@ export class ProjectState {
 		this.selection = next;
 		this.renaming = null;
 		this.renamingPart = null;
+		this.renamingSub = null;
 		this.confirming = false;
 		this.namingGroup = null;
 		this.units = null;
@@ -2087,6 +2108,16 @@ export class ProjectState {
 	/** Rename one photo in place (`project.rename` with `index`). */
 	async renamePart(name: string, index: number, to: string): Promise<boolean> {
 		const ok = await this.call(`Renaming photo ${index + 1} of ${name}`, 'project.rename', { name, to, index }, false);
+		if (ok) {
+			if (this.expanded.has(name)) void this.loadChildren(name);
+			void this.app.analyze.showSelection();
+		}
+		return ok;
+	}
+
+	/** Rename one element group, solid or set of mated surfaces of a geometry, or describe one mode of a shape set, in place (`project.rename` with its kind). */
+	async renameSub(name: string, kind: Exclude<SubName, 'channel'>, id: number, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming ${SUB_WORDS[kind]} ${id} of ${name}`, 'project.rename', { name, to, [kind]: id }, false);
 		if (ok) {
 			if (this.expanded.has(name)) void this.loadChildren(name);
 			void this.app.analyze.showSelection();

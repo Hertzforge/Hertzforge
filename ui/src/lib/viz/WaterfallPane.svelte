@@ -1,4 +1,6 @@
 <script lang="ts" module>
+	/** Perspective or parallel projection, one choice for every waterfall, kept until the app closes. */
+	let lastPerspective = true;
 	/** How each result's stage was left: a drag or a choice in it replaces the view, and the view belongs to the person, so the new one opens as they left it. */
 	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front'; logX: boolean; logZ: boolean }>();
 </script>
@@ -45,7 +47,6 @@
 		Mesh,
 		MeshBasicMaterial,
 		NoBlending,
-		PerspectiveCamera,
 		Points,
 		PointsMaterial,
 		RawShaderMaterial,
@@ -57,6 +58,7 @@
 		type Material
 	} from 'three';
 	import { TrackballControls } from './trackball';
+	import { StageCamera } from './projection';
 	import type { ParamValues } from '$lib/forms/params';
 	import type { Role, WaterfallView } from '$lib/protocol/types';
 	import { cssVar, theme } from '$lib/theme/theme.svelte';
@@ -187,7 +189,7 @@
 	// three.js objects (not reactive)
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
-	let camera: PerspectiveCamera;
+	let camera: StageCamera;
 	let controls: TrackballControls;
 	let geometry: BufferGeometry;
 	let curves: LineSegments | Mesh;
@@ -606,6 +608,16 @@
 		dirty = true;
 	}
 
+	/** Drawn in perspective; off, in parallel projection, the stage the size it was at its centre. */
+	let perspective = $state(lastPerspective);
+	function togglePerspective() {
+		perspective = !perspective;
+		lastPerspective = perspective;
+		if (!renderer) return;
+		camera.setParallel(!perspective);
+		dirty = true;
+	}
+
 	/** The distance at which the whole stage fits the pane, in whichever direction is tighter. */
 	function fitDistance(): number {
 		const radius = 0.5 * Math.hypot(STAGE.x, STAGE.y, STAGE.z);
@@ -650,7 +662,8 @@
 		});
 
 		scene = new Scene();
-		camera = new PerspectiveCamera(30, 1, 0.01, 100);
+		camera = new StageCamera(30, 1, 0.01, 100);
+		camera.setParallel(!perspective);
 
 		geometry = new BufferGeometry();
 		geometry.setAttribute('ax', new BufferAttribute(view.x_values, 1));
@@ -992,6 +1005,7 @@
 	<div class="top">
 		<div class="toolbar" role="toolbar" aria-label="Waterfall display">
 			<button class="btn ghost sm copyimg" data-testid="waterfall-copy-image" onclick={copyImage} title="Copy the 3-D view as an image">{copiedImage === 'copied' ? 'Copied' : copiedImage === 'saved' ? 'Saved as PNG' : 'Copy Image'}</button>
+			<button class="btn sm toggle" data-testid="waterfall-projection" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 			<div class="seg" role="radiogroup" aria-label="Viewpoint">
 				<button role="radio" data-testid="waterfall-perspective" aria-checked={facing === 'perspective'} class:on={facing === 'perspective'} onclick={() => face('perspective')} title="Perspective (R)">3-D</button>
 				<button role="radio" data-testid="waterfall-top" aria-checked={facing === 'top'} class:on={facing === 'top'} onclick={() => face('top')} title="From the top: a map of level over abscissa and record (T)">Top</button>
@@ -1054,6 +1068,12 @@
 </div>
 
 <style>
+	.toggle.on {
+		color: var(--text-1);
+		background: var(--blue-weak);
+		border-color: var(--blue-line);
+	}
+
 	.copyimg {
 		flex: none;
 		font-size: var(--text-2xs, 11px);

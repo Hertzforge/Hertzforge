@@ -23,6 +23,7 @@
 	import type { TableEdit, TableView } from '$lib/protocol/types';
 	import Self from './TablePane.svelte';
 	import { openedAtFirst, toggled } from './table';
+	import { mark, marked, markedRow } from './marks.svelte';
 	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
 
 	interface Props {
@@ -114,7 +115,12 @@
 		}
 	});
 	/** A row moved to by the keyboard, scrolled into view in a long table, where it may not be drawn. */
-	function reveal(row: number) {
+	function reveal(row: number, always = false) {
+		if (always && !long) {
+			// a short table is drawn whole: the row itself is brought into view
+			void tick().then(() => grid?.querySelector(`td[data-r="${row}"]`)?.scrollIntoView({ block: 'nearest' }));
+			return;
+		}
 		if (!long || !grid) return;
 		const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? rowHeight;
 		const rows = Math.max(1, Math.floor((grid.clientHeight - head) / rowHeight));
@@ -145,6 +151,41 @@
 		if (id === undefined || id === rowPicked) return;
 		rowPicked = id;
 		onrowpick(id);
+	});
+	// a table whose rows are marked with other views (`view.marks`): the rows selected mark their
+	// nodes in the 3-D view, and nodes marked there or in the tree are these rows, highlighted
+	const markedIds = $derived(view.marks ? new Set(marked(view.marks.link).map(String)) : null);
+	/** What this table last marked, so its own marks coming back do not move its selection. */
+	let sent: number[] | null = null;
+	$effect(() => {
+		const marks = view.marks;
+		if (!marks || !block) return;
+		const ids: number[] = [];
+		for (let r = block.r0; r <= block.r1; r++) {
+			const id = Number(known[r]?.[marks.column]);
+			if (Number.isFinite(id)) ids.push(id);
+		}
+		untrack(() => {
+			sent = ids;
+			mark(marks.link, ids, block.r0);
+		});
+	});
+	$effect(() => {
+		const marks = view.marks;
+		if (!marks) return;
+		const ids = marked(marks.link);
+		const hint = markedRow(marks.link);
+		untrack(() => {
+			if (ids === sent) return;
+			// marked from the view or the tree: the selection here would say other rows
+			sent = null;
+			anchor = null;
+			focus = null;
+			if (!ids.length) return;
+			const first = String(ids[0]);
+			const row = hint !== undefined && (known[hint] === undefined || known[hint]?.[marks.column] === first) ? hint : known.findIndex((cells) => cells?.[marks.column] === first);
+			if (row >= 0) reveal(row, true);
+		});
 	});
 	const fillBlock = $derived(block && fillTo && dragging === 'fill' ? spanned({ row: Math.min(block.r0, fillTo.row), col: Math.min(block.c0, fillTo.col) }, { row: Math.max(block.r1, fillTo.row), col: Math.max(block.c1, fillTo.col) }) : null);
 
@@ -368,7 +409,7 @@
 				{#if long && span.before > 0}<tr class="spacer" aria-hidden="true" style:height="{span.before}px"><td colspan={view.columns.length}></td></tr>{/if}
 				{#each drawn as row, k (span.first + k)}
 					{@const r = long ? span.first + k : k}
-					<tr>
+					<tr class:marked={!!markedIds?.has(row[view.marks?.column ?? 0])}>
 						{#each row as cell, i (i)}
 							{@const opens = i === 0 && !!view.nested?.[r]}
 							{#if editing && editing.row === r && editing.col === i}
@@ -514,6 +555,10 @@
 	td {
 		position: relative;
 		user-select: none;
+	}
+
+	tr.marked td {
+		background: color-mix(in srgb, var(--blue-weak) 55%, transparent);
 	}
 
 	td.picked {

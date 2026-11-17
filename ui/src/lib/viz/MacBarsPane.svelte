@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	/** Perspective or parallel projection, one choice for every bar chart, kept until the app closes. */
+	let lastPerspective = true;
+</script>
+
 <script lang="ts">
 	/**
 	 * A `matrix` view as 3-D bars, height and color the value: one instanced mesh whatever the mode
@@ -25,7 +30,6 @@
 		MeshLambertMaterial,
 		NearestFilter,
 		Object3D,
-		PerspectiveCamera,
 		Raycaster,
 		Scene,
 		Vector2,
@@ -33,6 +37,7 @@
 		WebGLRenderer
 	} from 'three';
 	import { TrackballControls } from './trackball';
+	import { StageCamera } from './projection';
 	import type { MatrixView } from '$lib/protocol/types';
 	import { theme } from '$lib/theme/theme.svelte';
 	import { colormap, colormapGradient } from './colormap';
@@ -78,7 +83,7 @@
 	let overlay: HTMLDivElement;
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
-	let camera: PerspectiveCamera;
+	let camera: StageCamera;
 	let controls: TrackballControls;
 	let bars: InstancedMesh | null = null;
 	let barGeometry: BoxGeometry | null = null;
@@ -250,7 +255,8 @@
 			failure = 'The graphics context was lost. Switch workspaces and back to rebuild the view.';
 		});
 		scene = new Scene();
-		camera = new PerspectiveCamera(30, 1, 0.05, 1000);
+		camera = new StageCamera(30, 1, 0.05, 1000);
+		camera.setParallel(!perspective);
 		camera.up.set(0, 0, 1);
 		scene.add(new AmbientLight(0xffffff, 0.8));
 		const sun = new DirectionalLight(0xffffff, 1.1);
@@ -265,6 +271,16 @@
 		resize();
 		build();
 		raf = requestAnimationFrame(loop);
+	}
+
+	/** Drawn in perspective; off, in parallel projection, the bars the size they were at what the camera looks at. */
+	let perspective = $state(lastPerspective);
+	function togglePerspective() {
+		perspective = !perspective;
+		lastPerspective = perspective;
+		if (!renderer) return;
+		camera.setParallel(!perspective);
+		dirty = true;
 	}
 
 	function resize() {
@@ -400,6 +416,7 @@
 		{#if failure}
 			<div class="failure" role="alert">{failure}</div>
 		{/if}
+		<button class="btn sm toggle projection" data-testid="mac-bars-perspective" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 	</div>
 	<div class="legend" aria-label="Color legend">
 		<div class="ltitle">{view.value_label}</div>
@@ -482,6 +499,19 @@
 		pointer-events: none;
 		white-space: nowrap;
 	}
+	.toggle.on {
+		color: var(--text-1);
+		background: var(--blue-weak);
+		border-color: var(--blue-line);
+	}
+
+	.projection {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		font-size: var(--text-2xs, 11px);
+	}
+
 	.failure {
 		position: absolute;
 		inset: 0;

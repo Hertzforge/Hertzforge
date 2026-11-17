@@ -227,9 +227,10 @@ export interface Shape3DView {
 	 * DOF arrows over the model in its own coordinates, solids that stay put: `tails` [A, 3] where
 	 * each starts, `directions` [A, 3] the unit vector it points along, `axes` [A] the DOF's own
 	 * axis (0 X, 1 Y, 2 Z), which picks its color, and the one `length`. `labels` names each
-	 * arrow's DOF; `inward` [A] is 1 for an arrow that points in and ends on its node.
+	 * arrow's DOF; `inward` [A] is 1 for an arrow that points in and ends on its node. With
+	 * `follow` [A] the arrows move: each takes the motion of that row of `nodes` (2^32 − 1 stays put).
 	 */
-	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; labels: string[]; inward: Uint8Array };
+	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
 	/**
 	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
 	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
@@ -257,6 +258,8 @@ export interface Shape3DView {
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
 	link?: string;
 	note?: string;
+	/** The nodes of `node_ids` are marked by a click, with every view of the same `link` (a table's rows). */
+	marks?: { link: string };
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
@@ -472,6 +475,8 @@ export interface TableView {
 	 * system's row puts the arrows and rings on it).
 	 */
 	select?: { op: string; params: Record<string, unknown>; param: string; column: number };
+	/** The rows selected are marked, each by its cell in `column`, with every view of the same `link` (a 3-D view's nodes). */
+	marks?: { link: string; column: number };
 }
 
 /** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
@@ -726,6 +731,8 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
+	/** Two shape sets on two geometries: how far a test node may be from its model node, in percent of the test geometry's extent. */
+	match_tolerance: number;
 	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';
@@ -750,10 +757,10 @@ export interface ShowPrefs {
 export type ProjectChildren =
 	| {
 			kind: 'geometry';
-			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number }[];
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[] }[];
 			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
 			solids: SolidRow[];
-			mates: { id: number; label: string }[];
+			mates: { id: number; label: string; name: string }[];
 	  }
 	| {
 			kind: 'grid';

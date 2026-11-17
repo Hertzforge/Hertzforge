@@ -83,7 +83,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'shape_view': None,
+         'projection': False, 'match_tolerance': 2.0, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
          'drive': None,
          'sensors': True,
@@ -719,6 +719,19 @@ def _matched(project: Any, first: str, second: str) -> tuple[str, Any] | None:
                  and obj.second == second), None)
 
 
+def _none_matched(first: str, second: str, homes: Any, error: Any
+                  ) -> tuple[list[dict], list[str]]:
+    """Two sets whose geometries share no node within the tolerance: how far off they
+    are, said in the window and not refused. The tolerance is set beside what is shown,
+    and a refusal shows nothing to set it beside."""
+    from .ops_modal_plan import _report_rows
+
+    both = homes[0][1].units_defined and homes[1][1].units_defined
+    return ([v.reading(f'No node of {first} and {second} matched',
+                       _report_rows(error.report, both))],
+            [f'{error}. Node match, above, sets the tolerance'])
+
+
 def _mac(project: Any, first: str, second: str, geometry: str | None,
          prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
     """Two shape sets: their MAC, each axis ticked by its own frequencies,
@@ -729,6 +742,8 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     projection on the basis geometry instead of both sets by DOF name.
     Pairs already committed to a Matched Modes object ride on the matrix
     as `matched`."""
+    from hertzforge.core.correlate import NoNodeMatched
+
     from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
@@ -737,9 +752,18 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     homes = project.geometry_for(first), project.geometry_for(second)
     apart = all(home is not None for home in homes) and homes[0][1] is not homes[1][1]
     notes: list[str] = []
+    # how far a test node may be from its model node, in percent of the test geometry's
+    # extent: the comparison's own setting, as the Projection view's (Brandon, 2026-11-17)
+    percent = float(prefs.get('match_tolerance') or 2.0)
     if apart and prefs.get('projection'):
-        views = _run(project, 'project.projection_overlay', first=first, second=second,
-                     tolerance=2.0)
+        try:
+            views = _run(project, 'project.projection_overlay', first=first, second=second,
+                         tolerance=percent)
+        except ProtocolError as error:
+            if 'within the match tolerance' not in str(error):
+                raise
+            # nothing to animate: answered as the comparison answers it, with how far off
+            return _mac(project, first, second, geometry, {**prefs, 'projection': False})
     else:
         from hertzforge.core.shapes import cross_mac
 
@@ -747,8 +771,11 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             # the two sets as they are compared: one projected onto the other's DOFs when
             # they are on two geometries, for the MAC and for each pair's alignment
             ours, theirs, said, report = ((rows, columns, '', None) if first == second
-                                          else project.compared_sets(first, second))
+                                          else project.compared_sets(
+                                              first, second, tolerance=percent / 100.0))
             values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
+        except NoNodeMatched as error:
+            return _none_matched(first, second, homes, error)
         except ValueError as error:
             raise refused(str(error)) from None
 
@@ -951,6 +978,16 @@ def _modal_frf_records(data: Any, picks: list[int]) -> list[int] | None:
     return records
 
 
+def _linked_geometry(project: Any, name: str) -> str | None:
+    """The geometry an object is linked to (the one in its object group), by name."""
+    from hertzforge.core.geometry import Geometry
+
+    for member in project.object_group_of(name) or ():
+        if isinstance(project.get(member), Geometry):
+            return member
+    return None
+
+
 def _driven_selection(project: Any, objects: list[str], records: dict[str, list[int]]
                       ) -> tuple[str, str, str, list[int]] | None:
     """(geometry, modal FRFs, channel table, the records read) when the selection is one
@@ -1043,14 +1080,27 @@ def _driven(project: Any, objects: list[str], records: dict[str, list[int]],
                       triangles=triangles, lines=lines, normalization='unscaled',
                       node_ids=np.asarray(geometry.node_id)[drawn_rows],
                       cursor='frequency')
-    # the one arrow is the force: modal coordinates are at no node
+    # the one arrow is the force: modal coordinates are at no node. The drive is a DOF of
+    # the table's geometry: when the table is linked to one, the shapes were read at its
+    # node's place (`Project.channel_shapes`), so the arrow is that node's place and
+    # coordinate system, not the node with the same number on the geometry drawn (a table
+    # on a sparse test geometry over a finite element model put it at the model's node of
+    # that number, or nowhere). It is drawn at the drawn node nearest that place and
+    # rides it (`follow`).
+    home = _linked_geometry(project, table)
+    on = geometry if home is None else project[home]
+    hit = dof_arrow_vectors(on, [drive])[0]
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
-    hit = dof_arrow_vectors(geometry, [drive])[0]
-    if hit is not None:
-        stage['arrows'] = arrows(xyz, [(True, hit)],
-                                 dof_arrow_length(xyz[[hit[0]]], _extent(xyz)), [drive])
+    if hit is not None and drawn_rows.size:
+        place = np.asarray(on.node_xyz, dtype=float).reshape(-1, 3)[hit[0]]
+        row = int(np.argmin(np.linalg.norm(xyz[drawn_rows] - place, axis=1)))
+        at_node = xyz[drawn_rows][[row]]
+        stage['arrows'] = arrows(at_node, [(True, (0, hit[1], hit[2]))],
+                                 dof_arrow_length(at_node, _extent(xyz)), [drive])
+        stage['arrows']['follow'] = np.array([row], dtype=np.uint32)
     else:
-        notes.append(f'{drive} is not a node of {geometry_name}: the force is not drawn')
+        notes.append(f'{drive} is not a node of {geometry_name if home is None else home}: '
+                     'the force is not drawn')
     curves = _run(project, 'project.plot', data=modal, records=_runs(read),
                   component=prefs['component'])
     for curve in curves:

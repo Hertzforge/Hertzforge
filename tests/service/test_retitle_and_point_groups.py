@@ -67,3 +67,57 @@ def test_the_points_of_the_groups_picked_are_drawn_over_the_rest():
     # a group of beams has no points to mark
     (frame,) = part_entities('G', geometry, {'kind': 'group', 'id': beams})
     assert len(frame['points']) == len(plain['points'])
+
+
+def test_an_element_group_is_renamed_from_the_tree():
+    held = projects.new({'title': 'Points'})
+    geometry, first, _second, _beams = _points()
+    held.project.add('Probed', geometry)
+    held.modified = False
+    projects.rename(held, {'name': 'Probed', 'to': '  Top Face ', 'group': first})
+    assert geometry.group_name[0] == 'Top Face' and held.modified
+    assert held.project.journal[-1].endswith(f".rename_group({first}, 'Top Face')")
+    kids = projects.children(held, {'name': 'Probed'})
+    labels = [group['label'] for family in kids['families'] for group in family['groups']]
+    assert 'Top Face' in labels and 'Face A' not in labels
+    # the same name again changes nothing
+    held.modified = False
+    projects.rename(held, {'name': 'Probed', 'to': 'Top Face', 'group': first})
+    assert not held.modified
+    with pytest.raises(ProtocolError, match='no element group 99'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'group': 99})
+    with pytest.raises(ProtocolError, match='"group" is a whole number'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'group': 'Face A'})
+    assert held.project.names == ['Probed']
+
+
+def test_a_solid_and_a_mode_are_named_from_the_tree():
+    from hertzforge.core.shapes import ShapeSet
+
+    held = projects.new({'title': 'Named'})
+    geometry, _first, _second, _beams = _points()
+    project = held.project
+    project.add('Probed', geometry)
+    project.add_solid_block('Probed', (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))
+    solid_id = int(geometry.solids[-1].id)
+    project.add('Modes', ShapeSet([10.0, 20.0], [0.01, 0.01], ['1Z+', '2Z+'], np.eye(2)))
+    held.modified = False
+    # a solid by its id
+    projects.rename(held, {'name': 'Probed', 'to': 'Base Block', 'solid': solid_id})
+    assert [one.name for one in geometry.solids] == ['Base Block'] and held.modified
+    kids = projects.children(held, {'name': 'Probed'})
+    assert kids['solids'][0]['label'] == 'Base Block'
+    with pytest.raises(ProtocolError, match='no solid 77'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'solid': 77})
+    # a mode's description, numbered from 1
+    projects.rename(held, {'name': 'Modes', 'to': 'First bending', 'mode': 2})
+    assert project['Modes'].description == ['', 'First bending']
+    assert project.journal[-1].endswith(".set_description(1, 'First bending')")
+    with pytest.raises(ProtocolError, match='no mode 3'):
+        projects.rename(held, {'name': 'Modes', 'to': 'x', 'mode': 3})
+    with pytest.raises(ProtocolError, match='not a shape set'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'mode': 1})
+    with pytest.raises(ProtocolError, match='not a geometry'):
+        projects.rename(held, {'name': 'Modes', 'to': 'x', 'mate': 1})
+    with pytest.raises(ProtocolError, match='no mated surfaces 4'):
+        projects.rename(held, {'name': 'Probed', 'to': 'x', 'mate': 4})

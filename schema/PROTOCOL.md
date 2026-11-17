@@ -399,7 +399,19 @@ picture; the shell draws it at its own aspect under its name. A Photos object se
 shows one `image` a photo, the picked ones when some are picked, stacked.
 
 A `shape3d` built from a geometry carries `node_ids`, the drawn nodes' ids (u32, one per node), so
-the view can caption the node under the pointer, coincident nodes listed together.
+the view can caption the node under the pointer, coincident nodes listed together. The ids are of
+the first rows of `nodes` when the view draws more than the geometry's nodes (solids not meshed
+yet). The shell offers to write each node's number beside it, on the nodes in the picture while
+they are few enough to read, and writes them unasked on a view with `marks`.
+
+Views with `marks` share the nodes marked. A `shape3d` with `marks` (`{"link"}`, and `node_ids`)
+marks the node clicked, Cmd (Ctrl) or Shift adding to or taking from the ones marked, a click on
+nothing or Escape clearing them, unless the view has a `pick`, whose clicks are its own. A `table`
+with `marks` (`{"link","column"}`) marks the rows selected, each by its cell in `column`, the
+node's id. What is marked in one view with a `link` is drawn marked in every other with the same
+one: the rows of the table highlighted and scrolled to, the nodes ringed in the view. The marks
+are the shell's and no operation reads them. A geometry's nodes have them: the table and the view
+of `project.view_entities` for nodes, and the view the Nodes part shows.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
 `{"eye":[x,y,z],"up":[x,y,z]}`, the direction from the model to the camera and the way up on
@@ -537,7 +549,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `project.drag_out` | `{"project":true}` or `{"names"}` | `{"paths"}` |
 | `op.cancel` | `{}` | `{"op"}` |
 | `report.*` | see Reports below | |
-| `project.rename` | `{"name","to","index"?}` | `{"project"}` |
+| `project.rename` | `{"name","to","index"?,"group"?,"solid"?,"mate"?,"mode"?}` | `{"project"}` |
 | `project.retitle` | `{"title"}` | `{"project"}`: the project's own name; its file keeps its name until saved elsewhere |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.delete_parts` | `{"parts":{name:[index,...]}}` | `{"project"}` |
@@ -659,7 +671,7 @@ it after the first set's group and marks its row with a short bracket striped in
 colors. A run record carries `run_folder`, the run folder it was converted from, while that folder is
 still there: the project was opened from its converted file, or the file was imported.
 `project.children` answers what one object opens into, by
-`kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts), its element
+`kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts, the nodes with `ids`, the first 2000 nodes' ids, which the row lists when opened and marks when clicked), its element
 `families` (every family, each with the element `groups` holding elements of it and their counts),
 its `solids` (a boolean's operands as its `children`) and its `mates`; a data object is a `grid`,
 `rows` of a DOF and a quantity (a time history's with a `role`), `columns` of what tells one record
@@ -706,7 +718,11 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the projection on the geometry
-projected onto. Which set is projected is decided by what the sets measure and not by their order: the
+projected onto. `prefs.match_tolerance` (percent of the test geometry's extent, above 0 and at most
+100, 2 when absent) is how far a test node may be from the model node it is matched to, for the MAC
+and for the projection; the shell offers it with `projection`. When no node matches at all the
+answer is a `reading` of how far off the nearest pair is and the limit, with the reason in `note`,
+so the tolerance can be set beside it. Which set is projected is decided by what the sets measure and not by their order: the
 set with nodes measured in fewer than three translation directions is the one projected onto, since it
 has no whole motion to sample; with none or with some in both, the set with more DOFs is projected onto
 the one with fewer. The MAC, the matches and each pair's alignment are read after that projection, and
@@ -723,7 +739,9 @@ every stage. The arrows are `arrows` on the `shape3d`, solids that stay put whil
 unit vector it points along, `axes` u8 [A] the DOF's own axis (0 X, 1 Y, 2 Z), which the shell
 colors it by as it colors the orientation axes, `length`, one for all of them, `labels`, each
 arrow's DOF, which the shell writes at the arrow's free end when asked, and `inward` u8 [A], 1 for
-an arrow that points in and ends on its node. A channel table
+an arrow that points in and ends on its node. With `follow` u32 [A] the arrows move instead: each
+takes the motion of that row of the view's `nodes`, as a body's points do (2^32 − 1 stays put), and
+its label goes with it. A channel table
 picked with a geometry shows the geometry alone with the table's arrows always drawn, so `arrows` is
 not offered there. `prefs.arrow_role` (`all`, `control` or a role; `offers.arrow_roles` lists the
 ones the table holds) chooses the channels whose arrows are drawn, there and wherever the arrows of
@@ -731,7 +749,9 @@ a table are on. Modal FRFs (whole, or the records picked: the modes kept), a cha
 reference channel measuring force and a geometry show the operating deflection shape of a force at
 that reference: at the cursor's line each mode's shape scaled by its modal FRF and its shape value
 at the drive, summed, at every DOF the modal FRFs' shape set has on the geometry, with one arrow at
-the force. `offers.drives` lists the table's force references and `prefs.drive` picks one (the
+the force. The drive is a DOF of the table's own geometry when the table is linked to one: the arrow
+points along that node's coordinate system and is drawn at the drawn node nearest its place, which
+it rides (`follow`); the DOF arrows of every other reading stay put. `offers.drives` lists the table's force references and `prefs.drive` picks one (the
 first when null or not among them); the shape set the modal FRFs are of may be selected with them.
 Channels picked inside the table (`records`) are the choice instead: only their
 arrows are drawn and no role is offered. The sensors are `bodies`: solids drawn
@@ -850,7 +870,7 @@ project came from; a `.vdyn` is opened but never written. `project.drag_out` wri
 empty one; it takes an optional `title` and defaults it to "Project". `project.rename` gives the object `name` the name `to`, and every
 group, provenance record and report block that names it follows; a name in use is refused.
 With `index`, `project.rename` renames one photo of a Photos object instead (the photo at that
-index, from 0), and the report blocks that show it follow. `project.remove` takes `names`, a list,
+index, from 0), and the report blocks that show it follow. With `group`, `solid` or `mate`, it renames one element group, solid or set of mated surfaces of a geometry instead, by its id, and with `mode` it writes the description of one mode of a shape set, numbered from 1. `project.remove` takes `names`, a list,
 and removes them all or, when one is not in the project, none. `project.delete_parts` deletes
 sub-items picked in the tree, `parts` mapping an object's name to the indices picked: records of a
 data object, modes of a shape set, channels of a channel table, photos of a Photos object. Taking every item is refused ("delete the object

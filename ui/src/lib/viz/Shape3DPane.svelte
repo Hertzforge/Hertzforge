@@ -1,5 +1,7 @@
 <script lang="ts" module>
 	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
+	/** Perspective or parallel projection, one choice for every 3-D view of a model, kept until the app closes. */
+	let lastPerspective = true;
 	/**
 	 * Where the camera stood, one for every 3-D view: the view belongs to the person, so picking
 	 * another object or a part, clicking away or an edit drawing the model again opens where
@@ -57,7 +59,6 @@
 		MeshLambertMaterial,
 		Matrix4,
 		Object3D,
-		PerspectiveCamera,
 		Points,
 		PointsMaterial,
 		Quaternion,
@@ -72,7 +73,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMesh, labelPoints, triadScene, TRIAD_HALF } from './arrows';
+	import { arrowMatrices, arrowMesh, labelPoints, moveArrows, riddenOffsets, triadScene, TRIAD_HALF } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { wideLines } from './wideLines';
@@ -83,11 +84,13 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, stillFramed, idList, markedBy, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
+	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
 	import { linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
 	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
+	import { StageCamera, lookAtFace } from './projection';
 
 	interface Props {
 		view: Shape3DView;
@@ -208,6 +211,34 @@
 	/** The playhead group playback is shared through, when the view links one. */
 	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
 
+	/** Drawn in perspective; off, in parallel projection, the scene the size it was at what the camera looks at. */
+	let perspective = $state(lastPerspective);
+	function togglePerspective() {
+		perspective = !perspective;
+		lastPerspective = perspective;
+		if (!renderer) return;
+		camera.setParallel(!perspective);
+		dirty = true;
+	}
+
+	/**
+	 * A press on a face of the cube at the orientation axes turns the view to look straight at
+	 * that face, and goes no further: the camera does not start a drag on it and nothing is picked.
+	 */
+	function pressCube(e: PointerEvent) {
+		if (e.button !== 0 || !triad || !orientation || !renderer) return;
+		const box = triad.getBoundingClientRect();
+		if (!box.width || e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) return;
+		orientation.look(camera.quaternion);
+		const face = orientation.faceAt(((e.clientX - box.left) / box.width) * 2 - 1, 1 - ((e.clientY - box.top) / box.height) * 2);
+		if (!face) return;
+		e.stopPropagation();
+		e.preventDefault();
+		lookAtFace(camera, controls.target, face.axis, face.sign);
+		controls.update();
+		dirty = true;
+	}
+
 	let copiedImage = $state<'copied' | 'saved' | null>(null);
 	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
 	async function copyImage() {
@@ -315,6 +346,48 @@
 			// no storage: the choice lasts as long as the pane
 		}
 	}
+	/** Each node's number written beside it; kept across views and launches. */
+	const NUMBERS_KEY = 'hertzforge.shape3d.nodeNumbers';
+	let nodeNumbers = $state(readNodeNumbers());
+	function readNodeNumbers(): boolean {
+		try {
+			return localStorage.getItem(NUMBERS_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+	/** The numbers turned off on a view of the nodes themselves, where they are written unasked. */
+	let numbersHidden = $state(false);
+	/** Written on the nodes' own views (the Nodes row picked, their table open) without being asked for; elsewhere when turned on. */
+	const numbersShown = $derived(view.marks ? !numbersHidden : nodeNumbers);
+	function toggleNodeNumbers() {
+		dirty = true;
+		if (view.marks) {
+			numbersHidden = !numbersHidden;
+			return;
+		}
+		nodeNumbers = !nodeNumbers;
+		try {
+			localStorage.setItem(NUMBERS_KEY, nodeNumbers ? '1' : '0');
+		} catch {
+			// no storage: the choice lasts as long as the pane
+		}
+	}
+	/** The node numbers over the canvas, redrawn each frame the view moves. */
+	let numbersSvg: SVGSVGElement;
+	/** More nodes are in the picture than numbers can be read on: said in place of them. */
+	let tooManyNumbers = $state(false);
+	/** The nodes a click marks, with the table and the tree of the same link: the link, or null. */
+	const marking = $derived(view.marks && view.node_ids ? view.marks.link : null);
+	/** Each marked node's row in `view.nodes`. */
+	const markedRows = $derived.by(() => {
+		const ids = marking ? marked(marking) : [];
+		if (!ids.length || !view.node_ids) return [];
+		const wanted = new Set(ids);
+		const rows: number[] = [];
+		for (let r = 0; r < view.node_ids.length; r++) if (wanted.has(view.node_ids[r])) rows.push(r);
+		return rows;
+	});
 	/** The DOF labels over the canvas, redrawn each frame the view moves. */
 	let labelsSvg: SVGSVGElement;
 	/** Where each label sits in the model: its arrow's free end, a little past it. */
@@ -398,7 +471,7 @@
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
 	let boundsBox: Box3Helper | null = null;
-	let camera: PerspectiveCamera;
+	let camera: StageCamera;
 	let controls: TrackballControls;
 	let geometry: BufferGeometry;
 	let lineGeometry: BufferGeometry | null = null;
@@ -413,8 +486,12 @@
 	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
-	/** The view's `arrows`: a solid arrow at each DOF, in its axis's color, drawn still. */
+	/** The view's `arrows`: a solid arrow at each DOF, in its axis's color, drawn still unless they `follow` nodes. */
 	let dofArrows: InstancedMesh | null = null;
+	/** Arrows that follow nodes: each one's place and its label's at rest, and how far each has gone. */
+	let arrowRest: Matrix4[] | null = null;
+	let labelRest: Float32Array | null = null;
+	let arrowGone: Float32Array | null = null;
 	/** The orientation axes, drawn in the corner of the canvas after the model. */
 	let orientation: ReturnType<typeof triadScene> | null = null;
 	/** The view's coordinate systems (`frames`), drawn as the gimbal is: X red, Y green, Z blue arrows. */
@@ -495,7 +572,7 @@
 	let fitBox = new Box3();
 	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
 	function fitDistance(dir?: Vector3, up?: Vector3): number {
-		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
+		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect, camera.parallel);
 	}
 	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
 	function homePose(): { dir: Vector3; up: Vector3 } {
@@ -602,6 +679,15 @@
 		followBodies(true);
 		dirty = true;
 		paintColors();
+	}
+
+	/** Carry the arrows that follow nodes, and their labels, to where those nodes are now. */
+	function rideArrows() {
+		const follow = view.arrows?.follow;
+		if (!follow || !dofArrows || !arrowRest || !labelRest || !labelAt || !arrowGone) return;
+		riddenOffsets(follow, shapeAttr.array, shapeImagAttr.array, uniforms.uRe.value, uniforms.uIm.value, arrowGone);
+		moveArrows(dofArrows, arrowRest, arrowGone);
+		for (let i = 0; i < labelAt.length; i++) labelAt[i] = labelRest[i] + arrowGone[i];
 	}
 
 	/** Give the bodies their nodes' offsets: the real part, and the imaginary too when `both`. */
@@ -722,7 +808,8 @@
 		});
 
 		scene = new Scene();
-		camera = new PerspectiveCamera(32, 1, 0.001, 1000);
+		camera = new StageCamera(32, 1, 0.001, 1000);
+		camera.setParallel(!perspective);
 		camera.up.copy(homePose().up);
 
 		// Geometry: one position buffer shared by the surface, outline and ghosts.
@@ -841,6 +928,12 @@
 			dofArrows = arrowMesh(view.arrows);
 			scene.add(dofArrows);
 			labelAt = labelPoints(view.arrows);
+			if (view.arrows.follow) {
+				// arrows that ride their nodes (a force on the node it pushes): where each rests
+				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.length);
+				labelRest = labelAt.slice();
+				arrowGone = new Float32Array(labelAt.length);
+			}
 		}
 		orientation = triadScene();
 
@@ -964,7 +1057,7 @@
 			otherOn = layer(start, held, 9, 0.9);
 			otherOff = layer(start + held, notHeld, 8, 0.3);
 		}
-		if (view.pick?.target === 'nodes') {
+		if (view.pick?.target === 'nodes' || (view.marks && view.node_ids)) {
 			markGeometry = new BufferGeometry();
 			markGeometry.setAttribute('position', new BufferAttribute(new Float32Array(0), 3));
 			marks = new Points(markGeometry, plain(new PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false })));
@@ -981,6 +1074,8 @@
 		scene.add(camera);
 
 		controls = new TrackballControls(camera, renderer.domElement);
+		// ahead of the camera's own listener and of every click the view takes
+		canvasHost.addEventListener('pointerdown', pressCube, { capture: true });
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
@@ -1099,6 +1194,44 @@
 		}
 		labelsSvg.innerHTML = drawn;
 	}
+	/** Past this many nodes the numbers are not offered: every node is projected on each frame the view moves. */
+	const NUMBERED_MODEL = 300_000;
+	/** Write each node's number beside it, on the nodes in the picture; nothing while they are off or too many. */
+	function updateNumbers() {
+		if (!numbersSvg) return;
+		const ids = view.node_ids;
+		const all = numbersShown && !!ids && ids.length <= NUMBERED_MODEL;
+		const under = marking && hoverNode !== null && ids && hoverNode < ids.length ? hoverNode : null;
+		if (!ids || (!all && under === null)) {
+			if (numbersSvg.firstChild) numbersSvg.replaceChildren();
+			if (tooManyNumbers) tooManyNumbers = false;
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		const place = (n: number): [number, number, boolean] => {
+			corner.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+			return [((corner.x + 1) / 2) * w, ((1 - corner.y) / 2) * h, corner.z > -1 && corner.z < 1];
+		};
+		let drawn = '';
+		let rows: number[] | null = [];
+		if (all) {
+			const count = ids.length;
+			const screen = new Float32Array(2 * count);
+			const visible = new Array<boolean>(count);
+			for (let n = 0; n < count; n++) [screen[2 * n], screen[2 * n + 1], visible[n]] = place(n);
+			rows = numbered(screen, visible, count, w, h);
+			for (const n of rows ?? []) if (n !== under) drawn += `<text x="${(screen[2 * n] + 5).toFixed(1)}" y="${(screen[2 * n + 1] - 5).toFixed(1)}">${ids[n]}</text>`;
+		}
+		if (tooManyNumbers !== (rows === null)) tooManyNumbers = rows === null;
+		if (under !== null) {
+			// the node under the pointer, whatever else is written
+			const [x, y] = place(under);
+			drawn += `<text class="under" x="${(x + 6).toFixed(1)}" y="${(y - 6).toFixed(1)}">${ids[under]}</text>`;
+		}
+		numbersSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		numbersSvg.innerHTML = drawn;
+	}
 	const escapeText = (text: string) => text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
 
 	function updateAxes() {
@@ -1172,6 +1305,7 @@
 		updateTriad();
 		updateAxes();
 		updateLabels();
+		updateNumbers();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -1208,6 +1342,7 @@
 			uniforms.uPeak.value = peak || 1;
 			dirty = true;
 		}
+		if (dirty) rideArrows();
 	}
 
 	/**
@@ -1349,7 +1484,7 @@
 	// The picked nodes and the one under the cursor, as marks on the model.
 	$effect(() => {
 		if (!renderer || !markGeometry) return;
-		const rows = hoverNode !== null && !picked.includes(hoverNode) ? [...picked, hoverNode] : picked;
+		const rows = [...new Set([...markedRows, ...picked, ...(hoverNode !== null ? [hoverNode] : [])])];
 		const xyz = new Float32Array(3 * rows.length);
 		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
 		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
@@ -1396,9 +1531,17 @@
 		picked = [];
 	}
 
-	function click(x: number, y: number) {
+	function click(x: number, y: number, add = false) {
 		const p = pick;
-		if (!p || !renderer) return;
+		if (!renderer) return;
+		if (!p) {
+			// no click of the view's own: it marks the node, with the table and the tree
+			if (!marking || !view.node_ids) return;
+			const row = nodeAt(x, y, view.node_ids.length);
+			const ids = markedBy(marked(marking), row === null ? null : view.node_ids[row], add);
+			mark(marking, ids, row !== null && ids.length === 1 ? row : undefined);
+			return;
+		}
 		if (p.target === 'nodes') {
 			const row = nodeAt(x, y);
 			if (row === null) return;
@@ -1446,7 +1589,7 @@
 		pressedAt = null;
 		if (!start || e.button !== 0) return;
 		const [x, y] = at(e);
-		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y);
+		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y, e.metaKey || e.ctrlKey || e.shiftKey);
 	}
 
 	function onPointerMove(e: PointerEvent) {
@@ -1462,7 +1605,9 @@
 		const [x, y] = at(e);
 		requestAnimationFrame(() => {
 			hoverPending = false;
-			hovered = nodeAt(x, y, nodeCount);
+			hovered = nodeAt(x, y, Math.min(nodeCount, view.node_ids?.length ?? nodeCount));
+			// on the nodes' own views the one a click would mark is ringed and numbered
+			if (marking) hoverNode = hovered;
 		});
 	}
 
@@ -1495,6 +1640,7 @@
 		else if (e.key === 'ArrowUp' && view.modes.length > 1) step(-1);
 		else if (e.key === 'Enter' && pick?.target === 'nodes') commitNodes();
 		else if (e.key === 'Escape' && picked.length) picked = [];
+		else if (e.key === 'Escape' && marking && marked(marking).length) mark(marking, []);
 		else return;
 		e.preventDefault();
 	}
@@ -1527,6 +1673,8 @@
 	>
 		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
 		<svg class="axes doflabels" bind:this={labelsSvg} data-testid="shape3d-dof-labels" aria-hidden="true"></svg>
+		<svg class="axes doflabels numbers" bind:this={numbersSvg} data-testid="shape3d-node-numbers" aria-hidden="true"></svg>
+		{#if tooManyNumbers}<span class="toomany" data-testid="shape3d-numbers-zoom">Zoom in to read the node numbers</span>{/if}
 	</div>
 
 	{#if view.gizmo && ongizmo}
@@ -1599,7 +1747,11 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
+			<button class="btn sm toggle" data-testid="shape3d-perspective" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
+			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
+				<button class="btn sm toggle" data-testid="shape3d-node-numbers-toggle" class:on={numbersShown} aria-pressed={numbersShown} onclick={toggleNodeNumbers} title="Node numbers: each node's number beside it, once few enough are in the picture to read">Node Numbers</button>
+			{/if}
 			{#if view.arrows?.labels.length}
 				<button class="btn sm toggle" data-testid="shape3d-dof-labels-toggle" class:on={dofLabels} aria-pressed={dofLabels} onclick={toggleDofLabels} title="DOF labels: each arrow's DOF written at its free end">DOF Labels</button>
 			{/if}
@@ -1769,6 +1921,30 @@
 		stroke: var(--bg-1);
 		stroke-width: 3px;
 		stroke-linejoin: round;
+	}
+
+	.toomany {
+		position: absolute;
+		bottom: 8px;
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 2px 8px;
+		border-radius: 4px;
+		background: var(--bg-1);
+		color: var(--text-2);
+		font-size: 11px;
+		pointer-events: none;
+	}
+
+	.numbers :global(text) {
+		font-weight: 500;
+		text-anchor: start;
+	}
+
+	.numbers :global(text.under) {
+		fill: var(--blue-2);
+		font-size: 13px;
+		font-weight: 700;
 	}
 
 	.axes :global(text.title) {

@@ -1919,6 +1919,30 @@ class Geometry:
             conn[conn == old] = node_id
         self._mates_follow(nodes={old: node_id})
 
+    def rename_group(self, group_id: int, name: str) -> None:
+        """Give an element group a name.
+
+        Parameters
+        ----------
+        group_id : int
+            The element group's id.
+        name : str
+            Its new name; empty for none.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            When the geometry has no element group with that id.
+        """
+        rows = np.flatnonzero(np.asarray(self.group_id) == group_id)
+        if not len(rows):
+            raise ValueError(f'no element group {group_id}')
+        self.group_name[int(rows[0])] = str(name).strip()
+
     def renumber_group(self, row: int, group_id: int) -> None:
         """Give an element group a new id, and update its elements.
 

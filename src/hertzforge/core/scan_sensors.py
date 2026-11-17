@@ -5,7 +5,10 @@ Each accelerometer becomes one node at the center of its body, measured
 in a coordinate system of its own whose axes are the accelerometer's.
 A tri-axial accelerometer gives three channels, X+, Y+ and Z+, whatever
 faces were measured; a uni-axial one gives one, on the axis its top was
-labelled with.
+labelled with. A uni-axial accelerometer that is a block (a catalog
+model whose body is a box) is measured by its flat faces as a tri-axial
+one is, with X along its length toward its cable and Z its sensing
+axis, and gives the one channel Z+.
 
 The center is half the body's size back from each measured face, so it
 needs the size. What is chosen for a sensor is its node, its model, and
@@ -67,6 +70,8 @@ class Placed:
         channel_type: 'acceleration', or 'force' for a force transducer.
         problem: Why it is not placed; '' when it is.
         channels: Its channel numbers in the table, once assembled.
+        directions: The channels it gives: X+, Y+ and Z+ for a tri-axial
+            accelerometer, one for a uni-axial one.
     """
 
     sensor: str
@@ -82,6 +87,7 @@ class Placed:
     channel_type: str
     problem: str
     channels: tuple[int, ...] = ()
+    directions: tuple[str, ...] = ()
 
     @property
     def placed(self) -> bool:
@@ -130,7 +136,9 @@ def _resolve_one(fit: SensorFit, choice: Mapping[str, Any], meters: float
         entry = lookup(model)
         if entry is None:
             entry = next((found for kind in kinds if (found := sized(model, kind))), None)
-        elif entry.kind not in kinds:
+        elif entry.kind not in kinds and not (
+                fit.kind == 'triax' and entry.kind == 'uniaxial' and entry.shape == 'box'):
+            # a uni-axial block is measured by its faces, as a cube is
             problem = problem or (f'{entry.model} is a {entry.kind} model, and this sensor was '
                                   f'measured as a {"cube" if fit.kind == "triax" else "cylinder"}')
             entry = None
@@ -177,9 +185,15 @@ def _resolve_one(fit: SensorFit, choice: Mapping[str, Any], meters: float
         sized_by = ''
         problem = problem or 'no surface was fitted'
     force = entry is not None and entry.kind == 'force'
+    if fit.kind != 'triax':
+        directions = (fit.direction,) if fit.direction else ()
+    elif entry is not None and entry.kind == 'uniaxial':
+        directions = ('Z+',)
+    else:
+        directions = ('X+', 'Y+', 'Z+')
     return ({'sensor': fit.sensor, 'kind': fit.kind, 'model': model,
              'table_model': model or written, 'shape': shape, 'size': size, 'length': length,
-             'body': body, 'sized_by': sized_by,
+             'body': body, 'sized_by': sized_by, 'directions': directions,
              'channel_type': 'force' if force else 'acceleration', 'problem': problem},
             notes)
 
@@ -303,16 +317,16 @@ def assemble(fits: Sequence[SensorFit], length_unit: str, *, meters: float = 1.0
         body = one.body if one.kind == 'triax' else (one.body[2],) * 3
         centers.append(fit.center(body))
         frames.append(fit.frame)
-        directions = ('X+', 'Y+', 'Z+') if one.kind == 'triax' else (fit.direction,)
+        triax = len(one.directions) == 3
         first = len(rows) + 1
         entry = lookup(one.model) if one.model else None
-        for direction in directions:
+        for direction in one.directions:
             rows.append({'channel': len(rows) + 1, 'node': one.node,
                          'direction': direction, 'role': 'response',
                          'channel_type': one.channel_type,
                          'unit': 'N' if one.channel_type == 'force' else 'g',
                          'make': entry.make if entry else '', 'model': one.table_model,
-                         'triax_dof': direction[0] if one.kind == 'triax' else ''})
+                         'triax_dof': direction[0] if triax else ''})
         channels[one.sensor] = tuple(range(first, len(rows) + 1))
     count = len(kept)
     cs_matrix = np.zeros((count + 1, 4, 3))

@@ -116,6 +116,10 @@ def grid(data: Any) -> dict[str, Any]:
     return out
 
 
+#: the most nodes a geometry's Nodes row lists under it
+LISTED_NODES = 2000
+
+
 def _geometry(geometry: Any) -> dict[str, Any]:
     """A geometry's parts as the tree lists them: nodes and coordinate
     systems with their counts; every element family, the six always and
@@ -150,12 +154,15 @@ def _geometry(geometry: Any) -> dict[str, Any]:
 
     return {
         'kind': 'geometry',
-        'parts': [{'id': 'nodes', 'label': 'Nodes', 'count': len(geometry.node_id)},
+        'parts': [{'id': 'nodes', 'label': 'Nodes', 'count': len(geometry.node_id),
+                   # listed under the row when it is opened; a model's hundred thousand
+                   # are read in its table
+                   'ids': [int(n) for n in geometry.node_id[:LISTED_NODES]]},
                   {'id': 'coordinate_systems', 'label': 'Coordinate systems',
                    'count': len(geometry.cs_id)}],
         'families': family_rows,
         'solids': [solid_row(s) for s in solids.top_level(geometry)],
-        'mates': [{'id': int(m.id), 'label': f'{m.name} ({m.describe()})'}
+        'mates': [{'id': int(m.id), 'label': f'{m.name} ({m.describe()})', 'name': m.name}
                   for m in getattr(geometry, 'mates', ())],
     }
 
