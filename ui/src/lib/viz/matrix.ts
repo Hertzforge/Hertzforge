@@ -9,6 +9,8 @@ export interface MatrixLayout {
 	cellH: number;
 	rows: number;
 	columns: number;
+	/** The part of the matrix drawn, when it is zoomed: the cells sizes are for it, and `x0`, `y0` its corner. */
+	shown?: { r0: number; r1: number; c0: number; c1: number };
 }
 
 /**
@@ -33,12 +35,62 @@ export function matrixLayout(
 	return { x0: left + (w - cellW * columns) / 2, y0: pad + (h - cellH * rows) / 2, cellW, cellH, rows, columns };
 }
 
-/** The cell under a point, or null outside the grid. */
+/** The cell under a point, or null outside the grid, or outside the part of it a zoom shows. */
 export function cellAt(x: number, y: number, layout: MatrixLayout): { row: number; column: number } | null {
-	const column = Math.floor((x - layout.x0) / layout.cellW);
-	const row = Math.floor((y - layout.y0) / layout.cellH);
+	const across = (x - layout.x0) / layout.cellW;
+	const down = (y - layout.y0) / layout.cellH;
+	const shown = layout.shown;
+	if (shown && !(across >= 0 && across <= shown.c1 - shown.c0 && down >= 0 && down <= shown.r1 - shown.r0)) return null;
+	const column = Math.floor(across + (shown?.c0 ?? 0));
+	const row = Math.floor(down + (shown?.r0 ?? 0));
 	if (!(column >= 0 && column < layout.columns && row >= 0 && row < layout.rows)) return null;
 	return { row, column };
+}
+
+/** The part of a matrix on screen, in cells: rows `r0` to `r1` and columns `c0` to `c1`, which need not be whole. */
+export interface MatrixWindow {
+	r0: number;
+	r1: number;
+	c0: number;
+	c1: number;
+}
+
+/** The whole matrix. */
+export function wholeWindow(rows: number, columns: number): MatrixWindow {
+	return { r0: 0, r1: rows, c0: 0, c1: columns };
+}
+
+/** Whether a window shows less than the whole matrix. */
+export function isZoomed(win: MatrixWindow, rows: number, columns: number): boolean {
+	return win.r0 > 1e-9 || win.c0 > 1e-9 || win.r1 < rows - 1e-9 || win.c1 < columns - 1e-9;
+}
+
+/** The fewest cells a zoom leaves across an axis. */
+export const FEWEST_CELLS = 2;
+
+/** One axis from `low` to `high` scaled by `factor` about `at`, kept on 0..`count` and no narrower than `FEWEST_CELLS`. */
+function zoomAxis(low: number, high: number, count: number, factor: number, at: number): [number, number] {
+	const span = Math.min(count, Math.max(Math.min(FEWEST_CELLS, count), (high - low) * factor));
+	const share = high > low ? (at - low) / (high - low) : 0.5;
+	const start = Math.max(0, Math.min(count - span, at - share * span));
+	return [start, start + span];
+}
+
+/**
+ * A window zoomed by `factor` (under 1 in, over 1 out) about the cell point `at`, on the rows, the
+ * columns or both: the point under the pointer stays where it is, as a data plot's zoom does.
+ */
+export function zoomWindow(win: MatrixWindow, rows: number, columns: number, factor: number, at: { row: number; column: number }, axes: { rows: boolean; columns: boolean }): MatrixWindow {
+	const [r0, r1] = axes.rows ? zoomAxis(win.r0, win.r1, rows, factor, at.row) : [win.r0, win.r1];
+	const [c0, c1] = axes.columns ? zoomAxis(win.c0, win.c1, columns, factor, at.column) : [win.c0, win.c1];
+	return { r0, r1, c0, c1 };
+}
+
+/** A window moved by cells, stopping at the matrix's edges. */
+export function panWindow(win: MatrixWindow, rows: number, columns: number, byRows: number, byColumns: number): MatrixWindow {
+	const r0 = Math.max(0, Math.min(rows - (win.r1 - win.r0), win.r0 + byRows));
+	const c0 = Math.max(0, Math.min(columns - (win.c1 - win.c0), win.c0 + byColumns));
+	return { r0, r1: r0 + (win.r1 - win.r0), c0, c1: c0 + (win.c1 - win.c0) };
 }
 
 /** Dark or light text on a cell of this color (RGB in 0..1), by its relative luminance. */
