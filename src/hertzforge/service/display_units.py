@@ -293,7 +293,7 @@ def _shape(view: dict, system: Any) -> None:
             if not gizmo['slide'].get('in_display'):
                 gizmo['to_si'] = change[0]
         pick = view.get('pick')
-        if pick is not None and pick.get('target') == 'point':
+        if pick is not None and pick.get('target') == 'point' and not pick.get('in_display'):
             pick['to_si'] = [change[0], change[1]]
     motion = view.get('motion')
     if motion is not None:

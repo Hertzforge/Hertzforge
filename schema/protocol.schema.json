@@ -292,6 +292,7 @@
             "kept": {"type": "array", "items": {"type": "integer"}},
             "out": {"type": "string"},
             "back": {"type": "string"},
+            "in_display": {"type": "boolean"},
             "to_si": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
           }
         },

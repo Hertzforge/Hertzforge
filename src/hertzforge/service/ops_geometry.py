@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-from . import group_cells
+from . import display_units, group_cells
 from . import views as v
 from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
@@ -276,10 +276,10 @@ def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -
     ids = [int(n) for n in geometry.node_id]
     if kind == 'nodes':
         return v.picking('project.add_node', {'geometry': name}, 'point',
-                         'Click in the view to place a node', ids=ids)
+                         'Click in the view to place a node', ids=ids, in_display=True)
     if kind == 'coordinate_systems':
         return v.picking('project.add_coordinate_system', {'geometry': name}, 'point',
-                         'Click in the view to place a coordinate system', ids=ids)
+                         'Click in the view to place a coordinate system', ids=ids, in_display=True)
     if kind != 'elements':
         return None
     from hertzforge.core.geometry import ELEMENT_TYPES
@@ -369,9 +369,9 @@ def _system(geometry: Any, cs: int) -> int:
     return cs
 
 
-X = Param('x', 'X', 'number', default=0.0, unit='m', step=0.001)
-Y = Param('y', 'Y', 'number', default=0.0, unit='m', step=0.001)
-Z = Param('z', 'Z', 'number', default=0.0, unit='m', step=0.001)
+X = Param('x', 'X', 'number', default=0.0, unit='m', step=0.001, length=True)
+Y = Param('y', 'Y', 'number', default=0.0, unit='m', step=0.001, length=True)
+Z = Param('z', 'Z', 'number', default=0.0, unit='m', step=0.001, length=True)
 NODE_ID = Param('id', 'Id (0: one more than the highest)', 'integer', default=0, min=0,
                 step=1)
 PLACEMENT_CS = Param('placement_cs', 'Placement CS (0: the first)', 'integer', default=0,
@@ -804,7 +804,8 @@ AXIS = Param('axis', 'About its own axis', 'enum', default='z', options=(
 SLIDE_AXIS = Param('axis', 'Along its own axis', 'enum', default='x', options=(
     Option('x', 'X'), Option('y', 'Y'), Option('z', 'Z')))
 ANGLE = Param('angle', 'Angle', 'number', default=0.0, unit='°', step=1.0)
-DISTANCE = Param('distance', 'Distance', 'number', default=0.0, unit='m', step=0.001)
+DISTANCE = Param('distance', 'Distance', 'number', default=0.0, unit='m', step=0.001,
+                 length=True)
 
 
 def _frame(geometry: Any, cs: int) -> tuple[int, np.ndarray]:
@@ -820,7 +821,7 @@ def _with_gizmo(views: list[dict], name: str, geometry: Any, cs: int) -> list[di
     held = {'geometry': name, 'cs': cs}
     views[0]['gizmo'] = v.gizmo(
         matrix[3], matrix[:3],
-        {'op': 'project.slide_coordinate_system', 'params': held,
+        {'op': 'project.slide_coordinate_system', 'params': held, 'in_display': True,
          'values': dict.fromkeys('xyz', 'distance'), 'adds': {a: {'axis': a} for a in 'xyz'}},
         {'op': 'project.rotate_coordinate_system', 'params': held,
          'values': dict.fromkeys('xyz', 'angle'), 'adds': {a: {'axis': a} for a in 'xyz'}})
@@ -848,8 +849,9 @@ def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]
 def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.slide_coordinate_system`: a coordinate system's origin
     moved a typed distance along one of its own axes
-    (`rotate.translate_frame`, `Geometry.place_coordinate_system`). The distance is in the
-    geometry's stored length unit, meters once its units are declared."""
+    (`rotate.translate_frame`, `Geometry.place_coordinate_system`). The distance is typed
+    in the display system's length unit and arrives here in meters; a geometry whose units are
+    not defined takes it in its file's own numbers."""
     from hertzforge.rotate import translate_frame
 
     name = params['geometry']
@@ -859,9 +861,11 @@ def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     geometry.place_coordinate_system(cs, origin=moved[3])
     project.record_call(name, 'place_coordinate_system', cs,
                         origin=[float(x) for x in moved[3]])
+    unit, scale = display_units.words_in('length') if geometry.units_defined else ('', 1.0)
+    moved_by = f'{params["distance"] * scale:+.6g}{" " + unit if unit else ""}'
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
-                              f'moved {cs} {params["distance"]:+g} along its '
-                              f'{params["axis"].upper()}'), name, geometry, cs)
+                              f'moved {cs} {moved_by} along its {params["axis"].upper()}'),
+                       name, geometry, cs)
 
 
 def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
