@@ -36,7 +36,7 @@ describe('the action table', () => {
 	const verbs = (i: number, module: 'modal' | 'report' = 'modal') => columnsFor(table, module)[i].rows.map((r) => r.verb);
 
 	it('puts defaults first, then the part, then the rest, and leaves out what cannot run', () => {
-		expect(verbs(0)).toEqual(['Plot', 'Add Node', 'Export', 'Averaging']);
+		expect(verbs(0)).toEqual(['Plot', 'Add Node', 'Export', 'Solve', 'Mesh', 'Averaging']);
 	});
 
 	it('cuts rows and empty combination columns to the module', () => {
@@ -51,16 +51,20 @@ describe('the action table', () => {
 
 	it('keeps the selection column when a module leaves it empty', () => {
 		const empty: ActionTable = { columns: [{ kinds: ['frf'], current: true, rows: [row('Fit', { modules: ['modal'] })] }] };
-		expect(columnsFor(empty, 'shock')).toHaveLength(1);
-		expect(columnsFor(empty, 'shock')[0].rows).toEqual([]);
+		expect(columnsFor(empty, 'report')).toHaveLength(1);
+		expect(columnsFor(empty, 'report')[0].rows).toEqual([]);
+	});
+
+	it('offers the analysis module every row an earlier analysis module had', () => {
+		const fit: ActionTable = { columns: [{ kinds: ['frf'], current: true, rows: [row('Fit', { modules: ['modal'] })] }] };
+		for (const module of ['signals', 'shock', 'geometry'] as const) expect(columnsFor(fit, module)[0].rows.map((r) => r.verb)).toEqual(['Fit']);
 	});
 
 	it('counts what other modules offer the selection, by home', () => {
-		expect(moreIn(table, 'modal')).toEqual([{ module: 'geometry', count: 2 }]);
-		expect(moreIn(table, 'shock')).toEqual([
-			{ module: 'geometry', count: 2 },
-			{ module: 'signals', count: 1 }
-		]);
+		// nothing an analysis row offers is in another module, whichever earlier id names it
+		expect(moreIn(table, 'modal')).toEqual([]);
+		expect(moreIn(table, 'signals')).toEqual([]);
+		expect(moreIn(table, 'report')).toEqual([{ module: 'signals', count: 3 }]);
 	});
 
 	it('words a kind for a sentence', () => {

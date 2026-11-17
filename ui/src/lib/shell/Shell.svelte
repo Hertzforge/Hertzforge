@@ -7,8 +7,7 @@
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
 	import Acquire from '$lib/workspaces/Acquire.svelte';
-	import Analyze from '$lib/workspaces/Analyze.svelte';
-	import Modal from '$lib/workspaces/Modal.svelte';
+	import Analysis from '$lib/workspaces/Analysis.svelte';
 	import Simulate from '$lib/workspaces/Simulate.svelte';
 	import CommandPalette from './CommandPalette.svelte';
 	import { listenForUpdateMenu } from './updates';
@@ -167,12 +166,10 @@
 				<Acquire {app} />
 			{:else if app.workspace === 'simulate'}
 				<Simulate {app} />
-			{:else if app.workspace === 'modal'}
-				<Modal {app} />
 			{:else if app.workspace === 'report'}
 				<Report {app} />
 			{:else}
-				<Analyze {app} only={app.workspace} />
+				<Analysis {app} />
 			{/if}
 			</div>
 			{#if app.project.summary}<Console console={app.console} />{/if}

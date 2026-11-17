@@ -16,40 +16,41 @@ export interface WorkspaceInfo {
 	study?: boolean;
 }
 
+/** The one analysis module's id: the id the recordings' module had, which addresses and scripts name. */
+export const ANALYSIS: Workspace = 'signals';
+
 /**
- * The rail, in Brandon's order (2026-11-13): control and simulation first, then the model and the
- * signal processing and specifications that every test shares, then one analysis module per kind
- * of test, so a sine test is not offered shock tools (2026-11-04), and the report last.
+ * The rail: control and simulation, then one analysis module, then the report. The analysis was
+ * one module per kind of test until an action was hard to find from the wrong one (Brandon,
+ * 2026-11-17: one module with every action until there is a reason to split it).
  */
 export const WORKSPACES: WorkspaceInfo[] = [
 	{ id: 'acquire', title: 'Acquire & Control', rail: 'Acquire & Control', summary: 'Closed-loop Random control on the simulator or NI hardware.' },
 	{ id: 'simulate', title: 'Simulate', rail: 'Simulate', summary: 'Run the control loop against a simulated system.' },
-	// shown as Model, its id still geometry, which projects, the service and scripts name
-	// (Brandon, 2026-11-10: the module holds a geometry and its finite element model)
-	{ id: 'geometry', title: 'Model', rail: 'Model', icon: 'model', study: true, summary: 'A geometry and its finite element model: nodes, coordinate systems, solids, meshing, properties and modes; sensors and channel tables on them.' },
-	{ id: 'signals', title: 'Signal Processing', rail: 'Signal Processing', study: true, summary: 'Recordings: averaging, filtering, truncation, statistics, spectra and what is read straight off them.' },
-	{ id: 'specify', title: 'Specifications', rail: 'Specifications', study: true, summary: 'Test specifications derived, authored and predicted.' },
-	{ id: 'sysid', title: 'System ID Analysis', rail: 'System ID Analysis', study: true, summary: 'A noise floor and an excitation read into PSDs, FRFs and coherence for a controller to use.' },
-	{ id: 'random', title: 'Random Analysis', rail: 'Random Analysis', study: true, summary: 'PSDs and cross-spectral matrices against their specification, coherence, control checks.' },
-	{ id: 'shock', title: 'Shock Analysis', rail: 'Shock Analysis', study: true, summary: 'Shock response spectra, pulses and synthesis.' },
-	{ id: 'transient', title: 'Transient Analysis', rail: 'Transient Analysis', study: true, summary: 'A waveform replicated on a shaker: whether it fits, its waveform error, its segments.' },
-	{ id: 'sine', title: 'Sine Analysis', rail: 'Sine Analysis', study: true, summary: 'Sine sweeps and dwells: extracted levels, distortion, frequency, sweep rate.' },
-	{ id: 'modal', title: 'Modal Analysis', rail: 'Modal Analysis', study: true, summary: 'FRFs fitted to modes, shape sets compared, matched and projected.' },
+	{ id: ANALYSIS, title: 'Analysis', rail: 'Analysis', study: true, summary: 'Everything offline: geometries and models, recordings and their spectra, specifications, and the analysis of every kind of test.' },
 	{ id: 'report', title: 'Report', rail: 'Report', summary: 'Reports from every workspace.' }
 ];
 
-/** The study modules, which share one host. */
-export const STUDIES = new Set(WORKSPACES.filter((w) => w.study).map((w) => w.id));
+/**
+ * The ids the analysis had when it was nine modules. Operations and table rows still name them
+ * as their homes, and an address may; every one of them is the analysis module now.
+ */
+export const STUDIES = new Set<Workspace>(['geometry', 'signals', 'specify', 'sysid', 'random', 'shock', 'transient', 'sine', 'modal']);
+
+/** The module an id opens: the analysis module for any of its earlier ids. */
+export function moduleOf(id: Workspace): Workspace {
+	return STUDIES.has(id) ? ANALYSIS : id;
+}
 
 export function workspaceInfo(id: Workspace): WorkspaceInfo {
-	return WORKSPACES.find((w) => w.id === id)!;
+	return WORKSPACES.find((w) => w.id === moduleOf(id))!;
 }
 
 export function isWorkspace(value: string): value is Workspace {
-	return WORKSPACES.some((w) => w.id === value);
+	return WORKSPACES.some((w) => w.id === value) || STUDIES.has(value as Workspace);
 }
 
-/** Whether a module offers an operation or a table row; a row with no list is offered in every module. */
+/** Whether a module offers an operation or a table row; a row with no list is offered in every module, and the analysis module offers what any of its earlier ids did. */
 export function offeredIn(op: { modules?: Workspace[] }, workspace: Workspace): boolean {
-	return !op.modules || op.modules.includes(workspace);
+	return !op.modules || op.modules.some((m) => moduleOf(m) === moduleOf(workspace));
 }

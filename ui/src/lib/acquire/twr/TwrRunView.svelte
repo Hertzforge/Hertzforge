@@ -6,7 +6,7 @@
 	 * come: the last play's records against time over the record, the identification against
 	 * frequency, each play's error against the play index. The coherence hold shows as a line in the
 	 * Run card. From arm on the Run card names the run's folder, and a finished run's end line opens
-	 * it in Transient Analysis. The window on another monitor shows the same, compact.
+	 * it in Analysis. The window on another monitor shows the same, compact.
 	 */
 	import type { Snippet } from 'svelte';
 	import LawLine from '../pulse/LawLine.svelte';

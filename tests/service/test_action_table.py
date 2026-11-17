@@ -76,7 +76,12 @@ def test_every_row_has_a_glyph():
 
 
 def test_verbs_are_short():
-    assert not [v for v in verbs.VERBS.values() if len(v.split()) > 2]
+    # two words, but for Work Up, which names its kind of test now that the one analysis
+    # module offers all six together
+    long = [v for v in verbs.VERBS.values() if len(v.split()) > 2]
+    assert all(v.startswith('Work Up ') for v in long)
+    work_ups = [v for k, v in verbs.VERBS.items() if 'work_up_' in k]
+    assert len(set(work_ups)) == len(work_ups) == 6
 
 
 def test_every_core_verb_an_operation_takes_has_its_types():
