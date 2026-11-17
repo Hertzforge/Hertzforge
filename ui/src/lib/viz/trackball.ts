@@ -77,6 +77,10 @@ export class TrackballControls extends EventDispatcher<{ change: object }> {
 	/** Whether the camera moved since the last call; the camera looks at the target. */
 	update(): boolean {
 		this.camera.lookAt(this.target);
+		// a parallel view is as tall as the camera's distance makes it (`StageCamera`)
+		const stage = this.camera as PerspectiveCamera & { parallel?: boolean; lookedAt?: Vector3 };
+		if (stage.lookedAt) stage.lookedAt.copy(this.target);
+		if (stage.parallel) stage.updateProjectionMatrix();
 		const moved = this.moved;
 		this.moved = false;
 		return moved;

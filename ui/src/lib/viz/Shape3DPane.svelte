@@ -1,5 +1,7 @@
 <script lang="ts" module>
 	let lastGizmoMode: 'translate' | 'rotate' = 'translate';
+	/** Perspective or parallel projection, one choice for every 3-D view of a model, kept until the app closes. */
+	let lastPerspective = true;
 	/**
 	 * Where the camera stood, one for every 3-D view: the view belongs to the person, so picking
 	 * another object or a part, clicking away or an edit drawing the model again opens where
@@ -57,7 +59,6 @@
 		MeshLambertMaterial,
 		Matrix4,
 		Object3D,
-		PerspectiveCamera,
 		Points,
 		PointsMaterial,
 		Quaternion,
@@ -89,6 +90,7 @@
 	import { linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
 	import { fitDistance as fitBoxDistance, homePose as poseOf } from './fit';
+	import { StageCamera, lookAtFace } from './projection';
 
 	interface Props {
 		view: Shape3DView;
@@ -208,6 +210,34 @@
 	const paneId = `s3-${Math.random().toString(36).slice(2, 9)}`;
 	/** The playhead group playback is shared through, when the view links one. */
 	const playhead = $derived(view.motion && view.link ? playheadGroup(view.link, scope) : null);
+
+	/** Drawn in perspective; off, in parallel projection, the scene the size it was at what the camera looks at. */
+	let perspective = $state(lastPerspective);
+	function togglePerspective() {
+		perspective = !perspective;
+		lastPerspective = perspective;
+		if (!renderer) return;
+		camera.setParallel(!perspective);
+		dirty = true;
+	}
+
+	/**
+	 * A press on a face of the cube at the orientation axes turns the view to look straight at
+	 * that face, and goes no further: the camera does not start a drag on it and nothing is picked.
+	 */
+	function pressCube(e: PointerEvent) {
+		if (e.button !== 0 || !triad || !orientation || !renderer) return;
+		const box = triad.getBoundingClientRect();
+		if (!box.width || e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) return;
+		orientation.look(camera.quaternion);
+		const face = orientation.faceAt(((e.clientX - box.left) / box.width) * 2 - 1, 1 - ((e.clientY - box.top) / box.height) * 2);
+		if (!face) return;
+		e.stopPropagation();
+		e.preventDefault();
+		lookAtFace(camera, controls.target, face.axis, face.sign);
+		controls.update();
+		dirty = true;
+	}
 
 	let copiedImage = $state<'copied' | 'saved' | null>(null);
 	/** The view as it stands, as an image on the clipboard: drawn and copied in one task. */
@@ -441,7 +471,7 @@
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene;
 	let boundsBox: Box3Helper | null = null;
-	let camera: PerspectiveCamera;
+	let camera: StageCamera;
 	let controls: TrackballControls;
 	let geometry: BufferGeometry;
 	let lineGeometry: BufferGeometry | null = null;
@@ -542,7 +572,7 @@
 	let fitBox = new Box3();
 	/** How far off the camera stands to frame the model (`fit.ts`), looking from `dir` with `up` on screen; the camera's own pose when not given. */
 	function fitDistance(dir?: Vector3, up?: Vector3): number {
-		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect);
+		return fitBoxDistance(fitBox, centre, dir ?? camera.position.clone().sub(controls.target), up ?? camera.up, camera.fov, camera.aspect, camera.parallel);
 	}
 	/** The way the view opens looking from, and which way is up: the geometry's own (`view.home`), else from the front right, Z up. */
 	function homePose(): { dir: Vector3; up: Vector3 } {
@@ -778,7 +808,8 @@
 		});
 
 		scene = new Scene();
-		camera = new PerspectiveCamera(32, 1, 0.001, 1000);
+		camera = new StageCamera(32, 1, 0.001, 1000);
+		camera.setParallel(!perspective);
 		camera.up.copy(homePose().up);
 
 		// Geometry: one position buffer shared by the surface, outline and ghosts.
@@ -1043,6 +1074,8 @@
 		scene.add(camera);
 
 		controls = new TrackballControls(camera, renderer.domElement);
+		// ahead of the camera's own listener and of every click the view takes
+		canvasHost.addEventListener('pointerdown', pressCube, { capture: true });
 		controls.zoomSpeed = 0.9;
 		controls.addEventListener('change', () => (dirty = true));
 
@@ -1714,6 +1747,7 @@
 			{#if moves}
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
+			<button class="btn sm toggle" data-testid="shape3d-perspective" class:on={perspective} aria-pressed={perspective} onclick={togglePerspective} title="Perspective: off, parallel projection, where parallel lines stay parallel and a length reads the same at any depth">Perspective</button>
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
 			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
 				<button class="btn sm toggle" data-testid="shape3d-node-numbers-toggle" class:on={numbersShown} aria-pressed={numbersShown} onclick={toggleNodeNumbers} title="Node numbers: each node's number beside it, once few enough are in the picture to read">Node Numbers</button>

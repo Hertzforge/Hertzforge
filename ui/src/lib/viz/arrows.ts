@@ -5,6 +5,7 @@
  */
 import {
 	AmbientLight,
+	BoxGeometry,
 	BufferGeometry,
 	Color,
 	ConeGeometry,
@@ -15,8 +16,9 @@ import {
 	MeshLambertMaterial,
 	OrthographicCamera,
 	Quaternion,
+	Raycaster,
 	Scene,
-	SphereGeometry,
+	Vector2,
 	Vector3,
 	Mesh
 } from 'three';
@@ -101,19 +103,44 @@ export function moveArrows(mesh: InstancedMesh, rest: Matrix4[], offsets: ArrayL
 /** Half the width of the orientation axes' picture, in arrow lengths. */
 export const TRIAD_HALF = 1.38;
 
+/** The view cube's edge, where the orientation axes' arrows are one long. */
+export const CUBE_EDGE = 0.6;
+/** How much of a negative face's color is white, to tell it from the positive face of its axis. */
+export const CUBE_TINT = 0.6;
+/** The cube's faces in the order a box's sides are made: (axis, sign) of each. */
+export const CUBE_FACES: readonly { axis: number; sign: number }[] = [
+	{ axis: 0, sign: 1 },
+	{ axis: 0, sign: -1 },
+	{ axis: 1, sign: 1 },
+	{ axis: 1, sign: -1 },
+	{ axis: 2, sign: 1 },
+	{ axis: 2, sign: -1 }
+];
+
 /**
- * The orientation axes: three solid arrows from a ball at the origin, with their own light and a
- * camera that only turns. `look` points the camera the way the view's camera looks.
+ * The orientation axes: three solid arrows from a cube at the origin, with their own light and a
+ * camera that only turns. `look` points the camera the way the view's camera looks. The cube's
+ * faces are in their axes' colors, the negative ones paler, and `faceAt` names the face drawn at
+ * a place in the picture (x and y from -1 to 1, y up), or null off the cube: a click there turns
+ * the view to look straight at that face (`lookAtFace`).
  */
-export function triadScene(): { scene: Scene; camera: OrthographicCamera; look: (q: Quaternion) => void; dispose: () => void } {
+export function triadScene(): {
+	scene: Scene;
+	camera: OrthographicCamera;
+	look: (q: Quaternion) => void;
+	faceAt: (x: number, y: number) => { axis: number; sign: number } | null;
+	dispose: () => void;
+} {
 	const scene = new Scene();
 	const stout = { shaft: 0.07, head: 0.36, headRadius: 0.17 };
 	const geometry = arrowGeometry(stout);
 	const mesh = arrowMesh({ tails: [0, 0, 0, 0, 0, 0, 0, 0, 0], directions: [1, 0, 0, 0, 1, 0, 0, 0, 1], axes: [0, 1, 2], length: 1 });
 	mesh.geometry.dispose();
 	mesh.geometry = geometry;
-	const ball = new Mesh(new SphereGeometry(0.12, 20, 14), new MeshLambertMaterial({ color: 0x9a9a9a }));
-	scene.add(mesh, ball);
+	const white = new Color(0xffffff);
+	const sides = CUBE_FACES.map(({ axis, sign }) => new MeshLambertMaterial({ color: new Color(AXIS_COLORS[axis]).lerp(white, sign > 0 ? 0 : CUBE_TINT) }));
+	const cube = new Mesh(new BoxGeometry(CUBE_EDGE, CUBE_EDGE, CUBE_EDGE), sides);
+	scene.add(mesh, cube);
 	const camera = new OrthographicCamera(-TRIAD_HALF, TRIAD_HALF, TRIAD_HALF, -TRIAD_HALF, 0.1, 20);
 	scene.add(new AmbientLight(0xffffff, 0.9));
 	const light = new DirectionalLight(0xffffff, 2.4);
@@ -121,6 +148,8 @@ export function triadScene(): { scene: Scene; camera: OrthographicCamera; look: 
 	camera.add(light);
 	scene.add(camera);
 	const back = new Vector3();
+	const ray = new Raycaster();
+	const spot = new Vector2();
 	return {
 		scene,
 		camera,
@@ -129,11 +158,17 @@ export function triadScene(): { scene: Scene; camera: OrthographicCamera; look: 
 			camera.position.copy(back.set(0, 0, 8).applyQuaternion(q));
 			camera.updateMatrixWorld();
 		},
+		faceAt(x, y) {
+			ray.setFromCamera(spot.set(x, y), camera);
+			const hit = ray.intersectObject(cube, false)[0];
+			const side = hit?.face?.materialIndex;
+			return side === undefined ? null : (CUBE_FACES[side] ?? null);
+		},
 		dispose() {
 			geometry.dispose();
 			(mesh.material as MeshLambertMaterial).dispose();
-			ball.geometry.dispose();
-			ball.material.dispose();
+			cube.geometry.dispose();
+			for (const side of sides) side.dispose();
 		}
 	};
 }
