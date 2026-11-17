@@ -83,7 +83,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'match_tolerance': 2.0, 'shape_view': None,
+         'projection': False, 'match_tolerance': 2.0, 'shape_view': None, 'limits': True,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
          'drive': None,
          'sensors': True,
@@ -488,7 +488,7 @@ def _alone(project: Any, name: str, picks: list[int],
         component = prefs['component']
         if picks and prefs['flat']:
             return _run(project, 'project.plot', data=name, records=_runs(picks),
-                        component=component), []
+                        component=component, limits=bool(prefs['limits'])), []
         if picks:
             from .waterfalls import waterfall_view
 
@@ -502,7 +502,7 @@ def _alone(project: Any, name: str, picks: list[int],
             # the flat plot draws every record
             return _run(project, 'project.plot', data=name,
                         records=_runs(list(range(int(obj.num_records)))),
-                        component=component), []
+                        component=component, limits=bool(prefs['limits'])), []
         views = _run(project, 'project.waterfall', data=name, component=component)
         _faced(views, obj)
         return views, []
@@ -1433,6 +1433,8 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
         'projection': (len(sets) == 2 and all(home is not None for home in homes)
                        and homes[0][1] is not homes[1][1]),
         'flat': bool(data),
+        # an object with warning and abort limits to draw on the 2-D plot, or leave off
+        'limits': any(bool(getattr(obj, 'limits', None)) for obj in data),
         'complex': any(getattr(obj, 'abscissa_dim', '') == 'frequency'
                        and np.iscomplexobj(obj.ordinate) for obj in data),
     }
