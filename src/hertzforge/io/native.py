@@ -68,7 +68,8 @@ STAMP = 'hertzforge_schema'
 #: the newest .hforge schema this build reads. Schema 1 holds everything
 #: `.vdyn` schema 3 held; schema 2 adds objects held by reference to
 #: another file; schema 3 adds the run record; schema 4 adds the test
-#: setup; schema 5 held measured points as a `scan/` group, which is
+#: setup; schema 5 adds measured points: elements of a geometry
+#: (`MEASURED_POINT`), and for a few days a `scan/` group, which is
 #: still read (as a geometry) and no longer written. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
@@ -91,6 +92,10 @@ TEST_SETUP_SCHEMA = 4
 #: the stamp of a file holding a `scan/` group, which no build writes any
 #: more: measured points are a geometry (`load_scan`)
 SCAN_SCHEMA = 5
+
+#: the stamp of a file holding a geometry with measured points, an
+#: element type a build that reads up to schema 4 does not know
+MEASURED_POINT_SCHEMA = 5
 
 #: the smallest object, in bytes stored, that a project imported from
 #: another `.hforge` holds by reference rather than copying: the size a
@@ -514,7 +519,7 @@ def load_geometry(group: h5py.Group) -> Geometry:
     element group of two-node lines, and element groups are split by
     family.
     """
-    from ..core.geometry import Geometry
+    from ..core.geometry import ELEMENT_TYPES, Geometry
 
     data = {name: group[_on_disk(group, name)][()] for name in (
         'node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
@@ -527,6 +532,14 @@ def load_geometry(group: h5py.Group) -> Geometry:
     data['group_properties'] = _load_group_properties(group)
     data['from_deck'] = bool(group.attrs.get('from_deck', False))
     data['mass_unit'] = group.attrs.get('mass_unit', '') or None
+    unknown = sorted({int(code) for code in data['elem_type']} - set(ELEMENT_TYPES))
+    if unknown:
+        # an element type this build does not know was added by a newer one
+        raise ValueError(
+            'The geometry holds elements of type '
+            f'{", ".join(str(code) for code in unknown)}, which this build '
+            'does not read: it was written by a newer Hertzforge. Update '
+            'Hertzforge to open it.')
     geometry = Geometry(**data)
     if 'traceline_conn' in group:
         # a file from before 2026-09-30 carried tracelines apart from
@@ -1572,7 +1585,14 @@ def _loader(kind: str, name: str, path: str) -> Callable[[h5py.Group], Any]:
     return loader
 
 
-def schema_for(kinds: Iterable[str], references: bool = False) -> int:
+def _has_measured_points(obj: Any) -> bool:
+    from ..core.geometry import MEASURED_POINT, Geometry
+
+    return isinstance(obj, Geometry) and bool(np.any(obj.elem_type == MEASURED_POINT))
+
+
+def schema_for(kinds: Iterable[str], references: bool = False,
+               measured_points: bool = False) -> int:
     """The schema a file holding objects of `kinds` is stamped with: the
     earliest that holds everything in it.
 
@@ -1582,16 +1602,21 @@ def schema_for(kinds: Iterable[str], references: bool = False) -> int:
         The kinds of the objects in the file, held or referred to.
     references : bool, optional
         Whether any object is held by reference to another file.
+    measured_points : bool, optional
+        Whether any geometry in the file holds measured points.
 
     Returns
     -------
     int
-        `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
+        `MEASURED_POINT_SCHEMA` when a geometry holds measured points,
+        otherwise `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
         `RUN_RECORD_SCHEMA` when any is a run record, otherwise
         `REFERENCE_SCHEMA` for a file with references, otherwise
         `BASE_SCHEMA`.
     """
     kinds = set(kinds)
+    if measured_points:
+        return MEASURED_POINT_SCHEMA
     if 'test_setup' in kinds:
         return TEST_SETUP_SCHEMA
     if 'run_record' in kinds:
@@ -1656,7 +1681,7 @@ def save_into(obj: Any, f: h5py.File) -> None:
     memory and store it inside their own files.
     """
     group_name, saver = _saver_for(obj)
-    f.attrs[STAMP] = schema_for([group_name])
+    f.attrs[STAMP] = schema_for([group_name], measured_points=_has_measured_points(obj))
     saver(obj, f.create_group(group_name))
 
 
@@ -1879,7 +1904,9 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     f.attrs[STAMP] = schema_for(
         [*(_saver_for(obj)[0] for name, obj in objects.items() if name not in references),
          *(reference.kind for reference in references.values())],
-        bool(references))
+        bool(references),
+        any(_has_measured_points(obj) for name, obj in objects.items()
+            if name not in references))
     f.attrs['test_name'] = name
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''
