@@ -318,7 +318,7 @@ export interface Pick3D {
 	kept?: number[];
 	out?: string;
 	back?: string;
-	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI. */
+	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI; absent where the service takes it in the view's unit. */
 	to_si?: [number, number];
 }
 

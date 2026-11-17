@@ -43,7 +43,7 @@ TIE_KEEP = Param('keep', 'Tie (else pick the elements)', 'boolean', default=Fals
 REACH = Param('reach', 'Reach (the file\'s own numbers if its units are not defined)', 'number',
               default=0.0, unit='mm', min=0.0, step=0.1)
 TOLERANCE = Param('tolerance', 'Tolerance', 'number', default=0.0, unit='m', min=0.0,
-                  step=0.0001)
+                  step=0.0001, length=True)
 LEFT_OUT = Param('left_out', 'Places left out: node ids, or all', 'string', default='')
 #: a place the view was clicked on; not a setting of the form's
 TOGGLE = Param('toggle', 'Place clicked', 'string', default='', in_view=True)

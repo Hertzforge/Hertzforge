@@ -197,6 +197,10 @@ the result's place:
                                        this many not (a mate's other side)
 ```
 
+A point clicked is sent in the view's `unit` when the pick says `"in_display":true` (its `op` takes
+its `x`, `y` and `z` as lengths typed in the display system), and otherwise in meters, by the
+pick's `to_si` (`[scale, offset]`, absent where the view's unit is already meters).
+
 A `shape3d` with `opacity` (below 1) opens with its surface that see-through, so places marked on
 surfaces inside the model show; the view's own slider changes it after.
 
@@ -551,7 +555,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 **Gizmos.** A `shape3d` with `gizmo` draws arrows and rings at `origin`, along the three `axes`.
 Letting go of one runs `slide` or `turn`: its `op` with its `params`, the amount in meters or degrees
 in the param `values` names for that axis, and what `adds` (optional) gives for that axis. `origin` is
-in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters.
+in the view's `unit`; `to_si` (optional) is what a length dragged is multiplied by to send it in meters. A `slide` with `"in_display":true` takes the length as dragged, in the view's unit, since its `op` takes it as a length typed in the display system; the view then has no `to_si`.
 
 **Previews.** An operation with `previews` can be shown while its form is typed: `op.run` with
 `"preview": true` runs it on a copy of its geometry and answers `{"views"}`, with no `project`.
