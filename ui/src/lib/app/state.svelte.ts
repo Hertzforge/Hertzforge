@@ -5,7 +5,7 @@
  */
 
 import { DisplayState } from '$lib/acquire/display/display.svelte';
-import { pairsText, togglePick } from '$lib/viz/macBars';
+import { bestCell, pairsText, togglePick } from '$lib/viz/macBars';
 import { askToReplace, chooseFiles, chooseObjectFile, chooseSavePath, discardUnsaved, hasNativeFiles, openingOrder, pastedFiles, startDragOut } from '$lib/project/files';
 import { EMPTY, clickObject, clickPart, clickRecord, partForService, pruned, renamed, type Modifiers, type Selection } from '$lib/project/selection';
 import { AcquireState } from '$lib/acquire/store.svelte';
@@ -242,6 +242,8 @@ class AnalyzeState {
 			this.pair = null;
 			this.picks = [];
 			this.shapeView = null;
+			// each selection opens as it is: Projection is asked for again, not carried over
+			if (this.prefs.projection) this.prefs = { ...this.prefs, projection: false };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -280,6 +282,11 @@ class AnalyzeState {
 			);
 			if (seq !== this.showSeq) return;
 			this.shown = res;
+			// two sets on two geometries: both are seen moving from the start, on the best pair;
+			// it is shown, not picked, so Add Matches keeps only what was clicked
+			const apart = res.views.some((v) => v.view === 'shape3d' && (v.overlay_triangles !== undefined || v.overlay_lines !== undefined));
+			const compared = res.views.find((v): v is MatrixView => v.view === 'matrix' && v.selects === 'shape3d');
+			if (apart && compared && !this.pair) this.pair = bestCell(compared.values, compared.columns.ticks.length);
 			// the views bring the averaging's frames themselves
 			this.averagingRegions = null;
 			this.showError = null;
@@ -627,7 +634,7 @@ class AnalyzeState {
 			// kept for this session only
 		}
 		// the shell's own choices redraw what is already here; the rest are the service's to answer
-		if (key !== 'bars' && key !== 'overlay') void this.showSelection();
+		if (key !== 'bars') void this.showSelection();
 	}
 
 	/** A MAC square clicked: picked alone, or toggled among the picks with the modifier; the last picked animates. */
@@ -1497,7 +1504,6 @@ function readPrefs(): ShowPrefs {
 		component: 'magnitude',
 		projection: false,
 		bars: true,
-		overlay: true,
 		values_dofs: 'all',
 		values_form: 'shapes',
 		arrows: false,
@@ -1512,7 +1518,8 @@ function readPrefs(): ShowPrefs {
 	try {
 		const kept = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<ShowPrefs>;
 		if (typeof kept.flat === 'boolean') prefs.flat = kept.flat;
-		for (const key of ['projection', 'bars', 'overlay', 'arrows', 'sensors'] as const) {
+		// Projection is not kept: left on, two sets on two geometries open drawn on one of them
+		for (const key of ['bars', 'arrows', 'sensors'] as const) {
 			if (typeof kept[key] === 'boolean') prefs[key] = kept[key];
 		}
 		if (kept.values_form && ['shapes', 'response', 'reference'].includes(kept.values_form)) prefs.values_form = kept.values_form;

@@ -6022,6 +6022,15 @@ class Project(dict):
         if home is None or theirs is None:
             raise ValueError(f'{source} and {basis_name} each need a '
                              'geometry — link one to each side')
+        if target is None:
+            # a set measured in fewer than three directions at a node has
+            # no whole motion there to sample at another set's DOFs
+            from .core.correlate import projection_order
+            flipped, why = projection_order(self[source], basis_shapes)
+            if not flipped and why.startswith('it has') and 'measured' in why:
+                raise ValueError(
+                    f'{source} cannot be projected onto {basis_name}: {why}. '
+                    f'Project {basis_name} onto {source}')
         projected, report = project_shapes(self[source], theirs[1],
                                            basis_shapes, home[1],
                                            tolerance=tolerance)
@@ -6126,16 +6135,57 @@ class Project(dict):
             The MAC matrix, with `first`'s shapes down the rows and
             `second`'s across the columns.
         """
-        from .core.correlate import project_shapes
         from .core.shapes import cross_mac
+
+        rows, columns, _said, _report = self.compared_sets(first, second)
+        return cross_mac(rows, columns)
+
+    def compared_sets(self, first: str, second: str, *, tolerance: float = 0.02
+                      ) -> tuple[ShapeSet, ShapeSet, str, dict | None]:
+        """Two shape sets as they are compared: on DOFs they share.
+
+        Sets on one geometry are compared as they are. Sets on two
+        geometries share no DOF, so one is projected onto the other's
+        DOFs, and which one is decided by what the sets measure, not by
+        the order they are named in (`core.correlate.projection_order`):
+        the set with nodes measured in fewer than three directions is the
+        one projected onto, since it has no whole motion to project. The
+        MAC, the matches and the angle that aligns a pair are all read
+        from these.
+
+        Parameters
+        ----------
+        first : str
+            One shape set, by name.
+        second : str
+            The other shape set, by name.
+        tolerance : float, default 0.02
+            How far the nearest node may be (`project_onto_basis`).
+
+        Returns
+        -------
+        tuple of (ShapeSet, ShapeSet, str, dict or None)
+            The first set and the second, one of them projected when
+            they are on two geometries; which was projected onto which
+            and why ('' on one geometry); and what the projection
+            matched (`core.correlate.project_shapes`' report, None on
+            one geometry).
+        """
+        from .core.correlate import project_shapes, projection_order
 
         first, second = self.name_of(first), self.name_of(second)
         home, theirs = self.geometry_for(first), self.geometry_for(second)
         if (home is None or theirs is None or home[1] is theirs[1]):
-            return cross_mac(self[first], self[second])
-        projected, _report = project_shapes(self[second], theirs[1],
-                                            self[first], home[1])
-        return cross_mac(self[first], projected)
+            return self[first], self[second], '', None
+        flipped, why = projection_order(self[first], self[second])
+        if flipped:
+            projected, report = project_shapes(self[first], home[1], self[second],
+                                               theirs[1], tolerance=tolerance)
+            return (projected, self[second], f'{first} projected onto {second}: {why}',
+                    report)
+        projected, report = project_shapes(self[second], theirs[1], self[first],
+                                           home[1], tolerance=tolerance)
+        return self[first], projected, f'{second} projected onto {first}: {why}', report
 
     def merge(self, *names: str, name: str | None = None) -> str:
         """Combine compatible objects into one (Merge). The merged object

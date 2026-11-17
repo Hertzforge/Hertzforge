@@ -459,8 +459,16 @@ def _alone(project: Any, name: str, picks: list[int],
         geometry = _geometry_for(project, obj.first)
         if geometry is None:
             return table, [*notes, f'{obj.first} is on no geometry, so the pairs are not drawn']
+        # a second set on a geometry of its own is drawn there, laid over the first's
+        other = project.geometry_for(obj.second)
+        apart = other is not None and other[1] is not project[geometry]
+        try:
+            compared = project.compared_sets(obj.first, obj.second)[:2] if apart else None
+        except ValueError:
+            compared = None
         stage = matched_stage(project[geometry], f'{obj.first} and {obj.second} matched',
-                              sets[0], sets[1], pairs, obj.second)
+                              sets[0], sets[1], pairs, obj.second,
+                              column_geometry=other[1] if apart else None, compared=compared)
         return [stage, *table], notes
     from hertzforge.core.photos import Photos
     from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
@@ -733,9 +741,14 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
         views = _run(project, 'project.projection_overlay', first=first, second=second,
                      tolerance=2.0)
     else:
+        from hertzforge.core.shapes import cross_mac
+
         try:
-            values = (rows.auto_mac() if first == second
-                      else project.comparison_mac(first, second))
+            # the two sets as they are compared: one projected onto the other's DOFs when
+            # they are on two geometries, for the MAC and for each pair's alignment
+            ours, theirs, said, report = ((rows, columns, '', None) if first == second
+                                          else project.compared_sets(first, second))
+            values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
         except ValueError as error:
             raise refused(str(error)) from None
 
@@ -746,11 +759,23 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
                  else f'MAC of {first} Against {second}')
         matrix = v.matrix(title, axis(first, rows), axis(second, columns), values, 'MAC',
                           (0.0, 1.0))
-        views = paired(None if geometry is None else project[geometry], matrix, rows,
-                       range(rows.num_shapes), columns, range(columns.num_shapes))
         if apart:
-            notes.append(f'the MAC after projecting {second} onto {first}; both drawn on '
-                         f'{geometry} by DOF name, Projection animates the projection')
+            # each set on its own geometry, the second's laid over the first's
+            views = paired(homes[0][1], matrix, rows, range(rows.num_shapes), columns,
+                           range(columns.num_shapes), column_geometry=homes[1][1],
+                           compared=(ours, theirs))
+            notes.append(f'the MAC with {said}; {first} drawn on '
+                         f'{homes[0][0]} and {second} on {homes[1][0]}, Projection animates '
+                         'the projection')
+            if report is not None:
+                # the projection behind the MAC is made whether or not it is animated: what
+                # it matched is shown with it, as beside the Projection view
+                from .ops_modal_plan import _report_rows
+                views.append(v.reading(said, _report_rows(
+                    report, homes[0][1].units_defined and homes[1][1].units_defined)))
+        else:
+            views = paired(None if geometry is None else project[geometry], matrix, rows,
+                           range(rows.num_shapes), columns, range(columns.num_shapes))
     found = _matched(project, first, second)
     if found is not None:
         views[0]['matched'] = [[int(a), int(b)] for a, b in found[1].pairs]

@@ -212,6 +212,12 @@ def shape3d(title: str, unit: str, nodes: np.ndarray,
                            'nodes': np.ascontiguousarray(nodes, np.float32)}
     if extra.get('node_ids') is not None:
         extra['node_ids'] = np.ascontiguousarray(extra['node_ids'], np.uint32)
+    if extra.get('overlay_triangles') is not None:
+        extra['overlay_triangles'] = np.ascontiguousarray(extra['overlay_triangles'],
+                                                          np.uint32).reshape(-1, 3)
+    if extra.get('overlay_lines') is not None:
+        extra['overlay_lines'] = np.ascontiguousarray(extra['overlay_lines'],
+                                                      np.uint32).reshape(-1, 2)
     if lines is not None and len(lines):
         out['lines'] = np.ascontiguousarray(lines, np.uint32).reshape(-1, 2)
     if triangles is not None and len(triangles):
