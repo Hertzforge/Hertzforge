@@ -189,7 +189,11 @@ PARTS = {f'project.{name}': part for name, part in {
 #: and modes are fitted on the fitting screen alone, the band fit left to scripts and
 #: to recomputing what it made (2026-11-14)
 UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reorder_solids',
-                       'project.delete_entities', 'project.solids', 'project.fit_modes'})
+                       'project.delete_entities', 'project.solids', 'project.fit_modes',
+                       # a coordinate system is slid and turned in its Edit: typed in its
+                       # row, or dragged by the arrows and rings on it (Brandon, 2026-11-17)
+                       'project.rotate_coordinate_system',
+                       'project.slide_coordinate_system', 'project.reset_rotation'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',

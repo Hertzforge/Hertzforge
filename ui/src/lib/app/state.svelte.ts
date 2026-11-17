@@ -54,6 +54,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView,
 	SimProfile,
 	SimStateResult,
 	TableEdit,
+	TableView,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
@@ -930,6 +931,67 @@ class AnalyzeState {
 		}
 	}
 
+	/**
+	 * A cell typed into in an action's table (a part's Edit): the edit runs, and the views it answers
+	 * with take the reading's place, so the model drawn beside the table follows what was typed.
+	 */
+	async editReadingCell(edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		const title = this.reading?.title ?? '';
+		// a preview typed into is still the preview: closing its form takes it away
+		const previewed = this.reading !== null && this.reading === this.previewDrawn;
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			this.reading = { title, views: res.views };
+			if (previewed) this.previewDrawn = this.reading;
+			const geometry = edit.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** Rows of an action's table of entities deleted: the views answered take the reading's place. */
+	async removeReadingRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
+		const title = this.reading?.title ?? '';
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			// a deletion may answer with a reading of what it kept: the drawn views and the table are what is edited
+			this.reading = { title, views: res.views.filter((v) => v.view !== 'reading') };
+			const geometry = remove.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/**
+	 * One row picked in an action's table that says what a row picked does (`select`): its operation
+	 * runs with the row's id, and the views answered that are not tables take the places of the ones
+	 * beside the table, which stays as it is with its selection.
+	 */
+	async pickReadingRow(select: NonNullable<TableView['select']>, id: string): Promise<void> {
+		const was = this.reading;
+		if (!was) return;
+		const number = Number(id);
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (this.reading !== was) return;
+			const others = res.views.filter((v) => v.view !== 'table');
+			let k = 0;
+			this.reading = { title: was.title, views: was.views.map((v) => (v.view === 'table' ? v : (others[k++] ?? v))) };
+		} catch (err) {
+			this.runError = message(err);
+		}
+	}
+
 	/** A cell typed into in what the selection shows: the edit runs, and the table it answers with takes the view's place. */
 	async editShownCell(viewIndex: number, edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		try {
@@ -943,31 +1005,6 @@ class AnalyzeState {
 			// a table showing a pick of its rows is shown again, since the one that comes back has them all
 			if (edit.rows) void this.showSelection();
 			else if (table && this.shown) this.shown = { ...this.shown, views: this.shown.views.map((v, i) => (i === viewIndex ? table : v)) };
-			return null;
-		} catch (err) {
-			return message(err);
-		}
-	}
-
-	/**
-	 * A cell typed into a table of an operation's result (Fit Sensors' table of sensors): the
-	 * table's own operation runs with the cell, and what it answers with is the result drawn
-	 * again, every view of it, since the cell changes more than its table.
-	 */
-	async editReadingCell(edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
-		try {
-			const res = await this.app.analysis.request<OpResult>(
-				'op.run',
-				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
-				{ timeoutMs: RUN_TIMEOUT_MS }
-			);
-			// the result stays up: applying the project would show the selection again in its place
-			if (res.project) this.app.project.apply(res.project, false);
-			const was = this.reading;
-			if (was && res.views.length) {
-				this.reading = { title: was.title, views: res.views };
-				if (was === this.previewDrawn) this.previewDrawn = this.reading;
-			}
 			return null;
 		} catch (err) {
 			return message(err);

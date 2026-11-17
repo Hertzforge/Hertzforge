@@ -466,6 +466,12 @@ export interface TableView {
 	nested?: (TableView | null)[];
 	/** The rows that start opened, from 1; the rest start closed. */
 	open?: number[];
+	/**
+	 * What picking one row does: `op` runs with `params` and the row's cell in `column` as `param`,
+	 * and the views it answers with that are not tables take the others' places (a coordinate
+	 * system's row puts the arrows and rings on it).
+	 */
+	select?: { op: string; params: Record<string, unknown>; param: string; column: number };
 }
 
 /** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
