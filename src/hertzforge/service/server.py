@@ -355,7 +355,7 @@ class Connection:
             self.project, added = await call(projects.import_file, self.project,
                                              params, report)
             return {'added': added, 'project': projects.summary(self.project)}
-        edits = {'project.rename': (projects.rename, ('name', 'to', 'index', 'group')),
+        edits = {'project.rename': (projects.rename, ('name', 'to', 'index', *projects.SUB_ITEMS)),
                  'project.retitle': (projects.retitle, ('title',)),
                  'project.remove': (projects.remove, ('names',)),
                  'project.delete_parts': (projects.delete_parts, ('parts',)),

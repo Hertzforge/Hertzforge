@@ -1593,6 +1593,10 @@ function readPrefs(): ShowPrefs {
 	return prefs;
 }
 
+/** What is renamed on its own row under an object in the tree. */
+export type SubName = 'group' | 'solid' | 'mate' | 'mode' | 'channel';
+const SUB_WORDS = { group: 'element group', solid: 'solid', mate: 'mated surfaces', mode: 'mode' } as const;
+
 export class ProjectState {
 	summary = $state.raw<ProjectSummary | null>(null);
 	/** What is being done, in words ("Importing modal.nc4"), or null. */
@@ -1611,8 +1615,8 @@ export class ProjectState {
 	renaming = $state<string | null>(null);
 	/** The photo being renamed in place: its object and index, or null. */
 	renamingPart = $state<{ name: string; index: number } | null>(null);
-	/** The element group being renamed in place: its geometry and id, or null. */
-	renamingGroup = $state<{ name: string; id: number } | null>(null);
+	/** The sub-item being renamed in place: its object, what it is and its id (a mode's number, a channel's row), or null. */
+	renamingSub = $state<{ name: string; kind: SubName; id: number } | null>(null);
 	/** The selection whose removal waits on a second click or Enter (Delete arms it from the tree). */
 	confirming = $state(false);
 	/** The group being named from the action table: the member it is reached by, or null. */
@@ -1675,7 +1679,7 @@ export class ProjectState {
 		this.selection = next;
 		this.renaming = null;
 		this.renamingPart = null;
-		this.renamingGroup = null;
+		this.renamingSub = null;
 		this.confirming = false;
 		this.namingGroup = null;
 		this.units = null;
@@ -2097,9 +2101,9 @@ export class ProjectState {
 		return ok;
 	}
 
-	/** Rename one element group of a geometry in place (`project.rename` with `group`). */
-	async renameGroup(name: string, group: number, to: string): Promise<boolean> {
-		const ok = await this.call(`Renaming element group ${group} of ${name}`, 'project.rename', { name, to, group }, false);
+	/** Rename one element group, solid or set of mated surfaces of a geometry, or describe one mode of a shape set, in place (`project.rename` with its kind). */
+	async renameSub(name: string, kind: Exclude<SubName, 'channel'>, id: number, to: string): Promise<boolean> {
+		const ok = await this.call(`Renaming ${SUB_WORDS[kind]} ${id} of ${name}`, 'project.rename', { name, to, [kind]: id }, false);
 		if (ok) {
 			if (this.expanded.has(name)) void this.loadChildren(name);
 			void this.app.analyze.showSelection();

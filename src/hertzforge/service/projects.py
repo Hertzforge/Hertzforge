@@ -410,7 +410,9 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     provenance record and report block that names it following
     (`Project.rename`); with `index`, one photo of a Photos object
     renamed instead, the report blocks that show it following; with
-    `group`, one element group of a geometry, by its id."""
+    `group`, `solid` or `mate`, one element group, solid or set of mated
+    surfaces of a geometry, by its id; with `mode`, the description of
+    one mode of a shape set, numbered from 1."""
     state = _open(state, 'project.rename')
     old = _name(params, 'name', 'project.rename')
     new = _name(params, 'to', 'project.rename').strip()
@@ -418,8 +420,9 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
         raise not_found(f'the project has no object named {old!r}')
     if params.get('index') is not None:
         return _rename_photo(state, old, params['index'], new)
-    if params.get('group') is not None:
-        return _rename_group(state, old, params['group'], new)
+    for kind in SUB_ITEMS:
+        if params.get(kind) is not None:
+            return _rename_sub(state, old, kind, params[kind], new)
     if new == old:
         return
     try:
@@ -429,23 +432,60 @@ def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     state.modified = True
 
 
-def _rename_group(state: OpenProject, name: str, group: Any, new: str) -> None:
-    """One element group of a geometry renamed (`Geometry.rename_group`),
-    journaled as the call."""
-    from hertzforge.core.geometry import Geometry
+#: what `project.rename` names inside an object, besides a photo
+SUB_ITEMS = ('group', 'solid', 'mate', 'mode')
 
-    geometry = state.project[name]
-    if not isinstance(geometry, Geometry):
-        raise refused(f'{name} is not a geometry; only a geometry has element groups')
-    if not isinstance(group, int) or isinstance(group, bool):
-        raise bad_request('project.rename "group" is an element group\'s id')
-    ids = [int(one) for one in geometry.group_id]
-    if group not in ids:
-        raise not_found(f'{name} has no element group {group}')
-    if geometry.group_name[ids.index(group)].strip() == new:
+
+def _rename_sub(state: OpenProject, name: str, kind: str, which: Any, new: str) -> None:
+    """One sub-item of an object renamed, as the script call that does it:
+    an element group (`Geometry.rename_group`), a solid
+    (`Project.edit_solid`), a set of mated surfaces
+    (`Project.edit_mated_surfaces`) or a mode's description
+    (`ShapeSet.set_description`)."""
+    from hertzforge.core import mates, solids
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    project = state.project
+    obj = project[name]
+    if not isinstance(which, int) or isinstance(which, bool):
+        raise bad_request(f'project.rename "{kind}" is a whole number')
+    if kind == 'mode':
+        if not isinstance(obj, ShapeSet):
+            raise refused(f'{name} is not a shape set; only a shape set has modes')
+        if not 1 <= which <= obj.num_shapes:
+            raise not_found(f'{name} has {obj.num_shapes} modes; there is no mode {which}')
+        if str(obj.description[which - 1]).strip() == new:
+            return
+        obj.set_description(which - 1, new)
+        project.record_call(obj, 'set_description', which - 1, new)
+        state.modified = True
         return
-    geometry.rename_group(group, new)
-    state.project.record_call(geometry, 'rename_group', group, new)
+    if not isinstance(obj, Geometry):
+        raise refused(f'{name} is not a geometry')
+    try:
+        if kind == 'group':
+            ids = [int(one) for one in obj.group_id]
+            if which not in ids:
+                raise not_found(f'{name} has no element group {which}')
+            if obj.group_name[ids.index(which)].strip() == new:
+                return
+            obj.rename_group(which, new)
+            project.record_call(obj, 'rename_group', which, new)
+        elif kind == 'solid':
+            if which not in {int(one.id) for one in obj.solids}:
+                raise not_found(f'{name} has no solid {which}')
+            if solids.solid(obj, which).name.strip() == new:
+                return
+            project.edit_solid(name, which, name=new)
+        else:
+            if which not in {int(one.id) for one in getattr(obj, 'mates', ())}:
+                raise not_found(f'{name} has no mated surfaces {which}')
+            if mates.find(obj, which).name.strip() == new:
+                return
+            project.edit_mated_surfaces(name, which, name=new)
+    except ValueError as error:
+        raise refused(str(error)) from None
     state.modified = True
 
 

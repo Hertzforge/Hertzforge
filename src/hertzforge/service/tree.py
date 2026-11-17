@@ -155,7 +155,7 @@ def _geometry(geometry: Any) -> dict[str, Any]:
                    'count': len(geometry.cs_id)}],
         'families': family_rows,
         'solids': [solid_row(s) for s in solids.top_level(geometry)],
-        'mates': [{'id': int(m.id), 'label': f'{m.name} ({m.describe()})'}
+        'mates': [{'id': int(m.id), 'label': f'{m.name} ({m.describe()})', 'name': m.name}
                   for m in getattr(geometry, 'mates', ())],
     }
 
