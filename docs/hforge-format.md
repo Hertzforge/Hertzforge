@@ -28,9 +28,12 @@ held by reference to another file (below), and only a file with such an
 object is stamped 2. Schema 3 adds the run record (`run_record/`,
 below), and only a file holding one, or referring to one, is stamped 3.
 Schema 4 adds the test setup (`test_setup/`, below), and only a file
-holding one, or referring to one, is stamped 4. Schema 5 held measured points as a
-group of their own (`scan/`, below) for a few days in November 2026.
-It is read and no longer written: measured points are a geometry.
+holding one, or referring to one, is stamped 4. Schema 5 adds measured
+points, an element type of a geometry (203), and only a file with a geometry
+holding them is stamped 5, so a build from before them says to update
+where it would otherwise stop at an element type it does not know. For a
+few days in November 2026 schema 5 held measured points as a group of their
+own (`scan/`, below). It is read and no longer written.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -45,6 +48,8 @@ opens it. The reader follows three rules:
   is refused as not a Hertzforge file, since every writer stamps;
 - an object of a kind the reader does not know is refused by its name
   and kind, saying the file was written by a newer Hertzforge;
+- a geometry with an element type the reader does not know is refused
+  the same way, by the type's number;
 - an older stamp always loads.
 
 While Hertzforge is an alpha this is a practice, not a promise: the
