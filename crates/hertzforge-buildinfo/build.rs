@@ -20,11 +20,34 @@
 use std::process::Command;
 
 fn main() {
-    // Re-stamp when HEAD moves. In a plain checkout `.git/HEAD` is the file; in a
-    // git WORKTREE (how the agent sessions build) `.git` is a FILE pointing at the
-    // real gitdir, so watch both and let the missing one be ignored.
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git");
+    // Re-stamp when HEAD moves or the index changes, and only then. The files watched are in
+    // the checkout's own git directory, which `git rev-parse --absolute-git-dir` names for a
+    // plain checkout (`.git`) and for a git WORKTREE (`<main>/.git/worktrees/<name>`, how the
+    // agent sessions build) alike:
+    //   - `HEAD` changes when another branch or a detached commit is checked out;
+    //   - `logs/HEAD`, the reflog, grows with every commit, merge, reset or checkout, so a new
+    //     commit on the same branch re-stamps too, which `HEAD` alone would miss;
+    //   - `index` changes when a file is staged, which is when the dirty flag can change.
+    // The `.git` directory itself is NOT watched: its modification time changes with any git
+    // command in the repository or in a worktree of it (a fetch, another session's commit),
+    // and each one recompiled every crate that carries the stamp. A path that does not exist
+    // is not named, since cargo reads a missing one as changed on every build.
+    let watched: Vec<String> = git(&["rev-parse", "--absolute-git-dir"])
+        .map(|dir| {
+            ["HEAD", "logs/HEAD", "index"]
+                .iter()
+                .map(|name| format!("{dir}/{name}"))
+                .filter(|path| std::path::Path::new(path).exists())
+                .collect()
+        })
+        .unwrap_or_default();
+    if watched.is_empty() {
+        // no git, or not a repository: the stamp is "unknown" and nothing moves it
+        println!("cargo:rerun-if-changed=build.rs");
+    }
+    for path in &watched {
+        println!("cargo:rerun-if-changed={path}");
+    }
     // An escape hatch for forcing a re-stamp (dirty-flag refresh) without touching
     // sources: `HERTZFORGE_BUILD_STAMP_NONCE=$(date +%s) cargo build`.
     println!("cargo:rerun-if-env-changed=HERTZFORGE_BUILD_STAMP_NONCE");
