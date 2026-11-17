@@ -753,7 +753,7 @@ export type ProjectChildren =
 			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number }[];
 			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
 			solids: SolidRow[];
-			mates: { id: number; label: string }[];
+			mates: { id: number; label: string; name: string }[];
 	  }
 	| {
 			kind: 'grid';
