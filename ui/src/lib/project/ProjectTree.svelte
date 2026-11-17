@@ -33,11 +33,6 @@
 	const order = $derived(objects.map((o) => o.name));
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-	/** Kinds that open into something. */
-	const OPENS = new Set([
-		'geometry', 'time_history', 'spectrum', 'psd', 'specification', 'srs', 'shock_specification', 'transient_specification',
-		'sine_target', 'sine_level', 'frf', 'coherence', 'multiple_coherence', 'shape_set', 'channel_table', 'photos', 'matched_modes'
-	]);
 	const ROLE_WORD = { reference: 'ref', response: 'resp', monitor: 'mon' } as const;
 
 	function mods(e: MouseEvent) {
@@ -102,7 +97,7 @@
 			e.preventDefault();
 			if (pick(o)) return;
 			p.clickObject(o.name, order, { toggle: isMac ? e.metaKey : e.ctrlKey, extend: e.shiftKey });
-		} else if (e.key === 'ArrowRight' && OPENS.has(o.kind) && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
+		} else if (e.key === 'ArrowRight' && o.opens && !p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'ArrowLeft' && p.expanded.has(o.name)) p.toggleExpanded(o.name);
 		else if (e.key === 'F2') startRename(o.name);
 		else if ((e.key === 'Delete' || e.key === 'Backspace') && p.selection.objects.length) {
@@ -450,8 +445,8 @@
 		{@const on = p.isSelected(o.name)}
 		{@const active = o.name === p.summary?.active_geometry}
 		{@const icon = objectIcon(o.kind, o.banded)}
-		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={OPENS.has(o.kind) ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
-			{#if OPENS.has(o.kind)}
+		<div class="row" class:on class:issue={!!o.issue} class:drop={dropOn === o.name} class:place={place === o.name} class:candidate={picking?.row.candidates?.includes(o.name)} role="treeitem" aria-selected={on} aria-expanded={o.opens ? open : undefined} tabindex="0" data-testid="object-{o.name}" title={o.issue?.message} use:rowBox={o.name} onpointerdown={(e) => dragDown(e, o)} onclick={(e) => rowClick(e, o)} onkeydown={(e) => rowKey(e, o)} ondblclick={() => startRename(o.name)}>
+			{#if o.opens}
 				<button class="twist" class:open aria-label={open ? `Close ${o.name}` : `Open ${o.name}`} tabindex="-1" data-testid="expand-{o.name}" onclick={(e) => { e.stopPropagation(); p.toggleExpanded(o.name); }}>
 					<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</button>
@@ -645,6 +640,14 @@
 							<Glyph name="mode" of="child" parent="matched_modes" size={14} />
 							<span class="label mono">M{match.first} to M{match.second}</span>
 							<span class="num dim">MAC {match.mac.toFixed(3)}</span>
+						</div>
+					{/each}
+				{:else if kids.kind === 'items'}
+					{#each kids.items as item, i (i)}
+						<div class="sub" class:picked={picked(o.name, i)} role="treeitem" aria-selected={picked(o.name, i)} tabindex="-1" data-testid="item-{o.name}-{i}" onclick={(e) => p.clickRecord(o.name, i, mods(e), column(kids.items.map((_, k) => k)))} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, i)}>
+							<Glyph name={icon} size={14} />
+							<span class="label">{item.label}</span>
+							{#if item.detail}<span class="dim desc" title={item.detail}>{item.detail}</span>{/if}
 						</div>
 					{/each}
 				{:else}

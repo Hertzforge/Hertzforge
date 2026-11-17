@@ -180,3 +180,40 @@ def test_sine_objects_open_into_their_control_dofs(validate):
     validate(held, 'children')
     assert held == {'kind': 'channels', 'channels': [
         {'dof': '101Z+', 'quantity': 'acceleration'}, {'dof': '102Z+', 'quantity': 'acceleration'}]}
+
+
+def test_every_object_that_holds_items_says_it_opens(plate, validate):
+    """The shell opens the rows the summary marks, and keeps no list of kinds."""
+    from hertzforge.core.prediction import Predictions
+    from hertzforge.core.report import Report
+
+    project = plate.project
+    project.add('Empty Report', Report())
+    filled = Report()
+    filled.blocks.append({'kind': 'text', 'text': 'What the test was for, in a few words.'})
+    project.add('Filled Report', filled)
+    project.add('No Predictions', Predictions())
+    listed = {entry['name']: entry for entry in projects.summary(plate)['objects']}
+    for name in project:
+        held = tree.children(project, name)
+        validate(held, 'children')
+        assert listed[name]['opens'] is (held['kind'] != 'none'), name
+    assert listed['Filled Report']['opens'] and not listed['Empty Report']['opens']
+    assert not listed['No Predictions']['opens']
+    rows = tree.children(project, 'Filled Report')
+    assert rows == {'kind': 'items', 'items': [
+        {'label': 'Text', 'detail': 'What the test was for, in a few words.'}]}
+    # picking a block shows what the report shows, not a refusal
+    shown = projects.show(plate, {'objects': ['Filled Report'],
+                                  'records': {'Filled Report': [0]}, 'part': None})
+    assert shown['views']
+
+
+def test_a_sine_specification_opens_onto_its_control_dofs():
+    from hertzforge.core.sine import SineSweepSpecification
+
+    project = Project()
+    project.add('Sweep', SineSweepSpecification([], ['1X+', '2Y+', '3Z+']))
+    assert tree.opens(project['Sweep'])
+    held = tree.children(project, 'Sweep')
+    assert [row['dof'] for row in held['channels']] == ['1X+', '2Y+', '3Z+']

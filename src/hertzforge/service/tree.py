@@ -213,7 +213,58 @@ def children(project: Any, name: str) -> dict[str, Any]:
         return {'kind': 'matches', 'matches': [
             {'first': int(first) + 1, 'second': int(second) + 1, 'mac': float(mac)}
             for (first, second), mac in zip(obj.pairs, obj.macs, strict=True)]}
+    from hertzforge.core.prediction import NOUN, Predictions
+    from hertzforge.core.report import Report
+
+    if isinstance(obj, Predictions) and len(obj.predictions):
+        return {'kind': 'items', 'items': [
+            {'label': str(each.channel), 'detail': NOUN.get(each.quantity, each.quantity)}
+            for each in obj.predictions]}
+    if isinstance(obj, Report) and obj.blocks:
+        return {'kind': 'items', 'items': [_block_row(block) for block in obj.blocks]}
     return {'kind': 'none'}
+
+
+def _block_row(block: Any) -> dict[str, str]:
+    """A report's block as its row in the tree: its kind, and its caption, the object it
+    draws or its first words."""
+    words = block.get('caption') or block.get('source') or ' '.join(
+        str(block.get('text', '')).split())
+    return {'label': str(block.get('kind', 'block')).capitalize(),
+            'detail': words if len(words) <= 60 else words[:57].rstrip() + '...'}
+
+
+def opens(obj: Any) -> bool:
+    """Whether an object opens in the tree: it holds a structure of items, which
+    `children` lists. The rule is the object's, not a list of kinds the shell keeps: one
+    with items beneath it opens, whatever it is (Brandon, 2026-11-17).
+
+    Parameters
+    ----------
+    obj : object
+        An object of the project.
+
+    Returns
+    -------
+    bool
+        True when `children` answers anything but `{'kind': 'none'}` for it.
+    """
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.data import DataArray
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.matches import MatchedModes
+    from hertzforge.core.photos import Photos
+    from hertzforge.core.prediction import Predictions
+    from hertzforge.core.report import Report
+    from hertzforge.core.shapes import ShapeSet
+    from hertzforge.core.sine import SineLevelSet, SineSweepSpecification
+
+    if isinstance(obj, Predictions):
+        return bool(len(obj.predictions))
+    if isinstance(obj, Report):
+        return bool(obj.blocks)
+    return isinstance(obj, (Geometry, DataArray, ShapeSet, ChannelTable, Photos,
+                            SineSweepSpecification, SineLevelSet, MatchedModes))
 
 
 def banded(obj: Any) -> bool:

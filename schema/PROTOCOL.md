@@ -678,8 +678,13 @@ its `solids` (a boolean's operands as its `children`) and its `mates`; a data ob
 from another (reference DOFs, capture labels, or one blank), `cells` of record indices (-1 for a
 hole), one icon key per record in `icons` (a quantity, two as `response/reference`, or empty for
 the object's own icon) and the records whose units are `undefined`; a shape set lists its `modes`;
-a channel table its `channels`; photographs their names; matched modes their `matches`; anything
-else is `none`. The answer describes the object as it stands and is asked again when the project
+a channel table its `channels`, and a sine specification or level set its control DOFs the same
+way; photographs their names; matched modes their `matches`; any other object that holds a
+structure lists it as `items`, each a `label` and a `detail` (a prediction's channel and what is
+predicted, a report's blocks by kind and caption); anything else is `none`. An object's summary
+entry carries `opens`, true when this answers anything but `none`: the shell opens every such row
+and keeps no list of kinds of its own. The rows of a list are picked alone or together (Cmd or
+Ctrl, Shift), and the picks go to `project.show` as the object's `records`. The answer describes the object as it stands and is asked again when the project
 changes.
 
 **Links and what fits.** The summary's `links` are the project's object groups,

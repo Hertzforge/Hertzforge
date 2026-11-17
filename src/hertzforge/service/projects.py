@@ -99,6 +99,7 @@ def summary(state: OpenProject) -> dict[str, Any]:
         if between:
             entry['between'] = between
         entry['holds'] = describe(obj)
+        entry['opens'] = tree.opens(obj)
         settings = settings_of(obj)
         if settings:
             entry['settings'] = settings
