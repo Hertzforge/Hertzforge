@@ -42,7 +42,7 @@
 		holding = false;
 	}
 
-	/** Delete on the project row takes the project out of the tree: a new, empty one in its place, after asking when this one has unsaved changes. */
+	/** Delete on the project row takes the project out of the tree: a new, empty one in its place, after asking when this one has unsaved changes. The row takes the focus on a click itself: the macOS app's web view does not focus a button that is clicked, and the key would go nowhere. */
 	function projectKey(e: KeyboardEvent) {
 		if (e.key === 'F2') return startTitle();
 		if ((e.key !== 'Delete' && e.key !== 'Backspace') || p.busy !== null) return;
@@ -113,7 +113,7 @@
 				<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
 			</div>
 		{:else}
-			<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Delete starts a new, empty project.'} onclick={() => p.clearSelection()} ondblclick={startTitle} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
+			<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Delete starts a new, empty project.'} onclick={(e) => { p.clearSelection(); e.currentTarget.focus(); }} ondblclick={startTitle} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
 				<span class="ctitle">
 					{p.summary.title}
 					{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
