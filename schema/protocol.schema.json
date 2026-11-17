@@ -562,6 +562,7 @@
         "source": {"$ref": "#/$defs/source"},
         "units_defined": {"type": "boolean"},
         "banded": {"type": "boolean"},
+        "opens": {"type": "boolean"},
         "between": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
         "holds": {"type": "string"},
         "issue": {
@@ -589,7 +590,7 @@
     },
     "children": {
       "type": "object", "required": ["kind"],
-      "properties": {"kind": {"enum": ["geometry", "grid", "modes", "channels", "photos", "matches", "none"]}},
+      "properties": {"kind": {"enum": ["geometry", "grid", "modes", "channels", "photos", "matches", "items", "none"]}},
       "oneOf": [
         {"properties": {"kind": {"const": "geometry"},
           "parts": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],
@@ -625,6 +626,10 @@
           "matches": {"type": "array", "items": {"type": "object", "required": ["first", "second", "mac"],
             "properties": {"first": {"type": "integer"}, "second": {"type": "integer"}, "mac": {"type": "number"}}}}},
          "required": ["matches"]},
+        {"properties": {"kind": {"const": "items"},
+          "items": {"type": "array", "items": {"type": "object", "required": ["label", "detail"], "additionalProperties": false,
+            "properties": {"label": {"type": "string"}, "detail": {"type": "string"}}}}},
+         "required": ["items"]},
         {"properties": {"kind": {"const": "none"}}, "additionalProperties": false}
       ]
     },

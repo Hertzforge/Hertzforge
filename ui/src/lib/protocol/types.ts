@@ -590,6 +590,8 @@ export interface ProjectObject {
 	between?: [string, string];
 	/** A few words on what the object holds: its size, not its name. */
 	holds?: string;
+	/** It holds a structure of items, so its row opens onto them (`project.children`). */
+	opens?: boolean;
 	/** Why the object does not fit what it answers to, and the records, modes or channels at fault. */
 	issue?: { message: string; sub_items: number[] };
 	/** Why a derived object no longer matches its source; absent while it does. */
@@ -777,6 +779,8 @@ export type ProjectChildren =
 	| { kind: 'channels'; channels: { dof: string; quantity: string }[] }
 	| { kind: 'photos'; photos: string[] }
 	| { kind: 'matches'; matches: { first: number; second: number; mac: number }[] }
+	/** What any other object with a structure holds, one row an item: a prediction, a report's block. */
+	| { kind: 'items'; items: { label: string; detail: string }[] }
 	| { kind: 'none' };
 
 export interface SolidRow {
