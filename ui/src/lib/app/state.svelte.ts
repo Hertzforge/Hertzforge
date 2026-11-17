@@ -54,6 +54,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView,
 	SimProfile,
 	SimStateResult,
 	TableEdit,
+	TableView,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
@@ -927,6 +928,64 @@ class AnalyzeState {
 			return null;
 		} catch (err) {
 			return message(err);
+		}
+	}
+
+	/**
+	 * A cell typed into in an action's table (a part's Edit): the edit runs, and the views it answers
+	 * with take the reading's place, so the model drawn beside the table follows what was typed.
+	 */
+	async editReadingCell(edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
+		const title = this.reading?.title ?? '';
+		try {
+			const res = await this.app.analysis.request<OpResult>(
+				'op.run',
+				{ op: edit.op, params: { ...edit.params, row: edit.rows ? edit.rows[row] : row + 1, column, value: inSi(edit, column, value) } },
+				{ timeoutMs: RUN_TIMEOUT_MS }
+			);
+			if (res.project) this.app.project.apply(res.project);
+			this.reading = { title, views: res.views };
+			const geometry = edit.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/** Rows of an action's table of entities deleted: the views answered take the reading's place. */
+	async removeReadingRows(remove: NonNullable<TableEdit['remove']>, ids: string[]): Promise<string | null> {
+		const title = this.reading?.title ?? '';
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: remove.op, params: { ...remove.params, ids: ids.join(', ') } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (res.project) this.app.project.apply(res.project);
+			// a deletion may answer with a reading of what it kept: the drawn views and the table are what is edited
+			this.reading = { title, views: res.views.filter((v) => v.view !== 'reading') };
+			const geometry = remove.params.geometry;
+			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
+			return null;
+		} catch (err) {
+			return message(err);
+		}
+	}
+
+	/**
+	 * One row picked in an action's table that says what a row picked does (`select`): its operation
+	 * runs with the row's id, and the views answered that are not tables take the places of the ones
+	 * beside the table, which stays as it is with its selection.
+	 */
+	async pickReadingRow(select: NonNullable<TableView['select']>, id: string): Promise<void> {
+		const was = this.reading;
+		if (!was) return;
+		const number = Number(id);
+		try {
+			const res = await this.app.analysis.request<OpResult>('op.run', { op: select.op, params: { ...select.params, [select.param]: Number.isFinite(number) ? number : id } }, { timeoutMs: RUN_TIMEOUT_MS });
+			if (this.reading !== was) return;
+			const others = res.views.filter((v) => v.view !== 'table');
+			let k = 0;
+			this.reading = { title: was.title, views: was.views.map((v) => (v.view === 'table' ? v : (others[k++] ?? v))) };
+		} catch (err) {
+			this.runError = message(err);
 		}
 	}
 

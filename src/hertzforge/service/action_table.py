@@ -455,8 +455,9 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             # every field filled, so the row opens the table at once rather than a form
             fill.setdefault('family', '')
             fill.setdefault('groups', '')
+            fill.setdefault('cs', 0)
             more['omit'] = list(dict.fromkeys([*more.get('omit', []), 'kind', 'family',
-                                               'groups']))
+                                               'groups', 'cs']))
         if op.id == 'project.mesh_solids' and where == 'solid':
             # the solids picked, all at one size: the size they are likely to hold at,
             # as shells when every one is flat

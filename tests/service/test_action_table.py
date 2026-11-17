@@ -182,7 +182,10 @@ def test_a_part_of_a_geometry_brings_its_own_verbs(plate):
     assert row(with_part, 'Add Node')['part'] is True
     assert 'Rotate' not in verbs_in(with_part)
     systems = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'coordinate_systems'})[0]
-    assert 'Rotate' in verbs_in(systems)
+    # a system is slid and turned in its Edit, by its row or its arrows and rings
+    assert verbs_in(systems) == ['Plot', 'Edit', 'Add System']
+    edit = row(systems, 'Edit')
+    assert edit['fill']['cs'] == 0 and 'cs' in edit['omit']
 
 
 SHAPES = ['Add Block', 'Add Cylinder', 'Add Cone', 'Add Sphere', 'Add Section', 'Add Plate',

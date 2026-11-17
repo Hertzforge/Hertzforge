@@ -113,20 +113,67 @@ def test_elements_are_added_by_family(project, validate):
         run(project, 'project.add_element', family='quads', nodes='101 102 202 9999')
 
 
-def test_a_click_adds_what_the_table_in_hand_holds(project, validate):
-    """The Add mode: the view says what a click adds, and
-    running that with what was clicked adds it."""
-    view, _table = run(project, 'project.view_entities', kind='nodes')
-    wire_views([view], validate)
-    assert view['pick']['op'] == 'project.add_node' and view['pick']['target'] == 'point'
+def test_a_click_places_one_only_while_one_is_being_added(project, validate):
+    """A node or a coordinate system is placed by a click in the views of its Add, and not
+    while its table is edited (Brandon, 2026-11-17)."""
+    for kind in ('nodes', 'coordinate_systems'):
+        view, _table = run(project, 'project.view_entities', kind=kind)
+        wire_views([view], validate)
+        assert 'pick' not in view, kind
+    view, table = run(project, 'project.add_node', x=0.01, y=0.02, z=0.0)
     pick = view['pick']
-    view, table = run(project, pick['op'], **pick['params'], x=0.01, y=0.02, z=0.0)
-    assert cells(table)[-1]['Node'] == '1314'
+    assert pick['op'] == 'project.add_node' and pick['target'] == 'point'
+    assert pick['in_display'] is True
+    view, table = run(project, pick['op'], **pick['params'], x=0.03, y=0.02, z=0.0)
+    assert cells(table)[-1]['Node'] == '1315'
     assert view['pick']['op'] == 'project.add_node', 'the next click adds another'
-    view, _table = run(project, 'project.view_entities', kind='coordinate_systems')
+    view, _table = run(project, 'project.add_coordinate_system', x=0.1)
     assert view['pick']['op'] == 'project.add_coordinate_system'
+    # a cell typed over and a row deleted leave the table's view as it was: no click adds
+    view, _table = run(project, 'project.set_entity_cell', kind='nodes', row=1, column='x',
+                       value='0.5')
+    assert 'pick' not in view
     _view, table = run(project, 'project.view_entities', kind='groups')
     assert 'pick' not in _view
+    assert OPS['project.add_node'].previews and OPS['project.add_coordinate_system'].previews
+
+
+def test_a_systems_row_puts_the_arrows_and_rings_on_it(project, validate):
+    """Edit is the one way to move a coordinate system: its row typed into, or the arrows and
+    rings on it dragged, which the row picked chooses (Brandon, 2026-11-17)."""
+    run(project, 'project.add_coordinate_system', x=0.1, name='gauge')
+    view, table = run(project, 'project.view_entities', kind='coordinate_systems')
+    wire_views([view, table], validate)
+    assert 'gizmo' not in view, 'two systems and no row picked: on neither'
+    select = table['select']
+    assert select == {'op': 'project.view_entities',
+                      'params': {'geometry': 'Geometry', 'kind': 'coordinate_systems'},
+                      'param': 'cs', 'column': 0}
+    view, table = run(project, select['op'], **select['params'], cs=2)
+    wire_views([view, table], validate)
+    assert view['gizmo']['origin'] == pytest.approx([0.1, 0.0, 0.0])
+    assert view['gizmo']['slide']['params'] == {'geometry': 'Geometry', 'cs': 2}
+    # typed in its row: the system moves, and the arrows and rings with it
+    edit = table['edit']
+    view, table = run(project, edit['op'], **edit['params'], row=2, column='origin_y',
+                      value='0.25')
+    assert view['gizmo']['origin'] == pytest.approx([0.1, 0.25, 0.0])
+    assert view['gizmo']['slide']['params']['cs'] == 2 and 'pick' not in view
+    view, table = run(project, edit['op'], **edit['params'], row=2, column='rotation_z',
+                      value='90')
+    assert np.asarray(view['gizmo']['axes'])[0] == pytest.approx([0.0, 1.0, 0.0], abs=1e-9)
+    # dragged: the same system, and the table says where it is now
+    slide = view['gizmo']['slide']
+    view, table = run(project, slide['op'], **slide['params'], axis='x', distance=0.05)
+    assert float(cells(table)[1]['Origin Y [m]']) == pytest.approx(0.30)
+    assert 'pick' not in view and table['select'] == select
+    with pytest.raises(ProtocolError, match='no coordinate system 9'):
+        run(project, select['op'], **select['params'], cs=9)
+
+
+def test_the_only_system_has_the_arrows_and_rings_without_a_pick(project):
+    view, _table = run(project, 'project.view_entities', kind='coordinate_systems')
+    assert view['gizmo']['slide']['params']['cs'] == 1
 
 
 def test_clicked_nodes_make_an_element_of_the_family_in_hand(project, validate):
@@ -207,7 +254,8 @@ def test_a_coordinate_system_turns_slides_and_resets(project, validate):
                                                        abs=1e-6)
     assert float(row['Origin Y [m]']) == pytest.approx(0.02 * np.sin(np.radians(30)),
                                                        abs=1e-6)
-    _view, table = run(project, 'project.reset_rotation', cs=2)
+    view, table = run(project, 'project.reset_rotation', cs=2)
+    assert view['gizmo']['slide']['params']['cs'] == 2 and 'pick' not in view
     row = cells(table)[1]
     assert float(row['Rotation Z [°]']) == 0.0
     assert float(row['Origin Y [m]']) == pytest.approx(0.01)
@@ -496,7 +544,7 @@ def test_a_part_picked_is_drawn_and_its_edit_holds_its_table(project, validate):
         assert drawn['view'] == 'shape3d' and 'pick' not in drawn
         assert ('frames' in drawn) is (part == 'coordinate_systems')
     drawn, nodes = _edited(project, {'kind': 'part', 'id': 'nodes'}, validate)
-    assert drawn['view'] == 'shape3d' and drawn['pick']['op'] == 'project.add_node'
+    assert drawn['view'] == 'shape3d' and 'pick' not in drawn
     assert len(nodes['rows']) == len(project['Geometry'].node_id)
     # Delete takes a row by its id, the first column
     assert nodes['edit']['remove'] == {

@@ -261,6 +261,11 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
         edit['remove'] = {'op': 'project.delete_entities',
                           'params': {'geometry': name, 'kind': kind}, 'column': 0}
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
+    if name is not None and kind == 'coordinate_systems':
+        # the row picked is the system the arrows and rings in the view are on
+        table['select'] = {'op': 'project.view_entities',
+                           'params': {'geometry': name, 'kind': kind}, 'param': 'cs',
+                           'column': 0}
     if name is not None and count > sent:
         table['total'] = count
         table['more'] = {'method': 'project.entity_rows',
@@ -296,7 +301,7 @@ def _pick(name: str, geometry: Any, kind: str, element: dict[str, Any] | None) -
 
 
 def _shown(name: str, geometry: Any, kind: str, said: str = '',
-           element: dict[str, Any] | None = None, **part: str) -> list[dict]:
+           element: dict[str, Any] | None = None, adds: bool = True, **part: str) -> list[dict]:
     """The geometry drawn, with its coordinate systems' axes when they are
     the entities in hand and what a click in it adds (`_pick`), and the
     table of `kind` (of a part's rows, when `family` or `groups` names one)."""
@@ -307,7 +312,10 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     if kind == 'coordinate_systems':
         drawn['frames'] = frames(geometry, drawn['nodes'])
     pick = _pick(name, geometry, kind, element)
-    if pick is not None:
+    # a node or a coordinate system is placed by a click only while one is being added
+    # (`adds`): a click while their table was edited placed one nobody asked for
+    # (Brandon, 2026-11-17)
+    if pick is not None and (adds or kind not in ('nodes', 'coordinate_systems')):
         drawn['pick'] = pick
     return [drawn, entity_table(geometry, kind, title, name, **part)]
 
@@ -332,10 +340,12 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
 
 def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.view_entities`, a part's Edit: its entities as a table beside the geometry
-    drawn, cells typed over and rows deleted in place, and a click in the view adding one
-    (Brandon, 2026-11-13: the table is editing's, not the plot's). The nodes or coordinate
-    systems; a family's elements (`family`); element groups and their elements, with
-    their connections (`groups`)."""
+    drawn, cells typed over and rows deleted in place (Brandon, 2026-11-13: the table is
+    editing's, not the plot's). The nodes or coordinate systems; a family's elements
+    (`family`), a click on its nodes adding one; element groups and their elements, with
+    their connections (`groups`). The coordinate system on the row picked (`cs`), or the
+    only one, has the arrows and rings on it: dragging them slides and turns it, as typing
+    in its row does (Brandon, 2026-11-17)."""
     from hertzforge.core.geometry import FAMILY_LABELS
 
     name = params['geometry']
@@ -352,7 +362,13 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
         element = {'family': family, 'type': '', 'group': 0} if family in FAMILY_ADD_TYPES else None
         return _shown(name, geometry, 'elements', FAMILY_LABELS.get(family, family).lower(),
                       element, family=family)
-    return _shown(name, geometry, params['kind'])
+    views = _shown(name, geometry, params['kind'], adds=False)
+    if params['kind'] == 'coordinate_systems':
+        ids = [int(c) for c in geometry.cs_id]
+        cs = params['cs'] or (ids[0] if len(ids) == 1 else 0)
+        if cs:
+            views = _with_gizmo(views, name, geometry, cs)
+    return views
 
 
 def _optional_id(value: int) -> int | None:
@@ -725,7 +741,11 @@ def _set_at_row(project: Any, name: str, kind: str, row: int, field: str, value:
         if said.startswith(('could not convert', 'invalid literal')):
             said = f'{value!r} is not a number'
         raise refused(f'{LABELS[kind]} {entity}, {field}: {said}') from None
-    return _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set')
+    views = _shown(name, geometry, kind, f'{LABELS[kind]} {entity}, {field} set', adds=False)
+    if kind == 'coordinate_systems':
+        # the arrows and rings stay on the system just typed into
+        views = _with_gizmo(views, name, geometry, int(geometry.cs_id[row]))
+    return views
 
 
 def set_entity_cell(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -793,7 +813,7 @@ def delete_entities(project: Any, params: dict[str, Any]) -> list[dict]:
                 'coordinate_systems': 'coordinate system'}
     removed = ', '.join(f'{count} {singular[key]}{"s" * (count != 1)}'
                         for key, count in report.items() if count and key in singular)
-    return _shown(name, geometry, kind, f'removed {removed}' if removed else '')
+    return _shown(name, geometry, kind, f'removed {removed}' if removed else '', adds=False)
 
 
 # ---- turning and sliding a coordinate system ----------------------------------------
@@ -843,7 +863,7 @@ def rotate_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]
                         angles=[float(a) for a in angles_of(turned)])
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
                               f'turned {cs} {params["angle"]:+g}° about its '
-                              f'{params["axis"].upper()}'), name, geometry, cs)
+                              f'{params["axis"].upper()}', adds=False), name, geometry, cs)
 
 
 def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -864,8 +884,8 @@ def slide_coordinate_system(project: Any, params: dict[str, Any]) -> list[dict]:
     unit, scale = display_units.words_in('length') if geometry.units_defined else ('', 1.0)
     moved_by = f'{params["distance"] * scale:+.6g}{" " + unit if unit else ""}'
     return _with_gizmo(_shown(name, geometry, 'coordinate_systems',
-                              f'moved {cs} {moved_by} along its {params["axis"].upper()}'),
-                       name, geometry, cs)
+                              f'moved {cs} {moved_by} along its {params["axis"].upper()}',
+                              adds=False), name, geometry, cs)
 
 
 def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -880,7 +900,8 @@ def reset_rotation(project: Any, params: dict[str, Any]) -> list[dict]:
     angles = [float(a) for a in angles_of(identity_frame(matrix))]
     geometry.place_coordinate_system(cs, angles=angles)
     project.record_call(name, 'place_coordinate_system', cs, angles=angles)
-    return _shown(name, geometry, 'coordinate_systems', f'rotation of {cs} reset')
+    return _with_gizmo(_shown(name, geometry, 'coordinate_systems', f'rotation of {cs} reset',
+                              adds=False), name, geometry, cs)
 
 
 # ---- DOF arrows and sensors ---------------------------------------------------------
@@ -1426,11 +1447,13 @@ def name_object_group(project: Any, params: dict[str, Any]) -> list[dict]:
 # ---- descriptors --------------------------------------------------------------------
 
 def _model(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
-           edits: bool = True, workspace: Workspace = 'geometry') -> Operation:
+           edits: bool = True, workspace: Workspace = 'geometry',
+           previews: bool = False) -> Operation:
     """An act on a geometry: in the Geometry module unless it is the finite
     element model's (element groups, solving)."""
     return Operation(id=id_, title=title, workspace=workspace,
-                     summary=summary, params=params, outputs=outputs, run=run, edits=edits)
+                     summary=summary, params=params, outputs=outputs, run=run, edits=edits,
+                     previews=previews)
 
 
 def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, run: Any,
@@ -1451,17 +1474,19 @@ OPERATIONS = (
            'as a table to edit, beside the geometry drawn.',
            (GEOMETRY, KIND, Param('family', 'Family whose elements the table shows', 'string',
                                   default=''),
-            Param('groups', 'Element groups the table shows', 'string', default='')),
+            Param('groups', 'Element groups the table shows', 'string', default=''),
+            Param('cs', 'Coordinate system with the arrows and rings (0: none)', 'integer',
+                  default=0, min=0, step=1)),
            DRAWN, view_entities, edits=False),
     _model('project.add_node', 'Add Node',
-           'A node at typed coordinates, in meters once the geometry\'s units are '
-           'declared.',
-           (GEOMETRY, X, Y, Z, NODE_ID, PLACEMENT_CS, DISPLACEMENT_CS), DRAWN, add_node),
+           'A node at typed coordinates, or where the view is clicked.',
+           (GEOMETRY, X, Y, Z, NODE_ID, PLACEMENT_CS, DISPLACEMENT_CS), DRAWN, add_node,
+           previews=True),
     _model('project.add_coordinate_system', 'Add Coordinate System',
            'A coordinate system at a typed origin, turned about the fixed X, then Y, then '
            'Z axes.',
            (GEOMETRY, X, Y, Z, RX, RY, RZ, CS_NAME, CS_TYPE, NODE_ID), DRAWN,
-           add_coordinate_system),
+           add_coordinate_system, previews=True),
     _model('project.add_element', 'Add Element',
            'An element of a family on the nodes named, in order; for beams, the chain of '
            'elements through every node named.',
