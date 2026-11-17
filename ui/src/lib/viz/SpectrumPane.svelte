@@ -1,10 +1,6 @@
-<script lang="ts" module>
-	/** Each scope's choice of a linear or log frequency axis, kept as the selection changes. */
-	const keptLogX = new Map<string, boolean>();
-</script>
-
 <script lang="ts">
 	import { copyCanvas, plotBackground } from './copyImage';
+	import { chooseScale, scaleChoice, scaleKey } from './plotScales.svelte';
 	/**
 	 * x-y line view (spectra and anything else on two axes), drawn with uPlot.
 	 *
@@ -76,10 +72,12 @@
 		/** The Copy Image button above the plot. */
 		copyButton?: boolean;
 		/**
-		 * A Lin/Log choice for a frequency axis above the plot, as the 3D stage has, kept for the
-		 * `scope` (Brandon, 2026-11-14: it was the bar's Log f, a second control for the stage's).
+		 * A Lin/Log choice for each axis above the plot, kept for what is plotted (`scaleOf`) and
+		 * not for the window: a PSD's log axes say nothing of a time history's.
 		 */
 		scaleToggle?: boolean;
+		/** What is plotted, as the choice of scales is kept: the kinds of the objects selected. */
+		scaleOf?: string;
 		/**
 		 * The series the y axis is ranged on, by index into `view.series`; every series shown when
 		 * absent. The fit ranges on the measured CMIFs, so a synthesis or a pending mode moving
@@ -137,6 +135,7 @@
 		readout = true,
 		copyButton = true,
 		scaleToggle = false,
+		scaleOf,
 		rangeOn,
 		styles = [],
 		onlegend,
@@ -199,15 +198,14 @@
 	const shownGroup = $derived(view.groups?.length ? view.groups[Math.min(group, view.groups.length - 1)] : null);
 	const inGroup = (i: number) => !shownGroup || shownGroup.series.includes(i);
 
-	/** The frequency axis chosen on the plot, or null to take the view's scale. */
-	let logXChoice = $state<boolean | null>(untrack(() => (scope ? (keptLogX.get(scope) ?? null) : null)));
-	const choosesX = $derived(scaleToggle && view.x.unit === 'Hz');
-	const logX = $derived(choosesX && logXChoice !== null ? logXChoice : view.x.scale === 'log');
-	function setLogX(log: boolean) {
-		logXChoice = log;
-		if (scope) keptLogX.set(scope, log);
-	}
-	const logY = $derived(view.y.scale === 'log');
+	/** The scales chosen on the plot for what it shows; an axis never chosen takes the view's. */
+	const scalesAt = $derived(scaleKey(scaleOf ?? scope, view.x.unit ?? ''));
+	const chosen = $derived(scaleChoice(scalesAt));
+	const choosesX = $derived(scaleToggle);
+	/** Values at or under zero cannot go on a log axis, so it is offered only where none are, or where the view is log already. */
+	const choosesY = $derived(scaleToggle && (view.y.scale === 'log' || view.series.every((s, i) => !inGroup(i) || s.y.every((value) => !(value <= 0)))));
+	const logX = $derived(choosesX && chosen.x !== undefined ? chosen.x : view.x.scale === 'log');
+	const logY = $derived(choosesY && chosen.y !== undefined ? chosen.y : view.y.scale === 'log');
 
 	/**
 	 * Per-series style, with measured series stepping through the blue family and followers dashed;
@@ -242,7 +240,7 @@
 
 	function keyOf(v: SpectrumView): string {
 		const xs = v.series.map((s) => [s.name, s.role, s.shape ?? 'line', s.x.length, s.x[0], s.x[s.x.length - 1]]);
-		return JSON.stringify([v.x, v.y, xs, theme.version, optionsKey, logX]);
+		return JSON.stringify([v.x, v.y, xs, theme.version, optionsKey, logX, logY]);
 	}
 
 	/**
@@ -1389,7 +1387,7 @@
 	/** The marks' readout sits in a top corner the legend does not take. */
 	const marksCorner = $derived<Corner>(legend === 'inside' && legendCorner === 'top-left' ? 'top-right' : 'top-left');
 
-	const showHead = $derived(showTitle || copyButton || choosesX || (legend === 'outside' && readout) || !!view.groups?.length);
+	const showHead = $derived(showTitle || copyButton || choosesX || choosesY || (legend === 'outside' && readout) || !!view.groups?.length);
 
 	/** A note being dragged: where it is, as fractions of the plot area. */
 	let dragNote = $state<{ id: string; fx: number; fy: number } | null>(null);
@@ -1479,8 +1477,15 @@
 		{#if choosesX}
 		<div class="seg" role="radiogroup" aria-label="{view.x.label} scale">
 			<span class="lbl">{view.x.label}</span>
-			<button role="radio" aria-checked={!logX} class:on={!logX} data-testid="spectrum-x-linear" title="Linear frequency axis" onclick={() => setLogX(false)}>Lin</button>
-			<button role="radio" aria-checked={logX} class:on={logX} data-testid="spectrum-x-log" title="Log frequency axis" onclick={() => setLogX(true)}>Log</button>
+			<button role="radio" aria-checked={!logX} class:on={!logX} data-testid="spectrum-x-linear" title="Linear {view.x.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'x', false)}>Lin</button>
+			<button role="radio" aria-checked={logX} class:on={logX} data-testid="spectrum-x-log" title="Log {view.x.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'x', true)}>Log</button>
+		</div>
+		{/if}
+		{#if choosesY}
+		<div class="seg" role="radiogroup" aria-label="{view.y.label} scale">
+			<span class="lbl">{view.y.label}</span>
+			<button role="radio" aria-checked={!logY} class:on={!logY} data-testid="spectrum-y-linear" title="Linear {view.y.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'y', false)}>Lin</button>
+			<button role="radio" aria-checked={logY} class:on={logY} data-testid="spectrum-y-log" title="Log {view.y.label.toLowerCase()} axis" onclick={() => chooseScale(scalesAt, 'y', true)}>Log</button>
 		</div>
 		{/if}
 		{#if copyButton}
