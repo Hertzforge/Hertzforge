@@ -794,14 +794,19 @@
 		scene.add(ghostSurface);
 
 		if (view.overlays?.length) {
-			// the same nodes and faces, moved by the overlay's own shape attributes
+			// the same nodes and faces, moved by the overlay's own shape attributes; or, when the
+			// overlays are a second geometry's shapes, that geometry's own faces and lines
+			const own = view.overlay_triangles !== undefined || view.overlay_lines !== undefined;
+			const faces = own ? view.overlay_triangles : view.triangles;
+			const edges = own ? view.overlay_lines : view.lines;
 			overlayAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 			overlayImagAttr = new BufferAttribute(new Float32Array(view.nodes.length), 3);
 			overlayGeometry = new BufferGeometry();
 			overlayGeometry.setAttribute('position', position);
 			overlayGeometry.setAttribute('shape', overlayAttr);
 			overlayGeometry.setAttribute('shapeImag', overlayImagAttr);
-			if (view.triangles) overlayGeometry.setIndex(new BufferAttribute(view.triangles, 1));
+			// with no faces there is nothing for the surface to draw: an empty index, not every third node
+			overlayGeometry.setIndex(new BufferAttribute(faces ?? new Uint32Array(0), 1));
 			overlaySurface = new Mesh(
 				overlayGeometry,
 				displaced(new MeshBasicMaterial({ color: OVERLAY_COLOR, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }))
@@ -810,9 +815,9 @@
 			overlaySurface.renderOrder = 3;
 			overlaySurface.visible = false;
 			scene.add(overlaySurface);
-			if (view.lines && view.lines.length) {
+			if (edges && edges.length) {
 				// its tracelines and bars as wide as the mode's; the edges on its faces stay thin
-				const { onFaces, apart } = splitOnFaces(view.lines, view.triangles);
+				const { onFaces, apart } = splitOnFaces(edges, faces);
 				if (apart.length) {
 					overlayOutline = wideLines(apart, view.nodes, overlayAttr, overlayImagAttr, uniforms, { color: OVERLAY_COLOR });
 					materials.push(overlayOutline.material);

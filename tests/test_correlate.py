@@ -354,3 +354,90 @@ def test_a_pick_with_no_dof_or_no_table_is_refused():
         project.project_onto_basis('FEM Shapes', onto='Other Shapes',
                                    channels=[0])
     assert 'FEM Shapes @ Channels (1 channel)' not in project
+
+
+# ---- which set is projected -----------------------------------------------------
+
+
+def _set(dofs, modes=2):
+    rng = np.random.default_rng(len(dofs))
+    return ShapeSet(np.arange(1.0, modes + 1), np.zeros(modes), list(dofs),
+                    rng.normal(size=(modes, len(dofs))))
+
+
+def test_nodes_measured_in_fewer_than_three_directions_are_counted():
+    from hertzforge.core.correlate import partial_nodes
+
+    assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '2X+', '2Y-', '2Z+'])) == 0
+    # a uni-axial node, a bi-axial one, and a skewed sensor named by one axis
+    assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '2Z+', '3X+', '3Y+', '4X-'])) == 3
+    # a rotation is not a translation, and a modal coordinate is at no node
+    assert partial_nodes(_set(['1X+', '1Y+', '1RZ+'])) == 1
+    assert partial_nodes(_set(['1X+', '1Y+', '1Z+', '1RX+', 'M1'])) == 0
+
+
+def test_the_set_with_uniaxial_nodes_is_the_one_projected_onto():
+    """A node measured along one axis has no whole motion to sample at
+    another set's DOFs, so the other set is projected onto it, whichever
+    is named first (Brandon, 2026-11-16)."""
+    from hertzforge.core.correlate import projection_order
+
+    full = _set([f'{n}{a}+' for n in range(1, 9) for a in 'XYZ'])
+    uniaxial = _set(['101X+', '102X+', '103Z+'])
+    onto_second, why = projection_order(full, uniaxial)
+    assert onto_second and '3 nodes measured in fewer than three directions' in why
+    onto_second, why = projection_order(uniaxial, full)
+    assert not onto_second and '3 nodes measured' in why
+    # both whole: the one with more DOFs is projected onto the one with fewer
+    small = _set([f'{n}{a}+' for n in (201, 202) for a in 'XYZ'])
+    assert projection_order(full, small) == (True, 'it has the fewer DOFs')
+    assert projection_order(small, full) == (False, 'it has the fewer DOFs')
+    assert projection_order(small, small)[0] is False, 'as many DOFs: the second onto the first'
+    # both with uni-axial nodes: neither way is exact, and it says so
+    other = _set(['301X+', '302Y+', '303Z+', '304Z+'])
+    onto_second, why = projection_order(other, uniaxial)
+    assert onto_second and 'neither way is exact' in why
+
+
+def _two_geometries():
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    project = hertzforge.Project()
+    project.add('FEM Geometry', fem_geometry)
+    project.add('FEM Shapes', fem_shapes)
+    project.add('Test Geometry', test_geometry)
+    project.add('Test Shapes', test_shapes)
+    project.link('FEM Geometry', 'FEM Shapes')
+    project.link('Test Geometry', 'Test Shapes')
+    return project
+
+
+def test_the_mac_is_the_same_whichever_set_is_named_first():
+    from hertzforge.core.shapes import cross_mac
+
+    project = _two_geometries()
+    forward = project.comparison_mac('FEM Shapes', 'Test Shapes')
+    back = project.comparison_mac('Test Shapes', 'FEM Shapes')
+    assert np.allclose(forward, back.T, atol=1e-12)
+    # it is the model sampled at the test's DOFs, both ways
+    sampled, _report = project_shapes(project['FEM Shapes'], project['FEM Geometry'],
+                                      project['Test Shapes'], project['Test Geometry'])
+    assert np.allclose(back, cross_mac(project['Test Shapes'], sampled))
+    rows, columns, said, _report = project.compared_sets('FEM Shapes', 'Test Shapes')
+    assert list(rows.coordinate) == list(project['Test Shapes'].coordinate)
+    assert columns is project['Test Shapes']
+    assert said.startswith('FEM Shapes projected onto Test Shapes: it has 2 nodes')
+    rows, columns, said, _report = project.compared_sets('Test Shapes', 'FEM Shapes')
+    assert rows is project['Test Shapes']
+    assert said.startswith('FEM Shapes projected onto Test Shapes')
+    # on one geometry nothing is projected
+    assert project.compared_sets('FEM Shapes', 'FEM Shapes')[2:] == ('', None)
+
+
+def test_projecting_a_uniaxial_set_onto_a_whole_one_is_refused():
+    project = _two_geometries()
+    with pytest.raises(ValueError, match='Test Shapes cannot be projected onto FEM Shapes: '
+                                         'it has 2 nodes measured in fewer than three'):
+        project.project_onto_basis('Test Shapes', onto='FEM Shapes')
+    made = project.project_onto_basis('FEM Shapes', onto='Test Shapes')
+    assert list(project[made].coordinate) == list(project['Test Shapes'].coordinate)

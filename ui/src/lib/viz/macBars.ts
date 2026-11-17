@@ -149,3 +149,16 @@ export function togglePick(
 export function pairsText(picks: { row: number; column: number }[]): string {
 	return picks.map((p) => `${p.row + 1},${p.column + 1}`).join('; ');
 }
+
+/**
+ * The cell of a matrix with the largest value, as a pair: what a stage of two geometries
+ * animates before any cell is picked, so both are seen moving from the start. Null for an
+ * empty matrix or one with no number in it.
+ */
+export function bestCell(values: ArrayLike<number>, columns: number): { row: number; column: number } | null {
+	let best = -1;
+	for (let k = 0; k < values.length; k++) {
+		if (Number.isFinite(values[k]) && (best < 0 || values[k] > values[best])) best = k;
+	}
+	return best < 0 || columns < 1 ? null : { row: Math.floor(best / columns), column: best % columns };
+}

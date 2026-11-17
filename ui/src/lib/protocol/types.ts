@@ -245,6 +245,12 @@ export interface Shape3DView {
 	overlays?: Mode[];
 	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
 	overlay_phase?: Float32Array;
+	/**
+	 * The mesh the overlays move when they are a second geometry's shapes, whose nodes follow the
+	 * first's in `nodes`; `triangles` and `lines` are then the first geometry's alone.
+	 */
+	overlay_triangles?: Uint32Array;
+	overlay_lines?: Uint32Array;
 	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
 	paired?: boolean;
 	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
@@ -727,8 +733,6 @@ export interface ShowPrefs {
 	sine_reading: 'curves' | 'bars';
 	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
 	bars: boolean;
-	/** A picked MAC pair animated overlaid, the second mode phase-aligned. The shell's own; not sent. */
-	overlay: boolean;
 }
 
 /** `project.children`: what an object opens into in the tree, by what it is. */

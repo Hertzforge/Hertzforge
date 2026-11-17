@@ -10,8 +10,7 @@ import {
 	pairOf,
 	pairsText,
 	PLINTH,
-	togglePick
-} from './macBars';
+	togglePick, bestCell } from './macBars';
 
 describe('bar heights', () => {
 	it('stand a full MAC at 0.4 of the larger side and a zero on a plinth', () => {
@@ -69,5 +68,19 @@ describe('picking squares', () => {
 		expect(togglePick([a, b], b, true)).toEqual({ picks: [a], active: a });
 		expect(togglePick([a], a, true)).toEqual({ picks: [], active: null });
 		expect(pairsText([a, b])).toBe('1,1; 2,3');
+	});
+});
+
+describe('the pair a stage of two geometries starts on', () => {
+	it('is the cell with the largest value', () => {
+		// 2 rows by 3 columns
+		expect(bestCell([0.1, 0.2, 0.05, 0.3, 0.97, 0.4], 3)).toEqual({ row: 1, column: 1 });
+		expect(bestCell(new Float32Array([0.9, 0.1]), 2)).toEqual({ row: 0, column: 0 });
+		expect(bestCell([NaN, 0.2], 2)).toEqual({ row: 0, column: 1 });
+	});
+
+	it('is none for a matrix with nothing in it', () => {
+		expect(bestCell([], 3)).toBeNull();
+		expect(bestCell([NaN, NaN], 2)).toBeNull();
 	});
 });

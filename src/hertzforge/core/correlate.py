@@ -41,6 +41,58 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .shapes import ShapeSet
 
 
+def partial_nodes(shapes: ShapeSet) -> int:
+    """How many of a shape set's nodes it holds in fewer than three
+    translation directions: the nodes a uni-axial or a bi-axial sensor
+    measured. A rotation, and a DOF at no node (a modal coordinate), is
+    not counted."""
+    axes: dict[str, set[str]] = {}
+    for dof in shapes.coordinate:
+        text = str(dof).strip().upper()
+        node = text[:len(text) - len(text.lstrip('0123456789'))]
+        direction = text[len(node):]
+        if node and direction[:1] in ('X', 'Y', 'Z'):
+            axes.setdefault(node, set()).add(direction[0])
+    return sum(1 for held in axes.values() if len(held) < 3)
+
+
+def projection_order(first: ShapeSet, second: ShapeSet) -> tuple[bool, str]:
+    """Which of two shape sets on two geometries is projected onto the
+    other's DOFs before they are compared: (whether it is the first that
+    is projected, why).
+
+    A projection samples one set's whole motion at the other's DOFs, so
+    the set projected has to have that whole motion to give. A node
+    measured along one axis does not: projected onto three directions,
+    what it did not measure is taken as no motion at all, and the other
+    set's motion there counts against the match. On a plate with twelve
+    uni-axial nodes of twenty-eight, two modes that match at 1.000 and
+    0.983 the right way read 0.448 and 0.264 the wrong way (Brandon,
+    2026-11-16).
+
+    So the set with nodes measured in fewer than three directions
+    (`partial_nodes`) is the one projected onto. When neither has any,
+    or both have, the set with more DOFs is projected onto the one with
+    fewer (the second onto the first when they have as many); with
+    partial nodes in both, neither way is exact, and the reason says so.
+    """
+    ours, theirs = partial_nodes(first), partial_nodes(second)
+
+    def nodes(count: int) -> str:
+        return (f'{count} node{"s" * (count != 1)} measured in fewer than three '
+                'directions')
+
+    if theirs and not ours:
+        return True, f'it has {nodes(theirs)}'
+    if ours and not theirs:
+        return False, f'it has {nodes(ours)}'
+    onto_second = len(second.coordinate) < len(first.coordinate)
+    if ours and theirs:
+        return onto_second, ('both have nodes measured in fewer than three directions, so '
+                             'neither way is exact; it has the fewer DOFs')
+    return onto_second, 'it has the fewer DOFs'
+
+
 def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
                    test_shapes: ShapeSet, test_geometry: Geometry,
                    tolerance: float = 0.02
@@ -70,7 +122,7 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     either has no nodes, when none of the test DOFs are translations
     on the test geometry, or when no test node is matched.
     """
-    from ..deform import dof_directions, node_displacements
+    from ..deform import dof_directions
     from ..drawing.viz.geometry import display_points
     from ..units import SYSTEMS
     from .shapes import ShapeSet
@@ -135,10 +187,17 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     complex_shapes = np.iscomplexobj(fem_shapes.shape_matrix)
     values = np.empty((fem_shapes.num_shapes, len(keep)),
                       dtype=np.complex128 if complex_shapes else np.float64)
+    # the model's DOFs are parsed once for every mode: parsed per mode,
+    # 38 modes of a 350,000-DOF model took 23 s where this takes one
+    model_rows, model_directions, model_used = dof_directions(
+        fem_geometry, fem_shapes.coordinate)
     for m in range(fem_shapes.num_shapes):
-        displacement = node_displacements(
-            fem_geometry, fem_shapes.coordinate,
-            fem_shapes.shape_matrix[m])
+        displacement = np.zeros((fem_geometry.num_nodes, 3),
+                                dtype=values.dtype)
+        if len(model_rows):
+            moved = np.asarray(fem_shapes.shape_matrix[m])[model_used]
+            np.add.at(displacement, model_rows,
+                      model_directions * moved[:, np.newaxis])
         sampled = displacement[fem_rows]
         if not complex_shapes:
             sampled = sampled.real
