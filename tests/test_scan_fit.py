@@ -256,7 +256,7 @@ def test_features_are_grouped_into_sensors_in_file_order():
         ('12', 'uniaxial', True), ('31', 'triax', True), ('9', 'uniaxial', False)]
     np.testing.assert_allclose(fits[1].center(side), center, atol=1e-9)
     np.testing.assert_allclose(fits[0].center(height), can_center, atol=1e-8)
-    assert 'one flat top; this sensor has 0' in fits[2].flags[0].text
+    assert 'one flat face, its top or its bottom; this sensor has 0' in fits[2].flags[0].text
     assert len(notes) == 2
     assert notes[0].startswith('datum is not named') and 'repeats a label' in notes[1]
 
@@ -329,8 +329,8 @@ def test_tops_named_for_each_others_sensor_are_said_to_look_exchanged():
     fits, _notes = fit_sensors({'11_c': side_a, '11_3': top_b, '12_c': side_b, '12_3': top_a})
     assert [fit.placed for fit in fits] == [False, False]
     said = [[flag.text for flag in fit.flags] for fit in fits]
-    assert "its top is on sensor 12's cylinder: 11_3 and 12_3 look exchanged" in said[0]
-    assert "its top is on sensor 11's cylinder: 12_3 and 11_3 look exchanged" in said[1]
+    assert "its flat face is on sensor 12's cylinder: 11_3 and 12_3 look exchanged" in said[0]
+    assert "its flat face is on sensor 11's cylinder: 12_3 and 11_3 look exchanged" in said[1]
     # named right, neither says it
     fits, _notes = fit_sensors({'11_c': side_a, '11_3': top_a, '12_c': side_b, '12_3': top_b})
     assert all(fit.placed and not fit.flags for fit in fits)

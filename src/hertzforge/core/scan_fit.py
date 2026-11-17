@@ -447,7 +447,7 @@ def fit_uniaxial(sensor: str, side: np.ndarray, top: np.ndarray, label: str = '3
     side = np.asarray(side, dtype=float).reshape(-1, 3)
     top = np.asarray(top, dtype=float).reshape(-1, 3)
     if len(top) < 3:
-        fit.flags.append(Flag('error', f'the top has {len(top)} points; a plane needs three'))
+        fit.flags.append(Flag('error', f'the flat face has {len(top)} points; a plane needs three'))
     if len(side) < 5:
         fit.flags.append(Flag('error', f'the side has {len(side)} points; a cylinder needs '
                                        'five'))
@@ -461,25 +461,25 @@ def fit_uniaxial(sensor: str, side: np.ndarray, top: np.ndarray, label: str = '3
     fit.planes[label] = plane
     fit.cylinder = cylinder
     fit.extent = 2.0 * cylinder.radius
-    fit.flags += _length_flags('the top', plane.rms, PLANE_RMS, meters)
+    fit.flags += _length_flags('the flat face', plane.rms, PLANE_RMS, meters)
     fit.flags += _length_flags('the side', cylinder.rms, CYLINDER_RMS, meters)
     lean = _angle(axis, normal)
     fit.moved = lean
     if lean > TOP_ANGLE:
-        fit.flags.append(Flag('warn', f'the top is {lean:.1f} degrees from square to the side'))
+        fit.flags.append(Flag('warn', f'the flat face is {lean:.1f} degrees from square to the side'))
     if cylinder.arc < ARC:
         fit.flags.append(Flag('warn', f'the side was measured over {cylinder.arc:.0f} degrees '
                                       'of its circumference, which fixes its diameter poorly'))
     off_axis = float(np.linalg.norm(_radial(plane.point[np.newaxis], cylinder.point, axis)))
     if off_axis > cylinder.radius:
-        fit.flags.append(Flag('error', 'the top is not on this cylinder: its points are '
+        fit.flags.append(Flag('error', 'the flat face is not on this cylinder: its points are '
                                        f'{off_axis / cylinder.radius:.1f} radii from the axis'))
         return fit
     height = float((plane.point - cylinder.point) @ axis)
     _low, high = (cylinder.span if cylinder.axis @ normal >= 0
                  else (-cylinder.span[1], -cylinder.span[0]))
     if height < high:
-        fit.flags.append(Flag('warn', 'the top is not past the end of the measured side, so it '
+        fit.flags.append(Flag('warn', 'the flat face is not past the end of the measured side, so it '
                                       'may be another surface'))
     # where the axis meets the top
     reach = ((plane.point - cylinder.point) @ normal) / (axis @ normal)
@@ -682,7 +682,7 @@ def fit_sensors(features: Mapping[str, np.ndarray], meters: float | None = None
         tops = [label for label in held if label != CYLINDER_LABEL]
         if len(tops) != 1:
             fit = SensorFit(sensor, 'uniaxial')
-            fit.flags.append(Flag('error', 'a cylinder needs one flat top; this sensor has '
+            fit.flags.append(Flag('error', 'a cylinder needs one flat face, its top or its bottom; this sensor has '
                                            f'{len(tops)}'))
             fits.append(fit)
             continue
@@ -706,7 +706,7 @@ def _name_exchanged_tops(fits: Sequence[SensorFit]) -> None:
                                                 other.cylinder.axis)))
             if away <= other.cylinder.radius:
                 theirs = next(iter(other.planes))
-                fit.flags.append(Flag('warn', f'its top is on sensor {other.sensor}\'s cylinder: '
+                fit.flags.append(Flag('warn', f'its flat face is on sensor {other.sensor}\'s cylinder: '
                                               f'{fit.sensor}_{label} and {other.sensor}_{theirs} '
                                               'look exchanged'))
                 break

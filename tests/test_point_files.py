@@ -162,3 +162,17 @@ def test_a_universal_file_takes_the_points_as_nodes(tmp_path):
     back = back if isinstance(back, Geometry) else next(
         obj for obj in back.values() if isinstance(obj, Geometry))
     assert back.num_nodes == 5 and not len(back.elem_conn)
+
+
+def test_a_table_that_names_no_unit_says_so_and_is_left_undefined(tmp_path):
+    """A file may be written in another unit system: the unit is taken
+    only when the file states it."""
+    path = _write(tmp_path, 'probed.csv', TABLE.replace('Length Units,Millimeters,,,,\r\n', ''))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        geometry = point_files.load_table(path)
+    said = [str(w.message) for w in caught if issubclass(w.category, ImportNote)]
+    assert said == [('probed.csv: the file names no length unit, so the coordinates are left '
+                    'as they are until a unit is declared')]
+    assert geometry.length_unit is None
+    np.testing.assert_allclose(geometry.node_xyz[0], [10.0, 0.0, 5.0])

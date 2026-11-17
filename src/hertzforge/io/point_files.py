@@ -164,7 +164,10 @@ def load_table(path: str | os.PathLike, length_unit: str | None = None) -> Geome
             _note(f'{base}: {name} says {stated} points and holds {found}')
     named = header.pop('Length Units', '')
     unit = length_unit or LENGTH_UNITS.get(named.lower())
-    if unit is None:
+    if unit is None and not named:
+        _note(f'{base}: the file names no length unit, so the coordinates are left as they '
+              'are until a unit is declared')
+    elif unit is None:
         _note(f'{base}: the length unit {named!r} is not one Hertzforge knows, so the '
               'coordinates are left as they are until a unit is declared')
     return points_geometry(table[:, 3:6], length_unit=unit, features=names,
