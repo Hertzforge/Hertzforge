@@ -135,6 +135,9 @@ ELEMENT_TYPES = {
     203: ('measured_point', 1, 'point'),
 }
 
+#: the element type of a point measured on the part (`io.point_files`)
+MEASURED_POINT = 203
+
 #: the element families the tree lists under a geometry (Brandon,
 #: 2026-09-30: one sub-item per element type, element groups under each), in
 #: listing order, with how each is told apart: drawn shape, then the
