@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+import { gizmoReading, gridStep, stillFramed, idList, markedBy, markedRun, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
 
 describe('nearestNode', () => {
 	const screen = [0, 0, 10, 0, 100, 100];
@@ -75,5 +75,42 @@ describe('a kept camera frames a model of about the same size', () => {
 		expect(stillFramed(0.87, 1.66)).toBe(false);
 		expect(stillFramed(1.66, 0.87)).toBe(false);
 		expect(stillFramed(0, 1)).toBe(false);
+	});
+});
+
+describe('nodes marked by a click', () => {
+	it('marks the one clicked, and with a modifier puts it in or takes it out', () => {
+
+		expect(markedBy([4, 7], 9, false)).toEqual([9]);
+		expect(markedBy([4, 7], 9, true)).toEqual([4, 7, 9]);
+		expect(markedBy([4, 7], 7, true)).toEqual([4]);
+	});
+
+	it('clears on a click on nothing, unless a modifier is held', () => {
+
+		expect(markedBy([4, 7], null, false)).toEqual([]);
+		expect(markedBy([4, 7], null, true)).toEqual([4, 7]);
+	});
+
+	it('marks the run between two rows of the tree, either way round', () => {
+
+		expect(markedRun([1, 2, 5, 8, 9], 8, 2)).toEqual([2, 5, 8]);
+		expect(markedRun([1, 2, 5, 8, 9], 2, 8)).toEqual([2, 5, 8]);
+		expect(markedRun([1, 2, 5], 77, 2)).toEqual([2]);
+	});
+});
+
+describe('node numbers', () => {
+	it('numbers the nodes in the picture and in front of the camera', () => {
+
+		const screen = [10, 10, 500, 10, 20, 20, 30, 300];
+		expect(numbered(screen, [true, true, false, true], 4, 100, 100)).toEqual([0]);
+	});
+
+	it('writes none when more are in the picture than can be read', () => {
+
+		const screen = [10, 10, 20, 20, 30, 30];
+		expect(numbered(screen, [true, true, true], 3, 100, 100, 2)).toBeNull();
+		expect(numbered(screen, [true, true, true], 3, 100, 100, 3)).toEqual([0, 1, 2]);
 	});
 });

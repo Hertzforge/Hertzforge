@@ -141,3 +141,43 @@ export function gridStep(unit: string): number | null {
 	if (meters === undefined) return null;
 	return (unit === 'in' || unit === 'ft' ? 0.00254 : 0.01) / meters;
 }
+
+/**
+ * The nodes marked after a click on node `id` (null for a click on nothing): the one clicked, or,
+ * with `add` (Cmd, Ctrl or Shift held), the ones marked with it put in or taken out. A click on
+ * nothing clears them, and with `add` leaves them.
+ */
+export function markedBy(ids: readonly number[], id: number | null, add: boolean): number[] {
+	if (id === null) return add ? [...ids] : [];
+	if (!add) return [id];
+	return ids.includes(id) ? ids.filter((n) => n !== id) : [...ids, id];
+}
+
+/** The ids in `order` from `from` through `to`, whichever comes first; `to` alone when either is not there. */
+export function markedRun(order: readonly number[], from: number, to: number): number[] {
+	const a = order.indexOf(from);
+	const b = order.indexOf(to);
+	if (a < 0 || b < 0) return [to];
+	return order.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+/** Past this many nodes in the picture their numbers are not written: they would cover the model and each other. */
+export const NUMBER_LIMIT = 800;
+
+/**
+ * Where each node's number is written: the nodes of the first `count` that are in the picture
+ * (`screen` x and y a node, `visible` in front of the camera) of `width` by `height`, as their
+ * rows; null when more than `limit` are, which is too many to read.
+ */
+export function numbered(screen: ArrayLike<number>, visible: ArrayLike<boolean>, count: number, width: number, height: number, limit = NUMBER_LIMIT): number[] | null {
+	const rows: number[] = [];
+	for (let n = 0; n < count; n++) {
+		if (!visible[n]) continue;
+		const x = screen[2 * n];
+		const y = screen[2 * n + 1];
+		if (x < 0 || x > width || y < 0 || y > height) continue;
+		if (rows.length === limit) return null;
+		rows.push(n);
+	}
+	return rows;
+}

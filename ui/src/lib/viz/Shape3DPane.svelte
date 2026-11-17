@@ -83,7 +83,8 @@
 	import { playheadGroup, playheads } from './cursor';
 	import { advance, movedNodes, NORMAL_SPEED, sampleAt, sampleCount, SPEEDS, writeFrame } from './motion';
 	import { alignedShape, followed, nodeTravel } from './shape';
-	import { gizmoReading, gridStep, stillFramed, idList, modelPlane, nearestNode, placedPoint, toggledSurface } from './pick';
+	import { gizmoReading, gridStep, stillFramed, idList, markedBy, modelPlane, nearestNode, numbered, placedPoint, toggledSurface } from './pick';
+	import { mark, marked } from './marks.svelte';
 	import { formatCount, formatFixed, formatNumber } from './format';
 	import { linearColors, span as pointSpan } from './points';
 	import { splitOnFaces } from './edges';
@@ -315,6 +316,48 @@
 			// no storage: the choice lasts as long as the pane
 		}
 	}
+	/** Each node's number written beside it; kept across views and launches. */
+	const NUMBERS_KEY = 'hertzforge.shape3d.nodeNumbers';
+	let nodeNumbers = $state(readNodeNumbers());
+	function readNodeNumbers(): boolean {
+		try {
+			return localStorage.getItem(NUMBERS_KEY) === '1';
+		} catch {
+			return false;
+		}
+	}
+	/** The numbers turned off on a view of the nodes themselves, where they are written unasked. */
+	let numbersHidden = $state(false);
+	/** Written on the nodes' own views (the Nodes row picked, their table open) without being asked for; elsewhere when turned on. */
+	const numbersShown = $derived(view.marks ? !numbersHidden : nodeNumbers);
+	function toggleNodeNumbers() {
+		dirty = true;
+		if (view.marks) {
+			numbersHidden = !numbersHidden;
+			return;
+		}
+		nodeNumbers = !nodeNumbers;
+		try {
+			localStorage.setItem(NUMBERS_KEY, nodeNumbers ? '1' : '0');
+		} catch {
+			// no storage: the choice lasts as long as the pane
+		}
+	}
+	/** The node numbers over the canvas, redrawn each frame the view moves. */
+	let numbersSvg: SVGSVGElement;
+	/** More nodes are in the picture than numbers can be read on: said in place of them. */
+	let tooManyNumbers = $state(false);
+	/** The nodes a click marks, with the table and the tree of the same link: the link, or null. */
+	const marking = $derived(view.marks && view.node_ids ? view.marks.link : null);
+	/** Each marked node's row in `view.nodes`. */
+	const markedRows = $derived.by(() => {
+		const ids = marking ? marked(marking) : [];
+		if (!ids.length || !view.node_ids) return [];
+		const wanted = new Set(ids);
+		const rows: number[] = [];
+		for (let r = 0; r < view.node_ids.length; r++) if (wanted.has(view.node_ids[r])) rows.push(r);
+		return rows;
+	});
 	/** The DOF labels over the canvas, redrawn each frame the view moves. */
 	let labelsSvg: SVGSVGElement;
 	/** Where each label sits in the model: its arrow's free end, a little past it. */
@@ -964,7 +1007,7 @@
 			otherOn = layer(start, held, 9, 0.9);
 			otherOff = layer(start + held, notHeld, 8, 0.3);
 		}
-		if (view.pick?.target === 'nodes') {
+		if (view.pick?.target === 'nodes' || (view.marks && view.node_ids)) {
 			markGeometry = new BufferGeometry();
 			markGeometry.setAttribute('position', new BufferAttribute(new Float32Array(0), 3));
 			marks = new Points(markGeometry, plain(new PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false })));
@@ -1099,6 +1142,44 @@
 		}
 		labelsSvg.innerHTML = drawn;
 	}
+	/** Past this many nodes the numbers are not offered: every node is projected on each frame the view moves. */
+	const NUMBERED_MODEL = 300_000;
+	/** Write each node's number beside it, on the nodes in the picture; nothing while they are off or too many. */
+	function updateNumbers() {
+		if (!numbersSvg) return;
+		const ids = view.node_ids;
+		const all = numbersShown && !!ids && ids.length <= NUMBERED_MODEL;
+		const under = marking && hoverNode !== null && ids && hoverNode < ids.length ? hoverNode : null;
+		if (!ids || (!all && under === null)) {
+			if (numbersSvg.firstChild) numbersSvg.replaceChildren();
+			if (tooManyNumbers) tooManyNumbers = false;
+			return;
+		}
+		const w = Math.max(1, canvasHost.clientWidth);
+		const h = Math.max(1, canvasHost.clientHeight);
+		const place = (n: number): [number, number, boolean] => {
+			corner.set(view.nodes[3 * n], view.nodes[3 * n + 1], view.nodes[3 * n + 2]).project(camera);
+			return [((corner.x + 1) / 2) * w, ((1 - corner.y) / 2) * h, corner.z > -1 && corner.z < 1];
+		};
+		let drawn = '';
+		let rows: number[] | null = [];
+		if (all) {
+			const count = ids.length;
+			const screen = new Float32Array(2 * count);
+			const visible = new Array<boolean>(count);
+			for (let n = 0; n < count; n++) [screen[2 * n], screen[2 * n + 1], visible[n]] = place(n);
+			rows = numbered(screen, visible, count, w, h);
+			for (const n of rows ?? []) if (n !== under) drawn += `<text x="${(screen[2 * n] + 5).toFixed(1)}" y="${(screen[2 * n + 1] - 5).toFixed(1)}">${ids[n]}</text>`;
+		}
+		if (tooManyNumbers !== (rows === null)) tooManyNumbers = rows === null;
+		if (under !== null) {
+			// the node under the pointer, whatever else is written
+			const [x, y] = place(under);
+			drawn += `<text class="under" x="${(x + 6).toFixed(1)}" y="${(y - 6).toFixed(1)}">${ids[under]}</text>`;
+		}
+		numbersSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+		numbersSvg.innerHTML = drawn;
+	}
 	const escapeText = (text: string) => text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
 
 	function updateAxes() {
@@ -1172,6 +1253,7 @@
 		updateTriad();
 		updateAxes();
 		updateLabels();
+		updateNumbers();
 		frames++;
 		if (now - fpsWindowStart >= 500) {
 			fps = playing ? Math.round((frames * 1000) / (now - fpsWindowStart)) : fps;
@@ -1349,7 +1431,7 @@
 	// The picked nodes and the one under the cursor, as marks on the model.
 	$effect(() => {
 		if (!renderer || !markGeometry) return;
-		const rows = hoverNode !== null && !picked.includes(hoverNode) ? [...picked, hoverNode] : picked;
+		const rows = [...new Set([...markedRows, ...picked, ...(hoverNode !== null ? [hoverNode] : [])])];
 		const xyz = new Float32Array(3 * rows.length);
 		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
 		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
@@ -1396,9 +1478,17 @@
 		picked = [];
 	}
 
-	function click(x: number, y: number) {
+	function click(x: number, y: number, add = false) {
 		const p = pick;
-		if (!p || !renderer) return;
+		if (!renderer) return;
+		if (!p) {
+			// no click of the view's own: it marks the node, with the table and the tree
+			if (!marking || !view.node_ids) return;
+			const row = nodeAt(x, y, view.node_ids.length);
+			const ids = markedBy(marked(marking), row === null ? null : view.node_ids[row], add);
+			mark(marking, ids, row !== null && ids.length === 1 ? row : undefined);
+			return;
+		}
 		if (p.target === 'nodes') {
 			const row = nodeAt(x, y);
 			if (row === null) return;
@@ -1446,7 +1536,7 @@
 		pressedAt = null;
 		if (!start || e.button !== 0) return;
 		const [x, y] = at(e);
-		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y);
+		if (Math.hypot(x - start[0], y - start[1]) <= CLICK_SLOP) click(x, y, e.metaKey || e.ctrlKey || e.shiftKey);
 	}
 
 	function onPointerMove(e: PointerEvent) {
@@ -1462,7 +1552,9 @@
 		const [x, y] = at(e);
 		requestAnimationFrame(() => {
 			hoverPending = false;
-			hovered = nodeAt(x, y, nodeCount);
+			hovered = nodeAt(x, y, Math.min(nodeCount, view.node_ids?.length ?? nodeCount));
+			// on the nodes' own views the one a click would mark is ringed and numbered
+			if (marking) hoverNode = hovered;
 		});
 	}
 
@@ -1495,6 +1587,7 @@
 		else if (e.key === 'ArrowUp' && view.modes.length > 1) step(-1);
 		else if (e.key === 'Enter' && pick?.target === 'nodes') commitNodes();
 		else if (e.key === 'Escape' && picked.length) picked = [];
+		else if (e.key === 'Escape' && marking && marked(marking).length) mark(marking, []);
 		else return;
 		e.preventDefault();
 	}
@@ -1527,6 +1620,8 @@
 	>
 		<svg class="axes" bind:this={axesSvg} data-testid="shape3d-axes" aria-hidden="true"></svg>
 		<svg class="axes doflabels" bind:this={labelsSvg} data-testid="shape3d-dof-labels" aria-hidden="true"></svg>
+		<svg class="axes doflabels numbers" bind:this={numbersSvg} data-testid="shape3d-node-numbers" aria-hidden="true"></svg>
+		{#if tooManyNumbers}<span class="toomany" data-testid="shape3d-numbers-zoom">Zoom in to read the node numbers</span>{/if}
 	</div>
 
 	{#if view.gizmo && ongizmo}
@@ -1600,6 +1695,9 @@
 			<button class="btn sm toggle" data-testid="shape3d-color" class:on={colored} aria-pressed={colored} onclick={() => (colored = !colored)} title="Color by deflection">Color</button>
 			{/if}
 			<button class="btn sm toggle" data-testid="shape3d-bounds" class:on={bounds} aria-pressed={bounds} onclick={() => (bounds = !bounds)} title="Plot axes: a box at the model's bounds, one edge per axis ticked and titled">Axes</button>
+			{#if view.node_ids && view.node_ids.length <= NUMBERED_MODEL}
+				<button class="btn sm toggle" data-testid="shape3d-node-numbers-toggle" class:on={numbersShown} aria-pressed={numbersShown} onclick={toggleNodeNumbers} title="Node numbers: each node's number beside it, once few enough are in the picture to read">Node Numbers</button>
+			{/if}
 			{#if view.arrows?.labels.length}
 				<button class="btn sm toggle" data-testid="shape3d-dof-labels-toggle" class:on={dofLabels} aria-pressed={dofLabels} onclick={toggleDofLabels} title="DOF labels: each arrow's DOF written at its free end">DOF Labels</button>
 			{/if}
@@ -1769,6 +1867,30 @@
 		stroke: var(--bg-1);
 		stroke-width: 3px;
 		stroke-linejoin: round;
+	}
+
+	.toomany {
+		position: absolute;
+		bottom: 8px;
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 2px 8px;
+		border-radius: 4px;
+		background: var(--bg-1);
+		color: var(--text-2);
+		font-size: 11px;
+		pointer-events: none;
+	}
+
+	.numbers :global(text) {
+		font-weight: 500;
+		text-anchor: start;
+	}
+
+	.numbers :global(text.under) {
+		fill: var(--blue-2);
+		font-size: 13px;
+		font-weight: 700;
 	}
 
 	.axes :global(text.title) {

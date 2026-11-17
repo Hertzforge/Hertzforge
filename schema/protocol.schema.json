@@ -276,6 +276,10 @@
             "to_si": {"type": "number"}
           }
         },
+        "marks": {
+          "type": "object", "required": ["link"], "additionalProperties": false,
+          "properties": {"link": {"type": "string"}}
+        },
         "pick": {
           "type": "object", "required": ["op", "params", "target", "hint"],
           "properties": {
@@ -492,6 +496,10 @@
           "type": "object", "required": ["method", "params"], "additionalProperties": false,
           "properties": {"method": {"type": "string"}, "params": {"type": "object"}}
         },
+        "marks": {
+          "type": "object", "required": ["link", "column"], "additionalProperties": false,
+          "properties": {"link": {"type": "string"}, "column": {"type": "integer", "minimum": 0}}
+        },
         "select": {
           "type": "object", "required": ["op", "params", "param", "column"], "additionalProperties": false,
           "properties": {
@@ -584,7 +592,8 @@
       "oneOf": [
         {"properties": {"kind": {"const": "geometry"},
           "parts": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],
-            "properties": {"id": {"enum": ["nodes", "coordinate_systems"]}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0}}}},
+            "properties": {"id": {"enum": ["nodes", "coordinate_systems"]}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0},
+              "ids": {"type": "array", "items": {"type": "integer"}}}}},
           "families": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count", "groups"],
             "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "count": {"type": "integer", "minimum": 0},
               "groups": {"type": "array", "items": {"type": "object", "required": ["id", "label", "count"],

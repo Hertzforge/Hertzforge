@@ -44,6 +44,10 @@ def test_a_geometry_opens_into_its_parts_and_families(plate, validate):
     parts = {p['id']: p['count'] for p in held['parts']}
     assert parts == {'nodes': len(geometry.node_id),
                      'coordinate_systems': len(geometry.cs_id)}
+    # the Nodes row lists its nodes when opened, the first of a large model's
+    listed = {p['id']: p.get('ids') for p in held['parts']}
+    assert listed['nodes'] == [int(n) for n in geometry.node_id[:tree.LISTED_NODES]]
+    assert listed['coordinate_systems'] is None
     families = {f['id']: f for f in held['families']}
     # the six always, and points too: a ground starts from one
     assert set(families) >= {'beams', 'triangles', 'quads', 'tetras', 'wedges', 'hexes', 'points'}

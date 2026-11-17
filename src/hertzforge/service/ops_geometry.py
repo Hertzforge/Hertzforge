@@ -80,8 +80,10 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     # the nodes no line or face is drawn through, as points, so a geometry of measured
     # points shows while its coordinate system is moved or one of its groups is picked
     points, _note = scans.layers(geometry)
+    # the first rows are the geometry's own nodes, so their ids caption and number them
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
-                     triangles=triangles, lines=lines, **({'points': points} if points else {}))
+                     triangles=triangles, lines=lines, node_ids=np.asarray(geometry.node_id),
+                     **({'points': points} if points else {}))
 
 
 def _solid_surfaces(geometry: Any) -> np.ndarray:
@@ -166,6 +168,23 @@ def _number(value: Any) -> str:
 #: asks for the rest as they scroll into view (`project.entity_rows`): a million elements
 #: whole took 2 s to write and 80 MB to send (2026-11-10)
 PAGE_ROWS = 1000
+
+
+def node_link(name: str) -> str:
+    """What ties the views of one geometry's nodes: a node marked in one (a row of the
+    table, a click in the 3-D view, a row of the tree) is marked in the others.
+
+    Parameters
+    ----------
+    name : str
+        The geometry's name in the project.
+
+    Returns
+    -------
+    str
+        The link the views carry as `marks.link`.
+    """
+    return f'nodes:{name}'
 
 
 def picked_rows(geometry: Any, kind: str, family: str = '', groups: str = '') -> np.ndarray | None:
@@ -261,6 +280,9 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
         edit['remove'] = {'op': 'project.delete_entities',
                           'params': {'geometry': name, 'kind': kind}, 'column': 0}
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
+    if name is not None and kind == 'nodes':
+        # its rows and the nodes of the view beside it are marked together
+        table['marks'] = {'link': node_link(name), 'column': 0}
     if name is not None and kind == 'coordinate_systems':
         # the row picked is the system the arrows and rings in the view are on
         table['select'] = {'op': 'project.view_entities',
@@ -317,6 +339,8 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     # (Brandon, 2026-11-17)
     if pick is not None and (adds or kind not in ('nodes', 'coordinate_systems')):
         drawn['pick'] = pick
+    if kind == 'nodes':
+        drawn['marks'] = {'link': node_link(name)}
     return [drawn, entity_table(geometry, kind, title, name, **part)]
 
 
@@ -335,6 +359,8 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
         drawn['frames'] = frames(geometry, drawn['nodes'])
     if where == 'group':
         _mark_points(drawn, geometry, picked_ids(part))
+    if where == 'part:nodes':
+        drawn['marks'] = {'link': node_link(name)}
     return [drawn]
 
 
