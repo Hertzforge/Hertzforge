@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from hertzforge.service import projects
+from hertzforge.service.protocol import ProtocolError
 
 from .conftest import wire_views
 
@@ -189,3 +190,50 @@ def test_the_projection_goes_onto_the_uniaxial_set_whichever_is_picked_first(sta
     assert matrix['rows']['label'] == 'Test Shapes'
     assert matrix['columns']['label'] == 'FEM Shapes, projected'
     assert len(stage['nodes']) == test_nodes
+
+
+@pytest.fixture
+def apart():
+    """The two sets with the test geometry moved well off the model."""
+    from test_correlate import _fem, _test_model
+
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    reach = float(np.ptp(np.asarray(fem_geometry.node_xyz), axis=0).max())
+    test_geometry.node_xyz = np.asarray(test_geometry.node_xyz) + [0.0, 0.0, 0.3 * reach]
+    held = projects.new({'title': 'Apart'})
+    project = held.project
+    project.add('FEM Geometry', fem_geometry)
+    project.add('FEM Shapes', fem_shapes)
+    project.add('Test Geometry', test_geometry)
+    project.add('Test Shapes', test_shapes)
+    project.link('FEM Geometry', 'FEM Shapes')
+    project.link('Test Geometry', 'Test Shapes')
+    return held
+
+
+def test_the_match_tolerance_is_the_comparisons_own(apart, validate):
+    # at 2 % nothing matches: said beside the tolerance, with how far off the nearest is
+    out = shown(apart, 'FEM Shapes', 'Test Shapes', validate=validate)
+    (reading,) = out['views']
+    assert reading['view'] == 'reading' and 'No node' in reading['title']
+    rows = {row['label']: row for row in reading['rows']}
+    assert rows['Nodes matched']['value'].startswith('0 of ')
+    assert rows['Worst distance']['value'] > rows['Match limit']['value'] > 0
+    assert 'no test node has a FEM node within the match tolerance: the nearest is' in out['note']
+    assert out['offers']['projection'] is True, 'the tolerance is offered with it'
+    # loosened, the MAC is made, and the limit shown is the looser one
+    loose = shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_tolerance': 100.0},
+                  validate=validate)
+    assert loose['views'][0]['view'] == 'matrix'
+    limit = {row['label']: row for row in loose['views'][2]['rows']}['Match limit']['value']
+    assert limit > rows['Match limit']['value']
+    # and the animated projection takes the same tolerance
+    moving = shown(apart, 'FEM Shapes', 'Test Shapes',
+                   prefs={'match_tolerance': 100.0, 'projection': True}, validate=validate)
+    assert any(view['view'] == 'shape3d' for view in moving['views'])
+    still = shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'projection': True})
+    assert 'No node' in still['views'][0]['title']
+    for bad in (0, -1, 150, '2', True):
+        with pytest.raises(ProtocolError, match='"match_tolerance"'):
+            shown(apart, 'FEM Shapes', 'Test Shapes', prefs={'match_tolerance': bad})
