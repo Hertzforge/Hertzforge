@@ -1,7 +1,7 @@
 """The words and modules of the action table, in one place to edit.
 
 Every operation's title stays for its form and the palette; `VERBS` is what
-its row in the table says, in two words at most, since the table's column
+its row in the table says, in a few words, since the table's column
 already says what it acts on. `HIDDEN` lists the operations that have no
 row: what a selection draws by itself (a default row names it), a cell typed
 into a table, or an act the table offers as its own row.
@@ -69,8 +69,10 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'add_element_group': 'Add Group', 'delete_entities': 'Delete Picks',
     'rotate_coordinate_system': 'Rotate', 'slide_coordinate_system': 'Slide',
     'reset_rotation': 'Reset Rotation', 'sensors': 'Sensors',
-    'work_up_sysid': 'Work Up', 'work_up_random': 'Work Up', 'work_up_shock': 'Work Up',
-    'work_up_transient': 'Work Up', 'work_up_sine': 'Work Up', 'work_up_modal': 'Work Up',
+    # one row per kind of test in the one analysis module, so each says which
+    'work_up_sysid': 'Work Up System ID', 'work_up_random': 'Work Up Random',
+    'work_up_shock': 'Work Up Shock', 'work_up_transient': 'Work Up Transient',
+    'work_up_sine': 'Work Up Sine', 'work_up_modal': 'Work Up Modal',
     'set_channel_role': 'Channel Role', 'rename_dof': 'Rename DOF',
     'set_control': 'Set Control', 'place': 'Place', 'set_role': 'Group Role',
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',

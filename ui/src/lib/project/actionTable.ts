@@ -5,7 +5,7 @@
  * what the picked part of a geometry offers, then the rest; combination columns follow by the
  * tree's order of kinds, with "any object" last, and one with nothing to run is not shown.
  */
-import { offeredIn } from '$lib/app/workspaces';
+import { moduleOf, offeredIn } from '$lib/app/workspaces';
 import type { ActionColumn, ActionRow, ActionTable, Workspace } from '$lib/protocol/types';
 import { kindRank } from './icons';
 
@@ -47,8 +47,9 @@ export function moreIn(table: ActionTable, module: Workspace): { module: Workspa
 	for (const column of table.columns) {
 		if (!column.current) continue;
 		for (const row of column.rows) {
-			if (!row.ready || !row.modules || row.modules.includes(module)) continue;
-			counts.set(row.modules[0], (counts.get(row.modules[0]) ?? 0) + 1);
+			if (!row.ready || !row.modules || offeredIn(row, module)) continue;
+			const home = moduleOf(row.modules[0]);
+			counts.set(home, (counts.get(home) ?? 0) + 1);
 		}
 	}
 	return [...counts].map(([home, count]) => ({ module: home, count }));

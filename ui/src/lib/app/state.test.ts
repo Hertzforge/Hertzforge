@@ -394,11 +394,11 @@ describe('a finished run opened in Analysis', () => {
 		return { app, sent, answers };
 	}
 
-	it('opens the folder as the project when the project holds nothing, and shows the Random workspace', async () => {
+	it('opens the folder as the project when the project holds nothing, and shows the analysis', async () => {
 		const { app, sent } = runApp({ ...summary, objects: [], active_geometry: null } as unknown as ProjectSummary);
 		expect(await app.runOpen.open('/data/20261113-180000_random_r-0001')).toBe(true);
 		expect(sent).toEqual([['project.open', { path: '/data/20261113-180000_random_r-0001' }]]);
-		expect(app.workspace).toBe('random');
+		expect(app.workspace).toBe('signals');
 		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
 		expect(app.project.busy).toBeNull();
 	});
@@ -409,7 +409,7 @@ describe('a finished run opened in Analysis', () => {
 		expect(sent.map(([m]) => m)).toEqual(['project.import']);
 		expect(app.project.summary?.objects.map((o) => o.name)).toEqual(['G', 'H', ...runObjects.map((o) => o.name)]);
 		expect(app.project.selection.objects).toEqual(runObjects.map((o) => o.name));
-		expect(app.workspace).toBe('random');
+		expect(app.workspace).toBe('signals');
 	});
 
 	it('stays on the run screen and says why when the analysis service refuses', async () => {

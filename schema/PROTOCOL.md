@@ -483,15 +483,14 @@ the operation again with the panel's values and the view's choice, and shows the
 place of the old. A waterfall's `quantity` is one: the view lists the quantities it can draw and
 the person picks one there.
 
-`workspace` is the module the operation belongs to, the rail entry that offers it: `acquire`,
-`simulate`, `signals` (recordings and what is read straight off them), `random`, `shock`, `sine`,
-`transient`, `sysid`, `modal`, `geometry`, `specify` or `report`. The analysis is split by what is studied, so a sine
-test is not offered shock tools. `geometry` holds the finite element work too (meshing, element
-group properties, solving for modes), which was a `model` module of its own until 2026-11-10; the
-shell shows it as Model. The modules share one project, one tree and one way of showing a
-selection; they differ in which operations their action table offers. An operation's `modules`
-lists the modules that offer it: its own `workspace`, or more when several studies need it (Export
-in all of them, Averaging in Signals, Random and Modal).
+`workspace` is what the operation is part of: `acquire`, `simulate`, `report`, or one of the
+analysis's kinds of work: `signals` (recordings and what is read straight off them), `random`,
+`shock`, `sine`, `transient`, `sysid`, `modal`, `geometry` (a geometry and its finite element
+model) or `specify`. An operation's `modules` lists the kinds of work it serves: its own
+`workspace`, or more when several need it. The shell has one analysis module, on the rail as
+Analysis, and its action table offers every operation whose `modules` names any of the analysis's
+kinds; until 2026-11-17 each kind was a module of its own with only its operations. The lists are
+kept so the split can be made again.
 Every operation runs on the connection's own project, and `op.run` is refused while no project
 is open. Its result carries the project's summary beside the views, `{"views":[...],"project"}`,
 and the project counts as modified when the operation added an object. The operations are the

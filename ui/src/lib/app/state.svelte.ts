@@ -61,7 +61,7 @@ import { baseName, confirmFirst, desktopRunFiles, isProjectFile } from '$lib/pro
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { isWorkspace, STUDIES } from './workspaces';
+import { ANALYSIS, isWorkspace, moduleOf, STUDIES } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -2072,8 +2072,8 @@ export class ProjectState {
 			const res = await this.app.analysis.request<{ project: ProjectSummary }>(method, params, { timeoutMs: FILE_TIMEOUT_MS });
 			this.apply(res.project);
 			if (show) {
-				// a study keeps the window; any other workspace goes to Signal Processing, the recordings' module
-				if (!STUDIES.has(this.app.workspace)) this.app.workspace = 'signals';
+				// any other workspace goes to the analysis
+				if (!STUDIES.has(this.app.workspace)) this.app.workspace = ANALYSIS;
 				this.app.analyze.selectProject();
 			}
 			return true;
@@ -2521,8 +2521,7 @@ export class AppState {
 	}
 
 	start(): void {
-		// an address from before the split (#analyze) opens the recordings' module, and #model
-		// opens the module shown as Model, whose id is geometry (Brandon, 2026-11-10)
+		// #analyze and #model are addresses the analysis had; any of its earlier ids opens it (`go`)
 		const named = (hash: string) => {
 			const h = hash.replace(/^#\/?/, '');
 			return h === 'analyze' ? 'signals' : h === 'model' ? 'geometry' : h;
@@ -2610,7 +2609,7 @@ export class AppState {
 
 	go(workspace: Workspace): void {
 		const entering = workspace === 'acquire' && this.workspace !== 'acquire';
-		this.workspace = workspace;
+		this.workspace = moduleOf(workspace);
 		if (entering) this.tests.open();
 	}
 
