@@ -175,6 +175,10 @@ def _number(text: str) -> bool:
 
 
 def _table(view: dict, system: Any) -> None:
+    for under in view.get('nested') or ():
+        # the table under an opened row is a table like any other
+        if under is not None:
+            _table(under, system)
     edit = view.get('edit') or {}
     edited = edit.get('columns') or []
     for k, heading in enumerate(view['columns']):

@@ -19,8 +19,10 @@
 	 * down to the last row. Each value goes through the table's own operation, so one it refuses
 	 * leaves its cell as it was, with the reason under the table.
 	 */
-	import { tick } from 'svelte';
-	import type { TableView } from '$lib/protocol/types';
+	import { tick, untrack } from 'svelte';
+	import type { TableEdit, TableView } from '$lib/protocol/types';
+	import Self from './TablePane.svelte';
+	import { openedAtFirst, toggled } from './table';
 	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
 
 	interface Props {
@@ -32,9 +34,13 @@
 		onremove?: (ids: string[]) => Promise<string | null>;
 		/** A table that sent its first rows (`view.more`): rows `start` to `start + count`, asked for as they scroll into view. */
 		onrows?: (start: number, count: number) => Promise<string[][]>;
+		/** A cell typed into the table under an opened row (`view.nested`), with that table's own `edit`; resolves as `onedit`. */
+		onnested?: (edit: TableEdit, row: number, column: string, value: string) => Promise<string | null>;
 	}
 
-	let { view, showTitle = true, onedit, onremove, onrows }: Props = $props();
+	let { view, showTitle = true, onedit, onremove, onrows, onnested }: Props = $props();
+	/** The rows opened onto their own tables (`view.nested`), from 0: those the view opens to start with, then as they are clicked. */
+	let opened = $state(openedAtFirst(untrack(() => view.open)));
 	let copied = $state(false);
 	let anchor = $state<{ row: number; col: number } | null>(null);
 	let focus = $state<{ row: number; col: number } | null>(null);
@@ -352,6 +358,7 @@
 					{@const r = long ? span.first + k : k}
 					<tr>
 						{#each row as cell, i (i)}
+							{@const opens = i === 0 && !!view.nested?.[r]}
 							{#if editing && editing.row === r && editing.col === i}
 								<td class="editing">
 									{#if kindOf(i) === 'choice' && choicesOf(i)}
@@ -375,6 +382,10 @@
 								<td data-r={r} data-c={i} class:num={numeric(cell)} class:editable={editable(i)}
 									class:picked={onedit && view.edit && inside(block, r, i)} class:filling={inside(fillBlock, r, i) && !inside(block, r, i)}
 									onpointerdown={(e) => onedit && view.edit && down(e, r, i)} ondblclick={() => kindOf(i) !== 'flag' && open(r, i)}>
+									{#if opens}
+										<button type="button" class="opener" class:on={opened.has(r)} aria-expanded={opened.has(r)} aria-label="{opened.has(r) ? 'Close' : 'Open'} {cell}" title={opened.has(r) ? 'Close' : 'Open what this row holds'}
+											onpointerdown={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()} onclick={(e) => { e.stopPropagation(); opened = toggled(opened, r); }} data-testid="table-row-opener">▸</button>
+									{/if}
 									{#if editable(i) && kindOf(i) === 'flag'}
 										<input type="checkbox" class="flag" checked={flagOn(cell)} aria-label="{view.columns[i]}, row {r + 1}" disabled={saving} onclick={(e) => { e.preventDefault(); void toggleFlag(r, i); }} data-testid="table-cell-flag" />
 									{:else}
@@ -387,6 +398,14 @@
 							{/if}
 						{/each}
 					</tr>
+					{#if view.nested?.[r] && opened.has(r)}
+						{@const under = view.nested[r]!}
+						<tr class="under">
+							<td colspan={view.columns.length}>
+								<Self view={under} showTitle={false} onedit={onnested && under.edit ? (row, column, value) => onnested(under.edit!, row, column, value) : undefined} />
+							</td>
+						</tr>
+					{/if}
 				{/each}
 				{#if long && span.after > 0}<tr class="spacer" aria-hidden="true" style:height="{span.after}px"><td colspan={view.columns.length}></td></tr>{/if}
 			</tbody>
@@ -492,6 +511,42 @@
 	td.filling {
 		background: color-mix(in srgb, var(--blue-weak) 50%, transparent);
 		outline: 1px dashed var(--blue-line, var(--line-2));
+	}
+
+	/* a row that opens onto a table of its own: the mark turns when it is open, and the table sits in from the edge */
+	.opener {
+		all: unset;
+		display: inline-block;
+		width: 1.1em;
+		margin-right: 0.3em;
+		color: var(--text-2);
+		cursor: pointer;
+		text-align: center;
+		transition: transform 80ms;
+	}
+
+	.opener.on {
+		transform: rotate(90deg);
+	}
+
+	.opener:hover,
+	.opener:focus-visible {
+		color: var(--text-1);
+	}
+
+	/* the table under a row has no heading of its own: the row above it is its title */
+	tr.under > td > :global(section > header) {
+		display: none;
+	}
+
+	/* and is as wide as its own columns, at the left under its row, however wide the row's table is */
+	tr.under > td :global(table) {
+		width: auto;
+	}
+
+	tr.under > td {
+		padding: var(--sp-2) var(--sp-2) var(--sp-3) calc(var(--sp-4) + 1.4em);
+		background: var(--bg-1);
 	}
 
 	.handle {

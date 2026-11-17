@@ -28,7 +28,7 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     'psd_overlay', 'srs_spectra', 'replication_waveforms', 'table', 'channel_table_view',
     'shape_values',
     # typed into a table
-    'set_entity', 'set_entity_cell', 'set_channel_cell', 'set_sensor', 'describe_mode',
+    'set_entity', 'set_entity_cell', 'set_channel_cell', 'set_sensor', 'set_scan_set', 'describe_mode',
     # dragged on the plot
     'drag_averaging',
     'set_band_edge',

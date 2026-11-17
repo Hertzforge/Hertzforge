@@ -334,3 +334,34 @@ def test_tops_named_for_each_others_sensor_are_said_to_look_exchanged():
     # named right, neither says it
     fits, _notes = fit_sensors({'11_c': side_a, '11_3': top_a, '12_c': side_b, '12_3': top_b})
     assert all(fit.placed and not fit.flags for fit in fits)
+
+
+def test_a_surface_is_called_by_name_and_written_as_a_label():
+    from hertzforge.core.scan_fit import SURFACES, label_of, surface_of, written_label
+
+    assert parse_feature('11_b') == ('11', '-3') and parse_feature('11_P') == ('11', '3')
+    assert written_label('11_b') == ('11', 'b') and written_label('11_x') is None
+    assert [surface_of(f'5_{label}') for label in ('1', '-2', '3', 'c', 'p', 'b')] == [
+        'X+', 'Y-', 'Z+', 'Cylinder', 'Uni-axial Top', 'Uni-axial Bottom']
+    # beside a cylinder a Z face is the top and a Z- face the bottom, and is called so
+    assert surface_of('5_3', beside_cylinder=True) == 'Uni-axial Top'
+    assert surface_of('5_-3', beside_cylinder=True) == 'Uni-axial Bottom'
+    assert surface_of('5_1', beside_cylinder=True) == 'X+' and surface_of('datum') == ''
+    for label, called in SURFACES.items():
+        assert label_of(called) == label == label_of(label)
+    assert label_of(' uni-axial   BOTTOM ') == 'b'
+    with pytest.raises(ValueError, match="'sideways' is not a surface; one is X\\+, X-"):
+        label_of('sideways')
+
+
+def test_a_bottom_measured_turns_the_axis_through_the_body():
+    """The flat face measured is the one the accelerometer is mounted by:
+    Z+ points away from it, and the center is half the length above it."""
+    frame, center, _radius, height, side, top = _can(61)
+    bottom = top - height * frame[2]
+    fits, notes = fit_sensors({'7_c': side, '7_b': bottom}, meters=1.0)
+    assert not notes and fits[0].placed and fits[0].axes == (-3,)
+    np.testing.assert_allclose(fits[0].frame[2], frame[2], atol=1e-8)
+    np.testing.assert_allclose(fits[0].anchor, center - (height / 2) * frame[2], atol=1e-8)
+    np.testing.assert_allclose(fits[0].center(height), center, atol=1e-8)
+    assert fits[0].direction == 'Z+'

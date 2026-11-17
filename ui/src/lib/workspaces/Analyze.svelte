@@ -134,10 +134,10 @@
 					<h3>{a.reading.title}</h3>
 					<p class="meta">{a.shown?.title ?? ''}</p>
 				</header>
-				<div class="svviews" class:several={a.reading.views.length > 1}>
+				<div class="svviews" class:several={a.reading.views.length > 1} style:--beside={Math.max(a.reading.views.length - 1, 1)}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
-							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editReadingCell(v.edit!, row, column, value) : undefined} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)} />
+							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onedit={v.view === 'table' && v.edit ? (row, column, value) => a.editReadingCell(v.edit!, row, column, value) : undefined} onnested={(edit, row, column, value) => a.editReadingCell(edit, row, column, value)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)} />
 						</div>
 					{/each}
 				</div>
@@ -544,6 +544,15 @@
 			grid-column: 1;
 			grid-row: 1 / span 2;
 			min-height: 520px;
+		}
+
+		/* an operation's views beside its 3-D view: each at its own height down the right, the 3-D view down the left beside all of them. Two rows shared between three tables laid them over each other */
+		.svviews.several:not(.panes):has(.view.shape3d) {
+			grid-auto-rows: max-content;
+		}
+
+		.svviews.several:not(.panes) .view.shape3d {
+			grid-row: 1 / span var(--beside, 2);
 		}
 
 		/* the panes share the frame's height instead of growing past it: the 3-D pane down the left, the rest in rows beside it; without one, the rows share the height */

@@ -462,6 +462,10 @@ export interface TableView {
 	total?: number;
 	/** How to ask for the rest: `method` with `params`, `start` and `count`. */
 	more?: { method: string; params: Record<string, unknown> };
+	/** A table of its own under a row, shown when the row is opened: one per row, null for a row with none. */
+	nested?: (TableView | null)[];
+	/** The rows that start opened, from 1; the rest start closed. */
+	open?: number[];
 }
 
 /** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
