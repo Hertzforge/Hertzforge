@@ -75,8 +75,13 @@ def _drawn(title: str, geometry: Any, extra_nodes: Any = None,
     if len(soup):
         triangles = np.vstack([triangles, len(nodes) + np.arange(len(soup)).reshape(-1, 3)])
         nodes = np.vstack([nodes, soup])
+    from . import scans
+
+    # the nodes no line or face is drawn through, as points, so a geometry of measured
+    # points shows while its coordinate system is moved or one of its groups is picked
+    points, _note = scans.layers(geometry)
     return v.shape3d(title, 'm' if geometry.units_defined else 'undefined', nodes, [],
-                     triangles=triangles, lines=lines)
+                     triangles=triangles, lines=lines, **({'points': points} if points else {}))
 
 
 def _solid_surfaces(geometry: Any) -> np.ndarray:

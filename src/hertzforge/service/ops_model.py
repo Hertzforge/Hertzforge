@@ -63,11 +63,21 @@ def view_geometry(project: Any, params: dict[str, Any]) -> list[dict]:
     geometry = project[name]
     if solids.top_level(geometry):
         return [_drawn(name, geometry)[0]]
+    from . import scans
+
     rows, triangles, lines = drawn_mesh(geometry)
-    return [v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
-                      np.asarray(geometry.node_xyz, dtype=float)[rows], [],
-                      triangles=triangles, lines=lines,
-                      node_ids=np.asarray(geometry.node_id)[rows])]
+    view = v.shape3d(name, 'm' if geometry.units_defined else 'undefined',
+                     np.asarray(geometry.node_xyz, dtype=float)[rows], [],
+                     triangles=triangles, lines=lines,
+                     node_ids=np.asarray(geometry.node_id)[rows])
+    # the nodes no line or face is drawn through, as points: a geometry of
+    # measured points, or of nodes alone, drew nothing
+    points, note = scans.layers(geometry)
+    if points:
+        view['points'] = points
+    if note:
+        view['note'] = note
+    return [view]
 
 
 _family = group_cells.family

@@ -52,7 +52,6 @@ from .core.prediction import Predictions
 from .core.report import Report
 from .core.run_log_extract import RunLogExtract
 from .core.run_record import RunRecord
-from .core.scan import Scan
 from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
 from .core.test_setup import TestSetup
@@ -84,7 +83,7 @@ ObjectGroup = dict[str, Any]
 # The three single-signal spectra come before the two-signal pair: a
 # spectrum, a density and a shock spectrum are each derived from one
 # record, where an FRF and a coherence need a reference as well.
-TYPE_ORDER = (Geometry, Scan, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
+TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
               Srs, SineSweepSpecification, SineLevelSet, Frf,
               _CoherenceBase, ShapeSet, MatchedModes, Predictions,
               RunLogExtract, RunRecord, TestSetup, Report)
@@ -138,7 +137,7 @@ def describe(obj: Any) -> str:
         count = len(obj.entries)
         return (f'test {obj.test}, {obj.kind}, {count} '
                 f'entr{"y" if count == 1 else "ies"} to log entry #{obj.upto}')
-    elif isinstance(obj, (RunRecord, TestSetup, Scan)):
+    elif isinstance(obj, (RunRecord, TestSetup)):
         return obj.describe()
     elif isinstance(obj, Report):
         counts = [(obj.num_blocks, 'block')]
@@ -279,7 +278,6 @@ def _retarget_record(record: dict[str, Any], mapping: Mapping[str, str]) -> None
 # is always a list. Both complete on tab.
 KINDS: tuple[tuple[str, str, type], ...] = (
     ('geometry', 'geometries', Geometry),
-    ('scan', 'scans', Scan),
     ('photos', 'photo_sets', Photos),
     ('channel_table', 'channel_tables', ChannelTable),
     ('time_history', 'time_histories', TimeHistory),
@@ -348,8 +346,6 @@ class Selection:
         # and type checking would quietly stop at the dot.
         geometry: Geometry
         geometries: list[Geometry]
-        scan: Scan
-        scans: list[Scan]
         photos: Photos
         photo_sets: list[Photos]
         channel_table: ChannelTable
@@ -526,8 +522,6 @@ class Project(dict):
         # completes and types at the top level too
         geometry: Geometry
         geometries: list[Geometry]
-        scan: Scan
-        scans: list[Scan]
         photos: Photos
         photo_sets: list[Photos]
         channel_table: ChannelTable

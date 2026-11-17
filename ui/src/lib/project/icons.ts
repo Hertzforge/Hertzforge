@@ -27,7 +27,6 @@ export const KIND_COLORS: Record<string, string> = {
 	channel_table: '#4bb3fd',
 	report: '#d2c14e',
 	photos: '#b07d62',
-	scan: '#39c5cf',
 	matched_modes: '#3fb950',
 	predictions: '#c9822b',
 	run_log_extract: '#d2c14e',
@@ -65,7 +64,6 @@ export const BADGE_COLOR = '#e6a23c';
 /** The order the tree lists kinds in; a specification sits beside the measurement it is for. */
 export const KIND_ORDER = [
 	'geometry',
-	'scan',
 	'photos',
 	'channel_table',
 	'time_history',
@@ -245,10 +243,6 @@ export const OBJECT_DRAW: Record<string, (color: string) => string> = {
 		line([21, 18], [43, 18], c, 3) +
 		line([21, 25], [43, 25], c, 3) +
 		polyline([[21, 46], [27, 38], [33, 42], [39, 32], [43, 35]], c, 4),
-	scan: (c) =>
-		[[14, 44], [22, 34], [30, 27], [39, 23], [49, 22], [18, 52], [27, 43], [36, 37], [45, 34], [53, 33], [32, 52], [41, 47], [50, 44]]
-			.map((at) => dot(at as [number, number], 3.2, c))
-			.join(''),
 	photos: (c) =>
 		rect(8, 12, 48, 40, c, 5, null, 6) + dot([21, 25], 5.5, c) + polygon([[13, 47], [28, 30], [37, 40], [45, 28], [51, 47]], c, 0, 1),
 	shape_set: (c) => {

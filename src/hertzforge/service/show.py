@@ -1164,12 +1164,18 @@ def _overlaid(project: Any, first: str, second: str) -> dict:
                  if t is not None and len(t)]
     lines = [t for t in (lines_a, None if lines_b is None or not len(lines_b) else lines_b + offset)
              if t is not None and len(t)]
+    from . import scans
+
+    # the nodes neither geometry draws a line or a face through, as points: measured points
+    # laid over a scan of the same part, or over the model
+    points = [layer for name in (first, second) for layer in scans.layers(project[name])[0]]
     return v.shape3d(f'{second} over {first}',
                      'm' if defined_a and defined_b else 'undefined',
                      np.vstack([nodes_a, nodes_b]), [],
                      triangles=np.vstack(triangles) if triangles else None,
                      lines=np.vstack(lines) if lines else None,
-                     node_ids=np.concatenate(ids))
+                     node_ids=np.concatenate(ids),
+                     **({'points': points} if points else {}))
 
 
 def _pair(project: Any, first: str, second: str, records: dict[str, list[int]],
@@ -1382,26 +1388,6 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
     }
 
 
-def _scans(project: Any, objects: list[str]) -> tuple[list[dict], list[str]] | None:
-    """Scans in one scene, with the one geometry picked beside them when
-    there is one; None for any other selection."""
-    from hertzforge.core.geometry import Geometry
-    from hertzforge.core.scan import Scan
-
-    from . import scans
-
-    held = [project[name] for name in objects]
-    names = [name for name, obj in zip(objects, held, strict=True) if isinstance(obj, Scan)]
-    geometries = [name for name, obj in zip(objects, held, strict=True)
-                  if isinstance(obj, Geometry)]
-    if not names or len(names) + len(geometries) != len(objects) or len(geometries) > 1:
-        return None
-    base = (_run(project, 'project.view_geometry', geometry=geometries[0])[0]
-            if geometries else None)
-    view, notes = scans.drawn(project, names, base)
-    return [view], notes
-
-
 def show(project: Any, objects: list[str], records: dict[str, list[int]],
          part: dict[str, Any] | None, prefs: dict[str, Any] | None = None) -> dict[str, Any]:
     """What `objects` show together: `{'title', 'views', 'note', 'offers'}`,
@@ -1410,10 +1396,7 @@ def show(project: Any, objects: list[str], records: dict[str, list[int]],
     notes: list[str] = []
     views: list[dict] = []
     try:
-        together = _scans(project, objects)
-        if together is not None:
-            views, notes = together
-        elif len(objects) == 2:
+        if len(objects) == 2:
             paired = _pair(project, objects[0], objects[1], records, prefs)
             if paired is not None:
                 views, notes = paired

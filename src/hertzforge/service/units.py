@@ -17,7 +17,6 @@ from typing import Any
 
 from hertzforge.core.data import UNKNOWN, DataArray, Psd, channel_quantities
 from hertzforge.core.geometry import Geometry
-from hertzforge.core.scan import Scan
 from hertzforge.core.shapes import ShapeSet
 from hertzforge.core.unit_choices import (
     LENGTH_UNITS,
@@ -65,10 +64,6 @@ def tables(project: Any, name: str) -> dict[str, Any]:
         raise not_found(f'the project has no object named {name!r}')
     obj = project[name]
     if isinstance(obj, Geometry):
-        rows = [_row('length', 'Coordinates', 'length',
-                     obj.length_unit if obj.units_defined else None, LENGTH_UNITS)]
-        return {'name': name, 'tables': [{'side': 'object', 'rows': rows}]}
-    if isinstance(obj, Scan):
         rows = [_row('length', 'Coordinates', 'length',
                      obj.length_unit if obj.units_defined else None, LENGTH_UNITS)]
         return {'name': name, 'tables': [{'side': 'object', 'rows': rows}]}
@@ -173,8 +168,8 @@ def define(project: Any, name: str, given: Any) -> list[int]:
         named[where] = unit
     obj = project[name]
     try:
-        if isinstance(obj, (Geometry, ShapeSet, Scan)):
-            unit = named[('object', 'mass' if isinstance(obj, ShapeSet) else 'length')]
+        if isinstance(obj, (Geometry, ShapeSet)):
+            unit = named[('object', 'length' if isinstance(obj, Geometry) else 'mass')]
             obj.define_units(unit)
             project.record_call(name, 'define_units', unit)
             return []

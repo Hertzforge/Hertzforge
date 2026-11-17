@@ -58,7 +58,6 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.report import Report
     from ..core.run_log_extract import RunLogExtract
     from ..core.run_record import RunRecord
-    from ..core.scan import Scan
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
     from ..core.test_setup import TestSetup
@@ -69,7 +68,8 @@ STAMP = 'hertzforge_schema'
 #: the newest .hforge schema this build reads. Schema 1 holds everything
 #: `.vdyn` schema 3 held; schema 2 adds objects held by reference to
 #: another file; schema 3 adds the run record; schema 4 adds the test
-#: setup; schema 5 adds the scan. The schema grows by addition, and a file is stamped
+#: setup; schema 5 held measured points as a `scan/` group, which is
+#: still read (as a geometry) and no longer written. The schema grows by addition, and a file is stamped
 #: with the earliest version that holds everything in it, so an older
 #: build opens every file that does not need a later one.
 SCHEMA_VERSION = 5
@@ -88,8 +88,8 @@ RUN_RECORD_SCHEMA = 3
 #: module's configuration as the control service accepts it
 TEST_SETUP_SCHEMA = 4
 
-#: the stamp of a file holding a scan (`core.scan`), points measured in
-#: space
+#: the stamp of a file holding a `scan/` group, which no build writes any
+#: more: measured points are a geometry (`load_scan`)
 SCAN_SCHEMA = 5
 
 #: the smallest object, in bytes stored, that a project imported from
@@ -1482,46 +1482,22 @@ def load_test_setup(group: h5py.Group) -> TestSetup:
                      origin=json.loads(held_origin) if held_origin else None)
 
 
-def save_scan(scan: Scan, group: h5py.Group) -> None:
-    """Write a `Scan` into `group`: the points as one [3, N] dataset (a
-    row each for x, y and z, so a compressed save chunks along the
-    points), and the features, the feature of each point, the
-    deviations and the header's properties when there are any."""
-    import json
-
-    import h5py
-
-    group.attrs['length_unit'] = scan.length_unit or ''
-    _write_array(group, 'points', np.ascontiguousarray(scan.points.T))
-    if scan.features:
-        _write_strings(group, 'features', scan.features)
-        _write_array(group, 'feature_of', scan.feature_of)
-    if scan.deviation is not None:
-        _write_array(group, 'deviation', scan.deviation)
-    if scan.properties:
-        group.create_dataset('properties', data=json.dumps(scan.properties),
-                             dtype=h5py.string_dtype('utf-8'))
-
-
-def load_scan(group: h5py.Group) -> Scan:
-    """Read a `Scan` written by `save_scan`."""
-    import json
-
-    from ..core.scan import Scan
+def load_scan(group: h5py.Group) -> Geometry:
+    """Read a `scan/` group as a geometry. Schema 5 stored measured points
+    as an object of their own for a few days in November 2026; they are a
+    geometry now (`io.point_files.points_geometry`), and a file that holds
+    the old group opens as one. Nothing writes the group."""
+    from .point_files import points_geometry
 
     unit = group.attrs.get('length_unit', '')
     unit = unit.decode('utf-8') if isinstance(unit, bytes) else str(unit)
-    held = group['properties'][()] if 'properties' in group else None
-    if isinstance(held, bytes):
-        held = held.decode('utf-8')
-    scan = Scan(group['points'][()].T,
-                features=_read_strings(group, 'features') if 'features' in group else None,
-                feature_of=group['feature_of'][()] if 'feature_of' in group else None,
-                deviation=group['deviation'][()] if 'deviation' in group else None,
-                properties=json.loads(held) if held else None)
-    # the points are stored in meters once a unit is declared, as held
-    scan.length_unit = unit or None
-    return scan
+    geometry = points_geometry(
+        group['points'][()].T,
+        features=_read_strings(group, 'features') if 'features' in group else None,
+        feature_of=group['feature_of'][()] if 'feature_of' in group else None)
+    # the points were stored in meters once a unit was declared
+    geometry.length_unit = unit or None
+    return geometry
 
 
 def _savers():
@@ -1534,7 +1510,6 @@ def _savers():
     from ..core.report import Report
     from ..core.run_log_extract import RunLogExtract
     from ..core.run_record import RunRecord
-    from ..core.scan import Scan
     from ..core.shapes import ShapeSet
     from ..core.sine import SineLevelSet, SineSweepSpecification
     from ..core.test_setup import TestSetup
@@ -1550,7 +1525,6 @@ def _savers():
             (ShapeSet, 'shapes', save_shapes),
             (Report, 'report', save_report),
             (Photos, 'photos', save_photos),
-            (Scan, 'scan', save_scan),
             (MatchedModes, 'matches', save_matches),
             (ChannelTable, 'channel_table', save_channel_table),
             (Predictions, 'predictions', save_predictions),
@@ -1600,15 +1574,12 @@ def schema_for(kinds: Iterable[str], references: bool = False) -> int:
     Returns
     -------
     int
-        `SCAN_SCHEMA` when any is a scan, otherwise
         `TEST_SETUP_SCHEMA` when any is a test setup, otherwise
         `RUN_RECORD_SCHEMA` when any is a run record, otherwise
         `REFERENCE_SCHEMA` for a file with references, otherwise
         `BASE_SCHEMA`.
     """
     kinds = set(kinds)
-    if 'scan' in kinds:
-        return SCAN_SCHEMA
     if 'test_setup' in kinds:
         return TEST_SETUP_SCHEMA
     if 'run_record' in kinds:

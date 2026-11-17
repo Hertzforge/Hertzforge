@@ -1,10 +1,16 @@
-"""Points measured with a coordinate measuring arm, read as a `Scan`.
+"""Points measured with a coordinate measuring arm, read as a geometry.
 
 Two files are read. A "Feature Measured Points Table" is what an arm's
 software exports for probed features: a header that gives the length
 unit, then one block per feature with its name and its points. A point
 file is bare `x, y, z` rows, as a laser scan is exported, with nothing
 said about units or what any point is.
+
+Either way each point is a node. The points of a feature are one
+element group of measured-point elements, named as the file names the
+feature, so the features show under the geometry and are renamed or
+deleted there, and the geometry's coordinate system moves and turns
+the whole scan.
 """
 
 from __future__ import annotations
@@ -12,10 +18,11 @@ from __future__ import annotations
 import csv
 import os
 import warnings
+from collections.abc import Sequence
 
 import numpy as np
 
-from ..core.scan import Scan
+from ..core.geometry import Geometry
 from .notes import ImportNote
 from .sniffing import text_head
 
@@ -34,9 +41,56 @@ POINT_SUFFIXES = ('.txt', '.csv', '.xyz', '.asc', '.pts')
 #: how many rows of a point file a sniff reads
 SNIFF_ROWS = 200
 
+#: the element type of a measured point (`core.geometry.ELEMENT_TYPES`)
+MEASURED_POINT = 203
+
+#: the color indices features take in turn (`drawing.viz.geometry.PALETTE`)
+FEATURE_COLORS = np.array([4, 2, 3, 6, 8, 9, 5, 7])
+
 
 def _note(text: str) -> None:
     warnings.warn(text, ImportNote, stacklevel=3)
+
+
+def points_geometry(points: np.ndarray, length_unit: str | None = None,
+                    features: Sequence[str] | None = None,
+                    feature_of: np.ndarray | None = None) -> Geometry:
+    """A geometry whose nodes are measured points.
+
+    Parameters
+    ----------
+    points : array_like, [N, 3]
+        The points, which become nodes 1 to N in this order.
+    length_unit : str, optional
+        The unit the points are in; the geometry is unit-less without it.
+    features : sequence of str, optional
+        The name of each feature the points were measured as.
+    feature_of : array_like of int, [N], optional
+        The row in `features` each point belongs to, or -1 for none.
+
+    Returns
+    -------
+    Geometry
+        The nodes, and for each feature one element group of its name
+        holding a measured-point element at each of its points. The
+        groups take colors in turn so neighboring features differ.
+    """
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    names = [str(name) for name in (features or [])]
+    owner = (np.full(len(points), -1, dtype=np.int64) if feature_of is None
+             else np.asarray(feature_of, dtype=np.int64).reshape(-1))
+    held = np.flatnonzero(owner >= 0)
+    geometry = Geometry(
+        node_id=np.arange(1, len(points) + 1), node_xyz=points,
+        elem_id=np.arange(1, len(held) + 1),
+        elem_type=np.full(len(held), MEASURED_POINT),
+        elem_color=FEATURE_COLORS[owner[held] % len(FEATURE_COLORS)],
+        elem_conn=[np.array([row + 1]) for row in held],
+        elem_group=owner[held] + 1,
+        group_id=np.arange(1, len(names) + 1), group_name=names)
+    # the constructor takes coordinates already in meters; these are the
+    # file's own numbers, converted by declaring their unit
+    return geometry if length_unit is None else geometry.define_units(length_unit)
 
 
 # ---- the feature table ---------------------------------------------------------
@@ -48,8 +102,9 @@ def sniff_table(path: str | os.PathLike) -> bool:
     return head is not None and head.lstrip('﻿ \t').startswith(TABLE_TITLE)
 
 
-def load_table(path: str | os.PathLike, length_unit: str | None = None) -> Scan:
-    """Read a feature measured points table as a scan with features.
+def load_table(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
+    """Read a feature measured points table as a geometry of points in
+    named element groups.
 
     Parameters
     ----------
@@ -61,11 +116,12 @@ def load_table(path: str | os.PathLike, length_unit: str | None = None) -> Scan:
 
     Returns
     -------
-    Scan
-        Every point, feature by feature in the file's order and, inside
-        a feature, in the order the points were measured (the file lists
-        them by deviation). `deviation` is the file's ``Dev`` column and
-        `properties` its other header rows.
+    Geometry
+        Every point as a node, numbered from 1, feature by feature in
+        the file's order and, inside a feature, in the order the points
+        were measured (the file lists them by deviation). Each feature
+        is an element group of its name. The file's deviations and its
+        other header rows are not kept.
 
     Raises
     ------
@@ -113,8 +169,8 @@ def load_table(path: str | os.PathLike, length_unit: str | None = None) -> Scan:
     if unit is None:
         _note(f'{base}: the length unit {named!r} is not one Hertzforge knows, so the '
               'coordinates are left as they are until a unit is declared')
-    return Scan(table[:, 3:6], length_unit=unit, features=names, feature_of=feature_of,
-                deviation=table[:, 2], properties=header)
+    return points_geometry(table[:, 3:6], length_unit=unit, features=names,
+                           feature_of=feature_of)
 
 
 # ---- bare points -----------------------------------------------------------------
@@ -153,8 +209,8 @@ def sniff_points(path: str | os.PathLike) -> bool:
     return bool(np.isfinite(rows).all()) and not bool((np.diff(first) > 0).all())
 
 
-def load_points(path: str | os.PathLike, length_unit: str | None = None) -> Scan:
-    """Read a file of bare ``x, y, z`` rows as a scan with no features.
+def load_points(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
+    """Read a file of bare ``x, y, z`` rows as a geometry of nodes.
 
     Parameters
     ----------
@@ -163,13 +219,14 @@ def load_points(path: str | os.PathLike, length_unit: str | None = None) -> Scan
         or spaces.
     length_unit : str, optional
         The unit of the coordinates, which the file cannot state.
-        Without it the scan imports unit-less and the unit can be
+        Without it the geometry imports unit-less and the unit can be
         defined later.
 
     Returns
     -------
-    Scan
-        The points in file order.
+    Geometry
+        The points as nodes, numbered from 1 in file order, with no
+        elements.
 
     Raises
     ------
@@ -184,4 +241,4 @@ def load_points(path: str | os.PathLike, length_unit: str | None = None) -> Scan
         raise ValueError(f'{path} is not rows of three numbers: {error}') from None
     if points.shape[1] != 3:
         raise ValueError(f'{path} has {points.shape[1]} columns; a point file has three')
-    return Scan(points, length_unit=length_unit)
+    return points_geometry(points, length_unit=length_unit)

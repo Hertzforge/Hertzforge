@@ -992,6 +992,10 @@ def _geometry_datasets(geometry, unit_system=None):
                 continue
             ids = [int(n) for n in conn]
             descriptor = int(geometry.elem_type[i])
+            if descriptor == 203:
+                # a measured point is its node, which is written; the
+                # universal file has no element that only marks one
+                continue
             if descriptor >= 200:
                 from ..core.geometry import ELEMENT_TYPES
                 raise ValueError(
