@@ -1923,6 +1923,78 @@ class Project(dict):
                          'was not judged')
         return fits, notes
 
+    def create_sensors(self, source: Any, models: Mapping[Any, str] | None = None,
+                       sizes: Mapping[Any, Any] | None = None,
+                       nodes: Mapping[Any, int] | None = None,
+                       name: str | None = None) -> dict[str, Any]:
+        """Make a geometry and a channel table of the accelerometers a
+        geometry's measured points locate (`fit_sensors`,
+        `core.scan_sensors.assemble`).
+
+        Each accelerometer is one node at the center of its body, with a
+        coordinate system of its own whose axes are the accelerometer's.
+        A tri-axial accelerometer gives channels X+, Y+ and Z+ whatever
+        faces were measured; a uni-axial one gives the one axis its top
+        was labelled with. The two objects are linked into one group.
+        The measured points are left as they are, and the result is not
+        made again when they change: call this again.
+
+        The center is half the body's size back from each measured face.
+        The size is the model's when one is named, else that of the
+        smallest tri-axial catalog model the points fit in, else the size
+        given, else the measured one, which the notes say.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry holding the measured points. Its length unit
+            must be declared.
+        models : mapping, optional
+            A catalog model for a sensor, by the sensor's name
+            (``{34: '356A02'}``).
+        sizes : mapping, optional
+            A body size for a sensor in millimeters, one number for a
+            cube or three for X, Y and Z, used in place of a model's.
+            For a uni-axial accelerometer it is the height.
+        nodes : mapping, optional
+            A node number for a sensor. A sensor named with a whole
+            number is that node otherwise.
+        name : str, optional
+            What the results are named after; the source's name when
+            omitted.
+
+        Returns
+        -------
+        dict
+            The names added, under 'geometry' and 'channels', and under
+            'notes' the sensors left out and the sizes that were assumed.
+
+        Raises
+        ------
+        TypeError
+            If the source is not a geometry.
+        ValueError
+            If it holds no measured points or has no length unit, no
+            accelerometer is located, a model is not in the catalog, or
+            two sensors would share a node.
+        """
+        from .core.scan_sensors import assemble
+
+        source = self.name_of(source)
+        fits, notes = self.fit_sensors(source)
+        scan = self[source]
+        if not scan.units_defined:
+            raise ValueError(f'{source!r} has no length unit; declare it before the '
+                             'accelerometers are sized')
+        geometry, table, _placed, said = assemble(
+            fits, scan.length_unit, models=models, sizes=sizes, nodes=nodes)
+        base = name or f'{source} Sensors'
+        added: dict[str, Any] = {'geometry': self.add(f'{base} Geometry', geometry),
+                                 'channels': self.add(f'{base} Channels', table)}
+        self.link(added['geometry'], added['channels'])
+        added['notes'] = [*notes, *said]
+        return added
+
     def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
         """(name, table) for the channel table linked with an object:
         the one lookup the overload check and the shape values share.
@@ -9941,7 +10013,7 @@ _JOURNALED_VERBS = (
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
-    'plan_instrumentation',
+    'plan_instrumentation', 'create_sensors',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
