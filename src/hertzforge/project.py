@@ -1897,21 +1897,13 @@ class Project(dict):
         ValueError
             If the geometry holds no measured points.
         """
-        from .core.scan_fit import fit_sensors
-        from .io.point_files import MEASURED_POINT
+        from .core.scan_fit import fit_sensors, measured_features
 
         name = self.name_of(name)
         geometry = self[name]
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{name!r} is not a geometry')
-        row_of = {int(node): row for row, node in enumerate(geometry.node_id)}
-        names = {int(group): str(label) for group, label
-                 in zip(geometry.group_id, geometry.group_name, strict=True)}
-        rows: dict[str, list[int]] = {}
-        for code, group, conn in zip(geometry.elem_type, geometry.elem_group,
-                                     geometry.elem_conn, strict=True):
-            if int(code) == MEASURED_POINT and int(group) in names:
-                rows.setdefault(names[int(group)], []).append(row_of[int(conn[0])])
+        rows = measured_features(geometry)
         if not rows:
             raise ValueError(f'{name!r} holds no measured points to fit')
         defined = geometry.units_defined
@@ -9589,6 +9581,15 @@ def _has_dims(obj, wanted):
         {obj.known_dim(i) for i in range(obj.num_records)} & wanted)
 
 
+def _has_measured_points(project, obj) -> bool:
+    """Whether a geometry holds points measured on accelerometers
+    (`io.point_files`), which `create_sensors` fits."""
+    from .core.geometry import MEASURED_POINT
+
+    return isinstance(obj, Geometry) and bool(
+        np.any(np.asarray(obj.elem_type, dtype=np.int64) == MEASURED_POINT))
+
+
 def _plannable(project, obj) -> bool:
     """Whether a shape set can plan a test's instrumentation: it has a
     mode above 0 Hz and is drawn on a geometry with solids, plates or
@@ -9758,6 +9759,9 @@ _VERB_APPLIES: tuple = (
     # finite element modes on a model to put sensors on (Brandon,
     # 2026-10-21, Plan Instrumentation)
     ('plan_instrumentation', _plannable),
+    # points measured on accelerometers with a measuring arm, to make the
+    # test geometry and channel table of (Brandon, 2026-11-16)
+    ('create_sensors', _has_measured_points),
     # coincident nodes matter to connectivity, so a geometry of elements;
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)

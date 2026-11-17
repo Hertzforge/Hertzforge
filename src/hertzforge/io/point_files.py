@@ -22,7 +22,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from ..core.geometry import Geometry
+from ..core.geometry import MEASURED_POINT, Geometry
 from .notes import ImportNote
 from .sniffing import text_head
 
@@ -41,8 +41,6 @@ POINT_SUFFIXES = ('.txt', '.csv', '.xyz', '.asc', '.pts')
 #: how many rows of a point file a sniff reads
 SNIFF_ROWS = 200
 
-#: the element type of a measured point (`core.geometry.ELEMENT_TYPES`)
-MEASURED_POINT = 203
 
 #: the color indices features take in turn (`drawing.viz.geometry.PALETTE`)
 FEATURE_COLORS = np.array([4, 2, 3, 6, 8, 9, 5, 7])

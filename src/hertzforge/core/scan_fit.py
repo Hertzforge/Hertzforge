@@ -24,10 +24,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 from scipy.optimize import least_squares
 
+from .geometry import MEASURED_POINT
 from .instrumentation import surface_frame
 
 #: a plane's residual RMS above this is warned about, in meters. Probed
@@ -477,6 +479,61 @@ def fit_uniaxial(sensor: str, side: np.ndarray, top: np.ndarray, label: str = '3
 
 
 # ---- every accelerometer of a set of features --------------------------------
+
+def measured_features(geometry: Any) -> dict[str, np.ndarray]:
+    """The features a geometry of measured points holds
+    (`io.point_files`): its element groups of measured-point elements.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry.
+
+    Returns
+    -------
+    dict of str to numpy.ndarray
+        The node rows of each feature by the group's name, in the order
+        the groups' elements come. Empty when it holds no measured point.
+    """
+    row_of = {int(node): row for row, node in enumerate(geometry.node_id)}
+    names = {int(group): str(label) for group, label
+             in zip(geometry.group_id, geometry.group_name, strict=True)}
+    rows: dict[str, list[int]] = {}
+    for code, group, conn in zip(geometry.elem_type, geometry.elem_group,
+                                 geometry.elem_conn, strict=True):
+        if int(code) == MEASURED_POINT and int(group) in names:
+            rows.setdefault(names[int(group)], []).append(row_of[int(conn[0])])
+    return {name: np.array(held, dtype=np.int64) for name, held in rows.items()}
+
+
+def residuals(fit: SensorFit, label: str, points: np.ndarray) -> np.ndarray | None:
+    """How far each of a surface's points lies from the surface fitted
+    to it.
+
+    Parameters
+    ----------
+    fit : SensorFit
+        The sensor's fit.
+    label : str
+        The surface's label, a face's or ``c``.
+    points : array_like, [N, 3]
+        Its points.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        The signed distances, in the points' unit; None when no surface
+        was fitted for that label.
+    """
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    if label == CYLINDER_LABEL:
+        if fit.cylinder is None:
+            return None
+        radial = _radial(points, fit.cylinder.point, fit.cylinder.axis)
+        return np.linalg.norm(radial, axis=1) - fit.cylinder.radius
+    plane = fit.planes.get(label)
+    return None if plane is None else (points - plane.point) @ plane.normal
+
 
 def parse_feature(name: str) -> tuple[str, str] | None:
     """A feature's sensor and label from its name, ``<sensor>_<label>``.

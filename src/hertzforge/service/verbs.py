@@ -75,6 +75,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'set_control': 'Set Control', 'place': 'Place', 'set_role': 'Group Role',
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',
     'plan_instrumentation': 'Plan Sensors', 'export_state_space': 'Export Model',
+    'create_sensors': 'Fit Sensors',
     'project_onto_channels': 'Project Channels', 'projection_overlay': 'Animate Projection',
     'merge': 'Merge', 'report_features': 'Features', 'report_requirement': 'Requirement',
     'report_finding': 'Finding', 'draft_finding_fact': 'Draft Fact',

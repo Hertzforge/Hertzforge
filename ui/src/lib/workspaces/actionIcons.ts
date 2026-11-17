@@ -227,6 +227,7 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.partial_coherence': 'partial_coherence',
 	'project.pattern_solids': 'solid_pattern',
 	'project.plan_instrumentation': 'plan_instrumentation',
+	'project.create_sensors': 'plan_instrumentation',
 	'project.predict': 'drive_prediction',
 	'project.project_onto_basis': 'project',
 	'project.project_onto_channels': 'project',
