@@ -32,9 +32,11 @@
 		onremove?: (ids: string[]) => Promise<string | null>;
 		/** A table that sent its first rows (`view.more`): rows `start` to `start + count`, asked for as they scroll into view. */
 		onrows?: (start: number, count: number) => Promise<string[][]>;
+		/** A table with `select`: one row picked, by its cell in the column `select` names. */
+		onrowpick?: (id: string) => void;
 	}
 
-	let { view, showTitle = true, onedit, onremove, onrows }: Props = $props();
+	let { view, showTitle = true, onedit, onremove, onrows, onrowpick }: Props = $props();
 	let copied = $state(false);
 	let anchor = $state<{ row: number; col: number } | null>(null);
 	let focus = $state<{ row: number; col: number } | null>(null);
@@ -128,6 +130,16 @@
 	}
 	const editable = (col: number) => !!keys[col];
 	const block = $derived(anchor && focus ? spanned(anchor, focus) : null);
+	// one row picked in a table that says what a row picked does (`view.select`): said once a row
+	let rowPicked: string | null = null;
+	$effect(() => {
+		const pick = view.select;
+		if (!pick || !onrowpick || !block || block.r0 !== block.r1 || dragging) return;
+		const id = known[block.r0]?.[pick.column];
+		if (id === undefined || id === rowPicked) return;
+		rowPicked = id;
+		onrowpick(id);
+	});
 	const fillBlock = $derived(block && fillTo && dragging === 'fill' ? spanned({ row: Math.min(block.r0, fillTo.row), col: Math.min(block.c0, fillTo.col) }, { row: Math.max(block.r1, fillTo.row), col: Math.max(block.c1, fillTo.col) }) : null);
 
 	function select(row: number, col: number, extend = false) {

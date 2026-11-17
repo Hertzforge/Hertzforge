@@ -178,6 +178,10 @@ def _said_as_preview(views: list[dict[str, Any]], units: Any) -> list[dict[str, 
         for row in view.get('rows', ()) if view.get('view') == 'reading' else ():
             if row.get('label') in AS_PREVIEW:
                 row['label'] = AS_PREVIEW[row['label']]
+        if view.get('view') == 'table':
+            # a copy's table: its rows are not the project's, so nothing is typed into it
+            view.pop('edit', None)
+            view.pop('select', None)
     display_units.convert(views, units)
     return views
 
