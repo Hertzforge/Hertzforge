@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DRAWN_FROM, drawnRows, flagOn, scrollFor, tableHtml, TALLEST } from './table';
-import { blockText, fillTargets, numeric, parseTsv, pasteTargets, spanned, tableText } from './table';
+import { blockText, fillTargets, numeric, openedAtFirst, parseTsv, pasteTargets, spanned, tableText, toggled } from './table';
 
 describe('table', () => {
 	it('reads numbers as numbers and words as words', () => {
@@ -107,5 +107,20 @@ describe('a long table draws the rows in view', () => {
 		// and back: the scroll that puts a row at the top shows that row
 		const at = drawnRows(rows, scrollFor(rows, 750_000, 400, 27), 400, 27);
 		expect(at.first + 30).toBeCloseTo(750_000, -1);
+	});
+});
+
+describe('rows that open onto a table of their own', () => {
+	it('start opened where the view says, counting from 1', () => {
+		expect([...openedAtFirst([1, 3])]).toEqual([0, 2]);
+		expect(openedAtFirst(undefined).size).toBe(0);
+	});
+
+	it('open and close on a click, leaving the set they came from alone', () => {
+		const first = new Set([0]);
+		const more = toggled(first, 2);
+		expect([...more].sort()).toEqual([0, 2]);
+		expect([...toggled(more, 0)]).toEqual([2]);
+		expect([...first]).toEqual([0]);
 	});
 });

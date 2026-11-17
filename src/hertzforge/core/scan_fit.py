@@ -7,8 +7,11 @@ and the points of each surface are exported as one feature, named
 - ``1``, ``2``, ``3`` and ``-1``, ``-2``, ``-3``: a flat face whose
   outward normal is the accelerometer's X+, Y+, Z+ or X-, Y-, Z- axis.
 - ``c``: the round side of a uni-axial accelerometer. Its sensor then has
-  one flat face as well, the top, whose label names the axis that points
-  out of it (``p`` is read as ``3``).
+  one flat face as well, whose label names the axis that points out of
+  it. ``p``, the top, is read as ``3``: Z+ points out of the face
+  measured. ``b``, the bottom, is read as ``-3``: the face measured is
+  the one it is mounted by, and Z+ points away from it, through the
+  body.
 
 A tri-axial accelerometer is located by the planes fitted to two or
 three of its faces, a uni-axial one by the cylinder fitted to its side
@@ -55,6 +58,16 @@ ARC = 120.0
 #: the labels of a flat face, and of a cylinder
 FACE_LABELS = ('1', '2', '3', '-1', '-2', '-3')
 CYLINDER_LABEL = 'c'
+
+#: a uni-axial accelerometer's top and bottom, and the face labels they are read as
+TOP_LABEL, BOTTOM_LABEL = 'p', 'b'
+ALIASES = {TOP_LABEL: '3', BOTTOM_LABEL: '-3'}
+
+#: what a surface is called where one is chosen, by the label written in a
+#: feature's name
+SURFACES = {'1': 'X+', '-1': 'X-', '2': 'Y+', '-2': 'Y-', '3': 'Z+', '-3': 'Z-',
+            CYLINDER_LABEL: 'Cylinder', TOP_LABEL: 'Uni-axial Top',
+            BOTTOM_LABEL: 'Uni-axial Bottom'}
 
 
 @dataclass(frozen=True)
@@ -546,16 +559,85 @@ def parse_feature(name: str) -> tuple[str, str] | None:
     Returns
     -------
     tuple of (str, str) or None
-        The sensor and the label, lower-cased, with ``p`` read as ``3``;
-        None when the name has no underscore, no sensor, or a label that
-        is neither a face's nor a cylinder's.
+        The sensor and the label, lower-cased, with ``p`` read as ``3``
+        and ``b`` as ``-3``; None when the name has no underscore, no
+        sensor, or a label that is neither a face's nor a cylinder's.
+    """
+    written = written_label(name)
+    return None if written is None else (written[0], ALIASES.get(written[1], written[1]))
+
+
+def written_label(name: str) -> tuple[str, str] | None:
+    """A feature's sensor and its label as written, ``p`` and ``b`` kept
+    (`parse_feature` reads them as faces).
+
+    Parameters
+    ----------
+    name : str
+        The feature's name.
+
+    Returns
+    -------
+    tuple of (str, str) or None
+        The sensor and the label, lower-cased; None as `parse_feature`.
     """
     sensor, mark, label = str(name).strip().rpartition('_')
     label = label.strip().lower()
-    label = '3' if label == 'p' else label
-    if not mark or not sensor.strip() or label not in (*FACE_LABELS, CYLINDER_LABEL):
+    if not mark or not sensor.strip() or label not in SURFACES:
         return None
     return sensor.strip(), label
+
+
+def surface_of(name: str, beside_cylinder: bool = False) -> str:
+    """What a feature's surface is called, one of `SURFACES`' values.
+
+    Parameters
+    ----------
+    name : str
+        The feature's name.
+    beside_cylinder : bool, default False
+        Whether its sensor has a cylinder: a ``3`` there is the top and
+        a ``-3`` the bottom, and is called so.
+
+    Returns
+    -------
+    str
+        'X+', 'Cylinder', 'Uni-axial Top' and so on; '' when the name is
+        no feature's.
+    """
+    written = written_label(name)
+    if written is None:
+        return ''
+    label = written[1]
+    if beside_cylinder:
+        label = {'3': TOP_LABEL, '-3': BOTTOM_LABEL}.get(label, label)
+    return SURFACES[label]
+
+
+def label_of(surface: str) -> str:
+    """The label a feature's name is written with for a surface.
+
+    Parameters
+    ----------
+    surface : str
+        One of `SURFACES`' values, in any case, or a label itself.
+
+    Returns
+    -------
+    str
+        The label.
+
+    Raises
+    ------
+    ValueError
+        When it is neither.
+    """
+    text = ' '.join(str(surface).split()).lower()
+    for label, called in SURFACES.items():
+        if text in (label, called.lower()):
+            return label
+    raise ValueError(f'{surface!r} is not a surface; one is '
+                     + ', '.join(SURFACES.values()))
 
 
 def fit_sensors(features: Mapping[str, np.ndarray], meters: float | None = None
@@ -584,7 +666,7 @@ def fit_sensors(features: Mapping[str, np.ndarray], meters: float | None = None
         parsed = parse_feature(name)
         if parsed is None:
             notes.append(f'{name} is not named <sensor>_<label>, with a label of 1, 2, 3, -1, '
-                         '-2, -3, c or p, and was left out')
+                         '-2, -3, c, p or b, and was left out')
             continue
         sensor, label = parsed
         held = sensors.setdefault(sensor, {})

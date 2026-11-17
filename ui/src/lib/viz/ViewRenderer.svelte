@@ -4,7 +4,7 @@
 	 * charts. Unknown kinds render a short note instead of failing the page.
 	 */
 	import type { ParamValues } from '$lib/forms/params';
-	import type { Region, View, SpectrumHandle } from '$lib/protocol/types';
+	import type { Region, View, SpectrumHandle, TableEdit } from '$lib/protocol/types';
 	import BarsPane from './BarsPane.svelte';
 	import ImagePane from './ImagePane.svelte';
 	import MatrixPane from './MatrixPane.svelte';
@@ -43,6 +43,8 @@
 		regions?: Region[] | null;
 		/** An editable table's cell typed into; resolves to the refusal's words, or null. */
 		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
+		/** A cell typed into the table under an opened row of a table, with that table's own `edit`. */
+		onnested?: (edit: TableEdit, row: number, column: string, value: string) => Promise<string | null>;
 		/** A table whose rows are entities: the selected rows' ids, removed; resolves to the refusal's words, or null. */
 		onremove?: (ids: string[]) => Promise<string | null>;
 		/** A table that sent its first rows: the rest, asked for as they scroll into view. */
@@ -57,7 +59,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, onedit, onremove, onrows, onrowpick, onspan, regions = null, onpick, onhandle, ongizmo }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, onedit, onnested, onremove, onrows, onrowpick, onspan, regions = null, onpick, onhandle, ongizmo }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -100,7 +102,7 @@
 {:else if view.view === 'matrix'}
 	<MatrixPane {view} {showTitle} {selected} {picks} {onselect} />
 {:else if view.view === 'table'}
-	<TablePane {view} {showTitle} {onedit} {onremove} {onrows} {onrowpick} />
+	<TablePane {view} {showTitle} {onedit} {onnested} {onremove} {onrows} {onrowpick} />
 {:else if view.view === 'image'}
 	<ImagePane {view} {showTitle} />
 {:else if view.view === 'bars'}

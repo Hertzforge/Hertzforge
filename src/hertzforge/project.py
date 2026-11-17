@@ -1987,6 +1987,92 @@ class Project(dict):
             self[source].sensor_choices.pop(sensor, None)
         return held
 
+    def set_scan_set(self, source: Any, scan_set: str, sensor: Any = None,
+                     surface: str | None = None) -> str:
+        """Say which sensor a set of measured points belongs to, or which
+        of its surfaces it is, where the name it was measured under is
+        wrong. The set is renamed ``<sensor>_<label>``, which is all that
+        says what it is.
+
+        When the sensor already has a set for that surface, the two
+        exchange: the other takes the sensor and surface this one had.
+        That is the whole correction for two sets measured under each
+        other's names.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry holding the measured points.
+        scan_set : str
+            The set's name, an element group of measured points.
+        sensor : str or int, optional
+            The sensor it belongs to; unchanged when omitted. A set not
+            yet named for a sensor, given one and no surface, takes the
+            first surface that sensor lacks: the top beside a cylinder
+            with no flat face, else X+, Y+ or Z+.
+        surface : str, optional
+            What it is: 'X+', 'X-', 'Y+', 'Y-', 'Z+', 'Z-', 'Cylinder',
+            'Uni-axial Top' or 'Uni-axial Bottom', or the label itself
+            ('1', '-2', 'c', 'p', 'b'). Unchanged when omitted.
+
+        Returns
+        -------
+        str
+            The set's new name.
+
+        Raises
+        ------
+        TypeError
+            If the source is not a geometry.
+        ValueError
+            If the geometry has no such set of measured points, the
+            surface is not one, a set not yet named for a sensor is
+            given a surface and no sensor, or the set to exchange with
+            has no sensor and surface to hand back.
+        """
+        from .core.scan_fit import label_of, measured_features, written_label
+
+        source = self.name_of(source)
+        geometry = self[source]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{source!r} is not a geometry')
+        scan_set = str(scan_set)
+        if scan_set not in measured_features(geometry):
+            raise ValueError(f'{source!r} has no set of measured points named {scan_set!r}')
+        was = written_label(scan_set)
+        if was is None and sensor is None:
+            raise ValueError(f'{scan_set} is not named for a sensor yet; give its sensor first')
+        to_sensor = str(sensor).strip() if sensor is not None else was[0]   # type: ignore[index]
+        if surface is not None:
+            to_label = label_of(surface)
+        elif was is not None:
+            to_label = was[1]
+        else:
+            # a set with no name of its own takes the first surface its sensor lacks: the
+            # top beside a cylinder with no flat face, else X+, Y+ or Z+
+            held = {found[1] for name in geometry.group_name
+                    if (found := written_label(str(name))) and found[0] == to_sensor}
+            flat = held - {'c'}
+            to_label = ('p' if 'c' in held and not flat
+                        else next((label for label in ('1', '2', '3')
+                                   if not {label, f'-{label}'} & held), '1'))
+        if not to_sensor or '_' in to_sensor and not to_sensor.replace('_', ''):
+            raise ValueError('a sensor needs a name')
+        named = f'{to_sensor}_{to_label}'
+        names = [str(name) for name in geometry.group_name]
+        if named == scan_set:
+            return named
+        holder = next((k for k, name in enumerate(names)
+                       if written_label(name) == (to_sensor, to_label)), None)
+        if holder is not None:
+            if was is None:
+                raise ValueError(f'{names[holder]} is already sensor {to_sensor}\'s; rename it '
+                                 f'first, since {scan_set} has no sensor and surface to hand '
+                                 'back')
+            geometry.group_name[holder] = scan_set
+        geometry.group_name[names.index(scan_set)] = named
+        return named
+
     def create_sensors(self, source: Any, name: str | None = None) -> dict[str, Any]:
         """Make a geometry and a channel table of the accelerometers a
         geometry's measured points locate (`fit_sensors`,
@@ -10078,7 +10164,7 @@ _JOURNALED_VERBS = (
     'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'generate_signal', 'compute_modal_responses', 'synthesize_modal_frfs',
-    'plan_instrumentation', 'create_sensors', 'set_sensor',
+    'plan_instrumentation', 'create_sensors', 'set_sensor', 'set_scan_set',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry',
     'new_channel_table', 'add_channels',
     'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',

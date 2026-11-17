@@ -11,9 +11,11 @@ from hertzforge.core.scan_fit import (
     CYLINDER_LABEL,
     CYLINDER_RMS,
     PLANE_RMS,
+    SURFACES,
     measured_features,
     parse_feature,
     residuals,
+    surface_of,
 )
 from hertzforge.core.scan_sensors import CHOICES, assemble, resolve
 from hertzforge.core.sensor_catalog import CATALOG
@@ -31,6 +33,8 @@ ROW = Param('row', 'Row', 'integer', default=1, min=1, step=1)
 COLUMN = Param('column', 'Column', 'enum', default='model', options=tuple(
     Option(key, key.title()) for key in CHOICES))
 VALUE = Param('value', 'Value', 'string', default='')
+SET_COLUMN = Param('column', 'Column', 'enum', default='surface', options=(
+    Option('sensor', 'Sensor'), Option('surface', 'Surface')))
 
 #: the bodies are drawn this much under size, so the points measured on
 #: their faces show outside them
@@ -73,7 +77,43 @@ def _length(value: float | None) -> str:
     return '' if value is None else f'{value:.6g}'
 
 
-def _sensors_table(name: str, resolved: list, fits: dict, defined: bool) -> dict:
+def _set_rows(scan: Any, fits: dict, scale: float) -> list[tuple[str | None, list[str]]]:
+    """Every set of measured points, in the geometry's order: the sensor it
+    is taken for (None when its name says none), and its row: its name,
+    that sensor, its surface, its points and how far they lie from the
+    surface fitted to them (RMS, in millimeters when the unit is known)."""
+    xyz = np.asarray(scan.node_xyz, dtype=float)
+    features = measured_features(scan)
+    cylinders = {parsed[0] for name in features
+                 if (parsed := parse_feature(name)) and parsed[1] == CYLINDER_LABEL}
+    out = []
+    for name, rows in features.items():
+        parsed = parse_feature(name)
+        sensor = parsed[0] if parsed else None
+        distance = (residuals(fits[sensor], parsed[1], xyz[rows])
+                    if parsed and sensor in fits else None)
+        rms = '' if distance is None else f'{float(np.sqrt(np.mean(distance ** 2))) * scale:.4f}'
+        out.append((sensor, [name, sensor or '', surface_of(name, sensor in cylinders),
+                             str(len(rows)), rms]))
+    return out
+
+
+def _sets_table(title: str, name: str, rows: list[tuple[int, list[str]]], unit: str) -> dict:
+    """A table of scan sets, typed into: the sensor each belongs to and
+    which of its surfaces it is (`project.set_scan_set`). `rows` pairs
+    each row with its set's place among the geometry's sets, from 1."""
+    return v.table(
+        title, ['Scan set', 'Sensor', 'Surface', 'Points', f'RMS ({unit})'],
+        [row for _place, row in rows],
+        edit={**v.editing('project.set_scan_set', {'geometry': name},
+                          [None, 'sensor', 'surface', None, None],
+                          choices={'surface': list(SURFACES.values())},
+                          kinds={'sensor': 'text', 'surface': 'choice'}),
+              'rows': [place for place, _row in rows]})
+
+
+def _sensors_table(name: str, resolved: list, fits: dict, defined: bool,
+                   sets: list[tuple[str | None, list[str]]]) -> dict:
     """The table of sensors, typed into: a node, a model from the catalog
     or any name, and a size and a length, which go out in the display
     system's length when the geometry's unit is declared."""
@@ -87,7 +127,13 @@ def _sensors_table(name: str, resolved: list, fits: dict, defined: bool) -> dict
              _length(one.size), _length(one.length), fit_cell(one)]
             for one in resolved]
     models = [entry.model for entry in CATALOG if entry.kind in ('triax', 'uniaxial', 'force')]
-    return v.table(
+    # under each sensor, the sets of points it was fitted to; a sensor that is not placed
+    # opens on them, since one of them is most likely what is wrong
+    nested = [_sets_table(f'Scan sets of sensor {one.sensor}', name,
+                          [(place, row) for place, (sensor, row) in enumerate(sets, start=1)
+                           if sensor == one.sensor], 'mm' if defined else 'file units')
+              for one in resolved]
+    table = v.table(
         f'Sensors of {name}',
         ['Sensor', 'Node', 'Model', 'Shape', f'Size{unit}', f'Length{unit}', 'Fit'], rows,
         edit=v.editing('project.set_sensor', {'geometry': name},
@@ -95,6 +141,9 @@ def _sensors_table(name: str, resolved: list, fits: dict, defined: bool) -> dict
                        choices={'model': models},
                        kinds={'node': 'number', 'model': 'text', 'size': 'number',
                               'length': 'number'}))
+    table['nested'] = nested
+    table['open'] = [row for row, one in enumerate(resolved, start=1) if not one.placed]
+    return table
 
 
 def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
@@ -182,7 +231,12 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
     else:
         readings.append(v.row('Not created', 'Apply adds the geometry and the channel table',
                               None, 'info'))
-    return [view, _sensors_table(name, resolved, by_sensor, defined),
+    sets = _set_rows(scan, by_sensor, scale)
+    stray = [(place, row) for place, (sensor, row) in enumerate(sets, start=1)
+             if sensor not in by_sensor]
+    return [view, _sensors_table(name, resolved, by_sensor, defined, sets),
+            *([_sets_table(f'Scan sets of {name} with no sensor', name, stray, unit)]
+              if stray else []),
             v.table(f'Fits of {name}',
                     ['Sensor', 'Surfaces', 'Points', f'Worst RMS [{unit}]', 'Squared by [°]',
                      f'Measured size [{unit}]', 'Flags'],
@@ -220,6 +274,30 @@ def set_sensor(project: Any, params: dict[str, Any]) -> list[dict]:
     return create_sensors(project, {'geometry': name, 'keep': False})
 
 
+def set_scan_set(project: Any, params: dict[str, Any]) -> list[dict]:
+    """`project.set_scan_set`: one cell of a table of scan sets typed over,
+    by the set's place among the geometry's sets (from 1) and column: the
+    sensor it belongs to, or which of its surfaces it is
+    (`Project.set_scan_set`). The set is renamed, and exchanges with the
+    set that held the place. The preview is drawn again with it."""
+    name = params['geometry']
+    try:
+        project.fit_sensors(name)
+    except (TypeError, ValueError) as error:
+        raise refused(str(error)) from None
+    sets = list(measured_features(project[name]))
+    if params['row'] > len(sets):
+        raise refused(f'{name} has {len(sets)} scan sets; there is no row {params["row"]}')
+    text = params['value'].strip()
+    if not text:
+        raise refused(f'a scan set needs a {params["column"]}')
+    try:
+        project.set_scan_set(name, sets[params['row'] - 1], **{params['column']: text})
+    except (TypeError, ValueError) as error:
+        raise refused(str(error)) from None
+    return create_sensors(project, {'geometry': name, 'keep': False})
+
+
 def _kept(params: dict[str, Any]) -> bool:
     return params['keep']
 
@@ -240,4 +318,11 @@ OPERATIONS = (
                 'length. The table edits through it.',
         params=(MEASURED, ROW, COLUMN, VALUE), outputs=('shape3d', 'table', 'reading'),
         run=set_sensor, edits=True),
+    Operation(
+        id='project.set_scan_set', title='Set Scan Set', workspace='geometry',
+        summary='One cell of a scan set under a sensor in Fit Sensors\' table typed over: the '
+                'sensor the set belongs to, or which surface it is. The set is renamed, and '
+                'exchanges with the set that held the place. The table edits through it.',
+        params=(MEASURED, ROW, SET_COLUMN, VALUE), outputs=('shape3d', 'table', 'reading'),
+        run=set_scan_set, edits=True),
 )

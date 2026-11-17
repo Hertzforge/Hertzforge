@@ -155,3 +155,15 @@ export function fillTargets(
 	}
 	return out;
 }
+
+/** The rows a table opens onto their own tables to start with: `open` counts from 1, the set from 0. */
+export function openedAtFirst(open: number[] | undefined): Set<number> {
+	return new Set((open ?? []).map((row) => row - 1));
+}
+
+/** A set of opened rows with `row` opened if it was closed and closed if it was open. */
+export function toggled(opened: Set<number>, row: number): Set<number> {
+	const next = new Set(opened);
+	if (!next.delete(row)) next.add(row);
+	return next;
+}

@@ -412,7 +412,12 @@ operation, by `op.run`) with `params` and `row` (from 1), `column` (the key) and
 and the first `table` view of the answer takes the table's place; a value the operation refuses
 leaves the cell as it was and the refusal is shown. In an operation's own result (Fit Sensors'
 table of sensors) the whole answer takes the result's place, every view of it, since a cell there
-changes more than its table. Tab-separated text pasted into a cell sets
+changes more than its table. A table may carry `nested`, a table view or null for each of its
+rows: a row with one opens onto it, shown under the row with no title of its own, and its cells are
+typed into through its own `edit`. `open` lists the rows that start opened, from 1. Fit Sensors'
+table of sensors nests each sensor's scan sets: the sensor a set belongs to and which surface it is,
+typed through `project.set_scan_set`, whose `row` is the set's place among the geometry's sets
+(`edit.rows`). Tab-separated text pasted into a cell sets
 the block it covers, cell by cell. `rows`, when the table shows some of the object's rows, gives the
 row each shown row is, from 1. `remove` (`{"op","params","column"}`) says the rows are the entities
 themselves, as in a geometry's entity tables: Delete removes the selected rows rather than clearing
