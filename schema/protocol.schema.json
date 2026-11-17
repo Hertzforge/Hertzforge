@@ -489,6 +489,15 @@
         "more": {
           "type": "object", "required": ["method", "params"], "additionalProperties": false,
           "properties": {"method": {"type": "string"}, "params": {"type": "object"}}
+        },
+        "select": {
+          "type": "object", "required": ["op", "params", "param", "column"], "additionalProperties": false,
+          "properties": {
+            "op": {"type": "string"},
+            "params": {"type": "object"},
+            "param": {"type": "string"},
+            "column": {"type": "integer", "minimum": 0}
+          }
         }
       }
     },

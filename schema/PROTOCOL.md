@@ -423,6 +423,16 @@ and `count` (at most 5000) for the rows it scrolls to, in the display units as t
 entity table of a part says the part in its edit's and `more`'s params (`family` or `groups`), and
 `project.set_entity_cell` takes a row as that part's.
 
+A table with `select` (`{"op","params","param","column"}`) says what picking one of its rows does:
+the shell runs `op` with `params` and that row's cell in `column` as `param`, and the views answered
+that are not tables take the places of the ones beside the table. The coordinate systems' table has
+it: `project.view_entities` with `cs`, which puts the arrows and rings (`gizmo`) on the system of
+the row picked. Typing in the row's origin or rotation cells and dragging the arrows and rings do
+the same thing, and each answers with the table and the gizmo where the system now is. A click in
+the view places a node or a coordinate system only in the views of `project.add_node` and
+`project.add_coordinate_system`, which preview; the table's views carry no `pick` for them. A
+preview's table has no `edit` or `select`: its rows are a copy's.
+
 With a part of a geometry picked (`part`), `project.show` draws its entities' table beside the
 geometry, with the click in the view that adds one: the nodes or the coordinate systems, a family's
 elements, or picked element groups' table and their elements. The Solids row or a solid picked draws
