@@ -31,6 +31,11 @@ which does not orient the accelerometer, so that sensor is left out.
 A uni-axial accelerometer needs its round side and one flat face. The direction comes from the flat
 face and the position from the side. A flat face labelled `3` beside a cylinder is read as the top.
 
+A uni-axial accelerometer that is a flat block, such as the 7270A, has no round side. Probe its flat
+faces as a tri-axial accelerometer's: `3` is the face it senses through, away from the mounting
+surface, `1` or `-1` an end, with X+ toward the cable, and `2` or `-2` a long side. Then name its
+model in the row. It gives one channel, Z+.
+
 The sensor's name becomes its node number when it is a whole number. Three points make a plane and
 five a cylinder; more show how flat the face is. A side probed over less than a third of the way
 round fixes its diameter poorly, and the fit says so.
@@ -179,7 +184,7 @@ Sets whose names say no sensor are listed in a table of their own, and take a se
   and Z+;
 - a channel table with acceleration channels in g. A tri-axial accelerometer gives X+, Y+ and Z+,
   whatever faces were probed. A uni-axial one gives the one axis its flat face was labelled with,
-  always positive.
+  always positive. A uni-axial block probed by its faces gives Z+.
 
 Selecting the two together draws the accelerometers' bodies and their channels' arrows. A sensor
 with no catalog model has its size written where its model would be, and is drawn at that size.

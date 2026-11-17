@@ -236,3 +236,40 @@ def test_a_sensors_choices_are_set_taken_back_and_saved(tmp_path):
     again['Probed'].define_units('mm')
     again['Probed'].sensor_choices['77'] = {'node': 5}
     assert again.create_sensors('Probed')['geometry'] == 'Probed Sensors Geometry'
+
+
+def test_a_uni_axial_block_is_measured_by_its_faces_and_gives_one_channel():
+    """A 7270A is a flat block: X along its length, Z its sensing axis."""
+    from test_scan_fit import _pose
+
+    size = np.array([14.22, 7.1, 2.79]) * MM
+    frame, center = _pose(7)
+    rng = np.random.default_rng(7)
+    features = {}
+    for label in (-1, 2, 3):
+        k, sign = abs(label) - 1, np.sign(label)
+        spread = rng.uniform(-0.4, 0.4, (6, 3)) * size
+        spread[:, k] = sign * size[k] / 2
+        features[f'5_{label}'] = center + spread @ frame
+    fits, _notes = fit_sensors(features, meters=1.0)
+    geometry, table, placed, _said = assemble(fits, 'mm', choices={5: {'model': '7270A-20K'}})
+    np.testing.assert_allclose(geometry.node_xyz[0], center, atol=1e-8)
+    assert placed[0].directions == ('Z+',) and placed[0].shape == 'Block'
+    assert placed[0].body == pytest.approx(tuple(size))
+    row = table.frame.iloc[0]
+    assert len(table.frame) == 1
+    assert (row['direction'], row['triax_dof'], row['make'], row['model']) == (
+        'Z+', '', 'Endevco', '7270A-20K')
+    # with no model named it is still a tri-axial block, three channels
+    _g, three, _p, _n = assemble(fits, 'mm', choices={5: {'size': 14.22 * MM}})
+    assert three.frame['direction'].tolist() == ['X+', 'Y+', 'Z+']
+
+
+def test_the_models_added_are_found_by_their_range_or_sensitivity():
+    from hertzforge.core.sensor_catalog import lookup
+
+    assert lookup('7270A-20K').size == (14.22, 7.1, 2.79) and lookup('7270a-60k').make == 'Endevco'
+    assert lookup('Endevco 7250AM1-10').shape == 'teardrop'
+    assert lookup('7250AM2-1').size == lookup('7250AM1').size == (11.49, 9.78, 5.8)
+    assert lookup('352A74').shape == 'rounded' and lookup('352A74').make == 'PCB'
+    assert lookup('9999-20K') is None and lookup('-') is None

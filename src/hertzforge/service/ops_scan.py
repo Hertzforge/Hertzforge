@@ -203,9 +203,7 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
         drawn, labels = [], []
         for row, one in enumerate(placed):
             frame = by_sensor[one.sensor].frame
-            axes = (0, 1, 2) if one.kind == 'triax' else (
-                'XYZ'.index(by_sensor[one.sensor].direction[0]),)
-            for axis in axes:
+            for axis in ('XYZ'.index(direction[0]) for direction in one.directions):
                 drawn.append((False, (row, frame[axis], axis)))
                 labels.append(f'{one.node}{"XYZ"[axis]}+')
         view['arrows'] = arrows(centers, drawn, 1.5 * max(max(one.body) for one in placed),
