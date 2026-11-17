@@ -8,11 +8,15 @@ faces were measured; a uni-axial one gives one, on the axis its top was
 labelled with.
 
 The center is half the body's size back from each measured face, so it
-needs the size. That comes from the model: one named for the sensor, or
-the smallest tri-axial model in the catalog the measured points fit in.
-A sensor with neither takes a size given for it, or the measured one,
-and that size is written where its model would be (`Block 17.5 mm`,
-`Cylinder 16 x 8 mm`), which is how the 3-D view draws it at that size.
+needs the size. What is chosen for a sensor is its node, its model, and
+its size: a cube's side, or a round body's diameter and length. A size
+typed is used. Otherwise the size is the model's, when the model is in
+the catalog or is itself a size (`Block 17.5 mm`); otherwise that of the
+smallest tri-axial catalog model the measured points fit in; otherwise
+what was measured, a block's least side or a cylinder's diameter for
+both its diameter and its length. A sensor with no model named takes
+its size written where its model would be, which is how the 3-D view
+draws it at that size.
 """
 
 from __future__ import annotations
@@ -32,31 +36,57 @@ from .sensor_catalog import CATALOG, SensorModel, lookup, size_text, sized
 #: that model, in millimeters: the reach is measured from a fitted corner
 MODEL_SLACK = 0.2
 
+#: what a body's shape is called in the table of sensors
+SHAPES = {'box': 'Cube', 'puck': 'Cylinder', 'hex': 'Hex', 'teardrop': 'Teardrop',
+          'rounded': 'Rounded'}
+
+#: what may be chosen for a sensor
+CHOICES = ('node', 'model', 'size', 'length')
+
 
 @dataclass(frozen=True)
 class Placed:
-    """One accelerometer as it was placed.
+    """One accelerometer as it would be placed, or why it is not.
 
     Attributes:
         sensor: The sensor's name in the features.
-        node: Its node in the geometry.
-        kind: 'triax' or 'uniaxial'.
-        model: What its rows name as the model: the catalog model it
-            was sized by, or its size written as one.
-        size: The body's size along its X, Y and Z, in millimeters.
-        sized_by: Where the size came from: 'model' (named for it),
-            'guess' (the catalog model the points fit in), 'given' or
-            'measured'.
-        channels: Its channel numbers in the table.
+        kind: 'triax' or 'uniaxial', as it was measured.
+        node: Its node in the geometry; None when it has none.
+        model: The model named or guessed for it, '' for none.
+        table_model: What its rows name as the model: `model`, or its
+            size written as one.
+        shape: 'Cube', 'Cylinder', or a catalog body's shape.
+        size: A cube's side or a round body's diameter, in the fits'
+            unit; None when nothing was measured.
+        length: A round body's length along its sensing axis; None for a
+            cube.
+        body: The body's size along its X, Y and Z, in the fits' unit.
+        sized_by: Where the size came from: 'given' (typed), 'model',
+            'guess' (the catalog model the points fit in) or 'measured';
+            '' when it has no size.
+        channel_type: 'acceleration', or 'force' for a force transducer.
+        problem: Why it is not placed; '' when it is.
+        channels: Its channel numbers in the table, once assembled.
     """
 
     sensor: str
-    node: int
     kind: str
+    node: int | None
     model: str
-    size: tuple[float, float, float]
+    table_model: str
+    shape: str
+    size: float | None
+    length: float | None
+    body: tuple[float, float, float] | None
     sized_by: str
-    channels: tuple[int, ...]
+    channel_type: str
+    problem: str
+    channels: tuple[int, ...] = ()
+
+    @property
+    def placed(self) -> bool:
+        """Whether the sensor becomes a node and channels."""
+        return not self.problem
 
 
 def guess_model(fit: SensorFit, meters: float) -> SensorModel | None:
@@ -85,94 +115,154 @@ def guess_model(fit: SensorFit, meters: float) -> SensorModel | None:
     return min(fitting, key=lambda entry: max(entry.size), default=None)
 
 
-def _size(fit: SensorFit, meters: float, model: str | None,
-          given: Any) -> tuple[str, tuple[float, float, float], str, list[str]]:
-    """(model, size in mm, where it came from, notes) for one sensor. A
-    sensor with no model named takes its size written as one
-    (`sensor_catalog.size_text`), so it is drawn at that size."""
+def _resolve_one(fit: SensorFit, choice: Mapping[str, Any], meters: float
+                 ) -> tuple[dict[str, Any], list[str]]:
+    """What one sensor's row holds before its node is settled, and notes."""
     notes: list[str] = []
-    assert fit.extent is not None
-    measured = fit.extent * meters * 1e3
-    if given is not None:
-        numbers = np.asarray(given, dtype=float)
-        if fit.kind == 'uniaxial' and numbers.ndim == 0:
-            # a round body: the measured diameter and the height given
-            size, shape = (measured, measured, float(numbers)), 'cylinder'
-        else:
-            size = tuple(float(v) for v in np.broadcast_to(numbers, (3,)))
-            shape = 'block'
-        return (model or size_text(shape, size)), size, 'given', notes  # type: ignore[return-value]
+    to_units = 1.0 / (meters * 1e3)                 # millimeters to the fits' unit
+    model = str(choice.get('model') or '').strip()
+    typed_size, typed_length = choice.get('size'), choice.get('length')
+    measured = fit.extent
+    problem = next((flag.text for flag in fit.flags if flag.level == 'error'), '')
+    kinds = ('triax',) if fit.kind == 'triax' else ('uniaxial', 'force')
+    entry: SensorModel | None = None
     if model:
-        entry = lookup(model) or sized(model, fit.kind)
+        entry = lookup(model)
         if entry is None:
-            raise ValueError(f'sensor {fit.sensor}: {model!r} is not in the sensor catalog; '
-                             'give its size')
-        if entry.kind != fit.kind:
-            raise ValueError(f'sensor {fit.sensor} is {fit.kind} and {entry.model} is '
-                             f'{entry.kind}')
-        return entry.model, entry.size, 'model', notes
-    guessed = guess_model(fit, meters)
-    if guessed is not None:
-        return guessed.model, guessed.size, 'guess', notes
-    size = (measured, measured, measured)
+            entry = next((found for kind in kinds if (found := sized(model, kind))), None)
+        elif entry.kind not in kinds:
+            problem = problem or (f'{entry.model} is a {entry.kind} model, and this sensor was '
+                                  f'measured as a {"cube" if fit.kind == "triax" else "cylinder"}')
+            entry = None
+    sized_by = 'given' if (typed_size is not None or typed_length is not None) else 'model'
     if fit.kind == 'triax':
-        notes.append(f'sensor {fit.sensor}: no catalog model fits a block of {measured:.1f} mm '
-                     'or more, so its side is taken as that, the least it can be')
-        return size_text('block', size), size, 'measured', notes
-    notes.append(f'sensor {fit.sensor}: its height is not measured and is taken as its '
-                 f'diameter, {measured:.1f} mm')
-    return size_text('cylinder', size), size, 'measured', notes
+        guessed = None if (model or typed_size is not None) else guess_model(fit, meters)
+        if typed_size is not None:
+            body = (float(typed_size),) * 3
+        elif entry is not None:
+            body = tuple(v * to_units for v in entry.size)
+        elif guessed is not None:
+            body, model, entry, sized_by = (tuple(v * to_units for v in guessed.size),
+                                            guessed.model, guessed, 'guess')
+        elif measured is not None:
+            body, sized_by = (measured,) * 3, 'measured'
+            notes.append(f'sensor {fit.sensor}: its side is taken as the least it can be, '
+                         f'{measured * meters * 1e3:.1f} mm, the furthest its points reach')
+        else:
+            body = None
+        cube = body is not None and body[0] == body[1] == body[2]
+        shape = 'Cube' if cube or body is None else 'Block'
+        size, length = (None if body is None else body[0]), None
+        written = size_text('block', [v * meters * 1e3 for v in body]) if body else ''
+    else:
+        if entry is not None:
+            body = tuple(v * to_units for v in entry.size)
+            shape = SHAPES.get(entry.shape, entry.shape.title())
+        elif measured is not None:
+            body, shape = (measured, measured, measured), 'Cylinder'
+            if typed_length is None:
+                sized_by = 'measured'
+                notes.append(f'sensor {fit.sensor}: its length is not measured and is taken '
+                             f'as its diameter, {measured * meters * 1e3:.1f} mm')
+        else:
+            body, shape = None, 'Cylinder'
+        if body is not None and (typed_size is not None or typed_length is not None):
+            across = float(typed_size) if typed_size is not None else body[0]
+            along = float(typed_length) if typed_length is not None else body[2]
+            body = (across, across, along)
+        size, length = (None, None) if body is None else (body[0], body[2])
+        written = size_text('cylinder', [v * meters * 1e3 for v in body]) if body else ''
+    if body is None:
+        # nothing measured to size it by
+        sized_by = ''
+        problem = problem or 'no surface was fitted'
+    force = entry is not None and entry.kind == 'force'
+    return ({'sensor': fit.sensor, 'kind': fit.kind, 'model': model,
+             'table_model': model or written, 'shape': shape, 'size': size, 'length': length,
+             'body': body, 'sized_by': sized_by,
+             'channel_type': 'force' if force else 'acceleration', 'problem': problem},
+            notes)
 
 
-def _node_ids(fits: Sequence[SensorFit], nodes: Mapping[str, int]) -> dict[str, int]:
-    """Each sensor's node: the one given, else its name when that is a
-    whole number, else the next number free."""
-    ids: dict[str, int] = {}
+def resolve(fits: Sequence[SensorFit], choices: Mapping[Any, Mapping[str, Any]] | None = None,
+            meters: float = 1.0) -> tuple[list[Placed], list[str]]:
+    """Each measured sensor as it would be placed: its node, model, shape
+    and size, from what was chosen for it and what its fit gives.
+
+    Parameters
+    ----------
+    fits : sequence of SensorFit
+        The fits.
+    choices : mapping, optional
+        By the sensor's name, a mapping with any of `CHOICES`: 'node' (a
+        whole number), 'model' (a catalog model, a size written as one,
+        or any name), 'size' (a cube's side or a round body's diameter)
+        and 'length' (a round body's length), the last two in the fits'
+        unit.
+    meters : float, default 1.0
+        How many meters one unit of the fits' lengths is.
+
+    Returns
+    -------
+    placed : list of Placed
+        One per fit, in order. One with a `problem` is not placed: its
+        fit has an error, its model is the other kind, or its node is
+        another sensor's.
+    notes : list of str
+        The sizes that were assumed.
+
+    Raises
+    ------
+    ValueError
+        When `choices` names a sensor the fits do not hold.
+    """
+    given = {str(sensor): dict(choice) for sensor, choice in (choices or {}).items()}
+    known = {fit.sensor for fit in fits}
+    for stray in sorted(set(given) - known):
+        raise ValueError(f'sensor {stray} is not among the measured points')
+    rows, notes = [], []
     for fit in fits:
-        if fit.sensor in nodes:
-            ids[fit.sensor] = int(nodes[fit.sensor])
-        elif fit.sensor.isdigit() and int(fit.sensor) > 0:
-            ids[fit.sensor] = int(fit.sensor)
-    free = max(ids.values(), default=0) + 1
-    for fit in fits:
-        if fit.sensor not in ids:
-            ids[fit.sensor] = free
-            free += 1
+        row, said = _resolve_one(fit, given.get(fit.sensor, {}), meters)
+        rows.append(row)
+        notes += said if not row['problem'] else []
+    # the nodes: the one chosen, else the sensor's name when that is a
+    # whole number, else the next number free
     taken: dict[int, str] = {}
-    for sensor, node in ids.items():
-        if node in taken:
-            raise ValueError(f'sensors {taken[node]} and {sensor} would both be node {node}')
-        taken[node] = sensor
-    return ids
+    for row in rows:
+        chosen = given.get(row['sensor'], {}).get('node')
+        row['node'] = (int(chosen) if chosen is not None
+                       else int(row['sensor']) if row['sensor'].isdigit() and int(row['sensor']) > 0
+                       else None)
+    free = max((row['node'] for row in rows if row['node'] is not None), default=0) + 1
+    for row in rows:
+        if row['node'] is None:
+            row['node'], free = free, free + 1
+        if row['problem']:
+            continue
+        if row['node'] in taken:
+            row['problem'] = f'node {row["node"]} is already sensor {taken[row["node"]]}\'s'
+        else:
+            taken[row['node']] = row['sensor']
+    return [Placed(**row) for row in rows], notes
 
 
 def assemble(fits: Sequence[SensorFit], length_unit: str, *, meters: float = 1.0,
-             models: Mapping[Any, str] | None = None,
-             sizes: Mapping[Any, Any] | None = None,
-             nodes: Mapping[Any, int] | None = None
+             choices: Mapping[Any, Mapping[str, Any]] | None = None
              ) -> tuple[Geometry, ChannelTable, list[Placed], list[str]]:
     """The geometry and channel table of fitted accelerometers.
 
     Parameters
     ----------
     fits : sequence of SensorFit
-        The fits; those that do not locate their accelerometer are left
-        out and named in the notes.
+        The fits; those that cannot be placed are left out and named in
+        the notes.
     length_unit : str
         The length unit of the geometry made, the one the points were
         measured in.
     meters : float, default 1.0
         How many meters one unit of the fits' lengths is.
-    models : mapping, optional
-        A catalog model for a sensor, by the sensor's name.
-    sizes : mapping, optional
-        A body size for a sensor in millimeters, one number for a cube
-        or three for X, Y and Z, by the sensor's name. It is used in
-        place of the model's. For a uni-axial accelerometer the one
-        number, or the third, is its height.
-    nodes : mapping, optional
-        A node number for a sensor, by the sensor's name. A sensor named
-        with a whole number is that node otherwise.
+    choices : mapping, optional
+        What was chosen for each sensor (`resolve`).
 
     Returns
     -------
@@ -182,70 +272,65 @@ def assemble(fits: Sequence[SensorFit], length_unit: str, *, meters: float = 1.0
         at the node, named ``Sensor <name>``, whose rows are the
         accelerometer's X+, Y+ and Z+.
     channels : ChannelTable
-        Acceleration channels in g, numbered from 1 in the sensors'
-        order: X+, Y+, Z+ for a tri-axial accelerometer and the one
-        labelled axis for a uni-axial one, with the make and model.
+        Channels numbered from 1 in the sensors' order: X+, Y+, Z+ for a
+        tri-axial accelerometer and the one labelled axis for a
+        uni-axial one, acceleration in g, or force in N for a force
+        transducer, with the make and model.
     placed : list of Placed
-        What each accelerometer was sized by and where it went.
+        Every sensor measured, placed or not, with its channels.
     notes : list of str
         The sensors left out and the sizes that were assumed.
 
     Raises
     ------
     ValueError
-        When no fit locates an accelerometer, a model is not in the
-        catalog or is the other kind, a name in `models`, `sizes` or
-        `nodes` is no sensor's, or two sensors would share a node.
+        When nothing can be placed, or `choices` names a sensor the fits
+        do not hold.
     """
-    by_name = {
-        what: {str(key): value for key, value in (given or {}).items()}
-        for what, given in (('models', models), ('sizes', sizes), ('nodes', nodes))}
-    known = {fit.sensor for fit in fits}
-    for what, given in by_name.items():
-        for stray in sorted(set(given) - known):
-            raise ValueError(f'{what} names sensor {stray}, which the measured points do not '
-                             'hold')
-    notes = [f'sensor {fit.sensor} is left out: {flag.text}'
-             for fit in fits if not fit.placed
-             for flag in fit.flags if flag.level == 'error']
-    kept = [fit for fit in fits if fit.placed]
+    resolved, notes = resolve(fits, choices, meters)
+    notes = [*(f'sensor {one.sensor} is left out: {one.problem}'
+               for one in resolved if one.problem), *notes]
+    by_sensor = {fit.sensor: fit for fit in fits}
+    kept = [one for one in resolved if one.placed]
     if not kept:
         raise ValueError('no accelerometer is located by its measured points')
-    ids = _node_ids(kept, by_name['nodes'])
-    centers, frames, placed, rows = [], [], [], []
-    for fit in kept:
-        model, size, sized_by, said = _size(fit, meters, by_name['models'].get(fit.sensor),
-                                            by_name['sizes'].get(fit.sensor))
-        notes += said
-        # the catalog holds a uni-axial body with z its sensing axis
-        # whichever axis that is here, so its height is its third size
-        body = size if fit.kind == 'triax' else (size[2], size[2], size[2])
-        centers.append(fit.center(np.asarray(body) / (meters * 1e3)))
+    centers, frames, rows, channels = [], [], [], {}
+    for one in kept:
+        fit = by_sensor[one.sensor]
+        assert one.body is not None
+        # a round body's length is its size along its sensing axis,
+        # whichever body axis the top was labelled with
+        body = one.body if one.kind == 'triax' else (one.body[2],) * 3
+        centers.append(fit.center(body))
         frames.append(fit.frame)
-        directions = ('X+', 'Y+', 'Z+') if fit.kind == 'triax' else (fit.direction,)
+        directions = ('X+', 'Y+', 'Z+') if one.kind == 'triax' else (fit.direction,)
         first = len(rows) + 1
-        entry = lookup(model) if model else None
+        entry = lookup(one.model) if one.model else None
         for direction in directions:
-            rows.append({'channel': len(rows) + 1, 'node': ids[fit.sensor],
+            rows.append({'channel': len(rows) + 1, 'node': one.node,
                          'direction': direction, 'role': 'response',
-                         'channel_type': 'acceleration', 'unit': 'g',
-                         'make': entry.make if entry else '', 'model': model,
-                         'triax_dof': direction[0] if fit.kind == 'triax' else ''})
-        placed.append(Placed(fit.sensor, ids[fit.sensor], fit.kind, model, size, sized_by,
-                             tuple(range(first, len(rows) + 1))))
+                         'channel_type': one.channel_type,
+                         'unit': 'N' if one.channel_type == 'force' else 'g',
+                         'make': entry.make if entry else '', 'model': one.table_model,
+                         'triax_dof': direction[0] if one.kind == 'triax' else ''})
+        channels[one.sensor] = tuple(range(first, len(rows) + 1))
     count = len(kept)
     cs_matrix = np.zeros((count + 1, 4, 3))
     cs_matrix[0, :3] = np.eye(3)
     cs_matrix[1:, :3] = np.array(frames)
     cs_matrix[1:, 3] = np.array(centers) * meters
     geometry = Geometry(
-        node_id=[placed_one.node for placed_one in placed],
+        node_id=[one.node for one in kept],
         node_xyz=np.array(centers) * meters,
         node_def_cs=np.ones(count, dtype=np.int64),
         node_disp_cs=np.arange(2, count + 2),
         cs_id=np.arange(1, count + 2),
-        cs_name=['', *(f'Sensor {fit.sensor}' for fit in kept)],
+        cs_name=['', *(f'Sensor {one.sensor}' for one in kept)],
         cs_type=np.zeros(count + 1, dtype=np.int64),
         cs_matrix=cs_matrix, length_unit=length_unit)
     table = ChannelTable({column: [row[column] for row in rows] for column in rows[0]})
+    import dataclasses
+
+    placed = [dataclasses.replace(one, channels=channels.get(one.sensor, ()))
+              for one in resolved]
     return geometry, table, placed, notes

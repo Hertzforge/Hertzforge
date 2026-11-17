@@ -6,7 +6,7 @@ from test_scan_fit import MM, _can, _cube
 
 from hertzforge import Project
 from hertzforge.core.scan_fit import fit_sensors
-from hertzforge.core.scan_sensors import assemble, guess_model
+from hertzforge.core.scan_sensors import assemble, guess_model, resolve
 from hertzforge.io.point_files import points_geometry
 
 
@@ -49,7 +49,8 @@ def test_the_catalog_model_a_block_fits_in_is_guessed():
 def test_each_accelerometer_is_a_node_at_its_center_in_its_own_system():
     features, truth, height = _features()
     fits, _notes = fit_sensors(features, meters=1.0)
-    geometry, table, placed, notes = assemble(fits, 'mm', sizes={11: height / MM, 40: 19.0})
+    geometry, table, placed, notes = assemble(
+        fits, 'mm', choices={11: {'length': height}, 40: {'size': 19.0 * MM}})
     assert geometry.node_id.tolist() == [31, 32, 40, 11] and geometry.length_unit == 'mm'
     assert list(geometry.cs_name) == ['', 'Sensor 31', 'Sensor 32', 'Sensor 40', 'Sensor 11']
     assert geometry.node_def_cs.tolist() == [1, 1, 1, 1]
@@ -62,9 +63,11 @@ def test_each_accelerometer_is_a_node_at_its_center_in_its_own_system():
             np.testing.assert_allclose(geometry.cs_matrix[row + 1, :3], frame, atol=1e-8)
     # the can's Z is its axis; its X and Y are laid into its top
     np.testing.assert_allclose(geometry.cs_matrix[4, 2], truth['11'][0][2], atol=1e-8)
-    assert [(p.sensor, p.model, p.sized_by) for p in placed] == [
-        ('31', '356A33', 'guess'), ('32', '356A01', 'guess'), ('40', 'Block 19 mm', 'given'),
-        ('11', 'Cylinder 8 x 6 mm', 'given')]
+    assert [(p.sensor, p.table_model, p.shape, p.sized_by, p.placed) for p in placed] == [
+        ('31', '356A33', 'Cube', 'guess', True), ('32', '356A01', 'Cube', 'guess', True),
+        ('40', 'Block 19 mm', 'Cube', 'given', True),
+        ('11', 'Cylinder 8 x 6 mm', 'Cylinder', 'given', True),
+        ('50', '', 'Cube', '', False)]
     assert notes == [('sensor 50 is left out: one face gives one axis; a second face is '
                      'needed to orient the accelerometer')]
     frame_ = table.frame
@@ -77,43 +80,69 @@ def test_each_accelerometer_is_a_node_at_its_center_in_its_own_system():
     assert frame_['model'].tolist() == (['356A33'] * 3 + ['356A01'] * 3 + ['Block 19 mm'] * 3
                                         + ['Cylinder 8 x 6 mm'])
     assert frame_['make'].tolist()[:6] == ['PCB'] * 6
-    assert placed[1].channels == (4, 5, 6) and placed[3].channels == (10,)
+    by_sensor = {p.sensor: p for p in placed}
+    assert by_sensor['32'].channels == (4, 5, 6) and by_sensor['11'].channels == (10,)
+    assert by_sensor['50'].channels == ()
 
 
-def test_sizes_come_from_the_model_named_then_given_then_measured():
+def test_a_sensors_size_is_typed_then_its_models_then_guessed_then_measured():
     features, truth, _height = _features()
     fits, _notes = fit_sensors(features, meters=1.0)
-    # a model named for sensor 31 that is larger than the one guessed moves its node
-    geometry, _table, placed, notes = assemble(fits, 'mm', models={'31': 'pcb 356a02'})
-    assert (placed[0].model, placed[0].sized_by, placed[0].size) == ('356A02', 'model', (14.0,) * 3)
+    by = lambda rows: {row.sensor: row for row in rows}
+    # nothing chosen: the cubes that fit a model are guessed, the rest measured, and said
+    rows, notes = resolve(fits)
+    found = by(rows)
+    assert (found['31'].model, found['31'].sized_by, found['31'].size) == (
+        '356A33', 'guess', pytest.approx(10.2 * MM))
+    assert found['40'].sized_by == 'measured' and found['40'].size == pytest.approx(17.1 * MM, abs=2e-4)
+    assert found['40'].table_model.startswith('Block 17.') and found['40'].length is None
+    assert (found['11'].shape, found['11'].sized_by) == ('Cylinder', 'measured')
+    assert found['11'].size == pytest.approx(8 * MM, rel=1e-5) == found['11'].length
+    assert any('sensor 40: its side is taken as the least it can be' in note for note in notes)
+    assert any('sensor 11: its length is not measured' in note for note in notes)
+    # a model named: its size, and a larger model moves the node
+    geometry, _table, placed, _notes = assemble(fits, 'mm', choices={'31': {'model': 'pcb 356a02'}})
+    one = by(placed)['31']
+    assert (one.model, one.sized_by, one.size) == ('pcb 356a02', 'model', pytest.approx(14 * MM))
     shift = geometry.node_xyz[0] - truth['31'][1]
     assert np.linalg.norm(shift) == pytest.approx(np.sqrt(3) * (14.0 - 10.2) / 2 * MM, rel=1e-6)
-    # with nothing said, the 19 mm block and the can take what was measured, and say so
-    assert placed[2].sized_by == 'measured' and placed[2].size[0] == pytest.approx(17.1, abs=0.2)
-    assert placed[3].sized_by == 'measured' and placed[3].size[2] == pytest.approx(8.0, abs=1e-4)
-    assert any('sensor 40: no catalog model fits a block of' in note for note in notes)
-    assert any('sensor 11: its height is not measured' in note for note in notes)
-    assert placed[2].model.startswith('Block 17.') and placed[3].model == 'Cylinder 8 x 8 mm'
-    # a size written as the model is read as one
-    _g, _t, placed, _n = assemble(fits, 'mm', models={'40': 'Block 20 mm', '11': 'cylinder 8x5 mm'})
-    assert (placed[2].size, placed[2].sized_by) == ((20.0,) * 3, 'model')
-    assert (placed[3].size, placed[3].model) == ((8.0, 8.0, 5.0), 'cylinder 8x5 mm')
-    # a box that is not a cube
-    _g, _t, placed, _n = assemble(fits, 'mm', sizes={'40': (19.0, 19.0, 19.0)}, models={'40': 'mine'})
-    assert (placed[2].model, placed[2].sized_by) == ('mine', 'given')
+    # a size written as the model is read as one; a size typed beside a model wins
+    found = by(resolve(fits, {'40': {'model': 'Block 20 mm'},
+                              '11': {'model': 'cylinder 8x5 mm'},
+                              '31': {'model': '356A02', 'size': 12 * MM}})[0])
+    assert found['40'].size == pytest.approx(20 * MM) and found['40'].sized_by == 'model'
+    assert found['11'].length == pytest.approx(5 * MM) and found['11'].table_model == 'cylinder 8x5 mm'
+    assert (found['31'].size, found['31'].sized_by, found['31'].table_model) == (
+        pytest.approx(12 * MM), 'given', '356A02')
+    # a name the catalog does not hold: kept as the model, sized as measured
+    found = by(resolve(fits, {'40': {'model': 'mine'}})[0])
+    assert (found['40'].table_model, found['40'].sized_by) == ('mine', 'measured')
+    # a catalog uni-axial that is not round, and a force transducer on a cylinder
+    found = by(resolve(fits, {'11': {'model': '352A24'}})[0])
+    assert (found['11'].shape, found['11'].length) == ('Teardrop', pytest.approx(4.8 * MM))
+    found = by(resolve(fits, {'11': {'model': '208C01'}})[0])
+    assert (found['11'].shape, found['11'].channel_type) == ('Hex', 'force')
+    assert found['11'].size == pytest.approx(15.88 * MM) == found['11'].length
+    _g, table, _p, _n = assemble(fits, 'mm', choices={'11': {'model': '208C01'}})
+    assert table.frame[['channel_type', 'unit', 'model']].iloc[-1].tolist() == ['force', 'N', '208C01']
 
 
-def test_what_cannot_be_placed_is_refused():
+def test_what_cannot_be_placed_is_said_and_left_out():
     features, _truth, _height = _features()
     fits, _notes = fit_sensors(features, meters=1.0)
-    with pytest.raises(ValueError, match="'XYZ99' is not in the sensor catalog; give its size"):
-        assemble(fits, 'mm', models={31: 'XYZ99'})
-    with pytest.raises(ValueError, match='sensor 31 is triax and 352A24 is uniaxial'):
-        assemble(fits, 'mm', models={31: '352A24'})
-    with pytest.raises(ValueError, match='models names sensor 99'):
-        assemble(fits, 'mm', models={99: '356A02'})
-    with pytest.raises(ValueError, match='sensors 31 and 32 would both be node 7'):
-        assemble(fits, 'mm', nodes={31: 7, 32: 7})
+    by = lambda rows: {row.sensor: row for row in rows}
+    # a model of the other kind
+    found = by(resolve(fits, {31: {'model': '352A24'}, 11: {'model': '356A02'}})[0])
+    assert found['31'].problem == ('352A24 is a uniaxial model, and this sensor was measured '
+                                   'as a cube')
+    assert found['11'].problem == ('356A02 is a triax model, and this sensor was measured as '
+                                   'a cylinder')
+    # a node chosen twice goes to the first
+    found = by(resolve(fits, {31: {'node': 7}, 32: {'node': 7}})[0])
+    assert found['31'].placed and found['32'].problem == "node 7 is already sensor 31's"
+    assert found['50'].problem.startswith('one face gives one axis')
+    with pytest.raises(ValueError, match='sensor 99 is not among the measured points'):
+        resolve(fits, {99: {'model': '356A02'}})
     with pytest.raises(ValueError, match='no accelerometer is located'):
         assemble([fit for fit in fits if fit.sensor == '50'], 'mm')
 
@@ -126,7 +155,7 @@ def test_sensors_not_named_with_a_number_take_the_next_node_free():
     geometry, _table, _placed, _notes = assemble(fit_sensors(features)[0], 'mm')
     assert geometry.node_id.tolist() == [9, 8, 10]
     geometry, _table, _placed, _notes = assemble(fit_sensors(features)[0], 'mm',
-                                                 nodes={'left': 101})
+                                                 choices={'left': {'node': 101}})
     assert geometry.node_id.tolist() == [101, 8, 102]
 
 
@@ -134,11 +163,15 @@ def test_a_project_creates_them_linked_and_the_drawing_agrees():
     features, truth, height = _features()
     project = Project()
     project.add('Probed', _geometry_of(features))
-    made = project.create_sensors('Probed', sizes={11: height / MM, 40: 19.0})
+    assert project.set_sensor('Probed', 11, length=height) == {'length': height}
+    project.set_sensor('Probed', '40', size=19.0 * MM)
+    made = project.create_sensors('Probed')
     assert (made['geometry'], made['channels']) == ('Probed Sensors Geometry',
                                                     'Probed Sensors Channels')
     assert any('sensor 50 is left out' in note for note in made['notes'])
-    assert project.journal[-1] == "project.create_sensors('Probed', sizes={11: 6.0, 40: 19.0})"
+    assert project.journal[-3:] == ["project.set_sensor('Probed', 11, length=0.006)",
+                                    "project.set_sensor('Probed', '40', size=0.019)",
+                                    "project.create_sensors('Probed')"]
     assert project.object_groups[-1]['members'] == [made['geometry'], made['channels']]
     geometry = project[made['geometry']]
     np.testing.assert_allclose(geometry.node_xyz[0], truth['31'][1], atol=1e-8)
@@ -172,3 +205,34 @@ def test_a_geometry_with_no_unit_is_refused_and_names_are_chosen():
     project['Raw'].define_units('mm')
     made = project.create_sensors('Raw', name='Frame')
     assert (made['geometry'], made['channels']) == ('Frame Geometry', 'Frame Channels')
+
+
+def test_a_sensors_choices_are_set_taken_back_and_saved(tmp_path):
+    features, _truth, _height = _features()
+    project = Project()
+    project.add('Probed', _geometry_of(features))
+    assert project.set_sensor('Probed', 31, node=131, size=0.012) == {'node': 131, 'size': 0.012}
+    # naming a model takes back the size typed before it, so the model's own is used
+    assert project.set_sensor('Probed', 31, model='356A02') == {'node': 131, 'model': '356A02'}
+    assert project.set_sensor('Probed', 31, model='356A02', size=0.013)['size'] == 0.013
+    assert project.set_sensor('Probed', 31, node=None, model='', size=None) == {}
+    assert project['Probed'].sensor_choices == {}
+    project.set_sensor('Probed', 40, size=0.019)
+    for given, said in (({'node': 0}, 'whole number above 0'), ({'node': 2.5}, 'whole number'),
+                        ({'size': -1.0}, 'a size is a length above 0'),
+                        ({'color': 'red'}, "a sensor's color is not chosen")):
+        with pytest.raises(ValueError, match=said):
+            project.set_sensor('Probed', 31, **given)
+    with pytest.raises(ValueError, match='has no sensor 99'):
+        project.set_sensor('Probed', 99, node=1)
+    # saved with the project, and scaled with the geometry's unit
+    path = tmp_path / 'probed.hforge'
+    project.save(path)
+    again = Project.open(path)
+    assert again['Probed'].sensor_choices == {'40': {'size': 0.019}}
+    again['Probed'].undefine_units()
+    assert again['Probed'].sensor_choices['40']['size'] == pytest.approx(19.0)
+    # a choice for a sensor whose features have gone is passed over
+    again['Probed'].define_units('mm')
+    again['Probed'].sensor_choices['77'] = {'node': 5}
+    assert again.create_sensors('Probed')['geometry'] == 'Probed Sensors Geometry'

@@ -318,3 +318,19 @@ def test_the_example_files_fit_as_the_plan_records():
     assert (fits['2'].direction, fits['5'].direction) == ('Z+', 'Z+')
     assert fits['2'].extent / MM == pytest.approx(28.19, abs=0.01)
     assert fits['5'].extent / MM == pytest.approx(3.38, abs=0.01)
+
+
+def test_tops_named_for_each_others_sensor_are_said_to_look_exchanged():
+    """Two cans whose tops were named for each other's sensor: each is
+    refused, and each says which two features to rename. Nothing is
+    exchanged for the person."""
+    _f, _c, _r, _h, side_a, top_a = _can(51)
+    _f, _c, _r, _h, side_b, top_b = _can(52)
+    fits, _notes = fit_sensors({'11_c': side_a, '11_3': top_b, '12_c': side_b, '12_3': top_a})
+    assert [fit.placed for fit in fits] == [False, False]
+    said = [[flag.text for flag in fit.flags] for fit in fits]
+    assert "its top is on sensor 12's cylinder: 11_3 and 12_3 look exchanged" in said[0]
+    assert "its top is on sensor 11's cylinder: 12_3 and 11_3 look exchanged" in said[1]
+    # named right, neither says it
+    fits, _notes = fit_sensors({'11_c': side_a, '11_3': top_a, '12_c': side_b, '12_3': top_b})
+    assert all(fit.placed and not fit.flags for fit in fits)

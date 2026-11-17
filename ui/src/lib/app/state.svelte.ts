@@ -937,6 +937,8 @@ class AnalyzeState {
 	 */
 	async editReadingCell(edit: TableEdit, row: number, column: string, value: string): Promise<string | null> {
 		const title = this.reading?.title ?? '';
+		// a preview typed into is still the preview: closing its form takes it away
+		const previewed = this.reading !== null && this.reading === this.previewDrawn;
 		try {
 			const res = await this.app.analysis.request<OpResult>(
 				'op.run',
@@ -945,6 +947,7 @@ class AnalyzeState {
 			);
 			if (res.project) this.app.project.apply(res.project);
 			this.reading = { title, views: res.views };
+			if (previewed) this.previewDrawn = this.reading;
 			const geometry = edit.params.geometry;
 			if (typeof geometry === 'string') void this.app.project.loadChildren(geometry);
 			return null;
