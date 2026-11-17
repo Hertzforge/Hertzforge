@@ -1862,6 +1862,67 @@ class Project(dict):
             raise ValueError(f'{name!r} has no geometry — link one')
         return place(table, home[1])
 
+    def fit_sensors(self, name: Any) -> tuple[list, list[str]]:
+        """The accelerometers a geometry's measured points locate
+        (`core.scan_fit.fit_sensors`): a plane fitted to each face probed
+        with a measuring arm, a cylinder to each round side, and from
+        them each accelerometer's axes, where it is and how good the fit
+        is. Nothing is changed.
+
+        The features are the geometry's element groups of measured
+        points (`io.point_files`), named ``<sensor>_<label>``. Renaming
+        a group changes what its surface is taken for, and deleting a
+        sensor's groups leaves it out.
+
+        Parameters
+        ----------
+        name : str or object
+            The geometry holding the measured points.
+
+        Returns
+        -------
+        fits : list of SensorFit
+            One per sensor, in the order the sensors first appear, with
+            its frame, its anchor, the fitted surfaces and its flags.
+            Lengths are in meters when the geometry's units are
+            declared, and in its own numbers when they are not.
+        notes : list of str
+            The features left out and why, and that roughness was not
+            judged when the geometry has no length unit.
+
+        Raises
+        ------
+        TypeError
+            If the object is not a geometry.
+        ValueError
+            If the geometry holds no measured points.
+        """
+        from .core.scan_fit import fit_sensors
+        from .io.point_files import MEASURED_POINT
+
+        name = self.name_of(name)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        row_of = {int(node): row for row, node in enumerate(geometry.node_id)}
+        names = {int(group): str(label) for group, label
+                 in zip(geometry.group_id, geometry.group_name, strict=True)}
+        rows: dict[str, list[int]] = {}
+        for code, group, conn in zip(geometry.elem_type, geometry.elem_group,
+                                     geometry.elem_conn, strict=True):
+            if int(code) == MEASURED_POINT and int(group) in names:
+                rows.setdefault(names[int(group)], []).append(row_of[int(conn[0])])
+        if not rows:
+            raise ValueError(f'{name!r} holds no measured points to fit')
+        defined = geometry.units_defined
+        fits, notes = fit_sensors({label: geometry.node_xyz[held]
+                                   for label, held in rows.items()},
+                                  meters=1.0 if defined else None)
+        if not defined:
+            notes.append(f'{name} has no length unit, so the roughness of the surfaces '
+                         'was not judged')
+        return fits, notes
+
     def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
         """(name, table) for the channel table linked with an object:
         the one lookup the overload check and the shape values share.
