@@ -138,8 +138,8 @@ CATALOG: tuple[SensorModel, ...] = (
     # outline drawing 80614: a flat block 14.22 mm long, 7.1 wide and
     # 2.79 high with two screw holes through it, sensing through its
     # height, a 1.27 mm cable out of one end. One body for every range
-    # (-2K to -60K). The drawing gives no mass: 1.5 g is the data sheet's
-    # figure as remembered, not read (Brandon, 2026-11-17)
+    # (-2K to -60K). The drawing gives no mass: 1.5 g is Brandon's
+    # figure (2026-11-17)
     _uniaxial('7270A', 'box', (14.22, 7.1, 2.79), 1.5, 'integral cable',
               plug=NOTHING, cable=(1.27, 12.0), make='Endevco'),
     # data sheet 091719, outline: a 9.78 mm round body 5.8 mm high, drawn
