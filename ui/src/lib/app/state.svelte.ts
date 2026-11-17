@@ -1728,6 +1728,11 @@ export class ProjectState {
 		return !this.summary?.modified || (await discardUnsaved(this.summary.title));
 	}
 
+	/** The project's own name typed over on its row. */
+	async retitle(title: string): Promise<boolean> {
+		return this.call('Renaming the project', 'project.retitle', { title }, false);
+	}
+
 	async rename(name: string, to: string): Promise<boolean> {
 		const ok = await this.call(`Renaming ${name}`, 'project.rename', { name, to }, false);
 		if (ok) {

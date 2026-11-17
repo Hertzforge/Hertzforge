@@ -31,6 +31,10 @@ CLOUD_SIZE, PROBED_SIZE = 2.0, 6.0
 #: the color of a few bare nodes (sRGB)
 BARE_COLOR = (139, 148, 158)
 
+#: the color of the points of the element groups picked, which reads on a dark and a
+#: light ground and is none of the element colors
+PICKED_COLOR = (255, 214, 10)
+
 
 def _by_height(points: np.ndarray) -> np.ndarray:
     """Each point's color from its height along the axis the points
@@ -97,3 +101,21 @@ def layers(geometry: Any) -> tuple[list[dict[str, Any]], str]:
     return [{'xyz': np.ascontiguousarray(xyz[::step], np.float32),
              'colors': np.ascontiguousarray(colors[::step], np.uint8),
              'size': CLOUD_SIZE if cloud else PROBED_SIZE}], note
+
+
+def picked_layer(geometry: Any, groups: Any) -> dict[str, Any] | None:
+    """A `points` layer of the nodes in the point elements of `groups`, larger than the
+    points under them and in one color, so the element groups picked stand out among the
+    rest (Brandon, 2026-11-17). None when the groups hold no point element."""
+    wanted = np.isin(np.asarray(geometry.elem_group, dtype=np.int64),
+                     np.asarray(list(groups), dtype=np.int64))
+    picked = np.flatnonzero(_point_elements(geometry) & wanted)
+    if not len(picked):
+        return None
+    first = np.array([int(geometry.elem_conn[k][0]) for k in picked], dtype=np.int64)
+    rows = np.unique(_rows_of(geometry, first))
+    step = -(-len(rows) // DRAWN_POINTS) if len(rows) > DRAWN_POINTS else 1
+    xyz = np.asarray(geometry.node_xyz, dtype=float)[rows][::step]
+    size = 2 * (CLOUD_SIZE if len(undrawn_rows(geometry)) > PROBED_POINTS else PROBED_SIZE)
+    return {'xyz': np.ascontiguousarray(xyz, np.float32),
+            'colors': np.tile(np.uint8(PICKED_COLOR), (len(xyz), 1)), 'size': size}

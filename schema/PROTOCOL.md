@@ -518,6 +518,7 @@ projects downloaded from hertzforge.com and opened like any other file.
 | `op.cancel` | `{}` | `{"op"}` |
 | `report.*` | see Reports below | |
 | `project.rename` | `{"name","to","index"?}` | `{"project"}` |
+| `project.retitle` | `{"title"}` | `{"project"}`: the project's own name; its file keeps its name until saved elsewhere |
 | `project.remove` | `{"names"}` | `{"project"}` |
 | `project.delete_parts` | `{"parts":{name:[index,...]}}` | `{"project"}` |
 | `project.activate` | `{"geometry"}` | `{"project"}` |

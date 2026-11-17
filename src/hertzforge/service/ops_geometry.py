@@ -317,7 +317,7 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
     coordinate systems' axes when they are the part, and no table: a part's table is its
     Edit verb (`view_entities`), not its plot (Brandon, 2026-11-13). None for a part
     drawn another way (solids, mated surfaces)."""
-    from .verbs import part_key
+    from .verbs import part_key, picked_ids
 
     where = part_key(part)
     if where not in ('part:nodes', 'part:coordinate_systems', 'family', 'group'):
@@ -325,7 +325,18 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
     drawn = _drawn(name, geometry)
     if where == 'part:coordinate_systems':
         drawn['frames'] = frames(geometry, drawn['nodes'])
+    if where == 'group':
+        _mark_points(drawn, geometry, picked_ids(part))
     return [drawn]
+
+
+def _mark_points(drawn: dict, geometry: Any, groups: Any) -> None:
+    """The points of the element groups picked, drawn over the rest in their own color."""
+    from . import scans
+
+    layer = scans.picked_layer(geometry, [int(g) for g in groups])
+    if layer is not None:
+        drawn['points'] = [*drawn.get('points', ()), layer]
 
 
 # ---- View Entities and the edits ----------------------------------------------------
@@ -346,6 +357,7 @@ def view_entities(project: Any, params: dict[str, Any]) -> list[dict]:
         runs = id_runs_text(groups)
         said = ('element group ' if len(groups) == 1 else 'element groups ') + runs
         drawn, elements = _shown(name, geometry, 'elements', said, groups=runs)
+        _mark_points(drawn, geometry, groups)
         return [drawn, entity_table(geometry, 'groups', f'Element groups of {name}: ' + runs,
                                     name, groups=runs), elements]
     if family:

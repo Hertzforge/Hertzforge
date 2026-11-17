@@ -44,9 +44,29 @@
 
 	/** Delete on the project row takes the project out of the tree: a new, empty one in its place, after asking when this one has unsaved changes. */
 	function projectKey(e: KeyboardEvent) {
+		if (e.key === 'F2') return startTitle();
 		if ((e.key !== 'Delete' && e.key !== 'Backspace') || p.busy !== null) return;
 		e.preventDefault();
 		void p.newProject();
+	}
+
+	// the project's name typed over on its row: a double-click, or F2 on it (Brandon, 2026-11-17)
+	let titling = $state(false);
+	let newTitle = $state('');
+	function startTitle() {
+		if (!p.summary || p.busy !== null) return;
+		newTitle = p.summary.title;
+		titling = true;
+	}
+	async function commitTitle() {
+		if (!titling) return;
+		titling = false;
+		const to = newTitle.trim();
+		if (to && to !== p.summary?.title) await p.retitle(to);
+	}
+	function focusAndSelect(node: HTMLInputElement) {
+		node.focus();
+		node.select();
 	}
 </script>
 
@@ -76,13 +96,31 @@
 
 	{#if p.summary}
 		<!-- the project itself, picked: nothing in the tree, and the action table offers the project's acts (Save, Open, Import) -->
-		<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Delete starts a new, empty project.'} onclick={() => p.clearSelection()} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
-			<span class="ctitle">
-				{p.summary.title}
-				{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
-			</span>
-			<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
-		</button>
+		{#if titling}
+			<div class="choice on titling">
+				<input
+					class="field rename"
+					aria-label="New name for the project"
+					data-testid="project-title-field"
+					bind:value={newTitle}
+					use:focusAndSelect
+					onkeydown={(e) => {
+						if (e.key === 'Enter') void commitTitle();
+						else if (e.key === 'Escape') titling = false;
+					}}
+					onblur={() => void commitTitle()}
+				/>
+				<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
+			</div>
+		{:else}
+			<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Delete starts a new, empty project.'} onclick={() => p.clearSelection()} ondblclick={startTitle} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
+				<span class="ctitle">
+					{p.summary.title}
+					{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
+				</span>
+				<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
+			</button>
+		{/if}
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
 			{#if p.summary.objects.length}
 				<ProjectTree {app} />
@@ -207,6 +245,11 @@
 	.muted {
 		color: var(--text-3);
 		font-size: var(--text-sm);
+	}
+
+	.titling .rename {
+		width: 100%;
+		font-weight: 600;
 	}
 
 	.choice {

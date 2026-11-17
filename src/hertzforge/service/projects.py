@@ -392,6 +392,19 @@ def _name(params: Mapping[str, Any], key: str, method: str) -> str:
     return value
 
 
+def retitle(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.retitle`: the project called `title`. Its file, if it has one, keeps its
+    name until it is saved somewhere else."""
+    state = _open(state, 'project.retitle')
+    title = _name(params, 'title', 'project.retitle').strip()
+    if not title:
+        raise bad_request('project.retitle "title" must be a name, not empty')
+    if title == state.project.name:
+        return
+    state.project.name = title
+    state.modified = True
+
+
 def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
     """`project.rename`: the object `name` called `to`, and every group,
     provenance record and report block that names it following
