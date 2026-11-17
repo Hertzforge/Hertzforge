@@ -93,6 +93,16 @@ def projection_order(first: ShapeSet, second: ShapeSet) -> tuple[bool, str]:
     return onto_second, 'it has the fewer DOFs'
 
 
+class NoNodeMatched(ValueError):
+    """No test node has a model node within the match tolerance. `report` says how far
+    off they are: `matched` (0), `total`, `worst` (the nearest pair's distance) and
+    `limit`, as `project_shapes` reports a projection that did match."""
+
+    def __init__(self, message: str, report: dict[str, Any]):
+        super().__init__(message)
+        self.report: dict[str, Any] = report
+
+
 def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
                    test_shapes: ShapeSet, test_geometry: Geometry,
                    tolerance: float = 0.02
@@ -174,9 +184,15 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
         distance[int(row)] = float(np.sqrt(squared[best]))
     matched_rows = {row for row in nearest if distance[row] <= limit}
     if not matched_rows:
-        raise ValueError(
-            'no test node has a FEM node within the match tolerance — '
-            'check that the geometries overlay, or loosen the tolerance')
+        closest = min(distance.values())
+        unit = (' m' if fem_geometry.units_defined and test_geometry.units_defined
+                else ' in model units')
+        raise NoNodeMatched(
+            'no test node has a FEM node within the match tolerance: the nearest is '
+            f'{closest:.4g}{unit} away and the limit is {limit:.4g} — '
+            'check that the geometries overlay, or loosen the tolerance',
+            {'matched': 0, 'total': len(unique_rows), 'worst': closest, 'limit': limit,
+             'dropped': []})
 
     keep = [i for i, row in enumerate(rows) if int(row) in matched_rows]
     used_indices = np.flatnonzero(used)

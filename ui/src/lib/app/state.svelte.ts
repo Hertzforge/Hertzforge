@@ -244,7 +244,8 @@ class AnalyzeState {
 			this.picks = [];
 			this.shapeView = null;
 			// each selection opens as it is: Projection is asked for again, not carried over
-			if (this.prefs.projection) this.prefs = { ...this.prefs, projection: false };
+			// and so is a loosened node match: one pair's tolerance is not the next pair's
+			if (this.prefs.projection || this.prefs.match_tolerance !== 2) this.prefs = { ...this.prefs, projection: false, match_tolerance: 2 };
 		}
 		// a redraw of the same selection (the Averaging form typed into) offers what it did
 		if (!redraw) void this.loadActions();
@@ -265,6 +266,7 @@ class AnalyzeState {
 						component: this.prefs.component,
 						line: this.line,
 						projection: this.prefs.projection,
+						match_tolerance: this.prefs.match_tolerance,
 						shape_view: this.shapeView,
 						values_dofs: this.prefs.values_dofs,
 						values_form: this.prefs.values_form,
@@ -1565,6 +1567,7 @@ function readPrefs(): ShowPrefs {
 		flat: false,
 		component: 'magnitude',
 		projection: false,
+		match_tolerance: 2,
 		bars: true,
 		values_dofs: 'all',
 		values_form: 'shapes',

@@ -726,6 +726,8 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
+	/** Two shape sets on two geometries: how far a test node may be from its model node, in percent of the test geometry's extent. */
+	match_tolerance: number;
 	/** Where and in what form a lone shape set's values are read. */
 	values_dofs: string;
 	values_form: 'shapes' | 'response' | 'reference';

@@ -706,7 +706,11 @@ grid is picked. Two shape sets (with or without a geometry in the selection) sho
 geometry, the stage the matrix `selects` a pair on; a `matrix` may carry `matched`, the `[row, column]`
 pairs already kept in a Matched Modes object for the two sets. `prefs.projection` (offered as
 `projection` when the two sets are on different geometries) animates the projection on the geometry
-projected onto. Which set is projected is decided by what the sets measure and not by their order: the
+projected onto. `prefs.match_tolerance` (percent of the test geometry's extent, above 0 and at most
+100, 2 when absent) is how far a test node may be from the model node it is matched to, for the MAC
+and for the projection; the shell offers it with `projection`. When no node matches at all the
+answer is a `reading` of how far off the nearest pair is and the limit, with the reason in `note`,
+so the tolerance can be set beside it. Which set is projected is decided by what the sets measure and not by their order: the
 set with nodes measured in fewer than three translation directions is the one projected onto, since it
 has no whole motion to sample; with none or with some in both, the set with more DOFs is projected onto
 the one with fewer. The MAC, the matches and each pair's alignment are read after that projection, and

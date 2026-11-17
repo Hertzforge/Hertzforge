@@ -83,7 +83,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: decades on the frequency axis, and the
 #: component of complex data
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'shape_view': None,
+         'projection': False, 'match_tolerance': 2.0, 'shape_view': None,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
          'drive': None,
          'sensors': True,
@@ -719,6 +719,19 @@ def _matched(project: Any, first: str, second: str) -> tuple[str, Any] | None:
                  and obj.second == second), None)
 
 
+def _none_matched(first: str, second: str, homes: Any, error: Any
+                  ) -> tuple[list[dict], list[str]]:
+    """Two sets whose geometries share no node within the tolerance: how far off they
+    are, said in the window and not refused. The tolerance is set beside what is shown,
+    and a refusal shows nothing to set it beside."""
+    from .ops_modal_plan import _report_rows
+
+    both = homes[0][1].units_defined and homes[1][1].units_defined
+    return ([v.reading(f'No node of {first} and {second} matched',
+                       _report_rows(error.report, both))],
+            [f'{error}. Node match, above, sets the tolerance'])
+
+
 def _mac(project: Any, first: str, second: str, geometry: str | None,
          prefs: dict[str, Any]) -> tuple[list[dict], list[str]]:
     """Two shape sets: their MAC, each axis ticked by its own frequencies,
@@ -729,6 +742,8 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     projection on the basis geometry instead of both sets by DOF name.
     Pairs already committed to a Matched Modes object ride on the matrix
     as `matched`."""
+    from hertzforge.core.correlate import NoNodeMatched
+
     from .mode_pairs import paired
 
     rows, columns = project[first], project[second]
@@ -737,9 +752,18 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     homes = project.geometry_for(first), project.geometry_for(second)
     apart = all(home is not None for home in homes) and homes[0][1] is not homes[1][1]
     notes: list[str] = []
+    # how far a test node may be from its model node, in percent of the test geometry's
+    # extent: the comparison's own setting, as the Projection view's (Brandon, 2026-11-17)
+    percent = float(prefs.get('match_tolerance') or 2.0)
     if apart and prefs.get('projection'):
-        views = _run(project, 'project.projection_overlay', first=first, second=second,
-                     tolerance=2.0)
+        try:
+            views = _run(project, 'project.projection_overlay', first=first, second=second,
+                         tolerance=percent)
+        except ProtocolError as error:
+            if 'within the match tolerance' not in str(error):
+                raise
+            # nothing to animate: answered as the comparison answers it, with how far off
+            return _mac(project, first, second, geometry, {**prefs, 'projection': False})
     else:
         from hertzforge.core.shapes import cross_mac
 
@@ -747,8 +771,11 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             # the two sets as they are compared: one projected onto the other's DOFs when
             # they are on two geometries, for the MAC and for each pair's alignment
             ours, theirs, said, report = ((rows, columns, '', None) if first == second
-                                          else project.compared_sets(first, second))
+                                          else project.compared_sets(
+                                              first, second, tolerance=percent / 100.0))
             values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
+        except NoNodeMatched as error:
+            return _none_matched(first, second, homes, error)
         except ValueError as error:
             raise refused(str(error)) from None
 
