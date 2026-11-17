@@ -951,6 +951,16 @@ def _modal_frf_records(data: Any, picks: list[int]) -> list[int] | None:
     return records
 
 
+def _linked_geometry(project: Any, name: str) -> str | None:
+    """The geometry an object is linked to (the one in its object group), by name."""
+    from hertzforge.core.geometry import Geometry
+
+    for member in project.object_group_of(name) or ():
+        if isinstance(project.get(member), Geometry):
+            return member
+    return None
+
+
 def _driven_selection(project: Any, objects: list[str], records: dict[str, list[int]]
                       ) -> tuple[str, str, str, list[int]] | None:
     """(geometry, modal FRFs, channel table, the records read) when the selection is one
@@ -1043,14 +1053,27 @@ def _driven(project: Any, objects: list[str], records: dict[str, list[int]],
                       triangles=triangles, lines=lines, normalization='unscaled',
                       node_ids=np.asarray(geometry.node_id)[drawn_rows],
                       cursor='frequency')
-    # the one arrow is the force: modal coordinates are at no node
+    # the one arrow is the force: modal coordinates are at no node. The drive is a DOF of
+    # the table's geometry: when the table is linked to one, the shapes were read at its
+    # node's place (`Project.channel_shapes`), so the arrow is that node's place and
+    # coordinate system, not the node with the same number on the geometry drawn (a table
+    # on a sparse test geometry over a finite element model put it at the model's node of
+    # that number, or nowhere). It is drawn at the drawn node nearest that place and
+    # rides it (`follow`).
+    home = _linked_geometry(project, table)
+    on = geometry if home is None else project[home]
+    hit = dof_arrow_vectors(on, [drive])[0]
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
-    hit = dof_arrow_vectors(geometry, [drive])[0]
-    if hit is not None:
-        stage['arrows'] = arrows(xyz, [(True, hit)],
-                                 dof_arrow_length(xyz[[hit[0]]], _extent(xyz)), [drive])
+    if hit is not None and drawn_rows.size:
+        place = np.asarray(on.node_xyz, dtype=float).reshape(-1, 3)[hit[0]]
+        row = int(np.argmin(np.linalg.norm(xyz[drawn_rows] - place, axis=1)))
+        at_node = xyz[drawn_rows][[row]]
+        stage['arrows'] = arrows(at_node, [(True, (0, hit[1], hit[2]))],
+                                 dof_arrow_length(at_node, _extent(xyz)), [drive])
+        stage['arrows']['follow'] = np.array([row], dtype=np.uint32)
     else:
-        notes.append(f'{drive} is not a node of {geometry_name}: the force is not drawn')
+        notes.append(f'{drive} is not a node of {geometry_name if home is None else home}: '
+                     'the force is not drawn')
     curves = _run(project, 'project.plot', data=modal, records=_runs(read),
                   component=prefs['component'])
     for curve in curves:

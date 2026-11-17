@@ -120,7 +120,8 @@ def arrows(xyz: np.ndarray, drawn: Sequence[tuple[bool, tuple[int, np.ndarray, i
     f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
     (0 X, 1 Y, 2 Z), which picks its color. `labels` names each arrow's DOF and `inward`
     u8 [A] is 1 for an arrow that points in, so a label can sit at the end away from the
-    node."""
+    node. A caller whose arrows move with the model adds `follow` u32 [A], the row of the
+    view's `nodes` whose motion each arrow takes."""
     tails = np.zeros((len(drawn), 3), dtype=np.float32)
     directions = np.zeros((len(drawn), 3), dtype=np.float32)
     axes = np.zeros(len(drawn), dtype=np.uint8)

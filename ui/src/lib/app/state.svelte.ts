@@ -626,8 +626,19 @@ class AnalyzeState {
 		}, 150);
 	}
 
+	/** The frequency the stage that reads at the cursor's line is drawn at; null with no such stage. */
+	private shownLine(): number | null {
+		for (const view of this.shown?.views ?? []) {
+			if (view.view === 'shape3d' && view.cursor === 'frequency') return view.modes[0]?.frequency_hz ?? null;
+		}
+		return null;
+	}
+
 	/** One of the bar's choices changed: kept, and the selection read again. */
 	setPref<K extends keyof ShowPrefs>(key: K, value: ShowPrefs[K]): void {
+		// moving the force is the same question asked of another point: the line shown is kept,
+		// where a cursor never moved would leave each force at its own strongest line
+		if (key === 'drive' && this.line === null) this.line = this.shownLine();
 		this.prefs = { ...this.prefs, [key]: value };
 		try {
 			localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));

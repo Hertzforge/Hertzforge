@@ -242,7 +242,8 @@
           "properties": {
             "tails": {"$ref": "#/$defs/arrayRef"}, "directions": {"$ref": "#/$defs/arrayRef"},
             "axes": {"$ref": "#/$defs/arrayRef"}, "length": {"type": "number", "minimum": 0},
-            "labels": {"type": "array", "items": {"type": "string"}}, "inward": {"$ref": "#/$defs/arrayRef"}
+            "labels": {"type": "array", "items": {"type": "string"}}, "inward": {"$ref": "#/$defs/arrayRef"},
+            "follow": {"$ref": "#/$defs/arrayRef"}
           }
         },
         "bodies": {

@@ -72,7 +72,7 @@
 	import { TransformControls } from 'three/addons/controls/TransformControls.js';
 	import type { Shape3DView } from '$lib/protocol/types';
 	import { AXIS_COLORS, AXIS_HEX } from './pick';
-	import { arrowMesh, labelPoints, triadScene, TRIAD_HALF } from './arrows';
+	import { arrowMatrices, arrowMesh, labelPoints, moveArrows, riddenOffsets, triadScene, TRIAD_HALF } from './arrows';
 	import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 	import type { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 	import { wideLines } from './wideLines';
@@ -413,8 +413,12 @@
 	let edges: LineSegments | null = null;
 	let ghostSurface: Mesh;
 	let ghostOutline: LineSegments | null = null;
-	/** The view's `arrows`: a solid arrow at each DOF, in its axis's color, drawn still. */
+	/** The view's `arrows`: a solid arrow at each DOF, in its axis's color, drawn still unless they `follow` nodes. */
 	let dofArrows: InstancedMesh | null = null;
+	/** Arrows that follow nodes: each one's place and its label's at rest, and how far each has gone. */
+	let arrowRest: Matrix4[] | null = null;
+	let labelRest: Float32Array | null = null;
+	let arrowGone: Float32Array | null = null;
 	/** The orientation axes, drawn in the corner of the canvas after the model. */
 	let orientation: ReturnType<typeof triadScene> | null = null;
 	/** The view's coordinate systems (`frames`), drawn as the gimbal is: X red, Y green, Z blue arrows. */
@@ -602,6 +606,15 @@
 		followBodies(true);
 		dirty = true;
 		paintColors();
+	}
+
+	/** Carry the arrows that follow nodes, and their labels, to where those nodes are now. */
+	function rideArrows() {
+		const follow = view.arrows?.follow;
+		if (!follow || !dofArrows || !arrowRest || !labelRest || !labelAt || !arrowGone) return;
+		riddenOffsets(follow, shapeAttr.array, shapeImagAttr.array, uniforms.uRe.value, uniforms.uIm.value, arrowGone);
+		moveArrows(dofArrows, arrowRest, arrowGone);
+		for (let i = 0; i < labelAt.length; i++) labelAt[i] = labelRest[i] + arrowGone[i];
 	}
 
 	/** Give the bodies their nodes' offsets: the real part, and the imaginary too when `both`. */
@@ -841,6 +854,12 @@
 			dofArrows = arrowMesh(view.arrows);
 			scene.add(dofArrows);
 			labelAt = labelPoints(view.arrows);
+			if (view.arrows.follow) {
+				// arrows that ride their nodes (a force on the node it pushes): where each rests
+				arrowRest = arrowMatrices(view.arrows.tails, view.arrows.directions, view.arrows.length);
+				labelRest = labelAt.slice();
+				arrowGone = new Float32Array(labelAt.length);
+			}
 		}
 		orientation = triadScene();
 
@@ -1208,6 +1227,7 @@
 			uniforms.uPeak.value = peak || 1;
 			dirty = true;
 		}
+		if (dirty) rideArrows();
 	}
 
 	/**
