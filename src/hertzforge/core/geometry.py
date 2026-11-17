@@ -128,6 +128,11 @@ ELEMENT_TYPES = {
     # The UNV writer refuses these two by name instead.
     201: ('pyramid5', 5, 'volume'),
     202: ('pyramid13', 13, 'volume'),
+    # A point measured on the part with a coordinate measuring arm, one
+    # node, with no stiffness or mass: the points probed on one surface
+    # are one element group, named as the person measuring named it
+    # (`io.point_files`).
+    203: ('measured_point', 1, 'point'),
 }
 
 #: the element families the tree lists under a geometry (Brandon,

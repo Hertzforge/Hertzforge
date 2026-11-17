@@ -28,9 +28,9 @@ held by reference to another file (below), and only a file with such an
 object is stamped 2. Schema 3 adds the run record (`run_record/`,
 below), and only a file holding one, or referring to one, is stamped 3.
 Schema 4 adds the test setup (`test_setup/`, below), and only a file
-holding one, or referring to one, is stamped 4. Schema 5 adds the scan
-(`scan/`, below), and only a file holding one, or referring to one, is
-stamped 5.
+holding one, or referring to one, is stamped 4. Schema 5 held measured points as a
+group of their own (`scan/`, below) for a few days in November 2026.
+It is read and no longer written: measured points are a geometry.
 
 The schema changes by addition. New datasets and attributes are
 optional, with a default when they are absent, and existing ones are
@@ -437,13 +437,14 @@ it was run at (`level`, dB relative to full level, or null).
              properties  one UTF-8 string, JSON: the header rows of
                          the file it was read from                 (optional)
 
-Points measured on the part with a coordinate measuring arm: probed,
-feature by feature, or scanned with a laser as a cloud with no
-features. `points` and `deviation` are in meters when `length_unit` is
-set and as the file gave them when it is '', the way a geometry's node
-coordinates are held. The points are stored one row per axis so a
-compressed save chunks along the points. `features` and `feature_of`
-are written together, and only for a scan that has features.
+Read only. Points measured on the part with a coordinate measuring arm
+were stored this way by builds between pull requests 309 and its
+successor; no release wrote it. A reader opens the group as a geometry:
+each point a node, numbered from 1, and each feature an element group
+of its name holding a one-node `measured_point` element (type 203) at
+each of its points. `deviation` and `properties` are not carried over.
+`points` is in meters when `length_unit` is set and as the file gave
+them when it is ''.
 
 ## `run_log_extract/`
 

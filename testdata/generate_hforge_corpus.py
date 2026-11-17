@@ -11,9 +11,10 @@ roles, project type, predictions, a run log extract) whose handling
 when absent is what future readers must keep. From schema 3 it also
 holds a converted control run: its channel table, streams, specification,
 results and run record. From schema 4 it also holds two test setups:
-one typed, and one taken from the converted run. From schema 5 it also
-holds two scans: probed points in features, and a bare cloud with no
-unit. The run log extract is
+one typed, and one taken from the converted run. The frozen schema 5
+file also holds two `scan/` groups, measured points as they were stored
+for a few days in November 2026; nothing writes that group now, so this
+script cannot write that file again. The run log extract is
 taken from the frozen run log in `vdlog_corpus/` and stored as if the
 log sat beside the project file, so the file holds a relative path and
 the log is not found beside it, a case a reader must keep too.
@@ -46,13 +47,7 @@ from hertzforge.core.sine import (
     SineSweepSpecification,
     SineTone,
 )
-from hertzforge.io.native import (
-    RUN_RECORD_SCHEMA,
-    SCAN_SCHEMA,
-    SCHEMA_VERSION,
-    SUFFIX,
-    TEST_SETUP_SCHEMA,
-)
+from hertzforge.io.native import RUN_RECORD_SCHEMA, SCHEMA_VERSION, SUFFIX, TEST_SETUP_SCHEMA
 
 #: the smallest legal PNG: 1x1, opaque. The corpus needs image *bytes*
 #: that survive verbatim, not a picture.
@@ -193,27 +188,7 @@ def build_project() -> hertzforge.Project:
         add_converted_run(project)
     if SCHEMA_VERSION >= TEST_SETUP_SCHEMA:
         add_test_setups(project)
-    if SCHEMA_VERSION >= SCAN_SCHEMA:
-        add_scans(project)
     return project
-
-
-def add_scans(project: hertzforge.Project) -> None:
-    """Schema 5 is the scan: one probed (two features and a point in
-    neither, in millimeters, with deviations and the header's rows) and
-    one bare cloud whose unit was never declared."""
-    from hertzforge.core.scan import Scan
-
-    probed = np.array([[10.0, 0.0, 5.0], [10.0, 4.0, 5.0], [10.0, 2.0, 9.0],
-                       [0.0, 12.0, 5.0], [4.0, 12.0, 5.0], [2.0, 12.0, 9.0],
-                       [50.0, 50.0, 50.0]])
-    project.add('Probed Scan', Scan(
-        probed, length_unit='mm', features=['31_1', '31_2'],
-        feature_of=[0, 0, 0, 1, 1, 1, -1],
-        deviation=[0.001, -0.002, 0.001, 0.0, 0.003, -0.003, 0.0],
-        properties={'Coordinate System': 'world', 'Data Alignments': 'original'}))
-    grid = np.arange(24, dtype=float).reshape(8, 3)
-    project.add('Cloud Scan', Scan(grid * [1.0, 0.5, 0.25]))
 
 
 def add_test_setups(project: hertzforge.Project) -> None:

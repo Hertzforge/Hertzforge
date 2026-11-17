@@ -446,9 +446,7 @@
 
 	/** The view's `bodies`: sensor solids, each point taking its node's motion. */
 	let bodies: Mesh | null = null;
-	/** How many free points the view's layers hold, for the readout. */
-	const pointCount = $derived((view.points ?? []).reduce((sum, layer) => sum + layer.xyz.length / 3, 0));
-	/** The view's `points` layers: a scan's measured points, which stay put. */
+	/** The view's `points` layers: the nodes no line or face is drawn through, which stay put. */
 	let pointLayers: Points[] = [];
 	let bodyShapeAttr: BufferAttribute | null = null;
 	let bodyShapeImagAttr: BufferAttribute | null = null;
@@ -750,7 +748,7 @@
 			others.push(new Box3().setFromBufferAttribute(new BufferAttribute(view.bodies.nodes, 3)));
 		}
 		for (const layer of view.points ?? []) {
-			// a scan's points are framed with the model, or alone when there is no model
+			// points are framed with the model, or alone when nothing else is drawn
 			if (layer.xyz.length) others.push(new Box3().setFromBufferAttribute(new BufferAttribute(layer.xyz, 3)));
 		}
 		for (const frame of view.frames ?? []) {
@@ -865,7 +863,7 @@
 		}
 
 		for (const layer of view.points ?? []) {
-			// a scan's points, each in its own color, at one size on screen however far away
+			// free points, each in its own color, at one size on screen however far away
 			const g = new BufferGeometry();
 			g.setAttribute('position', new BufferAttribute(layer.xyz, 3));
 			g.setAttribute('color', new BufferAttribute(linearColors(layer.colors), 3));
@@ -1699,7 +1697,6 @@
 				<span class="fps" data-testid="shape3d-fps" class:paused={!playing}>{playing ? (fps === null ? '-- fps' : `${fps} fps`) : 'Paused'}</span>
 				<span>{formatCount(nodeCount)} nodes</span>
 				<span>{formatCount(triCount)} triangles</span>
-				{#if pointCount}<span data-testid="shape3d-points">{formatCount(pointCount)} points</span>{/if}
 			</div>
 		</div>
 	</div>

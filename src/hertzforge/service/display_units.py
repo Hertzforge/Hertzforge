@@ -281,6 +281,9 @@ def _shape(view: dict, system: Any) -> None:
         bodies = view.get('bodies')
         if bodies is not None:
             bodies['nodes'] = np.asarray(_values(bodies['nodes'], change), dtype=np.float32)
+        for layer in view.get('points', ()):
+            # free points over the model, in its coordinates
+            layer['xyz'] = np.asarray(_values(layer['xyz'], change), dtype=np.float32)
         for frame in view.get('frames', ()):
             frame['origin'] = [float((v - change[1]) / change[0]) for v in frame['origin']]
             frame['length'] = float(frame['length'] / change[0])

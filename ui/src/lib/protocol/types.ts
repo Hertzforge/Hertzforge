@@ -236,7 +236,8 @@ export interface Shape3DView {
 	 */
 	bodies?: { nodes: Float32Array; triangles: Uint32Array; colors: Uint8Array; follow: Uint32Array };
 	/**
-	 * Free points over the model in its own coordinates, in layers: a scan's measured points.
+	 * Free points over the model in its own coordinates, in layers: the nodes of a geometry that no
+	 * line or face is drawn through (measured points, a cloud from a laser scan, nodes alone).
 	 * `xyz` f32 [P, 3], `colors` u8 [P, 3] each point's sRGB, `size` the point's width on screen
 	 * in pixels. They stay put and are framed with the model.
 	 */
