@@ -638,6 +638,23 @@ pulse, a waveform target a `TransientSpecification` of every control, its
 identification an `Frf` and a `MultipleCoherence`, and the rest stays in the run
 record (`docs/run-folder.md`, "What a MIMO Shock Run Saves").
 
+## MIMO Sine Runs
+
+A MIMO Sine run is a run folder and converts as one ("Run Folders and Their
+Conversion"), its project's type `Sine Sweep`. Its references
+(`results/reference`, kind `mimo_sine_reference`, every array controls by points)
+become a `Specification`: a `SineSweepSpecification` of one tone, `Tone 1`, with a
+column for each control, each with its own amplitude, phase and alarm and abort
+bands, in m/s**2, for a sweep or a dwell (a stepped sine's references stay in the
+run record). Its `channel_levels` (kind `sine_levels`) become a `SineLevelSet` of
+every control, limit channel and drive, its lines the last one-way pass at the
+highest level the run reached (a stepped sine read as a step test; a dwell's levels
+are against time and stay in the run record). Its identification is an `Frf` of
+every control's and limit channel's response to every drive and a
+`MultipleCoherence`; the trust mask, the law's calls (`control_trace`) and every
+other array stay in the run record (`docs/run-folder.md`, "What a MIMO Sine Run
+Saves").
+
 ## Reading One Without Hertzforge
 
 Because the layout is documented HDF5, this works:

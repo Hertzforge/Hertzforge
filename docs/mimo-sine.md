@@ -247,7 +247,34 @@ together; Abort ends the run within one batch.
 
 ## What a Run Saves
 
-<!-- This section is written with the control service's run record, from what its code records. -->
+Every run that arms leaves a run folder under the data folder, named
+`<date>-<time>_mimo_sine_<run id>`, written while the run goes and readable at every moment. From
+the arm: the configuration as accepted and what it resolved to (every control's reference and
+phase, every limit channel's bound, the test, the schedule, the guards, the identification's
+settings, the law and its parameters, the request switch, and the simulator's structure on the
+simulator), the channel table as it was used, and the law with what it accepts. After the
+identification: every control's and limit channel's response to every drive, the coherences, the
+lines trusted, the level it was taken at and the loop's delays the law was told. Then, tick by
+tick, every control's, limit channel's and drive's tracked amplitude and phase with the tone's
+frequency, the level, each control's reference and error, the notch and the two readings, and
+every call of the law with what the guards did with it. The run's log holds every state, level,
+hold, notch, alarm, unusable call, request and trip, and the end holds how the run ended and its
+report. Every input as read and every drive as played are kept as time histories unless the
+setup switches them off. The run is labelled SIM or HARDWARE from the station it ran on.
+
+**Open in Analysis** turns the folder into a project:
+
+| In the run folder | In the project |
+|---|---|
+| `streams/inputs`, `streams/drives` | Time histories, in SI |
+| `results/reference` | `Specification`: one tone with each control's own amplitude, phase and bands (a sweep or a dwell) |
+| `results/channel_levels` | `Sine Levels`: every control, limit channel and drive over the last one-way pass at the highest level (a sweep or a stepped sine) |
+| `results/identification_frf` | `identification_frf`: an FRF of every control and limit channel against every drive |
+| `results/identification_coherence` | `identification_coherence`: each one's multiple coherence |
+| `results/identification_trust`, `results/control_trace`, `results/limit_ch<n>`, the rest of `channel_levels`, the log and the end | The `Run Record`, as named arrays |
+
+A stepped sine's references and a dwell's levels have no analysis object yet and stay in the run
+record. The file-by-file list is in [run-folder.md](run-folder.md), "What a MIMO Sine Run Saves".
 
 ## Writing Your Own Law
 
