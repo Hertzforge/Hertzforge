@@ -570,31 +570,6 @@
 				{:else if kids.kind === 'grid'}
 					{@const headed = kids.columns.some((c) => c)}
 					{@const roles = kids.rows.some((r) => r.role)}
-					{#if kids.columns.length <= 1}
-						<!-- one record a row: nothing tells the records apart but their DOF, so they are a list as modes and channels are; the grid is for responses against references -->
-						<div class="nodelist" role="group" data-testid="records-{o.name}">
-							{#each kids.rows as row, r (r)}
-								{@const index = kids.cells[r][0] ?? -1}
-								{#if index >= 0}
-									<div class="sub" class:picked={picked(o.name, index)} class:bad={bad(o.name, index)} role="treeitem" aria-selected={picked(o.name, index)} tabindex="-1" data-testid="cell-{o.name}-{index}" title={(row.quantity ? `${row.dof}: ${row.quantity.replace(/_/g, ' ')}` : row.dof) + '. Double-click to rename the DOF.'}
-										onclick={(e) => p.clickRecord(o.name, index, mods(e), kids.cells)} ondblclick={(e) => { e.stopPropagation(); startDof(o.name, r, row.dof); }} onkeydown={(e) => e.key === 'Enter' && p.clickRecord(o.name, index)}>
-										<Glyph name={kids.icons[index]} of="record" parent={icon} badge={kids.undefined.includes(index)} size={14} />
-										{#if dofEdit && dofEdit.name === o.name && dofEdit.row === r}
-											<input class="field mono dofedit" aria-label="New DOF for {row.dof}" data-testid="dof-field" bind:value={dofText} use:focusAndSelect
-												onclick={(e) => e.stopPropagation()}
-												onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') void commitDof(kids); if (e.key === 'Escape') dofEdit = null; }}
-												onblur={() => void commitDof(kids)} />
-										{:else}
-											<span class="label mono">{row.label}</span>
-										{/if}
-										{#if row.role}
-											<span class="rolechip" role="button" tabindex="-1" title="{row.role}: click to change" data-testid="role-{o.name}-{r}" onclick={(e) => { e.stopPropagation(); if (row.role) void p.cycleRole(o.name, index, row.role); }} onkeydown={(e) => e.key === 'Enter' && e.stopPropagation()}>{roleWord(row.role)}</span>
-										{/if}
-									</div>
-								{/if}
-							{/each}
-						</div>
-					{:else}
 					<div class="gridbox">
 						<table class="grid" data-testid="grid-{o.name}">
 							{#if headed}
@@ -646,7 +621,6 @@
 							</tbody>
 						</table>
 					</div>
-					{/if}
 				{:else if kids.kind === 'modes'}
 					{#each kids.modes as mode (mode.index)}
 						<div class="sub" class:picked={picked(o.name, mode.index - 1)} role="treeitem" aria-selected={picked(o.name, mode.index - 1)} tabindex="-1" data-testid="mode-{o.name}-{mode.index}" onclick={(e) => p.clickRecord(o.name, mode.index - 1, mods(e), column(kids.modes.map((m) => m.index - 1)))} ondblclick={() => startSub(o.name, 'mode', mode.index, mode.description)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'mode', mode.index, mode.description), () => p.clickRecord(o.name, mode.index - 1))}>
@@ -997,22 +971,6 @@
 		text-align: right;
 		background: var(--bg-1);
 		white-space: nowrap;
-	}
-
-	.rolechip {
-		margin-left: auto;
-		padding: 0 4px;
-		color: var(--text-4);
-		font-size: 11px;
-		cursor: pointer;
-	}
-
-	.rolechip:hover {
-		color: var(--text-1);
-	}
-
-	.sub.bad {
-		box-shadow: inset 2px 0 0 var(--red, #d62728);
 	}
 
 	.grid td.role {
