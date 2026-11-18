@@ -14,6 +14,7 @@ use hertzforge_sine::profile::{ProfileRow, SineProfile};
 use hertzforge_sine::scheduler::{DwellFor, DwellPlan, LadderConfig, RungFor};
 use std::sync::Arc;
 
+#[allow(unused_imports)]
 pub use hertzforge_sdm::C64;
 
 pub const FS: f64 = SINE_CALIBRATION_RATE_HZ;

@@ -450,7 +450,7 @@ impl MimoSineService {
             });
         let acq = AcquisitionConfig::new(self.setup.fs_hz, block);
         let actual = self.backend.configure(&self.table, &acq).map_err(st)?;
-        if !(actual.actual_rate_hz > 0.0) {
+        if actual.actual_rate_hz.is_nan() || actual.actual_rate_hz <= 0.0 {
             return Err(ServiceError::Station(
                 "the station answered a rate of zero".into(),
             ));

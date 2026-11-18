@@ -154,12 +154,14 @@ fn mimo_sine_convention_tracked_controls_equal_the_identification_times_the_driv
         .iter()
         .position(|g| (g - f).abs() < 1e-9)
         .unwrap();
-    let mut hd = vec![C64::new(0.0, 0.0); nc];
-    for c in 0..nc {
-        for j in 0..m {
-            hd[c] += id.response.get(k, c, j) * d[j];
-        }
-    }
+    let hd: Vec<C64> = (0..nc)
+        .map(|c| {
+            d.iter()
+                .enumerate()
+                .map(|(j, dj)| id.response.get(k, c, j) * dj)
+                .sum()
+        })
+        .collect();
     let late: Vec<_> = run
         .ticks
         .iter()
@@ -168,10 +170,9 @@ fn mimo_sine_convention_tracked_controls_equal_the_identification_times_the_driv
     assert!(!late.is_empty());
     let mut worst = 0.0f64;
     for t in &late {
-        for c in 0..nc {
-            assert_eq!(t.drives()[0], d[0]);
-            let e = (t.controls()[c] - hd[c]).norm() / hd[c].norm();
-            worst = worst.max(e);
+        assert_eq!(t.drives()[0], d[0]);
+        for (c, h) in t.controls().iter().zip(&hd) {
+            worst = worst.max((c - h).norm() / h.norm());
         }
     }
     println!("tracked against H D: worst relative error {worst:.2e}");

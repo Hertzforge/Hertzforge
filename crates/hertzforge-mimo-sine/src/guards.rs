@@ -43,7 +43,7 @@ pub fn cap_drives(
     let down = g.max_step_db;
     for (f, p) in in_force.iter().zip(proposed.iter_mut()) {
         let (af, ap) = (f.norm(), p.norm());
-        if !(af > 0.0) {
+        if af.is_nan() || af <= 0.0 {
             continue;
         }
         // The turn asked for.
@@ -179,7 +179,7 @@ impl BackstopNotch {
     pub fn observe(&mut self, measured: &[C64], predicted: &[C64]) {
         for (j, (m, p)) in measured.iter().zip(predicted).enumerate() {
             let p = p.norm();
-            if !(p > 1e-12) || !m.norm().is_finite() {
+            if p.is_nan() || p <= 1e-12 || !m.norm().is_finite() {
                 continue;
             }
             let r = m.norm() / p;

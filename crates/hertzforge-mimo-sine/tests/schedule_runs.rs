@@ -52,8 +52,7 @@ fn mimo_sine_level_ladder_steps_up_and_the_controls_follow() {
         let t = r
             .ticks
             .iter()
-            .filter(|t| t.level_db == db && !t.settling)
-            .last()
+            .rfind(|t| t.level_db == db && !t.settling)
             .unwrap();
         let want = 10f64.powf(db / 20.0);
         for c in t.controls() {
@@ -72,7 +71,7 @@ fn mimo_sine_hold_resume_and_manual_frequency_move_the_tone() {
     let (rt, _re) = svc.take_records().unwrap();
     let cmd = svc.commands();
     let mut ticks = Vec::new();
-    let mut step = |svc: &mut service::MimoSineService, secs: f64| {
+    let step = |svc: &mut service::MimoSineService, secs: f64| {
         for _ in 0..(secs * FS / 512.0) as usize {
             svc.run_batches(1).unwrap();
         }

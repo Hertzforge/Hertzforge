@@ -149,7 +149,7 @@ pub fn excitation(
                 .collect();
             let mut x = irfft(&spec, record_len);
             let r = (x.iter().map(|v| v * v).sum::<f64>() / record_len as f64).sqrt();
-            if !(r > 0.0) {
+            if r.is_nan() || r <= 0.0 {
                 return Err("the identification band holds no line of the grid".into());
             }
             let pk = x.iter().fold(0.0f64, |a, v| a.max(v.abs())) / r;
