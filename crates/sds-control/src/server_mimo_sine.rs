@@ -941,39 +941,95 @@ impl Service {
         .flatten()
     }
 
-    /// `laws.check` of a MIMO Sine law: the laws crate's check.
+    /// `laws.check` of a MIMO Sine law: every case of the laws crate's check
+    /// on the simulator, one `laws.check` event as each starts and as it ends.
+    /// A law file's scored verdicts are recorded against its exact file.
     pub(super) async fn mimo_sine_laws_check(
         self: &Arc<Self>,
         conn: &Conn,
         params: &Map<String, Value>,
     ) -> Result<Value, MethodError> {
+        use crate::mimo::law_check::{bad_choice, not_recorded, now_rfc3339, CheckSlot};
         let id = protocol::named_str(params, "id")?
             .map(str::to_owned)
             .ok_or_else(|| {
                 MethodError::bad_params("id", "Checking a law needs its catalog \"id\".")
             })?;
+        let given = match params.get("params") {
+            None | Some(Value::Null) => Map::new(),
+            Some(Value::Object(m)) => m.clone(),
+            Some(_) => {
+                return Err(MethodError::bad_params(
+                    "params",
+                    "\"params\" is an object of parameter values by key.",
+                ))
+            }
+        };
         {
             let inner = self.inner.lock().await;
             inner.session.require_controller(conn.id)?;
             inner.run_active()?;
         }
         let law_id = id.clone();
-        let entry = self
+        let (facts, factory) = self
             .with_catalog(move |cat| {
-                mlaws::entry_json(cat, &law_id)
-                    .ok_or_else(|| crate::mimo::law_check::unknown_law(&law_id))
+                let facts = mlaws::facts(cat, &law_id)
+                    .ok_or_else(|| crate::mimo::law_check::unknown_law(&law_id))?;
+                for (k, v) in &given {
+                    match facts.params.iter().find(|p| &p.key == k) {
+                        None => return Err(bad_choice(&law_id, &format!("no parameter {k}"))),
+                        Some(spec) => {
+                            if let Some(why) = crate::shock::config::param_problem(spec, v) {
+                                return Err(bad_choice(&law_id, &format!("{} {why}", spec.label)));
+                            }
+                        }
+                    }
+                }
+                let factory = mlaws::resolve(
+                    cat,
+                    &law_id,
+                    &given,
+                    Duration::from_secs(1),
+                    BUILD_BUDGET,
+                    false,
+                )
+                .map_err(|e| bad_choice(&law_id, &e.message))?;
+                Ok((facts, factory))
             })
             .await?;
+        let _slot = CheckSlot::take()?;
         let svc = self.clone();
-        let check_id = id.clone();
-        let report = tokio::task::spawn_blocking(move || {
-            crate::mimo_sine::law_check::run_check(&check_id, &mut |event| {
+        let check_id = facts.id.clone();
+        let verdicts = tokio::task::spawn_blocking(move || {
+            crate::mimo_sine::law_check::run_check(&check_id, factory, &mut |event| {
                 svc.emit("laws.check", event);
             })
         })
         .await
         .map_err(|e| MethodError::internal(format!("the law check failed: {e}")))??;
-        Ok(json!({"law": entry, "report": report}))
+        let recorded = !facts.builtin;
+        let sha = facts.sha256.clone();
+        let v2 = verdicts.clone();
+        let id2 = facts.id.clone();
+        let law = self
+            .with_catalog(move |cat| {
+                if recorded {
+                    let record = hertzforge_mimo_sine_laws::check::check_record(
+                        &sha,
+                        &now_rfc3339(),
+                        &v2,
+                    );
+                    cat.record_check(&record)
+                        .map_err(|e| not_recorded(&e.to_string()))?;
+                }
+                mlaws::entry_json(cat, &id2)
+                    .ok_or_else(|| MethodError::internal("the checked law left the catalog"))
+            })
+            .await?;
+        Ok(json!({
+            "law": law,
+            "report": crate::mimo_sine::law_check::report_json(&verdicts, recorded),
+        }))
     }
 }
 
