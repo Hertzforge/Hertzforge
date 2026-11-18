@@ -1258,6 +1258,7 @@ def _stage_page(block, source, objects, us, caption, page):
     # With a `floor` it is the paired stage instead: the two
     # objects met station by station, overlaid or divided, which
     # is the same choice the app's bar offers over two PSDs.
+    from ..core.data import TimeHistory
     from ..drawing.viz.waterfall import (
         STAGE,
         stage_basis,
@@ -1347,6 +1348,15 @@ def _stage_page(block, source, objects, us, caption, page):
         drawing = chosen[page * MAX_STAGE_RECORDS:
                          (page + 1) * MAX_STAGE_RECORDS]
         per_record = _stage_budget(len(drawing))
+        if isinstance(source, TimeHistory):
+            # a record's stage is read as its flat figure is, for where the
+            # run was at level and how the frames sat on it, and costs what
+            # the flat figure costs: half its points, since a point on the
+            # stage is stored with its depth. At the stage's two million the
+            # plate's random report was 33 MB, 5.5 MB flat (Brandon,
+            # 2026-11-18, time data in 3-D; 2026-09-20, the size)
+            per_record = min(per_record,
+                             max(TIME_FIGURE_POINTS // 2 // max(len(drawing), 1), 512))
         arrays = waterfall_arrays(
             source, drawing, us, block.get('component', 'magnitude'),
             budget=per_record,

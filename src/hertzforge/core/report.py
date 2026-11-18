@@ -3040,7 +3040,11 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
             'Measured time histories, with the frames the spectra '
             'are averaged over',
             'Measured {quantity} time histories, with the frames '
-            'the spectra are averaged over'),
+            'the spectra are averaged over',
+            # one 3-D figure a quantity, every channel in depth with the frames
+            # on the floor, as the app's averaging stage draws it, in place of
+            # flat pages of two dozen channels (Brandon, 2026-11-18)
+            mode='stage'),
         *_random_control_blocks(objects, object_groups),
         *([{'kind': 'text', 'text':
             '## The Sweep Under the Random\n\n'

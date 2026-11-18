@@ -263,3 +263,29 @@ def test_an_exported_report_is_the_viewer_with_the_report_inside(tmp_path):
     assert held['title'] == project[name].title
     assert any(b['kind'] == 'figure' for b in held['blocks'])
     assert written == str(tmp_path / 'r.html')
+
+
+def test_the_random_reports_time_data_is_the_apps_averaging_stage():
+    """One waterfall a quantity, the frames on it as the averaging stage
+    draws them and no span to drag them by (Brandon, 2026-11-18)."""
+    from conftest import fixture_path
+
+    import hertzforge
+    from hertzforge.report.views import page_blocks
+    from hertzforge.service.ops_geometry import _work_up
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    _work_up('Random Vibration')(project, {})
+    report = next(n for n, o in project.items() if type(o).__name__ == 'Report')
+    stages = [view for block in page_blocks(project[report], project,
+                                            object_groups=project.object_groups)
+              if 'time histories' in block['caption']
+              for view in block.get('views', ())]
+    assert [view['view'] for view in stages] == ['waterfall', 'waterfall']
+    frames = project['Time History'].averaging.frames
+    for view in stages:
+        assert len(view['regions']) == frames
+        assert {region['kind'] for region in view['regions']} == {'frame'}
+        assert not any(region.get('drag') for region in view['regions'])
+    assert sorted(len(view['records']) for view in stages) == [4, 8]

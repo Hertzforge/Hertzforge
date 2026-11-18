@@ -366,26 +366,55 @@ def _scalogram(built: Mapping[str, Any], title: str) -> dict[str, Any]:
 
 
 def _stage(block: Mapping[str, Any], built: Mapping[str, Any], title: str,
-           objects: Mapping[str, Any]) -> dict[str, Any] | None:
+           objects: Mapping[str, Any], object_groups: Any = None) -> list[dict[str, Any]]:
     """A stage: a scalogram's sheet as it is, or else the waterfall the app
     draws for the block's source (the page's stage is in the stage's own
-    coordinates, which cannot be read back as data)."""
+    coordinates, which cannot be read back as data), one view a page of
+    it. The block's `select` picks the records, and a time history carries
+    its averaging frames on the floor and the back wall, as the app's
+    averaging stage draws them, without the span that drags them."""
     if built.get('sheet'):
-        return _scalogram(built, title)
+        return [_scalogram(built, title)]
+    from ..core.data import TimeHistory
+    from ..core.report import resolve_binding
     from ..service.waterfalls import waterfall_view
+    from . import _scalogram_candidates
 
-    source = objects.get(block.get('source', ''))
+    # the block names its source by a binding ('@basis:TimeHistory'), not by
+    # the object's name: looked up as it stood, a stage found nothing and
+    # dropped out of the page (2026-11-18)
+    source = objects.get(resolve_binding(block.get('source', ''), objects, object_groups) or '')
     if source is None:
-        return None
-    try:
-        return waterfall_view(title, source)
-    except Exception:  # noqa: BLE001 - a stage the app cannot draw is left out, as unbound
-        return None
+        return []
+    records = _scalogram_candidates(block, source) if block.get('select') else None
+    frames = None
+    averaging = getattr(source, 'averaging', None)
+    if isinstance(source, TimeHistory) and averaging is not None and block.get('averaging', True):
+        from ..service.ops_settings import frame_regions
+
+        try:
+            frames = frame_regions(averaging, source.sample_rate, float(source.abscissa[0]))
+        except ValueError:
+            frames = None           # unevenly sampled: no frames to speak of
+    views = []
+    page, pages = 1, 1
+    while page <= pages:
+        try:
+            view = waterfall_view(title, source, page=page, records=records)
+        except Exception:  # noqa: BLE001 - a stage the app cannot draw is left out, as unbound
+            break
+        pages = int((view.pop('page', None) or {}).get('count', 1))
+        view.pop('quantities', None)
+        if frames:
+            view['regions'] = frames
+        views.append(view)
+        page += 1
+    return views
 
 
 def block_views(built: Mapping[str, Any], block: Mapping[str, Any] | None = None,
                 objects: Mapping[str, Any] | None = None,
-                length_unit: str = '') -> list[dict[str, Any]]:
+                length_unit: str = '', object_groups: Any = None) -> list[dict[str, Any]]:
     """The views one built block draws as (none for text or an unbound
     slot). `block` and `objects` are the block as the report holds it and
     the project's objects, which only a stage needs; `length_unit` is the
@@ -414,7 +443,7 @@ def block_views(built: Mapping[str, Any], block: Mapping[str, Any] | None = None
         laid = _grid(built, title)
         return [] if laid is None else laid[0]
     elif kind == 'stage':
-        made = _stage(block or {}, built, title, objects or {})
+        return _stage(block or {}, built, title, objects or {}, object_groups)
     else:
         made = None
     return [] if made is None else [made]
@@ -434,8 +463,15 @@ def page_blocks(report: Any, objects: Mapping[str, Any], unit_system: Any = None
     payload = _report_payload(report, objects, us, edit=True, object_groups=object_groups)
     length = us.label_text('length')
     out = []
+    staged: set[int] = set()
     for built in payload['blocks']:
         index = built.get('index')
+        if built.get('kind') == 'stage' and not built.get('sheet'):
+            # a stage block's further pages: the app's waterfall pages of its
+            # records are drawn with its first, so they are not drawn again
+            if index in staged:
+                continue
+            staged.add(index)
         source_block = (report.blocks[index] if isinstance(index, int)
                         and 0 <= index < len(report.blocks) else {})
         kind = built.get('kind')
@@ -460,7 +496,7 @@ def page_blocks(report: Any, objects: Mapping[str, Any], unit_system: Any = None
                 if laid is not None:
                     entry['grid'] = laid[1]
             else:
-                views = block_views(built, source_block, objects, length)
+                views = block_views(built, source_block, objects, length, object_groups)
             entry.update(kind='figure' if views else 'unbound', views=views)
             if not views:
                 entry['was'] = str(kind)
