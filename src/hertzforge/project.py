@@ -9295,8 +9295,9 @@ class Project(dict):
     def refresh(self, name: Any) -> str:
         """Recompute a derived object in place, under its own name.
 
-        Links, the report's figures and the grids all refer to the
-        object by name, so replacing the value under that name keeps
+        What was set on the object itself (its comparison scale, its run
+        identity) is kept. Links, the report's
+        figures and the grids all refer to the object by name, so replacing the value under that name keeps
         every reference correct. Objects derived from this one then
         become stale by content, and are refreshed one at a time or all
         together with `refresh_stale`, never automatically. An object
@@ -9324,6 +9325,15 @@ class Project(dict):
                 f"{name!r} was computed from {source!r}, which is gone")
         verb, params = record['verb'], record.get('params', {})
         rebuilt = _RECOMPUTE[verb](self, source, params)
+        # what was set on the object itself is the user's, not the
+        # recipe's: a comparison scale lost on a refresh put a -6 dB run
+        # back on detection and the report read it as an under-test
+        # (Brandon, 2026-11-18)
+        was = self[name]
+        for setting in _HELD_ON_REFRESH:
+            value = getattr(was, setting, None)
+            if value is not None and hasattr(rebuilt, setting):
+                setattr(rebuilt, setting, value)
         self[name] = rebuilt
         record['state'] = self._analysis_state(source, verb, params)
         record.pop('source_print', None)
@@ -10247,6 +10257,10 @@ def _extract_again(project, source, params):
 
 #: how each verb rebuilds its object from the source, for `refresh` —
 #: the same core calls the verbs make, minus the add
+#: what a refresh carries from the object it replaces to the one it makes:
+#: settings made on the object itself, which its recipe does not hold
+_HELD_ON_REFRESH = ('scale_db', 'run_identity')
+
 _RECOMPUTE = {
     'compute_spectra': lambda p, s, k: p[s].compute_spectra(),
     'compute_psds': lambda p, s, k: p[s].compute_psds(),

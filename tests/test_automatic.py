@@ -252,3 +252,19 @@ def test_psds_made_before_the_averaging_changed_are_recomputed():
     assert psds in project.last_work_up_refreshed
     assert not project.stale()
     assert not np.allclose(project[psds].ordinate, before)
+
+
+def test_a_recompute_keeps_the_comparison_scale():
+    """A -6 dB run's scale, set by hand, survives its PSDs being made again;
+    lost, the report read the run as an under-test (Brandon, 2026-11-18)."""
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    psds = project.compute_psds('Time History')
+    project.set_comparison_scale(psds, 6)
+    history = project['Time History']
+    history.averaging = replace(history.averaging, start=10.0, frames=8, start_set=True)
+    project.work_up('Random Vibration')
+    assert psds in project.last_work_up_refreshed
+    assert project[psds].scale_db == 6
