@@ -1044,7 +1044,8 @@ def _caption_figures(built, block, source, objects, us):
     spectrum the run, the estimate, the resolution, the window and the
     DOF), and each cell says only its own channel's rows (the caption's
     `CHANNEL_ROWS`), so eight cells do not repeat the same five lines
-    eight times.
+    eight times. A plot drawn against a requirement leaves those rows
+    out: its channel is its title, and the requirement is drawn on it.
 
     A measured spectrum, a shock response spectrum, a sine level and a
     time history have one (`report_caption.caption_kind`), and only
@@ -1076,9 +1077,13 @@ def _caption_figures(built, block, source, objects, us):
         return caption_of(name, records, specification=specification,
                           per_octave=octave, unit_system=us, **extra)
 
+    # Brandon, 2026-11-18: no Channel, Location and axis or Requirement
+    # lines under a plot against a requirement
+    quiet = () if against is None else ('Channel', 'Location and axis', 'Requirement')
+
     def rows(caption, only=None):
         return [list(row) for row in caption.rows()
-                if only is None or row[0] in only]
+                if (only is None or row[0] in only) and row[0] not in quiet]
 
     def channels_of(figure):
         return [channel for channel in figure.get('channels') or []
