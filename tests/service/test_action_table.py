@@ -710,3 +710,47 @@ def test_the_projects_own_actions_are_grouped(validate):
                 assert by_id[op]['under'] == head
     assert {'group.index', 'group.reports', 'group.new'} <= set(by_id)
     assert 'group.object' not in by_id, 'nothing is selected'
+
+
+def test_an_action_runs_on_what_is_picked_in_the_tree_and_asks_for_no_channel(plate):
+    history = named(plate, 'time_history')
+    whole = {r['id']: r for r in table(plate, history)[0]['rows']}
+    picked = {r['id']: r for r in table(plate, history, records={history: [1, 2]})[0]['rows']}
+    # an action on one channel takes every channel picked, or every channel of the object
+    role = picked['project.set_channel_role']
+    assert role['fill']['picked'] == '2-3' and {'record', 'picked'} <= set(role['omit'])
+    assert whole['project.set_channel_role']['fill']['picked'] == 'all'
+    # a reading of one record reads the first one picked, and a list takes them all
+    assert picked['project.amplitude_spectrum']['fill']['record'] == '2'
+    assert 'record' in whole['project.amplitude_spectrum']['omit']
+    assert 'record' not in whole['project.amplitude_spectrum']['fill']
+    assert picked['project.rescale']['fill']['records'] == '2-3'
+    assert whole['project.rescale']['fill']['records'] == ''
+    assert 'records' in whole['project.rescale']['omit']
+    # no row of an object asks for its channels, records or rows by number
+    by_id = {op.id: op for op in OPERATIONS}
+    for row in whole.values():
+        op = by_id.get(row['id'])
+        if op is None or not row['ready']:
+            continue
+        asked = {p.name for p in op.params} - set(row.get('omit', ()))
+        assert not asked & {'records', 'channels', 'rows', 'record', 'drawn', 'picked'}, row['id']
+
+
+def test_a_channels_role_is_set_on_every_channel_picked(plate):
+    history = named(plate, 'time_history')
+    op = next(o for o in OPERATIONS if o.id == 'project.set_channel_role')
+    kinds = {name: projects.kind_of(obj) for name, obj in plate.project.items()}
+
+    def run(**given):
+        return op.run(plate.project, op.resolve({'source': history, **given}, objects=kinds))
+
+    run(role='monitor', picked='2-3')
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == roles[2] == 'monitor' and roles[0] != 'monitor'
+    # called with a channel and no picks, as a script calls it, it is the one channel
+    run(role='response', record=2)
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == 'response' and roles[2] == 'monitor'
+    with pytest.raises(ProtocolError, match='outside'):
+        run(role='monitor', picked='999')

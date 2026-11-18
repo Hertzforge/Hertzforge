@@ -19,6 +19,7 @@ from typing import Any
 from . import projects, verbs
 from .actions import _fill, _object_params, _placed, _runs
 from .descriptors import Operation, Param
+from .parsing import ALL_PICKED
 
 #: what two objects draw together, the table of `show._pair`'s branches
 #: (tests/service/test_action_table.py holds the two to each other)
@@ -91,6 +92,16 @@ VERB_WHEN: dict[str, tuple[tuple[str, ...], str]] = {
 INSTANT = frozenset({'project.new_geometry', 'project.new_channel_table'})
 #: forms with no Apply: each change is stored as it is made, and drawn where it is seen
 LIVE = frozenset({'project.set_averaging'})
+
+#: params that number the channels, records or rows of the object an action runs on:
+#: several as text ('1-3, 7', blank for all), or one. They are filled from what is picked
+#: in the tree and left off the form.
+PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
+PICKED_ONE = frozenset({'record', 'drawn'})
+#: an operation on one channel that runs on every channel picked (`parsing.each_picked`)
+#: names that channel by this param, which its form does not ask for either. A `row` is
+#: not taken for a channel anywhere else: a breakpoint's row is a breakpoint.
+EACH_PICKED_KEY = {'project.set_sensor_model': 'row'}
 
 #: the rows that read a geometry's nodes, off until it has some
 #: operations whose blank records are every record, so that a row with none picked runs at
@@ -515,11 +526,26 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             rows.append(_op_row(op, 'It has no nodes yet: mesh it first'))
             continue
         picks = [records.get(name, []) for name in fill.values()]
-        if any(picks) and any(p.name == 'records' and p.type == 'string' for p in op.params):
-            fill['records'] = _runs(next(r for r in picks if r))
-        elif op.id in EVERY_RECORD:
-            # nothing picked is every record: the row runs at once, with no form
-            fill['records'] = ''
+        # an action runs on what is picked in the tree: the channels, records or rows it
+        # would have asked for by number are the ones picked under the object, every one
+        # of them when the object is selected whole, and its form has no field for them
+        # (Brandon, 2026-11-17)
+        picked = next((r for r in picks if r), [])
+        unasked = []
+        for param in op.params if chosen else ():
+            if param.name in PICKED_LISTS and param.type == 'string':
+                fill[param.name] = _runs(picked) if picked else ''
+                unasked.append(param.name)
+            elif param.name in PICKED_ONE and param.type == 'integer':
+                # Create Spec draws a channel of the sheet it makes, numbered among the
+                # rows picked, not a row of the table
+                if picked and op.id != 'project.create_specification':
+                    fill[param.name] = str(picked[0] + 1)
+                unasked.append(param.name)
+            elif param.name == 'picked':
+                fill['picked'] = _runs(picked) if picked else ALL_PICKED
+                unasked += ['picked', *([EACH_PICKED_KEY[op.id]] if op.id in EACH_PICKED_KEY
+                                        else [])]
         if where in ('mate', 'solid', 'group') and part:
             # what is picked in the tree is what the row acts on
             picked = verbs.picked_ids(part)
@@ -538,13 +564,15 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         if where == 'family' and any(p.name == 'family' for p in op.params):
             fill['family'] = str(part['id'])
         more: dict[str, Any] = {'part': True} if homes else {}
+        if unasked:
+            more['omit'] = unasked
         if where and part:
             # what the pick fills is not asked again: the groups, solids or mates picked are
             # the ones it acts on, and more are picked in the tree (Brandon, 2026-11-10)
             picked_fields = [key for key in dict.fromkeys(
                 (where, f'{where}s', 'family')) if key in fill]
             if picked_fields:
-                more['omit'] = picked_fields
+                more['omit'] = [*more.get('omit', []), *picked_fields]
         if op.id == 'project.view_entities':
             # a part's Edit opens its own table (Brandon, 2026-11-13)
             fill['kind'] = {'part:nodes': 'nodes', 'part:coordinate_systems': 'coordinate_systems',
