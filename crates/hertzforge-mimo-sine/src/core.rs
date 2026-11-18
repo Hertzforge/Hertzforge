@@ -472,6 +472,10 @@ impl MimoSineCore {
         let ratio = self.level() / before;
         guards::scale(&mut self.in_force, ratio);
         self.sched.settle_for(self.settle_s(f));
+        // The readings answer the drive before the move until the window
+        // closes: the law is told to hold, as after an engage, so it does not
+        // correct on them.
+        self.engage_settle = true;
     }
 
     fn level(&self) -> f64 {

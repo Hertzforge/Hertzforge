@@ -5,10 +5,13 @@
 //!
 //! - `matrix`: none scored. Reported, not scored:
 //!   `moved_resonance_hardening`, 2.32 dB.
-//! - `paired`: `measurement_noise` and `stepped` (it opens about 5.4 dB from
-//!   the reference and is still there when the engine's settle window
-//!   closes) and `level_ladder` (4.8 dB on the -20 dB rung).
-//! - `steepest_descent`, `secant` and `ratio`: none.
+//! - `paired`, `steepest_descent`, `secant` and `ratio`: none.
+//!
+//! `paired` runs its dwells, measurement noise, level ladder and stepped sine
+//! on `sine-weak-4x4`, the kind of structure it declares itself for (before,
+//! on the coupled plate, it failed `measurement_noise`, `stepped` and
+//! `level_ladder`: its first drive was 5.4 dB low and it does not correct in
+//! the settle window; its first drive is now settled on the identification).
 //!
 //! `matrix`'s limit channel passes since the backstop notch holds a depth
 //! that goes in at once and comes out past a hysteresis at a capped rate, and
@@ -16,7 +19,7 @@
 //! article was 0.66 dB over its bound, a control 3.46 dB over its reference
 //! within a second of a release, and the notch went in eight times).
 //!
-//! The level ladder passes for every law but `paired` since the controller
+//! The level ladder passes for every law since the controller
 //! carries the drive with each level change (before, `matrix` was 1.16 dB out
 //! after the step to -12 dB and `steepest_descent` and `secant` ended on a
 //! control abort a second after it).
@@ -92,14 +95,7 @@ fn mimo_sine_check_matrix_natively() {
 
 #[test]
 fn mimo_sine_check_paired_natively() {
-    expect(
-        "paired",
-        &[
-            ("measurement_noise", "within"),
-            ("level_ladder", "each_rung_within"),
-            ("stepped", "within"),
-        ],
-    );
+    expect("paired", &[]);
 }
 
 #[test]

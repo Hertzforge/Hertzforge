@@ -74,9 +74,10 @@ pub use hertzforge_hal_sim::plants::ShockPlant as SimShockPlant;
 /// The standard sine structures a HERTZFORGE-SIM station can simulate, by name
 /// (`sine-linear-4x4`, `sine-softening-4x4-mild`, `sine-softening-4x4-moderate`,
 /// `sine-hardening-4x4`, `sine-tall-6x3`, `sine-wide-3x6`, `sine-base-article-6x4`,
-/// `sine-near-singular-4x4`; [`SimSineStructure::from_name`] reads one): cross-coupled
-/// plates calibrated for a multiple-drive sine test, some of whose resonances move with
-/// level.
+/// `sine-near-singular-4x4`, `sine-weak-4x4`, `sine-loopback-4x4`;
+/// [`SimSineStructure::from_name`] reads one): plates calibrated for a multiple-drive
+/// sine test, most cross-coupled and some with resonances that move with level, one with
+/// each control dominated by its own drive, and the bench's twin.
 pub use hertzforge_hal_sim::plants::SineStructure as SimSineStructure;
 /// The standard cross-coupled plants a HERTZFORGE-SIM station can simulate, by name
 /// (`modal-4x4`, `modal-12x6`, `modal-12x6-ill`, `modal-24x24`, `modal-72x24`,

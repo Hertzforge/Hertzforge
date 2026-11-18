@@ -1046,6 +1046,11 @@ are short so the check of one law takes seconds of simulated test.
 | law misbehaves | dwell | Linear 4 x 4 at 96 Hz; from the 150th update the law's answer is not finite | The run ends on a law fault after three refused answers, every drive at zero |
 | moved resonance (mild, moderate, hardening) | sweep | The softening and hardening 4 x 4 structures through a resonance that moves with level | Reported, not a pass condition |
 
+A law that declares itself for weakly coupled pairs (`paired`) runs the two dwells, the
+measurement noise, the level ladder and the stepped sine on `sine-weak-4x4` instead: the plate's
+modes with each control dominated by its own drive, every cross path at least 20 dB under the
+direct one across the band. Its transport delay and law-misbehaves cases are every law's.
+
 Every case first asks the same of the run, in this order: every answer of the law was used and it
 never faulted; no drive sample went over its ceiling and the controller never had to scale an answer
 down to the ceilings (the near-singular case excepted); the run did not end on an abort or the
@@ -1109,10 +1114,15 @@ four-by-four structure it completed 5 of 5 dwells at the lightest resonance, 5 o
 
 **`paired`** (dwell and stepped; amplitude-only references accepted). Control `i` is paired with
 drive `i`; every update that drive's amplitude is multiplied by its control's ratio of wanted to
-measured amplitude, raised to the gain, and its phase is left to the pair. It has no model of the
-coupling. On the testbed's coupled four-by-four structure it completed none of 5 dwells and none of
-5 stepped sines: it is for structures whose pairs are weakly coupled, and shows what a law without
-the coupling does. Parameters `gain_rule`, `fixed_gain` and `delay_estimate` as for `matrix`. Values: `gain`,
+measured amplitude, raised to the gain, and its phase is left to the pair. Its first drive is the
+drive that rule settles to on the identification at the tone (the rule run on the identification's
+response until every control is within 0.01 dB, at most 200 rounds), so it starts where its loop
+would end rather than where each pair's own path alone puts it. It has no model of the coupling: it
+is for structures whose pairs are weakly coupled, each control dominated by its own drive, and the
+law check runs its dwells, measurement noise, stepped sine and level ladder on such a structure
+(`sine-weak-4x4`), where it passes every case. On the testbed's coupled four-by-four structure it
+completed none of 5 dwells and none of 5 stepped sines; on the simulator's coupled plate its first
+drive was 5.4 dB low at 96 Hz before it was settled on the identification. Parameters `gain_rule`, `fixed_gain` and `delay_estimate` as for `matrix`. Values: `gain`,
 `error_db`.
 
 **`steepest_descent`** (dwell only; references with phases only). It starts from the

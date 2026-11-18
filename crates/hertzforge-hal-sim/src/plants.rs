@@ -91,8 +91,10 @@
 //! calibrated for a sine test at [`SINE_CALIBRATION_RATE_HZ`] over [`SINE_BAND_HZ`]
 //! with a stated full level each: linear ones of three shapes, softening and hardening
 //! ones whose resonances move by a stated number of half-power bandwidths at full level,
-//! a base carrying an article for limit channels, and one nearly singular near one
-//! frequency. Their table, calibration and claims are on [`SineStructure`].
+//! a base carrying an article for limit channels, one nearly singular near one
+//! frequency, one whose controls are each dominated by their own drive, and the bench's
+//! twin (four outputs wired to four inputs). Their table, calibration and claims are on
+//! [`SineStructure`].
 
 use crate::jointed::{JointLaw, JointedMode, JointedPlant, JointedStep, LevelRule};
 use crate::plant::{ModalPlant, Mode, ModeResponse, PlantModel, DEFAULT_FEEDTHROUGH};
@@ -908,6 +910,19 @@ pub const SINE_BAND_HZ: (f64, f64) = (5.0, 2000.0);
 /// about 30 dB under its largest (31.8 dB at this frequency; the tests recompute it).
 pub const SINE_NEAR_SINGULAR_HZ: f64 = 381.2;
 
+/// The path delay of `sine-loopback-4x4`, s: the bench's measured delay from an output to
+/// the input it is wired to.
+pub const SINE_LOOPBACK_DELAY_S: f64 = 0.0008;
+
+/// How far under each direct path every cross path of `sine-weak-4x4` stays across
+/// [`SINE_BAND_HZ`], dB (each control's largest cross term against its own drive's path;
+/// the tests recompute it).
+pub const SINE_WEAK_CROSS_DB: f64 = 20.0;
+
+/// The share of each `sine-weak-4x4` mode's shapes, and of its mass line, on the pairs
+/// the mode does not belong to.
+const SINE_WEAK_SPILL: f64 = 0.015;
+
 /// The standard sine structures, by name: cross-coupled plates for multiple-drive sine
 /// control, calibrated for a sine test at [`SINE_CALIBRATION_RATE_HZ`] over
 /// [`SINE_BAND_HZ`].
@@ -922,8 +937,18 @@ pub const SINE_NEAR_SINGULAR_HZ: f64 = 381.2;
 /// | `sine-wide-3x6` | 3 x 6 | none |
 /// | `sine-base-article-6x4` | 4 base controls and 2 article responses x 4 | none |
 /// | `sine-near-singular-4x4` | 4 x 4 | none; the smallest singular value falls about 30 dB under the largest near [`SINE_NEAR_SINGULAR_HZ`] |
+/// | `sine-weak-4x4` | 4 x 4 | none; the plate's modes, each control dominated by its own drive (every cross path at least [`SINE_WEAK_CROSS_DB`] under its control's direct path) |
+/// | `sine-loopback-4x4` | 4 x 4 | none; no modes: each output wired to its input, unity gain, [`SINE_LOOPBACK_DELAY_S`] delay, no coupling |
 ///
-/// The four 4 x 4 structures and the near-singular one share one plate. Every structure
+/// The four 4 x 4 structures and the near-singular one share one plate. `sine-weak-4x4`
+/// has the plate's eight modes (their frequencies and damping) with each mode given to
+/// one control and drive pair (the modes in order to pairs 1 to 4, twice round): its
+/// shapes and the mass line are on that pair, with [`SINE_WEAK_SPILL`] of each on the
+/// others. It is the kind of structure a law that pairs each control with one drive is
+/// made for. `sine-loopback-4x4` is the bench's twin: four outputs wired straight to four
+/// inputs, flat, one volt read per volt played, and the bench's path delay; it has no
+/// modes, so it tests timing, phase and the guards, not control through a structure.
+/// Every other structure
 /// is a [`PlantModel::Jointed`] model with acceleration-shaped modes on a mass line
 /// (outputs in g, drives in volts), elastic modes between 40 Hz and 1.6 kHz with `Q`
 /// between 17 and 50 and a lightly damped first mode near 40 Hz (1 % damping, `Q` 50;
@@ -978,6 +1003,10 @@ pub enum SineStructure {
     BaseArticle6x4,
     /// `sine-near-singular-4x4`.
     NearSingular4x4,
+    /// `sine-weak-4x4`.
+    Weak4x4,
+    /// `sine-loopback-4x4`.
+    Loopback4x4,
 }
 
 /// How a sine structure's modes change with level.
@@ -995,7 +1024,7 @@ pub struct SineLevelDesign {
 
 impl SineStructure {
     /// Every sine structure.
-    pub const ALL: [SineStructure; 8] = [
+    pub const ALL: [SineStructure; 10] = [
         SineStructure::Linear4x4,
         SineStructure::SofteningMild4x4,
         SineStructure::SofteningModerate4x4,
@@ -1004,6 +1033,8 @@ impl SineStructure {
         SineStructure::Wide3x6,
         SineStructure::BaseArticle6x4,
         SineStructure::NearSingular4x4,
+        SineStructure::Weak4x4,
+        SineStructure::Loopback4x4,
     ];
 
     /// The structure's name (`sine-linear-4x4`, ...).
@@ -1017,6 +1048,8 @@ impl SineStructure {
             SineStructure::Wide3x6 => "sine-wide-3x6",
             SineStructure::BaseArticle6x4 => "sine-base-article-6x4",
             SineStructure::NearSingular4x4 => "sine-near-singular-4x4",
+            SineStructure::Weak4x4 => "sine-weak-4x4",
+            SineStructure::Loopback4x4 => "sine-loopback-4x4",
         }
     }
 
@@ -1047,6 +1080,12 @@ impl SineStructure {
             }
             SineStructure::NearSingular4x4 => {
                 "The linear 4 x 4 plate with one more mode, at 600 Hz, that makes the response nearly singular near 381 Hz."
+            }
+            SineStructure::Weak4x4 => {
+                "The 4 x 4 plate's modes, each control dominated by its own drive: every cross path at least 20 dB under the direct one."
+            }
+            SineStructure::Loopback4x4 => {
+                "The bench's twin: four outputs wired to four inputs, flat at one volt per volt, the bench's path delay, no coupling."
             }
         }
     }
@@ -1112,6 +1151,10 @@ impl SineStructure {
     pub fn linear_structure(self) -> JointedPlant {
         let l = sine_layout(self);
         let mut p = sine_structure(&l);
+        if self == SineStructure::Loopback4x4 {
+            p.transport_delay_samples =
+                (SINE_LOOPBACK_DELAY_S * SINE_CALIBRATION_RATE_HZ).round() as usize;
+        }
         let fl = l.full_level_g;
         let nc = self.n_controls();
         let freqs: Vec<f64> = p.modes.iter().map(|m| m.f_hz).collect();
@@ -1243,6 +1286,10 @@ struct SineLayout {
     article: Option<SineArticle>,
     /// One more mode for the near-singular structure, acting on the drives in opposition.
     coupling: Option<SineCoupling>,
+    /// Each mode on one control and drive pair, this share of it on the others.
+    pairs: Option<f64>,
+    /// No modes: each output wired to its own drive.
+    wired: bool,
 }
 
 /// An article on the plate: one mode of its own, read by the outputs from `first_output`
@@ -1293,6 +1340,8 @@ fn sine_layout(s: SineStructure) -> SineLayout {
         participation: 0.15,
         article: None,
         coupling: None,
+        pairs: None,
+        wired: false,
     };
     match s {
         SineStructure::Linear4x4
@@ -1345,6 +1394,18 @@ fn sine_layout(s: SineStructure) -> SineLayout {
             }),
             ..plate4
         },
+        SineStructure::Weak4x4 => SineLayout {
+            seed: 0x5157_4E45_0404_0002,
+            pairs: Some(SINE_WEAK_SPILL),
+            ..plate4
+        },
+        SineStructure::Loopback4x4 => SineLayout {
+            seed: 0x5157_4E45_0404_0003,
+            modes: &[],
+            mass_line: 1.0,
+            wired: true,
+            ..plate4
+        },
         SineStructure::NearSingular4x4 => SineLayout {
             seed: 0x5157_4E45_0404_0001,
             coupling: Some(SineCoupling {
@@ -1369,17 +1430,34 @@ fn sine_structure(l: &SineLayout) -> JointedPlant {
     let mut modes: Vec<JointedMode> = l
         .modes
         .iter()
-        .map(|&(f_hz, zeta, k, weight)| JointedMode {
-            f_hz,
-            zeta,
-            input_shape: l
-                .drives
-                .iter()
-                .map(|p| weight * l.participation * l.mass_line * shape(k, p))
-                .collect(),
-            output_shape: l.outputs.iter().map(|p| shape(k, p)).collect(),
-            reference_amplitude: 1.0,
-            level: None,
+        .enumerate()
+        .map(|(m, &(f_hz, zeta, k, weight))| match l.pairs {
+            // Mode `m` belongs to pair `m mod 4`: all of it there, the spill elsewhere.
+            Some(spill) => {
+                let on = |i: usize| if i == m % n_d { 1.0 } else { spill };
+                JointedMode {
+                    f_hz,
+                    zeta,
+                    input_shape: (0..n_d)
+                        .map(|j| weight * l.participation * l.mass_line * on(j))
+                        .collect(),
+                    output_shape: (0..n_out).map(on).collect(),
+                    reference_amplitude: 1.0,
+                    level: None,
+                }
+            }
+            None => JointedMode {
+                f_hz,
+                zeta,
+                input_shape: l
+                    .drives
+                    .iter()
+                    .map(|p| weight * l.participation * l.mass_line * shape(k, p))
+                    .collect(),
+                output_shape: l.outputs.iter().map(|p| shape(k, p)).collect(),
+                reference_amplitude: 1.0,
+                level: None,
+            },
         })
         .collect();
     if let Some(a) = &l.article {
@@ -1410,16 +1488,24 @@ fn sine_structure(l: &SineLayout) -> JointedPlant {
             level: None,
         });
     }
-    let residual = l
-        .outputs
-        .iter()
-        .flat_map(|c| {
-            l.drives.iter().map(move |d| {
-                let d2 = (c[0] - d[0]).powi(2) + (c[1] - d[1]).powi(2);
-                l.mass_line * (-d2).exp()
+    let residual = if l.wired || l.pairs.is_some() {
+        // Each output on its own drive: the mass line there, the spill (or nothing,
+        // wired) elsewhere.
+        let off = l.pairs.unwrap_or(0.0);
+        (0..n_out)
+            .flat_map(|i| (0..n_d).map(move |j| l.mass_line * if i == j { 1.0 } else { off }))
+            .collect()
+    } else {
+        l.outputs
+            .iter()
+            .flat_map(|c| {
+                l.drives.iter().map(move |d| {
+                    let d2 = (c[0] - d[0]).powi(2) + (c[1] - d[1]).powi(2);
+                    l.mass_line * (-d2).exp()
+                })
             })
-        })
-        .collect();
+            .collect()
+    };
     JointedPlant {
         residual,
         step: JointedStep::equalized(SINE_BAND_HZ.1),

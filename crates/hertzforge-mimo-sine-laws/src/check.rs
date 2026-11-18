@@ -63,6 +63,13 @@
 //! | `moved_resonance_moderate` | sweep | `sine-softening-4x4-moderate` as `slow_sweep` | reported, not a pass condition |
 //! | `moved_resonance_hardening` | sweep | `sine-hardening-4x4`, 140 to 190 Hz at 1 octave a minute through its 165 Hz mode | reported, not a pass condition |
 //!
+//! A law that declares itself for weakly coupled pairs ([`PAIRED_SETUP_LAWS`]:
+//! `paired`, each control with its own drive and no model of the coupling)
+//! runs the two dwells, the measurement noise, the level ladder and the
+//! stepped sine on `sine-weak-4x4` ([`PAIRED_STRUCTURE`]), the plate's modes
+//! with every cross path at least 20 dB under the direct one, at the same
+//! frequencies; its transport-delay and misbehaving cases are the other laws'.
+//!
 //! The moved-resonance cases are judged against the slow sweep's band and
 //! printed, so a reader sees where `matrix`'s stated limit begins; they never
 //! fail a law.
@@ -189,7 +196,7 @@ pub struct CheckStructure {
 }
 
 /// The standard sine structures, by name, with their sizes.
-pub const CHECK_STRUCTURES: [CheckStructure; 8] = [
+pub const CHECK_STRUCTURES: [CheckStructure; 10] = [
     plate("sine-linear-4x4"),
     plate("sine-softening-4x4-mild"),
     plate("sine-softening-4x4-moderate"),
@@ -216,6 +223,8 @@ pub const CHECK_STRUCTURES: [CheckStructure; 8] = [
         full_level_g: 1.0,
     },
     plate("sine-near-singular-4x4"),
+    plate("sine-weak-4x4"),
+    plate("sine-loopback-4x4"),
 ];
 
 const fn plate(name: &'static str) -> CheckStructure {
@@ -761,7 +770,43 @@ pub struct RunPlan {
 /// How long each rung of a ladder below the last is held, s.
 pub const RUNG_S: f64 = 2.0;
 
+/// The laws that declare themselves for weakly coupled pairs (each control
+/// with its own drive, no model of the coupling between pairs), by name:
+/// their dwells, the measurement noise, the stepped sine and the level ladder
+/// run on [`PAIRED_STRUCTURE`] instead of the coupled plate. Their safety
+/// cases stay where every law runs them.
+pub const PAIRED_SETUP_LAWS: [&str; 1] = ["paired"];
+
+/// The structure the cases of a law in [`PAIRED_SETUP_LAWS`] run on where the
+/// coupled plate would otherwise be used.
+pub const PAIRED_STRUCTURE: &str = "sine-weak-4x4";
+
 impl MimoSineCheckCase {
+    /// Whether a law that declares itself for weakly coupled pairs runs this
+    /// case on [`PAIRED_STRUCTURE`].
+    pub fn runs_on_pairs(self) -> bool {
+        matches!(
+            self,
+            MimoSineCheckCase::DwellAtResonance
+                | MimoSineCheckCase::DwellAwayFromResonance
+                | MimoSineCheckCase::MeasurementNoise
+                | MimoSineCheckCase::LevelLadder
+                | MimoSineCheckCase::Stepped
+        )
+    }
+
+    /// The case's run for the law named `law`: [`Self::run_plan`], on
+    /// [`PAIRED_STRUCTURE`] where the law is one of [`PAIRED_SETUP_LAWS`] and
+    /// the case [`Self::runs_on_pairs`].
+    pub fn run_plan_for(self, law: &str) -> RunPlan {
+        let mut p = self.run_plan();
+        if PAIRED_SETUP_LAWS.contains(&law) && self.runs_on_pairs() {
+            p.structure = check_structure(PAIRED_STRUCTURE).expect("a standard structure");
+            p.station.structure = PAIRED_STRUCTURE;
+        }
+        p
+    }
+
     /// The case's run.
     pub fn run_plan(self) -> RunPlan {
         let req = self.requirement();
@@ -1571,12 +1616,18 @@ pub fn check_law(
     mut station: impl FnMut(&StationSpec) -> Result<Box<dyn Backend>, String>,
 ) -> Vec<CaseResult> {
     let manifest = factory.manifest();
+    let name = factory.describe().name;
     cases_for(&manifest)
         .into_iter()
         .map(|case| {
-            let ran = station(&case.station())
+            let plan = case.run_plan_for(&name);
+            let ran = station(&plan.station)
                 .map_err(CheckRunError::Setup)
-                .and_then(|b| run_check_case(case, factory.clone(), b));
+                .and_then(|b| {
+                    let mut m = run_plan(&plan, factory.clone(), b)?;
+                    m.case = Some(case);
+                    Ok(m)
+                });
             match ran {
                 Ok(m) => CaseResult {
                     verdict: judge(&m),

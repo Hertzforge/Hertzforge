@@ -93,6 +93,29 @@ fn mimo_sine_a_ladder_step_carries_the_drive_without_the_laws_help() {
         assert!(n > 50, "{db} dB: {n} judged updates");
         assert!(w < CARRIED_DB, "{db} dB: {w}");
     }
+    // While a level move's settle window is open the law is told to hold
+    // (`engage`): its readings still answer the drive before the move.
+    let level_at: Vec<f64> = r
+        .events
+        .iter()
+        .filter(|e| e.kind == EventKind::Level)
+        .map(|e| e.time_s)
+        .collect();
+    assert_eq!(level_at.len(), 3);
+    for t0 in level_at {
+        let window: Vec<_> = r
+            .ticks
+            .iter()
+            .filter(|t| t.time_s > t0 + 0.015 && t.law_called)
+            .take_while(|t| t.settling)
+            .collect();
+        assert!(window.len() > 10, "{}", window.len());
+        assert!(
+            window.iter().all(|t| t.hold == Hold::Engage),
+            "{:?}",
+            window.iter().map(|t| t.hold).collect::<Vec<_>>()
+        );
+    }
     // The carry moved no drive by more than the change cap in one update.
     let cap = GuardSettings::default().max_step_db;
     for w in r.ticks.windows(2) {
