@@ -53,11 +53,22 @@ pub fn station(spec: &StationSpec) -> Result<Box<dyn Backend>, String> {
     ))
 }
 
-/// One case's line in the check report.
-pub fn case_json(v: &CaseVerdict) -> Value {
+/// One case's line in the check report, for the law named `law`: a case a
+/// law set up for weakly coupled pairs runs on the weakly coupled structure
+/// says so.
+pub fn case_json(v: &CaseVerdict, law: &str) -> Value {
+    let structure = if mcheck::PAIRED_SETUP_LAWS.contains(&law) && v.case.runs_on_pairs() {
+        format!(
+            "{}, on the weakly coupled structure {} (the law is set up for weakly coupled pairs)",
+            v.case.describe(),
+            mcheck::PAIRED_STRUCTURE
+        )
+    } else {
+        v.case.describe().to_owned()
+    };
     json!({
         "case": v.case.name(),
-        "structure": v.case.describe(),
+        "structure": structure,
         "scored": v.scored,
         "passed": v.passed,
         "failed": v.failed,
@@ -67,13 +78,16 @@ pub fn case_json(v: &CaseVerdict) -> Value {
 }
 
 /// Run the check of `factory`'s law (catalog id `law_id`): every case its
-/// manifest accepts, telling `progress` as each starts and ends.
+/// manifest accepts, telling `progress` as each starts and ends. Returns the
+/// verdicts and each case's line in the report.
 pub fn run_check(
     law_id: &str,
     factory: Arc<dyn MimoSineLawFactory>,
     progress: &mut dyn FnMut(Value),
-) -> Result<Vec<CaseVerdict>, MethodError> {
+) -> Result<(Vec<CaseVerdict>, Vec<Value>), MethodError> {
+    let name = factory.describe().name;
     let cases = mcheck::cases_for(&factory.manifest());
+    let mut lines = Vec::with_capacity(cases.len());
     let of = cases.len();
     let mut out = Vec::with_capacity(of);
     for (index, case) in cases.into_iter().enumerate() {
@@ -81,35 +95,27 @@ pub fn run_check(
             json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
                         "state": "running", "result": null}),
         );
-        let ran = station(&case.station())
-            .map_err(mcheck::CheckRunError::Setup)
-            .and_then(|b| mcheck::run_check_case(case, factory.clone(), b));
-        let v = match ran {
-            Ok(m) => mcheck::judge(&m),
-            Err(e) => CaseVerdict {
-                case,
-                scored: case.scored(),
-                passed: false,
-                failed: Some("ran".into()),
-                number: f64::NAN,
-                detail: e.to_string(),
-            },
-        };
+        // The case's run for this law, as the laws crate's own check runs
+        // it: a law set up for weakly coupled pairs runs its pair cases on
+        // the weakly coupled structure.
+        let v = mcheck::check_case(case, factory.clone(), &mut station).verdict;
+        let line = case_json(&v, &name);
         progress(
             json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
-                        "state": "done", "result": case_json(&v)}),
+                        "state": "done", "result": line.clone()}),
         );
         out.push(v);
+        lines.push(line);
     }
-    Ok(out)
+    Ok((out, lines))
 }
 
 /// The `laws.check` report: passed when every scored case passed.
-pub fn report_json(verdicts: &[CaseVerdict], recorded: bool) -> Value {
+pub fn report_json(verdicts: &[CaseVerdict], lines: Vec<Value>, recorded: bool) -> Value {
     json!({
         "passed": !verdicts.is_empty() && mcheck::check_passed(verdicts),
         "recorded": recorded,
         "tool_version": MIMO_SINE_CHECK_VERSION,
-        "cases": verdicts.iter().map(case_json).collect::<Vec<_>>(),
+        "cases": lines,
     })
 }

@@ -4082,7 +4082,9 @@ alone) and, for a built-in law, `limits` (its limits as measured on the research
 words; null for a law file). A law is checked with `laws.check`: a law file by its `id` or the
 `path` of its file, a built-in law by its `id` with `"world":"sine_mimo"` (built-in names are
 shared with other worlds). The check runs every case the law's manifest accepts on the
-simulator's sine structures, one `laws.check` event as each starts and as it ends (`{"law_id",
+simulator's sine structures (a law set up for weakly coupled pairs, `paired`, runs its dwells, its
+noise, stepped and ladder cases on `sine-weak-4x4`, and each such case's `structure` says so), one
+`laws.check` event as each starts and as it ends (`{"law_id",
 "index","of","case","state","result"}`), and answers `{"law","report"}`: the report's `passed`
 (every scored case passed), `recorded`, `tool_version` and `cases`, each `{"case","structure",
 "scored","passed","failed","number","detail"}`. A law file's scored verdicts are recorded against

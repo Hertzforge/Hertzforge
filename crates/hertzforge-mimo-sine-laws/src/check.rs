@@ -1615,38 +1615,49 @@ pub fn check_law(
     factory: Arc<dyn MimoSineLawFactory>,
     mut station: impl FnMut(&StationSpec) -> Result<Box<dyn Backend>, String>,
 ) -> Vec<CaseResult> {
-    let manifest = factory.manifest();
-    let name = factory.describe().name;
-    cases_for(&manifest)
+    cases_for(&factory.manifest())
         .into_iter()
-        .map(|case| {
-            let plan = case.run_plan_for(&name);
-            let ran = station(&plan.station)
-                .map_err(CheckRunError::Setup)
-                .and_then(|b| {
-                    let mut m = run_plan(&plan, factory.clone(), b)?;
-                    m.case = Some(case);
-                    Ok(m)
-                });
-            match ran {
-                Ok(m) => CaseResult {
-                    verdict: judge(&m),
-                    measure: Some(m),
-                },
-                Err(e) => CaseResult {
-                    verdict: CaseVerdict {
-                        case,
-                        scored: case.scored(),
-                        passed: false,
-                        failed: Some("ran".into()),
-                        number: f64::NAN,
-                        detail: e.to_string(),
-                    },
-                    measure: None,
-                },
-            }
-        })
+        .map(|case| check_case(case, factory.clone(), &mut station))
         .collect()
+}
+
+/// What builds a case's station: the simulator's, or another a caller holds.
+pub type StationBuilder<'a> = dyn FnMut(&StationSpec) -> Result<Box<dyn Backend>, String> + 'a;
+
+/// Run one `case` of `factory`'s law as [`check_law`] runs it (its run for the
+/// law's name, [`MimoSineCheckCase::run_plan_for`]), on the station `station`
+/// builds for it, and judge it. A caller that reports each case as it goes
+/// runs the cases of [`cases_for`] through this.
+pub fn check_case(
+    case: MimoSineCheckCase,
+    factory: Arc<dyn MimoSineLawFactory>,
+    station: &mut StationBuilder<'_>,
+) -> CaseResult {
+    let plan = case.run_plan_for(&factory.describe().name);
+    let ran = station(&plan.station)
+        .map_err(CheckRunError::Setup)
+        .and_then(|b| {
+            let mut m = run_plan(&plan, factory.clone(), b)?;
+            m.case = Some(case);
+            Ok(m)
+        });
+    match ran {
+        Ok(m) => CaseResult {
+            verdict: judge(&m),
+            measure: Some(m),
+        },
+        Err(e) => CaseResult {
+            verdict: CaseVerdict {
+                case,
+                scored: case.scored(),
+                passed: false,
+                failed: Some("ran".into()),
+                number: f64::NAN,
+                detail: e.to_string(),
+            },
+            measure: None,
+        },
+    }
 }
 
 /// Whether every scored verdict passed.

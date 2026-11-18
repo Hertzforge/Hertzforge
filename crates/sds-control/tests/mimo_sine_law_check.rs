@@ -193,3 +193,162 @@ async fn mimo_sine_a_law_file_arms_and_runs_a_dwell() {
     assert_eq!(law["builtin"], false);
     assert_eq!(law["sha256"], id);
 }
+
+/// The five built-in laws, each with the cases the laws crate plans for it.
+const BUILTINS: [&str; 5] = ["matrix", "paired", "steepest_descent", "secant", "ratio"];
+
+/// One law's check report, one line: its verdict and every case's number.
+fn summary(id: &str, report: &Value) -> String {
+    let cases = report["cases"].as_array().unwrap();
+    let failed: Vec<String> = cases
+        .iter()
+        .filter(|k| k["scored"] == true && k["passed"] != true)
+        .map(|k| format!("{} ({}: {})", k["case"], k["failed"], k["detail"]))
+        .collect();
+    format!(
+        "{id}: passed {} over {} cases, failed [{}]",
+        report["passed"],
+        cases.len(),
+        failed.join("; ")
+    )
+}
+
+/// Every built-in law passes its check through the service's own method, and
+/// `paired` runs its pair cases (dwells, noise, stepped and the ladder) on the
+/// weakly coupled structure, as the laws crate plans them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_sine_check_every_builtin_passes_through_the_service() {
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(
+        1800,
+    ))))
+    .await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Check"})).await;
+    let mut lines = Vec::new();
+    let mut all = true;
+    for id in BUILTINS {
+        let r = long_call(
+            &mut c,
+            "laws.check",
+            json!({"id": id, "world": "sine_mimo"}),
+        )
+        .await;
+        let report = &r["report"];
+        lines.push(summary(id, report));
+        all &= report["passed"] == true;
+        if id == "paired" {
+            let cases = report["cases"].as_array().unwrap();
+            for name in ["measurement_noise", "stepped", "level_ladder"] {
+                let k = cases.iter().find(|k| k["case"] == name).unwrap();
+                assert!(
+                    k["structure"].as_str().unwrap().contains("sine-weak-4x4"),
+                    "paired's {name} did not run on the weakly coupled structure: {k}"
+                );
+            }
+        }
+    }
+    eprintln!("{}", lines.join("\n"));
+    assert!(all, "{}", lines.join("\n"));
+}
+
+/// Every built-in law as a law file passes its check through the service, the
+/// check is recorded against its file, and the hardware arming gate reads the
+/// record and lets each file arm.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_sine_check_every_law_file_passes_through_the_service_and_may_arm() {
+    let opts = msine::opts(Duration::from_secs(1800));
+    let root = opts.data_root.clone();
+    let addr = serve(Service::with_options(opts)).await;
+    let mut c = Client::connect(addr).await;
+    c.ok("session.claim", json!({"name": "Check"})).await;
+    let mut lines = Vec::new();
+    let mut ids = Vec::new();
+    let mut all = true;
+    for name in BUILTINS {
+        let path = law_file(&format!("hertzforge_law_mimo_sine_{name}"));
+        let id = c
+            .ok("laws.import", json!({"path": path.display().to_string()}))
+            .await["law"]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let r = long_call(&mut c, "laws.check", json!({"id": id})).await;
+        lines.push(summary(name, &r["report"]));
+        all &= r["report"]["passed"] == true;
+        assert_eq!(r["report"]["recorded"], true);
+        assert_eq!(
+            r["law"]["check"]["status"],
+            if r["report"]["passed"] == true {
+                "passed"
+            } else {
+                "failed"
+            }
+        );
+        ids.push(id);
+    }
+    eprintln!("{}", lines.join("\n"));
+    assert!(all, "{}", lines.join("\n"));
+    let cat = LawCatalog::open(&root).unwrap();
+    for id in &ids {
+        let hw = mlaws::resolve(
+            &cat,
+            id,
+            &Map::new(),
+            Duration::from_millis(5),
+            Duration::from_secs(120),
+            true,
+        );
+        assert!(
+            hw.is_ok(),
+            "{id} with a passed record was refused on hardware"
+        );
+    }
+}
+
+/// The hardware arming gate refuses a law file whose record is missing or
+/// failing, and takes it once a passed record is written for its file.
+#[test]
+fn mimo_sine_the_arming_gate_refuses_a_missing_or_failing_record() {
+    let dir = std::env::temp_dir().join(format!("msine-gate2-{}", std::process::id()));
+    let mut cat = LawCatalog::open(&dir).unwrap();
+    let e = cat
+        .import(&law_file("hertzforge_law_mimo_sine_paired"))
+        .expect("imports");
+    let arm = |cat: &LawCatalog| {
+        mlaws::resolve(
+            cat,
+            &e.id,
+            &Map::new(),
+            Duration::from_millis(5),
+            Duration::from_secs(120),
+            true,
+        )
+        .err()
+        .and_then(|e| e.reason)
+    };
+    assert_eq!(arm(&cat), Some("law_not_checked"), "a missing record armed");
+    let record = |passed: bool| {
+        hertzforge_random_laws::CheckRecord::new(
+            &e.id,
+            hertzforge_mimo_sine_laws::check::MIMO_SINE_CHECK_VERSION,
+            "2026-11-18T00:00:00Z",
+            vec![
+                hertzforge_random_laws::CheckCase {
+                    name: "stepped".into(),
+                    passed: true,
+                    detail: String::new(),
+                },
+                hertzforge_random_laws::CheckCase {
+                    name: "measurement_noise".into(),
+                    passed,
+                    detail: String::new(),
+                },
+            ],
+        )
+    };
+    cat.record_check(&record(false)).unwrap();
+    assert_eq!(arm(&cat), Some("law_not_checked"), "a failing record armed");
+    cat.record_check(&record(true)).unwrap();
+    assert_eq!(arm(&cat), None, "a passed record was refused");
+    let _ = std::fs::remove_dir_all(&dir);
+}
