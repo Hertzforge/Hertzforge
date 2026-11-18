@@ -362,7 +362,35 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
         _mark_points(drawn, geometry, picked_ids(part))
     if where == 'part:nodes':
         drawn['marks'] = {'link': node_link(name)}
+    if where == 'part:coordinate_systems':
+        # a system's row in the tree marks its origin among the frames drawn
+        drawn['mark_sets'] = [{'link': f'systems:{name}', 'frames': True,
+                               'ids': [int(cs) for cs in geometry.cs_id]}]
+    if where == 'group':
+        drawn['mark_sets'] = [_element_marks(name, geometry, picked_ids(part))]
     return [drawn]
+
+
+def _element_marks(name: str, geometry: Any, groups: Any) -> dict[str, Any]:
+    """The elements of the groups picked, as the view marks them one at a time: each
+    element's id and the rows of its nodes, which an element's row in the tree rings. The
+    first of a large group's, the ones the tree lists (`tree.LISTED_NODES`)."""
+    from .tree import LISTED_NODES
+
+    rows = {int(node): row for row, node in enumerate(geometry.node_id)}
+    wanted = {int(group) for group in groups}
+    listed: dict[int, int] = {}
+    ids: list[int] = []
+    nodes: list[list[int]] = []
+    for element, group, conn in zip(geometry.elem_id, geometry.elem_group,
+                                    geometry.elem_conn, strict=True):
+        group = int(group)
+        if group not in wanted or listed.get(group, 0) >= LISTED_NODES:
+            continue
+        listed[group] = listed.get(group, 0) + 1
+        ids.append(int(element))
+        nodes.append([rows[int(node)] for node in conn if int(node) in rows])
+    return {'link': f'elements:{name}', 'ids': ids, 'rows': nodes}
 
 
 def _mark_points(drawn: dict, geometry: Any, groups: Any) -> None:

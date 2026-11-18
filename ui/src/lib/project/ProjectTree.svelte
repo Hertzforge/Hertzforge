@@ -85,6 +85,21 @@
 		}
 	}
 
+	/**
+	 * A coordinate system's or an element's row clicked: it is marked in the 3-D view, with the
+	 * modifiers a node's row takes. What holds it (the systems, the element's group) is what is
+	 * selected, unless it already is.
+	 */
+	function clickListed(name: string, link: string, holder: { kind: string; id: string | number }, id: number, m: Modifiers, order: number[]) {
+		if (picking) return;
+		if (!partPicked(name, holder.kind, holder.id)) p.clickPart(name, holder.kind, holder.id);
+		if (m.extend && nodeAnchor !== null) mark(link, markedRun(order, nodeAnchor, id));
+		else {
+			nodeAnchor = id;
+			mark(link, markedBy(marked(link), id, !!m.toggle));
+		}
+	}
+
 	function subCandidate(kind: string, id: string | number): boolean {
 		return !!picking?.part && picking.part === kind && !!picking.row.candidates?.includes(String(id));
 	}
@@ -497,7 +512,7 @@
 							<Glyph name={part.id} of="child" parent="geometry" empty={!part.count} size={14} />
 							<span class="label">{part.label} ({part.count})</span>
 						</div>
-						{#if listed && part.ids}
+						{#if listed && part.ids && part.id === 'nodes'}
 							{@const ids = part.ids}
 							{@const on = new Set(marked(nodeLink(o.name)))}
 							<div class="nodelist" role="group" data-testid="nodes-{o.name}">
@@ -511,9 +526,11 @@
 							</div>
 						{/if}
 						{#if listed && part.rows}
+							{@const ids = part.ids ?? []}
+							{@const on = new Set(marked(`systems:${o.name}`))}
 							<div class="nodelist" role="group" data-testid="{part.id}-{o.name}">
 								{#each part.rows as row, i (i)}
-									<div class="sub" style="--depth: 1" role="treeitem" aria-selected="false" tabindex="-1" data-testid="{part.id}-{o.name}-{i}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
+									<div class="sub" class:picked={on.has(ids[i])} style="--depth: 1" role="treeitem" aria-selected={on.has(ids[i])} tabindex="-1" data-testid="{part.id}-{o.name}-{i}" onclick={(e) => clickListed(o.name, `systems:${o.name}`, { kind: 'part', id: part.id }, ids[i], mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickListed(o.name, `systems:${o.name}`, { kind: 'part', id: part.id }, ids[i], {}, ids)}>
 										<Glyph name={part.id} of="child" parent="geometry" size={14} />
 										<span class="label">{row}</span>
 									</div>
@@ -538,9 +555,11 @@
 								{#if naming(o.name, 'group', group.id)}{@render subField(group.label, group.label)}{:else}<span class="label">{group.label} ({group.count})</span>{/if}
 							</div>
 							{#if group.elements?.length && nodesOpen.includes(listKey(o.name, 'group', group.id))}
+								{@const elements = group.elements}
+								{@const on = new Set(marked(`elements:${o.name}`))}
 								<div class="nodelist" role="group" data-testid="elements-{o.name}-{group.id}">
-									{#each group.elements as element (element)}
-										<div class="sub" style="--depth: 2" role="treeitem" aria-selected="false" tabindex="-1" data-testid="element-{o.name}-{element}" onclick={() => clickSub(o.name, 'group', group.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'group', group.id)}>
+									{#each elements as element (element)}
+										<div class="sub" class:picked={on.has(element)} style="--depth: 2" role="treeitem" aria-selected={on.has(element)} tabindex="-1" data-testid="element-{o.name}-{element}" onclick={(e) => clickListed(o.name, `elements:${o.name}`, { kind: 'group', id: group.id }, element, mods(e), elements)} onkeydown={(e) => e.key === 'Enter' && clickListed(o.name, `elements:${o.name}`, { kind: 'group', id: group.id }, element, {}, elements)}>
 											<Glyph name={family.id} of="child" parent="geometry" size={14} />
 											<span class="label">Element {element}</span>
 										</div>

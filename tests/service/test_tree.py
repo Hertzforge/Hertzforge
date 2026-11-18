@@ -47,7 +47,7 @@ def test_a_geometry_opens_into_its_parts_and_families(plate, validate):
     # the Nodes row lists its nodes when opened, the first of a large model's
     listed = {p['id']: p.get('ids') for p in held['parts']}
     assert listed['nodes'] == [int(n) for n in geometry.node_id[:tree.LISTED_NODES]]
-    assert listed['coordinate_systems'] is None
+    assert listed['coordinate_systems'] == [int(cs) for cs in geometry.cs_id]
     # the coordinate systems row lists a line a system, and a group its elements
     systems = next(p for p in held['parts'] if p['id'] == 'coordinate_systems')
     assert len(systems['rows']) == len(geometry.cs_id)

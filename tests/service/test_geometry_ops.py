@@ -82,6 +82,27 @@ def test_the_node_table_and_its_view_mark_nodes_together(project, validate):
         assert list(view['node_ids']) == ids, 'numbered whatever is edited'
 
 
+def test_systems_and_a_groups_elements_are_marked_one_at_a_time(project, validate):
+    geometry = project['Geometry']
+    (drawn,) = _picked(project, {'kind': 'part', 'id': 'coordinate_systems'}, validate)
+    (systems,) = drawn['mark_sets']
+    # a system's row rings the origin of its frame, by its place among the frames
+    assert systems == {'link': 'systems:Geometry', 'frames': True,
+                       'ids': [int(cs) for cs in geometry.cs_id]}
+    assert len(drawn['frames']) == len(systems['ids'])
+    group = int(geometry.group_id[0])
+    (drawn,) = _picked(project, {'kind': 'group', 'id': group}, validate)
+    (elements,) = drawn['mark_sets']
+    mine = [k for k, g in enumerate(geometry.elem_group) if int(g) == group]
+    assert elements['link'] == 'elements:Geometry'
+    assert elements['ids'] == [int(geometry.elem_id[k]) for k in mine]
+    # each element by the rows of its own nodes in the view
+    rows = {int(node): row for row, node in enumerate(geometry.node_id)}
+    assert elements['rows'][0] == [rows[int(n)] for n in geometry.elem_conn[mine[0]]]
+    assert np.allclose(drawn['nodes'][elements['rows'][0]],
+                       np.asarray(geometry.node_xyz)[elements['rows'][0]])
+
+
 def test_a_node_is_added_at_typed_coordinates(project, validate):
     view, table = run(project, 'project.add_node', x=0.1, y=0.2, z=0.3)
     wire_views([view, table], validate)

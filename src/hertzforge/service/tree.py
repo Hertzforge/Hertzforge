@@ -127,9 +127,13 @@ def _geometry(geometry: Any) -> dict[str, Any]:
     when there are any, each with the element groups holding elements of
     it; the solids, a boolean's operands under it; the mated surfaces."""
     from hertzforge.core import solids
-    from hertzforge.core.geometry import FAMILIES, FAMILY_LABELS, RARE_FAMILIES, element_family
-
-    from hertzforge.core.geometry import CS_TYPES
+    from hertzforge.core.geometry import (
+        CS_TYPES,
+        FAMILIES,
+        FAMILY_LABELS,
+        RARE_FAMILIES,
+        element_family,
+    )
 
     families: dict[str, dict[int, int]] = {}
     # each group's elements, the first of a large one, listed when its row is opened
@@ -171,7 +175,8 @@ def _geometry(geometry: Any) -> dict[str, Any]:
                    # are read in its table
                    'ids': [int(n) for n in geometry.node_id[:LISTED_NODES]]},
                   {'id': 'coordinate_systems', 'label': 'Coordinate systems',
-                   'count': len(geometry.cs_id), 'rows': systems}],
+                   'count': len(geometry.cs_id), 'rows': systems,
+                   'ids': [int(cs) for cs in geometry.cs_id]}],
         'families': family_rows,
         'solids': [solid_row(s) for s in solids.top_level(geometry)],
         'mates': [{'id': int(m.id), 'label': f'{m.name} ({m.describe()})', 'name': m.name}

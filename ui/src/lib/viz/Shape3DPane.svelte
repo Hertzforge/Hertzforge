@@ -388,6 +388,20 @@
 		for (let r = 0; r < view.node_ids.length; r++) if (wanted.has(view.node_ids[r])) rows.push(r);
 		return rows;
 	});
+	/** Where the things marked from the tree are ringed (`view.mark_sets`): an element's nodes, a coordinate system's origin. */
+	const setPlaces = $derived.by(() => {
+		const places: number[] = [];
+		for (const set of view.mark_sets ?? []) {
+			const wanted = new Set(marked(set.link));
+			if (!wanted.size) continue;
+			set.ids.forEach((id, k) => {
+				if (!wanted.has(id)) return;
+				if (set.frames) places.push(...(view.frames?.[k]?.origin ?? []));
+				for (const row of set.rows?.[k] ?? []) places.push(view.nodes[3 * row], view.nodes[3 * row + 1], view.nodes[3 * row + 2]);
+			});
+		}
+		return places;
+	});
 	/** The DOF labels over the canvas, redrawn each frame the view moves. */
 	let labelsSvg: SVGSVGElement;
 	/** Where each label sits in the model: its arrow's free end, a little past it. */
@@ -1057,7 +1071,7 @@
 			otherOn = layer(start, held, 9, 0.9);
 			otherOff = layer(start + held, notHeld, 8, 0.3);
 		}
-		if (view.pick?.target === 'nodes' || (view.marks && view.node_ids)) {
+		if (view.pick?.target === 'nodes' || (view.marks && view.node_ids) || view.mark_sets?.length) {
 			markGeometry = new BufferGeometry();
 			markGeometry.setAttribute('position', new BufferAttribute(new Float32Array(0), 3));
 			marks = new Points(markGeometry, plain(new PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false })));
@@ -1485,8 +1499,9 @@
 	$effect(() => {
 		if (!renderer || !markGeometry) return;
 		const rows = [...new Set([...markedRows, ...picked, ...(hoverNode !== null ? [hoverNode] : [])])];
-		const xyz = new Float32Array(3 * rows.length);
+		const xyz = new Float32Array(3 * rows.length + setPlaces.length);
 		rows.forEach((r, k) => xyz.set(view.nodes.subarray(3 * r, 3 * r + 3), 3 * k));
+		xyz.set(setPlaces, 3 * rows.length);
 		markGeometry.setAttribute('position', new BufferAttribute(xyz, 3));
 		dirty = true;
 	});

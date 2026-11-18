@@ -281,6 +281,17 @@
           "type": "object", "required": ["link"], "additionalProperties": false,
           "properties": {"link": {"type": "string"}}
         },
+        "mark_sets": {
+          "type": "array", "items": {
+            "type": "object", "required": ["link", "ids"], "additionalProperties": false,
+            "properties": {
+              "link": {"type": "string"},
+              "ids": {"type": "array", "items": {"type": "integer"}},
+              "rows": {"type": "array", "items": {"type": "array", "items": {"type": "integer", "minimum": 0}}},
+              "frames": {"type": "boolean"}
+            }
+          }
+        },
         "pick": {
           "type": "object", "required": ["op", "params", "target", "hint"],
           "properties": {
