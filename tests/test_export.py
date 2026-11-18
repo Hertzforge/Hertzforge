@@ -1080,3 +1080,18 @@ def test_shapes_are_written_in_the_display_mass(tmp_path):
     back = hertzforge.import_file(path)
     assert np.allclose(np.real(back.shape_matrix),
                        np.real(source.shape_matrix) * np.sqrt(0.45359237))
+
+
+def test_frfs_with_one_pair_written_twice_stay_one_row(tmp_path):
+    """One pair repeated and another missing still counts responses times
+    references; only the check that every pair is unique keeps it flat."""
+    some = hertzforge.import_file(plate('frfs.npz'))
+    last = some.num_records - 1
+    some.response_dof[last] = some.response_dof[0]
+    some.reference_dof[last] = some.reference_dof[0]
+    assert len(set(some.response_dof)) * len(set(some.reference_dof)) == \
+        some.num_records
+    path = str(tmp_path / 'twice.npz')
+    hertzforge.export_file(some, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (some.num_records,)
