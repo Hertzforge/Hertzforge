@@ -127,12 +127,28 @@ def _geometry(geometry: Any) -> dict[str, Any]:
     when there are any, each with the element groups holding elements of
     it; the solids, a boolean's operands under it; the mated surfaces."""
     from hertzforge.core import solids
-    from hertzforge.core.geometry import FAMILIES, FAMILY_LABELS, RARE_FAMILIES, element_family
+    from hertzforge.core.geometry import (
+        CS_TYPES,
+        FAMILIES,
+        FAMILY_LABELS,
+        RARE_FAMILIES,
+        element_family,
+    )
 
     families: dict[str, dict[int, int]] = {}
-    for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
+    # each group's elements, the first of a large one, listed when its row is opened
+    members: dict[int, list[int]] = {}
+    for code, group, element in zip(geometry.elem_type, geometry.elem_group,
+                                    geometry.elem_id, strict=True):
         held = families.setdefault(element_family(int(code)), {})
         held[int(group)] = held.get(int(group), 0) + 1
+        listed_here = members.setdefault(int(group), [])
+        if len(listed_here) < LISTED_NODES:
+            listed_here.append(int(element))
+    systems = [f'CS {int(cs)}' + (f', {str(name).strip()}' if str(name).strip() else '')
+               + f' ({CS_TYPES.get(int(kind), "cartesian")})'
+               for cs, name, kind in zip(geometry.cs_id, geometry.cs_name, geometry.cs_type,
+                                         strict=True)]
     listed = [*FAMILIES, *(f for f in RARE_FAMILIES if f == 'points' or f in families)]
     names = {int(g): str(n).strip() for g, n in
              zip(geometry.group_id, geometry.group_name, strict=True)}
@@ -143,7 +159,7 @@ def _geometry(geometry: Any) -> dict[str, Any]:
             'id': family, 'label': FAMILY_LABELS[family],
             'count': sum(groups.values()),
             'groups': [{'id': group, 'label': names.get(group) or f'Element group {group}',
-                        'count': groups[group]}
+                        'count': groups[group], 'elements': members.get(group, [])}
                        for group in (int(g) for g in geometry.group_id) if group in groups]})
 
     def solid_row(solid: Any) -> dict[str, Any]:
@@ -159,7 +175,8 @@ def _geometry(geometry: Any) -> dict[str, Any]:
                    # are read in its table
                    'ids': [int(n) for n in geometry.node_id[:LISTED_NODES]]},
                   {'id': 'coordinate_systems', 'label': 'Coordinate systems',
-                   'count': len(geometry.cs_id)}],
+                   'count': len(geometry.cs_id), 'rows': systems,
+                   'ids': [int(cs) for cs in geometry.cs_id]}],
         'families': family_rows,
         'solids': [solid_row(s) for s in solids.top_level(geometry)],
         'mates': [{'id': int(m.id), 'label': f'{m.name} ({m.describe()})', 'name': m.name}

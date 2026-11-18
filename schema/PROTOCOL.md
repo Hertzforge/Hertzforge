@@ -410,7 +410,12 @@ nothing or Escape clearing them, unless the view has a `pick`, whose clicks are 
 with `marks` (`{"link","column"}`) marks the rows selected, each by its cell in `column`, the
 node's id. What is marked in one view with a `link` is drawn marked in every other with the same
 one: the rows of the table highlighted and scrolled to, the nodes ringed in the view. The marks
-are the shell's and no operation reads them. A geometry's nodes have them: the table and the view
+are the shell's and no operation reads them. A `shape3d` may also carry `mark_sets`, things
+marked by where they are and not by a click in the view: each `{"link","ids"}` with `rows`, the
+rows of `nodes` id k rings (an element's nodes), or `"frames":true`, id k being the k-th of
+`frames` and ringed at its origin (a coordinate system). The tree's rows for them mark with the
+same `link`: the view of a geometry's Coordinate systems part, and of element groups picked, whose
+listed elements are the ones sent. A geometry's nodes have `marks`: the table and the view
 of `project.view_entities` for nodes, and the view the Nodes part shows.
 
 A `shape3d` drawn on a geometry with a view of its own (`Geometry.view`) carries `home`:
@@ -672,7 +677,7 @@ colors. A run record carries `run_folder`, the run folder it was converted from,
 still there: the project was opened from its converted file, or the file was imported.
 `project.children` answers what one object opens into, by
 `kind`: a `geometry` lists its `parts` (nodes and coordinate systems with counts, the nodes with `ids`, the first 2000 nodes' ids, which the row lists when opened and marks when clicked), its element
-`families` (every family, each with the element `groups` holding elements of it and their counts),
+`families` (every family, each with the element `groups` holding elements of it and their counts, a group with `elements`, the ids of its first 2000, listed when its row is opened), the coordinate systems part with `rows`, a line a system (its id, name and type) and `ids`, their ids,
 its `solids` (a boolean's operands as its `children`) and its `mates`; a data object is a `grid`,
 `rows` of a DOF and a quantity (a time history's with a `role`), `columns` of what tells one record
 from another (reference DOFs, capture labels, or one blank), `cells` of record indices (-1 for a

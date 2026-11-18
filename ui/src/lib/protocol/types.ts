@@ -260,6 +260,8 @@ export interface Shape3DView {
 	note?: string;
 	/** The nodes of `node_ids` are marked by a click, with every view of the same `link` (a table's rows). */
 	marks?: { link: string };
+	/** Things the tree's rows mark with the same `link`: id k rings the nodes `rows[k]`, or with `frames` the origin of the k-th frame. */
+	mark_sets?: { link: string; ids: number[]; rows?: number[][]; frames?: boolean }[];
 	/** What a click in the view does. */
 	pick?: Pick3D;
 	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
@@ -763,8 +765,8 @@ export interface ShowPrefs {
 export type ProjectChildren =
 	| {
 			kind: 'geometry';
-			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[] }[];
-			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[]; rows?: string[] }[];
+			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number; elements?: number[] }[] }[];
 			solids: SolidRow[];
 			mates: { id: number; label: string; name: string }[];
 	  }
