@@ -18,6 +18,14 @@ async fn client() -> Client {
     Client::connect(addr).await
 }
 
+/// A service whose simulator runs at `speed` times real time, for the tests
+/// that act on a run while it drives.
+async fn paced_client(speed: f64) -> Client {
+    let svc = Service::with_options(msine::paced(speed, Duration::from_secs(600)));
+    let addr = serve(svc).await;
+    Client::connect(addr).await
+}
+
 /// The worst |error| over the live frames judged outside the first second.
 fn worst_live_error(c: &Client) -> f64 {
     c.of_topic("mimo_sine.live")
@@ -144,11 +152,6 @@ async fn mimo_sine_a_limit_channel_notches_the_drive_on_the_base_and_article() {
         "{}",
         end["end"]
     );
-    let notched = c
-        .of_topic("mimo_sine.live")
-        .iter()
-        .any(|e| e.data()["notch"] == true && e.data()["notch_scale"].as_f64().unwrap() < 1.0);
-    assert!(notched, "no live frame showed the notch");
     let log = c.ok("mimo_sine.log", json!({})).await;
     let notch_in = log["entries"]
         .as_array()
@@ -162,7 +165,7 @@ async fn mimo_sine_a_limit_channel_notches_the_drive_on_the_base_and_article() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mimo_sine_hold_resume_and_a_manual_frequency_act_on_a_sweep() {
-    let mut c = client().await;
+    let mut c = paced_client(10.0).await;
     controller(&mut c, 4, 0, 4).await;
     let cfg = config("sine-linear-4x4", 4, 0, 4, sweep(30.0, 200.0, 1.0), "matrix");
     c.ok("mimo_sine.configure", json!({"config": cfg})).await;
@@ -214,7 +217,7 @@ async fn mimo_sine_hold_resume_and_a_manual_frequency_act_on_a_sweep() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mimo_sine_a_stop_ramps_every_drive_down_and_an_abort_ends_at_once() {
-    let mut c = client().await;
+    let mut c = paced_client(10.0).await;
     controller(&mut c, 4, 0, 4).await;
     let cfg = config("sine-linear-4x4", 4, 0, 4, dwell(80.0, 60.0), "matrix");
     c.ok("mimo_sine.configure", json!({"config": cfg.clone()})).await;

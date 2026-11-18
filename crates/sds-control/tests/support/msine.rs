@@ -22,6 +22,11 @@ pub fn opts(timeout: Duration) -> ServiceOptions {
     options(no_driver(), 0.0, timeout, Duration::from_secs(5))
 }
 
+/// Simulator options paced at `speed` times real time.
+pub fn paced(speed: f64, timeout: Duration) -> ServiceOptions {
+    options(no_driver(), speed, timeout, Duration::from_secs(5))
+}
+
 pub fn row(index: u32, role: &str) -> Value {
     let units = if role == "drive" { "V" } else { "g" };
     json!({
