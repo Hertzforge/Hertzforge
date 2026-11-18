@@ -49,3 +49,7 @@ simulator = ["dep:hertzforge-hal-sim"]
 hertzforge-mimo-sine-laws = { path = ".", features = ["reference-structure", "simulator"] }
 # Reads the law mathematics' research structures for the build-time measurement.
 serde_json = { workspace = true }
+
+[[example]]
+name = "mimo_sine_law_study"
+required-features = ["simulator"]

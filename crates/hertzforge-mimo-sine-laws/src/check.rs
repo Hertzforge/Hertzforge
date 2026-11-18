@@ -726,31 +726,104 @@ pub fn check_table(s: CheckStructure) -> ChannelTable {
     t
 }
 
+/// One run on the engine, as a check case or a study run plays it: the
+/// structure and its station, the test, the level ladder, the limits and
+/// how the run is measured.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunPlan {
+    /// The structure.
+    pub structure: CheckStructure,
+    /// The station the caller builds.
+    pub station: StationSpec,
+    /// The test.
+    pub test: TestPlan,
+    /// The levels, dB; the last is the judged one. Each rung but the last is
+    /// held [`RUNG_S`].
+    pub ladder_db: Vec<f64>,
+    /// The bound on every response that is not a control, g; `None` for no
+    /// limit channels.
+    pub limit_bound_g: Option<f64>,
+    /// Every control's abort band, dB either way.
+    pub abort_db: f64,
+    /// The longest the run may take, test time, s.
+    pub max_s: f64,
+    /// Judge each control against the response the drives can reach.
+    pub reachable: bool,
+    /// Measure the worst error from this long after the engage, s.
+    pub settle_after_s: Option<f64>,
+    /// Measure near (`.1` Hz either side of) and away from this resonance,
+    /// Hz.
+    pub resonance: Option<(f64, f64)>,
+    /// Make the law's answers unusable from this update on.
+    pub misbehave_from: Option<u64>,
+}
+
+/// How long each rung of a ladder below the last is held, s.
+pub const RUNG_S: f64 = 2.0;
+
+impl MimoSineCheckCase {
+    /// The case's run.
+    pub fn run_plan(self) -> RunPlan {
+        let req = self.requirement();
+        RunPlan {
+            structure: self.structure(),
+            station: self.station(),
+            test: self.plan(),
+            ladder_db: self.ladder_db(),
+            limit_bound_g: (self == MimoSineCheckCase::LimitChannel).then_some(CHECK_LIMIT_BOUND_G),
+            // A delay's first updates read a response that has not arrived
+            // yet: a control briefly far from its reference is the case, not
+            // a fault.
+            abort_db: if self == MimoSineCheckCase::TransportDelay {
+                20.0
+            } else {
+                CHECK_ABORT_DB
+            },
+            max_s: self.max_s(),
+            reachable: matches!(req, Requirement::Reachable { .. }),
+            settle_after_s: match req {
+                Requirement::Settles { after_s, .. } => Some(after_s),
+                _ => None,
+            },
+            resonance: match req {
+                Requirement::WithinAway {
+                    resonance_hz,
+                    away_hz,
+                    ..
+                } => Some((resonance_hz, away_hz)),
+                _ => None,
+            },
+            misbehave_from: (self == MimoSineCheckCase::LawMisbehaves)
+                .then_some(CHECK_MISBEHAVE_FROM),
+        }
+    }
+}
+
 /// The setup `case` runs with a law of `id` and `manifest`.
 pub fn check_setup(case: MimoSineCheckCase, id: &str, manifest: &LawManifest) -> MimoSineSetup {
-    let s = case.structure();
+    plan_setup(&case.run_plan(), id, manifest)
+}
+
+/// The setup of the run `p` with a law of `id` and `manifest`: every control
+/// at full level on a flat profile, in phase unless the law accepts an
+/// amplitude-only reference.
+pub fn plan_setup(p: &RunPlan, id: &str, manifest: &LawManifest) -> MimoSineSetup {
+    let s = p.structure;
     let g = s.full_level_g;
     let phased = !manifest.amplitude_only;
-    let ladder = case.ladder_db();
+    let ladder = p.ladder_db.clone();
     let start = ladder[0];
-    let limits = if case == MimoSineCheckCase::LimitChannel {
-        (s.controls..s.outputs)
+    let limits = match p.limit_bound_g {
+        Some(bound) => (s.controls..s.outputs)
             .map(|j| LimitChannel {
                 channel: 1 + j,
-                profile: flat(CHECK_LIMIT_BOUND_G, CHECK_ALARM_DB, 3.0),
+                profile: flat(bound, CHECK_ALARM_DB, 3.0),
             })
-            .collect()
-    } else {
-        Vec::new()
+            .collect(),
+        None => Vec::new(),
     };
-    let rung = if ladder.len() > 1 { 2.0 } else { 1e6 };
-    // A delay's first updates read a response that has not arrived yet: a
-    // control briefly far from its reference is the case, not a fault.
-    let abort_db = if case == MimoSineCheckCase::TransportDelay {
-        20.0
-    } else {
-        CHECK_ABORT_DB
-    };
+    let rung = if ladder.len() > 1 { RUNG_S } else { 1e6 };
+    let abort_db = p.abort_db;
     MimoSineSetup {
         controls: (0..s.controls)
             .map(|i| ControlChannel {
@@ -775,7 +848,7 @@ pub fn check_setup(case: MimoSineCheckCase, id: &str, manifest: &LawManifest) ->
             .collect(),
         limits,
         phase_specified: phased,
-        test: case.plan(),
+        test: p.test.clone(),
         schedule: Schedule {
             mode: LevelMode::Auto,
             ladder: LadderConfig {
@@ -823,8 +896,8 @@ pub struct ControlErrors {
 /// What a case's run measured.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaseMeasure {
-    /// The case.
-    pub case: MimoSineCheckCase,
+    /// The case; `None` for a run that is not a check case.
+    pub case: Option<MimoSineCheckCase>,
     /// How the run ended; `None` when it had not ended in the case's time.
     pub outcome: Option<Outcome>,
     /// Where the run's stop began, Hz, when it stopped early.
@@ -850,6 +923,8 @@ pub struct CaseMeasure {
     pub per_control: Vec<ControlErrors>,
     /// The worst |error| from the settle time on, dB (`Settles` cases).
     pub settled_db: f64,
+    /// The updates `settled_db` is taken over.
+    pub settled_updates: usize,
     /// The worst |error| near the resonance, dB (`WithinAway`).
     pub through_db: f64,
     /// The worst |error| away from it, dB (`WithinAway`).
@@ -877,11 +952,10 @@ pub struct CaseMeasure {
     pub run_s: f64,
 }
 
-/// A law's answers, refused from [`CHECK_MISBEHAVE_FROM`] on: one drive
-/// non-finite.
-struct Misbehaving(Arc<dyn MimoSineLawFactory>);
+/// A law's answers, refused from an update on: one drive non-finite.
+struct Misbehaving(Arc<dyn MimoSineLawFactory>, u64);
 
-struct MisbehavingLaw(Box<dyn MimoSineLaw + Send>);
+struct MisbehavingLaw(Box<dyn MimoSineLaw + Send>, u64);
 
 impl MimoSineLaw for MisbehavingLaw {
     fn name(&self) -> &str {
@@ -902,7 +976,7 @@ impl MimoSineLaw for MisbehavingLaw {
         v: &mut LawValues,
     ) -> Result<(), LawFault> {
         self.0.tick(x, o, v)?;
-        if x.index >= CHECK_MISBEHAVE_FROM {
+        if x.index >= self.1 {
             o.drive[0] = C64::new(f64::NAN, 0.0);
         }
         Ok(())
@@ -911,7 +985,7 @@ impl MimoSineLaw for MisbehavingLaw {
 
 impl MimoSineLawFactory for Misbehaving {
     fn build(&self, s: &LawSetup) -> Result<Box<dyn MimoSineLaw + Send>, LawFault> {
-        Ok(Box::new(MisbehavingLaw(self.0.build(s)?)))
+        Ok(Box::new(MisbehavingLaw(self.0.build(s)?, self.1)))
     }
     fn describe(&self) -> LawDescriptor {
         self.0.describe()
@@ -970,15 +1044,26 @@ pub fn run_check_case(
     factory: Arc<dyn MimoSineLawFactory>,
     backend: Box<dyn Backend>,
 ) -> Result<CaseMeasure, CheckRunError> {
+    let mut m = run_plan(&case.run_plan(), factory, backend)?;
+    m.case = Some(case);
+    Ok(m)
+}
+
+/// Run `plan` with the law `factory` builds on `backend` (the station built
+/// from `plan.station`) and measure it.
+pub fn run_plan(
+    plan: &RunPlan,
+    factory: Arc<dyn MimoSineLawFactory>,
+    backend: Box<dyn Backend>,
+) -> Result<CaseMeasure, CheckRunError> {
     let manifest = factory.manifest();
     let id = factory.describe().id;
-    let setup = check_setup(case, &id, &manifest);
+    let setup = plan_setup(plan, &id, &manifest);
     let phased = setup.phase_specified;
-    let s = case.structure();
-    let factory: Arc<dyn MimoSineLawFactory> = if case == MimoSineCheckCase::LawMisbehaves {
-        Arc::new(Misbehaving(factory))
-    } else {
-        factory
+    let s = plan.structure;
+    let factory: Arc<dyn MimoSineLawFactory> = match plan.misbehave_from {
+        Some(from) => Arc::new(Misbehaving(factory, from)),
+        None => factory,
     };
     let err = |e: hertzforge_mimo_sine::service::ServiceError| CheckRunError::Setup(e.to_string());
     let mut svc = MimoSineService::new(
@@ -1012,7 +1097,7 @@ pub fn run_check_case(
     let t2 = Instant::now();
     let mut ticks: Vec<TickRecord> = Vec::new();
     let mut events: Vec<Event> = Vec::new();
-    let rounds = (case.max_s() * CHECK_FS_HZ / 512.0 / 16.0) as u64 + 64;
+    let rounds = (plan.max_s * CHECK_FS_HZ / 512.0 / 16.0) as u64 + 64;
     for _ in 0..rounds {
         let alive = svc.run_batches(16).map_err(err)?;
         ticks.extend(rt.try_iter());
@@ -1037,7 +1122,7 @@ pub fn run_check_case(
         drive_is_zero: core.drive_is_zero(),
     };
     Ok(measure(
-        case,
+        plan,
         &ticks,
         &events,
         outcome,
@@ -1056,7 +1141,7 @@ struct Station {
 
 #[allow(clippy::too_many_arguments)]
 fn measure(
-    case: MimoSineCheckCase,
+    plan: &RunPlan,
     ticks: &[TickRecord],
     events: &[Event],
     outcome: Option<Outcome>,
@@ -1065,17 +1150,16 @@ fn measure(
     phased: bool,
     (ident_s, build_s, run_s): (f64, f64, f64),
 ) -> CaseMeasure {
-    let s = case.structure();
+    let s = plan.structure;
     let (n, m) = (s.controls, s.drives);
-    let ladder = case.ladder_db();
+    let ladder = &plan.ladder_db;
     let top = *ladder.last().unwrap_or(&0.0);
-    let req = case.requirement();
     let at = |t: &TickRecord, l: f64| (t.level_db - l).abs() < 1e-6;
     let judged: Vec<&TickRecord> = ticks
         .iter()
         .filter(|t| !t.settling && t.miss.is_none() && at(t, top))
         .collect();
-    let reach = matches!(req, Requirement::Reachable { .. });
+    let reach = plan.reachable;
     let errs = |t: &TickRecord| -> Vec<f64> {
         if reach {
             let c = reachable(id, n, m, t);
@@ -1102,12 +1186,7 @@ fn measure(
             }
         }
         let w = largest(e.iter().copied());
-        if let Requirement::WithinAway {
-            resonance_hz,
-            away_hz,
-            ..
-        } = req
-        {
+        if let Some((resonance_hz, away_hz)) = plan.resonance {
             if (t.frequency_hz - resonance_hz).abs() <= away_hz {
                 through = through.max(w);
             } else {
@@ -1130,15 +1209,18 @@ fn measure(
         .collect();
     let worst = largest(all.iter().copied());
     let med = median(&mut all);
-    let settled = match req {
-        Requirement::Settles { after_s, .. } => largest(
-            ticks
-                .iter()
-                .filter(|t| t.time_s >= after_s - 1e-9 && t.miss.is_none() && at(t, top))
-                .flat_map(|t| t.errors_db().iter().map(|e| e.abs()).collect::<Vec<_>>()),
-        ),
-        _ => f64::NAN,
+    let after: Vec<&TickRecord> = match plan.settle_after_s {
+        Some(after_s) => ticks
+            .iter()
+            .filter(|t| t.time_s >= after_s - 1e-9 && t.miss.is_none() && at(t, top))
+            .collect(),
+        None => Vec::new(),
     };
+    let settled = largest(
+        after
+            .iter()
+            .flat_map(|t| t.errors_db().iter().map(|e| e.abs()).collect::<Vec<_>>()),
+    );
     let rungs = ladder
         .iter()
         .map(|&l| {
@@ -1153,7 +1235,7 @@ fn measure(
         .collect();
     let nl = s.outputs - s.controls;
     let mut limit_over = f64::NEG_INFINITY;
-    if case == MimoSineCheckCase::LimitChannel {
+    if plan.limit_bound_g.is_some() {
         for t in ticks {
             for j in 0..nl {
                 if t.limit_bound[j] > 0.0 {
@@ -1188,7 +1270,7 @@ fn measure(
         .find(|e| matches!(e.kind, EventKind::Stopping { .. }))
         .map(|e| e.frequency_hz);
     CaseMeasure {
-        case,
+        case: None,
         outcome,
         stop_hz,
         misses: ticks.iter().filter(|t| t.miss.is_some()).count(),
@@ -1201,6 +1283,7 @@ fn measure(
         median_db: med,
         per_control,
         settled_db: settled,
+        settled_updates: after.len(),
         through_db: through,
         away_db: away,
         rungs,
@@ -1242,7 +1325,16 @@ fn outcome_str(o: Option<Outcome>) -> String {
 
 /// Judge a case's measure against the check's requirements.
 pub fn judge(m: &CaseMeasure) -> CaseVerdict {
-    let case = m.case;
+    let Some(case) = m.case else {
+        return CaseVerdict {
+            case: MimoSineCheckCase::DwellAtResonance,
+            scored: false,
+            passed: false,
+            failed: Some("ran".into()),
+            number: f64::NAN,
+            detail: "the run was not a check case".into(),
+        };
+    };
     let req = case.requirement();
     let v = |failed: Option<&str>, number: f64, detail: String| CaseVerdict {
         case,
@@ -1343,7 +1435,11 @@ pub fn judge(m: &CaseMeasure) -> CaseVerdict {
             v(
                 (!inside(x, db)).then_some(name),
                 x,
-                format!("worst error from {after_s} s after the engage {x:.2} dB (asked {db})"),
+                format!(
+                    "worst error from {after_s} s after the engage {x:.2} dB over {} updates \
+                     (asked {db})",
+                    m.settled_updates
+                ),
             )
         }
         Requirement::Within { db } => {
@@ -1520,8 +1616,22 @@ pub fn check_record(law_sha256: &str, date: &str, verdicts: &[CaseVerdict]) -> C
 /// The simulated station of `spec`.
 #[cfg(feature = "simulator")]
 pub fn sim_station(spec: &StationSpec) -> Result<Box<dyn Backend>, String> {
+    use hertzforge_hal_sim::{SimBackend, SimConfig};
+    let b: SimBackend = SimConfig::new()
+        .sample_rate_hz(spec.fs_hz)
+        .plant(sim_structure(spec)?)
+        .noise_level(spec.noise_g)
+        .seed(spec.seed)
+        .shared_clock(true)
+        .build();
+    Ok(Box::new(b))
+}
+
+/// The simulator's model of `spec`'s structure, edited as it says.
+#[cfg(feature = "simulator")]
+pub fn sim_structure(spec: &StationSpec) -> Result<hertzforge_hal_sim::PlantModel, String> {
     use hertzforge_hal_sim::plants::SineStructure;
-    use hertzforge_hal_sim::{PlantModel, SimBackend, SimConfig};
+    use hertzforge_hal_sim::PlantModel;
     let s = SineStructure::from_name(spec.structure)
         .ok_or_else(|| format!("no standard sine structure {}", spec.structure))?;
     let mut model = s.build().model;
@@ -1545,14 +1655,7 @@ pub fn sim_station(spec: &StationSpec) -> Result<Box<dyn Backend>, String> {
         }
         p.transport_delay_samples = (spec.transport_delay_s * spec.fs_hz).round() as usize;
     }
-    let b: SimBackend = SimConfig::new()
-        .sample_rate_hz(spec.fs_hz)
-        .plant(model)
-        .noise_level(spec.noise_g)
-        .seed(spec.seed)
-        .shared_clock(true)
-        .build();
-    Ok(Box::new(b))
+    Ok(model)
 }
 
 #[cfg(test)]
@@ -1587,5 +1690,261 @@ mod tests {
         );
         // The first version's entry still builds and runs nothing.
         assert_eq!(run_check(), Err(CheckNotBuilt));
+    }
+
+    /// A run that meets every requirement of every case.
+    fn clean(case: MimoSineCheckCase) -> CaseMeasure {
+        CaseMeasure {
+            case: Some(case),
+            outcome: Some(Outcome::Completed),
+            stop_hz: None,
+            misses: 0,
+            over_ceiling: 0,
+            largest_sample_v: 0.2,
+            largest_drive_db: -20.0,
+            drive_is_zero: true,
+            judged: 500,
+            worst_db: 0.2,
+            median_db: 0.05,
+            per_control: Vec::new(),
+            settled_db: 0.1,
+            settled_updates: 400,
+            through_db: 0.3,
+            away_db: 0.2,
+            rungs: vec![(0.0, 0.2)],
+            limit_over_db: 0.1,
+            notch_engaged: true,
+            deepest_notch_db: -6.0,
+            release_overshoot_db: 0.2,
+            opposition_db: 0.1,
+            ident_s: 0.0,
+            build_s: 0.0,
+            run_s: 0.0,
+        }
+    }
+
+    fn failed(m: &CaseMeasure) -> Option<String> {
+        judge(m).failed
+    }
+
+    #[test]
+    fn mimo_sine_check_a_clean_run_passes_every_case() {
+        for c in MimoSineCheckCase::ALL {
+            let mut m = clean(c);
+            if c == MimoSineCheckCase::LawMisbehaves {
+                m.outcome = Some(Outcome::LawFault);
+                m.misses = 3;
+            }
+            let v = judge(&m);
+            assert!(v.passed, "{}: {v:?}", c.name());
+            assert_eq!(v.scored, c.scored());
+        }
+    }
+
+    #[test]
+    fn mimo_sine_check_each_requirement_fails_by_name() {
+        use MimoSineCheckCase as C;
+        let with = |c: C, f: &dyn Fn(&mut CaseMeasure)| {
+            let mut m = clean(c);
+            f(&mut m);
+            failed(&m)
+        };
+        let s = |x: &str| Some(x.to_string());
+        // Every case.
+        assert_eq!(with(C::SlowSweep, &|m| m.misses = 1), s("no_law_fault"));
+        assert_eq!(
+            with(C::SlowSweep, &|m| m.outcome = Some(Outcome::LawFault)),
+            s("no_law_fault")
+        );
+        assert_eq!(
+            with(C::SlowSweep, &|m| m.over_ceiling = 1),
+            s("within_ceiling")
+        );
+        assert_eq!(
+            with(C::SlowSweep, &|m| m.largest_sample_v = 2.1),
+            s("within_ceiling")
+        );
+        for o in [
+            Outcome::ControlAbort { control: 1 },
+            Outcome::LimitAbort { limit: 0 },
+            Outcome::DriveAbort { drive: 2 },
+            Outcome::Kinematic { control: 0 },
+            Outcome::Divergence,
+        ] {
+            assert_eq!(with(C::SlowSweep, &|m| m.outcome = Some(o)), s("no_abort"));
+        }
+        assert_eq!(with(C::SlowSweep, &|m| m.outcome = None), s("completes"));
+        assert_eq!(
+            with(C::SlowSweep, &|m| m.outcome = Some(Outcome::Stopped)),
+            s("completes")
+        );
+        // Each case's own.
+        assert_eq!(
+            with(C::DwellAtResonance, &|m| m.settled_db = 1.01),
+            s("settles")
+        );
+        assert_eq!(
+            with(C::TransportDelay, &|m| m.settled_db = 0.51),
+            s("settles")
+        );
+        assert_eq!(
+            with(C::MeasurementNoise, &|m| m.worst_db = 1.51),
+            s("within")
+        );
+        assert_eq!(with(C::Stepped, &|m| m.worst_db = f64::NAN), s("within"));
+        assert_eq!(
+            with(C::SlowSweep, &|m| m.worst_db = 1.51),
+            s("sweep_within")
+        );
+        assert_eq!(
+            with(C::SlowSweep, &|m| m.median_db = 0.51),
+            s("sweep_within")
+        );
+        assert_eq!(
+            with(C::FastSweep, &|m| m.through_db = 5.01),
+            s("within_away")
+        );
+        assert_eq!(with(C::FastSweep, &|m| m.away_db = 2.01), s("within_away"));
+        assert_eq!(with(C::CloseModes, &|m| m.worst_db = 2.01), s("within"));
+        assert_eq!(
+            with(C::MoreControlsThanDrives, &|m| m.worst_db = 3.01),
+            s("reachable")
+        );
+        assert_eq!(
+            with(C::MoreDrivesThanControls, &|m| m.opposition_db = 6.01),
+            s("within_effort")
+        );
+        assert_eq!(
+            with(C::LevelLadder, &|m| m.rungs =
+                vec![(-20.0, 1.01), (0.0, 0.1)]),
+            s("each_rung_within")
+        );
+        assert_eq!(
+            with(C::LimitChannel, &|m| m.limit_over_db = 0.51),
+            s("limit_held")
+        );
+        assert_eq!(
+            with(C::LimitChannel, &|m| m.release_overshoot_db = 1.01),
+            s("limit_held")
+        );
+        assert_eq!(
+            with(C::LimitChannel, &|m| m.notch_engaged = false),
+            s("limit_held")
+        );
+        // Surviving: an engine stop and the ceiling's scaling are allowed; a
+        // sample over the ceiling, a law fault or another end is not.
+        assert_eq!(
+            with(C::NearSingular, &|m| {
+                m.outcome = Some(Outcome::ControlAbort { control: 0 });
+                m.over_ceiling = 40;
+            }),
+            None
+        );
+        assert_eq!(
+            with(C::NearSingular, &|m| m.outcome = Some(Outcome::Divergence)),
+            None
+        );
+        assert_eq!(
+            with(C::NearSingular, &|m| m.largest_sample_v = 2.1),
+            s("within_ceiling")
+        );
+        assert_eq!(
+            with(C::NearSingular, &|m| m.outcome =
+                Some(Outcome::DriveAbort { drive: 0 })),
+            s("survive")
+        );
+        // The misbehaving law: the run must end on the fault, at once.
+        let bad = |f: &dyn Fn(&mut CaseMeasure)| {
+            with(C::LawMisbehaves, &|m| {
+                m.outcome = Some(Outcome::LawFault);
+                m.misses = 3;
+                f(m);
+            })
+        };
+        assert_eq!(bad(&|_| {}), None);
+        assert_eq!(bad(&|m| m.misses = 4), s("stops_on_fault"));
+        assert_eq!(
+            bad(&|m| m.outcome = Some(Outcome::Completed)),
+            s("stops_on_fault")
+        );
+        assert_eq!(bad(&|m| m.drive_is_zero = false), s("stops_on_fault"));
+        assert_eq!(bad(&|m| m.largest_sample_v = 2.1), s("within_ceiling"));
+    }
+
+    #[test]
+    fn mimo_sine_check_the_record_holds_the_scored_cases_only() {
+        let v: Vec<CaseVerdict> = MimoSineCheckCase::ALL
+            .iter()
+            .map(|&c| {
+                let mut m = clean(c);
+                if c == MimoSineCheckCase::LawMisbehaves {
+                    m.outcome = Some(Outcome::LawFault);
+                    m.misses = 3;
+                }
+                if !c.scored() {
+                    m.worst_db = 9.0;
+                }
+                judge(&m)
+            })
+            .collect();
+        assert!(check_passed(&v));
+        let rec = check_record(&"a".repeat(64), "2026-11-18T00:00:00Z", &v);
+        assert!(rec.passed);
+        assert_eq!(rec.tool_version, MIMO_SINE_CHECK_VERSION);
+        assert_eq!(rec.cases.len(), 14);
+        assert!(rec.cases.iter().all(|c| !c.name.starts_with("moved")));
+        rec.validate().unwrap();
+    }
+
+    #[cfg(feature = "simulator")]
+    #[test]
+    fn mimo_sine_check_structures_are_the_simulators_and_the_stations_are_edited() {
+        use hertzforge_hal_sim::plants::SineStructure;
+        use hertzforge_hal_sim::PlantModel;
+        assert_eq!(CHECK_STRUCTURES.len(), SineStructure::ALL.len());
+        for s in SineStructure::ALL {
+            let c = check_structure(s.name()).unwrap();
+            assert_eq!((c.outputs, c.drives), s.dims(), "{}", s.name());
+            assert_eq!(c.controls, s.n_controls(), "{}", s.name());
+            assert_eq!(c.full_level_g, s.full_level_g(), "{}", s.name());
+        }
+        // The edits reach the structure the station is built on.
+        let modes = |c: MimoSineCheckCase| -> (Vec<f64>, usize) {
+            match sim_structure(&c.station()).unwrap() {
+                PlantModel::Jointed(p) => (
+                    p.modes.iter().map(|m| m.f_hz).collect(),
+                    p.transport_delay_samples,
+                ),
+                _ => panic!("a modal structure"),
+            }
+        };
+        let (plain, d) = modes(MimoSineCheckCase::SlowSweep);
+        assert_eq!(plain.len(), 8);
+        assert_eq!(d, 0);
+        let (close, _) = modes(MimoSineCheckCase::CloseModes);
+        assert!(close.iter().any(|f| (f - 97.92).abs() < 1e-9));
+        assert!(close.iter().any(|f| (f - 96.0).abs() < 1e-9));
+        assert!(!close.iter().any(|f| (f - 165.0).abs() < 1e-9));
+        let (none, d) = modes(MimoSineCheckCase::TransportDelay);
+        assert!(none.is_empty());
+        assert_eq!(d, (0.05 * CHECK_FS_HZ).round() as usize);
+        assert!(sim_station(&StationSpec {
+            structure: "none",
+            ..MimoSineCheckCase::SlowSweep.station()
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn mimo_sine_check_a_law_runs_only_the_cases_of_its_test_types() {
+        let types = |id: &str| {
+            let m = hertzforge_mimo_sine::laws::builtin(id).unwrap().manifest();
+            cases_for(&m).len()
+        };
+        assert_eq!(types("matrix"), 17);
+        assert_eq!(types("paired"), 7);
+        assert_eq!(types("ratio"), 7);
+        assert_eq!(types("steepest_descent"), 6);
+        assert_eq!(types("secant"), 6);
     }
 }

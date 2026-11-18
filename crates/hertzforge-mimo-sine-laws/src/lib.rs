@@ -25,9 +25,9 @@ pub mod parity;
 pub mod wasm;
 
 pub use check::{
-    cases_for, check_law, check_passed, check_record, judge, run_check, run_check_case,
-    CaseMeasure, CaseResult, CaseVerdict, CheckNotBuilt, CheckRunError, MimoSineCheckCase,
-    Requirement, StationSpec, MIMO_SINE_CHECK_VERSION,
+    cases_for, check_law, check_passed, check_record, judge, plan_setup, run_check, run_check_case,
+    run_plan, CaseMeasure, CaseResult, CaseVerdict, CheckNotBuilt, CheckRunError,
+    MimoSineCheckCase, Requirement, RunPlan, StationSpec, MIMO_SINE_CHECK_VERSION,
 };
 pub use choice::{
     builtin_decl, load_law_file, resolve, resolve_builtin, resolve_builtin_with, resolve_for_run,
