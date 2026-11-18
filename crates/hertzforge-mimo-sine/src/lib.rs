@@ -25,10 +25,20 @@
 //! these types field for field.
 
 pub mod engine;
+pub mod guards;
+pub mod ident;
 pub mod law;
+pub mod laws;
 pub mod limits;
+pub mod records;
+pub mod schedule;
 pub mod setup;
 pub mod tick;
+
+#[cfg(feature = "service")]
+pub mod core;
+#[cfg(feature = "service")]
+pub mod service;
 
 pub use engine::{EngineError, MimoSineEngine};
 pub use law::{

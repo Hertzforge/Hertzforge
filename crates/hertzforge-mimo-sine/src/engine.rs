@@ -1,6 +1,7 @@
-//! The run engine's public surface. The engine is not built in this version:
-//! [`MimoSineEngine::new`] checks the setup and the law's acceptance of it,
-//! and every run function answers [`EngineError::NotBuilt`].
+//! The run engine's public surface: [`MimoSineEngine::new`] checks the setup
+//! and the law's acceptance of it; with the `service` feature,
+//! [`MimoSineEngine::service`] hands the checked run to a station as a
+//! [`crate::service::MimoSineService`], which identifies, engages and runs it.
 
 use crate::law::{check_law_accepts, MimoSineLawFactory};
 use crate::setup::{MimoSineSetup, SetupError};
@@ -12,16 +13,13 @@ use std::sync::Arc;
 pub enum EngineError {
     /// The setup was refused, or the law does not accept it.
     Setup(SetupError),
-    /// The run engine is not built in this version.
-    NotBuilt,
 }
 
 impl EngineError {
-    /// The stable name: the setup rule's name, or `not_built`.
+    /// The stable name: the setup rule's name.
     pub fn reason(&self) -> &'static str {
         match self {
             EngineError::Setup(e) => e.rule.as_str(),
-            EngineError::NotBuilt => "not_built",
         }
     }
 }
@@ -30,7 +28,6 @@ impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EngineError::Setup(e) => write!(f, "the setup was refused: {e}"),
-            EngineError::NotBuilt => f.write_str("the MIMO Sine run engine is not built yet"),
         }
     }
 }
@@ -76,13 +73,14 @@ impl MimoSineEngine {
         &self.law
     }
 
-    /// Identify the structure. Not built in this version.
-    pub fn identify(&mut self) -> Result<(), EngineError> {
-        Err(EngineError::NotBuilt)
-    }
-
-    /// Run the test. Not built in this version.
-    pub fn run(&mut self) -> Result<(), EngineError> {
-        Err(EngineError::NotBuilt)
+    /// The run on a station: its backend and channel table, with `opts`.
+    #[cfg(feature = "service")]
+    pub fn service(
+        self,
+        table: hertzforge_channel_table::ChannelTable,
+        backend: Box<dyn hertzforge_hal::Backend>,
+        opts: crate::service::EngineOptions,
+    ) -> Result<crate::service::MimoSineService, crate::service::ServiceError> {
+        crate::service::MimoSineService::new(self.setup, table, backend, self.law, opts)
     }
 }
