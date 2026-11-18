@@ -4,7 +4,8 @@
 	/**
 	 * x-y line view (spectra and anything else on two axes), drawn with uPlot.
 	 *
-	 * Log or linear axes come from the view. Each series' role sets its dash pattern and width;
+	 * Log or linear axes come from the view, or with `scaleToggle` from the choice kept for what
+	 * is plotted (`plotScales`). Each series' role sets its dash pattern and width;
 	 * color is the second cue, and the legend names the line style in words. Panes with the same
 	 * `link` share a cursor on x through the CursorHub, and a shape view of the same result with
 	 * that `link` puts its playback time on the plot as a line that drags to seek. Live updates keep the axes still: the

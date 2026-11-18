@@ -8,7 +8,7 @@
 	 * selects its block (the report itself with a click outside the blocks), and the selected
 	 * block is outlined; read, nothing is selectable and unbound slots are left out.
 	 */
-	import type { ReportPageBlock, ReportPageData } from '$lib/protocol/types';
+	import type { ReportPageBlock, ReportPageData, View } from '$lib/protocol/types';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 
 	interface Props {
@@ -45,6 +45,15 @@
 		}
 	}
 </script>
+
+<!-- the words for a plot's shaded zones and marks, under it: in a grid's cell and under a figure of one channel alike -->
+{#snippet zoneKey(view: View)}
+	{#if view.view === 'spectrum' && view.key?.length}
+		<p class="key">
+			{#each view.key as [code, words] (code)}<span class="keyed"><i class="swatch {code}"></i>{words}</span>{/each}
+		</p>
+	{/if}
+{/snippet}
 
 <!-- a click between the blocks selects the report itself; the blocks take the keyboard -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -86,11 +95,7 @@
 												<div class="view" style:height="260px">
 													<ViewRenderer {view} showTitle={false} minHeight={200} />
 												</div>
-												{#if view.view === 'spectrum' && view.key?.length}
-													<p class="key">
-														{#each view.key as [code, words] (code)}<span class="keyed"><i class="swatch {code}"></i>{words}</span>{/each}
-													</p>
-												{/if}
+												{@render zoneKey(view)}
 												<p class="celltitle"><b>{placed.caption}</b>{placed.note ? ` (${placed.note})` : ''}</p>
 												{#each placed.facts ?? [] as [label, text] (label)}
 													<p class="fact"><b>{label}:</b> {text}</p>
@@ -106,6 +111,7 @@
 						<div class="view" style:height={height(block) ? `${height(block)}px` : undefined}>
 							<ViewRenderer {view} showTitle={false} minHeight={height(block) || 160} />
 						</div>
+						{@render zoneKey(view)}
 					{/each}
 					{/if}
 					{#if block.label || block.caption}
