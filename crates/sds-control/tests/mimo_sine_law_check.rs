@@ -23,6 +23,10 @@ fn law_file(name: &str) -> PathBuf {
         .unwrap_or_else(|| panic!("{file} is not built; run scripts/build_laws.sh"))
 }
 
+/// The service runs one law check at a time in a process (a second is refused
+/// while one runs), so this binary's checks take turns.
+static ONE_CHECK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// A call that may take minutes (the check runs every case).
 async fn long_call(c: &mut Client, method: &str, params: Value) -> Value {
     use futures_util::SinkExt;
@@ -47,6 +51,7 @@ async fn long_call(c: &mut Client, method: &str, params: Value) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mimo_sine_laws_check_runs_every_case_and_records_a_law_file() {
+    let _turn = ONE_CHECK.lock().await;
     let addr = serve(Service::with_options(msine::opts(Duration::from_secs(600)))).await;
     let mut c = Client::connect(addr).await;
     c.ok("session.claim", json!({"name": "Check"})).await;
@@ -218,6 +223,7 @@ fn summary(id: &str, report: &Value) -> String {
 /// weakly coupled structure, as the laws crate plans them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mimo_sine_check_every_builtin_passes_through_the_service() {
+    let _turn = ONE_CHECK.lock().await;
     let addr = serve(Service::with_options(msine::opts(Duration::from_secs(
         1800,
     ))))
@@ -256,6 +262,7 @@ async fn mimo_sine_check_every_builtin_passes_through_the_service() {
 /// record and lets each file arm.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mimo_sine_check_every_law_file_passes_through_the_service_and_may_arm() {
+    let _turn = ONE_CHECK.lock().await;
     let opts = msine::opts(Duration::from_secs(1800));
     let root = opts.data_root.clone();
     let addr = serve(Service::with_options(opts)).await;
