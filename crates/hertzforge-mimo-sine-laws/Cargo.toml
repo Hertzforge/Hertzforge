@@ -1,0 +1,15 @@
+[package]
+name = "hertzforge-mimo-sine-laws"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The choice of a MIMO Sine law: the built-in laws by name and law files by
+# catalog id. The facts the law picker shows, the law check's cases and their
+# requirements, and the side-by-side runs that show a law file and its native
+# law give the same drives come with the law plumbing. It names no backend.
+[dependencies]
+hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine" }
+# The catalog's world for MIMO Sine laws, shared with every other world.
+hertzforge-random-laws = { path = "../hertzforge-random-laws" }

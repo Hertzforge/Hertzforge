@@ -2,7 +2,8 @@
 //! [`export_law!`]), multiple-output Random ([`RandomMimoLaw`],
 //! [`export_mimo_law!`], the [`mimo`] module), classical and SRS shock
 //! ([`shock`], [`srs`]), MIMO Shock ([`ShockMimoLaw`],
-//! [`export_shock_mimo_law!`], the [`shock_mimo`] module), single-output Sine ([`SineSingleLaw`],
+//! [`export_shock_mimo_law!`], the [`shock_mimo`] module), MIMO Sine (the
+//! [`sine_mimo`] module's types), single-output Sine ([`SineSingleLaw`],
 //! [`export_sine_law!`], the [`sine`] module) or time waveform replication
 //! ([`TwrSingleLaw`], [`export_twr_law!`], the [`twr`] module).
 //!
@@ -192,10 +193,30 @@ pub mod __shock_mimo_bindings {
     });
 }
 
+/// The generated bindings of the `sine-mimo` world. Not a stable API: use
+/// [`sine_mimo`]. The shared `types` interface is the one [`__bindings`]
+/// generated.
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod __sine_mimo_bindings {
+    wit_bindgen::generate!({
+        path: "../../wit/control-law",
+        world: "sine-mimo",
+        pub_export_macro: true,
+        export_macro_name: "__export_sine_mimo",
+        default_bindings_module: "hertzforge_law_sdk::__sine_mimo_bindings",
+        additional_derives: [PartialEq],
+        with: {
+            "hertzforge:control-law/types@0.1.0": hertzforge_law_sdk::__bindings::hertzforge::control_law::types,
+        },
+    });
+}
+
 pub mod mimo;
 pub mod shock;
 pub mod shock_mimo;
 pub mod sine;
+pub mod sine_mimo;
 pub mod srs;
 pub mod twr;
 

@@ -66,14 +66,19 @@ pub enum LawWorld {
     /// its built-in law and its law files are served.
     Twr,
     /// MIMO Shock (`shock-mimo`): classical pulses and SRS at several controls
-    /// with several drives. Listed with no entries: a law file of this world is
-    /// refused when it is loaded, and the built-in laws are not served yet.
+    /// with several drives. Its built-in laws are listed by
+    /// `hertzforge-mimo-shock-laws`; the catalog holds its imported law files.
     ShockMimo,
+    /// MIMO Sine (`sine-mimo`): sweeps, dwells and steps at several controls
+    /// with several drives. The catalog holds the imported law files of this
+    /// world; it has no built-in law yet, so a catalog without such a file
+    /// lists none.
+    SineMimo,
 }
 
 impl LawWorld {
     /// The stable wire name: `single`, `mimo`, `shock_classical`,
-    /// `shock_srs`, `sine`, `twr` or `shock_mimo`.
+    /// `shock_srs`, `sine`, `twr`, `shock_mimo` or `sine_mimo`.
     pub fn as_str(self) -> &'static str {
         match self {
             LawWorld::Single => "single",
@@ -83,12 +88,13 @@ impl LawWorld {
             LawWorld::Sine => "sine",
             LawWorld::Twr => "twr",
             LawWorld::ShockMimo => "shock_mimo",
+            LawWorld::SineMimo => "sine_mimo",
         }
     }
 
     /// The test type, in words, for a refusal: "single-output Random",
-    /// "multiple-output Random", "classical shock", "SRS shock", "Sine", "TWR"
-    /// or "MIMO Shock".
+    /// "multiple-output Random", "classical shock", "SRS shock", "Sine", "TWR",
+    /// "MIMO Shock" or "MIMO Sine".
     pub fn test_type(self) -> &'static str {
         match self {
             LawWorld::Single => "single-output Random",
@@ -98,6 +104,7 @@ impl LawWorld {
             LawWorld::Sine => "Sine",
             LawWorld::Twr => "TWR",
             LawWorld::ShockMimo => "MIMO Shock",
+            LawWorld::SineMimo => "MIMO Sine",
         }
     }
 }
@@ -595,6 +602,7 @@ impl LawCatalog {
             LawWorld::Sine => self.sine_entries(),
             LawWorld::Twr => self.twr_entries(),
             LawWorld::ShockMimo => self.shock_mimo_entries(),
+            LawWorld::SineMimo => self.sine_mimo_entries(),
         }
     }
 
@@ -613,6 +621,24 @@ impl LawCatalog {
     pub fn shock_mimo_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedShockMimoLaw> {
         match self.imported_law(id).map(|i| &i.law) {
             Some(AnyLaw::ShockMimo(l)) => Some(l),
+            _ => None,
+        }
+    }
+
+    /// The imported MIMO Sine (`sine-mimo`) law files by name, version and
+    /// hash. MIMO Sine has no built-in law in the catalog yet.
+    pub fn sine_mimo_entries(&self) -> Vec<CatalogEntry> {
+        self.imported
+            .iter()
+            .filter(|i| matches!(i.law, AnyLaw::SineMimo(_)))
+            .map(imported_entry)
+            .collect()
+    }
+
+    /// The imported MIMO Sine law file with `id` (its SHA-256).
+    pub fn sine_mimo_law(&self, id: &str) -> Option<&hertzforge_law_host::LoadedSineMimoLaw> {
+        match self.imported_law(id).map(|i| &i.law) {
+            Some(AnyLaw::SineMimo(l)) => Some(l),
             _ => None,
         }
     }
@@ -785,6 +811,7 @@ fn imported_entry(i: &Imported) -> CatalogEntry {
         AnyLaw::Sine(l) => (l.manifest().clone(), LawWorld::Sine, None),
         AnyLaw::Twr(l) => (l.manifest().clone(), LawWorld::Twr, None),
         AnyLaw::ShockMimo(l) => (l.manifest().law.clone(), LawWorld::ShockMimo, None),
+        AnyLaw::SineMimo(l) => (l.manifest().law.clone(), LawWorld::SineMimo, None),
     };
     CatalogEntry {
         id: i.law.identity().sha256.clone(),

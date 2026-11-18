@@ -4022,6 +4022,488 @@ last 60 s, at most 1200 points.
 A plot is empty (`views` empty) until there is something to draw: `identification` until the
 gate has run, the others until the loop has engaged.
 
+## MIMO Sine
+
+**Draft.** No `mimo_sine.*` method is served yet. This section is the contract the service, the
+screens and the simulated service are built to, and it may change until the service answers it.
+
+A MIMO Sine test plays one tone at a time on several drives at once, each drive with its own
+amplitude and phase, and controls the response at several control channels, each against its own
+reference amplitude and, when the phases are specified, its own reference phase. The test is a
+sweep, a dwell or a stepped sine (`test.kind`). The service identifies the structure before the
+run with independent random on every drive at low level (each control's and each limit channel's
+response over every drive, with coherence and a trust mask), engages at the first level of the
+schedule, and every control tick: reads the inputs, tracks every control and limit channel at the
+tone, judges the controls and limits, steps the schedule (frequency and level), calls the control
+law, guards its answer, ramps each drive to the guarded value and records. The control law decides
+one complex amplitude per drive each tick (world `sine_mimo`); the frequency, the sweep and its
+direction, the tone's phase, the level schedule, every protection and every abort are the
+service's. Drives are in volts peak. The run is one test like any other and excludes every other
+run (`run_active`). **Any connected screen may stop or abort** (`mimo_sine.stop`,
+`mimo_sine.abort`); `mimo_sine.configure` (other than a dry run), `arm`, `start`, `proceed`,
+`level`, `mode`, `hold`, `resume`, `reverse`, `jog`, `goto`, `reset` and `clear` need control;
+everything that only reads is open to every connection. While the service shuts down, `arm`,
+`start`, `proceed`, `level`, `mode`, `resume`, `reverse`, `jog` and `goto` are refused
+`shutting_down`; `hold`, `stop` and `abort` are not. Words mean what they mean in "Sine" and
+"MIMO Shock" unless this section says otherwise.
+
+| Method | Params | From | Result |
+|---|---|---|---|
+| `mimo_sine.configure` | `{"config","dry_run"}` (`dry_run` optional) | any but live | `{"state","derived","warnings"}`; a dry run `{"errors","warnings","derived","views"}` |
+| `mimo_sine.config` | `{}` | any | `{"run_id","config","derived","views"}` |
+| `mimo_sine.arm` | `{"override_ack"}` (optional) | `configured`, `blocked` | state |
+| `mimo_sine.start` | `{}` | `configured`, `armed` | state |
+| `mimo_sine.proceed` | `{"acknowledge"}` (optional) | `review` | state |
+| `mimo_sine.level` | `{"delta_db"}` or `{"to_db"}` | `running`, in `manual` | `{"level_db"}` |
+| `mimo_sine.mode` | `{"mode":"auto"\|"manual"}` | any configured state | `{"mode"}` |
+| `mimo_sine.hold` | `{}` | `running` | state |
+| `mimo_sine.resume` | `{}` | `running`, held | state |
+| `mimo_sine.reverse` | `{}` | `running`, a sweep | state |
+| `mimo_sine.jog` | `{"delta_hz"}` | `running`, a sweep | `{"frequency_hz"}` |
+| `mimo_sine.goto` | `{"hz"}` | `running`, a sweep | `{"frequency_hz"}` |
+| `mimo_sine.stop` | `{}` | any | state |
+| `mimo_sine.abort` | `{}` | any | state |
+| `mimo_sine.reset` | `{}` | any but live | state |
+| `mimo_sine.clear` | `{}` | any but live | state |
+| `mimo_sine.state` | `{}` | any | state |
+| `mimo_sine.log` | `{"since"}` (optional, default 0) | any | `{"entries","next"}` |
+| `mimo_sine.report` | `{}` | any | `{"report"}` |
+| `mimo_sine.subscribe` | see "MIMO Sine Display" | any | as there |
+
+"state" is the `mimo_sine.state` object below. A run is live while it is armed, running, holding
+for review or stopping. `mimo_sine.configure` replaces a run that is not live; `mimo_sine.reset`
+configures the present run's configuration again on the present table and station;
+`mimo_sine.clear` forgets it (`unconfigured`). A result that carries views travels as a binary
+frame. A configuration is validated with `mimo_sine.configure` and `dry_run: true`, which checks
+without replacing anything and needs no control. The laws are listed with `laws.list` and
+`{"world":"sine_mimo"}`, and a law file is checked with `laws.check`, as for every world (see
+"Control Laws"); an imported law without a passed check for its exact file is refused
+`law_not_checked` by `mimo_sine.arm` on a hardware station.
+
+### MIMO Sine Configuration
+
+```
+{"title":"Four-Shaker Sweep, 1 g, 10 to 500 Hz",
+ "channels":{"controls":[{"channel":1,
+                          "profile":{"label":"1 g","rows":[{"freq_hz":10,"quantity":"accel_g","value":1},
+                                                           {"freq_hz":500,"quantity":"accel_g","value":1}],
+                                     "alarm_db":[1.5,1.5],"abort_db":[3,3]},
+                          "phase":[{"freq_hz":10,"phase_deg":0}]}, ...],
+             "drives":[{"channel":5,"ceiling_vpk":2,"abort_vpk":3},
+                       {"channel":6,"ceiling_vpk":2,"abort_vpk":3}, ...]},
+ "phase_specified":true,
+ "test":{"kind":"sweep","band_hz":[10,500],"rate":{"law":"log","oct_per_min":2},
+         "start_hz":10,"direction":"up","end":{"sweeps":2,"duration_s":null}},
+ "acquisition":{"fs_hz":null,"tick_ms":10},
+ "schedule":{"mode":"auto","levels_db":[-12,-6,0],"start_db":-12,
+             "per_level":{"sweeps":1},"full_level":{"sweeps":2}},
+ "identification":{"level_db":-20,"frames":null,"trust_coherence":0.5,"gate_coherence":0.5,
+                   "review":true},
+ "control":{"tracking":{"kind":"proportional","pct":10,"max_hz":100},
+            "law":{"id":"matrix","params":{"carry":0.67}},
+            "law_budget":0.25,"law_misses":3,"max_step_db":1,"max_rise_db_per_s":240,
+            "rotation_cap_deg":null,"divergence_s":1,"abort_ticks":3},
+ "requests":{"honour":false,"max_hold_s":2,"min_slow_factor":0.1},
+ "limits":{"kinematic_monitor":true,
+           "channels":[{"channel":9,
+                        "profile":{"label":"Fixture bound",
+                                   "rows":[{"freq_hz":10,"quantity":"accel_g","value":3},
+                                           {"freq_hz":500,"quantity":"accel_g","value":3}],
+                                   "alarm_db":[1.5,1.5],"abort_db":[3,3]}}],
+           "notch":{"smoothing_ticks":3,"release_ramp_db_per_s":20,"near_bound_db":3}},
+ "feasibility":null,
+ "simulator":{"structure":null},
+ "operator":"A. Operator","article":"Bracket, serial 7","notes":"",
+ "specification":{"document":"Test procedure 12","clause":"4.2"},"record":{"streams":true},
+ "metadata":[]}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `title` | empty | The run's name |
+| `channels.controls` | (required) | The control channels by table `index` (each an enabled `control` row), 1 to 16. Their order is the order of every per-control list. Each has its `profile`, Sine's control profile (rows in `accel_g`, `velocity_ips` or `disp_pp_in`, with `alarm_db` and `abort_db` overall and per row), the reference amplitude at full level and its bands, covering the test's band; and its `phase`, the reference phase against frequency: rows `{"freq_hz","phase_deg"}`, frequencies above 0 and ascending, phases above -180 and at most 180 degrees relative to the tone, joined linearly in phase against the logarithm of frequency and held beyond the first and last rows. `phase` is required on every control when `phase_specified` is true and ignored when it is false |
+| `channels.drives` | (required) | The drives by table `index` (each an enabled `drive` row), 1 to 8, in the order of the table's enabled drive rows, each with its own `ceiling_vpk` (above 0, at most 10) and `abort_vpk` (above the ceiling, at most 10). A drive vector with a drive over its ceiling is scaled down as a whole so that drive sits at its ceiling, its direction kept, and counted (`over_ceiling`); a drive at or over its abort ends the run (`drive_vpk`). A drive row the run does not name is refused (`drive_unknown_channel`) |
+| `phase_specified` | true | True: each control's reference is an amplitude and a phase. False: amplitudes only for the whole run, and the law chooses the phases; a law that does not accept an amplitude-only reference is refused `law_amplitude_only_not_accepted` |
+| `test.kind` | (required) | `sweep`, `dwell` or `stepped` |
+| `test` (`sweep`) | | Sine's: `band_hz` `[lo, hi]` (above 0, under 0.45 times the rate); `rate` `{"law":"log","oct_per_min"}` or `{"law":"linear","hz_per_s"}`; `start_hz` (default `lo`); `direction` `up` (the default) or `down`, the first leg; `end` `{"sweeps","duration_s"}`, one-way sweeps or seconds of test time or whichever comes first, counted over the whole run from engage at every level |
+| `test` (`dwell`) | | Sine's: `freq_hz`, and `end` `{"seconds"}` or `{"cycles"}` (a whole number) |
+| `test` (`stepped`) | | On a grid, Sine's step test: `band_hz`, `steps_per_octave` (above 0), `spacing` `log` (the default) or `linear`, and `dwell` at each step (`{"seconds"}`, `{"cycles"}`, or null for a dwell computed per step). Or on a list: `frequencies_hz` (each above 0, at least one, played in the order given) and `dwell` (`{"seconds"}` or `{"cycles"}`). One of `band_hz` and `frequencies_hz` |
+| `acquisition.fs_hz` | null: 16384 | The rate requested of the station, 1000 to 204800 Hz; the run reports the rate the station adopted |
+| `acquisition.tick_ms` | 10 | The control tick, ms, converted to the nearest whole frame (at least two) at the rate the station adopts: 2 to 1000 for a built-in law, 8 to 1000 for a law file |
+| `schedule` | as Sine's | Sine's: `mode` `auto` or `manual`; `levels_db` ascending, each from -60 to 12, the last full level; `start_db` a level of the schedule; `per_level` and `full_level` `{"sweeps"}` (a sweep test only) or `{"seconds"}`. One schedule for every control |
+| `identification.level_db` | -20 | The identification's level under the full-level references, dB (-60 to 0). Every drive plays independent random at once |
+| `identification.frames` | null: the larger of 64 and 10 times the drives | Records averaged, 1 to 4096 |
+| `identification.trust_coherence` | 0.5 | A line where a control's multiple coherence is under it is not trusted (0 to 1) |
+| `identification.gate_coherence` | 0.5 | The band-mean multiple coherence every control must reach; under it the run ends `held` (0 to 1) |
+| `identification.review` | true | Hold for the operator after identification (`review`) |
+| `control.tracking` | `{"kind":"proportional","pct":10,"max_hz":100}` | Sine's: `{"kind":"fixed","hz"}` or `{"kind":"proportional","pct","max_hz"}`. Every control and limit channel is tracked against the one tone's phase. A sweep too fast for it is refused or warned (`tracking_lag`) |
+| `control.law` | `{"id":"matrix"}` | The control law by catalog `id` (world `sine_mimo`; built in: `matrix`, the default, `paired`, `steepest_descent`, `secant`, `ratio`) and values for the parameters its entry declares (`params` by key; defaults fill the rest). A law whose entry does not accept the test's shape, its type or an amplitude-only reference is refused (`law_shape_not_accepted`, `law_test_type_not_accepted`, `law_amplitude_only_not_accepted`) |
+| `control.law_budget`, `law_misses` | 0.25, 3 | Sine's: the share of the tick one call may take (above 0, at most 1) and the unusable calls in a row that end the run with the controlled stop (1 to 100) |
+| `control.max_step_db` | 1 | The most each drive's magnitude may change in one tick, dB either way (1 to 3) |
+| `control.max_rise_db_per_s` | 240 | The most each drive's magnitude may rise in a second, dB (above 0, at most 10000) |
+| `control.rotation_cap_deg` | null | The most each drive's phase may turn in one tick, degrees (above 0, at most 180); null for no cap. The largest turn the law asked for is reported either way |
+| `control.divergence_s` | 1 | Seconds a cap may bind without a break before the run takes the controlled stop (`divergence`), above 0, at most 60 |
+| `control.abort_ticks` | 3 | Ticks in a row a control may be outside its abort band, outside a settle window, before the run aborts (`abort_band`), 1 to 100 |
+| `requests.honour` | false | Whether a law's request to hold or slow the sweep is acted on. Every request is recorded and shown either way |
+| `requests.max_hold_s` | 2 | The longest a granted hold may last without a break, seconds (above 0, at most 2). A granted hold freezes the schedule's clock; the test's length grows by it |
+| `requests.min_slow_factor` | 0.1 | The lowest share of the scheduled sweep rate a granted slow may ask for (0.1 to 1); a request under it is granted at it |
+| `limits.kinematic_monitor` | true | With `feasibility`, abort when a shaker's velocity or displacement passes its rating (`kinematic`) |
+| `limits.channels` | none | Limit channels, 0 to 8: each a table row's `channel` (an enabled input that is not a control) and a `profile` in the profile's form, its bound at each frequency, covering the test's band. Where the predicted or measured response of a limit channel would pass its bound the whole drive vector is scaled down, its direction kept (the notch); a channel outside its own abort band ends the run (`limit_channel`) |
+| `limits.notch` | `{"smoothing_ticks":3,"release_ramp_db_per_s":20,"near_bound_db":3}` | The ticks each limit channel's measured-over-identified ratio is smoothed over (at least 1); how fast the drive may come back once the notch releases, dB/s (above 0); and how near its bound a limit channel must be, dB (above 0, at most 20), for a notched reference a law returns to be taken |
+| `feasibility` | null | Each shaker's record and moving mass, one per drive: `{"shakers":[{"drive","shaker","moving_mass_lb"}]}` with `drive` the drive's table index and the rest Sine's. Checked at configure and at arm against the references' peaks. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
+| `simulator.structure` | null: chosen by size | The simulator's structure by name, one of its standard sine structures; null takes the linear structure of the run's size where there is one. Ignored on NI |
+| `operator`, `article`, `notes`, `specification`, `record`, `metadata` | as Sine's | Sine's, for the run's record. None of them changes how the run drives |
+
+MIMO Sine takes no `capture` and no `cola`: a configuration that gives either is refused
+`bad_params` at `config.capture` or `config.cola`. A configuration whose shape is wrong is refused
+`bad_params` naming the field in `detail.param` as the request's own path; its content errors are
+refused `config_invalid` with the items, located by `field` (the path inside the configuration,
+`channels.drives[1].abort_vpk`, with no `config.` before it), or by `row` and `channel` for a
+profile row.
+
+**Result.** `state` (`configured`), `derived` and `warnings`. `derived`:
+
+```
+{"band_hz":[10,500],"shape":"square","controls":4,"drives":4,"limits":1,
+ "grid":{"fs_hz":16384,"tick_frames":164,"tick_s":0.0100098,"actual":false},
+ "profiles":[{"channel":1,"crossovers":[],"peak_accel_g":1,"peak_velocity_ips":6.15,
+              "peak_disp_pp_in":0.3913}, ...],
+ "test_s":339.6,"identification_s":64.0,"call_budget_s":0.0025,
+ "stop_ramp_db_per_s":120,"safe_stop_s":0.85,
+ "tracking":{"verdict":"ok","ratio":0.04,"at_hz":null,"message":null},
+ "law":{"id":"matrix","name":"matrix","version":"0.1.0","sha256":null,
+        "shapes":["square","more_controls_than_drives","fewer_controls_than_drives"],
+        "test_types":["sweep","dwell","stepped"],"amplitude_only":true},
+ "feasibility":{"verdict":"not_evaluated","message":"..."}}
+```
+
+- `shape` is `square`, `more_controls_than_drives` or `fewer_controls_than_drives`; `controls`,
+  `drives` and `limits` the counts.
+- `grid`, `test_s`, `identification_s`, `call_budget_s`, `stop_ramp_db_per_s`, `safe_stop_s` and
+  `tracking` are Sine's. `profiles` gives each control's crossovers and peaks over the band, as
+  Sine's `profile`.
+- `law` is the run's law with the shapes, test types and references its entry accepts.
+
+`views` are, per control, **Profile** *n* (*n* its table index: Sine's **Profile** view of that
+control's reference and bands at full level) and, with `phase_specified`, **Phase** *n* (`spectrum`,
+x `Frequency` Hz log, y `Phase` deg linear: `Reference phase` (`reference`)); and per limit
+channel **Limit** *n* (its bound and abort band). Every series is a line on 256 log-spaced points
+across the band and every row frequency inside it, and every view has `link` `frequency`.
+
+Item reasons (MIMO Sine): errors `out_of_range`, `controls_out_of_range`, `drives_out_of_range`,
+`limits_out_of_range`, `duplicate_channel` (a channel named twice among the controls, drives and
+limits), `control_unknown_channel`, `drive_unknown_channel` (also a table drive row the run does
+not name, or the drives out of the table's order), `limit_unknown_channel`,
+`limit_on_control_channel`, `abort_below_ceiling`, `profile_too_short`,
+`frequency_not_positive`, `frequency_not_ascending`, `value_not_positive`,
+`profile_not_covering`, `phase_missing` (a control with no phase rows while `phase_specified`),
+`phase_invalid` (a phase row out of order or out of range), `steps_empty`, `band_above_grid`,
+`levels_empty`, `levels_not_ascending`, `start_not_a_level`, `end_before_full_level`,
+`tick_out_of_range`, `safe_stop_budget`, `tracking_lag` (refused), `structure_unknown`,
+`structure_wrong_size`, `shaker_record_invalid`, `law_unknown`, `law_wrong_world`,
+`law_shape_not_accepted`, `law_test_type_not_accepted`, `law_amplitude_only_not_accepted`,
+`law_param_unknown`, `law_param_invalid`; warnings `join_discontinuity`, `alarm_wider_than_abort`,
+`tracking_lag` (advisory).
+
+### Running a MIMO Sine Test
+
+- **`mimo_sine.arm`** checks feasibility (when given), opens the station with every drive row as
+  an output and every control and limit row as an input on one clock, adopts its rate, converts the
+  tick to the nearest whole frame at that rate, narrows the band to under 0.45 times it (logged),
+  passes the arm gate and claims the run's folder (refused `record_unwritable`, with the path and
+  the reason, when it cannot be written, and the station released). Nothing is driven. On the
+  simulator the structure must be the table's size (`arm_refused`). Refusals are otherwise Sine's,
+  with `law_not_checked` on a hardware station.
+- **`mimo_sine.start`** from `configured` arms first, then identifies the structure (`phase`
+  `sysid`): independent random on every drive at once at `identification.level_db`, on a grid
+  covering the band, giving each control's and each limit channel's response over every drive
+  (controls by drives, limit channels by drives, per line), each one's multiple coherence, the
+  lines it trusts and the drive-to-response lag; then the coherence gate (`coherence_gate`). A
+  control whose band-mean coherence is under `gate_coherence` ends the run `held`. Otherwise it
+  holds for review (`review`), or without one goes on as `mimo_sine.proceed` does. It answers at
+  once.
+- **The review** shows the identification and, for every resonance it finds in the band, the
+  number of the resonance's own time constants the sweep spends inside its half-power bandwidth at
+  the scheduled rate (`review.resonances`), flagged under two: there the law's error through the
+  resonance is expected to be large, and a slower sweep is the remedy. A flag is a warning, never a
+  hold.
+- **`mimo_sine.proceed`** builds the law from the identification (a law that cannot be built ends
+  the run `law_fault` before the tone starts) and engages at `schedule.start_db`. The first drive
+  vector's norm is at most the identification's inverse drive at the start frequency and level plus
+  6 dB, and never over a ceiling; without a trusted identification there, at most 0.05 times the
+  ceilings' norm times the start level. The settle window then keeps the band, kinematic and abort
+  judgements off while the responses come onto their references. `acknowledge`, when given, is the
+  operator's words and goes in the log.
+- **Each tick**, in this order: read the inputs; track every control and limit channel at the
+  tone; judge each control against its alarm and abort bands at the present frequency and level
+  (outside a settle window), and each limit channel against its bound; step the schedule (frequency
+  and level, and a granted request); call the law with the drive in force; check its answer
+  (one finite amplitude per drive, a well-formed request, a notched reference of one value per
+  control); cap each drive's magnitude change (`max_step_db`) and rise (`max_rise_db_per_s`) and,
+  when set, its rotation (`rotation_cap_deg`); scale the whole drive vector for the limit channels
+  (`notch_scale`) and for a drive over its ceiling; ramp each drive to the result; record. A late,
+  failed, panicked or refused call keeps the drive in force and counts a miss; `law_misses` in a
+  row end the run with the controlled stop (`law_fault`).
+- **A notched reference** a law returns is taken only when it lowers each control's reference and
+  a limit channel is within `limits.notch.near_bound_db` of its bound, or the notch is releasing;
+  the controls are then judged against it and its depth is reported per control. Otherwise it is
+  shown, recorded and not used.
+- **A request** to hold or slow the sweep is recorded on every tick it is made. With
+  `requests.honour` on, a hold freezes the schedule's clock for at most `max_hold_s` without a
+  break, and a slow multiplies the sweep rate by its factor, never under `min_slow_factor`; a
+  dwell's and a step's clock is held the same way. With it off nothing is acted on.
+- **`mimo_sine.level`**, **`mimo_sine.mode`**, **`mimo_sine.hold`**, **`mimo_sine.resume`**,
+  **`mimo_sine.reverse`**, **`mimo_sine.jog`** and **`mimo_sine.goto`** are Sine's, with the same
+  refusals (`manual_mode_required`, `not_a_rung`, `not_a_sweep`, `out_of_band`); the drive vector
+  is held with its relative phases while the frequency or the level moves, and a level change, a
+  jog and a go to re-open the settle window.
+- **`mimo_sine.stop`** is Sine's controlled stop applied to every drive at once: each drive ramps
+  down at 120 dB a second of station time from the drive in force, its phase kept, then to zero
+  (state `stopping`), and the run ends `operator_stop` once every output is at zero. From `armed`
+  or `review` it ends at once. **`mimo_sine.abort`** ends the run within one batch of ticks without
+  the ramp; the station takes every drive down with its own stop (`operator_abort`).
+- **When nobody holds control** the run goes on; after `timeout_s` it ends `safe_stop` with the
+  controlled stop, as Sine's. While the service shuts down it ends the same way.
+- **Time is the station's**, as Sine's.
+
+### MIMO Sine Run State
+
+```
+{"run_id":"msine-0002","state":"running","phase":"engaged",
+ "title":"Four-Shaker Sweep, 1 g, 10 to 500 Hz","source":"SIM",
+ "station":{"kind":"sim","class":"sim","devices":[],"structure":"..."},
+ "grid":{"fs_hz":16384,"tick_frames":164,"tick_s":0.0100098,"actual":true},"clock":"shared",
+ "test":"sweep","shape":"square","phase_specified":true,"mode":"auto",
+ "levels_db":[-12,-6,0],"level_db":-6,"rung":1,
+ "frequency_hz":97.2,"direction":"up","sweeps":{"done":0,"of":1},"steps":null,"held":false,
+ "request_held":false,"elapsed_s":81.3,"at_level_s":12.0,"remaining_s":258.3,
+ "alarm":false,"notch":false,"notch_scale":1,
+ "identification":{...},"review":{...},
+ "law":{"id":"matrix","name":"matrix","version":"0.1.0","sha256":null,"params":{...},
+        "misses":0,"capped_ticks":0,"over_ceiling":0,"rotation_max_deg":4.2,
+        "requests":{"asked":0,"granted":0}},
+ "feasibility":{"verdict":"not_evaluated","message":"..."},"end":null,
+ "record":{"folder":"/home/operator/Hertzforge_Data/20261117-140000_mimo_sine_msine-0002",
+           "streams":"on","problem":null}}
+```
+
+| `state` | `phase` | Meaning |
+|---|---|---|
+| `unconfigured`, `configured` | `idle` | No configuration; configured, nothing open |
+| `blocked` | `feasibility_blocked` | Feasibility exceeded; arming needs an acknowledgement |
+| `armed` | `armed` | Station open and gated; nothing driven yet |
+| `running` | `sysid`, `coherence_gate`, `engaged`, `full_level` | Identification, its gate, the schedule, full level |
+| `review` | `awaiting_review` | The gate passed; nothing drives until `mimo_sine.proceed` |
+| `stopping` | `ramping_down` | A controlled stop or a safe stop is ramping every drive down |
+| `finished` | `stopped`, `aborted`, `coherence_hold` | Ended; `end` says how |
+
+- `station.structure` is the simulator's structure (null on NI). `test`, `shape` and
+  `phase_specified` are the configuration's. `mode`, `levels_db`, `level_db`, `rung`,
+  `frequency_hz`, `direction`, `sweeps`, `held`, `elapsed_s`, `at_level_s` and `remaining_s` are
+  Sine's. `steps` is `{"done","of"}` in a stepped sine (null otherwise).
+- `request_held` is true while a granted request holds or slows the sweep. `alarm` is true while
+  any control is outside its alarm band; `notch` true while a limit channel holds the drive vector
+  down, and `notch_scale` the scale it holds it to (1 when none).
+- `identification` is null until the gate has run:
+
+```
+{"level_db":-20,"measured_level_db":-17.6,"realizations":64,
+ "drive_vrms":[0.05,0.05,0.05,0.05],"coherence_mean":[0.99,0.98,0.99,0.97],
+ "limit_coherence_mean":[0.96],"trusted_frac":0.97,"condition_max":12.4,"lag_frames":0,
+ "gate_coherence":0.5,"passed":true}
+```
+
+  Its level as set and as measured (the largest, over the controls, of the measured response peak
+  over the reference's at full level, dB: the level the law is told the structure was identified
+  at), the records averaged, each drive's rms, each control's and each limit channel's band-mean
+  multiple coherence, the share of the band's lines it trusts, the largest condition number of the
+  response on a trusted line, the drive-to-response lag, and whether the gate passed.
+- `review` is null until identification is done:
+
+```
+{"resonances":[{"freq_hz":84.1,"bandwidth_hz":1.7,"time_constants":1.3,"flagged":true}, ...],
+ "acknowledged":null}
+```
+
+  Each resonance's frequency and half-power bandwidth, the time constants the sweep spends inside
+  it, and `flagged` under two (empty outside a sweep); `acknowledged` the operator's words once
+  given.
+- `law` is the run's law, its parameter values in force, its unusable calls in a row now, the
+  ticks a cap has bound, the ticks a drive was over its ceiling, the largest turn of a drive's
+  phase in one tick the law has asked for, degrees, and its requests made and granted.
+- `end` is null until the run finishes, then Sine's `{"outcome","message","at_s","level_db",
+  "at_hz","ramp_s","trip"}`.
+- `record` is Sine's.
+
+| `outcome` | How the run ended |
+|---|---|
+| `completed` | The schedule finished; every drive ramped down with the controlled stop |
+| `operator_stop`, `operator_abort`, `safe_stop` | As Sine's |
+| `aborted` | A protection tripped; `trip` says which |
+| `held` | The coherence gate held: a control's band coherence stayed under `gate_coherence` |
+| `law_fault` | The law gave no usable drive `law_misses` times in a row, or could not be built; the drive in force was held through the misses, then the run took its controlled stop. `trip` says why |
+| `fault` | The loop or the station failed; `message` is the controller's words |
+
+`trip` is null unless `outcome` is `aborted` or `law_fault`; it has `kind`, `at_hz`,
+`at_level_db`, `at_tick` and its kind's facts:
+
+| `kind` | Facts |
+|---|---|
+| `abort_band` | `channel`, `side` (`high` or `low`), `measured`, `limit` |
+| `kinematic` | `drive`, `axis` (`velocity` or `displacement`), `value`, `limit` |
+| `limit_channel` | `channel`, `measured`, `limit` |
+| `drive_vpk` | `channel`, `vpk`, `abort_vpk` |
+| `watchdog` | Sine's |
+| `oscillator_range` | `requested_hz`, `fs_hz` |
+| `divergence` | `capped_s`, `cap` (`step`, `rise` or `rotation`) |
+| `law_fault` | `reason`, `consecutive` |
+
+A `law_fault` trip's `reason` is `error` (the law reported one, or could not be built),
+`panicked` (it panicked or, for a law file, trapped), `over_budget`, `over_memory` (a law file),
+`wrong_drive_count`, `non_finite`, `too_many_values`, `undeclared_value`, `bad_request` (a slow
+request whose factor is not above 0 and at most 1) or `wrong_reference_count` (a notched
+reference that is not one value per control).
+
+### MIMO Sine Report
+
+`mimo_sine.report` returns `{"report"}`, null until the run has finished; the
+`mimo_sine.report` text event carries `{"report"}` to every connection when it finishes.
+
+```
+{"run_id","title","source","grid","test","shape","phase_specified","law","levels_db",
+ "controls":[{"channel","worst_error_db","worst_error_hz","worst_phase_error_deg",
+              "alarm_s","notch_depth_max_db"}],
+ "limits":[{"channel","worst_margin_db","worst_margin_hz","notched_s"}],
+ "drives":[{"channel","vpk_max","vpk_max_hz","ceiling_vpk","over_ceiling_ticks"}],
+ "readings":{"opposition_ratio_max","largest_share_max"},
+ "requests":{"asked","granted","held_s"},
+ "identification","end"}
+```
+
+Per control its worst error against its reference (dB, signed, positive an over-test) and where,
+its worst phase error (degrees, null without `phase_specified`), the time it spent outside its
+alarm band and its deepest notch; per limit channel its smallest margin to its bound (dB, negative
+over it) and where, and the time it held the drive down; per drive its largest peak and where, its
+ceiling and the ticks it was over it; the largest readings; the requests; the identification
+summary and the run's end.
+
+### MIMO Sine Run Folders
+
+Every MIMO Sine run that arms is to leave a run folder as Sine's does (Run Folders), named
+`<YYYYMMDD-HHMMSS>_mimo_sine_<run id>`, with: the configuration as accepted and what it resolved
+to (each control's reference amplitude and phase on the run's band, its bands, each limit
+channel's bound, the test, the schedule, the law and its parameters, the request switch and the
+guards); the channel table; the identification (the response of every control and limit channel to
+every drive, the coherences, the trust mask and the level); the timeline of every state, level,
+hold, request, notch in and out, alarm, trip and operator action; per tick every control's and
+limit channel's tracked amplitude and phase, each control's reference and error, the notch depth
+by control, each drive's amplitude and phase as played, and the readings; and every law call. The
+record's contents are fixed with the service; until then nothing is written.
+
+### MIMO Sine Display
+
+Event topics:
+
+- `mimo_sine.state` (text): the state object on every change of `state`, `phase`, `mode`,
+  `level_db`, `held`, `request_held`, `alarm`, `notch` or `end`.
+- `mimo_sine.log` (text): new log entries, as Sine's, with `law` entries for unusable calls and
+  `request` entries for the law's requests.
+- `mimo_sine.live` (binary, the **default subscription**, 5 times a second from the start of
+  identification until the run has finished, then once more).
+- `mimo_sine.sweep` (binary, to every connection, when a one-way sweep or a stepped sine's pass
+  ends, and when the run ends with one partly done): the pass's results against frequency.
+- `mimo_sine.data` (binary, to one subscribed connection): `mimo_sine.live`'s fields but `views`,
+  and `plots`, at most `rate_hz` times a second, and once at once on subscribe.
+- `mimo_sine.report` (text): the report, when the run finishes.
+
+**The live frame.**
+
+```
+{"run_id","source","class","state","phase","test","mode","t_s","elapsed_s","frequency_hz",
+ "direction","sweep_rate_oct_per_min","sweeps","steps","held","request_held",
+ "level_db","commanded_db","notch","notch_scale","alarm",
+ "controls":[{"channel":1,"description":"Control 1","unit":"g","amplitude":0.501,
+              "phase_deg":-12.4,"reference":0.5,"reference_phase_deg":-10,
+              "error_db":0.02,"phase_error_deg":-2.4,"notch_depth_db":0,"overload":false}, ...],
+ "limits":[{"channel":9,"description":"Fixture","unit":"g","amplitude":1.2,"phase_deg":171.0,
+            "bound":3,"margin_db":-7.96}, ...],
+ "drives":[{"channel":5,"vpk":0.21,"phase_deg":33.1,"ceiling_vpk":2}, ...],
+ "readings":{"opposition_ratio":1.08,"largest_share":0.31,"rotation_deg":0.8},
+ "request":null,
+ "law":{"values":{"gain":0.12},"misses":0,"capped_ticks":0,"faulted":false},
+ "views":[controls, drives, run readings]}
+```
+
+- `t_s`, `elapsed_s`, `frequency_hz`, `direction`, `sweep_rate_oct_per_min` (or
+  `sweep_rate_hz_per_s` for a linear rate, exactly one of the two), `sweeps`, `held`, `level_db`
+  and `commanded_db` are Sine's. `steps` and `request_held` are the state's. `notch_scale` is the
+  scale the limit channels hold the drive vector to (1 when none).
+- `controls`: every control in configuration order: its tracked `amplitude` at the tone (peak, in
+  its unit) and `phase_deg` (its response's phase relative to the tone, in (-180, 180]), its
+  `reference` and `reference_phase_deg` at this frequency and level (`reference_phase_deg` null
+  without `phase_specified`), `error_db` (`20 log10(amplitude / reference)`, null until both are
+  known), `phase_error_deg` (the tracked phase less the reference's, in (-180, 180]; null without
+  `phase_specified`), `notch_depth_db` (how far a taken notched reference sits under the
+  reference, dB, 0 when none) and Sine's `overload` latch.
+- `limits`: every limit channel: its tracked `amplitude` and `phase_deg`, its `bound` here and
+  `margin_db` (`20 log10(amplitude / bound)`, negative under it).
+- `drives`: every drive as played: `vpk` its amplitude, `phase_deg` its phase relative to the
+  tone, and its ceiling.
+- `readings` are shown and recorded, never judged: `opposition_ratio` the drive vector's norm over
+  the least norm that would give the same control response by the identification (1 when the
+  shakers do not work against each other; null where the identification is not trusted),
+  `largest_share` the largest share of the drive vector's norm carried by one drive, and
+  `rotation_deg` the largest turn of a drive's phase in this tick.
+- `request` is null, or the law's request this tick, `{"kind":"hold"}` or
+  `{"kind":"slow","factor"}`, with `granted` true when it was acted on.
+- `law` is the law's values on its last call by the keys its entry declares, its unusable calls
+  in a row, the ticks a cap has bound and its own fault judgement; null until the law is built.
+- `views` are **Controls** (`spectrum`, y `Amplitude`, log: per control `Control <index>`
+  (`measured`) on the points the run has reached, with `Reference <index>` (`reference`) at the
+  present level), **Drives** (y `Drive` V log: `Drive <index>` (`drive`) per drive) and **Run**
+  (a `reading`: `Frequency` Hz, `Direction` (a sweep), `Level` dB, `Notch` (the scale), `Drive`
+  (the largest, V), `Opposition`, `Largest share`, `Sweeps` or `Steps`, `Elapsed` s and
+  `Remaining` s). In a sweep or a stepped sine their x is `Frequency` Hz log on the sweep grid
+  (`link` `frequency`); in a dwell it is `Time` s linear over the last 60 s, at most 1200 points
+  (`link` `time`).
+
+**The sweep frame.** `mimo_sine.sweep` carries `{"run_id","pass","level_db","direction","views"}`:
+`pass` counts the passes from 1, `level_db` is the level the pass ran at (the last when it changed
+during the pass), `direction` `up` or `down` (null in a stepped sine). Its views are against
+frequency on the run's sweep grid (256 log-spaced points across the band the station adopted, with
+its exact ends; a stepped sine's steps), each series carrying only the points the pass reached:
+per control **Control** *n* (`Measured` (`measured`), `Reference` (`reference`), `Alarm high`,
+`Alarm low` (`tolerance`), `Abort high`, `Abort low` (`abort`), at the pass's level, in the
+control's unit) and, with `phase_specified`, **Phase** *n* (`Measured` and `Reference`, deg) and
+**Error** *n* (`Error` dB and, with a taken notched reference, `Notch depth` dB); per limit channel
+**Limit** *n* (`Measured`, `Bound` (`limit`)); **Drives** (`Drive <index>` V per drive) and **Drive
+phase** (`Drive <index>` deg per drive); and **Readings** (`Opposition` and `Largest share`).
+
+`mimo_sine.subscribe` takes Sine's form: `{"rate_hz","plots":[plot...]}` (`rate_hz` 0.5 to 10,
+default 5; at most 64 plots, each `id` unique) or `{"default":true}` (back to `mimo_sine.live`).
+A plot is `{"id","quantity","channels","points"}`; `channels` applies to `control`, `phase`,
+`limit` and `time` (a list of table indexes, or `"all"`), `points` to `time` only (64 to 8192,
+default 1024). The result is `{"default","rate_hz","plots","quantities"}`, every default filled in.
+In `mimo_sine.data` each plot is `{"id","quantity","channels","views"}`. Plots against frequency
+are on the run's sweep grid in a sweep or a stepped sine and hold the latest tick at each point;
+in a dwell they are against time, the last 60 s, at most 1200 points.
+
+| `quantity` | Views | What they show |
+|---|---|---|
+| `control` | one `spectrum` per resolved control | As the sweep frame's **Control** *n*, at the present level |
+| `phase` | one `spectrum` per resolved control | As the sweep frame's **Phase** *n* |
+| `error` | one `spectrum` | **Error**, `Control <index>` dB per control, and the notch depth per control while one is taken |
+| `limit` | one `spectrum` per resolved limit channel | As the sweep frame's **Limit** *n* |
+| `drive` | one `spectrum` | **Drives**, V per drive |
+| `drive_phase` | one `spectrum` | **Drive phase**, deg per drive |
+| `readings` | one `spectrum` and one `reading` | **Readings** against frequency (or time), and the live frame's **Run** reading |
+| `time` | one `spectrum` per resolved channel | The last batch's acquired samples, as Sine's |
+| `identification` | **Identification Gain** *n*, **Identification Phase** *n*, **Coherence** | `abs(H)` and its phase from every drive to the plot's `channels` (default the first control; a limit channel's index for its row), one trace per drive (`Drive <index>`), on the identification's grid inside the band; every control's and limit channel's multiple coherence (`Control <index>`, `Limit <index>`) with `Trust coherence` (`tolerance`) |
+| `law` | one `reading` | **Law**: each declared value on the last call by its label and unit, then `Unusable calls in a row`, `Ticks a cap bound`, `Largest rotation` deg and `Requests` (made and granted) |
+
+A plot is empty (`views` empty) until there is something to draw: `identification` until the
+gate has run, the others until the loop has engaged.
+
 ## Mixed Mode
 
 **Status.** This section is the contract the Mixed Mode service and screen are built against;
@@ -6323,7 +6805,7 @@ folder.
 
 | Method | Params | Result |
 |---|---|---|
-| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, `sine`, `twr`, `shock_mimo`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
+| `laws.list` | `{"world"}` (optional: `single`, `mimo`, `shock_classical`, `shock_srs`, `sine`, `twr`, `shock_mimo`, `sine_mimo`, or absent for every world) | `{"laws":[entry...],"problems":[{"file","reason"}]}` |
 | `laws.import` | `{"path"}` | `{"law":entry}` |
 | `laws.check` | `{"id"}` or `{"path"}`, and `{"params"}` and `{"mixed"}` (optional; `mixed` see "Mixed Mode Laws") | `{"law":entry,"report":{"passed","recorded","tool_version","cases":[case...]}}` |
 
@@ -6367,6 +6849,11 @@ folder.
   that kind opens on (`["waveform"]` on `inverse`, `["srs"]` on `shape`, empty on every other
   entry). `laws.import` takes a `shock-mimo` law file like any other; it runs on the simulator at
   once and drives hardware after a passing `laws.check`.
+- **Draft.** A MIMO Sine law's entry is to have `world: "sine_mimo"`, its `diagnostics` scalar
+  values (`layout` null), at most 8, reported once per call, `shapes` (the shapes it accepts),
+  `test_types` (`sweep`, `dwell`, `stepped`: the test types it accepts) and `amplitude_only`
+  (whether it accepts an amplitude-only reference); `needs` is null. The world has no built-in law
+  in the catalog yet.
 - `check.hardware` says whether the law may drive hardware: a built-in law always may; an
   imported law only with a passing check record for its exact file. Any law runs on the
   simulator. `check.message` says what stands.

@@ -23,6 +23,7 @@ pub fn world_name(w: LawWorld) -> &'static str {
         LawWorld::Sine => "sine",
         LawWorld::Twr => "twr",
         LawWorld::ShockMimo => "shock_mimo",
+        LawWorld::SineMimo => "sine_mimo",
     }
 }
 
@@ -175,7 +176,7 @@ fn entry_json_common(e: &CatalogEntry) -> Value {
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
 /// first, then multiple-output Random, then MIMO Shock, then classical shock, then
-/// SRS shock, then Sine, then TWR).
+/// SRS shock, then Sine, then TWR, then MIMO Sine).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
     for w in [
@@ -186,6 +187,7 @@ pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
         LawWorld::ShockSrs,
         LawWorld::Sine,
         LawWorld::Twr,
+        LawWorld::SineMimo,
     ] {
         if world.is_none_or(|x| x == w) {
             if w == LawWorld::ShockMimo {
@@ -217,10 +219,11 @@ pub fn parse_world(params: &Map<String, Value>) -> Result<Option<LawWorld>, Meth
         Some("sine") => Ok(Some(LawWorld::Sine)),
         Some("twr") => Ok(Some(LawWorld::Twr)),
         Some("shock_mimo") => Ok(Some(LawWorld::ShockMimo)),
+        Some("sine_mimo") => Ok(Some(LawWorld::SineMimo)),
         Some(_) => Err(MethodError::bad_params(
             "world",
             "\"world\" is \"single\", \"mimo\", \"shock_classical\", \"shock_srs\", \
-             \"sine\", \"twr\" or \"shock_mimo\", or absent for every world",
+             \"sine\", \"twr\", \"shock_mimo\" or \"sine_mimo\", or absent for every world",
         )),
     }
 }
@@ -313,6 +316,7 @@ pub fn classical_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::Sine => Err("Sine"),
             LawWorld::Twr => Err("TWR"),
             LawWorld::ShockMimo => Err("MIMO Shock"),
+            LawWorld::SineMimo => Err("MIMO Sine"),
         },
         params: e.manifest.params.clone(),
     }
@@ -361,6 +365,7 @@ pub fn srs_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::Sine => Err("Sine"),
             LawWorld::Twr => Err("TWR"),
             LawWorld::ShockMimo => Err("MIMO Shock"),
+            LawWorld::SineMimo => Err("MIMO Sine"),
         },
         params: e.manifest.params.clone(),
     }
@@ -410,6 +415,7 @@ pub fn sine_facts(e: &CatalogEntry) -> crate::sine::config::LawFacts {
             LawWorld::Sine => Ok(()),
             LawWorld::Twr => Err("TWR"),
             LawWorld::ShockMimo => Err("MIMO Shock"),
+            LawWorld::SineMimo => Err("MIMO Sine"),
         },
         params: e.manifest.params.clone(),
         live: e.live.clone(),
@@ -449,6 +455,7 @@ pub fn twr_facts(e: &CatalogEntry) -> crate::shock::config::LawFacts {
             LawWorld::Sine => Err("Sine"),
             LawWorld::Twr => Ok(()),
             LawWorld::ShockMimo => Err("MIMO Shock"),
+            LawWorld::SineMimo => Err("MIMO Sine"),
         },
         params: e.manifest.params.clone(),
     }
@@ -494,6 +501,7 @@ fn world_words(world: LawWorld) -> &'static str {
         LawWorld::Sine => "Sine",
         LawWorld::Twr => "TWR",
         LawWorld::ShockMimo => "MIMO Shock",
+        LawWorld::SineMimo => "MIMO Sine",
     }
 }
 
@@ -592,6 +600,19 @@ mod mimo_shock_tests {
         p.insert("world".into(), json!("mimo_shock"));
         let e = parse_world(&p).unwrap_err();
         assert!(format!("{e:?}").contains("shock_mimo"), "{e:?}");
+    }
+
+    #[test]
+    fn mimo_sine_the_world_is_named_and_parsed() {
+        assert_eq!(world_name(LawWorld::SineMimo), "sine_mimo");
+        assert_eq!(world_name(LawWorld::SineMimo), LawWorld::SineMimo.as_str());
+        assert_eq!(world_words(LawWorld::SineMimo), "MIMO Sine");
+        let mut p = Map::new();
+        p.insert("world".into(), json!("sine_mimo"));
+        assert_eq!(parse_world(&p).unwrap(), Some(LawWorld::SineMimo));
+        p.insert("world".into(), json!("mimo_sine"));
+        let e = parse_world(&p).unwrap_err();
+        assert!(format!("{e:?}").contains("sine_mimo"), "{e:?}");
     }
 
     #[test]
