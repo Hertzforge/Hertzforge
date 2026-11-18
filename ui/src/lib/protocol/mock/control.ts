@@ -78,6 +78,7 @@ import { createTwrMock } from './twr';
 import { createExplorerMock } from './explorer';
 import { createRecorderMock } from './recorder';
 import { createMimoShockMock } from './mimoShock';
+import { createMimoSineMock } from './mimoSine';
 import { binEdges } from './bins';
 import {
 	breakpointArrays,
@@ -839,7 +840,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 
 	const isLive = () => random !== null && LIVE_STATES.includes(random.state);
 	/** A run of any test type is live (the seat's countdown runs for every one). */
-	const anyLive = () => isLive() || mimoShock.isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive();
+	const anyLive = () => isLive() || mimoShock.isLive() || shock.isLive() || srs.isLive() || sine.isLive() || twr.isLive() || explorer.isLive() || recorder.isLive() || mixed.isLive() || mimoSine.isLive();
 	const orphanS = () => (seatDeadline !== null && anyLive() ? round(Math.max(0, (seatDeadline - Date.now()) / 1000), 1) : null);
 	const seatView = () => (seat ? { name: seat.name, present: seat.conn !== null } : null);
 
@@ -876,6 +877,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			explorer.seatExpired();
 			recorder.seatExpired();
 			mimoShock.seatExpired();
+			mimoSine.seatExpired();
 		}
 		sessionChanged();
 	}
@@ -1039,7 +1041,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		timeoutS,
 		own,
 		hasController: () => !!seat?.conn,
-		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId())),
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId() ?? mimoSine.liveId())),
 		broadcast: (topic, data) => broadcast(topic, data),
 		rows: () => rows,
 		station: () => {
@@ -1051,6 +1053,24 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 		absoluteAbort: options.mimoShockAbsoluteAbort ?? false,
 		record: options.record,
 		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'mimo_shock')}`
+	});
+	// ---- MIMO Sine, on the same run slot and seat -----------------------------------------------
+	const mimoSine = createMimoSineMock({
+		speed,
+		timeoutS,
+		own,
+		hasController: () => !!seat?.conn,
+		otherRun: () => (random && isLive() ? random.id : simRun ? simRun.id : (shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId() ?? mimoShock.liveId())),
+		broadcast: (topic, data) => broadcast(topic, data),
+		rows: () => rows,
+		station: () => {
+			const sel = selected();
+			const devices = scan.filter((d) => sel.devices.includes(d.id)).map((d) => ({ id: d.id, serial: d.serial }));
+			return { source: sel.source, ref: { kind: sel.kind, class: sel.class, devices } };
+		},
+		clientName,
+		record: options.record,
+		recordFolder: (runId) => `${(options.dataRoot ?? '~/Hertzforge_Data').replace(/[\\/]+$/, '')}/${runFolderName(new Date(), runId, 'mimo_sine')}`
 	});
 
 	// ---- stations and the channel table -------------------------------------------------------
@@ -1114,7 +1134,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	/** The arms and the starts that arm, each held behind the one table check. */
-	const GATED = ['random.arm', 'random.start', 'shock.arm', 'shock.start', 'srs.arm', 'srs.start', 'sine.arm', 'sine.start', 'mixed.arm', 'mixed.start', 'twr.arm', 'twr.start', 'explorer.start', 'recorder.start', 'mimo_shock.arm', 'mimo_shock.start'];
+	const GATED = ['random.arm', 'random.start', 'shock.arm', 'shock.start', 'srs.arm', 'srs.start', 'sine.arm', 'sine.start', 'mixed.arm', 'mixed.start', 'twr.arm', 'twr.start', 'explorer.start', 'recorder.start', 'mimo_shock.arm', 'mimo_shock.start', 'mimo_sine.arm', 'mimo_sine.start'];
 	function gated(methods: Record<string, MockMethod>): Record<string, MockMethod> {
 		const out: Record<string, MockMethod> = { ...methods };
 		for (const name of GATED) {
@@ -1866,7 +1886,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function notWhileShock(what: string) {
-		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId() ?? mimoShock.liveId();
+		const id = shock.liveId() ?? srs.liveId() ?? sine.liveId() ?? twr.liveId() ?? explorer.liveId() ?? recorder.liveId() ?? mixed.liveId() ?? mimoShock.liveId() ?? mimoSine.liveId();
 		if (id) refuse('refused', 'run_active', `Run ${id} is live; stop it before ${what}.`, { run_id: id });
 	}
 
@@ -1899,6 +1919,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			explorer.detach(c);
 			recorder.detach(c);
 			mimoShock.detach(c);
+			mimoSine.detach(c);
 			if (seat?.conn === c) {
 				// The mock cannot tell a clean close from a drop, so every close is treated as a
 				// drop: the run goes on, and the seat is kept (absent) for the timeout. A claim
@@ -1917,6 +1938,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 			...explorer.methods,
 			...recorder.methods,
 			...mimoShock.methods,
+			...mimoSine.methods,
 			// Playback reads a drive folder from the disk of the computer that runs the test: the
 			// mock has none, so it holds no run and checks no drive.
 			'playback.state': () => ({ run_id: null, state: 'unconfigured' }),
@@ -1933,7 +1955,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 				const classical = (shock.methods['laws.list'](params, conn) as { laws: unknown[] }).laws;
 				const all = world === undefined || world === null;
 				return {
-					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : []), ...(all || world === 'shock_mimo' ? mimoShock.laws() : [])],
+					laws: [...classical, ...(all || world === 'single' ? mixed.floorLaws() : []), ...(all || world === 'shock_srs' ? srs.laws() : []), ...(all || world === 'sine' ? sine.laws() : []), ...(all || world === 'twr' ? twr.laws() : []), ...(all || world === 'shock_mimo' ? mimoShock.laws() : []), ...(all || world === 'sine_mimo' ? mimoSine.laws() : [])],
 					problems: []
 				};
 			},

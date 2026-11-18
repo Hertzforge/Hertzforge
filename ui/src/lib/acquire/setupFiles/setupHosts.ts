@@ -21,6 +21,7 @@ import { fromExplorerConfig, toExplorerConfig } from '../explorer/explorerSetup'
 import { fromRecorderConfig, toRecorderConfig } from '../recorder/recorderSetup';
 import { fromPlaybackConfig, toPlaybackConfig } from '../playback/playbackSetup';
 import { fitChannels, fromMsConfig, toMsConfig } from '../mimoshock/msSetup';
+import { fitChannels as fitMsineChannels, fromMsineConfig, toMsineConfig } from '../mimosine/msineSetup';
 import { toWireSetup } from '../mimo/mimoSetup';
 import { fromMimoSetup } from '../mimo/mimoOpen';
 import type { SetupModule, SetupTable } from './setupFile';
@@ -192,6 +193,18 @@ export function hostFor(app: AppState, module: SetupModule): SetupHost {
 				(d) => toMsConfig(d, (s.laws ?? []).find((l) => l.id === d.law.id) ?? null),
 				// as the screen takes the service's setup: the draft fitted to the table's channels
 				(d) => void fitChannels(d, s.acq.rows)
+			);
+		}
+		case 'mimo_sine': {
+			const s = app.mimoSine;
+			return wireHost(
+				module,
+				s,
+				protocol,
+				(c) => fromMsineConfig(c as never),
+				(d) => toMsineConfig(d, (s.laws ?? []).find((l) => l.id === d.law.id) ?? null),
+				// as the screen takes the service's setup: the draft fitted to the table's channels
+				(d) => void fitMsineChannels(d, s.acq.rows)
 			);
 		}
 		case 'playback': {
