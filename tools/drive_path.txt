@@ -62,6 +62,7 @@ crates/hertzforge-law-ratio-math    the ratio law's math, run by the built-in la
 crates/hertzforge-law-band-average-math  the band-average law's math, run by a built-in law
 crates/hertzforge-shock-law-math    the classical, SRS and waveform shock law math
 crates/hertzforge-mimo-shock-law-math  the multiple-drive shock law math and its safe-gain checks
+crates/hertzforge-mimo-sine-law-math  the multiple-drive sine law math: the laws' steps, the loop-speed rule, the model the drive is carried along
 laws/hinv                           a law file: computes a drive
 laws/mimo-band-average              a law file: computes a drive
 laws/mimo-buzz                      a law file: computes a drive
