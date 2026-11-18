@@ -700,8 +700,10 @@
       "properties": {
         "id": {"type": "string"},
         "verb": {"type": "string"},
-        "kind": {"enum": ["default", "run", "self"]},
+        "kind": {"enum": ["default", "run", "self", "group"]},
         "ready": {"type": "boolean"},
+        "under": {"type": "string"},
+        "open": {"const": true},
         "reason": {"type": "string"},
         "modules": {"type": "array", "items": {"$ref": "#/$defs/workspace"}},
         "fill": {"type": "object", "additionalProperties": {"type": "string"}},

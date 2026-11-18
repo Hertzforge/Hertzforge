@@ -76,10 +76,10 @@ def test_every_row_has_a_glyph():
 
 
 def test_verbs_are_short():
-    # two words, but for Work Up, which names its kind of test now that the one analysis
-    # module offers all six together
+    # two words, but for Auto Compute, which names its kind of test now that the one
+    # analysis module offers all six together; under its row they read by the test alone
     long = [v for v in verbs.VERBS.values() if len(v.split()) > 2]
-    assert all(v.startswith('Work Up ') for v in long)
+    assert all(v.startswith('Auto Compute ') for v in long)
     work_ups = [v for k, v in verbs.VERBS.items() if 'work_up_' in k]
     assert len(set(work_ups)) == len(work_ups) == 6
 
@@ -652,3 +652,55 @@ def test_cmif_plots_the_whole_frf_with_no_form(plate):
     frf = named(plate, 'frf')
     cmif = next(r for r in table(plate, frf)[0]['rows'] if r['id'] == 'project.cmif')
     assert cmif['ready'] and cmif['fill']['records'] == '' and cmif['fill']['frf'] == frf
+
+
+def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
+    from hertzforge.service.action_table import NESTS, OBJECT_GROUP, OBJECT_ROWS, nested
+
+    history = named(plate, 'time_history')
+    rows = {r['id']: r for r in table(plate, history)[0]['rows']}
+    # what is computed from the averaging is under it, and it opens showing them
+    for child in ('project.compute_psds', 'project.compute_cpsds', 'project.compute_frfs'):
+        assert rows[child]['under'] == 'project.set_averaging'
+    assert rows['project.set_averaging'].get('open') is True
+    assert 'under' not in rows['project.set_averaging']
+    assert rows['project.filter_data']['under'] == 'project.set_filter'
+    assert rows['project.truncate_data']['under'] == 'project.set_truncation'
+    # the object's own acts are under a row that is not an action
+    assert rows[OBJECT_GROUP]['kind'] == 'group'
+    assert rows['self.rename']['under'] == OBJECT_GROUP
+    assert all(rows[r]['under'] == OBJECT_GROUP for r in OBJECT_ROWS if r in rows)
+    # nothing is under two rows, and nothing holds and is held
+    children = [child for held in NESTS.values() for child in held]
+    assert len(children) == len(set(children)) and not set(children) & set(NESTS)
+    assert not set(children) & set(OBJECT_ROWS)
+    # a row whose setting cannot run stays where it was
+    loose = nested([{'id': 'project.set_filter', 'verb': 'Set Filter', 'kind': 'run',
+                     'ready': False, 'reason': 'no'},
+                    {'id': 'project.filter_data', 'verb': 'Apply Filter', 'kind': 'run',
+                     'ready': True}])
+    assert all('under' not in row for row in loose)
+
+
+def test_the_projects_own_actions_are_grouped(validate):
+    from hertzforge.service.action_table import HEADS
+
+    held = projects.new({'title': 'Empty'})
+    rows = table(held, validate=validate)[0]['rows']
+    by_id = {r['id']: r for r in rows}
+    order = [r['id'] for r in rows]
+    # the six computations by kind of test are under one row, which stands where they did
+    six = HEADS['group.auto_compute'][1]
+    assert len(six) == 6 and all(by_id[op]['under'] == 'group.auto_compute' for op in six)
+    assert by_id['group.auto_compute'] == {'id': 'group.auto_compute', 'verb': 'Auto Compute',
+                                           'kind': 'group', 'ready': True}
+    assert order.index('group.auto_compute') == order.index(six[0]) - 1
+    assert all(by_id[op]['verb'].startswith('Auto Compute ') for op in six)
+    # the ways a file comes in are under Import, and the rest under rows of their own
+    assert by_id['project.import_text']['under'] == 'self.import'
+    for head, (_words, ops) in HEADS.items():
+        for op in ops:
+            if op in by_id:
+                assert by_id[op]['under'] == head
+    assert {'group.index', 'group.reports', 'group.new'} <= set(by_id)
+    assert 'group.object' not in by_id, 'nothing is selected'

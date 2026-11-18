@@ -663,8 +663,13 @@ export interface ActionRow {
 	/** `show.*` for a default, an operation's id, or `self.*`. */
 	id: string;
 	verb: string;
-	kind: 'default' | 'run' | 'self';
+	/** `group`: not an action, a row that holds the ones `under` it. */
+	kind: 'default' | 'run' | 'self' | 'group';
 	ready: boolean;
+	/** The id of the row it is listed under: the setting it computes with, or the object's group. */
+	under?: string;
+	/** A row with rows under it opens showing them. */
+	open?: true;
 	/** Why it cannot run now. */
 	reason?: string;
 	/** The modules that offer it; absent, every module. */

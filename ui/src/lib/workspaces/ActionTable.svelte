@@ -11,7 +11,7 @@
 	import { workspaceInfo } from '$lib/app/workspaces';
 	import ParamForm from '$lib/forms/ParamForm.svelte';
 	import type { ActionColumn, ActionRow, SolidRow, Workspace } from '$lib/protocol/types';
-	import { columnsFor, kindWords, moreIn } from '$lib/project/actionTable';
+	import { columnsFor, kindWords, moreIn, nestedRows, type ShownRow } from '$lib/project/actionTable';
 	import Glyph from '$lib/project/Glyph.svelte';
 	import { solidIcon } from '$lib/project/icons';
 	import UnitsEditor from '$lib/project/UnitsEditor.svelte';
@@ -28,7 +28,29 @@
 	const a = $derived(app.analyze);
 	const p = $derived(app.project);
 	const table = $derived(a.actions?.table ?? null);
-	const columns = $derived(table ? columnsFor(table, only) : []);
+	/** The groups of actions opened or closed by hand, by the id of the row that holds them; kept across launches. */
+	const OPEN_KEY = 'hertzforge.actions.open';
+	let openChoice = $state<Record<string, boolean>>(readOpen());
+	function readOpen(): Record<string, boolean> {
+		try {
+			const kept = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}');
+			return kept && typeof kept === 'object' ? kept : {};
+		} catch {
+			return {};
+		}
+	}
+	function toggleOpen(row: ShownRow) {
+		openChoice = { ...openChoice, [row.id]: !row.opened };
+		try {
+			localStorage.setItem(OPEN_KEY, JSON.stringify(openChoice));
+		} catch {
+			// no storage: the choice lasts as long as the window
+		}
+	}
+	/** Each column's rows as they are drawn: a group's rows under it while it is open. */
+	const columns = $derived(
+		(table ? columnsFor(table, only) : []).map((column) => ({ ...column, rows: nestedRows(column.rows, (id, atFirst) => openChoice[id] ?? atFirst) }))
+	);
 	const current = $derived(columns.find((c) => c.current) ?? null);
 	const others = $derived(columns.filter((c) => !c.current));
 	const rowCount = $derived(Math.max(0, ...columns.map((c) => c.rows.length)));
@@ -253,9 +275,22 @@
 										{#if row}
 											{@const clickable = live(row, column)}
 											{#if clickable}
-												<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : column.parts ? `Adds another ${partWords(column.parts[column.parts.length - 1])}` : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{@render glyph(row)}{row.verb}</button>
+												<div class="line" class:nested={row.depth > 0}>
+													{#if row.holds}
+														<button class="twist" class:open={row.opened} aria-expanded={row.opened} aria-label="{row.opened ? 'Close' : 'Open'} the actions under {row.verb}" data-testid="action-twist-{row.id}" onclick={() => toggleOpen(row)}>
+															<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+														</button>
+													{:else}
+														<span class="twist blank"></span>
+													{/if}
+													{#if row.kind === 'group'}
+														<button class="verb grouphead" aria-expanded={row.opened} data-testid="action-{row.id}" onclick={() => toggleOpen(row)}>{row.label}</button>
+													{:else}
+														<button class="verb" class:default={row.kind === 'default'} class:on={a.readingId === row.id || (column.current && row.id === `show.${a.shapeView}`)} data-testid="action-{row.id}" title={column.current ? undefined : column.parts ? `Adds another ${partWords(column.parts[column.parts.length - 1])}` : `Adds a ${kindWords(column.kinds[column.kinds.length - 1])}`} onclick={() => a.perform(row, column)}>{@render glyph(row)}{row.label}</button>
+													{/if}
+												</div>
 											{:else}
-												<span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{@render glyph(row)}{row.verb}</span>
+												<div class="line"><span class="twist blank"></span><span class="verb default still" data-testid="action-{row.id}" title="Drawn by itself when this is selected">{@render glyph(row)}{row.verb}</span></div>
 											{/if}
 										{/if}
 									</td>
@@ -485,6 +520,43 @@
 	}
 	.verb.default {
 		color: var(--action-default);
+	}
+	/* a row and the arrow that opens the actions under it; a nested row sits in from its holder */
+	.line {
+		display: flex;
+		align-items: center;
+	}
+	.line.nested {
+		padding-left: 14px;
+	}
+	.line .verb {
+		flex: 1;
+		min-width: 0;
+	}
+	.twist {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 14px;
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--text-4);
+		cursor: pointer;
+	}
+	.twist.open svg {
+		transform: rotate(90deg);
+	}
+	.twist:hover {
+		color: var(--text-1);
+	}
+	.twist.blank {
+		cursor: default;
+	}
+	.verb.grouphead {
+		color: var(--text-2);
 	}
 	button.verb.default {
 		text-decoration: underline;
