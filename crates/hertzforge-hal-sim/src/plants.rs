@@ -894,6 +894,10 @@ pub const SINE_CALIBRATION_RATE_HZ: f64 = 16_384.0;
 /// The band the sine structures are calibrated over, Hz.
 pub const SINE_BAND_HZ: (f64, f64) = (5.0, 2000.0);
 
+/// The frequency, Hz, near which `sine-near-singular-4x4`'s smallest singular value falls
+/// about 30 dB under its largest (31.8 dB at this frequency; the tests recompute it).
+pub const SINE_NEAR_SINGULAR_HZ: f64 = 381.2;
+
 /// The standard sine structures, by name: cross-coupled plates for multiple-drive sine
 /// control, calibrated for a sine test at [`SINE_CALIBRATION_RATE_HZ`] over
 /// [`SINE_BAND_HZ`].
@@ -907,7 +911,7 @@ pub const SINE_BAND_HZ: (f64, f64) = (5.0, 2000.0);
 /// | `sine-tall-6x3` | 6 x 3 | none |
 /// | `sine-wide-3x6` | 3 x 6 | none |
 /// | `sine-base-article-6x4` | 4 base controls and 2 article responses x 4 | none |
-/// | `sine-near-singular-4x4` | 4 x 4 | none; the smallest singular value falls about 30 dB under the largest near one frequency |
+/// | `sine-near-singular-4x4` | 4 x 4 | none; the smallest singular value falls about 30 dB under the largest near [`SINE_NEAR_SINGULAR_HZ`] |
 ///
 /// The four 4 x 4 structures and the near-singular one share one plate. Every structure
 /// is a [`PlantModel::Jointed`] model with acceleration-shaped modes on a mass line
@@ -1005,13 +1009,13 @@ impl SineStructure {
                 "A linear plate, 4 controls by 4 drives, eight elastic modes 40 Hz to 1.6 kHz."
             }
             SineStructure::SofteningMild4x4 => {
-                "The 4 x 4 plate softening: at full level every resonance down a sixth of a half-power bandwidth."
+                "The 4 x 4 plate softening: at full level every resonance down 0.15 of a half-power bandwidth, damping up 1.2 times."
             }
             SineStructure::SofteningModerate4x4 => {
                 "The 4 x 4 plate softening: at full level every resonance down three quarters of a half-power bandwidth, damping up 1.75 times."
             }
             SineStructure::Hardening4x4 => {
-                "The 4 x 4 plate with its 40 Hz and 165 Hz modes stiffening: up three quarters of a half-power bandwidth at full level."
+                "The 4 x 4 plate with its 40 Hz and 165 Hz modes stiffening: up three quarters of a half-power bandwidth at full level, damping up 1.25 times."
             }
             SineStructure::Tall6x3 => "A linear plate, 6 controls by 3 drives.",
             SineStructure::Wide3x6 => "A linear plate, 3 controls by 6 drives.",
@@ -1019,7 +1023,7 @@ impl SineStructure {
                 "A linear base with 4 controls and an article on it read by 2 more responses, whose resonance reads about four times the base."
             }
             SineStructure::NearSingular4x4 => {
-                "The linear 4 x 4 plate with a stiff coupling that makes the response nearly singular near one frequency."
+                "The linear 4 x 4 plate with one more mode, at 600 Hz, that makes the response nearly singular near 381 Hz."
             }
         }
     }
@@ -1205,15 +1209,16 @@ struct SineLayout {
     drives: &'static [[f64; 2]],
     /// Every output: the controls, then any article responses.
     outputs: &'static [[f64; 2]],
-    /// `(f_hz, zeta, shape index)` per elastic mode of the plate.
-    modes: &'static [(f64, f64, usize)],
+    /// `(f_hz, zeta, shape index, weight)` per elastic mode of the plate: the weight
+    /// scales the participation.
+    modes: &'static [(f64, f64, usize, f64)],
     /// The mass line at a drive's own point, g per volt.
     mass_line: f64,
     /// Generalized force per volt over modal mass, relative to the mass line.
     participation: f64,
     /// The article, for the base and article structure.
     article: Option<SineArticle>,
-    /// A stiff coupling between two drives, for the near-singular structure.
+    /// One more mode for the near-singular structure, acting on the drives in opposition.
     coupling: Option<SineCoupling>,
 }
 
@@ -1240,15 +1245,15 @@ struct SineCoupling {
     output: [f64; 4],
 }
 
-const SINE_4X4_MODES: &[(f64, f64, usize)] = &[
-    (40.0, 0.010, 0),
-    (96.0, 0.020, 1),
-    (165.0, 0.015, 2),
-    (270.0, 0.025, 3),
-    (430.0, 0.020, 4),
-    (690.0, 0.030, 5),
-    (1080.0, 0.025, 6),
-    (1620.0, 0.030, 7),
+const SINE_4X4_MODES: &[(f64, f64, usize, f64)] = &[
+    (40.0, 0.010, 0, 0.67),
+    (96.0, 0.020, 1, 1.0),
+    (165.0, 0.015, 2, 0.6),
+    (270.0, 0.025, 3, 1.0),
+    (430.0, 0.020, 4, 1.0),
+    (690.0, 0.030, 5, 1.0),
+    (1080.0, 0.025, 6, 1.0),
+    (1620.0, 0.030, 7, 1.0),
 ];
 
 const SINE_4X4_DRIVES: &[[f64; 2]] = &[[0.8, 0.8], [-0.8, 0.8], [-0.8, -0.8], [0.8, -0.8]];
@@ -1261,8 +1266,8 @@ fn sine_layout(s: SineStructure) -> SineLayout {
         drives: SINE_4X4_DRIVES,
         outputs: SINE_4X4_CONTROLS,
         modes: SINE_4X4_MODES,
-        mass_line: 4.0,
-        participation: 0.3,
+        mass_line: 8.0,
+        participation: 0.15,
         article: None,
         coupling: None,
     };
@@ -1312,17 +1317,17 @@ fn sine_layout(s: SineStructure) -> SineLayout {
                 zeta: 0.02,
                 first_output: 4,
                 on_article: 1.0,
-                on_plate: 0.25,
-                participation: 0.3,
+                on_plate: 0.4,
+                participation: 0.09,
             }),
             ..plate4
         },
         SineStructure::NearSingular4x4 => SineLayout {
-            seed: 0x5157_4E45_0404_0002,
+            seed: 0x5157_4E45_0404_0001,
             coupling: Some(SineCoupling {
                 f_hz: 600.0,
                 zeta: 0.02,
-                input: [1.0, -1.0, 1.0, -1.0],
+                input: [0.3, -0.3, 0.3, -0.3],
                 output: [1.0, -1.0, 1.0, -1.0],
             }),
             ..plate4
@@ -1341,13 +1346,13 @@ fn sine_structure(l: &SineLayout) -> JointedPlant {
     let mut modes: Vec<JointedMode> = l
         .modes
         .iter()
-        .map(|&(f_hz, zeta, k)| JointedMode {
+        .map(|&(f_hz, zeta, k, weight)| JointedMode {
             f_hz,
             zeta,
             input_shape: l
                 .drives
                 .iter()
-                .map(|p| l.participation * l.mass_line * shape(k, p))
+                .map(|p| weight * l.participation * l.mass_line * shape(k, p))
                 .collect(),
             output_shape: l.outputs.iter().map(|p| shape(k, p)).collect(),
             reference_amplitude: 1.0,

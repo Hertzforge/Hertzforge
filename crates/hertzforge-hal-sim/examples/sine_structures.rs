@@ -92,7 +92,12 @@ fn held_resonance(p: &JointedPlant, amplitude: f64) -> (f64, f64) {
 
 fn main() {
     let grid = band_grid(2000);
+    // Names on the command line print only those structures.
+    let only: Vec<String> = std::env::args().skip(1).collect();
     for s in SineStructure::ALL {
+        if !only.is_empty() && !only.iter().any(|n| n == s.name()) {
+            continue;
+        }
         let p = s.structure();
         let (n_out, n_d) = s.dims();
         println!(
