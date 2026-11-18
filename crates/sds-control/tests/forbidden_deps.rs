@@ -165,10 +165,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // the run contracts (`hertzforge-mimo-sine`, MIT, written here), whose
     // `[dependencies]` are `hertzforge-dsp`, `hertzforge-sdm`, `hertzforge-sine` (its
     // pure core, without the service), `serde` and `serde_json`; it names no backend.
-    // The choice of its laws (`hertzforge-mimo-sine-laws`) depends on it and the law
-    // catalog only, and its laws' math (`hertzforge-mimo-sine-law-math`, on
-    // `hertzforge-dsp` and `hertzforge-sdm` alone, built for WebAssembly) is named
-    // before it exists. Both are on LAW_CRATES.
+    // The choice of its laws (`hertzforge-mimo-sine-laws`) depends on it, the law
+    // catalog, the law host and the law SDK (the built-in laws' declarations), as
+    // MIMO Shock's choice does, and its laws' math (`hertzforge-mimo-sine-law-math`,
+    // on `hertzforge-sdm` alone, built for WebAssembly). Both are on LAW_CRATES.
     "hertzforge-mimo-sine",
     "hertzforge-mimo-sine-laws",
     "hertzforge-mimo-sine-law-math",

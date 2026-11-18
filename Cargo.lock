@@ -1390,8 +1390,13 @@ dependencies = [
 name = "hertzforge-mimo-sine-laws"
 version = "0.1.14"
 dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
  "hertzforge-mimo-sine",
+ "hertzforge-mimo-sine-law-math",
+ "hertzforge-mimo-sine-laws",
  "hertzforge-random-laws",
+ "hertzforge-sdm",
 ]
 
 [[package]]
