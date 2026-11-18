@@ -241,9 +241,11 @@ The pages until you change them:
 - **Law**: the law's values and the run in numbers.
 
 In a sweep or a stepped sine the plots are against frequency; in a dwell, against the last minute
-of test time. The run card holds the verbs: Start, Proceed, Hold and Resume, and in a sweep Reverse,
-Jog and Go To, the level steps in the manual mode, Stop and Abort. Stop ramps every drive down
-together; Abort ends the run within one batch.
+of test time. The run card holds the verbs: Start, Proceed, Hold and Resume, and in a sweep Jog and
+Go To, the level steps in the manual mode, Stop and Abort. A sweep turns only at the band's edges:
+there is no Reverse, so to sweep the other way from where the tone is, go to a frequency, or stop
+and start a sweep in the other direction. Stop ramps every drive down together; Abort ends the run
+within one batch.
 
 ## What a Run Saves
 
