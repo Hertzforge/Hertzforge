@@ -20,7 +20,7 @@
 //    with the sweep-rate warning; Proceed with words for the log.
 // 6. The frequency readout moves with every control's trace on the Controls page; the sweep offers
 //    Jog and Go to and no Reverse (the sweep turns only at the band's edges); the limit channel
-//    nears its bound and the drive vector is notched; Hold keeps the frequency and Resume lets it
+//    nears its bound and the notch holds the reference down; Hold keeps the frequency and Resume lets it
 //    go on; the run completes.
 // 7. A dwell: the sweep verbs are gone; Abort ends it in words.
 // 8. The level card at 4 controls and 4 drives and at 16 and 8, each with the dock at its start,
@@ -300,9 +300,9 @@ try {
 	await tid(a, 'act-goto').click();
 	await until(a, 'at 222 Hz', async (p) => Math.abs((await hzNow(p)) - 222) < 1, 10_000);
 	await pageTo(a, 'Limits');
-	await until(a, 'the limit notching', async (p) => /Scaled to/.test(await text(p, 'msine-notch')), 20_000);
+	await until(a, 'the limit notching', async (p) => /Reference held down/.test(await text(p, 'msine-notch')), 20_000);
 	await a.waitForTimeout(1500);
-	check('the limit channel notches the drive vector', /Scaled to [\d.]+ \([\d.]+ dB\)/.test(await text(a, 'msine-notch')), await text(a, 'msine-notch'));
+	check('the limit channel holds the reference down', /^Reference held down [\d.]+ dB$/.test(await text(a, 'msine-notch')), await text(a, 'msine-notch'));
 	await shot(a, 'notch_held');
 	await tid(a, 'act-resume').click();
 	await until(a, 'resumed', async (p) => (await attr(p, 'msine-run-view', 'data-held')) === 'false', 10_000);

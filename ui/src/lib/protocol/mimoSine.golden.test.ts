@@ -9,9 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { decodeFrame, encodeFrame } from './codec';
 import type { Event, Request, ResponseOk } from './types';
-import type { MimoSineConfigureParams, MimoSineState } from './mimoSine';
+import type { MimoSineConfigureParams, MimoSineLiveHead, MimoSineReport, MimoSineState } from './mimoSine';
 import { canonical } from '$lib/acquire/mimo/mimoSetup';
-import { fromMsineConfig, toMsineConfig } from '$lib/acquire/mimosine/msineSetup';
+import { defaultMsineSetup, fromMsineConfig, toMsineConfig } from '$lib/acquire/mimosine/msineSetup';
+import { notchWords } from '$lib/acquire/mimosine/msineWords';
 
 const DIR = fileURLToPath(new URL('../../../../schema/golden/', import.meta.url));
 const ALL = existsSync(DIR) ? readdirSync(DIR).filter((f) => /mimo_sine/.test(f)) : [];
@@ -40,6 +41,28 @@ describe('the MIMO Sine goldens', () => {
 		const again = toMsineConfig(fromMsineConfig(params.config), null);
 		expect(canonical(toMsineConfig(fromMsineConfig(again), null))).toBe(canonical(again));
 		expect(again.channels.controls.map((c) => c.channel)).toEqual(params.config.channels.controls.map((c) => c.channel));
+	});
+
+	it.skipIf(!ALL.includes('request_mimo_sine_configure.json'))("the draft holds every member of the notch the service takes, at the service's defaults", () => {
+		const notch = (readJson('request_mimo_sine_configure.json').params as MimoSineConfigureParams).config.limits!.notch!;
+		const draft = defaultMsineSetup().limits.notch;
+		expect(Object.keys(draft).sort()).toEqual(Object.keys(notch).sort());
+		expect(draft).toEqual(notch);
+	});
+
+	it.skipIf(!ALL.includes('event_mimo_sine_live.expected.json'))("the live frame's notch reads as the drive cut and each control's depth", () => {
+		const l = readJson('event_mimo_sine_live.expected.json').data as MimoSineLiveHead;
+		expect(l.controls.every((c) => typeof c.notch_depth_db === 'number')).toBe(true);
+		const depth = Math.max(0, ...l.controls.map((c) => c.notch_depth_db));
+		// the golden frame is taken while the drive vector is cut to 0.75 and no reference is held down
+		expect([l.notch, l.notch_scale, depth]).toEqual([true, 0.75, 0]);
+		expect(notchWords(l.notch, l.notch_scale, depth)).toBe('Drive cut to 0.75 (2.5 dB)');
+	});
+
+	it.skipIf(!ALL.includes('event_mimo_sine_report.json'))("the report gives each limit channel's worst margin and the time the notch was in", () => {
+		const r = readJson('event_mimo_sine_report.json').data.report as MimoSineReport;
+		for (const l of r.limits) expect(Object.keys(l).sort()).toEqual(['channel', 'notched_s', 'worst_margin_db', 'worst_margin_hz']);
+		expect(r.limits.some((l) => l.notched_s > 0)).toBe(true);
 	});
 
 	it.skipIf(!ALL.includes('response_mimo_sine_state.json'))('the state carries every member the shell reads', () => {

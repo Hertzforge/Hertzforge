@@ -1,23 +1,26 @@
 <script lang="ts">
 	/**
 	 * The run in numbers, in the dock: the tone's frequency, direction and sweep rate, the passes or
-	 * steps done, the level, the notch scale and whether the run is held; the readings across the
+	 * steps done, the level, the notch (the reference held down, the drive vector cut) and whether the run is held; the readings across the
 	 * shakers (shown, never judged); then per control its amplitude against its reference, its error
 	 * and its phase error and any notch depth; per limit channel its margin to its bound; per drive
-	 * its amplitude and phase as played. After the run, how it ended and what tripped. Every number
+	 * its amplitude and phase as played. After the run, how it ended, what tripped, and per limit
+	 * channel its worst margin and the time the notch was in. Every number
 	 * is the service's.
 	 */
-	import type { MimoSineLiveHead, MimoSineState } from '$lib/protocol/mimoSine';
+	import type { MimoSineLiveHead, MimoSineReport, MimoSineState } from '$lib/protocol/mimoSine';
 	import { formatNumber } from '$lib/viz/format';
 	import { db } from '../words';
-	import { hz, MSINE_OUTCOME_WORDS, MSINE_TRIP_WORDS, msineTripFacts, readingsWords } from './msineWords';
+	import { hz, MSINE_OUTCOME_WORDS, MSINE_TRIP_WORDS, msineTripFacts, notchWords, readingsWords } from './msineWords';
 
 	interface Props {
 		status: MimoSineState | null;
 		live: MimoSineLiveHead | null;
+		/** The finished run's report: each limit channel's worst margin and the time the notch was in. */
+		report?: MimoSineReport | null;
 		compact?: boolean;
 	}
-	let { status, live, compact = false }: Props = $props();
+	let { status, live, report = null, compact = false }: Props = $props();
 
 	const n = (v: number | null | undefined, sig = 4) => (v === null || v === undefined || !Number.isFinite(v) ? '-' : formatNumber(v, sig));
 	const rate = $derived.by(() => {
@@ -39,7 +42,9 @@
 		if (live?.request && !live.request.granted) return `The law asks to ${live.request.kind === 'hold' ? 'hold' : 'slow'} the sweep; not acted on`;
 		return null;
 	});
-	const scale = $derived(live?.notch_scale ?? status?.notch_scale ?? 1);
+	const notchIn = $derived(live?.notch ?? status?.notch ?? false);
+	const depth = $derived(Math.max(0, ...(live?.controls ?? []).map((c) => c.notch_depth_db)));
+	const notch = $derived(notchWords(notchIn, live?.notch_scale ?? status?.notch_scale, depth));
 	const readings = $derived(readingsWords(live?.readings));
 	const end = $derived(status?.state === 'finished' ? status.end : null);
 	/** The unit every row shares, said once in the heading; null where the rows' units differ. */
@@ -54,7 +59,7 @@
 		<div><dt>Level</dt><dd class="num">{db(live?.level_db ?? status?.level_db ?? null)}</dd></div>
 		{#if (live?.direction ?? status?.direction) && rate && !end}<div><dt>Sweep</dt><dd class="num">{live?.direction ?? status?.direction}, {rate}</dd></div>{/if}
 		{#if progress}<div><dt>Progress</dt><dd class="num">{progress}</dd></div>{/if}
-		<div><dt>Notch</dt><dd class="num" class:warn={scale < 1} data-testid="msine-notch">{scale < 1 ? `Scaled to ${n(scale, 3)} (${n(-20 * Math.log10(scale), 3)} dB)` : 'None'}</dd></div>
+		<div><dt>Notch</dt><dd class="num" class:warn={notchIn} data-testid="msine-notch">{notch}</dd></div>
 		{#if holdWords}<div><dt>Hold</dt><dd data-testid="msine-hold">{holdWords}</dd></div>{/if}
 		{#if live?.alarm ?? status?.alarm}<div><dt>Alarm</dt><dd class="warn">A control is outside its alarm band</dd></div>{/if}
 	</dl>
@@ -121,6 +126,16 @@
 			{#if end.trip}
 				<dl>
 					{#each msineTripFacts(end.trip) as f (f.label)}<div><dt>{f.label}</dt><dd class="num">{f.value}</dd></div>{/each}
+				</dl>
+			{/if}
+			{#if report?.run_id === status?.run_id && report?.limits.length}
+				<dl data-testid="msine-report-limits">
+					{#each report.limits as l (l.channel)}
+						<div>
+							<dt>Limit {l.channel}</dt>
+							<dd class="num">{l.worst_margin_db === null ? '-' : `${n(l.worst_margin_db, 3)} dB${l.worst_margin_hz === null ? '' : ` at ${hz(l.worst_margin_hz)}`}`}, notch in {n(l.notched_s, 3)} s</dd>
+						</div>
+					{/each}
 				</dl>
 			{/if}
 		</div>

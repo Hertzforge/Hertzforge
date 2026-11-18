@@ -177,6 +177,22 @@ export function readingsWords(r: MimoSineReadings | null | undefined): { label: 
  * Each built-in law's limit, as the guide states it. A law the catalog lists that is not here has
  * its own entry's summary and nothing more.
  */
+/**
+ * The notch in words, as the service reports it: `notch` true while the reference is held down
+ * (`depthDb`, the deepest control's `notch_depth_db`) or the whole drive vector was cut on the last
+ * update (`scale` under 1).
+ */
+export function notchWords(notch: boolean, scale: number | null | undefined, depthDb: number): string {
+	const cut = typeof scale === 'number' && scale < 1 ? scale : null;
+	const held = depthDb > 0 ? `Reference held down ${formatNumber(depthDb, 3)} dB` : null;
+	const cutWords = cut !== null ? `drive cut to ${formatNumber(cut, 3)} (${formatNumber(-20 * Math.log10(cut), 3)} dB)` : null;
+	if (!notch && !held && !cutWords) return 'None';
+	if (held && cutWords) return `${held}; ${cutWords}`;
+	if (held) return held;
+	if (cutWords) return cutWords.charAt(0).toUpperCase() + cutWords.slice(1);
+	return 'In';
+}
+
 export const LAW_LIMITS: Record<string, string> = {
 	matrix:
 		'This law assumes the test article responds at test level as it did during the low-level identification. Where a resonance has moved by less than a quarter of its half-power bandwidth, expect the same control as on a linear article. Between a quarter and one bandwidth, expect errors over 3 dB at that resonance. Past about one bandwidth the loop can be lost and the test will abort. A Q of 50 puts one bandwidth at 2 percent of frequency.',

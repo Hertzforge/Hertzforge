@@ -123,7 +123,7 @@ export interface MsineDraft {
 	limits: {
 		kinematic_monitor: boolean;
 		channels: MsineLimitDraft[];
-		notch: { smoothing_ticks: number; release_ramp_db_per_s: number; near_bound_db: number };
+		notch: { smoothing_ticks: number; release_ramp_db_per_s: number; release_hysteresis_db: number; near_bound_db: number };
 	};
 	feasibility: { enabled: boolean; shakers: MsineShakerDraft[] };
 	simulator: { structure: string | null };
@@ -140,7 +140,9 @@ export const STRUCTURES: { id: string; label: string; controls: number; drives: 
 	{ id: 'sine-tall-6x3', label: 'Linear, 6 controls by 3 drives', controls: 6, drives: 3 },
 	{ id: 'sine-wide-3x6', label: 'Linear, 3 controls by 6 drives', controls: 3, drives: 6 },
 	{ id: 'sine-base-article-6x4', label: 'Base and article with a limit channel, 6 by 4', controls: 6, drives: 4 },
-	{ id: 'sine-near-singular-4x4', label: 'Near-singular at one frequency, 4 by 4', controls: 4, drives: 4 }
+	{ id: 'sine-near-singular-4x4', label: 'Near-singular at one frequency, 4 by 4', controls: 4, drives: 4 },
+	{ id: 'sine-weak-4x4', label: 'Weakly coupled pairs, 4 by 4', controls: 4, drives: 4 },
+	{ id: 'sine-loopback-4x4', label: 'Loopback: four outputs wired to four inputs, 4 by 4', controls: 4, drives: 4 }
 ];
 
 export const MAX_CONTROLS = 16;
@@ -199,7 +201,7 @@ export function defaultMsineSetup(): MsineDraft {
 			abort_ticks: 3
 		},
 		requests: { honour: false, max_hold_s: 2, min_slow_factor: 0.1 },
-		limits: { kinematic_monitor: true, channels: [], notch: { smoothing_ticks: 3, release_ramp_db_per_s: 20, near_bound_db: 3 } },
+		limits: { kinematic_monitor: true, channels: [], notch: { smoothing_ticks: 3, release_ramp_db_per_s: 10, release_hysteresis_db: 1, near_bound_db: 3 } },
 		feasibility: { enabled: false, shakers: [] },
 		simulator: { structure: null },
 		record: defaultRecord(),
@@ -729,6 +731,7 @@ export function localErrors(d: MsineDraft): FieldErrors {
 	lim.channels.forEach((ch, i) => profileErrors(out, ch.profile, `limits.channels.${i}.profile`));
 	need(out, 'limits.notch.smoothing_ticks', lim.notch.smoothing_ticks, true);
 	need(out, 'limits.notch.release_ramp_db_per_s', lim.notch.release_ramp_db_per_s);
+	need(out, 'limits.notch.release_hysteresis_db', lim.notch.release_hysteresis_db);
 	need(out, 'limits.notch.near_bound_db', lim.notch.near_bound_db);
 	if (d.feasibility.enabled) {
 		d.feasibility.shakers.forEach((s, i) => {

@@ -7,8 +7,9 @@
  *
  * The run's clock is compressed: a one-way sweep takes a few seconds of the mock's time whatever
  * its rate, a dwell's level a few seconds, a stepped sine's step half a second. Where the run has
- * a limit channel, the channel nears its bound partway up the band and the drive vector is scaled
- * down there (the notch), then released. The simulator's structure picks the story:
+ * a limit channel, the channel nears its bound partway up the band and the reference is held down
+ * there (the notch's depth), the drive vector cut on the updates the depth lags behind, then
+ * released. The simulator's structure picks the story:
  *
  * - any structure but the two below: a clean run to completion;
  * - `sine-softening-4x4-moderate`: at full level one control's error grows through a resonance
@@ -82,8 +83,15 @@ export const MOCK_STRUCTURES = [
 	'sine-tall-6x3',
 	'sine-wide-3x6',
 	'sine-base-article-6x4',
-	'sine-near-singular-4x4'
+	'sine-near-singular-4x4',
+	'sine-weak-4x4',
+	'sine-loopback-4x4'
 ];
+/** Whether the notch is in: the reference held down or the drive vector cut. */
+function notchIn(r: { notchScale: number; cut: number }): boolean {
+	return r.notchScale < 0.999 || r.cut < 0.999;
+}
+
 const SIZE: Record<string, [number, number]> = {
 	'sine-tall-6x3': [6, 3],
 	'sine-wide-3x6': [3, 6],
@@ -220,7 +228,10 @@ interface Run {
 	held: boolean;
 	requestHeld: boolean;
 	alarm: boolean;
+	/** The notch's depth as a factor on the reference, 1 when none. */
 	notchScale: number;
+	/** The cut of the whole drive vector on the last update, 1 when none. */
+	cut: number;
 	notchedS: number[];
 	identification: MimoSineIdentificationFacts | null;
 	review: MimoSineReview | null;
@@ -362,8 +373,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			at_level_s: driving ? round(r.atLevel, 2) : null,
 			remaining_s: driving ? remaining(r) : null,
 			alarm: r.alarm,
-			notch: r.notchScale < 1,
-			notch_scale: round(r.notchScale, 3),
+			notch: notchIn(r),
+			notch_scale: round(r.cut, 3),
 			identification: r.identification,
 			review: r.review,
 			law: { id: r.law.id, name: r.law.name, version: r.law.version, sha256: r.law.sha256, params: r.params, misses: r.misses, capped_ticks: r.cappedTicks, over_ceiling: r.overCeiling, rotation_max_deg: round(r.rotationMax, 2), requests: { asked: r.requests.asked, granted: r.requests.granted } },
@@ -441,6 +452,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		if (!levels.length) errors.push(item('levels_empty', 'The schedule has no levels.', 'schedule.levels_db'));
 		for (let i = 1; i < levels.length; i++) if (levels[i] <= levels[i - 1]) errors.push(item('levels_not_ascending', 'The levels rise from one to the next.', `schedule.levels_db[${i}]`));
 		if (s.start_db !== undefined && !levels.includes(s.start_db)) errors.push(item('start_not_a_level', `${s.start_db} dB is not a level of the schedule.`, 'schedule.start_db'));
+		const hyst = c.limits?.notch?.release_hysteresis_db;
+		if (hyst !== undefined && !(typeof hyst === 'number' && hyst >= 0 && hyst <= 6)) errors.push(item('out_of_range', "The notch's release hysteresis runs from 0 to 6 dB.", 'limits.notch.release_hysteresis_db'));
 		const structure = structureOf(c);
 		if (!MOCK_STRUCTURES.includes(structure)) errors.push(item('structure_unknown', `No simulator structure "${structure}".`, 'simulator.structure'));
 		else if (c.simulator?.structure) {
@@ -593,7 +606,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			{ label: 'Frequency', value: round(freqOf(r), 2), unit: 'Hz', status: 'info' },
 			...(r.config.test.kind === 'sweep' ? [{ label: 'Direction', value: r.direction, unit: null, status: 'info' as const }] : []),
 			{ label: 'Level', value: r.levelDb ?? 0, unit: 'dB', status: 'info' },
-			{ label: 'Notch', value: round(r.notchScale, 3), unit: null, status: r.notchScale < 1 ? 'warn' : 'info' },
+			{ label: 'Notch', value: round(r.cut, 3), unit: null, status: notchIn(r) ? 'warn' : 'info' },
 			{ label: 'Drive', value: p ? round(Math.max(...p.drv), 3) : 0, unit: 'V', status: 'info' },
 			{ label: 'Opposition', value: p ? round(p.opp, 3) : 0, unit: null, status: 'info' },
 			{ label: 'Largest share', value: p ? round(p.share, 3) : 0, unit: null, status: 'info' },
@@ -728,17 +741,19 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		const bound = r.config.limits?.channels?.map((l) => profileAt(l.profile.rows, f)) ?? [];
 		const wanted = bound.map((b) => b * lin * 10 ** ((-8 + 11 * limNear) / 20));
 		const scale = Math.min(1, ...wanted.map((w, j) => (w > bound[j] * lin ? (bound[j] * lin) / w : 1)));
+		// The depth follows the limit readings a tick late; on the ticks it lags, the drive vector is cut.
 		const target = r.notchScale + (scale - r.notchScale) * 0.5;
 		r.notchScale = target;
+		r.cut = Math.min(1, scale / target);
 		const depthDb = r.notchScale < 1 ? -20 * Math.log10(r.notchScale) : 0;
 		const ref = r.config.channels.controls.map((c) => profileAt(c.profile.rows, f) * lin);
 		const refPh = r.config.channels.controls.map((c) => ((r.config.phase_specified ?? true) ? phaseAt(c.phase, f) : 0));
 		const err = ref.map((_, i) => round(0.4 * near * Math.sin(1 + i) + 0.05 * Math.sin(r.t * 2.3 + i) + (i === 1 ? grow * near * 3 + grow * 0.2 : 0) - depthDb, 3));
 		const ctl = ref.map((v, i) => v * 10 ** (err[i] / 20));
 		const ph = refPh.map((p, i) => wrap(p + 2 * near * Math.cos(i) + 0.3 * Math.sin(r.t + i)));
-		const lim = wanted.map((w) => w * r.notchScale);
+		const lim = wanted.map((w) => w * r.notchScale * r.cut);
 		const singular = r.structure === 'sine-near-singular-4x4' ? Math.exp(-((Math.log(f / (fr * 0.8)) / 0.05) ** 2)) : 0;
-		const drv = r.drives.map((_, k) => round(lin * r.notchScale * (0.18 + 0.05 * k + 0.4 * near) * (1 + 2 * singular), 4));
+		const drv = r.drives.map((_, k) => round(lin * r.notchScale * r.cut * (0.18 + 0.05 * k + 0.4 * near) * (1 + 2 * singular), 4));
 		const drvPh = r.drives.map((_, k) => wrap(-20 * k - 70 * near + (singular ? 150 * singular * (k % 2) : 0)));
 		const norm = Math.hypot(...drv);
 		const share = drv.length ? Math.max(...drv.map((v) => (v * v) / (norm * norm || 1))) : 0;
@@ -768,8 +783,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			request_held: r.requestHeld,
 			level_db: r.levelDb,
 			commanded_db: r.levelDb,
-			notch: r.notchScale < 0.999,
-			notch_scale: round(r.notchScale, 3),
+			notch: notchIn(r),
+			notch_scale: round(r.cut, 3),
 			alarm: r.alarm,
 			controls: r.controls.map((ch, i) => ({
 				channel: ch,
@@ -846,7 +861,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 				w.margin[j] = round(m, 2);
 				w.marginHz[j] = round(p.f, 2);
 			}
-			if (r.notchScale < 0.999) r.notchedS[j] += dt;
+			if (notchIn(r)) r.notchedS[j] += dt;
 		});
 		p.drv.forEach((v, k) => {
 			if (v > w.vpk[k]) {
@@ -1040,7 +1055,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			return;
 		}
 		if (r.state !== 'running' || (r.phase !== 'engaged' && r.phase !== 'full_level')) return;
-		const wasNotch = r.notchScale < 0.999;
+		const wasNotch = notchIn(r);
 		const p = pointOf(r);
 		r.last = p;
 		if (r.config.test.kind === 'dwell') {
@@ -1057,8 +1072,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			addLog('alarm', alarm ? 'A control is outside its alarm band.' : 'Every control is back inside its alarm band.');
 			stateChanged(true);
 		}
-		if (wasNotch !== (r.notchScale < 0.999)) {
-			addLog('note', r.notchScale < 0.999 ? `A limit channel holds the drive vector down (notch in at ${round(p.f, 1)} Hz).` : `The notch released at ${round(p.f, 1)} Hz.`);
+		if (wasNotch !== notchIn(r)) {
+			addLog('note', notchIn(r) ? `A limit channel holds the reference down (notch in at ${round(p.f, 1)} Hz).` : `The notch released at ${round(p.f, 1)} Hz.`);
 			stateChanged(true);
 		}
 		// The softening structure: control 2 passes its abort band at full level.
@@ -1139,6 +1154,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			requestHeld: false,
 			alarm: false,
 			notchScale: 1,
+			cut: 1,
 			notchedS: Array(nl).fill(0),
 			identification: null,
 			review: null,

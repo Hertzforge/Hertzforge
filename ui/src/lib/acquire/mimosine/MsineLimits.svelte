@@ -73,6 +73,7 @@
 			<div class="aq-fields">
 				<NumberField id="msine-notch-smooth" label="Smoothed over" unit="ticks" integer step={1} min={1} bind:value={lim.notch.smoothing_ticks} errors={errs('limits.notch.smoothing_ticks')} disabled={locked} />
 				<NumberField id="msine-notch-release" label="Released at most" unit="dB/s" step={5} min={0} bind:value={lim.notch.release_ramp_db_per_s} errors={errs('limits.notch.release_ramp_db_per_s')} disabled={locked} />
+				<NumberField id="msine-notch-hysteresis" label="Released once allowed by" unit="dB" step={0.5} min={0} max={6} bind:value={lim.notch.release_hysteresis_db} errors={errs('limits.notch.release_hysteresis_db')} help="How far the limit readings must allow the notch to rise before it begins to, so a reading near its bound neither toggles the notch nor releases it with a kick." disabled={locked} testid="msine-notch-hysteresis" />
 				<NumberField id="msine-notch-near" label="Near the bound within" unit="dB" step={0.5} min={0} max={20} bind:value={lim.notch.near_bound_db} errors={errs('limits.notch.near_bound_db')} help="How near its bound a limit channel must be for a notched reference a law returns to be taken." disabled={locked} />
 			</div>
 		</div>

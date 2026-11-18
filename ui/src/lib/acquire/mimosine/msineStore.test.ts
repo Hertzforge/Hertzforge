@@ -133,15 +133,21 @@ describe('the MIMO Sine store', () => {
 		expect(await ms.proceed()).toBe(true);
 		expect(ms.status?.review?.acknowledged).toBe('Reviewed the identification.');
 		let notched = false;
-		await until(() => {
-			if (ms.now?.notch) notched = true;
-			return ms.status?.state === 'finished';
+		// the notch is in while the reference is held down, with the drive cut or not: notch_scale is the cut alone
+		let heldDown = false;
+		client.on('mimo_sine.state', (d) => {
+			const f = d as { notch: boolean; notch_scale: number | null };
+			if (f.notch) notched = true;
+			if (f.notch && f.notch_scale === 1) heldDown = true;
 		});
+		await until(() => ms.status?.state === 'finished');
+		expect(heldDown).toBe(true);
 		expect(ms.status?.end?.outcome).toBe('completed');
 		expect(notched).toBe(true);
 		expect(ms.lastPass?.views.some((v) => v.title === 'Limit 9')).toBe(true);
 		await until(() => ms.report !== null);
 		expect(ms.report?.limits[0].notched_s).toBeGreaterThan(0);
+		expect(Math.max(...ms.report!.controls.map((c) => c.notch_depth_max_db))).toBeGreaterThan(0);
 		expect(ms.report?.controls.length).toBe(4);
 		expect(ms.log.some((e) => /notch/i.test(e.text))).toBe(true);
 		// A window that opens on the finished run is drawn the last pass, not empty plots.
@@ -213,6 +219,21 @@ describe('the MIMO Sine store', () => {
 		const facts = msineTripFacts(end!.trip!);
 		expect(facts.find((f) => f.label === 'Control')?.value).toBe('2');
 		expect(facts.some((f) => f.label === 'Upper abort')).toBe(true);
+	});
+
+	it("refuses a notch release hysteresis out of 0 to 6 dB at its field, and takes the new structures", async () => {
+		const { ms } = await screen({}, 4, 4, 0);
+		ms.setup.limits.notch.release_hysteresis_db = 7;
+		await ms.checkSetup();
+		expect(ms.findings.errors.map((e) => [e.reason, e.field])).toEqual([['out_of_range', 'limits.notch.release_hysteresis_db']]);
+		expect(ms.fieldErrors['limits.notch.release_hysteresis_db']?.length).toBe(1);
+		expect(ms.counts.limits.errors).toBe(1);
+		ms.setup.limits.notch.release_hysteresis_db = 0;
+		for (const structure of ['sine-weak-4x4', 'sine-loopback-4x4']) {
+			ms.setup.simulator.structure = structure;
+			await ms.checkSetup();
+			expect(ms.check?.errors).toEqual([]);
+		}
 	});
 
 	it('refuses a simulator structure of another size by name', async () => {

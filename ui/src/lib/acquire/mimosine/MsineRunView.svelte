@@ -81,7 +81,7 @@
 
 {#snippet cards(kind: CardKind)}
 	{#if kind === 'level'}
-		<MsineLevelCard {status} {live} {compact} />
+		<MsineLevelCard {status} {live} report={ms.report} {compact} />
 	{:else if kind === 'law'}
 		<MsineLawCard law={status?.law ?? null} live={live?.law ?? null} entry={ms.runLaw} />
 	{:else if kind === 'station' && station}
