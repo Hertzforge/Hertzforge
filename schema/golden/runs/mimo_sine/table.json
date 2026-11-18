@@ -1,0 +1,158 @@
+{
+  "revision": 2,
+  "sha256": "57f327a988e31f4febb8f7eac35b45ac378157a601fabaab0a94cb508aee8a83",
+  "rows": [
+    {
+      "index": 1,
+      "enabled": true,
+      "description": "control 1",
+      "role": "control",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 1000,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 2,
+      "enabled": true,
+      "description": "control 2",
+      "role": "control",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 1000,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 3,
+      "enabled": true,
+      "description": "control 3",
+      "role": "control",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 1000,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 4,
+      "enabled": true,
+      "description": "control 4",
+      "role": "control",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 1000,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 5,
+      "enabled": true,
+      "description": "drive 5",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 6,
+      "enabled": true,
+      "description": "drive 6",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 7,
+      "enabled": true,
+      "description": "drive 7",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 8,
+      "enabled": true,
+      "description": "drive 8",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    }
+  ]
+}

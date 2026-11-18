@@ -4,6 +4,7 @@
 
 pub mod golden_runs;
 pub mod msine;
+pub mod msine_golden;
 pub mod schema;
 
 use futures_util::{SinkExt, StreamExt};

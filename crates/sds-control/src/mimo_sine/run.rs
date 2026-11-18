@@ -1362,7 +1362,13 @@ impl Actor {
                 if self.stop_at_s.is_none() {
                     self.stop_at_s = Some(e.time_s);
                 }
-                if self.view.end.is_none() && !matches!(outcome, Outcome::Stopped) {
+                if outcome == Outcome::Completed {
+                    self.shared.add_log_data(
+                        "note",
+                        format!("the schedule is complete at {hz} Hz; every drive ramps down"),
+                        Some(with(json!({"event": "stopping", "outcome": outcome.as_str()}))),
+                    );
+                } else if self.view.end.is_none() && !matches!(outcome, Outcome::Stopped) {
                     self.shared.add_log_data(
                         "trip",
                         format!(

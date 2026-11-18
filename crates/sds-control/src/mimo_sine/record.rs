@@ -31,7 +31,7 @@ use std::path::PathBuf;
 
 /// Ticks of one record of `channel_levels` and of `control_trace`; the last
 /// record of a run is filled out with NaN.
-pub const TICK_BLOCK: usize = 64;
+pub const TICK_BLOCK: usize = 16;
 
 /// The holds a law is told, by their codes in `control_trace`.
 pub const HOLDS: [&str; 5] = ["free", "notch", "held", "probe", "engage"];
