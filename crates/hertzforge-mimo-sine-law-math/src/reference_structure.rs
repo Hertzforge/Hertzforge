@@ -379,11 +379,68 @@ pub fn run_closed_loop(
     values: usize,
     max_updates: usize,
 ) -> Result<Vec<Row>, String> {
+    let ones = |_: f64| 1.0;
+    run_closed_loop_with(
+        law,
+        st,
+        setup,
+        schedule,
+        played,
+        dynamics,
+        values,
+        max_updates,
+        &ones,
+    )
+}
+
+/// A reference amplitude against frequency, the same on every control, in
+/// phase: `lo` up to `f1`, `hi` from `f2`, straight in the logarithms of
+/// both between them (as a profile's rows are joined).
+pub fn stepped_reference(lo: f64, hi: f64, f1: f64, f2: f64) -> impl Fn(f64) -> f64 {
+    move |f| {
+        if f <= f1 {
+            lo
+        } else if f >= f2 {
+            hi
+        } else {
+            let t = (f.ln() - f1.ln()) / (f2.ln() - f1.ln());
+            (lo.ln() + t * (hi.ln() - lo.ln())).exp()
+        }
+    }
+}
+
+/// The setup's reference on its grid from `reference` (the same amplitude on
+/// every control, in phase), as the controller samples a profile for a law.
+pub fn sample_reference(setup: &mut Setup, reference: &dyn Fn(f64) -> f64) {
+    let lines = setup.identification.grid_hz.len();
+    for c in 0..setup.controls {
+        for k in 0..lines {
+            let f = setup.identification.grid_hz[k];
+            setup.reference[c * lines + k] = C64::new(reference(f), 0.0);
+        }
+    }
+}
+
+/// [`run_closed_loop`] with the reference told the law each update taken from
+/// `reference` at the frequency told (the same amplitude on every control,
+/// in phase), as the controller reads its profile.
+#[allow(clippy::too_many_arguments)]
+pub fn run_closed_loop_with(
+    law: &mut dyn SineLaw,
+    st: &ModalStructure,
+    setup: &Setup,
+    schedule: Schedule,
+    played: Played,
+    dynamics: Dynamics,
+    values: usize,
+    max_updates: usize,
+    reference: &dyn Fn(f64) -> f64,
+) -> Result<Vec<Row>, String> {
     let modes = st.f_hz.len();
     let mut env = vec![ZERO; modes];
     let mut stages = vec![[ZERO; 2]; st.controls];
     let (n, m) = (st.controls, st.drives);
-    let r = vec![C64::new(1.0, 0.0); n];
+    let mut r = vec![C64::new(1.0, 0.0); n];
     let mut z = vec![ZERO; n];
     let mut d_force = vec![ZERO; m];
     let mut out = Outputs::new(m, values);
@@ -393,6 +450,7 @@ pub fn run_closed_loop(
     let mut hold = Hold::Engage;
     for k in 0..max_updates {
         let (f, _, hz_s, oct, done) = tone_at(schedule, k);
+        r.iter_mut().for_each(|v| *v = C64::new(reference(f), 0.0));
         let x = Inputs {
             index: k as u64,
             dt_s: if k == 0 { 0.0 } else { dt },

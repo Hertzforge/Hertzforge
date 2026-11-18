@@ -1044,6 +1044,7 @@ are short so the check of one law takes seconds of simulated test.
 | limit channel | sweep | Base and article, the article limited at 2 g, 150 to 350 Hz at two octaves a minute | The notch engages; the limit at most 0.5 dB over its bound; no control over 1.0 dB in the second after a release |
 | more controls than drives | sweep | 6 controls by 3 drives, 80 to 120 Hz | Within 3.0 dB of the response the drives can reach, median within 0.5 dB |
 | more drives than controls | sweep | 3 controls by 6 drives, 80 to 120 Hz | Within 1.5 dB, median within 0.5 dB, opposition ratio at most 6 dB |
+| steep reference | sweep | Linear 4 x 4, 100 to 120 Hz at one octave a minute, the reference rising 12 dB (a quarter of full level to full level) between 109 and 110 Hz | No control more than 1.0 dB over its reference |
 | law misbehaves | dwell | Linear 4 x 4 at 96 Hz; from the 150th update the law's answer is not finite | The run ends on a law fault after three refused answers, every drive at zero |
 | moved resonance (mild, moderate, hardening) | sweep | The softening and hardening 4 x 4 structures through a resonance that moves with level | Reported, not a pass condition |
 
@@ -1072,7 +1073,8 @@ as a law file with the same verdicts, through the laws crate and through the ser
 `laws.check`. Every built-in law passes every scored case it runs. On the
 limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
 control is over its reference in the second after the release (the worst is 1.1 dB under). On the
-level ladder the worst rung is 0.3 to 0.4 dB for every law. `matrix`'s hardening sweep, reported
+level ladder the worst rung is 0.3 to 0.4 dB for every law. Through the steep reference `matrix`
+reads at most 0.19 dB over its reference (it is the only built-in law that accepts a sweep). `matrix`'s hardening sweep, reported
 and not scored, is 2.3 dB: the resonance has moved past where its stated limit begins.
 
 `matrix` as a law file fits its model when it is built, which on the check's widest band (the limit
@@ -1093,9 +1095,22 @@ update it corrects the drive through the regularized inverse of the identificati
 with more controls than drives, least norm with more drives), at a gain set every update from the
 tracking filter's delay and the identification's group delay near the tone. In a sweep it also
 carries the drive along a model of the structure: the change of drive the model predicts for the
-next frequency is added with the carry weight. It rebases on the drive in force every update, and
+next frequency is added with the carry weight. Where the reference itself changes with frequency
+(a profile's breakpoint, a slope), the drive follows the change through the inverse the update it
+is told, at full weight. Its correction compares each control with the reference as the tracking
+filter would read it (the reference passed through the filter's delay and the transport delay),
+so while the reference moves the filter's trail is not taken for a control error. A reference
+that moves faster than the change cap allows is followed at the cap's pace: what the cap cut from
+the change is carried again the next update. It rebases on the drive in force every update, and
 with spare drives it removes the part of the drive the controls cannot see. With an amplitude-only
 reference it controls every control in phase, or takes each control's phase from its measurement.
+
+A 12 dB rise or fall over 0.1 Hz at one octave a minute leaves the response within about 1 dB of
+the reference on the simulator's loopback and linear structures. A fall faster than the change
+cap allows (1 dB an update by default, so 12 dB takes 120 ms) over-tests by up to the part of the
+fall the cap holds back, about 8 dB for a 12 dB fall over 0.1 Hz at four octaves a minute, for
+about 0.1 s. While the reference falls, the tracked controls read high by up to the size of the
+fall for about the filter's delay, and the controller judges them as read.
 
 | Key | What it does |
 |---|---|

@@ -58,6 +58,7 @@
 //! | `limit_channel` | sweep | `sine-base-article-6x4`, the two article responses limited at 2 g, 150 to 350 Hz at 2 octaves a minute | the backstop notch engages; the limit channels at most 0.5 dB over their bound; no control more than 1.0 dB over its reference in the 1 s after each release |
 //! | `more_controls_than_drives` | sweep | `sine-tall-6x3`, 80 to 120 Hz at 1 octave a minute | judged against the response the drives can reach (the least-squares fit through the identification): within 3.0 dB, median within 0.5 dB |
 //! | `more_drives_than_controls` | sweep | `sine-wide-3x6`, 80 to 120 Hz at 1 octave a minute | within 1.5 dB, median within 0.5 dB; the opposition ratio at most 6 dB |
+//! | `steep_reference` | sweep | `sine-linear-4x4`, 100 to 120 Hz up at 1 octave a minute, every control's reference rising 12 dB (0.25 g to 1 g) between 109 and 110 Hz | every judged update: no control more than 1.0 dB over its reference |
 //! | `law_misbehaves` | dwell | `sine-linear-4x4`, 96 Hz; from the 150th update the law's answer has a non-finite drive | the run ends on a law fault after three refused answers in a row, every drive walked to zero, no sample over a ceiling |
 //! | `moved_resonance_mild` | sweep | `sine-softening-4x4-mild` as `slow_sweep` | reported, not a pass condition |
 //! | `moved_resonance_moderate` | sweep | `sine-softening-4x4-moderate` as `slow_sweep` | reported, not a pass condition |
@@ -106,7 +107,7 @@ use std::time::Instant;
 
 /// The version of the MIMO Sine check written into its records. A change to
 /// a case, a structure or a rule changes it.
-pub const MIMO_SINE_CHECK_VERSION: &str = "mimo-sine-check 1";
+pub const MIMO_SINE_CHECK_VERSION: &str = "mimo-sine-check 2";
 
 /// The rate every case runs at, Hz (the sine structures' calibration rate).
 pub const CHECK_FS_HZ: f64 = 16_384.0;
@@ -333,6 +334,12 @@ pub enum Requirement {
         /// The largest opposition ratio, dB.
         opposition_db: f64,
     },
+    /// No control more than `db` over its reference at any judged update
+    /// (under it is not judged by this requirement).
+    NeverOver {
+        /// The most a control may read over its reference, dB.
+        db: f64,
+    },
     /// At every rung of the ladder, every judged update within `db` of the
     /// reference at that rung.
     EachRungWithin {
@@ -367,6 +374,7 @@ impl Requirement {
             Requirement::WithinAway { .. } => "within_away",
             Requirement::Reachable { .. } => "reachable",
             Requirement::WithinEffort { .. } => "within_effort",
+            Requirement::NeverOver { .. } => "never_over",
             Requirement::EachRungWithin { .. } => "each_rung_within",
             Requirement::LimitHeld { .. } => "limit_held",
             Requirement::Survive => "survive",
@@ -404,6 +412,8 @@ pub enum MimoSineCheckCase {
     MoreDrivesThanControls,
     /// A stepped sine.
     Stepped,
+    /// A sweep through a 12 dB rise of the reference over 1 Hz.
+    SteepReference,
     /// The law's answers become unusable part way through.
     LawMisbehaves,
     /// A sweep where the resonance moves 0.15 of its bandwidth at full
@@ -417,7 +427,7 @@ pub enum MimoSineCheckCase {
 
 impl MimoSineCheckCase {
     /// Every case, in the order the check runs them.
-    pub const ALL: [MimoSineCheckCase; 17] = [
+    pub const ALL: [MimoSineCheckCase; 18] = [
         MimoSineCheckCase::DwellAtResonance,
         MimoSineCheckCase::DwellAwayFromResonance,
         MimoSineCheckCase::MeasurementNoise,
@@ -431,6 +441,7 @@ impl MimoSineCheckCase {
         MimoSineCheckCase::LimitChannel,
         MimoSineCheckCase::MoreControlsThanDrives,
         MimoSineCheckCase::MoreDrivesThanControls,
+        MimoSineCheckCase::SteepReference,
         MimoSineCheckCase::LawMisbehaves,
         MimoSineCheckCase::MovedResonanceMild,
         MimoSineCheckCase::MovedResonanceModerate,
@@ -453,6 +464,7 @@ impl MimoSineCheckCase {
             MimoSineCheckCase::MoreControlsThanDrives => "more_controls_than_drives",
             MimoSineCheckCase::MoreDrivesThanControls => "more_drives_than_controls",
             MimoSineCheckCase::Stepped => "stepped",
+            MimoSineCheckCase::SteepReference => "steep_reference",
             MimoSineCheckCase::LawMisbehaves => "law_misbehaves",
             MimoSineCheckCase::MovedResonanceMild => "moved_resonance_mild",
             MimoSineCheckCase::MovedResonanceModerate => "moved_resonance_moderate",
@@ -499,6 +511,9 @@ impl MimoSineCheckCase {
             }
             MimoSineCheckCase::MoreControlsThanDrives => "six controls on three drives",
             MimoSineCheckCase::MoreDrivesThanControls => "three controls on six drives",
+            MimoSineCheckCase::SteepReference => {
+                "a sweep through a 12 dB rise of the reference over 1 Hz"
+            }
             MimoSineCheckCase::LawMisbehaves => {
                 "the law's answer turns non-finite part way through a dwell"
             }
@@ -616,6 +631,7 @@ impl MimoSineCheckCase {
             MimoSineCheckCase::NearSingular => sweep(350.0, 420.0, 1.0),
             MimoSineCheckCase::LimitChannel => sweep(150.0, 350.0, 2.0),
             MimoSineCheckCase::MovedResonanceHardening => sweep(140.0, 190.0, 1.0),
+            MimoSineCheckCase::SteepReference => sweep(100.0, 120.0, 1.0),
         }
     }
 
@@ -691,6 +707,7 @@ impl MimoSineCheckCase {
                 median_db: 0.5,
                 opposition_db: 6.0,
             },
+            MimoSineCheckCase::SteepReference => Requirement::NeverOver { db: 1.0 },
             MimoSineCheckCase::LawMisbehaves => Requirement::StopsOnFault,
         }
     }
@@ -712,6 +729,19 @@ fn flat(g: f64, alarm_db: f64, abort_db: f64) -> SineProfile {
     p.global_alarm_db = (alarm_db, alarm_db);
     p.global_abort_db = (abort_db, abort_db);
     p.push(ProfileRow::accel(5.0, g));
+    p.push(ProfileRow::accel(2000.0, g));
+    p
+}
+
+/// A profile at a quarter of `g` up to `f1` and `g` from `f2` (12 dB up),
+/// straight in log-log between, over 5 to 2000 Hz, with the given bands.
+fn rising(g: f64, f1: f64, f2: f64, alarm_db: f64, abort_db: f64) -> SineProfile {
+    let mut p = SineProfile::new("rising");
+    p.global_alarm_db = (alarm_db, alarm_db);
+    p.global_abort_db = (abort_db, abort_db);
+    p.push(ProfileRow::accel(5.0, g / 4.0));
+    p.push(ProfileRow::accel(f1, g / 4.0));
+    p.push(ProfileRow::accel(f2, g));
     p.push(ProfileRow::accel(2000.0, g));
     p
 }
@@ -765,7 +795,14 @@ pub struct RunPlan {
     pub resonance: Option<(f64, f64)>,
     /// Make the law's answers unusable from this update on.
     pub misbehave_from: Option<u64>,
+    /// Every control's reference steps from a quarter of full level up to
+    /// full level, straight in log-log between these two frequencies, Hz;
+    /// `None` for the flat full-level reference.
+    pub reference_rise_hz: Option<(f64, f64)>,
 }
+
+/// Where the steep-reference case's reference rises 12 dB, Hz.
+pub const CHECK_STEEP_RISE_HZ: (f64, f64) = (109.0, 110.0);
 
 /// How long each rung of a ladder below the last is held, s.
 pub const RUNG_S: f64 = 2.0;
@@ -840,6 +877,8 @@ impl MimoSineCheckCase {
             },
             misbehave_from: (self == MimoSineCheckCase::LawMisbehaves)
                 .then_some(CHECK_MISBEHAVE_FROM),
+            reference_rise_hz: (self == MimoSineCheckCase::SteepReference)
+                .then_some(CHECK_STEEP_RISE_HZ),
         }
     }
 }
@@ -873,7 +912,10 @@ pub fn plan_setup(p: &RunPlan, id: &str, manifest: &LawManifest) -> MimoSineSetu
         controls: (0..s.controls)
             .map(|i| ControlChannel {
                 channel: 1 + i,
-                profile: flat(g, CHECK_ALARM_DB, abort_db),
+                profile: match p.reference_rise_hz {
+                    Some((f1, f2)) => rising(g, f1, f2, CHECK_ALARM_DB, abort_db),
+                    None => flat(g, CHECK_ALARM_DB, abort_db),
+                },
                 phase: if phased {
                     vec![PhasePoint {
                         freq_hz: 5.0,
@@ -994,6 +1036,9 @@ pub struct CaseMeasure {
     pub notch_entries: usize,
     /// The largest opposition ratio over the judged updates, dB.
     pub opposition_db: f64,
+    /// The most any control read over its reference at a judged update, dB
+    /// (negative when every control stayed under).
+    pub over_db: f64,
     /// Wall time of the identification, s.
     pub ident_s: f64,
     /// Wall time of the engage (the law's build), s.
@@ -1349,6 +1394,12 @@ fn measure(
             .filter(|e| matches!(e.kind, EventKind::NotchIn { .. }))
             .count(),
         opposition_db: opposition,
+        over_db: largest(
+            judged
+                .iter()
+                .flat_map(|t| t.errors_db().to_vec())
+                .collect::<Vec<_>>(),
+        ),
         ident_s,
         build_s,
         run_s,
@@ -1557,6 +1608,17 @@ pub fn judge(m: &CaseMeasure) -> CaseVerdict {
                 return v(Some(name), a, detail);
             }
             v(None, t, detail)
+        }
+        Requirement::NeverOver { db } => {
+            let x = m.over_db;
+            v(
+                (!inside(x, db)).then_some(name),
+                x,
+                format!(
+                    "most over the reference {x:.2} dB over {} judged updates (asked {db})",
+                    m.judged
+                ),
+            )
         }
         Requirement::EachRungWithin { db } => {
             let worst = largest(m.rungs.iter().map(|r| r.1));
@@ -1793,6 +1855,7 @@ mod tests {
             release_overshoot_by_control_db: vec![0.2],
             notch_entries: 1,
             opposition_db: 0.1,
+            over_db: 0.1,
             ident_s: 0.0,
             build_s: 0.0,
             run_s: 0.0,
@@ -1907,6 +1970,12 @@ mod tests {
             with(C::LimitChannel, &|m| m.notch_engaged = false),
             s("limit_held")
         );
+        assert_eq!(
+            with(C::SteepReference, &|m| m.over_db = 1.01),
+            s("never_over")
+        );
+        // Under the reference is not what this requirement judges.
+        assert_eq!(with(C::SteepReference, &|m| m.over_db = -3.0), None);
         // Surviving: an engine stop and the ceiling's scaling are allowed; a
         // sample over the ceiling, a law fault or another end is not.
         assert_eq!(
@@ -1967,7 +2036,7 @@ mod tests {
         let rec = check_record(&"a".repeat(64), "2026-11-18T00:00:00Z", &v);
         assert!(rec.passed);
         assert_eq!(rec.tool_version, MIMO_SINE_CHECK_VERSION);
-        assert_eq!(rec.cases.len(), 14);
+        assert_eq!(rec.cases.len(), 15);
         assert!(rec.cases.iter().all(|c| !c.name.starts_with("moved")));
         rec.validate().unwrap();
     }
@@ -2017,7 +2086,7 @@ mod tests {
             let m = hertzforge_mimo_sine::laws::builtin(id).unwrap().manifest();
             cases_for(&m).len()
         };
-        assert_eq!(types("matrix"), 17);
+        assert_eq!(types("matrix"), 18);
         assert_eq!(types("paired"), 7);
         assert_eq!(types("ratio"), 7);
         assert_eq!(types("steepest_descent"), 6);
