@@ -20,6 +20,9 @@
 // 6. The frequency readout moves; the sweep offers Jog and Go to and no Reverse (the sweep turns
 //    only at the band's edges); Hold keeps it and Resume lets it go on; the run completes.
 // 7. A dwell: the sweep verbs are gone; Abort ends it in words.
+// 8. The level card at 4 controls and 4 drives and at 16 and 8, each with the dock at its start,
+//    narrowest and widest: every cell of the controls and drives tables reads whole, on one line,
+//    inside the card.
 //
 // Screenshots (1,440 by 900): `mimo_sine_<name>.png`.
 
@@ -120,6 +123,96 @@ async function startRun(page) {
 	await until(page, 'the review hold', async (p) => (await runState(p)) === 'review', 30_000);
 }
 
+/** The channel table through its rows: `nc` controls, then `nd` drives, then `nm` monitors. */
+async function channelTable(page, nc, nd, nm = 0) {
+	await section(page, 'channels');
+	await until(page, 'the channel table', async (p) => (await p.locator('[data-testid^="channel-on-"]').count()) >= nc + nd + nm);
+	const ctl = [0, ...Array.from({ length: nc - 1 }, (_, k) => k + 2)];
+	const drv = [1, ...Array.from({ length: nd - 1 }, (_, k) => nc + 1 + k)];
+	const mon = Array.from({ length: nm }, (_, k) => nc + nd + k);
+	const states = await page.locator('[data-testid^="channel-on-"]').evaluateAll((els) => els.map((e) => [Number(e.dataset.testid.replace('channel-on-', '')), e.checked]));
+	for (const [i, checked] of states) {
+		const on = ctl.includes(i) || drv.includes(i) || mon.includes(i);
+		if (checked !== on) await page.locator(`[data-testid="channel-on-${i}"]`).setChecked(on, { force: true });
+	}
+	for (const i of [...ctl, ...drv, ...mon]) if (i > 1) await tid(page, `channel-role-${i}`).selectOption(ctl.includes(i) ? 'control' : drv.includes(i) ? 'drive' : 'monitor');
+	await page.waitForTimeout(300);
+	if (await tid(page, 'table-apply').isEnabled()) await tid(page, 'table-apply').click();
+	await until(page, 'the drives', async (p) => (await p.locator('[data-testid^="msine-drive-ceiling-"]').count()) === nd, 20_000);
+	for (let i = 0; i < nd; i++) {
+		await tid(page, `msine-drive-ceiling-${i}`).fill('4');
+		await tid(page, `msine-drive-abort-${i}`).fill('6');
+		await tid(page, `msine-drive-abort-${i}`).blur();
+	}
+}
+
+/** The dock's width: its start, or pressed to its narrowest or widest with the arrow keys. */
+async function dockTo(page, where) {
+	const edge = page.locator('[data-testid="dock"] [role="separator"]').first();
+	await edge.focus();
+	const key = where === 'narrowest' ? 'ArrowRight' : 'ArrowLeft';
+	for (let i = 0; i < 8; i++) await edge.press(`Shift+${key}`);
+	await page.waitForTimeout(200);
+	return Number(await edge.getAttribute('aria-valuenow'));
+}
+
+/**
+ * Every cell of the level card's tables reads whole: its text inside its cell, the cell inside the
+ * card, and a value on one line (a heading may put its unit under its word). The problems found.
+ */
+async function levelCardProblems(page) {
+	return page.evaluate(() => {
+		const card = document.querySelector('[data-testid="msine-level-card"]');
+		if (!card) return ['no level card'];
+		const box = card.getBoundingClientRect();
+		const out = [];
+		for (const t of card.querySelectorAll('table')) {
+			for (const c of t.querySelectorAll('td, th')) {
+				const cb = c.getBoundingClientRect();
+				const r = document.createRange();
+				r.selectNodeContents(c);
+				const rb = r.getBoundingClientRect();
+				const what = `${t.dataset.testid} "${c.textContent.replace(/\s+/g, ' ').trim()}"`;
+				if (cb.right > box.right + 0.5 || cb.left < box.left - 0.5) out.push(`${what} outside the card`);
+				if (rb.width > 0 && (rb.right > cb.right + 0.5 || rb.left < cb.left - 0.5)) out.push(`${what} clipped`);
+				const lines = new Set([...r.getClientRects()].filter((x) => x.width > 0).map((x) => Math.round(x.top)));
+				if (c.tagName === 'TD' && lines.size > 1) out.push(`${what} wraps`);
+			}
+		}
+		return out;
+	});
+}
+
+async function levelCardCase(nc, nd) {
+	const c2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	const p = await c2.newPage();
+	try {
+		await p.goto(URL_(`&preview=mimo_sine&mock_sim=${Math.max(8, nc + 1)}x${nd}`));
+		await until(p, 'the chooser', async (q) => (await attr(q, 'conn-control', 'data-status')) === 'open' && (await tid(q, 'test-type-chooser').isVisible()));
+		await tid(p, 'test-type-mimo_sine').click();
+		await until(p, 'the MIMO Sine screen', async (q) => tid(q, 'mimo-sine-screen').isVisible());
+		await tid(p, 'claim').click();
+		await until(p, 'control', async (q) => (await attr(q, 'session-role', 'data-role')) === 'controller');
+		await channelTable(p, nc, nd);
+		await until(p, 'the setup checked clean', async (q) => (await attr(q, 'msine-ready', 'data-ready')) === 'true', 30_000);
+		await startRun(p);
+		await tid(p, 'review-proceed').click();
+		await until(p, 'the tone engaged', async (q) => ['engaged', 'full_level'].includes(await runPhase(q)), 30_000);
+		await until(p, 'every control in the level card', async (q) => (await q.locator('[data-testid="msine-controls-table"] tbody tr').count()) === nc && (await q.locator('[data-testid="msine-drives-table"] tbody tr').count()) === nd, 15_000);
+		for (const where of ['start', 'narrowest', 'widest']) {
+			const w = where === 'start' ? Number(await p.locator('[data-testid="dock"] [role="separator"]').first().getAttribute('aria-valuenow')) : await dockTo(p, where);
+			const bad = await levelCardProblems(p);
+			check(`the level card reads whole, ${nc} by ${nd}, dock ${w} px`, bad.length === 0, bad.slice(0, 4).join('; '));
+			const file = path.join(SHOTS, `mimo_sine_level_${nc}x${nd}_dock${w}.png`);
+			await tid(p, 'msine-level-card').screenshot({ path: file });
+			console.log(`      screenshot ${file}`);
+		}
+		await tid(p, 'act-abort').click();
+	} finally {
+		await c2.close();
+	}
+}
+
 try {
 	const a = await ctx.newPage();
 	// ---- 1. coming, then by name -------------------------------------------------------------------
@@ -199,6 +292,10 @@ try {
 	await tid(a, 'act-abort').click();
 	await until(a, 'the run aborted', async (p) => (await runState(p)) === 'finished', 15_000);
 	check('Abort ends the run in words', /Aborted by the Operator/.test(await text(a, 'msine-end')));
+
+	// ---- 8. the level card at every dock width ---------------------------------------------------------
+	await levelCardCase(4, 4);
+	await levelCardCase(16, 8);
 } catch (err) {
 	failed = err;
 	console.error(err);

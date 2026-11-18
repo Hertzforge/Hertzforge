@@ -17,6 +17,19 @@ import { MSINE_PLOT_TYPES, MSINE_QUANTITIES } from './msineLayout';
 import { MimoSineStore } from './msineStore.svelte';
 import { MSINE_HOOKS } from './msineViews.svelte';
 
+describe('The mock simulator for a larger table', () => {
+	it('takes its inputs and outputs from mock_sim, and offers them as the station', async () => {
+		expect(readConfig('?mock=1&mock_sim=17x8').mockControl).toMatchObject({ simInputs: 17, simOutputs: 8 });
+		for (const bad of ['0x8', '17', 'x8', '99x8', '17x8x1']) expect(readConfig(`?mock=1&mock_sim=${bad}`).mockControl.simInputs).toBeUndefined();
+		const client = new ServiceClient({ service: 'control', url: 'ws://mock/', socketFactory: mockSocketFactory(createControlServer({ simInputs: 17, simOutputs: 8 }), 1) });
+		client.connect();
+		await client.whenOpen();
+		const list = await client.request<{ stations: { kind: string; inputs: number; outputs: number }[] }>('station.list');
+		expect(list.stations.find((x) => x.kind === 'sim')).toMatchObject({ inputs: 17, outputs: 8 });
+		client.close();
+	});
+});
+
 const plot = (id: string, quantity: string, channels: number[] | 'all' = 'all', points = 1024) => ({ id, kind: 'plot', plot: { quantity, channels, points } }) as unknown as PlotPanel;
 
 const until = async (cond: () => boolean, ms = 8000) => {

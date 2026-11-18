@@ -33,9 +33,18 @@ export interface ShellConfig {
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
 	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`,
-	 * `mock_record=unwritable|problem` (a Random run's record refused at arm, or failing as it runs).
+	 * `mock_record=unwritable|problem` (a Random run's record refused at arm, or failing as it runs),
+	 * `mock_sim=<inputs>x<outputs>` (the simulator's channels, default 8x1).
 	 */
 	mockControl: ControlServerOptions;
+}
+
+/** `mock_sim=24x8`: the mock simulator's inputs and outputs, each 1 to 64. */
+function simChannels(value: string | null): { simInputs?: number; simOutputs?: number } {
+	const m = /^(\d{1,2})x(\d{1,2})$/.exec(value ?? '');
+	if (!m) return {};
+	const [i, o] = [Number(m[1]), Number(m[2])];
+	return i >= 1 && i <= 64 && o >= 1 && o <= 64 ? { simInputs: i, simOutputs: o } : {};
 }
 
 function num(value: string | null): number | undefined {
@@ -76,7 +85,8 @@ export function readConfig(search: string): ShellConfig {
 			abortDemoAtS: num(q.get('mock_abort_at')),
 			feasibilityExceeds: q.get('mock_feasibility') === 'exceeds' ? true : undefined,
 			coherence: num(q.get('mock_coherence')),
-			record: q.get('mock_record') === 'unwritable' ? 'unwritable' : q.get('mock_record') === 'problem' ? 'problem' : undefined
+			record: q.get('mock_record') === 'unwritable' ? 'unwritable' : q.get('mock_record') === 'problem' ? 'problem' : undefined,
+			...simChannels(q.get('mock_sim'))
 		}
 	};
 }
