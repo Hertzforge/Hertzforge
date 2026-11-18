@@ -998,7 +998,8 @@ Every one of these holds whatever the law returns:
   that scale, or it fights the notch: on the base-and-article structure `matrix` aiming for the
   whole reference held the article 0.66 dB over its bound with the notch going in eight times. Every
   built-in law does. The scale goes down at once when a limit channel demands it and comes back up
-  only past a hysteresis (1 dB by default) at a capped rate (10 dB a second by default), and while
+  only past a hysteresis (`limits.notch.release_hysteresis_db`, 1 dB by default) at a capped rate
+  (`limits.notch.release_ramp_db_per_s`, 10 dB a second by default), and while
   it is under 1 the whole drive vector rises no faster than that rate;
 - the first drive is bounded near what the identification predicts;
 - when the level moves (the ladder, or the operator's level step), the controller carries the drive
@@ -1051,6 +1052,12 @@ measurement noise, the level ladder and the stepped sine on `sine-weak-4x4` inst
 modes with each control dominated by its own drive, every cross path at least 20 dB under the
 direct one across the band. Its transport delay and law-misbehaves cases are every law's.
 
+The control service's `laws.check` (with `"world":"sine_mimo"` for a built-in law) runs the same
+cases, each as the laws crate plans it for the law, so `paired`'s pair cases run on
+`sine-weak-4x4` there too and the report's `structure` says so. A law file's scored verdicts are
+recorded against its exact file, and arming on a hardware station is refused (`law_not_checked`)
+until that record has passed; a missing or failing record is refused alike.
+
 Every case first asks the same of the run, in this order: every answer of the law was used and it
 never faulted; no drive sample went over its ceiling and the controller never had to scale an answer
 down to the ceilings (the near-singular case excepted); the run did not end on an abort or the
@@ -1061,7 +1068,8 @@ can be seen, and never fail a law.
 
 The requirements are what a good law should do, written before any law was run against them, and
 several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
-as a law file with the same verdicts. Every built-in law passes every scored case it runs. On the
+as a law file with the same verdicts, through the laws crate and through the service's
+`laws.check`. Every built-in law passes every scored case it runs. On the
 limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
 control is over its reference in the second after the release (the worst is 1.1 dB under). On the
 level ladder the worst rung is 0.3 to 0.4 dB for every law. `matrix`'s hardening sweep, reported
