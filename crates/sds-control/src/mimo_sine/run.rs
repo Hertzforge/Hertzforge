@@ -98,8 +98,6 @@ pub struct RunShared {
     pub live_started: AtomicBool,
     pub record: Mutex<Option<LogHandle>>,
     pub station_frame: Arc<AtomicU64>,
-    /// While nobody holds control the schedule is held.
-    pub orphan_hold: AtomicBool,
 }
 
 impl RunShared {
@@ -114,7 +112,6 @@ impl RunShared {
             live_started: AtomicBool::new(false),
             record: Mutex::new(None),
             station_frame: Arc::new(AtomicU64::new(NO_FRAME)),
-            orphan_hold: AtomicBool::new(false),
         }
     }
 
@@ -1189,14 +1186,6 @@ impl Actor {
             self.abort_now(&self.ender());
             return;
         }
-        // While nobody holds control the schedule is held; the drive stays.
-        let orphan = self.shared.orphan_hold.load(Ordering::SeqCst);
-        if orphan != self.view.held && !self.operator_hold {
-            if let Some(c) = &self.commands {
-                let _ = c.try_send(if orphan { Command::Hold } else { Command::Resume });
-            }
-            self.view.held = orphan;
-        }
         let Some(svc) = self.svc.as_mut() else {
             self.fault("the run lost its station");
             return;
@@ -1577,9 +1566,7 @@ impl Actor {
         self.view.notch = r.notch_scale < 1.0;
         self.view.notch_scale = r.notch_scale;
         self.view.alarm = self.in_alarm.iter().any(|a| *a);
-        self.view.held = self.operator_hold
-            || self.shared.orphan_hold.load(Ordering::Relaxed)
-            || matches!(r.hold, hertzforge_mimo_sine::Hold::Held) && !granted;
+        self.view.held = self.operator_hold;
         if let Some(s) = self.view.sweeps.as_mut() {
             s.0 = self.pass;
         }
