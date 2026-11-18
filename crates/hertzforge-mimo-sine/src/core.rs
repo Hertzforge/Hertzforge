@@ -665,6 +665,7 @@ impl MimoSineCore {
         };
         // The record of the call.
         let rec = &mut self.record;
+        rec.law_called = true;
         rec.law_s = took;
         rec.values = [f64::NAN; crate::limits::MAX_LAW_VALUES];
         for (i, v) in self.law_values.iter() {
@@ -804,6 +805,7 @@ impl MimoSineCore {
         }
         self.records.tick(&self.record);
         self.record.engage = false;
+        self.record.law_called = false;
     }
 
     fn drain_commands(&mut self) {

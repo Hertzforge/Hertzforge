@@ -62,6 +62,9 @@ pub struct TickRecord {
     pub drive_asked: [C64; MAX_DRIVES],
     /// The drive played from this update on, after every guard.
     pub drive: [C64; MAX_DRIVES],
+    /// Whether the law was called this update (not on an update that ended
+    /// the run before the law's turn).
+    pub law_called: bool,
     /// Whether the law's answer was used (`None`) or the miss's reason.
     pub miss: Option<&'static str>,
     /// Whether this call was the law's engage.
@@ -125,6 +128,7 @@ impl TickRecord {
             drive_in_force: [ZERO; MAX_DRIVES],
             drive_asked: [ZERO; MAX_DRIVES],
             drive: [ZERO; MAX_DRIVES],
+            law_called: false,
             miss: None,
             engage: false,
             law_s: 0.0,
@@ -359,8 +363,8 @@ pub struct ReplayMismatch {
 
 /// Replay a run's law calls: build the law again from `setup`, feed it each
 /// recorded update's inputs in order, and compare its drive with the drive
-/// the record says it asked for. Updates where the law was not called (a stop
-/// ramp) are absent from the record; a miss is replayed and compared as a miss.
+/// the record says it asked for. Updates where the law was not called are
+/// skipped; a miss is replayed and compared as a miss.
 /// Returns every update whose replay differs by more than `tolerance_v`.
 pub fn replay(
     factory: &dyn MimoSineLawFactory,
@@ -372,7 +376,7 @@ pub fn replay(
     let mut out = TickOutputs::new(setup.drives, setup.controls);
     let mut values = LawValues::new(factory.describe().diagnostics.len());
     let mut bad = Vec::new();
-    for r in records {
+    for r in records.iter().filter(|r| r.law_called) {
         let (n, m, p) = (r.controls as usize, r.drives as usize, r.limits as usize);
         let bounds: Vec<Option<f64>> = r.limit_bound[..p]
             .iter()
