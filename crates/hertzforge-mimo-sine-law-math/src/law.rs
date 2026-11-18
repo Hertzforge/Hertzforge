@@ -64,7 +64,11 @@ pub struct Inputs<'a> {
     pub drive_in_force: &'a [C64],
     /// The controller's hold state.
     pub hold: Hold,
-    /// The backstop notch's present scale (1 when not binding).
+    /// The backstop notch's depth: the share of the reference the controller
+    /// judges the controls against while a limit channel holds the drive down
+    /// (1 when no notch is in). A law aims for `reference x notch_scale`
+    /// ([`aimed_reference`]) so it does not push against the notch, and its
+    /// drive follows the notch out as the controller releases it.
     pub notch_scale: f64,
     /// Whether a settle window is open.
     pub settle_open: bool,
@@ -103,6 +107,18 @@ pub trait SineLaw {
     fn tick(&mut self, x: &Inputs, out: &mut Outputs) -> Result<(), String>;
     /// The names of the diagnostics it declares, in order.
     fn value_names(&self) -> &'static [&'static str];
+}
+
+/// The reference a law aims for this update: the reference times the notch
+/// scale (see [`Inputs::notch_scale`]); the reference itself when no notch is
+/// in.
+pub fn aimed_reference(x: &Inputs) -> Vec<C64> {
+    let s = if x.notch_scale.is_finite() {
+        x.notch_scale.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    x.reference.iter().map(|r| r * s).collect()
 }
 
 /// The largest `|dB(C) - dB(R)|` over the controls.

@@ -15,7 +15,7 @@
 //! regularized inverse of the identification. The law has no gain: its pace is
 //! the stride and `K`.
 
-use crate::law::{worst_error_db, Hold, Inputs, Outputs, SineLaw};
+use crate::law::{aimed_reference, worst_error_db, Hold, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, reg_pinv};
 use crate::setup::{Setup, Shape};
 use crate::{TestTypes, C64};
@@ -100,18 +100,14 @@ impl RatioLaw {
         let mut h = vec![C64::new(0.0, 0.0); n * m];
         self.setup.response_at(x.f_hz, &mut h);
         let (z, _) = reg_pinv(&h, n, m, self.params.eps)?;
+        let aimed = aimed_reference(x);
         match self.params.pairing {
             Pairing::Reference => {
-                let r: Vec<C64> = x
-                    .reference
-                    .iter()
-                    .zip(&self.sigma)
-                    .map(|(r, s)| r * s)
-                    .collect();
+                let r: Vec<C64> = aimed.iter().zip(&self.sigma).map(|(r, s)| r * s).collect();
                 mat_vec(&z, m, n, &r, &mut out.drive);
             }
             Pairing::Drive => {
-                mat_vec(&z, m, n, x.reference, &mut out.drive);
+                mat_vec(&z, m, n, &aimed, &mut out.drive);
                 out.drive
                     .iter_mut()
                     .zip(&self.sigma)
@@ -147,8 +143,9 @@ impl SineLaw for RatioLaw {
         }
         self.count = 0;
         let k = self.params.k;
+        let aimed = aimed_reference(x);
         for (i, s) in self.sigma.iter_mut().enumerate() {
-            let eq = (x.controls[i].norm() / x.reference[i].norm().max(1e-300)).max(1e-6);
+            let eq = (x.controls[i].norm() / aimed[i].norm().max(1e-300)).max(1e-6);
             *s *= if eq <= 1.0 {
                 (k + 1.0 / eq) / (k + eq)
             } else {

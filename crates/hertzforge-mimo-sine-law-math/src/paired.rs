@@ -11,7 +11,7 @@
 //! a first drive, and an update that turns one tick's measurements into the
 //! next drive.
 
-use crate::law::{worst_error_db, Hold, Inputs, Outputs, SineLaw};
+use crate::law::{aimed_reference, worst_error_db, Hold, Inputs, Outputs, SineLaw};
 use crate::setup::{GroupDelay, Setup, TrackingRule};
 use crate::speed::{gain, GainRule};
 use crate::{TestTypes, C64};
@@ -87,9 +87,10 @@ impl SineLaw for PairedLaw {
         let mut h = vec![C64::new(0.0, 0.0); n * m];
         self.setup.response_at(x.f_hz, &mut h);
         out.drive.iter_mut().for_each(|v| *v = C64::new(0.0, 0.0));
+        let r = aimed_reference(x);
         for (c, &d) in self.params.drive_of.iter().enumerate() {
             let path = h[c * m + d].norm().max(1e-300);
-            out.drive[d] = C64::new(x.reference[c].norm() / path, 0.0);
+            out.drive[d] = C64::new(r[c].norm() / path, 0.0);
         }
         out.values.clear();
         out.values.extend_from_slice(&[0.0, 0.0]);
@@ -108,11 +109,12 @@ impl SineLaw for PairedLaw {
         );
         let g = if x.hold == Hold::Engage { 0.0 } else { gn.g };
         out.drive.iter_mut().for_each(|v| *v = C64::new(0.0, 0.0));
+        let r = aimed_reference(x);
         for (c, &d) in self.params.drive_of.iter().enumerate() {
             let now = x.drive_in_force[d];
             let measured = x.controls[c].norm();
             let ratio = if measured > 1e-300 {
-                x.reference[c].norm() / measured
+                r[c].norm() / measured
             } else {
                 1.0
             };

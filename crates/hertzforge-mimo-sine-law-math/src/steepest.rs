@@ -5,7 +5,7 @@
 //! the loop-speed rule's by default; the published fixed gain is a parameter.
 //! Slow in the ill-conditioned directions, which is why it trails `matrix`.
 
-use crate::law::{worst_error_db, Hold, Inputs, Outputs, SineLaw};
+use crate::law::{aimed_reference, worst_error_db, Hold, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, reg_pinv, singular_values};
 use crate::setup::{GroupDelay, Setup};
 use crate::speed::{gain, GainRule};
@@ -68,7 +68,7 @@ impl SineLaw for SteepestLaw {
         let mut h = vec![C64::new(0.0, 0.0); n * m];
         self.setup.response_at(x.f_hz, &mut h);
         let (z, _) = reg_pinv(&h, n, m, self.params.eps)?;
-        mat_vec(&z, m, n, x.reference, &mut out.drive);
+        mat_vec(&z, m, n, &aimed_reference(x), &mut out.drive);
         out.values.clear();
         out.values.extend_from_slice(&[0.0, 0.0]);
         Ok(())
@@ -93,9 +93,10 @@ impl SineLaw for SteepestLaw {
             .g
         };
         let k = g / (smax * smax);
+        let r = aimed_reference(x);
         for (j, d) in out.drive.iter_mut().enumerate() {
             let s = (0..n).fold(C64::new(0.0, 0.0), |s, i| {
-                s + h[i * m + j].conj() * (x.reference[i] - x.controls[i])
+                s + h[i * m + j].conj() * (r[i] - x.controls[i])
             });
             *d = x.drive_in_force[j] + s * k;
         }

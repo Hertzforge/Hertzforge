@@ -351,6 +351,13 @@ impl Default for RequestSettings {
     }
 }
 
+/// The default rate the notch's depth rises at once the limits allow, dB per
+/// second.
+pub const DEFAULT_NOTCH_RELEASE_DB_PER_S: f64 = 10.0;
+
+/// The default gap between the notch going in and coming out, dB.
+pub const DEFAULT_NOTCH_HYSTERESIS_DB: f64 = 1.0;
+
 /// The backstop notch: how the limit channels hold the drive down.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -358,9 +365,14 @@ pub struct NotchSettings {
     /// Updates each limit channel's measured-over-identified ratio is
     /// smoothed over, at least 1.
     pub smoothing_ticks: u32,
-    /// How fast the drive may come back once the notch releases, dB per
-    /// second, above 0.
+    /// How fast the notch's depth (the share of the reference the controls
+    /// are held to while it is in) may rise once the limit readings allow,
+    /// dB per second, above 0.
     pub release_ramp_db_per_s: f64,
+    /// How far the limit readings must allow the depth to rise before it
+    /// begins to, dB, 0 to 6: the gap between going in and coming out, so
+    /// the notch does not toggle on readings near its bound.
+    pub release_hysteresis_db: f64,
     /// A notched reference a law returns is taken only while a limit channel
     /// is within this of its bound (or the notch is releasing), dB, above 0
     /// and at most 20.
@@ -371,7 +383,8 @@ impl Default for NotchSettings {
     fn default() -> Self {
         NotchSettings {
             smoothing_ticks: 3,
-            release_ramp_db_per_s: 20.0,
+            release_ramp_db_per_s: DEFAULT_NOTCH_RELEASE_DB_PER_S,
+            release_hysteresis_db: DEFAULT_NOTCH_HYSTERESIS_DB,
             near_bound_db: 3.0,
         }
     }
@@ -957,6 +970,11 @@ impl MimoSineSetup {
         }
         if !(g.notch.release_ramp_db_per_s.is_finite() && g.notch.release_ramp_db_per_s > 0.0) {
             return g_bad("notch.release_ramp_db_per_s", "above 0 dB/s is accepted");
+        }
+        if !(g.notch.release_hysteresis_db.is_finite()
+            && (0.0..=6.0).contains(&g.notch.release_hysteresis_db))
+        {
+            return g_bad("notch.release_hysteresis_db", "0 to 6 dB is accepted");
         }
         if !in_range(g.notch.near_bound_db, 0.0, 20.0) {
             return g_bad(

@@ -753,7 +753,11 @@ scheduled level as a fraction of full level, every control's reference at this f
 every control's and limit channel's tracked amplitude, each limit channel's bound here, the drive
 in force as it was played after every guard, why the controller holds the drive (`free`, `notch`,
 `held`, `probe`, or `engage` for the settle window after engage), the notch's scale, and whether a
-settle window is open.
+settle window is open. The notch's scale is the share of the reference the controller judges the
+controls against while the backstop notch is in (1 when it is out); a law aims for the reference
+times it, so it does not push against the notch and its drive follows the notch out as the scale
+comes back up (at no more than the setup's release rate, once the limit channels allow more than
+its hysteresis).
 
 **What it returns.** One finite complex amplitude per drive, in volts peak at the scheduled level:
 the controller does not rescale it. Its own judgement that it is faulted (shown and recorded,

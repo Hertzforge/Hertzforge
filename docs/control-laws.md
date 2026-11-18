@@ -993,6 +993,13 @@ Every one of these holds whatever the law returns:
   available;
 - the whole drive vector is scaled down, its direction kept, when a limit channel nears its bound
   or a drive is over its ceiling;
+- while the backstop notch is in, the law is told `hold` `notch` and the notch scale: the share of
+  the reference the controller now judges the controls against. A law aims for the reference times
+  that scale, or it fights the notch: on the base-and-article structure `matrix` aiming for the
+  whole reference held the article 0.66 dB over its bound with the notch going in eight times. Every
+  built-in law does. The scale goes down at once when a limit channel demands it and comes back up
+  only past a hysteresis (1 dB by default) at a capped rate (10 dB a second by default), and while
+  it is under 1 the whole drive vector rises no faster than that rate;
 - the first drive is bounded near what the identification predicts;
 - when the level moves (the ladder, or the operator's level step), the controller carries the drive
   with it: the drive in force is scaled by the level's ratio, at no more per update than the change

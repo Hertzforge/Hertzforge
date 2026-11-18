@@ -21,8 +21,9 @@ use std::fmt;
 pub enum Hold {
     /// Nothing holds it: the law's drive is used, within the core's guards.
     Free,
-    /// A limit channel holds the drive down: the core scales the whole drive
-    /// vector by `notch_scale`.
+    /// A limit channel holds the drive down: the core judges the controls
+    /// against the reference times `notch_scale` and scales the whole drive
+    /// vector to keep the limit channels at their bounds.
     Notch,
     /// The core granted the law's request to hold the sweep.
     Held,
@@ -87,7 +88,9 @@ pub struct TickInputs<'a> {
     /// every drive at `engage`.
     pub drive_in_force: &'a [C64],
     pub hold: Hold,
-    /// The scale the limit channels hold the whole drive vector to, 0 to 1.
+    /// The backstop notch's depth, 0 to 1 (1 when it is out): the share of
+    /// the reference the controls are judged against while it is in. A law
+    /// aims for the reference times it, so it never pushes against the notch.
     pub notch_scale: f64,
     /// Whether the core's settle window is open.
     pub settling: bool,

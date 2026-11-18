@@ -3,15 +3,18 @@
 //! verdict is the one recorded here. A built-in law's failures are findings,
 //! named and kept, never hidden by easing a requirement:
 //!
-//! - `matrix`: `limit_channel` (the article 0.66 dB over its
-//!   bound against 0.5 dB, and a control 3.46 dB over its reference within a
-//!   second of a notch release, against 1.0 dB, with the backstop notch
-//!   going in and out several times between 213 and 272 Hz). Reported, not
-//!   scored: `moved_resonance_hardening`, 2.28 dB.
+//! - `matrix`: none scored. Reported, not scored:
+//!   `moved_resonance_hardening`, 2.32 dB.
 //! - `paired`: `measurement_noise` and `stepped` (it opens about 5.4 dB from
 //!   the reference and is still there when the engine's settle window
 //!   closes) and `level_ladder` (4.8 dB on the -20 dB rung).
 //! - `steepest_descent`, `secant` and `ratio`: none.
+//!
+//! `matrix`'s limit channel passes since the backstop notch holds a depth
+//! that goes in at once and comes out past a hysteresis at a capped rate, and
+//! every built-in law aims for the reference times that depth (before, the
+//! article was 0.66 dB over its bound, a control 3.46 dB over its reference
+//! within a second of a release, and the notch went in eight times).
 //!
 //! The level ladder passes for every law but `paired` since the controller
 //! carries the drive with each level change (before, `matrix` was 1.16 dB out
@@ -84,13 +87,7 @@ fn expect(id: &str, failed: &[(&str, &str)]) {
 
 #[test]
 fn mimo_sine_check_matrix_natively() {
-    expect(
-        "matrix",
-        &[
-            ("limit_channel", "limit_held"),
-            ("moved_resonance_hardening", "sweep_within"),
-        ],
-    );
+    expect("matrix", &[("moved_resonance_hardening", "sweep_within")]);
 }
 
 #[test]

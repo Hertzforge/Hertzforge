@@ -134,38 +134,83 @@ pub fn mat_vec(a: &[C64], rows: usize, cols: usize, x: &[C64], y: &mut [C64]) {
     }
 }
 
+/// How far under its bound a limit channel's predicted reading may be and
+/// still teach the notch its measured-over-identified ratio, dB: further
+/// under, the reading is the station's noise rather than the drive's
+/// response, and a ratio learned from it would hold the drive down for good.
+pub const NOTCH_OBSERVE_FLOOR_DB: f64 = -40.0;
+
 /// The backstop notch: each limit channel's amplitude is predicted for the
 /// proposed drive as `kappa_j |T_j D|`, `T_j` the identification's limit row
 /// at the tone and `kappa_j` the measured-over-identified ratio (seeded
 /// directly, then smoothed over the setup's count of updates); where a
 /// prediction passes its bound the whole vector is scaled by the smallest
-/// ratio, direction kept. Once nothing binds, the scale comes back toward 1 at
-/// the release ramp.
+/// ratio, direction kept. While the notch is in or releasing, the whole
+/// vector may also rise no faster than the release rate against the drive
+/// as played. The cut acts on each answer afresh: the drive in force already
+/// carries the cuts before it, and a law is told that drive, so a cut is
+/// never carried into the next update (on a law that starts from the drive
+/// in force a carried cut would compound, update after update, to nothing).
+///
+/// The notch's depth is its state: the share of the reference the limit
+/// channels allow, which the controls are judged against and the law is told
+/// as the notch scale. It goes deeper at once when the limit readings demand
+/// it, and comes back up only once they allow it more than the hysteresis
+/// above where it is, and then at no more than the release rate, so a reading
+/// that wanders near its bound neither toggles the notch nor releases it with
+/// a kick.
 #[derive(Debug, Clone)]
 pub struct BackstopNotch {
     kappa: [f64; MAX_LIMITS],
     seeded: [bool; MAX_LIMITS],
     alpha: f64,
     release_db_per_s: f64,
+    hysteresis: f64,
     scale: f64,
+    depth: f64,
 }
 
 impl BackstopNotch {
-    /// A notch smoothing over `smoothing_ticks` updates, releasing at
-    /// `release_db_per_s`.
-    pub fn new(smoothing_ticks: u32, release_db_per_s: f64) -> Self {
+    /// A notch smoothing over `smoothing_ticks` updates, its depth and its
+    /// per-update scale released at `release_db_per_s` once the readings
+    /// allow `hysteresis_db` more.
+    pub fn new(smoothing_ticks: u32, release_db_per_s: f64, hysteresis_db: f64) -> Self {
         BackstopNotch {
             kappa: [1.0; MAX_LIMITS],
             seeded: [false; MAX_LIMITS],
             alpha: 2.0 / (smoothing_ticks.max(1) as f64 + 1.0),
             release_db_per_s,
+            hysteresis: 10f64.powf(hysteresis_db / 20.0),
             scale: 1.0,
+            depth: 1.0,
         }
     }
 
-    /// The scale now, 0 to 1.
+    /// The scale the last drive was played at, 0 to 1.
     pub fn scale(&self) -> f64 {
         self.scale
+    }
+
+    /// The notch's depth now, 0 to 1 (1 when it is out).
+    pub fn depth(&self) -> f64 {
+        self.depth
+    }
+
+    /// Move the depth for one update of `dt_s` given `allowed`, the share of
+    /// the reference the limit readings allow now (above 1 when they allow
+    /// more than the whole reference): deeper at once; up only past the
+    /// hysteresis, at the release rate, never above 1. Returns the depth.
+    pub fn track_depth(&mut self, allowed: f64, dt_s: f64) -> f64 {
+        if allowed.is_nan() {
+            return self.depth;
+        }
+        if allowed < self.depth {
+            self.depth = allowed.max(0.0);
+        } else if self.depth < 1.0 && allowed > self.depth * self.hysteresis {
+            let up = self.depth * 10f64.powf(self.release_db_per_s * dt_s / 20.0);
+            self.depth = up.min(allowed).min(1.0);
+        }
+        self.depth
     }
 
     /// Each limit channel's measured-over-identified ratio now.
@@ -175,11 +220,22 @@ impl BackstopNotch {
 
     /// Take one update's measured limit amplitudes against what the
     /// identification predicts for the drive in force. A channel whose
-    /// prediction is too small to divide by keeps its ratio.
-    pub fn observe(&mut self, measured: &[C64], predicted: &[C64]) {
+    /// prediction is too small to divide by, or more than
+    /// [`NOTCH_OBSERVE_FLOOR_DB`] under its bound (where the reading is the
+    /// noise, not the drive), keeps its ratio.
+    pub fn observe(&mut self, measured: &[C64], predicted: &[C64], bounds: &[Option<f64>]) {
+        let floor = 10f64.powf(NOTCH_OBSERVE_FLOOR_DB / 20.0);
         for (j, (m, p)) in measured.iter().zip(predicted).enumerate() {
             let p = p.norm();
             if p.is_nan() || p <= 1e-12 || !m.norm().is_finite() {
+                continue;
+            }
+            if bounds
+                .get(j)
+                .copied()
+                .flatten()
+                .is_some_and(|b| p < b * floor)
+            {
                 continue;
             }
             let r = m.norm() / p;
@@ -194,9 +250,17 @@ impl BackstopNotch {
 
     /// The scale the proposed drive is played at: `predicted` holds each
     /// limit channel's identified amplitude for the proposed drive, `bounds`
-    /// each bound here (`None` where there is none). Returns the scale and
-    /// whether the notch binds (a prediction at or over its bound).
-    pub fn apply(&mut self, predicted: &[C64], bounds: &[Option<f64>], dt_s: f64) -> (f64, bool) {
+    /// each bound here (`None` where there is none); `norms` the proposed
+    /// drive's norm and the played drive's, for the rise cap while the notch
+    /// is in or releasing. Returns the scale and whether the notch binds (a
+    /// prediction at or over its bound).
+    pub fn apply(
+        &mut self,
+        predicted: &[C64],
+        bounds: &[Option<f64>],
+        dt_s: f64,
+        norms: (f64, f64),
+    ) -> (f64, bool) {
         let mut need = 1.0f64;
         for (j, (p, b)) in predicted.iter().zip(bounds).enumerate() {
             let Some(b) = b else { continue };
@@ -206,8 +270,14 @@ impl BackstopNotch {
             }
         }
         let binds = need < 1.0;
-        let released = (self.scale * 10f64.powf(self.release_db_per_s * dt_s / 20.0)).min(1.0);
-        self.scale = need.min(released);
+        let (proposed, played) = norms;
+        if self.depth < 1.0 && played > 0.0 && proposed > 0.0 {
+            let up = played * 10f64.powf(self.release_db_per_s * dt_s / 20.0);
+            if proposed * need > up {
+                need = up / proposed;
+            }
+        }
+        self.scale = need;
         (self.scale, binds)
     }
 }
@@ -320,19 +390,47 @@ mod tests {
     }
 
     #[test]
-    fn mimo_sine_guard_notch_scales_to_the_bound_and_releases_on_its_ramp() {
-        let mut n = BackstopNotch::new(3, 20.0);
+    fn mimo_sine_guard_notch_scales_to_the_bound_and_caps_the_rise_while_in() {
+        let mut n = BackstopNotch::new(3, 20.0, 0.5);
         // Measured twice the identified: kappa seeds to 2.
-        n.observe(&[c(2.0, 0.0)], &[c(1.0, 0.0)]);
+        n.observe(&[c(2.0, 0.0)], &[c(1.0, 0.0)], &[Some(1.0)]);
         assert!((n.kappa(0) - 2.0).abs() < 1e-12);
         // Identified 1 for the proposed drive, predicted 2, bound 1: half.
-        let (s, binds) = n.apply(&[c(1.0, 0.0)], &[Some(1.0)], 0.01);
+        let (s, binds) = n.apply(&[c(1.0, 0.0)], &[Some(1.0)], 0.01, (1.0, 1.0));
         assert!(binds);
         assert!((s - 0.5).abs() < 1e-12);
-        // Nothing binds now: back up by 0.2 dB a 10 ms update, not at once.
-        let (s2, binds) = n.apply(&[c(0.1, 0.0)], &[Some(1.0)], 0.01);
+        // Nothing binds and the notch is out: the answer is played as asked;
+        // the cut before it is not carried.
+        let (s2, binds) = n.apply(&[c(0.1, 0.0)], &[Some(1.0)], 0.01, (1.0, 0.5));
         assert!(!binds);
-        assert!((20.0 * (s2 / 0.5).log10() - 0.2).abs() < 1e-9);
+        assert_eq!(s2, 1.0);
+        // With the notch in, the vector rises at most 0.2 dB a 10 ms update
+        // against the drive as played.
+        n.track_depth(0.5, 0.01);
+        let (s3, _) = n.apply(&[c(0.1, 0.0)], &[Some(1.0)], 0.01, (1.0, 0.5));
+        assert!((20.0 * (s3 / 0.5).log10() - 0.2).abs() < 1e-9, "{s3}");
+    }
+
+    #[test]
+    fn mimo_sine_guard_notch_depth_goes_in_at_once_and_out_past_its_hysteresis() {
+        let mut n = BackstopNotch::new(3, 10.0, 0.5);
+        assert_eq!(n.track_depth(2.0, 0.01), 1.0);
+        // In at once.
+        assert_eq!(n.track_depth(0.5, 0.01), 0.5);
+        // Readings that allow less than the hysteresis more: held.
+        let inside = 0.5 * 10f64.powf(0.45 / 20.0);
+        assert_eq!(n.track_depth(inside, 0.01), 0.5);
+        // Past it: up at 10 dB/s, 0.1 dB a 10 ms update, never past what is
+        // allowed or past 1.
+        let d = n.track_depth(0.9, 0.01);
+        assert!((20.0 * (d / 0.5).log10() - 0.1).abs() < 1e-9, "{d}");
+        let mut last = d;
+        for _ in 0..1000 {
+            last = n.track_depth(2.0, 0.01);
+        }
+        assert_eq!(last, 1.0);
+        // Deeper at once from anywhere.
+        assert_eq!(n.track_depth(0.25, 0.01), 0.25);
     }
 
     #[test]

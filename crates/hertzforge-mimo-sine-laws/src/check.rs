@@ -942,6 +942,11 @@ pub struct CaseMeasure {
     /// The worst control over its reference in the watch after a release,
     /// dB (minus infinity with no release).
     pub release_overshoot_db: f64,
+    /// The same per control, dB (minus infinity with no release).
+    pub release_overshoot_by_control_db: Vec<f64>,
+    /// How many times the backstop notch went in (a notch that toggles goes
+    /// in many times).
+    pub notch_entries: usize,
     /// The largest opposition ratio over the judged updates, dB.
     pub opposition_db: f64,
     /// Wall time of the identification, s.
@@ -1249,6 +1254,7 @@ fn measure(
         .any(|e| matches!(e.kind, EventKind::NotchIn { .. }));
     let deepest = ticks.iter().map(|t| t.notch_depth).fold(1.0f64, f64::min);
     let mut release = f64::NEG_INFINITY;
+    let mut release_by = vec![f64::NEG_INFINITY; n];
     for e in events.iter().filter(|e| e.kind == EventKind::NotchOut) {
         for t in ticks.iter().filter(|t| {
             t.time_s >= e.time_s
@@ -1256,8 +1262,9 @@ fn measure(
                 && !t.settling
                 && t.miss.is_none()
         }) {
-            for &x in t.errors_db() {
+            for (k, &x) in t.errors_db().iter().enumerate() {
                 release = release.max(x);
+                release_by[k] = release_by[k].max(x);
             }
         }
     }
@@ -1291,6 +1298,11 @@ fn measure(
         notch_engaged,
         deepest_notch_db: db(deepest),
         release_overshoot_db: release,
+        release_overshoot_by_control_db: release_by,
+        notch_entries: events
+            .iter()
+            .filter(|e| matches!(e.kind, EventKind::NotchIn { .. }))
+            .count(),
         opposition_db: opposition,
         ident_s,
         build_s,
@@ -1523,9 +1535,9 @@ pub fn judge(m: &CaseMeasure) -> CaseVerdict {
             let (l, r) = (m.limit_over_db, m.release_overshoot_db);
             let detail = format!(
                 "limit {l:.2} dB over its bound (asked {over_bound_db}), deepest notch \
-                 {:.1} dB, control over its reference after release {r:.2} dB \
+                 {:.1} dB, in {} times, control over its reference after release {r:.2} dB \
                  (asked {overshoot_db})",
-                m.deepest_notch_db
+                m.deepest_notch_db, m.notch_entries
             );
             if !m.notch_engaged {
                 return v(Some(name), l, format!("the notch never engaged; {detail}"));
@@ -1716,6 +1728,8 @@ mod tests {
             notch_engaged: true,
             deepest_notch_db: -6.0,
             release_overshoot_db: 0.2,
+            release_overshoot_by_control_db: vec![0.2],
+            notch_entries: 1,
             opposition_db: 0.1,
             ident_s: 0.0,
             build_s: 0.0,

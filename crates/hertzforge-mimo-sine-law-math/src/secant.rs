@@ -26,7 +26,7 @@
 //! present settle wait is restarted, so the next reading is taken settled at
 //! the new level.
 
-use crate::law::{worst_error_db, Inputs, Outputs, SineLaw};
+use crate::law::{aimed_reference, worst_error_db, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, norm, reg_pinv};
 use crate::setup::{GroupDelay, Setup};
 use crate::{TestTypes, C64};
@@ -266,7 +266,7 @@ impl SineLaw for SecantLaw {
         self.phase = Phase::AwaitBase;
         self.wait = self.settle_n(x.f_hz);
         let mut d = vec![ZERO; m];
-        mat_vec(&z0, m, n, x.reference, &mut d);
+        mat_vec(&z0, m, n, &aimed_reference(x), &mut d);
         self.emit(&d, x, out);
         Ok(())
     }
@@ -287,8 +287,9 @@ impl SineLaw for SecantLaw {
                 let y: Vec<C64> = ck.iter().zip(&c0).map(|(a, b)| a - b).collect();
                 self.secant(&s, &y, &zs);
             }
-            let e: Vec<C64> = x.reference.iter().zip(&ck).map(|(r, c)| r - c).collect();
-            let small = norm(&e) <= self.params.tol * norm(x.reference);
+            let aimed = aimed_reference(x);
+            let e: Vec<C64> = aimed.iter().zip(&ck).map(|(r, c)| r - c).collect();
+            let small = norm(&e) <= self.params.tol * norm(&aimed);
             self.base = (ck, dk.clone(), e.clone());
             if small {
                 self.prev = None;
