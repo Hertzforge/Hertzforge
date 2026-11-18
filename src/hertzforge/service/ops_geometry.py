@@ -1,7 +1,7 @@
 """Editing a geometry and what is drawn on it, and the project's own
 structure: the entity tables, the coordinate system gizmo,
 the DOF arrows and sensors of the 3-D view,
-Work Up, channel roles and DOF names, a channel table's
+Auto Compute, channel roles and DOF names, a channel table's
 control loops, and the object groups.
 
 A geometry's nodes, coordinate systems, elements and element groups are
@@ -25,7 +25,7 @@ import numpy as np
 
 from . import display_units, group_cells
 from . import views as v
-from .descriptors import Operation, Option, Param, Workspace
+from .descriptors import TREE_PICKS, Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
@@ -171,21 +171,24 @@ def _number(value: Any) -> str:
 PAGE_ROWS = 1000
 
 
-def node_link(name: str) -> str:
-    """What ties the views of one geometry's nodes: a node marked in one (a row of the
-    table, a click in the 3-D view, a row of the tree) is marked in the others.
+def part_link(kind: str, name: str) -> str:
+    """What ties the views of one kind of a geometry's entities: one marked in one view
+    (a row of the node table, a click in the 3-D view, a row of the tree) is marked in the
+    others. The shell's tree builds the same words for its rows.
 
     Parameters
     ----------
+    kind : str
+        'nodes', 'systems' or 'elements'.
     name : str
         The geometry's name in the project.
 
     Returns
     -------
     str
-        The link the views carry as `marks.link`.
+        The link the views carry, as `marks.link` or a `mark_sets` entry's `link`.
     """
-    return f'nodes:{name}'
+    return f'{kind}:{name}'
 
 
 def picked_rows(geometry: Any, kind: str, family: str = '', groups: str = '') -> np.ndarray | None:
@@ -283,7 +286,7 @@ def entity_table(geometry: Any, kind: str, title: str, name: str | None = None,
     table = v.table(title, entity_columns(geometry, kind), rows, edit)
     if name is not None and kind == 'nodes':
         # its rows and the nodes of the view beside it are marked together
-        table['marks'] = {'link': node_link(name), 'column': 0}
+        table['marks'] = {'link': part_link('nodes', name), 'column': 0}
     if name is not None and kind == 'coordinate_systems':
         # the row picked is the system the arrows and rings in the view are on
         table['select'] = {'op': 'project.view_entities',
@@ -341,7 +344,7 @@ def _shown(name: str, geometry: Any, kind: str, said: str = '',
     if pick is not None and (adds or kind not in ('nodes', 'coordinate_systems')):
         drawn['pick'] = pick
     if kind == 'nodes':
-        drawn['marks'] = {'link': node_link(name)}
+        drawn['marks'] = {'link': part_link('nodes', name)}
     return [drawn, entity_table(geometry, kind, title, name, **part)]
 
 
@@ -356,17 +359,15 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
     if where not in ('part:nodes', 'part:coordinate_systems', 'family', 'group'):
         return None
     drawn = _drawn(name, geometry)
-    if where == 'part:coordinate_systems':
-        drawn['frames'] = frames(geometry, drawn['nodes'])
-    if where == 'group':
-        _mark_points(drawn, geometry, picked_ids(part))
     if where == 'part:nodes':
-        drawn['marks'] = {'link': node_link(name)}
-    if where == 'part:coordinate_systems':
+        drawn['marks'] = {'link': part_link('nodes', name)}
+    elif where == 'part:coordinate_systems':
+        drawn['frames'] = frames(geometry, drawn['nodes'])
         # a system's row in the tree marks its origin among the frames drawn
-        drawn['mark_sets'] = [{'link': f'systems:{name}', 'frames': True,
+        drawn['mark_sets'] = [{'link': part_link('systems', name), 'frames': True,
                                'ids': [int(cs) for cs in geometry.cs_id]}]
-    if where == 'group':
+    elif where == 'group':
+        _mark_points(drawn, geometry, picked_ids(part))
         drawn['mark_sets'] = [_element_marks(name, geometry, picked_ids(part))]
     return [drawn]
 
@@ -374,23 +375,18 @@ def part_entities(name: str, geometry: Any, part: dict[str, Any]) -> list[dict] 
 def _element_marks(name: str, geometry: Any, groups: Any) -> dict[str, Any]:
     """The elements of the groups picked, as the view marks them one at a time: each
     element's id and the rows of its nodes, which an element's row in the tree rings. The
-    first of a large group's, the ones the tree lists (`tree.LISTED_NODES`)."""
-    from .tree import LISTED_NODES
+    first of a large group's, the ones the tree lists (`tree.listed_elements`)."""
+    from .tree import listed_elements
 
     rows = {int(node): row for row, node in enumerate(geometry.node_id)}
-    wanted = {int(group) for group in groups}
-    listed: dict[int, int] = {}
-    ids: list[int] = []
-    nodes: list[list[int]] = []
-    for element, group, conn in zip(geometry.elem_id, geometry.elem_group,
-                                    geometry.elem_conn, strict=True):
-        group = int(group)
-        if group not in wanted or listed.get(group, 0) >= LISTED_NODES:
-            continue
-        listed[group] = listed.get(group, 0) + 1
-        ids.append(int(element))
-        nodes.append([rows[int(node)] for node in conn if int(node) in rows])
-    return {'link': f'elements:{name}', 'ids': ids, 'rows': nodes}
+    listed = listed_elements(geometry)
+    # in the geometry's order, as the tree lists them group by group
+    elements = sorted(element for group in {int(group) for group in groups}
+                      for element in listed.get(group, ()))
+    return {'link': part_link('elements', name),
+            'ids': [int(geometry.elem_id[element]) for element in elements],
+            'rows': [[rows[int(node)] for node in geometry.elem_conn[element]
+                      if int(node) in rows] for element in elements]}
 
 
 def _mark_points(drawn: dict, geometry: Any, groups: Any) -> None:
@@ -1208,7 +1204,7 @@ def _place_basis(project: Any, test: str) -> list[str]:
 
 
 def _srs_bands(project: Any, added: list[str]) -> list[dict]:
-    """Where a low-pass stopped an SRS Work Up made, since nothing else in
+    """Where a low-pass stopped an SRS Auto Compute made, since nothing else in
     its reading would say the top of the band was left off."""
     rows = []
     for name in added:
@@ -1229,7 +1225,7 @@ def _work_up(test: str) -> Any:
         expects computed from what is loaded, the report last
         (`Project.work_up`), and what is still missing after it."""
         if not project.names:
-            raise refused('Nothing is loaded to work up')
+            raise refused('Nothing is loaded to compute from')
         moved = _place_basis(project, test)
         try:
             added = project.work_up(test)
@@ -1534,8 +1530,6 @@ def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, r
 
 DRAWN = ('shape3d', 'table')
 GROUPS = ('table',)
-#: the channels picked in the tree, which a form does not ask for (`parsing.each_picked`)
-PICKED = Param('picked', 'Channels picked in the tree', 'string', default='')
 
 OPERATIONS = (
     _model('project.view_entities', 'Edit',
@@ -1591,7 +1585,7 @@ OPERATIONS = (
     _shared('project.set_channel_role', 'Set Channel Role',
              'One channel made a reference, a response or a monitor, on a time history or '
              'channel table and on what is linked with it.',
-             (ROLE_SOURCE, RECORD, CHANNEL_ROLE, PICKED), ('table',),
+             (ROLE_SOURCE, RECORD, CHANNEL_ROLE, TREE_PICKS), ('table',),
              each_picked(set_channel_role)),
     _shared('project.rename_dof', 'Rename DOF',
              'A channel\'s DOF corrected on an object and on everything derived from it; '
@@ -1604,7 +1598,7 @@ OPERATIONS = (
              workspace='geometry'),
     _shared('project.set_control', 'Set Control',
              'Control checked or cleared on one channel of one control loop.',
-             (TABLE, ENVIRONMENT, RECORD, CONTROL, PICKED), ('table',),
+             (TABLE, ENVIRONMENT, RECORD, CONTROL, TREE_PICKS), ('table',),
              each_picked(set_control, source='table'), workspace='geometry'),
     _shared('project.link', 'Link', 'Objects linked into one group, merging the groups '
              'they are in.', (FIRST, SECOND, MORE, LINK_NAME), GROUPS, link),

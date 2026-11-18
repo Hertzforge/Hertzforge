@@ -1495,7 +1495,7 @@
 		renderer = null;
 	});
 
-	// The picked nodes and the one under the cursor, as marks on the model.
+	// What is marked on the model: the nodes picked toward an element, the nodes and the places marked with the table and the tree, and the node under the cursor.
 	$effect(() => {
 		if (!renderer || !markGeometry) return;
 		const rows = [...new Set([...markedRows, ...picked, ...(hoverNode !== null ? [hoverNode] : [])])];

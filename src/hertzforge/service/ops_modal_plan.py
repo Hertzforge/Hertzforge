@@ -494,7 +494,8 @@ def projection_overlay(project: Any, params: dict[str, Any]) -> list[dict]:
                                              tolerance=params['tolerance'] / 100.0)
         values = cross_mac(rows, columns)
     except ValueError as error:
-        raise refused(str(error)) from None
+        # the cause is kept: the comparison tells no node matched from another refusal
+        raise refused(str(error)) from error
     moved, onto, basis = (first, second, theirs) if flipped else (second, first, home)
 
     def axis(name: str, shapes: Any) -> dict:

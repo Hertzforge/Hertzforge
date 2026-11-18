@@ -2,7 +2,7 @@
 	/** Perspective or parallel projection, one choice for every waterfall, kept until the app closes. */
 	let lastPerspective = true;
 	/** How each result's stage was left: a drag or a choice in it replaces the view, and the view belongs to the person, so the new one opens as they left it. */
-	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front'; logX: boolean; logZ: boolean }>();
+	const poses = new Map<string, { position: number[]; target: number[]; up: number[]; facing: 'perspective' | 'top' | 'front' }>();
 </script>
 
 <script lang="ts">
@@ -840,7 +840,7 @@
 		renderer.render(scene, camera);
 		placeLabels();
 		// kept as it is drawn, not as the pane goes: the view that replaces it is made first
-		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), facing, logX, logZ });
+		if (scope) poses.set(scope, { position: camera.position.toArray(), target: controls.target.toArray(), up: camera.up.toArray(), facing });
 	}
 
 	onMount(init);

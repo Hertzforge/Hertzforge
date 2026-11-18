@@ -26,7 +26,7 @@ from hertzforge.core.channel_table import ChannelTable, title_of
 from hertzforge.core.sensor_catalog import CATALOG
 
 from . import views as v
-from .descriptors import Operation, Option, Param
+from .descriptors import TREE_PICKS, Operation, Option, Param
 from .ops_project import chosen_records
 from .parsing import each_picked, parse_id_runs, parse_numbers
 from .protocol import refused
@@ -888,9 +888,6 @@ def predict(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Channels predicted', f'{len(held)}', None, 'info')]
     return [prediction_table(name, held), v.reading(f'Prediction in {name}', rows)]
 
-
-#: the channels picked in the tree, which a form does not ask for (`parsing.each_picked`)
-TREE_PICKS = Param('picked', 'Channels picked in the tree', 'string', default='')
 
 OPERATIONS = (
     Operation(

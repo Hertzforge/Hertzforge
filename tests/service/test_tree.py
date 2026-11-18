@@ -46,7 +46,7 @@ def test_a_geometry_opens_into_its_parts_and_families(plate, validate):
                      'coordinate_systems': len(geometry.cs_id)}
     # the Nodes row lists its nodes when opened, the first of a large model's
     listed = {p['id']: p.get('ids') for p in held['parts']}
-    assert listed['nodes'] == [int(n) for n in geometry.node_id[:tree.LISTED_NODES]]
+    assert listed['nodes'] == [int(n) for n in geometry.node_id[:tree.LISTED]]
     assert listed['coordinate_systems'] == [int(cs) for cs in geometry.cs_id]
     # the coordinate systems row lists a line a system, and a group its elements
     systems = next(p for p in held['parts'] if p['id'] == 'coordinate_systems')
@@ -56,7 +56,7 @@ def test_a_geometry_opens_into_its_parts_and_families(plate, validate):
         for group in family['groups']:
             mine = [int(e) for e, g in zip(geometry.elem_id, geometry.elem_group, strict=True)
                     if int(g) == group['id']]
-            assert group['elements'] == mine[:tree.LISTED_NODES]
+            assert group['elements'] == mine[:tree.LISTED]
     families = {f['id']: f for f in held['families']}
     # the six always, and points too: a ground starts from one
     assert set(families) >= {'beams', 'triangles', 'quads', 'tetras', 'wedges', 'hexes', 'points'}

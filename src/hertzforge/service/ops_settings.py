@@ -1,8 +1,10 @@
 """A time history's analysis settings, set from the shell: its averaging,
 its filter and its truncation span, which Compute Spectra and Compute
-PSDs, Apply Filter and Apply Truncation then read. Each is an
+PSDs, the filtered history and Apply Truncation then read. Each is an
 operation whose params open on the history's own settings (`setting`)
-and whose result draws the setting on one record, and reads back what was stored.
+and whose result draws the setting on one record, and reads back what was
+stored. Filter is set and applied in one: with `keep` it adds the filtered
+history and draws that.
 """
 
 from __future__ import annotations

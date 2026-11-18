@@ -1,6 +1,6 @@
 """Editing a geometry and what is drawn on it, and the project's structure:
 entity tables and edits, the coordinate system gizmo, DOF arrows and
-sensors, Work Up, channel roles and DOF names, a
+sensors, Auto Compute, channel roles and DOF names, a
 channel table's control loops, and the object groups."""
 
 from __future__ import annotations
@@ -354,7 +354,7 @@ def test_sensors_are_drawn_at_a_multiple_of_true_size(project, validate):
 
 
 def test_work_up_goes_by_the_module_it_is_run_in(validate):
-    """Each kind of test's module has its own Work Up, and nothing has to be
+    """Each kind of test's module has its own Auto Compute, and nothing has to be
     set first."""
     state, _ = projects.import_file(None, {'path': str(PLATE / 'random.nc4')})
     project = state.project

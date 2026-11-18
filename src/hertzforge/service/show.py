@@ -79,9 +79,9 @@ def _geometry_for(project: Any, name: str) -> str | None:
     return found[0] if found else None
 
 
-#: how the window reads data, kept across selections: the stage or the flat plot,
-#: decades on the frequency axis, and the
-#: component of complex data
+#: how the window reads data, kept across selections: the stage or the flat plot, the
+#: component of complex data, and what is drawn with it (a specification's limits, a
+#: table's arrows and sensors). The axes' scales are chosen on the plot, not here.
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
          'projection': False, 'match_tolerance': 2.0, 'shape_view': None, 'limits': True,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
@@ -760,7 +760,7 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             views = _run(project, 'project.projection_overlay', first=first, second=second,
                          tolerance=percent)
         except ProtocolError as error:
-            if 'within the match tolerance' not in str(error):
+            if not isinstance(error.__cause__, NoNodeMatched):
                 raise
             # nothing to animate: answered as the comparison answers it, with how far off
             return _mac(project, first, second, geometry, {**prefs, 'projection': False})

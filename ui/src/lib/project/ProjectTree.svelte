@@ -61,42 +61,33 @@
 		p.clickPart(name, kind, id, m, ids);
 	}
 
-	/** The sub-items opened onto what they list (a geometry's nodes, its coordinate systems, a group's elements), each by its key. */
-	let nodesOpen = $state<string[]>([]);
+	/** The rows opened onto what they list (a geometry's nodes, its coordinate systems, a group's elements), each by its key. */
+	let listsOpen = $state<string[]>([]);
 	const listKey = (name: string, kind: string, id: string | number) => `${name}\u0000${kind}\u0000${id}`;
-	const toggleList = (key: string) => (nodesOpen = nodesOpen.includes(key) ? nodesOpen.filter((k) => k !== key) : [...nodesOpen, key]);
-	/** Where a Shift run of node rows starts: the last one clicked without Shift. */
-	let nodeAnchor: number | null = null;
-	const nodeLink = (name: string) => `nodes:${name}`;
+	const toggleList = (key: string) => (listsOpen = listsOpen.includes(key) ? listsOpen.filter((k) => k !== key) : [...listsOpen, key]);
+	/** What a geometry lists one a row, and marks one at a time. */
+	type Listed = 'nodes' | 'systems' | 'elements';
+	/** The link a list's marks are kept under, the service's `part_link`: the 3-D view and the node table mark with the same one. */
+	const partLink = (kind: Listed, name: string) => `${kind}:${name}`;
+	/** Where a Shift run starts in each list: the last row clicked there without Shift. */
+	const anchors: Record<string, number> = {};
 
 	/**
-	 * A node's row clicked: the node is marked, in the 3-D view and the node table with it. Cmd
-	 * (Ctrl) puts it in or takes it out, Shift marks the run from the last one clicked. The
-	 * geometry's nodes are what is selected, unless they already are (their table may be open).
+	 * A listed row clicked (a node, a coordinate system, an element): it is marked, in the 3-D
+	 * view and for a node in the node table with it. Cmd (Ctrl) puts it in or takes it out, Shift
+	 * marks the run from the last one clicked in that list. What holds it (the nodes, the systems,
+	 * the element's group) is what is selected, unless it already is (its table may be open).
 	 */
-	function clickNode(name: string, id: number, m: Modifiers, order: number[]) {
-		if (picking) return;
-		if (!partPicked(name, 'part', 'nodes')) p.clickPart(name, 'part', 'nodes');
-		const link = nodeLink(name);
-		if (m.extend && nodeAnchor !== null) mark(link, markedRun(order, nodeAnchor, id));
-		else {
-			nodeAnchor = id;
-			mark(link, markedBy(marked(link), id, !!m.toggle), m.toggle ? undefined : order.indexOf(id));
-		}
-	}
-
-	/**
-	 * A coordinate system's or an element's row clicked: it is marked in the 3-D view, with the
-	 * modifiers a node's row takes. What holds it (the systems, the element's group) is what is
-	 * selected, unless it already is.
-	 */
-	function clickListed(name: string, link: string, holder: { kind: string; id: string | number }, id: number, m: Modifiers, order: number[]) {
+	function clickListed(name: string, kind: Listed, holder: { kind: string; id: string | number }, id: number, m: Modifiers, order: number[]) {
 		if (picking) return;
 		if (!partPicked(name, holder.kind, holder.id)) p.clickPart(name, holder.kind, holder.id);
-		if (m.extend && nodeAnchor !== null) mark(link, markedRun(order, nodeAnchor, id));
+		const link = partLink(kind, name);
+		const from = anchors[link];
+		if (m.extend && from !== undefined) mark(link, markedRun(order, from, id));
 		else {
-			nodeAnchor = id;
-			mark(link, markedBy(marked(link), id, !!m.toggle));
+			anchors[link] = id;
+			// the row it stands at among them, which a long table scrolls to
+			mark(link, markedBy(marked(link), id, !!m.toggle), m.toggle ? undefined : order.indexOf(id));
 		}
 	}
 
@@ -371,9 +362,22 @@
 	const picked = (name: string, index: number) => (p.selection.records[name] ?? []).includes(index);
 	const partPicked = (name: string, kind: string, id: string | number) => partIsPicked(p.selection, name, kind, id);
 	const held = (name: string): ProjectChildren | undefined => p.children[name];
-	/** How many rows and columns a grid shows before it scrolls. */
 	const roleWord = (role?: string) => (role ? ROLE_WORD[role as keyof typeof ROLE_WORD] : '');
 </script>
+
+<!-- what a row of a geometry lists, one a row: each is marked by a click, with its list's link -->
+{#snippet entries(name: string, kind: Listed, holder: { kind: string; id: string | number }, ids: number[], label: (id: number, i: number) => string, glyph: string, depth: number, more: string)}
+	{@const on = new Set(marked(partLink(kind, name)))}
+	<div class="entries" role="group" data-testid="{kind}-{name}{holder.kind === 'group' ? `-${holder.id}` : ''}">
+		{#each ids as id, i (id)}
+			<div class="sub" class:picked={on.has(id)} style="--depth: {depth}" role="treeitem" aria-selected={on.has(id)} tabindex="-1" data-testid="{kind}-{name}-{id}" onclick={(e) => clickListed(name, kind, holder, id, mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickListed(name, kind, holder, id, {}, ids)}>
+				<Glyph name={glyph} of="child" parent="geometry" size={14} />
+				<span class="label">{label(id, i)}</span>
+			</div>
+		{/each}
+		{#if more}<p class="note" style="padding-left: {8 + 14 * depth}px">{more}</p>{/if}
+	</div>
+{/snippet}
 
 {#snippet subField(what: string, current: string)}
 	<input
@@ -502,7 +506,7 @@
 				{:else if kids.kind === 'geometry'}
 					{#each kids.parts as part (part.id)}
 						{@const lists = !!part.ids?.length || !!part.rows?.length}
-						{@const listed = lists && nodesOpen.includes(listKey(o.name, 'part', part.id))}
+						{@const listed = lists && listsOpen.includes(listKey(o.name, 'part', part.id))}
 						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} aria-expanded={lists ? listed : undefined} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
 							{#if lists}
 								<button class="twist inner" class:open={listed} aria-label={listed ? `Close the ${part.label.toLowerCase()} of ${o.name}` : `List the ${part.label.toLowerCase()} of ${o.name}`} tabindex="-1" data-testid="expand-{part.id}-{o.name}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'part', part.id)); }}>
@@ -512,30 +516,11 @@
 							<Glyph name={part.id} of="child" parent="geometry" empty={!part.count} size={14} />
 							<span class="label">{part.label} ({part.count})</span>
 						</div>
-						{#if listed && part.ids && part.id === 'nodes'}
-							{@const ids = part.ids}
-							{@const on = new Set(marked(nodeLink(o.name)))}
-							<div class="nodelist" role="group" data-testid="nodes-{o.name}">
-								{#each ids as id (id)}
-									<div class="sub" class:picked={on.has(id)} style="--depth: 1" role="treeitem" aria-selected={on.has(id)} tabindex="-1" data-testid="node-{o.name}-{id}" onclick={(e) => clickNode(o.name, id, mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickNode(o.name, id, {}, ids)}>
-										<Glyph name="nodes" of="child" parent="geometry" size={14} />
-										<span class="label">Node {id}</span>
-									</div>
-								{/each}
-								{#if part.count > ids.length}<p class="note" style="padding-left: 22px">{part.count - ids.length} more not listed: they are in the nodes' table (Edit).</p>{/if}
-							</div>
-						{/if}
-						{#if listed && part.rows}
-							{@const ids = part.ids ?? []}
-							{@const on = new Set(marked(`systems:${o.name}`))}
-							<div class="nodelist" role="group" data-testid="{part.id}-{o.name}">
-								{#each part.rows as row, i (i)}
-									<div class="sub" class:picked={on.has(ids[i])} style="--depth: 1" role="treeitem" aria-selected={on.has(ids[i])} tabindex="-1" data-testid="{part.id}-{o.name}-{i}" onclick={(e) => clickListed(o.name, `systems:${o.name}`, { kind: 'part', id: part.id }, ids[i], mods(e), ids)} onkeydown={(e) => e.key === 'Enter' && clickListed(o.name, `systems:${o.name}`, { kind: 'part', id: part.id }, ids[i], {}, ids)}>
-										<Glyph name={part.id} of="child" parent="geometry" size={14} />
-										<span class="label">{row}</span>
-									</div>
-								{/each}
-							</div>
+						{#if listed && part.id === 'nodes' && part.ids}
+							{@render entries(o.name, 'nodes', { kind: 'part', id: part.id }, part.ids, (id) => `Node ${id}`, 'nodes', 1, part.count > part.ids.length ? `${part.count - part.ids.length} more not listed: they are in the nodes' table (Edit).` : '')}
+						{:else if listed && part.rows}
+							{@const rows = part.rows}
+							{@render entries(o.name, 'systems', { kind: 'part', id: part.id }, part.ids ?? [], (_id, i) => rows[i], part.id, 1, '')}
 						{/if}
 					{/each}
 					{#each kids.families as family (family.id)}
@@ -546,7 +531,7 @@
 						{#each family.groups as group (group.id)}
 							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} ondblclick={() => startSub(o.name, 'group', group.id, group.label)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'group', group.id, group.label), () => clickSub(o.name, 'group', group.id))}>
 								{#if group.elements?.length}
-									{@const shown = nodesOpen.includes(listKey(o.name, 'group', group.id))}
+									{@const shown = listsOpen.includes(listKey(o.name, 'group', group.id))}
 									<button class="twist inner" class:open={shown} aria-label={shown ? `Close the elements of ${group.label}` : `List the elements of ${group.label}`} tabindex="-1" data-testid="expand-group-{o.name}-{group.id}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'group', group.id)); }}>
 										<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 									</button>
@@ -554,18 +539,8 @@
 								<Glyph name="groups" of="child" parent="geometry" size={14} />
 								{#if naming(o.name, 'group', group.id)}{@render subField(group.label, group.label)}{:else}<span class="label">{group.label} ({group.count})</span>{/if}
 							</div>
-							{#if group.elements?.length && nodesOpen.includes(listKey(o.name, 'group', group.id))}
-								{@const elements = group.elements}
-								{@const on = new Set(marked(`elements:${o.name}`))}
-								<div class="nodelist" role="group" data-testid="elements-{o.name}-{group.id}">
-									{#each elements as element (element)}
-										<div class="sub" class:picked={on.has(element)} style="--depth: 2" role="treeitem" aria-selected={on.has(element)} tabindex="-1" data-testid="element-{o.name}-{element}" onclick={(e) => clickListed(o.name, `elements:${o.name}`, { kind: 'group', id: group.id }, element, mods(e), elements)} onkeydown={(e) => e.key === 'Enter' && clickListed(o.name, `elements:${o.name}`, { kind: 'group', id: group.id }, element, {}, elements)}>
-											<Glyph name={family.id} of="child" parent="geometry" size={14} />
-											<span class="label">Element {element}</span>
-										</div>
-									{/each}
-									{#if group.count > group.elements.length}<p class="note" style="padding-left: 36px">{group.count - group.elements.length} more not listed: they are in the group's table (Edit).</p>{/if}
-								</div>
+							{#if group.elements?.length && listsOpen.includes(listKey(o.name, 'group', group.id))}
+								{@render entries(o.name, 'elements', { kind: 'group', id: group.id }, group.elements, (id) => `Element ${id}`, family.id, 2, group.count > group.elements.length ? `${group.count - group.elements.length} more not listed: they are in the group's table (Edit).` : '')}
 							{/if}
 						{/each}
 					{/each}
@@ -914,8 +889,8 @@
 		margin-left: -2px;
 	}
 
-	/* a geometry's nodes, one a row: past its height the list scrolls rather than the tree */
-	.nodelist {
+	/* what a row lists, one a row (nodes, coordinate systems, a group's elements): past its height the list scrolls rather than the tree */
+	.entries {
 		max-height: 260px;
 		overflow-y: auto;
 	}

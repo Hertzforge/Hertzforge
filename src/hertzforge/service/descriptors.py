@@ -309,3 +309,8 @@ class Operation:
                 raise bad_request(f'{self.id} needs param "{param.name}" '
                                   f'({param.label})')
         return out
+
+
+#: the channels picked in the tree, sent to an operation that acts on one channel so that
+#: it acts on each of them; a form does not ask for it (`parsing.each_picked`)
+TREE_PICKS = Param('picked', 'Channels picked in the tree', 'string', default='')

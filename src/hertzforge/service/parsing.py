@@ -80,6 +80,9 @@ def each_picked(run: Any, key: str = 'record', source: str = 'source') -> Any:
             raise refused(f'{params[source]} has no channels')
         return views
 
+    #: the param that numbers the one channel, which a form filled from the tree's picks
+    #: does not ask for (`action_table`)
+    picked_run.picked_key = key
     return picked_run
 
 

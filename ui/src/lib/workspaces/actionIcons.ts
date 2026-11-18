@@ -195,7 +195,6 @@ export const ROW_GLYPHS: Record<string, string> = {
 	'project.extract_sine': 'sine',
 	'project.fatigue': 'fatigue',
 	'project.field_limit': 'field_limit',
-	'project.filter_data': 'filter',
 	'project.fit_modes': 'edit',
 	'project.generate_from_template': 'report',
 	'project.generate_rigid_body_modes': 'rigid',

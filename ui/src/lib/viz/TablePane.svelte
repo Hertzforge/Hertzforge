@@ -22,9 +22,8 @@
 	import { tick, untrack } from 'svelte';
 	import type { TableEdit, TableView } from '$lib/protocol/types';
 	import Self from './TablePane.svelte';
-	import { openedAtFirst, toggled } from './table';
 	import { mark, marked, markedRow } from './marks.svelte';
-	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, parseTsv, pasteTargets, spanned, tableHtml, tableText, type Block } from './table';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pasteTargets, spanned, tableHtml, tableText, toggled, type Block } from './table';
 
 	interface Props {
 		view: TableView;
