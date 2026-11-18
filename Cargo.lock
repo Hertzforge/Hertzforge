@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-sine"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "hertzforge-dsp",
  "hertzforge-sdm",
@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-sine-law-math"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "hertzforge-mimo-sine-law-math",
  "hertzforge-sdm",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "hertzforge-mimo-sine-laws"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "hertzforge-mimo-sine",
  "hertzforge-random-laws",
