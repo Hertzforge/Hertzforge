@@ -19,11 +19,7 @@ pub fn f64s(v: &Value) -> Vec<f64> {
 }
 
 pub fn flat(v: &Value) -> Vec<f64> {
-    v.as_array()
-        .expect("array")
-        .iter()
-        .flat_map(f64s)
-        .collect()
+    v.as_array().expect("array").iter().flat_map(f64s).collect()
 }
 
 pub fn cplx(v: &Value) -> Vec<C64> {

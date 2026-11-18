@@ -35,7 +35,7 @@
 //! linear structure; between a quarter and one bandwidth errors over 3 dB are
 //! expected there; past about one the loop can be lost.
 
-use crate::law::{worst_error_db, Hold, Inputs, Outputs, SineLaw};
+use crate::law::{Hold, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, norm, reg_pinv, row_space_part};
 use crate::modal::{Model, ModelChoice};
 use crate::setup::{GroupDelay, Setup, Shape, TrackingRule};
@@ -45,14 +45,15 @@ use crate::{TestTypes, C64};
 const ZERO: C64 = C64::new(0.0, 0.0);
 
 /// The diagnostics `matrix` declares, in order.
-pub const MATRIX_VALUES: [&str; 7] = [
+pub const MATRIX_VALUES: [&str; 8] = [
     "gain",
     "group_delay_s",
     "condition",
     "carried_share",
     "rotation_deg",
-    "error_db",
     "unseen_share",
+    "modes_kept",
+    "candidates_left_out",
 ];
 
 /// The test types `matrix` accepts: all three. On the research testbed's
@@ -159,6 +160,14 @@ impl MatrixLaw {
     /// The model the law reads (its modes and its smoothed grid).
     pub fn model(&self) -> &Model {
         &self.model
+    }
+
+    fn kept(&self) -> f64 {
+        self.model.modes.modes() as f64
+    }
+
+    fn left_out(&self) -> f64 {
+        self.model.fit.candidates_left_out as f64
     }
 
     fn model_at(&self, f: f64) -> Vec<C64> {
@@ -275,8 +284,9 @@ impl MatrixLaw {
             cond,
             share,
             rotation,
-            worst_error_db(x.controls, x.reference),
             unseen,
+            self.kept(),
+            self.left_out(),
         ]);
         Ok(())
     }

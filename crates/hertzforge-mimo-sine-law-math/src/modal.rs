@@ -46,15 +46,92 @@ pub struct ModalForm {
     pub residues: Vec<C64>,
 }
 
+/// Hard bounds on the fit's work, in counts (never a clock, so the fit is the
+/// same everywhere and its time is bounded). A group that hits a bound is
+/// left out of the modal part; its lines stay in the smoothed remainder.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FitLimits {
+    /// The most candidates fitted together.
+    pub max_group: usize,
+    /// Levenberg-Marquardt iterations per group.
+    pub max_iterations: usize,
+    /// Trial cost evaluations per group.
+    pub max_evaluations: usize,
+    /// Arithmetic per group, in units of `lines x columns x (elements + columns)`
+    /// summed over its cost evaluations.
+    pub max_group_work: u64,
+    /// The same summed over the whole fit.
+    pub max_total_work: u64,
+}
+
+impl Default for FitLimits {
+    fn default() -> Self {
+        FitLimits {
+            max_group: 8,
+            max_iterations: 40,
+            max_evaluations: 30_000,
+            max_group_work: 2_000_000_000,
+            max_total_work: 5_000_000_000,
+        }
+    }
+}
+
+/// Why a group of candidates was not kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupOutcome {
+    /// Fitted (its modes may still be dropped for damping or band).
+    Fitted,
+    /// More candidates than `max_group`.
+    TooLarge,
+    /// Hit the evaluation or work bound while fitting.
+    OutOfWork,
+}
+
+/// What one group of candidates cost and how it ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupReport {
+    /// Candidates in the group.
+    pub candidates: usize,
+    /// Lines in its window.
+    pub lines: usize,
+    /// Cost evaluations spent.
+    pub evaluations: usize,
+    /// Work spent (the unit of [`FitLimits::max_group_work`]).
+    pub work: u64,
+    /// How it ended.
+    pub outcome: GroupOutcome,
+}
+
+/// What the fit did.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct FitReport {
+    /// Each group in frequency order.
+    pub groups: Vec<GroupReport>,
+    /// Candidates in groups that hit a bound (not those dropped for damping).
+    pub candidates_left_out: usize,
+    /// Work spent over the whole fit.
+    pub total_work: u64,
+}
+
 impl ModalForm {
     /// Number of modes.
     pub fn modes(&self) -> usize {
         self.f_hz.len()
     }
 
-    /// The fit described in the module's documentation, over `band` (Hz).
+    /// The fit described in the module's documentation, over `band` (Hz),
+    /// within the default bounds.
     pub fn fit(id: &Identification, band: (f64, f64)) -> Result<ModalForm, String> {
-        fit(id, band, 4.0, 24)
+        Ok(fit(id, band, 4.0, 24, FitLimits::default())?.0)
+    }
+
+    /// The fit within `limits`, with its report.
+    pub fn fit_bounded(
+        id: &Identification,
+        band: (f64, f64),
+        limits: FitLimits,
+    ) -> Result<(ModalForm, FitReport), String> {
+        fit(id, band, 4.0, 24, limits)
     }
 }
 
@@ -67,7 +144,8 @@ fn fit(
     band: (f64, f64),
     min_prom_db: f64,
     max_modes: usize,
-) -> Result<ModalForm, String> {
+    limits: FitLimits,
+) -> Result<(ModalForm, FitReport), String> {
     let g = &id.grid_hz;
     let l = g.len();
     let (_, n, m) = id.response.dims();
@@ -107,8 +185,9 @@ fn fit(
         zeta: Vec::new(),
         residues: Vec::new(),
     };
+    let mut report = FitReport::default();
     if picked.is_empty() {
-        return Ok(out);
+        return Ok((out, report));
     }
     let s1: Vec<f64> = (0..l).map(|k| s[k * kmin]).collect();
     let z_init: Vec<f64> = picked
@@ -152,8 +231,36 @@ fn fit(
             let c = argmin_abs(g, mean);
             sel = (c.saturating_sub(kk + 3)..(c + kk + 4).min(l)).collect();
         }
-        let window = Window::new(id, &sel);
-        let (fr, zr, a) = window.fit_group(fr, zr)?;
+        let mut gr = GroupReport {
+            candidates: kk,
+            lines: sel.len(),
+            evaluations: 0,
+            work: 0,
+            outcome: GroupOutcome::TooLarge,
+        };
+        if kk > limits.max_group {
+            report.candidates_left_out += kk;
+            report.groups.push(gr);
+            continue;
+        }
+        let left = limits.max_total_work.saturating_sub(report.total_work);
+        let window = Window::new(id, &sel, limits, left);
+        let fitted = window.fit_group(fr, zr, limits.max_iterations);
+        gr.evaluations = window.evaluations.get();
+        gr.work = window.work.get();
+        report.total_work += gr.work;
+        let (fr, zr, a) = match fitted {
+            Ok(v) => v,
+            Err(Halt::Bound) => {
+                gr.outcome = GroupOutcome::OutOfWork;
+                report.candidates_left_out += kk;
+                report.groups.push(gr);
+                continue;
+            }
+            Err(Halt::Error(e)) => return Err(e),
+        };
+        gr.outcome = GroupOutcome::Fitted;
+        report.groups.push(gr);
         for r in 0..kk {
             if band.0 * 0.9 <= fr[r] && fr[r] <= band.1 * 1.1 && 1e-4 < zr[r] && zr[r] < 0.2 {
                 out.f_hz.push(fr[r]);
@@ -163,7 +270,7 @@ fn fit(
             }
         }
     }
-    Ok(out)
+    Ok((out, report))
 }
 
 fn argmin_abs(g: &[f64], f: f64) -> usize {
@@ -179,16 +286,34 @@ fn argmin_abs(g: &[f64], f: f64) -> usize {
 /// A group's fitted frequencies, damping ratios and residues.
 type GroupFit = (Vec<f64>, Vec<f64>, Vec<C64>);
 
+/// Why a group's fit stopped early.
+enum Halt {
+    /// A work bound was reached.
+    Bound,
+    /// The arithmetic failed.
+    Error(String),
+}
+
+impl From<String> for Halt {
+    fn from(e: String) -> Halt {
+        Halt::Error(e)
+    }
+}
+
 /// The lines a group of modes is fitted over.
 struct Window {
     gg: Vec<f64>,
     /// `lines x (controls * drives)`.
     y: Vec<C64>,
     e: usize,
+    evaluations: std::cell::Cell<usize>,
+    work: std::cell::Cell<u64>,
+    max_evaluations: usize,
+    max_work: u64,
 }
 
 impl Window {
-    fn new(id: &Identification, sel: &[usize]) -> Window {
+    fn new(id: &Identification, sel: &[usize], limits: FitLimits, total_left: u64) -> Window {
         let (_, n, m) = id.response.dims();
         let e = n * m;
         let mut y = Vec::with_capacity(sel.len() * e);
@@ -199,6 +324,10 @@ impl Window {
             gg: sel.iter().map(|&k| id.grid_hz[k]).collect(),
             y,
             e,
+            evaluations: std::cell::Cell::new(0),
+            work: std::cell::Cell::new(0),
+            max_evaluations: limits.max_evaluations,
+            max_work: limits.max_group_work.min(total_left),
         }
     }
 
@@ -242,13 +371,21 @@ impl Window {
         Ok((cost, x))
     }
 
-    fn cost(&self, th: &[f64], k: usize) -> Result<f64, String> {
+    fn cost(&self, th: &[f64], k: usize) -> Result<f64, Halt> {
+        let cols = (k + 2) as u64;
+        let unit = self.gg.len() as u64 * cols * (self.e as u64 + cols);
+        if self.evaluations.get() >= self.max_evaluations || self.work.get() + unit > self.max_work
+        {
+            return Err(Halt::Bound);
+        }
+        self.evaluations.set(self.evaluations.get() + 1);
+        self.work.set(self.work.get() + unit);
         let zr: Vec<f64> = th[k..].iter().map(|v| v.exp()).collect();
         Ok(self.lsq(&th[..k], &zr)?.0)
     }
 
     /// Levenberg-Marquardt over `(f_r, ln zeta_r)`.
-    fn fit_group(&self, fr: Vec<f64>, zr: Vec<f64>) -> Result<GroupFit, String> {
+    fn fit_group(&self, fr: Vec<f64>, zr: Vec<f64>, iterations: usize) -> Result<GroupFit, Halt> {
         let k = fr.len();
         let np = 2 * k;
         let mut th: Vec<f64> = fr
@@ -265,7 +402,7 @@ impl Window {
             }
             v
         };
-        for _ in 0..40 {
+        for _ in 0..iterations {
             let h: Vec<f64> = (0..np)
                 .map(|i| if i < k { 1e-5 * th[i] } else { 1e-4 })
                 .collect();
@@ -403,6 +540,8 @@ pub struct Model {
     size: usize,
     /// The modes found (empty unless the choice is modal).
     pub modes: ModalForm,
+    /// What the fit did (empty unless the choice is modal).
+    pub fit: FitReport,
 }
 
 impl Model {
@@ -421,11 +560,13 @@ impl Model {
             zeta: Vec::new(),
             residues: Vec::new(),
         };
+        let mut fit = FitReport::default();
         let (data, modes) = match choice {
             ModelChoice::Identification => (raw.to_vec(), none),
             ModelChoice::Smoothed { lines } => (smooth_grid(g, raw, size, lines), none),
             ModelChoice::Modal { lines } => {
-                let mf = ModalForm::fit(id, band)?;
+                let (mf, rep) = ModalForm::fit_bounded(id, band, FitLimits::default())?;
+                fit = rep;
                 (modal_smoothed(id, &mf, lines), mf)
             }
         };
@@ -434,6 +575,7 @@ impl Model {
             data,
             size,
             modes,
+            fit,
         })
     }
 
@@ -454,6 +596,7 @@ impl Model {
             data: modal_smoothed(id, &modes, lines),
             size: n * m,
             modes,
+            fit: FitReport::default(),
         })
     }
 
