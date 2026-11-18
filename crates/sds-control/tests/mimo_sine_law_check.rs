@@ -60,13 +60,18 @@ async fn mimo_sine_laws_check_runs_every_case_and_records_a_law_file() {
     let report = &r["report"];
     let cases = report["cases"].as_array().unwrap();
     assert!(!cases.is_empty());
-    assert!(cases.iter().all(|k| k["scored"].is_boolean() && k["case"].is_string()));
+    assert!(cases
+        .iter()
+        .all(|k| k["scored"].is_boolean() && k["case"].is_string()));
     assert_eq!(report["recorded"], false);
     assert_eq!(r["law"]["check"]["status"], "built_in");
     assert_eq!(r["law"]["world"], "sine_mimo");
     let events = c.of_topic("laws.check");
     assert_eq!(
-        events.iter().filter(|e| e.data()["state"] == "done").count(),
+        events
+            .iter()
+            .filter(|e| e.data()["state"] == "done")
+            .count(),
         cases.len()
     );
     // A law file: imported unchecked, its check recorded against its file.

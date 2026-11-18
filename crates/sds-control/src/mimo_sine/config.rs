@@ -12,7 +12,7 @@ use crate::sine::config::{
     DIRECTIONS, MODES, SPACINGS, STOP_RAMP_DB_PER_S,
 };
 use crate::sine::profile::{self, check_profile, covers, parse_profile, Locate};
-use crate::table::{At, Item, Report};
+use crate::table::{Item, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_dsp::sweep::sweep_seconds;
 use hertzforge_mimo_sine::core::ShakerRating;
@@ -850,7 +850,7 @@ impl WireMsine {
             let at = format!("channels.controls[{i}].profile");
             let pr = check_profile(&c.profile, Locate::Field(&at));
             let ok = pr.errors.is_empty();
-            r.extend(locate_rows(pr, c.channel as u32));
+            r.extend(pr);
             if ok && self.band_ok() && !covers(&c.profile, band) {
                 r.errors.push(not_covering(&at, &c.profile, band));
             }
@@ -887,7 +887,7 @@ impl WireMsine {
             let at = format!("limits.channels[{i}].profile");
             let pr = check_profile(&l.profile, Locate::Field(&at));
             let ok = pr.errors.is_empty();
-            r.extend(locate_rows(pr, l.channel as u32));
+            r.extend(pr);
             if ok && self.band_ok() && !covers(&l.profile, band) {
                 r.errors.push(not_covering(&at, &l.profile, band));
             }
@@ -904,7 +904,9 @@ impl WireMsine {
                     num(MAX_DRIVE_V)
                 ),
             );
-            if !(d.abort_vpk.is_finite() && d.abort_vpk > d.ceiling_vpk && d.abort_vpk <= MAX_DRIVE_V)
+            if !(d.abort_vpk.is_finite()
+                && d.abort_vpk > d.ceiling_vpk
+                && d.abort_vpk <= MAX_DRIVE_V)
             {
                 r.errors.push(Item::field(
                     "abort_below_ceiling",
@@ -1193,7 +1195,10 @@ impl WireMsine {
                     r,
                     "test.freq_hz",
                     d.freq_hz.is_finite() && d.freq_hz > 0.0,
-                    format!("The dwell's frequency is {} Hz; it is above 0.", num(d.freq_hz)),
+                    format!(
+                        "The dwell's frequency is {} Hz; it is above 0.",
+                        num(d.freq_hz)
+                    ),
                 );
                 dwell_for(r, "test.end", d.for_);
             }
@@ -1445,13 +1450,11 @@ impl WireMsine {
         }
         for (k, rung) in [("per_level", l.per_rung), ("full_level", l.full_for)] {
             match rung {
-                RungFor::Seconds(s) if !(s.is_finite() && s > 0.0) => {
-                    r.errors.push(Item::field(
-                        "out_of_range",
-                        format!("schedule.{k}.seconds"),
-                        "A level's time is above 0 s.",
-                    ))
-                }
+                RungFor::Seconds(s) if !(s.is_finite() && s > 0.0) => r.errors.push(Item::field(
+                    "out_of_range",
+                    format!("schedule.{k}.seconds"),
+                    "A level's time is above 0 s.",
+                )),
                 RungFor::Sweeps(0) => r.errors.push(Item::field(
                     "out_of_range",
                     format!("schedule.{k}.sweeps"),
@@ -1703,36 +1706,6 @@ fn not_covering(at: &str, p: &SineProfile, band: (f64, f64)) -> Item {
             num(band.1)
         ),
     )
-}
-
-/// A profile's row items as the protocol locates them: by `row` and `channel`.
-fn locate_rows(r: Report, channel: u32) -> Report {
-    let map = |items: Vec<Item>| -> Vec<Item> {
-        items
-            .into_iter()
-            .map(|it| match &it.at {
-                At::Field(f) if f.contains(".rows[") => {
-                    let row = f
-                        .rsplit(".rows[")
-                        .next()
-                        .and_then(|s| s.trim_end_matches(']').parse::<usize>().ok());
-                    match row {
-                        Some(k) => Item {
-                            reason: it.reason,
-                            message: it.message,
-                            at: At::RowOf(k, channel),
-                        },
-                        None => it,
-                    }
-                }
-                _ => it,
-            })
-            .collect()
-    };
-    Report {
-        errors: map(r.errors),
-        warnings: map(r.warnings),
-    }
 }
 
 /// The test as resolved, for the record.

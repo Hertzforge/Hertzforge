@@ -228,7 +228,13 @@ fn live() -> Live {
 /// the third point not reached yet.
 fn figures() -> Figures {
     let x = vec![100.0, 200.0, 400.0];
-    let ctl = |a: f64| vec![[a, -12.5, 0.5, -10.0, 0.25, 0.0], [a * 2.0, -15.0, 0.5, -10.0, -0.5, 0.0], [f64::NAN; 6]];
+    let ctl = |a: f64| {
+        vec![
+            [a, -12.5, 0.5, -10.0, 0.25, 0.0],
+            [a * 2.0, -15.0, 0.5, -10.0, -0.5, 0.0],
+            [f64::NAN; 6],
+        ]
+    };
     Figures {
         against_time: false,
         x,
@@ -298,7 +304,11 @@ fn mimo_sine_golden_the_states_are_the_service_objects() {
     if printing() {
         return;
     }
-    same(&got, &read_json("response_mimo_sine_state.json")["result"], "state");
+    same(
+        &got,
+        &read_json("response_mimo_sine_state.json")["result"],
+        "state",
+    );
     let mut review = running_view();
     review.state = State::Review;
     review.phase = "awaiting_review";
@@ -342,13 +352,21 @@ fn mimo_sine_golden_the_live_sweep_and_data_frames_are_the_service_frames() {
     .unwrap()
     .unwrap();
     let mut a = Arrays::new();
-    let data = protocol::event("mimo_sine.data", 311, subscribe::data_json(&v, &sub, &mut a));
+    let data = protocol::event(
+        "mimo_sine.data",
+        311,
+        subscribe::data_json(&v, &sub, &mut a),
+    );
     let got_data = resolved(&data, &a);
     show("event_mimo_sine_data", &got_data);
     if printing() {
         return;
     }
-    same(&got, &read_json("event_mimo_sine_live.expected.json"), "live");
+    same(
+        &got,
+        &read_json("event_mimo_sine_live.expected.json"),
+        "live",
+    );
     same(
         &got_sweep,
         &read_json("event_mimo_sine_sweep.expected.json"),
@@ -383,9 +401,7 @@ fn mimo_sine_golden_every_text_golden_is_a_compact_text_frame() {
         .unwrap()
         .filter_map(|e| e.ok()?.file_name().into_string().ok())
         .filter(|n| {
-            n.contains("mimo_sine")
-                && n.ends_with(".json")
-                && !n.ends_with(".expected.json")
+            n.contains("mimo_sine") && n.ends_with(".json") && !n.ends_with(".expected.json")
         })
         .collect();
     names.sort();

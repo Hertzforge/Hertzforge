@@ -108,7 +108,10 @@ async fn mimo_sine_the_record_holds_every_item_of_the_run() {
     assert_eq!(law["id"], "matrix");
     assert_eq!(law["builtin"], true);
     assert!(law["params"]["carry"].is_number(), "{law}");
-    assert_eq!(law["accepts"]["test_types"], json!(["sweep", "dwell", "stepped"]));
+    assert_eq!(
+        law["accepts"]["test_types"],
+        json!(["sweep", "dwell", "stepped"])
+    );
     let id = &run["identification"];
     assert_eq!(id["gate_passed"], true);
     assert!(id["tracker_delay_factor"].is_number());
@@ -119,7 +122,13 @@ async fn mimo_sine_the_record_holds_every_item_of_the_run() {
     assert_eq!(frf["channels"]["references"], json!([7, 8, 9, 10]));
 
     // The shaker and feasibility inputs.
-    assert_eq!(setup["feasibility"]["inputs"]["shakers"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        setup["feasibility"]["inputs"]["shakers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
     assert_eq!(r["aborts"]["shaker_ratings"].as_array().unwrap().len(), 4);
     assert!(r["aborts"]["shaker_ratings"][0]["max_velocity_m_s_pk"].is_number());
 
@@ -127,7 +136,12 @@ async fn mimo_sine_the_record_holds_every_item_of_the_run() {
     let log = std::fs::read_to_string(folder.join("log.jsonl")).unwrap();
     let kinds: Vec<String> = log
         .lines()
-        .map(|l| serde_json::from_str::<Value>(l).unwrap()["kind"].as_str().unwrap().to_owned())
+        .map(|l| {
+            serde_json::from_str::<Value>(l).unwrap()["kind"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
         .collect();
     for k in ["state", "station", "gate", "level", "notch"] {
         assert!(kinds.iter().any(|x| x == k), "no {k} entry: {kinds:?}");
@@ -177,7 +191,14 @@ async fn mimo_sine_the_folder_is_valid_while_the_run_drives() {
     let svc = Service::with_options(msine::paced(5.0, Duration::from_secs(600)));
     let mut c = Client::connect(serve(svc).await).await;
     controller(&mut c, 4, 0, 4).await;
-    let cfg = msine::config("sine-linear-4x4", 4, 0, 4, msine::dwell(80.0, 60.0), "matrix");
+    let cfg = msine::config(
+        "sine-linear-4x4",
+        4,
+        0,
+        4,
+        msine::dwell(80.0, 60.0),
+        "matrix",
+    );
     c.ok("mimo_sine.configure", json!({"config": cfg})).await;
     let armed = c.ok("mimo_sine.arm", json!({})).await;
     let folder = msine::folder(&armed);
@@ -209,7 +230,14 @@ async fn mimo_sine_a_record_that_cannot_be_written_refuses_the_arm() {
     o.capture_root = Some(blocked.clone());
     let mut c = Client::connect(serve(Service::with_options(o)).await).await;
     controller(&mut c, 4, 0, 4).await;
-    let cfg = msine::config("sine-linear-4x4", 4, 0, 4, msine::dwell(80.0, 1.0), "matrix");
+    let cfg = msine::config(
+        "sine-linear-4x4",
+        4,
+        0,
+        4,
+        msine::dwell(80.0, 1.0),
+        "matrix",
+    );
     c.ok("mimo_sine.configure", json!({"config": cfg})).await;
     let e = c.refused("mimo_sine.arm", json!({})).await;
     assert_eq!(e["reason"], "record_unwritable", "{e}");

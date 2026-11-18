@@ -50,12 +50,12 @@ mod srs_methods;
 #[path = "server_mimo_shock.rs"]
 mod mimo_shock_methods;
 
+#[path = "server_mimo_sine.rs"]
+mod mimo_sine_methods;
 #[path = "server_mixed.rs"]
 mod mixed_methods;
 #[path = "server_sine.rs"]
 mod sine_methods;
-#[path = "server_mimo_sine.rs"]
-mod mimo_sine_methods;
 
 #[path = "server_explorer.rs"]
 mod explorer_methods;
@@ -1375,10 +1375,7 @@ impl Service {
                 .clone()
                 .filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
-            let msine = inner
-                .mimo_sine
-                .clone()
-                .filter(|s| s.view().state.is_live());
+            let msine = inner.mimo_sine.clone().filter(|s| s.view().state.is_live());
             let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
@@ -1683,13 +1680,8 @@ impl Service {
                 let patience = mimo_sine_methods::shutdown_patience(&s);
                 while s.view().state.is_live() {
                     if asked.elapsed() > patience {
-                        mimo_sine_methods::stop_mimo_sine(
-                            &s,
-                            None,
-                            rrun::SHUTDOWN_BY.into(),
-                            true,
-                        )
-                        .await;
+                        mimo_sine_methods::stop_mimo_sine(&s, None, rrun::SHUTDOWN_BY.into(), true)
+                            .await;
                         break;
                     }
                     tokio::time::sleep(SHUTDOWN_POLL).await;

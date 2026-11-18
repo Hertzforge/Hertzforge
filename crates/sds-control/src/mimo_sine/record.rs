@@ -661,7 +661,12 @@ pub fn levels_result(
                 col(&|r| r.sweep_hz_per_s.signum() * f64::from(u8::from(r.sweep_hz_per_s != 0.0))),
             ),
             f64s("pass", vec![n], "", padded(k.pass.clone(), n)),
-            f64s("settling", vec![n], "", col(&|r| f64::from(u8::from(r.settling)))),
+            f64s(
+                "settling",
+                vec![n],
+                "",
+                col(&|r| f64::from(u8::from(r.settling))),
+            ),
             f64s(
                 "values",
                 vec![rows, n],
@@ -700,8 +705,18 @@ pub fn levels_result(
             ),
             f64s("notch_scale", vec![n], "", col(&|r| r.notch_scale)),
             f64s("notch_depth", vec![n], "", col(&|r| r.notch_depth)),
-            f64s("notched", vec![n], "", col(&|r| f64::from(u8::from(r.notched)))),
-            f64s("opposition_ratio", vec![n], "", col(&|r| r.opposition_ratio)),
+            f64s(
+                "notched",
+                vec![n],
+                "",
+                col(&|r| f64::from(u8::from(r.notched))),
+            ),
+            f64s(
+                "opposition_ratio",
+                vec![n],
+                "",
+                col(&|r| r.opposition_ratio),
+            ),
             f64s("largest_share", vec![n], "", col(&|r| r.largest_share)),
         ],
     )
@@ -721,10 +736,7 @@ pub fn trace_result(k: &Kept, drives: &[usize], diagnostics: &[String]) -> rrec:
             .collect()
     };
     let cplx = |g: &dyn Fn(&TickRecord, usize) -> C64| -> (Vec<f64>, Vec<f64>) {
-        (
-            per(m, &|r, c| g(r, c).re),
-            per(m, &|r, c| g(r, c).im),
-        )
+        (per(m, &|r, c| g(r, c).re), per(m, &|r, c| g(r, c).im))
     };
     let (fi_re, fi_im) = cplx(&|r, c| r.drive_in_force[c]);
     let (as_re, as_im) = cplx(&|r, c| r.drive_asked[c]);
@@ -764,7 +776,14 @@ pub fn trace_result(k: &Kept, drives: &[usize], diagnostics: &[String]) -> rrec:
     d.insert("request".into(), json!(["hold", "slow"]));
     d.insert(
         "request_outcome".into(),
-        json!(["none", "granted", "bounded", "not_honoured", "not_sweeping", "hold_too_long"]),
+        json!([
+            "none",
+            "granted",
+            "bounded",
+            "not_honoured",
+            "not_sweeping",
+            "hold_too_long"
+        ]),
     );
     let miss_code = |r: &TickRecord| match r.miss {
         None => -1.0,
@@ -818,8 +837,18 @@ pub fn trace_result(k: &Kept, drives: &[usize], diagnostics: &[String]) -> rrec:
         f64s("tick", vec![n], "", col(&|r| r.index as f64)),
         f64s("frequency", vec![n], "Hz", col(&|r| r.frequency_hz)),
         f64s("dt", vec![n], "s", col(&|r| r.dt_s)),
-        f64s("called", vec![n], "", col(&|r| f64::from(u8::from(r.law_called)))),
-        f64s("engage", vec![n], "", col(&|r| f64::from(u8::from(r.engage)))),
+        f64s(
+            "called",
+            vec![n],
+            "",
+            col(&|r| f64::from(u8::from(r.law_called))),
+        ),
+        f64s(
+            "engage",
+            vec![n],
+            "",
+            col(&|r| f64::from(u8::from(r.engage))),
+        ),
         f64s("hold", vec![n], "", col(&hold_code)),
         f64s("drive_in_force_re", vec![m, n], "V", fi_re),
         f64s("drive_in_force_im", vec![m, n], "V", fi_im),
@@ -829,13 +858,28 @@ pub fn trace_result(k: &Kept, drives: &[usize], diagnostics: &[String]) -> rrec:
         f64s("drive_im", vec![m, n], "V", pl_im),
         f64s("miss", vec![n], "", col(&miss_code)),
         f64s("call_s", vec![n], "s", col(&|r| r.law_s)),
-        f64s("faulted", vec![n], "", col(&|r| f64::from(u8::from(r.law_faulted)))),
+        f64s(
+            "faulted",
+            vec![n],
+            "",
+            col(&|r| f64::from(u8::from(r.law_faulted))),
+        ),
         f64s("request", vec![n], "", col(&request_code)),
         f64s("request_factor", vec![n], "", col(&factor)),
         f64s("request_outcome", vec![n], "", col(&outcome_code)),
         f64s("ceiling_scale", vec![n], "", col(&|r| r.ceiling_scale)),
-        f64s("first_drive_scale", vec![n], "", col(&|r| r.first_drive_scale)),
-        f64s("cap_bound", vec![n], "", col(&|r| f64::from(u8::from(r.cap_bound)))),
+        f64s(
+            "first_drive_scale",
+            vec![n],
+            "",
+            col(&|r| r.first_drive_scale),
+        ),
+        f64s(
+            "cap_bound",
+            vec![n],
+            "",
+            col(&|r| f64::from(u8::from(r.cap_bound))),
+        ),
         f64s(
             "rotation_bound",
             vec![n],

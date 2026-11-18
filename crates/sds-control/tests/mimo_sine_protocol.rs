@@ -68,22 +68,38 @@ async fn mimo_sine_every_refusal_of_a_configuration_is_named() {
         ),
         (
             "drive_unknown_channel",
-            with(b.clone(), &["channels", "drives", "1", "channel"], json!(99)),
+            with(
+                b.clone(),
+                &["channels", "drives", "1", "channel"],
+                json!(99),
+            ),
             None,
         ),
         (
             "control_unknown_channel",
-            with(b.clone(), &["channels", "controls", "0", "channel"], json!(9)),
+            with(
+                b.clone(),
+                &["channels", "controls", "0", "channel"],
+                json!(9),
+            ),
             Some("channels.controls[0].channel"),
         ),
         (
             "abort_below_ceiling",
-            with(b.clone(), &["channels", "drives", "2", "abort_vpk"], json!(1)),
+            with(
+                b.clone(),
+                &["channels", "drives", "2", "abort_vpk"],
+                json!(1),
+            ),
             Some("channels.drives[2].abort_vpk"),
         ),
         (
             "phase_missing",
-            with(b.clone(), &["channels", "controls", "1", "phase"], json!([])),
+            with(
+                b.clone(),
+                &["channels", "controls", "1", "phase"],
+                json!([]),
+            ),
             Some("channels.controls[1].phase"),
         ),
         (
@@ -118,12 +134,20 @@ async fn mimo_sine_every_refusal_of_a_configuration_is_named() {
         ),
         (
             "levels_not_ascending",
-            with(b.clone(), &["schedule"], json!({"levels_db": [0, -6], "start_db": 0})),
+            with(
+                b.clone(),
+                &["schedule"],
+                json!({"levels_db": [0, -6], "start_db": 0}),
+            ),
             Some("schedule.levels_db"),
         ),
         (
             "start_not_a_level",
-            with(b.clone(), &["schedule"], json!({"levels_db": [-6, 0], "start_db": -3})),
+            with(
+                b.clone(),
+                &["schedule"],
+                json!({"levels_db": [-6, 0], "start_db": -3}),
+            ),
             Some("schedule.start_db"),
         ),
         (
@@ -138,29 +162,44 @@ async fn mimo_sine_every_refusal_of_a_configuration_is_named() {
         ),
         (
             "law_param_unknown",
-            with(b.clone(), &["control", "law", "params"], json!({"speed": 2})),
+            with(
+                b.clone(),
+                &["control", "law", "params"],
+                json!({"speed": 2}),
+            ),
             Some("control.law.params.speed"),
         ),
         (
             "law_param_invalid",
-            with(b.clone(), &["control", "law", "params"], json!({"carry": 3})),
+            with(
+                b.clone(),
+                &["control", "law", "params"],
+                json!({"carry": 3}),
+            ),
             Some("control.law.params.carry"),
         ),
         (
             "law_test_type_not_accepted",
-            with(b.clone(), &["control", "law", "id"], json!("paired")).pipe(|c| {
-                with(c, &["test"], sweep(30.0, 60.0, 1.0))
-            }),
+            with(b.clone(), &["control", "law", "id"], json!("paired"))
+                .pipe(|c| with(c, &["test"], sweep(30.0, 60.0, 1.0))),
             Some("control.law.id"),
         ),
         (
             "structure_unknown",
-            with(b.clone(), &["simulator", "structure"], json!("sine-flat-9x9")),
+            with(
+                b.clone(),
+                &["simulator", "structure"],
+                json!("sine-flat-9x9"),
+            ),
             Some("simulator.structure"),
         ),
         (
             "structure_wrong_size",
-            with(b.clone(), &["simulator", "structure"], json!("sine-tall-6x3")),
+            with(
+                b.clone(),
+                &["simulator", "structure"],
+                json!("sine-tall-6x3"),
+            ),
             Some("simulator.structure"),
         ),
         (
@@ -196,7 +235,7 @@ async fn mimo_sine_every_refusal_of_a_configuration_is_named() {
             assert_eq!(item["field"], f, "{reason}: {item}");
         }
     }
-    // A profile row's item is located by its row and its channel.
+    // A profile row's item is located by its field: the control, its profile, the row.
     let bad = with(
         b.clone(),
         &["channels", "controls", "2", "profile", "rows", "1", "value"],
@@ -204,7 +243,7 @@ async fn mimo_sine_every_refusal_of_a_configuration_is_named() {
     );
     let (got, item) = refused_item(&mut c, bad, "value_not_positive").await;
     assert_eq!(got, "value_not_positive");
-    assert_eq!((item["row"].clone(), item["channel"].clone()), (json!(1), json!(3)));
+    assert_eq!(item["field"], "channels.controls[2].profile.rows[1]");
     // Nothing was replaced: no run is configured.
     let s = c.ok("mimo_sine.state", json!({})).await;
     assert_eq!(s["state"], "unconfigured");
@@ -260,7 +299,10 @@ async fn mimo_sine_control_is_needed_and_one_run_at_a_time() {
     assert_eq!(e["reason"], "not_controller", "{e}");
     // A dry run needs no control.
     let dry = other
-        .ok("mimo_sine.configure", json!({"config": base(), "dry_run": true}))
+        .ok(
+            "mimo_sine.configure",
+            json!({"config": base(), "dry_run": true}),
+        )
         .await;
     assert_eq!(dry["errors"], json!([]));
     assert!(other.decoded_response(&json!(other.last_id)).is_some());
@@ -271,7 +313,9 @@ async fn mimo_sine_control_is_needed_and_one_run_at_a_time() {
     .await;
     c.ok("mimo_sine.start", json!({})).await;
     // Another module, or MIMO Sine again, is refused while it is live.
-    let e = c.refused("mimo_sine.configure", json!({"config": base()})).await;
+    let e = c
+        .refused("mimo_sine.configure", json!({"config": base()}))
+        .await;
     assert_eq!(e["reason"], "run_active");
     let e = c.refused("mimo_sine.clear", json!({})).await;
     assert_eq!(e["reason"], "run_active");

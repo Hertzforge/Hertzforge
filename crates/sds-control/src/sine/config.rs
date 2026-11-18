@@ -450,7 +450,8 @@ const DWELL_MODES: [(&str, RstdDwellMode); 2] = [
     ("fixed", RstdDwellMode::Fixed),
     ("phase_tracked", RstdDwellMode::PhaseTracked),
 ];
-pub(crate) const MODES: [(&str, RunMode); 2] = [("auto", RunMode::Auto), ("manual", RunMode::Manual)];
+pub(crate) const MODES: [(&str, RunMode); 2] =
+    [("auto", RunMode::Auto), ("manual", RunMode::Manual)];
 const COMPOSITES: [(&str, CompositeMode); 3] = [
     ("weighted_avg", CompositeMode::WeightedAvg),
     ("min", CompositeMode::Min),

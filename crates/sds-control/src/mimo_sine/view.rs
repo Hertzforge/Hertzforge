@@ -4,10 +4,10 @@
 //! publishes.
 
 use super::config::mode_name;
-use crate::sine::config::round;
 use crate::codec::Arrays;
 use crate::protocol::num;
 use crate::random::view::{RecordRef, State};
+use crate::sine::config::round;
 use crate::sine::config::Grid;
 use crate::sine::view::StationRef;
 use crate::views::{self, Axis, Role, Row, Scale, Series, Status};
@@ -409,7 +409,10 @@ pub fn state_key(v: Option<&MsView>) -> String {
             v.notch,
             v.end.is_some(),
             v.identification.is_some(),
-            v.record.as_ref().and_then(|r| r.problem.clone()).unwrap_or_default(),
+            v.record
+                .as_ref()
+                .and_then(|r| r.problem.clone())
+                .unwrap_or_default(),
         ),
     }
 }
@@ -737,10 +740,10 @@ pub fn pass_views_where(
     let mut out = Vec::new();
     for (c, pts) in v.controls.iter().zip(&f.control) {
         let title = &format!("Control {}", c.channel);
-        if want(&title) {
+        if want(title) {
             out.push(views::spectrum(
                 arrays,
-                &title,
+                title,
                 &x,
                 &Axis::new("Amplitude", Some(&c.unit), Scale::Log),
                 vec![
@@ -752,10 +755,10 @@ pub fn pass_views_where(
         }
         if v.phase_specified {
             let title = &format!("Phase {}", c.channel);
-            if want(&title) {
+            if want(title) {
                 out.push(views::spectrum(
                     arrays,
-                    &title,
+                    title,
                     &x,
                     &Axis::new("Phase", Some("deg"), Scale::Linear),
                     vec![
@@ -767,10 +770,10 @@ pub fn pass_views_where(
             }
         }
         let title = &format!("Error {}", c.channel);
-        if want(&title) {
+        if want(title) {
             out.push(views::spectrum(
                 arrays,
-                &title,
+                title,
                 &x,
                 &Axis::new("Error", Some("dB"), Scale::Linear),
                 vec![
@@ -783,10 +786,10 @@ pub fn pass_views_where(
     }
     for (c, pts) in v.limits.iter().zip(&f.limit) {
         let title = &format!("Limit {}", c.channel);
-        if want(&title) {
+        if want(title) {
             out.push(views::spectrum(
                 arrays,
-                &title,
+                title,
                 &x,
                 &Axis::new("Amplitude", Some(&c.unit), Scale::Log),
                 vec![
@@ -798,10 +801,10 @@ pub fn pass_views_where(
         }
     }
     let title = "Drives";
-    if want(&title) {
+    if want(title) {
         out.push(views::spectrum(
             arrays,
-            &title,
+            title,
             &x,
             &Axis::new("Drive", Some("V"), Scale::Log),
             v.drives
@@ -820,10 +823,10 @@ pub fn pass_views_where(
         ));
     }
     let title = "Drive phase";
-    if want(&title) {
+    if want(title) {
         out.push(views::spectrum(
             arrays,
-            &title,
+            title,
             &x,
             &Axis::new("Phase", Some("deg"), Scale::Linear),
             v.drives
@@ -842,10 +845,10 @@ pub fn pass_views_where(
         ));
     }
     let title = "Readings";
-    if want(&title) {
+    if want(title) {
         out.push(views::spectrum(
             arrays,
-            &title,
+            title,
             &x,
             &Axis::new("Reading", None, Scale::Linear),
             vec![

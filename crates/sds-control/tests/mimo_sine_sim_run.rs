@@ -79,8 +79,10 @@ async fn mimo_sine_a_sweep_on_the_linear_four_by_four_completes_with_its_pass_fr
     assert_eq!(end["test"], "sweep");
     let worst = worst_live_error(&c);
     assert!(worst < 3.0, "the worst live error was {worst} dB");
-    c.wait_for("mimo_sine.sweep", msine::LONG, |e| e.topic() == "mimo_sine.sweep")
-        .await;
+    c.wait_for("mimo_sine.sweep", msine::LONG, |e| {
+        e.topic() == "mimo_sine.sweep"
+    })
+    .await;
     let sweep = c.of_topic("mimo_sine.sweep")[0].data().clone();
     assert_eq!(sweep["pass"], 1);
     assert_eq!(sweep["direction"], "up");
@@ -90,7 +92,10 @@ async fn mimo_sine_a_sweep_on_the_linear_four_by_four_completes_with_its_pass_fr
         .iter()
         .filter_map(|v| v["title"].as_str())
         .collect();
-    assert!(titles.contains(&"Control 1") && titles.contains(&"Drives"), "{titles:?}");
+    assert!(
+        titles.contains(&"Control 1") && titles.contains(&"Drives"),
+        "{titles:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -111,8 +116,10 @@ async fn mimo_sine_a_stepped_sine_on_the_linear_four_by_four_plays_every_step() 
     .await;
     assert_eq!(end["end"]["outcome"], "completed", "{}", end["end"]);
     assert_eq!(end["steps"], json!({"done": 3, "of": 3}));
-    c.wait_for("mimo_sine.sweep", msine::LONG, |e| e.topic() == "mimo_sine.sweep")
-        .await;
+    c.wait_for("mimo_sine.sweep", msine::LONG, |e| {
+        e.topic() == "mimo_sine.sweep"
+    })
+    .await;
     let pass = c.of_topic("mimo_sine.sweep")[0].data().clone();
     assert_eq!(pass["pass"], 1);
     assert!(pass["direction"].is_null());
@@ -160,14 +167,24 @@ async fn mimo_sine_a_limit_channel_notches_the_drive_on_the_base_and_article() {
         .any(|e| e["kind"] == "notch");
     assert!(notch_in, "the log has no notch entry");
     let report = c.ok("mimo_sine.report", json!({})).await["report"].clone();
-    assert!(report["limits"][0]["notched_s"].as_f64().unwrap() > 0.0, "{report}");
+    assert!(
+        report["limits"][0]["notched_s"].as_f64().unwrap() > 0.0,
+        "{report}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mimo_sine_hold_resume_and_a_manual_frequency_act_on_a_sweep() {
     let mut c = paced_client(10.0).await;
     controller(&mut c, 4, 0, 4).await;
-    let cfg = config("sine-linear-4x4", 4, 0, 4, sweep(30.0, 200.0, 1.0), "matrix");
+    let cfg = config(
+        "sine-linear-4x4",
+        4,
+        0,
+        4,
+        sweep(30.0, 200.0, 1.0),
+        "matrix",
+    );
     c.ok("mimo_sine.configure", json!({"config": cfg})).await;
     c.ok("mimo_sine.start", json!({})).await;
     msine::phase(&mut c, "engaged").await;
@@ -193,7 +210,10 @@ async fn mimo_sine_hold_resume_and_a_manual_frequency_act_on_a_sweep() {
         .array(&c.events[i].data()["plots"][0]["views"][0]["series"][0]["y"])
         .unwrap();
     assert_eq!(y.to_f64().len(), 256);
-    assert!(y.to_f64().iter().any(|v| v.abs() > 1e-3), "the samples are silent");
+    assert!(
+        y.to_f64().iter().any(|v| v.abs() > 1e-3),
+        "the samples are silent"
+    );
     let held = c.ok("mimo_sine.hold", json!({})).await;
     assert_eq!(held["held"], true);
     c.pump(Duration::from_millis(500)).await;
@@ -204,7 +224,10 @@ async fn mimo_sine_hold_resume_and_a_manual_frequency_act_on_a_sweep() {
     let b = c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
         .as_f64()
         .unwrap();
-    assert!((a - b).abs() < 1e-6, "the frequency moved while held: {a} to {b}");
+    assert!(
+        (a - b).abs() < 1e-6,
+        "the frequency moved while held: {a} to {b}"
+    );
     let to = c.ok("mimo_sine.goto", json!({"hz": 120})).await;
     assert_eq!(to["frequency_hz"], 120);
     c.pump(Duration::from_millis(500)).await;
@@ -240,7 +263,8 @@ async fn mimo_sine_a_stop_ramps_every_drive_down_and_an_abort_ends_at_once() {
     let mut c = paced_client(10.0).await;
     controller(&mut c, 4, 0, 4).await;
     let cfg = config("sine-linear-4x4", 4, 0, 4, dwell(80.0, 60.0), "matrix");
-    c.ok("mimo_sine.configure", json!({"config": cfg.clone()})).await;
+    c.ok("mimo_sine.configure", json!({"config": cfg.clone()}))
+        .await;
     c.ok("mimo_sine.start", json!({})).await;
     msine::phase(&mut c, "engaged").await;
     c.pump(Duration::from_millis(500)).await;

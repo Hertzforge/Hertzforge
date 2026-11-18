@@ -27,9 +27,7 @@
 use super::config::{test_kind, WireMsine};
 use super::laws::LawFacts;
 use super::record::{self as mrec, Kept, TICK_BLOCK};
-use super::view::{
-    sig, Chan, End, Figures, IdentFigures, LawCounts, Live, MsView, Pass,
-};
+use super::view::{sig, Chan, End, Figures, IdentFigures, LawCounts, Live, MsView, Pass};
 use crate::protocol::{num, ErrorCode, MethodError};
 use crate::random::backend::{Interruptible, ABORT, NONE, STOP};
 use crate::random::record as rrec;
@@ -978,10 +976,7 @@ impl Actor {
         self.set(State::Running, "coherence_gate");
         self.view.identification = Some(self.identification_json(&rep));
         self.view.review = Some(self.review_json(&rep, None));
-        self.view.identification_figures = Some(Arc::new(ident_figures(
-            &rep,
-            &self.plan.config,
-        )));
+        self.view.identification_figures = Some(Arc::new(ident_figures(&rep, &self.plan.config)));
         if let Some(k) = self.keep.as_ref() {
             for (name, d, arrays) in
                 mrec::identification_results(&rep, &self.plan.config, &self.table)
@@ -1009,8 +1004,10 @@ impl Actor {
                 num(gate),
                 if rep.gate_passed { "passed" } else { "held" }
             ),
-            Some(json!({"coherence_mean": rep.band_coherence, "gate_coherence": gate,
-                        "passed": rep.gate_passed, "lag_frames": rep.lag_frames})),
+            Some(
+                json!({"coherence_mean": rep.band_coherence, "gate_coherence": gate,
+                        "passed": rep.gate_passed, "lag_frames": rep.lag_frames}),
+            ),
         );
         for w in rep.sweep_rate_warning.iter().filter(|w| w.flagged) {
             self.shared.add_log_data(
@@ -1330,7 +1327,9 @@ impl Actor {
                     "the limit channels hold the reference down to {} of it at {hz} Hz",
                     num(round(depth, 4))
                 ),
-                Some(with(json!({"event": "notch_in", "depth": num(round(depth, 5))}))),
+                Some(with(
+                    json!({"event": "notch_in", "depth": num(round(depth, 5))}),
+                )),
             ),
             EventKind::NotchOut => self.shared.add_log_data(
                 "notch",
@@ -1370,7 +1369,10 @@ impl Actor {
             }
             EventKind::LawMiss { reason } => self.shared.add_log_data(
                 "law",
-                format!("the law's call was not used ({}) at {hz} Hz", reason.replace('_', " ")),
+                format!(
+                    "the law's call was not used ({}) at {hz} Hz",
+                    reason.replace('_', " ")
+                ),
                 Some(with(json!({"event": "law_miss", "reason": reason}))),
             ),
             EventKind::OverCeiling { scale } => self.shared.add_log_data(
@@ -1379,7 +1381,9 @@ impl Actor {
                     "a drive over its ceiling scaled the drive vector by {} at {hz} Hz",
                     num(round(scale, 4))
                 ),
-                Some(with(json!({"event": "over_ceiling", "scale": num(round(scale, 5))}))),
+                Some(with(
+                    json!({"event": "over_ceiling", "scale": num(round(scale, 5))}),
+                )),
             ),
             EventKind::Stopping { outcome } => {
                 if self.stop_at_s.is_none() {
@@ -1389,7 +1393,9 @@ impl Actor {
                     self.shared.add_log_data(
                         "note",
                         format!("the schedule is complete at {hz} Hz; every drive ramps down"),
-                        Some(with(json!({"event": "stopping", "outcome": outcome.as_str()}))),
+                        Some(with(
+                            json!({"event": "stopping", "outcome": outcome.as_str()}),
+                        )),
                     );
                 } else if self.view.end.is_none() && !matches!(outcome, Outcome::Stopped) {
                     self.shared.add_log_data(
@@ -1398,7 +1404,9 @@ impl Actor {
                             "{} at {hz} Hz; the drive ramps down",
                             outcome.as_str().replace('_', " ")
                         ),
-                        Some(with(json!({"event": "stopping", "outcome": outcome.as_str()}))),
+                        Some(with(
+                            json!({"event": "stopping", "outcome": outcome.as_str()}),
+                        )),
                     );
                 }
                 if self.view.state == State::Running {
@@ -1407,7 +1415,10 @@ impl Actor {
             }
             EventKind::Ended { outcome } => self.shared.add_log_data(
                 "state",
-                format!("every drive at zero ({})", outcome.as_str().replace('_', " ")),
+                format!(
+                    "every drive at zero ({})",
+                    outcome.as_str().replace('_', " ")
+                ),
                 Some(with(json!({"event": "ended", "outcome": outcome.as_str()}))),
             ),
         }
@@ -1472,7 +1483,8 @@ impl Actor {
             let amp = r.limit[j].norm();
             let b = r.limit_bound[j];
             let margin = 20.0 * (amp / b).log10();
-            live.limits.push([amp, wrap(r.limit[j].arg().to_degrees()), b, margin]);
+            live.limits
+                .push([amp, wrap(r.limit[j].arg().to_degrees()), b, margin]);
             let a = &mut self.acc.limits[j];
             if margin.is_finite() && margin > a.0 {
                 a.0 = margin;
@@ -1555,8 +1567,11 @@ impl Actor {
         if r.cap_bound || r.rotation_bound {
             self.view.counts.capped_ticks += 1;
         }
-        self.view.counts.rotation_max_deg =
-            self.view.counts.rotation_max_deg.max(r.largest_rotation_deg);
+        self.view.counts.rotation_max_deg = self
+            .view
+            .counts
+            .rotation_max_deg
+            .max(r.largest_rotation_deg);
         // The schedule's place.
         let prev_freq = self.last.as_ref().map(|l| l.frequency_hz);
         let dir = r.sweep_hz_per_s.signum() * f64::from(u8::from(r.sweep_hz_per_s != 0.0));
@@ -1887,7 +1902,9 @@ impl Actor {
                 let outcome = self.stop_outcome();
                 self.end(outcome, "stopped", None, None, ramp)
             }
-            Outcome::RunThreadFailure => self.fault("the loop's thread failed; the station was stopped at once"),
+            Outcome::RunThreadFailure => {
+                self.fault("the loop's thread failed; the station was stopped at once")
+            }
             Outcome::Station => self.fault(&format!(
                 "the station stopped the run ({})",
                 note.unwrap_or_else(|| "no reason given".into())
@@ -1928,9 +1945,11 @@ impl Actor {
                 let side = if err >= 0.0 { "high" } else { "low" };
                 let f = at_hz.unwrap_or(0.0);
                 let lvl = 10f64.powf(at_level.unwrap_or(0.0) / 20.0);
-                let limit = s.controls.get(c).and_then(|cc| cc.profile.abort_bounds(f)).map(
-                    |b| if side == "high" { b.1 * lvl } else { b.0 * lvl },
-                );
+                let limit = s
+                    .controls
+                    .get(c)
+                    .and_then(|cc| cc.profile.abort_bounds(f))
+                    .map(|b| if side == "high" { b.1 * lvl } else { b.0 * lvl });
                 t["kind"] = json!("abort_band");
                 t["channel"] = json!(ch);
                 t["side"] = json!(side);
@@ -1946,7 +1965,11 @@ impl Actor {
                 let ch = self.view.limits.get(j).map_or(0, |l| l.channel);
                 let measured = r.map_or(f64::NAN, |r| r.limit[j].norm());
                 let f = at_hz.unwrap_or(0.0);
-                let bound = s.limits.get(j).and_then(|l| l.profile.abort_bounds(f)).map(|b| b.1);
+                let bound = s
+                    .limits
+                    .get(j)
+                    .and_then(|l| l.profile.abort_bounds(f))
+                    .map(|b| b.1);
                 t["kind"] = json!("limit_channel");
                 t["channel"] = json!(ch);
                 t["measured"] = num(sig(measured));
@@ -2068,7 +2091,8 @@ impl Actor {
             ),
             _ => "The run ended.".to_owned(),
         });
-        let unramped = matches!(outcome, "aborted" | "operator_abort" | "fault") && ramp_s.is_none();
+        let unramped =
+            matches!(outcome, "aborted" | "operator_abort" | "fault") && ramp_s.is_none();
         if matches!(outcome, "operator_abort" | "fault") {
             self.shared.signal.store(ABORT, Ordering::SeqCst);
         }
@@ -2081,7 +2105,8 @@ impl Actor {
         }
         self.svc = None;
         self.lock = None;
-        if self.plan.config.is_sweep() || !self.pass_figures.as_ref().is_some_and(|f| f.against_time)
+        if self.plan.config.is_sweep()
+            || !self.pass_figures.as_ref().is_some_and(|f| f.against_time)
         {
             self.end_pass();
         }
@@ -2223,7 +2248,11 @@ fn ident_figures(rep: &IdentificationReport, w: &WireMsine) -> IdentFigures {
     IdentFigures {
         freqs_hz: idx.iter().map(|&k| id.frequency_hz[k]).collect(),
         gain: (0..nc + nl)
-            .map(|r| (0..m).map(|d| idx.iter().map(|&k| h(r, d, k).norm()).collect()).collect())
+            .map(|r| {
+                (0..m)
+                    .map(|d| idx.iter().map(|&k| h(r, d, k).norm()).collect())
+                    .collect()
+            })
             .collect(),
         phase: (0..nc + nl)
             .map(|r| {

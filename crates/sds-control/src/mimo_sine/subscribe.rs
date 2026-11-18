@@ -287,7 +287,10 @@ pub fn parse(params: &Map<String, Value>) -> Result<Option<Subscription>, Method
             (_, Some(_)) => {
                 return Err(bad(
                     &at("points"),
-                    format!("\"points\" applies to time plots, not to {}", quantity.name()),
+                    format!(
+                        "\"points\" applies to time plots, not to {}",
+                        quantity.name()
+                    ),
                 ))
             }
         };
@@ -391,7 +394,12 @@ fn identification_views(v: &MsView, ch: &Channels, arrays: &mut Arrays) -> Vec<V
             } else {
                 format!("Limit {c}")
             };
-            Series::new(&name, Role::Measured, f.freqs_hz.clone(), f.coherence[*r].clone())
+            Series::new(
+                &name,
+                Role::Measured,
+                f.freqs_hz.clone(),
+                f.coherence[*r].clone(),
+            )
         })
         .collect();
     coh.push(Series::new(
@@ -420,7 +428,10 @@ fn law_reading(v: &MsView) -> Value {
         .map(|(k, (_, label, unit))| {
             Row::number(
                 label,
-                view::sig(live.and_then(|l| l.values.get(k).copied()).unwrap_or(f64::NAN)),
+                view::sig(
+                    live.and_then(|l| l.values.get(k).copied())
+                        .unwrap_or(f64::NAN),
+                ),
                 (!unit.is_empty()).then_some(unit.as_str()),
                 Status::Info,
             )
@@ -483,14 +494,22 @@ pub fn data_json(v: &MsView, sub: &Subscription, arrays: &mut Arrays) -> Value {
                 Quantity::Time => v
                     .time
                     .as_ref()
-                    .map(|t| t.inputs.iter().map(|(c, _)| *c).filter(|c| ch.picks(*c)).collect())
+                    .map(|t| {
+                        t.inputs
+                            .iter()
+                            .map(|(c, _)| *c)
+                            .filter(|c| ch.picks(*c))
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 _ => Vec::new(),
             };
             let views: Vec<Value> = match p.quantity {
                 Quantity::Identification => identification_views(v, &ch, arrays),
                 Quantity::Law if v.law_built => vec![law_reading(v)],
-                Quantity::Time => time_views(v, &resolved, p.points.unwrap_or(DEFAULT_POINTS), arrays),
+                Quantity::Time => {
+                    time_views(v, &resolved, p.points.unwrap_or(DEFAULT_POINTS), arrays)
+                }
                 _ if !engaged => Vec::new(),
                 q => {
                     let f = f.unwrap_or(&empty);
@@ -549,14 +568,17 @@ fn time_views(v: &MsView, channels: &[u32], points: usize, arrays: &mut Arrays) 
                 return None;
             }
             let n = samples.len().min(points);
-            let y: Vec<f64> = samples[samples.len() - n..].iter().map(|x| f64::from(*x)).collect();
-            let x: Vec<f64> = (0..n).map(|k| (k as f64 + 1.0 - n as f64) / t.fs_hz).collect();
-            let (title, unit) = all
-                .clone()
-                .find(|c| c.channel == *ch)
-                .map_or_else(|| (format!("Channel {ch}"), "g".to_owned()), |c| {
-                    (c.description.clone(), c.unit.clone())
-                });
+            let y: Vec<f64> = samples[samples.len() - n..]
+                .iter()
+                .map(|x| f64::from(*x))
+                .collect();
+            let x: Vec<f64> = (0..n)
+                .map(|k| (k as f64 + 1.0 - n as f64) / t.fs_hz)
+                .collect();
+            let (title, unit) = all.clone().find(|c| c.channel == *ch).map_or_else(
+                || (format!("Channel {ch}"), "g".to_owned()),
+                |c| (c.description.clone(), c.unit.clone()),
+            );
             Some(views::spectrum(
                 arrays,
                 &title,
@@ -579,26 +601,24 @@ fn error_view(v: &MsView, f: &Figures, arrays: &mut Arrays) -> Value {
     };
     let mut series = Vec::new();
     for (c, pts) in v.controls.iter().zip(&f.control) {
-        let (xs, ys): (Vec<f64>, Vec<f64>) = f
-            .x
-            .iter()
-            .zip(pts.iter().map(|p| p[4]))
-            .filter(|(_, y)| y.is_finite())
-            .map(|(x, y)| (*x, y))
-            .unzip();
+        let (xs, ys): (Vec<f64>, Vec<f64>) =
+            f.x.iter()
+                .zip(pts.iter().map(|p| p[4]))
+                .filter(|(_, y)| y.is_finite())
+                .map(|(x, y)| (*x, y))
+                .unzip();
         series.push(Series::new(
             &format!("Control {}", c.channel),
             Role::Measured,
             xs,
             ys,
         ));
-        let (xs, ys): (Vec<f64>, Vec<f64>) = f
-            .x
-            .iter()
-            .zip(pts.iter().map(|p| p[5]))
-            .filter(|(_, y)| y.is_finite() && *y > 0.0)
-            .map(|(x, y)| (*x, y))
-            .unzip();
+        let (xs, ys): (Vec<f64>, Vec<f64>) =
+            f.x.iter()
+                .zip(pts.iter().map(|p| p[5]))
+                .filter(|(_, y)| y.is_finite() && *y > 0.0)
+                .map(|(x, y)| (*x, y))
+                .unzip();
         if !xs.is_empty() {
             series.push(Series::new(
                 &format!("Notch depth {}", c.channel),
@@ -649,9 +669,11 @@ mod tests {
             refused(json!({"plots": [{"id": "a", "quantity": "law", "points": 3}]})),
             "plots[0].points"
         );
-        let s = parse(&params(json!({"plots": [{"id": "p", "quantity": "phase"}]})))
-            .unwrap()
-            .unwrap();
+        let s = parse(&params(
+            json!({"plots": [{"id": "p", "quantity": "phase"}]}),
+        ))
+        .unwrap()
+        .unwrap();
         assert_eq!(s.plots[0].channels, Some(Channels::All));
     }
 }

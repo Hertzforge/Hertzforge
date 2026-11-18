@@ -77,8 +77,10 @@ pub fn run_check(
     let of = cases.len();
     let mut out = Vec::with_capacity(of);
     for (index, case) in cases.into_iter().enumerate() {
-        progress(json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
-                        "state": "running", "result": null}));
+        progress(
+            json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
+                        "state": "running", "result": null}),
+        );
         let ran = station(&case.station())
             .map_err(mcheck::CheckRunError::Setup)
             .and_then(|b| mcheck::run_check_case(case, factory.clone(), b));
@@ -93,8 +95,10 @@ pub fn run_check(
                 detail: e.to_string(),
             },
         };
-        progress(json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
-                        "state": "done", "result": case_json(&v)}));
+        progress(
+            json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
+                        "state": "done", "result": case_json(&v)}),
+        );
         out.push(v);
     }
     Ok(out)

@@ -544,11 +544,7 @@ impl Service {
         Ok(json!({"mode": config::mode_name(mode)}))
     }
 
-    pub(super) async fn mimo_sine_hold(
-        &self,
-        conn: &Conn,
-        on: bool,
-    ) -> Result<Value, MethodError> {
+    pub(super) async fn mimo_sine_hold(&self, conn: &Conn, on: bool) -> Result<Value, MethodError> {
         let run = self.controlled_mimo_sine(conn).await?;
         run.ask(|reply| Cmd::Hold { on, reply }, wait_for(&run))
             .await?;
@@ -588,12 +584,12 @@ impl Service {
         } else {
             ("hz", "A go to moves the frequency to \"hz\".")
         };
-        let hz = protocol::named_f64(params, key)?
-            .ok_or_else(|| MethodError::bad_params(key, words))?;
+        let hz =
+            protocol::named_f64(params, key)?.ok_or_else(|| MethodError::bad_params(key, words))?;
         let run = self.controlled_mimo_sine(conn).await?;
         Self::mimo_sine_sweep_only(&run, if relative { "A jog" } else { "A go to" })?;
         let band = run.wire.band();
-        if !relative && !(hz >= band.0 && hz <= band.1) {
+        if !(relative || (hz >= band.0 && hz <= band.1)) {
             return Err(MethodError::named(
                 ErrorCode::Refused,
                 "out_of_band",
@@ -820,7 +816,8 @@ impl Service {
             );
         }
         if let Some(p) = &shown.last_pass {
-            let sent = inner.mimo_sine_pass_sent.0 == run.id && inner.mimo_sine_pass_sent.1 >= p.pass;
+            let sent =
+                inner.mimo_sine_pass_sent.0 == run.id && inner.mimo_sine_pass_sent.1 >= p.pass;
             if !sent {
                 inner.mimo_sine_pass_sent = (run.id.clone(), p.pass);
                 let mut arrays = Arrays::new();
@@ -1014,11 +1011,8 @@ impl Service {
         let law = self
             .with_catalog(move |cat| {
                 if recorded {
-                    let record = hertzforge_mimo_sine_laws::check::check_record(
-                        &sha,
-                        &now_rfc3339(),
-                        &v2,
-                    );
+                    let record =
+                        hertzforge_mimo_sine_laws::check::check_record(&sha, &now_rfc3339(), &v2);
                     cat.record_check(&record)
                         .map_err(|e| not_recorded(&e.to_string()))?;
                 }

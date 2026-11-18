@@ -190,7 +190,10 @@ mod tests {
             .collect();
         assert_eq!(defaults, ["matrix"]);
         let of = |id: &str| laws.iter().find(|l| l["id"] == id).expect("listed").clone();
-        assert_eq!(of("matrix")["test_types"], json!(["sweep", "dwell", "stepped"]));
+        assert_eq!(
+            of("matrix")["test_types"],
+            json!(["sweep", "dwell", "stepped"])
+        );
         assert_eq!(of("ratio")["test_types"], json!(["dwell", "stepped"]));
         assert_eq!(of("secant")["test_types"], json!(["dwell"]));
         assert_eq!(of("secant")["amplitude_only"], false);

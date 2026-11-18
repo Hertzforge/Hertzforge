@@ -4169,8 +4169,7 @@ MIMO Sine takes no `capture` and no `cola`: a configuration that gives either is
 `bad_params` at `config.capture` or `config.cola`. A configuration whose shape is wrong is refused
 `bad_params` naming the field in `detail.param` as the request's own path; its content errors are
 refused `config_invalid` with the items, located by `field` (the path inside the configuration,
-`channels.drives[1].abort_vpk`, with no `config.` before it), or by `row` and `channel` for a
-profile row.
+`channels.drives[1].abort_vpk`, with no `config.` before it).
 
 **Result.** `state` (`configured`), `derived` and `warnings`. `derived`:
 
@@ -4215,9 +4214,10 @@ not name, or the drives out of the table's order), `limit_unknown_channel`,
 `law_shape_not_accepted`, `law_test_type_not_accepted`, `law_amplitude_only_not_accepted`,
 `law_param_unknown`, `law_param_invalid`, `limits_out_of_range`, `levels_empty`,
 `profile_too_short`, `quantity_ambiguous`; warnings `join_discontinuity`,
-`alarm_wider_than_abort`, `tracking_lag` (advisory). A profile row's item is located by `row` and
-`channel` (the table index of the control or limit channel the profile is for). A shaker record
-that does not parse is refused `shaker_record_invalid` as a whole.
+`alarm_wider_than_abort`, `tracking_lag` (advisory). A profile row's item is located by its
+`field`, the row inside the control's or limit channel's profile
+(`channels.controls[2].profile.rows[1]`). A shaker record that does not parse is refused
+`shaker_record_invalid` as a whole.
 
 ### Running a MIMO Sine Test
 
