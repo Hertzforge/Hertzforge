@@ -73,7 +73,7 @@ fn mimo_sine_parity_interpolation_inverse_gain_and_fit() {
             assert!((gd.at(f, 2.0 * b) / p["gd"].as_f64().unwrap() - 1.0).abs() < 1e-9);
             assert!((gd.at(f, 0.0) / p["gd_local"].as_f64().unwrap() - 1.0).abs() < 1e-9);
             let g = gain(
-                GainRule::default(),
+                testbed_rule(),
                 &setup.tracking,
                 setup.loop_delay,
                 &gd,
@@ -122,7 +122,11 @@ fn mimo_sine_parity_matrix_closed_loop_runs() {
                 },
             };
             let model = testbed_model(case, &setup);
-            let mut law = MatrixLaw::with_model(&setup, MatrixParams::default(), model).unwrap();
+            let p = MatrixParams {
+                gain_rule: testbed_rule(),
+                ..Default::default()
+            };
+            let mut law = MatrixLaw::with_model(&setup, p, model).unwrap();
             let rows = run_closed_loop(
                 &mut law,
                 &st,
@@ -205,6 +209,7 @@ fn mimo_sine_parity_matrix_amplitude_only_reference() {
         let run = &amp[key];
         let p = MatrixParams {
             free_phase: fp,
+            gain_rule: testbed_rule(),
             ..Default::default()
         };
         let mut law = MatrixLaw::with_model(&setup, p, testbed_model(case, &setup)).unwrap();

@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 
 use hertzforge_mimo_sine_law_math::reference_structure::ModalStructure;
+use hertzforge_mimo_sine_law_math::setup::DelayEstimate;
+use hertzforge_mimo_sine_law_math::speed::GainRule;
 use hertzforge_mimo_sine_law_math::C64;
 use serde_json::Value;
 
@@ -54,4 +56,14 @@ pub fn rel_err(a: &[C64], b: &[C64]) -> f64 {
         .map(|(x, y)| (x - y).norm())
         .fold(0.0, f64::max)
         / scale
+}
+
+/// The research testbed's gain rule, named: the loop-speed rule reading the
+/// structure delay by the largest element (the form the parity vectors hold).
+pub fn testbed_rule() -> GainRule {
+    GainRule::LoopSpeed {
+        g_max: 0.5,
+        beta: 0.5,
+        delay: DelayEstimate::Largest,
+    }
 }

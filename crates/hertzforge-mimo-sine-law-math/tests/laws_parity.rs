@@ -16,7 +16,16 @@ use hertzforge_mimo_sine_law_math::Setup;
 
 fn make(name: &str, setup: &Setup) -> Box<dyn SineLaw> {
     match name {
-        "steepest_descent" => Box::new(SteepestLaw::new(setup, SteepestParams::default()).unwrap()),
+        "steepest_descent" => Box::new(
+            SteepestLaw::new(
+                setup,
+                SteepestParams {
+                    gain_rule: testbed_rule(),
+                    ..Default::default()
+                },
+            )
+            .unwrap(),
+        ),
         "secant_factor" => Box::new(SecantLaw::new(setup, SecantParams::default()).unwrap()),
         "secant_plain" => Box::new(
             SecantLaw::new(
@@ -39,7 +48,16 @@ fn make(name: &str, setup: &Setup) -> Box<dyn SineLaw> {
             )
             .unwrap(),
         ),
-        _ => Box::new(PairedLaw::new(setup, PairedParams::diagonal(4, 4)).unwrap()),
+        _ => Box::new(
+            PairedLaw::new(
+                setup,
+                PairedParams {
+                    gain_rule: testbed_rule(),
+                    ..PairedParams::diagonal(4, 4)
+                },
+            )
+            .unwrap(),
+        ),
     }
 }
 
