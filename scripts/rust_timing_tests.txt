@@ -471,3 +471,4 @@ hertzforge-mimo-sine-laws  test:check_law_files  mimo_sine_check_matrix_as_a_law
 # The same check of every MIMO Sine built-in, natively and as law files, through the service
 sds-control  test:mimo_sine_law_check  mimo_sine_check_every_builtin_passes_through_the_service
 sds-control  test:mimo_sine_law_check  mimo_sine_check_every_law_file_passes_through_the_service_and_may_arm
+sds-control  test:mimo_sine_sim_run  mimo_sine_a_sweep_stopped_part_way_counts_no_sweep_done
