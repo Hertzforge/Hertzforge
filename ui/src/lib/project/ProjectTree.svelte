@@ -61,8 +61,10 @@
 		p.clickPart(name, kind, id, m, ids);
 	}
 
-	/** The geometries whose Nodes row is opened onto its nodes. */
+	/** The sub-items opened onto what they list (a geometry's nodes, its coordinate systems, a group's elements), each by its key. */
 	let nodesOpen = $state<string[]>([]);
+	const listKey = (name: string, kind: string, id: string | number) => `${name}\u0000${kind}\u0000${id}`;
+	const toggleList = (key: string) => (nodesOpen = nodesOpen.includes(key) ? nodesOpen.filter((k) => k !== key) : [...nodesOpen, key]);
 	/** Where a Shift run of node rows starts: the last one clicked without Shift. */
 	let nodeAnchor: number | null = null;
 	const nodeLink = (name: string) => `nodes:${name}`;
@@ -484,11 +486,11 @@
 					<p class="note">Opening.</p>
 				{:else if kids.kind === 'geometry'}
 					{#each kids.parts as part (part.id)}
-						{@const lists = !!part.ids?.length}
-						{@const listed = lists && nodesOpen.includes(o.name)}
+						{@const lists = !!part.ids?.length || !!part.rows?.length}
+						{@const listed = lists && nodesOpen.includes(listKey(o.name, 'part', part.id))}
 						<div class="sub" class:picked={partPicked(o.name, 'part', part.id)} role="treeitem" aria-selected={partPicked(o.name, 'part', part.id)} aria-expanded={lists ? listed : undefined} tabindex="-1" data-testid="part-{o.name}-{part.id}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
 							{#if lists}
-								<button class="twist inner" class:open={listed} aria-label={listed ? `Close the nodes of ${o.name}` : `List the nodes of ${o.name}`} tabindex="-1" data-testid="expand-nodes-{o.name}" onclick={(e) => { e.stopPropagation(); nodesOpen = listed ? nodesOpen.filter((n) => n !== o.name) : [...nodesOpen, o.name]; }}>
+								<button class="twist inner" class:open={listed} aria-label={listed ? `Close the ${part.label.toLowerCase()} of ${o.name}` : `List the ${part.label.toLowerCase()} of ${o.name}`} tabindex="-1" data-testid="expand-{part.id}-{o.name}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'part', part.id)); }}>
 									<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 								</button>
 							{/if}
@@ -508,6 +510,16 @@
 								{#if part.count > ids.length}<p class="note" style="padding-left: 22px">{part.count - ids.length} more not listed: they are in the nodes' table (Edit).</p>{/if}
 							</div>
 						{/if}
+						{#if listed && part.rows}
+							<div class="nodelist" role="group" data-testid="{part.id}-{o.name}">
+								{#each part.rows as row, i (i)}
+									<div class="sub" style="--depth: 1" role="treeitem" aria-selected="false" tabindex="-1" data-testid="{part.id}-{o.name}-{i}" onclick={() => clickSub(o.name, 'part', part.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'part', part.id)}>
+										<Glyph name={part.id} of="child" parent="geometry" size={14} />
+										<span class="label">{row}</span>
+									</div>
+								{/each}
+							</div>
+						{/if}
 					{/each}
 					{#each kids.families as family (family.id)}
 						<div class="sub" class:picked={partPicked(o.name, 'family', family.id)} role="treeitem" aria-selected={partPicked(o.name, 'family', family.id)} tabindex="-1" data-testid="family-{o.name}-{family.id}" onclick={() => clickSub(o.name, 'family', family.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'family', family.id)}>
@@ -516,9 +528,26 @@
 						</div>
 						{#each family.groups as group (group.id)}
 							<div class="sub" class:picked={partPicked(o.name, 'group', group.id)} class:candidate={subCandidate('group', group.id)} style="--depth: 1" role="treeitem" aria-selected={partPicked(o.name, 'group', group.id)} tabindex="-1" data-testid="group-{o.name}-{group.id}" onclick={(e) => clickSub(o.name, 'group', group.id, mods(e), kids.families.flatMap((f) => f.groups.map((g) => g.id)))} ondblclick={() => startSub(o.name, 'group', group.id, group.label)} onkeydown={(e) => subKey(e, () => startSub(o.name, 'group', group.id, group.label), () => clickSub(o.name, 'group', group.id))}>
+								{#if group.elements?.length}
+									{@const shown = nodesOpen.includes(listKey(o.name, 'group', group.id))}
+									<button class="twist inner" class:open={shown} aria-label={shown ? `Close the elements of ${group.label}` : `List the elements of ${group.label}`} tabindex="-1" data-testid="expand-group-{o.name}-{group.id}" onclick={(e) => { e.stopPropagation(); toggleList(listKey(o.name, 'group', group.id)); }}>
+										<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3 1.5l4 3.5-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+									</button>
+								{/if}
 								<Glyph name="groups" of="child" parent="geometry" size={14} />
 								{#if naming(o.name, 'group', group.id)}{@render subField(group.label, group.label)}{:else}<span class="label">{group.label} ({group.count})</span>{/if}
 							</div>
+							{#if group.elements?.length && nodesOpen.includes(listKey(o.name, 'group', group.id))}
+								<div class="nodelist" role="group" data-testid="elements-{o.name}-{group.id}">
+									{#each group.elements as element (element)}
+										<div class="sub" style="--depth: 2" role="treeitem" aria-selected="false" tabindex="-1" data-testid="element-{o.name}-{element}" onclick={() => clickSub(o.name, 'group', group.id)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'group', group.id)}>
+											<Glyph name={family.id} of="child" parent="geometry" size={14} />
+											<span class="label">Element {element}</span>
+										</div>
+									{/each}
+									{#if group.count > group.elements.length}<p class="note" style="padding-left: 36px">{group.count - group.elements.length} more not listed: they are in the group's table (Edit).</p>{/if}
+								</div>
+							{/if}
 						{/each}
 					{/each}
 					<div class="sub" class:picked={partPicked(o.name, 'solids', 0)} role="treeitem" aria-selected={partPicked(o.name, 'solids', 0)} tabindex="-1" data-testid="solids-{o.name}" title="Shapes to build parts from, before they are meshed" onclick={() => clickSub(o.name, 'solids', 0)} onkeydown={(e) => e.key === 'Enter' && clickSub(o.name, 'solids', 0)}>

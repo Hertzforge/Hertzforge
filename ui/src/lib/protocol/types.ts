@@ -763,8 +763,8 @@ export interface ShowPrefs {
 export type ProjectChildren =
 	| {
 			kind: 'geometry';
-			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[] }[];
-			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number }[] }[];
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[]; rows?: string[] }[];
+			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number; elements?: number[] }[] }[];
 			solids: SolidRow[];
 			mates: { id: number; label: string; name: string }[];
 	  }
