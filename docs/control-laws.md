@@ -1044,6 +1044,7 @@ are short so the check of one law takes seconds of simulated test.
 | limit channel | sweep | Base and article, the article limited at 2 g, 150 to 350 Hz at two octaves a minute | The notch engages; the limit at most 0.5 dB over its bound; no control over 1.0 dB in the second after a release |
 | more controls than drives | sweep | 6 controls by 3 drives, 80 to 120 Hz | Within 3.0 dB of the response the drives can reach, median within 0.5 dB |
 | more drives than controls | sweep | 3 controls by 6 drives, 80 to 120 Hz | Within 1.5 dB, median within 0.5 dB, opposition ratio at most 6 dB |
+| steep reference | sweep | Linear 4 x 4, 100 to 120 Hz at one octave a minute, the reference rising 12 dB (a quarter of full level to full level) between 109 and 110 Hz | No control more than 1.0 dB over its reference |
 | law misbehaves | dwell | Linear 4 x 4 at 96 Hz; from the 150th update the law's answer is not finite | The run ends on a law fault after three refused answers, every drive at zero |
 | moved resonance (mild, moderate, hardening) | sweep | The softening and hardening 4 x 4 structures through a resonance that moves with level | Reported, not a pass condition |
 
@@ -1072,7 +1073,8 @@ as a law file with the same verdicts, through the laws crate and through the ser
 `laws.check`. Every built-in law passes every scored case it runs. On the
 limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
 control is over its reference in the second after the release (the worst is 1.1 dB under). On the
-level ladder the worst rung is 0.3 to 0.4 dB for every law. `matrix`'s hardening sweep, reported
+level ladder the worst rung is 0.3 to 0.4 dB for every law. Through the steep reference `matrix`
+reads at most 0.19 dB over its reference (it is the only built-in law that accepts a sweep). `matrix`'s hardening sweep, reported
 and not scored, is 2.3 dB: the resonance has moved past where its stated limit begins.
 
 `matrix` as a law file fits its model when it is built, which on the check's widest band (the limit

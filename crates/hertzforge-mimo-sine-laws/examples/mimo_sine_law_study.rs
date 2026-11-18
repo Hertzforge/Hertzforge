@@ -116,6 +116,7 @@ fn plan(si: usize, name: &'static str, tt: TestType) -> RunPlan {
         settle_after_s: None,
         resonance: None,
         misbehave_from: None,
+        reference_rise_hz: None,
     }
 }
 

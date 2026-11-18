@@ -7,6 +7,10 @@
 //!   `moved_resonance_hardening`, 2.32 dB.
 //! - `paired`, `steepest_descent`, `secant` and `ratio`: none.
 //!
+//! `matrix` passes `steep_reference` at 0.19 dB since it carries the
+//! reference's change between two references the controller told and
+//! corrects on the reference as the trackers read it (before, 2.56 dB over).
+//!
 //! `paired` runs its dwells, measurement noise, level ladder and stepped sine
 //! on `sine-weak-4x4`, the kind of structure it declares itself for (before,
 //! on the coupled plate, it failed `measurement_noise`, `stepped` and

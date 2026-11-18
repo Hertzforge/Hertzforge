@@ -245,8 +245,10 @@ fn mimo_sine_steep_reference_sweep_evidence() {
                             // `STEEP_BANDS=alarm,abort` to see the judging.
                             let (al, ab) = std::env::var("STEEP_BANDS")
                                 .map(|v| {
-                                    let p: Vec<f64> =
-                                        v.split(',').map(|x| x.parse().expect("a number")).collect();
+                                    let p: Vec<f64> = v
+                                        .split(',')
+                                        .map(|x| x.parse().expect("a number"))
+                                        .collect();
                                     (p[0], p[1])
                                 })
                                 .unwrap_or((20.0, 20.0));
