@@ -543,17 +543,29 @@ impl MimoSineCore {
     fn engage(&mut self) {
         self.engaged = true;
         let f = self.osc.frequency();
+        let d = self.first_drive(f);
+        self.event(EventKind::Engaged);
+        self.emit_record(f, 0.0, 0.0, 0.0, Hold::Engage, true);
+        self.start_ramps(&d);
+        self.index = 1;
+    }
+
+    /// The law's engage at `f` (the run's start, and every step or manual
+    /// frequency after it), bounded by the first-drive rule, through the
+    /// guards after the law's; opens the settle window there.
+    fn first_drive(&mut self, f: f64) -> Vec<C64> {
         let lv = self.level();
         reference_at(&self.setup, f, &mut self.reference);
         self.reference.iter_mut().for_each(|r| *r *= lv);
         self.limit_bounds_at(f);
         self.model_at(f);
         self.sched.settle_for(self.settle_s(f));
+        self.judged.copy_from_slice(&self.reference);
         let proposed = self.call_law(true, f, 0.0, 0.0, Hold::Engage, true);
         self.record.engage = true;
         let mut d = match proposed {
             Some(()) => self.proposed.clone(),
-            None => vec![ZERO; self.m],
+            None => self.in_force.clone(),
         };
         // The first drive's bound: the identification's inverse drive here
         // plus 6 dB, or a share of the ceilings without a trusted line.
@@ -581,11 +593,12 @@ impl MimoSineCore {
             guards::scale(&mut d, s);
             self.record.first_drive_scale = s;
         }
+        self.record.cap_bound = false;
+        self.record.rotation_bound = false;
+        self.record.largest_rotation_deg = 0.0;
         self.finish_guards(&mut d, f, 0.0);
-        self.event(EventKind::Engaged);
-        self.emit_record(f, 0.0, 0.0, 0.0, Hold::Engage, true);
-        self.start_ramps(&d);
-        self.index = 1;
+        self.engage_settle = true;
+        d
     }
 
     /// Call the law into `self.proposed`. `None` is a miss (the drive in
@@ -917,7 +930,10 @@ impl MimoSineCore {
             self.level_db = st.level_db;
             self.event(EventKind::Level);
         }
-        if st.jumped {
+        if st.jumped && !st.done {
+            // A new step (or a manual frequency): the law engages again at the
+            // new frequency, its first drive there bounded as at the start, and
+            // the settle window opens.
             for t in self
                 .ctl_trackers
                 .iter_mut()
@@ -925,8 +941,25 @@ impl MimoSineCore {
             {
                 t.restart_settle();
             }
-            self.sched.settle_for(self.settle_s(st.frequency_hz));
-            self.engage_settle = true;
+            let fj = st.frequency_hz;
+            if self.osc.try_set_frequency(fj).is_err() {
+                self.stop(Outcome::FrequencyOutOfRange);
+                return;
+            }
+            let bw = self.setup.tracking.bandwidth_hz(fj);
+            for t in self
+                .ctl_trackers
+                .iter_mut()
+                .chain(self.lim_trackers.iter_mut())
+            {
+                t.set_bn_hz(bw);
+            }
+            let d = self.first_drive(fj);
+            self.divergence.update(false, dt);
+            self.emit_record(fj, 0.0, 0.0, 0.0, Hold::Engage, true);
+            self.start_ramps(&d);
+            self.index += 1;
+            return;
         }
         if !self.sched.settling() {
             self.engage_settle = false;

@@ -196,3 +196,7 @@ pub fn worst_error_db(r: &Run, from_s: f64) -> f64 {
         .flat_map(|t| t.errors_db().iter().map(|e| e.abs()).collect::<Vec<_>>())
         .fold(0.0, f64::max)
 }
+
+/// The measurement noise on every input in the closed-loop tests, g rms per
+/// sample: about 1 % of the sine structures' full level.
+pub const NOISE: f64 = 0.01;
