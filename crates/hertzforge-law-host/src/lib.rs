@@ -1,12 +1,13 @@
 //! The control-law host: loads a control law compiled to a WebAssembly
 //! component (the `random-single`, `random-mimo`, `shock-classical`,
-//! `shock-srs`, `sine-single`, `twr-single` or `shock-mimo` world of
+//! `shock-srs`, `sine-single`, `twr-single`, `shock-mimo` or `sine-mimo` world of
 //! `hertzforge:control-law@0.1.0`, in `wit/control-law/`) and runs it
 //! contained. [`LawHost::load`] loads a single-output Random law,
 //! [`LawHost::load_mimo`] a multiple-output one, [`LawHost::load_classical`] a
 //! classical shock law, [`LawHost::load_srs`] an SRS shock law,
 //! [`LawHost::load_sine`] a Sine law, [`LawHost::load_shock_mimo`] a MIMO Shock
-//! law, and [`LawHost::load_any`] whichever the file is.
+//! law, [`LawHost::load_sine_mimo`] a MIMO Sine law, and [`LawHost::load_any`]
+//! whichever the file is.
 //!
 //! # What the host guarantees
 //!
@@ -80,6 +81,7 @@ pub mod shock_classical;
 pub mod shock_mimo;
 pub mod shock_srs;
 pub mod sine;
+pub mod sine_mimo;
 mod ticker;
 pub mod twr;
 mod types;
@@ -109,6 +111,7 @@ pub use sine::{
     LoadedSineLaw, SineHold, SineIdentification, SineInputs, SineLawInstance, SineOutputs,
     SineSetup, MAX_SINE_VALUES,
 };
+pub use sine_mimo::{LoadedSineMimoLaw, SineMimoManifest, MAX_SINE_MIMO_VALUES};
 pub use twr::{
     LoadedTwrLaw, TwrInputs, TwrLawInstance, TwrOutputs, TwrPlayKind, TwrSetup, TwrVerdict,
     MAX_TWR_VALUES,
@@ -131,6 +134,8 @@ pub const CLASSICAL_WORLD: &str = "shock-classical";
 pub const SRS_WORLD: &str = "shock-srs";
 /// The world a MIMO Shock law file implements.
 pub const SHOCK_MIMO_WORLD: &str = "shock-mimo";
+/// The world a MIMO Sine law file implements.
+pub const SINE_MIMO_WORLD: &str = "sine-mimo";
 /// The world a single-output Sine law file implements.
 pub const SINE_WORLD: &str = "sine-single";
 /// The world a time waveform replication law file implements.

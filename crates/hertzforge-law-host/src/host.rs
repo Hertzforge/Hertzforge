@@ -11,6 +11,7 @@ use crate::shock_classical::{LoadedClassicalLaw, ShockClassicalPre};
 use crate::shock_mimo::{LoadedShockMimoLaw, ShockMimoPre};
 use crate::shock_srs::{LoadedSrsLaw, ShockSrsPre};
 use crate::sine::{LoadedSineLaw, SineSinglePre};
+use crate::sine_mimo::{LoadedSineMimoLaw, SineMimoPre};
 use crate::ticker::Ticker;
 use crate::twr::{LoadedTwrLaw, TwrSinglePre};
 use crate::types::{
@@ -124,6 +125,8 @@ pub enum AnyLaw {
     Twr(LoadedTwrLaw),
     /// A MIMO Shock law (the `shock-mimo` world).
     ShockMimo(LoadedShockMimoLaw),
+    /// A MIMO Sine law (the `sine-mimo` world).
+    SineMimo(LoadedSineMimoLaw),
 }
 
 impl AnyLaw {
@@ -137,12 +140,13 @@ impl AnyLaw {
             AnyLaw::Sine(l) => l.identity(),
             AnyLaw::Twr(l) => l.identity(),
             AnyLaw::ShockMimo(l) => l.identity(),
+            AnyLaw::SineMimo(l) => l.identity(),
         }
     }
 
     /// The world the file implements: `random-single`, `random-mimo`,
-    /// `shock-classical`, `shock-srs`, `sine-single`, `twr-single` or
-    /// `shock-mimo`.
+    /// `shock-classical`, `shock-srs`, `sine-single`, `twr-single`,
+    /// `shock-mimo` or `sine-mimo`.
     pub fn world(&self) -> &'static str {
         match self {
             AnyLaw::Single(_) => crate::WORLD,
@@ -152,6 +156,7 @@ impl AnyLaw {
             AnyLaw::Sine(_) => crate::SINE_WORLD,
             AnyLaw::Twr(_) => crate::TWR_WORLD,
             AnyLaw::ShockMimo(_) => crate::SHOCK_MIMO_WORLD,
+            AnyLaw::SineMimo(_) => crate::SINE_MIMO_WORLD,
         }
     }
 }
@@ -300,13 +305,18 @@ impl LawHost {
             Ok(c) => return LoadedTwrLaw::read(self, sha256, c).map(AnyLaw::Twr),
             Err(e) => chain(&e),
         };
-        match ShockMimoPre::new(pre) {
-            Ok(c) => LoadedShockMimoLaw::read(self, sha256, c).map(AnyLaw::ShockMimo),
+        let shock_mimo_err = match ShockMimoPre::new(pre.clone()) {
+            Ok(c) => return LoadedShockMimoLaw::read(self, sha256, c).map(AnyLaw::ShockMimo),
+            Err(e) => chain(&e),
+        };
+        match SineMimoPre::new(pre) {
+            Ok(c) => LoadedSineMimoLaw::read(self, sha256, c).map(AnyLaw::SineMimo),
             Err(e) => Err(LawError::NotALaw(format!(
                 "not a single-output law ({single_err}), not a multiple-output law ({mimo_err}), \
                  not a classical shock law ({classical_err}), not an SRS shock law ({srs_err}), \
                  not a Sine law ({sine_err}), not a time waveform replication law \
-                 ({twr_err}) and not a MIMO Shock law ({})",
+                 ({twr_err}), not a MIMO Shock law ({shock_mimo_err}) and not a MIMO Sine law \
+                 ({})",
                 chain(&e)
             ))),
         }
@@ -332,12 +342,52 @@ impl LawHost {
                     "it is a single-output shock law, not a MIMO Shock law (the shock-mimo \
                      world)"
                         .into()
+                } else if SineMimoPre::new(pre.clone()).is_ok() {
+                    "it is a MIMO Sine law (the sine-mimo world), not a MIMO Shock law (the \
+                     shock-mimo world)"
+                        .into()
                 } else if RandomSinglePre::new(pre.clone()).is_ok()
                     || SineSinglePre::new(pre.clone()).is_ok()
                     || TwrSinglePre::new(pre).is_ok()
                 {
                     "it is a law of another test type, not a MIMO Shock law (the shock-mimo \
                      world)"
+                        .into()
+                } else {
+                    chain(&e)
+                },
+            )),
+        }
+    }
+
+    /// Compile a MIMO Sine law file and read its manifest: as [`Self::load`],
+    /// for the `sine-mimo` world. Fails with [`LawError::NotALaw`] when the
+    /// component is not a `sine-mimo` law, naming the world it is when it is
+    /// another law, and [`LawError::ManifestInvalid`] when the manifest breaks
+    /// a rule (including no shape or no test type, or more values than eight).
+    pub fn load_sine_mimo(&self, bytes: &[u8]) -> Result<LoadedSineMimoLaw, LawError> {
+        let (sha256, pre) = self.compile(bytes)?;
+        match SineMimoPre::new(pre.clone()) {
+            Ok(c) => LoadedSineMimoLaw::read(self, sha256, c),
+            Err(e) => Err(LawError::NotALaw(
+                if SineSinglePre::new(pre.clone()).is_ok() {
+                    "it is a single-output Sine law (the sine-single world), not a MIMO Sine law \
+                     (the sine-mimo world)"
+                        .into()
+                } else if ShockMimoPre::new(pre.clone()).is_ok() {
+                    "it is a MIMO Shock law (the shock-mimo world), not a MIMO Sine law (the \
+                     sine-mimo world)"
+                        .into()
+                } else if RandomMimoPre::new(pre.clone()).is_ok() {
+                    "it is a multiple-output Random law (the random-mimo world), not a MIMO Sine \
+                     law (the sine-mimo world)"
+                        .into()
+                } else if RandomSinglePre::new(pre.clone()).is_ok()
+                    || ShockClassicalPre::new(pre.clone()).is_ok()
+                    || ShockSrsPre::new(pre.clone()).is_ok()
+                    || TwrSinglePre::new(pre).is_ok()
+                {
+                    "it is a law of another test type, not a MIMO Sine law (the sine-mimo world)"
                         .into()
                 } else {
                     chain(&e)
@@ -386,9 +436,13 @@ impl LawHost {
                 {
                     "it is a Random law, not a Sine law (the sine-single world)".into()
                 } else if ShockClassicalPre::new(pre.clone()).is_ok()
-                    || ShockSrsPre::new(pre).is_ok()
+                    || ShockSrsPre::new(pre.clone()).is_ok()
                 {
                     "it is a shock law, not a Sine law (the sine-single world)".into()
+                } else if SineMimoPre::new(pre).is_ok() {
+                    "it is a MIMO Sine law (the sine-mimo world), not a single-output Sine law \
+                     (the sine-single world)"
+                        .into()
                 } else {
                     chain(&e)
                 },
