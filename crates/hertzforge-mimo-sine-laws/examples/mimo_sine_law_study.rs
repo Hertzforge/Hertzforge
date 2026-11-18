@@ -15,7 +15,7 @@
 //!
 //! | Structure | Dwell | Stepped | Sweep |
 //! |---|---|---|---|
-//! | the four-by-four plates, the tall and the wide | 96 Hz, 6 s | 60 to 120 Hz, 6 an octave, 2 s each | 80 to 120 Hz, 1 octave a minute |
+//! | the four-by-four plates, the weakly coupled one, the loopback, the tall and the wide | 96 Hz, 6 s | 60 to 120 Hz, 6 an octave, 2 s each | 80 to 120 Hz, 1 octave a minute |
 //! | `sine-hardening-4x4` | 165 Hz | 120 to 240 Hz | 140 to 190 Hz, 1 octave a minute |
 //! | `sine-base-article-6x4`, article limited at 2 g | 230 Hz | 150 to 350 Hz | 150 to 350 Hz, 2 octaves a minute |
 //! | `sine-near-singular-4x4` | 381.2 Hz | 350 to 420 Hz, 12 an octave | 350 to 420 Hz, 1 octave a minute |
@@ -41,7 +41,7 @@ use hertzforge_sine::SweepRate;
 
 const LAWS: [&str; 5] = ["matrix", "paired", "ratio", "steepest_descent", "secant"];
 
-const STRUCTURES: [&str; 8] = [
+const STRUCTURES: [&str; 10] = [
     "sine-linear-4x4",
     "sine-softening-4x4-mild",
     "sine-softening-4x4-moderate",
@@ -50,6 +50,8 @@ const STRUCTURES: [&str; 8] = [
     "sine-wide-3x6",
     "sine-base-article-6x4",
     "sine-near-singular-4x4",
+    "sine-weak-4x4",
+    "sine-loopback-4x4",
 ];
 
 /// The dwell, the step grid `(lo, hi, per octave)` and the sweep

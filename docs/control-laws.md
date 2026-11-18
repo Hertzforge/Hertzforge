@@ -1061,11 +1061,11 @@ can be seen, and never fail a law.
 
 The requirements are what a good law should do, written before any law was run against them, and
 several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
-as a law file with the same verdicts. `ratio`, `steepest_descent` and `secant` pass every case
-they run. `matrix` fails one: the limit channel (the article 0.66 dB over its bound against 0.5,
-and a control 3.5 dB over its reference in the second after the notch releases); its hardening
-sweep is 2.3 dB. `paired` fails measurement noise, the stepped sine and the level ladder: it starts
-about 5 dB from the reference and is still there when the settle window closes.
+as a law file with the same verdicts. Every built-in law passes every scored case it runs. On the
+limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
+control is over its reference in the second after the release (the worst is 1.1 dB under). On the
+level ladder the worst rung is 0.3 to 0.4 dB for every law. `matrix`'s hardening sweep, reported
+and not scored, is 2.3 dB: the resonance has moved past where its stated limit begins.
 
 `matrix` as a law file fits its model when it is built, which on the check's widest band (the limit
 case) takes about 20 s; the check times the build apart from the run.
