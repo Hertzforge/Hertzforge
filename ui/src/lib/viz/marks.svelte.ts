@@ -1,7 +1,8 @@
 /**
- * The nodes marked, by link: what a geometry's node table, its 3-D view and its rows in the
- * project tree share (`marks` in schema/PROTOCOL.md). A row selected in the table, a node clicked
- * in the view or a node's row clicked in the tree marks it in all three. The marks are the
+ * What is marked, by link: the ids of a geometry's nodes, coordinate systems or elements, which
+ * the views of the same link share (`marks` and `mark_sets` in schema/PROTOCOL.md). A row
+ * selected in the node table, a node clicked in the 3-D view and a node's, a system's or an
+ * element's row clicked in the project tree each mark it in the others. The marks are the
  * shell's alone: no operation reads them.
  */
 

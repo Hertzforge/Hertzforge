@@ -57,7 +57,8 @@ def unit_text(dimension: str) -> str | None:
 def axes(data: Any, first: int, component: str,
          arrays: dict[str, Any]) -> tuple[dict, dict]:
     """The abscissa and value axes of `data`'s records as `waterfall_arrays`
-    drew them, labeled by the first drawn record's quantity."""
+    drew them, labeled by the first drawn record's quantity. A PSD's frequency
+    axis is log whatever the arrays say."""
     from hertzforge.core.data import Psd, TimeHistory
     from hertzforge.drawing.viz.waterfall import quantity_label
     from hertzforge.names import display_name

@@ -98,16 +98,8 @@ LIVE = frozenset({'project.set_averaging'})
 #: in the tree and left off the form.
 PICKED_LISTS = frozenset({'records', 'channels', 'rows'})
 PICKED_ONE = frozenset({'record', 'drawn'})
-#: an operation on one channel that runs on every channel picked (`parsing.each_picked`)
-#: names that channel by this param, which its form does not ask for either. A `row` is
-#: not taken for a channel anywhere else: a breakpoint's row is a breakpoint.
-EACH_PICKED_KEY = {'project.set_sensor_model': 'row'}
 
 #: the rows that read a geometry's nodes, off until it has some
-#: operations whose blank records are every record, so that a row with none picked runs at
-#: once: CMIF plots the whole FRF (Brandon, 2026-11-14)
-EVERY_RECORD = frozenset(('project.cmif',))
-
 NEEDS_NODES = frozenset(('project.merge_coincident_nodes', 'project.mate_surfaces'))
 
 #: an object param that takes this many types takes anything: it says nothing
@@ -364,11 +356,13 @@ HEADS: dict[str, tuple[str, tuple[str, ...]]] = {
 
 
 def nested(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """A column's rows with each one told what it is under (`NESTS`, `OBJECT_ROWS`).
+    """A column's rows with each one told what it is under (`NESTS`, `HEADS`).
 
-    A row is put under another only when that other is in the column and can run: a row
-    whose setting is not offered stays where it was. The rows keep their order; the shell
-    draws a group's rows under it.
+    A row is put under an action only when that action is in the column and can run: a
+    row whose setting is not offered stays where it was. A row of `HEADS` is put under
+    its head, a row of kind `group` that is not an action, which is added where the
+    first of its rows stood (the object's own, `OBJECT_GROUP`, last). The rows keep
+    their order; the shell draws a group's rows under it.
 
     Parameters
     ----------
@@ -378,9 +372,8 @@ def nested(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     Returns
     -------
     list of dict
-        The rows, a nested one with `under` (the id of the row it is under), a row with
-        rows under it that opens showing them with `open`, and the object's own acts
-        under a last row of kind `group`.
+        The rows, a nested one with `under` (the id of the row it is under), an action
+        that opens showing what is under it with `open`, and the head rows added.
     """
     ready = {row['id'] for row in rows if row.get('ready')}
     parent_of = {child: parent for parent, children in NESTS.items() for child in children}
@@ -532,7 +525,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
         # (Brandon, 2026-11-17)
         picked = next((r for r in picks if r), [])
         unasked = []
-        for param in op.params if chosen else ():
+        for param in op.params:
             if param.name in PICKED_LISTS and param.type == 'string':
                 fill[param.name] = _runs(picked) if picked else ''
                 unasked.append(param.name)
@@ -543,9 +536,12 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
                     fill[param.name] = str(picked[0] + 1)
                 unasked.append(param.name)
             elif param.name == 'picked':
+                # an operation on one channel that runs on every channel picked
+                # (`parsing.each_picked`): the param that numbers its one channel is not
+                # asked for either. A `row` is not taken for a channel anywhere else: a
+                # breakpoint's row is a breakpoint.
                 fill['picked'] = _runs(picked) if picked else ALL_PICKED
-                unasked += ['picked', *([EACH_PICKED_KEY[op.id]] if op.id in EACH_PICKED_KEY
-                                        else [])]
+                unasked += ['picked', getattr(op.run, 'picked_key', 'record')]
         if where in ('mate', 'solid', 'group') and part:
             # what is picked in the tree is what the row acts on
             picked = verbs.picked_ids(part)
@@ -565,7 +561,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
             fill['family'] = str(part['id'])
         more: dict[str, Any] = {'part': True} if homes else {}
         if unasked:
-            more['omit'] = unasked
+            more['omit'] = list(dict.fromkeys(unasked))
         if where and part:
             # what the pick fills is not asked again: the groups, solids or mates picked are
             # the ones it acts on, and more are picked in the tree (Brandon, 2026-11-10)

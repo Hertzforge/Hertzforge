@@ -809,16 +809,20 @@ object can be written in, `.hforge` first. The desktop app lists them as the sav
 for the action table beside the project tree, as `{"table":{"columns":[...]}}`. An operation is offered
 when the selected objects fill its object params: each object on a param that takes its kind (or whose
 verb applies to it), every object used and every required object param filled. With nothing selected, the first column is the project: the acts that take no object
-and the project's files. `fill` is the params to set from the selection (and `records`, as `'1-3, 7'`,
-when records are picked and the operation takes them).
+and the project's files. `fill` is the params to set from the selection. An action runs on what is picked in the tree, so
+the params that number an object's channels, records or rows are filled from the picks under it and
+named in `omit`, which keeps them off the form: a list (`records`, `channels`, `rows`) as `'1-3, 7'`,
+blank for the object whole; one number (`record`, `drawn`) as the first one picked; and `picked`, for
+an operation on one channel that is run on each of them, as that list or `"all"`.
 
 The first column has `"current": true` and is the selection; each other column is the selection with one
 more object of the last type in its `kinds`, `"*"` meaning any object. A row is
-`{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?}`. `kind` is `default`
+`{"id","verb","kind","ready","reason"?,"modules"?,"fill"?,"candidates"?,"part"?,"omit"?,"instant"?,"live"?,"formats"?,"under"?,"open"?}`. `kind` is `group`
+for a row that is not an action and holds the ones `under` it, `default`
 for what the selection draws by itself (`id` starting `show.`), `run` for an operation (`id` is the
 operation's) or another of a lone shape set's views (`id` starting `show.`), and `self` for an act on the selection that is not an operation (`id` starting
 `self.`). A row that cannot run has `ready` false and a `reason` to show, including one whose operation
-would refuse what the selection holds, as far as that can be told with nothing typed. In the selection's column a row may be listed `under` another, by that row's id: the setting or the reading it works from (Compute PSDs under Averaging, Apply Truncation under Truncation, the breakpoint acts under Edit Spec), and the shell draws it under that row, which opens and closes. A row is put under another only while that other can run. A row with `open` shows what is under it to start with. The acts every object has on itself and its group (Export, Units, Group Role, Name Group, Basis, Unlink, Recompute, Duplicate, Rename) are under a last row of kind `group`, `group.object`, which is not an action and only opens. A row without `modules` is
+would refuse what the selection holds, as far as that can be told with nothing typed. In the selection's column a row may be listed `under` another, by that row's id: the setting or the reading it works from (Compute PSDs under Averaging, Apply Truncation under Truncation, the breakpoint acts under Edit Spec), and the shell draws it under that row, which opens and closes. A row is put under another only while that other can run. A row with `open` shows what is under it to start with. Rows that go together and have no action to sit under are under a row of kind `group`, which is not an action and only opens; it stands where the first of its rows stood. They are `group.calculus` (Integrate, Differentiate), and with nothing selected `group.auto_compute` (the six computations by kind of test), `group.index`, `group.reports` and `group.new`. The acts every object has on itself and its group (Export, Units, Group Role, Name Group, Basis, Unlink, Recompute, Duplicate, Rename) are under `group.object`, the last row. A row without `modules` is
 offered in every module. In a combination column, `candidates` names the project's objects that
 complete the row, and a row with none is not ready. `part`, the part of a geometry picked in the tree
 as `project.show` takes it, offers the operations on that part alone, each carrying `"part": true`,
@@ -840,7 +844,7 @@ geometry named Geometry (then Geometry (2) and on) in the display system's lengt
 `solid`; run with `solid` set, an Add changes that solid instead of adding one, only what differs from
 it, and a live form is run each time a changed field is left, with no Apply button. Averaging's row is live too: each change to its form is stored on the time history as it is made. Edit Solid stays for
 booleans and patterns. A solid added, edited or picked is drawn in the view's `bodies`, in its own
-color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out because they
+color, with the gimbal (`gizmo`) on it. A row's `omit` names params its form leaves out, because the tree's picks fill them (above) or because they
 do not apply to what is picked: Set Properties on element groups with no shells is not asked for a
 plate thickness, and no row on a part picked asks again for what the pick fills (its groups,
 solids or mates: more are picked in the tree). Mate Surfaces is offered on two element groups

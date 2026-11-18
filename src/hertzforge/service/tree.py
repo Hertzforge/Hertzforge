@@ -4,13 +4,16 @@ The shell's tree opens an object into what it contains from this answer
 (`project.children`). A
 geometry opens into its nodes, its coordinate systems, its elements by
 family with the element groups under each, its solids and its mated
-surfaces. Every object that holds
-more than one thing opens into a grid, even one column wide: rows are a DOF and a
-quantity, columns are what
-tells one record from another (the reference, the capture, or nothing),
-and each cell names its record, whose icon says what it measures. A shape set opens into
-its modes, a channel
-table into its channels, photographs into their names.
+surfaces; its Nodes and Coordinate systems rows and each element group's
+row list what they hold, the first `LISTED` of a large one. A data object
+opens into a grid, even one column wide: rows are a DOF and a quantity,
+columns are what tells one record from another (the reference, the capture,
+or nothing), and each cell names its record, whose icon says what it
+measures. A shape set opens into its modes, a channel table and a sine
+object into their channels, photographs into their names, matched modes
+into their pairs, and any other object that holds a structure into `items`
+(a set of predictions, a report's blocks). `opens` says whether an object
+opens at all, which is the shell's only word on it.
 
 Nothing here is drawn. The icon of a record is a key the shell draws
 from: a quantity ('acceleration'), two as a fraction, response over
@@ -126,16 +129,31 @@ def grid(data: Any) -> dict[str, Any]:
     return out
 
 
-#: the most nodes a geometry's Nodes row lists under it
-LISTED_NODES = 2000
+#: the most entries a row of a geometry lists under it: the nodes of its Nodes row, the
+#: elements of an element group
+LISTED = 2000
+
+
+def listed_elements(geometry: Any) -> dict[int, list[int]]:
+    """The elements each element group's row lists, by group id: the rows of the first
+    `LISTED` of its elements, in the geometry's order. The tree lists them and the 3-D
+    view marks them one at a time, so both read them here."""
+    listed: dict[int, list[int]] = {}
+    for row, group in enumerate(geometry.elem_group):
+        held = listed.setdefault(int(group), [])
+        if len(held) < LISTED:
+            held.append(row)
+    return listed
 
 
 def _geometry(geometry: Any) -> dict[str, Any]:
     """A geometry's parts as the tree lists them: nodes and coordinate
-    systems with their counts; every element family, the six always and
-    points too (a ground or a spring to ground starts from one), pyramids
-    when there are any, each with the element groups holding elements of
-    it; the solids, a boolean's operands under it; the mated surfaces."""
+    systems with their counts, the nodes with `ids` (the first `LISTED`) and
+    the systems with `ids` and `rows`, a line a system; every element family,
+    the six always and points too (a ground or a spring to ground starts from
+    one), pyramids when there are any, each with the element groups holding
+    elements of it, a group with the `elements` its row lists; the solids, a
+    boolean's operands under it; the mated surfaces."""
     from hertzforge.core import solids
     from hertzforge.core.geometry import (
         CS_TYPES,
@@ -146,15 +164,12 @@ def _geometry(geometry: Any) -> dict[str, Any]:
     )
 
     families: dict[str, dict[int, int]] = {}
-    # each group's elements, the first of a large one, listed when its row is opened
-    members: dict[int, list[int]] = {}
-    for code, group, element in zip(geometry.elem_type, geometry.elem_group,
-                                    geometry.elem_id, strict=True):
+    for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
         held = families.setdefault(element_family(int(code)), {})
         held[int(group)] = held.get(int(group), 0) + 1
-        listed_here = members.setdefault(int(group), [])
-        if len(listed_here) < LISTED_NODES:
-            listed_here.append(int(element))
+    # each group's elements, the first of a large one, listed when its row is opened
+    members = {group: [int(geometry.elem_id[row]) for row in rows]
+               for group, rows in listed_elements(geometry).items()}
     systems = [f'CS {int(cs)}' + (f', {str(name).strip()}' if str(name).strip() else '')
                + f' ({CS_TYPES.get(int(kind), "cartesian")})'
                for cs, name, kind in zip(geometry.cs_id, geometry.cs_name, geometry.cs_type,
@@ -183,7 +198,7 @@ def _geometry(geometry: Any) -> dict[str, Any]:
         'parts': [{'id': 'nodes', 'label': 'Nodes', 'count': len(geometry.node_id),
                    # listed under the row when it is opened; a model's hundred thousand
                    # are read in its table
-                   'ids': [int(n) for n in geometry.node_id[:LISTED_NODES]]},
+                   'ids': [int(n) for n in geometry.node_id[:LISTED]]},
                   {'id': 'coordinate_systems', 'label': 'Coordinate systems',
                    'count': len(geometry.cs_id), 'rows': systems,
                    'ids': [int(cs) for cs in geometry.cs_id]}],
@@ -196,7 +211,7 @@ def _geometry(geometry: Any) -> dict[str, Any]:
 
 def children(project: Any, name: str) -> dict[str, Any]:
     """What the object `name` holds, by what it is; `{'kind': 'none'}` for
-    one that opens into nothing (a report, predictions)."""
+    one that opens into nothing (an empty report, a run log extract)."""
     from hertzforge.core.channel_table import ChannelTable
     from hertzforge.core.data import DataArray
     from hertzforge.core.geometry import Geometry
