@@ -226,3 +226,24 @@ def test_a_sine_specification_opens_onto_its_control_dofs():
     assert tree.opens(project['Sweep'])
     held = tree.children(project, 'Sweep')
     assert [row['dof'] for row in held['channels']] == ['1X+', '2Y+', '3Z+']
+
+
+def test_asds_are_one_column_and_cross_terms_a_matrix():
+    from hertzforge.core.data import Psd
+
+    f = np.arange(10.0, 60.0, 10.0)
+    dofs = ['1X+', '2Y+', '3Z+']
+    project = Project()
+    # each record against itself: nothing to tell apart but the DOF
+    project.add('Autos', Psd(f, np.ones((3, f.size)), dofs, dofs, ordinate_dim='acceleration',
+                             ordinate_unit='g'))
+    held = tree.children(project, 'Autos')
+    assert held['columns'] == [''] and held['cells'] == [[0], [1], [2]]
+    assert [row['dof'] for row in held['rows']] == dofs
+    # with cross terms the references are the columns, as before
+    pairs = [(a, b) for a in dofs for b in dofs]
+    project.add('Matrix', Psd(f, np.ones((9, f.size)), [a for a, _b in pairs],
+                              [b for _a, b in pairs], ordinate_dim='acceleration',
+                              ordinate_unit='g'))
+    full = tree.children(project, 'Matrix')
+    assert full['columns'] == dofs and len(full['cells']) == 3 and len(full['cells'][0]) == 3
