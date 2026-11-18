@@ -43,9 +43,29 @@
 //! `{"kind": "equalized", "band_hz": 2000.0, "half_taps": 2}`, which matches the
 //! continuous modal model at small signal and delays every path `half_taps` samples.
 //!
+//! Research options (2026-11-18, level-indexed model study), each absent by default so a
+//! case without them runs as before:
+//! - `run.identification.frf_file`: a raw little-endian complex128 file, band lines by
+//!   controls by drives (the layout and units of `frf_identified.c16`). The noise floor
+//!   and the identification run as always; then, at the gate, the identification's
+//!   frequency response is replaced by the file's on the band lines
+//!   (`MimoRandomService::replace_identification_frf`, which repeats the setup and size
+//!   checks of `load_identification` and judges the gate again), so the gate and the
+//!   law's first solve use it. The manifest's `frf_loaded` names the file (its folder
+//!   and name only); `frf_identified.c16` stays the measured one and `frf_loaded.c16` is
+//!   the one adopted.
+//! - every run writes `frf_final.c16`: the frequency response the service hands the law
+//!   when the run ends (`frf_law`), controls by drives as `frf_identified.c16` (this
+//!   runner sets no transformation; were one set, the file would be
+//!   `frf_final_law_space.c16` and say so).
+//! - `run.stop_after_loops`: after that many control loops (loops.csv's `loop`), the run
+//!   ends with an operator stop (`Stopped`), recorded in the manifest's
+//!   `outcome.stopped_after_loops`; exit status 0 when nothing tripped.
+//!
 //! Exit status: 0 the run reached the end of its full-level loops (or, with `stop_after`
-//! set to `seed`, made its first solve); 1 it tripped or stopped early (the folder is
-//! written); 2 the case was refused (no folder is made).
+//! set to `seed`, made its first solve, or stopped cleanly at `stop_after_loops`); 1 it
+//! tripped or stopped early (the folder is written); 2 the case was refused (no folder is
+//! made).
 #![recursion_limit = "512"]
 
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable, Units};
@@ -1228,7 +1248,13 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
 
 /// Walk the run from idle to engaged, overriding a failed gate or prediction
 /// (law_check.rs `engage`).
-fn engage(svc: &mut MimoRandomService, gate_passed: &mut Option<bool>) -> Result<(), MimoError> {
+fn engage(
+    svc: &mut MimoRandomService,
+    gate_passed: &mut Option<bool>,
+    frf_load: Option<(&[C64], &str)>,
+    band: (usize, usize),
+    measured_frf: &mut Option<MatrixStack>,
+) -> Result<(), MimoError> {
     const ACK: &str =
         "A benchmark run on the simulator; the gate is the structure's, not the law's.";
     svc.start()?;
@@ -1240,6 +1266,25 @@ fn engage(svc: &mut MimoRandomService, gate_passed: &mut Option<bool>) -> Result
     }
     if svc.state() == MimoState::SysId {
         svc.run_identification()?;
+    }
+    // `identification.frf_file`: the measured identification's frequency response is
+    // replaced, band lines only, before the gate and the law's first solve (the
+    // service's own checks apply; the lines outside the band keep what was measured).
+    if let (MimoState::Gate, Some((data, source))) = (svc.state(), frf_load) {
+        if let Some(id) = svc.identification() {
+            let measured = id.frf.clone();
+            let mut h = measured.clone();
+            let (_, rows, cols) = h.dims();
+            for l in 0..band.1 - band.0 {
+                for r in 0..rows {
+                    for c in 0..cols {
+                        h.set(band.0 + l, r, c, data[(l * rows + r) * cols + c]);
+                    }
+                }
+            }
+            *measured_frf = Some(measured);
+            svc.replace_identification_frf(h, source)?;
+        }
     }
     if svc.state() == MimoState::Gate {
         let passed = svc.gate().is_some_and(|g| g.passed);
@@ -1484,9 +1529,17 @@ fn main() {
             "moments",
             "keep_loop_drive",
             "stop_after",
+            "stop_after_loops",
         ],
         "run",
     );
+    // "stop_after_loops": the run ends with an operator stop (clean, `Stopped`) once
+    // that many control loops have been played, counted as loops.csv's `loop` column,
+    // whatever the level. Absent: no such stop.
+    let stop_after_loops = getu(run, "stop_after_loops");
+    if stop_after_loops == Some(0) {
+        die("stop_after_loops must be 1 or more");
+    }
     // "stop_after": "seed" ends the run once the law has made its first solve (the seed
     // call, on the identification FRF, before any loop): the identification and that
     // drive are written and nothing is played at test level.
@@ -1655,13 +1708,25 @@ fn main() {
     if let Some(v) = getf(run, "overlap") {
         cfg.estimation.overlap = v;
     }
+    // "identification.frf_file": a raw little-endian complex128 file, band lines by
+    // controls by drives, the layout of frf_identified.c16; read after the setup is known.
+    let mut frf_file: Option<PathBuf> = None;
     if let Some(v) = present(run, "identification") {
         let i = obj(v, "run.identification");
         only(
             i,
-            &["frames", "noise_frames", "start_vrms", "below_reference_db"],
+            &[
+                "frames",
+                "noise_frames",
+                "start_vrms",
+                "below_reference_db",
+                "frf_file",
+            ],
             "run.identification",
         );
+        if let Some(f) = gets(i, "frf_file") {
+            frf_file = Some(base.join(f));
+        }
         if let Some(x) = getu(i, "frames") {
             cfg.identification.frames = x as usize;
         }
@@ -1733,6 +1798,39 @@ fn main() {
         on_at_in: 0,
         on_at_dr: 0,
     }));
+    // The loaded frequency response (the runner sets no limit channels, so its rows are
+    // the controls).
+    let frf_loaded: Option<(Vec<C64>, String)> = frf_file.as_ref().map(|p| {
+        let data = read_c16(p, nl * n_c * n_d);
+        if let Some(bad) = data
+            .iter()
+            .position(|v| !(v.re.is_finite() && v.im.is_finite()))
+        {
+            die(format!("{}: value {bad} is not finite", p.display()));
+        }
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        (data, name)
+    });
+    let frf_loaded_from = frf_file.as_ref().map(|p| {
+        // The file name and its parent folder (the arm), never a home path.
+        let parent = p
+            .parent()
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if parent.is_empty() {
+            name
+        } else {
+            format!("{parent}/{name}")
+        }
+    });
     // The case is accepted: only now is the run folder made (a refused case leaves none).
     std::fs::create_dir_all(&out).unwrap_or_else(|e| die(format!("{}: {e}", out.display())));
     let sim: Box<dyn Backend> = Box::new(
@@ -1798,7 +1896,19 @@ fn main() {
     // response fed back) after the service's output check and drive ceilings
     // (service.rs predict, prediction_from). Physical, full level.
     let mut first_drive: Option<Vec<C64>> = None;
-    let outcome = engage(&mut svc, &mut gate_passed).and_then(|()| {
+    let mut measured_frf: Option<MatrixStack> = None;
+    let mut stopped_after_loops = false;
+    let frf_load_src = frf_loaded_from.clone().unwrap_or_default();
+    let outcome = engage(
+        &mut svc,
+        &mut gate_passed,
+        frf_loaded
+            .as_ref()
+            .map(|(d, _)| (d.as_slice(), frf_load_src.as_str())),
+        (lo, hi),
+        &mut measured_frf,
+    )
+    .and_then(|()| {
         engage_s = t_engage.elapsed().as_secs_f64();
         first_drive = herm_band(svc.drive_full_level(), &grid);
         if seed_only {
@@ -1877,6 +1987,13 @@ fn main() {
                     break;
                 }
             }
+            if let Some(n) = stop_after_loops {
+                if svc.loop_count() >= n && svc.state().is_running() {
+                    svc.stop();
+                    stopped_after_loops = true;
+                    break;
+                }
+            }
             if svc.loop_count() > ladder + loops_at_full + 20 {
                 break;
             }
@@ -1887,6 +2004,7 @@ fn main() {
     let run_error = outcome.err().map(|e| e.to_string());
     let trip = svc.trip().map(|t| t.kind.words());
     let completed = run_error.is_none() && trip.is_none() && full_ticks >= loops_at_full;
+    let clean_stop = stopped_after_loops && run_error.is_none() && trip.is_none();
     // What tripped, when and on which control or drive (the service's own record, whole).
     let trip_record = svc.trip().map(|t| {
         let kind = serde_json::to_value(&t.kind).unwrap_or(Value::Null);
@@ -1971,14 +2089,28 @@ fn main() {
         );
     }
     if let Some(id) = svc.identification() {
-        if let Some(d) = mat_band(&id.frf, &grid) {
+        // With identification.frf_file, the FRF the identification measured (before the
+        // file's replaced it); frf_loaded.c16 is the one in force from the gate.
+        let measured = measured_frf.as_ref().unwrap_or(&id.frf);
+        if let Some(d) = mat_band(measured, &grid) {
             write_c16(&out.join("frf_identified.c16"), &d);
             add(
                 "frf_identified.c16",
                 "<c16",
-                vec![nl, id.frf.rows(), id.frf.cols()],
+                vec![nl, measured.rows(), measured.cols()],
                 "the identification FRF, controls by drives",
             );
+        }
+        if measured_frf.is_some() {
+            if let Some(d) = mat_band(&id.frf, &grid) {
+                write_c16(&out.join("frf_loaded.c16"), &d);
+                add(
+                    "frf_loaded.c16",
+                    "<c16",
+                    vec![nl, id.frf.rows(), id.frf.cols()],
+                    "the FRF loaded from identification.frf_file and adopted at the gate (it replaced the measured one), controls by drives",
+                );
+            }
         }
         write_f8(&out.join("coherence_identified.f8"), &id.coherence);
         add(
@@ -1997,6 +2129,19 @@ fn main() {
                 vec![nl, c.frf.rows(), c.frf.cols()],
                 "the FRF handed to the law on its last call",
             );
+        }
+    }
+    // The FRF the law has in force at the end (the service's own, after any update).
+    let frf_final_physical = svc.law_space_is_physical();
+    if let Some(f) = svc.frf_law() {
+        if let Some(d) = mat_band(f, &grid) {
+            let (file, what) = if frf_final_physical {
+                ("frf_final.c16", "the FRF the service hands the law at the end of the run (its frf_law, after any update), controls by drives, same units as frf_identified.c16")
+            } else {
+                ("frf_final_law_space.c16", "the FRF the service hands the law at the end of the run, in the law's transformed space (NOT controls by drives)")
+            };
+            write_c16(&out.join(file), &d);
+            add(file, "<c16", vec![nl, f.rows(), f.cols()], what);
         }
     }
     let h_band = mat_band(&h_all, &grid).unwrap_or_default();
@@ -2203,6 +2348,7 @@ fn main() {
         "moments": moments_block.map(|(first, count)| json!({"first": first, "count": count})),
         "law": {"id": law_id, "params_given": given, "params_resolved": format!("{params:?}")},
         "frf_mode": format!("{frf_mode:?}"),
+        "frf_loaded": frf_loaded_from.as_ref().map(|f| json!({"loaded": true, "from": f, "adopted_at": "the gate, after the measured identification"})),
         "levels_db": levels,
         "loops_at_full_asked": loops_at_full,
         "estimation": {"frames_per_loop": est.frames_per_loop, "memory_loops": est.memory_loops,
@@ -2225,6 +2371,7 @@ fn main() {
             "completed": completed,
             "trip": trip,
             "stopped_after_seed": seed_only && run_error.is_none() && trip.is_none(),
+            "stopped_after_loops": if stopped_after_loops { json!({"operator_stop": true, "loops": stop_after_loops, "clean": clean_stop}) } else { Value::Null },
             "trip_record": trip_record,
             "record_window_status": window_status,
             "record_frames_drive": frames_d,
@@ -2310,5 +2457,15 @@ fn main() {
         println!("  error: {e}");
     }
     let seed_done = manifest_j["outcome"]["stopped_after_seed"] == json!(true);
-    std::process::exit(if completed || seed_done { 0 } else { 1 });
+    if stopped_after_loops {
+        println!(
+            "  operator stop after {} loops (stop_after_loops)",
+            loop_wall.len()
+        );
+    }
+    std::process::exit(if completed || seed_done || clean_stop {
+        0
+    } else {
+        1
+    });
 }
