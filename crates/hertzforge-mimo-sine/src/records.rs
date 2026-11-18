@@ -79,6 +79,9 @@ pub struct TickRecord {
     pub notched: bool,
     /// The backstop notch's scale, 0 to 1.
     pub notch_scale: f64,
+    /// The depth the controls were judged at while the backstop notch bound:
+    /// the share of the reference the limit channels allow, 1 when free.
+    pub notch_depth: f64,
     /// The scale a drive over its ceiling put on the vector (1 when none).
     pub ceiling_scale: f64,
     /// The first drive's bound's scale (1 when none or not binding).
@@ -131,6 +134,7 @@ impl TickRecord {
             request_outcome: RequestOutcome::None,
             notched: false,
             notch_scale: 1.0,
+            notch_depth: 1.0,
             ceiling_scale: 1.0,
             first_drive_scale: 1.0,
             cap_bound: false,
@@ -236,9 +240,10 @@ pub enum EventKind {
     Resumed,
     /// The operator moved the frequency.
     ManualFrequency,
-    /// The backstop notch began to bind.
-    NotchIn { scale: f64 },
-    /// The backstop notch released fully.
+    /// The limit channels began to hold the reference down: the depth they
+    /// allow of it.
+    NotchIn { depth: f64 },
+    /// The limit channels allow the whole reference again.
     NotchOut,
     /// A law's notched reference was refused (not lower, or no limit near).
     NotchedReferenceRefused,

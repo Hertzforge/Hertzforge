@@ -275,6 +275,7 @@ pub struct MimoSineCore {
     proposed: Vec<C64>,
     predicted: Vec<C64>,
     next: Vec<C64>,
+    law_notch: Vec<f64>,
     record: TickRecord,
     worst_played: f64,
 }
@@ -361,6 +362,7 @@ impl MimoSineCore {
             proposed: vec![ZERO; m],
             predicted: vec![ZERO; p],
             next: vec![ZERO; m],
+            law_notch: vec![1.0; n],
             record: TickRecord::empty(n, m, p),
             worst_played: 0.0,
             slots: parts.slots,
@@ -709,15 +711,8 @@ impl MimoSineCore {
         // The backstop notch.
         if self.p > 0 {
             guards::mat_vec(&self.t, self.p, self.m, d, &mut self.predicted);
-            let (s, binds) = self.notch.apply(&self.predicted, &self.bounds, dt);
+            let (s, _) = self.notch.apply(&self.predicted, &self.bounds, dt);
             guards::scale(d, s);
-            if binds && !self.notch_binding {
-                self.event(EventKind::NotchIn { scale: s });
-            }
-            if !binds && self.notch_binding && s >= 1.0 {
-                self.event(EventKind::NotchOut);
-            }
-            self.notch_binding = binds || s < 1.0;
         }
         self.record.notch_scale = self.notch.scale();
         // A drive over its ceiling scales the whole vector.
@@ -745,6 +740,27 @@ impl MimoSineCore {
         let (share, which) = largest_share(d);
         self.record.largest_share = share;
         self.record.largest_share_drive = which as u8;
+    }
+
+    /// The depth the limit channels demand of the reference (1 when none).
+    fn notch_depth(&mut self) -> f64 {
+        let Ok((z, _)) = reg_pinv(&self.h, self.n, self.m, FIRST_DRIVE_EPS) else {
+            return 1.0;
+        };
+        let mut d = vec![ZERO; self.m];
+        guards::mat_vec(&z, self.m, self.n, &self.reference, &mut d);
+        let mut y = vec![ZERO; self.p];
+        guards::mat_vec(&self.t, self.p, self.m, &d, &mut y);
+        let mut depth = 1.0f64;
+        for (j, (b, v)) in self.bounds.iter().zip(&y).enumerate() {
+            if let Some(b) = b {
+                let pred = self.notch.kappa(j) * v.norm();
+                if pred > *b {
+                    depth = depth.min(b / pred);
+                }
+            }
+        }
+        depth
     }
 
     fn start_ramps(&mut self, d: &[C64]) {
@@ -835,11 +851,7 @@ impl MimoSineCore {
                 continue;
             }
             let p = &self.setup.controls[c].profile;
-            let scale = if self.record.notched {
-                r / (self.reference[c].norm().max(1e-300))
-            } else {
-                1.0
-            };
+            let scale = r / self.reference[c].norm().max(1e-300);
             if let Some((lo, hi)) = p.abort_bounds(f) {
                 let (lo, hi) = (lo * lv * scale, hi * lv * scale);
                 if a < lo || a > hi {
@@ -905,9 +917,31 @@ impl MimoSineCore {
         let lv = self.level();
         reference_at(&self.setup, f, &mut self.reference);
         self.reference.iter_mut().for_each(|r| *r *= lv);
-        self.judged.copy_from_slice(&self.reference);
+        // While the backstop notch holds the drive down the controls are
+        // judged against the reference scaled by the same factor.
         self.limit_bounds_at(f);
         self.model_at(f);
+        // While the backstop notch binds, the controls are judged against the
+        // reference scaled to the depth the limit channels demand: the scale
+        // that puts the most loaded limit channel at its bound when the drive
+        // is the identification's inverse for the reference.
+        let depth = if self.p > 0 { self.notch_depth() } else { 1.0 };
+        let binding = depth < 1.0;
+        if binding && !self.notch_binding {
+            self.event(EventKind::NotchIn { depth });
+        } else if !binding && self.notch_binding {
+            self.event(EventKind::NotchOut);
+        }
+        self.notch_binding = binding;
+        self.record.notch_depth = depth;
+        for ((j, r), d) in self
+            .judged
+            .iter_mut()
+            .zip(&self.reference)
+            .zip(&self.law_notch)
+        {
+            *j = r * (depth * d);
+        }
         // The notch learns how the limit channels read against the
         // identification.
         if self.p > 0 {
@@ -971,7 +1005,7 @@ impl MimoSineCore {
         }
         let hold = if self.engage_settle {
             Hold::Engage
-        } else if self.notch.scale() < 1.0 {
+        } else if self.notch_binding || self.notch.scale() < 1.0 {
             Hold::Notch
         } else if st.held && !self.sched.operator_held() {
             Hold::Held
@@ -1017,11 +1051,17 @@ impl MimoSineCore {
                     });
                 let releasing = self.notch.scale() < 1.0;
                 if lowers && (near || releasing) {
-                    self.judged.copy_from_slice(&self.law_out.notched_reference);
+                    for c in 0..self.n {
+                        self.law_notch[c] = self.law_out.notched_reference[c].norm()
+                            / self.reference[c].norm().max(1e-300);
+                    }
                     self.record.notched = true;
                 } else {
+                    self.law_notch.fill(1.0);
                     self.event(EventKind::NotchedReferenceRefused);
                 }
+            } else {
+                self.law_notch.fill(1.0);
             }
             // The caps per drive.
             let caps = guards::cap_drives(&self.in_force, &mut d, &self.setup.guards, dt);

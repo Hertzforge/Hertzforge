@@ -68,6 +68,7 @@ sds-control             tests/srs_protocol.rs                  wrong_mode_and_th
 sds-control             tests/mimo_setup_fields.rs             a_prediction_over_a_ceiling_engages_only_on_its_own_acknowledgement  drive-ceiling  a multiple-output run predicted over a ceiling waits for its acknowledgement
 hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_drive_over_its_ceiling_scales_the_whole_vector  drive-ceiling  a multiple-drive sine drive over its ceiling scales the whole vector
 hertzforge-mimo-sine    src/core.rs                            mimo_sine_core_every_drive_stays_under_its_ceiling_whatever_the_law_asks  drive-ceiling  every multiple-drive sine drive sample stays under its ceiling
+hertzforge-mimo-sine    tests/limit_channel.rs                 mimo_sine_the_backstop_notch_holds_the_article_at_its_bound_and_releases  drive-ceiling  the multiple-drive sine backstop notch holds a limit channel at its bound
 hertzforge-mimo-sine    tests/guards_run.rs                    mimo_sine_a_first_drive_over_its_bound_is_scaled_to_it    drive-ceiling  the first multiple-drive sine drive is bounded
 
 # ------------------------------------------------------------------ drive abort
