@@ -59,16 +59,26 @@ def grid(data: Any) -> dict[str, Any]:
     every quantity is unknown) the channel order breaks the tie, and the
     row's label says so ('101Z+ #2'). Columns are the reference DOFs of a
     matrix of measurements, the captures of a repeated one, or one blank
-    column. A set that does not fill its rectangle keeps its holes (-1).
+    column, which is also what records that are each their own reference
+    (ASDs) get. A set that does not fill its rectangle keeps its holes (-1).
     Time data has a role per row."""
     from hertzforge.core.data import channel_quantities
 
     count = int(data.num_records)
     factors = [channel_quantities(data.known_dim(i)) for i in range(count)]
     quantities = [(str(dof), factors[i][0]) for i, dof in enumerate(data.response_dof)]
-    if data.reference_dof is not None:
-        identities: list[Any] = [(str(dof), factors[i][1])
-                                 for i, dof in enumerate(data.reference_dof)]
+    # every record its own response against itself (an ASD, a specification of autos):
+    # the references tell nothing apart, so they make no columns. A column a reference
+    # laid eight ASDs out as an eight by eight diagonal (Brandon, 2026-11-17).
+    autos = (data.reference_dof is not None and count > 0
+             and all(str(response) == str(reference) for response, reference
+                     in zip(data.response_dof, data.reference_dof, strict=True)))
+    if autos:
+        identities: list[Any] = [''] * count
+        labels = {'': ''}
+    elif data.reference_dof is not None:
+        identities = [(str(dof), factors[i][1])
+                      for i, dof in enumerate(data.reference_dof)]
         labels = {identity: identity[0] for identity in identities}
     else:
         keys = data.column_keys()
