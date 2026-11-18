@@ -466,9 +466,12 @@ sds-control  test:mimo_sine_protocol  mimo_sine_a_run_nobody_holds_control_of_en
 sds-control  test:mimo_sine_protocol  mimo_sine_the_shutdown_ends_a_driving_run_with_its_ramp
 sds-control  test:mimo_sine_record  mimo_sine_the_folder_is_valid_while_the_run_drives
 # The MIMO Sine law check of matrix, whose law file's build is held to a wall-clock budget
-hertzforge-mimo-sine-laws  test:check_builtins  mimo_sine_check_matrix_natively
 hertzforge-mimo-sine-laws  test:check_law_files  mimo_sine_check_matrix_as_a_law_file
 # The same check of every MIMO Sine built-in, natively and as law files, through the service
 sds-control  test:mimo_sine_law_check  mimo_sine_check_every_builtin_passes_through_the_service
 sds-control  test:mimo_sine_law_check  mimo_sine_check_every_law_file_passes_through_the_service_and_may_arm
 sds-control  test:mimo_sine_sim_run  mimo_sine_a_sweep_stopped_part_way_counts_no_sweep_done
+hertzforge-mimo-sine-laws  test:check_wrong_laws  mimo_sine_check_a_late_law_is_held_to_the_real_budget
+sds-control  test:mimo_sine_golden_run  mimo_sine_todays_code_writes_the_golden_run_folder
+sds-control  test:mimo_sine_golden_run  mimo_sine_the_golden_run_repeats_exactly
+sds-control  test:mimo_sine_law_check  mimo_sine_a_law_file_arms_and_runs_a_dwell
