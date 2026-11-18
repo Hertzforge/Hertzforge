@@ -11,7 +11,7 @@ use hertzforge_mimo_sine_law_math::reference_structure::{
     run_closed_loop, Dynamics, Played, Schedule,
 };
 use hertzforge_mimo_sine_law_math::setup::GroupDelay;
-use hertzforge_mimo_sine_law_math::speed::{gain, GainRule};
+use hertzforge_mimo_sine_law_math::speed::gain;
 use hertzforge_mimo_sine_law_math::C64;
 
 /// The model on the testbed's own modes (its fit exported), so a run compares

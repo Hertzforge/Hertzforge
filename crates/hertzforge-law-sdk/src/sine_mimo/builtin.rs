@@ -127,7 +127,9 @@ const DELAY_ESTIMATE: ParamDecl = ParamDecl {
            `largest` takes the largest phase slope over the response's elements (an element \
            with little response and some noise can set it, and the loop then runs slower than \
            it needs to between resonances); `principal` takes the phase slope along the \
-           response's largest singular direction, which at a resonance is the mode's.",
+           response's largest singular direction, which at a resonance is the mode's. \
+           `principal` runs the loop faster between resonances; on a structure whose \
+           resonances move with level that can lose a resonance `largest` holds.",
     knob: Knob::Choice {
         options: &DelayEstimate::NAMES,
         default: "largest",
