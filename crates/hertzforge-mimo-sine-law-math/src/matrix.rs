@@ -38,7 +38,7 @@
 //! linear structure; between a quarter and one bandwidth errors over 3 dB are
 //! expected there; past about one the loop can be lost.
 
-use crate::law::{Hold, Inputs, Outputs, SineLaw};
+use crate::law::{aimed_reference, Hold, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, norm, reg_pinv, row_space_part};
 use crate::modal::{Model, ModelChoice};
 use crate::setup::{GroupDelay, Setup, Shape, TrackingRule};
@@ -235,7 +235,7 @@ impl MatrixLaw {
     fn engage_impl(&mut self, x: &Inputs, out: &mut Outputs) -> Result<(), String> {
         let h = self.model_at(x.f_hz);
         let (z, cond) = reg_pinv(&h, self.n, self.m, self.params.eps)?;
-        let r = self.effective(x.reference, x.controls);
+        let r = self.effective(&aimed_reference(x), x.controls);
         let mut d = vec![ZERO; self.m];
         mat_vec(&z, self.m, self.n, &r, &mut d);
         let (d, unseen) = self.reset(d, x.f_hz)?;
@@ -259,12 +259,20 @@ impl MatrixLaw {
             x.f_hz,
         );
         let g = if x.hold == Hold::Engage { 0.0 } else { gn.g };
-        let rk = self.effective(x.reference, x.controls);
+        // Aimed at the reference the controller judges against: under a notch,
+        // the reference times its depth, so the correction never pushes
+        // against the notch.
+        let rk = self.effective(&aimed_reference(x), x.controls);
         let e: Vec<C64> = rk.iter().zip(x.controls).map(|(r, c)| r - c).collect();
         let f_next = (x.f_hz + x.sweep_hz_s * self.tick_s).clamp(self.grid_lo, self.grid_hi);
         let mut rn = vec![ZERO; n];
         self.setup.reference_at(f_next, &mut rn);
-        rn.iter_mut().for_each(|v| *v *= x.level);
+        let notch = if x.notch_scale.is_finite() {
+            x.notch_scale.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        rn.iter_mut().for_each(|v| *v *= x.level * notch);
         let rn = self.effective(&rn, x.controls);
         let hk = self.model_at(x.f_hz);
         let (zk, cond) = reg_pinv(&hk, n, m, self.params.eps)?;

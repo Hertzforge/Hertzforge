@@ -177,8 +177,14 @@ A limit channel is watched, not controlled. Where its predicted or measured resp
 bound, the controller scales the whole drive vector down, its direction kept, and every control
 falls with it. This backstop needs no model to be right. The run screen shows the scale (the
 **Notch** on the run card and in the Run reading) and, per control, how far under its reference it
-sits. When the limit channel comes back under its bound, the drive comes back at most at the
-release rate you set. A limit channel outside its own abort band ends the run.
+sits. The notch has a depth: the share of the reference the limit channels allow, which the
+controls are judged against and every law is told, so the law aims for the lowered reference
+instead of pushing against the notch. The depth goes deeper at once when a limit channel demands it.
+It comes back up only once the limit channels allow more than the release hysteresis above where it
+is (1 dB by default), and then at most at the release rate (10 dB a second by default), and while
+the notch is in the whole drive vector rises no faster than that rate either. So a limit reading
+that wanders near its bound does not take the notch in and out, and the controls follow it out
+without overshooting their reference. A limit channel outside its own abort band ends the run.
 
 A law may also return a reference of its own, lowered at some controls. The controller takes it
 only when it lowers every control's reference and a limit channel is within the "near the bound"

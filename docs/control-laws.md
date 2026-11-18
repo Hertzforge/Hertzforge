@@ -993,7 +993,21 @@ Every one of these holds whatever the law returns:
   available;
 - the whole drive vector is scaled down, its direction kept, when a limit channel nears its bound
   or a drive is over its ceiling;
+- while the backstop notch is in, the law is told `hold` `notch` and the notch scale: the share of
+  the reference the controller now judges the controls against. A law aims for the reference times
+  that scale, or it fights the notch: on the base-and-article structure `matrix` aiming for the
+  whole reference held the article 0.66 dB over its bound with the notch going in eight times. Every
+  built-in law does. The scale goes down at once when a limit channel demands it and comes back up
+  only past a hysteresis (1 dB by default) at a capped rate (10 dB a second by default), and while
+  it is under 1 the whole drive vector rises no faster than that rate;
 - the first drive is bounded near what the identification predicts;
+- when the level moves (the ladder, or the operator's level step), the controller carries the drive
+  with it: the drive in force is scaled by the level's ratio, at no more per update than the change
+  and rise caps allow, and the law is told the scaled drive as the drive in force and the level it
+  is at, which follows the scheduled level at the same pace. On a linear structure that is exactly
+  the drive the new level needs, so a law keeps what it has learned; a law that keeps readings or
+  drives of its own scales them with the level (`secant` does). The controls are not judged until
+  the settle window after the last move closes;
 - a cap that binds without a break for a second ends the run in the controlled stop;
 - a late, failed, crashed or refused call is a miss; three in a row end the run; a law file that
   traps, runs past its budget or asks for too much memory stays stopped for the rest of the run.
@@ -1032,6 +1046,11 @@ are short so the check of one law takes seconds of simulated test.
 | law misbehaves | dwell | Linear 4 x 4 at 96 Hz; from the 150th update the law's answer is not finite | The run ends on a law fault after three refused answers, every drive at zero |
 | moved resonance (mild, moderate, hardening) | sweep | The softening and hardening 4 x 4 structures through a resonance that moves with level | Reported, not a pass condition |
 
+A law that declares itself for weakly coupled pairs (`paired`) runs the two dwells, the
+measurement noise, the level ladder and the stepped sine on `sine-weak-4x4` instead: the plate's
+modes with each control dominated by its own drive, every cross path at least 20 dB under the
+direct one across the band. Its transport delay and law-misbehaves cases are every law's.
+
 Every case first asks the same of the run, in this order: every answer of the law was used and it
 never faulted; no drive sample went over its ceiling and the controller never had to scale an answer
 down to the ceilings (the near-singular case excepted); the run did not end on an abort or the
@@ -1042,13 +1061,11 @@ can be seen, and never fail a law.
 
 The requirements are what a good law should do, written before any law was run against them, and
 several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
-as a law file with the same verdicts. `ratio` passes every case it runs. `matrix` fails two: the
-level ladder (1.16 dB on the first judged update after the step to -12 dB, against 1.0) and the
-limit channel (the article 0.66 dB over its bound against 0.5, and a control 3.5 dB over its
-reference in the second after the notch releases); its hardening sweep is 2.3 dB. `paired` fails
-measurement noise, the stepped sine and the level ladder: it starts about 5 dB from the reference
-and is still there when the settle window closes. `steepest_descent` and `secant` fail the level
-ladder: their drive does not follow a step in level, and the run aborts a second after the step.
+as a law file with the same verdicts. Every built-in law passes every scored case it runs. On the
+limit channel `matrix` holds the article 0.37 dB over its bound, the notch goes in once, and no
+control is over its reference in the second after the release (the worst is 1.1 dB under). On the
+level ladder the worst rung is 0.3 to 0.4 dB for every law. `matrix`'s hardening sweep, reported
+and not scored, is 2.3 dB: the resonance has moved past where its stated limit begins.
 
 `matrix` as a law file fits its model when it is built, which on the check's widest band (the limit
 case) takes about 20 s; the check times the build apart from the run.
@@ -1097,10 +1114,15 @@ four-by-four structure it completed 5 of 5 dwells at the lightest resonance, 5 o
 
 **`paired`** (dwell and stepped; amplitude-only references accepted). Control `i` is paired with
 drive `i`; every update that drive's amplitude is multiplied by its control's ratio of wanted to
-measured amplitude, raised to the gain, and its phase is left to the pair. It has no model of the
-coupling. On the testbed's coupled four-by-four structure it completed none of 5 dwells and none of
-5 stepped sines: it is for structures whose pairs are weakly coupled, and shows what a law without
-the coupling does. Parameters `gain_rule`, `fixed_gain` and `delay_estimate` as for `matrix`. Values: `gain`,
+measured amplitude, raised to the gain, and its phase is left to the pair. Its first drive is the
+drive that rule settles to on the identification at the tone (the rule run on the identification's
+response until every control is within 0.01 dB, at most 200 rounds), so it starts where its loop
+would end rather than where each pair's own path alone puts it. It has no model of the coupling: it
+is for structures whose pairs are weakly coupled, each control dominated by its own drive, and the
+law check runs its dwells, measurement noise, stepped sine and level ladder on such a structure
+(`sine-weak-4x4`), where it passes every case. On the testbed's coupled four-by-four structure it
+completed none of 5 dwells and none of 5 stepped sines; on the simulator's coupled plate its first
+drive was 5.4 dB low at 96 Hz before it was settled on the identification. Parameters `gain_rule`, `fixed_gain` and `delay_estimate` as for `matrix`. Values: `gain`,
 `error_db`.
 
 **`steepest_descent`** (dwell only; references with phases only). It starts from the

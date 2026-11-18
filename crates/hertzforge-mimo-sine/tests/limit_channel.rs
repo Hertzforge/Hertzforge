@@ -81,6 +81,71 @@ fn mimo_sine_the_backstop_notch_holds_the_article_at_its_bound_and_releases() {
     println!("worst control error against the judged reference {worst_err:.2} dB");
 }
 
+/// What the notch did on a run: the worst limit reading over its bound, dB;
+/// the notch's entries and releases; each control's worst error against its
+/// judged reference in the second after each release, dB.
+fn notch_numbers(r: &Run) -> (f64, usize, usize, Vec<f64>) {
+    let over = r
+        .ticks
+        .iter()
+        .flat_map(|t| {
+            (0..2)
+                .map(|j| 20.0 * (t.limit[j].norm() / t.limit_bound[j]).log10())
+                .collect::<Vec<_>>()
+        })
+        .fold(f64::NEG_INFINITY, f64::max);
+    let ins = r
+        .events
+        .iter()
+        .filter(|e| matches!(e.kind, EventKind::NotchIn { .. }))
+        .count();
+    let outs: Vec<f64> = r
+        .events
+        .iter()
+        .filter(|e| e.kind == EventKind::NotchOut)
+        .map(|e| e.time_s)
+        .collect();
+    let mut release = vec![f64::NEG_INFINITY; 4];
+    for t0 in &outs {
+        for t in r
+            .ticks
+            .iter()
+            .filter(|t| t.time_s >= *t0 && t.time_s <= t0 + 1.0 && !t.settling)
+        {
+            for (w, e) in release.iter_mut().zip(t.errors_db()) {
+                *w = w.max(*e);
+            }
+        }
+    }
+    (over, ins, outs.len(), release)
+}
+
+#[test]
+fn mimo_sine_the_backstop_notch_goes_in_once_and_releases_without_a_kick() {
+    let s = SineStructure::BaseArticle6x4;
+    let mut st = setup(s, sweep((150.0, 350.0), 2.0), "matrix");
+    st.limits = (0..2)
+        .map(|j| LimitChannel {
+            channel: 5 + j,
+            profile: flat(BOUND_G, 1.5, 3.0),
+        })
+        .collect();
+    let r = run(engaged(s, st, law("matrix"), NOISE), 60.0);
+    assert_eq!(r.outcome, Some(Outcome::Completed));
+    let (over, ins, outs, release) = notch_numbers(&r);
+    println!(
+        "limit {over:.2} dB over its bound; notch in {ins}, out {outs}; worst control over its \
+         judged reference in the second after release {release:.2?} dB"
+    );
+    // The single-shaker Sine check's numbers: the limit at most 0.5 dB over
+    // its bound, no control more than 1 dB over in the second after release.
+    assert!(over <= 0.5, "{over}");
+    assert_eq!((ins, outs), (1, 1), "the notch toggled");
+    for (c, w) in release.iter().enumerate() {
+        assert!(*w <= 1.0, "control {c}: {w}");
+    }
+}
+
 #[test]
 fn mimo_sine_the_near_singular_structure_survives_a_sweep() {
     let s = SineStructure::NearSingular4x4;

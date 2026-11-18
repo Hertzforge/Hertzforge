@@ -63,6 +63,13 @@
 //! | `moved_resonance_moderate` | sweep | `sine-softening-4x4-moderate` as `slow_sweep` | reported, not a pass condition |
 //! | `moved_resonance_hardening` | sweep | `sine-hardening-4x4`, 140 to 190 Hz at 1 octave a minute through its 165 Hz mode | reported, not a pass condition |
 //!
+//! A law that declares itself for weakly coupled pairs ([`PAIRED_SETUP_LAWS`]:
+//! `paired`, each control with its own drive and no model of the coupling)
+//! runs the two dwells, the measurement noise, the level ladder and the
+//! stepped sine on `sine-weak-4x4` ([`PAIRED_STRUCTURE`]), the plate's modes
+//! with every cross path at least 20 dB under the direct one, at the same
+//! frequencies; its transport-delay and misbehaving cases are the other laws'.
+//!
 //! The moved-resonance cases are judged against the slow sweep's band and
 //! printed, so a reader sees where `matrix`'s stated limit begins; they never
 //! fail a law.
@@ -189,7 +196,7 @@ pub struct CheckStructure {
 }
 
 /// The standard sine structures, by name, with their sizes.
-pub const CHECK_STRUCTURES: [CheckStructure; 8] = [
+pub const CHECK_STRUCTURES: [CheckStructure; 10] = [
     plate("sine-linear-4x4"),
     plate("sine-softening-4x4-mild"),
     plate("sine-softening-4x4-moderate"),
@@ -216,6 +223,8 @@ pub const CHECK_STRUCTURES: [CheckStructure; 8] = [
         full_level_g: 1.0,
     },
     plate("sine-near-singular-4x4"),
+    plate("sine-weak-4x4"),
+    plate("sine-loopback-4x4"),
 ];
 
 const fn plate(name: &'static str) -> CheckStructure {
@@ -761,7 +770,43 @@ pub struct RunPlan {
 /// How long each rung of a ladder below the last is held, s.
 pub const RUNG_S: f64 = 2.0;
 
+/// The laws that declare themselves for weakly coupled pairs (each control
+/// with its own drive, no model of the coupling between pairs), by name:
+/// their dwells, the measurement noise, the stepped sine and the level ladder
+/// run on [`PAIRED_STRUCTURE`] instead of the coupled plate. Their safety
+/// cases stay where every law runs them.
+pub const PAIRED_SETUP_LAWS: [&str; 1] = ["paired"];
+
+/// The structure the cases of a law in [`PAIRED_SETUP_LAWS`] run on where the
+/// coupled plate would otherwise be used.
+pub const PAIRED_STRUCTURE: &str = "sine-weak-4x4";
+
 impl MimoSineCheckCase {
+    /// Whether a law that declares itself for weakly coupled pairs runs this
+    /// case on [`PAIRED_STRUCTURE`].
+    pub fn runs_on_pairs(self) -> bool {
+        matches!(
+            self,
+            MimoSineCheckCase::DwellAtResonance
+                | MimoSineCheckCase::DwellAwayFromResonance
+                | MimoSineCheckCase::MeasurementNoise
+                | MimoSineCheckCase::LevelLadder
+                | MimoSineCheckCase::Stepped
+        )
+    }
+
+    /// The case's run for the law named `law`: [`Self::run_plan`], on
+    /// [`PAIRED_STRUCTURE`] where the law is one of [`PAIRED_SETUP_LAWS`] and
+    /// the case [`Self::runs_on_pairs`].
+    pub fn run_plan_for(self, law: &str) -> RunPlan {
+        let mut p = self.run_plan();
+        if PAIRED_SETUP_LAWS.contains(&law) && self.runs_on_pairs() {
+            p.structure = check_structure(PAIRED_STRUCTURE).expect("a standard structure");
+            p.station.structure = PAIRED_STRUCTURE;
+        }
+        p
+    }
+
     /// The case's run.
     pub fn run_plan(self) -> RunPlan {
         let req = self.requirement();
@@ -942,6 +987,11 @@ pub struct CaseMeasure {
     /// The worst control over its reference in the watch after a release,
     /// dB (minus infinity with no release).
     pub release_overshoot_db: f64,
+    /// The same per control, dB (minus infinity with no release).
+    pub release_overshoot_by_control_db: Vec<f64>,
+    /// How many times the backstop notch went in (a notch that toggles goes
+    /// in many times).
+    pub notch_entries: usize,
     /// The largest opposition ratio over the judged updates, dB.
     pub opposition_db: f64,
     /// Wall time of the identification, s.
@@ -1249,6 +1299,7 @@ fn measure(
         .any(|e| matches!(e.kind, EventKind::NotchIn { .. }));
     let deepest = ticks.iter().map(|t| t.notch_depth).fold(1.0f64, f64::min);
     let mut release = f64::NEG_INFINITY;
+    let mut release_by = vec![f64::NEG_INFINITY; n];
     for e in events.iter().filter(|e| e.kind == EventKind::NotchOut) {
         for t in ticks.iter().filter(|t| {
             t.time_s >= e.time_s
@@ -1256,8 +1307,9 @@ fn measure(
                 && !t.settling
                 && t.miss.is_none()
         }) {
-            for &x in t.errors_db() {
+            for (k, &x) in t.errors_db().iter().enumerate() {
                 release = release.max(x);
+                release_by[k] = release_by[k].max(x);
             }
         }
     }
@@ -1291,6 +1343,11 @@ fn measure(
         notch_engaged,
         deepest_notch_db: db(deepest),
         release_overshoot_db: release,
+        release_overshoot_by_control_db: release_by,
+        notch_entries: events
+            .iter()
+            .filter(|e| matches!(e.kind, EventKind::NotchIn { .. }))
+            .count(),
         opposition_db: opposition,
         ident_s,
         build_s,
@@ -1523,9 +1580,9 @@ pub fn judge(m: &CaseMeasure) -> CaseVerdict {
             let (l, r) = (m.limit_over_db, m.release_overshoot_db);
             let detail = format!(
                 "limit {l:.2} dB over its bound (asked {over_bound_db}), deepest notch \
-                 {:.1} dB, control over its reference after release {r:.2} dB \
+                 {:.1} dB, in {} times, control over its reference after release {r:.2} dB \
                  (asked {overshoot_db})",
-                m.deepest_notch_db
+                m.deepest_notch_db, m.notch_entries
             );
             if !m.notch_engaged {
                 return v(Some(name), l, format!("the notch never engaged; {detail}"));
@@ -1559,12 +1616,18 @@ pub fn check_law(
     mut station: impl FnMut(&StationSpec) -> Result<Box<dyn Backend>, String>,
 ) -> Vec<CaseResult> {
     let manifest = factory.manifest();
+    let name = factory.describe().name;
     cases_for(&manifest)
         .into_iter()
         .map(|case| {
-            let ran = station(&case.station())
+            let plan = case.run_plan_for(&name);
+            let ran = station(&plan.station)
                 .map_err(CheckRunError::Setup)
-                .and_then(|b| run_check_case(case, factory.clone(), b));
+                .and_then(|b| {
+                    let mut m = run_plan(&plan, factory.clone(), b)?;
+                    m.case = Some(case);
+                    Ok(m)
+                });
             match ran {
                 Ok(m) => CaseResult {
                     verdict: judge(&m),
@@ -1716,6 +1779,8 @@ mod tests {
             notch_engaged: true,
             deepest_notch_db: -6.0,
             release_overshoot_db: 0.2,
+            release_overshoot_by_control_db: vec![0.2],
+            notch_entries: 1,
             opposition_db: 0.1,
             ident_s: 0.0,
             build_s: 0.0,

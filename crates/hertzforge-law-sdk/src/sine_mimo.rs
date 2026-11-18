@@ -345,7 +345,9 @@ pub struct Inputs {
     pub drive_in_force: Vec<C64>,
     /// Why the controller holds the drive this update.
     pub hold: Hold,
-    /// The scale the limit channels hold the whole drive vector to, 0 to 1.
+    /// The backstop notch's depth, 0 to 1 (1 when it is out): the share of
+    /// the reference the controller judges the controls against while it is
+    /// in. Aim for the reference times it, or the law fights the notch.
     pub notch_scale: f64,
     /// Whether the controller's settle window is open.
     pub settling: bool,
