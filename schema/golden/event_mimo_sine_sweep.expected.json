@@ -69,6 +69,102 @@
         0.5
        ]
       }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5942511137185092,
+        0.5942511137185092
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.42069757082259757,
+        0.42069757082259757
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.9976311574844398,
+        0.9976311574844398
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.2505936168136361,
+        0.2505936168136361
+       ]
+      }
      }
     ],
     "link": "frequency"
@@ -199,6 +295,102 @@
         0.0
        ]
       }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.5,
+        1.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -1.5,
+        -1.5
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        6.0,
+        6.0
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -6.0,
+        -6.0
+       ]
+      }
      }
     ],
     "link": "frequency"
@@ -262,6 +454,102 @@
        "values": [
         0.5,
         0.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5942511137185092,
+        0.5942511137185092
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.42069757082259757,
+        0.42069757082259757
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.9976311574844398,
+        0.9976311574844398
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.2505936168136361,
+        0.2505936168136361
        ]
       }
      }
@@ -394,6 +682,102 @@
         0.0
        ]
       }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.5,
+        1.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -1.5,
+        -1.5
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        6.0,
+        6.0
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -6.0,
+        -6.0
+       ]
+      }
      }
     ],
     "link": "frequency"
@@ -457,6 +841,102 @@
        "values": [
         0.5,
         0.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5942511137185092,
+        0.5942511137185092
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.42069757082259757,
+        0.42069757082259757
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.9976311574844398,
+        0.9976311574844398
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.2505936168136361,
+        0.2505936168136361
        ]
       }
      }
@@ -589,6 +1069,102 @@
         0.0
        ]
       }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.5,
+        1.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -1.5,
+        -1.5
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        6.0,
+        6.0
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -6.0,
+        -6.0
+       ]
+      }
      }
     ],
     "link": "frequency"
@@ -652,6 +1228,102 @@
        "values": [
         0.5,
         0.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5942511137185092,
+        0.5942511137185092
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.42069757082259757,
+        0.42069757082259757
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.9976311574844398,
+        0.9976311574844398
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.2505936168136361,
+        0.2505936168136361
        ]
       }
      }
@@ -782,6 +1454,102 @@
        "values": [
         0.0,
         0.0
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.5,
+        1.5
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -1.5,
+        -1.5
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        6.0,
+        6.0
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -6.0,
+        -6.0
        ]
       }
      }

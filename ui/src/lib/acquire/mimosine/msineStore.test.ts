@@ -133,15 +133,10 @@ describe('the MIMO Sine store', () => {
 		expect(await ms.proceed()).toBe(true);
 		expect(ms.status?.review?.acknowledged).toBe('Reviewed the identification.');
 		let notched = false;
-		// the notch is in while the reference is held down, with the drive cut or not: notch_scale is the cut alone
-		let heldDown = false;
 		client.on('mimo_sine.state', (d) => {
-			const f = d as { notch: boolean; notch_scale: number | null };
-			if (f.notch) notched = true;
-			if (f.notch && f.notch_scale === 1) heldDown = true;
+			if ((d as { notch: boolean }).notch) notched = true;
 		});
 		await until(() => ms.status?.state === 'finished');
-		expect(heldDown).toBe(true);
 		expect(ms.status?.end?.outcome).toBe('completed');
 		expect(notched).toBe(true);
 		expect(ms.lastPass?.views.some((v) => v.title === 'Limit 9')).toBe(true);
@@ -234,6 +229,24 @@ describe('the MIMO Sine store', () => {
 			await ms.checkSetup();
 			expect(ms.check?.errors).toEqual([]);
 		}
+	});
+
+	it('says the notch is in while the reference is held down, with notch_scale the drive cut alone', async () => {
+		const { ms } = await screen({ speed: 4 });
+		expect(ms.addLimit()).toBe(true);
+		ms.setup.limits.channels[0].profile.rows.forEach((r) => (r.value = 1));
+		await run(ms);
+		await until(() => ms.now?.phase === 'engaged');
+		expect(await ms.hold()).toBe(true);
+		// where the limit channel's response passes its bound, held there until the depth settles
+		const [lo, hi] = ms.check!.derived!.band_hz;
+		expect(await ms.gotoHz(Math.round(lo * (hi / lo) ** 0.45 * 1.4))).not.toBeNull();
+		await until(() => {
+			const f = ms.frameOfRun;
+			return !!f && f.notch && f.notch_scale === 1 && f.controls.some((c) => c.notch_depth_db > 0);
+		});
+		expect(ms.now?.notch).toBe(true);
+		await ms.abort();
 	});
 
 	it('refuses a simulator structure of another size by name', async () => {

@@ -6096,6 +6096,11 @@ _MSINE_READINGS = {'opp': [1.0625, 1.125], 'share': [0.3125, 0.375]}
 _MSINE_LOG_X = _axis('Frequency', 'Hz', 'log')
 
 
+# Each control's alarm (1.5 dB) and abort (6 dB) bands: name, role and dB from its reference.
+_MSINE_BANDS = [('Alarm high', 'tolerance', 1.5), ('Alarm low', 'tolerance', -1.5),
+                ('Abort high', 'abort', 6.0), ('Abort low', 'abort', -6.0)]
+
+
 def _msine_spec(a, title, y, series):
     return _spectrum(title, _MSINE_LOG_X, y,
                      [a.series(n, r, _MSINE_REACHED, v) for n, r, v in series], 'frequency')
@@ -6110,7 +6115,9 @@ def _msine_pass_views(a, want=None):
         if ok(f'Control {c}'):
             out.append(_msine_spec(a, f'Control {c}', _axis('Amplitude', 'g', 'log'),
                                    [('Measured', 'measured', p['amp']),
-                                    ('Reference', 'reference', p['ref'])]))
+                                    ('Reference', 'reference', p['ref']),
+                                    *[(n, r, [x * 10 ** (db / 20) for x in p['ref']])
+                                      for n, r, db in _MSINE_BANDS]]))
         if ok(f'Phase {c}'):
             out.append(_msine_spec(a, f'Phase {c}', _axis('Phase', 'deg', 'linear'),
                                    [('Measured', 'measured', p['phase']),
@@ -6118,7 +6125,8 @@ def _msine_pass_views(a, want=None):
         if ok(f'Error {c}'):
             out.append(_msine_spec(a, f'Error {c}', _axis('Error', 'dB', 'linear'),
                                    [('Error', 'measured', p['err']),
-                                    ('Notch depth', 'limit', p['notch'])]))
+                                    ('Notch depth', 'limit', p['notch']),
+                                    *[(n, r, [db] * len(p['err'])) for n, r, db in _MSINE_BANDS]]))
     for c, p in zip(MSINE_LIMITS, _MSINE_LIMIT_POINTS):
         if ok(f'Limit {c}'):
             out.append(_msine_spec(a, f'Limit {c}', _axis('Amplitude', 'g', 'log'),
@@ -6214,6 +6222,9 @@ def _msine_error_view(a):
     for k, c in enumerate(MSINE_CONTROLS):
         series.append(a.series(f'Control {c}', 'measured', _MSINE_REACHED,
                                _msine_ctl_points(k)['err']))
+    # Every control shares its bands: drawn once.
+    series += [a.series(n, r, _MSINE_REACHED, [db] * len(_MSINE_REACHED))
+               for n, r, db in _MSINE_BANDS]
     return _spectrum('Error', _MSINE_LOG_X, _axis('Error', 'dB', 'linear'), series, 'frequency')
 
 

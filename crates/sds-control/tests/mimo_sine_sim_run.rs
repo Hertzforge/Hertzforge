@@ -342,3 +342,117 @@ async fn mimo_sine_the_base_and_article_sweep_completes_with_a_six_db_abort_band
     let end = msine::run_to_end(&mut c, base_article()).await;
     assert_eq!(end["end"]["outcome"], "completed", "{}", end["end"]);
 }
+
+/// The `name` series of `view`, decoded, from the event at `i`.
+fn series_y(c: &Client, i: usize, view: &Value, name: &str) -> Vec<f64> {
+    let s = view["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == name)
+        .unwrap_or_else(|| panic!("no {name} series in {}", view["title"]));
+    c.events[i]
+        .decoded
+        .as_ref()
+        .unwrap()
+        .array(&s["y"])
+        .unwrap()
+        .to_f64()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_a_finished_one_sweep_run_counts_its_sweep_and_draws_its_bands() {
+    let mut c = client().await;
+    controller(&mut c, 4, 0, 4).await;
+    let end = msine::run_to_end(
+        &mut c,
+        config("sine-linear-4x4", 4, 0, 4, sweep(30.0, 60.0, 4.0), "matrix"),
+    )
+    .await;
+    assert_eq!(end["end"]["outcome"], "completed", "{}", end["end"]);
+    // The one sweep ran to the band's edge: it is counted.
+    assert_eq!(end["sweeps"], json!({"done": 1, "of": 1}));
+    let state = c.ok("mimo_sine.state", json!({})).await;
+    assert_eq!(state["sweeps"], json!({"done": 1, "of": 1}));
+    // The pass frame: each control's amplitude against its reference with its
+    // alarm (1.5 dB) and abort (6 dB) bands around it, and the same bands on
+    // its error in dB.
+    let i = c
+        .wait_for("mimo_sine.sweep", msine::LONG, |e| {
+            e.topic() == "mimo_sine.sweep"
+        })
+        .await;
+    let views = c.events[i].data()["views"].as_array().unwrap().clone();
+    let view = |t: &str| views.iter().find(|v| v["title"] == t).unwrap().clone();
+    let amp = view("Control 1");
+    let reference = series_y(&c, i, &amp, "Reference");
+    for (name, db) in [
+        ("Alarm high", 1.5),
+        ("Alarm low", -1.5),
+        ("Abort high", 6.0),
+        ("Abort low", -6.0),
+    ] {
+        let band = series_y(&c, i, &amp, name);
+        assert_eq!(band.len(), reference.len(), "{name}");
+        let k = reference.iter().position(|r| r.is_finite()).unwrap();
+        let ratio = 20.0 * (band[k] / reference[k]).log10();
+        assert!(
+            (ratio - db).abs() < 1e-6,
+            "{name} sits {ratio} dB off the reference"
+        );
+        let err = series_y(&c, i, &view("Error 1"), name);
+        assert!(
+            err.iter().all(|y| (y - db).abs() < 1e-9),
+            "{name} on the error view"
+        );
+    }
+    // The identification's gain is in the control's unit per drive volt; the
+    // Error plot carries the band lines once, every control sharing them.
+    c.ok(
+        "mimo_sine.subscribe",
+        json!({"rate_hz": 10, "plots": [{"id": "i", "quantity": "identification", "channels": "all"},
+                                        {"id": "e", "quantity": "error"}]}),
+    )
+    .await;
+    let i = c
+        .wait_for("an identification plot", msine::LONG, |e| {
+            e.topic() == "mimo_sine.data"
+                && e.data()["plots"][0]["views"]
+                    .as_array()
+                    .is_some_and(|v| !v.is_empty())
+        })
+        .await;
+    let gain = &c.events[i].data()["plots"][0]["views"][0];
+    assert_eq!(gain["title"], "Identification Gain 1");
+    assert_eq!(gain["y"]["unit"], "g/V");
+    let error = c.events[i].data()["plots"][1]["views"][0].clone();
+    for (name, db) in [("Alarm high", 1.5), ("Abort low", -6.0)] {
+        let y = series_y(&c, i, &error, name);
+        assert!(
+            !y.is_empty() && y.iter().all(|v| (v - db).abs() < 1e-9),
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_a_sweep_stopped_part_way_counts_no_sweep_done() {
+    let mut c = paced_client(10.0).await;
+    controller(&mut c, 4, 0, 4).await;
+    let cfg = config(
+        "sine-linear-4x4",
+        4,
+        0,
+        4,
+        sweep(30.0, 200.0, 1.0),
+        "matrix",
+    );
+    c.ok("mimo_sine.configure", json!({"config": cfg})).await;
+    c.ok("mimo_sine.start", json!({})).await;
+    msine::phase(&mut c, "engaged").await;
+    c.pump(Duration::from_millis(300)).await;
+    c.ok("mimo_sine.stop", json!({})).await;
+    let end = msine::state(&mut c, "finished").await;
+    assert_eq!(end["end"]["outcome"], "operator_stop", "{}", end["end"]);
+    assert_eq!(end["sweeps"], json!({"done": 0, "of": 1}));
+}

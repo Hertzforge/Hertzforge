@@ -283,6 +283,9 @@ try {
 	await tid(a, 'review-proceed').click();
 	await until(a, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await hzNow(p)), 30_000);
 	await neverLive(a, 'run');
+	const front = async (p) => (await p.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+	await until(a, 'the Controls page in front', async (p) => (await front(p)) === 'Controls', 10_000).catch(() => {});
+	check('proceeding from the review brings the Controls page forward', (await front(a)) === 'Controls', await front(a));
 
 	// ---- 6. the frequency moves; a notch; hold and resume; completion ------------------------------
 	await pageTo(a, 'Controls');

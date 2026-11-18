@@ -355,6 +355,14 @@ fn identification_views(v: &MsView, ch: &Channels, arrays: &mut Arrays) -> Vec<V
     let x = Axis::new("Frequency", Some("Hz"), Scale::Linear);
     let mut out = Vec::new();
     for (r, chn) in picked {
+        let unit = v
+            .controls
+            .iter()
+            .chain(&v.limits)
+            .nth(r)
+            .map_or("g", |c| c.unit.as_str());
+        // The response per drive volt.
+        let gain_unit = format!("{unit}/V");
         let series = |which: &Vec<Vec<Vec<f64>>>| -> Vec<Series> {
             v.drives
                 .iter()
@@ -373,7 +381,7 @@ fn identification_views(v: &MsView, ch: &Channels, arrays: &mut Arrays) -> Vec<V
             arrays,
             &format!("Identification Gain {chn}"),
             &x,
-            &Axis::new("Gain", None, Scale::Log),
+            &Axis::new("Gain", Some(&gain_unit), Scale::Log),
             series(&f.gain),
             Some("frequency"),
         ));
@@ -591,8 +599,8 @@ fn time_views(v: &MsView, channels: &[u32], points: usize, arrays: &mut Arrays) 
         .collect()
 }
 
-/// **Error**: every control's error, dB, and its notch depth while one is
-/// taken.
+/// **Error**: every control's error, dB, its notch depth while one is taken,
+/// and the alarm and abort band lines (once when every control shares them).
 fn error_view(v: &MsView, f: &Figures, arrays: &mut Arrays) -> Value {
     let (x, link) = if f.against_time {
         (Axis::new("Time", Some("s"), Scale::Linear), "time")
@@ -600,7 +608,8 @@ fn error_view(v: &MsView, f: &Figures, arrays: &mut Arrays) -> Value {
         (Axis::new("Frequency", Some("Hz"), Scale::Log), "frequency")
     };
     let mut series = Vec::new();
-    for (c, pts) in v.controls.iter().zip(&f.control) {
+    let shared = view::bands_shared(v, f);
+    for (k, (c, pts)) in v.controls.iter().zip(&f.control).enumerate() {
         let (xs, ys): (Vec<f64>, Vec<f64>) =
             f.x.iter()
                 .zip(pts.iter().map(|p| p[4]))
@@ -627,6 +636,15 @@ fn error_view(v: &MsView, f: &Figures, arrays: &mut Arrays) -> Value {
                 ys,
             ));
         }
+        if !shared {
+            series.extend(view::error_bands(v, f, k, &format!(" {}", c.channel)));
+        }
+    }
+    if shared && !v.controls.is_empty() {
+        // Over every point any control's error is drawn at.
+        series.extend(view::error_bands_where(v, f, 0, "", &|k| {
+            f.control.iter().any(|c| c[k][4].is_finite())
+        }));
     }
     views::spectrum(
         arrays,

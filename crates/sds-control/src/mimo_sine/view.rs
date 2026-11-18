@@ -12,6 +12,7 @@ use crate::sine::config::Grid;
 use crate::sine::view::StationRef;
 use crate::views::{self, Axis, Role, Row, Scale, Series, Status};
 use hertzforge_mimo_sine::LevelMode;
+use hertzforge_sine::SineProfile;
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
@@ -280,6 +281,8 @@ pub struct MsView {
     pub record: Option<RecordRef>,
     pub streaming: bool,
     pub controls: Vec<Chan>,
+    /// Each control's profile, for its alarm and abort bands.
+    pub bands: Arc<Vec<SineProfile>>,
     pub limits: Vec<Chan>,
     pub drives: Vec<Chan>,
     pub ceilings: Vec<f64>,
@@ -441,6 +444,107 @@ fn reached(x: &[f64], y: impl Iterator<Item = f64>) -> (Vec<f64>, Vec<f64>) {
 fn series_of(name: &str, role: Role, x: &[f64], y: impl Iterator<Item = f64>) -> Series {
     let (x, y) = reached(x, y);
     Series::new(name, role, x, y)
+}
+
+/// A control's band lines: name, role, and which of [`band_db`]'s four.
+const BAND_LINES: [(&str, Role, usize); 4] = [
+    ("Alarm high", Role::Tolerance, 1),
+    ("Alarm low", Role::Tolerance, 0),
+    ("Abort high", Role::Abort, 3),
+    ("Abort low", Role::Abort, 2),
+];
+
+/// A profile's bands at `f_hz` against its reference, dB: alarm low, alarm
+/// high, abort low, abort high (the lows negative). NaN out of its band.
+pub fn band_db(p: &SineProfile, f_hz: f64) -> [f64; 4] {
+    let db = |x: f64, t: f64| 20.0 * (x / t).log10();
+    match (
+        p.target_accel_g_pk(f_hz),
+        p.alarm_bounds(f_hz),
+        p.abort_bounds(f_hz),
+    ) {
+        (Some(t), Some((al, ah)), Some((bl, bh))) if t > 0.0 => {
+            [db(al, t), db(ah, t), db(bl, t), db(bh, t)]
+        }
+        _ => [f64::NAN; 4],
+    }
+}
+
+/// Control `c`'s bands at each point of `f`: the point's frequency, or in a
+/// dwell (against time) the tone's.
+fn bands_of(v: &MsView, f: &Figures, c: usize) -> Vec<[f64; 4]> {
+    let Some(p) = v.bands.get(c) else {
+        return vec![[f64::NAN; 4]; f.x.len()];
+    };
+    if f.against_time {
+        let b = v.frequency_hz.map_or([f64::NAN; 4], |hz| band_db(p, hz));
+        vec![b; f.x.len()]
+    } else {
+        f.x.iter().map(|hz| band_db(p, *hz)).collect()
+    }
+}
+
+/// Control `c`'s band lines around its reference as judged (the notched
+/// reference while a notch is in), in its unit.
+fn amplitude_bands(v: &MsView, f: &Figures, c: usize) -> Vec<Series> {
+    let bands = bands_of(v, f, c);
+    BAND_LINES
+        .iter()
+        .map(|(name, role, i)| {
+            series_of(
+                name,
+                *role,
+                &f.x,
+                f.control[c]
+                    .iter()
+                    .zip(&bands)
+                    .map(|(p, b)| p[2] * 10f64.powf(b[*i] / 20.0)),
+            )
+        })
+        .collect()
+}
+
+/// Control `c`'s band lines on its error, dB, where its error is drawn.
+/// `suffix` follows each name (empty, or the channel where controls differ).
+pub fn error_bands(v: &MsView, f: &Figures, c: usize, suffix: &str) -> Vec<Series> {
+    error_bands_where(v, f, c, suffix, &|k| f.control[c][k][4].is_finite())
+}
+
+/// [`error_bands`] at the points `at` takes.
+pub fn error_bands_where(
+    v: &MsView,
+    f: &Figures,
+    c: usize,
+    suffix: &str,
+    at: &dyn Fn(usize) -> bool,
+) -> Vec<Series> {
+    let bands = bands_of(v, f, c);
+    BAND_LINES
+        .iter()
+        .map(|(name, role, i)| {
+            series_of(
+                &format!("{name}{suffix}"),
+                *role,
+                &f.x,
+                bands
+                    .iter()
+                    .enumerate()
+                    .map(|(k, b)| if at(k) { b[*i] } else { f64::NAN }),
+            )
+        })
+        .collect()
+}
+
+/// Whether every control's bands are the same at every point of `f`.
+pub fn bands_shared(v: &MsView, f: &Figures) -> bool {
+    let first = bands_of(v, f, 0);
+    (1..v.controls.len()).all(|c| {
+        bands_of(v, f, c).iter().zip(&first).all(|(a, b)| {
+            a.iter()
+                .zip(b)
+                .all(|(x, y)| x == y || (x.is_nan() && y.is_nan()))
+        })
+    })
 }
 
 /// The live frame's three views: Controls, Drives and Run.
@@ -738,18 +842,20 @@ pub fn pass_views_where(
 ) -> Vec<Value> {
     let (x, link) = x_axis(f);
     let mut out = Vec::new();
-    for (c, pts) in v.controls.iter().zip(&f.control) {
+    for (k, (c, pts)) in v.controls.iter().zip(&f.control).enumerate() {
         let title = &format!("Control {}", c.channel);
         if want(title) {
+            let mut series = vec![
+                series_of("Measured", Role::Measured, &f.x, pts.iter().map(|p| p[0])),
+                series_of("Reference", Role::Reference, &f.x, pts.iter().map(|p| p[2])),
+            ];
+            series.extend(amplitude_bands(v, f, k));
             out.push(views::spectrum(
                 arrays,
                 title,
                 &x,
                 &Axis::new("Amplitude", Some(&c.unit), Scale::Log),
-                vec![
-                    series_of("Measured", Role::Measured, &f.x, pts.iter().map(|p| p[0])),
-                    series_of("Reference", Role::Reference, &f.x, pts.iter().map(|p| p[2])),
-                ],
+                series,
                 Some(link),
             ));
         }
@@ -771,15 +877,17 @@ pub fn pass_views_where(
         }
         let title = &format!("Error {}", c.channel);
         if want(title) {
+            let mut series = vec![
+                series_of("Error", Role::Measured, &f.x, pts.iter().map(|p| p[4])),
+                series_of("Notch depth", Role::Limit, &f.x, pts.iter().map(|p| p[5])),
+            ];
+            series.extend(error_bands(v, f, k, ""));
             out.push(views::spectrum(
                 arrays,
                 title,
                 &x,
                 &Axis::new("Error", Some("dB"), Scale::Linear),
-                vec![
-                    series_of("Error", Role::Measured, &f.x, pts.iter().map(|p| p[4])),
-                    series_of("Notch depth", Role::Limit, &f.x, pts.iter().map(|p| p[5])),
-                ],
+                series,
                 Some(link),
             ));
         }

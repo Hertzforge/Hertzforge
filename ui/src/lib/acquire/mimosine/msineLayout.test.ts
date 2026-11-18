@@ -15,7 +15,7 @@ import { TEST_TYPES, TestTypeView } from '../testTypes.svelte';
 import { readConfig } from '$lib/app/config';
 import { MSINE_PLOT_TYPES, MSINE_QUANTITIES } from './msineLayout';
 import { MimoSineStore } from './msineStore.svelte';
-import { MSINE_HOOKS } from './msineViews.svelte';
+import { MSINE_HOOKS, reviewPage, type ReviewPages } from './msineViews.svelte';
 
 describe('The mock simulator for a larger table', () => {
 	it('takes its inputs and outputs from mock_sim, and offers them as the station', async () => {
@@ -92,6 +92,23 @@ describe('the MIMO Sine run screen', () => {
 		expect(got.get('identification')!.map((v) => v.title)).toEqual(['Identification Gain 1', 'Identification Phase 1', 'Coherence']);
 		expect(got.get('limit')!.map((v) => v.title)).toEqual(['Limit 9']);
 		await ms.abort();
+	});
+});
+
+describe('the pages a review brings forward', () => {
+	it('shows the identification at the review hold, then the controls once the run drives again, once each per run', () => {
+		const seen: ReviewPages = { review: null, proceeded: null };
+		const at = (state: string, run_id: string | null = 'msine-0001') => reviewPage({ state, run_id }, seen);
+		expect(at('running')).toBeNull();
+		expect(at('review')).toBe('identification');
+		expect(at('review')).toBeNull();
+		expect(at('running')).toBe('control');
+		expect(at('running')).toBeNull();
+		expect(at('finished')).toBeNull();
+		// a run with no review hold keeps the operator's page
+		expect(at('running', 'msine-0002')).toBeNull();
+		expect(at('review', 'msine-0003')).toBe('identification');
+		expect(reviewPage(null, seen)).toBeNull();
 	});
 });
 

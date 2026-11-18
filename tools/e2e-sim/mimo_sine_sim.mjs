@@ -253,6 +253,9 @@ try {
 	await shot(a, 'review');
 	await tid(a, 'review-proceed').click();
 	await until(a, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await hzNow(p)), 60_000);
+	const front = async (p) => (await p.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim();
+	await until(a, 'the Controls page in front', async (p) => (await front(p)) === 'Controls', 10_000).catch(() => {});
+	check('proceeding from the review brings the Controls page forward', (await front(a)) === 'Controls', await front(a));
 	const f0 = await hzNow(a);
 	await until(a, 'the frequency moving', async (p) => (await hzNow(p)) !== f0, 30_000);
 	check('the frequency readout moves', true);
@@ -263,6 +266,8 @@ try {
 	await until(a, 'the run finished', async (p) => (await runState(p)) === 'finished', 300_000);
 	const end = await text(a, 'msine-end');
 	check('the sweep completes', /Completed|complete/.test(end), end);
+	const swept = await text(a, 'run-sweep');
+	check('the finished one-sweep run reads 1 of 1', /\b1 of 1$/.test(swept.trim()), swept);
 	await shot(a, 'finished');
 
 	// ---- 3. the run folder and Open in Analysis -----------------------------------------------------

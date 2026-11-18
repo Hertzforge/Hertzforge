@@ -4501,11 +4501,12 @@ Event topics:
 during the pass), `direction` `up` or `down` (null in a stepped sine). Its views are against
 frequency on the run's sweep grid (256 log-spaced points across the band the station adopted, with
 its exact ends; a stepped sine's steps), each series carrying only the points the pass reached:
-per control **Control** *n* (`Measured` (`measured`), `Reference` (`reference`), `Alarm high`,
-`Alarm low` (`tolerance`), `Abort high`, `Abort low` (`abort`), at the pass's level, in the
-control's unit) and, with `phase_specified`, **Phase** *n* (`Measured` and `Reference`, deg) and
-**Error** *n* (`Error` dB and, while the notch or a taken notched reference holds the reference
-down, `Notch depth` dB); per limit channel
+per control **Control** *n* (`Measured` (`measured`), `Reference` (`reference`, the reference as
+judged: held down by the notch's depth while a notch is in), `Alarm high`, `Alarm low`
+(`tolerance`), `Abort high`, `Abort low` (`abort`), the control's bands around that reference, at
+the pass's level, in the control's unit) and, with `phase_specified`, **Phase** *n* (`Measured`
+and `Reference`, deg) and **Error** *n* (`Error` dB, `Notch depth` dB (0 where the reference is
+whole), and the same four band lines in dB); per limit channel
 **Limit** *n* (`Measured`, `Bound` (`limit`)); **Drives** (`Drive <index>` V per drive) and **Drive
 phase** (`Drive <index>` deg per drive); and **Readings** (`Opposition` and `Largest share`).
 
@@ -4522,12 +4523,12 @@ in a dwell they are against time, the last 60 s, at most 1200 points.
 |---|---|---|
 | `control` | one `spectrum` per resolved control | As the sweep frame's **Control** *n*, at the present level |
 | `phase` | one `spectrum` per resolved control | As the sweep frame's **Phase** *n* |
-| `error` | one `spectrum` | **Error**, `Control <index>` dB per control, and the notch depth per control while the reference is held down |
+| `error` | one `spectrum` | **Error**, `Control <index>` dB per control, the notch depth per control while the reference is held down, and the band lines in dB (`Alarm high`, `Alarm low`, `Abort high`, `Abort low`; once when every control shares them, otherwise each with its control's index) |
 | `limit` | one `spectrum` per resolved limit channel | As the sweep frame's **Limit** *n* |
 | `drive` | one `spectrum` | **Drives**, V per drive |
 | `drive_phase` | one `spectrum` | **Drive phase**, deg per drive |
 | `readings` | one `spectrum` and one `reading` | **Readings** against frequency (or time), and the live frame's **Run** reading |
-| `identification` | **Identification Gain** *n*, **Identification Phase** *n*, **Coherence** | `abs(H)` and its phase from every drive to the plot's `channels` (`"all"`: the first control; a limit channel's index for its row), against frequency on a linear axis, one trace per drive (`Drive <index>`), on the identification's grid inside the band; every control's and limit channel's multiple coherence (`Control <index>`, `Limit <index>`) with `Trust coherence` (`tolerance`) |
+| `identification` | **Identification Gain** *n*, **Identification Phase** *n*, **Coherence** | `abs(H)` (y in the row's unit per volt, `g/V`) and its phase from every drive to the plot's `channels` (`"all"`: the first control; a limit channel's index for its row), against frequency on a linear axis, one trace per drive (`Drive <index>`), on the identification's grid inside the band; every control's and limit channel's multiple coherence (`Control <index>`, `Limit <index>`) with `Trust coherence` (`tolerance`) |
 | `law` | one `reading` | **Law**: each declared value on the last call by its label and unit, then `Unusable calls in a row`, `Ticks a cap bound`, `Largest rotation` deg and `Requests` (made and granted) |
 
 A plot is empty (`views` empty) until there is something to draw: `identification` until the

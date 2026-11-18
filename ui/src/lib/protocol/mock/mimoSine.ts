@@ -579,7 +579,18 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 
 	function errorView(r: Run, pts: Point[], dwell: boolean): SpectrumView {
 		const s = r.controls.map((ch, i) => series(pts, `Control ${ch}`, 'measured', (p) => p.err[i], dwell));
-		if (pts.some((p) => p.depth.some((d) => d > 0))) r.controls.forEach((ch, i) => s.push(series(pts, `Notch depth ${ch}`, 'other', (p) => -p.depth[i], dwell)));
+		if (pts.some((p) => p.depth.some((d) => d > 0))) r.controls.forEach((ch, i) => s.push(series(pts, `Notch depth ${ch}`, 'limit', (p) => p.depth[i], dwell)));
+		// The band lines, once when every control shares them, as the service draws them.
+		const bands = r.config.channels.controls.map((c) => [...(c.profile.alarm_db ?? [1.5, 1.5]), ...(c.profile.abort_db ?? [3, 3])]);
+		const shared = bands.every((b) => b.every((v, k) => v === bands[0][k]));
+		const lines = (b: number[], suffix: string) => [
+			series(pts, `Alarm high${suffix}`, 'tolerance', () => b[1], dwell),
+			series(pts, `Alarm low${suffix}`, 'tolerance', () => -b[0], dwell),
+			series(pts, `Abort high${suffix}`, 'abort', () => b[3], dwell),
+			series(pts, `Abort low${suffix}`, 'abort', () => -b[2], dwell)
+		];
+		if (shared && bands.length) s.push(...lines(bands[0], ''));
+		else r.controls.forEach((ch, i) => s.push(...lines(bands[i], ` ${ch}`)));
 		return { view: 'spectrum', title: 'Error', x: xAxis(dwell), y: { label: 'Error', unit: 'dB', scale: 'linear' }, link: dwell ? 'time' : 'frequency', series: s };
 	}
 
@@ -746,9 +757,10 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		r.notchScale = target;
 		r.cut = Math.min(1, scale / target);
 		const depthDb = r.notchScale < 1 ? -20 * Math.log10(r.notchScale) : 0;
-		const ref = r.config.channels.controls.map((c) => profileAt(c.profile.rows, f) * lin);
+		// The reference as judged: held down by the notch's depth while a notch is in.
+		const ref = r.config.channels.controls.map((c) => profileAt(c.profile.rows, f) * lin * r.notchScale);
 		const refPh = r.config.channels.controls.map((c) => ((r.config.phase_specified ?? true) ? phaseAt(c.phase, f) : 0));
-		const err = ref.map((_, i) => round(0.4 * near * Math.sin(1 + i) + 0.05 * Math.sin(r.t * 2.3 + i) + (i === 1 ? grow * near * 3 + grow * 0.2 : 0) - depthDb, 3));
+		const err = ref.map((_, i) => round(0.4 * near * Math.sin(1 + i) + 0.05 * Math.sin(r.t * 2.3 + i) + (i === 1 ? grow * near * 3 + grow * 0.2 : 0), 3));
 		const ctl = ref.map((v, i) => v * 10 ** (err[i] / 20));
 		const ph = refPh.map((p, i) => wrap(p + 2 * near * Math.cos(i) + 0.3 * Math.sin(r.t + i)));
 		const lim = wanted.map((w) => w * r.notchScale * r.cut);

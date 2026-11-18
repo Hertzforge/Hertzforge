@@ -326,6 +326,8 @@ struct Actor {
     pass_figures: Option<Figures>,
     pass: u64,
     last_dir: f64,
+    /// How far the sweep moved in one tick, as a log of frequency, while it moved.
+    sweep_step_ln: f64,
     level_since_s: f64,
     in_alarm: Vec<bool>,
     operator_hold: bool,
@@ -401,6 +403,7 @@ pub fn spawn(
             pass_figures: None,
             pass: 0,
             last_dir: 0.0,
+            sweep_step_ln: 0.0,
             level_since_s: 0.0,
             in_alarm: Vec::new(),
             operator_hold: false,
@@ -1581,6 +1584,9 @@ impl Actor {
                 self.end_pass();
             }
             self.last_dir = dir;
+            self.sweep_step_ln =
+                (r.sweep_oct_per_min.abs() / 60.0 * r.dt_s * std::f64::consts::LN_2)
+                    .max(r.sweep_hz_per_s.abs() * r.dt_s / r.frequency_hz.max(f64::MIN_POSITIVE));
             self.view.direction = Some(if dir > 0.0 { "up" } else { "down" });
         }
         if let (Some(f0), false) = (prev_freq, sweep) {
@@ -1640,6 +1646,20 @@ impl Actor {
             }
         }
         self.last = Some(*r);
+    }
+
+    /// Whether the sweep's last tick is at the band's edge it was sweeping
+    /// towards (within two ticks of the sweep's rate).
+    fn at_sweep_edge(&self) -> bool {
+        let Some(r) = self.last.as_ref() else {
+            return false;
+        };
+        if !self.plan.config.is_sweep() || self.last_dir == 0.0 {
+            return false;
+        }
+        let (lo, hi) = self.plan.config.band();
+        let edge = if self.last_dir > 0.0 { hi } else { lo };
+        (r.frequency_hz / edge).ln().abs() <= 1e-6 + 2.0 * self.sweep_step_ln
     }
 
     /// A one-way sweep's pass has ended: its figures become the sweep frame.
@@ -2105,10 +2125,19 @@ impl Actor {
         }
         self.svc = None;
         self.lock = None;
+        let last_sweep_done = self.at_sweep_edge();
         if self.plan.config.is_sweep()
             || !self.pass_figures.as_ref().is_some_and(|f| f.against_time)
         {
             self.end_pass();
+        }
+        // A sweep is counted once it reaches the band's edge: the last one only
+        // when the run ended there, not part way.
+        if last_sweep_done {
+            let pass = self.pass;
+            if let Some(s) = self.view.sweeps.as_mut() {
+                s.0 = s.1.map_or(pass, |of| pass.min(of));
+            }
         }
         // Every drive is at zero now: the ramp, or the station's own stop.
         if let Some(l) = self.view.live.as_deref() {
@@ -2337,6 +2366,7 @@ pub fn configured_view(
         record: None,
         streaming: false,
         controls: Vec::new(),
+        bands: Arc::new(s.controls.iter().map(|c| c.profile.clone()).collect()),
         limits: Vec::new(),
         drives: Vec::new(),
         ceilings: s.drives.iter().map(|d| d.ceiling_vpk).collect(),
