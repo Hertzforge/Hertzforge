@@ -545,8 +545,8 @@ impl MimoSineCore {
         let f = self.osc.frequency();
         let d = self.first_drive(f);
         self.event(EventKind::Engaged);
-        self.emit_record(f, 0.0, 0.0, 0.0, Hold::Engage, true);
         self.start_ramps(&d);
+        self.emit_record(f, 0.0, 0.0, 0.0, Hold::Engage, true);
         self.index = 1;
     }
 
@@ -671,6 +671,8 @@ impl MimoSineCore {
             }
         }
         rec.drive_asked = [ZERO; MAX_DRIVES];
+        rec.drive_in_force = [ZERO; MAX_DRIVES];
+        rec.drive_in_force[..self.m].copy_from_slice(&self.in_force);
         match r {
             Ok(()) => {
                 self.misses = 0;
@@ -959,8 +961,8 @@ impl MimoSineCore {
             }
             let d = self.first_drive(fj);
             self.divergence.update(false, dt);
-            self.emit_record(fj, 0.0, 0.0, 0.0, Hold::Engage, true);
             self.start_ramps(&d);
+            self.emit_record(fj, 0.0, 0.0, 0.0, Hold::Engage, true);
             self.index += 1;
             return;
         }
@@ -1052,6 +1054,7 @@ impl MimoSineCore {
         if st.done {
             self.stop(Outcome::Completed);
         }
+        self.start_ramps(&d);
         self.emit_record(
             f,
             st.sweep_hz_per_s,
@@ -1060,7 +1063,6 @@ impl MimoSineCore {
             hold,
             settling_now,
         );
-        self.start_ramps(&d);
         self.next = d;
         self.index += 1;
     }
@@ -1069,6 +1071,198 @@ impl MimoSineCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::law::LawValues;
+    use crate::setup::*;
+    use hertzforge_sdm::MatrixStack;
+    use hertzforge_sine::profile::{ProfileRow, SineProfile};
+    use hertzforge_sine::scheduler::{DwellFor, DwellPlan, LadderConfig, RungFor};
+
+    /// A law that asks the same drive every update.
+    struct Constant(C64);
+
+    impl MimoSineLaw for Constant {
+        fn name(&self) -> &str {
+            "constant"
+        }
+        fn engage(
+            &mut self,
+            _: &TickInputs<'_>,
+            o: &mut TickOutputs,
+            _: &mut LawValues,
+        ) -> Result<(), LawFault> {
+            o.drive.fill(self.0);
+            Ok(())
+        }
+        fn tick(
+            &mut self,
+            _: &TickInputs<'_>,
+            o: &mut TickOutputs,
+            _: &mut LawValues,
+        ) -> Result<(), LawFault> {
+            o.drive.fill(self.0);
+            Ok(())
+        }
+    }
+
+    struct Clock;
+    impl LawClock for Clock {
+        fn now_s(&self) -> f64 {
+            0.0
+        }
+    }
+
+    /// A two-by-two core on an identity identification, its law asking
+    /// `ask` volts on every drive, ceilings 1 V and aborts 2 V.
+    fn core(ask: f64) -> MimoSineCore {
+        let mut p = SineProfile::new("flat");
+        p.global_abort_db = (60.0, 60.0);
+        p.push(ProfileRow::accel(5.0, 1.0));
+        p.push(ProfileRow::accel(2000.0, 1.0));
+        let setup = MimoSineSetup {
+            controls: (0..2)
+                .map(|i| ControlChannel {
+                    channel: i,
+                    profile: p.clone(),
+                    phase: vec![],
+                })
+                .collect(),
+            drives: (0..2)
+                .map(|i| DriveChannel {
+                    channel: 10 + i,
+                    ceiling_vpk: 1.0,
+                    abort_vpk: 2.0,
+                })
+                .collect(),
+            limits: vec![],
+            phase_specified: false,
+            test: TestPlan::Dwell(DwellPlan {
+                freq_hz: 100.0,
+                for_: DwellFor::Seconds(10.0),
+            }),
+            schedule: Schedule {
+                mode: LevelMode::Auto,
+                ladder: LadderConfig {
+                    sysid_level_db: -20.0,
+                    start_db: 0.0,
+                    table_db: vec![0.0],
+                    per_rung: RungFor::Seconds(100.0),
+                    full_for: RungFor::Seconds(100.0),
+                },
+            },
+            fs_hz: 4096.0,
+            tick_s: 0.01,
+            tracking: Default::default(),
+            identification: Default::default(),
+            law: Default::default(),
+            requests: Default::default(),
+            guards: Default::default(),
+        };
+        setup.validate().unwrap();
+        let grid = vec![50.0, 200.0];
+        let mut h = MatrixStack::zeros(2, 2, 2);
+        for k in 0..2 {
+            h.set(k, 0, 0, C64::new(1.0, 0.0));
+            h.set(k, 1, 1, C64::new(1.0, 0.0));
+        }
+        let id = LawIdentification {
+            frequency_hz: grid,
+            response: h,
+            limit_response: MatrixStack::zeros(2, 0, 2),
+            coherence: vec![1.0; 4],
+            limit_coherence: vec![],
+            trusted: vec![false; 2],
+        };
+        let parts = CoreParts {
+            slots: Slots {
+                in_channels: 2,
+                out_channels: 2,
+                controls: vec![0, 1],
+                limits: vec![],
+                drives: vec![0, 1],
+            },
+            identification: id,
+            lag_frames: 0,
+            law: Box::new(Constant(C64::new(ask, 0.0))),
+            law_values: 0,
+            clock: Arc::new(Clock),
+            ratings: vec![],
+            records: RecordSink::none(),
+            commands: None,
+        };
+        MimoSineCore::new(setup, 4096.0, parts).unwrap()
+    }
+
+    /// Play `secs` of the core with the drive looped back as the input
+    /// (a unit structure); the largest output sample.
+    fn play(c: &mut MimoSineCore, secs: f64) -> f32 {
+        let mut out = [0.0f32; 2];
+        let mut inp = [0.0f32; 2];
+        let mut big = 0.0f32;
+        for _ in 0..(secs * 4096.0) as usize {
+            c.sample(&inp, &mut out);
+            inp = out;
+            big = big.max(out[0].abs()).max(out[1].abs());
+        }
+        big
+    }
+
+    #[test]
+    fn mimo_sine_core_a_drive_at_its_abort_ends_the_run_even_past_the_ceiling() {
+        // The ceiling guard is what keeps a drive off its abort; with it
+        // raised past the abort, the drive abort is the last word.
+        let mut c = core(3.0);
+        c.ceiling_vpk = vec![10.0, 10.0];
+        play(&mut c, 3.0);
+        assert!(
+            matches!(
+                c.state(),
+                CoreState::Ended(Outcome::DriveAbort { .. })
+                    | CoreState::Stopping(Outcome::DriveAbort { .. })
+            ),
+            "{:?}",
+            c.state()
+        );
+    }
+
+    #[test]
+    fn mimo_sine_core_every_drive_stays_under_its_ceiling_whatever_the_law_asks() {
+        let mut c = core(3.0);
+        let big = play(&mut c, 3.0);
+        assert!(big <= 1.0 + 1e-6, "{big}");
+        assert!(c.over_ceiling_count() > 0);
+    }
+
+    #[test]
+    fn mimo_sine_core_an_abort_walks_the_drive_to_zero_on_the_ramp() {
+        let mut c = core(0.5);
+        play(&mut c, 2.0);
+        let mut out = [0.0f32; 2];
+        let inp = [0.0f32; 2];
+        c.stop(Outcome::ControlAbort { control: 0 });
+        let mut peaks = Vec::new();
+        let mut peak = 0.0f32;
+        for k in 0..(1.5 * 4096.0) as usize {
+            c.sample(&inp, &mut out);
+            peak = peak.max(out[0].abs());
+            if k % 410 == 409 {
+                peaks.push(peak);
+                peak = 0.0;
+            }
+        }
+        // 0.1 s windows: each about 12 dB under the last, never a cliff; at
+        // zero within the ramp's 1 s and held there.
+        for w in peaks.windows(2).take(8) {
+            let db = 20.0 * (w[1] / w[0]).log10();
+            assert!((db + 12.0).abs() < 1.5, "{db}");
+        }
+        assert_eq!(*peaks.last().unwrap(), 0.0);
+        assert_eq!(
+            c.state(),
+            CoreState::Ended(Outcome::ControlAbort { control: 0 })
+        );
+        assert!(c.drive_is_zero());
+    }
 
     #[test]
     fn mimo_sine_core_ramp_moves_amplitude_and_phase_without_a_step() {
