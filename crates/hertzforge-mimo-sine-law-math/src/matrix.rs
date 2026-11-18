@@ -30,7 +30,8 @@
 //!
 //! The model is the identification's modes exact plus its smoothed remainder
 //! (see [`crate::modal`]); the loop-speed rule reads the identification
-//! itself.
+//! itself. Where the fit left a group of candidates out, the model is not
+//! modal and the law carries nothing there: the correction alone.
 //!
 //! The law's stated limit: a resonance that has moved less than a quarter of
 //! its half-power bandwidth from where it was identified is controlled as on a
@@ -98,6 +99,9 @@ pub struct MatrixParams {
     /// How an amplitude-only reference is read (no effect when the reference's
     /// phases are specified).
     pub free_phase: FreePhase,
+    /// Carry also where the model is not modal (inside the window of a group
+    /// the fit left out). Off by default; on only to show what that costs.
+    pub carry_outside_model: bool,
 }
 
 impl Default for MatrixParams {
@@ -110,6 +114,7 @@ impl Default for MatrixParams {
             rebase: true,
             reset_unseen: true,
             free_phase: FreePhase::InPhase,
+            carry_outside_model: false,
         }
     }
 }
@@ -278,8 +283,19 @@ impl MatrixLaw {
         let dr: Vec<C64> = rn.iter().zip(&rk).map(|(p, q)| p - q).collect();
         let mut c = vec![ZERO; m];
         mat_vec(&zn, m, n, &dr, &mut c);
-        let w = self.params.carry;
-        let carried: Vec<C64> = (0..m).map(|i| (a[i] - b[i]) * w + c[i]).collect();
+        // Inside the window of a group the fit left out, the model there is the
+        // smoothed identification, not modal, and a carry through it can do
+        // worse than none: carry nothing (the correction alone). The carry is
+        // an increment on the drive in force, so switching it off or on moves
+        // only the next increment and puts no step in the drive; no ramp.
+        let modal_here = self.params.carry_outside_model
+            || !(self.model.left_out_at(x.f_hz) || self.model.left_out_at(f_next));
+        let (w, wr) = if modal_here {
+            (self.params.carry, 1.0)
+        } else {
+            (0.0, 0.0)
+        };
+        let carried: Vec<C64> = (0..m).map(|i| (a[i] - b[i]) * w + c[i] * wr).collect();
         let mut corr = vec![ZERO; m];
         mat_vec(&zk, m, n, &e, &mut corr);
         corr.iter_mut().for_each(|v| *v *= g);
