@@ -1059,13 +1059,22 @@ cases, each as the laws crate plans it for the law, so `paired`'s pair cases run
 recorded against its exact file, and arming on a hardware station is refused (`law_not_checked`)
 until that record has passed; a missing or failing record is refused alike.
 
-Every case first asks the same of the run, in this order: every answer of the law was used and it
-never faulted; no drive sample went over its ceiling and the controller never had to scale an answer
+Every case first asks the same of the run, in this order: no answer of the law was refused for what
+it was (a wrong count, a value that is not finite, an undeclared value, a bad request, an error or a
+crash) and the run did not end on a law fault for one; the law was on time; no drive sample went over its ceiling and the controller never had to scale an answer
 down to the ceilings (the near-singular case excepted); the run did not end on an abort or the
 divergence stop; and it completed. "Within" is judged on every control at every update outside a
 settle window at the case's last level. A failed case is recorded with the requirement it broke and
 the number that broke it; the moved-resonance cases are printed so the linear law's stated limit
 can be seen, and never fail a law.
+
+A late answer is not a wrong one. The check holds every call to the run's budget (a quarter of the
+update) as a run on hardware does: a call past it is refused and the drive in force held. "On time"
+fails only when the run ends on the controller's own rule of three late answers in a row, or when
+the law's median call is over the budget, so one call that a busy computer delays cannot fail a
+case. Every case's line in the report gives the law's call times: its calls, the slowest and the
+median call, how many were over the budget (`over_budget` of `budget_ms`), and its refused answers
+with the late ones among them (`misses`, `late`).
 
 The requirements are what a good law should do, written before any law was run against them, and
 several carry the single-output Sine check's numbers. Each built-in law runs the check natively and

@@ -494,6 +494,15 @@ export interface MimoSineLawCheckCase {
 	failed: string | null;
 	number: number | null;
 	detail: string;
+	/** The law's refused answers, and of those the ones refused only for coming late; null when the case could not run. */
+	misses: number | null;
+	late: number | null;
+	/** The law's calls, the slowest and the median, ms, and how many were over the setup's budget of `budget_ms`; null when the case could not run. */
+	calls: number | null;
+	worst_call_ms: number | null;
+	median_call_ms: number | null;
+	over_budget: number | null;
+	budget_ms: number | null;
 }
 
 /** The `laws.check` result for a MIMO Sine law. */

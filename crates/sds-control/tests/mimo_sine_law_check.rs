@@ -359,3 +359,38 @@ fn mimo_sine_the_arming_gate_refuses_a_missing_or_failing_record() {
     assert_eq!(arm(&cat), None, "a passed record was refused");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Each case's line in the report carries the law's call times against the
+/// setup's budget, which the service's check keeps: the refused answers and
+/// the late ones among them, the calls, the slowest and the median call, and
+/// how many were over the budget. A case that could not run has them null.
+#[test]
+fn mimo_sine_a_case_line_carries_the_law_call_times() {
+    use hertzforge_mimo_sine_laws::check::{self as mcheck, MimoSineCheckCase};
+    use sds_control::mimo_sine::law_check::{case_json, station};
+    let law = hertzforge_mimo_sine::laws::builtin("ratio").unwrap();
+    let case = MimoSineCheckCase::DwellAwayFromResonance;
+    let r = mcheck::check_case(case, law, &mut station);
+    let m = r.measure.as_ref().expect("the case ran");
+    let line = case_json(&r.verdict, Some(m), "ratio");
+    assert_eq!(line["case"], case.name());
+    let calls = line["calls"].as_u64().unwrap();
+    assert!(calls > 500, "{line}");
+    assert!(line["late"].as_u64().unwrap() <= line["misses"].as_u64().unwrap());
+    assert!(line["over_budget"].as_u64().unwrap() <= calls);
+    // The setup's budget: a quarter of the 10 ms update (164 frames at 16384 Hz).
+    assert_eq!(line["budget_ms"], json!(2.502));
+    assert!(line["worst_call_ms"].as_f64().unwrap() >= line["median_call_ms"].as_f64().unwrap());
+    let none = case_json(&r.verdict, None, "ratio");
+    for k in [
+        "misses",
+        "late",
+        "calls",
+        "worst_call_ms",
+        "median_call_ms",
+        "over_budget",
+        "budget_ms",
+    ] {
+        assert!(none[k].is_null(), "{k}: {none}");
+    }
+}

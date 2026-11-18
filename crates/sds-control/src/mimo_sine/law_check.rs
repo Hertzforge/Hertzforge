@@ -4,12 +4,16 @@
 //! event as each case starts and as it ends, and the report on the wire. A law
 //! file's scored verdicts are recorded against its exact file by the caller;
 //! the hardware arming gate reads that record, as every other world's does.
+//!
+//! The check here holds every law call to the setup's budget, as a run on
+//! hardware does. A late answer is judged by the check's `on_time`, never as
+//! a law fault, and each case's line carries the law's call times.
 
 use crate::protocol::{num, MethodError};
 use hertzforge_hal::Backend;
 use hertzforge_mimo_sine::MimoSineLawFactory;
 use hertzforge_mimo_sine_laws::check::{
-    self as mcheck, CaseVerdict, StationSpec, StructureEdit, MIMO_SINE_CHECK_VERSION,
+    self as mcheck, CaseMeasure, CaseVerdict, StationSpec, StructureEdit, MIMO_SINE_CHECK_VERSION,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -55,8 +59,12 @@ pub fn station(spec: &StationSpec) -> Result<Box<dyn Backend>, String> {
 
 /// One case's line in the check report, for the law named `law`: a case a
 /// law set up for weakly coupled pairs runs on the weakly coupled structure
-/// says so.
-pub fn case_json(v: &CaseVerdict, law: &str) -> Value {
+/// says so. With the case's measure `m`, the line carries the law's call
+/// times: its refused answers (`misses`) and of those the late ones
+/// (`late`), its calls, the slowest and the median call, and how many were
+/// over the setup's budget (`over_budget`, of `budget_ms`); without one
+/// (the case could not run), those are null.
+pub fn case_json(v: &CaseVerdict, m: Option<&CaseMeasure>, law: &str) -> Value {
     let structure = if mcheck::PAIRED_SETUP_LAWS.contains(&law) && v.case.runs_on_pairs() {
         format!(
             "{}, on the weakly coupled structure {} (the law is set up for weakly coupled pairs)",
@@ -74,6 +82,13 @@ pub fn case_json(v: &CaseVerdict, law: &str) -> Value {
         "failed": v.failed,
         "number": num(crate::views::round_to(v.number, 3)),
         "detail": v.detail,
+        "misses": m.map(|m| m.misses),
+        "late": m.map(|m| m.late_misses),
+        "calls": m.map(|m| m.calls),
+        "worst_call_ms": m.map(|m| num(crate::views::round_to(m.slowest_call_s * 1e3, 3))),
+        "median_call_ms": m.map(|m| num(crate::views::round_to(m.median_call_s * 1e3, 3))),
+        "over_budget": m.map(|m| m.calls_over_budget),
+        "budget_ms": m.map(|m| num(crate::views::round_to(m.law_budget_s * 1e3, 3))),
     })
 }
 
@@ -98,8 +113,9 @@ pub fn run_check(
         // The case's run for this law, as the laws crate's own check runs
         // it: a law set up for weakly coupled pairs runs its pair cases on
         // the weakly coupled structure.
-        let v = mcheck::check_case(case, factory.clone(), &mut station).verdict;
-        let line = case_json(&v, &name);
+        let r = mcheck::check_case(case, factory.clone(), &mut station);
+        let v = r.verdict;
+        let line = case_json(&v, r.measure.as_ref(), &name);
         progress(
             json!({"law_id": law_id, "index": index, "of": of, "case": case.name(),
                         "state": "done", "result": line.clone()}),
