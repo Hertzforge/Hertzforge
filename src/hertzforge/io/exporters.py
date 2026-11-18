@@ -10,12 +10,16 @@ from the display selector, so a file holds the numbers shown on screen.
 With no system given, they are written as stored: SI once units are
 declared.
 
-A display system that shows acceleration in g writes the coherent system
-it is built on (in/s² for in-slinch-lbf-s (g)), because most formats
-cannot label a value as g: UNV's units block, for one, carries length,
-force and temperature factors and nothing else. A few formats write
-their own way, and `units_written` says how each one did, for the line
-the app shows after a save.
+A format with no place to record units is written in the display system
+itself, g included: in-slinch-lbf-s (g) writes accelerations in g. The
+file cannot say so, and choosing a display system that suits whatever
+reads the file next is the user's call (Brandon, 2026-11-18). A format
+that records its units writes a system it can declare: UNV's units block
+carries length, force and temperature factors and nothing else, so UNV
+writes the coherent system the display system is built on (in/s² for
+in-slinch-lbf-s (g)); Nastran and ADF are SI and 3MF is meters.
+`units_written` says how each one did, for the line the app shows after
+a save.
 
 An object whose units are unknown is written exactly as it stands. There
 is no factor to convert it by.
@@ -105,11 +109,11 @@ def units_written(format: str, unit_system: UnitSystem) -> str:
     `unit_system` chosen, in words.
 
     The status line shows this after a save, because most formats do
-    not record it themselves. A `.mat`, a delimited-text `.csv` and a
-    controller's random specification are in the display system itself,
-    g included; Nastran and ADF files are SI; 3MF is in meters; ESCDF
-    labels each value with the unit it was declared in; every other
-    format is in the coherent system the display system is built on.
+    not record it themselves. UNV declares the coherent system the
+    display system is built on, since its units block cannot hold g;
+    Nastran and ADF files are SI; 3MF is in meters; ESCDF labels each
+    value with the unit it was declared in; every other format is in the
+    display system itself, g included.
 
     Parameters
     ----------
@@ -124,29 +128,22 @@ def units_written(format: str, unit_system: UnitSystem) -> str:
         For example 'in-slinch-lbf-s', 'SI', or 'the units each object
         was declared in'.
     """
-    # MATLAB writes the display system itself, g included, and so does
-    # a CSV, whose header names each column's unit; ADF's
-    # definition and Nastran's writer are SI; 3MF declares meters; ESCDF
-    # labels each value with the unit it was declared in. The rest write
-    # the coherent system (2026-10-13: the line named the coherent system
-    # whatever the format did)
-    # a controller's random specification too (2026-10-31): its target
-    # is read in each channel's own unit, g for an accelerometer
-    if format in ('matlab', 'delimited', 'rattlesnake_specification'):
-        return unit_system.name
+    # formats without units write the display system, g included
+    # (2026-11-18: they wrote the coherent system, in/s² for a display in g)
+    if format.startswith('unv'):
+        return unit_system.coherent.name
     if format == 'nastran' or format.startswith('adf'):
         return 'SI'
     if format == 'threemf':
         return 'meters'
     if format == 'escdf':
         return 'the units each object was declared in'
-    return unit_system.coherent.name
+    return unit_system.name
 
 
 def geometry_values(geometry: Geometry, unit_system: UnitSystem | None
                     ) -> tuple[np.ndarray, np.ndarray]:
-    """(coordinates, coordinate system matrices) in the coherent form of
-    `unit_system`, or as stored when it is None or the geometry has no
+    """(coordinates, coordinate system matrices) in `unit_system`, or as stored when it is None or the geometry has no
     units defined.
 
     Only the origin row of a coordinate system matrix has length; its
@@ -156,26 +153,23 @@ def geometry_values(geometry: Geometry, unit_system: UnitSystem | None
     matrices = np.asarray(geometry.cs_matrix, dtype=np.float64).copy()
     if unit_system is None or not geometry.units_defined:
         return points, matrices
-    unit_system = unit_system.coherent
     matrices[:, 3, :] = unit_system.from_si(matrices[:, 3, :], 'length')
     return unit_system.from_si(points, 'length'), matrices
 
 
 def data_values(data: DataArray, unit_system: UnitSystem | None
                 ) -> tuple[np.ndarray, np.ndarray]:
-    """(abscissa, ordinate) in the coherent form of `unit_system`, or as
+    """(abscissa, ordinate) in `unit_system`, g included, or as
     stored when it is None or the data has no units defined."""
     if unit_system is None or not data.units_defined:
         return data.abscissa, data.ordinate
-    unit_system = unit_system.coherent
     return (data.display_abscissa(unit_system),
             data.display_ordinate(unit_system))
 
 
 def shape_values(shapes: ShapeSet,
                  unit_system: UnitSystem | None) -> np.ndarray:
-    """Mode shape coefficients in the mass unit of the coherent form of
-    `unit_system`, or as stored when it is None or the shapes have no
+    """Mode shape coefficients in the mass unit of `unit_system`, or as stored when it is None or the shapes have no
     units defined.
 
     The shapes are mass normalized, so they scale by 1/sqrt(mass), the
@@ -186,7 +180,7 @@ def shape_values(shapes: ShapeSet,
         return values
     from ..units import si_factor
 
-    mass = unit_system.coherent.unit('mass')
+    mass = unit_system.unit('mass')
     return values * np.sqrt(si_factor(mass, 'mass'))
 
 

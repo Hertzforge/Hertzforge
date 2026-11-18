@@ -1280,6 +1280,9 @@ def save(obj: Any, path: str | os.PathLike,
     """
     from ..core.geometry import Geometry
 
+    # the units block cannot declare g, so UNV writes the coherent system
+    if unit_system is not None:
+        unit_system = unit_system.coherent
     blocks = []
     if getattr(obj, 'units_defined', False):
         blocks.append(_units_dataset(unit_system))

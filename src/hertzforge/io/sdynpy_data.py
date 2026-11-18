@@ -140,7 +140,7 @@ def _coordinate_pairs(data):
 def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
     """Write a data array in the sdynpy .npz layout.
 
-    Values are written in the coherent form of `unit_system` when the
+    Values are written in `unit_system`, g included, when the
     units are defined, and as stored otherwise. The format has no place
     to record which units they are. The ordinate is complex only when
     the data is, and the comment fields are left blank.

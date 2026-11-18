@@ -749,7 +749,7 @@ def save(obj: Any, path: str | os.PathLike, title: str = 'hertzforge geometry',
     over `time_whole` (or a global variable when it has no DOF). Values
     at a node with a local displacement system are rotated into the
     global frame, because an Exodus nodal variable is always global.
-    Positions and values are written in `unit_system` (its coherent form)
+    Positions and values are written in `unit_system`, g included,
     where their units are defined, and as stored otherwise. `title` is
     the file's title.
     """
