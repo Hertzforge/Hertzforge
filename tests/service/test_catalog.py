@@ -43,7 +43,7 @@ def test_an_operation_that_waits_to_be_told_says_which_param_tells_it(catalog):
         ('project.mate_surfaces', 'project.merge_coincident_nodes',
          'project.tie_elements', 'project.align_meshes', 'project.plan_instrumentation',
          'project.generate_rigid_body_modes', 'project.rescale',
-         'project.create_sensors'), 'keep')
+         'project.create_sensors', 'project.set_filter'), 'keep')
     for op in catalog['operations']:
         named = {param['name']: param for param in op['params']}
         if 'commits' in op:

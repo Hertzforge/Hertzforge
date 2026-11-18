@@ -164,7 +164,7 @@ def _shocks_to_unmark(project: Any, name: str) -> str:
 
 
 def _span(project: Any, name: str) -> str:
-    return '' if project[name].truncation is not None else 'No span is set: Set Truncation sets one'
+    return '' if project[name].truncation is not None else 'No span is set: Truncation sets one'
 
 
 def _sensors_placed(project: Any, name: str) -> str:
@@ -307,7 +307,6 @@ NESTS: dict[str, tuple[str, ...]] = {
     'project.set_averaging': ('project.detect_averaging', 'project.compute_psds',
                               'project.compute_cpsds', 'project.compute_frfs',
                               'project.compute_multiple_coherence', 'project.compute_spectra'),
-    'project.set_filter': ('project.filter_data',),
     'project.set_truncation': ('project.truncate_data',),
     'project.resample_reading': ('project.resample',),
     'project.shocks': ('project.detect_shocks', 'project.set_shock', 'project.remove_shock',
@@ -340,6 +339,7 @@ OBJECT_ROWS = ('project.save_as', 'self.units', 'project.set_role', 'self.name_g
 #: Auto Compute is the six per-test computations, one a kind of test (Brandon, 2026-11-17:
 #: under one row, and no longer called Work Up).
 HEADS: dict[str, tuple[str, tuple[str, ...]]] = {
+    'group.calculus': ('Calculus', ('project.integrate', 'project.differentiate')),
     'group.auto_compute': ('Auto Compute', tuple(
         f'project.work_up_{test}' for test in ('sysid', 'random', 'shock', 'transient',
                                                'sine', 'modal'))),
