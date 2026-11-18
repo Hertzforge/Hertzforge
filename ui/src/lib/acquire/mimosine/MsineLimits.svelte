@@ -39,7 +39,7 @@
 			<h2 id="msine-lim-title">Limit Channels</h2>
 			<span class="aq-sub">Watched, not controlled: up to {MAX_LIMITS}, each an enabled input that is not a control.</span>
 		</div>
-		<p class="aq-lead aq-small">Where a limit channel's predicted or measured response would pass its bound, the whole drive vector is scaled down with its direction kept, and every control falls with it; the run shows the scale and the depth at every control. A limit channel outside its own abort band ends the run.</p>
+		<p class="aq-lead aq-small">Where a limit channel's predicted or measured response would pass its bound, the reference is held down (the notch's depth) and, behind it, the whole drive vector is scaled down with its direction kept, so every control falls with it; the run shows how far the reference is held down at every control and the drive's cut. A limit channel outside its own abort band ends the run.</p>
 		{#each lim.channels as ch, i (ch.channel)}
 			<div class="aq-group" data-testid="msine-limit-{ch.channel}">
 				<div class="row">

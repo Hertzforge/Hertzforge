@@ -10,16 +10,20 @@
 // (loopback, a free port, its data folder `--data`, else a new temporary folder), the analysis
 // service and the shell's dev server, and stops all three. Not part of `npm --prefix ui test`.
 //
-// 0. The channel table is set to the simulator's linear four by four (controls 1 to 4, drives 5 to
-//    8) over the wire before the screen opens.
+// 0. The channel table is set to the simulator's base and article over the wire before the screen
+//    opens: controls 1 to 4 on the base, the article's two responses 5 and 6 as monitors, drives 7
+//    to 10.
 // 1. MIMO Sine is chosen in the chooser and takes control.
-//    Station & Channels: each drive's ceiling and abort. Test: a sweep of 30 to 60 Hz at
-//    4 oct/min, one way, through the plate's lightly damped 40 Hz resonance. Schedule: one level;
-//    a quick identification. Control: the laws that cannot run a sweep are listed apart, with
-//    why. The run's record: operator and article.
-// 2. Start identifies; the review hold shows the sweep-rate warning for the 40 Hz resonance;
-//    Proceed with words for the log. The frequency readout moves, every control's trace on the
-//    Controls page, and the run completes.
+//    Station & Channels: each drive's ceiling and abort, and the base-and-article structure.
+//    References: each control's abort band at 6 dB. Test: a sweep of 150 to 350 Hz at 2 oct/min,
+//    one way, through the article's 230 Hz resonance. Schedule: one level; the identification.
+//    Limits: channels 5 and 6 limit channels with a 0.6 g bound, which the article passes
+//    near its resonance at the schedule's one level (-12 dB). Control: the laws that cannot run a
+//    sweep are listed apart, with why. The run's record: operator and article.
+// 2. Start identifies; the review hold shows the identification; Proceed with words for the log
+//    brings the Controls page forward. The frequency readout moves, every control's trace with its
+//    bands on the Controls page, the article's limit channels take the notch in near 230 Hz, and
+//    the run completes with its one sweep counted and the time the notch was in.
 // 3. The run folder holds the operator's words and is complete; Open in Analysis opens the
 //    project with the objects docs/run-folder.md says a MIMO Sine run saves.
 //
@@ -139,7 +143,7 @@ async function section(page, id) {
 	await tid(page, `tab-${id}`).click();
 }
 
-/** The channel table over the wire: four controls, then four drives. */
+/** The channel table over the wire: four controls, the article's two responses, then four drives. */
 async function setTable(url) {
 	const ws = new WebSocket(url);
 	const replies = new Map();
@@ -163,12 +167,12 @@ async function setTable(url) {
 	await call('station.select', { kind: 'sim' });
 	const { revision } = await call('channels.get');
 	const row = (index, role) => ({
-		index, enabled: true, description: role === 'drive' ? `Shaker ${index - 4}` : `Control ${index}`, role, physical: null,
+		index, enabled: true, description: role === 'drive' ? `Shaker ${index - 6}` : role === 'monitor' ? `Article ${index - 4}` : `Base ${index}`, role, physical: null,
 		interface: 'single_ended', iepe_bias_v: null, units: role === 'drive' ? 'V' : 'g', sensitivity_mv_per_eu: 1000,
 		range_max: role === 'drive' ? 10 : 1000, polarity: 'positive', control_group: null,
 		abort: { accel_g: null, velocity_ips: null, displacement_mil: null }
 	});
-	await call('channels.set', { revision, channels: [1, 2, 3, 4].map((i) => row(i, 'control')).concat([5, 6, 7, 8].map((i) => row(i, 'drive'))) });
+	await call('channels.set', { revision, channels: [1, 2, 3, 4].map((i) => row(i, 'control')).concat([5, 6].map((i) => row(i, 'monitor')), [7, 8, 9, 10].map((i) => row(i, 'drive'))) });
 	await call('session.release');
 	ws.close();
 }
@@ -213,14 +217,19 @@ try {
 	await until(a, 'the drives', async (p) => tid(p, 'msine-drives').isVisible());
 	for (let i = 0; i < 4; i++) {
 		await fill(a, `[data-testid="msine-drive-ceiling-${i}"]`, 2);
-		await fill(a, `[data-testid="msine-drive-abort-${i}"]`, 3);
+		await fill(a, `[data-testid="msine-drive-abort-${i}"]`, 4);
 	}
+	await tid(a, 'msine-structure').selectOption('sine-base-article-6x4');
 	await shot(a, 'channels');
+	await section(a, 'references');
+	await fill(a, '#msine-abort-lo-0', 6);
+	await fill(a, '#msine-abort-hi-0', 6);
+	await tid(a, 'msine-copy-1').click();
 	await section(a, 'test');
 	await tid(a, 'msine-kind-sweep').check();
-	await fill(a, '#msine-lo', 30);
-	await fill(a, '#msine-hi', 60);
-	await fill(a, '#msine-rate', 4);
+	await fill(a, '#msine-lo', 150);
+	await fill(a, '#msine-hi', 350);
+	await fill(a, '#msine-rate', 2);
 	await a.locator('#msine-end').selectOption('sweeps');
 	await fill(a, '#msine-sweeps', 1);
 	await section(a, 'schedule');
@@ -230,7 +239,15 @@ try {
 	// A field with a default is off until its box is cleared.
 	const framesBox = a.locator('#msine-id-frames').locator('xpath=ancestor::*[.//input[@type="checkbox"]][1]//input[@type="checkbox"]').first();
 	if (await framesBox.isChecked()) await framesBox.uncheck();
-	await fill(a, '#msine-id-frames', 4);
+	await fill(a, '#msine-id-frames', 8);
+	await section(a, 'limits');
+	for (const ch of ['5', '6']) {
+		await tid(a, 'msine-limit-pick').selectOption(ch);
+		await tid(a, 'msine-limit-add').click();
+		for (const i of [0, 1]) await fill(a, `[data-testid="msine-bound-${ch}-${i}-value"]`, 0.6);
+	}
+	check('the article\'s two responses are limit channels', (await tid(a, 'msine-limit-5').isVisible()) && (await tid(a, 'msine-limit-6').isVisible()));
+	await shot(a, 'limits');
 	await section(a, 'law');
 	await until(a, 'the law list', async (p) => tid(p, 'law-list').isVisible());
 	const why = await text(a, 'msine-refused-secant');
@@ -247,9 +264,9 @@ try {
 	await until(a, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step', 30_000);
 	await tid(a, 'act-start').click();
 	await until(a, 'the review hold', async (p) => (await runState(p)) === 'review', 300_000);
-	const warning = await text(a, 'msine-rate-warnings');
-	check('the review shows the sweep-rate warning at the 40 Hz resonance', /4\d(\.\d+)? Hz/.test(warning) && /slower sweep/.test(warning), warning);
-	await tid(a, 'msine-ack').fill('Reviewed the identification; the warning is expected at this rate.');
+	const ident = await text(a, 'msine-ident-words');
+	check('the review shows the identification in words', ident.length > 0, ident);
+	await tid(a, 'msine-ack').fill('Reviewed the identification.');
 	await shot(a, 'review');
 	await tid(a, 'review-proceed').click();
 	await until(a, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await hzNow(p)), 60_000);
@@ -260,12 +277,23 @@ try {
 	await until(a, 'the frequency moving', async (p) => (await hzNow(p)) !== f0, 30_000);
 	check('the frequency readout moves', true);
 	await shot(a, 'running');
-	await pageTo(a, 'Controls');
-	await until(a, 'the sweep past 45 Hz', async (p) => (await hzNow(p)) > 45 || (await runState(p)) === 'finished', 60_000);
+	await until(a, 'the sweep past 200 Hz', async (p) => (await hzNow(p)) > 200 || (await runState(p)) === 'finished', 120_000);
+	const bands = await a.locator('[data-testid="msine-page-view"]').innerText();
+	check('each control is drawn with its alarm and abort bands', /Alarm high/.test(bands) && /Abort low/.test(bands));
 	await shot(a, 'running_controls');
+	// The article's limit channels take the notch in near its 230 Hz resonance.
+	let notch = '';
+	await until(a, 'the notch in', async (p) => /Reference held down|Drive cut/.test((notch = await text(p, 'msine-notch'))) || (await runState(p)) === 'finished', 120_000);
+	check('the limit channels take the notch in, and the card says how', /Reference held down|Drive cut/.test(notch), notch);
+	await pageTo(a, 'Limits');
+	await shot(a, 'notch');
+	await pageTo(a, 'Controls');
+	await shot(a, 'notch_controls');
 	await until(a, 'the run finished', async (p) => (await runState(p)) === 'finished', 300_000);
 	const end = await text(a, 'msine-end');
 	check('the sweep completes', /Completed|complete/.test(end), end);
+	const notched = await text(a, 'msine-report-limits');
+	check('the finished run gives the time the notch was in per limit channel', /Limit 5/.test(notched) && /notch in [\d.]+ s/.test(notched), notched);
 	const swept = await text(a, 'run-sweep');
 	check('the finished one-sweep run reads 1 of 1', /\b1 of 1$/.test(swept.trim()), swept);
 	await shot(a, 'finished');
