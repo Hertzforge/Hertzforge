@@ -26,10 +26,6 @@ use hertzforge_dsp::fft;
 use hertzforge_sdm::linalg::{h1_frf, multiple_coherence, Regularization};
 use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
 
-/// The finest line spacing an identification aims for, Hz: a lightly damped
-/// mode (Q 50 at 40 Hz is 0.8 Hz wide) needs several lines across it.
-pub const TARGET_LINE_SPACING_HZ: f64 = 0.25;
-
 /// The longest record, samples.
 pub const MAX_RECORD_LEN: usize = 1 << 18;
 
@@ -89,11 +85,11 @@ pub fn irfft(half: &[C64], n: usize) -> Vec<f64> {
     fft::ifft(&spec).iter().map(|c| c.0).collect()
 }
 
-/// The record length for a rate: the shortest power of two whose line
-/// spacing is at most [`TARGET_LINE_SPACING_HZ`], at most [`MAX_RECORD_LEN`].
-pub fn record_len_for(fs_hz: f64) -> usize {
+/// The record length for a rate and a line spacing: the shortest power of two
+/// whose spacing is at most `resolution_hz`, at most [`MAX_RECORD_LEN`].
+pub fn record_len_for(fs_hz: f64, resolution_hz: f64) -> usize {
     let mut n = 1024usize;
-    while fs_hz / n as f64 > TARGET_LINE_SPACING_HZ && n < MAX_RECORD_LEN {
+    while fs_hz / n as f64 > resolution_hz && n < MAX_RECORD_LEN {
         n *= 2;
     }
     n

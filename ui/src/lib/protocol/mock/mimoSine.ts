@@ -476,7 +476,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 				return { channel: x.channel, crossovers: [], peak_accel_g: peak, peak_velocity_ips: round(peak * 6.15, 2), peak_disp_pp_in: round(peak * 0.39, 4) } as MimoSineDerived['profiles'][number];
 			}),
 			test_s: t.kind === 'sweep' && rate ? round(((Math.log2(band[1] / band[0]) / rate) * 60) * (levels.length + 1), 1) : null,
-			identification_s: Math.max(64, 10 * nd) / 4,
+			identification_s: (2 * (1 + (c.identification?.frames ?? Math.max(24, 6 * nd)))) / (c.identification?.resolution_hz ?? 0.25),
 			call_budget_s: round((c.control?.law_budget ?? 0.25) * (tickFrames / fs), 5),
 			stop_ramp_db_per_s: 120,
 			safe_stop_s: 0.85,
@@ -900,7 +900,9 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		r.identification = {
 			level_db: id.level_db ?? -20,
 			measured_level_db: round((id.level_db ?? -20) + 2.4, 1),
-			realizations: id.frames ?? Math.max(64, 10 * nd),
+			realizations: id.frames ?? Math.max(24, 6 * nd),
+			line_spacing_hz: id.resolution_hz ?? 0.25,
+			duration_s: (2 * (1 + (id.frames ?? Math.max(24, 6 * nd)))) / (id.resolution_hz ?? 0.25),
 			drive_vrms: r.drives.map(() => 0.05),
 			coherence_mean: r.controls.map((_, i) => round(0.99 - 0.004 * i, 3)),
 			limit_coherence_mean: r.limits.map(() => 0.96),

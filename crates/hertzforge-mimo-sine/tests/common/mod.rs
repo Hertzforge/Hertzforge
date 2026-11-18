@@ -101,6 +101,7 @@ pub fn setup(s: SineStructure, test: TestPlan, law: &str) -> MimoSineSetup {
         tracking: Tracking::default(),
         identification: IdentificationSettings {
             level_db: -20.0,
+            resolution_hz: 0.25,
             frames: Some(6.max(n_d as u32 + 2)),
             trust_coherence: 0.5,
             gate_coherence: 0.5,

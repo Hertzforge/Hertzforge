@@ -120,7 +120,9 @@ export type MimoSineTest = SineSweepTest | SineDwellTest | MimoSineStepGridTest 
 /** Every field optional; the defaults are in PROTOCOL.md. */
 export interface MimoSineIdentification {
 	level_db?: number;
-	/** Null: the larger of 64 and ten times the drives. */
+	/** The identification's line spacing, Hz (0.05 to 4); each record lasts about its inverse. */
+	resolution_hz?: number;
+	/** Null: the larger of 24 and six times the drives. */
 	frames?: number | null;
 	trust_coherence?: number;
 	gate_coherence?: number;
@@ -349,6 +351,10 @@ export interface MimoSineIdentificationFacts {
 	/** The level the law is told the structure was identified at, dB; null when not measured. */
 	measured_level_db: number | null;
 	realizations: number;
+	/** The line spacing the identification ran at, Hz. */
+	line_spacing_hz: number;
+	/** How long it played on the station, s. */
+	duration_s: number;
 	drive_vrms: number[];
 	coherence_mean: number[];
 	limit_coherence_mean: number[];

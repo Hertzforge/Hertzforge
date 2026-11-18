@@ -4093,8 +4093,8 @@ without replacing anything and needs no control. The laws are listed with `laws.
  "acquisition":{"fs_hz":null,"tick_ms":10},
  "schedule":{"mode":"auto","levels_db":[-12,-6,0],"start_db":-12,
              "per_level":{"sweeps":1},"full_level":{"sweeps":2}},
- "identification":{"level_db":-20,"frames":null,"trust_coherence":0.5,"gate_coherence":0.5,
-                   "review":true},
+ "identification":{"level_db":-20,"resolution_hz":0.25,"frames":null,"trust_coherence":0.5,
+                   "gate_coherence":0.5,"review":true},
  "control":{"tracking":{"kind":"proportional","pct":10,"max_hz":100},
             "law":{"id":"matrix","params":{"carry":0.67}},
             "law_budget":0.25,"law_misses":3,"max_step_db":1,"max_rise_db_per_s":240,
@@ -4128,7 +4128,8 @@ without replacing anything and needs no control. The laws are listed with `laws.
 | `acquisition.tick_ms` | 10 | The control tick, ms, converted to the nearest whole frame (at least two) at the rate the station adopts: 2 to 1000 for a built-in law, 8 to 1000 for a law file |
 | `schedule` | as Sine's | Sine's: `mode` `auto` or `manual`; `levels_db` ascending, each from -60 to 12, the last full level; `start_db` a level of the schedule; `per_level` and `full_level` `{"sweeps"}` (a sweep test only) or `{"seconds"}`. One schedule for every control |
 | `identification.level_db` | -20 | The identification's level under the full-level references, dB (-60 to 0). Every drive plays independent random at once |
-| `identification.frames` | null: the larger of 64 and 10 times the drives | Records averaged, 1 to 4096 |
+| `identification.resolution_hz` | 0.25 | The line spacing, Hz (0.05 to 4): each record is the shortest power of two of samples whose spacing is at most this, about `1 / resolution_hz` seconds |
+| `identification.frames` | null: the larger of 24 and 6 times the drives | Records averaged, 1 to 4096; each plays twice (once to settle, once to measure), so the identification lasts about `2 (frames + 1) / resolution_hz` seconds with its probe |
 | `identification.trust_coherence` | 0.5 | A line where a control's multiple coherence is under it is not trusted (0 to 1) |
 | `identification.gate_coherence` | 0.5 | The band-mean multiple coherence every control must reach; under it the run ends `held` (0 to 1) |
 | `identification.review` | true | Hold for the operator after identification (`review`) |
@@ -4164,7 +4165,7 @@ profile row.
  "grid":{"fs_hz":16384,"tick_frames":164,"tick_s":0.0100098,"actual":false},
  "profiles":[{"channel":1,"crossovers":[],"peak_accel_g":1,"peak_velocity_ips":6.15,
               "peak_disp_pp_in":0.3913}, ...],
- "test_s":339.6,"identification_s":64.0,"call_budget_s":0.0025,
+ "test_s":339.6,"identification_s":200.0,"call_budget_s":0.0025,
  "stop_ramp_db_per_s":120,"safe_stop_s":0.85,
  "tracking":{"verdict":"ok","ratio":0.04,"at_hz":null,"message":null},
  "law":{"id":"matrix","name":"matrix","version":"0.1.0","sha256":null,
@@ -4303,7 +4304,7 @@ not name, or the drives out of the table's order), `limit_unknown_channel`,
 - `identification` is null until the gate has run:
 
 ```
-{"level_db":-20,"measured_level_db":-17.6,"realizations":64,
+{"level_db":-20,"measured_level_db":-17.6,"realizations":24,"line_spacing_hz":0.25,"duration_s":200,
  "drive_vrms":[0.05,0.05,0.05,0.05],"coherence_mean":[0.99,0.98,0.99,0.97],
  "limit_coherence_mean":[0.96],"trusted_frac":0.97,"condition_max":12.4,"lag_frames":0,
  "gate_coherence":0.5,"passed":true}

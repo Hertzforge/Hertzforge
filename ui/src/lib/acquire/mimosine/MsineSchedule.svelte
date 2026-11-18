@@ -78,7 +78,8 @@
 		<div class="aq-head"><h2 id="msine-id-title">Identification</h2><span class="aq-sub">Independent random on every drive at once, before the tone, at low level.</span></div>
 		<div class="aq-fields">
 			<NumberField id="msine-id-level" label="Level under the references" unit="dB" step={1} min={-60} max={0} bind:value={id.level_db} errors={errs('identification.level_db')} disabled={locked} />
-			<NumberField id="msine-id-frames" label="Records averaged" integer nullable="64 or ten per drive" step={8} min={1} max={4096} bind:value={id.frames} errors={errs('identification.frames')} disabled={locked} />
+			<NumberField id="msine-id-resolution" label="Line spacing" unit="Hz" step={0.05} min={0.05} max={4} bind:value={id.resolution_hz} errors={errs('identification.resolution_hz')} help="Each record lasts about its inverse; a lightly damped mode needs several lines across its bandwidth." disabled={locked} />
+			<NumberField id="msine-id-frames" label="Records averaged" integer nullable="24 or six per drive" step={8} min={1} max={4096} bind:value={id.frames} errors={errs('identification.frames')} help="Each record plays twice: once to settle, once to measure." disabled={locked} />
 			<NumberField id="msine-id-trust" label="Trust a line from coherence" step={0.05} min={0} max={1} bind:value={id.trust_coherence} errors={errs('identification.trust_coherence')} help="A line where a control's multiple coherence is under it is not trusted." disabled={locked} />
 			<NumberField id="msine-id-gate" label="Every control's coherence at least" step={0.05} min={0} max={1} bind:value={id.gate_coherence} errors={errs('identification.gate_coherence')} help="The band-mean coherence every control must reach; under it the run ends held." disabled={locked} />
 		</div>

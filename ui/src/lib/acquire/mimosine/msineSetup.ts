@@ -107,7 +107,7 @@ export interface MsineDraft {
 		per_level: { by: 'sweeps' | 'seconds'; n: number };
 		full_level: { by: 'sweeps' | 'seconds'; n: number };
 	};
-	identification: { level_db: number; frames: number | null; trust_coherence: number; gate_coherence: number; review: boolean };
+	identification: { level_db: number; resolution_hz: number; frames: number | null; trust_coherence: number; gate_coherence: number; review: boolean };
 	law: LawDraft;
 	control: {
 		tracking: { kind: 'fixed' | 'proportional'; hz: number; pct: number; max_hz: number };
@@ -186,7 +186,7 @@ export function defaultMsineSetup(): MsineDraft {
 		},
 		acquisition: { fs_hz: null, tick_ms: 10 },
 		schedule: { mode: 'auto', levels: [-12, -6, 0], start_db: -12, per_level: { by: 'sweeps', n: 1 }, full_level: { by: 'sweeps', n: 2 } },
-		identification: { level_db: -20, frames: null, trust_coherence: 0.5, gate_coherence: 0.5, review: true },
+		identification: { level_db: -20, resolution_hz: 0.25, frames: null, trust_coherence: 0.5, gate_coherence: 0.5, review: true },
 		law: { id: '', params: {} },
 		control: {
 			tracking: { kind: 'proportional', hz: 10, pct: 10, max_hz: 100 },
@@ -710,7 +710,7 @@ export function localErrors(d: MsineDraft): FieldErrors {
 		if (sch.mode === 'auto' && sch[k].by === 'sweeps' && t.kind !== 'sweep') add(out, `schedule.${k}`, 'Sweeps count in a sweep test only; give seconds.');
 	}
 	const id = d.identification;
-	for (const k of ['level_db', 'trust_coherence', 'gate_coherence'] as const) need(out, `identification.${k}`, id[k]);
+	for (const k of ['level_db', 'resolution_hz', 'trust_coherence', 'gate_coherence'] as const) need(out, `identification.${k}`, id[k]);
 	if (id.frames !== null) need(out, 'identification.frames', id.frames, true);
 	const c = d.control;
 	if (c.tracking.kind === 'fixed') need(out, 'control.tracking', c.tracking.hz);

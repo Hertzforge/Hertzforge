@@ -253,8 +253,16 @@ pub struct IdentificationSettings {
     /// The identification's level under the full-level reference, dB, -60 to
     /// 0.
     pub level_db: f64,
-    /// Records averaged; `None` takes the larger of 64 and ten times the
-    /// drives. At most 4096.
+    /// The identification's line spacing, Hz: each record is the shortest
+    /// power of two of samples whose spacing is at most this (a record of
+    /// about `1 / resolution_hz` seconds), from
+    /// [`MIN_IDENT_RESOLUTION_HZ`] to [`MAX_IDENT_RESOLUTION_HZ`]. A lightly
+    /// damped mode needs several lines across its half-power bandwidth
+    /// (`f / Q`).
+    pub resolution_hz: f64,
+    /// Records averaged, each played twice (once to settle, once to
+    /// measure); `None` takes [`IdentificationSettings::default_frames`]. At
+    /// most 4096.
     pub frames: Option<u32>,
     /// A line where a control's multiple coherence is under this is not
     /// trusted, 0 to 1.
@@ -270,11 +278,31 @@ impl Default for IdentificationSettings {
     fn default() -> Self {
         IdentificationSettings {
             level_db: -20.0,
+            resolution_hz: DEFAULT_IDENT_RESOLUTION_HZ,
             frames: None,
             trust_coherence: 0.5,
             gate_coherence: 0.5,
             review: true,
         }
+    }
+}
+
+/// The identification's line spacing when none is given, Hz.
+pub const DEFAULT_IDENT_RESOLUTION_HZ: f64 = 0.25;
+
+/// The finest line spacing an identification may ask for, Hz.
+pub const MIN_IDENT_RESOLUTION_HZ: f64 = 0.05;
+
+/// The coarsest line spacing an identification may ask for, Hz.
+pub const MAX_IDENT_RESOLUTION_HZ: f64 = 4.0;
+
+impl IdentificationSettings {
+    /// The records averaged when none is given for `drives` drives: the
+    /// larger of 24 and six times the drives (enough records over the drives
+    /// for the estimate's inverse to be well posed and its coherence
+    /// meaningful).
+    pub fn default_frames(drives: usize) -> usize {
+        24.max(6 * drives)
     }
 }
 
@@ -850,6 +878,11 @@ impl MimoSineSetup {
         };
         if !(id.level_db.is_finite() && (-60.0..=0.0).contains(&id.level_db)) {
             return id_bad("level_db", "the level is outside -60 to 0 dB");
+        }
+        if !(id.resolution_hz.is_finite()
+            && (MIN_IDENT_RESOLUTION_HZ..=MAX_IDENT_RESOLUTION_HZ).contains(&id.resolution_hz))
+        {
+            return id_bad("resolution_hz", "the line spacing is outside 0.05 to 4 Hz");
         }
         if let Some(f) = id.frames {
             if f == 0 || f > 4096 {

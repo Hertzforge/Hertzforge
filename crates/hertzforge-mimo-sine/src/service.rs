@@ -155,6 +155,11 @@ pub struct IdentificationReport {
     /// The record length and the realizations averaged.
     pub record_len: usize,
     pub realizations: usize,
+    /// The line spacing, Hz.
+    pub line_spacing_hz: f64,
+    /// How long the identification played on the station, s: the probe
+    /// and every realization, each two records.
+    pub duration_s: f64,
     /// The resonances found in the identification (a sweep only).
     pub modes_found: usize,
     /// The sweep-rate warning for each resonance (a sweep only): the
@@ -565,7 +570,7 @@ impl MimoSineService {
             return Err(ServiceError::State("identify before arm".into()));
         }
         let fs = self.actual.expect("armed").actual_rate_hz;
-        let n = ident::record_len_for(fs);
+        let n = ident::record_len_for(fs, self.setup.identification.resolution_hz);
         let gband = ident::grid_band(self.setup.test.band_hz(), fs);
         let band = ident::band_lines(fs, n, gband.0, gband.1);
         let m = self.setup.drives.len();
@@ -576,7 +581,7 @@ impl MimoSineService {
             .identification
             .frames
             .map(|f| f as usize)
-            .unwrap_or_else(|| 64.max(10 * m))
+            .unwrap_or_else(|| crate::setup::IdentificationSettings::default_frames(m))
             .max(m);
         let idf = |e: String| ServiceError::Identification(e);
         self.fresh_engine()?;
@@ -638,6 +643,8 @@ impl MimoSineService {
             gate_passed,
             record_len: n,
             realizations,
+            line_spacing_hz: fs / n as f64,
+            duration_s: (2 * (1 + realizations) * n) as f64 / fs,
             modes_found,
             sweep_rate_warning,
         });

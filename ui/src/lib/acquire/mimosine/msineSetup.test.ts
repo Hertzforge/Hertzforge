@@ -138,4 +138,13 @@ describe('the MIMO Sine setup draft', () => {
 		expect(msineTitle(back)).toBe('MIMO Sine 1 g, dwell at 100 Hz');
 		expect(msineTitle(d)).toBe('MIMO Sine 1 g, 20 to 2000 Hz');
 	});
+	it('carries the identification line spacing, 0.25 Hz by default, and wants a number there', () => {
+		const d = filled();
+		expect(d.identification.resolution_hz).toBe(0.25);
+		expect(toMsineConfig(d, null).identification?.resolution_hz).toBe(0.25);
+		d.identification.resolution_hz = Number.NaN;
+		expect(localErrors(d)['identification.resolution_hz']).toBeDefined();
+		const back = mergeMsineSetup({ identification: { level_db: -20, frames: null, trust_coherence: 0.5, gate_coherence: 0.5, review: true } } as never);
+		expect(back.identification.resolution_hz).toBe(0.25);
+	});
 });
