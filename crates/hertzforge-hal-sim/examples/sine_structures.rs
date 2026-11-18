@@ -113,13 +113,37 @@ fn main() {
             s.full_level_g(),
             s.seed()
         );
-        println!("  modes (f Hz, Q, reference amplitude):");
+        // For each mode, how far past its reference amplitude the full level takes it
+        // when the controls' phases are the ones that excite it most (the calibration
+        // is for the controls in phase): `sum |g_i| / |sum g_i|`, `g` the mode's force
+        // per unit reference at each control.
+        let lin = s.linear_structure();
+        let nc = s.n_controls();
+        println!("  modes (f Hz, Q, reference amplitude, worst-phase ratio at full level):");
         for m in &p.modes {
+            let h = lin.frf_at_envelope(&[m.f_hz], FS, &vec![0.0; lin.modes.len()]);
+            let mut hc = hertzforge_hal_sim::MatrixStack::zeros(1, nc, n_d);
+            for i in 0..nc {
+                for j in 0..n_d {
+                    hc.set(0, i, j, h.get(0, i, j));
+                }
+            }
+            let (inv, _) = linalg::pinv(&hc, linalg::Regularization::None).expect("pinv");
+            let g: Vec<C64> = (0..nc)
+                .map(|i| {
+                    (0..n_d).fold(C64::new(0.0, 0.0), |acc, j| {
+                        acc + inv.get(0, j, i) * m.input_shape[j]
+                    })
+                })
+                .collect();
+            let sum_abs: f64 = g.iter().map(|v| v.norm()).sum();
+            let abs_sum = g.iter().fold(C64::new(0.0, 0.0), |a, v| a + v).norm();
             println!(
-                "    {:7.1}  {:5.1}  {:.3e}",
+                "    {:7.1}  {:5.1}  {:.3e}  {:6.1}",
                 m.f_hz,
                 1.0 / (2.0 * m.zeta),
-                m.reference_amplitude
+                m.reference_amplitude,
+                sum_abs / abs_sum
             );
         }
         print!("  full-level drive, largest |d| V:");
@@ -130,9 +154,7 @@ fn main() {
         }
         println!();
         // Over the band: the largest drive and the singular values of the controlled rows.
-        let lin = s.linear_structure();
         let h = lin.frf_at_envelope(&grid, FS, &vec![0.0; lin.modes.len()]);
-        let nc = s.n_controls();
         let mut hc = hertzforge_hal_sim::MatrixStack::zeros(grid.len(), nc, n_d);
         for k in 0..grid.len() {
             for i in 0..nc {

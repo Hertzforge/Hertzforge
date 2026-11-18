@@ -83,6 +83,16 @@
 //! to it. Other modes stay below theirs under that pulse. The tests recompute the
 //! calibration and measure the shift and the damping at full level from the plant's
 //! own response.
+//!
+//! # The sine structures
+//!
+//! A third set, [`SineStructure`], for multiple-drive sine control: plates like the
+//! shock structures' (jointed modal models, acceleration-shaped modes on a mass line),
+//! calibrated for a sine test at [`SINE_CALIBRATION_RATE_HZ`] over [`SINE_BAND_HZ`]
+//! with a stated full level each: linear ones of three shapes, softening and hardening
+//! ones whose resonances move by a stated number of half-power bandwidths at full level,
+//! a base carrying an article for limit channels, and one nearly singular near one
+//! frequency. Their table, calibration and claims are on [`SineStructure`].
 
 use crate::jointed::{JointLaw, JointedMode, JointedPlant, JointedStep, LevelRule};
 use crate::plant::{ModalPlant, Mode, ModeResponse, PlantModel, DEFAULT_FEEDTHROUGH};
@@ -916,8 +926,9 @@ pub const SINE_NEAR_SINGULAR_HZ: f64 = 381.2;
 /// The four 4 x 4 structures and the near-singular one share one plate. Every structure
 /// is a [`PlantModel::Jointed`] model with acceleration-shaped modes on a mass line
 /// (outputs in g, drives in volts), elastic modes between 40 Hz and 1.6 kHz with `Q`
-/// between 17 and 50 and a lightly damped first mode near 40 Hz (1 % damping, `Q` 50),
-/// no output delays, and the equalized step fitted to 2 kHz (so the small-signal
+/// between 17 and 50 and a lightly damped first mode near 40 Hz (1 % damping, `Q` 50;
+/// its participation two thirds of the others', so the antiresonance below it stays
+/// shallow), no output delays, and the equalized step fitted to 2 kHz (so the small-signal
 /// response is the continuous model's within about 0.1 dB, delayed two samples on every
 /// path). A mode's half-power bandwidth is `f / Q = 2 zeta f`.
 ///
@@ -937,6 +948,18 @@ pub const SINE_NEAR_SINGULAR_HZ: f64 = 381.2;
 /// a fractional drop of `b / Q`. Exponents are 1 on the drop and the damping (each grows
 /// linearly with amplitude to the reference amplitude and stops there) and 2 on the rise
 /// (a cubic stiffness, stopping at 1.25 times the reference amplitude).
+///
+/// The calibration is for the controls in phase, the reference the research on these
+/// laws used. A mode the in-phase reference hardly excites gets a small reference
+/// amplitude, so another pattern of phases at the same level, or drives that are not
+/// a controlled reference at all (an identification's independent noise), takes it past
+/// its reference amplitude at a lower level: on the 4 x 4 plate, the most exciting
+/// pattern of phases at full level reaches 17 to 112 times the reference amplitude of
+/// six of the eight modes (the example prints the ratio per mode). Past its reference
+/// amplitude a mode's movement and damping stop growing, so it never moves more than
+/// the stated amount; a low-level identification on a level-dependent structure should
+/// be scaled by the envelope it reaches (`JointedPlant::simulate` reports each mode's
+/// peak) rather than by its drive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SineStructure {
     /// `sine-linear-4x4`.
