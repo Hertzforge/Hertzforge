@@ -10,15 +10,18 @@
 //
 // 1. The chooser offers MIMO Sine like the other modules; its screen opens on Setup and takes
 //    control. The SIM badge is checked at every step.
-// 2. Station & Channels: the run's controls and drives from the channel table; each drive's ceiling
-//    and abort, which have no default.
-// 3. References and Test: each control's reference; the test is a sweep.
+// 2. Station & Channels: a simulator of 8 inputs and 4 outputs; the table gives 4 controls, 4
+//    drives and a monitor; each drive's ceiling and abort, which have no default.
+// 3. References, Test and Schedule: each control's reference; the test is a sweep. Limits: the
+//    monitor is a limit channel with its bound.
 // 4. Control: the laws that cannot run a sweep are listed apart, each with why in words, and the
 //    chosen law states its limit.
 // 5. Proceed to Run applies; Start identifies; the review hold brings the identification forward
 //    with the sweep-rate warning; Proceed with words for the log.
-// 6. The frequency readout moves; the sweep offers Jog and Go to and no Reverse (the sweep turns
-//    only at the band's edges); Hold keeps it and Resume lets it go on; the run completes.
+// 6. The frequency readout moves with every control's trace on the Controls page; the sweep offers
+//    Jog and Go to and no Reverse (the sweep turns only at the band's edges); the limit channel
+//    nears its bound and the drive vector is notched; Hold keeps the frequency and Resume lets it
+//    go on; the run completes.
 // 7. A dwell: the sweep verbs are gone; Abort ends it in words.
 // 8. The level card at 4 controls and 4 drives and at 16 and 8, each with the dock at its start,
 //    narrowest and widest: every cell of the controls and drives tables reads whole, on one line,
@@ -89,6 +92,9 @@ const until = (page, what, fn, ms) => waitFor(what, () => fn(page), ms);
 
 async function shot(page, name) {
 	const file = path.join(SHOTS, `mimo_sine_${name}.png`);
+	// A note stays until it is dismissed; it would cover the plots in the picture.
+	const note = page.locator('[data-testid="note"] button[aria-label="Dismiss"]');
+	if (await note.count()) await note.first().click().catch(() => {});
 	await page.waitForTimeout(300);
 	await page.screenshot({ path: file });
 	console.log(`      screenshot ${file}`);
@@ -144,6 +150,12 @@ async function channelTable(page, nc, nd, nm = 0) {
 		await tid(page, `msine-drive-abort-${i}`).fill('6');
 		await tid(page, `msine-drive-abort-${i}`).blur();
 	}
+}
+
+/** The run view's page, by its tab's name. */
+async function pageTo(page, name) {
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await p.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim() === name);
 }
 
 /** The dock's width: its start, or pressed to its narrowest or widest with the arrow keys. */
@@ -216,7 +228,7 @@ async function levelCardCase(nc, nd) {
 try {
 	const a = await ctx.newPage();
 	// ---- 1. the chooser ----------------------------------------------------------------------------
-	await a.goto(URL_());
+	await a.goto(URL_('&mock_sim=8x4'));
 	await until(a, 'the chooser', async (p) => (await attr(p, 'conn-control', 'data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
 	check('the chooser offers MIMO Sine like the other modules', (await attr(a, 'test-type-mimo_sine', 'aria-disabled')) === 'false' && (await attr(a, 'test-type-mimo_shock', 'aria-disabled')) === 'false' && !/coming/i.test(await text(a, 'test-type-mimo_sine')));
 	await shot(a, 'chooser');
@@ -228,19 +240,27 @@ try {
 	await neverLive(a, 'setup');
 
 	// ---- 2. channels -------------------------------------------------------------------------------
-	await section(a, 'channels');
-	await until(a, 'the drives', async (p) => tid(p, 'msine-drives').isVisible());
-	await tid(a, 'msine-drive-ceiling-0').fill('2');
-	await tid(a, 'msine-drive-abort-0').fill('3');
-	await tid(a, 'msine-drive-abort-0').blur();
+	await channelTable(a, 4, 4, 1);
+	check('the run has 4 controls and 4 drives', (await a.locator('[data-testid^="msine-control-"]').count()) === 4 && (await a.locator('[data-testid^="msine-drive-ceiling-"]').count()) === 4);
+	await tid(a, 'msine-channels').scrollIntoViewIfNeeded();
 	await shot(a, 'channels');
 
-	// ---- 3. references and test --------------------------------------------------------------------
+	// ---- 3. references, test, schedule and limits ----------------------------------------------------
 	await section(a, 'references');
-	check('each control has its reference', await tid(a, 'msine-reference-1').isVisible());
+	check('each control has its reference', await tid(a, 'msine-reference-1').isVisible() && await tid(a, 'msine-reference-5').isVisible());
+	await shot(a, 'references');
 	await section(a, 'test');
 	check('the test is a sweep', await tid(a, 'msine-kind-sweep').isChecked());
 	await shot(a, 'test');
+	await section(a, 'schedule');
+	await shot(a, 'schedule');
+	await section(a, 'limits');
+	await tid(a, 'msine-limit-pick').selectOption('9');
+	await tid(a, 'msine-limit-add').click();
+	check('the monitor is a limit channel', await tid(a, 'msine-limit-9').isVisible());
+	for (const i of [0, 1]) await tid(a, `msine-bound-9-${i}-value`).fill('1');
+	await tid(a, 'msine-bound-9-1-value').blur();
+	await shot(a, 'limits');
 
 	// ---- 4. the laws ---------------------------------------------------------------------------------
 	await section(a, 'law');
@@ -260,16 +280,29 @@ try {
 	await until(a, 'the tone engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)) && Number.isFinite(await hzNow(p)), 30_000);
 	await neverLive(a, 'run');
 
-	// ---- 6. the frequency moves; hold and resume; completion ---------------------------------------
+	// ---- 6. the frequency moves; a notch; hold and resume; completion ------------------------------
+	await pageTo(a, 'Controls');
 	const f0 = await hzNow(a);
 	await until(a, 'the frequency moving', async (p) => (await hzNow(p)) !== f0, 15_000);
 	check('the frequency readout moves', true);
 	check('a sweep offers Jog and Go to, and no Reverse', (await tid(a, 'jog-up').count()) === 1 && (await tid(a, 'act-goto').count()) === 1 && (await a.getByRole('button', { name: 'Reverse' }).count()) === 0);
+	await until(a, 'every control traced', async (p) => (await p.locator('[data-testid="msine-page-view"]').innerText()).includes('Control 5'), 10_000);
+	await until(a, 'the sweep past 120 Hz', async (p) => (await hzNow(p)) > 120, 60_000);
+	await shot(a, 'sweep');
+	// Held, then moved to where the limit channel's response passes its bound: the notch holds there.
 	await tid(a, 'act-hold').click();
 	await until(a, 'held', async (p) => (await attr(p, 'msine-run-view', 'data-held')) === 'true', 10_000);
-	await shot(a, 'held');
+	await tid(a, 'goto-hz').fill('222');
+	await tid(a, 'act-goto').click();
+	await until(a, 'at 222 Hz', async (p) => Math.abs((await hzNow(p)) - 222) < 1, 10_000);
+	await pageTo(a, 'Limits');
+	await until(a, 'the limit notching', async (p) => /Scaled to/.test(await text(p, 'msine-notch')), 20_000);
+	await a.waitForTimeout(1500);
+	check('the limit channel notches the drive vector', /Scaled to [\d.]+ \([\d.]+ dB\)/.test(await text(a, 'msine-notch')), await text(a, 'msine-notch'));
+	await shot(a, 'notch_held');
 	await tid(a, 'act-resume').click();
 	await until(a, 'resumed', async (p) => (await attr(p, 'msine-run-view', 'data-held')) === 'false', 10_000);
+	await pageTo(a, 'Controls');
 	await until(a, 'the run finished', async (p) => (await runState(p)) === 'finished', 120_000);
 	check('the sweep completes', /Completed/.test(await text(a, 'msine-end')));
 	await shot(a, 'finished');
