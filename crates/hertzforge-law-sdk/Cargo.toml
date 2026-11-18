@@ -7,7 +7,7 @@ publish = false
 
 # The guest side of the control-law interface: what a law author depends on
 # to build a law file. Generates the bindings for the `random-single`,
-# `random-mimo`, `shock-classical`, `shock-srs`, `shock-mimo` and `sine-single` worlds of
+# `random-mimo`, `shock-classical`, `shock-srs`, `shock-mimo`, `sine-single` and `sine-mimo` worlds of
 # `wit/control-law/` and wraps them in the `RandomLaw`, `RandomMimoLaw`,
 # `ShockClassicalLaw`, `ShockSrsLaw` and `SineSingleLaw` traits and their
 # `export_*!` macros. Builds for the host too (so the workspace lints it and a law's math

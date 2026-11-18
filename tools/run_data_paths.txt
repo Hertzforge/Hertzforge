@@ -24,6 +24,7 @@ crates/hertzforge-mixed             Mixed Mode: its parts, setup, run state and 
 crates/hertzforge-shock-common      classical shock: pulse records, ladders and the pulse store
 crates/hertzforge-shock-host        the shock firer: its setup, pulses and run state
 crates/hertzforge-mimo-shock        multiple-drive shock: its setup, pulses and verdicts
+crates/hertzforge-mimo-sine         multiple-drive sine: its setup, run state and results
 crates/hertzforge-srs               SRS shock: its setup, pulses and results
 crates/hertzforge-twr               waveform replication: its reference, plays and results
 crates/hertzforge-explorer-host     Explorer: its setup, survey and records
@@ -75,6 +76,7 @@ schema/PROTOCOL.md#classical-shock  the classical shock setup, run state and pul
 schema/PROTOCOL.md#srs-shock        the SRS shock setup, run state and pulses
 schema/PROTOCOL.md#mimo-shock       the multiple-drive shock setup, run state and pulses
 schema/PROTOCOL.md#sine             the Sine setup and run state
+schema/PROTOCOL.md#mimo-sine        the multiple-drive sine setup, run state and results
 schema/PROTOCOL.md#mixed-mode       the Mixed Mode setup and run state
 schema/PROTOCOL.md#time-waveform-replication  the waveform replication reference, setup and plays
 schema/PROTOCOL.md#explorer         the Explorer setup, run state and records

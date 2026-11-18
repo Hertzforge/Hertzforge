@@ -1,0 +1,330 @@
+package hertzforge:control-law@0.1.0;
+
+// MIMO Sine: several drives, several control channels, one tone at a time,
+// one complex amplitude per drive decided every control tick.
+//
+// - The tone. The core's oscillator plays one tone on every drive, each drive
+//   with its own amplitude and phase: drive `i` plays
+//   `d_i(t) = Re{ D_i exp(j phi(t)) }`, `phi` the tone's phase. The tone's
+//   frequency, the sweep and its direction, the tone's phase (kept
+//   continuous), the level schedule, every protection and every abort are the
+//   core's. A law decides `D`, one complex amplitude per drive, each update.
+// - Tracked amplitudes. A channel's tracked amplitude `C_c` is its response
+//   at the tone, `y_c(t) = Re{ C_c exp(j phi(t)) }`: the response's phase
+//   minus the tone's. This is the negative-exponent convention of
+//   `random-mimo`, so a linear structure in steady state gives `C = H D`,
+//   with `H` the identification's response over drive.
+// - Complex values are a pair of f64 (`complex`). A matrix travels in full,
+//   row-major within a line, lines one after another: element (r, c) of line
+//   l of a `matrix-stack` is `data[(l * rows + r) * cols + c]`. The
+//   identification is controls (or limit channels) by drives on every line.
+//   A list of values per channel and per line is flat, channel after
+//   channel: the value of channel `c` on line `l` is `data[c * lines + l]`.
+//   Controls are in the setup's control order, drives in its drive order,
+//   limit channels in its limit order.
+// - Units. References, controls and tracked limit channels are in each
+//   channel's own units, peak (EU pk, g pk for an accelerometer). Drives are
+//   in volts peak. The identification is in EU peak per volt peak. Decibels
+//   are relative to full level unless a field says otherwise.
+// - Level. The setup's reference is at full level. Each update a law is told
+//   the scheduled level and the reference at this frequency and this level,
+//   and returns the drive as it is to be played: the core does not rescale it.
+// - Cadence. A law is called once per control update on the controller's
+//   real-time thread: `engage` for the first drive after identification,
+//   `tick` for every update after it. Each call has a time budget the core
+//   sets from the tick; a call past it is not used. A law is not called while
+//   the drive ramps down.
+// - The core's word is final. After every call the core checks the answer,
+//   caps each drive's change per update and its rise per second, scales the
+//   whole drive vector down (its direction kept) for the limit channels and
+//   for any drive over its ceiling, and ramps each drive to the result. The
+//   drive in force is what was played after all of that, and a law rebases on
+//   it every update. A refused answer, a failed call or a late one is a miss:
+//   the drive in force is held, and a run of misses ends the run with the
+//   core's controlled stop.
+//
+// This world is a draft until MIMO Sine is merged, and frozen then.
+
+/// Types for MIMO Sine.
+interface mimo-sine-types {
+    use types.{diagnostic-value, manifest};
+
+    /// A complex number.
+    record complex {
+        re: f64,
+        im: f64,
+    }
+
+    /// One complex matrix per line, stacked and passed in full: `lines`
+    /// matrices of `rows` by `cols`, row-major within a line, line after
+    /// line. `data` holds `lines * rows * cols` values.
+    record matrix-stack {
+        lines: u32,
+        rows: u32,
+        cols: u32,
+        data: list<complex>,
+    }
+
+    /// What kind of test the run is.
+    enum test-type {
+        /// The tone sweeps the band, up, down or both, logarithmically or
+        /// linearly in frequency.
+        sweep,
+        /// The tone stays at one frequency for a time or a count of cycles.
+        dwell,
+        /// The tone steps through a list of frequencies and stays at each.
+        stepped,
+    }
+
+    /// The count of controls against the count of drives.
+    enum sine-shape {
+        /// As many control channels as drives.
+        square,
+        /// More control channels than drives: the controls are met in the
+        /// least-squares sense.
+        more-controls-than-drives,
+        /// Fewer control channels than drives: the spare drives are free, and
+        /// the drive of least norm meets the controls.
+        fewer-controls-than-drives,
+    }
+
+    /// The tracking filter's bandwidth at a frequency.
+    variant tracking {
+        /// A share of the tone's frequency (above 0, at most 1), capped at
+        /// `max-hz`.
+        proportional(proportional-tracking),
+        /// A fixed bandwidth, Hz.
+        fixed(f64),
+    }
+
+    /// A tracking bandwidth that is a share of the tone's frequency.
+    record proportional-tracking {
+        /// The bandwidth as a share of the tone's frequency: 0.1 is 10 %.
+        share: f64,
+        /// The most the bandwidth may be, Hz.
+        max-hz: f64,
+    }
+
+    /// The identification taken before the run, on its own frequency grid:
+    /// independent random on every drive at low level, the response over the
+    /// drive at every control and limit channel.
+    record identification {
+        /// The grid, Hz, ascending: `lines` values.
+        frequency-hz: list<f64>,
+        /// The response of every control to every drive, EU pk per volt pk:
+        /// `lines` matrices of controls by drives.
+        response: matrix-stack,
+        /// The response of every limit channel to every drive, in the limit
+        /// channel's units per volt: `lines` matrices of limit channels by
+        /// drives (no data when the run has no limit channel).
+        limit-response: matrix-stack,
+        /// The multiple coherence of each control on all drives, 0 to 1:
+        /// `controls * lines` values, control after control.
+        coherence: list<f64>,
+        /// The multiple coherence of each limit channel on all drives, 0 to
+        /// 1: `limits * lines` values, limit channel after limit channel.
+        limit-coherence: list<f64>,
+        /// Whether the core trusts the identification on each line (its
+        /// coherence floor and the band): one per line.
+        trusted: list<bool>,
+    }
+
+    /// Each control's alarm and abort bands on the identification's grid, in
+    /// positive dB below and above the reference: `controls * lines` values
+    /// in each list, control after control. The core judges the controls
+    /// against them; a law may use them to know how close is close enough.
+    record tolerance {
+        alarm-low-db: list<f64>,
+        alarm-high-db: list<f64>,
+        abort-low-db: list<f64>,
+        abort-high-db: list<f64>,
+    }
+
+    /// What a MIMO Sine law is built for: fixed for the run.
+    record sine-mimo-setup {
+        /// Control channels, 1 to 16.
+        controls: u32,
+        /// Drives the law commands, 1 to 8.
+        drives: u32,
+        /// Limit channels, 0 to 8.
+        limits: u32,
+        /// The station's sample rate, Hz.
+        fs-hz: f64,
+        /// The control update interval, s (a whole number of samples).
+        tick-s: f64,
+        /// The band the run sweeps, steps or dwells in, Hz.
+        band-lo-hz: f64,
+        band-hi-hz: f64,
+        /// The kind of test the run is.
+        test-type: test-type,
+        /// The count of controls against the count of drives.
+        shape: sine-shape,
+        /// Each drive's ceiling, volts peak, one per drive. A drive vector with
+        /// a drive over its ceiling is scaled down as a whole so the largest
+        /// drive sits at its ceiling.
+        drive-ceiling-v: list<f64>,
+        identification: identification,
+        /// The level the identification was taken at, dB against full level:
+        /// the largest, over the controls, of the identification's measured
+        /// response peak over the reference's. A structure that changes with
+        /// level was measured here, so it is the first point of the level trend
+        /// a law may follow. Not finite when the core could not measure it.
+        identification-level-db: f64,
+        /// The full-level reference of every control on the identification's
+        /// grid: `controls * lines` values, control after control, EU pk.
+        reference: list<complex>,
+        /// Whether the reference's phases are part of the test. False: only
+        /// each control's amplitude is specified for the whole run, and the
+        /// phases in `reference` carry no meaning (the law chooses them).
+        phase-specified: bool,
+        /// Each limit channel's bound on the identification's grid, in its own
+        /// units, peak: `limits * lines` values, limit channel after limit
+        /// channel, absent on a line where the channel has no bound.
+        limit-bounds: list<option<f64>>,
+        /// Each control's alarm and abort bands.
+        tolerance: tolerance,
+        /// The tracking filter's bandwidth rule; with the tick it sets how
+        /// quickly a tracked amplitude follows a change.
+        tracking: tracking,
+    }
+
+    /// Why the core holds the drive this update.
+    enum hold {
+        /// Nothing holds it: the law's drive is used, within the core's
+        /// guards.
+        free,
+        /// A limit channel holds the drive down: the core scales the whole
+        /// drive vector by `notch-scale`.
+        notch,
+        /// The core granted the law's request to hold the sweep: the frequency
+        /// is not moving.
+        held,
+        /// The core plays a fixed drive to measure the structure. The law's
+        /// output is not used; it is still called so its state keeps up.
+        probe,
+        /// The settle window after engage: the tracking filters are still
+        /// rising, so a correction would act on readings that have not
+        /// settled.
+        engage,
+    }
+
+    /// Everything a MIMO Sine law sees on one update.
+    record sine-mimo-inputs {
+        /// Updates since the law was built: 0 at `engage`.
+        index: u64,
+        /// Seconds since the last call.
+        dt-s: f64,
+        /// The tone's frequency this update, Hz.
+        frequency-hz: f64,
+        /// The sweep rate, Hz per second, signed: positive sweeping up,
+        /// negative sweeping down, 0 at a dwell, at a step or while held.
+        sweep-hz-per-s: f64,
+        /// The same rate in octaves per minute, signed.
+        sweep-oct-per-min: f64,
+        /// The scheduled level as a fraction of full level (1 is full level,
+        /// 0.5 is 6 dB under it).
+        level: f64,
+        /// Every control's reference at this frequency and this level, EU pk:
+        /// one per control.
+        reference: list<complex>,
+        /// Every control's tracked amplitude, EU pk: one per control.
+        controls: list<complex>,
+        /// Every limit channel's tracked amplitude, in its units, peak: one
+        /// per limit channel.
+        limits: list<complex>,
+        /// Every limit channel's bound at this frequency, in its units, peak:
+        /// one per limit channel, absent where it has none.
+        limit-bounds: list<option<f64>>,
+        /// The drive in force, volts peak, as it was played after every guard:
+        /// one per drive. A law rebases on it.
+        drive-in-force: list<complex>,
+        hold: hold,
+        /// The scale the limit channels hold the whole drive vector to, 0 to
+        /// 1: 1 when no limit channel binds.
+        notch-scale: f64,
+        /// Whether the core's settle window is open (at the start, after a
+        /// level change, after a jump in frequency): the controls are not
+        /// judged against their bands yet.
+        settling: bool,
+    }
+
+    /// What a law may ask of the sweep. The core records every request and
+    /// honours one only when the run's setup allows requests, within its own
+    /// bounds on how long and how slow.
+    variant request {
+        /// Keep the frequency where it is for this update.
+        hold,
+        /// Sweep at this share of the scheduled rate (above 0, at most 1).
+        slow(f64),
+    }
+
+    /// One update's answer.
+    record sine-mimo-outputs {
+        /// The drive, volts peak: one finite complex amplitude per drive.
+        drive: list<complex>,
+        /// The law's own judgement that it is faulted. Shown and recorded;
+        /// the core never relies on it.
+        faulted: bool,
+        /// At most 8 values, each under a key the manifest declares.
+        values: list<diagnostic-value>,
+        /// A request to hold or slow the sweep, or none.
+        request: option<request>,
+        /// A reference the law has lowered to keep a limit channel under its
+        /// bound: one per control, at this frequency and level, or none. The
+        /// core accepts it only when it lowers the reference and a limit
+        /// channel is near its bound or the notch is releasing; it then judges
+        /// the controls against it and records the depth by control.
+        notched-reference: option<list<complex>>,
+    }
+
+    /// What a MIMO Sine law says about itself. Read once, when the law file
+    /// is loaded.
+    record sine-mimo-manifest {
+        /// Name, version, author, summary, parameters and diagnostics, as for
+        /// every law.
+        law: manifest,
+        /// The shapes the law accepts. The controller refuses a test of
+        /// another shape. At least one, each at most once.
+        shapes: list<sine-shape>,
+        /// The test types the law accepts. The controller refuses a test of
+        /// another type. At least one, each at most once.
+        test-types: list<test-type>,
+        /// Whether the law accepts an amplitude-only reference
+        /// (`phase-specified` false). A law that does not is refused such a
+        /// run.
+        amplitude-only: bool,
+    }
+}
+
+/// A MIMO Sine law: its state lives in one `law` resource, built once per run,
+/// after identification, and kept for the whole run (every level and pass).
+interface sine-mimo-law {
+    use types.{param};
+    use mimo-sine-types.{sine-mimo-setup, sine-mimo-inputs, sine-mimo-outputs};
+
+    resource law {
+        /// Build the law for a run. `params` holds every declared parameter,
+        /// already checked against the manifest, in manifest order; values
+        /// the operator left out carry their defaults. An error refuses the
+        /// run with the given reason.
+        constructor(setup: sine-mimo-setup, params: list<param>) -> result<law, string>;
+
+        /// The first update after identification: return the first drive.
+        /// `drive-in-force` is zero on every drive.
+        engage: func(inputs: sine-mimo-inputs) -> result<sine-mimo-outputs, string>;
+
+        /// One control update: return the drive.
+        tick: func(inputs: sine-mimo-inputs) -> result<sine-mimo-outputs, string>;
+    }
+}
+
+/// The world a MIMO Sine law file implements.
+world sine-mimo {
+    use mimo-sine-types.{sine-mimo-manifest};
+
+    /// The law's name, version, parameters, diagnostics, shapes, test types
+    /// and whether it accepts an amplitude-only reference.
+    export describe: func() -> sine-mimo-manifest;
+
+    export sine-mimo-law;
+}

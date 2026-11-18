@@ -1041,7 +1041,7 @@
         "fills": {"type": "string"}
       }
     },
-    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock", "playback"]},
+    "testSetupModule": {"enum": ["random", "sine", "mixed", "classical_shock", "srs", "twr", "explorer", "recorder", "mimo_random", "mimo_shock", "mimo_sine", "playback"]},
     "testSetup": {
       "type": "object", "required": ["module", "protocol", "config", "table", "title", "notes", "origin"],
       "properties": {
@@ -2653,9 +2653,11 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "minLength": 1},
-        "world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "shock_mimo"]},
+        "world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "shock_mimo", "sine_mimo"]},
         "targets": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
         "default_for": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
+        "test_types": {"type": "array", "items": {"enum": ["sweep", "dwell", "stepped"]}},
+        "amplitude_only": {"type": "boolean"},
         "builtin": {"type": "boolean"},
         "name": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},
@@ -2691,13 +2693,17 @@
       },
       "if": {"properties": {"world": {"const": "mimo"}}},
       "then": {"properties": {"shapes": {"type": "array"}, "needs": {"type": "array"}}},
-      "else": {"properties": {"shapes": {"type": "null"}, "needs": {"type": "null"}}},
+      "else": {"if": {"properties": {"world": {"const": "sine_mimo"}}},
+               "then": {"required": ["test_types", "amplitude_only"],
+                        "properties": {"shapes": {"type": "array"}, "needs": {"type": "null"}}},
+               "else": {"properties": {"shapes": {"type": "null"}, "needs": {"type": "null"},
+                                       "test_types": false, "amplitude_only": false}}},
       "allOf": [{"if": {"properties": {"world": {"const": "sine"}}},
                  "then": {"required": ["live"]}, "else": {"properties": {"live": false}}}]
     },
     "lawsListParams": {
       "type": "object", "additionalProperties": false,
-      "properties": {"world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", null]}}
+      "properties": {"world": {"enum": ["single", "mimo", "shock_classical", "shock_srs", "sine", "twr", "sine_mimo", null]}}
     },
     "lawsListResult": {
       "type": "object", "required": ["laws", "problems"], "additionalProperties": false,
