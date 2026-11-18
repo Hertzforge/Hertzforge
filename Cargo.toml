@@ -100,6 +100,11 @@ opt-level = 3
 [profile.dev.package.hertzforge-mimo-shock-law-math]
 opt-level = 3
 
+# The MIMO Sine law math: its modal fit fits up to eight candidate modes jointly by finite
+# differences; the parity tests took over 60 s unoptimized on the ten-core Mac and 2.5 s optimized.
+[profile.dev.package.hertzforge-mimo-sine-law-math]
+opt-level = 3
+
 # The Sine core: its law check's seven cases took 24.2 s unoptimized on the ten-core Mac and
 # 14.6 s with this.
 [profile.dev.package.hertzforge-sine]
