@@ -125,6 +125,19 @@ pub enum LawError {
         /// What was wrong, in words.
         detail: String,
     },
+    /// A MIMO Sine law returned a result that breaks the output rules: not one
+    /// drive per drive, a value that is not a finite number, a slow request
+    /// whose factor is not above 0 and at most 1, a notched reference that is
+    /// not one value per control, too many values, or a value the manifest
+    /// does not declare (or reported twice). The change, rise and rotation
+    /// caps, the drive ceilings and every other protection belong to the
+    /// controller.
+    BadSineMimoOutput {
+        /// Which rule (the first broken, in the order the rules are listed).
+        rule: SineMimoOutputRule,
+        /// What was wrong, in words.
+        detail: String,
+    },
     /// An earlier trap, deadline or memory error left this instance
     /// unusable. Carries that first error.
     Poisoned(String),
@@ -262,6 +275,42 @@ impl ShockMimoOutputRule {
     }
 }
 
+/// The output rules a MIMO Sine law's result is checked against, in the
+/// order they are checked ([`LawError::BadSineMimoOutput`]). The names are the
+/// controller's own for the same rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SineMimoOutputRule {
+    /// Not one complex amplitude per drive.
+    WrongDriveCount,
+    /// A drive, a value, a request's factor or a notched reference value
+    /// that is not a finite number.
+    NonFinite,
+    /// A slow request whose factor is not above 0 and at most 1.
+    BadRequest,
+    /// A notched reference that is not one value per control.
+    WrongReferenceCount,
+    /// More than [`crate::sine_mimo::MAX_SINE_MIMO_VALUES`] values.
+    TooManyValues,
+    /// A value the manifest does not declare, or one reported twice.
+    UndeclaredValue,
+}
+
+impl SineMimoOutputRule {
+    /// The stable wire and record name: `wrong_drive_count`, `non_finite`,
+    /// `bad_request`, `wrong_reference_count`, `too_many_values`,
+    /// `undeclared_value`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SineMimoOutputRule::WrongDriveCount => "wrong_drive_count",
+            SineMimoOutputRule::NonFinite => "non_finite",
+            SineMimoOutputRule::BadRequest => "bad_request",
+            SineMimoOutputRule::WrongReferenceCount => "wrong_reference_count",
+            SineMimoOutputRule::TooManyValues => "too_many_values",
+            SineMimoOutputRule::UndeclaredValue => "undeclared_value",
+        }
+    }
+}
+
 /// The output rules a Sine law's result is checked against, in the order
 /// they are checked ([`LawError::BadSineOutput`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -362,7 +411,8 @@ impl fmt::Display for LawError {
             | LawError::BadSrsOutput { detail, .. }
             | LawError::BadSineOutput { detail, .. }
             | LawError::BadTwrOutput { detail, .. }
-            | LawError::BadShockMimoOutput { detail, .. } => {
+            | LawError::BadShockMimoOutput { detail, .. }
+            | LawError::BadSineMimoOutput { detail, .. } => {
                 write!(f, "the law's output was refused: {detail}")
             }
             LawError::Poisoned(s) => write!(

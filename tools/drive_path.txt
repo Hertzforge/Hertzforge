@@ -73,6 +73,11 @@ laws/mimo-shape                     a law file: computes a drive
 laws/mimo-shock-inverse             a law file: computes a drive
 laws/mimo-shock-paired              a law file: computes a drive
 laws/mimo-shock-shape               a law file: computes a drive
+laws/mimo-sine-matrix               a law file: computes a drive
+laws/mimo-sine-paired               a law file: computes a drive
+laws/mimo-sine-ratio                a law file: computes a drive
+laws/mimo-sine-secant               a law file: computes a drive
+laws/mimo-sine-steepest-descent     a law file: computes a drive
 laws/mimo-zero                      a law file: computes a drive
 laws/ratio                          a law file: computes a drive
 laws/shock-fdc                      a law file: computes a drive

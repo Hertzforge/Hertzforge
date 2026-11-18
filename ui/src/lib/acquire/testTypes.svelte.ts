@@ -23,6 +23,8 @@ import type { RecorderRunState } from '$lib/protocol/recorder';
 import type { PlaybackRunState } from '$lib/protocol/playback';
 import type { MimoShockRunState } from '$lib/protocol/mimoShock';
 import { MS_LIVE_STATES } from './mimoshock/msVerbs';
+import type { MimoSineRunState } from '$lib/protocol/mimoSine';
+import { MSINE_LIVE_STATES } from './mimosine/msineVerbs';
 import { isLive, LIVE_STATES } from './actions';
 import { TWR_LIVE_STATES } from './twr/twrVerbs';
 import { EXPLORER_LIVE_STATES } from './explorer/explorerVerbs';
@@ -92,6 +94,15 @@ export function typesIn(group: TestGroupId, types: readonly TestType[] = TEST_TY
 	return types.filter((t) => t.group === group);
 }
 
+/**
+ * The test types with the named ones offered although they are not ready yet: a test type that is
+ * built in the shell before its control service answers can be opened by name for a preview.
+ */
+export function withPreview(types: readonly TestType[], ids: readonly string[]): readonly TestType[] {
+	if (!ids.length) return types;
+	return types.map((t) => (ids.includes(t.id) ? { ...t, ready: true } : t));
+}
+
 /** What the workspace shows. */
 export type AcquireView = 'chooser' | TestTypeId;
 
@@ -115,7 +126,8 @@ export function liveTestOf(
 	recorder?: { status: { state: RecorderRunState } | null; syncError: string | null },
 	mixed?: { status: { state: RandomRunState } | null; syncError: string | null },
 	mimoShock?: { status: { state: MimoShockRunState } | null; syncError: string | null },
-	playback?: { status: { state: PlaybackRunState } | null; syncError: string | null }
+	playback?: { status: { state: PlaybackRunState } | null; syncError: string | null },
+	mimoSine?: { status: { state: MimoSineRunState } | null; syncError: string | null }
 ): LiveTest {
 	if (acq.run !== null && isLive(acq.run)) return 'random';
 	if (mimo?.status && LIVE_STATES.includes(mimo.status.state)) return 'mimo_random';
@@ -128,9 +140,10 @@ export function liveTestOf(
 	if (recorder?.status && RECORDER_LIVE_STATES.includes(recorder.status.state)) return 'recorder';
 	if (mimoShock?.status && MS_LIVE_STATES.includes(mimoShock.status.state)) return 'mimo_shock';
 	if (playback?.status && PLAYBACK_LIVE_STATES.includes(playback.status.state)) return 'playback';
+	if (mimoSine?.status && MSINE_LIVE_STATES.includes(mimoSine.status.state)) return 'mimo_sine';
 	// Every run read has answered (or one could not be read): nothing is live.
 	const answered = (s?: { status: unknown; syncError: string | null }) => !s || s.status !== null || s.syncError !== null;
-	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed) && answered(mimoShock) && answered(playback)) return null;
+	if (acq.run !== null && answered(mimo) && answered(shock) && answered(srs) && answered(sine) && answered(twr) && answered(explorer) && answered(recorder) && answered(mixed) && answered(mimoShock) && answered(playback) && answered(mimoSine)) return null;
 	const waiting = status === 'offline' || status === 'connecting' || status === 'open';
 	return waiting && acq.syncError === null ? undefined : null;
 }

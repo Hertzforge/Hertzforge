@@ -2,8 +2,9 @@
 //! [`export_law!`]), multiple-output Random ([`RandomMimoLaw`],
 //! [`export_mimo_law!`], the [`mimo`] module), classical and SRS shock
 //! ([`shock`], [`srs`]), MIMO Shock ([`ShockMimoLaw`],
-//! [`export_shock_mimo_law!`], the [`shock_mimo`] module), MIMO Sine (the
-//! [`sine_mimo`] module's types), single-output Sine ([`SineSingleLaw`],
+//! [`export_shock_mimo_law!`], the [`shock_mimo`] module), MIMO Sine
+//! ([`SineMimoLaw`], [`export_sine_mimo_law!`], the [`sine_mimo`] module),
+//! single-output Sine ([`SineSingleLaw`],
 //! [`export_sine_law!`], the [`sine`] module) or time waveform replication
 //! ([`TwrSingleLaw`], [`export_twr_law!`], the [`twr`] module).
 //!
@@ -224,6 +225,7 @@ pub use mimo::{MimoLawResource, RandomMimoLaw};
 pub use shock::{ClassicalLawResource, ShockClassicalLaw};
 pub use shock_mimo::{ShockMimoLaw, ShockMimoLawResource};
 pub use sine::{SineLawResource, SineSingleLaw};
+pub use sine_mimo::{SineMimoLaw, SineMimoLawResource};
 pub use srs::{ShockSrsLaw, SrsLawResource};
 pub use twr::{TwrLawResource, TwrSingleLaw};
 
@@ -580,6 +582,32 @@ macro_rules! export_shock_mimo_law {
 
         $crate::__shock_mimo_bindings::__export_shock_mimo!(
             __HertzforgeShockMimoLawExport with_types_in $crate::__shock_mimo_bindings
+        );
+    };
+}
+
+/// Export a [`SineMimoLaw`] as this crate's law. Use it once, at the crate
+/// root of a `cdylib` law crate. A law crate exports one law.
+#[macro_export]
+macro_rules! export_sine_mimo_law {
+    ($law:ty) => {
+        #[doc(hidden)]
+        pub struct __HertzforgeSineMimoLawExport;
+
+        impl $crate::__sine_mimo_bindings::Guest for __HertzforgeSineMimoLawExport {
+            fn describe() -> $crate::sine_mimo::SineMimoManifest {
+                <$law as $crate::SineMimoLaw>::describe()
+            }
+        }
+
+        impl $crate::__sine_mimo_bindings::exports::hertzforge::control_law::sine_mimo_law::Guest
+            for __HertzforgeSineMimoLawExport
+        {
+            type Law = $crate::SineMimoLawResource<$law>;
+        }
+
+        $crate::__sine_mimo_bindings::__export_sine_mimo!(
+            __HertzforgeSineMimoLawExport with_types_in $crate::__sine_mimo_bindings
         );
     };
 }

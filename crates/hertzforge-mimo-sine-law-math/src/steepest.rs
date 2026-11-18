@@ -56,7 +56,7 @@ impl SteepestLaw {
         setup.check()?;
         Ok(SteepestLaw {
             params,
-            delay: GroupDelay::of(&setup.identification),
+            delay: GroupDelay::of_with(&setup.identification, params.gain_rule.delay_estimate()),
             setup: setup.clone(),
         })
     }
@@ -85,6 +85,7 @@ impl SineLaw for SteepestLaw {
             gain(
                 self.params.gain_rule,
                 &self.setup.tracking,
+                self.setup.loop_delay,
                 &self.delay,
                 self.setup.tick_s,
                 x.f_hz,

@@ -1193,6 +1193,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-mimo-sine-matrix"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-paired"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-ratio"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-secant"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-steepest-descent"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
 name = "hertzforge-law-mimo-zero"
 version = "0.1.15"
 dependencies = [
@@ -1217,6 +1252,7 @@ name = "hertzforge-law-sdk"
 version = "0.1.15"
 dependencies = [
  "hertzforge-mimo-shock-law-math",
+ "hertzforge-mimo-sine-law-math",
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
  "hertzforge-sine",
@@ -1334,7 +1370,14 @@ dependencies = [
 name = "hertzforge-mimo-sine"
 version = "0.1.15"
 dependencies = [
+ "hertzforge-channel-table",
  "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-sdk",
+ "hertzforge-mimo-sine-law-math",
+ "hertzforge-module-abi",
  "hertzforge-sdm",
  "hertzforge-sine",
  "serde",
@@ -1354,8 +1397,14 @@ dependencies = [
 name = "hertzforge-mimo-sine-laws"
 version = "0.1.15"
 dependencies = [
+ "hertzforge-law-host",
+ "hertzforge-law-sdk",
  "hertzforge-mimo-sine",
+ "hertzforge-mimo-sine-law-math",
+ "hertzforge-mimo-sine-laws",
  "hertzforge-random-laws",
+ "hertzforge-sdm",
+ "serde_json",
 ]
 
 [[package]]
@@ -1929,6 +1978,20 @@ dependencies = [
 
 [[package]]
 name = "law-fixture-shock-template"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-mimo-misbehave"
+version = "0.1.15"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-mimo-template"
 version = "0.1.15"
 dependencies = [
  "hertzforge-law-sdk",

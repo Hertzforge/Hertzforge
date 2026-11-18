@@ -165,10 +165,10 @@ const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
     // the run contracts (`hertzforge-mimo-sine`, MIT, written here), whose
     // `[dependencies]` are `hertzforge-dsp`, `hertzforge-sdm`, `hertzforge-sine` (its
     // pure core, without the service), `serde` and `serde_json`; it names no backend.
-    // The choice of its laws (`hertzforge-mimo-sine-laws`) depends on it and the law
-    // catalog only, and its laws' math (`hertzforge-mimo-sine-law-math`, on
-    // `hertzforge-dsp` and `hertzforge-sdm` alone, built for WebAssembly) is named
-    // before it exists. Both are on LAW_CRATES.
+    // The choice of its laws (`hertzforge-mimo-sine-laws`) depends on it, the law
+    // catalog, the law host and the law SDK (the built-in laws' declarations), as
+    // MIMO Shock's choice does, and its laws' math (`hertzforge-mimo-sine-law-math`,
+    // on `hertzforge-sdm` alone, built for WebAssembly). Both are on LAW_CRATES.
     "hertzforge-mimo-sine",
     "hertzforge-mimo-sine-laws",
     "hertzforge-mimo-sine-law-math",
@@ -293,7 +293,8 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// math (`hertzforge-mimo-sine-law-math`), the law files `mimo-sine-matrix`,
 /// `mimo-sine-paired`, `mimo-sine-steepest-descent`, `mimo-sine-secant` and
 /// `mimo-sine-ratio` (the SDK over the same math), and the `sine-mimo-misbehave` host
-/// fixture.
+/// fixture; the `sine-mimo-template` host fixture (the SDK template's law, compiled as
+/// a law file) joined them with the law plumbing.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -339,6 +340,7 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
     "law-fixture-sine-mimo-misbehave",
+    "law-fixture-sine-mimo-template",
     "law-fixture-sine-misbehave",
     "law-fixture-sine-template",
     "law-fixture-srs-misbehave",

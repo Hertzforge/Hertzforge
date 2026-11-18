@@ -569,6 +569,7 @@ Each test type gets its own world, built on the same mechanism.
 | Sine | Every control tick | Built: section 10 |
 | MIMO variants of the above | As above | After MIMO Random |
 | MIMO Shock (classical and SRS, several drives) | Between pulses | Built: section 15 |
+| MIMO Sine (sweep, dwell and stepped sine, several drives) | Every control update | Built: section 16; its check is not built yet |
 
 ## 13. Writing a law
 
@@ -700,3 +701,99 @@ last level passing jointly; the worst control's error on that pulse no more than
 best at that level; no drive's peak growing more than 6 dB over that level's pulses. The
 requirements describe a good law; the facts of a built-in law list the cases it is known to fail.
 A record clears a law file at the check in force (`mimo-shock-check 1`).
+
+## 16. MIMO Sine (`sine-mimo`)
+
+A MIMO Sine law decides, every control update, one complex amplitude per drive for a sine played
+on several drives at once and tracked at several control channels. The world is
+`wit/control-law/sine-mimo.wit`; one world serves sweeps, dwells and stepped sines, and a law's
+manifest says which shapes (`square`, `more-controls-than-drives`, `fewer-controls-than-drives`),
+which test types (`sweep`, `dwell`, `stepped`) and whether an amplitude-only reference it accepts.
+The controller refuses a run the law does not accept, before the law is built.
+
+**What the controller keeps.** The tone's frequency, the sweep and its direction, the tone's phase
+(kept continuous), the level schedule, every protection and every abort. Drive `i` plays
+`Re{ D_i exp(j phi(t)) }`; the law decides `D`.
+
+**When it runs.** On the controller's real-time thread, once per control update (10 ms by
+default): `engage` for the first drive after identification (the drive in force is zero then),
+`tick` for every update after it. Building the law (its constructor) has a long budget, 120 s by
+default for a law file, because a law may fit a model of the structure there; each update has the
+call budget, a quarter of the update by default. A law file's host deadlines are the same numbers.
+
+**What it is built with.** Fixed for the run:
+
+| Field | Meaning |
+|---|---|
+| `controls`, `drives`, `limits` | 1 to 16 control channels, 1 to 8 drives, 0 to 8 limit channels |
+| `fs-hz`, `tick-s` | The sample rate and the control update interval (a whole number of samples) |
+| `band-lo-hz`, `band-hi-hz` | The band the run sweeps, steps or dwells in, inside the Nyquist frequency |
+| `test-type`, `shape` | The kind of test, and the controls against the drives |
+| `drive-ceiling-v` | Each drive's ceiling, volts peak |
+| `identification` | On its own ascending grid: the response of every control to every drive (controls by drives on every line, EU peak per volt peak), the same for the limit channels, each channel's multiple coherence, and the lines the controller trusts |
+| `identification-level-db` | The level the identification was taken at, dB against full level: the largest, over the controls, of its measured response peak over the reference's; not finite when it was not measured |
+| `reference` | Every control's full-level reference on the grid, complex, EU peak; `phase-specified` false means only the amplitudes are the test and the law chooses the phases |
+| `limit-bounds` | Each limit channel's bound on the grid, absent where it has none |
+| `tolerance` | Each control's alarm and abort bands below and above the reference on the grid, dB |
+| `tracking` | The tracking filter's bandwidth: a share of the frequency capped in Hz, or fixed in Hz |
+| `tracker-delay-factor` | The tracker's group delay times its bandwidth: a tracked amplitude lags its response by this over the bandwidth `tracking` gives. The controller's trackers state 0.625 (four one-pole sections); a setup that states none is read as `1 / pi` (two sections) |
+| `transport-delay-s` | The delay between a drive and its tracked reading that the identification does not show, seconds: the identification has the drive-to-response lag taken out, and the loop still waits that long for every answer. The built-in laws add it, with the tracker's delay and the structure's group delay, to the time the loop-speed rule divides the tick by |
+| `params` | Every declared parameter, checked against the manifest, defaults filled in |
+
+A channel's tracked amplitude `C_c` reads `Re{ C_c exp(j phi(t)) }`: the response's phase minus
+the tone's, the negative-exponent convention of `random-mimo`, so a linear structure in steady
+state gives `C = H D` with `H` the identification. A matrix stack travels in full, row-major within
+a line, line after line; a list per channel and line is channel after channel. The SDK gives a Rust
+law plain values (`Setup`, `Inputs`) with a `MatrixStack` and complex numbers, and the built-in
+laws' mathematics (`sine_mimo::math`).
+
+**What it sees each update.** The update index, the time since the last call, the frequency, the
+sweep rate in Hz per second and in octaves per minute (signed, 0 at a dwell, a step or a hold), the
+scheduled level as a fraction of full level, every control's reference at this frequency and level,
+every control's and limit channel's tracked amplitude, each limit channel's bound here, the drive
+in force as it was played after every guard, why the controller holds the drive (`free`, `notch`,
+`held`, `probe`, or `engage` for the settle window after engage), the notch's scale, and whether a
+settle window is open.
+
+**What it returns.** One finite complex amplitude per drive, in volts peak at the scheduled level:
+the controller does not rescale it. Its own judgement that it is faulted (shown and recorded,
+never relied on). Up to eight values, each under a key its manifest declares. Optionally a request
+to hold the sweep or slow it by a factor above 0 and at most 1 (recorded always; honoured only when
+the run allows requests, within its bounds). Optionally a notched reference, one per control,
+lower than the reference, which the controller accepts only when a limit channel is near its bound
+or the notch is releasing.
+
+**What the host refuses**, each by name, each a miss with the drive in force held: not one drive
+per drive (`wrong_drive_count`); a drive, a value, a request's factor or a notched reference value
+that is not finite (`non_finite`); a slow request's factor not above 0 and at most 1
+(`bad_request`); a notched reference that is not one value per control (`wrong_reference_count`);
+more than eight values (`too_many_values`); a value the manifest does not declare or reported twice
+(`undeclared_value`). A trap, a call past its budget or memory past the cap leave the instance
+unusable, and every later call reports that first fault. The setup and each update's inputs are
+checked against the limits and lengths above before the law sees them. A drive over its ceiling is
+not refused: the controller scales the whole drive vector.
+
+**What the controller enforces, for every law.** The answer checks and the miss rule (three in a
+row take the controlled stop); the call budget; a cap on each drive's change in dB per update and
+on its rise in dB per second; a rotation cap per update, off by default, with the largest rotation
+asked for recorded; a divergence stop when a cap binds without a break for a second; a bound on
+the first drive; the whole drive vector scaled down, its direction kept, for the limit channels and
+for a drive over its ceiling; the alarm and abort bands per control outside settle windows; the
+limit aborts; and the kinematic and shaker checks per shaker. The law is told the drive in force
+every update and must rebase on it.
+
+**The built-in laws.** `matrix` (the default), `paired` (the contributor's template),
+`steepest_descent`, `secant` and `ratio`. Each runs natively and as a law file
+(`laws/mimo-sine-matrix`, `laws/mimo-sine-paired`, `laws/mimo-sine-steepest-descent`,
+`laws/mimo-sine-secant`, `laws/mimo-sine-ratio`) from the same mathematics and the same
+declaration. On the same inputs over whole recorded runs (sweeps on square, tall and wide
+structures, dwells and stepped sines) the law file gives the native law's drives within rounding
+(1e-12 of the update's largest drive), except `matrix` with its modal model, whose fit is an
+iterative search that the platforms' rounding moves by up to about 1e-7 of the drive. Their
+parameters, the test types they accept and their limits are in `docs/control-laws.md`.
+
+**The check.** Not built yet. It will run each law through whole runs on the simulator's standard
+structures (slow and fast sweeps, close modes, a near-singular frequency, measurement noise, a
+level ladder, a limit channel, a transport delay, more controls than drives, more drives than
+controls), with requirements stated before any law is run, and it will gate a law file's arming on
+hardware as in every other world.

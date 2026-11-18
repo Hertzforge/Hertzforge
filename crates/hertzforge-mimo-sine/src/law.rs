@@ -94,6 +94,21 @@ pub struct LawSetup {
     pub limit_bounds: Vec<Option<f64>>,
     pub tolerance: LawTolerance,
     pub tracking: Tracking,
+    /// The tracker's group delay times its bandwidth: a tracked amplitude
+    /// lags its response by `tracker_delay_factor / B`.
+    #[serde(default = "default_tracker_delay_factor")]
+    pub tracker_delay_factor: f64,
+    /// The delay between a drive and its tracked reading that the
+    /// identification does not show, s (the identification has the lag taken
+    /// out). The loop takes it on every update.
+    #[serde(default)]
+    pub transport_delay_s: f64,
+}
+
+/// The delay factor a setup that does not state one is read with: two
+/// one-pole stages, `1 / pi`.
+pub fn default_tracker_delay_factor() -> f64 {
+    1.0 / std::f64::consts::PI
 }
 
 /// The rule a [`LawSetup`] broke.
@@ -317,6 +332,18 @@ impl LawSetup {
                     "the identification's level is not finite",
                 ));
             }
+        }
+        if !(self.tracker_delay_factor.is_finite() && self.tracker_delay_factor > 0.0) {
+            return Err(law_err(
+                LawSetupRule::ValueInvalid,
+                "the tracker's delay factor is not a number above 0",
+            ));
+        }
+        if !(self.transport_delay_s.is_finite() && self.transport_delay_s >= 0.0) {
+            return Err(law_err(
+                LawSetupRule::ValueInvalid,
+                "the transport delay is not a time of 0 or more",
+            ));
         }
         Ok(())
     }

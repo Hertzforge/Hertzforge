@@ -72,7 +72,7 @@ impl PairedLaw {
             used[d] = true;
         }
         Ok(PairedLaw {
-            delay: GroupDelay::of(&setup.identification),
+            delay: GroupDelay::of_with(&setup.identification, params.gain_rule.delay_estimate()),
             tracking: setup.tracking,
             setup: setup.clone(),
             params,
@@ -101,6 +101,7 @@ impl SineLaw for PairedLaw {
         let gn = gain(
             self.params.gain_rule,
             &self.tracking,
+            self.setup.loop_delay,
             &self.delay,
             self.setup.tick_s,
             x.f_hz,

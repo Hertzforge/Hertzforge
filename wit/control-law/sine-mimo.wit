@@ -186,6 +186,15 @@ interface mimo-sine-types {
         /// The tracking filter's bandwidth rule; with the tick it sets how
         /// quickly a tracked amplitude follows a change.
         tracking: tracking,
+        /// The tracker's group delay times its bandwidth: a tracked amplitude
+        /// lags its response by `tracker-delay-factor / B` seconds, `B` the
+        /// bandwidth the rule gives. Above 0.
+        tracker-delay-factor: f64,
+        /// The delay between a drive and its tracked reading that the
+        /// identification does not show, seconds (the identification has the
+        /// drive-to-response lag taken out). The loop takes it on every
+        /// update. 0 or more.
+        transport-delay-s: f64,
     }
 
     /// Why the core holds the drive this update.

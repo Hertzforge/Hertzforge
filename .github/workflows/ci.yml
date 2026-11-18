@@ -197,8 +197,17 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install the toolchain rust-toolchain.toml names
         run: rustup toolchain install --no-self-update
+      # One package at a time. `cargo fmt --all` hands rustfmt the whole
+      # workspace's file list on one command line, and with this many crates
+      # that line is past the length Windows allows ("The filename or
+      # extension is too long", os error 206). Every package is still checked
+      # on every system.
       - name: Formatting
-        run: cargo fmt --all --check
+        shell: bash
+        run: |
+          for p in $(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[].name' | tr -d '\r'); do
+            cargo fmt --check -p "$p"
+          done
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # The control laws and the law host's test fixtures, built to

@@ -88,8 +88,8 @@ mod types;
 pub mod validate;
 
 pub use error::{
-    ClassicalOutputRule, MimoOutputRule, ShockMimoOutputRule, SineOutputRule, SrsOutputRule,
-    TwrOutputRule,
+    ClassicalOutputRule, MimoOutputRule, ShockMimoOutputRule, SineMimoOutputRule, SineOutputRule,
+    SrsOutputRule, TwrOutputRule,
 };
 pub use error::{LawError, OutputRule};
 pub use host::{law_file_sha256, AnyLaw, HostConfig, LawHost, LawInstance, LoadedLaw};
@@ -111,7 +111,9 @@ pub use sine::{
     LoadedSineLaw, SineHold, SineIdentification, SineInputs, SineLawInstance, SineOutputs,
     SineSetup, MAX_SINE_VALUES,
 };
-pub use sine_mimo::{LoadedSineMimoLaw, SineMimoManifest, MAX_SINE_MIMO_VALUES};
+pub use sine_mimo::{
+    LoadedSineMimoLaw, SineMimoLawInstance, SineMimoManifest, MAX_SINE_MIMO_VALUES,
+};
 pub use twr::{
     LoadedTwrLaw, TwrInputs, TwrLawInstance, TwrOutputs, TwrPlayKind, TwrSetup, TwrVerdict,
     MAX_TWR_VALUES,

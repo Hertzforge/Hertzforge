@@ -52,6 +52,8 @@ const BY_TEST: Record<string, Template> = {
 	explorer: 'explorer',
 	recorder: 'recorder',
 	mimo_shock: 'mimo_shock',
+	// a MIMO Sine run's controls against their references, as the Sine sweep template reports them
+	mimo_sine: 'sine',
 	// a Playback run is its time histories, as the analysis side's Signals reports them
 	playback: 'signals'
 };

@@ -381,6 +381,8 @@ fn law_setup(nc: usize, nd: usize, nl: usize) -> LawSetup {
             abort_high_db: vec![3.0; nc * lines],
         },
         tracking: Tracking::default(),
+        tracker_delay_factor: law::default_tracker_delay_factor(),
+        transport_delay_s: 0.0,
     }
 }
 
@@ -503,9 +505,8 @@ fn mimo_sine_a_native_law_runs_through_the_traits_and_the_engine_is_not_built() 
     assert_eq!(out.drive, played);
     assert_eq!(out.request, Some(Request::Slow(0.5)));
 
-    let mut e = MimoSineEngine::new(setup(2, 2), Arc::new(SilentFactory(manifest()))).unwrap();
-    assert_eq!(e.identify(), Err(EngineError::NotBuilt));
-    assert_eq!(e.run().unwrap_err().reason(), "not_built");
+    let e = MimoSineEngine::new(setup(2, 2), Arc::new(SilentFactory(manifest()))).unwrap();
+    assert_eq!(e.setup().drives.len(), 2);
     let refused = MimoSineEngine::new(setup(3, 2), Arc::new(SilentFactory(manifest())));
     match refused {
         Err(EngineError::Setup(e)) => assert_eq!(e.rule, SetupRule::LawShapeNotAccepted),
