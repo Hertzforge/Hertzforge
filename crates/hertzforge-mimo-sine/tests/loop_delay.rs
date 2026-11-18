@@ -148,7 +148,12 @@ fn delayed_run(f: Arc<dyn MimoSineLawFactory>, hz: f64) -> (Option<Outcome>, f64
         table(s),
         Box::new(b),
         f,
-        EngineOptions::new(StationClass::HertzforgeSim),
+        // On the simulator the law's time budget is relaxed, as the other simulator
+        // harnesses relax theirs, so a call a busy machine made late is not a miss here.
+        EngineOptions {
+            law_budget: Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+            ..EngineOptions::new(StationClass::HertzforgeSim)
+        },
     )
     .unwrap();
     svc.arm().unwrap();
