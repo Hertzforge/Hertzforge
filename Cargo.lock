@@ -1193,6 +1193,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-law-mimo-sine-matrix"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-paired"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-ratio"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-secant"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "hertzforge-law-mimo-sine-steepest-descent"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
 name = "hertzforge-law-mimo-zero"
 version = "0.1.14"
 dependencies = [

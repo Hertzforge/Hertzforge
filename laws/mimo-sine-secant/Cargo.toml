@@ -1,0 +1,18 @@
+[package]
+name = "hertzforge-law-mimo-sine-secant"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The built-in MIMO Sine law `secant` as a law file: the secant law: a complex gain found from a probe and its measured response.
+# It is the controller's own law from `hertzforge-mimo-sine-law-math`, built by the
+# SDK's `sine_mimo::builtin` constructor and declared by `sine_mimo::builtin::SECANT`,
+# so the native law and the law file are one implementation. Built to a law file by
+# `scripts/build_laws.sh`; its parity with the native law is tested in
+# `crates/hertzforge-mimo-sine-laws`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
