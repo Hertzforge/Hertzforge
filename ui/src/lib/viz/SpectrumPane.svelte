@@ -605,8 +605,10 @@
 		if (!plot) return;
 		if (change.x) plot.setScale('x', { min: change.x[0], max: change.x[1] });
 		else if (change.x === null) {
+			// View All goes back to the range the plot opened on: a requirement's own band when it names one
 			const xs = plot.data[0];
-			if (xs.length) plot.setScale('x', { min: xs[0], max: xs[xs.length - 1] });
+			if (view.x_home && (!logX || view.x_home[0] > 0)) plot.setScale('x', { min: view.x_home[0], max: view.x_home[1] });
+			else if (xs.length) plot.setScale('x', { min: xs[0], max: xs[xs.length - 1] });
 		}
 		if (change.y !== undefined) {
 			yZoom = change.y;
@@ -762,27 +764,40 @@
 		ctx.rect(left, top, width, height);
 		ctx.clip();
 		for (const band of bands) {
-			const edge = (values: (number | null)[] | null, fallback: number): [number, number][] => {
-				const points: [number, number][] = [];
-				band.x.forEach((x, i) => {
-					if (x === null || (logX && x <= 0)) return;
-					const value = values ? values[i] : undefined;
-					if (values && (value === null || value === undefined || (logY && value <= 0))) return;
-					points.push([u.valToPos(x, 'x', true), values ? u.valToPos(value as number, 'y', true) : fallback]);
-				});
-				return points;
+			// shaded only where its edges are: each run of points where every edge it has is drawn,
+			// its far side the plot's own (its top, or its bottom) for a zone with one edge
+			const usable = (values: (number | null)[] | null, i: number) => {
+				if (!values) return true;
+				const value = values[i];
+				return value !== null && value !== undefined && Number.isFinite(value) && (!logY || value > 0);
 			};
-			// the far side of a zone with one edge is the plot's own: its top, or its bottom
-			const upper = edge(band.upper, top);
-			const lower = edge(band.lower, top + height);
-			if (upper.length < 2 || lower.length < 2) continue;
-			ctx.beginPath();
-			upper.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-			for (let k = lower.length - 1; k >= 0; k--) ctx.lineTo(lower[k][0], lower[k][1]);
-			ctx.closePath();
-			ctx.globalAlpha = band.kind === 'warning' ? 0.16 : 0.2;
-			ctx.fillStyle = BAND_COLORS[band.kind];
-			ctx.fill();
+			const runs: number[][] = [];
+			let run: number[] = [];
+			band.x.forEach((x, i) => {
+				if (x !== null && !(logX && x <= 0) && usable(band.upper, i) && usable(band.lower, i)) run.push(i);
+				else if (run.length) (runs.push(run), (run = []));
+			});
+			if (run.length) runs.push(run);
+			const at = (values: (number | null)[] | null, i: number, fallback: number) =>
+				values ? u.valToPos(values[i] as number, 'y', true) : fallback;
+			for (const indices of runs) {
+				if (indices.length < 2) continue;
+				ctx.beginPath();
+				indices.forEach((i, k) => {
+					const x = u.valToPos(band.x[i] as number, 'x', true);
+					const y = at(band.upper, i, top);
+					if (k) ctx.lineTo(x, y);
+					else ctx.moveTo(x, y);
+				});
+				for (let k = indices.length - 1; k >= 0; k--) {
+					const i = indices[k];
+					ctx.lineTo(u.valToPos(band.x[i] as number, 'x', true), at(band.lower, i, top + height));
+				}
+				ctx.closePath();
+				ctx.globalAlpha = band.kind === 'warning' ? 0.16 : 0.2;
+				ctx.fillStyle = BAND_COLORS[band.kind];
+				ctx.fill();
+			}
 		}
 		ctx.globalAlpha = 1;
 		ctx.restore();
