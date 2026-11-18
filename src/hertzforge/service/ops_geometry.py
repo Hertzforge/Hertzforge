@@ -1120,7 +1120,7 @@ def sensors(project: Any, params: dict[str, Any]) -> list[dict]:
             v.reading(f'Sensors of {name}', readings)]
 
 
-# ---- Work Up ------------------------------------------------------------------------
+# ---- Auto Compute (the ids keep `work_up`) ------------------------------------------------------------------------
 
 def _still_missing(project: Any) -> list[dict]:
     """What the reports are still without: the slots required, those left
@@ -1224,7 +1224,7 @@ def _srs_bands(project: Any, added: list[str]) -> list[dict]:
 
 def _work_up(test: str) -> Any:
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
-        """Work Up in one module, which says the kind of test: the objects
+        """Auto Compute in one module, which says the kind of test: the objects
         that fill its Basis placed there, then every missing object it
         expects computed from what is loaded, the report last
         (`Project.work_up`), and what is still missing after it."""
@@ -1242,7 +1242,7 @@ def _work_up(test: str) -> Any:
         rows += _srs_bands(project, added)
         rows += [v.row('Not computed', f'{slot}: {why}', None, 'warn')
                  for slot, why in dict.fromkeys(project.last_work_up_skipped)]
-        return [v.reading(f'Work Up, {test}', rows + _still_missing(project))]
+        return [v.reading(f'Auto Compute, {test}', rows + _still_missing(project))]
     return run
 
 
@@ -1630,7 +1630,7 @@ OPERATIONS = (
                 Param('groups', 'Element groups the table shows', 'string', default='')),
         outputs=('shape3d', 'table'), run=set_entity_cell, edits=True),
     *(Operation(
-        id=f'project.work_up_{module}', title=f'Work Up {test}', workspace=module,
+        id=f'project.work_up_{module}', title=f'Auto Compute {test}', workspace=module,
         summary=f'Every object a {test} test expects computed from what is loaded, the report '
                 'last.',
         params=(), outputs=('reading',), run=_work_up(test))

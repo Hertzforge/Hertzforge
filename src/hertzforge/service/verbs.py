@@ -70,9 +70,9 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'rotate_coordinate_system': 'Rotate', 'slide_coordinate_system': 'Slide',
     'reset_rotation': 'Reset Rotation', 'sensors': 'Sensors',
     # one row per kind of test in the one analysis module, so each says which
-    'work_up_sysid': 'Work Up System ID', 'work_up_random': 'Work Up Random',
-    'work_up_shock': 'Work Up Shock', 'work_up_transient': 'Work Up Transient',
-    'work_up_sine': 'Work Up Sine', 'work_up_modal': 'Work Up Modal',
+    'work_up_sysid': 'Auto Compute System ID', 'work_up_random': 'Auto Compute Random',
+    'work_up_shock': 'Auto Compute Shock', 'work_up_transient': 'Auto Compute Transient',
+    'work_up_sine': 'Auto Compute Sine', 'work_up_modal': 'Auto Compute Modal',
     'set_channel_role': 'Channel Role', 'rename_dof': 'Rename DOF',
     'set_control': 'Set Control', 'place': 'Place', 'set_role': 'Group Role',
     'kurtosis': 'Kurtosis', 'amplitude_spectrum': 'Amplitude', 'resample_reading': 'Resample View',

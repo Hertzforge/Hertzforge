@@ -299,6 +299,102 @@ def _on_geometry(project: Any, name: str) -> bool:
     return _geometry_for(project, name) is not None
 
 
+#: an action and the actions under it: the setting, or the reading, and what is computed
+#: from it or acts on what it shows, so a list reads by what depends on what. Compute
+#: PSDs is under Averaging because the averaging is what it computes with (Brandon,
+#: 2026-11-17).
+NESTS: dict[str, tuple[str, ...]] = {
+    'project.set_averaging': ('project.detect_averaging', 'project.compute_psds',
+                              'project.compute_cpsds', 'project.compute_frfs',
+                              'project.compute_multiple_coherence', 'project.compute_spectra'),
+    'project.set_filter': ('project.filter_data',),
+    'project.set_truncation': ('project.truncate_data',),
+    'project.resample_reading': ('project.resample',),
+    'project.shocks': ('project.detect_shocks', 'project.set_shock', 'project.remove_shock',
+                       'project.pulse_check', 'project.compute_srs'),
+    'project.time_statistics': ('project.kurtosis', 'project.amplitude_spectrum',
+                                'project.overload'),
+    'project.edit_specification': ('project.set_breakpoint', 'project.add_breakpoint',
+                                   'project.remove_breakpoint', 'project.scale_specification',
+                                   'project.specification_areas'),
+    'project.octave_bands': ('project.compute_octave',),
+    'project.realizability': ('project.make_realizable', 'project.conditioning'),
+    'project.convert_to_specification': ('project.derive_specification',),
+    'project.sensors': ('project.set_sensor_model', 'project.calibration_check'),
+    'project.set_control': ('project.add_controller_settings',
+                            'project.remove_controller_settings'),
+    # with nothing selected: the ways a file is brought in are under Import
+    'self.import': ('project.rattlesnake_preview', 'project.import_rattlesnake_part',
+                    'project.truncate_rattlesnake_file', 'project.text_preview',
+                    'project.import_text'),
+}
+#: the groups that open with their actions showing: the ones most selections are made for
+OPEN_AT_FIRST = frozenset({'project.set_averaging'})
+#: the acts every object has, on the object itself and its group, under one row that is
+#: not an action
+OBJECT_GROUP = 'group.object'
+OBJECT_ROWS = ('project.save_as', 'self.units', 'project.set_role', 'self.name_group',
+               'self.basis', 'self.unlink', 'self.recompute', 'self.copy', 'self.rename')
+#: rows that are not actions and hold the ones that go together: its id, its words and
+#: what is under it. Each stands where the first of its rows stood, the object's own last.
+#: Auto Compute is the six per-test computations, one a kind of test (Brandon, 2026-11-17:
+#: under one row, and no longer called Work Up).
+HEADS: dict[str, tuple[str, tuple[str, ...]]] = {
+    'group.auto_compute': ('Auto Compute', tuple(
+        f'project.work_up_{test}' for test in ('sysid', 'random', 'shock', 'transient',
+                                               'sine', 'modal'))),
+    'group.index': ('Data Index', ('project.index_file', 'project.unindex_file',
+                                   'project.verify_data_index')),
+    'group.reports': ('Reports', ('project.generate_from_template', 'project.reports_from_runs',
+                                  'project.attach_run_log')),
+    'group.new': ('New', ('project.new_channel_table', 'project.new_geometry')),
+    OBJECT_GROUP: ('Object', OBJECT_ROWS),
+}
+
+
+def nested(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A column's rows with each one told what it is under (`NESTS`, `OBJECT_ROWS`).
+
+    A row is put under another only when that other is in the column and can run: a row
+    whose setting is not offered stays where it was. The rows keep their order; the shell
+    draws a group's rows under it.
+
+    Parameters
+    ----------
+    rows : list of dict
+        The column's rows, as `_row` makes them.
+
+    Returns
+    -------
+    list of dict
+        The rows, a nested one with `under` (the id of the row it is under), a row with
+        rows under it that opens showing them with `open`, and the object's own acts
+        under a last row of kind `group`.
+    """
+    ready = {row['id'] for row in rows if row.get('ready')}
+    parent_of = {child: parent for parent, children in NESTS.items() for child in children}
+    head_of = {child: head for head, (_words, children) in HEADS.items() for child in children}
+    out: list[dict[str, Any]] = []
+    placed: set[str] = set()
+    for row in rows:
+        parent = parent_of.get(row['id'])
+        head = head_of.get(row['id'])
+        if parent in ready and row['id'] != parent:
+            row = {**row, 'under': parent}
+        elif head is not None:
+            row = {**row, 'under': head}
+            if head != OBJECT_GROUP and head not in placed and row.get('ready'):
+                # the row that holds them stands where the first of them stood
+                placed.add(head)
+                out.append(_row(head, HEADS[head][0], 'group'))
+        if row['id'] in OPEN_AT_FIRST:
+            row = {**row, 'open': True}
+        out.append(row)
+    if any(row.get('under') == OBJECT_GROUP and row.get('ready') for row in out):
+        out.append(_row(OBJECT_GROUP, HEADS[OBJECT_GROUP][0], 'group'))
+    return out
+
+
 def _row(row_id: str, verb: str, kind: str, reason: str = '', **more: Any) -> dict[str, Any]:
     row = {'id': row_id, 'verb': verb, 'kind': kind, 'ready': not reason, **more}
     if reason:
@@ -492,7 +588,7 @@ def _current(project: Any, chosen: list[Chosen], records: dict[str, list[int]],
     # a part picked is acted on by its own rows; the geometry's are its row's
     if chosen and not where:
         rows += _own_rows(project, names)
-    column: dict[str, Any] = {'kinds': kinds, 'current': True, 'rows': rows}
+    column: dict[str, Any] = {'kinds': kinds, 'current': True, 'rows': nested(rows)}
     if where:
         column['parts'] = [where] * len(verbs.picked_ids(part))
     return column

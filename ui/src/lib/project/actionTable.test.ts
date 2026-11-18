@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionRow, ActionTable } from '$lib/protocol/types';
-import { columnsFor, kindWords, moreIn } from './actionTable';
+import { columnsFor, kindWords, moreIn, nestedRows } from './actionTable';
 
 const row = (verb: string, more: Partial<ActionRow> = {}): ActionRow => ({
 	id: `project.${verb.toLowerCase()}`,
@@ -70,5 +70,39 @@ describe('the action table', () => {
 	it('words a kind for a sentence', () => {
 		expect(kindWords('time_history')).toBe('time history');
 		expect(kindWords('*')).toBe('object');
+	});
+});
+
+describe('rows under the row they work from', () => {
+	const rows: ActionRow[] = [
+		row('Plot', { kind: 'default', id: 'show.plot' }),
+		row('PSDs', { under: 'project.averaging' }),
+		row('Integrate'),
+		row('Averaging', { open: true }),
+		row('FRFs', { under: 'project.averaging' }),
+		row('Filter'),
+		row('Apply', { under: 'project.filter' }),
+		row('Orphan', { under: 'project.missing' }),
+		row('Rename', { kind: 'self', id: 'self.rename', under: 'group.object' }),
+		{ id: 'group.object', verb: 'Object', kind: 'group', ready: true }
+	];
+	const drawn = (open: Record<string, boolean> = {}) => nestedRows(rows, (id, atFirst) => open[id] ?? atFirst).map((r) => `${'  '.repeat(r.depth)}${r.verb}${r.holds ? (r.opened ? ' v' : ' >') : ''}`);
+
+	it('lists a group under its row while it is open, and opens the ones that say so', () => {
+		expect(drawn()).toEqual(['Plot', 'Integrate', 'Averaging v', '  PSDs', '  FRFs', 'Filter >', 'Orphan', 'Object >']);
+	});
+
+	it('takes the choice made by hand over how a group opens at first', () => {
+		expect(drawn({ 'project.averaging': false, 'project.filter': true, 'group.object': true })).toEqual(['Plot', 'Integrate', 'Averaging >', 'Filter v', '  Apply', 'Orphan', 'Object v', '  Rename']);
+	});
+
+	it('leaves a row whose holder is not there where it was, and a group of nothing out', () => {
+		const few = rows.filter((r) => r.id !== 'self.rename' && r.id !== 'project.averaging');
+		expect(nestedRows(few, () => false).map((r) => r.verb)).toEqual(['Plot', 'PSDs', 'Integrate', 'FRFs', 'Filter', 'Orphan']);
+	});
+
+	it('reads a row under its holder without the holder\'s own words', () => {
+		const six: ActionRow[] = [{ id: 'group.auto_compute', verb: 'Auto Compute', kind: 'group', ready: true }, row('Auto Compute Random', { id: 'project.work_up_random', under: 'group.auto_compute' }), row('Predict', { under: 'group.auto_compute' })];
+		expect(nestedRows(six, () => true).map((r) => r.label)).toEqual(['Auto Compute', 'Random', 'Predict']);
 	});
 });
