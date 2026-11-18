@@ -1397,6 +1397,7 @@ dependencies = [
  "hertzforge-mimo-sine-laws",
  "hertzforge-random-laws",
  "hertzforge-sdm",
+ "serde_json",
 ]
 
 [[package]]

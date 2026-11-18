@@ -17,10 +17,14 @@ use hertzforge_mimo_sine::{
 use hertzforge_sdm::C64;
 use std::time::Duration;
 
-/// The default budget of a law file's constructor, seconds: a law may fit a
-/// model of the structure when it is built (`matrix` does), so it is given
-/// the long first-call budget MIMO Shock gives a law's seed.
-pub const DEFAULT_BUILD_BUDGET_S: f64 = 60.0;
+/// The default budget of a law file's constructor, seconds. A law may fit a
+/// model of the structure when it is built (`matrix` does), and in a law file
+/// that fit runs about nine times slower than natively: `matrix` on a four by
+/// four structure with 1441 identification lines took 4.6 s natively and 42 s
+/// as a law file (measured on an 18-core M5 Pro Mac, `tests/build_time.rs`). The
+/// fit's work bounds allow about 7.5 s natively, about 70 s as a law file, so
+/// the budget is twice MIMO Shock's 60 s for a law's first solve.
+pub const DEFAULT_BUILD_BUDGET_S: f64 = 120.0;
 
 /// A law host error as the core's [`LawFault`]. A refused output keeps the
 /// host's rule, which has the core's name.

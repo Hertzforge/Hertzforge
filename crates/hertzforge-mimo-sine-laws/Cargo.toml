@@ -36,3 +36,5 @@ reference-structure = [
 
 [dev-dependencies]
 hertzforge-mimo-sine-laws = { path = ".", features = ["reference-structure"] }
+# Reads the law mathematics' research structures for the build-time measurement.
+serde_json = { workspace = true }
