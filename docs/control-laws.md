@@ -4,7 +4,8 @@ A control law is the math the controller runs once per loop to decide the next d
 loads control laws from files, so a law can be written, built and shared without rebuilding
 Hertzforge. This page is a guide for someone writing one, for the test types with a law
 interface: single-output Random, and multiple-output (MIMO) Random, classical shock, SRS shock,
-Sine and time waveform replication, which each have their own chapter below. The requirements a law must meet, what it is given and what it must return are in the
+Sine, time waveform replication, MIMO Shock and MIMO Sine, which each have their own chapter
+below. The requirements a law must meet, what it is given and what it must return are in the
 specification, [`control-law-spec.md`](control-law-spec.md); where this guide and the
 specification differ, the specification governs.
 
@@ -936,6 +937,159 @@ cannot answer in time is named (`law_too_slow`) before the run, not in the middl
 4. Import the law file in the law panel, run its check on the simulator, and read the record: each
    case passed, or the requirement it broke with its number. A new law is worth keeping when it
    passes a case the built-ins fail, or passes the same cases with less drive.
+
+## MIMO Sine laws
+
+A MIMO Sine law drives several shakers with one tone to put a sine at several control points: a
+sweep, a dwell or a stepped sine. The controller plays the tone on every drive, each with its own
+amplitude and phase, tracks it at every control and limit channel, and calls the law once per
+control update (10 ms by default) for one complex amplitude per drive. The tone's frequency, the
+sweep, the level schedule and every protection are the controller's. The specification's section
+16 states the world in full.
+
+Every result stated here was measured on the research testbed's simulated structures. No MIMO Sine
+law has yet run on a shaker, and the law check, which will gate a law file's arming on hardware as
+in every other world, is not built yet.
+
+What differs from the single-output Sine laws:
+
+- **The drive is a complex vector.** Each drive's amplitude and phase are the law's; a control's
+  tracked amplitude is its response's phase minus the tone's, so a linear structure in steady
+  state gives `C = H D` with `H` the identification.
+- **The law is told the drive in force.** The controller caps each drive's change and rise and
+  scales the whole drive vector down for the limit channels and the drive ceilings, so what was
+  played is not always what was asked for. A law that integrates starts each update from the drive
+  in force.
+- **The manifest states what the law accepts:** the shapes (as many controls as drives, more, or
+  fewer), the test types (sweep, dwell, stepped) and whether it takes an amplitude-only
+  reference. The controller refuses a run the law does not accept before the law is built.
+
+### Writing a MIMO Sine law in Rust
+
+Implement `SineMimoLaw` (`describe`, `new`, `engage`, `tick`) from
+`hertzforge_law_sdk::sine_mimo` and export it with `export_sine_mimo_law!`. Build the manifest
+with `ManifestBuilder`: name, version, summary, the shapes, the test types, whether it takes an
+amplitude-only reference, the parameters and the values. The SDK hands the law plain Rust: `Setup`
+(the identification as a `MatrixStack` of controls by drives on every line, the reference, the
+bands, the ceilings, the tracking rule) and `Inputs` (every channel's tracked amplitude, the drive
+in force, the hold), and takes `Outputs` back (the drive, the fault flag, the values, a request, a
+notched reference). `sine_mimo::math` is the mathematics the built-in laws run on: the
+regularized inverse by shape, the loop-speed rule, the model the carry runs through and each
+built-in law's steps.
+
+Start from the template, `crates/hertzforge-law-sdk/template/sine-mimo`: a complete law that pairs
+each control with one drive and follows the ratio of wanted to measured amplitude, written plainly
+with its README. Copy the folder, rename the package, change `src/law.rs`, and build it with
+`cargo build --target wasm32-wasip2 --release`.
+
+### What the controller does with a MIMO Sine law's drive
+
+Every one of these holds whatever the law returns:
+
+- one finite complex amplitude per drive, at most eight declared values, a slow request's factor
+  above 0 and at most 1, a notched reference of one value per control; anything else is refused
+  by name and is a miss with the drive in force held;
+- each drive's change per update and rise per second are capped, and a rotation cap per update is
+  available;
+- the whole drive vector is scaled down, its direction kept, when a limit channel nears its bound
+  or a drive is over its ceiling;
+- the first drive is bounded near what the identification predicts;
+- a cap that binds without a break for a second ends the run in the controlled stop;
+- a late, failed, crashed or refused call is a miss; three in a row end the run; a law file that
+  traps, runs past its budget or asks for too much memory stays stopped for the rest of the run.
+
+**Time.** A law is built after identification, before the first drive. A law file's constructor
+has 120 s by default, because a law may fit a model there: `matrix` fits its modal model when it
+is built, which took 4.6 s natively and 42 s as a law file on a four-by-four structure with 1441
+identification lines. Each update's call has a quarter of the update by default.
+
+### The built-in MIMO Sine laws
+
+Each runs natively and as a law file (`laws/mimo-sine-matrix`, `laws/mimo-sine-paired`,
+`laws/mimo-sine-steepest-descent`, `laws/mimo-sine-secant`, `laws/mimo-sine-ratio`), from the same
+mathematics and the same declaration; on the same inputs over whole recorded runs the law file
+gives the native law's drives within rounding (`matrix` with its modal model within about 1e-7,
+because the modal fit is an iterative search that the platforms' rounding moves). Every built-in
+accepts all three shapes. A law that accepts a test type is not promised to hold it on every
+structure: the limits below are what the testbed measured.
+
+**`matrix`** (the default; sweep, dwell and stepped; amplitude-only references accepted). Each
+update it corrects the drive through the regularized inverse of the identification (least squares
+with more controls than drives, least norm with more drives), at a gain set every update from the
+tracking filter's delay and the identification's group delay near the tone. In a sweep it also
+carries the drive along a model of the structure: the change of drive the model predicts for the
+next frequency is added with the carry weight. It rebases on the drive in force every update, and
+with spare drives it removes the part of the drive the controls cannot see. With an amplitude-only
+reference it controls every control in phase, or takes each control's phase from its measurement.
+
+| Key | What it does |
+|---|---|
+| `carry` | The weight on the carry, 0 to 1; 0 is the correction alone (default 0.67, the value that leaves at most a third of the sweep error whether damping at test level is as identified or up to three times it) |
+| `gain_rule` | `loop_speed` (default): the gain from the loop's delays; `fixed`: `fixed_gain` every update |
+| `fixed_gain` | The gain when the rule is fixed (default 0.5, the published value; on a lightly damped structure it can lose the loop) |
+| `regularization` | Regularization of the inverse, relative to its largest singular value (default 0.001) |
+| `model` | `modal` (default): the identification's resonances fitted exactly and the rest smoothed; `smoothed`: the whole identification smoothed; `identification`: as measured |
+| `smoothing_lines` | Half-width of the model's smoothing in identification lines (default 8) |
+| `free_phase` | With an amplitude-only reference: `in_phase` (default) or `measured` |
+| `carry_outside_model` | Carry also where the modal fit left a group of resonances out (default off) |
+
+Values: `gain`, `group_delay_s`, `condition`, `carried_share`, `rotation_deg`, `unseen_share`,
+`modes_kept`, `candidates_left_out`.
+
+Its limit. This law assumes the test article responds at test level as it did during the
+low-level identification. Where a resonance has moved by less than a quarter of its half-power
+bandwidth, expect the same control as on a linear article. Between a quarter and one bandwidth,
+expect errors over 3 dB at that resonance. Past about one bandwidth the loop can be lost and the
+test will abort. A Q of 50 puts one bandwidth at 2 percent of frequency. On the testbed's linear
+four-by-four structure it completed 5 of 5 dwells at the lightest resonance, 5 of 5 stepped sines
+(12 steps an octave, 30 to 120 Hz) and 16 of 20 sweeps at one octave a minute.
+
+**`paired`** (dwell and stepped; amplitude-only references accepted). Control `i` is paired with
+drive `i`; every update that drive's amplitude is multiplied by its control's ratio of wanted to
+measured amplitude, raised to the gain, and its phase is left to the pair. It has no model of the
+coupling. On the testbed's coupled four-by-four structure it completed none of 5 dwells and none of
+5 stepped sines: it is for structures whose pairs are weakly coupled, and shows what a law without
+the coupling does. Parameters `gain_rule` and `fixed_gain` as for `matrix`. Values: `gain`,
+`error_db`.
+
+**`steepest_descent`** (dwell only; references with phases only). It starts from the
+identification's inverse drive and then moves the drive every update down the gradient of the
+squared control error through the identification, scaled by its largest singular value. On the
+testbed's four-by-four structure it completed 5 of 5 dwells, 2 of 5 stepped sines and none of 20
+sweeps at one octave a minute. Parameters `gain_rule`, `fixed_gain` and `regularization` as for
+`matrix`. Values: `gain`, `error_db`.
+
+**`secant`** (dwell only; references with phases only). Two-step cycles: a probe along the inverse
+correction, then a step with the complex gain found from the probe's measured response, and a
+rank-one update of its inverse model. Each step waits for the response to settle, so its pace is
+the settle wait. On the testbed's four-by-four structure it completed 4 of 5 dwells with either
+carry, none of 5 stepped sines and none of 20 sweeps: each cycle holds the drive for several settle
+waits while the tone moves on.
+
+| Key | What it does |
+|---|---|
+| `carry` | How the inverse model moves to a new frequency: `factor` (default) keeps the learned correction as a factor on the identification's inverse there; `plain` keeps the inverse learned at the start |
+| `first_probe` | The probe's weight at the start (default 0.1) |
+| `largest_probe` | The largest the probe's weight may grow (default 1) |
+| `settle_factor` | How long each step waits, in multiples of the filter's and the structure's delays (default 5) |
+| `regularization` | As for `matrix` (default 0.001) |
+
+Values: `a_re`, `a_im` (the last measured gain against the probe), `c` (the probe weight), `phase`
+(the step of the cycle), `error_db`, `secant_skipped`.
+
+**`ratio`** (dwell and stepped; amplitude-only references accepted). It plays the identification's
+inverse of a reference scaled by one factor per control, and updates each factor from a
+compressed ratio of wanted to measured amplitude once the reading has settled. On the testbed's
+four-by-four structure, with reference pairing it completed 5 of 5 dwells, 5 of 5 stepped sines and
+3 of 20 sweeps; with drive pairing, 1 of 5 dwells and none of 5 stepped sines.
+
+| Key | What it does |
+|---|---|
+| `pairing` | `reference` (default): control `i`'s ratio scales its own reference, any shape; `drive`: it scales drive `i`, square setups only |
+| `compression` | The constant of the ratio update; larger is gentler (default 1) |
+| `regularization` | As for `matrix` (default 0.001) |
+
+Values: `sigma_min`, `sigma_max` (the smallest and largest factor), `error_db`.
 
 ## Importing a law
 
