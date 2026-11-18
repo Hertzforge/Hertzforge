@@ -242,7 +242,15 @@ fn mimo_sine_steep_reference_sweep_evidence() {
                         let width = if width == 0.0 { 1.0 } else { width };
                         let mut st = setup(s, sweep(rate), id);
                         for c in &mut st.controls {
-                            c.profile = stepped_profile(a, b, 60.0 - width, 60.0, 20.0, 20.0);
+                            // `STEEP_BANDS=alarm,abort` to see the judging.
+                            let (al, ab) = std::env::var("STEEP_BANDS")
+                                .map(|v| {
+                                    let p: Vec<f64> =
+                                        v.split(',').map(|x| x.parse().expect("a number")).collect();
+                                    (p[0], p[1])
+                                })
+                                .unwrap_or((20.0, 20.0));
+                            c.profile = stepped_profile(a, b, 60.0 - width, 60.0, al, ab);
                         }
                         if let Ok(v) = std::env::var("STEEP_RES") {
                             st.identification.resolution_hz = v.parse().expect("a number");
