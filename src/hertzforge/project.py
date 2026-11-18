@@ -8573,8 +8573,15 @@ class Project(dict):
         def settled(record):
             # the FRFs and the coherence adopt the suggested averaging,
             # so PSDs made ahead of them on no averaging were one window
-            # over the whole record, and stale as soon as they were made
-            if self[record].averaging is None:
+            # over the whole record, and stale as soon as they were made.
+            # A random run's frames also go to its steady stretch when
+            # nobody chose where they start: a run folder's setup names
+            # the recipe and a count from the record's beginning, and
+            # that came through to the report undetected (Brandon,
+            # 2026-11-18). A burst record has no steady stretch to find.
+            own = self[record].averaging
+            random = project_type in ('Random Vibration', 'Random and Sine')
+            if own is None or (random and not own.start_set):
                 with contextlib.suppress(ValueError):
                     self[record].averaging = self[record].suggest_averaging()
 

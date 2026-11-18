@@ -205,3 +205,31 @@ def test_a_random_and_sine_run_works_up_both_halves():
     assert not [slot[0] for slot in project.missing()
                 if not slot[4] and slot[0] not in
                 ('Geometry', 'Photos', 'Channel Table', 'Multiple Coherence')]
+
+
+def test_a_random_run_whose_start_nobody_chose_is_framed_on_its_steady_stretch():
+    """A run folder's setup gives the recipe and a count from the record's
+    beginning; Auto Compute moves the frames to the steady stretch, as
+    the import of a controller file does (Brandon, 2026-11-18)."""
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    history = project['Time History']
+    detected = history.averaging
+    assert detected.start > 0
+    history.averaging = replace(detected, start=0.0, frames=10, start_set=False)
+    project.work_up('Random Vibration')
+    assert history.averaging == detected
+
+
+def test_a_start_chosen_by_hand_is_kept():
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    history = project['Time History']
+    chosen = replace(history.averaging, start=1.0, frames=10, start_set=True)
+    history.averaging = chosen
+    project.work_up('Random Vibration')
+    assert history.averaging == chosen
