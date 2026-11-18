@@ -17,6 +17,8 @@ import { ShockStore } from '$lib/acquire/shock/shockStore.svelte';
 import { ShockViewsState } from '$lib/acquire/shock/shockViews.svelte';
 import { MimoShockStore } from '$lib/acquire/mimoshock/msStore.svelte';
 import { MsViewsState } from '$lib/acquire/mimoshock/msViews.svelte';
+import { MimoSineStore } from '$lib/acquire/mimosine/msineStore.svelte';
+import { MsineViewsState } from '$lib/acquire/mimosine/msineViews.svelte';
 import { SrsStore } from '$lib/acquire/srs/srsStore.svelte';
 import { SrsViewsState } from '$lib/acquire/srs/srsViews.svelte';
 import { SineStore } from '$lib/acquire/sine/sineStore.svelte';
@@ -32,7 +34,7 @@ import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { RecorderViewsState } from '$lib/acquire/recorder/recorderViews.svelte';
 import { PlaybackStore } from '$lib/acquire/playback/playbackStore.svelte';
 import { PlaybackViewsState } from '$lib/acquire/playback/playbackViews.svelte';
-import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
+import { liveTestOf, TEST_TYPES, TestTypeView, withPreview, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
@@ -2272,6 +2274,8 @@ export class AppState {
 	readonly srsRunOpen: RunOpen;
 	/** A finished MIMO Shock run's way to its data: the Shock workspace. */
 	readonly mimoShockRunOpen: RunOpen;
+	/** A finished MIMO Sine run's way to its data: the Sine workspace. */
+	readonly mimoSineRunOpen: RunOpen;
 	/** A finished Sine run's way to its data on the analysis side. */
 	readonly sineRunOpen: RunOpen;
 	/** A finished Mixed Mode run's way to its data on the analysis side. */
@@ -2301,6 +2305,10 @@ export class AppState {
 	readonly mimoShock: MimoShockStore;
 	/** The MIMO Shock run's pages and this window's subscription. */
 	readonly mimoShockViews: MsViewsState;
+	/** MIMO Sine's setup and run; the station and table are the Acquire store's. */
+	readonly mimoSine: MimoSineStore;
+	/** The MIMO Sine run's pages and this window's subscription. */
+	readonly mimoSineViews: MsineViewsState;
 	/** SRS shock's setup and run; the station and table are the Acquire store's. */
 	readonly srs: SrsStore;
 	/** The SRS shock run's pages and this window's subscription. */
@@ -2365,6 +2373,7 @@ export class AppState {
 		this.shockRunOpen = new RunOpen(runHost, 'classical_shock');
 		this.srsRunOpen = new RunOpen(runHost, 'srs');
 		this.mimoShockRunOpen = new RunOpen(runHost, 'mimo_shock');
+		this.mimoSineRunOpen = new RunOpen(runHost, 'mimo_sine');
 		this.sineRunOpen = new RunOpen(runHost, 'sine');
 		this.mixedRunOpen = new RunOpen(runHost, 'mixed');
 		this.explorerRunOpen = new RunOpen(runHost, 'explorer');
@@ -2375,6 +2384,7 @@ export class AppState {
 		this.mimo = new MimoState(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.shock = new ShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mimoShock = new MimoShockStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
+		this.mimoSine = new MimoSineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.srs = new SrsStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.sine = new SineStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.mixed = new MixedStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
@@ -2382,7 +2392,7 @@ export class AppState {
 		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.playback = new PlaybackStore(this.acquire, config.popout ? { local: null, drafts: false } : { analysis: this.analysis, objects: () => this.project.summary?.objects ?? [] });
-		this.tests = new TestTypeView(() => this.liveTest);
+		this.tests = new TestTypeView(() => this.liveTest, withPreview(TEST_TYPES, config.preview ?? []));
 		this.display = new DisplayState(this.control, {
 			// The layout belongs to the setup the service holds, else to the one being edited here.
 			setupTitle: () => this.acquire.held?.config.title ?? (config.popout ? null : this.acquire.setup.title),
@@ -2416,6 +2426,12 @@ export class AppState {
 			},
 			this.mimoShock
 		);
+		const mimoSinePopout = config.popout && config.popoutTest === 'mimo_sine';
+		this.mimoSineViews = new MsineViewsState(this.control, {
+			setupTitle: () => this.mimoSine.status?.title ?? (config.popout ? null : this.mimoSine.setup.title),
+			showing: () => mimoSinePopout || (!config.popout && this.workspace === 'acquire' && this.tests.screen === 'mimo_sine' && this.mimoSine.step === 'run'),
+			page: mimoSinePopout ? config.page : null
+		});
 		const srsPopout = config.popout && config.popoutTest === 'srs';
 		this.srsViews = new SrsViewsState(
 			this.control,
@@ -2488,7 +2504,7 @@ export class AppState {
 	 * page, observing the run with a subscription of its own. Every window shows the run's state and
 	 * keeps Stop and Abort. False when the browser refused to open it.
 	 */
-	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' = 'random'): boolean {
+	openDisplayWindow(pageId: string, test: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' | 'mimo_sine' = 'random'): boolean {
 		const q = new URLSearchParams(location.search);
 		q.set('popout', '1');
 		q.set('page', pageId);
@@ -2511,6 +2527,7 @@ export class AppState {
 		const explorer = this.config.popoutTest === 'explorer';
 		const recorder = this.config.popoutTest === 'recorder';
 		const mimoShock = this.config.popoutTest === 'mimo_shock';
+		const mimoSine = this.config.popoutTest === 'mimo_sine';
 		$effect.root(() => {
 			$effect(() => {
 				if (this.control.status === 'open') void this.acquire.sync();
@@ -2560,6 +2577,11 @@ export class AppState {
 					if (this.control.status === 'open') void this.mimoShock.sync();
 				});
 			}
+			if (mimoSine) {
+				$effect(() => {
+					if (this.control.status === 'open') void this.mimoSine.sync();
+				});
+			}
 		});
 		if (mimo) this.mimoViews.watch();
 		else if (shock) this.shockViews.watch();
@@ -2570,13 +2592,14 @@ export class AppState {
 		else if (explorer) this.explorerViews.watch();
 		else if (recorder) this.recorderViews.watch();
 		else if (mimoShock) this.mimoShockViews.watch();
+		else if (mimoSine) this.mimoSineViews.watch();
 		else this.display.watch();
 		this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
 	get liveTest(): LiveTest {
-		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback);
+		return liveTestOf(this.acquire, this.control.status, this.mimo, this.shock, this.srs, this.sine, this.twr, this.explorer, this.recorder, this.mixed, this.mimoShock, this.playback, this.mimoSine);
 	}
 
 	/** The live run is the screen on show, so the top bar need not offer it. */
@@ -2615,6 +2638,8 @@ export class AppState {
 		if (onRecorder || this.recorder.isLive) return this.recorder.source;
 		const onMimoShock = this.workspace === 'acquire' && this.tests.screen === 'mimo_shock';
 		if (onMimoShock || this.mimoShock.isLive) return this.mimoShock.source;
+		const onMimoSine = this.workspace === 'acquire' && this.tests.screen === 'mimo_sine';
+		if (onMimoSine || this.mimoSine.isLive) return this.mimoSine.source;
 		const onPlayback = this.workspace === 'acquire' && this.tests.screen === 'playback';
 		if (onPlayback || this.playback.isLive) return this.playback.source;
 		return null;
@@ -2672,6 +2697,9 @@ export class AppState {
 				if (this.control.status === 'open') void this.mimoShock.sync();
 			});
 			$effect(() => {
+				if (this.control.status === 'open') void this.mimoSine.sync();
+			});
+			$effect(() => {
 				if (this.control.status === 'open') void this.playback.sync();
 			});
 			$effect(() => {
@@ -2690,6 +2718,7 @@ export class AppState {
 		this.explorer.watch();
 		this.recorder.watch();
 		this.mimoShock.watch();
+		this.mimoSine.watch();
 		this.playback.watch();
 		this.tests.watch();
 		this.display.watch();
@@ -2702,6 +2731,7 @@ export class AppState {
 		this.explorerViews.watch();
 		this.recorderViews.watch();
 		this.mimoShockViews.watch();
+		this.mimoSineViews.watch();
 		this.playbackViews.watch();
 		this.analysis.connect();
 		this.control.connect();
