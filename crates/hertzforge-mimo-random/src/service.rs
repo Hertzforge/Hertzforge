@@ -586,6 +586,16 @@ impl MimoRandomService {
     pub fn identification_loaded(&self) -> bool {
         self.ident_loaded
     }
+    /// The frequency response the law is handed now, in the law's space (controls by
+    /// drives when no response or drive transformation is set). Read only.
+    pub fn frf_law(&self) -> Option<&MatrixStack> {
+        self.frf_law.as_ref()
+    }
+    /// True when the law's space is the physical controls by drives (no response or
+    /// drive transformation), so [`Self::frf_law`] is in the identification's layout.
+    pub fn law_space_is_physical(&self) -> bool {
+        self.t_resp.is_none() && self.t_drive.is_none()
+    }
     pub fn level_db(&self) -> f64 {
         self.schedule_level_db
     }
@@ -1785,6 +1795,49 @@ impl MimoRandomService {
                     .into(),
             ));
         }
+        self.adopt_identification(set, true)
+    }
+
+    /// Research: at the gate, after the identification was measured, replace the
+    /// identification's frequency response with `frf` (physical, responses by drives,
+    /// every line) and adopt the set again, so the gate is judged afresh on it and the
+    /// law's first solve uses it. Everything else the identification measured (its
+    /// response, coherence, noise floor, level and lag) is kept; the condition numbers
+    /// are recomputed from `frf`. The same checks as [`Self::load_identification`]
+    /// apply (setup and size); the set is then marked loaded.
+    pub fn replace_identification_frf(
+        &mut self,
+        frf: MatrixStack,
+        source: &str,
+    ) -> Result<(), MimoError> {
+        if self.state != MimoState::Gate {
+            return Err(MimoError::BadState(format!(
+                "a frequency response replaces the identification's at the gate; the run is {:?}",
+                self.state
+            )));
+        }
+        let mut set = self.ident.clone().ok_or_else(|| {
+            MimoError::BadState("there is no identification set to replace".into())
+        })?;
+        let want = self.setup_hash();
+        if set.setup_hash != want {
+            return Err(MimoError::Blocked(format!(
+                "the identification set was measured on another setup (hash {}, this setup {})",
+                set.setup_hash, want
+            )));
+        }
+        if frf.dims() != (self.lines, self.n_c + self.n_l, self.n_d) {
+            return Err(MimoError::Blocked(
+                "the frequency response does not fit this test's grid or channels".into(),
+            ));
+        }
+        let h_c = crate::estimate::rows(&frf, 0..self.n_c);
+        let frf_law = self.frf_to_law(&h_c)?;
+        set.condition = la(pool::condition_numbers(&frf_law, self.band))?;
+        set.frf = frf;
+        self.note(format!(
+            "Identification frequency response replaced from {source}."
+        ));
         self.adopt_identification(set, true)
     }
 
