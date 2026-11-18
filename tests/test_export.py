@@ -1025,3 +1025,28 @@ def test_an_assignment_set_naming_a_frame_that_is_not_there_is_ignored(
             list('def_cs_9999'.ljust(width, '\0')), dtype='S1')
     back = hertzforge.import_file(path)
     assert set(back.node_def_cs) == {1}, 'nobody is placed in a frame the file lacks'
+
+
+#: a display system off its coherent base in length and mass, which the
+#: (g) systems, differing only in acceleration, cannot catch
+MM_LB = hertzforge.units.SI.with_units(length='mm', mass='lb')
+
+
+def test_geometry_is_written_in_the_display_length(tmp_path):
+    source = inch_plate()
+    path = str(tmp_path / 'mm.npz')
+    hertzforge.export_file(source, path, format='sdynpy_geometry',
+                           unit_system=MM_LB)
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['node']['coordinate'][:, 0].max() == pytest.approx(
+            RAW * 25.4, rel=1e-9)
+
+
+def test_shapes_are_written_in_the_display_mass(tmp_path):
+    source = hertzforge.import_file(survey('shapes.npy'), mass_unit='kg')
+    path = str(tmp_path / 'lb.npy')
+    hertzforge.export_file(source, path, format='sdynpy_shapes',
+                           unit_system=MM_LB)
+    back = hertzforge.import_file(path)
+    assert np.allclose(np.real(back.shape_matrix),
+                       np.real(source.shape_matrix) * np.sqrt(0.45359237))
