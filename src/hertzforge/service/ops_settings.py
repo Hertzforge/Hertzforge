@@ -55,6 +55,8 @@ HIGH = Param('high', 'High edge', 'number', default=1000.0, unit='Hz', min=0.0,
              step=10.0, setting='filtering.high')
 ORDER = Param('order', 'Order', 'integer', default=4, min=1, max=12, step=1,
               setting='filtering.order')
+FILTER_KEEP = Param('keep', 'Add the filtered record (else the preview)', 'boolean',
+                    default=False)
 
 CUT_START = Param('start', 'Start', 'number', default=0.0, unit='s', step=0.1,
                   setting='truncation.start')
@@ -326,9 +328,13 @@ def detect_averaging(project: Any, params: dict[str, Any]) -> list[dict]:
 
 
 def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.set_filter`: the pass band Apply Filter filters a history
-    to. A low-pass takes the high edge, a high-pass the low edge and a
-    band-pass both."""
+    """`project.set_filter`: a time history's filter, set and applied in
+    one place (Brandon, 2026-11-17: Set Filter and Apply Filter were two
+    actions for one thing). A low-pass takes the high edge, a high-pass the
+    low edge and a band-pass both. The settings are stored on the history
+    either way. Without `keep` the picked record is drawn as recorded and
+    as the filter would leave it; with it the filtered history is added
+    (`Project.filter_data`), every channel at zero phase."""
     from hertzforge.core.filters import Filtering
 
     name, kind = params['source'], params['kind']
@@ -348,8 +354,11 @@ def set_filter(project: Any, params: dict[str, Any]) -> list[dict]:
         raise refused(str(error)) from None
     history.filtering = filtering
     project.record_setting(name, 'filtering', filtering)
-    # the preview is what Apply Filter will make of this record: the same
-    # design, zero phase
+    if params.get('keep'):
+        from .ops_project import _derived
+
+        return _derived(project, lambda: project.filter_data(name))
+    # the preview is what Apply will make of this record: the same design, zero phase
     from scipy.signal import sosfiltfilt
 
     from hertzforge.core.filters import design
@@ -414,10 +423,11 @@ OPERATIONS = (
         params=(HISTORY, SHOWN), outputs=('spectrum', 'reading'), run=detect_averaging, edits=True),
     Operation(
         id='project.set_filter', title='Filter', workspace='signals', everywhere=True,
-        summary='The pass band Apply Filter filters a time history to, at zero '
-                'phase.',
-        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN), outputs=('spectrum', 'reading'),
-        run=set_filter, edits=True),
+        summary='A time history filtered to a pass band at zero phase: Preview draws a '
+                'record as the filter would leave it, and Apply adds the filtered history.',
+        params=(HISTORY, PASS, LOW, HIGH, ORDER, SHOWN, FILTER_KEEP),
+        outputs=('spectrum', 'reading', 'waterfall'), run=set_filter, edits=True,
+        commits='keep'),
     Operation(
         id='project.set_truncation', title='Truncation', workspace='signals', everywhere=True,
         summary='The span of a time history Apply Truncation keeps.',

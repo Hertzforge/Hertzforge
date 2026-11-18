@@ -47,8 +47,8 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'detect_shocks': 'Detect Shocks', 'extract_sine': 'Extract Sine', 'transform': 'Transform',
     'expand': 'Expand', 'generate_rigid_body_modes': 'Rigid Modes', 'solve_modes': 'Solve',
     'project_onto_basis': 'Project', 'set_averaging': 'Averaging',
-    'detect_averaging': 'Detect Averaging', 'set_filter': 'Set Filter',
-    'set_truncation': 'Set Truncation', 'group_properties': 'Set Properties',
+    'detect_averaging': 'Detect Averaging', 'set_filter': 'Filter',
+    'set_truncation': 'Truncation', 'group_properties': 'Set Properties',
     'merge_coincident_nodes': 'Merge Nodes', 'element_groups': 'Show Groups',
     'merge_element_groups': 'Merge Groups', 'delete_element_groups': 'Delete Groups',
     'tie_elements': 'Tie', 'align_meshes': 'Align', 'derive_specification': 'Derive Spec',
@@ -193,7 +193,11 @@ UNOFFERED = frozenset({'project.add_solid_hole', 'project.place', 'project.reord
                        # a coordinate system is slid and turned in its Edit: typed in its
                        # row, or dragged by the arrows and rings on it (Brandon, 2026-11-17)
                        'project.rotate_coordinate_system',
-                       'project.slide_coordinate_system', 'project.reset_rotation'})
+                       'project.slide_coordinate_system', 'project.reset_rotation',
+                       # a filter is set and applied in its one action, Filter
+                       # (`project.set_filter` with `keep`); the verb stays for scripts
+                       # and for a filtered history's recipe (Brandon, 2026-11-17)
+                       'project.filter_data'})
 
 #: the operations on element groups that tie or merge two or more of them
 TWO_GROUPS = frozenset({'project.merge_element_groups', 'project.align_meshes',

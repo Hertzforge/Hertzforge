@@ -538,8 +538,8 @@ def test_sensors_says_a_table_names_no_sensor_model(rich):
 def test_apply_truncation_names_the_row_that_sets_a_span(rich):
     history = named(rich, 'time_history')
     found = _offered(rich, history, 'Apply Truncation', 'project.truncate_data')
-    assert not found['ready'] and 'Set Truncation' in found['reason']
-    assert 'Set Truncation' in _refusal(rich.project, found['id'], {'source': history})
+    assert not found['ready'] and 'Truncation sets one' in found['reason']
+    assert 'Truncation sets one' in _refusal(rich.project, found['id'], {'source': history})
     rich.project[history].truncation = (0.0, 0.01)
     assert _offered(rich, history, 'Apply Truncation', 'project.truncate_data')['ready']
 
@@ -664,7 +664,13 @@ def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
         assert rows[child]['under'] == 'project.set_averaging'
     assert rows['project.set_averaging'].get('open') is True
     assert 'under' not in rows['project.set_averaging']
-    assert rows['project.filter_data']['under'] == 'project.set_filter'
+    # a filter is one action, set and applied in its form; Integrate and Differentiate
+    # are under a row that is not an action
+    assert 'project.filter_data' not in rows and rows['project.set_filter']['verb'] == 'Filter'
+    assert 'under' not in rows['project.set_filter']
+    assert rows['group.calculus']['kind'] == 'group'
+    assert rows['project.integrate']['under'] == rows['project.differentiate']['under'] \
+        == 'group.calculus'
     assert rows['project.truncate_data']['under'] == 'project.set_truncation'
     # the object's own acts are under a row that is not an action
     assert rows[OBJECT_GROUP]['kind'] == 'group'
@@ -675,9 +681,9 @@ def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
     assert len(children) == len(set(children)) and not set(children) & set(NESTS)
     assert not set(children) & set(OBJECT_ROWS)
     # a row whose setting cannot run stays where it was
-    loose = nested([{'id': 'project.set_filter', 'verb': 'Set Filter', 'kind': 'run',
+    loose = nested([{'id': 'project.set_truncation', 'verb': 'Truncation', 'kind': 'run',
                      'ready': False, 'reason': 'no'},
-                    {'id': 'project.filter_data', 'verb': 'Apply Filter', 'kind': 'run',
+                    {'id': 'project.truncate_data', 'verb': 'Apply Truncation', 'kind': 'run',
                      'ready': True}])
     assert all('under' not in row for row in loose)
 

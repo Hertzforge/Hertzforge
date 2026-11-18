@@ -42,7 +42,7 @@ def test_the_descriptors_validate_and_open_on_settings(validate):
         assert op.edits
         # a drag's span is where the pointer let go, not a setting to open on
         assert all('setting' in p.to_json() for p in op.params
-                   if p.name not in ('source', 'record')
+                   if p.name not in ('source', 'record', 'keep')
                    and not (op.id == 'project.drag_averaging'
                             and p.name in ('start', 'stop', 'was_stop')))
 
@@ -197,3 +197,22 @@ def test_a_dragged_frame_span_slides_the_frames_and_keeps_the_rest(state):
     assert averaging.frames == 1 and averaging.fits(len(history.abscissa), rate)
     assert averaging.stop(rate, float(history.abscissa[0])) == pytest.approx(end, abs=2 / rate)
     assert settings(state)['averaging']['frames'] == 1
+
+
+def test_filter_is_set_previewed_and_applied_in_one_action(state, validate):
+    project = state.project
+    before = list(project)
+    # the preview stores the settings and adds nothing
+    trace, reading = run(project, 'project.set_filter', kind='low-pass', high=300.0)
+    wire_views([trace, reading], validate)
+    assert list(project) == before
+    history = next(obj for obj in project.values() if type(obj).__name__ == 'TimeHistory')
+    assert history.filtering.describe() == reading['rows'][0]['value']
+    # Apply adds the filtered history, made with those settings
+    (drawn,) = run(project, 'project.set_filter', kind='low-pass', high=300.0, keep=True)
+    wire_views([drawn], validate)
+    added = [name for name in project if name not in before]
+    assert len(added) == 1 and added[0].endswith('Filtered')
+    assert drawn['view'] == 'waterfall' and drawn['title'] == added[0]
+    op = OPS['project.set_filter']
+    assert op.commits == 'keep' and op.title == 'Filter'
