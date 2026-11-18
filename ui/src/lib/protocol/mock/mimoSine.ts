@@ -439,7 +439,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		if (s.start_db !== undefined && !levels.includes(s.start_db)) errors.push(item('start_not_a_level', `${s.start_db} dB is not a level of the schedule.`, 'schedule.start_db'));
 		const structure = structureOf(c);
 		if (!MOCK_STRUCTURES.includes(structure)) errors.push(item('structure_unknown', `No simulator structure "${structure}".`, 'simulator.structure'));
-		else {
+		else if (c.simulator?.structure) {
+			// A structure named must be the run's size; with none named the mock plays its linear story at any size.
 			const [sc, sd] = SIZE[structure] ?? [4, 4];
 			if (host.station().ref.kind === 'sim' && (sc !== nc || sd !== nd)) errors.push(item('structure_wrong_size', `The structure "${structure}" has ${sc} controls and ${sd} drives; the run has ${nc} and ${nd}.`, 'simulator.structure'));
 		}
