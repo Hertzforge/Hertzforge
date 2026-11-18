@@ -9,6 +9,7 @@ pub mod laws;
 pub mod record;
 pub mod run;
 pub mod subscribe;
+pub mod time;
 pub mod view;
 
 use crate::protocol::{ErrorCode, MethodError};

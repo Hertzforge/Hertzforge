@@ -335,6 +335,8 @@ struct Actor {
     last_request: Option<(&'static str, bool)>,
     tick_s: f64,
     hardware: bool,
+    /// The last samples the station read, for the `time` plot.
+    time_ring: super::time::Shared,
 }
 
 fn refuse(reason: &'static str, message: impl Into<String>) -> MethodError {
@@ -408,6 +410,7 @@ pub fn spawn(
             last_request: None,
             tick_s: 0.0,
             hardware: false,
+            time_ring: Default::default(),
         };
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.run(rx)));
         if r.is_err() {
@@ -490,6 +493,21 @@ impl Actor {
         }
         if let Some(f) = &self.figures {
             self.view.figures = Some(Arc::new(f.clone()));
+        }
+        if self.view.streaming {
+            let ring = match self.time_ring.lock() {
+                Ok(g) => g.clone(),
+                Err(p) => p.into_inner().clone(),
+            };
+            let inputs: Vec<(u32, Vec<f32>)> = rrec::input_rows(&self.table)
+                .iter()
+                .enumerate()
+                .map(|(slot, c)| (c.index, ring.last(slot, super::time::RING_FRAMES)))
+                .collect();
+            self.view.time = Some(Arc::new(super::view::TimeFigures {
+                fs_hz: self.view.grid.fs_hz,
+                inputs,
+            }));
         }
         self.last_publish = Some(Instant::now());
         self.shared.publish(self.view.clone());
@@ -708,7 +726,12 @@ impl Actor {
             drives_tap,
             self.shared.station_frame.clone(),
         );
-        let backend = Interruptible::wrap(recorded, self.shared.signal.clone());
+        let timed = super::time::TimeTap::wrap(
+            recorded,
+            self.time_ring.clone(),
+            rrec::input_rows(&table).len(),
+        );
+        let backend = Interruptible::wrap(timed, self.shared.signal.clone());
         let ratings = w.ratings();
         let mut opts = EngineOptions::new(class);
         opts.seed = SYSID_SEED;
@@ -2293,6 +2316,7 @@ pub fn configured_view(
         last_pass: None,
         identification_figures: None,
         report: None,
+        time: None,
     }
 }
 

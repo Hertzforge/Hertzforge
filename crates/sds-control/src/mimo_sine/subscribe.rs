@@ -11,7 +11,7 @@ use crate::views::{self, Axis, Role, Row, Scale, Series, Status};
 use serde_json::{json, Map, Value};
 
 /// The quantities, in the order the result lists them.
-pub const QUANTITIES: [&str; 9] = [
+pub const QUANTITIES: [&str; 10] = [
     "control",
     "phase",
     "error",
@@ -19,6 +19,7 @@ pub const QUANTITIES: [&str; 9] = [
     "drive",
     "drive_phase",
     "readings",
+    "time",
     "identification",
     "law",
 ];
@@ -27,6 +28,9 @@ pub const MIN_RATE_HZ: f64 = 0.5;
 pub const MAX_RATE_HZ: f64 = 10.0;
 pub const MAX_PLOTS: usize = 64;
 pub const MAX_ID_CHARS: usize = 64;
+pub const DEFAULT_POINTS: usize = 1024;
+pub const MIN_POINTS: usize = 64;
+pub const MAX_POINTS: usize = 8192;
 
 /// What a plot shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +42,7 @@ pub enum Quantity {
     Drive,
     DrivePhase,
     Readings,
+    Time,
     Identification,
     Law,
 }
@@ -52,6 +57,7 @@ impl Quantity {
             "drive" => Quantity::Drive,
             "drive_phase" => Quantity::DrivePhase,
             "readings" => Quantity::Readings,
+            "time" => Quantity::Time,
             "identification" => Quantity::Identification,
             "law" => Quantity::Law,
             _ => return None,
@@ -67,6 +73,7 @@ impl Quantity {
             Quantity::Drive => "drive",
             Quantity::DrivePhase => "drive_phase",
             Quantity::Readings => "readings",
+            Quantity::Time => "time",
             Quantity::Identification => "identification",
             Quantity::Law => "law",
         }
@@ -76,7 +83,11 @@ impl Quantity {
     pub fn has_channels(self) -> bool {
         matches!(
             self,
-            Quantity::Control | Quantity::Phase | Quantity::Limit | Quantity::Identification
+            Quantity::Control
+                | Quantity::Phase
+                | Quantity::Limit
+                | Quantity::Time
+                | Quantity::Identification
         )
     }
 }
@@ -110,6 +121,8 @@ pub struct Plot {
     pub id: String,
     pub quantity: Quantity,
     pub channels: Option<Channels>,
+    /// A `time` plot's samples.
+    pub points: Option<usize>,
 }
 
 /// What one connection asked to be sent, every default filled in.
@@ -191,11 +204,13 @@ pub fn parse(params: &Map<String, Value>) -> Result<Option<Subscription>, Method
             .ok_or_else(|| bad(&format!("plots[{i}]"), "each plot is an object"))?;
         if let Some(k) = o
             .keys()
-            .find(|k| !matches!(k.as_str(), "id" | "quantity" | "channels"))
+            .find(|k| !matches!(k.as_str(), "id" | "quantity" | "channels" | "points"))
         {
             return Err(bad(
                 &at(k),
-                format!("a plot takes \"id\", \"quantity\" and \"channels\", not \"{k}\""),
+                format!(
+                    "a plot takes \"id\", \"quantity\", \"channels\" and \"points\", not \"{k}\""
+                ),
             ));
         }
         let id = match o.get("id") {
@@ -250,10 +265,29 @@ pub fn parse(params: &Map<String, Value>) -> Result<Option<Subscription>, Method
                 return Err(bad(
                     &at("channels"),
                     format!(
-                        "\"channels\" applies to control, phase, limit and identification \
-                         plots, not to {}",
+                        "\"channels\" applies to control, phase, limit, time and \
+                         identification plots, not to {}",
                         quantity.name()
                     ),
+                ))
+            }
+        };
+        let points = match (quantity, o.get("points")) {
+            (Quantity::Time, None | Some(Value::Null)) => Some(DEFAULT_POINTS),
+            (Quantity::Time, Some(v)) => match v.as_u64() {
+                Some(n) if (MIN_POINTS as u64..=MAX_POINTS as u64).contains(&n) => Some(n as usize),
+                _ => {
+                    return Err(bad(
+                        &at("points"),
+                        format!("\"points\" is a whole number from {MIN_POINTS} to {MAX_POINTS}"),
+                    ))
+                }
+            },
+            (_, None | Some(Value::Null)) => None,
+            (_, Some(_)) => {
+                return Err(bad(
+                    &at("points"),
+                    format!("\"points\" applies to time plots, not to {}", quantity.name()),
                 ))
             }
         };
@@ -261,6 +295,7 @@ pub fn parse(params: &Map<String, Value>) -> Result<Option<Subscription>, Method
             id,
             quantity,
             channels,
+            points,
         });
     }
     Ok(Some(Subscription { rate_hz, plots }))
@@ -288,6 +323,9 @@ pub fn result_json(sub: Option<&Subscription>) -> Value {
             m.insert("quantity".into(), Value::from(p.quantity.name()));
             if let Some(c) = &p.channels {
                 m.insert("channels".into(), c.to_json());
+            }
+            if let Some(n) = p.points {
+                m.insert("points".into(), Value::from(n));
             }
             Value::Object(m)
         })
@@ -442,11 +480,17 @@ pub fn data_json(v: &MsView, sub: &Subscription, arrays: &mut Arrays) -> Value {
                     .map(|c| c.channel)
                     .filter(|c| ch.picks(*c))
                     .collect(),
+                Quantity::Time => v
+                    .time
+                    .as_ref()
+                    .map(|t| t.inputs.iter().map(|(c, _)| *c).filter(|c| ch.picks(*c)).collect())
+                    .unwrap_or_default(),
                 _ => Vec::new(),
             };
             let views: Vec<Value> = match p.quantity {
                 Quantity::Identification => identification_views(v, &ch, arrays),
                 Quantity::Law if v.law_built => vec![law_reading(v)],
+                Quantity::Time => time_views(v, &resolved, p.points.unwrap_or(DEFAULT_POINTS), arrays),
                 _ if !engaged => Vec::new(),
                 q => {
                     let f = f.unwrap_or(&empty);
@@ -488,6 +532,41 @@ pub fn data_json(v: &MsView, sub: &Subscription, arrays: &mut Arrays) -> Value {
         .collect();
     m.insert("plots".into(), Value::Array(plots));
     Value::Object(m)
+}
+
+/// One view per resolved input: its last `points` samples against time, the
+/// last sample at 0 s.
+fn time_views(v: &MsView, channels: &[u32], points: usize, arrays: &mut Arrays) -> Vec<Value> {
+    let Some(t) = v.time.as_deref() else {
+        return Vec::new();
+    };
+    let all = v.controls.iter().chain(&v.limits);
+    channels
+        .iter()
+        .filter_map(|ch| {
+            let samples = &t.inputs.iter().find(|(c, _)| c == ch)?.1;
+            if samples.is_empty() {
+                return None;
+            }
+            let n = samples.len().min(points);
+            let y: Vec<f64> = samples[samples.len() - n..].iter().map(|x| f64::from(*x)).collect();
+            let x: Vec<f64> = (0..n).map(|k| (k as f64 + 1.0 - n as f64) / t.fs_hz).collect();
+            let (title, unit) = all
+                .clone()
+                .find(|c| c.channel == *ch)
+                .map_or_else(|| (format!("Channel {ch}"), "g".to_owned()), |c| {
+                    (c.description.clone(), c.unit.clone())
+                });
+            Some(views::spectrum(
+                arrays,
+                &title,
+                &Axis::new("Time", Some("s"), Scale::Linear),
+                &Axis::new("Amplitude", Some(&unit), Scale::Linear),
+                vec![Series::new("Measured", Role::Measured, x, y)],
+                Some("time"),
+            ))
+        })
+        .collect()
 }
 
 /// **Error**: every control's error, dB, and its notch depth while one is
@@ -563,7 +642,7 @@ mod tests {
             "plots[0].channels"
         );
         assert_eq!(
-            refused(json!({"plots": [{"id": "a", "quantity": "time"}]})),
+            refused(json!({"plots": [{"id": "a", "quantity": "speed"}]})),
             "plots[0].quantity"
         );
         assert_eq!(

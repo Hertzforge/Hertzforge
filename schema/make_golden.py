@@ -6066,11 +6066,12 @@ MSINE_SUBSCRIBE_PLOTS = [
     {'id': 'drv', 'quantity': 'drive'},
     {'id': 'dph', 'quantity': 'drive_phase'},
     {'id': 'run', 'quantity': 'readings'},
+    {'id': 't', 'quantity': 'time', 'channels': [1, 5], 'points': 2048},
     {'id': 'id', 'quantity': 'identification'},
     {'id': 'law', 'quantity': 'law'},
 ]
 MSINE_QUANTITIES = ['control', 'phase', 'error', 'limit', 'drive', 'drive_phase', 'readings',
-                    'identification', 'law']
+                    'time', 'identification', 'law']
 
 # The running run's figures: three points of the sweep grid, the third not
 # reached; per control its amplitude, phase, reference, reference phase, error
@@ -6247,6 +6248,7 @@ def _msine_data_build() -> tuple[dict, dict]:
          'views': _msine_pass_views(a, lambda t: t == 'Drive phase')},
         {'id': 'run', 'quantity': 'readings', 'channels': None,
          'views': [*_msine_pass_views(a, lambda t: t == 'Readings'), MSINE_RUN_READING]},
+        {'id': 't', 'quantity': 'time', 'channels': [], 'views': []},
         {'id': 'id', 'quantity': 'identification', 'channels': 1, 'views': _msine_ident_views(a)},
         {'id': 'law', 'quantity': 'law', 'channels': None, 'views': [MSINE_LAW_READING]},
     ]

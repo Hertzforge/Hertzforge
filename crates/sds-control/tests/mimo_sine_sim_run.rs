@@ -174,6 +174,26 @@ async fn mimo_sine_hold_resume_and_a_manual_frequency_act_on_a_sweep() {
     c.pump(Duration::from_millis(300)).await;
     let now = c.ok("mimo_sine.state", json!({})).await;
     assert_eq!(now["state"], "running", "{}", now["end"]);
+    // The last samples read, on a time plot.
+    c.ok(
+        "mimo_sine.subscribe",
+        json!({"rate_hz": 10, "plots": [{"id": "t", "quantity": "time", "channels": [1], "points": 256}]}),
+    )
+    .await;
+    let i = c
+        .wait_for("a time plot with samples", msine::LONG, |e| {
+            e.topic() == "mimo_sine.data"
+                && e.data()["plots"][0]["views"]
+                    .as_array()
+                    .is_some_and(|v| v.len() == 1)
+        })
+        .await;
+    let d = c.events[i].decoded.as_ref().unwrap();
+    let y = d
+        .array(&c.events[i].data()["plots"][0]["views"][0]["series"][0]["y"])
+        .unwrap();
+    assert_eq!(y.to_f64().len(), 256);
+    assert!(y.to_f64().iter().any(|v| v.abs() > 1e-3), "the samples are silent");
     let held = c.ok("mimo_sine.hold", json!({})).await;
     assert_eq!(held["held"], true);
     c.pump(Duration::from_millis(500)).await;

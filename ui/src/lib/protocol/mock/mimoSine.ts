@@ -123,7 +123,9 @@ function entry(id: string, summary: string, tests: MimoSineTestType[], amplitude
 		shapes: ['square', 'more_controls_than_drives', 'fewer_controls_than_drives'],
 		needs: null,
 		test_types: tests,
-		amplitude_only: amplitudeOnly
+		amplitude_only: amplitudeOnly,
+		default: id === 'matrix',
+		limits: null
 	} as MimoSineLawEntry;
 }
 
@@ -1245,6 +1247,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		'mimo_sine.mode': (params, conn) => {
 			host.own(conn);
 			const r = needRun();
+			if (!['configured', 'blocked'].includes(stateOf(r).state)) refuse('refused', 'mode_fixed', "The ladder's mode is fixed once the run has armed; it is set in the configuration (schedule.mode).");
 			const mode = params.mode === 'manual' ? 'manual' : 'auto';
 			r.config = { ...r.config, schedule: { ...(r.config.schedule ?? {}), mode } };
 			stateChanged(true);
@@ -1269,12 +1272,8 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		},
 		'mimo_sine.reverse': (_p, conn) => {
 			host.own(conn);
-			const r = needSweep('Reverse');
-			r.direction = r.direction === 'up' ? 'down' : 'up';
-			r.progress = 1 - r.progress;
-			addLog('note', `The sweep turned ${r.direction}.`);
-			stateChanged(true);
-			return stateOf(r);
+			needSweep('Reverse');
+			return refuse('refused', 'reverse_not_available', "A MIMO Sine sweep turns only at the band's edges; go to a frequency, or stop and start a sweep in the other direction.");
 		},
 		'mimo_sine.jog': (params, conn) => {
 			host.own(conn);

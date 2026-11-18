@@ -4,8 +4,6 @@
  * against its own reference amplitude and phase. A sweep, a dwell or a stepped sine. The run's law
  * is chosen from the control-law catalog's `sine_mimo` world. Where a part of the wire is Sine's
  * or MIMO Shock's, the type is theirs.
- *
- * The section is a draft: no service answers it yet.
  */
 import type {
 	ClockDomain,
@@ -57,8 +55,11 @@ export const MIMO_SINE_TOPICS = {
 /** The law world MIMO Sine's laws are listed under. */
 export const MIMO_SINE_WORLD = 'sine_mimo';
 
-/** Refusals of the `mimo_sine.*` methods: Sine's. */
-export type MimoSineRefusalReason = SineRefusalReason;
+/**
+ * Refusals of the `mimo_sine.*` methods: Sine's, and `reverse_not_available` (a sweep turns only at
+ * the band's edges) and `mode_fixed` (the ladder's mode is set before the run arms).
+ */
+export type MimoSineRefusalReason = SineRefusalReason | 'reverse_not_available' | 'mode_fixed';
 
 export type MimoSineTestType = 'sweep' | 'dwell' | 'stepped';
 
@@ -68,6 +69,10 @@ export type MimoSineLawEntry = LawEntry & {
 	shapes: MimoShape[];
 	test_types: MimoSineTestType[];
 	amplitude_only: boolean;
+	/** True on the world's default law alone. */
+	default: boolean;
+	/** A built-in law's limits as measured, in words; null for a law file. */
+	limits: string | null;
 };
 
 // --- configuration -------------------------------------------------------------------------

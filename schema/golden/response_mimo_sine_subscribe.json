@@ -42,6 +42,15 @@
     "quantity": "readings"
    },
    {
+    "id": "t",
+    "quantity": "time",
+    "channels": [
+     1,
+     5
+    ],
+    "points": 2048
+   },
+   {
     "id": "id",
     "quantity": "identification",
     "channels": "all"
@@ -59,6 +68,7 @@
    "drive",
    "drive_phase",
    "readings",
+   "time",
    "identification",
    "law"
   ]

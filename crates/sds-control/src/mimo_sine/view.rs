@@ -288,6 +288,16 @@ pub struct MsView {
     pub last_pass: Option<Arc<Pass>>,
     pub identification_figures: Option<Arc<IdentFigures>>,
     pub report: Option<Value>,
+    /// The last samples read of every enabled input, by table index, and the
+    /// rate: the `time` plot's.
+    pub time: Option<Arc<TimeFigures>>,
+}
+
+/// The last samples of every enabled input.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimeFigures {
+    pub fs_hz: f64,
+    pub inputs: Vec<(u32, Vec<f32>)>,
 }
 
 /// The identification as drawn.
