@@ -457,9 +457,10 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		const structure = structureOf(c);
 		if (!MOCK_STRUCTURES.includes(structure)) errors.push(item('structure_unknown', `No simulator structure "${structure}".`, 'simulator.structure'));
 		else if (c.simulator?.structure) {
-			// A structure named must be the run's size; with none named the mock plays its linear story at any size.
-			const [sc, sd] = SIZE[structure] ?? [4, 4];
-			if (host.station().ref.kind === 'sim' && (sc !== nc || sd !== nd)) errors.push(item('structure_wrong_size', `The structure "${structure}" has ${sc} controls and ${sd} drives; the run has ${nc} and ${nd}.`, 'simulator.structure'));
+			// A structure named must be the table's size (its enabled inputs and drives); with none named the mock plays its linear story at any size.
+			const [si, sd] = SIZE[structure] ?? [4, 4];
+			const ni = rows.filter((r) => r.enabled && r.role !== 'drive').length;
+			if (host.station().ref.kind === 'sim' && (si !== ni || sd !== driveRows.length)) errors.push(item('structure_wrong_size', `The simulator's structure "${structure}" has ${si} inputs and ${sd} drives; the table has ${ni} enabled inputs and ${driveRows.length} drives.`, 'simulator.structure'));
 		}
 		const lawId = c.control?.law?.id ?? 'matrix';
 		const law = LAWS.find((l) => l.id === lawId);

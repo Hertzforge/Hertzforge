@@ -249,6 +249,13 @@ describe('the MIMO Sine store', () => {
 		await ms.abort();
 	});
 
+	it('takes the base and article on 4 controls, 2 monitors and 4 drives: a structure is sized by its inputs', async () => {
+		const { ms } = await screen({}, 4, 4, 2);
+		ms.setup.simulator.structure = 'sine-base-article-6x4';
+		await ms.checkSetup();
+		expect(ms.check?.errors).toEqual([]);
+	});
+
 	it('refuses a simulator structure of another size by name', async () => {
 		const { ms } = await screen({}, 4, 4, 0);
 		ms.setup.simulator.structure = 'sine-tall-6x3';

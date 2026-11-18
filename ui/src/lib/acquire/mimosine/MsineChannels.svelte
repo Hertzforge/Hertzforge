@@ -12,7 +12,7 @@
 	import NumberField from '../NumberField.svelte';
 	import StationPanel from '../StationPanel.svelte';
 	import MsineRecord from './MsineRecord.svelte';
-	import { MAX_CONTROLS, MAX_DRIVES, setControl, STRUCTURES } from './msineSetup';
+	import { MAX_CONTROLS, MAX_DRIVES, setControl, STRUCTURES, structuresFor } from './msineSetup';
 	import type { MimoSineStore } from './msineStore.svelte';
 
 	interface Props {
@@ -26,7 +26,7 @@
 	const errs = (k: string) => E[k] ?? [];
 	const controlRows = $derived(ms.rows.filter((r) => r.enabled && r.role === 'control'));
 	const onSim = $derived(ms.acq.selected?.kind !== 'ni');
-	const sized = $derived(STRUCTURES.filter((s) => s.controls === d.controls.length && s.drives === d.drives.length));
+	const sized = $derived(structuresFor(ms.rows));
 	const name = (i: number) => {
 		const r = ms.rows.find((x) => x.index === i);
 		return r?.description ? `${i}, ${r.description}` : String(i);

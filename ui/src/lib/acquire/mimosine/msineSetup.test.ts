@@ -8,7 +8,7 @@ import type { ChannelRow } from '$lib/protocol/types';
 import type { LawEntry } from '$lib/protocol/mimo';
 import { canonical } from '../mimo/mimoSetup';
 import { notchWords } from './msineWords';
-import { defaultMsineSetup, fitChannels, STRUCTURES, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
+import { defaultMsineSetup, fitChannels, STRUCTURES, structuresFor, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
 
 function row(index: number, role: ChannelRow['role'], enabled = true): ChannelRow {
 	return { index, enabled, description: '', role, units: 'g' } as unknown as ChannelRow;
@@ -48,7 +48,14 @@ describe('the MIMO Sine setup draft', () => {
 		const ids = STRUCTURES.map((s) => s.id);
 		expect(ids).toContain('sine-weak-4x4');
 		expect(ids).toContain('sine-loopback-4x4');
-		expect(STRUCTURES.filter((s) => s.id === 'sine-weak-4x4' || s.id === 'sine-loopback-4x4').every((s) => s.controls === 4 && s.drives === 4)).toBe(true);
+		expect(STRUCTURES.filter((s) => s.id === 'sine-weak-4x4' || s.id === 'sine-loopback-4x4').every((s) => s.inputs === 4 && s.drives === 4)).toBe(true);
+	});
+
+	it('offers a structure by the table\'s inputs and drives: the base and article for 4 controls, 2 monitors and 4 drives', () => {
+		const rows = [1, 2, 3, 4].map((i) => row(i, 'control')).concat([row(5, 'monitor'), row(6, 'monitor')], [7, 8, 9, 10].map((i) => row(i, 'drive')));
+		expect(structuresFor(rows).map((s) => s.id)).toEqual(['sine-base-article-6x4']);
+		expect(structuresFor(rows.slice(0, 4).concat(rows.slice(6))).map((s) => s.id)).toContain('sine-weak-4x4');
+		expect(structuresFor([...rows.slice(0, 5), row(6, 'monitor', false), ...rows.slice(6)])).toEqual([]);
 	});
 
 	it('says the notch as the service reports it: the reference held down, the drive cut, or none', () => {
