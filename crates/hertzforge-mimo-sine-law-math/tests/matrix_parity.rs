@@ -72,7 +72,15 @@ fn mimo_sine_parity_interpolation_inverse_gain_and_fit() {
             let b = setup.tracking.bandwidth_hz(f);
             assert!((gd.at(f, 2.0 * b) / p["gd"].as_f64().unwrap() - 1.0).abs() < 1e-9);
             assert!((gd.at(f, 0.0) / p["gd_local"].as_f64().unwrap() - 1.0).abs() < 1e-9);
-            let g = gain(GainRule::default(), &setup.tracking, &gd, setup.tick_s, f).g;
+            let g = gain(
+                GainRule::default(),
+                &setup.tracking,
+                setup.loop_delay,
+                &gd,
+                setup.tick_s,
+                f,
+            )
+            .g;
             assert!(
                 (g / p["gain"].as_f64().unwrap() - 1.0).abs() < 1e-9,
                 "{name} gain at {f}"

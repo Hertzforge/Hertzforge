@@ -302,6 +302,14 @@ pub fn validate_sine_mimo_setup(s: &SineMimoSetup) -> Result<(), LawError> {
         Tracking::Fixed(hz) if hz.is_finite() && hz > 0.0 => {}
         _ => return Err(setup_err("the tracking rule is not usable")),
     }
+    if !(s.tracker_delay_factor.is_finite() && s.tracker_delay_factor > 0.0) {
+        return Err(setup_err(
+            "the tracker's delay factor is not a number above 0",
+        ));
+    }
+    if !(s.transport_delay_s.is_finite() && s.transport_delay_s >= 0.0) {
+        return Err(setup_err("the transport delay is not a time of 0 or more"));
+    }
     Ok(())
 }
 
@@ -811,6 +819,8 @@ mod tests {
                 share: 0.1,
                 max_hz: 20.0,
             }),
+            tracker_delay_factor: 1.0 / std::f64::consts::PI,
+            transport_delay_s: 0.0,
         }
     }
 
@@ -971,7 +981,7 @@ mod tests {
     #[test]
     fn mimo_sine_the_setup_is_checked() {
         validate_sine_mimo_setup(&setup()).unwrap();
-        let breaks: [Break<SineMimoSetup>; 18] = [
+        let breaks: [Break<SineMimoSetup>; 21] = [
             ("no controls", |s| s.controls = 0),
             ("17 controls", |s| s.controls = 17),
             ("9 drives", |s| s.drives = 9),
@@ -1003,6 +1013,9 @@ mod tests {
                     max_hz: 20.0,
                 })
             }),
+            ("tracker delay factor", |s| s.tracker_delay_factor = 0.0),
+            ("transport delay", |s| s.transport_delay_s = -0.01),
+            ("transport delay", |s| s.transport_delay_s = f64::NAN),
         ];
         for (what, f) in breaks {
             let mut s = setup();

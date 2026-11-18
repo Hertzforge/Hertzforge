@@ -87,6 +87,8 @@ fn setup(test_type: TestType) -> SineMimoSetup {
             share: 0.1,
             max_hz: 20.0,
         }),
+        tracker_delay_factor: 1.0 / std::f64::consts::PI,
+        transport_delay_s: 0.0,
     }
 }
 

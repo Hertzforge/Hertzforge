@@ -154,6 +154,8 @@ pub fn host_setup(s: &LawSetup) -> SineMimoSetup {
             }
             Tracking::Fixed { hz } => host::Tracking::Fixed(hz),
         },
+        tracker_delay_factor: s.tracker_delay_factor,
+        transport_delay_s: s.transport_delay_s,
     }
 }
 

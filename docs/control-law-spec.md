@@ -736,6 +736,8 @@ call budget, a quarter of the update by default. A law file's host deadlines are
 | `limit-bounds` | Each limit channel's bound on the grid, absent where it has none |
 | `tolerance` | Each control's alarm and abort bands below and above the reference on the grid, dB |
 | `tracking` | The tracking filter's bandwidth: a share of the frequency capped in Hz, or fixed in Hz |
+| `tracker-delay-factor` | The tracker's group delay times its bandwidth: a tracked amplitude lags its response by this over the bandwidth `tracking` gives. The controller's trackers state 0.625 (four one-pole sections); a setup that states none is read as `1 / pi` (two sections) |
+| `transport-delay-s` | The delay between a drive and its tracked reading that the identification does not show, seconds: the identification has the drive-to-response lag taken out, and the loop still waits that long for every answer. The built-in laws add it, with the tracker's delay and the structure's group delay, to the time the loop-speed rule divides the tick by |
 | `params` | Every declared parameter, checked against the manifest, defaults filled in |
 
 A channel's tracked amplitude `C_c` reads `Re{ C_c exp(j phi(t)) }`: the response's phase minus

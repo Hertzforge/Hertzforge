@@ -85,6 +85,7 @@ impl SineLaw for SteepestLaw {
             gain(
                 self.params.gain_rule,
                 &self.setup.tracking,
+                self.setup.loop_delay,
                 &self.delay,
                 self.setup.tick_s,
                 x.f_hz,

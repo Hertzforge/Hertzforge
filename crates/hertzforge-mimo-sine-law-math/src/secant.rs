@@ -165,8 +165,9 @@ impl SecantLaw {
         if let Some(s) = self.params.settle {
             return s;
         }
-        let tf = self.setup.tracking.delay_s(f);
-        let ts = self.delay.at(f, 0.0);
+        let ld = self.setup.loop_delay;
+        let tf = self.setup.tracking.delay_s_with(f, ld.tracker_delay_factor);
+        let ts = self.delay.at(f, 0.0) + ld.transport_delay_s;
         ((self.params.settle_factor * (tf + ts) / self.setup.tick_s).ceil() as usize).max(1)
     }
 

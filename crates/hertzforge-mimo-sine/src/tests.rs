@@ -381,6 +381,8 @@ fn law_setup(nc: usize, nd: usize, nl: usize) -> LawSetup {
             abort_high_db: vec![3.0; nc * lines],
         },
         tracking: Tracking::default(),
+        tracker_delay_factor: law::default_tracker_delay_factor(),
+        transport_delay_s: 0.0,
     }
 }
 

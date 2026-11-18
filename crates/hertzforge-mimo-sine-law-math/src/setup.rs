@@ -54,9 +54,42 @@ impl TrackingRule {
         b.min(0.5 * f_hz)
     }
 
-    /// The filter's group delay at `f_hz`: two one-pole stages, `2 / (2 pi B)`.
+    /// The filter's group delay at `f_hz` with the default delay factor (two
+    /// one-pole stages, `2 / (2 pi B)`).
     pub fn delay_s(&self, f_hz: f64) -> f64 {
-        2.0 / (2.0 * std::f64::consts::PI * self.bandwidth_hz(f_hz))
+        self.delay_s_with(f_hz, DEFAULT_TRACKER_DELAY_FACTOR)
+    }
+
+    /// The filter's group delay at `f_hz` for a tracker whose delay is
+    /// `factor / B`.
+    pub fn delay_s_with(&self, f_hz: f64, factor: f64) -> f64 {
+        factor / self.bandwidth_hz(f_hz)
+    }
+}
+
+/// The delay factor of the research testbed's tracker, two one-pole stages:
+/// `1 / pi`, so its delay is `1 / (pi B)`.
+pub const DEFAULT_TRACKER_DELAY_FACTOR: f64 = 1.0 / std::f64::consts::PI;
+
+/// What the loop takes between a drive and its reading besides the
+/// structure's own response: the tracker's delay (as a factor over its
+/// bandwidth) and a transport delay the identification does not show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoopDelay {
+    /// The tracker's group delay times its bandwidth: its delay is
+    /// `tracker_delay_factor / B`. Default [`DEFAULT_TRACKER_DELAY_FACTOR`].
+    pub tracker_delay_factor: f64,
+    /// The delay between a drive and its reading that the identification
+    /// does not show, s. Default 0.
+    pub transport_delay_s: f64,
+}
+
+impl Default for LoopDelay {
+    fn default() -> Self {
+        LoopDelay {
+            tracker_delay_factor: DEFAULT_TRACKER_DELAY_FACTOR,
+            transport_delay_s: 0.0,
+        }
     }
 }
 
@@ -114,6 +147,9 @@ pub struct Setup {
     pub shape: Shape,
     /// The tracking filter's bandwidth rule.
     pub tracking: TrackingRule,
+    /// The tracker's delay factor and the transport delay the identification
+    /// does not show.
+    pub loop_delay: LoopDelay,
 }
 
 impl Setup {
@@ -158,6 +194,13 @@ impl Setup {
         }
         if !(self.tick_s > 0.0 && self.tick_s.is_finite()) {
             return Err("the tick must be a positive time".into());
+        }
+        let ld = &self.loop_delay;
+        if !(ld.tracker_delay_factor.is_finite() && ld.tracker_delay_factor > 0.0) {
+            return Err("the tracker's delay factor must be a number above 0".into());
+        }
+        if !(ld.transport_delay_s.is_finite() && ld.transport_delay_s >= 0.0) {
+            return Err("the transport delay must be a time of 0 or more".into());
         }
         if !id.response.is_finite() || self.reference.iter().any(|v| !v.is_finite()) {
             return Err("the identification and the reference must be finite".into());

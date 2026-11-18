@@ -259,6 +259,8 @@ pub mod bench {
                 }
                 math::TrackingRule::Fixed { hz } => Tracking::Fixed { hz },
             },
+            tracker_delay_factor: s.loop_delay.tracker_delay_factor,
+            transport_delay_s: s.loop_delay.transport_delay_s,
         }
     }
 

@@ -77,7 +77,9 @@ pub use crate::__sine_mimo_bindings::hertzforge::control_law::mimo_sine_types::S
 /// runs through, the regularized inverse and the readings for several
 /// shakers. Plain math that builds for `wasm32-wasip2`.
 pub use hertzforge_mimo_sine_law_math as math;
-pub use hertzforge_mimo_sine_law_math::{Hold, MatrixStack, Request, Shape, TrackingRule, C64};
+pub use hertzforge_mimo_sine_law_math::{
+    Hold, LoopDelay, MatrixStack, Request, Shape, TrackingRule, C64,
+};
 
 pub mod builtin;
 
@@ -251,6 +253,9 @@ pub struct Setup {
     pub bands: Bands,
     /// The tracking filter's bandwidth rule.
     pub tracking: TrackingRule,
+    /// The tracker's delay factor and the transport delay the identification
+    /// does not show.
+    pub loop_delay: LoopDelay,
 }
 
 /// Each control's tightest band over its lines, below and above.
@@ -306,6 +311,7 @@ impl Setup {
             abort_db: tightest(&b.abort_low_db, &b.abort_high_db, nc, lines),
             shape: self.shape,
             tracking: self.tracking,
+            loop_delay: self.loop_delay,
         }
     }
 }
@@ -486,6 +492,10 @@ pub fn setup_from_wit(s: wit::SineMimoSetup) -> Result<Setup, String> {
                 max_hz: p.max_hz,
             },
             wit::Tracking::Fixed(hz) => TrackingRule::Fixed { hz },
+        },
+        loop_delay: LoopDelay {
+            tracker_delay_factor: s.tracker_delay_factor,
+            transport_delay_s: s.transport_delay_s,
         },
     })
 }
@@ -851,6 +861,8 @@ mod tests {
                 share: 0.1,
                 max_hz: 20.0,
             }),
+            tracker_delay_factor: 1.0 / std::f64::consts::PI,
+            transport_delay_s: 0.0,
         };
         let p = setup_from_wit(s).unwrap();
         assert_eq!(

@@ -228,6 +228,7 @@ pub struct MimoSineCore {
     // The tone.
     osc: SweepOscillator,
     phase_ring: Vec<f64>,
+    lag_s: f64,
     ring_head: usize,
     ctl_trackers: Vec<ToneTracker>,
     lim_trackers: Vec<ToneTracker>,
@@ -314,6 +315,7 @@ impl MimoSineCore {
             tick_s,
             osc: SweepOscillator::new(fs_hz, f0),
             phase_ring: vec![0.0; lag + 1],
+            lag_s: lag as f64 / fs_hz,
             ring_head: 0,
             ctl_trackers: vec![ToneTracker::new(fs_hz, bw); n],
             lim_trackers: vec![ToneTracker::new(fs_hz, bw); p],
@@ -442,7 +444,9 @@ impl MimoSineCore {
         let b = self.setup.tracking.bandwidth_hz(f);
         let tracker = SETTLE_WIDTHS / b;
         let structure = self.group_delay.at(f, 2.0 * b);
-        SETTLE_TRACKER_TIMES * tracker + SETTLE_STRUCTURE_TIMES * structure
+        // The identification has the lag taken out, so its group delay does
+        // not hold the transport: add it once.
+        SETTLE_TRACKER_TIMES * tracker + SETTLE_STRUCTURE_TIMES * structure + self.lag_s
     }
 
     /// One sample: the drive frame for it, written into `out` (`out_channels`

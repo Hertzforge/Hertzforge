@@ -52,6 +52,7 @@ fn setup(controls: usize, drives: usize) -> Setup {
             pct: 10.0,
             max_hz: 20.0,
         },
+        loop_delay: Default::default(),
     }
 }
 

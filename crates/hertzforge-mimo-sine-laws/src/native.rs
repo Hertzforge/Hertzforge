@@ -110,6 +110,10 @@ pub fn sdk_setup(s: &LawSetup) -> sdk::Setup {
             abort_high_db: s.tolerance.abort_high_db.clone(),
         },
         tracking: tracking_rule(s.tracking),
+        loop_delay: sdk::LoopDelay {
+            tracker_delay_factor: s.tracker_delay_factor,
+            transport_delay_s: s.transport_delay_s,
+        },
     }
 }
 

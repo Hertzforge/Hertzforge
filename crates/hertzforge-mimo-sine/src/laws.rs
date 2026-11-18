@@ -96,6 +96,10 @@ pub fn math_setup(s: &LawSetup) -> lm::Setup {
             .collect(),
         shape: shape(s.shape),
         tracking: tracking(s.tracking),
+        loop_delay: lm::LoopDelay {
+            tracker_delay_factor: s.tracker_delay_factor,
+            transport_delay_s: s.transport_delay_s,
+        },
     }
 }
 

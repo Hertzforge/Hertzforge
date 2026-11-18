@@ -729,6 +729,18 @@ impl MimoSineService {
             limit_bounds,
             tolerance: tol,
             tracking: self.setup.tracking,
+            // The trackers' own delay over their bandwidth (four one-pole
+            // sections; measured in the tests).
+            tracker_delay_factor: hertzforge_dsp::tone::TRACKER_DELAY_FACTOR,
+            // What the identification does not show: it had the
+            // drive-to-response lag taken out, and the trackers take the same
+            // lag out of their reference phase, but a drive the law answers
+            // still reaches its reading that many samples later. The lag
+            // counts the station's buffering (the engine's output queue, the
+            // device) and the structure's own transport; between a law's
+            // answer and the drive there is only the ramp over the next tick,
+            // which the loop-speed rule counts as its tick.
+            transport_delay_s: rep.lag_frames as f64 / fs,
         };
         s.validate()
             .map_err(|e| ServiceError::Identification(e.to_string()))?;

@@ -253,6 +253,7 @@ impl MatrixLaw {
         let gn = gain(
             self.params.gain_rule,
             &self.tracking,
+            self.setup.loop_delay,
             &self.delay,
             self.tick_s,
             x.f_hz,

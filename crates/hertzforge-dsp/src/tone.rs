@@ -20,6 +20,13 @@ pub const SETTLE_WIDTHS: f64 = 1.3;
 /// over `alpha`, as `alpha` goes to zero: `(2n - 2)! / ((n - 1)!^2 2^(2n - 1))`.
 const NOISE_GAIN_PER_ALPHA: f64 = 720.0 / (36.0 * 128.0);
 
+/// The tracker's group delay times its noise bandwidth, as the bandwidth goes
+/// small against the rate: each of the [`TRACKER_POLES`] sections delays by
+/// `(1 - alpha) / alpha` samples and `alpha = B_n / (g fs)` with `g` the
+/// noise gain per alpha, so the delay is `TRACKER_POLES g / B_n` seconds:
+/// `4 x 0.15625 = 0.625` over the bandwidth.
+pub const TRACKER_DELAY_FACTOR: f64 = TRACKER_POLES as f64 * NOISE_GAIN_PER_ALPHA;
+
 /// One tone's tracker on one control channel.
 #[derive(Debug, Clone)]
 pub struct ToneTracker {

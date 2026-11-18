@@ -167,6 +167,7 @@ impl ModalStructure {
                 pct: 10.0,
                 max_hz: 20.0,
             },
+            loop_delay: Default::default(),
         }
     }
 }
