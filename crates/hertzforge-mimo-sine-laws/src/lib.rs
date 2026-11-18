@@ -14,8 +14,9 @@
 //!   shapes, test types and amplitude-only flag the shared entry lacks;
 //!   [`all_facts`]: what the law picker shows, with each built-in's limits.
 //! - [`parity`]: two laws over one recorded sequence.
-//! - [`check`]: the law check's cases; the check is not built in this
-//!   version.
+//! - [`check`]: the law check: its cases and their requirements, the runner
+//!   that plays a case through the engine ([`run_check_case`]) and the judge;
+//!   [`check_law`] runs every case a law accepts.
 
 pub mod check;
 pub mod choice;
@@ -23,7 +24,11 @@ pub mod facts;
 pub mod parity;
 pub mod wasm;
 
-pub use check::{run_check, CheckNotBuilt, MimoSineCheckCase};
+pub use check::{
+    cases_for, check_law, check_passed, check_record, judge, plan_setup, run_check, run_check_case,
+    run_plan, CaseMeasure, CaseResult, CaseVerdict, CheckNotBuilt, CheckRunError,
+    MimoSineCheckCase, Requirement, RunPlan, StationSpec, MIMO_SINE_CHECK_VERSION,
+};
 pub use choice::{
     builtin_decl, load_law_file, resolve, resolve_builtin, resolve_builtin_with, resolve_for_run,
     ResolveError,

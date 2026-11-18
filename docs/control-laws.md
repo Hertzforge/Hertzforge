@@ -947,9 +947,9 @@ control update (10 ms by default) for one complex amplitude per drive. The tone'
 sweep, the level schedule and every protection are the controller's. The specification's section
 16 states the world in full.
 
-Every result stated here was measured on the research testbed's simulated structures. No MIMO Sine
-law has yet run on a shaker, and the law check, which will gate a law file's arming on hardware as
-in every other world, is not built yet.
+Every result stated here was measured on simulated structures: the research testbed's, and the
+simulator's standard sine structures the law check runs on. No MIMO Sine law has yet run on a
+shaker.
 
 What differs from the single-output Sine laws:
 
@@ -1002,6 +1002,56 @@ Every one of these holds whatever the law returns:
 has 120 s by default, because a law may fit a model there: `matrix` fits its modal model when it
 is built, which took 4.6 s natively and 42 s as a law file on a four-by-four structure with 1441
 identification lines. Each update's call has a quarter of the update by default.
+
+### Checking a MIMO Sine law before hardware
+
+A MIMO Sine law file must pass the check before it may drive hardware. Each case is a whole run on
+the simulator at 16384 Hz with a 10 ms update: every control at full level (1 g peak) on a flat
+profile, an alarm band of 1.5 dB and an abort band of 6 dB, every drive's ceiling 2 V, identification
+20 dB under the reference, the guards at their defaults, and noise of 0.01 g rms on every input
+unless the case says otherwise. A law that accepts an amplitude-only reference runs one; any other
+law gets every control in phase. A law runs only the cases of the test types it accepts: `matrix`
+all seventeen, `paired` and `ratio` seven, `steepest_descent` and `secant` six. The bands and dwells
+are short so the check of one law takes seconds of simulated test.
+
+| Case | Type | Structure and run | Asks |
+|---|---|---|---|
+| dwell at resonance | dwell | Linear 4 x 4, 6 s at its 96 Hz mode | Within 1.0 dB from 2 s after the start |
+| dwell away from resonance | dwell | Linear 4 x 4, 6 s at 130 Hz | Within 1.0 dB from 2 s after the start |
+| measurement noise | dwell | Linear 4 x 4 at 96 Hz, noise 30 dB under full level | Within 1.5 dB |
+| transport delay | dwell | The plate without its modes, 50 ms on every drive, at -6 dB, 6 s at 100 Hz | Within 0.5 dB from 2 s after the start |
+| level ladder | dwell | Mildly softening 4 x 4 at 96 Hz, rungs of 2 s at -20, -12, -6 and 0 dB | Every rung within 1.0 dB |
+| stepped | stepped | Linear 4 x 4, 60 to 120 Hz, six steps an octave of 2 s | Within 1.5 dB |
+| slow sweep | sweep | Linear 4 x 4, 80 to 120 Hz at one octave a minute | Within 1.5 dB, median within 0.5 dB |
+| fast sweep | sweep | Linear 4 x 4, 80 to 160 Hz at four octaves a minute | Within 5.0 dB within 12 Hz of the mode, 2.0 dB further away |
+| close modes | sweep | The linear plate with a second mode 2 percent above the 96 Hz mode, two octaves a minute | Within 2.0 dB |
+| near-singular | sweep | Near-singular 4 x 4, 350 to 420 Hz through 381.2 Hz | Completes, or ends on the controller's own abort or divergence stop, no drive over its ceiling |
+| limit channel | sweep | Base and article, the article limited at 2 g, 150 to 350 Hz at two octaves a minute | The notch engages; the limit at most 0.5 dB over its bound; no control over 1.0 dB in the second after a release |
+| more controls than drives | sweep | 6 controls by 3 drives, 80 to 120 Hz | Within 3.0 dB of the response the drives can reach, median within 0.5 dB |
+| more drives than controls | sweep | 3 controls by 6 drives, 80 to 120 Hz | Within 1.5 dB, median within 0.5 dB, opposition ratio at most 6 dB |
+| law misbehaves | dwell | Linear 4 x 4 at 96 Hz; from the 150th update the law's answer is not finite | The run ends on a law fault after three refused answers, every drive at zero |
+| moved resonance (mild, moderate, hardening) | sweep | The softening and hardening 4 x 4 structures through a resonance that moves with level | Reported, not a pass condition |
+
+Every case first asks the same of the run, in this order: every answer of the law was used and it
+never faulted; no drive sample went over its ceiling and the controller never had to scale an answer
+down to the ceilings (the near-singular case excepted); the run did not end on an abort or the
+divergence stop; and it completed. "Within" is judged on every control at every update outside a
+settle window at the case's last level. A failed case is recorded with the requirement it broke and
+the number that broke it; the moved-resonance cases are printed so the linear law's stated limit
+can be seen, and never fail a law.
+
+The requirements are what a good law should do, written before any law was run against them, and
+several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
+as a law file with the same verdicts. `ratio` passes every case it runs. `matrix` fails two: the
+level ladder (1.16 dB on the first judged update after the step to -12 dB, against 1.0) and the
+limit channel (the article 0.66 dB over its bound against 0.5, and a control 3.5 dB over its
+reference in the second after the notch releases); its hardening sweep is 2.3 dB. `paired` fails
+measurement noise, the stepped sine and the level ladder: it starts about 5 dB from the reference
+and is still there when the settle window closes. `steepest_descent` and `secant` fail the level
+ladder: their drive does not follow a step in level, and the run aborts a second after the step.
+
+`matrix` as a law file fits its model when it is built, which on the check's widest band (the limit
+case) takes about 20 s; the check times the build apart from the run.
 
 ### The built-in MIMO Sine laws
 
