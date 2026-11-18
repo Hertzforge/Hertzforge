@@ -351,14 +351,15 @@ fn row_configs(rehearse: bool, laws: &[(String, Vec<String>)]) -> Vec<(String, V
     }
     b5["identification"]["level_db"] = json!(-30);
     out.push(("B5".into(), b5));
-    // B6: the reference rises 12 dB (0.025 to 0.1) from 59 to 60 Hz; matrix asks for more than
-    // the change cap allows while the sweep crosses it. (Its overshoot after the rise, about
-    // 10 dB, keeps every drive under 0.35 V at these levels.)
+    // B6: the reference rises 12 dB (0.025 to 0.1) from 59.9 to 60 Hz. At four octaves a
+    // minute the sweep crosses that tenth of a hertz in under four updates, so following it
+    // asks for more than the change cap's 1 dB an update and the cap binds. The largest
+    // reference here is 0.1, so every drive stays far under its ceiling.
     let mut b6 = base(sweep(40.0, 80.0, 4.0), "matrix");
     for k in 0..4 {
         b6["channels"]["controls"][k]["profile"] = json!({
             "rows": [{"freq_hz": 5, "quantity": "accel_g", "value": 0.025},
-                     {"freq_hz": 59, "quantity": "accel_g", "value": 0.025},
+                     {"freq_hz": 59.9, "quantity": "accel_g", "value": 0.025},
                      {"freq_hz": 60, "quantity": "accel_g", "value": 0.1},
                      {"freq_hz": 2000, "quantity": "accel_g", "value": 0.1}],
             "alarm_db": [20, 20], "abort_db": [20, 20]});
