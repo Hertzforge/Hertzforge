@@ -70,6 +70,20 @@
 	}
 </script>
 
+<!-- what Save writes to, said as that: the path alone read as where the project came from (Brandon, 2026-11-17). An older project file is read and not written back to, so it says so. -->
+{#snippet fileLine(file: string | null | undefined)}
+	{#if !file}
+		<span class="cdesc">Not saved yet</span>
+	{:else}
+		{@const old = file.endsWith('.vdyn')}
+		<span class="cline" title={old ? `Opened from ${file}. Save asks for a new file: this one is not written back to.` : `Save writes to ${file}`} data-testid="project-file">
+			<span class="clead">{old ? 'Opened from' : 'Saves to'}</span>
+			<span class="cdesc mono">{file}</span>
+		</span>
+	{/if}
+{/snippet}
+
+
 <section class="project" aria-labelledby="project-title" data-testid="project-panel">
 	<div class="head">
 		<h2 id="project-title" class="eyebrow">Project</h2>
@@ -110,7 +124,7 @@
 					}}
 					onblur={() => void commitTitle()}
 				/>
-				<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
+				{@render fileLine(p.summary.file)}
 			</div>
 		{:else}
 			<button type="button" class="choice" class:on={!p.selection.objects.length} aria-pressed={!p.selection.objects.length} data-testid="project-select" title={canDragOut() ? 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Drag it to a folder to save a copy there. Delete starts a new, empty project.' : 'The project: Save, Open, Import and the acts that take no object. Double-click to rename it. Delete starts a new, empty project.'} onclick={(e) => { p.clearSelection(); e.currentTarget.focus(); }} ondblclick={startTitle} onkeydown={projectKey} onpointerdown={projectDown} onpointermove={projectMove} onpointerup={projectUp} onpointercancel={projectUp}>
@@ -118,7 +132,7 @@
 					{p.summary.title}
 					{#if p.summary.modified}<span class="dot" title="Changes not saved" aria-label="Changes not saved"></span>{/if}
 				</span>
-				<span class="cdesc mono" title={p.summary.file ?? undefined}>{p.summary.file ?? 'Not saved yet'}</span>
+				{@render fileLine(p.summary.file)}
 			</button>
 		{/if}
 		{#if p.summary.objects.length || p.summary.unresolved?.length}
@@ -283,6 +297,24 @@
 		font-size: var(--text-sm);
 		font-weight: var(--weight-medium);
 		color: var(--text-1);
+	}
+
+	.cline {
+		display: flex;
+		align-items: baseline;
+		gap: 4px;
+		min-width: 0;
+	}
+
+	.clead {
+		flex: none;
+		font-size: var(--text-xs);
+		color: var(--text-4);
+		white-space: nowrap;
+	}
+
+	.cline .cdesc {
+		min-width: 0;
 	}
 
 	.cdesc {
