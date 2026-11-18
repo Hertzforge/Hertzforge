@@ -456,6 +456,7 @@ pub fn parse(config: &Value) -> Result<WireMsine, MethodError> {
                     .map_or(nd.smoothing_ticks, |x| u32::try_from(x).unwrap_or(u32::MAX)),
                 release_ramp_db_per_s: n
                     .f64_or("release_ramp_db_per_s", nd.release_ramp_db_per_s)?,
+                release_hysteresis_db: nd.release_hysteresis_db,
                 near_bound_db: n.f64_or("near_bound_db", nd.near_bound_db)?,
             };
         }
