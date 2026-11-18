@@ -40,6 +40,9 @@ pub enum At {
     Row(usize),
     /// A configuration field path.
     Field(String),
+    /// A breakpoint row, from 0, of the profile of the channel with this table
+    /// `index` (a module with a profile per channel).
+    RowOf(usize, u32),
 }
 
 impl Item {
@@ -80,6 +83,10 @@ impl Item {
             }
             At::Row(r) => {
                 m.insert("row".into(), Value::from(*r));
+            }
+            At::RowOf(r, c) => {
+                m.insert("row".into(), Value::from(*r));
+                m.insert("channel".into(), Value::from(*c));
             }
             At::Field(f) => {
                 m.insert("field".into(), Value::from(f.as_str()));

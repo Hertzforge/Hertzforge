@@ -2641,6 +2641,8 @@ dependencies = [
  "hertzforge-mimo-random",
  "hertzforge-mimo-shock",
  "hertzforge-mimo-shock-laws",
+ "hertzforge-mimo-sine",
+ "hertzforge-mimo-sine-laws",
  "hertzforge-mixed",
  "hertzforge-mixed-laws",
  "hertzforge-module-abi",

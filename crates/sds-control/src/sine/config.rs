@@ -387,12 +387,12 @@ fn bad(path: &str, message: impl Into<String>) -> MethodError {
     MethodError::bad_params(path, message)
 }
 
-fn band_hz(o: &Obj<'_>, k: &str) -> Result<(f64, f64), MethodError> {
+pub(crate) fn band_hz(o: &Obj<'_>, k: &str) -> Result<(f64, f64), MethodError> {
     o.band(k)?
         .ok_or_else(|| bad(&o.at(k), format!("\"{}\" is [low, high] in Hz", o.at(k))))
 }
 
-fn parse_rate(o: &Obj<'_>, k: &str) -> Result<SweepRate, MethodError> {
+pub(crate) fn parse_rate(o: &Obj<'_>, k: &str) -> Result<SweepRate, MethodError> {
     let r = o.obj(k)?;
     match r.opt_str("law")? {
         Some("log") => Ok(SweepRate::LogOctPerMin(r.f64("oct_per_min")?)),
@@ -408,7 +408,7 @@ fn parse_rate(o: &Obj<'_>, k: &str) -> Result<SweepRate, MethodError> {
 }
 
 /// `{"seconds"}` or `{"cycles"}`, exactly one.
-fn parse_dwell_for(v: &Value, path: &str) -> Result<DwellFor, MethodError> {
+pub(crate) fn parse_dwell_for(v: &Value, path: &str) -> Result<DwellFor, MethodError> {
     let o = Obj::of(v, path)?;
     match (o.opt_f64("seconds")?, o.opt_count("cycles")?) {
         (Some(s), None) => Ok(DwellFor::Seconds(s)),
@@ -421,7 +421,7 @@ fn parse_dwell_for(v: &Value, path: &str) -> Result<DwellFor, MethodError> {
 }
 
 /// `{"sweeps"}` or `{"seconds"}`, exactly one.
-fn parse_rung_for(o: &Obj<'_>, k: &str) -> Result<Option<RungFor>, MethodError> {
+pub(crate) fn parse_rung_for(o: &Obj<'_>, k: &str) -> Result<Option<RungFor>, MethodError> {
     let Some(r) = o.opt_obj(k)? else {
         return Ok(None);
     };
@@ -442,15 +442,15 @@ fn clip32(n: u64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-const DIRECTIONS: [(&str, SweepDirection); 2] =
+pub(crate) const DIRECTIONS: [(&str, SweepDirection); 2] =
     [("up", SweepDirection::Up), ("down", SweepDirection::Down)];
-const SPACINGS: [(&str, StepSpacing); 2] =
+pub(crate) const SPACINGS: [(&str, StepSpacing); 2] =
     [("log", StepSpacing::Log), ("linear", StepSpacing::Linear)];
 const DWELL_MODES: [(&str, RstdDwellMode); 2] = [
     ("fixed", RstdDwellMode::Fixed),
     ("phase_tracked", RstdDwellMode::PhaseTracked),
 ];
-const MODES: [(&str, RunMode); 2] = [("auto", RunMode::Auto), ("manual", RunMode::Manual)];
+pub(crate) const MODES: [(&str, RunMode); 2] = [("auto", RunMode::Auto), ("manual", RunMode::Manual)];
 const COMPOSITES: [(&str, CompositeMode); 3] = [
     ("weighted_avg", CompositeMode::WeightedAvg),
     ("min", CompositeMode::Min),
@@ -564,7 +564,7 @@ pub(crate) fn parse_feasibility(o: &Obj<'_>) -> Result<WireFeasibility, MethodEr
 }
 
 /// A channel index at `k`.
-fn channel_index(o: &Obj<'_>, k: &str) -> Result<u32, MethodError> {
+pub(crate) fn channel_index(o: &Obj<'_>, k: &str) -> Result<u32, MethodError> {
     o.opt_count(k)?
         .and_then(|n| u32::try_from(n).ok())
         .ok_or_else(|| {
