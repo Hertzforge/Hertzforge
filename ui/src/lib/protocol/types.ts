@@ -129,6 +129,14 @@ export interface SpectrumView {
 	handles?: SpectrumHandle[];
 	/** Sets of series shown one at a time, chosen from a list: a channel each, say. */
 	groups?: SeriesGroup[];
+	/** Zones shaded behind the curves, each between two edges at `x` (null: the plot's edge on that side): past a warning limit, over or under an abort. */
+	bands?: { kind: 'warning' | 'over' | 'under'; x: (number | null)[]; lower: (number | null)[] | null; upper: (number | null)[] | null }[];
+	/** The legend's lines for the zones and marks: a code (`warning`, `above`, `below`, `exceed_over`, `exceed_under`) and its words. */
+	key?: [string, string][];
+	/** Numbers boxed under the plot, as a group's: the share of lines out, the RMS error. */
+	readouts?: { label: string; text: string; status: Status }[];
+	/** The range of x the plot opens on, where that is not all of its data. */
+	x_home?: [number, number];
 }
 
 /** One set of a spectrum's series, by index, with readings that go with it. */
@@ -142,8 +150,8 @@ export interface SeriesGroup {
 export interface Region {
 	x0: number;
 	x1: number;
-	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone. */
-	kind: 'frame' | 'cut' | 'span';
+	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone; `over`, `under`: lines outside an abort limit. */
+	kind: 'frame' | 'cut' | 'span' | 'over' | 'under';
 	label?: string;
 	/** A frame's window: its weights from 0 to 1, evenly spaced from x0 to x1, drawn on a rail above the curves and followed by the frame's shading. */
 	window?: number[];
@@ -1640,6 +1648,8 @@ export interface ReportPageBlock {
 	html?: string;
 	/** A figure: the views it is drawn as. */
 	views?: View[];
+	/** A figure laid out as a table of plots: a column a direction, a row a node, each cell its figures by their place in `views`. */
+	grid?: { columns: string[]; rows: { label: string; cells: { view: number; caption: string; note?: string; facts?: [string, string][] }[][] }[] };
 	/** An unbound slot: what the block was. */
 	was?: string;
 	empty?: boolean;

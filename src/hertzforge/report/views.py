@@ -78,6 +78,9 @@ def _plot(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
     curves = built.get('curves') or []
     series: list[dict[str, Any]] = []
     groups: list[dict[str, Any]] = []
+    bands: list[dict[str, Any]] = []
+    regions: list[dict[str, Any]] = []
+    lone: dict[str, Any] = {}
 
     def own_x(curve: Mapping[str, Any]) -> np.ndarray:
         return x if curve.get('x') is None else _values(curve['x'], logx)
@@ -103,12 +106,25 @@ def _plot(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
             for response in channel.get('responses') or []:
                 series.append(_curve(str(response.get('label') or 'measured'), 'measured', x,
                                      _values(response['y'], logy), block_edges))
+            limits_from = len(series)
             for zone in channel.get('zones') or []:
                 role = _ZONE_ROLES.get(zone.get('severity'), 'tolerance')
+                sides: dict[str, Any] = {'lower': None, 'upper': None}
                 for side in ('lower', 'upper'):
                     if zone.get(side) is not None:
+                        sides[side] = _values(zone[side], logy)
                         series.append(_curve(f"{zone.get('severity', 'limit')} {side}", role,
-                                             tx, _values(zone[side], logy), tedges))
+                                             tx, sides[side], tedges))
+                # the zone shaded between its two edges, or from its one edge to the
+                # plot's: above the upper abort, below the lower
+                kind = ('warning' if zone.get('severity') == 'warning'
+                        else 'over' if sides['upper'] is None else 'under')
+                bands.append({'kind': kind, 'x': _listed(tx),
+                              'lower': None if sides['lower'] is None else _listed(sides['lower']),
+                              'upper': None if sides['upper'] is None else _listed(sides['upper'])})
+            # the lines outside an abort limit, each across its own bin
+            for key in ('over', 'under'):
+                regions += _runs(channel.get(key), x, block_edges, key)
             group: dict[str, Any] = {'label': str(channel['label']),
                                      'series': list(range(first, len(series)))}
             readouts = [{'label': str(r['label']), 'text': str(r['text']),
@@ -117,6 +133,8 @@ def _plot(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
             if readouts:
                 group['readouts'] = readouts
             groups.append(group)
+            lone = {'bands': bands, 'readouts': readouts, 'limits_from': limits_from,
+                    'limits_to': len(series), 'key': channel.get('key') or []}
     else:
         colors: dict[Any, int] = {}
         for curve in curves:
@@ -131,13 +149,67 @@ def _plot(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
                                  _values(curve['y'], logy), own_edges(curve), follows))
     if not series:
         return None
-    regions = []
     averaging = built.get('averaging') or {}
     for x0, x1 in averaging.get('frames') or []:
         regions.append(v.region(float(x0), float(x1), 'frame', averaging.get('label') or None))
     view = v.spectrum(title, axis_of(built.get('xlabel', ''), logx),
                       axis_of(built.get('ylabel', ''), logy), series, regions=regions)
-    return v.grouped(view, groups) if len(groups) > 1 else view
+    if len(groups) > 1:
+        # several channels on one plot, one shown at a time: the zones and marks of each
+        # would lie over the others', so they are drawn where a channel has a plot alone
+        view.pop('regions', None)
+        kept = [region for region in regions if region['kind'] == 'frame']
+        if kept:
+            view['regions'] = kept
+        return v.grouped(view, groups)
+    if lone.get('bands'):
+        # one channel alone: its zones are shaded, so their edges are not drawn as lines
+        # too, which is how the page has always drawn a channel against its requirement
+        del view['series'][lone['limits_from']:lone['limits_to']]
+        view['bands'] = lone['bands']
+    if lone.get('key'):
+        view['key'] = [[str(code), str(label)] for code, label in lone['key']]
+    if lone.get('readouts'):
+        view['readouts'] = lone['readouts']
+    home = built.get('home_x')
+    if home and len(home) == 2 and all(value is not None for value in home):
+        low, high = (float(value) for value in _values(home, logx))
+        if high > low:
+            view['x_home'] = [low, high]
+    return view
+
+
+def _listed(values: np.ndarray) -> list[float | None]:
+    """An edge of a zone as the frame carries it: its numbers, a missing one null."""
+    return [float(value) if np.isfinite(value) else None for value in values]
+
+
+def _runs(marks: Any, x: np.ndarray, edges: np.ndarray | None, kind: str) -> list[dict[str, Any]]:
+    """The lines a channel has outside an abort limit (`marks`, a level where a line is
+    out and None where it is not) as spans of x, neighbors joined: each line across its
+    own bin when the plot has `edges`, else from halfway to its neighbors."""
+    if not marks:
+        return []
+    out = [value is not None for value in marks][:len(x)]
+    if edges is not None and len(edges) == len(x) + 1:
+        low, high = edges[:-1], edges[1:]
+    else:
+        mid = 0.5 * (x[:-1] + x[1:])
+        low = np.concatenate([x[:1], mid])
+        high = np.concatenate([mid, x[-1:]])
+    spans: list[dict[str, Any]] = []
+    k = 0
+    while k < len(out):
+        if not out[k]:
+            k += 1
+            continue
+        start = k
+        while k + 1 < len(out) and out[k + 1]:
+            k += 1
+        if np.isfinite(low[start]) and np.isfinite(high[k]) and high[k] > low[start]:
+            spans.append(v.region(float(low[start]), float(high[k]), kind))
+        k += 1
+    return spans
 
 
 def _scene(built: Mapping[str, Any], title: str, unit: str) -> dict[str, Any]:
@@ -231,34 +303,39 @@ def _image(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
     return v.image(title, fmt, base64.b64decode(encoded))
 
 
-def _grid(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
-    """A grid of channel figures as one `spectrum`, a group a cell, named
-    by its row and column, on the first cell's axes."""
-    series: list[dict[str, Any]] = []
-    groups: list[dict[str, Any]] = []
-    first_view = None
-    columns = built.get('columns') or []
+def _grid(built: Mapping[str, Any], title: str
+          ) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
+    """A grid of channel figures as the page lays it out: a `spectrum` a figure, and the
+    layout that places them, a row a node and a column a direction (`report.channel_grid`).
+    Each cell lists its figures by their place among the views, each with its caption
+    (the channel), its `note` (how far its direction is off the column's axis) and its
+    `facts`, the lines read under it. A grid was one plot with its channels picked from a
+    list, which drew neither the table nor the shading (Brandon, 2026-11-17)."""
+    views: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for row in built.get('rows') or []:
-        for c, cell in enumerate(row.get('cells') or []):
+        cells: list[list[dict[str, Any]]] = []
+        for cell in row.get('cells') or []:
+            placed: list[dict[str, Any]] = []
             for figure in cell:
-                view = _plot(figure, title)
+                caption = str(figure.get('caption', ''))
+                view = _plot(figure, caption or title)
                 if view is None:
                     continue
-                first_view = first_view or view
-                start = len(series)
-                for s in view['series']:
-                    if 'follows' in s:
-                        s = {**s, 'follows': s['follows'] + start}
-                    series.append(s)
-                column = columns[c] if c < len(columns) else ''
-                groups.append({'label': f"{row.get('label', '')} {column}".strip()
-                               or str(figure.get('caption', '')),
-                               'series': list(range(start, len(series)))})
-    if first_view is None:
+                entry: dict[str, Any] = {'view': len(views), 'caption': caption}
+                if figure.get('note'):
+                    entry['note'] = str(figure['note'])
+                facts = [[str(label), str(text)] for label, text in figure.get('facts') or []]
+                if facts:
+                    entry['facts'] = facts
+                placed.append(entry)
+                views.append(view)
+            cells.append(placed)
+        rows.append({'label': str(row.get('label', '')), 'cells': cells})
+    if not views:
         return None
-    view = {**first_view, 'series': series}
-    view.pop('groups', None)
-    return v.grouped(view, groups)
+    return views, {'columns': [str(column) for column in built.get('columns') or []],
+                   'rows': rows}
 
 
 def _scalogram(built: Mapping[str, Any], title: str) -> dict[str, Any]:
@@ -326,7 +403,8 @@ def block_views(built: Mapping[str, Any], block: Mapping[str, Any] | None = None
     elif kind == 'image':
         made = _image(built, title)
     elif kind == 'grid':
-        made = _grid(built, title)
+        laid = _grid(built, title)
+        return [] if laid is None else laid[0]
     elif kind == 'stage':
         made = _stage(block or {}, built, title, objects or {})
     else:
@@ -369,6 +447,9 @@ def page_blocks(report: Any, objects: Mapping[str, Any], unit_system: Any = None
         else:
             views = block_views(built, source_block, objects, length)
             entry.update(kind='figure' if views else 'unbound', views=views)
+            if kind == 'grid' and views:
+                # where each of the views goes: a row a node, a column a direction
+                entry['grid'] = _grid(built, str(built.get('label') or ''))[1]
             if not views:
                 entry['was'] = str(kind)
         out.append(entry)

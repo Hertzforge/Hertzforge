@@ -130,7 +130,25 @@
               }
             }}
           }
-        }}
+        }},
+        "bands": {"type": "array", "items": {
+          "type": "object", "required": ["x", "lower", "upper", "kind"], "additionalProperties": false,
+          "properties": {
+            "x": {"type": "array", "items": {"type": ["number", "null"]}},
+            "lower": {"type": ["array", "null"], "items": {"type": ["number", "null"]}},
+            "upper": {"type": ["array", "null"], "items": {"type": ["number", "null"]}},
+            "kind": {"enum": ["warning", "over", "under"]}
+          }
+        }},
+        "key": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}},
+        "readouts": {"type": "array", "items": {
+          "type": "object", "required": ["label", "text", "status"], "additionalProperties": false,
+          "properties": {
+            "label": {"type": "string"}, "text": {"type": "string"},
+            "status": {"enum": ["pass", "warn", "fail", "info"]}
+          }
+        }},
+        "x_home": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
       }
     },
     "barsView": {
@@ -158,7 +176,7 @@
       "properties": {
         "x0": {"type": "number"},
         "x1": {"type": "number"},
-        "kind": {"enum": ["frame", "cut", "span"]},
+        "kind": {"enum": ["frame", "cut", "span", "over", "under"]},
         "label": {"type": "string"},
         "window": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}},
         "level": {"type": "integer", "minimum": 0},
@@ -845,6 +863,27 @@
             "note": {"type": "string"},
             "html": {"type": "string"},
             "views": {"$ref": "#/$defs/views"},
+            "grid": {
+              "type": "object", "required": ["columns", "rows"], "additionalProperties": false,
+              "properties": {
+                "columns": {"type": "array", "items": {"type": "string"}},
+                "rows": {"type": "array", "items": {
+                  "type": "object", "required": ["label", "cells"], "additionalProperties": false,
+                  "properties": {
+                    "label": {"type": "string"},
+                    "cells": {"type": "array", "items": {"type": "array", "items": {
+                      "type": "object", "required": ["view", "caption"], "additionalProperties": false,
+                      "properties": {
+                        "view": {"type": "integer", "minimum": 0},
+                        "caption": {"type": "string"},
+                        "note": {"type": "string"},
+                        "facts": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}}
+                      }
+                    }}}
+                  }
+                }}
+              }
+            },
             "was": {"type": "string"},
             "empty": {"type": "boolean"}
           }

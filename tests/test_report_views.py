@@ -64,11 +64,39 @@ def test_a_random_run_draws_its_grids_and_bars_as_views():
                          object_groups=project.object_groups)
     views = [view for b in blocks for view in b.get('views', [])]
     _valid(views)
-    grouped = [view for view in views if view['view'] == 'spectrum' and view.get('groups')]
-    assert grouped, 'the control grid is a spectrum shown a channel at a time'
-    first = grouped[0]
-    roles = {first['series'][i]['role'] for i in first['groups'][0]['series']}
-    assert {'reference', 'measured'} <= roles
+    # the control grid is a table of plots: a row a node, a column a direction, a plot a
+    # channel, each with its zones shaded, its lines outside abort marked and its numbers
+    laid = next(b for b in blocks if b.get('grid'))
+    grid, plots = laid['grid'], laid['views']
+    assert grid['columns'] and all(column.startswith('Global ') for column in grid['columns'])
+    placed = [figure for row in grid['rows'] for cell in row['cells'] for figure in cell]
+    assert [figure['view'] for figure in placed] == list(range(len(plots)))
+    assert all(len(row['cells']) == len(grid['columns']) for row in grid['rows'])
+    assert all(row['label'].startswith('Node ') for row in grid['rows'])
+    first = plots[0]
+    assert 'groups' not in first, 'a plot a channel, none picked from a list'
+    assert [line['role'] for line in first['series']] == ['reference', 'measured']
+    assert {band['kind'] for band in first['bands']} == {'warning', 'over', 'under'}
+    for band in first['bands']:
+        edges = [edge for edge in (band['lower'], band['upper']) if edge is not None]
+        assert edges and all(len(edge) == len(band['x']) for edge in edges)
+        assert (band['upper'] is None) == (band['kind'] == 'over')
+        assert (band['lower'] is None) == (band['kind'] == 'under')
+    assert [r['label'] for r in first['readouts']] == ['% Lines Out', 'RMS Error']
+    low, high = first['x_home']
+    assert first['series'][0]['x'][0] < low < high
+    # a line outside abort is shaded across its own bin, inside the band read
+    marks = [region for plot in plots for region in plot.get('regions', ())
+             if region['kind'] in ('over', 'under')]
+    assert marks and all(region['x1'] > region['x0'] for region in marks)
+    out = float(first['readouts'][0]['text'])
+    assert (out > 0) == any(r['kind'] in ('over', 'under') for r in first.get('regions', ()))
+    # built from the project itself, as the service builds it, each plot has the lines
+    # read under it: its channel, where it is and the global axis it is nearest
+    whole = page_blocks(project[name], project, object_groups=project.object_groups)
+    cell = next(b for b in whole if b.get('grid'))['grid']['rows'][0]['cells'][0][0]
+    assert [fact[0] for fact in cell['facts']] == ['Channel', 'Location and axis', 'Requirement']
+    assert 'nearest global' in cell['facts'][1][1]
     assert any(view['view'] == 'bars' for view in views)
 
 

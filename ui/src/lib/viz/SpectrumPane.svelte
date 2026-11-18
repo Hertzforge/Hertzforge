@@ -279,10 +279,13 @@
 	}
 
 	/** y range for data, snapped; with `live`, only moves when the data leaves it or shrinks far inside. */
-	function nextYRange(cols: ArrayLike<number | null>[]): [number, number] {
+	function nextYRange(cols: ArrayLike<number | null>[], xs?: ArrayLike<number>): [number, number] {
 		if (yFixed) return yFixed;
 		if (yZoom) return yZoom;
-		const ext = finiteExtent(shownCols(cols), logY) ?? (logY ? [1e-4, 1] : [0, 1]);
+		// a plot that opens on part of its x (`x_home`) is ranged on what that part holds
+		const home = view.x_home;
+		const within = home && xs ? shownCols(cols).map((col) => Array.from(col, (value, i) => (xs[i] >= home[0] && xs[i] <= home[1] ? value : null))) : shownCols(cols);
+		const ext = finiteExtent(within, logY) ?? (logY ? [1e-4, 1] : [0, 1]);
 		let target = logY ? logRange(ext[0], ext[1]) : linearRange(ext[0], ext[1]);
 		// the windows of averaging frames stand on a rail along the top: the curves keep clear of it
 		const rail = logY ? 0 : railShare(shownRegions);
@@ -366,7 +369,7 @@
 		destroyPlot();
 		const data = alignSeries(view.series, logX, logY);
 		const [xs, ...cols] = data;
-		yRange = nextYRange(cols);
+		yRange = nextYRange(cols, xs as ArrayLike<number>);
 		const axisColor = cssVar('--plot-axis');
 		const gridColor = cssVar('--plot-grid');
 		const tickFont = font(11);
@@ -470,7 +473,7 @@
 				}))
 			],
 			hooks: {
-				drawAxes: [drawMinorGrid, drawEnvelopes],
+				drawAxes: [drawMinorGrid, drawBands, drawEnvelopes],
 				draw: [placePlayLine, placeMarker, placeGuides, placeRegions, placeHandles, drawSeriesMarkers, drawMarks],
 				setScale: [
 					(u, key) => {
@@ -545,6 +548,8 @@
 		});
 		if (xFixed) plot.setScale('x', { min: xFixed[0], max: xFixed[1] });
 		else if (kept) plot.setScale('x', kept);
+		// it opens on the range the view names (a requirement's own band), not on all its data
+		else if (view.x_home && (!logX || view.x_home[0] > 0)) plot.setScale('x', { min: view.x_home[0], max: view.x_home[1] });
 		appliedX = xFixed;
 		measureArea();
 		resizeObs = new ResizeObserver(() => {
@@ -560,7 +565,7 @@
 		if (!plot) return;
 		if (keyOf(view) !== structureKey) return build();
 		const [xs, ...cols] = alignSeries(view.series, logX, logY);
-		const next = nextYRange(cols);
+		const next = nextYRange(cols, xs as ArrayLike<number>);
 		const plotData = [xs, ...drawOrder.map((o) => cols[o.index])] as uPlot.AlignedData;
 		// Without its scale reset, setData only swaps the data and draws nothing; setting the y range
 		// (held for live data, or moved) is what draws it. `redraw()` is not used: before the first
@@ -605,8 +610,8 @@
 		if (change.y !== undefined) {
 			yZoom = change.y;
 			if (!yZoom) yRange = null;
-			const [, ...cols] = alignSeries(view.series, logX, logY);
-			const next = nextYRange(cols);
+			const [xs, ...cols] = alignSeries(view.series, logX, logY);
+			const next = nextYRange(cols, xs as ArrayLike<number>);
 			yRange = next;
 			plot.setScale('y', { min: next[0], max: next[1] });
 		}
@@ -741,6 +746,44 @@
 			}
 		});
 		ctx.stroke();
+		ctx.restore();
+	}
+
+	/** The zones a response must not be in (`view.bands`), shaded under the curves: warm past a warning limit, red over an abort and blue under one. */
+	const BAND_COLORS = { warning: '#d9a441', over: '#d6453d', under: '#3d7fd6' };
+	function drawBands(u: uPlot) {
+		const bands = view.bands;
+		if (!bands?.length) return;
+		const ctx = u.ctx;
+		const { left, top, width, height } = u.bbox;
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(left, top, width, height);
+		ctx.clip();
+		for (const band of bands) {
+			const edge = (values: (number | null)[] | null, fallback: number): [number, number][] => {
+				const points: [number, number][] = [];
+				band.x.forEach((x, i) => {
+					if (x === null || (logX && x <= 0)) return;
+					const value = values ? values[i] : undefined;
+					if (values && (value === null || value === undefined || (logY && value <= 0))) return;
+					points.push([u.valToPos(x, 'x', true), values ? u.valToPos(value as number, 'y', true) : fallback]);
+				});
+				return points;
+			};
+			// the far side of a zone with one edge is the plot's own: its top, or its bottom
+			const upper = edge(band.upper, top);
+			const lower = edge(band.lower, top + height);
+			if (upper.length < 2 || lower.length < 2) continue;
+			ctx.beginPath();
+			upper.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+			for (let k = lower.length - 1; k >= 0; k--) ctx.lineTo(lower[k][0], lower[k][1]);
+			ctx.closePath();
+			ctx.globalAlpha = band.kind === 'warning' ? 0.16 : 0.2;
+			ctx.fillStyle = BAND_COLORS[band.kind];
+			ctx.fill();
+		}
+		ctx.globalAlpha = 1;
 		ctx.restore();
 	}
 
@@ -1307,8 +1350,10 @@
 				line(b, 1.5, 1);
 			} else {
 				ctx.globalAlpha = 1;
-				ctx.fillStyle = cssVar(region.kind === 'cut' ? '--region-cut' : '--region-frame');
+				if (region.kind === 'over' || region.kind === 'under') ctx.globalAlpha = 0.45;
+				ctx.fillStyle = region.kind === 'over' || region.kind === 'under' ? BAND_COLORS[region.kind] : cssVar(region.kind === 'cut' ? '--region-cut' : '--region-frame');
 				ctx.fillRect(a, box.top, b - a, box.height);
+				ctx.globalAlpha = 1;
 				if (region.kind === 'frame') line(a, 1, 1);
 			}
 		}
@@ -1467,9 +1512,9 @@
 			{/each}
 		</select>
 		{/if}
-		{#if shownGroup?.readouts?.length}
+		{#if (shownGroup?.readouts ?? view.readouts)?.length}
 		<span class="group-readouts">
-			{#each shownGroup.readouts as r, k (k)}
+			{#each shownGroup?.readouts ?? view.readouts ?? [] as r, k (k)}
 				<span class="group-readout" data-status={r.status}>{r.label}: <b>{r.text}</b> <span class="word">{r.status}</span></span>
 			{/each}
 		</span>
@@ -1807,6 +1852,15 @@
 
 	.plot :global(.region.cut) {
 		background: var(--region-cut);
+	}
+
+	/* a line outside an abort limit, across its bin: red over, blue under */
+	.plot :global(.region.over) {
+		background: color-mix(in srgb, #d6453d 45%, transparent);
+	}
+
+	.plot :global(.region.under) {
+		background: color-mix(in srgb, #3d7fd6 45%, transparent);
 	}
 
 	.plot :global(.region.span) {
