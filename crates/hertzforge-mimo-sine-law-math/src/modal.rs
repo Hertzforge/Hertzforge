@@ -176,6 +176,9 @@ fn argmin_abs(g: &[f64], f: f64) -> usize {
     best
 }
 
+/// A group's fitted frequencies, damping ratios and residues.
+type GroupFit = (Vec<f64>, Vec<f64>, Vec<C64>);
+
 /// The lines a group of modes is fitted over.
 struct Window {
     gg: Vec<f64>,
@@ -245,11 +248,7 @@ impl Window {
     }
 
     /// Levenberg-Marquardt over `(f_r, ln zeta_r)`.
-    fn fit_group(
-        &self,
-        fr: Vec<f64>,
-        zr: Vec<f64>,
-    ) -> Result<(Vec<f64>, Vec<f64>, Vec<C64>), String> {
+    fn fit_group(&self, fr: Vec<f64>, zr: Vec<f64>) -> Result<GroupFit, String> {
         let k = fr.len();
         let np = 2 * k;
         let mut th: Vec<f64> = fr
@@ -413,7 +412,7 @@ impl Model {
         band: (f64, f64),
         choice: ModelChoice,
     ) -> Result<Model, String> {
-        let (l, n, m) = id.response.dims();
+        let (_, n, m) = id.response.dims();
         let size = n * m;
         let g = &id.grid_hz;
         let raw = id.response.data();

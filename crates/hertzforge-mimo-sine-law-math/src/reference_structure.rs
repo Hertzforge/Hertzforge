@@ -51,6 +51,54 @@ impl ModalStructure {
         }
     }
 
+    /// One update interval of [`Dynamics::Envelope`] at frequency `f` with the
+    /// tracking bandwidth `b`: the drive ramps from `d0` to `d1`.
+    pub fn envelope_interval(
+        &self,
+        f: f64,
+        b: f64,
+        d0: &[C64],
+        d1: &[C64],
+        env: &mut [C64],
+        stages: &mut [[C64; 2]],
+    ) {
+        let (n, m) = (self.controls, self.drives);
+        let w = 2.0 * PI * f;
+        let jw = C64::new(0.0, w);
+        let alpha = 1.0 - (-2.0 * PI * b / FS_HZ).exp();
+        let modes = self.f_hz.len();
+        let mut coef = Vec::with_capacity(modes);
+        for r in 0..modes {
+            let wr = 2.0 * PI * self.f_hz[r];
+            let z = self.zeta[r];
+            let wd = wr * (1.0 - z * z).max(1e-6).sqrt();
+            let p = C64::new(-z * wr, wd);
+            let kk = p * p / C64::new(0.0, 2.0 * wd);
+            let qs = C64::new(1.0, 0.0) + kk.conj() / (jw - p.conj());
+            let lam = p - jw;
+            let e = (lam / FS_HZ).exp();
+            coef.push((e, (e - 1.0) / lam * kk, qs));
+        }
+        let mut u = vec![ZERO; modes];
+        for s in 0..TICK_SAMPLES {
+            let t = (s + 1) as f64 / TICK_SAMPLES as f64;
+            for (r, ur) in u.iter_mut().enumerate() {
+                *ur = (0..m).fold(ZERO, |acc, j| {
+                    acc + (d0[j] * (1.0 - t) + d1[j] * t) * self.drive_shape[r * m + j]
+                });
+                let (e, g, _) = coef[r];
+                env[r] = e * env[r] + g * *ur;
+            }
+            for (i, sg) in stages.iter_mut().enumerate().take(n) {
+                let y = (0..modes).fold(ZERO, |acc, r| {
+                    acc + (coef[r].2 * u[r] + env[r]) * self.output_shape[r * n + i]
+                });
+                sg[0] += (y - sg[0]) * alpha;
+                sg[1] += (sg[0] - sg[1]) * alpha;
+            }
+        }
+    }
+
     /// The small-signal response at `f`.
     pub fn frf(&self, f: f64, out: &mut [C64]) {
         self.frf_with(f, &self.f_hz, &self.zeta, out);
@@ -217,8 +265,10 @@ pub struct Row {
     pub f: f64,
     /// Tracked controls the law saw.
     pub controls: Vec<C64>,
-    /// The drive it set.
+    /// The drive played (after the loop's own ceiling, if any).
     pub drive: Vec<C64>,
+    /// The drive the law asked for.
+    pub asked: Vec<C64>,
     /// Its diagnostics.
     pub values: Vec<f64>,
 }
@@ -228,23 +278,41 @@ pub struct Row {
 pub enum Played {
     /// As asked.
     AsAsked,
-    /// The whole vector scaled by this factor every update (a ceiling that
-    /// always binds).
-    Scaled(f64),
+    /// The whole vector scaled, direction kept, so that no drive is over this
+    /// ceiling (volts peak).
+    Ceiling(f64),
+}
+
+/// How the structure and the tracking filter answer between updates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dynamics {
+    /// The research testbed's fast path: the structure in steady state at the
+    /// interval's last frequency, a first-order lag of `2 / (2 pi B)` for the
+    /// filter. No build-up of a mode.
+    QuasiSteady,
+    /// Each mode's resonant part builds up as one pole sample by sample
+    /// (`Y' = (p - j w) Y + k u`, exact with the force held over a sample,
+    /// the drive ramped across the interval), the rest of the mode answers at
+    /// once, and the tracking filter is its two one-pole stages per sample.
+    Envelope,
 }
 
 /// Run `law` on `st` through `schedule` with a reference of ones and no
-/// guards. The structure's true response may differ from the small-signal
-/// one by `fn_hz` and `zeta` (pass the structure's own for a linear run).
+/// guards.
+#[allow(clippy::too_many_arguments)]
 pub fn run_closed_loop(
     law: &mut dyn SineLaw,
     st: &ModalStructure,
     setup: &Setup,
     schedule: Schedule,
     played: Played,
+    dynamics: Dynamics,
     values: usize,
     max_updates: usize,
 ) -> Result<Vec<Row>, String> {
+    let modes = st.f_hz.len();
+    let mut env = vec![ZERO; modes];
+    let mut stages = vec![[ZERO; 2]; st.controls];
     let (n, m) = (st.controls, st.drives);
     let r = vec![C64::new(1.0, 0.0); n];
     let mut z = vec![ZERO; n];
@@ -282,12 +350,17 @@ pub fn run_closed_loop(
         }
         let d_new: Vec<C64> = match played {
             Played::AsAsked => out.drive.clone(),
-            Played::Scaled(s) => out.drive.iter().map(|v| v * s).collect(),
+            Played::Ceiling(c) => {
+                let top = out.drive.iter().map(|v| v.norm()).fold(0.0, f64::max);
+                let s = if top > c { c / top } else { 1.0 };
+                out.drive.iter().map(|v| v * s).collect()
+            }
         };
         rows.push(Row {
             f,
             controls: z.clone(),
             drive: d_new.clone(),
+            asked: out.drive.clone(),
             values: out.values.clone(),
         });
         hold = if (k as f64) * dt + dt < ENGAGE_SETTLE_S {
@@ -299,12 +372,22 @@ pub fn run_closed_loop(
             break;
         }
         let (_, fe, _, _, _) = tone_at(schedule, k + 1);
-        st.frf(fe, &mut h);
         let b = setup.tracking.bandwidth_hz(fe);
-        let a = 1.0 - (-dt * 2.0 * PI * b / 2.0).exp();
-        for (i, zi) in z.iter_mut().enumerate() {
-            let yt = (0..m).fold(ZERO, |s, j| s + h[i * m + j] * d_new[j]);
-            *zi += (yt - *zi) * a;
+        match dynamics {
+            Dynamics::QuasiSteady => {
+                st.frf(fe, &mut h);
+                let a = 1.0 - (-dt * 2.0 * PI * b / 2.0).exp();
+                for (i, zi) in z.iter_mut().enumerate() {
+                    let yt = (0..m).fold(ZERO, |s, j| s + h[i * m + j] * d_new[j]);
+                    *zi += (yt - *zi) * a;
+                }
+            }
+            Dynamics::Envelope => {
+                st.envelope_interval(fe, b, &d_force, &d_new, &mut env, &mut stages);
+                for (zi, sg) in z.iter_mut().zip(&stages) {
+                    *zi = sg[1];
+                }
+            }
         }
         d_force = d_new;
     }

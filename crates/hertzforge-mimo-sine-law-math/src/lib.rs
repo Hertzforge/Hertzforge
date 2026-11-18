@@ -15,6 +15,9 @@
 //! - [`paired`]: each control paired with one drive, that drive's amplitude
 //!   following the ratio of wanted to measured amplitude. No model of the
 //!   coupling; the contributor's template.
+//! - [`steepest`], [`secant`], [`ratio`]: the three other published laws,
+//!   as the research testbed runs them: steepest descent, the secant law with
+//!   a complex gain, and the amplitude-only ratio law per control.
 //! - [`speed`]: the loop-speed rule, the gain per update.
 //! - [`modal`]: the model the carry reads (modes exact, remainder smoothed).
 //! - [`setup`]: the setup, interpolation at a frequency, the identification's
@@ -43,9 +46,12 @@ pub mod linalg;
 pub mod matrix;
 pub mod modal;
 pub mod paired;
+pub mod ratio;
 pub mod readings;
+pub mod secant;
 pub mod setup;
 pub mod speed;
+pub mod steepest;
 
 #[cfg(feature = "reference-structure")]
 pub mod reference_structure;

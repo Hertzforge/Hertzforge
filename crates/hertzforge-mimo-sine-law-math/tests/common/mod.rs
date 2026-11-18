@@ -22,7 +22,7 @@ pub fn flat(v: &Value) -> Vec<f64> {
     v.as_array()
         .expect("array")
         .iter()
-        .flat_map(|r| f64s(r))
+        .flat_map(f64s)
         .collect()
 }
 

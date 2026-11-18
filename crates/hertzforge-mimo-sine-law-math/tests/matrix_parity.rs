@@ -7,7 +7,9 @@ use common::*;
 use hertzforge_mimo_sine_law_math::linalg::reg_pinv;
 use hertzforge_mimo_sine_law_math::matrix::{MatrixLaw, MatrixParams, MATRIX_VALUES};
 use hertzforge_mimo_sine_law_math::modal::{ModalForm, Model};
-use hertzforge_mimo_sine_law_math::reference_structure::{run_closed_loop, Played, Schedule};
+use hertzforge_mimo_sine_law_math::reference_structure::{
+    run_closed_loop, Dynamics, Played, Schedule,
+};
 use hertzforge_mimo_sine_law_math::setup::GroupDelay;
 use hertzforge_mimo_sine_law_math::speed::{gain, GainRule};
 use hertzforge_mimo_sine_law_math::C64;
@@ -119,6 +121,7 @@ fn mimo_sine_parity_matrix_closed_loop_runs() {
                 &setup,
                 sched,
                 Played::AsAsked,
+                Dynamics::QuasiSteady,
                 MATRIX_VALUES.len(),
                 100_000,
             )

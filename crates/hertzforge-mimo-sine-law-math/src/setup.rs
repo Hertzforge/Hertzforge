@@ -128,7 +128,11 @@ impl Setup {
         if lines < 2 {
             return Err("the identification needs at least two lines".into());
         }
-        if id.grid_hz.windows(2).any(|w| !(w[1] > w[0])) {
+        if id
+            .grid_hz
+            .windows(2)
+            .any(|w| w[1].partial_cmp(&w[0]) != Some(std::cmp::Ordering::Greater))
+        {
             return Err("the identification's grid must ascend strictly".into());
         }
         if id.response.dims() != (lines, n, m) {
@@ -306,16 +310,16 @@ pub fn unwrap(p: &mut [f64]) {
     use std::f64::consts::PI;
     let mut acc = 0.0;
     let mut prev = p.first().copied().unwrap_or(0.0);
-    for k in 1..p.len() {
-        let dd = p[k] - prev;
-        prev = p[k];
+    for v in p.iter_mut().skip(1) {
+        let dd = *v - prev;
+        prev = *v;
         let mut m = (dd + PI).rem_euclid(2.0 * PI) - PI;
         if m == -PI && dd > 0.0 {
             m = PI;
         }
         let corr = if dd.abs() < PI { 0.0 } else { m - dd };
         acc += corr;
-        p[k] += acc;
+        *v += acc;
     }
 }
 

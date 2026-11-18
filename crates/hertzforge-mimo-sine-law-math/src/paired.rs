@@ -19,9 +19,12 @@ use crate::{TestTypes, C64};
 /// The diagnostics `paired` declares, in order.
 pub const PAIRED_VALUES: [&str; 2] = ["gain", "error_db"];
 
-/// The test types `paired` accepts.
+/// The test types `paired` accepts: a dwell and a stepped sine, on a structure
+/// whose pairs are weakly coupled. It has no model of the coupling, and on the
+/// research testbed's coupled linear 4 by 4 it completed none (0 of 5 dwells,
+/// 0 of 5 stepped sines); that is what the template is there to show.
 pub const PAIRED_TEST_TYPES: TestTypes = TestTypes {
-    sweep: true,
+    sweep: false,
     dwell: true,
     stepped: true,
 };
