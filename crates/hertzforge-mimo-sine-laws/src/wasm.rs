@@ -21,7 +21,7 @@ use std::time::Duration;
 /// model of the structure when it is built (`matrix` does), and in a law file
 /// that fit runs about nine times slower than natively: `matrix` on a four by
 /// four structure with 1441 identification lines took 4.6 s natively and 42 s
-/// as a law file (measured on an 18-core M5 Pro Mac, `tests/build_time.rs`). The
+/// as a law file (measured on an 18-core Mac, `tests/build_time.rs`). The
 /// fit's work bounds allow about 7.5 s natively, about 70 s as a law file, so
 /// the budget is twice MIMO Shock's 60 s for a law's first solve.
 pub const DEFAULT_BUILD_BUDGET_S: f64 = 120.0;
