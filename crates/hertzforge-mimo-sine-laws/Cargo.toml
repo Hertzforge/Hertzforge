@@ -8,8 +8,9 @@ publish = false
 # The choice of a MIMO Sine law: the built-in laws by name and law files by
 # catalog id or path through the law host, the catalog entries and the facts the
 # law picker shows, and the side-by-side runs that show a law file and its native
-# law give the same drives. The law check's cases are a later version's. It names
-# no backend.
+# law give the same drives, and the law check: its cases, the runner that plays
+# each through the engine and the judge. It names no backend; the `simulator`
+# feature adds the simulated station the check's cases run on.
 [dependencies]
 hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine" }
 # MIMO Sine law files: the `sine-mimo` world and its contained instance.
@@ -22,19 +23,29 @@ hertzforge-law-sdk = { path = "../hertzforge-law-sdk" }
 hertzforge-random-laws = { path = "../hertzforge-random-laws" }
 # The complex values and matrix stacks of the law boundary.
 hertzforge-sdm = { path = "../hertzforge-sdm" }
-# The exact linear reference structure, for the parity bench (feature
+# The law mathematics' linear algebra, for the check's reachable response, and
+# its exact linear reference structure for the parity bench (feature
 # `reference-structure` only; the controller never builds it).
-hertzforge-mimo-sine-law-math = { path = "../hertzforge-mimo-sine-law-math", optional = true }
+hertzforge-mimo-sine-law-math = { path = "../hertzforge-mimo-sine-law-math" }
+# The check's runs: the station the engine is handed, the channel table it is
+# set up on, the station's class, and single-shaker Sine's profile and
+# schedulers (the control core alone, as the engine takes it).
+hertzforge-hal = { path = "../hertzforge-hal" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+# The simulated station of a check case (feature `simulator` only).
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim", optional = true }
 
 [features]
 # `parity::bench`: whole recorded sequences on the law mathematics' exact
 # reference structure, used by the law files' parity tests.
-reference-structure = [
-    "dep:hertzforge-mimo-sine-law-math",
-    "hertzforge-mimo-sine-law-math/reference-structure",
-]
+reference-structure = ["hertzforge-mimo-sine-law-math/reference-structure"]
+# `check::sim_station`: the simulator's sine structures as the check's
+# stations.
+simulator = ["dep:hertzforge-hal-sim"]
 
 [dev-dependencies]
-hertzforge-mimo-sine-laws = { path = ".", features = ["reference-structure"] }
+hertzforge-mimo-sine-laws = { path = ".", features = ["reference-structure", "simulator"] }
 # Reads the law mathematics' research structures for the build-time measurement.
 serde_json = { workspace = true }
