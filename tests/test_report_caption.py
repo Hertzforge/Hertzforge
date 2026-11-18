@@ -438,7 +438,9 @@ def test_a_block_that_asks_carries_the_caption_its_records_give(run):
     one, forces, plain = _payload(page)['blocks']
     expected = run.caption_of('Time History PSDs', 1,
                               specification='Specification')
-    assert one['facts'] == [list(row) for row in expected.rows()]
+    # against a requirement, no Channel, Location or Requirement lines
+    assert one['facts'] == [list(row) for row in expected.rows()
+                            if row[0] not in ('Channel', 'Location and axis', 'Requirement')]
     assert one['channels'][0]['facts'] == one['facts']
     assert dict(forces['facts'])['Channel'].count('force') == 4
     assert 'facts' not in plain
@@ -459,8 +461,8 @@ def test_a_grid_says_once_what_its_cells_share(run):
     cells = [cell for row in grid['rows'] for column in row['cells']
              for cell in column]
     assert len(cells) == 8
-    assert all([label for label, _ in cell['facts']] == list(CHANNEL_ROWS)
-               for cell in cells)
+    assert not any(cell.get('facts') for cell in cells), \
+        'each cell is titled by its channel and says nothing more'
     assert dict(grid['facts'])['Estimate'].startswith('ASD of each of 8 channels')
 
 
@@ -491,32 +493,6 @@ def test_the_editor_reads_out_what_the_figure_will_carry(run):
     assert block_caption({'kind': 'plot', 'source': 'Specification'},
                          run) is None, 'a requirement is not a measurement'
     assert block_caption({'kind': 'text', 'text': ''}, run) is None
-
-
-def test_each_grid_cell_carries_its_own_channels_values(run):
-    """Every cell's rows are its own record's: the channel it draws and
-    the rms of that channel against its own reference."""
-    from hertzforge.core.report import Report
-    from hertzforge.report import render_html
-
-    block = {'kind': 'plot', 'source': 'Time History PSDs',
-             'specification': 'Specification', 'grid': True,
-             'caption': 'Control', 'record_caption': True}
-    [grid] = _payload(render_html(Report('R', [block]), run,
-                                  object_groups=run.object_groups))['blocks']
-    psds = run['Time History PSDs']
-    cells = [cell for row in grid['rows'] for column in row['cells']
-             for cell in column]
-    named = []
-    for cell in cells:
-        said = dict(cell['facts'])
-        dof = said['Channel'].split(', ')[-1].split(' ')[0]
-        record = list(psds.response_dof).index(dof)
-        expected = dict(run.caption_of('Time History PSDs', record,
-                                       specification='Specification').rows())
-        assert said == {label: expected[label] for label in CHANNEL_ROWS}
-        named.append(dof)
-    assert len(set(named)) == len(cells) == 8, 'eight cells, eight channels'
 
 
 def _caption_page(run, tmp_path, drop=None):

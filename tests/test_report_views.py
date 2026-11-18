@@ -91,12 +91,13 @@ def test_a_random_run_draws_its_grids_and_bars_as_views():
     assert marks and all(region['x1'] > region['x0'] for region in marks)
     out = float(first['readouts'][0]['text'])
     assert (out > 0) == any(r['kind'] in ('over', 'under') for r in first.get('regions', ()))
-    # built from the project itself, as the service builds it, each plot has the lines
-    # read under it: its channel, where it is and the global axis it is nearest
+    # built from the project itself, as the service builds it, a plot against its
+    # requirement has no Channel, Location and axis or Requirement lines under it
+    # (Brandon, 2026-11-18): its channel is its title
     whole = page_blocks(project[name], project, object_groups=project.object_groups)
     cell = next(b for b in whole if b.get('grid'))['grid']['rows'][0]['cells'][0][0]
-    assert [fact[0] for fact in cell['facts']] == ['Channel', 'Location and axis', 'Requirement']
-    assert 'nearest global' in cell['facts'][1][1]
+    assert not cell.get('facts')
+    assert cell['caption']
     assert any(view['view'] == 'bars' for view in views)
 
 

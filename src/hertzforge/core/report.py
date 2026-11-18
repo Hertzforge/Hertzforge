@@ -397,7 +397,8 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
     is rendered, so a report does not depend on what the objects are
     named: 'basis' is the first object of the type in the Basis object
     group, 'other' the first outside it, and 'any' the first anywhere.
-    Without a Basis group, 'basis' is the first of the type and 'other'
+    A geometry is the one exception: with none in the Basis group,
+    'basis' is the first geometry anywhere. Without a Basis group, 'basis' is the first of the type and 'other'
     the second, so a small project with no groups still renders.
 
     A specification never answers for the measurement it bounds:
@@ -451,6 +452,12 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
         if basis is None:
             return names[0] if names else None
         inside = [name for name in names if name in basis]
+        if not inside and cls.__name__ == 'Geometry':
+            # one article is under test, so its geometry serves the run
+            # wherever it sits: a geometry loaded beside a Basis group
+            # left the report's channel grid on the DOF letters
+            # (Brandon, 2026-11-18)
+            return names[0] if names else None
         return inside[0] if inside else None
     if role == 'other':
         if basis is None:

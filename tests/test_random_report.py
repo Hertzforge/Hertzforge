@@ -953,3 +953,28 @@ def test_the_dof_sentence_names_what_there_is():
     assert dof_sentence('{{figure:E}}', '', 'a', 'b') == (
         ' The excitation degrees of freedom ({{figure:E}}) mark where and a.')
     assert dof_sentence('', '', 'a', 'b') == ''
+
+
+def test_a_geometry_outside_the_basis_group_still_sorts_the_grid():
+    """A geometry loaded beside a run whose objects are the Basis group
+    is still the article's geometry: the grid's columns are the global
+    axes, not the DOF letters (Brandon, 2026-11-18)."""
+    import json
+    import re
+
+    from hertzforge.core.report import random_template, resolve_binding
+    from hertzforge.report import render_html
+
+    project = hertzforge.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
+    geometry = next(n for n, o in project.items()
+                    if type(o).__name__ == 'Geometry')
+    groups = [{'members': [n for n in project if n != geometry], 'role': 'Basis'}]
+    assert resolve_binding('@basis:Geometry', dict(project.items()), groups) == geometry
+    page = render_html(random_template(project, object_groups=groups), project,
+                       object_groups=groups, unit_system=hertzforge.SI)
+    payload = json.loads(re.search(
+        r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
+    control = next(b for b in payload['blocks'] if b['kind'] == 'grid')
+    assert control['columns'] == ['Global Z']

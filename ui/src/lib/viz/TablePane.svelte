@@ -38,9 +38,11 @@
 		onnested?: (edit: TableEdit, row: number, column: string, value: string) => Promise<string | null>;
 		/** A table with `select`: one row picked, by its cell in the column `select` names. */
 		onrowpick?: (id: string) => void;
+		/** Drawn whole, as a report page shows it: every row, no scrolling, each row one line of text. */
+		whole?: boolean;
 	}
 
-	let { view, showTitle = true, onedit, onremove, onrows, onnested, onrowpick }: Props = $props();
+	let { view, showTitle = true, onedit, onremove, onrows, onnested, onrowpick, whole = false }: Props = $props();
 	/** The rows opened onto their own tables (`view.nested`), from 0: those the view opens to start with, then as they are clicked. */
 	let opened = $state(openedAtFirst(untrack(() => view.open)));
 	let copied = $state(false);
@@ -74,7 +76,7 @@
 		return all;
 	});
 	const blank = $derived(view.columns.map(() => ''));
-	const long = $derived(count > DRAWN_FROM);
+	const long = $derived(!whole && count > DRAWN_FROM);
 	const span = $derived(drawnRows(count, scrollTop, viewHeight, rowHeight));
 	const drawn = $derived(long ? Array.from(known.slice(span.first, span.last), (row) => row ?? blank) : known);
 	function scrolled() {
@@ -396,7 +398,7 @@
 		</button>
 	</header>
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-	<div class="scroll" class:long class:typed={!!view.edit} bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
+	<div class="scroll" class:long class:whole class:typed={!!view.edit} bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
 		aria-label={onedit && view.edit ? `${view.title}, editable` : undefined} onkeydown={gridKey} onpaste={paste} data-testid="table-grid">
 		<table>
 			<thead>
@@ -520,6 +522,18 @@
 	   description into a tall row */
 	.long td,
 	.typed td {
+		white-space: nowrap;
+	}
+
+	/* a page's table: as tall as its rows, each row one line of text, wider than the page scrolling sideways */
+	.whole {
+		max-height: none;
+	}
+
+	.whole th,
+	.whole td {
+		padding: 1px var(--sp-2);
+		line-height: 1.3;
 		white-space: nowrap;
 	}
 

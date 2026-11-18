@@ -59,9 +59,11 @@
 		onhandle?: (handle: SpectrumHandle, decibels: number) => void;
 		/** A gizmo let go: the operation to run, with what the drag adds. */
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
+		/** A table drawn whole, as a page shows it: every row, no scrolling, each row one line of text. */
+		whole?: boolean;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, scaleOf, onedit, onnested, onremove, onrows, onrowpick, onspan, regions = null, onpick, onhandle, ongizmo }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, scaleOf, onedit, onnested, onremove, onrows, onrowpick, onspan, regions = null, onpick, onhandle, ongizmo, whole = false }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -104,7 +106,7 @@
 {:else if view.view === 'matrix'}
 	<MatrixPane {view} {showTitle} {selected} {picks} {onselect} />
 {:else if view.view === 'table'}
-	<TablePane {view} {showTitle} {onedit} {onnested} {onremove} {onrows} {onrowpick} />
+	<TablePane {view} {showTitle} {onedit} {onnested} {onremove} {onrows} {onrowpick} {whole} />
 {:else if view.view === 'image'}
 	<ImagePane {view} {showTitle} />
 {:else if view.view === 'bars'}

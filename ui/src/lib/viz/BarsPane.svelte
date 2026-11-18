@@ -2,9 +2,10 @@
 	/**
 	 * A bar a row (a channel's RMS error, its kurtosis, its signal to noise), the rows named down
 	 * the side so a long column of channels stays legible, and the chart as tall as its rows.
-	 * The service has judged every bar: one past a threshold is drawn in the fail color and says
-	 * which side it is out on in words, so nothing rests on color alone. The ground past each
-	 * threshold is shaded. A row with no number draws no bar and keeps its name and its note.
+	 * The service has judged every bar: one over its limit is red, one under it blue, one within
+	 * gray, and each out says which side in words, so nothing rests on color alone. The ground
+	 * past each limit is shaded the same way, red above and blue below, as the specification
+	 * plots shade their abort zones. A row with no number draws no bar and keeps its name and its note.
 	 */
 	import type { BarsView } from '$lib/protocol/types';
 	import { barSpan, barsAxis, barText, place } from './bars';
@@ -44,10 +45,10 @@
 		{#if width > 0}
 			<svg {width} {height} role="img" aria-label={`${view.title}: ${view.value.label}${unit}, one bar a row`}>
 				{#if view.over !== null && view.over !== undefined && view.over < axis.hi}
-					<rect class="beyond" x={x(view.over)} y={TOP} width={left + plotW - x(view.over)} height={view.labels.length * ROW} />
+					<rect class="beyond over" x={x(view.over)} y={TOP} width={left + plotW - x(view.over)} height={view.labels.length * ROW} />
 				{/if}
 				{#if view.under !== null && view.under !== undefined && view.under > axis.lo}
-					<rect class="beyond" x={left} y={TOP} width={x(view.under) - left} height={view.labels.length * ROW} />
+					<rect class="beyond under" x={left} y={TOP} width={x(view.under) - left} height={view.labels.length * ROW} />
 				{/if}
 				{#each axis.ticks as t (t)}
 					<line class="grid" x1={x(t)} x2={x(t)} y1={TOP} y2={TOP + view.labels.length * ROW} />
@@ -58,7 +59,7 @@
 					{@const y = TOP + k * ROW}
 					{@const span = barSpan(axis, left, plotW, base, view.values[k])}
 					{@const state = view.states[k]}
-					<g class="row" class:out={state !== null}>
+					<g class="row" class:over={state === 'over'} class:under={state === 'under'}>
 						<title>{barText(view, k)}</title>
 						<text class="label" x={left - 6} y={y + ROW * 0.68} text-anchor="end">{label}</text>
 						{#if span}
@@ -109,8 +110,12 @@
 		font-size: 10px;
 	}
 
-	.beyond {
-		fill: var(--amber-weak);
+	.beyond.over {
+		fill: rgba(229, 83, 75, 0.16);
+	}
+
+	.beyond.under {
+		fill: rgba(76, 146, 217, 0.16);
 	}
 
 	.grid {
@@ -134,13 +139,15 @@
 	}
 
 	.bar {
-		fill: var(--text-3);
-		opacity: 0.75;
+		fill: rgba(140, 140, 148, 0.75);
 	}
 
-	.out .bar {
-		fill: var(--status-fail-fill);
-		opacity: 1;
+	.over .bar {
+		fill: rgba(229, 83, 75, 0.85);
+	}
+
+	.under .bar {
+		fill: rgba(76, 146, 217, 0.85);
 	}
 
 	.note {
@@ -149,7 +156,14 @@
 	}
 
 	.state {
-		fill: var(--status-fail);
 		font-weight: 600;
+	}
+
+	.over .state {
+		fill: #e5534b;
+	}
+
+	.under .state {
+		fill: #4c92d9;
 	}
 </style>

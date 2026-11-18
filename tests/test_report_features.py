@@ -638,6 +638,7 @@ def test_record_captions_put_the_facts_on_every_spectrum_figure(run):
         spectra = [cell for block in captioned['blocks']
                    for cell in _cells(block)
                    if 'g²/Hz' in json.dumps(cell) or 'frequency' in json.dumps(cell)]
+        spectra += [block for block in captioned['blocks'] if block['kind'] == 'grid']
         with_facts = [cell for cell in spectra if cell.get('facts')
                       or any(c.get('facts') for c in cell.get('curves', ())
                              if isinstance(c, dict))]

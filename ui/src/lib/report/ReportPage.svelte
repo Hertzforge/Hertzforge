@@ -109,7 +109,7 @@
 					{:else}
 					{#each block.views ?? [] as view, i (i)}
 						<div class="view" style:height={height(block) ? `${height(block)}px` : undefined}>
-							<ViewRenderer {view} showTitle={false} minHeight={height(block) || 160} />
+							<ViewRenderer {view} showTitle={false} minHeight={height(block) || 160} whole />
 						</div>
 						{@render zoneKey(view)}
 					{/each}
@@ -199,9 +199,8 @@
 		background: #3d7fd6;
 	}
 
+	/* the window's whole width, so a large screen gives the plots their room */
 	.page {
-		max-width: 960px;
-		margin: 0 auto;
 		padding: var(--sp-4) var(--sp-5) var(--sp-6);
 		color: var(--text-1);
 		font-size: var(--text-sm);
@@ -277,7 +276,6 @@
 
 	@media print {
 		.page {
-			max-width: none;
 			padding: 0;
 		}
 
