@@ -1397,7 +1397,8 @@
                "shaker_record_invalid", "setup_invalid", "gate_failed", "prediction_exceeded", "identification_mismatch", "law_import_failed",
                "catalog_unavailable", "law_unknown", "law_params_invalid", "law_check_unsupported",
                "law_check_running", "law_check_not_recorded", "law_not_checked", "shutting_down", "not_yet", "wrong_mode", "drive_ceiling", "not_a_sweep", "out_of_band", "adjust_refused", "reference_unreadable", "not_converged", "coherence_hold", "level_zero", "not_enough_space", "record_unwritable",
-               "drive_changed", "drive_unreadable", "rate_mismatch", "table_changed"]
+               "drive_changed", "drive_unreadable", "rate_mismatch", "table_changed",
+               "reverse_not_available", "mode_fixed"]
     },
     "itemReason": {
       "enum": ["no_floor", "too_many_floors", "unknown_part_kind", "duplicate_part_id", "part_out_of_band", "parts_too_close", "too_many_tones", "too_many_bands", "follow_unknown_part", "follow_self", "follow_loop", "schedule_unsupported", "not_power_of_two", "row_not_recorded", "frf_same_row",
@@ -2658,6 +2659,8 @@
         "default_for": {"type": "array", "items": {"enum": ["waveform", "srs"]}},
         "test_types": {"type": "array", "items": {"enum": ["sweep", "dwell", "stepped"]}},
         "amplitude_only": {"type": "boolean"},
+        "default": {"type": "boolean"},
+        "limits": {"type": ["string", "null"]},
         "builtin": {"type": "boolean"},
         "name": {"type": "string", "minLength": 1},
         "version": {"type": "string", "minLength": 1},
@@ -2694,10 +2697,11 @@
       "if": {"properties": {"world": {"const": "mimo"}}},
       "then": {"properties": {"shapes": {"type": "array"}, "needs": {"type": "array"}}},
       "else": {"if": {"properties": {"world": {"const": "sine_mimo"}}},
-               "then": {"required": ["test_types", "amplitude_only"],
+               "then": {"required": ["test_types", "amplitude_only", "default", "limits"],
                         "properties": {"shapes": {"type": "array"}, "needs": {"type": "null"}}},
                "else": {"properties": {"shapes": {"type": "null"}, "needs": {"type": "null"},
-                                       "test_types": false, "amplitude_only": false}}},
+                                       "test_types": false, "amplitude_only": false,
+                                       "default": false, "limits": false}}},
       "allOf": [{"if": {"properties": {"world": {"const": "sine"}}},
                  "then": {"required": ["live"]}, "else": {"properties": {"live": false}}}]
     },

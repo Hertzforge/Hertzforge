@@ -1,0 +1,311 @@
+{
+ "type": "request",
+ "id": 81,
+ "method": "mimo_sine.configure",
+ "params": {
+  "config": {
+   "title": "Four-Shaker Sweep, 1 g, 20 to 400 Hz",
+   "channels": {
+    "controls": [
+     {
+      "channel": 1,
+      "profile": {
+       "label": "1 g",
+       "rows": [
+        {
+         "freq_hz": 10,
+         "quantity": "accel_g",
+         "value": 1
+        },
+        {
+         "freq_hz": 500,
+         "quantity": "accel_g",
+         "value": 1
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        6,
+        6
+       ]
+      },
+      "phase": [
+       {
+        "freq_hz": 10,
+        "phase_deg": 0
+       }
+      ]
+     },
+     {
+      "channel": 2,
+      "profile": {
+       "label": "1 g",
+       "rows": [
+        {
+         "freq_hz": 10,
+         "quantity": "accel_g",
+         "value": 1
+        },
+        {
+         "freq_hz": 500,
+         "quantity": "accel_g",
+         "value": 1
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        6,
+        6
+       ]
+      },
+      "phase": [
+       {
+        "freq_hz": 10,
+        "phase_deg": 0
+       }
+      ]
+     },
+     {
+      "channel": 3,
+      "profile": {
+       "label": "1 g",
+       "rows": [
+        {
+         "freq_hz": 10,
+         "quantity": "accel_g",
+         "value": 1
+        },
+        {
+         "freq_hz": 500,
+         "quantity": "accel_g",
+         "value": 1
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        6,
+        6
+       ]
+      },
+      "phase": [
+       {
+        "freq_hz": 10,
+        "phase_deg": 0
+       }
+      ]
+     },
+     {
+      "channel": 4,
+      "profile": {
+       "label": "1 g",
+       "rows": [
+        {
+         "freq_hz": 10,
+         "quantity": "accel_g",
+         "value": 1
+        },
+        {
+         "freq_hz": 500,
+         "quantity": "accel_g",
+         "value": 1
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        6,
+        6
+       ]
+      },
+      "phase": [
+       {
+        "freq_hz": 10,
+        "phase_deg": 0
+       }
+      ]
+     }
+    ],
+    "drives": [
+     {
+      "channel": 7,
+      "ceiling_vpk": 2,
+      "abort_vpk": 3
+     },
+     {
+      "channel": 8,
+      "ceiling_vpk": 2,
+      "abort_vpk": 3
+     },
+     {
+      "channel": 9,
+      "ceiling_vpk": 2,
+      "abort_vpk": 3
+     },
+     {
+      "channel": 10,
+      "ceiling_vpk": 2,
+      "abort_vpk": 3
+     }
+    ]
+   },
+   "phase_specified": true,
+   "test": {
+    "kind": "sweep",
+    "band_hz": [
+     20,
+     400
+    ],
+    "rate": {
+     "law": "log",
+     "oct_per_min": 2
+    },
+    "start_hz": 20,
+    "direction": "up",
+    "end": {
+     "sweeps": 2,
+     "duration_s": null
+    }
+   },
+   "acquisition": {
+    "fs_hz": null,
+    "tick_ms": 10
+   },
+   "schedule": {
+    "mode": "auto",
+    "levels_db": [
+     -12,
+     -6,
+     0
+    ],
+    "start_db": -12,
+    "per_level": {
+     "sweeps": 1
+    },
+    "full_level": {
+     "sweeps": 2
+    }
+   },
+   "identification": {
+    "level_db": -20,
+    "resolution_hz": 0.25,
+    "frames": null,
+    "trust_coherence": 0.5,
+    "gate_coherence": 0.5,
+    "review": true
+   },
+   "control": {
+    "tracking": {
+     "kind": "proportional",
+     "pct": 10,
+     "max_hz": 100
+    },
+    "law": {
+     "id": "matrix",
+     "params": {
+      "carry": 0.67
+     }
+    },
+    "law_budget": 0.25,
+    "law_misses": 3,
+    "max_step_db": 1,
+    "max_rise_db_per_s": 240,
+    "rotation_cap_deg": null,
+    "divergence_s": 1,
+    "abort_ticks": 3
+   },
+   "requests": {
+    "honour": false,
+    "max_hold_s": 2,
+    "min_slow_factor": 0.1
+   },
+   "limits": {
+    "kinematic_monitor": true,
+    "channels": [
+     {
+      "channel": 5,
+      "profile": {
+       "label": "Article bound",
+       "rows": [
+        {
+         "freq_hz": 10,
+         "quantity": "accel_g",
+         "value": 3
+        },
+        {
+         "freq_hz": 500,
+         "quantity": "accel_g",
+         "value": 3
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        3,
+        3
+       ]
+      }
+     },
+     {
+      "channel": 6,
+      "profile": {
+       "label": "Article bound",
+       "rows": [
+        {
+         "freq_hz": 10,
+         "quantity": "accel_g",
+         "value": 3
+        },
+        {
+         "freq_hz": 500,
+         "quantity": "accel_g",
+         "value": 3
+        }
+       ],
+       "alarm_db": [
+        1.5,
+        1.5
+       ],
+       "abort_db": [
+        3,
+        3
+       ]
+      }
+     }
+    ],
+    "notch": {
+     "smoothing_ticks": 3,
+     "release_ramp_db_per_s": 20,
+     "near_bound_db": 3
+    }
+   },
+   "feasibility": null,
+   "simulator": {
+    "structure": "sine-base-article-6x4"
+   },
+   "operator": "A. Operator",
+   "article": "Bracket, serial 7",
+   "notes": "",
+   "specification": {
+    "document": "Test procedure 12",
+    "clause": "4.2"
+   },
+   "record": {
+    "streams": true
+   },
+   "metadata": []
+  }
+ }
+}

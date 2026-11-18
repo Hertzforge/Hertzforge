@@ -1,0 +1,597 @@
+{
+  "config": {
+    "title": "Golden MIMO Sine",
+    "channels": {
+      "controls": [
+        {
+          "channel": 1,
+          "profile": {
+            "label": "flat",
+            "rows": [
+              {
+                "freq_hz": 5,
+                "quantity": "accel_g",
+                "value": 1.0
+              },
+              {
+                "freq_hz": 2000,
+                "quantity": "accel_g",
+                "value": 1.0
+              }
+            ],
+            "alarm_db": [
+              1.5,
+              1.5
+            ],
+            "abort_db": [
+              6.0,
+              6.0
+            ]
+          },
+          "phase": [
+            {
+              "freq_hz": 10,
+              "phase_deg": 0
+            }
+          ]
+        },
+        {
+          "channel": 2,
+          "profile": {
+            "label": "flat",
+            "rows": [
+              {
+                "freq_hz": 5,
+                "quantity": "accel_g",
+                "value": 1.0
+              },
+              {
+                "freq_hz": 2000,
+                "quantity": "accel_g",
+                "value": 1.0
+              }
+            ],
+            "alarm_db": [
+              1.5,
+              1.5
+            ],
+            "abort_db": [
+              6.0,
+              6.0
+            ]
+          },
+          "phase": [
+            {
+              "freq_hz": 10,
+              "phase_deg": 0
+            }
+          ]
+        },
+        {
+          "channel": 3,
+          "profile": {
+            "label": "flat",
+            "rows": [
+              {
+                "freq_hz": 5,
+                "quantity": "accel_g",
+                "value": 1.0
+              },
+              {
+                "freq_hz": 2000,
+                "quantity": "accel_g",
+                "value": 1.0
+              }
+            ],
+            "alarm_db": [
+              1.5,
+              1.5
+            ],
+            "abort_db": [
+              6.0,
+              6.0
+            ]
+          },
+          "phase": [
+            {
+              "freq_hz": 10,
+              "phase_deg": 0
+            }
+          ]
+        },
+        {
+          "channel": 4,
+          "profile": {
+            "label": "flat",
+            "rows": [
+              {
+                "freq_hz": 5,
+                "quantity": "accel_g",
+                "value": 1.0
+              },
+              {
+                "freq_hz": 2000,
+                "quantity": "accel_g",
+                "value": 1.0
+              }
+            ],
+            "alarm_db": [
+              1.5,
+              1.5
+            ],
+            "abort_db": [
+              6.0,
+              6.0
+            ]
+          },
+          "phase": [
+            {
+              "freq_hz": 10,
+              "phase_deg": 0
+            }
+          ]
+        }
+      ],
+      "drives": [
+        {
+          "channel": 5,
+          "ceiling_vpk": 2,
+          "abort_vpk": 4
+        },
+        {
+          "channel": 6,
+          "ceiling_vpk": 2,
+          "abort_vpk": 4
+        },
+        {
+          "channel": 7,
+          "ceiling_vpk": 2,
+          "abort_vpk": 4
+        },
+        {
+          "channel": 8,
+          "ceiling_vpk": 2,
+          "abort_vpk": 4
+        }
+      ]
+    },
+    "test": {
+      "kind": "sweep",
+      "band_hz": [
+        80,
+        81
+      ],
+      "rate": {
+        "law": "log",
+        "oct_per_min": 2
+      },
+      "start_hz": 80,
+      "direction": "up",
+      "end": {
+        "sweeps": 1
+      }
+    },
+    "identification": {
+      "resolution_hz": 4,
+      "frames": 4,
+      "review": false
+    },
+    "control": {
+      "law": {
+        "id": "matrix"
+      }
+    },
+    "simulator": {
+      "structure": "sine-linear-4x4"
+    },
+    "operator": "A. Operator",
+    "article": "Plate",
+    "notes": "the golden run folder",
+    "specification": {
+      "document": "Example procedure",
+      "clause": "3.2"
+    },
+    "acquisition": {
+      "fs_hz": 16384,
+      "tick_ms": 50
+    }
+  },
+  "resolved": {
+    "test": {
+      "kind": "sweep",
+      "band_hz": [
+        80,
+        81
+      ],
+      "rate": {
+        "law": "log",
+        "oct_per_min": 2
+      },
+      "start_hz": 80,
+      "direction": "up",
+      "sweeps": 1,
+      "duration_s": null
+    },
+    "schedule": {
+      "mode": "auto",
+      "levels_db": [
+        0
+      ],
+      "start_db": 0,
+      "per_level": {
+        "sweeps": 1
+      },
+      "full_level": null
+    },
+    "phase_specified": true,
+    "controls": [
+      {
+        "channel": 1,
+        "unit": "g",
+        "profile": {
+          "breakpoints": [
+            {
+              "freq_hz": 5,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            },
+            {
+              "freq_hz": 2000,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            }
+          ],
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            6,
+            6
+          ],
+          "unit": "g",
+          "label": "flat"
+        },
+        "phase": [
+          {
+            "freq_hz": 10,
+            "phase_deg": 0
+          }
+        ]
+      },
+      {
+        "channel": 2,
+        "unit": "g",
+        "profile": {
+          "breakpoints": [
+            {
+              "freq_hz": 5,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            },
+            {
+              "freq_hz": 2000,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            }
+          ],
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            6,
+            6
+          ],
+          "unit": "g",
+          "label": "flat"
+        },
+        "phase": [
+          {
+            "freq_hz": 10,
+            "phase_deg": 0
+          }
+        ]
+      },
+      {
+        "channel": 3,
+        "unit": "g",
+        "profile": {
+          "breakpoints": [
+            {
+              "freq_hz": 5,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            },
+            {
+              "freq_hz": 2000,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            }
+          ],
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            6,
+            6
+          ],
+          "unit": "g",
+          "label": "flat"
+        },
+        "phase": [
+          {
+            "freq_hz": 10,
+            "phase_deg": 0
+          }
+        ]
+      },
+      {
+        "channel": 4,
+        "unit": "g",
+        "profile": {
+          "breakpoints": [
+            {
+              "freq_hz": 5,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            },
+            {
+              "freq_hz": 2000,
+              "quantity": "accel_g_pk",
+              "value": 1,
+              "accel_g_pk": 1,
+              "alarm_db": [
+                1.5,
+                1.5
+              ],
+              "abort_db": [
+                6,
+                6
+              ]
+            }
+          ],
+          "alarm_db": [
+            1.5,
+            1.5
+          ],
+          "abort_db": [
+            6,
+            6
+          ],
+          "unit": "g",
+          "label": "flat"
+        },
+        "phase": [
+          {
+            "freq_hz": 10,
+            "phase_deg": 0
+          }
+        ]
+      }
+    ],
+    "drives": [
+      {
+        "channel": 5,
+        "unit": "V",
+        "ceiling_vpk": 2,
+        "abort_vpk": 4
+      },
+      {
+        "channel": 6,
+        "unit": "V",
+        "ceiling_vpk": 2,
+        "abort_vpk": 4
+      },
+      {
+        "channel": 7,
+        "unit": "V",
+        "ceiling_vpk": 2,
+        "abort_vpk": 4
+      },
+      {
+        "channel": 8,
+        "unit": "V",
+        "ceiling_vpk": 2,
+        "abort_vpk": 4
+      }
+    ],
+    "limits": [],
+    "aborts": {
+      "abort_ticks": 3,
+      "kinematic_monitor": true,
+      "divergence_s": 1,
+      "notch": {
+        "smoothing_ticks": 3,
+        "release_ramp_db_per_s": 20,
+        "near_bound_db": 3
+      },
+      "shaker_ratings": []
+    },
+    "identification": {
+      "level_db": -20,
+      "resolution_hz": 4,
+      "frames": 4,
+      "trust_coherence": 0.5,
+      "gate_coherence": 0.5,
+      "review": false
+    },
+    "control": {
+      "tracking": {
+        "kind": "proportional",
+        "pct": 10,
+        "max_hz": 100
+      },
+      "law": {
+        "id": "matrix",
+        "params": {}
+      },
+      "law_budget": 0.25,
+      "law_misses": 3,
+      "max_step_db": 1,
+      "max_rise_db_per_s": 240,
+      "rotation_cap_deg": null
+    },
+    "requests": {
+      "honour": false,
+      "max_hold_s": 2,
+      "min_slow_factor": 0.1
+    },
+    "acquisition": {
+      "requested_fs_hz": 16384,
+      "fs_hz": 16384,
+      "tick_ms": 50,
+      "tick_frames": 819
+    },
+    "simulator": {
+      "structure": "sine-linear-4x4"
+    }
+  },
+  "derived": {
+    "band_hz": [
+      80,
+      81
+    ],
+    "shape": "square",
+    "controls": 4,
+    "drives": 4,
+    "limits": 0,
+    "grid": {
+      "fs_hz": 16384,
+      "tick_frames": 819,
+      "tick_s": 0.04998779296875,
+      "actual": true
+    },
+    "profiles": [
+      {
+        "crossovers": [],
+        "peak_accel_g": 1,
+        "peak_velocity_ips": 0.7681,
+        "peak_disp_pp_in": 0.003056,
+        "channel": 1
+      },
+      {
+        "crossovers": [],
+        "peak_accel_g": 1,
+        "peak_velocity_ips": 0.7681,
+        "peak_disp_pp_in": 0.003056,
+        "channel": 2
+      },
+      {
+        "crossovers": [],
+        "peak_accel_g": 1,
+        "peak_velocity_ips": 0.7681,
+        "peak_disp_pp_in": 0.003056,
+        "channel": 3
+      },
+      {
+        "crossovers": [],
+        "peak_accel_g": 1,
+        "peak_velocity_ips": 0.7681,
+        "peak_disp_pp_in": 0.003056,
+        "channel": 4
+      }
+    ],
+    "test_s": 0.5,
+    "identification_s": 2.5,
+    "call_budget_s": 0.0124969,
+    "stop_ramp_db_per_s": 120,
+    "safe_stop_s": 1.05,
+    "tracking": {
+      "verdict": "ok",
+      "ratio": 0.00361,
+      "at_hz": null,
+      "message": null
+    },
+    "law": {
+      "id": "matrix",
+      "name": "matrix",
+      "version": "0.1.0",
+      "sha256": null,
+      "shapes": [
+        "square",
+        "more_controls_than_drives",
+        "fewer_controls_than_drives"
+      ],
+      "test_types": [
+        "sweep",
+        "dwell",
+        "stepped"
+      ],
+      "amplitude_only": true
+    },
+    "feasibility": {
+      "verdict": "not_evaluated",
+      "message": "No shaker was given, so the references were not checked against shaker ratings and the kinematic monitor is off."
+    }
+  },
+  "feasibility": {
+    "inputs": null,
+    "verdict": "not_evaluated",
+    "message": "No shaker was given, so the references were not checked against shaker ratings and the kinematic monitor is off."
+  }
+}

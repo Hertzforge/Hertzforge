@@ -1,0 +1,1214 @@
+{
+ "type": "event",
+ "topic": "mimo_sine.sweep",
+ "seq": 310,
+ "data": {
+  "run_id": "msine-0002",
+  "pass": 1,
+  "level_db": -6,
+  "direction": "up",
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Control 1",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        1.0
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        0.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Phase 1",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Phase",
+     "unit": "deg",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -12.5,
+        -15.0
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -10.0,
+        -10.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Error 1",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Error",
+     "unit": "dB",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Error",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.25,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Notch depth",
+      "role": "limit",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.0,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Control 2",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5625,
+        1.125
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        0.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Phase 2",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Phase",
+     "unit": "deg",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -12.5,
+        -15.0
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -10.0,
+        -10.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Error 2",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Error",
+     "unit": "dB",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Error",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.25,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Notch depth",
+      "role": "limit",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.0,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Control 3",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.625,
+        1.25
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        0.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Phase 3",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Phase",
+     "unit": "deg",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -12.5,
+        -15.0
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -10.0,
+        -10.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Error 3",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Error",
+     "unit": "dB",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Error",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.25,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Notch depth",
+      "role": "limit",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.0,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Control 4",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.6875,
+        1.375
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        0.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Phase 4",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Phase",
+     "unit": "deg",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -12.5,
+        -15.0
+       ]
+      }
+     },
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        -10.0,
+        -10.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Error 4",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Error",
+     "unit": "dB",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Error",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.25,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Notch depth",
+      "role": "limit",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.0,
+        0.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Limit 5",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.25,
+        2.5
+       ]
+      }
+     },
+     {
+      "name": "Bound",
+      "role": "limit",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        3.0,
+        3.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Limit 6",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Amplitude",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Measured",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.5,
+        2.75
+       ]
+      }
+     },
+     {
+      "name": "Bound",
+      "role": "limit",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        3.0,
+        3.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Drives",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Drive",
+     "unit": "V",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Drive 7",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.25,
+        0.5
+       ]
+      }
+     },
+     {
+      "name": "Drive 8",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.375,
+        0.5
+       ]
+      }
+     },
+     {
+      "name": "Drive 9",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.5,
+        0.5
+       ]
+      }
+     },
+     {
+      "name": "Drive 10",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.625,
+        0.5
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Drive phase",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Phase",
+     "unit": "deg",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Drive 7",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        33.0,
+        30.0
+       ]
+      }
+     },
+     {
+      "name": "Drive 8",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        33.0,
+        30.0
+       ]
+      }
+     },
+     {
+      "name": "Drive 9",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        33.0,
+        30.0
+       ]
+      }
+     },
+     {
+      "name": "Drive 10",
+      "role": "drive",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        33.0,
+        30.0
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Readings",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Reading",
+     "unit": null,
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Opposition",
+      "role": "other",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        1.0625,
+        1.125
+       ]
+      }
+     },
+     {
+      "name": "Largest share",
+      "role": "other",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        2
+       ],
+       "values": [
+        0.3125,
+        0.375
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   }
+  ]
+ }
+}

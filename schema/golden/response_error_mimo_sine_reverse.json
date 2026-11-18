@@ -1,0 +1,9 @@
+{
+ "type": "response",
+ "id": 90,
+ "error": {
+  "code": "refused",
+  "reason": "reverse_not_available",
+  "message": "A MIMO Sine sweep turns only at the band's edges; go to a frequency, or stop and start a sweep in the other direction."
+ }
+}

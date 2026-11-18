@@ -1,0 +1,85 @@
+{
+  "id": "matrix",
+  "name": "matrix",
+  "version": "0.1.0",
+  "sha256": null,
+  "builtin": true,
+  "params": {
+    "carry": 0.67,
+    "gain_rule": "loop_speed",
+    "fixed_gain": 0.5,
+    "delay_estimate": "largest",
+    "regularization": 0.001,
+    "model": "modal",
+    "smoothing_lines": 8,
+    "free_phase": "in_phase",
+    "carry_outside_model": false
+  },
+  "accepts": {
+    "id": "matrix",
+    "name": "matrix",
+    "version": "0.1.0",
+    "sha256": null,
+    "shapes": [
+      "square",
+      "more_controls_than_drives",
+      "fewer_controls_than_drives"
+    ],
+    "test_types": [
+      "sweep",
+      "dwell",
+      "stepped"
+    ],
+    "amplitude_only": true
+  },
+  "values": [
+    {
+      "key": "gain",
+      "label": "Gain",
+      "unit": ""
+    },
+    {
+      "key": "group_delay_s",
+      "label": "Structure delay",
+      "unit": "s"
+    },
+    {
+      "key": "condition",
+      "label": "Condition",
+      "unit": ""
+    },
+    {
+      "key": "carried_share",
+      "label": "Carried share",
+      "unit": ""
+    },
+    {
+      "key": "rotation_deg",
+      "label": "Rotation",
+      "unit": "deg"
+    },
+    {
+      "key": "unseen_share",
+      "label": "Unseen share",
+      "unit": ""
+    },
+    {
+      "key": "modes_kept",
+      "label": "Modes in the model",
+      "unit": ""
+    },
+    {
+      "key": "candidates_left_out",
+      "label": "Resonances left out",
+      "unit": ""
+    }
+  ],
+  "guards": {
+    "law_budget": 0.25,
+    "law_misses": 3,
+    "max_step_db": 1,
+    "max_rise_db_per_s": 240,
+    "rotation_cap_deg": null,
+    "divergence_s": 1
+  }
+}

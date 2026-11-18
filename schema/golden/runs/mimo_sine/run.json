@@ -1,0 +1,148 @@
+{
+  "test": "mimo_sine",
+  "run_uid": "golden-mimo-sine",
+  "run_id": "msine-0001",
+  "title": "Golden MIMO Sine",
+  "operator": "A. Operator",
+  "article": "Plate",
+  "notes": "the golden run folder",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "3.2"
+  },
+  "metadata": [],
+  "source": "SIM",
+  "sim": {
+    "model": "sine_structure",
+    "parameters": {
+      "sample_rate_hz": 16384.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 4
+    },
+    "seed": 1515852340,
+    "structure": "sine-linear-4x4"
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 16384,
+    "fs_hz": 16384,
+    "tick_frames": 819,
+    "tick_s": 0.04998779296875
+  },
+  "build": {
+    "version": "0.0.0",
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false
+  },
+  "armed": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "on"
+  },
+  "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "57f327a988e31f4febb8f7eac35b45ac378157a601fabaab0a94cb508aee8a83"
+  },
+  "streams": [
+    {
+      "name": "inputs",
+      "kind": "inputs",
+      "channels": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "drives",
+      "kind": "drives",
+      "channels": [
+        5,
+        6,
+        7,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "name": "reference",
+      "kind": "mimo_sine_reference"
+    },
+    {
+      "name": "identification_frf",
+      "kind": "frf"
+    },
+    {
+      "name": "identification_coherence",
+      "kind": "coherence"
+    },
+    {
+      "name": "identification_trust",
+      "kind": "mimo_sine_trust"
+    },
+    {
+      "name": "channel_levels",
+      "kind": "sine_levels"
+    },
+    {
+      "name": "control_trace",
+      "kind": "mimo_sine_control"
+    }
+  ],
+  "complete": true,
+  "identification": {
+    "level_db": -17.957222959437576,
+    "lag_frames": 266,
+    "record_len": 4096,
+    "realizations": 4,
+    "line_spacing_hz": 4,
+    "duration_s": 2.5,
+    "drive_vrms": [
+      0.0028932891542028036,
+      0.0028932891542028057,
+      0.002893289154202806,
+      0.002893289154202811
+    ],
+    "coherence_mean": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "gate_passed": true,
+    "modes_found": 0,
+    "sweep_rate_warning": [],
+    "tracker_delay_factor": 0.625,
+    "transport_delay_s": 0.0162353515625
+  }
+}

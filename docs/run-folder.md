@@ -425,6 +425,68 @@ and each law call's measured duration normalized, and each shot of its streams
 cut to its first 80 frames (`cut_from_frames`, on the stream and on each shot);
 `scripts/make_golden_runs.sh` rewrites it.
 
+## What a MIMO Sine Run Saves
+
+From arm: `run.json` (with the simulator's structure by name in
+`sim.structure`; after the identification, its facts in `identification`: the
+level it was taken at by response, the drive-to-response lag, the record
+length, the records averaged, the line spacing, how long it played, each
+drive's rms, each control's band-mean coherence, whether the gate passed, the
+resonances it found and the sweep-rate warning for each, and, once the law is
+built, the tracker delay factor and the transport delay the law was told),
+`table.json`, `setup.json` (the configuration as accepted; resolved, the test,
+the level schedule, whether the phases are specified, the controls with their
+units, profiles and phase rows, the drives with their ceilings and aborts, the
+limit channels with their bounds, the guards and the notch, the shaker ratings
+the kinematic monitor judges, the identification's settings, the tracking
+rule, the law and its parameters, the request switch and its bounds, the rates
+and the simulator's structure; the derived values; the feasibility inputs and
+verdict), `law/law.json` (the law's identity, its parameters as given and in
+force, the shapes, test types and references it accepts, its declared values
+and its guards) and `log.jsonl` (every state, the station, the identification's
+gate and each flagged resonance, the engage, every level change, hold and
+resume, manual frequency, notch in and out, refused notched reference, alarm in
+and out, unusable law call, drive over its ceiling, each change of the law's
+request and its outcome, the stop or trip and the end, each with its tick, its
+station time, its frequency and its level in `data`), and these files, each
+checked against the golden run folder (`schema/golden/runs/mimo_sine/`) by
+`tests/test_run_folder_golden_mimo_sine.py`:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order, from arm, the identification included (`kind` `inputs`) |
+| `streams/drives` | Every enabled drive as the device accepted it, in volts (`kind` `drives`) |
+| `results/reference` | Each control's reference amplitude and phase at full level, peak, and its alarm and abort bands, on the run's band: every control's breakpoints and the points between them; the phase NaN where the run's phases are not specified (`kind` `mimo_sine_reference`) |
+| `results/limit_ch<n>` | Each limit channel's bound and abort bound at full level on the run's band (`kind` `limit`), one result per limit channel |
+| `results/identification_frf` | The identification: every control's and limit channel's response to every drive on its grid, a delay lagging (`kind` `frf`) |
+| `results/identification_coherence` | Each control's and limit channel's multiple coherence with the drives (`kind` `coherence`) |
+| `results/identification_trust` | Whether each line of the identification is trusted (`kind` `mimo_sine_trust`, kept as arrays) |
+| `results/channel_levels` | Every control's, limit channel's and drive's tracked amplitude, peak, and phase against the tone, tick by tick, with the tone's frequency, the scheduled level, the sweep's direction and pass, whether a settle window was open, each control's reference (as judged, and its phase) and error, each limit channel's bound, the notch's scale and depth, whether a law's notched reference was taken, and the two readings (`kind` `sine_levels`, one record per 16 ticks) |
+| `results/control_trace` | Every tick of the control law: whether it was called and whether as its engage, the hold it was told, the drive in force it was told, the drive it asked for and the drive played after every guard (each drive's real and imaginary parts), the miss and its reason, the call's time, its own fault judgement, its request and what came of it, the ceiling and first-drive scales, the caps that bound, the largest rotation asked for and the law's declared values (`kind` `mimo_sine_control`, kept as arrays, one record per 16 ticks) |
+| `end.json` | The end, as the run's state reports it, with the records written and dropped and the run's report (per control its worst error and phase error and where, its time in alarm and its deepest notch; per limit channel its largest margin to its bound and where and its time notched; per drive its largest amplitude and where and its ticks over its ceiling; the largest readings; the law's requests) |
+
+Every tick is kept; a record is handed to the record's writer when its 16 ticks
+are full, the last one, part full, at the end, and nothing is held to the end
+of the run. A run that ends before it engages has its identification (when it
+got that far) and no `channel_levels` or `control_trace`; one held by the
+coherence gate has its identification and no levels. A run killed part way
+leaves the records written so far and `run.json` with `complete` false, and
+converts with what it has. With `record.streams` false there is no `streams/`
+folder.
+
+On the analysis side the streams become time histories; the references a
+`SineSweepSpecification` of one tone with each control's own amplitude, phase
+and bands (a sweep's tone one pass across the band in the direction the run
+started, a dwell's its frequency held for its dwell; a stepped sine plays no
+one tone, so its references stay in the run record); the levels of the last
+one-way pass at the highest level a `SineLevelSet` of every control, limit
+channel and drive (a sweep or a stepped sine; a dwell's levels are against
+time and stay in the run record); the identification an `Frf` and its
+coherence a `MultipleCoherence`; all in SI, opened in the Sine Sweep
+workspace. The trust mask, every other point of the levels, the references as
+judged, the errors, the notch, the readings and the law's calls have no
+analysis class and stay in the run record as named arrays.
+
 ## What a TWR Run Saves
 
 From arm: `run.json`, `table.json`, `setup.json` (the configuration as accepted;

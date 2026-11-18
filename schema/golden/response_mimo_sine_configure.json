@@ -1,0 +1,164 @@
+{
+ "type": "response",
+ "id": 81,
+ "result": {
+  "state": {
+   "run_id": "msine-0002",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Four-Shaker Sweep, 1 g, 20 to 400 Hz",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": [],
+    "structure": "sine-base-article-6x4"
+   },
+   "grid": {
+    "fs_hz": 16384,
+    "tick_frames": 164,
+    "tick_s": 0.0100098,
+    "actual": false
+   },
+   "clock": null,
+   "test": "sweep",
+   "shape": "square",
+   "phase_specified": true,
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -6,
+    0
+   ],
+   "level_db": null,
+   "rung": null,
+   "frequency_hz": null,
+   "direction": null,
+   "sweeps": {
+    "done": 0,
+    "of": 2
+   },
+   "steps": null,
+   "held": false,
+   "request_held": false,
+   "elapsed_s": null,
+   "at_level_s": null,
+   "remaining_s": null,
+   "alarm": false,
+   "notch": false,
+   "notch_scale": 1,
+   "identification": null,
+   "review": null,
+   "law": {
+    "id": "matrix",
+    "name": "matrix",
+    "version": "0.1.0",
+    "sha256": null,
+    "params": {
+     "carry": 0.67,
+     "gain_rule": "loop_speed",
+     "fixed_gain": 0.5,
+     "delay_estimate": "largest",
+     "regularization": 0.001,
+     "model": "modal",
+     "smoothing_lines": 8,
+     "free_phase": "in_phase",
+     "carry_outside_model": false
+    },
+    "misses": 0,
+    "capped_ticks": 0,
+    "over_ceiling": 0,
+    "rotation_max_deg": 0,
+    "requests": {
+     "asked": 0,
+     "granted": 0
+    }
+   },
+   "feasibility": {
+    "verdict": "not_evaluated",
+    "message": "No shaker was given, so the references were not checked against shaker ratings and the kinematic monitor is off."
+   },
+   "end": null,
+   "record": null
+  },
+  "derived": {
+   "band_hz": [
+    20,
+    400
+   ],
+   "shape": "square",
+   "controls": 4,
+   "drives": 4,
+   "limits": 2,
+   "grid": {
+    "fs_hz": 16384,
+    "tick_frames": 164,
+    "tick_s": 0.0100098,
+    "actual": false
+   },
+   "profiles": [
+    {
+     "crossovers": [],
+     "peak_accel_g": 1,
+     "peak_velocity_ips": 3.072,
+     "peak_disp_pp_in": 0.0489,
+     "channel": 1
+    },
+    {
+     "crossovers": [],
+     "peak_accel_g": 1,
+     "peak_velocity_ips": 3.072,
+     "peak_disp_pp_in": 0.0489,
+     "channel": 2
+    },
+    {
+     "crossovers": [],
+     "peak_accel_g": 1,
+     "peak_velocity_ips": 3.072,
+     "peak_disp_pp_in": 0.0489,
+     "channel": 3
+    },
+    {
+     "crossovers": [],
+     "peak_accel_g": 1,
+     "peak_velocity_ips": 3.072,
+     "peak_disp_pp_in": 0.0489,
+     "channel": 4
+    }
+   ],
+   "test_s": 259.3,
+   "identification_s": 200,
+   "call_budget_s": 0.0025024,
+   "stop_ramp_db_per_s": 120,
+   "safe_stop_s": 1.05,
+   "tracking": {
+    "verdict": "ok",
+    "ratio": 0.00361,
+    "at_hz": null,
+    "message": null
+   },
+   "law": {
+    "id": "matrix",
+    "name": "matrix",
+    "version": "0.1.0",
+    "sha256": null,
+    "shapes": [
+     "square",
+     "more_controls_than_drives",
+     "fewer_controls_than_drives"
+    ],
+    "test_types": [
+     "sweep",
+     "dwell",
+     "stepped"
+    ],
+    "amplitude_only": true
+   },
+   "feasibility": {
+    "verdict": "not_evaluated",
+    "message": "No shaker was given, so the references were not checked against shaker ratings and the kinematic monitor is off."
+   }
+  },
+  "warnings": []
+ }
+}

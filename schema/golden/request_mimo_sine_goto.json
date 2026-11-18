@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 86,
+ "method": "mimo_sine.goto",
+ "params": {
+  "hz": 120
+ }
+}
