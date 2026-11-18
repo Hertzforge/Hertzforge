@@ -455,3 +455,4 @@ sds-control  test:table_restored  kept_table_a_damaged_file_is_refused_and_named
 sds-control  test:table_restored  kept_table_a_failed_write_is_reported_and_the_run_still_runs
 sds-control  test:table_restored  restored_table_source_and_apply_are_checked_by_name
 sds-control  test:table_restored  project_table_rows_survive_restore_apply_and_a_restart
+hertzforge-law-host  test:sine_mimo_host  mimo_sine_a_late_law_is_stopped_at_its_budget_and_stays_stopped
