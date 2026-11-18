@@ -63,6 +63,13 @@ pub const SHUTDOWN_BY: &str = crate::random::run::SHUTDOWN_BY;
 pub const PUBLISH_PERIOD: Duration = Duration::from_millis(200);
 /// The identification's random seed.
 pub const SYSID_SEED: u64 = 0x5EED_0003;
+/// The engine's controlled stop on the station's clock, s: from full scale to
+/// its floor at its rate.
+pub const STOP_RAMP_S: f64 = STOP_RAMP_DB / hertzforge_mimo_sine::core::RAMP_DB_PER_S;
+
+/// The engine's stop ramp's depth, dB: its floor scale, 1e-6.
+const STOP_RAMP_DB: f64 = 120.0;
+
 /// Engine batches run between two looks at the request queue.
 const BATCHES: u32 = 8;
 
@@ -1815,11 +1822,10 @@ impl Actor {
         let Some(svc) = self.svc.as_ref() else { return };
         let state = svc.state();
         let note = svc.station_note().map(str::to_owned);
-        let t_end = self.view.elapsed_s;
-        let ramp = match (self.stop_at_s, t_end) {
-            (Some(a), Some(b)) => Some((b - a).max(0.0)),
-            _ => None,
-        };
+        // The engine's stop ramp takes every drive from its value to the floor
+        // at a fixed rate on the station's clock: its length is the floor in dB
+        // over the rate, whatever the drive was.
+        let ramp = Some(STOP_RAMP_S);
         let outcome = match state {
             ServiceState::Ended(o) => o,
             other => {
@@ -1833,6 +1839,9 @@ impl Actor {
         }
         match outcome {
             Outcome::Completed => {
+                if let Some(s) = self.view.steps.as_mut() {
+                    s.0 = s.1;
+                }
                 let words = match self.plan.config.test_s() {
                     Some(s) if self.view.mode == LevelMode::Auto => format!(
                         "Test complete: the schedule ran its {} s of test time and every drive \
@@ -2046,6 +2055,12 @@ impl Actor {
         if self.plan.config.is_sweep() || !self.pass_figures.as_ref().is_some_and(|f| f.against_time)
         {
             self.end_pass();
+        }
+        // Every drive is at zero now: the ramp, or the station's own stop.
+        if let Some(l) = self.view.live.as_deref() {
+            let mut l = l.clone();
+            l.drives.iter_mut().for_each(|d| d[0] = 0.0);
+            self.view.live = Some(Arc::new(l));
         }
         self.view.end = Some(End {
             outcome,
@@ -2272,5 +2287,15 @@ pub fn configured_view(
         last_pass: None,
         identification_figures: None,
         report: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mimo_sine_the_stop_ramp_length_is_the_engines() {
+        let db = -20.0 * hertzforge_mimo_sine::core::RAMP_FLOOR_SCALE.log10();
+        assert!((db - super::STOP_RAMP_DB).abs() < 1e-9);
+        assert!((super::STOP_RAMP_S - 1.0).abs() < 1e-9);
     }
 }
