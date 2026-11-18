@@ -704,9 +704,8 @@ class UnitSystem:
 
     `base` is the coherent system a derived system was made from, such as
     in-slinch-lbf-s for in-slinch-lbf-s (g), which shows accelerations in
-    g. It is None for a coherent system. Most exporters write in the
-    coherent system (see `coherent`), because most file formats cannot
-    label a value as g.
+    g. It is None for a coherent system. UNV export writes the coherent
+    system (see `coherent`), because its units block cannot declare g.
 
     The angular, moment, density and modal units are filled in from
     the base units when the system does not name them.

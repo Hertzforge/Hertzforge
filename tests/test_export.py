@@ -668,17 +668,13 @@ def test_without_a_system_the_stored_values_go_out(tmp_path):
             RAW * 0.0254, rel=1e-9)
 
 
-def test_reading_in_g_does_not_put_g_in_the_file(tmp_path):
-    """The display override is a convenience of the screen. No format here
-    can record 'g', so exports use the coherent system underneath."""
+def test_a_format_without_units_holds_g_when_the_display_is_in_g(tmp_path):
+    """A file that cannot say its units holds the numbers on screen, g
+    included; picking a display system that suits the reader is the
+    user's call."""
     source = hertzforge.import_file(plate('time.npz'), ordinate_unit='g')
     in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
     plain = hertzforge.units.SYSTEMS['in-slinch-lbf-s']
-
-    # on screen: in/s**2 -> SI is x0.0254, SI -> g is /9.80665
-    assert np.abs(source.display_ordinate(in_g)).max() == pytest.approx(
-        np.abs(source.display_ordinate(plain)).max() * 0.0254 / 9.80665,
-        rel=1e-6)
 
     written = {}
     for system in (in_g, plain):
@@ -687,8 +683,45 @@ def test_reading_in_g_does_not_put_g_in_the_file(tmp_path):
                          unit_system=system)
         with np.load(path, allow_pickle=True) as archive:
             written[system.name] = np.abs(archive['data']['ordinate']).max()
-    assert written[in_g.name] == pytest.approx(written[plain.name]), \
-        'both write in/s**2'
+    assert written[in_g.name] == pytest.approx(
+        np.abs(source.display_ordinate(in_g)).max(), rel=1e-9), 'g'
+    assert written[plain.name] == pytest.approx(
+        np.abs(source.display_ordinate(plain)).max(), rel=1e-9), 'in/s**2'
+    assert written[in_g.name] == pytest.approx(
+        written[plain.name] * 0.0254 / 9.80665, rel=1e-6)
+
+
+def test_an_frf_without_units_in_the_file_holds_g_per_volt(tmp_path):
+    source = hertzforge.import_file(plate('frfs.npz'), response_unit='g',
+                                    reference_unit='V')
+    in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
+    path = str(tmp_path / 'frfs.npz')
+    hertzforge.export_file(source, path, format='sdynpy_data', unit_system=in_g)
+    with np.load(path, allow_pickle=True) as archive:
+        ordinate = archive['data']['ordinate']
+    assert np.allclose(ordinate.reshape(source.ordinate.shape),
+                       source.display_ordinate(in_g))
+    assert np.allclose(np.abs(ordinate).ravel(),
+                       np.abs(source.ordinate).ravel() / 9.80665)
+
+
+def test_unv_writes_the_coherent_system_it_can_declare(tmp_path):
+    source = hertzforge.import_file(plate('time.npz'), ordinate_unit='g')
+    in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
+    path = str(tmp_path / 'g.unv')
+    hertzforge.export_file(source, path, format='unv', unit_system=in_g)
+    back = hertzforge.import_file(path)
+    assert np.allclose(back.ordinate, source.ordinate, rtol=1e-4)
+
+
+def test_the_status_line_names_what_each_format_holds():
+    from hertzforge.io.exporters import units_written
+
+    in_g = hertzforge.units.SYSTEMS['in-slinch-lbf-s (g)']
+    for format in ('sdynpy_data', 'sdynpy_geometry', 'exodus', 'matlab'):
+        assert units_written(format, in_g) == 'in-slinch-lbf-s (g)', format
+    for format in ('unv', 'unv_binary'):
+        assert units_written(format, in_g) == 'in-slinch-lbf-s', format
 
 
 def test_the_164_names_the_coherent_system(tmp_path):
