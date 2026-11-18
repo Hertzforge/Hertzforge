@@ -14,6 +14,7 @@ use math::modal::ModelChoice;
 use math::paired::{PairedLaw, PairedParams, PAIRED_TEST_TYPES, PAIRED_VALUES};
 use math::ratio::{Pairing, RatioLaw, RatioParams, RATIO_TEST_TYPES, RATIO_VALUES};
 use math::secant::{SecantCarry, SecantLaw, SecantParams, SECANT_TEST_TYPES, SECANT_VALUES};
+use math::setup::DelayEstimate;
 use math::speed::GainRule;
 use math::steepest::{SteepestLaw, SteepestParams, STEEPEST_TEST_TYPES, STEEPEST_VALUES};
 
@@ -119,6 +120,19 @@ const FIXED_GAIN: ParamDecl = ParamDecl {
            a lightly damped structure it can lose the loop.",
     knob: number(0.01, 1.0, 0.01, 0.5, ""),
 };
+const DELAY_ESTIMATE: ParamDecl = ParamDecl {
+    key: "delay_estimate",
+    label: "Structure delay",
+    help: "How the loop-speed rule reads the identification's group delay near the tone: \
+           `largest` takes the largest phase slope over the response's elements (an element \
+           with little response and some noise can set it, and the loop then runs slower than \
+           it needs to between resonances); `principal` takes the phase slope along the \
+           response's largest singular direction, which at a resonance is the mode's.",
+    knob: Knob::Choice {
+        options: &DelayEstimate::NAMES,
+        default: "largest",
+    },
+};
 const REGULARIZATION: ParamDecl = ParamDecl {
     key: "regularization",
     label: "Regularization",
@@ -167,6 +181,7 @@ pub const MATRIX: LawDecl = LawDecl {
         },
         GAIN_RULE,
         FIXED_GAIN,
+        DELAY_ESTIMATE,
         REGULARIZATION,
         ParamDecl {
             key: "model",
@@ -269,7 +284,7 @@ pub const PAIRED: LawDecl = LawDecl {
     shapes: &ALL_SHAPES,
     test_types: PAIRED_TEST_TYPES,
     amplitude_only: true,
-    params: &[GAIN_RULE, FIXED_GAIN],
+    params: &[GAIN_RULE, FIXED_GAIN, DELAY_ESTIMATE],
     values: &[GAIN, ERROR_DB],
 };
 
@@ -286,7 +301,7 @@ pub const STEEPEST_DESCENT: LawDecl = LawDecl {
     shapes: &ALL_SHAPES,
     test_types: STEEPEST_TEST_TYPES,
     amplitude_only: false,
-    params: &[GAIN_RULE, FIXED_GAIN, REGULARIZATION],
+    params: &[GAIN_RULE, FIXED_GAIN, DELAY_ESTIMATE, REGULARIZATION],
     values: &[GAIN, ERROR_DB],
 };
 
@@ -467,7 +482,17 @@ fn gain_rule(p: &Params) -> Result<GainRule, String> {
         "fixed" => GainRule::Fixed {
             g: p.number("fixed_gain")?,
         },
-        _ => GainRule::default(),
+        _ => {
+            let name = p.choice("delay_estimate")?;
+            let delay = DelayEstimate::from_name(name)
+                .ok_or_else(|| format!("no structure delay estimate is named `{name}`"))?;
+            match GainRule::default() {
+                GainRule::LoopSpeed { g_max, beta, .. } => {
+                    GainRule::LoopSpeed { g_max, beta, delay }
+                }
+                fixed => fixed,
+            }
+        }
     })
 }
 
@@ -688,6 +713,26 @@ mod tests {
         match config("paired", &defaults(&PAIRED)).unwrap() {
             Config::Paired(r) => assert_eq!(r, GainRule::default()),
             c => panic!("{c:?}"),
+        }
+    }
+
+    #[test]
+    fn mimo_sine_the_structure_delay_choice_reaches_the_gain_rule() {
+        use crate::ParamValue;
+        for d in [&MATRIX, &PAIRED, &STEEPEST_DESCENT] {
+            let mut p = defaults(d);
+            for x in p.0.iter_mut() {
+                if x.key == "delay_estimate" {
+                    x.value = ParamValue::Choice("principal".into());
+                }
+            }
+            let rule = match config(d.id, &p).unwrap() {
+                Config::Matrix(m) => m.gain_rule,
+                Config::Paired(r) => r,
+                Config::Steepest(s) => s.gain_rule,
+                c => panic!("{c:?}"),
+            };
+            assert_eq!(rule.delay_estimate(), DelayEstimate::Principal, "{}", d.id);
         }
     }
 }

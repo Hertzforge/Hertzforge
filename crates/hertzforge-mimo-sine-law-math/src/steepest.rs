@@ -56,7 +56,7 @@ impl SteepestLaw {
         setup.check()?;
         Ok(SteepestLaw {
             params,
-            delay: GroupDelay::of(&setup.identification),
+            delay: GroupDelay::of_with(&setup.identification, params.gain_rule.delay_estimate()),
             setup: setup.clone(),
         })
     }

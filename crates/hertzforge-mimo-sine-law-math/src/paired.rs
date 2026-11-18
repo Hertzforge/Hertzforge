@@ -72,7 +72,7 @@ impl PairedLaw {
             used[d] = true;
         }
         Ok(PairedLaw {
-            delay: GroupDelay::of(&setup.identification),
+            delay: GroupDelay::of_with(&setup.identification, params.gain_rule.delay_estimate()),
             tracking: setup.tracking,
             setup: setup.clone(),
             params,

@@ -171,7 +171,7 @@ impl MatrixLaw {
             grid_lo: g[0],
             grid_hi: g[g.len() - 1],
             phase_specified: setup.phase_specified,
-            delay: GroupDelay::of(id),
+            delay: GroupDelay::of_with(id, params.gain_rule.delay_estimate()),
             setup: setup.clone(),
             model,
             asked: vec![ZERO; setup.drives],

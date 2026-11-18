@@ -14,7 +14,7 @@
 //! A fixed gain (the published `0.5`) is available as [`GainRule::Fixed`] for
 //! tests only: on lightly damped structures it loses the loop.
 
-use crate::setup::{GroupDelay, LoopDelay, TrackingRule};
+use crate::setup::{DelayEstimate, GroupDelay, LoopDelay, TrackingRule};
 
 /// How the gain per update is set.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,6 +25,8 @@ pub enum GainRule {
         g_max: f64,
         /// Fraction of the inverse total lag the loop may run at.
         beta: f64,
+        /// How the identification's group delay is read.
+        delay: DelayEstimate,
     },
     /// A fixed gain every update. For tests: it ignores the loop's lags.
     Fixed {
@@ -38,6 +40,18 @@ impl Default for GainRule {
         GainRule::LoopSpeed {
             g_max: 0.5,
             beta: 0.5,
+            delay: DelayEstimate::default(),
+        }
+    }
+}
+
+impl GainRule {
+    /// How the identification's group delay is read for this rule (the
+    /// present form for a fixed gain, which only reports it).
+    pub fn delay_estimate(&self) -> DelayEstimate {
+        match *self {
+            GainRule::LoopSpeed { delay, .. } => delay,
+            GainRule::Fixed { .. } => DelayEstimate::Largest,
         }
     }
 }
@@ -70,7 +84,9 @@ pub fn gain(
     let tt = loop_delay.transport_delay_s;
     let g = match rule {
         GainRule::Fixed { g } => g,
-        GainRule::LoopSpeed { g_max, beta } => g_max.min(beta * tick_s / (tf + ts + tt + tick_s)),
+        GainRule::LoopSpeed { g_max, beta, .. } => {
+            g_max.min(beta * tick_s / (tf + ts + tt + tick_s))
+        }
     };
     Gain {
         g,
@@ -103,6 +119,7 @@ mod tests {
         let rule = GainRule::LoopSpeed {
             g_max: 1.0,
             beta: 0.5,
+            delay: DelayEstimate::Largest,
         };
         let base = gain(rule, &tr, LoopDelay::default(), &gd, 0.01, 100.0);
         assert!((base.filter_delay_s - DEFAULT_TRACKER_DELAY_FACTOR / 10.0).abs() < 1e-15);
