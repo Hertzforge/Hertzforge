@@ -172,3 +172,127 @@ fn mimo_sine_steep_reference_math_evidence() {
         }
     }
 }
+
+/// Requirement: on a structure close to flat, at one octave a minute,
+/// `matrix` holds the response within 1 dB over the reference through a
+/// 12 dB rise or fall over 1 Hz or over 0.1 Hz (the identification's lines
+/// are 0.25 Hz apart). Before the fix: up to 24.9 dB.
+#[test]
+fn mimo_sine_matrix_holds_a_steep_reference_on_a_flat_structure() {
+    for rise in [true, false] {
+        for width in [1.0, 0.1] {
+            let (a, _) = sweep_case(&flat(), MatrixParams::default(), 1.0, rise, width);
+            println!(
+                "rise {rise} width {width}: true over {:+.2} dB",
+                a.true_over_db
+            );
+            assert!(a.true_over_db < 1.0, "rise {rise} width {width}: {a:?}");
+        }
+    }
+}
+
+/// The correction compares the tracked controls with the reference as the
+/// trackers read it: without that, the trackers' trail behind a moving
+/// reference is integrated as an error (measured 1.98 dB over on the 0.1 Hz
+/// rise against 0.52 with it).
+#[test]
+fn mimo_sine_matrix_corrects_on_the_reference_as_the_trackers_read_it() {
+    let with = sweep_case(&flat(), MatrixParams::default(), 1.0, true, 0.1).0;
+    let without = sweep_case(
+        &flat(),
+        MatrixParams {
+            seen_reference: false,
+            ..MatrixParams::default()
+        },
+        1.0,
+        true,
+        0.1,
+    )
+    .0;
+    println!(
+        "seen reference: {:+.2} dB; reference now: {:+.2} dB",
+        with.true_over_db, without.true_over_db
+    );
+    assert!(with.true_over_db < 0.75, "{with:?}");
+    assert!(without.true_over_db > 1.5, "{without:?}");
+}
+
+/// Updates after the told reference falls 12 dB at once until every control
+/// is within 1 dB of it, with the drive in force held to a 1 dB change per
+/// update (the controller's default change cap) and the structure answering
+/// at once.
+fn updates_to_follow_a_capped_fall(params: MatrixParams) -> usize {
+    use hertzforge_mimo_sine_law_math::law::{Hold, Inputs, Outputs};
+    let st = flat();
+    let s = st.setup((30.0, 120.0), false);
+    let (n, m) = (s.controls, s.drives);
+    let f = 60.0;
+    let mut h = vec![C64::new(0.0, 0.0); n * m];
+    st.frf(f, &mut h);
+    let mut law = MatrixLaw::new(&s, params).expect("builds");
+    let mut out = Outputs::new(m, MATRIX_VALUES.len());
+    let mut d = vec![C64::new(0.0, 0.0); m];
+    let mut c = vec![C64::new(0.0, 0.0); n];
+    let cap = 10f64.powf(1.0 / 20.0);
+    let fall_at = 50;
+    let mut within_at = None;
+    for k in 0..400 {
+        let level = if k < fall_at { 1.0 } else { 0.25 };
+        let r = vec![C64::new(level, 0.0); n];
+        let x = Inputs {
+            index: k as u64,
+            dt_s: if k == 0 { 0.0 } else { s.tick_s },
+            f_hz: f,
+            sweep_hz_s: 0.0,
+            sweep_oct_min: 0.0,
+            level: 1.0,
+            reference: &r,
+            controls: &c,
+            limits: &[],
+            limit_bounds: &[],
+            drive_in_force: &d,
+            hold: if k == 0 { Hold::Engage } else { Hold::Free },
+            notch_scale: 1.0,
+            settle_open: false,
+        };
+        if k == 0 {
+            law.engage(&x, &mut out).unwrap();
+            d.copy_from_slice(&out.drive);
+        } else {
+            law.tick(&x, &mut out).unwrap();
+            for (di, ai) in d.iter_mut().zip(&out.drive) {
+                let (a0, a1) = (di.norm(), ai.norm());
+                let mag = a1.clamp(a0 / cap, a0 * cap);
+                *di = if a1 > 0.0 { ai * (mag / a1) } else { *ai };
+            }
+        }
+        for (i, ci) in c.iter_mut().enumerate() {
+            *ci = (0..m).map(|j| h[i * m + j] * d[j]).sum();
+        }
+        if k > fall_at && within_at.is_none() {
+            let worst = c
+                .iter()
+                .map(|v| (20.0 * (v.norm() / 0.25).log10()).abs())
+                .fold(0.0, f64::max);
+            if worst < 1.0 {
+                within_at = Some(k - fall_at);
+            }
+        }
+    }
+    within_at.unwrap_or(usize::MAX)
+}
+
+/// A fall faster than the change cap allows is followed at the cap's pace:
+/// the part of the carry the cap cut is carried again, not left to the
+/// correction.
+#[test]
+fn mimo_sine_matrix_carries_again_what_the_change_cap_cut() {
+    let with = updates_to_follow_a_capped_fall(MatrixParams::default());
+    let without = updates_to_follow_a_capped_fall(MatrixParams {
+        recarry: false,
+        ..MatrixParams::default()
+    });
+    println!("within 1 dB after {with} updates (carried again), {without} (not)");
+    assert!(with <= 13, "{with}");
+    assert!(without >= 25, "{without}");
+}

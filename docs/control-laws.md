@@ -1093,9 +1093,22 @@ update it corrects the drive through the regularized inverse of the identificati
 with more controls than drives, least norm with more drives), at a gain set every update from the
 tracking filter's delay and the identification's group delay near the tone. In a sweep it also
 carries the drive along a model of the structure: the change of drive the model predicts for the
-next frequency is added with the carry weight. It rebases on the drive in force every update, and
+next frequency is added with the carry weight. Where the reference itself changes with frequency
+(a profile's breakpoint, a slope), the drive follows the change through the inverse the update it
+is told, at full weight. Its correction compares each control with the reference as the tracking
+filter would read it (the reference passed through the filter's delay and the transport delay),
+so while the reference moves the filter's trail is not taken for a control error. A reference
+that moves faster than the change cap allows is followed at the cap's pace: what the cap cut from
+the change is carried again the next update. It rebases on the drive in force every update, and
 with spare drives it removes the part of the drive the controls cannot see. With an amplitude-only
 reference it controls every control in phase, or takes each control's phase from its measurement.
+
+A 12 dB rise or fall over 0.1 Hz at one octave a minute leaves the response within about 1 dB of
+the reference on the simulator's loopback and linear structures. A fall faster than the change
+cap allows (1 dB an update by default, so 12 dB takes 120 ms) over-tests by up to the part of the
+fall the cap holds back, about 8 dB for a 12 dB fall over 0.1 Hz at four octaves a minute, for
+about 0.1 s. While the reference falls, the tracked controls read high by up to the size of the
+fall for about the filter's delay, and the controller judges them as read.
 
 | Key | What it does |
 |---|---|

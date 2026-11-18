@@ -3,7 +3,9 @@
 //! over 0.1 Hz in a sweep at one and at four octaves a minute, and a 12 dB
 //! level step at a dwell, on `sine-loopback-4x4` and `sine-linear-4x4`.
 //! Printed update by update around the step. Run with
-//! `cargo test -p hertzforge-mimo-sine --test steep_reference_evidence -- --ignored --nocapture`.
+//! `cargo test -p hertzforge-mimo-sine --test steep_reference -- --ignored --nocapture`.
+//! The tests that are not ignored hold `matrix` to its requirement on the
+//! simulator's loopback and linear structures.
 //! Optional filters: `STEEP_LAW`, `STEEP_STRUCTURE`, `STEEP_TRACE=1` for the
 //! update-by-update print.
 
@@ -33,10 +35,14 @@ fn stepped_profile(lo: f64, hi: f64, f1: f64, f2: f64, alarm: f64, abort: f64) -
 }
 
 fn sweep(rate: f64) -> TestPlan {
+    sweep_over((40.0, 80.0), rate)
+}
+
+fn sweep_over(band: (f64, f64), rate: f64) -> TestPlan {
     TestPlan::Sweep(BidirSweepConfig {
-        band: (40.0, 80.0),
+        band,
         rate: SweepRate::LogOctPerMin(rate),
-        start_hz: 40.0,
+        start_hz: band.0,
         initial_direction: SweepDirection::Up,
         target: SweepTarget::Sweeps(1),
     })
@@ -366,6 +372,44 @@ fn mimo_sine_steep_reference_stepped_evidence() {
                 );
                 trace(&r, 58.5, 61.5);
             }
+        }
+    }
+}
+
+/// One sweep of `matrix` from 55 to 65 Hz through a 12 dB step between
+/// `60 - width` and 60 Hz on `s`, judged with 20 dB bands so nothing stops
+/// it; the summary around the step.
+fn matrix_through_a_step(s: SineStructure, rate: f64, rise: bool, width: f64) -> Summary {
+    let hi = s.full_level_g();
+    let (a, b) = if rise { (hi / 4.0, hi) } else { (hi, hi / 4.0) };
+    let mut st = setup(s, sweep_over((55.0, 65.0), rate), "matrix");
+    for c in &mut st.controls {
+        c.profile = stepped_profile(a, b, 60.0 - width, 60.0, 20.0, 20.0);
+    }
+    let r = run(engaged(s, st, law("matrix"), NOISE), 40.0);
+    summarize(&r, (60.0 - width - 0.5, 63.0))
+}
+
+/// Requirement: through a 12 dB rise or fall over 1 Hz or 0.1 Hz at one
+/// octave a minute, the response `matrix` drives is never more than 1 dB
+/// over the reference beyond what the identification leaves with no step
+/// (about 1 dB here: 2 dB in all), and the run completes. Before the fix,
+/// on the loopback: 4.1, 18.2, 6.0 dB and an abort.
+#[test]
+fn mimo_sine_matrix_holds_a_steep_reference_on_the_loopback() {
+    for rise in [true, false] {
+        for width in [1.0, 0.1] {
+            let sm = matrix_through_a_step(SineStructure::Loopback4x4, 1.0, rise, width);
+            println!(
+                "rise {rise} width {width}: {:?}, true over {:+.2} dB, read over {:+.2} dB",
+                sm.outcome, sm.true_over_db, sm.over_db
+            );
+            assert_eq!(sm.outcome, Some(Outcome::Completed));
+            assert!(
+                sm.true_over_db < 2.0,
+                "rise {rise} width {width}: {}",
+                sm.true_over_db
+            );
         }
     }
 }
