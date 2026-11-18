@@ -58,25 +58,42 @@ fn time_fit(st: &ModalStructure, band: (f64, f64), limits: FitLimits) {
 }
 
 #[test]
-fn mimo_sine_fit_bound_leaves_a_group_out_and_the_model_still_builds() {
-    use hertzforge_mimo_sine_law_math::matrix::{MatrixLaw, MatrixParams};
+fn mimo_sine_fit_splits_a_long_chain_and_keeps_its_true_modes() {
     let st = structure(&load("matrix_parity.json")["lin4x4"]);
-    // Over 40 to 400 Hz the identification's scatter merges 15 candidates into
-    // one group, over the size bound: it is left out, the rest is fitted.
-    let setup = st.setup((40.0, 400.0), true);
-    let law = MatrixLaw::new(&setup, MatrixParams::default()).unwrap();
-    let fit = &law.model().fit;
-    assert_eq!(fit.candidates_left_out, 15);
-    assert!(fit
+    let band = (40.0, 400.0);
+    let setup = st.setup(band, true);
+    // Unsplit, the scatter chains 15 candidates over 330 to 400 Hz into one
+    // group over the size bound, and the group is left out whole.
+    let whole = FitLimits {
+        split: false,
+        ..FitLimits::default()
+    };
+    let (mf0, rep0) = ModalForm::fit_bounded(&setup.identification, band, whole).unwrap();
+    assert_eq!(rep0.candidates_left_out, 15);
+    assert!(rep0
         .groups
         .iter()
         .any(|g| g.outcome == GroupOutcome::TooLarge));
-    assert_eq!(law.model().modes.modes(), 5);
-    // A work bound hit while fitting: the eight-candidate group over 30 to
-    // 120 Hz needs about 1.8e9 units; with 1e8 it stops and is left out.
+    let in_chain = (330.0, 400.0);
+    assert_eq!(true_modes_found(&st, in_chain, &mf0, 0.1), (0, 3));
+    // Split: nothing left out, and the three true modes in the chain are found
+    // within a tenth of a bandwidth.
+    let (mf, rep) =
+        ModalForm::fit_bounded(&setup.identification, band, FitLimits::default()).unwrap();
+    assert_eq!(rep.candidates_left_out, 0);
+    assert!(rep.groups.iter().all(|g| g.candidates <= 8));
+    assert_eq!(true_modes_found(&st, in_chain, &mf, 0.1), (3, 3));
+}
+
+#[test]
+fn mimo_sine_fit_work_bound_leaves_a_group_out_and_the_model_still_builds() {
+    let st = structure(&load("matrix_parity.json")["lin4x4"]);
+    // The eight-candidate group over 30 to 120 Hz needs about 1.8e9 units;
+    // with 1e8 it stops and is left out, its window recorded.
     let setup = st.setup((30.0, 120.0), true);
     let tight = FitLimits {
         max_group_work: 100_000_000,
+        split: false,
         ..FitLimits::default()
     };
     let (mf, rep) = ModalForm::fit_bounded(&setup.identification, (30.0, 120.0), tight).unwrap();
@@ -88,9 +105,29 @@ fn mimo_sine_fit_bound_leaves_a_group_out_and_the_model_still_builds() {
     assert_eq!(out.len(), 1);
     assert!(out[0].work <= 100_000_000);
     assert_eq!(rep.candidates_left_out, 8);
+    assert_eq!(rep.left_out_windows.len(), 1);
     assert_eq!(mf.modes(), 1);
-    let model = Model::from_modes(&setup.identification, mf, 8).unwrap();
-    assert_eq!(model.modes.modes(), 1);
+    let model = Model::build_with(
+        &setup.identification,
+        (30.0, 120.0),
+        Default::default(),
+        tight,
+    )
+    .unwrap();
+    assert!(model.left_out_at(80.0) && !model.left_out_at(31.0));
+    // Splitting, the group that runs out of work is halved and its halves
+    // fitted in its place: fewer candidates are left out.
+    let split = FitLimits {
+        split: true,
+        ..tight
+    };
+    let (mf2, rep2) = ModalForm::fit_bounded(&setup.identification, (30.0, 120.0), split).unwrap();
+    eprintln!(
+        "split on work bound: kept {}, left out {}",
+        mf2.modes(),
+        rep2.candidates_left_out
+    );
+    assert!(rep2.candidates_left_out < 8 && mf2.modes() > 1);
 }
 
 #[test]
@@ -138,6 +175,139 @@ fn mimo_sine_fit_time_four_by_four_unbounded() {
         max_evaluations: usize::MAX,
         max_group_work: u64::MAX,
         max_total_work: u64::MAX,
+        split: false,
+        subtract_fitted: false,
     };
     time_fit(&st, (40.0, 400.0), none);
+}
+
+/// True modes of `st` within `band` matched by a fitted pole within `tol`
+/// half-power bandwidths in frequency and a factor 1.5 in damping.
+fn true_modes_found(
+    st: &ModalStructure,
+    band: (f64, f64),
+    mf: &ModalForm,
+    tol: f64,
+) -> (usize, usize) {
+    let mut found = 0;
+    let mut total = 0;
+    for r in 0..st.f_hz.len() {
+        let (f, z) = (st.f_hz[r], st.zeta[r]);
+        if f < band.0 || f > band.1 {
+            continue;
+        }
+        total += 1;
+        let bw = 2.0 * z * f;
+        if (0..mf.modes())
+            .any(|j| (mf.f_hz[j] - f).abs() < tol * bw && (mf.zeta[j] / z).ln().abs() < 1.5f64.ln())
+        {
+            found += 1;
+        }
+    }
+    (found, total)
+}
+
+#[test]
+#[ignore = "diagnosis: split with and without subtracting the groups already fitted"]
+fn mimo_sine_fit_split_diagnosis() {
+    let st = structure(&load("matrix_parity.json")["lin4x4"]);
+    let setup = st.setup((40.0, 400.0), true);
+    let before = FitLimits {
+        split: false,
+        ..FitLimits::default()
+    };
+    let m0 = Model::build_with(
+        &setup.identification,
+        (40.0, 400.0),
+        Default::default(),
+        before,
+    )
+    .unwrap();
+    eprintln!(
+        "no split (left out): model error {:.4}",
+        model_error(&st, &setup, &m0)
+    );
+    let id = Model::build_with(
+        &setup.identification,
+        (40.0, 400.0),
+        hertzforge_mimo_sine_law_math::modal::ModelChoice::Identification,
+        before,
+    )
+    .unwrap();
+    eprintln!(
+        "identification as measured: model error {:.4}",
+        model_error(&st, &setup, &id)
+    );
+    for subtract in [false, true] {
+        let lim = FitLimits {
+            subtract_fitted: subtract,
+            ..FitLimits::default()
+        };
+        let t = Instant::now();
+        let (mf, rep) = ModalForm::fit_bounded(&setup.identification, (40.0, 400.0), lim).unwrap();
+        let (found, total) = true_modes_found(&st, (40.0, 400.0), &mf, 0.1);
+        eprintln!(
+            "subtract {subtract}: {:.2} s, {} modes kept, {found} of {total} true within 0.1 bandwidth, left out {}, groups {:?}",
+            t.elapsed().as_secs_f64(),
+            mf.modes(),
+            rep.candidates_left_out,
+            rep.groups.iter().map(|g| (g.candidates, g.lines)).collect::<Vec<_>>()
+        );
+        let model = Model::build_with(
+            &setup.identification,
+            (40.0, 400.0),
+            Default::default(),
+            lim,
+        )
+        .unwrap();
+        eprintln!(
+            "  model error against the truth: {:.4}",
+            model_error(&st, &setup, &model)
+        );
+        eprintln!(
+            "  fitted {:?}",
+            mf.f_hz
+                .iter()
+                .zip(&mf.zeta)
+                .map(|(f, z)| (f.round(), (z * 1e4).round() / 1e4))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// RMS over the grid of each line's |model - truth| / |truth| (Frobenius).
+fn model_error(
+    st: &ModalStructure,
+    setup: &hertzforge_mimo_sine_law_math::Setup,
+    model: &Model,
+) -> f64 {
+    use hertzforge_mimo_sine_law_math::C64;
+    let (n, m) = (st.controls, st.drives);
+    let mut h = vec![C64::new(0.0, 0.0); n * m];
+    let mut t = vec![C64::new(0.0, 0.0); n * m];
+    let g = &setup.identification.grid_hz;
+    let mut acc = 0.0;
+    for &f in g {
+        model.at(f, &mut h);
+        st.frf(f, &mut t);
+        let d: f64 = h.iter().zip(&t).map(|(a, b)| (a - b).norm_sqr()).sum();
+        let r: f64 = t.iter().map(|b| b.norm_sqr()).sum();
+        acc += d / r;
+    }
+    (acc / g.len() as f64).sqrt()
+}
+
+#[test]
+#[ignore = "diagnosis: the parity case's group work"]
+fn mimo_sine_fit_parity_case_work() {
+    let st = structure(&load("matrix_parity.json")["lin4x4"]);
+    let setup = st.setup((30.0, 120.0), true);
+    let (_, rep) =
+        ModalForm::fit_bounded(&setup.identification, (30.0, 120.0), FitLimits::default()).unwrap();
+    for g in &rep.groups {
+        eprintln!(
+            "group {} candidates, {} lines, {} evaluations, work {:.3e}",
+            g.candidates, g.lines, g.evaluations, g.work as f64
+        );
+    }
 }
