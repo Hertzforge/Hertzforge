@@ -64,7 +64,13 @@ the controls; a control row taken out, or a monitor row, can then be a limit cha
 enabled drive row is a drive, in the table's order, each with its own **ceiling** and **abort** in
 volts peak. There is no default for either: they are your amplifier inputs. On the simulator,
 choose the **structure** the run is played on; its size must match the controls and drives, and
-by default the linear structure of the run's size is taken.
+by default the linear structure of the run's size is taken. The simulator's sine structures are a
+linear one in three sizes (4 controls by 4 drives, 6 by 3 and 3 by 6), three 4 by 4 structures
+whose resonances move with level (softening mildly, softening moderately, hardening), a base and
+article with two limit channels (6 by 4), a 4 by 4 that is nearly singular at one frequency, a 4
+by 4 of weakly coupled pairs (each drive's cross paths at least 21.9 dB under its direct one), and
+a 4 by 4 loopback (four outputs wired to four inputs: unity gain, a 0.8 ms delay, no coupling),
+the simulator's twin of the bench's wire loopback.
 
 ### References
 
@@ -101,8 +107,11 @@ for the law's requests.
 
 ### Limits
 
-Limit channels with their bounds, the notch's settings, and optionally each shaker's rating record
-and moving masses for the feasibility check and the kinematic monitor.
+Limit channels with their bounds; the notch's settings: the ticks each limit reading is smoothed
+over, the release rate (10 dB a second by default), the release hysteresis (0 to 6 dB, 1 by
+default) and how near its bound a limit channel must be for a law's own lowered reference to be
+taken (see "Limit Channels and the Backstop Notch"); and optionally each shaker's rating record and
+moving masses for the feasibility check and the kinematic monitor.
 
 ## The Control Laws
 
@@ -147,7 +156,9 @@ gain, and they are the baselines a comparison of laws needs. Their limits, from 
 on a linear 4 by 4 structure:
 
 - `paired` held none of the dwells on that coupled structure. Expect it to fail where the shakers
-  are strongly coupled. It is the simplest law and the template for writing your own.
+  are strongly coupled. It is the simplest law and the template for writing your own. Its check
+  runs its dwells, noise, stepped and ladder cases on the weakly coupled pairs, the setting it is
+  for, and each such case names that structure.
 - `steepest_descent` held every dwell, two stepped sines in five, and no sweep.
 - `secant` held four dwells in five (with either carry), and no stepped sine or sweep. Its
   parameter **Carry** chooses how the gain is carried to the next frequency (`factor` or
@@ -173,18 +184,26 @@ a slower sweep is the remedy. A warning never holds the run.
 
 ## Limit Channels and the Backstop Notch
 
-A limit channel is watched, not controlled. Where its predicted or measured response would pass its
-bound, the controller scales the whole drive vector down, its direction kept, and every control
-falls with it. This backstop needs no model to be right. The run screen shows the scale (the
-**Notch** on the run card and in the Run reading) and, per control, how far under its reference it
-sits. The notch has a depth: the share of the reference the limit channels allow, which the
-controls are judged against and every law is told, so the law aims for the lowered reference
-instead of pushing against the notch. The depth goes deeper at once when a limit channel demands it.
-It comes back up only once the limit channels allow more than the release hysteresis above where it
-is (1 dB by default), and then at most at the release rate (10 dB a second by default), and while
-the notch is in the whole drive vector rises no faster than that rate either. So a limit reading
-that wanders near its bound does not take the notch in and out, and the controls follow it out
-without overshooting their reference. A limit channel outside its own abort band ends the run.
+A limit channel is watched, not controlled. The notch has a depth: the share of the reference the
+limit channels allow, which the controls are judged against and every law is told, so the law aims
+for the lowered reference instead of pushing against the limit. The depth goes deeper at once when
+a limit channel demands it. It comes back up only once the limit channels allow more than the
+release hysteresis above where it is (1 dB by default), and then at most at the release rate (10 dB
+a second by default), and while the notch is in the whole drive vector rises no faster than that
+rate either. So a limit reading that wanders near its bound does not take the notch in and out,
+and the controls follow it out without overshooting their reference.
+
+Behind the depth is the backstop: where a limit channel's predicted or measured response would
+still pass its bound on an update, the controller scales the whole drive vector down, its direction
+kept, and every control falls with it. The backstop needs no model to be right.
+
+The notch is in while the depth holds the reference down or the backstop cuts the drive. The
+**Notch** on the run card says which, and by how much: the reference held down so many dB (the
+deepest control's), the drive cut to a scale (and in dB) on the last update, or both; the Run
+reading shows the cut. Per control, the controls table gives how far under its reference it sits,
+and each control's amplitude plot draws the reference as held down, with its bands around it.
+After the run the card gives, per limit channel, its worst margin to its bound and where, and the
+time the notch was in. A limit channel outside its own abort band ends the run.
 
 A law may also return a reference of its own, lowered at some controls. The controller takes it
 only when it lowers every control's reference and a limit channel is within the "near the bound"
@@ -237,20 +256,24 @@ guard bound, the ticks a drive was over its ceiling and its requests.
 
 The pages until you change them:
 
-- **Controls**: each control's amplitude against its reference with its alarm and abort bands, and
-  its phase against its reference phase.
-- **Error**: every control's error in dB, the notch depth while one is taken, and the readings.
+- **Controls**: each control's amplitude against its reference (as held down while the notch is
+  in) with its alarm and abort bands around it, and its phase against its reference phase.
+- **Error**: every control's error in dB with the alarm and abort band lines, the notch depth while
+  one is taken, and the readings.
 - **Limits**: each limit channel against its bound.
 - **Drives**: every drive's amplitude and phase as played.
-- **Identification**: the response from every drive to a control, its phase, and every channel's
-  coherence with the trust line.
+- **Identification**: the response from every drive to a control (in the control's unit per
+  volt), its phase, and every channel's coherence with the trust line. The review hold brings this
+  page forward; proceeding brings the Controls page back.
 - **Law**: the law's values and the run in numbers.
 
 In a sweep or a stepped sine the plots are against frequency; in a dwell, against the last minute
-of test time. The run card holds the verbs: Start, Proceed, Hold and Resume, and in a sweep Jog and
+of test time. The progress counts the one-way sweeps or steps completed: a sweep counts once it
+reaches the band's edge, so a finished one-sweep run reads 1 of 1, and one stopped part way 0. The
+run card holds the verbs: Start, Proceed, Hold and Resume, and in a sweep Jog and
 Go To, the level steps in the manual mode, Stop and Abort. A sweep turns only at the band's edges:
-there is no Reverse, so to sweep the other way from where the tone is, go to a frequency, or stop
-and start a sweep in the other direction. Stop ramps every drive down together; Abort ends the run
+to sweep the other way from where the tone is, go to a frequency, or stop and start a sweep in the
+other direction. Stop ramps every drive down together; Abort ends the run
 within one batch.
 
 ## What a Run Saves
@@ -259,8 +282,8 @@ Every run that arms leaves a run folder under the data folder, named
 `<date>-<time>_mimo_sine_<run id>`, written while the run goes and readable at every moment. From
 the arm: the configuration as accepted and what it resolved to (every control's reference and
 phase, every limit channel's bound, the test, the schedule, the guards, the identification's
-settings, the law and its parameters, the request switch, and the simulator's structure on the
-simulator), the channel table as it was used, and the law with what it accepts. After the
+settings, the law and its parameters, the request switch, the notch's settings, and the
+simulator's structure on the simulator), the channel table as it was used, and the law with what it accepts. After the
 identification: every control's and limit channel's response to every drive, the coherences, the
 lines trusted, the level it was taken at and the loop's delays the law was told. Then, tick by
 tick, every control's, limit channel's and drive's tracked amplitude and phase with the tone's
@@ -281,8 +304,9 @@ setup switches them off. The run is labelled SIM or HARDWARE from the station it
 | `results/identification_coherence` | `identification_coherence`: each one's multiple coherence |
 | `results/identification_trust`, `results/control_trace`, `results/limit_ch<n>`, the rest of `channel_levels`, the log and the end | The `Run Record`, as named arrays |
 
-A stepped sine's references and a dwell's levels have no analysis object yet and stay in the run
-record. The file-by-file list is in [run-folder.md](run-folder.md), "What a MIMO Sine Run Saves".
+The project also holds the setup the run was accepted with, which opens again as a MIMO Sine
+setup. A stepped sine's references and a dwell's levels have no analysis object yet and stay in the
+run record. The file-by-file list is in [run-folder.md](run-folder.md), "What a MIMO Sine Run Saves".
 
 ## Writing Your Own Law
 
