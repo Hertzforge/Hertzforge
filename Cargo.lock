@@ -1397,13 +1397,19 @@ dependencies = [
 name = "hertzforge-mimo-sine-laws"
 version = "0.1.15"
 dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
  "hertzforge-law-host",
  "hertzforge-law-sdk",
  "hertzforge-mimo-sine",
  "hertzforge-mimo-sine-law-math",
  "hertzforge-mimo-sine-laws",
+ "hertzforge-module-abi",
  "hertzforge-random-laws",
  "hertzforge-sdm",
+ "hertzforge-sine",
  "serde_json",
 ]
 
@@ -2641,6 +2647,8 @@ dependencies = [
  "hertzforge-mimo-random",
  "hertzforge-mimo-shock",
  "hertzforge-mimo-shock-laws",
+ "hertzforge-mimo-sine",
+ "hertzforge-mimo-sine-laws",
  "hertzforge-mixed",
  "hertzforge-mixed-laws",
  "hertzforge-module-abi",

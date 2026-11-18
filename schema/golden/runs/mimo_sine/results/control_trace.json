@@ -1,0 +1,293 @@
+{
+  "name": "control_trace",
+  "kind": "mimo_sine_control",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "drives": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "every tick of the control law: whether it was called, the drive in force it was told, the drive it asked for, the drive played after every guard (each drive's real and imaginary parts, V peak), the miss, the call's time, the request and its outcome, the caps and scales that bound, and the law's declared values; time from engage; a tick is NaN where a record was not filled",
+  "diagnostics": [
+    "gain",
+    "group_delay_s",
+    "condition",
+    "carried_share",
+    "rotation_deg",
+    "unseen_share",
+    "modes_kept",
+    "candidates_left_out"
+  ],
+  "miss": [
+    "error",
+    "panicked",
+    "over_budget",
+    "over_memory",
+    "wrong_drive_count",
+    "non_finite",
+    "too_many_values",
+    "undeclared_value",
+    "bad_request",
+    "wrong_reference_count"
+  ],
+  "hold": [
+    "free",
+    "notch",
+    "held",
+    "probe",
+    "engage"
+  ],
+  "request": [
+    "hold",
+    "slow"
+  ],
+  "request_outcome": [
+    "none",
+    "granted",
+    "bounded",
+    "not_honoured",
+    "not_sweeping",
+    "hold_too_long"
+  ],
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "tick",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 128
+    },
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "Hz",
+      "offset": 256
+    },
+    {
+      "name": "dt",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "s",
+      "offset": 384
+    },
+    {
+      "name": "called",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 512
+    },
+    {
+      "name": "engage",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 640
+    },
+    {
+      "name": "hold",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 768
+    },
+    {
+      "name": "drive_in_force_re",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "V",
+      "offset": 896
+    },
+    {
+      "name": "drive_in_force_im",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "V",
+      "offset": 1408
+    },
+    {
+      "name": "drive_asked_re",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "V",
+      "offset": 1920
+    },
+    {
+      "name": "drive_asked_im",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "V",
+      "offset": 2432
+    },
+    {
+      "name": "drive_re",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "V",
+      "offset": 2944
+    },
+    {
+      "name": "drive_im",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "V",
+      "offset": 3456
+    },
+    {
+      "name": "miss",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 3968
+    },
+    {
+      "name": "call_s",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "s",
+      "offset": 4096
+    },
+    {
+      "name": "faulted",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4224
+    },
+    {
+      "name": "request",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4352
+    },
+    {
+      "name": "request_factor",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4480
+    },
+    {
+      "name": "request_outcome",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4608
+    },
+    {
+      "name": "ceiling_scale",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4736
+    },
+    {
+      "name": "first_drive_scale",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4864
+    },
+    {
+      "name": "cap_bound",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4992
+    },
+    {
+      "name": "rotation_bound",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 5120
+    },
+    {
+      "name": "largest_rotation",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "deg",
+      "offset": 5248
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        8,
+        16
+      ],
+      "unit": "",
+      "offset": 5376
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "name": "reference",
+  "kind": "mimo_sine_reference",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "controls": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "description": "every control's reference amplitude and phase at full level, peak, and its alarm and abort bands, on the run's band: every control's breakpoints and the points between them; the phase is NaN where the run's phases are not specified",
+  "phase_specified": true,
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        4,
+        9
+      ],
+      "unit": "g",
+      "offset": 72
+    },
+    {
+      "name": "phase",
+      "dtype": "f8",
+      "shape": [
+        4,
+        9
+      ],
+      "unit": "deg",
+      "offset": 360
+    },
+    {
+      "name": "alarm_low",
+      "dtype": "f8",
+      "shape": [
+        4,
+        9
+      ],
+      "unit": "g",
+      "offset": 648
+    },
+    {
+      "name": "alarm_high",
+      "dtype": "f8",
+      "shape": [
+        4,
+        9
+      ],
+      "unit": "g",
+      "offset": 936
+    },
+    {
+      "name": "abort_low",
+      "dtype": "f8",
+      "shape": [
+        4,
+        9
+      ],
+      "unit": "g",
+      "offset": 1224
+    },
+    {
+      "name": "abort_high",
+      "dtype": "f8",
+      "shape": [
+        4,
+        9
+      ],
+      "unit": "g",
+      "offset": 1512
+    }
+  ]
+}

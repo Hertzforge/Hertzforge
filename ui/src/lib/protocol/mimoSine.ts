@@ -4,8 +4,6 @@
  * against its own reference amplitude and phase. A sweep, a dwell or a stepped sine. The run's law
  * is chosen from the control-law catalog's `sine_mimo` world. Where a part of the wire is Sine's
  * or MIMO Shock's, the type is theirs.
- *
- * The section is a draft: no service answers it yet.
  */
 import type {
 	ClockDomain,
@@ -57,8 +55,11 @@ export const MIMO_SINE_TOPICS = {
 /** The law world MIMO Sine's laws are listed under. */
 export const MIMO_SINE_WORLD = 'sine_mimo';
 
-/** Refusals of the `mimo_sine.*` methods: Sine's. */
-export type MimoSineRefusalReason = SineRefusalReason;
+/**
+ * Refusals of the `mimo_sine.*` methods: Sine's, and `reverse_not_available` (a sweep turns only at
+ * the band's edges) and `mode_fixed` (the ladder's mode is set before the run arms).
+ */
+export type MimoSineRefusalReason = SineRefusalReason | 'reverse_not_available' | 'mode_fixed';
 
 export type MimoSineTestType = 'sweep' | 'dwell' | 'stepped';
 
@@ -68,6 +69,10 @@ export type MimoSineLawEntry = LawEntry & {
 	shapes: MimoShape[];
 	test_types: MimoSineTestType[];
 	amplitude_only: boolean;
+	/** True on the world's default law alone. */
+	default: boolean;
+	/** A built-in law's limits as measured, in words; null for a law file. */
+	limits: string | null;
 };
 
 // --- configuration -------------------------------------------------------------------------
@@ -152,8 +157,13 @@ export interface MimoSineRequests {
 }
 
 export interface MimoSineNotch {
+	/** Ticks each limit channel's reading is smoothed over; default 3, at least 1. */
 	smoothing_ticks?: number;
+	/** How fast the notch's depth may rise back towards the whole reference, dB/s; default 10, above 0. */
 	release_ramp_db_per_s?: number;
+	/** How far the readings must allow the depth to rise before it begins to, dB; default 1, 0 to 6. */
+	release_hysteresis_db?: number;
+	/** How near its bound a limit channel must be for a law's notched reference to be taken, dB; default 3. */
 	near_bound_db?: number;
 }
 
@@ -422,7 +432,9 @@ export interface MimoSineState {
 	at_level_s: number | null;
 	remaining_s: number | null;
 	alarm: boolean;
+	/** True while the limit channels hold the reference down (the notch's depth under 1) or cut the drive vector. */
 	notch: boolean;
+	/** The scale the whole drive vector was cut to on the last update, 1 when none; null before the run. */
 	notch_scale: number | null;
 	identification: MimoSineIdentificationFacts | null;
 	review: MimoSineReview | null;
@@ -462,12 +474,41 @@ export interface MimoSineReport {
 		alarm_s: number;
 		notch_depth_max_db: number;
 	}[];
+	/** `notched_s`: the time the notch was in (the reference held down or the drive vector cut), s. */
 	limits: { channel: number; worst_margin_db: number | null; worst_margin_hz: number | null; notched_s: number }[];
 	drives: { channel: number; vpk_max: number; vpk_max_hz: number | null; ceiling_vpk: number; over_ceiling_ticks: number }[];
 	readings: { opposition_ratio_max: number | null; largest_share_max: number | null };
 	requests: { asked: number; granted: number; held_s: number };
 	identification: MimoSineIdentificationFacts | null;
 	end: MimoSineEnd;
+}
+
+/** One case of a MIMO Sine law's check (`laws.check` with `"world":"sine_mimo"`). */
+export interface MimoSineLawCheckCase {
+	case: string;
+	/** The case's description and the structure it ran on; a law set up for weakly coupled pairs runs on `sine-weak-4x4`. */
+	structure: string;
+	scored: boolean;
+	passed: boolean;
+	/** The first requirement that failed, by name; null when every one held. */
+	failed: string | null;
+	number: number | null;
+	detail: string;
+	/** The law's refused answers, and of those the ones refused only for coming late; null when the case could not run. */
+	misses: number | null;
+	late: number | null;
+	/** The law's calls, the slowest and the median, ms, and how many were over the setup's budget of `budget_ms`; null when the case could not run. */
+	calls: number | null;
+	worst_call_ms: number | null;
+	median_call_ms: number | null;
+	over_budget: number | null;
+	budget_ms: number | null;
+}
+
+/** The `laws.check` result for a MIMO Sine law. */
+export interface MimoSineLawsCheckResult {
+	law: LawEntry;
+	report: { passed: boolean; recorded: boolean; tool_version: string; cases: MimoSineLawCheckCase[] };
 }
 
 export interface MimoSineReportResult {
@@ -590,7 +631,9 @@ export interface MimoSineLiveHead {
 	request_held: boolean;
 	level_db: number | null;
 	commanded_db: number | null;
+	/** The state's: the reference held down or the drive vector cut. */
 	notch: boolean;
+	/** The state's: the drive vector's cut on the last update, 1 when none. */
 	notch_scale: number;
 	alarm: boolean;
 	controls: MimoSineLiveControl[];

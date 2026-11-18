@@ -50,6 +50,8 @@ mod srs_methods;
 #[path = "server_mimo_shock.rs"]
 mod mimo_shock_methods;
 
+#[path = "server_mimo_sine.rs"]
+mod mimo_sine_methods;
 #[path = "server_mixed.rs"]
 mod mixed_methods;
 #[path = "server_sine.rs"]
@@ -85,7 +87,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// The methods that could start a drive or raise one. Once shutdown has begun
 /// ([`Service::shutdown`]) they are refused; one already under way finishes first.
-const DRIVE_METHODS: [&str; 57] = [
+const DRIVE_METHODS: [&str; 65] = [
     "random.arm",
     "random.start",
     "random.proceed",
@@ -143,6 +145,14 @@ const DRIVE_METHODS: [&str; 57] = [
     "mimo_shock.start",
     "mimo_shock.proceed",
     "mimo_shock.fire",
+    "mimo_sine.arm",
+    "mimo_sine.start",
+    "mimo_sine.proceed",
+    "mimo_sine.level",
+    "mimo_sine.mode",
+    "mimo_sine.resume",
+    "mimo_sine.jog",
+    "mimo_sine.goto",
 ];
 
 /// The methods this service serves, for the unknown-method message.
@@ -165,6 +175,10 @@ const METHODS: &str = "session.state, session.claim, session.release, station.li
     mimo_shock.proceed, mimo_shock.fire, mimo_shock.stop, mimo_shock.abort, mimo_shock.reset, \
     mimo_shock.clear, mimo_shock.state, mimo_shock.log, mimo_shock.subscribe, \
     mimo_shock.pulses, mimo_shock.pulse, \
+    mimo_sine.configure, mimo_sine.config, mimo_sine.arm, mimo_sine.start, mimo_sine.proceed, \
+    mimo_sine.level, mimo_sine.mode, mimo_sine.hold, mimo_sine.resume, mimo_sine.reverse, \
+    mimo_sine.jog, mimo_sine.goto, mimo_sine.stop, mimo_sine.abort, mimo_sine.reset, \
+    mimo_sine.clear, mimo_sine.state, mimo_sine.log, mimo_sine.report, mimo_sine.subscribe, \
     sine.configure, sine.config, sine.profile.import, sine.profile.validate, sine.arm, \
     sine.start, sine.proceed, sine.level, sine.mode, sine.hold, sine.resume, sine.reverse, \
     sine.jog, sine.goto, sine.adjust, sine.stop, sine.abort, sine.reset, sine.clear, \
@@ -315,6 +329,7 @@ pub enum Feed {
     Shock,
     Srs,
     MimoShock,
+    MimoSine,
     Sine,
     Mixed,
     Twr,
@@ -429,6 +444,14 @@ struct Inner {
     mimo_shock_log_sent: (String, u64),
     mimo_shock_rows_sent: u64,
     mimo_shock_ident_sent: bool,
+    /// The MIMO Sine configuration and its run, beside the others, and what of
+    /// it has been sent.
+    mimo_sine: Option<Arc<crate::mimo_sine::MsineRun>>,
+    mimo_sine_runs: u64,
+    mimo_sine_state_key: String,
+    mimo_sine_log_sent: (String, u64),
+    mimo_sine_pass_sent: (String, u64),
+    mimo_sine_report_sent: String,
     /// The Sine configuration and its run, beside the others, and what of it has
     /// been sent.
     sine: Option<Arc<crate::sine::SineRun>>,
@@ -503,6 +526,12 @@ impl Inner {
         self.sine.as_ref().is_some_and(|s| s.view().state.is_live())
     }
 
+    fn mimo_sine_live(&self) -> bool {
+        self.mimo_sine
+            .as_ref()
+            .is_some_and(|s| s.view().state.is_live())
+    }
+
     fn mixed_live(&self) -> bool {
         self.mixed
             .as_ref()
@@ -539,6 +568,7 @@ impl Inner {
             || self.shock_live()
             || self.srs_live()
             || self.mimo_shock_live()
+            || self.mimo_sine_live()
             || self.sine_live()
             || self.mixed_live()
             || self.twr_live()
@@ -619,6 +649,21 @@ impl Inner {
                     "run_active",
                     format!(
                         "MIMO Shock run {} is {}; stop it first.",
+                        s.id,
+                        v.state.name()
+                    ),
+                )
+                .with_detail(json!({"run_id": s.id})));
+            }
+        }
+        if let Some(s) = &self.mimo_sine {
+            let v = s.view();
+            if v.state.is_live() {
+                return Err(MethodError::named(
+                    ErrorCode::Refused,
+                    "run_active",
+                    format!(
+                        "MIMO Sine run {} is {}; stop it first.",
                         s.id,
                         v.state.name()
                     ),
@@ -761,6 +806,12 @@ pub struct Service {
             mpsc::UnboundedReceiver<crate::pulse::rails::Notice<crate::mimo_shock::view::MsView>>,
         >,
     >,
+    /// The connections with a MIMO Sine display subscription.
+    mimo_sine_displays: std::sync::Mutex<HashMap<ConnId, mimo_sine_methods::MsineDisplay>>,
+    /// MIMO Sine runs' publishes, in order.
+    mimo_sine_notify: mpsc::UnboundedSender<crate::mimo_sine::run::Notice>,
+    mimo_sine_notices:
+        std::sync::Mutex<Option<mpsc::UnboundedReceiver<crate::mimo_sine::run::Notice>>>,
     /// The connections with a Sine display subscription.
     sine_displays: std::sync::Mutex<HashMap<ConnId, sine_methods::SineDisplay>>,
     /// Sine runs' publishes, in order.
@@ -893,6 +944,7 @@ impl Service {
         let (srs_notify, srs_notices) = mpsc::unbounded_channel();
         let (mimo_shock_notify, mimo_shock_notices) = mpsc::unbounded_channel();
         let (sine_notify, sine_notices) = mpsc::unbounded_channel();
+        let (mimo_sine_notify, mimo_sine_notices) = mpsc::unbounded_channel();
         let (mixed_notify, mixed_notices) = mpsc::unbounded_channel();
         let (twr_notify, twr_notices) = mpsc::unbounded_channel();
         let (explorer_notify, explorer_notices) = mpsc::unbounded_channel();
@@ -927,6 +979,12 @@ impl Service {
                 mimo_shock_log_sent: (String::new(), 0),
                 mimo_shock_rows_sent: 0,
                 mimo_shock_ident_sent: false,
+                mimo_sine: None,
+                mimo_sine_runs: 0,
+                mimo_sine_state_key: String::new(),
+                mimo_sine_log_sent: (String::new(), 0),
+                mimo_sine_pass_sent: (String::new(), 0),
+                mimo_sine_report_sent: String::new(),
                 sine: None,
                 sine_runs: 0,
                 sine_state_key: String::new(),
@@ -975,6 +1033,9 @@ impl Service {
             mimo_shock_displays: std::sync::Mutex::new(HashMap::new()),
             mimo_shock_notify,
             mimo_shock_notices: std::sync::Mutex::new(Some(mimo_shock_notices)),
+            mimo_sine_displays: std::sync::Mutex::new(HashMap::new()),
+            mimo_sine_notify,
+            mimo_sine_notices: std::sync::Mutex::new(Some(mimo_sine_notices)),
             sine_displays: std::sync::Mutex::new(HashMap::new()),
             sine_notify,
             sine_notices: std::sync::Mutex::new(Some(sine_notices)),
@@ -1056,6 +1117,7 @@ impl Service {
             Feed::Srs => self.srs_displays().contains_key(&conn),
             Feed::MimoShock => self.mimo_shock_displays().contains_key(&conn),
             Feed::Sine => self.sine_displays().contains_key(&conn),
+            Feed::MimoSine => self.mimo_sine_displays().contains_key(&conn),
             Feed::Mixed => self.mixed_displays().contains_key(&conn),
             Feed::Twr => self.twr_displays().contains_key(&conn),
             Feed::Explorer => self.explorer_displays().contains_key(&conn),
@@ -1173,6 +1235,19 @@ impl Service {
             tokio::spawn(async move {
                 while let Some((run_id, view)) = notices.recv().await {
                     svc.mimo_shock_changed(&run_id, &view).await;
+                }
+            });
+        }
+        let msine_notices = self
+            .mimo_sine_notices
+            .lock()
+            .ok()
+            .and_then(|mut n| n.take());
+        if let Some(mut notices) = msine_notices {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                while let Some((run_id, _view)) = notices.recv().await {
+                    svc.mimo_sine_changed(&run_id).await;
                 }
             });
         }
@@ -1300,6 +1375,7 @@ impl Service {
                 .clone()
                 .filter(|s| s.view().state.is_live());
             let sine = inner.sine.clone().filter(|s| s.view().state.is_live());
+            let msine = inner.mimo_sine.clone().filter(|s| s.view().state.is_live());
             let mixed = inner.mixed.clone().filter(|s| s.view().state.is_live());
             let twr = inner.twr.clone().filter(|s| s.view().state.is_live());
             let explorer = inner.explorer.clone().filter(|s| s.view().state.is_live());
@@ -1307,6 +1383,15 @@ impl Service {
             let playback = inner.playback.clone().filter(|s| s.view().state.is_live());
             let random = inner.random.clone();
             drop(inner);
+            if let Some(s) = msine {
+                mimo_sine_methods::stop_mimo_sine(
+                    &s,
+                    Some("safe_stop"),
+                    "the service (nobody held control)".into(),
+                    false,
+                )
+                .await;
+            }
             if let Some(s) = playback {
                 playback_methods::stop_playback(&s, "the service (nobody held control)".into());
             }
@@ -1577,6 +1662,37 @@ impl Service {
                 })
             }
         };
+        // A MIMO Sine run takes its controlled stop, the 120 dB/s ramp on every
+        // drive at once. Should it still be live well after the ramp, it is
+        // aborted.
+        let msine = self.inner.lock().await.mimo_sine.clone();
+        let msine_said = match msine.filter(|s| s.view().state.is_live()) {
+            None => None,
+            Some(s) => {
+                mimo_sine_methods::stop_mimo_sine(
+                    &s,
+                    Some("safe_stop"),
+                    rrun::SHUTDOWN_BY.into(),
+                    true,
+                )
+                .await;
+                let asked = Instant::now();
+                let patience = mimo_sine_methods::shutdown_patience(&s);
+                while s.view().state.is_live() {
+                    if asked.elapsed() > patience {
+                        mimo_sine_methods::stop_mimo_sine(&s, None, rrun::SHUTDOWN_BY.into(), true)
+                            .await;
+                        break;
+                    }
+                    tokio::time::sleep(SHUTDOWN_POLL).await;
+                }
+                let v = s.view();
+                Some(match &v.end {
+                    Some(end) => format!("run {} ended ({}): {}", s.id, end.outcome, end.message),
+                    None => format!("run {} ended", s.id),
+                })
+            }
+        };
         // A MIMO Shock run takes its controlled stop the same way.
         let mshock = self.inner.lock().await.mimo_shock.clone();
         let mshock_said = match mshock.filter(|s| s.view().state.is_live()) {
@@ -1662,6 +1778,7 @@ impl Service {
             return shock_said
                 .or(srs_said)
                 .or(mshock_said)
+                .or(msine_said)
                 .or(sine_said)
                 .or(mixed_said)
                 .or(twr_said)
@@ -1718,6 +1835,7 @@ impl Service {
         self.shock_displays().remove(&conn.id);
         self.srs_displays().remove(&conn.id);
         self.mimo_shock_displays().remove(&conn.id);
+        self.mimo_sine_displays().remove(&conn.id);
         self.sine_displays().remove(&conn.id);
         self.mixed_displays().remove(&conn.id);
         self.twr_displays().remove(&conn.id);
@@ -1833,6 +1951,8 @@ impl Service {
             "mimo_shock.configure" => self.mimo_shock_configure(conn, params).await,
             "mimo_shock.config" => Ok(self.mimo_shock_config().await),
             "mimo_shock.pulse" => self.mimo_shock_pulse(params).await,
+            "mimo_sine.configure" => self.mimo_sine_configure(conn, params).await,
+            "mimo_sine.config" => Ok(self.mimo_sine_config().await),
             "sine.configure" => self.sine_configure(conn, params).await,
             "sine.config" => Ok(self.sine_config().await),
             "sine.profile.validate" => self.sine_profile_validate(params).await,
@@ -1986,6 +2106,24 @@ impl Service {
             "mimo_shock.log" => self.mimo_shock_log(params).await,
             "mimo_shock.subscribe" => self.mimo_shock_subscribe(conn, params).await,
             "mimo_shock.pulses" => self.mimo_shock_pulses(params).await,
+            "mimo_sine.arm" => self.mimo_sine_arm(conn, params, false).await,
+            "mimo_sine.start" => self.mimo_sine_arm(conn, params, true).await,
+            "mimo_sine.proceed" => self.mimo_sine_proceed(conn, params).await,
+            "mimo_sine.level" => self.mimo_sine_level(conn, params).await,
+            "mimo_sine.mode" => self.mimo_sine_mode(conn, params).await,
+            "mimo_sine.hold" => self.mimo_sine_hold(conn, true).await,
+            "mimo_sine.resume" => self.mimo_sine_hold(conn, false).await,
+            "mimo_sine.reverse" => self.mimo_sine_reverse(conn).await,
+            "mimo_sine.jog" => self.mimo_sine_goto(conn, params, true).await,
+            "mimo_sine.goto" => self.mimo_sine_goto(conn, params, false).await,
+            "mimo_sine.stop" => self.mimo_sine_end(conn, false).await,
+            "mimo_sine.abort" => self.mimo_sine_end(conn, true).await,
+            "mimo_sine.reset" => self.mimo_sine_reset(conn).await,
+            "mimo_sine.clear" => self.mimo_sine_clear(conn).await,
+            "mimo_sine.state" => Ok(self.mimo_sine_state_now().await),
+            "mimo_sine.log" => self.mimo_sine_log(params).await,
+            "mimo_sine.report" => Ok(self.mimo_sine_report().await),
+            "mimo_sine.subscribe" => self.mimo_sine_subscribe(conn, params).await,
             "sine.profile.import" => self.sine_profile_import(params).await,
             "sine.arm" => self.sine_arm(conn, params, false).await,
             "sine.start" => self.sine_arm(conn, params, true).await,
@@ -2075,6 +2213,16 @@ impl Service {
             "laws.import" => self.laws_import(conn, params).await,
             "laws.check" if params.get("mixed").is_some_and(|m| !m.is_null()) => {
                 self.mixed_laws_check(conn, params).await
+            }
+            "laws.check" if self.mimo_sine_law_id(conn, params).await.is_some() => {
+                let id = self
+                    .mimo_sine_law_id(conn, params)
+                    .await
+                    .unwrap_or_default();
+                let mut p = params.clone();
+                p.remove("path");
+                p.insert("id".into(), Value::from(id));
+                self.mimo_sine_laws_check(conn, &p).await
             }
             "laws.check" if self.mimo_shock_law_id(conn, params).await.is_some() => {
                 let id = self
@@ -2646,6 +2794,7 @@ impl Service {
                 || inner.playback_live()
                 || inner.playback_live()
                 || inner.mimo_shock_live()
+                || inner.mimo_sine_live()
             {
                 inner.run_active()?;
             }
@@ -2929,6 +3078,7 @@ impl Service {
             || inner.recorder_live()
             || inner.playback_live()
             || inner.mimo_shock_live()
+            || inner.mimo_sine_live()
         {
             inner.run_active()?;
         }

@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
 import type { ChannelRow } from '$lib/protocol/types';
 import type { LawEntry } from '$lib/protocol/mimo';
 import { canonical } from '../mimo/mimoSetup';
-import { defaultMsineSetup, fitChannels, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
+import { notchWords } from './msineWords';
+import { defaultMsineSetup, fitChannels, STRUCTURES, structuresFor, fromMsineConfig, lawRefusal, localErrors, mergeMsineSetup, msineItemKey, msineSectionOf, msineTitle, setControl, shapeOf, toMsineConfig } from './msineSetup';
 
 function row(index: number, role: ChannelRow['role'], enabled = true): ChannelRow {
 	return { index, enabled, description: '', role, units: 'g' } as unknown as ChannelRow;
@@ -28,6 +29,43 @@ function filled() {
 const law = (id: string, test_types: string[], amplitude_only: boolean, shapes: string[] | null = null) => ({ id, name: id, shapes, test_types, amplitude_only }) as unknown as LawEntry;
 
 describe('the MIMO Sine setup draft', () => {
+	it("sends the notch's release as the service takes it: 10 dB/s, 1 dB of hysteresis by default", () => {
+		const d = filled();
+		expect(d.limits.notch).toEqual({ smoothing_ticks: 3, release_ramp_db_per_s: 10, release_hysteresis_db: 1, near_bound_db: 3 });
+		d.limits.notch.release_hysteresis_db = 2.5;
+		const c = toMsineConfig(d, null);
+		expect(c.limits?.notch?.release_hysteresis_db).toBe(2.5);
+		expect(fromMsineConfig(c).limits.notch.release_hysteresis_db).toBe(2.5);
+		// a configuration without it opens on the default
+		const { release_hysteresis_db: _gone, ...rest } = c.limits!.notch!;
+		expect(fromMsineConfig({ ...c, limits: { ...c.limits, notch: rest } }).limits.notch.release_hysteresis_db).toBe(1);
+		d.limits.notch.release_hysteresis_db = Number.NaN;
+		expect(localErrors(d)['limits.notch.release_hysteresis_db']).toBeTruthy();
+		expect(msineSectionOf('limits.notch.release_hysteresis_db')).toBe('limits');
+	});
+
+	it("offers the simulator's weakly coupled and loopback structures", () => {
+		const ids = STRUCTURES.map((s) => s.id);
+		expect(ids).toContain('sine-weak-4x4');
+		expect(ids).toContain('sine-loopback-4x4');
+		expect(STRUCTURES.filter((s) => s.id === 'sine-weak-4x4' || s.id === 'sine-loopback-4x4').every((s) => s.inputs === 4 && s.drives === 4)).toBe(true);
+	});
+
+	it('offers a structure by the table\'s inputs and drives: the base and article for 4 controls, 2 monitors and 4 drives', () => {
+		const rows = [1, 2, 3, 4].map((i) => row(i, 'control')).concat([row(5, 'monitor'), row(6, 'monitor')], [7, 8, 9, 10].map((i) => row(i, 'drive')));
+		expect(structuresFor(rows).map((s) => s.id)).toEqual(['sine-base-article-6x4']);
+		expect(structuresFor(rows.slice(0, 4).concat(rows.slice(6))).map((s) => s.id)).toContain('sine-weak-4x4');
+		expect(structuresFor([...rows.slice(0, 5), row(6, 'monitor', false), ...rows.slice(6)])).toEqual([]);
+	});
+
+	it('says the notch as the service reports it: the reference held down, the drive cut, or none', () => {
+		expect(notchWords(false, 1, 0)).toBe('None');
+		expect(notchWords(true, 1, 3.5)).toBe('Reference held down 3.5 dB');
+		expect(notchWords(true, 0.5, 0)).toMatch(/^Drive cut to 0.5 \(6.0\d* dB\)$/);
+		expect(notchWords(true, 0.5, 2)).toMatch(/^Reference held down 2 dB; drive cut to 0.5/);
+		expect(notchWords(true, null, 0)).toBe('In');
+	});
+
 	it('fits the controls and drives to the table, each control keeping its reference', () => {
 		const d = filled();
 		expect(d.controls.map((c) => c.channel)).toEqual([1, 2, 3]);

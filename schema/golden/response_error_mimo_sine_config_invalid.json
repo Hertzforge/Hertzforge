@@ -1,0 +1,29 @@
+{
+ "type": "response",
+ "id": 89,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 3 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "abort_below_ceiling",
+     "field": "channels.drives[1].abort_vpk",
+     "message": "Drive 8's abort of 1 V is not above its ceiling of 2 V and at most 10 V."
+    },
+    {
+     "reason": "law_test_type_not_accepted",
+     "field": "control.law.id",
+     "message": "secant does not accept a sweep; it accepts dwell."
+    },
+    {
+     "reason": "law_param_invalid",
+     "field": "control.law.params.carry",
+     "message": "secant's Carry along frequency is one of factor, plain."
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

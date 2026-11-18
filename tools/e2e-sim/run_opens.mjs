@@ -8,7 +8,8 @@
 //                                    [--data <dir>] [--shots <dir>] [--unwritable] [--headed]
 //
 // <module> is one of random, sine, shock (Classical Shock), srs, twr, mixed, mimo_random, explorer,
-// recorder. Without `--exe` it builds `sds-control` (release) and runs that. It starts the control
+// recorder, mimo_sine. MIMO Sine's run, its table set over the wire,
+// is mimo_sine_sim.mjs, which this runs with the same arguments. Without `--exe` it builds `sds-control` (release) and runs that. It starts the control
 // service (loopback, a free port, its data folder `--data`, else a new temporary folder), the
 // analysis service (`python -m hertzforge serve`, a free port) and the shell's dev server, runs one
 // short run on the simulator, and stops all three. Not part of `npm --prefix ui test`.
@@ -43,6 +44,12 @@ const flag = (name) => {
 	return i >= 0 ? args[i + 1] : undefined;
 };
 const MODULE = flag('--module') ?? 'random';
+if (MODULE === 'mimo_sine') {
+	const { spawnSync } = await import('node:child_process');
+	const rest = args.filter((x, i) => x !== '--module' && args[i - 1] !== '--module' && x !== '--unwritable');
+	const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), 'mimo_sine_sim.mjs'), ...rest], { stdio: 'inherit' });
+	process.exit(r.status ?? 1);
+}
 const UNWRITABLE = args.includes('--unwritable');
 const SHOTS = path.resolve(flag('--shots') ?? path.join(os.tmpdir(), 'hertzforge-e2e-opens', MODULE));
 const PYTHON = flag('--python') ?? process.env.HERTZFORGE_PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');

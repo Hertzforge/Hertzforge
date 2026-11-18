@@ -95,7 +95,12 @@ fn mimo_sine_the_sweep_rate_warning_flags_a_light_mode_swept_too_fast() {
             table(s),
             backend(s, NOISE, 7),
             law("matrix"),
-            EngineOptions::new(StationClass::HertzforgeSim),
+            // On the simulator the law's time budget is relaxed, as the other simulator
+            // harnesses relax theirs, so a call a busy machine made late is not a miss here.
+            EngineOptions {
+                law_budget: Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+                ..EngineOptions::new(StationClass::HertzforgeSim)
+            },
         )
         .unwrap();
         svc.arm().unwrap();

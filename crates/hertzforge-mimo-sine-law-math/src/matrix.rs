@@ -6,16 +6,32 @@
 //! interval (`f + sweep rate x tick`) and `w` the weight on the carry:
 //!
 //! ```text
-//! D+ = D_f + w (Z(f') - Z(f)) H(f) D_f + Z(f') (R(f') - R(f)) + g Z(f) (R - C)
+//! D+ = D_f + w (Z(f') - Z(f)) H(f) D_f + Z(f') (R - R_) + P + g Z(f) (R~ - C)
 //! ```
 //!
-//! - **Correction:** `g Z(f) (R - C)`, the published inverse correction at the
-//!   loop-speed rule's gain.
+//! with `R` the reference told this update, `R_` the one told the update
+//! before (at this update's level and notch), `R~` the reference as the
+//! trackers read it and `P` the part of the last carry a change cap cut.
+//!
+//! - **Correction:** `g Z(f) (R~ - C)`, the published inverse correction at
+//!   the loop-speed rule's gain, on the reference passed through the loop's
+//!   delay besides the structure (the tracker's delay, the transport delay,
+//!   half an update). While the reference moves the tracked controls trail it
+//!   by that delay; corrected on the reference now, the trail would be
+//!   integrated on top of a drive the carry has already moved.
 //! - **Carry:** the drive moved by the model's own change between this
 //!   frequency and the next, and by the reference's change through the model.
-//!   A model error common to `Z` and `H` cancels. At a dwell or a step it is
-//!   zero and the law is the correction alone. With `w = 0` it is the
-//!   correction alone everywhere.
+//!   A model error common to `Z` and `H` cancels. The reference's change is
+//!   taken between two references the controller told, so it sums to the
+//!   reference told whatever the profile does between the identification's
+//!   lines. At a dwell or a step it is zero and the law is the correction
+//!   alone. With `w = 0` the model's change is not carried; the reference's
+//!   change still is.
+//! - **Carry again what a cap cut:** `P`, per drive, the part of the last
+//!   answer a guard took off, where it lies along the last carry and no
+//!   larger than it, only while nothing holds the loop. A reference that
+//!   moves faster than the change cap allows is reached at the cap's pace
+//!   instead of being left to the correction.
 //! - **Rebase:** `D_f` is the drive in force as played, after every guard, so
 //!   nothing the controller cut is integrated again (no wind-up).
 //! - **Reset:** with more drives than controls the drive's part the controls
@@ -38,7 +54,7 @@
 //! linear structure; between a quarter and one bandwidth errors over 3 dB are
 //! expected there; past about one the loop can be lost.
 
-use crate::law::{Hold, Inputs, Outputs, SineLaw};
+use crate::law::{aimed_reference, Hold, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, norm, reg_pinv, row_space_part};
 use crate::modal::{Model, ModelChoice};
 use crate::setup::{GroupDelay, Setup, Shape, TrackingRule};
@@ -102,6 +118,15 @@ pub struct MatrixParams {
     /// Carry also where the model is not modal (inside the window of a group
     /// the fit left out). Off by default; on only to show what that costs.
     pub carry_outside_model: bool,
+    /// Correct on the reference as the trackers read it (the reference
+    /// through the loop's delay besides the structure) rather than the
+    /// reference now. Off only to show what the trail of a moving reference
+    /// does to the correction.
+    pub seen_reference: bool,
+    /// Carry again, next update, the part of the last carry a guard cut (a
+    /// change cap), while nothing holds the loop. Off only to show what is
+    /// lost to the cap otherwise.
+    pub recarry: bool,
 }
 
 impl Default for MatrixParams {
@@ -115,6 +140,8 @@ impl Default for MatrixParams {
             reset_unseen: true,
             free_phase: FreePhase::InPhase,
             carry_outside_model: false,
+            seen_reference: true,
+            recarry: true,
         }
     }
 }
@@ -135,6 +162,11 @@ pub struct MatrixLaw {
     model: Model,
     delay: GroupDelay,
     asked: Vec<C64>,
+    told_prev: Vec<C64>,
+    told_valid: bool,
+    seen: Vec<C64>,
+    seen_valid: bool,
+    carried_prev: Vec<C64>,
 }
 
 impl MatrixLaw {
@@ -175,6 +207,11 @@ impl MatrixLaw {
             setup: setup.clone(),
             model,
             asked: vec![ZERO; setup.drives],
+            told_prev: vec![ZERO; setup.controls],
+            told_valid: false,
+            seen: vec![ZERO; setup.controls],
+            seen_valid: false,
+            carried_prev: vec![ZERO; setup.drives],
         })
     }
 
@@ -231,11 +268,33 @@ impl MatrixLaw {
         Ok((kept, share))
     }
 
+    /// Keep the reference told this update, per unit of level, for the next
+    /// update's carry.
+    fn remember_told(&mut self, x: &Inputs) {
+        if x.level > 0.0 && x.level.is_finite() {
+            for (p, r) in self.told_prev.iter_mut().zip(x.reference) {
+                *p = r / x.level;
+            }
+            self.told_valid = true;
+        } else {
+            self.told_valid = false;
+        }
+    }
+
     /// The first drive: the inverse at the start frequency and level.
     fn engage_impl(&mut self, x: &Inputs, out: &mut Outputs) -> Result<(), String> {
         let h = self.model_at(x.f_hz);
         let (z, cond) = reg_pinv(&h, self.n, self.m, self.params.eps)?;
-        let r = self.effective(x.reference, x.controls);
+        let aimed = aimed_reference(x);
+        self.seen.copy_from_slice(x.reference);
+        if x.level > 0.0 && x.level.is_finite() {
+            self.seen.iter_mut().for_each(|v| *v /= x.level);
+        }
+        self.seen_valid = true;
+        self.carried_prev.iter_mut().for_each(|v| *v = ZERO);
+        self.told_valid = false;
+        self.remember_told(x);
+        let r = self.effective(&aimed, x.controls);
         let mut d = vec![ZERO; self.m];
         mat_vec(&z, self.m, self.n, &r, &mut d);
         let (d, unseen) = self.reset(d, x.f_hz)?;
@@ -259,13 +318,62 @@ impl MatrixLaw {
             x.f_hz,
         );
         let g = if x.hold == Hold::Engage { 0.0 } else { gn.g };
-        let rk = self.effective(x.reference, x.controls);
-        let e: Vec<C64> = rk.iter().zip(x.controls).map(|(r, c)| r - c).collect();
+        // Aimed at the reference the controller judges against: under a notch,
+        // the reference times its depth, so the correction never pushes
+        // against the notch.
+        let notch = if x.notch_scale.is_finite() {
+            x.notch_scale.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let aimed = aimed_reference(x);
+        let rk = self.effective(&aimed, x.controls);
         let f_next = (x.f_hz + x.sweep_hz_s * self.tick_s).clamp(self.grid_lo, self.grid_hi);
-        let mut rn = vec![ZERO; n];
-        self.setup.reference_at(f_next, &mut rn);
-        rn.iter_mut().for_each(|v| *v *= x.level);
-        let rn = self.effective(&rn, x.controls);
+        // The reference's change since the last update, both ends as the
+        // controller tells them (the last one at this update's level and
+        // notch, so a level move, which the controller carries itself, is not
+        // carried twice). It sums to the reference told, whatever the shape
+        // of the profile between the identification's lines.
+        let rp: Vec<C64> = if self.told_valid {
+            let s = x.level * notch;
+            self.told_prev.iter().map(|v| v * s).collect()
+        } else {
+            aimed.clone()
+        };
+        let rp = self.effective(&rp, x.controls);
+        self.remember_told(x);
+        // The reference as the trackers read it: the reference through
+        // a lag of the loop's delay besides the structure (the tracker's
+        // delay, the transport, and half the update over which a new drive is
+        // ramped in). While the reference moves, the tracked controls trail it
+        // by that delay and the trail is not a control error.
+        let tau = gn.filter_delay_s + gn.transport_delay_s + 0.5 * self.tick_s;
+        let a_seen = if self.seen_valid {
+            1.0 - (-self.tick_s / tau.max(1e-12)).exp()
+        } else {
+            1.0
+        };
+        self.seen_valid = true;
+        // Kept per unit of level and notch depth: the controller moves the
+        // level and the notch itself and opens a settle window for them, so
+        // only the profile's own change with frequency is trailed.
+        if x.level > 0.0 && x.level.is_finite() {
+            for (sv, r) in self.seen.iter_mut().zip(x.reference) {
+                *sv += (r / x.level - *sv) * a_seen;
+            }
+        }
+        let sc = x.level * notch;
+        let compared = if self.params.seen_reference {
+            let seen: Vec<C64> = self.seen.iter().map(|v| v * sc).collect();
+            self.effective(&seen, x.controls)
+        } else {
+            rk.clone()
+        };
+        let e: Vec<C64> = compared
+            .iter()
+            .zip(x.controls)
+            .map(|(r, c)| r - c)
+            .collect();
         let hk = self.model_at(x.f_hz);
         let (zk, cond) = reg_pinv(&hk, n, m, self.params.eps)?;
         let (zn, _) = reg_pinv(&self.model_at(f_next), n, m, self.params.eps)?;
@@ -274,14 +382,14 @@ impl MatrixLaw {
         } else {
             self.asked.clone()
         };
-        // Carried: w (Zn - Zk) Hk D0 + Zn (Rn - Rk).
+        // Carried: w (Zn - Zk) Hk D0 + Zn (Rk - Rp).
         let mut c0 = vec![ZERO; n];
         mat_vec(&hk, n, m, &d0, &mut c0);
         let mut a = vec![ZERO; m];
         let mut b = vec![ZERO; m];
         mat_vec(&zn, m, n, &c0, &mut a);
         mat_vec(&zk, m, n, &c0, &mut b);
-        let dr: Vec<C64> = rn.iter().zip(&rk).map(|(p, q)| p - q).collect();
+        let dr: Vec<C64> = rk.iter().zip(&rp).map(|(p, q)| p - q).collect();
         let mut c = vec![ZERO; m];
         mat_vec(&zn, m, n, &dr, &mut c);
         // Inside the window of a group the fit left out, the model there is the
@@ -296,7 +404,33 @@ impl MatrixLaw {
         } else {
             (0.0, 0.0)
         };
-        let carried: Vec<C64> = (0..m).map(|i| (a[i] - b[i]) * w + c[i] * wr).collect();
+        // The part of the last carry a guard cut (the change cap), carried
+        // again: only while nothing holds the loop.
+        let pend: Vec<C64> = if !self.params.recarry || !self.params.rebase || x.hold != Hold::Free
+        {
+            vec![ZERO; m]
+        } else {
+            // Per drive: what the guard took off the last answer, re-asked
+            // where it lies along the last carry and no larger than it.
+            self.asked
+                .iter()
+                .zip(x.drive_in_force)
+                .zip(&self.carried_prev)
+                .map(|((a, f), c)| {
+                    let cut = a - f;
+                    let (nc, nk) = (c.norm(), cut.norm());
+                    if nk > 0.0 && (cut * c.conj()).re > 0.0 {
+                        cut * (nc / nk).min(1.0)
+                    } else {
+                        ZERO
+                    }
+                })
+                .collect()
+        };
+        let carried: Vec<C64> = (0..m)
+            .map(|i| (a[i] - b[i]) * w + c[i] * wr + pend[i])
+            .collect();
+        self.carried_prev.copy_from_slice(&carried);
         let mut corr = vec![ZERO; m];
         mat_vec(&zk, m, n, &e, &mut corr);
         corr.iter_mut().for_each(|v| *v *= g);

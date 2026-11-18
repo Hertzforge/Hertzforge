@@ -175,25 +175,30 @@ fn entry_json_common(e: &CatalogEntry) -> Value {
 }
 
 /// The `laws.list` result for `world` (`None`: every world, single-output Random
-/// first, then multiple-output Random, then MIMO Shock, then classical shock, then
-/// SRS shock, then Sine, then TWR, then MIMO Sine).
+/// first, then multiple-output Random, then MIMO Shock, then MIMO Sine, then classical
+/// shock, then SRS shock, then Sine, then TWR).
 pub fn list_json(catalog: &LawCatalog, world: Option<LawWorld>) -> Value {
     let mut laws = Vec::new();
     for w in [
         LawWorld::Single,
         LawWorld::Mimo,
         LawWorld::ShockMimo,
+        LawWorld::SineMimo,
         LawWorld::ShockClassical,
         LawWorld::ShockSrs,
         LawWorld::Sine,
         LawWorld::Twr,
-        LawWorld::SineMimo,
     ] {
         if world.is_none_or(|x| x == w) {
             if w == LawWorld::ShockMimo {
                 // The built-ins first, then the imported files, each with the
                 // target kinds it accepts.
                 laws.extend(crate::mimo_shock::laws::list(catalog));
+            } else if w == LawWorld::SineMimo {
+                // The built-ins first, then the imported files, each with the
+                // shapes, test types and references it accepts, the default
+                // marked.
+                laws.extend(crate::mimo_sine::laws::list(catalog));
             } else {
                 laws.extend(catalog.entries_for(w).iter().map(entry_json));
             }

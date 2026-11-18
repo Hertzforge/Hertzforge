@@ -10,6 +10,7 @@ import { MIMO_SINE_TOPICS, type MimoSineData, type MimoSineSubscribeResult } fro
 import { pulseHooks } from '../pulse/pulseScreen';
 import { PulseScreenState } from '../pulse/pulseScreenState.svelte';
 import type { ScreenHooks, ScreenOptions } from '../screen/screen.svelte';
+import type { MimoSineQuantity } from '$lib/protocol/mimoSine';
 import { MSINE_SCREEN } from './msineLayout';
 
 export const MSINE_TEST_TYPE = 'mimo_sine';
@@ -20,4 +21,28 @@ export class MsineViewsState extends PulseScreenState<MimoSineData, MimoSineSubs
 	constructor(control: ServiceClient, opts: ScreenOptions) {
 		super(control, MSINE_HOOKS, opts);
 	}
+}
+
+/** Which pages the review has brought forward, by run. */
+export interface ReviewPages {
+	review: string | null;
+	proceeded: string | null;
+}
+
+/**
+ * The quantity whose page to bring forward as a run goes through its review, once each per run:
+ * the identification when it holds for review, then the controls once the operator proceeds and
+ * the run drives again; null otherwise.
+ */
+export function reviewPage(s: { state: string; run_id: string | null } | null, seen: ReviewPages): MimoSineQuantity | null {
+	if (!s?.run_id) return null;
+	if (s.state === 'review' && seen.review !== s.run_id) {
+		seen.review = s.run_id;
+		return 'identification';
+	}
+	if (s.state === 'running' && seen.review === s.run_id && seen.proceeded !== s.run_id) {
+		seen.proceeded = s.run_id;
+		return 'control';
+	}
+	return null;
 }

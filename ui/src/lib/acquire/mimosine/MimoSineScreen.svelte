@@ -3,7 +3,8 @@
 	 * The operator's screen for MIMO Sine, on the test screen's frame: Setup in sections with its
 	 * summary beside every one, then Run with its pages of plots and the control dock. The header
 	 * carries the tone's frequency and the sweep beside the run's state and level. The review hold
-	 * after identification brings the identification page forward, once per hold.
+	 * after identification brings the identification page forward, once per hold, and proceeding
+	 * from it brings the controls page back.
 	 */
 	import { untrack } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
@@ -20,6 +21,7 @@
 	import MsineSummary from './MsineSummary.svelte';
 	import MsineTest from './MsineTest.svelte';
 	import { MSINE_SECTIONS, type MsineSection } from './msineSetup';
+	import { reviewPage, type ReviewPages } from './msineViews.svelte';
 	import { hz } from './msineWords';
 
 	interface Props {
@@ -34,14 +36,13 @@
 	const now = $derived(ms.now);
 	const freq = $derived(ms.frameOfRun?.frequency_hz ?? now?.frequency_hz ?? null);
 
-	let reviewed: string | null = null;
+	const seen: ReviewPages = { review: null, proceeded: null };
 	$effect(() => {
-		const s = ms.status;
-		if (s?.state !== 'review' || !s.run_id || reviewed === s.run_id) return;
-		reviewed = s.run_id;
+		const page = reviewPage(ms.status, seen);
+		if (!page) return;
 		untrack(() => {
 			ms.step = 'run';
-			views.bringForward('identification');
+			views.bringForward(page);
 		});
 	});
 

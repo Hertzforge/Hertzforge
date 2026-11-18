@@ -19,7 +19,8 @@ use common::{arg, cdiv, mag};
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
 use hertzforge_hal::{AcquisitionConfig, Backend};
 use hertzforge_hal_sim::plants::{
-    Conditioning, SineStructure, SINE_BAND_HZ, SINE_CALIBRATION_RATE_HZ, SINE_NEAR_SINGULAR_HZ,
+    Conditioning, SineStructure, SINE_BAND_HZ, SINE_CALIBRATION_RATE_HZ, SINE_LOOPBACK_DELAY_S,
+    SINE_NEAR_SINGULAR_HZ, SINE_WEAK_CROSS_DB,
 };
 use hertzforge_hal_sim::{JointedPlant, MatrixStack, SimBackend, SimConfig, C64};
 use hertzforge_sdm::linalg;
@@ -137,6 +138,8 @@ fn mimo_sine_structures_by_name() {
             "sine-wide-3x6",
             "sine-base-article-6x4",
             "sine-near-singular-4x4",
+            "sine-weak-4x4",
+            "sine-loopback-4x4",
         ]
     );
     let grid = band_grid(1200);
@@ -160,8 +163,13 @@ fn mimo_sine_structures_by_name() {
             s.structure().is_level_dependent(),
             s.level_design().is_some()
         );
-        // Every elastic mode's Q is between 16 and 50, and one sits near 40 Hz at 1 %.
+        // Every elastic mode's Q is between 16 and 50, and one sits near 40 Hz at 1 %
+        // (the loopback has no modes).
         let p = s.structure();
+        if s == SineStructure::Loopback4x4 {
+            assert!(p.modes.is_empty());
+            continue;
+        }
         for m in &p.modes {
             let q = 0.5 / m.zeta;
             assert!(
@@ -237,6 +245,11 @@ fn mimo_sine_low_level_tone_reads_the_small_signal_response() {
                 let d = demodulate(&drive, f, settle);
                 for (i, r) in resp.iter().enumerate() {
                     let h = cdiv(demodulate(r, f, settle), d);
+                    // A path that is not there (the loopback's cross paths) reads nothing.
+                    if mag(truth.get(0, i, j)) == 0.0 {
+                        assert!(mag(h) < 1e-6, "{} drive {j} response {i}: {h}", s.name());
+                        continue;
+                    }
                     let e = cdiv(h, truth.get(0, i, j));
                     let (em, ep) = ((mag(e) - 1.0).abs(), arg(e).abs());
                     worst = (worst.0.max(em), worst.1.max(ep));
@@ -546,5 +559,115 @@ fn mimo_sine_structures_are_reproducible() {
     for s in SineStructure::ALL {
         assert_eq!(s.build(), s.build(), "{}", s.name());
         assert_eq!(play(s), play(s), "{}", s.name());
+    }
+}
+
+/// `sine-weak-4x4`: across the band every control's largest cross path is at least
+/// [`SINE_WEAK_CROSS_DB`] under its own drive's path, and its modes are the plate's.
+#[test]
+fn mimo_sine_weak_structure_keeps_each_control_on_its_own_drive() {
+    let s = SineStructure::Weak4x4;
+    let grid = band_grid(4000);
+    let h = s.build().model.analytic_frf_at(&grid, FS);
+    let mut worst = f64::INFINITY;
+    let mut at = 0.0;
+    for (k, &f) in grid.iter().enumerate() {
+        for i in 0..4 {
+            let direct = mag(h.get(k, i, i));
+            let cross = (0..4)
+                .filter(|&j| j != i)
+                .map(|j| mag(h.get(k, i, j)))
+                .fold(0.0, f64::max);
+            let db = 20.0 * (direct / cross).log10();
+            if db < worst {
+                worst = db;
+                at = f;
+            }
+        }
+    }
+    println!(
+        "sine-weak-4x4: cross paths at least {worst:.1} dB under the direct ones (at {at:.1} Hz)"
+    );
+    assert!(worst >= SINE_WEAK_CROSS_DB, "{worst} dB at {at} Hz");
+    // The plate's coupled 4 x 4, for contrast, has cross paths within a few dB.
+    let lin = SineStructure::Linear4x4
+        .build()
+        .model
+        .analytic_frf_at(&grid, FS);
+    let mut lin_worst = f64::INFINITY;
+    for k in 0..grid.len() {
+        for i in 0..4 {
+            let direct = mag(lin.get(k, i, i));
+            let cross = (0..4)
+                .filter(|&j| j != i)
+                .map(|j| mag(lin.get(k, i, j)))
+                .fold(0.0, f64::max);
+            lin_worst = lin_worst.min(20.0 * (direct / cross).log10());
+        }
+    }
+    println!("sine-linear-4x4: cross paths as close as {lin_worst:.1} dB to the direct ones");
+    assert!(lin_worst < 0.0, "{lin_worst}");
+    let plate: Vec<(f64, f64)> = SineStructure::Linear4x4
+        .structure()
+        .modes
+        .iter()
+        .map(|m| (m.f_hz, m.zeta))
+        .collect();
+    let weak: Vec<(f64, f64)> = s
+        .structure()
+        .modes
+        .iter()
+        .map(|m| (m.f_hz, m.zeta))
+        .collect();
+    assert_eq!(weak, plate);
+}
+
+/// `sine-loopback-4x4`: a tone on each drive in turn reads back on its own input only,
+/// at one volt per volt within 0.1 dB over the band, its phase lagging by the path
+/// delay (the bench's, plus the structures' two-sample equalized step).
+#[test]
+fn mimo_sine_loopback_reads_each_drive_back_flat_after_the_path_delay() {
+    let s = SineStructure::Loopback4x4;
+    let model = s.build().model;
+    let hertzforge_hal_sim::PlantModel::Jointed(p) = &model else {
+        panic!("a jointed structure");
+    };
+    let delay = p.transport_delay_samples + p.step_delay_samples();
+    assert_eq!(
+        p.transport_delay_samples,
+        (SINE_LOOPBACK_DELAY_S * FS).round() as usize
+    );
+    for f in [5.0, 40.0, 96.0, 381.0, 1000.0, 2000.0] {
+        for j in 0..4 {
+            let mut b = running(s, 0.0, 1);
+            let mut frame = vec![0.0f32; 4];
+            let mut buf = vec![0.0f32; 4];
+            let (mut drive, mut resp) = (Vec::new(), vec![Vec::new(); 4]);
+            for k in 0..2 * N {
+                frame[j] = (0.5 * (TAU * f * k as f64 / FS).cos()) as f32;
+                b.write_drive(&frame).unwrap();
+                b.read_input(&mut buf).unwrap();
+                if k >= N {
+                    drive.push(frame[j] as f64);
+                    for (r, &y) in resp.iter_mut().zip(&buf) {
+                        r.push(y as f64);
+                    }
+                }
+            }
+            let d = demodulate(&drive, f, N);
+            for (i, r) in resp.iter().enumerate() {
+                let h = cdiv(demodulate(r, f, N), d);
+                if i != j {
+                    assert!(mag(h) < 1e-6, "{f} Hz drive {j} read on {i}: {h}");
+                    continue;
+                }
+                let db = 20.0 * mag(h).log10();
+                assert!(db.abs() < 0.1, "{f} Hz drive {j}: {db} dB");
+                let want = -TAU * f * delay as f64 / FS;
+                let e =
+                    (arg(h) - want + std::f64::consts::PI).rem_euclid(TAU) - std::f64::consts::PI;
+                assert!(e.abs() < 0.01, "{f} Hz drive {j}: phase off by {e} rad");
+            }
+        }
     }
 }

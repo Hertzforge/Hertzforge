@@ -118,7 +118,7 @@ describe('the MIMO Sine store', () => {
 	});
 
 	it('runs a sweep through the review to completion, with a limit channel notching and every pass reported', async () => {
-		const { ms } = await screen();
+		const { ms, client } = await screen();
 		expect(ms.addLimit()).toBe(true);
 		ms.setup.limits.channels[0].profile.rows.forEach((r) => (r.value = 1));
 		await ms.checkSetup();
@@ -133,17 +133,24 @@ describe('the MIMO Sine store', () => {
 		expect(await ms.proceed()).toBe(true);
 		expect(ms.status?.review?.acknowledged).toBe('Reviewed the identification.');
 		let notched = false;
-		await until(() => {
-			if (ms.now?.notch) notched = true;
-			return ms.status?.state === 'finished';
+		client.on('mimo_sine.state', (d) => {
+			if ((d as { notch: boolean }).notch) notched = true;
 		});
+		await until(() => ms.status?.state === 'finished');
 		expect(ms.status?.end?.outcome).toBe('completed');
 		expect(notched).toBe(true);
 		expect(ms.lastPass?.views.some((v) => v.title === 'Limit 9')).toBe(true);
 		await until(() => ms.report !== null);
 		expect(ms.report?.limits[0].notched_s).toBeGreaterThan(0);
+		expect(Math.max(...ms.report!.controls.map((c) => c.notch_depth_max_db))).toBeGreaterThan(0);
 		expect(ms.report?.controls.length).toBe(4);
 		expect(ms.log.some((e) => /notch/i.test(e.text))).toBe(true);
+		// A window that opens on the finished run is drawn the last pass, not empty plots.
+		const frame = new Promise<{ plots: { views: { series: { x: ArrayLike<number> }[] }[] }[] }>((resolve) => client.on('mimo_sine.data', (d) => resolve(d as never)));
+		await client.request('mimo_sine.subscribe', { rate_hz: 5, plots: [{ id: 'c', quantity: 'control', channels: 'all' }] });
+		const views = (await frame).plots[0].views;
+		expect(views.length).toBe(4);
+		expect(views.every((v) => v.series.every((x) => x.x.length > 10))).toBe(true);
 	});
 
 	it('runs a dwell and a stepped sine to completion', async () => {
@@ -173,6 +180,9 @@ describe('the MIMO Sine store', () => {
 		await until(() => ms.now?.phase === 'engaged');
 		expect(ms.verbs.hold.enabled).toBe(true);
 		expect(ms.verbs.jog.visible).toBe(true);
+		// A MIMO Sine sweep turns only at the band's edges: Reverse is never offered.
+		expect(Object.keys(ms.verbs).sort()).toEqual(['goto', 'hold', 'jog', 'resume']);
+		expect('reverse' in ms).toBe(false);
 		expect(await ms.hold()).toBe(true);
 		expect(ms.status?.held).toBe(true);
 		expect(ms.verbs.resume.visible).toBe(true);
@@ -189,7 +199,7 @@ describe('the MIMO Sine store', () => {
 		await until(() => ms.status?.state === 'review');
 		await ms.proceed();
 		expect(ms.verbs.jog.visible).toBe(false);
-		expect(ms.verbs.reverse.visible).toBe(false);
+		expect(ms.verbs.goto.visible).toBe(false);
 		await ms.abort();
 	});
 
@@ -204,6 +214,46 @@ describe('the MIMO Sine store', () => {
 		const facts = msineTripFacts(end!.trip!);
 		expect(facts.find((f) => f.label === 'Control')?.value).toBe('2');
 		expect(facts.some((f) => f.label === 'Upper abort')).toBe(true);
+	});
+
+	it("refuses a notch release hysteresis out of 0 to 6 dB at its field, and takes the new structures", async () => {
+		const { ms } = await screen({}, 4, 4, 0);
+		ms.setup.limits.notch.release_hysteresis_db = 7;
+		await ms.checkSetup();
+		expect(ms.findings.errors.map((e) => [e.reason, e.field])).toEqual([['out_of_range', 'limits.notch.release_hysteresis_db']]);
+		expect(ms.fieldErrors['limits.notch.release_hysteresis_db']?.length).toBe(1);
+		expect(ms.counts.limits.errors).toBe(1);
+		ms.setup.limits.notch.release_hysteresis_db = 0;
+		for (const structure of ['sine-weak-4x4', 'sine-loopback-4x4']) {
+			ms.setup.simulator.structure = structure;
+			await ms.checkSetup();
+			expect(ms.check?.errors).toEqual([]);
+		}
+	});
+
+	it('says the notch is in while the reference is held down, with notch_scale the drive cut alone', async () => {
+		const { ms } = await screen({ speed: 4 });
+		expect(ms.addLimit()).toBe(true);
+		ms.setup.limits.channels[0].profile.rows.forEach((r) => (r.value = 1));
+		await run(ms);
+		await until(() => ms.now?.phase === 'engaged');
+		expect(await ms.hold()).toBe(true);
+		// where the limit channel's response passes its bound, held there until the depth settles
+		const [lo, hi] = ms.check!.derived!.band_hz;
+		expect(await ms.gotoHz(Math.round(lo * (hi / lo) ** 0.45 * 1.4))).not.toBeNull();
+		await until(() => {
+			const f = ms.frameOfRun;
+			return !!f && f.notch && f.notch_scale === 1 && f.controls.some((c) => c.notch_depth_db > 0);
+		});
+		expect(ms.now?.notch).toBe(true);
+		await ms.abort();
+	});
+
+	it('takes the base and article on 4 controls, 2 monitors and 4 drives: a structure is sized by its inputs', async () => {
+		const { ms } = await screen({}, 4, 4, 2);
+		ms.setup.simulator.structure = 'sine-base-article-6x4';
+		await ms.checkSetup();
+		expect(ms.check?.errors).toEqual([]);
 	});
 
 	it('refuses a simulator structure of another size by name', async () => {

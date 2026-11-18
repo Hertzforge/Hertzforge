@@ -2,7 +2,7 @@
 	/**
 	 * The MIMO Sine run as it happens, on the test screen's frame: the pages of plots, and the dock
 	 * with the Run card (the shared verbs and MIMO Sine's own: Hold and Resume, and on a sweep
-	 * Reverse, Jog and Go To), the run in numbers, the law's card and the station. While the run
+	 * Jog and Go To), the run in numbers, the law's card and the station. While the run
 	 * holds for review, the Run card gives the identification in a line, the sweep-rate warning for
 	 * every resonance the sweep passes too fast for, and a place for the operator's words. The plots
 	 * are the service's views as they come: against frequency on the sweep grid in a sweep or a
@@ -81,7 +81,7 @@
 
 {#snippet cards(kind: CardKind)}
 	{#if kind === 'level'}
-		<MsineLevelCard {status} {live} {compact} />
+		<MsineLevelCard {status} {live} report={ms.report} {compact} />
 	{:else if kind === 'law'}
 		<MsineLawCard law={status?.law ?? null} live={live?.law ?? null} entry={ms.runLaw} />
 	{:else if kind === 'station' && station}

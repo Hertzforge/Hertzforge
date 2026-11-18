@@ -1,0 +1,76 @@
+{
+ "type": "response",
+ "id": 88,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control",
+    "channels": [
+     1,
+     2
+    ]
+   },
+   {
+    "id": "ph",
+    "quantity": "phase",
+    "channels": [
+     1
+    ]
+   },
+   {
+    "id": "err",
+    "quantity": "error"
+   },
+   {
+    "id": "lim",
+    "quantity": "limit",
+    "channels": "all"
+   },
+   {
+    "id": "drv",
+    "quantity": "drive"
+   },
+   {
+    "id": "dph",
+    "quantity": "drive_phase"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "t",
+    "quantity": "time",
+    "channels": [
+     1,
+     5
+    ],
+    "points": 2048
+   },
+   {
+    "id": "id",
+    "quantity": "identification",
+    "channels": "all"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   }
+  ],
+  "quantities": [
+   "control",
+   "phase",
+   "error",
+   "limit",
+   "drive",
+   "drive_phase",
+   "readings",
+   "time",
+   "identification",
+   "law"
+  ]
+ }
+}

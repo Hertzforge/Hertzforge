@@ -40,8 +40,10 @@ BINARY = {
 
 def test_every_sine_golden_is_checked_here():
     # The Rust, TypeScript and Python suites read the same files in schema/golden/.
+    # MIMO Sine's goldens are its own module's, checked in test_mimo_sine_protocol.py.
     names = {p.name.split('.')[0] for p in GOLDEN.iterdir()
              if ('_sine_' in p.name or p.name.split('.')[0].endswith('_sine'))
+             and '_mimo_sine' not in p.name
              and not p.name.endswith('.expected.json')}
     assert names == set(TEXT) | set(BINARY), sorted(names ^ (set(TEXT) | set(BINARY)))
 

@@ -39,7 +39,7 @@
 			<h2 id="msine-lim-title">Limit Channels</h2>
 			<span class="aq-sub">Watched, not controlled: up to {MAX_LIMITS}, each an enabled input that is not a control.</span>
 		</div>
-		<p class="aq-lead aq-small">Where a limit channel's predicted or measured response would pass its bound, the whole drive vector is scaled down with its direction kept, and every control falls with it; the run shows the scale and the depth at every control. A limit channel outside its own abort band ends the run.</p>
+		<p class="aq-lead aq-small">Where a limit channel's predicted or measured response would pass its bound, the reference is held down (the notch's depth) and, behind it, the whole drive vector is scaled down with its direction kept, so every control falls with it; the run shows how far the reference is held down at every control and the drive's cut. A limit channel outside its own abort band ends the run.</p>
 		{#each lim.channels as ch, i (ch.channel)}
 			<div class="aq-group" data-testid="msine-limit-{ch.channel}">
 				<div class="row">
@@ -73,6 +73,7 @@
 			<div class="aq-fields">
 				<NumberField id="msine-notch-smooth" label="Smoothed over" unit="ticks" integer step={1} min={1} bind:value={lim.notch.smoothing_ticks} errors={errs('limits.notch.smoothing_ticks')} disabled={locked} />
 				<NumberField id="msine-notch-release" label="Released at most" unit="dB/s" step={5} min={0} bind:value={lim.notch.release_ramp_db_per_s} errors={errs('limits.notch.release_ramp_db_per_s')} disabled={locked} />
+				<NumberField id="msine-notch-hysteresis" label="Released once allowed by" unit="dB" step={0.5} min={0} max={6} bind:value={lim.notch.release_hysteresis_db} errors={errs('limits.notch.release_hysteresis_db')} help="How far the limit readings must allow the notch to rise before it begins to, so a reading near its bound neither toggles the notch nor releases it with a kick." disabled={locked} testid="msine-notch-hysteresis" />
 				<NumberField id="msine-notch-near" label="Near the bound within" unit="dB" step={0.5} min={0} max={20} bind:value={lim.notch.near_bound_db} errors={errs('limits.notch.near_bound_db')} help="How near its bound a limit channel must be for a notched reference a law returns to be taken." disabled={locked} />
 			</div>
 		</div>

@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 82,
+ "method": "mimo_sine.start",
+ "params": {}
+}

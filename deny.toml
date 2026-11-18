@@ -76,6 +76,8 @@ deny = [
     "hertzforge-station",   # the station factory, the one construction point
     "hertzforge-demo",      # a demo binary whose subject is the Sim plant
     "sds-control",     # the control service's simulated run; no hardware path yet
+    # Behind an opt-in feature only, each on the lint's feature-only list.
+    "hertzforge-mimo-sine-laws",  # the law check's simulated stations (`simulator`)
     # Test fixtures only (dev-dependencies).
     "hertzforge-engine",
     "hertzforge-explorer-host",

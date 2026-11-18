@@ -23,7 +23,9 @@ from hertzforge.service.protocol import ProtocolError
 GOLDEN = Path(__file__).resolve().parents[2] / 'schema' / 'golden'
 RUNS = GOLDEN / 'runs'
 
-#: each module's configure request golden and its params' schema definition
+#: each module's configure request golden and its params' schema definition;
+#: a module whose params have no definition of their own (MIMO Sine) is
+#: checked as its whole configure request against the protocol
 REQUESTS = {'random': ('request_random_configure', 'randomConfigureParams'),
             'sine': ('request_sine_configure', 'sineConfigureParams'),
             'mixed': ('request_mixed_configure', 'mixedConfigureParams'),
@@ -34,6 +36,7 @@ REQUESTS = {'random': ('request_random_configure', 'randomConfigureParams'),
             'recorder': ('request_recorder_configure', 'recorderConfigureParams'),
             'mimo_random': ('request_mimo_random_setup', 'mimoSetupParams'),
             'mimo_shock': ('request_mimo_shock_configure', 'mimoShockConfigureParams'),
+            'mimo_sine': ('request_mimo_sine_configure', None),
             'playback': ('request_playback_configure', 'playbackConfigureParams')}
 
 #: the golden run folders, by the module each ran
@@ -47,6 +50,16 @@ def _request(module):
 
 def _params(module, config):
     return {CONFIGURE[module][1]: config}
+
+
+def _takes(validate, module, config):
+    """Check that the module's configure request takes `config`."""
+    method, member = CONFIGURE[module]
+    schema = REQUESTS[module][1]
+    if schema is None:
+        validate({'type': 'request', 'id': 1, 'method': method, 'params': {member: config}})
+    else:
+        validate(_params(module, config), schema)
 
 
 def test_every_module_is_covered_and_its_golden_is_its_configure_request():
@@ -74,7 +87,7 @@ def test_a_saved_setup_opens_back_as_its_configuration(module, tmp_path, validat
     opened = projects.open_setup(reopened, {'name': 'Saved'})
     validate({'setup': opened}, 'projectOpenSetupResult')
     assert opened == sent
-    validate(_params(module, opened['config']), REQUESTS[module][1])
+    _takes(validate, module, opened['config'])
 
 
 @pytest.fixture(scope='module')
@@ -109,7 +122,7 @@ def test_a_setup_opened_from_a_golden_run_is_what_its_configure_takes(name, conv
         table = json.load(f)
     assert opened['table'] == {'rows': table['rows'], 'revision': table['revision'],
                                'sha256': table['sha256']}
-    validate(_params(name, opened['config']), REQUESTS[name][1])
+    _takes(validate, name, opened['config'])
 
 
 def test_what_is_not_a_setup_is_refused_and_a_name_is_not_overwritten(converted):

@@ -179,10 +179,12 @@ pub fn limits(id: &str) -> Option<&'static str> {
              bandwidth at 2 percent of frequency."
         }
         "paired" => {
-            "No model of the coupling between pairs. On the research testbed's coupled linear \
-             four-by-four structure it completed none of 5 dwells and none of 5 stepped sines. \
-             It is for structures whose pairs are weakly coupled, and is the template to start \
-             a law from."
+            "No model of the coupling between pairs. It is for structures whose pairs are \
+             weakly coupled, each control dominated by its own drive: the law check runs its \
+             dwells, measurement noise, stepped sine and level ladder on such a structure, \
+             where it passes. On the research testbed's coupled linear four-by-four structure \
+             it completed none of 5 dwells and none of 5 stepped sines. It is the template to \
+             start a law from."
         }
         "steepest_descent" => {
             "On the research testbed's linear four-by-four structure it completed 5 of 5 dwells \

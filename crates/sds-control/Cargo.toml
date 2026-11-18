@@ -90,6 +90,13 @@ hertzforge-recorder.workspace = true
 # law files, the catalog's entries) and the law check's cases.
 hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }
 hertzforge-mimo-shock-laws = { path = "../hertzforge-mimo-shock-laws" }
+# MIMO Sine: the engine the run thread drives (its run service, handed the
+# station at arm), and the law choice (built-ins, law files, the catalog's
+# entries) and the law check's cases. Reviewed 2026-11-17 with their contracts
+# (tests/forbidden_deps.rs): each reaches hardware only through the station
+# backend it is handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine" }
+hertzforge-mimo-sine-laws = { path = "../hertzforge-mimo-sine-laws" }
 serde_json.workspace = true
 # A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
 # or Apache-2.0, as the reference reader already has it).

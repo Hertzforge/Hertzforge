@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 85,
+ "method": "mimo_sine.level",
+ "params": {
+  "delta_db": -3
+ }
+}
