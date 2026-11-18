@@ -997,7 +997,7 @@ impl Service {
         let _slot = CheckSlot::take()?;
         let svc = self.clone();
         let check_id = facts.id.clone();
-        let verdicts = tokio::task::spawn_blocking(move || {
+        let (verdicts, lines) = tokio::task::spawn_blocking(move || {
             crate::mimo_sine::law_check::run_check(&check_id, factory, &mut |event| {
                 svc.emit("laws.check", event);
             })
@@ -1022,7 +1022,7 @@ impl Service {
             .await?;
         Ok(json!({
             "law": law,
-            "report": crate::mimo_sine::law_check::report_json(&verdicts, recorded),
+            "report": crate::mimo_sine::law_check::report_json(&verdicts, lines, recorded),
         }))
     }
 }

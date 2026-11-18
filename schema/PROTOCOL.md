@@ -4082,7 +4082,9 @@ alone) and, for a built-in law, `limits` (its limits as measured on the research
 words; null for a law file). A law is checked with `laws.check`: a law file by its `id` or the
 `path` of its file, a built-in law by its `id` with `"world":"sine_mimo"` (built-in names are
 shared with other worlds). The check runs every case the law's manifest accepts on the
-simulator's sine structures, one `laws.check` event as each starts and as it ends (`{"law_id",
+simulator's sine structures (a law set up for weakly coupled pairs, `paired`, runs its dwells, its
+noise, stepped and ladder cases on `sine-weak-4x4`, and each such case's `structure` says so), one
+`laws.check` event as each starts and as it ends (`{"law_id",
 "index","of","case","state","result"}`), and answers `{"law","report"}`: the report's `passed`
 (every scored case passed), `recorded`, `tool_version` and `cases`, each `{"case","structure",
 "scored","passed","failed","number","detail"}`. A law file's scored verdicts are recorded against
@@ -4120,7 +4122,8 @@ the simulator takes any law.
                                    "rows":[{"freq_hz":10,"quantity":"accel_g","value":3},
                                            {"freq_hz":500,"quantity":"accel_g","value":3}],
                                    "alarm_db":[1.5,1.5],"abort_db":[3,3]}}],
-           "notch":{"smoothing_ticks":3,"release_ramp_db_per_s":20,"near_bound_db":3}},
+           "notch":{"smoothing_ticks":3,"release_ramp_db_per_s":10,"release_hysteresis_db":1,
+                    "near_bound_db":3}},
  "feasibility":null,
  "simulator":{"structure":null},
  "operator":"A. Operator","article":"Bracket, serial 7","notes":"",
@@ -4159,10 +4162,10 @@ the simulator takes any law.
 | `requests.max_hold_s` | 2 | The longest a granted hold may last without a break, seconds (above 0, at most 2). A granted hold freezes the schedule's clock; the test's length grows by it |
 | `requests.min_slow_factor` | 0.1 | The lowest share of the scheduled sweep rate a granted slow may ask for (0.1 to 1); a request under it is granted at it |
 | `limits.kinematic_monitor` | true | With `feasibility`, abort when a shaker's velocity or displacement passes its rating (`kinematic`) |
-| `limits.channels` | none | Limit channels, 0 to 8: each a table row's `channel` (an enabled input that is not a control) and a `profile` in the profile's form, its bound at each frequency, covering the test's band. Where the predicted or measured response of a limit channel would pass its bound the whole drive vector is scaled down, its direction kept (the notch); a channel outside its own abort band ends the run (`limit_channel`) |
-| `limits.notch` | `{"smoothing_ticks":3,"release_ramp_db_per_s":20,"near_bound_db":3}` | The ticks each limit channel's measured-over-identified ratio is smoothed over (at least 1); how fast the drive may come back once the notch releases, dB/s (above 0); and how near its bound a limit channel must be, dB (above 0, at most 20), for a notched reference a law returns to be taken |
+| `limits.channels` | none | Limit channels, 0 to 8: each a table row's `channel` (an enabled input that is not a control) and a `profile` in the profile's form, its bound at each frequency, covering the test's band. Where the predicted or measured response of a limit channel would pass its bound the notch goes in: the controls are held to a share of their reference (its depth), which every built-in law aims for, and on any update where the drive asked for would still pass a bound the whole drive vector is scaled down, its direction kept; a channel outside its own abort band ends the run (`limit_channel`) |
+| `limits.notch` | `{"smoothing_ticks":3,"release_ramp_db_per_s":10,"release_hysteresis_db":1,"near_bound_db":3}` | The ticks each limit channel's measured-over-identified ratio is smoothed over (at least 1); how fast the notch's depth may rise back towards the whole reference once the limit readings allow, dB/s (above 0); how far the readings must allow it to rise before it begins to, dB (0 to 6), so a reading near its bound neither toggles the notch nor releases it with a kick; and how near its bound a limit channel must be, dB (above 0, at most 20), for a notched reference a law returns to be taken |
 | `feasibility` | null | Each shaker's record and moving mass, one per drive: `{"shakers":[{"drive","shaker","moving_mass_lb"}]}` with `drive` the drive's table index and the rest Sine's. Checked at configure and at arm against the references' peaks. Without it, feasibility is not evaluated, the kinematic monitor is off, and the run says so |
-| `simulator.structure` | null: chosen by size | The simulator's structure by name, one of its standard sine structures; null takes the linear structure of the run's size where there is one. Ignored on NI |
+| `simulator.structure` | null: chosen by size | The simulator's structure by name, one of its standard sine structures: `sine-linear-4x4`, `sine-softening-4x4-mild`, `sine-softening-4x4-moderate`, `sine-hardening-4x4`, `sine-tall-6x3`, `sine-wide-3x6`, `sine-base-article-6x4` (4 controls, 2 limit channels, 4 drives), `sine-near-singular-4x4`, `sine-weak-4x4` (each drive's cross paths at least 21.9 dB under its direct one) or `sine-loopback-4x4` (four outputs wired to four inputs: unity gain, 0.8 ms delay, no coupling, the bench's twin); null takes the linear structure of the run's size where there is one. Ignored on NI |
 | `operator`, `article`, `notes`, `specification`, `record`, `metadata` | as Sine's | Sine's, for the run's record. None of them changes how the run drives |
 
 MIMO Sine takes no `capture` and no `cola`: a configuration that gives either is refused
@@ -4255,11 +4258,13 @@ not name, or the drives out of the table's order), `limit_unknown_channel`,
 - **Each tick**, in this order: read the inputs; track every control and limit channel at the
   tone; judge each control against its alarm and abort bands at the present frequency and level
   (outside a settle window), and each limit channel against its bound; step the schedule (frequency
-  and level, and a granted request); call the law with the drive in force; check its answer
-  (one finite amplitude per drive, a well-formed request, a notched reference of one value per
-  control); cap each drive's magnitude change (`max_step_db`) and rise (`max_rise_db_per_s`) and,
-  when set, its rotation (`rotation_cap_deg`); scale the whole drive vector for the limit channels
-  (`notch_scale`) and for a drive over its ceiling; ramp each drive to the result; record. A late,
+  and level, and a granted request); call the law with the drive in force and the notch's depth
+  (the share of the reference the limit channels allow, 1 when the notch is out: every built-in law
+  aims for the reference times it); check its answer (one finite amplitude per drive, a well-formed
+  request, a notched reference of one value per control); cap each drive's magnitude change
+  (`max_step_db`) and rise (`max_rise_db_per_s`) and, when set, its rotation (`rotation_cap_deg`);
+  scale the whole drive vector where it would still pass a limit channel's bound (`notch_scale`)
+  and for a drive over its ceiling; ramp each drive to the result; record. A late,
   failed, panicked or refused call keeps the drive in force and counts a miss; `law_misses` in a
   row end the run with the controlled stop (`law_fault`).
 - **A notched reference** a law returns is taken only when it lowers each control's reference and
@@ -4272,8 +4277,10 @@ not name, or the drives out of the table's order), `limit_unknown_channel`,
   dwell's and a step's clock is held the same way. With it off nothing is acted on.
 - **`mimo_sine.level`**, **`mimo_sine.hold`**, **`mimo_sine.resume`**, **`mimo_sine.jog`** and
   **`mimo_sine.goto`** are Sine's, with the same refusals (`manual_mode_required`, `not_a_rung`,
-  `not_a_sweep`, `out_of_band`; a jog's frequency is held inside the band); a level change opens
-  the settle window, and a jog and a go to engage the law again at the new frequency with its first
+  `not_a_sweep`, `out_of_band`; a jog's frequency is held inside the band); a level change scales
+  the drive in force by the ratio of the levels (at the change caps' pace) and opens the settle
+  window, through which the law is engaged again rather than corrected on readings that still
+  answer the drive before it; a jog and a go to engage the law again at the new frequency with its first
   drive bounded as at the start. **`mimo_sine.mode`** sets the ladder's mode of a run that has not
   armed; once it has, it is refused `mode_fixed`. **`mimo_sine.reverse`** is refused
   `reverse_not_available` in this version: a MIMO Sine sweep turns only at the band's edges.
@@ -4323,8 +4330,10 @@ not name, or the drives out of the table's order), `limit_unknown_channel`,
   `frequency_hz`, `direction`, `sweeps`, `held`, `elapsed_s`, `at_level_s` and `remaining_s` are
   Sine's. `steps` is `{"done","of"}` in a stepped sine (null otherwise).
 - `request_held` is true while a granted request holds or slows the sweep. `alarm` is true while
-  any control is outside its alarm band; `notch` true while a limit channel holds the drive vector
-  down, and `notch_scale` the scale it holds it to (1 when none).
+  any control is outside its alarm band; `notch` true while the limit channels hold the
+  reference down (the notch's depth under 1) or scale the drive vector down, and `notch_scale` the
+  scale the whole drive vector was cut to on the last update (1 when none; how far the reference is
+  held down is each control's `notch_depth_db` in the live frame).
 - `identification` is null until the gate has run:
 
 ```
@@ -4404,8 +4413,8 @@ reference that is not one value per control).
 Per control its worst error against its reference (dB, signed, positive an over-test) and where,
 its worst phase error (degrees, null without `phase_specified`), the time it spent outside its
 alarm band and its deepest notch; per limit channel its largest `margin_db` (its reading over its
-bound, dB: negative under the bound, positive over it) and where, and the time the notch held the
-drive down; per drive its largest peak and where, its
+bound, dB: negative under the bound, positive over it) and where, and the time the notch was in
+(the reference held down or the drive vector scaled down); per drive its largest peak and where, its
 ceiling and the ticks it was over it; the largest readings; the requests; the identification
 summary and the run's end.
 
@@ -4455,8 +4464,8 @@ Event topics:
 
 - `t_s`, `elapsed_s`, `frequency_hz`, `direction`, `sweep_rate_oct_per_min` (or
   `sweep_rate_hz_per_s` for a linear rate, exactly one of the two), `sweeps`, `held`, `level_db`
-  and `commanded_db` are Sine's. `steps` and `request_held` are the state's. `notch_scale` is the
-  scale the limit channels hold the drive vector to (1 when none).
+  and `commanded_db` are Sine's. `steps` and `request_held` are the state's. `notch` and
+  `notch_scale` are the state's.
 - `controls`: every control in configuration order: its tracked `amplitude` at the tone (peak, in
   its unit) and `phase_deg` (its response's phase relative to the tone, in (-180, 180]), its
   `reference` (as judged: the notched reference while one is taken) and `reference_phase_deg` at
@@ -4495,7 +4504,8 @@ its exact ends; a stepped sine's steps), each series carrying only the points th
 per control **Control** *n* (`Measured` (`measured`), `Reference` (`reference`), `Alarm high`,
 `Alarm low` (`tolerance`), `Abort high`, `Abort low` (`abort`), at the pass's level, in the
 control's unit) and, with `phase_specified`, **Phase** *n* (`Measured` and `Reference`, deg) and
-**Error** *n* (`Error` dB and, with a taken notched reference, `Notch depth` dB); per limit channel
+**Error** *n* (`Error` dB and, while the notch or a taken notched reference holds the reference
+down, `Notch depth` dB); per limit channel
 **Limit** *n* (`Measured`, `Bound` (`limit`)); **Drives** (`Drive <index>` V per drive) and **Drive
 phase** (`Drive <index>` deg per drive); and **Readings** (`Opposition` and `Largest share`).
 
@@ -4512,7 +4522,7 @@ in a dwell they are against time, the last 60 s, at most 1200 points.
 |---|---|---|
 | `control` | one `spectrum` per resolved control | As the sweep frame's **Control** *n*, at the present level |
 | `phase` | one `spectrum` per resolved control | As the sweep frame's **Phase** *n* |
-| `error` | one `spectrum` | **Error**, `Control <index>` dB per control, and the notch depth per control while one is taken |
+| `error` | one `spectrum` | **Error**, `Control <index>` dB per control, and the notch depth per control while the reference is held down |
 | `limit` | one `spectrum` per resolved limit channel | As the sweep frame's **Limit** *n* |
 | `drive` | one `spectrum` | **Drives**, V per drive |
 | `drive_phase` | one `spectrum` | **Drive phase**, deg per drive |

@@ -467,7 +467,8 @@
       "divergence_s": 1,
       "notch": {
         "smoothing_ticks": 3,
-        "release_ramp_db_per_s": 20,
+        "release_ramp_db_per_s": 10,
+        "release_hysteresis_db": 1,
         "near_bound_db": 3
       },
       "shaker_ratings": []

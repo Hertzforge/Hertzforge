@@ -330,12 +330,12 @@ async fn mimo_sine_a_law_is_refused_a_test_type_it_does_not_accept() {
     );
 }
 
-/// Found on the wire, for the engine: on the station's simulator the same
-/// sweep with the controls' abort band at 6 dB ends on a low control abort near
-/// 218 Hz, where the notch holds the drive down further than the depth the
-/// controls are judged against. Run with `--ignored` to see it.
+/// The same sweep with the controls' abort band at 6 dB completes: the
+/// notch's depth is what the controls are judged against and what every
+/// built-in law aims for, so the notch no longer holds the drive further down
+/// than the controls are judged (it ended on a low control abort near 218 Hz
+/// before the notch kept a depth).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "a finding for the engine: the notch's drive scale and its judged depth part near 218 Hz"]
 async fn mimo_sine_the_base_and_article_sweep_completes_with_a_six_db_abort_band() {
     let mut c = client().await;
     controller(&mut c, 4, 2, 4).await;

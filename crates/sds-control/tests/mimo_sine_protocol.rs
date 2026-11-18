@@ -380,3 +380,61 @@ async fn mimo_sine_the_shutdown_ends_a_driving_run_with_its_ramp() {
     c.ok("mimo_sine.abort", json!({})).await;
     c.ok("mimo_sine.log", json!({})).await;
 }
+
+/// The notch's release hysteresis is a setup value: out of its range it is
+/// refused by name, inside it it is taken and recorded with the release rate's
+/// default of 10 dB/s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_the_notchs_release_hysteresis_is_taken_refused_and_recorded() {
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(600)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 0, 4).await;
+    for bad in [json!(-0.5), json!(6.5)] {
+        let cfg = with(
+            base(),
+            &["limits"],
+            json!({"notch": {"release_hysteresis_db": bad}}),
+        );
+        let (got, item) = refused_item(&mut c, cfg, "out_of_range").await;
+        assert_eq!(got, "out_of_range", "{item}");
+        assert_eq!(
+            item["field"], "limits.notch.release_hysteresis_db",
+            "{item}"
+        );
+    }
+    let cfg = with(
+        base(),
+        &["limits"],
+        json!({"notch": {"release_hysteresis_db": 2.5}}),
+    );
+    c.ok("mimo_sine.configure", json!({"config": cfg})).await;
+    let armed = c.ok("mimo_sine.arm", json!({})).await;
+    let folder = msine::folder(&armed);
+    let setup: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join("setup.json")).unwrap()).unwrap();
+    let notch = &setup["resolved"]["aborts"]["notch"];
+    assert_eq!(notch["release_hysteresis_db"], 2.5, "{notch}");
+    assert_eq!(notch["release_ramp_db_per_s"], 10.0, "{notch}");
+}
+
+/// The weakly coupled and the loopback 4 by 4 are taken by name, and the
+/// refusal of an unknown structure names them with the rest.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_the_weak_and_loopback_structures_are_taken_by_name() {
+    let addr = serve(Service::with_options(msine::opts(Duration::from_secs(600)))).await;
+    let mut c = Client::connect(addr).await;
+    controller(&mut c, 4, 0, 4).await;
+    for name in ["sine-weak-4x4", "sine-loopback-4x4"] {
+        let cfg = with(base(), &["simulator", "structure"], json!(name));
+        let r = c.ok("mimo_sine.configure", json!({"config": cfg})).await;
+        assert_eq!(r["state"]["station"]["structure"], name, "{r}");
+    }
+    let cfg = with(base(), &["simulator", "structure"], json!("sine-none"));
+    let (got, item) = refused_item(&mut c, cfg, "structure_unknown").await;
+    assert_eq!(got, "structure_unknown");
+    let msg = item["message"].as_str().unwrap();
+    assert!(
+        msg.contains("sine-weak-4x4") && msg.contains("sine-loopback-4x4"),
+        "{msg}"
+    );
+}
