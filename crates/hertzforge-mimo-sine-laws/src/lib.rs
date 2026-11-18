@@ -6,7 +6,8 @@
 //! - [`resolve`]: a catalog id to the factory a run builds its law with. A
 //!   built-in id (`matrix`, `paired`, `steepest_descent`, `secant`, `ratio`)
 //!   goes to [`resolve_builtin_with`], its native form over the SDK's
-//!   built-in constructor ([`native`]); any other is a `sine-mimo` law file in
+//!   built-in constructor (`hertzforge_mimo_sine::laws`, the engine's own);
+//!   any other is a `sine-mimo` law file in
 //!   the catalog, run through the law host ([`wasm`]).
 //! - [`load_law_file`]: a law file by path, as a contributor tries one.
 //! - [`entries`]: the world's catalog entries, built-ins first, each with the
@@ -19,7 +20,6 @@
 pub mod check;
 pub mod choice;
 pub mod facts;
-pub mod native;
 pub mod parity;
 pub mod wasm;
 
@@ -31,7 +31,7 @@ pub use choice::{
 pub use facts::{
     all_facts, builtin_entry, builtin_facts, entries, file_facts, limits, LawFacts, SineMimoEntry,
 };
-pub use native::MathLawFactory;
+pub use hertzforge_mimo_sine::laws::BuiltinFactory;
 pub use parity::{compare_laws, ParityReport, RecordedInputs};
 pub use wasm::{
     sine_mimo_law_fault, WasmSineMimoLaw, WasmSineMimoLawFactory, DEFAULT_BUILD_BUDGET_S,

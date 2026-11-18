@@ -24,6 +24,10 @@ hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
 # The built-in laws' mathematics: the native laws are adapters to it, and the
 # readings and the sweep-rate warning are its helpers.
 hertzforge-mimo-sine-law-math = { path = "../hertzforge-mimo-sine-law-math" }
+# The built-in laws' declarations and constructor (`sine_mimo::builtin`): the
+# native built-in laws and the law files run the same code, with one set of
+# parameters.
+hertzforge-law-sdk = { path = "../hertzforge-law-sdk" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The run service, behind the default `service` feature: the engine it runs the

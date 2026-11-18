@@ -2,10 +2,10 @@
 //! name ([`resolve_builtin`]), or a `sine-mimo` law file in the catalog by its
 //! SHA-256 ([`resolve`]); and a law file by path ([`load_law_file`]).
 
-use crate::native::MathLawFactory;
 use crate::wasm::WasmSineMimoLawFactory;
 use hertzforge_law_host::{LawHost, LoadedSineMimoLaw, Param};
 use hertzforge_law_sdk::sine_mimo::builtin::{self as decl, LawDecl};
+use hertzforge_mimo_sine::laws::BuiltinFactory;
 use hertzforge_mimo_sine::MimoSineLawFactory;
 use hertzforge_random_laws::{LawCatalog, LawWorld};
 use std::fmt;
@@ -102,7 +102,7 @@ pub fn resolve_builtin_with(
             })
             .collect(),
     );
-    MathLawFactory::new(d, all)
+    BuiltinFactory::new(d, all)
         .map(|f| Arc::new(f) as Arc<dyn MimoSineLawFactory>)
         .map_err(|e| ResolveError::BadParams(format!("the law `{id}`: {e}")))
 }

@@ -14,7 +14,7 @@ use hertzforge_mimo_sine_law_math::Setup;
 use hertzforge_mimo_sine_laws::parity::bench::{record, Recording};
 use hertzforge_mimo_sine_laws::parity::{relative_difference, run_sequence};
 use hertzforge_mimo_sine_laws::{
-    compare_laws, entries, load_law_file, MathLawFactory, WasmSineMimoLawFactory,
+    compare_laws, entries, load_law_file, BuiltinFactory, WasmSineMimoLawFactory,
 };
 use hertzforge_random_laws::LawCatalog;
 use std::path::{Path, PathBuf};
@@ -162,7 +162,7 @@ fn parity_within(
         asked,
     } = record(d, &params, st, setup, schedule, test_type, 20_000).unwrap();
     assert!(inputs.len() > 20, "{}: a short sequence", d.id);
-    let native = MathLawFactory::new(d, params).unwrap();
+    let native = BuiltinFactory::new(d, params).unwrap();
     let host = LawHost::new(HostConfig::default()).unwrap();
     let file = WasmSineMimoLawFactory::new(
         load_law_file(&host, &file_of(d)).unwrap(),
@@ -225,7 +225,7 @@ fn mimo_sine_each_law_file_states_its_declaration() {
         let values: Vec<&str> = m.law.diagnostics.iter().map(|v| v.key.as_str()).collect();
         assert_eq!(values, d.value_keys(), "{}", d.id);
         let f = WasmSineMimoLawFactory::new(law.clone(), Vec::new(), BUDGET);
-        let native = MathLawFactory::new(d, builtin::defaults(d)).unwrap();
+        let native = BuiltinFactory::new(d, builtin::defaults(d)).unwrap();
         assert_eq!(f.manifest(), native.manifest(), "{}", d.id);
     }
 }

@@ -1375,6 +1375,7 @@ dependencies = [
  "hertzforge-engine",
  "hertzforge-hal",
  "hertzforge-hal-sim",
+ "hertzforge-law-sdk",
  "hertzforge-mimo-sine-law-math",
  "hertzforge-module-abi",
  "hertzforge-sdm",

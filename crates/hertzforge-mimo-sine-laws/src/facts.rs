@@ -9,12 +9,12 @@
 //! `laws.list` answer for this world emits them (`test_types`,
 //! `amplitude_only`) from here.
 
-use crate::native::core_test_type;
 use hertzforge_law_host::{
     ChoiceSpec, DiagnosticSpec, IntegerSpec, LawIdentity, LoadedSineMimoLaw, Manifest, NumberSpec,
     ParamKind, ParamSpec,
 };
 use hertzforge_law_sdk::sine_mimo::builtin::{self, Knob, LawDecl};
+use hertzforge_mimo_sine::laws::core_test_type;
 use hertzforge_mimo_sine::{shape_name, MimoShape, TestType};
 use hertzforge_random_laws::{CatalogEntry, CheckStatus, LawCatalog, LawWorld};
 
@@ -127,7 +127,7 @@ pub fn builtin_entry(d: &LawDecl) -> SineMimoEntry {
         shapes: d
             .shapes
             .iter()
-            .map(|s| crate::native::core_shape(*s))
+            .map(|s| hertzforge_mimo_sine::laws::core_shape(*s))
             .collect(),
         test_types: d.test_types().into_iter().map(core_test_type).collect(),
         amplitude_only: d.amplitude_only,

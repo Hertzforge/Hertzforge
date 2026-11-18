@@ -18,7 +18,18 @@ use hertzforge_mimo_sine::*;
 use hertzforge_sine::scheduler::{DwellFor, StepSineConfig, StepSpacing};
 
 fn case(s: SineStructure, id: &str, test: TestPlan, max_s: f64) -> (Option<Outcome>, f64, usize) {
-    let r = run(engaged(s, setup(s, test, id), law(id), NOISE), max_s);
+    let mut st = setup(s, test, id);
+    if !law(id).manifest().amplitude_only {
+        // These laws need the references' phases: every control in phase.
+        st.phase_specified = true;
+        for c in &mut st.controls {
+            c.phase = vec![PhasePoint {
+                freq_hz: 5.0,
+                phase_deg: 0.0,
+            }];
+        }
+    }
+    let r = run(engaged(s, st, law(id), NOISE), max_s);
     let v: Vec<f64> = r
         .ticks
         .iter()

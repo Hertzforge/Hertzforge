@@ -10,7 +10,7 @@ use hertzforge_mimo_sine::{MimoSineLawFactory, TestType};
 use hertzforge_mimo_sine_law_math::reference_structure::ModalStructure;
 use hertzforge_mimo_sine_laws::parity::bench::law_setup;
 use hertzforge_mimo_sine_laws::{
-    load_law_file, MathLawFactory, WasmSineMimoLawFactory, DEFAULT_BUILD_BUDGET_S,
+    load_law_file, BuiltinFactory, WasmSineMimoLawFactory, DEFAULT_BUILD_BUDGET_S,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -61,7 +61,7 @@ fn mimo_sine_matrix_build_time_native_and_as_a_law_file() {
     let st = lin4x4();
     let setup = law_setup(&st.setup((40.0, 400.0), true), TestType::Sweep);
     let native =
-        MathLawFactory::new(&builtin::MATRIX, builtin::defaults(&builtin::MATRIX)).unwrap();
+        BuiltinFactory::new(&builtin::MATRIX, builtin::defaults(&builtin::MATRIX)).unwrap();
     let t = Instant::now();
     native.build(&setup).unwrap();
     let native_s = t.elapsed().as_secs_f64();

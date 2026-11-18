@@ -185,7 +185,7 @@ pub fn run(mut service: MimoSineService, max_s: f64) -> Run {
 
 /// The built-in law `id` with its defaults.
 pub fn law(id: &str) -> Arc<dyn MimoSineLawFactory> {
-    laws::builtin(id, &Default::default()).expect("a built-in law")
+    laws::builtin(id).expect("a built-in law")
 }
 
 /// The worst |error| in dB over the records after `from_s`, judged records
