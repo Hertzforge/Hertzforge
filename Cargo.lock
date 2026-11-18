@@ -1936,6 +1936,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "law-fixture-sine-mimo-misbehave"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
+name = "law-fixture-sine-mimo-template"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-law-sdk",
+]
+
+[[package]]
 name = "law-fixture-sine-misbehave"
 version = "0.1.14"
 dependencies = [

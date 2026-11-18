@@ -293,7 +293,8 @@ const OWN_PACKAGES: &[&str] = &["sds-control"];
 /// math (`hertzforge-mimo-sine-law-math`), the law files `mimo-sine-matrix`,
 /// `mimo-sine-paired`, `mimo-sine-steepest-descent`, `mimo-sine-secant` and
 /// `mimo-sine-ratio` (the SDK over the same math), and the `sine-mimo-misbehave` host
-/// fixture.
+/// fixture; the `sine-mimo-template` host fixture (the SDK template's law, compiled as
+/// a law file) joined them with the law plumbing.
 const LAW_CRATES: &[&str] = &[
     "hertzforge-law-band-average-math",
     "hertzforge-law-hinv",
@@ -339,6 +340,7 @@ const LAW_CRATES: &[&str] = &[
     "law-fixture-shock-misbehave",
     "law-fixture-shock-template",
     "law-fixture-sine-mimo-misbehave",
+    "law-fixture-sine-mimo-template",
     "law-fixture-sine-misbehave",
     "law-fixture-sine-template",
     "law-fixture-srs-misbehave",

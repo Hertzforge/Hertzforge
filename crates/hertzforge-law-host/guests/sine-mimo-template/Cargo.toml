@@ -1,0 +1,17 @@
+[package]
+name = "law-fixture-sine-mimo-template"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# A test fixture: the MIMO Sine template's law
+# (`crates/hertzforge-law-sdk/template/sine-mimo`), compiled from the template's
+# own source as a law file of this workspace, so the host's tests load the code a
+# law author copies with its dependencies under the workspace's lockfile. Built to
+# WebAssembly by scripts/build_laws.sh.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../../hertzforge-law-sdk" }
