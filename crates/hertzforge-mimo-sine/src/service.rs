@@ -113,6 +113,13 @@ pub struct EngineOptions {
     pub ratings: Vec<ShakerRating>,
     /// The clock law calls are timed against; `None` is the monotonic clock.
     pub clock: Option<Arc<dyn LawClock>>,
+    /// The deadline of every law call in place of the setup's
+    /// (`guards.law_budget` of the update); `None` keeps the setup's. A
+    /// deterministic harness on the simulator passes
+    /// [`hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET`] by name, so a call a
+    /// busy machine delays is not refused there. A hardware station class
+    /// ignores it: the setup's budget is the deadline on hardware.
+    pub law_budget: Option<std::time::Duration>,
     /// Update records the caller's channel holds before one is dropped.
     pub record_capacity: usize,
     /// Events the caller's channel holds before one is dropped.
@@ -129,6 +136,7 @@ impl EngineOptions {
             seed: 1,
             ratings: Vec::new(),
             clock: None,
+            law_budget: None,
             record_capacity: 1 << 16,
             event_capacity: 4096,
         }
@@ -301,6 +309,16 @@ pub fn slots_for(setup: &MimoSineSetup, table: &ChannelTable) -> Result<Slots, S
             .map(|c| find(&drives, c.channel, "drive"))
             .collect::<Result<_, _>>()?,
     })
+}
+
+/// The law call deadline `asked` in place of the setup's, s, on `station`:
+/// `None` (the setup's) on a hardware station class whatever was asked.
+pub fn law_budget_s(station: StationClass, asked: Option<std::time::Duration>) -> Option<f64> {
+    if station.is_hardware() {
+        None
+    } else {
+        asked.map(|d| d.as_secs_f64())
+    }
 }
 
 fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
@@ -786,6 +804,7 @@ impl MimoSineService {
                 .clock
                 .clone()
                 .unwrap_or_else(|| Arc::new(MonotonicClock::new())),
+            law_budget_s: law_budget_s(self.opts.station, self.opts.law_budget),
             ratings: self.opts.ratings.clone(),
             records: self.sink.clone(),
             commands: self.commands_rx.take(),

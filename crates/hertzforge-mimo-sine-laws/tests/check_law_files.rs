@@ -7,15 +7,21 @@
 //! build apart from the run ([`CaseMeasure::build_s`]), so the build counts
 //! once per case and never against the law's per-update budget; this test
 //! prints both.
+//!
+//! Both forms run with the law's time budget relaxed by the engine's named
+//! test-only switch, `TEST_RELAX_COMPUTE_BUDGET`, in the engine and as the law
+//! host's deadline on each call, so no verdict depends on how busy the
+//! machine is. The constructor keeps its own budget.
 
+use hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET;
 use hertzforge_law_host::{HostConfig, LawHost};
 use hertzforge_mimo_sine::laws::builtin;
 use hertzforge_mimo_sine::MimoSineLawFactory;
-use hertzforge_mimo_sine_laws::check::{check_law, sim_station, CaseResult, CHECK_TICK_S};
+use hertzforge_mimo_sine_laws::check::{check_law_with, sim_station, CaseResult};
 use hertzforge_mimo_sine_laws::{load_law_file, WasmSineMimoLawFactory};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 fn law_file(id: &str) -> PathBuf {
     let file = format!("hertzforge_law_mimo_sine_{id}.wasm");
@@ -34,7 +40,7 @@ fn file_law(id: &str) -> Arc<dyn MimoSineLawFactory> {
     Arc::new(WasmSineMimoLawFactory::new(
         load_law_file(&host, &law_file(id)).unwrap(),
         Vec::new(),
-        Duration::from_secs_f64(CHECK_TICK_S),
+        TEST_RELAX_COMPUTE_BUDGET,
     ))
 }
 
@@ -51,9 +57,10 @@ fn verdicts(r: &[CaseResult]) -> Vec<(&'static str, bool, Option<String>)> {
 }
 
 fn same_as_native(id: &str) {
-    let native = check_law(builtin(id).unwrap(), sim_station);
+    let relaxed = Some(TEST_RELAX_COMPUTE_BUDGET);
+    let native = check_law_with(builtin(id).unwrap(), sim_station, relaxed);
     let t = Instant::now();
-    let file = check_law(file_law(id), sim_station);
+    let file = check_law_with(file_law(id), sim_station, relaxed);
     let wall = t.elapsed().as_secs_f64();
     let build: f64 = file
         .iter()

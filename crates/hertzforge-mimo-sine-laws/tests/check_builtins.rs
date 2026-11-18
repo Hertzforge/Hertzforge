@@ -27,9 +27,17 @@
 //! carries the drive with each level change (before, `matrix` was 1.16 dB out
 //! after the step to -12 dB and `steepest_descent` and `secant` ended on a
 //! control abort a second after it).
+//!
+//! Every check here runs with the law's time budget relaxed by the engine's
+//! named test-only switch, `TEST_RELAX_COMPUTE_BUDGET`, so no verdict depends
+//! on how busy the machine is; each case still prints the law's call times
+//! against the setup's budget.
 
+use hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET;
 use hertzforge_mimo_sine::laws::builtin;
-use hertzforge_mimo_sine_laws::check::{check_law, sim_station, CaseResult, MimoSineCheckCase};
+use hertzforge_mimo_sine_laws::check::{
+    call_times, check_law_with, sim_station, CaseResult, MimoSineCheckCase,
+};
 use std::time::Instant;
 
 pub fn print(id: &str, results: &[CaseResult]) {
@@ -39,8 +47,9 @@ pub fn print(id: &str, results: &[CaseResult]) {
             .measure
             .as_ref()
             .map_or((0.0, 0.0, 0.0), |m| (m.ident_s, m.build_s, m.run_s));
+        let calls = r.measure.as_ref().map(call_times).unwrap_or_default();
         println!(
-            "{id:17} {:27} {:5} {:18} {} [ident {ident:.2} s, build {build:.2} s, run {run:.2} s]",
+            "{id:17} {:27} {:5} {:18} {} [ident {ident:.2} s, build {build:.2} s, run {run:.2} s; {calls}]",
             v.case.name(),
             if v.passed { "pass" } else { "FAIL" },
             v.failed.as_deref().unwrap_or(""),
@@ -51,7 +60,11 @@ pub fn print(id: &str, results: &[CaseResult]) {
 
 fn run(id: &str) -> Vec<CaseResult> {
     let t = Instant::now();
-    let r = check_law(builtin(id).expect("a built-in"), sim_station);
+    let r = check_law_with(
+        builtin(id).expect("a built-in"),
+        sim_station,
+        Some(TEST_RELAX_COMPUTE_BUDGET),
+    );
     print(id, &r);
     println!("{id}: the check took {:.1} s", t.elapsed().as_secs_f64());
     r

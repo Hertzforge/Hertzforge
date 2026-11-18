@@ -1398,6 +1398,7 @@ name = "hertzforge-mimo-sine-laws"
 version = "0.1.15"
 dependencies = [
  "hertzforge-channel-table",
+ "hertzforge-engine",
  "hertzforge-hal",
  "hertzforge-hal-sim",
  "hertzforge-law-host",

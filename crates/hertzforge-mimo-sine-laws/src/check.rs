@@ -30,16 +30,35 @@
 //!
 //! 1. **`ran`**: the case could be set up, identified (the coherence gate
 //!    passed) and engaged.
-//! 2. **`no_law_fault`**: every answer of the law is used (no miss) and the
-//!    run does not end on a law fault.
-//! 3. **`within_ceiling`**: no sample of any drive over its ceiling, and the
+//! 2. **`no_law_fault`**: no answer of the law is refused for what it is (a
+//!    wrong count, a value that is not finite, an undeclared value, a bad
+//!    request, an error or a trap), and the run does not end on a law fault
+//!    for one. An answer refused only for coming late is not a law fault.
+//! 3. **`on_time`**: the run does not end on the miss rule for late answers
+//!    (the engine's own rule: [`DEFAULT_LAW_MISSES`] refused in a row), and
+//!    the median call is within the budget in force. A single late call
+//!    cannot fail it: one late answer is held and the run goes on, and one
+//!    call does not move the median. Every case reports the law's call
+//!    times: the slowest, the median, and how many were over the setup's
+//!    budget (a quarter of the update), whatever budget the run had.
+//! 4. **`within_ceiling`**: no sample of any drive over its ceiling, and the
 //!    engine never had to scale an answer down to the ceilings (except where
 //!    the case only asks the run to survive).
-//! 4. **`no_abort`**: the run does not end on a control, limit, drive or
+//! 5. **`no_abort`**: the run does not end on a control, limit, drive or
 //!    kinematic abort or on the divergence stop: no control outside its abort
 //!    band for longer than the engine allows.
-//! 5. **`completes`**: the run ends completed.
-//! 6. The case's own requirement, below.
+//! 6. **`completes`**: the run ends completed.
+//! 7. The case's own requirement, below.
+//!
+//! # The law's time budget
+//!
+//! A check run on a user's machine ([`check_law`], [`check_case`]) holds every
+//! call to the setup's budget, as a run on hardware does: a call past it is
+//! refused and the drive in force held. A deterministic test harness
+//! ([`check_law_with`], [`check_case_with`]) passes the engine's named
+//! test-only budget, `hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET`, so its
+//! verdicts do not depend on how busy the machine is; the call times are
+//! still measured and reported against the setup's budget.
 //!
 //! # The cases
 //!
@@ -103,11 +122,13 @@ use hertzforge_sine::scheduler::{
 use hertzforge_sine::SweepRate;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+pub use hertzforge_mimo_sine::limits::DEFAULT_LAW_MISSES;
 
 /// The version of the MIMO Sine check written into its records. A change to
 /// a case, a structure or a rule changes it.
-pub const MIMO_SINE_CHECK_VERSION: &str = "mimo-sine-check 2";
+pub const MIMO_SINE_CHECK_VERSION: &str = "mimo-sine-check 3";
 
 /// The rate every case runs at, Hz (the sine structures' calibration rate).
 pub const CHECK_FS_HZ: f64 = 16_384.0;
@@ -989,8 +1010,27 @@ pub struct CaseMeasure {
     pub outcome: Option<Outcome>,
     /// Where the run's stop began, Hz, when it stopped early.
     pub stop_hz: Option<f64>,
-    /// Updates whose answer was refused.
+    /// Updates whose answer was refused, for any reason.
     pub misses: usize,
+    /// Of those, the answers refused only for coming late (past the budget
+    /// in force).
+    pub late_misses: usize,
+    /// Whether the run ended on a law fault because its last refused
+    /// answers came late (the miss rule's count in a row).
+    pub ended_late: bool,
+    /// The law's calls (the engage and every update).
+    pub calls: usize,
+    /// The slowest call, s.
+    pub slowest_call_s: f64,
+    /// The median call, s.
+    pub median_call_s: f64,
+    /// Calls over the setup's budget, whatever budget the run had.
+    pub calls_over_budget: usize,
+    /// The setup's budget of a call, s: the deadline on hardware.
+    pub law_budget_s: f64,
+    /// The budget the run held each call to, s (the setup's, or a test
+    /// harness's relaxed one).
+    pub budget_in_force_s: f64,
     /// Updates where the engine scaled an answer down to the ceilings.
     pub over_ceiling: u64,
     /// The largest drive sample played, V.
@@ -1151,6 +1191,18 @@ pub fn run_plan(
     factory: Arc<dyn MimoSineLawFactory>,
     backend: Box<dyn Backend>,
 ) -> Result<CaseMeasure, CheckRunError> {
+    run_plan_with(plan, factory, backend, None)
+}
+
+/// [`run_plan`] with every law call held to `law_budget` in place of the
+/// setup's budget; `None` keeps the setup's. A test harness passes
+/// `hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET` by name.
+pub fn run_plan_with(
+    plan: &RunPlan,
+    factory: Arc<dyn MimoSineLawFactory>,
+    backend: Box<dyn Backend>,
+    law_budget: Option<Duration>,
+) -> Result<CaseMeasure, CheckRunError> {
     let manifest = factory.manifest();
     let id = factory.describe().id;
     let setup = plan_setup(plan, &id, &manifest);
@@ -1166,7 +1218,10 @@ pub fn run_plan(
         check_table(s),
         backend,
         factory,
-        EngineOptions::new(StationClass::HertzforgeSim),
+        EngineOptions {
+            law_budget,
+            ..EngineOptions::new(StationClass::HertzforgeSim)
+        },
     )
     .map_err(err)?;
     svc.arm().map_err(err)?;
@@ -1215,6 +1270,8 @@ pub fn run_plan(
         over_ceiling: core.over_ceiling_count(),
         largest_sample_v: core.largest_sample_v(),
         drive_is_zero: core.drive_is_zero(),
+        law_budget_s: core.setup_law_budget_s(),
+        budget_in_force_s: core.law_budget_s(),
     };
     Ok(measure(
         plan,
@@ -1232,7 +1289,12 @@ struct Station {
     over_ceiling: u64,
     largest_sample_v: f64,
     drive_is_zero: bool,
+    law_budget_s: f64,
+    budget_in_force_s: f64,
 }
+
+/// The reason the engine gives an answer refused for coming late.
+const LATE: &str = "over_budget";
 
 #[allow(clippy::too_many_arguments)]
 fn measure(
@@ -1366,11 +1428,25 @@ fn measure(
         .iter()
         .find(|e| matches!(e.kind, EventKind::Stopping { .. }))
         .map(|e| e.frequency_hz);
+    let mut call_s: Vec<f64> = ticks
+        .iter()
+        .filter(|t| t.law_called)
+        .map(|t| t.law_s)
+        .collect();
+    let last_miss = ticks.iter().rev().find_map(|t| t.miss);
     CaseMeasure {
         case: None,
         outcome,
         stop_hz,
         misses: ticks.iter().filter(|t| t.miss.is_some()).count(),
+        late_misses: ticks.iter().filter(|t| t.miss == Some(LATE)).count(),
+        ended_late: outcome == Some(Outcome::LawFault) && last_miss == Some(LATE),
+        calls: call_s.len(),
+        slowest_call_s: largest(call_s.iter().copied()),
+        calls_over_budget: call_s.iter().filter(|&&s| s > st.law_budget_s).count(),
+        median_call_s: median(&mut call_s),
+        law_budget_s: st.law_budget_s,
+        budget_in_force_s: st.budget_in_force_s,
         over_ceiling: st.over_ceiling,
         largest_sample_v: st.largest_sample_v,
         largest_drive_db: db(largest_drive / CHECK_CEILING_V),
@@ -1424,6 +1500,27 @@ pub struct CaseVerdict {
     pub detail: String,
 }
 
+/// The law's call times in words: the slowest, the median, and how many were
+/// over the setup's budget.
+pub fn call_times(m: &CaseMeasure) -> String {
+    format!(
+        "{} calls, slowest {:.3} ms, median {:.3} ms, {} over the {:.3} ms budget",
+        m.calls,
+        m.slowest_call_s * 1e3,
+        m.median_call_s * 1e3,
+        m.calls_over_budget,
+        m.law_budget_s * 1e3
+    )
+}
+
+/// The late answers a refused count leaves out, in words ("" for none).
+fn late_note(m: &CaseMeasure) -> String {
+    match m.late_misses {
+        0 => String::new(),
+        n => format!(" ({n} late, not counted)"),
+    }
+}
+
 fn outcome_str(o: Option<Outcome>) -> String {
     match o {
         Some(o) => o.as_str().to_string(),
@@ -1465,25 +1562,52 @@ pub fn judge(m: &CaseMeasure) -> CaseVerdict {
                 format!("a drive sample reached {:.3} V", m.largest_sample_v),
             );
         }
-        let misses = hertzforge_mimo_sine::limits::DEFAULT_LAW_MISSES as usize;
-        let held = m.outcome == Some(Outcome::LawFault) && m.misses == misses && m.drive_is_zero;
+        let misses = DEFAULT_LAW_MISSES as usize;
+        let wrong = m.misses - m.late_misses;
+        let held = m.outcome == Some(Outcome::LawFault)
+            && !m.ended_late
+            && wrong == misses
+            && m.drive_is_zero;
         let detail = format!(
-            "ended {} after {} refused answers; every drive at zero: {}",
+            "ended {} after {} refused answers{}; every drive at zero: {}",
             outcome_str(m.outcome),
-            m.misses,
+            wrong,
+            late_note(m),
             m.drive_is_zero
         );
-        return v((!held).then_some("stops_on_fault"), m.misses as f64, detail);
+        return v((!held).then_some("stops_on_fault"), wrong as f64, detail);
     }
-    if m.misses > 0 || m.outcome == Some(Outcome::LawFault) {
+    let wrong = m.misses - m.late_misses;
+    if wrong > 0 || (m.outcome == Some(Outcome::LawFault) && !m.ended_late) {
         return v(
             Some("no_law_fault"),
-            m.misses as f64,
+            wrong as f64,
             format!(
-                "{} refused answers; the run ended {}{at}",
-                m.misses,
+                "{} refused answers{}; the run ended {}{at}",
+                wrong,
+                late_note(m),
                 outcome_str(m.outcome)
             ),
+        );
+    }
+    if m.ended_late || m.median_call_s > m.budget_in_force_s {
+        let why = if m.ended_late {
+            format!(
+                "the run ended {}{at} after {} late answers in a row",
+                outcome_str(m.outcome),
+                DEFAULT_LAW_MISSES
+            )
+        } else {
+            format!(
+                "the median call took {:.3} ms against a budget of {:.3} ms",
+                m.median_call_s * 1e3,
+                m.budget_in_force_s * 1e3
+            )
+        };
+        return v(
+            Some("on_time"),
+            m.median_call_s * 1e3,
+            format!("{why}; {}", call_times(m)),
         );
     }
     let survive = req == Requirement::Survive;
@@ -1675,11 +1799,23 @@ pub struct CaseResult {
 /// a failure named `ran`.
 pub fn check_law(
     factory: Arc<dyn MimoSineLawFactory>,
+    station: impl FnMut(&StationSpec) -> Result<Box<dyn Backend>, String>,
+) -> Vec<CaseResult> {
+    check_law_with(factory, station, None)
+}
+
+/// [`check_law`] with every law call held to `law_budget` in place of the
+/// setup's budget; `None` keeps the setup's. A test harness passes
+/// `hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET` by name, so that no verdict
+/// depends on how busy the machine is.
+pub fn check_law_with(
+    factory: Arc<dyn MimoSineLawFactory>,
     mut station: impl FnMut(&StationSpec) -> Result<Box<dyn Backend>, String>,
+    law_budget: Option<Duration>,
 ) -> Vec<CaseResult> {
     cases_for(&factory.manifest())
         .into_iter()
-        .map(|case| check_case(case, factory.clone(), &mut station))
+        .map(|case| check_case_with(case, factory.clone(), &mut station, law_budget))
         .collect()
 }
 
@@ -1695,11 +1831,22 @@ pub fn check_case(
     factory: Arc<dyn MimoSineLawFactory>,
     station: &mut StationBuilder<'_>,
 ) -> CaseResult {
+    check_case_with(case, factory, station, None)
+}
+
+/// [`check_case`] with every law call held to `law_budget` in place of the
+/// setup's budget, as [`check_law_with`].
+pub fn check_case_with(
+    case: MimoSineCheckCase,
+    factory: Arc<dyn MimoSineLawFactory>,
+    station: &mut StationBuilder<'_>,
+    law_budget: Option<Duration>,
+) -> CaseResult {
     let plan = case.run_plan_for(&factory.describe().name);
     let ran = station(&plan.station)
         .map_err(CheckRunError::Setup)
         .and_then(|b| {
-            let mut m = run_plan(&plan, factory.clone(), b)?;
+            let mut m = run_plan_with(&plan, factory.clone(), b, law_budget)?;
             m.case = Some(case);
             Ok(m)
         });
@@ -1835,6 +1982,14 @@ mod tests {
             outcome: Some(Outcome::Completed),
             stop_hz: None,
             misses: 0,
+            late_misses: 0,
+            ended_late: false,
+            calls: 600,
+            slowest_call_s: 0.0004,
+            median_call_s: 0.0001,
+            calls_over_budget: 0,
+            law_budget_s: 0.0025,
+            budget_in_force_s: 0.0025,
             over_ceiling: 0,
             largest_sample_v: 0.2,
             largest_drive_db: -20.0,
@@ -2014,6 +2169,94 @@ mod tests {
         );
         assert_eq!(bad(&|m| m.drive_is_zero = false), s("stops_on_fault"));
         assert_eq!(bad(&|m| m.largest_sample_v = 2.1), s("within_ceiling"));
+    }
+
+    #[test]
+    fn mimo_sine_check_a_late_answer_is_judged_on_time_not_as_a_law_fault() {
+        use MimoSineCheckCase as C;
+        let with = |c: C, f: &dyn Fn(&mut CaseMeasure)| {
+            let mut m = clean(c);
+            f(&mut m);
+            judge(&m)
+        };
+        // One late call on a busy machine: held, the run goes on, the case
+        // passes.
+        let one = with(C::Stepped, &|m| {
+            m.misses = 1;
+            m.late_misses = 1;
+            m.calls_over_budget = 1;
+            m.slowest_call_s = 0.0032;
+        });
+        assert!(one.passed, "{one:?}");
+        // A wrong answer beside a late one: a law fault, the late one not
+        // counted.
+        let wrong = with(C::Stepped, &|m| {
+            m.misses = 2;
+            m.late_misses = 1;
+        });
+        assert_eq!(wrong.failed.as_deref(), Some("no_law_fault"));
+        assert_eq!(wrong.number, 1.0);
+        assert!(
+            wrong.detail.contains("1 late, not counted"),
+            "{}",
+            wrong.detail
+        );
+        // The miss rule's count of late answers in a row ends the run: on
+        // time, not a law fault.
+        let ended = with(C::Stepped, &|m| {
+            m.misses = 3;
+            m.late_misses = 3;
+            m.ended_late = true;
+            m.outcome = Some(Outcome::LawFault);
+        });
+        assert_eq!(ended.failed.as_deref(), Some("on_time"));
+        assert!(
+            ended.detail.contains("late answers in a row"),
+            "{}",
+            ended.detail
+        );
+        // A law slower than the budget as a rule: its median call is over.
+        let slow = with(C::Stepped, &|m| m.median_call_s = 0.003);
+        assert_eq!(slow.failed.as_deref(), Some("on_time"));
+        assert!(slow
+            .detail
+            .contains("3.000 ms against a budget of 2.500 ms"));
+        // Under a relaxed budget the same median is on time.
+        let relaxed = with(C::Stepped, &|m| {
+            m.median_call_s = 0.003;
+            m.budget_in_force_s = 1.0;
+        });
+        assert!(relaxed.passed, "{relaxed:?}");
+        // The misbehaving law: three wrong answers stop it, a late one
+        // beside them is not counted; a stop on late answers is not the
+        // stop the case asks for.
+        let bad = |f: &dyn Fn(&mut CaseMeasure)| {
+            with(C::LawMisbehaves, &|m| {
+                m.outcome = Some(Outcome::LawFault);
+                m.misses = 3;
+                f(m);
+            })
+            .failed
+        };
+        assert_eq!(
+            bad(&|m| {
+                m.misses = 4;
+                m.late_misses = 1;
+            }),
+            None
+        );
+        assert_eq!(
+            bad(&|m| {
+                m.late_misses = 3;
+                m.ended_late = true;
+            }),
+            Some("stops_on_fault".into())
+        );
+        // The call times are in words.
+        assert_eq!(
+            call_times(&clean(C::Stepped)),
+            "600 calls, slowest 0.400 ms, median 0.100 ms, 0 over the 2.500 ms budget"
+        );
     }
 
     #[test]

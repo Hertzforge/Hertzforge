@@ -37,6 +37,8 @@ enum Mode {
     Low(f64),
     /// Sleep past the budget (with the stepping clock).
     Slow,
+    /// Take this many seconds on the stepping clock every tick.
+    SlowBy(f64),
 }
 
 struct Bad {
@@ -99,6 +101,11 @@ impl MimoSineLaw for BadLaw {
             Mode::Slow => {
                 if let Some(c) = &self.clock {
                     c.advance(1.0);
+                }
+            }
+            Mode::SlowBy(s) => {
+                if let Some(c) = &self.clock {
+                    c.advance(s);
                 }
             }
             Mode::BigFirst(_) => {}
@@ -225,6 +232,71 @@ fn mimo_sine_a_law_over_its_budget_three_times_ends_the_run() {
     let r = run(svc, 12.0);
     assert_eq!(r.outcome, Some(Outcome::LawFault));
     assert_eq!(misses(&r), vec!["over_budget"; 3]);
+}
+
+/// A run of a law 0.1 s late on every update from the 150th, on `class`
+/// with the law budget `relaxed` (or the setup's).
+fn late_run(class: StationClass, relaxed: Option<std::time::Duration>) -> (Run, f64, f64) {
+    let s = SineStructure::Linear4x4;
+    let clock = Arc::new(StepClock::default());
+    let f = Arc::new(Bad {
+        inner: law("matrix"),
+        mode: Mode::SlowBy(0.1),
+        from: 150,
+        clock: Some(clock.clone()),
+    });
+    let mut svc = MimoSineService::new(
+        setup(s, dwell(96.0, 4.0), "matrix"),
+        table(s),
+        backend(s, NOISE, 7),
+        f,
+        EngineOptions {
+            clock: Some(clock),
+            law_budget: relaxed,
+            ..EngineOptions::new(class)
+        },
+    )
+    .unwrap();
+    svc.arm().unwrap();
+    svc.identify().unwrap();
+    svc.engage().unwrap();
+    let core = svc.core().unwrap();
+    let budgets = (core.law_budget_s(), core.setup_law_budget_s());
+    (run(svc, 8.0), budgets.0, budgets.1)
+}
+
+#[test]
+fn mimo_sine_a_relaxed_law_budget_on_the_simulator_takes_a_late_answer() {
+    // The harness's budget, by name: a law 0.1 s late every update (40 times
+    // the setup's 2.5 ms) is answered on time and the run completes.
+    let (r, in_force, setup) = late_run(
+        StationClass::HertzforgeSim,
+        Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+    );
+    assert_eq!(in_force, 1.0);
+    assert!((setup - 0.25 * 0.01).abs() < 1e-4, "{setup}");
+    assert!(misses(&r).is_empty(), "{:?}", misses(&r));
+    assert_eq!(r.outcome, Some(Outcome::Completed));
+    assert!(r.ticks.iter().any(|t| t.law_s >= 0.1));
+    // Without it, the setup's budget refuses the same answers.
+    let (r, in_force, _) = late_run(StationClass::HertzforgeSim, None);
+    assert_eq!(in_force, setup);
+    assert_eq!(r.outcome, Some(Outcome::LawFault));
+    assert_eq!(misses(&r), vec!["over_budget"; 3]);
+}
+
+#[test]
+fn mimo_sine_a_hardware_station_class_keeps_the_setup_law_budget() {
+    use hertzforge_mimo_sine::service::law_budget_s;
+    let relaxed = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
+    assert_eq!(
+        law_budget_s(StationClass::HertzforgeSim, relaxed),
+        Some(1.0)
+    );
+    assert_eq!(law_budget_s(StationClass::HertzforgeSim, None), None);
+    for class in [StationClass::NiSimulated, StationClass::NiReal] {
+        assert_eq!(law_budget_s(class, relaxed), None, "{class:?}");
+    }
 }
 
 #[test]

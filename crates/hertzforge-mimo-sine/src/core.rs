@@ -210,6 +210,9 @@ pub struct CoreParts {
     pub law_values: usize,
     /// The clock the law's calls are timed against.
     pub clock: Arc<dyn LawClock>,
+    /// The deadline of every law call in place of the setup's, s; `None`
+    /// keeps the setup's (`guards.law_budget` of the update).
+    pub law_budget_s: Option<f64>,
     /// Shaker ratings for the kinematic check (empty: none).
     pub ratings: Vec<ShakerRating>,
     pub records: RecordSink,
@@ -243,6 +246,7 @@ pub struct MimoSineCore {
     law_values: LawValues,
     clock: Arc<dyn LawClock>,
     budget_s: f64,
+    setup_budget_s: f64,
     misses: u32,
     ident: LawIdentification,
     group_delay: GroupDelay,
@@ -311,7 +315,8 @@ impl MimoSineCore {
             limit_coherence: parts.identification.limit_coherence.clone(),
             trusted: parts.identification.trusted.clone(),
         });
-        let budget_s = setup.guards.law_budget * tick_s;
+        let setup_budget_s = setup.guards.law_budget * tick_s;
+        let budget_s = parts.law_budget_s.unwrap_or(setup_budget_s);
         Ok(MimoSineCore {
             n,
             m,
@@ -334,6 +339,7 @@ impl MimoSineCore {
             law_values: LawValues::new(parts.law_values),
             clock: parts.clock,
             budget_s,
+            setup_budget_s,
             misses: 0,
             ident: parts.identification,
             group_delay,
@@ -403,6 +409,17 @@ impl MimoSineCore {
     /// The drive in force (the last update's guarded drive), volts peak.
     pub fn drive_in_force(&self) -> &[C64] {
         &self.in_force
+    }
+
+    /// The deadline of a law call in force, s.
+    pub fn law_budget_s(&self) -> f64 {
+        self.budget_s
+    }
+
+    /// The setup's deadline of a law call, s (`guards.law_budget` of the
+    /// update): the deadline on hardware, whatever a harness relaxed.
+    pub fn setup_law_budget_s(&self) -> f64 {
+        self.setup_budget_s
     }
 
     /// Updates where a drive over its ceiling scaled the vector.
@@ -1304,6 +1321,7 @@ mod tests {
             law: Box::new(Constant(C64::new(ask, 0.0))),
             law_values: 0,
             clock: Arc::new(Clock),
+            law_budget_s: None,
             ratings: vec![],
             records: RecordSink::none(),
             commands: None,
