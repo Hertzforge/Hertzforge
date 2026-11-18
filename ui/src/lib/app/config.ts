@@ -27,15 +27,22 @@ export interface ShellConfig {
 	page: string | null;
 	/** `&test=mimo_random`, `&test=shock`, `&test=srs`, `&test=sine`, `&test=twr`, `&test=explorer`, `&test=recorder` or `&test=mimo_shock`: the pop-out shows that run's page; otherwise Random's. */
 	popoutTest: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' | 'mimo_sine';
-	/** `?preview=mimo_sine`: test types not ready yet, offered by name in the chooser (comma-separated). */
-	preview: string[];
 	/**
 	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
 	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
 	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`,
-	 * `mock_record=unwritable|problem` (a Random run's record refused at arm, or failing as it runs).
+	 * `mock_record=unwritable|problem` (a Random run's record refused at arm, or failing as it runs),
+	 * `mock_sim=<inputs>x<outputs>` (the simulator's channels, default 8x1).
 	 */
 	mockControl: ControlServerOptions;
+}
+
+/** `mock_sim=24x8`: the mock simulator's inputs and outputs, each 1 to 64. */
+function simChannels(value: string | null): { simInputs?: number; simOutputs?: number } {
+	const m = /^(\d{1,2})x(\d{1,2})$/.exec(value ?? '');
+	if (!m) return {};
+	const [i, o] = [Number(m[1]), Number(m[2])];
+	return i >= 1 && i <= 64 && o >= 1 && o <= 64 ? { simInputs: i, simOutputs: o } : {};
 }
 
 function num(value: string | null): number | undefined {
@@ -68,7 +75,6 @@ export function readConfig(search: string): ShellConfig {
 		runLogFile: q.get('runlog_file'),
 		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
 		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : q.get('test') === 'shock' ? 'shock' : q.get('test') === 'srs' ? 'srs' : q.get('test') === 'sine' ? 'sine' : q.get('test') === 'mixed' ? 'mixed' : q.get('test') === 'twr' ? 'twr' : q.get('test') === 'explorer' ? 'explorer' : q.get('test') === 'recorder' ? 'recorder' : q.get('test') === 'mimo_shock' ? 'mimo_shock' : q.get('test') === 'mimo_sine' ? 'mimo_sine' : 'random',
-		preview: (q.get('preview') ?? '').split(',').map((x) => x.trim()).filter((x) => /^[a-z_]{1,32}$/.test(x)),
 		mockControl: {
 			speed: num(q.get('mock_speed')),
 			niReal: q.get('mock_ni') === 'real' ? true : undefined,
@@ -76,7 +82,8 @@ export function readConfig(search: string): ShellConfig {
 			abortDemoAtS: num(q.get('mock_abort_at')),
 			feasibilityExceeds: q.get('mock_feasibility') === 'exceeds' ? true : undefined,
 			coherence: num(q.get('mock_coherence')),
-			record: q.get('mock_record') === 'unwritable' ? 'unwritable' : q.get('mock_record') === 'problem' ? 'problem' : undefined
+			record: q.get('mock_record') === 'unwritable' ? 'unwritable' : q.get('mock_record') === 'problem' ? 'problem' : undefined,
+			...simChannels(q.get('mock_sim'))
 		}
 	};
 }

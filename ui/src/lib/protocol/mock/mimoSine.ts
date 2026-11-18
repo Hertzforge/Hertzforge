@@ -233,6 +233,8 @@ interface Run {
 	rotationMax: number;
 	requests: { asked: number; granted: number; heldS: number };
 	pass: Point[];
+	/** The last pass ended, still drawn once the run has finished. */
+	lastPass: Point[];
 	history: Point[];
 	last: Point | null;
 	worst: { err: number[]; errHz: (number | null)[]; ph: (number | null)[]; alarmS: number[]; depth: number[]; margin: (number | null)[]; marginHz: (number | null)[]; vpk: number[]; vpkHz: (number | null)[]; opp: number | null; share: number | null };
@@ -526,10 +528,14 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 		return { name, role, x: Float64Array.from(points, (p) => (dwell ? p.t : p.f)), y: Float64Array.from(points, y) };
 	}
 
-	/** The points a view is drawn on: the pass in a sweep or a stepped sine, the last 60 s in a dwell. */
+	/**
+	 * The points a view is drawn on: the pass in a sweep or a stepped sine (the last one ended, once
+	 * the run has finished), the last 60 s in a dwell.
+	 */
 	function pointsOf(r: Run): { pts: Point[]; dwell: boolean } {
 		const dwell = r.config.test.kind === 'dwell';
-		return dwell ? { pts: r.history.filter((p) => p.t >= r.t - 60).slice(-1200), dwell } : { pts: r.pass, dwell };
+		if (dwell) return { pts: r.history.filter((p) => p.t >= r.t - 60).slice(-1200), dwell };
+		return { pts: r.state === 'finished' && !r.pass.length ? r.lastPass : r.pass, dwell };
 	}
 
 	function xAxis(dwell: boolean) {
@@ -817,6 +823,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 	function endPass(r: Run) {
 		if (!r.pass.length) return;
 		host.broadcast('mimo_sine.sweep', { run_id: r.id, pass: r.passes + 1, level_db: r.levelDb ?? 0, direction: r.config.test.kind === 'sweep' ? r.direction : null, views: passViews(r) } as unknown as Record<string, unknown>);
+		r.lastPass = r.pass;
 		r.pass = [];
 	}
 
@@ -1144,6 +1151,7 @@ export function createMimoSineMock(host: MimoSineMockHost): MimoSineMock {
 			rotationMax: 4.2,
 			requests: { asked: 0, granted: 0, heldS: 0 },
 			pass: [],
+			lastPass: [],
 			history: [],
 			last: null,
 			worst: { err: Array(nc).fill(0), errHz: Array(nc).fill(null), ph: Array(nc).fill(null), alarmS: Array(nc).fill(0), depth: Array(nc).fill(0), margin: Array(nl).fill(null), marginHz: Array(nl).fill(null), vpk: Array(nd).fill(0), vpkHz: Array(nd).fill(null), opp: null, share: null },

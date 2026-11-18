@@ -127,7 +127,7 @@
 	<div class="aq-group">
 		<h3>Acquisition</h3>
 		<div class="aq-fields">
-			<NumberField id="msine-fs" label="Rate asked of the station" unit="Hz" nullable="16384 Hz" step={1024} bind:value={d.acquisition.fs_hz} errors={errs('acquisition.fs_hz')} disabled={locked} />
+			<NumberField id="msine-fs" label="Rate asked of the station" unit="Hz" nullable="The usual rate, 16384" step={1024} bind:value={d.acquisition.fs_hz} errors={errs('acquisition.fs_hz')} disabled={locked} />
 			<NumberField id="msine-tick" label="Control tick" unit="ms" step={1} min={2} max={1000} bind:value={d.acquisition.tick_ms} errors={errs('acquisition.tick_ms')} help="Converted to whole frames at the rate the station adopts; 8 ms at least for a law file." disabled={locked} />
 		</div>
 	</div>

@@ -118,7 +118,7 @@ describe('the MIMO Sine store', () => {
 	});
 
 	it('runs a sweep through the review to completion, with a limit channel notching and every pass reported', async () => {
-		const { ms } = await screen();
+		const { ms, client } = await screen();
 		expect(ms.addLimit()).toBe(true);
 		ms.setup.limits.channels[0].profile.rows.forEach((r) => (r.value = 1));
 		await ms.checkSetup();
@@ -144,6 +144,12 @@ describe('the MIMO Sine store', () => {
 		expect(ms.report?.limits[0].notched_s).toBeGreaterThan(0);
 		expect(ms.report?.controls.length).toBe(4);
 		expect(ms.log.some((e) => /notch/i.test(e.text))).toBe(true);
+		// A window that opens on the finished run is drawn the last pass, not empty plots.
+		const frame = new Promise<{ plots: { views: { series: { x: ArrayLike<number> }[] }[] }[] }>((resolve) => client.on('mimo_sine.data', (d) => resolve(d as never)));
+		await client.request('mimo_sine.subscribe', { rate_hz: 5, plots: [{ id: 'c', quantity: 'control', channels: 'all' }] });
+		const views = (await frame).plots[0].views;
+		expect(views.length).toBe(4);
+		expect(views.every((v) => v.series.every((x) => x.x.length > 10))).toBe(true);
 	});
 
 	it('runs a dwell and a stepped sine to completion', async () => {
@@ -173,6 +179,9 @@ describe('the MIMO Sine store', () => {
 		await until(() => ms.now?.phase === 'engaged');
 		expect(ms.verbs.hold.enabled).toBe(true);
 		expect(ms.verbs.jog.visible).toBe(true);
+		// A MIMO Sine sweep turns only at the band's edges: Reverse is never offered.
+		expect(Object.keys(ms.verbs).sort()).toEqual(['goto', 'hold', 'jog', 'resume']);
+		expect('reverse' in ms).toBe(false);
 		expect(await ms.hold()).toBe(true);
 		expect(ms.status?.held).toBe(true);
 		expect(ms.verbs.resume.visible).toBe(true);
@@ -189,7 +198,7 @@ describe('the MIMO Sine store', () => {
 		await until(() => ms.status?.state === 'review');
 		await ms.proceed();
 		expect(ms.verbs.jog.visible).toBe(false);
-		expect(ms.verbs.reverse.visible).toBe(false);
+		expect(ms.verbs.goto.visible).toBe(false);
 		await ms.abort();
 	});
 

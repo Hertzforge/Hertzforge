@@ -34,7 +34,7 @@ import { RecorderStore } from '$lib/acquire/recorder/recorderStore.svelte';
 import { RecorderViewsState } from '$lib/acquire/recorder/recorderViews.svelte';
 import { PlaybackStore } from '$lib/acquire/playback/playbackStore.svelte';
 import { PlaybackViewsState } from '$lib/acquire/playback/playbackViews.svelte';
-import { liveTestOf, TEST_TYPES, TestTypeView, withPreview, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
+import { liveTestOf, TestTypeView, type LiveTest, type TestTypeId } from '$lib/acquire/testTypes.svelte';
 import { RequestError, ServiceClient } from '$lib/protocol/client.svelte';
 import { createAnalysisServer } from '$lib/protocol/mock/analysis';
 import { createControlServer } from '$lib/protocol/mock/control';
@@ -2392,7 +2392,7 @@ export class AppState {
 		this.explorer = new ExplorerStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.recorder = new RecorderStore(this.acquire, config.popout ? { local: null, drafts: false } : {});
 		this.playback = new PlaybackStore(this.acquire, config.popout ? { local: null, drafts: false } : { analysis: this.analysis, objects: () => this.project.summary?.objects ?? [] });
-		this.tests = new TestTypeView(() => this.liveTest, withPreview(TEST_TYPES, config.preview ?? []));
+		this.tests = new TestTypeView(() => this.liveTest);
 		this.display = new DisplayState(this.control, {
 			// The layout belongs to the setup the service holds, else to the one being edited here.
 			setupTitle: () => this.acquire.held?.config.title ?? (config.popout ? null : this.acquire.setup.title),

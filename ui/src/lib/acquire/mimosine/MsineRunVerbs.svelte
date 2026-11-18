@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
 	 * MIMO Sine's own verbs, beside the shared ones in the Run card: Hold and Resume, which freeze
-	 * and restart the test's progress with every drive still under control, and on a sweep Reverse,
-	 * Jog and Go to, which turn the sweep and move the frequency with the drive vector held. A verb
+	 * and restart the test's progress with every drive still under control, and on a sweep Jog and
+	 * Go to, which move the frequency with the drive vector held. A verb
 	 * that cannot run says why when it is focused or hovered.
 	 */
 	import type { ActionState } from '../actions';
@@ -12,7 +12,6 @@
 		verbs: Record<MsineVerbId, ActionState>;
 		hold(): unknown;
 		resume(): unknown;
-		reverse(): unknown;
 		jog(deltaHz: number): unknown;
 		gotoHz(hz: number): Promise<number | null>;
 	}
@@ -54,9 +53,6 @@
 		{/if}
 		{#if v.resume.visible}
 			<button class="btn primary" data-testid="act-resume" aria-disabled={!v.resume.enabled} class:off={!v.resume.enabled} onclick={() => go('resume', () => ms.resume())} {...tip('resume')}>Resume</button>
-		{/if}
-		{#if v.reverse.visible}
-			<button class="btn" data-testid="act-reverse" aria-disabled={!v.reverse.enabled} class:off={!v.reverse.enabled} onclick={() => go('reverse', () => ms.reverse())} {...tip('reverse')}>Reverse</button>
 		{/if}
 		{#if v.jog.visible}
 			<div class="jog" role="group" aria-label="Jog the frequency">

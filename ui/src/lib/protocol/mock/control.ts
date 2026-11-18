@@ -119,6 +119,9 @@ export interface ControlServerOptions {
 	dataRoot?: string;
 	/** A Random, Sine, classical shock, SRS shock, MIMO Shock, TWR or Explorer run's record: refused at arm or start (`unwritable`), or a stream stops while it runs (`problem`). */
 	record?: 'unwritable' | 'problem';
+	/** The simulator's inputs and outputs (default 8 and 1), so a larger channel table can be seen. */
+	simInputs?: number;
+	simOutputs?: number;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -710,6 +713,8 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	const timeoutS = options.timeoutS ?? TIMEOUT_S;
 	const niReal = options.niReal ?? false;
 	const niInstalled = options.niInstalled ?? true;
+	const simInputs = options.simInputs ?? SIM_INPUTS;
+	const simOutputs = options.simOutputs ?? SIM_OUTPUTS;
 	const connections = new Set<MockConnection>();
 	const names = new Map<MockConnection, string>();
 	/** Each subscribed connection's plots, rate and when it was last sent a frame (ms). */
@@ -1083,7 +1088,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	let restored: RestoredTable | null = null;
 
 	const niClass = (): StationClass => (niReal ? 'ni_real' : 'ni_simulated');
-	const simStation: SimStation = { kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: SIM_INPUTS, outputs: SIM_OUTPUTS, clock: 'shared' };
+	const simStation: SimStation = { kind: 'sim', title: 'Simulator', available: true, class: 'sim', inputs: simInputs, outputs: simOutputs, clock: 'shared' };
 
 	function niStation(): NiStation {
 		if (!niInstalled) {
@@ -1103,7 +1108,7 @@ export function createControlServer(options: ControlServerOptions = {}): MockSer
 	}
 
 	function selected(): StationSelected {
-		if (selection.kind === 'sim') return { kind: 'sim', devices: [], class: 'sim', source: 'SIM', inputs: SIM_INPUTS, outputs: SIM_OUTPUTS, timing_family: null };
+		if (selection.kind === 'sim') return { kind: 'sim', devices: [], class: 'sim', source: 'SIM', inputs: simInputs, outputs: simOutputs, timing_family: null };
 		const devices = scan.filter((d) => selection.devices.includes(d.id));
 		const cls = niClass();
 		return {
