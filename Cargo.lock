@@ -1217,6 +1217,7 @@ name = "hertzforge-law-sdk"
 version = "0.1.14"
 dependencies = [
  "hertzforge-mimo-shock-law-math",
+ "hertzforge-mimo-sine-law-math",
  "hertzforge-sdm",
  "hertzforge-shock-law-math",
  "hertzforge-sine",

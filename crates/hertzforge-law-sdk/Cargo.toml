@@ -9,7 +9,7 @@ publish = false
 # to build a law file. Generates the bindings for the `random-single`,
 # `random-mimo`, `shock-classical`, `shock-srs`, `shock-mimo`, `sine-single` and `sine-mimo` worlds of
 # `wit/control-law/` and wraps them in the `RandomLaw`, `RandomMimoLaw`,
-# `ShockClassicalLaw`, `ShockSrsLaw` and `SineSingleLaw` traits and their
+# `ShockClassicalLaw`, `ShockSrsLaw`, `ShockMimoLaw`, `SineSingleLaw` and `SineMimoLaw` traits and their
 # `export_*!` macros. Builds for the host too (so the workspace lints it and a law's math
 # can be unit-tested natively); a law file is built with
 # `cargo build --target wasm32-wasip2 --release`.
@@ -34,3 +34,8 @@ hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math" }
 # core alone, without the run service: plain math that builds for
 # `wasm32-wasip2`.
 hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+# The MIMO Sine laws' mathematics (the built-in laws' steps, the loop-speed rule,
+# the model the carry runs through, the regularized inverse), re-exported as
+# `sine_mimo::math` so a MIMO Sine law file runs the controller's own code.
+# Plain math that builds for `wasm32-wasip2`.
+hertzforge-mimo-sine-law-math = { path = "../hertzforge-mimo-sine-law-math" }
