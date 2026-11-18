@@ -462,17 +462,19 @@ pub fn sim_spec(fs_hz: f64, plant: Option<&SimPlant>, outputs: Option<u32>) -> S
 }
 
 /// What a simulated run's record says of its plant: the model, its parameters and
-/// its seed.
+/// its seed. A sine structure's record also names the structure (`structure`), which
+/// is what sets its modes, its level rules and its full level.
 pub fn sim_identity(spec: &SimPlantSpec) -> Value {
     let model = match &spec.plant {
         SimPlant::Resonators => "resonator_bank".to_owned(),
+        SimPlant::SineStructure(_) => "sine_structure".to_owned(),
         other => format!("{other:?}")
             .split(['(', ' ', '{'])
             .next()
             .unwrap_or("plant")
             .to_ascii_lowercase(),
     };
-    json!({
+    let mut identity = json!({
         "model": model,
         "parameters": {
             "sample_rate_hz": spec.sample_rate_hz,
@@ -484,7 +486,11 @@ pub fn sim_identity(spec: &SimPlantSpec) -> Value {
             "outputs": spec.max_output_channels,
         },
         "seed": spec.seed,
-    })
+    });
+    if let SimPlant::SineStructure(structure) = &spec.plant {
+        identity["structure"] = json!(structure.name());
+    }
+    identity
 }
 
 /// Build the station a run arms on. The simulator through the factory; NI from a
@@ -841,6 +847,39 @@ mod tests {
         // The sized plant refuses a table of another size.
         let mut st = build(&plan, &DriverScanner).unwrap();
         assert!(mimo_shock_arm(&mut st, &mimo_shock_table(4, 3)).is_err());
+    }
+
+    /// A sine structure arms at its own size, refuses another, and its run's identity
+    /// names it; the shock and modal identities are as before (no `structure`).
+    #[test]
+    fn mimo_sine_a_sine_structure_arms_by_name_and_is_recorded() {
+        let s = hertzforge_station::SimSineStructure::from_name("sine-tall-6x3").unwrap();
+        let plan = StationPlan::Sim {
+            fs_hz: 16_384.0,
+            plant: Some(SimPlant::SineStructure(s)),
+            outputs: None,
+        };
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        assert_eq!(st.station, StationClass::HertzforgeSim);
+        assert_eq!(st.backend.caps().max_output_channels, 3);
+        mimo_shock_arm(&mut st, &mimo_shock_table(6, 3)).unwrap();
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        assert!(mimo_shock_arm(&mut st, &mimo_shock_table(6, 4)).is_err());
+        let mut st = build(&plan, &DriverScanner).unwrap();
+        assert!(mimo_shock_arm(&mut st, &mimo_shock_table(4, 3)).is_err());
+
+        let id = sim_identity(&sim_spec(16_384.0, Some(&SimPlant::SineStructure(s)), None));
+        assert_eq!(id["model"], "sine_structure");
+        assert_eq!(id["structure"], "sine-tall-6x3");
+        assert_eq!(id["parameters"]["sample_rate_hz"], 16_384.0);
+        let shock = hertzforge_station::SimShockPlant::from_name("shock-linear-4x4").unwrap();
+        let id = sim_identity(&sim_spec(12_800.0, Some(&SimPlant::Shock(shock)), None));
+        assert_eq!(id["model"], "shock");
+        assert!(id.get("structure").is_none());
+        let modal = hertzforge_station::SimStandardPlant::from_name("modal-4x4").unwrap();
+        let id = sim_identity(&sim_spec(8192.0, Some(&SimPlant::Modal(modal)), None));
+        assert_eq!(id["model"], "modal");
+        assert!(id.get("structure").is_none());
     }
 
     #[test]

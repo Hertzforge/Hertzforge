@@ -71,6 +71,13 @@ use serde::{Deserialize, Serialize};
 /// `shock-jointed-6x3`; [`SimShockPlant::from_name`] reads one): cross-coupled plates whose
 /// jointed modes fall in frequency and rise in damping with level, a delay per control.
 pub use hertzforge_hal_sim::plants::ShockPlant as SimShockPlant;
+/// The standard sine structures a HERTZFORGE-SIM station can simulate, by name
+/// (`sine-linear-4x4`, `sine-softening-4x4-mild`, `sine-softening-4x4-moderate`,
+/// `sine-hardening-4x4`, `sine-tall-6x3`, `sine-wide-3x6`, `sine-base-article-6x4`,
+/// `sine-near-singular-4x4`; [`SimSineStructure::from_name`] reads one): cross-coupled
+/// plates calibrated for a multiple-drive sine test, some of whose resonances move with
+/// level.
+pub use hertzforge_hal_sim::plants::SineStructure as SimSineStructure;
 /// The standard cross-coupled plants a HERTZFORGE-SIM station can simulate, by name
 /// (`modal-4x4`, `modal-12x6`, `modal-12x6-ill`, `modal-24x24`, `modal-72x24`,
 /// `rigid-plate-12x6`; [`SimStandardPlant::from_name`] reads one). Plain names: the
@@ -276,6 +283,9 @@ pub enum SimPlant {
     /// the structure through its own delay, and a jointed plant's modes change with
     /// level.
     Shock(SimShockPlant),
+    /// A standard sine structure: every drive reaches every response, and the
+    /// level-dependent ones' resonances move with level.
+    SineStructure(SimSineStructure),
     /// A plant that plays this FRF matrix (line `k` at `k * df_hz`), measured or
     /// computed, by block convolution. The convolution's partition, `block_frames`
     /// samples (a power of two), is also the latency it adds; `None` takes the
@@ -700,6 +710,7 @@ fn build_sim(plant: &SimPlantSpec) -> StationBackend {
         SimPlant::Resonators => None,
         SimPlant::Modal(p) => Some(p.build().model),
         SimPlant::Shock(p) => Some(p.build().model),
+        SimPlant::SineStructure(s) => Some(s.build().model),
         SimPlant::Frf {
             stack,
             df_hz,
@@ -1155,6 +1166,70 @@ mod tests {
         assert!(
             energy.iter().all(|&e| e > 1e-3),
             "every control sees the last drive: {energy:?}"
+        );
+    }
+
+    /// A sine structure by name sizes the station to itself and refuses a table of
+    /// another size, and every response answers the last drive through the station's
+    /// own `Backend`.
+    ///
+    /// RED-MUTATION: map the `SimPlant::SineStructure` arm of `build_sim` to `None` and
+    /// the station is the single-path bank: the caps stay at 8 by 2 and the 3 by 6 table
+    /// is refused for its six drives.
+    #[test]
+    fn mimo_sine_station_builds_a_sine_structure() {
+        use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
+        let table = |n_in: usize, n_d: usize| {
+            let mut t = ChannelTable::new();
+            for k in 0..n_in + n_d {
+                let mut c = Channel::new(k as u32 + 1);
+                c.role = if k < n_in {
+                    ChannelRole::Control
+                } else {
+                    ChannelRole::Drive
+                };
+                c.range_max = 1e9;
+                t.channels.push(c);
+            }
+            t
+        };
+        let fs = 16_384.0;
+        let structure = SimSineStructure::from_name("sine-wide-3x6").expect("a sine structure");
+        let spec = StationSpec {
+            sim: SimPlantSpec {
+                sample_rate_hz: fs,
+                shared_clock: true,
+                noise_level: 0.0,
+                plant: SimPlant::SineStructure(structure),
+                ..SimPlantSpec::default()
+            },
+            ..StationSpec::default()
+        };
+        let mut st = try_build_station_backend(BackendKind::Sim, &spec).expect("builds");
+        let caps = st.backend.caps();
+        assert_eq!((caps.max_input_channels, caps.max_output_channels), (8, 6));
+        let acq = hertzforge_hal::AcquisitionConfig::new(fs, 64);
+        st.backend.open().unwrap();
+        assert!(st.backend.configure(&table(4, 4), &acq).is_err());
+        assert!(st.backend.configure(&table(3, 4), &acq).is_err());
+        st.backend.configure(&table(3, 6), &acq).expect("3 by 6");
+        st.backend.arm().unwrap();
+        st.backend.start().unwrap();
+        let mut energy = [0.0f64; 3];
+        let mut buf = [0.0f32; 3];
+        for s in 0..4096 {
+            let x = 0.1 * (std::f64::consts::TAU * 97.0 * s as f64 / fs).sin() as f32;
+            st.backend
+                .write_drive(&[0.0, 0.0, 0.0, 0.0, 0.0, x])
+                .unwrap();
+            st.backend.read_input(&mut buf).unwrap();
+            for (e, v) in energy.iter_mut().zip(&buf) {
+                *e += (*v as f64).powi(2);
+            }
+        }
+        assert!(
+            energy.iter().all(|&e| e > 1e-3),
+            "every response sees the last drive: {energy:?}"
         );
     }
 
