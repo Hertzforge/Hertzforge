@@ -139,6 +139,51 @@ impl ModalStructure {
         }
     }
 
+    /// An identification on a grid of `step` Hz over `band` with seeded
+    /// scatter: each element times `1 + relative n1`, plus `floor` times the
+    /// line's largest magnitude times `n2`, with `n1`, `n2` complex, each part
+    /// uniform in -1 to 1. The floor is the shape of measurement noise: the
+    /// same absolute error on every element of a line, so a small element's
+    /// phase is the least certain.
+    pub fn identification_scattered(
+        &self,
+        band: (f64, f64),
+        step: f64,
+        scatter: Scatter,
+    ) -> Identification {
+        let mut id = self.identification(band, step, false);
+        let (l, n, m) = id.response.dims();
+        let mut data = id.response.data().to_vec();
+        let mut rng = scatter.seed ^ 0x9e37_79b9_7f4a_7c15;
+        let mut uni = || {
+            rng = rng.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = rng;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^= z >> 31;
+            (z >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+        for k in 0..l {
+            let line = &mut data[k * n * m..(k + 1) * n * m];
+            let big = line.iter().map(|v| v.norm()).fold(0.0, f64::max);
+            for v in line.iter_mut() {
+                let n1 = C64::new(uni(), uni());
+                let n2 = C64::new(uni(), uni());
+                *v = *v * (C64::new(1.0, 0.0) + n1 * scatter.relative) + n2 * (scatter.floor * big);
+            }
+        }
+        id.response = MatrixStack::from_vec(l, n, m, data).expect("sizes agree");
+        id
+    }
+
+    /// [`ModalStructure::setup`] with a seeded scatter in place of the fixed
+    /// one.
+    pub fn setup_scattered(&self, band: (f64, f64), scatter: Scatter) -> Setup {
+        let mut s = self.setup(band, false);
+        s.identification = self.identification_scattered(band, 0.25, scatter);
+        s
+    }
+
     /// A setup on this structure with a reference of ones, the testbed's
     /// defaults (16384 Hz, an update every 164 samples, tracking at 10 percent
     /// of the frequency up to 20 Hz).
@@ -168,6 +213,29 @@ impl ModalStructure {
                 max_hz: 20.0,
             },
             loop_delay: Default::default(),
+        }
+    }
+}
+
+/// Seeded scatter on an identification (see
+/// [`ModalStructure::identification_scattered`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Scatter {
+    /// Relative scatter on each element.
+    pub relative: f64,
+    /// Absolute scatter on each element, as a fraction of the line's largest.
+    pub floor: f64,
+    /// Seed.
+    pub seed: u64,
+}
+
+impl Scatter {
+    /// `fraction` of both parts: "2 percent scatter" is `Scatter::of(0.02, seed)`.
+    pub fn of(fraction: f64, seed: u64) -> Scatter {
+        Scatter {
+            relative: fraction,
+            floor: fraction,
+            seed,
         }
     }
 }

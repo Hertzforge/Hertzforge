@@ -59,7 +59,8 @@ pub mod reference_structure;
 pub use hertzforge_sdm::{MatrixStack, C64};
 pub use law::{Hold, Inputs, Outputs, Request};
 pub use setup::{
-    Identification, LoopDelay, Setup, Shape, TrackingRule, DEFAULT_TRACKER_DELAY_FACTOR,
+    DelayEstimate, Identification, LoopDelay, Setup, Shape, TrackingRule,
+    DEFAULT_TRACKER_DELAY_FACTOR,
 };
 
 /// The test types a law accepts. The controller refuses a setup that asks a

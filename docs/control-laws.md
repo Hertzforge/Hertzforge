@@ -1027,6 +1027,7 @@ reference it controls every control in phase, or takes each control's phase from
 | `carry` | The weight on the carry, 0 to 1; 0 is the correction alone (default 0.67, the value that leaves at most a third of the sweep error whether damping at test level is as identified or up to three times it) |
 | `gain_rule` | `loop_speed` (default): the gain from the loop's delays; `fixed`: `fixed_gain` every update |
 | `fixed_gain` | The gain when the rule is fixed (default 0.5, the published value; on a lightly damped structure it can lose the loop) |
+| `delay_estimate` | How the loop-speed rule reads the identification's group delay near the tone. `largest` (default): the largest phase slope over the response's elements at or above a tenth of the largest; with noise in the identification, an element with little response can set it, and the loop then runs slower than it needs to between resonances. `principal`: the phase slope along the response's largest singular direction, which at a resonance is the mode's own delay and which a noisy small element cannot set. It lets the loop run faster between resonances; on a structure whose resonances move with level that speed can lose a resonance that `largest` holds, so it is for structures that respond at test level as identified |
 | `regularization` | Regularization of the inverse, relative to its largest singular value (default 0.001) |
 | `model` | `modal` (default): the identification's resonances fitted exactly and the rest smoothed; `smoothed`: the whole identification smoothed; `identification`: as measured |
 | `smoothing_lines` | Half-width of the model's smoothing in identification lines (default 8) |
@@ -1049,15 +1050,15 @@ drive `i`; every update that drive's amplitude is multiplied by its control's ra
 measured amplitude, raised to the gain, and its phase is left to the pair. It has no model of the
 coupling. On the testbed's coupled four-by-four structure it completed none of 5 dwells and none of
 5 stepped sines: it is for structures whose pairs are weakly coupled, and shows what a law without
-the coupling does. Parameters `gain_rule` and `fixed_gain` as for `matrix`. Values: `gain`,
+the coupling does. Parameters `gain_rule`, `fixed_gain` and `delay_estimate` as for `matrix`. Values: `gain`,
 `error_db`.
 
 **`steepest_descent`** (dwell only; references with phases only). It starts from the
 identification's inverse drive and then moves the drive every update down the gradient of the
 squared control error through the identification, scaled by its largest singular value. On the
 testbed's four-by-four structure it completed 5 of 5 dwells, 2 of 5 stepped sines and none of 20
-sweeps at one octave a minute. Parameters `gain_rule`, `fixed_gain` and `regularization` as for
-`matrix`. Values: `gain`, `error_db`.
+sweeps at one octave a minute. Parameters `gain_rule`, `fixed_gain`, `delay_estimate` and
+`regularization` as for `matrix`. Values: `gain`, `error_db`.
 
 **`secant`** (dwell only; references with phases only). Two-step cycles: a probe along the inverse
 correction, then a step with the complex gain found from the probe's measured response, and a
