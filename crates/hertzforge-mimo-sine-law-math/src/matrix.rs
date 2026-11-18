@@ -22,9 +22,11 @@
 //!   cannot see (outside the row space of `H(f')`) is removed every update; the
 //!   correction never adds to it, but the drive in force keeps it as the row
 //!   space turns with frequency.
-//! - **Amplitude-only reference:** each control's phase is taken from its
-//!   measurement, `R_c |C_c| / C_c` scaled to `|R_c|`, so only amplitudes are
-//!   corrected.
+//! - **Amplitude-only reference:** by default (`FreePhase::InPhase`, what the
+//!   research testbed ran) the law controls to the in-phase reference `|R|`,
+//!   every control at phase zero. With `FreePhase::Measured` each control's
+//!   phase is taken from its measurement, `|R_c| C_c / |C_c|`, so only
+//!   amplitudes are corrected.
 //!
 //! The model is the identification's modes exact plus its smoothed remainder
 //! (see [`crate::modal`]); the loop-speed rule reads the identification
@@ -66,6 +68,16 @@ pub const MATRIX_TEST_TYPES: TestTypes = TestTypes {
     stepped: true,
 };
 
+/// How `matrix` reads an amplitude-only reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum FreePhase {
+    /// Every control at phase zero: the in-phase reference `|R|`.
+    #[default]
+    InPhase,
+    /// Each control's phase from its measurement.
+    Measured,
+}
+
 /// Parameters of `matrix`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MatrixParams {
@@ -83,6 +95,9 @@ pub struct MatrixParams {
     /// Remove the drive the controls cannot see on a setup with spare drives.
     /// Off only to show what the reset prevents.
     pub reset_unseen: bool,
+    /// How an amplitude-only reference is read (no effect when the reference's
+    /// phases are specified).
+    pub free_phase: FreePhase,
 }
 
 impl Default for MatrixParams {
@@ -94,6 +109,7 @@ impl Default for MatrixParams {
             model: ModelChoice::default(),
             rebase: true,
             reset_unseen: true,
+            free_phase: FreePhase::InPhase,
         }
     }
 }
@@ -176,11 +192,14 @@ impl MatrixLaw {
         h
     }
 
-    /// The reference the law controls to: as given, or with each control's
-    /// phase from its measurement when the reference is amplitude only.
+    /// The reference the law controls to: as given; or, when it is amplitude
+    /// only, in phase or with each control's phase from its measurement.
     fn effective(&self, r: &[C64], c: &[C64]) -> Vec<C64> {
         if self.phase_specified {
             return r.to_vec();
+        }
+        if self.params.free_phase == FreePhase::InPhase {
+            return r.iter().map(|v| C64::new(v.norm(), 0.0)).collect();
         }
         r.iter()
             .zip(c)

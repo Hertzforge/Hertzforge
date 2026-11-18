@@ -23,31 +23,23 @@ use crate::{TestTypes, C64};
 /// The diagnostics `ratio` declares, in order.
 pub const RATIO_VALUES: [&str; 3] = ["sigma_min", "sigma_max", "error_db"];
 
-/// The test types `ratio` accepts with a pairing. With the reference pairing,
-/// a dwell and a stepped sine: on the research testbed's linear 4 by 4 it
-/// completed 5 of 5 of each and 3 of 20 sweeps at one octave a minute. With the
-/// drive pairing, none: 1 of 5 dwells and 0 of 5 stepped sines.
-pub fn ratio_test_types(pairing: Pairing) -> TestTypes {
-    match pairing {
-        Pairing::Reference => TestTypes {
-            sweep: false,
-            dwell: true,
-            stepped: true,
-        },
-        Pairing::Drive => TestTypes {
-            sweep: false,
-            dwell: false,
-            stepped: false,
-        },
-    }
-}
+/// The test types `ratio` accepts: a dwell and a stepped sine. With its
+/// default reference pairing it completed 5 of 5 of each on the research
+/// testbed's linear 4 by 4, and 3 of 20 sweeps at one octave a minute.
+pub const RATIO_TEST_TYPES: TestTypes = TestTypes {
+    sweep: false,
+    dwell: true,
+    stepped: true,
+};
 
 /// Where each ratio is applied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pairing {
     /// To the control's own reference (any shape).
     Reference,
-    /// To drive `i`, paired with control `i` (square setups).
+    /// To drive `i`, paired with control `i` (square setups). On the research
+    /// testbed's coupled linear 4 by 4 it held 1 of 5 dwells and 0 of 5
+    /// stepped sines: the reference pairing is the one to use.
     Drive,
 }
 

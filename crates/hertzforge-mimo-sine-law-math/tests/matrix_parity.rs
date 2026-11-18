@@ -154,3 +154,71 @@ fn mimo_sine_parity_matrix_closed_loop_runs() {
         }
     }
 }
+
+#[test]
+fn mimo_sine_parity_matrix_amplitude_only_reference() {
+    use hertzforge_mimo_sine_law_math::matrix::FreePhase;
+    let data = load("matrix_parity.json");
+    let amp = load("amplitude_parity.json");
+    let case = &data["lin4x4"];
+    let st = structure(case);
+    let mut setup = st.setup(band(case), true);
+    setup.phase_specified = false;
+    for (key, sched, fp) in [
+        (
+            "dwell/in_phase",
+            Schedule::Dwell { f: 69.0, secs: 1.5 },
+            FreePhase::InPhase,
+        ),
+        (
+            "sweep/in_phase",
+            Schedule::Sweep {
+                f0: 60.0,
+                f1: 85.0,
+                oct_min: 1.0,
+            },
+            FreePhase::InPhase,
+        ),
+        (
+            "dwell/measured",
+            Schedule::Dwell { f: 69.0, secs: 1.5 },
+            FreePhase::Measured,
+        ),
+        (
+            "sweep/measured",
+            Schedule::Sweep {
+                f0: 60.0,
+                f1: 85.0,
+                oct_min: 1.0,
+            },
+            FreePhase::Measured,
+        ),
+    ] {
+        let run = &amp[key];
+        let p = MatrixParams {
+            free_phase: fp,
+            ..Default::default()
+        };
+        let mut law = MatrixLaw::with_model(&setup, p, testbed_model(case, &setup)).unwrap();
+        let rows = run_closed_loop(
+            &mut law,
+            &st,
+            &setup,
+            sched,
+            Played::AsAsked,
+            Dynamics::QuasiSteady,
+            MATRIX_VALUES.len(),
+            100_000,
+        )
+        .unwrap();
+        assert_eq!(rows.len() as u64, run["updates"].as_u64().unwrap(), "{key}");
+        let mut worst = 0.0f64;
+        for (j, i) in run["index"].as_array().unwrap().iter().enumerate() {
+            let row = &rows[i.as_u64().unwrap() as usize];
+            worst = worst.max(rel_err(&row.drive, &cplx(&run["D"][j])));
+            worst = worst.max(rel_err(&row.controls, &cplx(&run["C"][j])));
+        }
+        eprintln!("amplitude only {key}: worst relative difference {worst:.2e}");
+        assert!(worst < 1e-9, "{key}: {worst}");
+    }
+}

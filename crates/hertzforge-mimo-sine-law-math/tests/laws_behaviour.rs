@@ -3,7 +3,7 @@
 
 mod common;
 use common::*;
-use hertzforge_mimo_sine_law_math::matrix::{MatrixLaw, MatrixParams, MATRIX_VALUES};
+use hertzforge_mimo_sine_law_math::matrix::{FreePhase, MatrixLaw, MatrixParams, MATRIX_VALUES};
 use hertzforge_mimo_sine_law_math::modal::ModalForm;
 use hertzforge_mimo_sine_law_math::paired::{PairedLaw, PairedParams, PAIRED_VALUES};
 use hertzforge_mimo_sine_law_math::readings::{
@@ -14,17 +14,21 @@ use hertzforge_mimo_sine_law_math::reference_structure::{
 };
 use hertzforge_mimo_sine_law_math::C64;
 
-/// With an amplitude-only reference each control's phase is taken from its
+/// With an amplitude-only reference and `FreePhase::Measured` each control's phase is taken from its
 /// measurement: controls at the reference's amplitude with any phases ask for
 /// no correction at a dwell. With the phases specified the same reading is an
 /// error and moves the drive.
-fn step_norm(phase_specified: bool) -> f64 {
+fn step_norm(phase_specified: bool, free_phase: FreePhase) -> f64 {
     use hertzforge_mimo_sine_law_math::law::{Hold, Inputs, Outputs, SineLaw};
     let data = load("matrix_parity.json");
     let st = structure(&data["lin4x4"]);
     let mut setup = st.setup(band(&data["lin4x4"]), true);
     setup.phase_specified = phase_specified;
-    let mut law = MatrixLaw::new(&setup, MatrixParams::default()).unwrap();
+    let p = MatrixParams {
+        free_phase,
+        ..Default::default()
+    };
+    let mut law = MatrixLaw::new(&setup, p).unwrap();
     let r = vec![C64::new(1.0, 0.0); 4];
     let c: Vec<C64> = (0..4)
         .map(|i| C64::from_polar(1.0, 0.7 * i as f64))
@@ -58,10 +62,16 @@ fn step_norm(phase_specified: bool) -> f64 {
 
 #[test]
 fn mimo_sine_amplitude_only_reference_takes_phases_from_the_measurement() {
-    let (free, fixed) = (step_norm(false), step_norm(true));
-    eprintln!("controls on amplitude, phases spread: step {free:.2e} amplitude only, {fixed:.2e} phases fixed");
+    let free = step_norm(false, FreePhase::Measured);
+    let in_phase = step_norm(false, FreePhase::InPhase);
+    let fixed = step_norm(true, FreePhase::Measured);
+    eprintln!("controls on amplitude, phases spread: step {free:.2e} measured, {in_phase:.2e} in phase, {fixed:.2e} phases specified");
     assert!(free < 1e-12, "{free}");
-    assert!(fixed > 1e-3, "{fixed}");
+    assert!(in_phase > 1e-3, "{in_phase}");
+    assert!(
+        (in_phase - fixed).abs() < 1e-12,
+        "in phase is the specified reference of ones"
+    );
 }
 
 #[test]
