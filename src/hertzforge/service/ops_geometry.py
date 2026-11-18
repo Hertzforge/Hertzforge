@@ -29,7 +29,7 @@ from .descriptors import Operation, Option, Param, Workspace
 from .mesh import drawn_mesh
 from .ops_files import SAVED_KINDS
 from .ops_project import DATA_KINDS
-from .parsing import parse_id_runs
+from .parsing import each_picked, parse_id_runs
 from .protocol import refused
 
 ANY = 'objects:' + '|'.join(SAVED_KINDS)
@@ -1534,6 +1534,8 @@ def _shared(id_: str, title: str, summary: str, params: tuple, outputs: tuple, r
 
 DRAWN = ('shape3d', 'table')
 GROUPS = ('table',)
+#: the channels picked in the tree, which a form does not ask for (`parsing.each_picked`)
+PICKED = Param('picked', 'Channels picked in the tree', 'string', default='')
 
 OPERATIONS = (
     _model('project.view_entities', 'Edit',
@@ -1589,7 +1591,8 @@ OPERATIONS = (
     _shared('project.set_channel_role', 'Set Channel Role',
              'One channel made a reference, a response or a monitor, on a time history or '
              'channel table and on what is linked with it.',
-             (ROLE_SOURCE, RECORD, CHANNEL_ROLE), ('table',), set_channel_role),
+             (ROLE_SOURCE, RECORD, CHANNEL_ROLE, PICKED), ('table',),
+             each_picked(set_channel_role)),
     _shared('project.rename_dof', 'Rename DOF',
              'A channel\'s DOF corrected on an object and on everything derived from it; '
              'with a quantity, only that channel at the DOF.',
@@ -1601,8 +1604,8 @@ OPERATIONS = (
              workspace='geometry'),
     _shared('project.set_control', 'Set Control',
              'Control checked or cleared on one channel of one control loop.',
-             (TABLE, ENVIRONMENT, RECORD, CONTROL), ('table',), set_control,
-             workspace='geometry'),
+             (TABLE, ENVIRONMENT, RECORD, CONTROL, PICKED), ('table',),
+             each_picked(set_control, source='table'), workspace='geometry'),
     _shared('project.link', 'Link', 'Objects linked into one group, merging the groups '
              'they are in.', (FIRST, SECOND, MORE, LINK_NAME), GROUPS, link),
     _shared('project.unlink', 'Unlink', 'An object taken out of its group.',

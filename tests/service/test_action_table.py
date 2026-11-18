@@ -538,8 +538,8 @@ def test_sensors_says_a_table_names_no_sensor_model(rich):
 def test_apply_truncation_names_the_row_that_sets_a_span(rich):
     history = named(rich, 'time_history')
     found = _offered(rich, history, 'Apply Truncation', 'project.truncate_data')
-    assert not found['ready'] and 'Set Truncation' in found['reason']
-    assert 'Set Truncation' in _refusal(rich.project, found['id'], {'source': history})
+    assert not found['ready'] and 'Truncation sets one' in found['reason']
+    assert 'Truncation sets one' in _refusal(rich.project, found['id'], {'source': history})
     rich.project[history].truncation = (0.0, 0.01)
     assert _offered(rich, history, 'Apply Truncation', 'project.truncate_data')['ready']
 
@@ -664,7 +664,13 @@ def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
         assert rows[child]['under'] == 'project.set_averaging'
     assert rows['project.set_averaging'].get('open') is True
     assert 'under' not in rows['project.set_averaging']
-    assert rows['project.filter_data']['under'] == 'project.set_filter'
+    # a filter is one action, set and applied in its form; Integrate and Differentiate
+    # are under a row that is not an action
+    assert 'project.filter_data' not in rows and rows['project.set_filter']['verb'] == 'Filter'
+    assert 'under' not in rows['project.set_filter']
+    assert rows['group.calculus']['kind'] == 'group'
+    assert rows['project.integrate']['under'] == rows['project.differentiate']['under'] \
+        == 'group.calculus'
     assert rows['project.truncate_data']['under'] == 'project.set_truncation'
     # the object's own acts are under a row that is not an action
     assert rows[OBJECT_GROUP]['kind'] == 'group'
@@ -675,9 +681,9 @@ def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
     assert len(children) == len(set(children)) and not set(children) & set(NESTS)
     assert not set(children) & set(OBJECT_ROWS)
     # a row whose setting cannot run stays where it was
-    loose = nested([{'id': 'project.set_filter', 'verb': 'Set Filter', 'kind': 'run',
+    loose = nested([{'id': 'project.set_truncation', 'verb': 'Truncation', 'kind': 'run',
                      'ready': False, 'reason': 'no'},
-                    {'id': 'project.filter_data', 'verb': 'Apply Filter', 'kind': 'run',
+                    {'id': 'project.truncate_data', 'verb': 'Apply Truncation', 'kind': 'run',
                      'ready': True}])
     assert all('under' not in row for row in loose)
 
@@ -704,3 +710,47 @@ def test_the_projects_own_actions_are_grouped(validate):
                 assert by_id[op]['under'] == head
     assert {'group.index', 'group.reports', 'group.new'} <= set(by_id)
     assert 'group.object' not in by_id, 'nothing is selected'
+
+
+def test_an_action_runs_on_what_is_picked_in_the_tree_and_asks_for_no_channel(plate):
+    history = named(plate, 'time_history')
+    whole = {r['id']: r for r in table(plate, history)[0]['rows']}
+    picked = {r['id']: r for r in table(plate, history, records={history: [1, 2]})[0]['rows']}
+    # an action on one channel takes every channel picked, or every channel of the object
+    role = picked['project.set_channel_role']
+    assert role['fill']['picked'] == '2-3' and {'record', 'picked'} <= set(role['omit'])
+    assert whole['project.set_channel_role']['fill']['picked'] == 'all'
+    # a reading of one record reads the first one picked, and a list takes them all
+    assert picked['project.amplitude_spectrum']['fill']['record'] == '2'
+    assert 'record' in whole['project.amplitude_spectrum']['omit']
+    assert 'record' not in whole['project.amplitude_spectrum']['fill']
+    assert picked['project.rescale']['fill']['records'] == '2-3'
+    assert whole['project.rescale']['fill']['records'] == ''
+    assert 'records' in whole['project.rescale']['omit']
+    # no row of an object asks for its channels, records or rows by number
+    by_id = {op.id: op for op in OPERATIONS}
+    for row in whole.values():
+        op = by_id.get(row['id'])
+        if op is None or not row['ready']:
+            continue
+        asked = {p.name for p in op.params} - set(row.get('omit', ()))
+        assert not asked & {'records', 'channels', 'rows', 'record', 'drawn', 'picked'}, row['id']
+
+
+def test_a_channels_role_is_set_on_every_channel_picked(plate):
+    history = named(plate, 'time_history')
+    op = next(o for o in OPERATIONS if o.id == 'project.set_channel_role')
+    kinds = {name: projects.kind_of(obj) for name, obj in plate.project.items()}
+
+    def run(**given):
+        return op.run(plate.project, op.resolve({'source': history, **given}, objects=kinds))
+
+    run(role='monitor', picked='2-3')
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == roles[2] == 'monitor' and roles[0] != 'monitor'
+    # called with a channel and no picks, as a script calls it, it is the one channel
+    run(role='response', record=2)
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == 'response' and roles[2] == 'monitor'
+    with pytest.raises(ProtocolError, match='outside'):
+        run(role='monitor', picked='999')

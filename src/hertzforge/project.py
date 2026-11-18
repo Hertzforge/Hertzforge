@@ -3565,7 +3565,7 @@ class Project(dict):
         source = self.name_of(source)
         history = self[source]
         if history.truncation is None:
-            raise ValueError('no span set: Set Truncation sets one')
+            raise ValueError('no span set: Truncation sets one')
         return self._derive(source, history.truncate(),
                             f'{source} Truncated',
                             recipe=('truncate_data', {}))
