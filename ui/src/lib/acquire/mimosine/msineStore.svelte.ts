@@ -798,11 +798,13 @@ export class MimoSineStore {
 	}
 
 	async reset(): Promise<boolean> {
+		// The new run holds the same configuration: the draft is still the service's only if it was before.
+		const held = this.setupStatus === 'applied' ? this.held : null;
 		const res = await this.act<MimoSineState>('New Run', 'mimo_sine.reset');
 		if (!res) return false;
 		this.onStatus(res);
 		this.live = null;
-		if (this.held && this.setupStatus !== 'changed') this.setHeld({ runId: res.run_id, key: this.key });
+		if (held) this.setHeld({ runId: res.run_id, key: held.key });
 		return true;
 	}
 
