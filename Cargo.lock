@@ -1331,6 +1331,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-mimo-sine"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-dsp",
+ "hertzforge-sdm",
+ "hertzforge-sine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hertzforge-mimo-sine-laws"
+version = "0.1.14"
+dependencies = [
+ "hertzforge-mimo-sine",
+ "hertzforge-random-laws",
+]
+
+[[package]]
 name = "hertzforge-mixed"
 version = "0.1.14"
 dependencies = [

@@ -1,0 +1,25 @@
+[package]
+name = "hertzforge-mimo-sine"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# MIMO Sine: sweeps, dwells and stepped sines at several control channels with
+# several drives, one tone at a time, closed every control update. This crate
+# holds the contracts the run engine and the laws are written against: the
+# run's setup, the per-update law inputs and outputs, the law traits, their
+# validation and size limits, and the run engine's public surface. It names no
+# backend.
+[dependencies]
+# The tracking filter's bandwidth rule.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The complex values and matrix stacks the identification travels in, and the
+# control-to-drive shape.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+# Single-shaker Sine's schedulers (sweep, dwell, step, level ladder), its
+# profile grammar and its law seam's value buffer and descriptor. The control
+# core alone, without the run service.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
