@@ -1221,8 +1221,8 @@ def _srs_bands(project: Any, added: list[str]) -> list[dict]:
 def _work_up(test: str) -> Any:
     def run(project: Any, params: dict[str, Any]) -> list[dict]:
         """Auto Compute in one module, which says the kind of test: the objects
-        that fill its Basis placed there, then every missing object it
-        expects computed from what is loaded, the report last
+        that fill its Basis placed there, anything out of date recomputed,
+        then every missing object it expects computed from what is loaded, the report last
         (`Project.work_up`), and what is still missing after it."""
         if not project.names:
             raise refused('Nothing is loaded to compute from')
@@ -1231,8 +1231,10 @@ def _work_up(test: str) -> Any:
             added = project.work_up(test)
         except ValueError as error:
             raise refused(str(error)) from None
-        rows = ([v.row('Added', name, None, 'pass') for name in added]
-                or [v.row('Added', 'nothing to compute', None, 'info')])
+        rows = [v.row('Recomputed', name, None, 'pass')
+                for name in project.last_work_up_refreshed]
+        rows += ([v.row('Added', name, None, 'pass') for name in added]
+                 or [v.row('Added', 'nothing to compute', None, 'info')])
         if moved:
             rows.append(v.row('Placed in the Basis', ', '.join(moved), None, 'info'))
         rows += _srs_bands(project, added)

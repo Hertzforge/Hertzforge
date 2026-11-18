@@ -588,6 +588,7 @@ class Project(dict):
             for group in (object_groups or [])]
         #: what the last Work Up could not compute, (slot, why)
         self.last_work_up_skipped: list[tuple[str, str]] = []
+        self.last_work_up_refreshed: list[str] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -8480,7 +8481,10 @@ class Project(dict):
         computation the data refuses (no drive channel for a coherence)
         is skipped, with its reason in `last_work_up_skipped`, and the
         rest still run. Nothing already present is made again, so calling
-        this twice adds nothing the second time.
+        this twice adds nothing the second time; but an object already
+        present that is out of date (its source's settings or values
+        changed since it was made, `stale`) is recomputed first, and its
+        name is in `last_work_up_refreshed`.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -8520,6 +8524,11 @@ class Project(dict):
                              'to work up: name the kind of test')
         added: list[str] = []
         self.last_work_up_skipped = []
+        # what is already here is brought up to date first: PSDs made
+        # before the averaging or the scale was changed were left as they
+        # were, and the report read them while it named the new frames
+        # (Brandon, 2026-11-18)
+        self.last_work_up_refreshed = self.refresh_stale()
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)

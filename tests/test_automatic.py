@@ -233,3 +233,22 @@ def test_a_start_chosen_by_hand_is_kept():
     history.averaging = chosen
     project.work_up('Random Vibration')
     assert history.averaging == chosen
+
+
+def test_psds_made_before_the_averaging_changed_are_recomputed():
+    """Auto Compute brings what is already here up to date: PSDs computed
+    on the old frames were read by the report while it named the new
+    ones (Brandon, 2026-11-18)."""
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    psds = project.compute_psds('Time History')
+    before = project[psds].ordinate.copy()
+    history = project['Time History']
+    history.averaging = replace(history.averaging, start=10.0, frames=8, start_set=True)
+    assert psds in project.stale()
+    project.work_up('Random Vibration')
+    assert psds in project.last_work_up_refreshed
+    assert not project.stale()
+    assert not np.allclose(project[psds].ordinate, before)
