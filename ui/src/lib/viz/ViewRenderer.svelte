@@ -37,6 +37,8 @@
 		scope?: string;
 		/** A Lin/Log choice on a flat plot's frequency axis, kept for the `scope`. */
 		scaleToggle?: boolean;
+		/** What a flat plot shows, as its choice of scales is kept: the kinds of the objects selected. */
+		scaleOf?: string;
 		/** A draggable region released at new edges. */
 		onspan?: (region: number, x0: number, x1: number) => void;
 		/** Regions drawn on a spectrum or a stage in place of the view's own. */
@@ -59,7 +61,7 @@
 		ongizmo?: (act: { op: string; params: Record<string, unknown> }, patch: Record<string, unknown>) => void;
 	}
 
-	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, onedit, onnested, onremove, onrows, onrowpick, onspan, regions = null, onpick, onhandle, ongizmo }: Props = $props();
+	let { view, live = false, layout = 'list', showTitle = true, minHeight = 180, mode = $bindable(0), onparams, selected = null, picks = [], onselect, bars = false, overlay = undefined, scope, scaleToggle = false, scaleOf, onedit, onnested, onremove, onrows, onrowpick, onspan, regions = null, onpick, onhandle, ongizmo }: Props = $props();
 
 	// three.js is most of the bundle; load it only when a shape view first appears.
 	const shape3d = () => import('./Shape3DPane.svelte');
@@ -68,7 +70,7 @@
 </script>
 
 {#if view.view === 'spectrum'}
-	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {scaleToggle} {onspan} {onhandle} {regions} />
+	<SpectrumPane {view} {live} {showTitle} {minHeight} {scope} {scaleToggle} {scaleOf} {onspan} {onhandle} {regions} />
 {:else if view.view === 'reading'}
 	<ReadingPane {view} {layout} {showTitle} />
 {:else if view.view === 'shape3d'}
@@ -86,7 +88,7 @@
 		<div class="loading">Loading the 3-D view.</div>
 	{:then { default: WaterfallPane }}
 		{#key view}
-			<WaterfallPane {view} {onparams} {onspan} {scope} {regions} />
+			<WaterfallPane {view} {onparams} {onspan} {scope} {scaleOf} {regions} />
 		{/key}
 	{:catch err}
 		<p class="unknown">The 3-D view failed to load: {err.message}</p>

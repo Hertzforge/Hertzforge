@@ -704,6 +704,8 @@ export interface Shown {
 	/** Which of the bar's choices this selection takes. */
 	offers?: {
 		flat: boolean;
+		/** An object with warning and abort limits, which the 2-D plot draws or leaves off (`prefs.limits`). */
+		limits: boolean;
 		complex: boolean;
 		projection: boolean;
 		/** A lone shape set: its four views, one at a time, and where its values are read. */
@@ -733,6 +735,8 @@ export interface ShowPrefs {
 	line?: number | null;
 	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
 	projection: boolean;
+	/** The warning and abort limits of a specification, drawn on its 2-D plot. */
+	limits: boolean;
 	/** Two shape sets on two geometries: how far a test node may be from its model node, in percent of the test geometry's extent. */
 	match_tolerance: number;
 	/** Where and in what form a lone shape set's values are read. */

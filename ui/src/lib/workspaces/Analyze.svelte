@@ -36,6 +36,11 @@
 	let { app, only, replacing }: Props = $props();
 
 	const a = $derived(app.analyze);
+	/** What the selection plots, as a plot's choice of scales is kept: the kinds of its objects. */
+	const scaleOf = $derived.by(() => {
+		const kinds = new Map((app.project.summary?.objects ?? []).map((o) => [o.name, o.kind]));
+		return [...new Set(app.project.selection.objects.map((name) => kinds.get(name) ?? 'object'))].sort().join('+');
+	});
 
 	// the action column's width, dragged by its edge and remembered; put away, it waits in the frame's header
 	const TABLE_KEY = 'hertzforge.actionTable';
@@ -161,6 +166,9 @@
 									<button role="radio" aria-checked={!a.prefs.flat} class:on={!a.prefs.flat} data-testid="read-3d" title="The 3-D stage, every record at its own depth" onclick={() => a.prefs.flat && a.setPref('flat', false)}>3D</button>
 									<button role="radio" aria-checked={a.prefs.flat} class:on={a.prefs.flat} data-testid="read-flat" title="The 2-D plot, every record as a curve" onclick={() => !a.prefs.flat && a.setPref('flat', true)}>2D</button>
 								</div>
+							{/if}
+							{#if offers.limits && a.prefs.flat}
+								<button class="btn ghost sm" class:on={a.prefs.limits} aria-pressed={a.prefs.limits} data-testid="read-limits" title="Draw the specification's warning and abort limits on the plot" onclick={() => a.setPref('limits', !a.prefs.limits)}>Limits</button>
 							{/if}
 							{#if offers.complex}
 								<select class="field sm" aria-label="Component" data-testid="read-component" value={a.prefs.component} onchange={(e) => a.setPref('component', (e.currentTarget as HTMLSelectElement).value as typeof a.prefs.component)}>
@@ -288,6 +296,7 @@
 										minHeight={240}
 										scope="selection"
 										scaleToggle
+										scaleOf={scaleOf}
 										selected={v.view === 'matrix' && v.selects ? a.pair : null}
 										picks={v.view === 'matrix' && v.selects ? a.picks : []}
 										onselect={v.view === 'matrix' && v.selects ? (cell, extend) => a.pickCell(cell, extend) : undefined}
