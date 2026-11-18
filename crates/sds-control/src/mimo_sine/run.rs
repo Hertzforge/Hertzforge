@@ -1490,7 +1490,7 @@ impl Actor {
                 a.0 = margin;
                 a.1 = r.frequency_hz;
             }
-            if r.notch_scale < 1.0 {
+            if notch_in(r) {
                 a.2 += 1;
             }
         }
@@ -1614,7 +1614,7 @@ impl Actor {
             .get("test_s")
             .and_then(Value::as_f64)
             .map(|t| (t - r.time_s).max(0.0));
-        self.view.notch = r.notch_scale < 1.0;
+        self.view.notch = notch_in(r);
         self.view.notch_scale = r.notch_scale;
         self.view.alarm = self.in_alarm.iter().any(|a| *a);
         self.view.held = self.operator_hold;
@@ -2347,6 +2347,13 @@ pub fn configured_view(
         report: None,
         time: None,
     }
+}
+
+/// Whether the backstop notch is in on this update: the limit channels hold
+/// the reference down (its depth under 1, which a law aims for) or cut the
+/// drive vector (its scale under 1).
+fn notch_in(r: &TickRecord) -> bool {
+    r.notch_depth < 1.0 || r.notch_scale < 1.0
 }
 
 #[cfg(test)]

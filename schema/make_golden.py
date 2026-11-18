@@ -5964,7 +5964,8 @@ MSINE_CONFIG = {
     'limits': {'kinematic_monitor': True,
                'channels': [{'channel': c, 'profile': _msine_profile(3, 1.5, 3, 'Article bound')}
                             for c in MSINE_LIMITS],
-               'notch': {'smoothing_ticks': 3, 'release_ramp_db_per_s': 20, 'near_bound_db': 3}},
+               'notch': {'smoothing_ticks': 3, 'release_ramp_db_per_s': 10,
+                         'release_hysteresis_db': 1, 'near_bound_db': 3}},
     'feasibility': None,
     'simulator': {'structure': 'sine-base-article-6x4'},
     'operator': 'A. Operator', 'article': 'Bracket, serial 7', 'notes': '',

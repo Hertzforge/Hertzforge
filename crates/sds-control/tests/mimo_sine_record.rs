@@ -244,3 +244,56 @@ async fn mimo_sine_a_record_that_cannot_be_written_refuses_the_arm() {
     let s = c.ok("mimo_sine.state", json!({})).await;
     assert_eq!(s["state"], "configured");
 }
+
+/// While the backstop notch is in, the limit channels hold the reference down
+/// (its depth) and a law aims under it, so the drive vector is often not cut
+/// at all on that update: the time a limit channel is reported notched counts
+/// every update the notch is in, by its depth as well as by its cut.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mimo_sine_the_report_counts_the_notch_by_its_depth() {
+    let svc = Service::with_options(msine::opts(Duration::from_secs(600)));
+    let mut c = Client::connect(serve(svc).await).await;
+    controller(&mut c, 4, 2, 4).await;
+    let end = msine::run_to_end(&mut c, base_article_config()).await;
+    let folder = msine::folder(&end);
+    msine::complete(&folder).await;
+    let report = read_json(&folder.join("end.json"));
+    let report = if report.get("report").is_some() {
+        &report["report"]
+    } else {
+        &report
+    };
+    let deepest = report["controls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["notch_depth_max_db"].as_f64().unwrap())
+        .fold(0.0, f64::max);
+    assert!(deepest > 0.1, "the notch never went in: {report}");
+    // The time the notch was in, from the run's timeline: each `notch_in` to
+    // its `notch_out`, the last to the end of the test.
+    let log = std::fs::read_to_string(folder.join("log.jsonl")).unwrap();
+    let mut since: Option<f64> = None;
+    let mut held_s = 0.0;
+    for l in log.lines() {
+        let e: Value = serde_json::from_str(l).unwrap();
+        let t = e["data"]["t_s"].as_f64();
+        match (e["data"]["event"].as_str(), t) {
+            (Some("notch_in"), Some(t)) => since = Some(t),
+            (Some("notch_out"), Some(t)) => held_s += t - since.take().unwrap_or(t),
+            _ => {}
+        }
+    }
+    if let Some(t) = since {
+        held_s += end["end"]["at_s"].as_f64().unwrap() - t;
+    }
+    assert!(held_s > 0.5, "the notch was in only {held_s} s: {report}");
+    for l in report["limits"].as_array().unwrap() {
+        assert!(
+            l["notched_s"].as_f64().unwrap() >= 0.9 * held_s,
+            "the notch was in for {held_s} s ({deepest} dB deep), but limit channel {} reports {} s notched",
+            l["channel"],
+            l["notched_s"]
+        );
+    }
+}

@@ -456,7 +456,8 @@ pub fn parse(config: &Value) -> Result<WireMsine, MethodError> {
                     .map_or(nd.smoothing_ticks, |x| u32::try_from(x).unwrap_or(u32::MAX)),
                 release_ramp_db_per_s: n
                     .f64_or("release_ramp_db_per_s", nd.release_ramp_db_per_s)?,
-                release_hysteresis_db: nd.release_hysteresis_db,
+                release_hysteresis_db: n
+                    .f64_or("release_hysteresis_db", nd.release_hysteresis_db)?,
                 near_bound_db: n.f64_or("near_bound_db", nd.near_bound_db)?,
             };
         }
@@ -1577,6 +1578,12 @@ impl WireMsine {
             "limits.notch.release_ramp_db_per_s",
             n.release_ramp_db_per_s.is_finite() && n.release_ramp_db_per_s > 0.0,
             "The notch's release ramp is above 0 dB a second.".into(),
+        );
+        out_of_range(
+            r,
+            "limits.notch.release_hysteresis_db",
+            inside(n.release_hysteresis_db, 0.0, 6.0),
+            "The notch's release hysteresis runs from 0 to 6 dB.".into(),
         );
         out_of_range(
             r,

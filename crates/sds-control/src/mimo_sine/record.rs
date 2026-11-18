@@ -105,6 +105,7 @@ fn setup_json(f: &ArmFacts<'_>) -> Value {
                 "divergence_s": num(g.divergence_s),
                 "notch": {"smoothing_ticks": g.notch.smoothing_ticks,
                           "release_ramp_db_per_s": num(g.notch.release_ramp_db_per_s),
+                          "release_hysteresis_db": num(g.notch.release_hysteresis_db),
                           "near_bound_db": num(g.notch.near_bound_db)},
                 "shaker_ratings": f.ratings.iter().map(|r| json!({
                     "control": s.controls.get(r.control).map(|c| c.channel),
