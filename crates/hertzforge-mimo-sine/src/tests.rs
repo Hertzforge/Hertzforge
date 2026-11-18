@@ -512,3 +512,19 @@ fn mimo_sine_a_native_law_runs_through_the_traits_and_the_engine_is_not_built() 
         _ => panic!("a law that does not accept the shape was not refused"),
     }
 }
+
+#[test]
+fn mimo_sine_the_hold_names_include_the_engage_settle_window() {
+    let names: Vec<_> = [
+        Hold::Free,
+        Hold::Notch,
+        Hold::Held,
+        Hold::Probe,
+        Hold::Engage,
+    ]
+    .iter()
+    .map(|h| h.as_str())
+    .collect();
+    assert_eq!(names, ["free", "notch", "held", "probe", "engage"]);
+    assert_eq!(serde_json::to_value(Hold::Engage).unwrap(), "engage");
+}

@@ -202,6 +202,10 @@ interface mimo-sine-types {
         /// The core plays a fixed drive to measure the structure. The law's
         /// output is not used; it is still called so its state keeps up.
         probe,
+        /// The settle window after engage: the tracking filters are still
+        /// rising, so a correction would act on readings that have not
+        /// settled.
+        engage,
     }
 
     /// Everything a MIMO Sine law sees on one update.

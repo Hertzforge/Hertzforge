@@ -29,6 +29,9 @@ pub enum Hold {
     /// The core plays a fixed drive to measure the structure; the law's output
     /// is not used.
     Probe,
+    /// The settle window after engage: the tracking filters are still rising,
+    /// so a correction would act on readings that have not settled.
+    Engage,
 }
 
 impl Hold {
@@ -39,6 +42,7 @@ impl Hold {
             Hold::Notch => "notch",
             Hold::Held => "held",
             Hold::Probe => "probe",
+            Hold::Engage => "engage",
         }
     }
 }
