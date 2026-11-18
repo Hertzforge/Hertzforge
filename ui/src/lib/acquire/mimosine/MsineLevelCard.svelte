@@ -52,7 +52,7 @@
 	<dl class="head">
 		<div><dt>Frequency</dt><dd class="num big" data-testid="msine-frequency">{hz(live?.frequency_hz ?? status?.frequency_hz)}</dd></div>
 		<div><dt>Level</dt><dd class="num">{db(live?.level_db ?? status?.level_db ?? null)}</dd></div>
-		{#if (live?.direction ?? status?.direction) && rate}<div><dt>Sweep</dt><dd class="num">{live?.direction ?? status?.direction}, {rate}</dd></div>{/if}
+		{#if (live?.direction ?? status?.direction) && rate && !end}<div><dt>Sweep</dt><dd class="num">{live?.direction ?? status?.direction}, {rate}</dd></div>{/if}
 		{#if progress}<div><dt>Progress</dt><dd class="num">{progress}</dd></div>{/if}
 		<div><dt>Notch</dt><dd class="num" class:warn={scale < 1} data-testid="msine-notch">{scale < 1 ? `Scaled to ${n(scale, 3)} (${n(-20 * Math.log10(scale), 3)} dB)` : 'None'}</dd></div>
 		{#if holdWords}<div><dt>Hold</dt><dd data-testid="msine-hold">{holdWords}</dd></div>{/if}

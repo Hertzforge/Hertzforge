@@ -251,8 +251,12 @@ try {
 	await shot(a, 'references');
 	await section(a, 'test');
 	check('the test is a sweep', await tid(a, 'msine-kind-sweep').isChecked());
+	const ratePlaceholder = (await a.locator('#msine-fs').getAttribute('placeholder')) ?? '';
+	check("the station rate's default does not repeat the unit beside it", !/Hz$/.test(ratePlaceholder), ratePlaceholder);
 	await shot(a, 'test');
 	await section(a, 'schedule');
+	const rungWords = await Promise.all(['per_level', 'full_level'].map(async (k) => ((await a.locator(`label[for="msine-${k}-n"]`).first().textContent()) ?? '').trim()));
+	check('the two hold fields say which level they hold', rungWords[0] !== rungWords[1], rungWords.join(' | '));
 	await shot(a, 'schedule');
 	await section(a, 'limits');
 	await tid(a, 'msine-limit-pick').selectOption('9');
@@ -305,6 +309,7 @@ try {
 	await pageTo(a, 'Controls');
 	await until(a, 'the run finished', async (p) => (await runState(p)) === 'finished', 120_000);
 	check('the sweep completes', /Completed/.test(await text(a, 'msine-end')));
+	check('a finished run shows no sweep rate', !/oct\/min/.test(await text(a, 'msine-level-card')), await text(a, 'msine-level-card'));
 	await shot(a, 'finished');
 
 	// ---- 7. a dwell, aborted ---------------------------------------------------------------------------

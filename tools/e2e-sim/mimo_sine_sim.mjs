@@ -18,7 +18,8 @@
 //    a quick identification. Control: the laws that cannot run a sweep are listed apart, with
 //    why. The run's record: operator and article.
 // 2. Start identifies; the review hold shows the sweep-rate warning for the 40 Hz resonance;
-//    Proceed with words for the log. The frequency readout moves and the run completes.
+//    Proceed with words for the log. The frequency readout moves, every control's trace on the
+//    Controls page, and the run completes.
 // 3. The run folder holds the operator's words and is complete; Open in Analysis opens the
 //    project with the objects docs/run-folder.md says a MIMO Sine run saves.
 //
@@ -113,9 +114,18 @@ const hzNow = async (page) => Number((await attr(page, 'msine-run-view', 'data-h
 async function shot(page, name) {
 	const file = path.join(SHOTS, `mimo_sine_sim_${name}.png`);
 	await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+	// A note stays until it is dismissed; it would cover the plots in the picture.
+	const note = page.locator('[data-testid="note"] button[aria-label="Dismiss"]');
+	if (await note.count()) await note.first().click().catch(() => {});
 	await page.waitForTimeout(300);
 	await page.screenshot({ path: file });
 	console.log(`      screenshot ${file}`);
+}
+
+/** The run view's page, by its tab's name. */
+async function pageTo(page, name) {
+	await page.locator('[data-testid="page-tabs"]').getByRole('tab', { name, exact: true }).click();
+	await until(page, `the ${name} page`, async (p) => (await p.locator('[data-testid="page-tabs"] [role="tab"][aria-selected="true"]').first().innerText()).trim() === name);
 }
 
 async function fill(page, selector, value) {
@@ -225,6 +235,7 @@ try {
 	await until(a, 'the law list', async (p) => tid(p, 'law-list').isVisible());
 	const why = await text(a, 'msine-refused-secant');
 	check('a law that cannot run a sweep is listed apart, with why', /secant/.test(why) && /sweep/i.test(why), why);
+	await shot(a, 'law');
 	await section(a, 'channels');
 	await fill(a, '#msine-operator', RECORD.operator);
 	await fill(a, '#msine-article', RECORD.article);
@@ -246,6 +257,9 @@ try {
 	await until(a, 'the frequency moving', async (p) => (await hzNow(p)) !== f0, 30_000);
 	check('the frequency readout moves', true);
 	await shot(a, 'running');
+	await pageTo(a, 'Controls');
+	await until(a, 'the sweep past 45 Hz', async (p) => (await hzNow(p)) > 45 || (await runState(p)) === 'finished', 60_000);
+	await shot(a, 'running_controls');
 	await until(a, 'the run finished', async (p) => (await runState(p)) === 'finished', 300_000);
 	const end = await text(a, 'msine-end');
 	check('the sweep completes', /Completed|complete/.test(end), end);

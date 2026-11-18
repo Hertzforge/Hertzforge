@@ -68,7 +68,7 @@
 							<option value="seconds">Seconds</option>
 						</select>
 					</div>
-					<NumberField id="msine-{r.key}-n" label={rung.by === 'sweeps' ? 'Sweeps' : 'Seconds'} integer={rung.by === 'sweeps'} step={1} min={0} bind:value={rung.n} errors={errs(`schedule.${r.key}`)} disabled={locked} />
+					<NumberField id="msine-{r.key}-n" label="{rung.by === 'sweeps' ? 'Sweeps' : 'Seconds'} {r.key === 'per_level' ? 'at each level' : 'at full level'}" integer={rung.by === 'sweeps'} step={1} min={0} bind:value={rung.n} errors={errs(`schedule.${r.key}`)} disabled={locked} />
 				{/each}
 			{/if}
 		</div>
