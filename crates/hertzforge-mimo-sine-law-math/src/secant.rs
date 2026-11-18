@@ -16,6 +16,15 @@
 //! source: `Factor` (default) keeps `Z(f) = M Z0(f)` with the updates acting on
 //! the drive-side factor `M`; `Plain` carries `Z` unchanged from engage. The
 //! law has no gain: its pace is the settle wait.
+//!
+//! A level change: the controller scales the drive in force by the level's
+//! ratio and tells the law the new level. The readings and drives the cycle
+//! holds (the base reading, its drive and error, and the last control step's)
+//! are scaled by the same ratio, so the probe, its gain and the secant pair are
+//! read against the drive as it is now; the model `Z` is unchanged, since a
+//! linear structure's response over drive does not move with level. The
+//! present settle wait is restarted, so the next reading is taken settled at
+//! the new level.
 
 use crate::law::{worst_error_db, Inputs, Outputs, SineLaw};
 use crate::linalg::{mat_vec, norm, reg_pinv};
@@ -108,6 +117,8 @@ pub struct SecantLaw {
     /// (C, D, E) at the base reading.
     base: (Vec<C64>, Vec<C64>, Vec<C64>),
     zk: Vec<C64>,
+    /// The level the held readings and drives were taken at.
+    level: f64,
 }
 
 impl SecantLaw {
@@ -133,6 +144,7 @@ impl SecantLaw {
             prev: None,
             base: (Vec::new(), Vec::new(), Vec::new()),
             zk: Vec::new(),
+            level: 1.0,
         })
     }
 
@@ -194,6 +206,25 @@ impl SecantLaw {
         ]);
     }
 
+    /// Carry the held readings and drives to the level `x.level` (see the
+    /// module's documentation).
+    fn follow_level(&mut self, x: &Inputs) {
+        if !(x.level > 0.0 && self.level > 0.0) || x.level == self.level {
+            return;
+        }
+        let r = x.level / self.level;
+        self.level = x.level;
+        let scale = |v: &mut Vec<C64>| v.iter_mut().for_each(|a| *a *= r);
+        scale(&mut self.base.0);
+        scale(&mut self.base.1);
+        scale(&mut self.base.2);
+        if let Some((c0, d0, _)) = self.prev.as_mut() {
+            scale(c0);
+            scale(d0);
+        }
+        self.wait = self.wait.max(self.settle_n(x.f_hz));
+    }
+
     /// The minimum-change update of the inverse model.
     fn secant(&mut self, s: &[C64], y: &[C64], zk: &[C64]) {
         let (n, m) = (self.setup.controls, self.setup.drives);
@@ -231,6 +262,7 @@ impl SineLaw for SecantLaw {
         let z0 = self.z0(x.f_hz)?;
         self.plain = z0.clone();
         self.prev = None;
+        self.level = x.level;
         self.phase = Phase::AwaitBase;
         self.wait = self.settle_n(x.f_hz);
         let mut d = vec![ZERO; m];
@@ -241,6 +273,7 @@ impl SineLaw for SecantLaw {
 
     fn tick(&mut self, x: &Inputs, out: &mut Outputs) -> Result<(), String> {
         let (n, m) = (self.setup.controls, self.setup.drives);
+        self.follow_level(x);
         if self.wait > 0 {
             self.wait -= 1;
             self.emit(x.drive_in_force, x, out);

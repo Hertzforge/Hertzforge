@@ -255,7 +255,11 @@ pub struct MimoSineCore {
     index: u64,
     engaged: bool,
     engage_settle: bool,
+    /// The level the reference, the judgement and the drive are at now, dB:
+    /// it follows the scheduled level at the change caps' pace.
     level_db: f64,
+    /// The scheduled level, dB.
+    level_target_db: f64,
     request: Option<Request>,
     outside_abort: [u32; MAX_CONTROLS],
     in_alarm: [bool; MAX_CONTROLS],
@@ -276,6 +280,7 @@ pub struct MimoSineCore {
     proposed: Vec<C64>,
     predicted: Vec<C64>,
     next: Vec<C64>,
+    played: Vec<C64>,
     law_notch: Vec<f64>,
     record: TickRecord,
     worst_played: f64,
@@ -345,6 +350,7 @@ impl MimoSineCore {
             engaged: false,
             engage_settle: true,
             level_db,
+            level_target_db: level_db,
             request: None,
             outside_abort: [0; MAX_CONTROLS],
             in_alarm: [false; MAX_CONTROLS],
@@ -364,6 +370,7 @@ impl MimoSineCore {
             proposed: vec![ZERO; m],
             predicted: vec![ZERO; p],
             next: vec![ZERO; m],
+            played: vec![ZERO; m],
             law_notch: vec![1.0; n],
             record: TickRecord::empty(n, m, p),
             worst_played: 0.0,
@@ -427,13 +434,43 @@ impl MimoSineCore {
     }
 
     fn event(&self, kind: EventKind) {
+        self.event_at(kind, self.level_db);
+    }
+
+    fn event_at(&self, kind: EventKind, level_db: f64) {
         self.records.event(Event {
             time_s: self.index as f64 * self.tick_s,
             index: self.index,
             frequency_hz: self.osc.frequency(),
-            level_db: self.level_db,
+            level_db,
             kind,
         });
+    }
+
+    /// The level carry: while the level in force is not the scheduled one,
+    /// move it toward the schedule by at most the change caps allow in one
+    /// update (the rise cap on the way up) and scale the drive in force by
+    /// the same ratio, so the drive follows the level and keeps what the
+    /// loop has learned (exactly right on a linear structure). The settle
+    /// window opens with every move.
+    fn carry_level(&mut self, f: f64, dt: f64) {
+        if self.level_db == self.level_target_db {
+            return;
+        }
+        let g = &self.setup.guards;
+        let up = g.max_step_db.min(g.max_rise_db_per_s * dt);
+        let down = g.max_step_db;
+        let want = self.level_target_db - self.level_db;
+        let step = want.clamp(-down, up);
+        let before = self.level();
+        self.level_db = if step == want {
+            self.level_target_db
+        } else {
+            self.level_db + step
+        };
+        let ratio = self.level() / before;
+        guards::scale(&mut self.in_force, ratio);
+        self.sched.settle_for(self.settle_s(f));
     }
 
     fn level(&self) -> f64 {
@@ -919,6 +956,10 @@ impl MimoSineCore {
         let dt = self.tick_s;
         let f = self.osc.frequency();
         self.read_trackers();
+        // The drive as played this interval, before any carry: what the caps
+        // measure the next drive's change against.
+        self.played.copy_from_slice(&self.in_force);
+        self.carry_level(f, dt);
         // The reference here, and the bounds.
         let lv = self.level();
         reference_at(&self.setup, f, &mut self.reference);
@@ -969,10 +1010,12 @@ impl MimoSineCore {
             self.event(EventKind::Held { by_law: true });
         }
         if st.level_changed {
-            // The response takes the structure's own time to follow a new
-            // level: the controls are not judged until it has.
-            self.level_db = st.level_db;
-            self.event(EventKind::Level);
+            // The level in force follows from the next update on, carrying
+            // the drive with it (`carry_level`); the response takes the
+            // structure's own time to follow, so the controls are not judged
+            // until it has.
+            self.level_target_db = st.level_db;
+            self.event_at(EventKind::Level, st.level_db);
             self.sched.settle_for(self.settle_s(st.frequency_hz));
         }
         if st.jumped && !st.done {
@@ -1069,8 +1112,9 @@ impl MimoSineCore {
             } else {
                 self.law_notch.fill(1.0);
             }
-            // The caps per drive.
-            let caps = guards::cap_drives(&self.in_force, &mut d, &self.setup.guards, dt);
+            // The caps per drive, against the drive as played (a level carry
+            // counts toward them).
+            let caps = guards::cap_drives(&self.played, &mut d, &self.setup.guards, dt);
             cap_bound = caps.magnitude_bound || caps.rotation_bound;
             self.record.cap_bound = caps.magnitude_bound;
             self.record.rotation_bound = caps.rotation_bound;

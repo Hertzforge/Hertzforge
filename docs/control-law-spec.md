@@ -780,7 +780,11 @@ asked for recorded; a divergence stop when a cap binds without a break for a sec
 the first drive; the whole drive vector scaled down, its direction kept, for the limit channels and
 for a drive over its ceiling; the alarm and abort bands per control outside settle windows; the
 limit aborts; and the kinematic and shaker checks per shaker. The law is told the drive in force
-every update and must rebase on it.
+every update and must rebase on it. When the level moves, the controller carries the drive: the
+level the law is told follows the scheduled level at no more per update than the change and rise
+caps allow, and the drive in force is scaled by the same ratio before the law is called, so the
+law is told the scaled drive. A law that keeps readings or drives of its own scales them by the
+ratio of the level it is told.
 
 **The built-in laws.** `matrix` (the default), `paired` (the contributor's template),
 `steepest_descent`, `secant` and `ratio`. Each runs natively and as a law file

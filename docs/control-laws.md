@@ -994,6 +994,13 @@ Every one of these holds whatever the law returns:
 - the whole drive vector is scaled down, its direction kept, when a limit channel nears its bound
   or a drive is over its ceiling;
 - the first drive is bounded near what the identification predicts;
+- when the level moves (the ladder, or the operator's level step), the controller carries the drive
+  with it: the drive in force is scaled by the level's ratio, at no more per update than the change
+  and rise caps allow, and the law is told the scaled drive as the drive in force and the level it
+  is at, which follows the scheduled level at the same pace. On a linear structure that is exactly
+  the drive the new level needs, so a law keeps what it has learned; a law that keeps readings or
+  drives of its own scales them with the level (`secant` does). The controls are not judged until
+  the settle window after the last move closes;
 - a cap that binds without a break for a second ends the run in the controlled stop;
 - a late, failed, crashed or refused call is a miss; three in a row end the run; a law file that
   traps, runs past its budget or asks for too much memory stays stopped for the rest of the run.
@@ -1042,13 +1049,11 @@ can be seen, and never fail a law.
 
 The requirements are what a good law should do, written before any law was run against them, and
 several carry the single-output Sine check's numbers. Each built-in law runs the check natively and
-as a law file with the same verdicts. `ratio` passes every case it runs. `matrix` fails two: the
-level ladder (1.16 dB on the first judged update after the step to -12 dB, against 1.0) and the
-limit channel (the article 0.66 dB over its bound against 0.5, and a control 3.5 dB over its
-reference in the second after the notch releases); its hardening sweep is 2.3 dB. `paired` fails
-measurement noise, the stepped sine and the level ladder: it starts about 5 dB from the reference
-and is still there when the settle window closes. `steepest_descent` and `secant` fail the level
-ladder: their drive does not follow a step in level, and the run aborts a second after the step.
+as a law file with the same verdicts. `ratio`, `steepest_descent` and `secant` pass every case
+they run. `matrix` fails one: the limit channel (the article 0.66 dB over its bound against 0.5,
+and a control 3.5 dB over its reference in the second after the notch releases); its hardening
+sweep is 2.3 dB. `paired` fails measurement noise, the stepped sine and the level ladder: it starts
+about 5 dB from the reference and is still there when the settle window closes.
 
 `matrix` as a law file fits its model when it is built, which on the check's widest band (the limit
 case) takes about 20 s; the check times the build apart from the run.
