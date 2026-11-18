@@ -1027,6 +1027,36 @@ def test_an_assignment_set_naming_a_frame_that_is_not_there_is_ignored(
     assert set(back.node_def_cs) == {1}, 'nobody is placed in a frame the file lacks'
 
 
+def test_a_full_grid_of_frfs_is_written_as_a_matrix(tmp_path):
+    """Responses down the rows and references across, as a controller
+    reading a system's FRFs wants, in the order the FRF lists them."""
+    from hertzforge.io.sdynpy_data import dof_string
+
+    source = hertzforge.import_file(plate('frfs.npz'))
+    responses = list(dict.fromkeys(source.response_dof))
+    references = list(dict.fromkeys(source.reference_dof))
+    assert len(references) > 1
+    path = str(tmp_path / 'frfs.npz')
+    hertzforge.export_file(source, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        records = archive['data']
+    assert records.shape == (len(responses), len(references))
+    first = records[0, 1]['coordinate']
+    assert dof_string(
+        first['node'][1], first['direction'][1]) == references[1]
+    back = hertzforge.import_file(path)
+    order = [list(zip(source.response_dof, source.reference_dof)).index(pair)
+             for pair in zip(back.response_dof, back.reference_dof)]
+    assert np.allclose(back.ordinate, source.ordinate[order])
+
+
+def test_frfs_short_of_a_full_grid_stay_one_row(tmp_path):
+    some = hertzforge.import_file(plate('frfs.npz'))
+    some.delete_records([some.num_records - 1])
+    path = str(tmp_path / 'some.npz')
+    hertzforge.export_file(some, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (some.num_records,)
 #: a display system off its coherent base in length and mass, which the
 #: (g) systems, differing only in acceleration, cannot catch
 MM_LB = hertzforge.units.SI.with_units(length='mm', mass='lb')
@@ -1050,3 +1080,18 @@ def test_shapes_are_written_in_the_display_mass(tmp_path):
     back = hertzforge.import_file(path)
     assert np.allclose(np.real(back.shape_matrix),
                        np.real(source.shape_matrix) * np.sqrt(0.45359237))
+
+
+def test_frfs_with_one_pair_written_twice_stay_one_row(tmp_path):
+    """One pair repeated and another missing still counts responses times
+    references; only the check that every pair is unique keeps it flat."""
+    some = hertzforge.import_file(plate('frfs.npz'))
+    last = some.num_records - 1
+    some.response_dof[last] = some.response_dof[0]
+    some.reference_dof[last] = some.reference_dof[0]
+    assert len(set(some.response_dof)) * len(set(some.reference_dof)) == \
+        some.num_records
+    path = str(tmp_path / 'twice.npz')
+    hertzforge.export_file(some, path, format='sdynpy_data')
+    with np.load(path, allow_pickle=True) as archive:
+        assert archive['data'].shape == (some.num_records,)

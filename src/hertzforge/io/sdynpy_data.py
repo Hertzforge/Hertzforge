@@ -137,8 +137,30 @@ def _coordinate_pairs(data):
     return pairs
 
 
+def _matrix(data: DataArray) -> np.ndarray | None:
+    """The record indices of an FRF laid out responses by references, each
+    in the order it first appears, or None when it is not an FRF or not a
+    full grid: a pair missing or repeated."""
+    if not isinstance(data, Frf) or data.reference_dof is None:
+        return None
+    responses = list(dict.fromkeys(data.response_dof))
+    references = list(dict.fromkeys(data.reference_dof))
+    if len(responses) * len(references) != data.num_records:
+        return None
+    at = {pair: i for i, pair in
+          enumerate(zip(data.response_dof, data.reference_dof))}
+    if len(at) != data.num_records:
+        return None
+    return np.array([[at[(r, q)] for q in references] for r in responses])
+
+
 def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
     """Write a data array in the sdynpy .npz layout.
+
+    An FRF that fills every response and reference pair is written as a
+    matrix, responses down the rows and references across, as a
+    controller reading a system's FRFs expects; any other data is one row
+    of records.
 
     Values are written in `unit_system`, g included, when the
     units are defined, and as stored otherwise. The format has no place
@@ -163,5 +185,8 @@ def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | Non
     records['abscissa'] = abscissa
     records['ordinate'] = np.conj(ordinate) if isinstance(data, Psd) else ordinate
     records['coordinate'] = _coordinate_pairs(data)
+    matrix = _matrix(data)
+    if matrix is not None:
+        records = records[matrix]
     np.savez(path, data=records,
              function_type=np.array(data.function_type))
