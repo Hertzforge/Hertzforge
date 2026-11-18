@@ -1,0 +1,54 @@
+{
+ "type": "request",
+ "id": 88,
+ "method": "mimo_sine.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control",
+    "channels": [
+     1,
+     2
+    ]
+   },
+   {
+    "id": "ph",
+    "quantity": "phase",
+    "channels": [
+     1
+    ]
+   },
+   {
+    "id": "err",
+    "quantity": "error"
+   },
+   {
+    "id": "lim",
+    "quantity": "limit",
+    "channels": "all"
+   },
+   {
+    "id": "drv",
+    "quantity": "drive"
+   },
+   {
+    "id": "dph",
+    "quantity": "drive_phase"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "id",
+    "quantity": "identification"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   }
+  ]
+ }
+}
