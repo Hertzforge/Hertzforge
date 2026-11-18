@@ -8,8 +8,8 @@
 // The mock's numbers are made up so that every panel can be seen; nothing here is a measurement,
 // and the run against the real control service is a flow of its own. Not part of `npm test`.
 //
-// 1. The chooser shows MIMO Sine as coming; opened by name (`preview=mimo_sine`) it is offered, and
-//    its screen opens on Setup and takes control. The SIM badge is checked at every step.
+// 1. The chooser offers MIMO Sine like the other modules; its screen opens on Setup and takes
+//    control. The SIM badge is checked at every step.
 // 2. Station & Channels: the run's controls and drives from the channel table; each drive's ceiling
 //    and abort, which have no default.
 // 3. References and Test: each control's reference; the test is a sweep.
@@ -187,7 +187,7 @@ async function levelCardCase(nc, nd) {
 	const c2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	const p = await c2.newPage();
 	try {
-		await p.goto(URL_(`&preview=mimo_sine&mock_sim=${Math.max(8, nc + 1)}x${nd}`));
+		await p.goto(URL_(`&mock_sim=${Math.max(8, nc + 1)}x${nd}`));
 		await until(p, 'the chooser', async (q) => (await attr(q, 'conn-control', 'data-status')) === 'open' && (await tid(q, 'test-type-chooser').isVisible()));
 		await tid(p, 'test-type-mimo_sine').click();
 		await until(p, 'the MIMO Sine screen', async (q) => tid(q, 'mimo-sine-screen').isVisible());
@@ -215,13 +215,11 @@ async function levelCardCase(nc, nd) {
 
 try {
 	const a = await ctx.newPage();
-	// ---- 1. coming, then by name -------------------------------------------------------------------
+	// ---- 1. the chooser ----------------------------------------------------------------------------
 	await a.goto(URL_());
 	await until(a, 'the chooser', async (p) => (await attr(p, 'conn-control', 'data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
-	check('the chooser shows MIMO Sine as coming', (await attr(a, 'test-type-mimo_sine', 'aria-disabled')) === 'true');
-	await a.goto(URL_('&preview=mimo_sine'));
-	await until(a, 'the chooser', async (p) => (await attr(p, 'conn-control', 'data-status')) === 'open' && (await tid(p, 'test-type-chooser').isVisible()));
-	check('opened by name, the chooser offers MIMO Sine', (await attr(a, 'test-type-mimo_sine', 'aria-disabled')) === 'false');
+	check('the chooser offers MIMO Sine like the other modules', (await attr(a, 'test-type-mimo_sine', 'aria-disabled')) === 'false' && (await attr(a, 'test-type-mimo_shock', 'aria-disabled')) === 'false' && !/coming/i.test(await text(a, 'test-type-mimo_sine')));
+	await shot(a, 'chooser');
 	await tid(a, 'test-type-mimo_sine').click();
 	await until(a, 'the MIMO Sine screen', async (p) => tid(p, 'mimo-sine-screen').isVisible());
 	await tid(a, 'claim').click();

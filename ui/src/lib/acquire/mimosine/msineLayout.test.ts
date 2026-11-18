@@ -1,7 +1,7 @@
 /**
  * MIMO Sine's run screen: its plot types and first pages, what a window asks the service for, and
  * every quantity offered answered with views by the mock control service once the tone engages.
- * Also the chooser: MIMO Sine stays coming, and opens by name for a preview.
+ * Also the chooser: MIMO Sine is offered like the other modules.
  */
 import { describe, expect, it } from 'vitest';
 import { ServiceClient } from '$lib/protocol/client.svelte';
@@ -11,7 +11,7 @@ import type { ChannelRow, View } from '$lib/protocol/types';
 import { pulseSubscription } from '../pulse/pulseScreen';
 import type { PlotPanel } from '../screen/screen.svelte';
 import { AcquireState } from '../store.svelte';
-import { TEST_TYPES, TestTypeView, withPreview } from '../testTypes.svelte';
+import { TEST_TYPES, TestTypeView } from '../testTypes.svelte';
 import { readConfig } from '$lib/app/config';
 import { MSINE_PLOT_TYPES, MSINE_QUANTITIES } from './msineLayout';
 import { MimoSineStore } from './msineStore.svelte';
@@ -96,14 +96,15 @@ describe('the MIMO Sine run screen', () => {
 });
 
 describe('MIMO Sine in the chooser', () => {
-	it('stays coming, and opens by name for a preview', () => {
-		const plain = new TestTypeView(() => null);
-		expect(plain.whyNot('mimo_sine')).toBe('Coming');
-		expect(plain.choose('mimo_sine')).toBe(false);
-		const preview = new TestTypeView(() => null, withPreview(TEST_TYPES, readConfig('?preview=mimo_sine').preview));
-		expect(preview.choose('mimo_sine')).toBe(true);
-		expect(preview.screen).toBe('mimo_sine');
-		expect(preview.whyNot('mimo_twr')).toBe('Coming');
-		expect(readConfig('?preview=mimo_sine,<b>').preview).toEqual(['mimo_sine']);
+	it('is offered like the other modules, with no switch to reach it', () => {
+		expect(TEST_TYPES.find((t) => t.id === 'mimo_sine')?.ready).toBe(true);
+		const view = new TestTypeView(() => null);
+		view.open();
+		view.settle(null);
+		expect(view.whyNot('mimo_sine')).toBeNull();
+		expect(view.choose('mimo_sine')).toBe(true);
+		expect(view.screen).toBe('mimo_sine');
+		expect(new TestTypeView(() => null).whyNot('mimo_twr')).toBe('Coming');
+		expect('preview' in readConfig('?preview=mimo_sine')).toBe(false);
 	});
 });

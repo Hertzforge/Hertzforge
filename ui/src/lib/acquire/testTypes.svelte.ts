@@ -81,7 +81,7 @@ export const TEST_TYPES: readonly TestType[] = [
 	{ id: 'twr', group: 'single', title: 'TWR', summary: 'Time waveform replication: a recorded signal reproduced at the control point.', ready: true },
 	{ id: 'mimo_random', group: 'mimo', title: 'MIMO Random', summary: 'Random vibration from several shakers or drives at once, controlled together to target spectra.', ready: true },
 	{ id: 'mimo_shock', group: 'mimo', title: 'MIMO Shock', summary: 'Shock pulses from several shakers at once, controlled together at every control point.', ready: true },
-	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: false },
+	{ id: 'mimo_sine', group: 'mimo', title: 'MIMO Sine', summary: 'A sine from several shakers at once, with the amplitude and phase between them controlled.', ready: true },
 	{ id: 'mimo_mixed', group: 'mimo', title: 'MIMO Mixed Mode', summary: 'Sine, random and shock combined in one test, on several shakers controlled together.', ready: false },
 	{ id: 'mimo_twr', group: 'mimo', title: 'MIMO TWR', summary: 'Recorded signals reproduced at several control points at once, from several shakers.', ready: false },
 	{ id: 'recorder', group: 'specialized', title: 'Recorder', summary: 'Records the inputs with no drive, continuously or from a level trigger.', ready: true },
@@ -92,15 +92,6 @@ export const TEST_TYPES: readonly TestType[] = [
 /** The test types under each section of the chooser, in order. */
 export function typesIn(group: TestGroupId, types: readonly TestType[] = TEST_TYPES): TestType[] {
 	return types.filter((t) => t.group === group);
-}
-
-/**
- * The test types with the named ones offered although they are not ready yet: a test type that is
- * built in the shell before its control service answers can be opened by name for a preview.
- */
-export function withPreview(types: readonly TestType[], ids: readonly string[]): readonly TestType[] {
-	if (!ids.length) return types;
-	return types.map((t) => (ids.includes(t.id) ? { ...t, ready: true } : t));
 }
 
 /** What the workspace shows. */

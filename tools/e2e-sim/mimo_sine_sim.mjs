@@ -12,7 +12,7 @@
 //
 // 0. The channel table is set to the simulator's linear four by four (controls 1 to 4, drives 5 to
 //    8) over the wire before the screen opens.
-// 1. MIMO Sine is opened by name (`preview=mimo_sine`, its card is not ready) and takes control.
+// 1. MIMO Sine is chosen in the chooser and takes control.
 //    Station & Channels: each drive's ceiling and abort. Test: a sweep of 30 to 60 Hz at
 //    4 oct/min, one way, through the plate's lightly damped 40 Hz resonance. Schedule: one level;
 //    a quick identification. Control: the laws that cannot run a sweep are listed apart, with
@@ -185,7 +185,7 @@ await waitFor('the analysis service', () => new Promise((resolve) => {
 start('shell', process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--prefix', 'ui', 'run', 'dev', '--', '--port', String(shellPort), '--strictPort'], { shell: process.platform === 'win32' });
 await waitFor('the shell dev server', async () => (await fetch(`http://127.0.0.1:${shellPort}/`)).ok, 60_000);
 await setTable(`ws://127.0.0.1:${controlPort}/`);
-const URL_ = `http://127.0.0.1:${shellPort}/?control=ws://127.0.0.1:${controlPort}/&analysis=ws://127.0.0.1:${analysisPort}/&theme=light&preview=mimo_sine#acquire`;
+const URL_ = `http://127.0.0.1:${shellPort}/?control=ws://127.0.0.1:${controlPort}/&analysis=ws://127.0.0.1:${analysisPort}/&theme=light#acquire`;
 
 const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
 let failed = null;

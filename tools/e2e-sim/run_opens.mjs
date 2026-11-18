@@ -8,7 +8,7 @@
 //                                    [--data <dir>] [--shots <dir>] [--unwritable] [--headed]
 //
 // <module> is one of random, sine, shock (Classical Shock), srs, twr, mixed, mimo_random, explorer,
-// recorder, mimo_sine. MIMO Sine's run, its table set over the wire and its screen opened by name,
+// recorder, mimo_sine. MIMO Sine's run, its table set over the wire,
 // is mimo_sine_sim.mjs, which this runs with the same arguments. Without `--exe` it builds `sds-control` (release) and runs that. It starts the control
 // service (loopback, a free port, its data folder `--data`, else a new temporary folder), the
 // analysis service (`python -m hertzforge serve`, a free port) and the shell's dev server, runs one
