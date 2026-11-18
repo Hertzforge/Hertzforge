@@ -112,12 +112,13 @@ def spectrum(title: str, x: dict, y: dict, lines: Sequence[dict],
     return out
 
 
-def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span'],
+def region(x0: float, x1: float, kind: Literal['frame', 'cut', 'span', 'over', 'under'],
            label: str | None = None, drag: dict[str, Any] | None = None,
            window: Sequence[float] | None = None, level: int = 0, rows: int = 1,
            snap: dict[str, float] | None = None) -> dict[str, Any]:
     """A span of x behind a spectrum's curves: a `frame` averaged from, a
-    `cut` left out, or a `span` (its edges drawn, nothing shaded). With
+    `cut` left out, a `span` (its edges drawn, nothing shaded), or lines `over` or
+    `under` an abort limit, shaded in the limit's color. With
     `drag` (`dragging`) it is moved on the plot: its middle slides it and
     an edge moves that edge. A frame with `window` (its weights from 0 to 1,
     evenly spaced from x0 to x1) has that window drawn on a rail above the

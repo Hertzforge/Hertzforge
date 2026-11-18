@@ -1167,6 +1167,15 @@ margins when the report identity is on; empty otherwise): each drawn block is `{
 `{"kind":"figure","views"}` (the protocol's views, arrays as binary frames) or
 `{"kind":"unbound","was"}`, with `block` (the index of the report block it came from, shared by a
 block's several figures), `label` (its figure or table number), `caption` and an optional `note`.
+A figure laid out as a table of plots carries `grid`: `columns`, the column headings (a direction,
+"Global Z"), and `rows`, each a `label` (a node) and `cells`, one a column, each cell the figures
+in it by their place in `views` (`view`), with a `caption` (the channel), an optional `note` (how
+far its direction is off the column's axis) and `facts`, `[label, text]` lines read under it. A
+`spectrum` drawn for one channel against its requirement carries `bands`, zones shaded between two
+edges given at `x` (`lower`, `upper`; null for the plot's edge on that side), `kind` `warning`,
+`over` or `under`, with `key`, the `[code, words]` lines of the legend that name them; `regions` of kind `over` and `under`, the lines outside an abort limit, each
+across its bin; `readouts`, the numbers boxed under it, as a group's; and `x_home`, the range of
+x it opens on, the requirement's own band.
 `report.export` writes the page that is printed and issued,
 light, to `path` (`.html` added when it has another suffix), beside the target first and renamed
 over it. First it makes the checks asked before a report leaves the project: with skeleton sections
