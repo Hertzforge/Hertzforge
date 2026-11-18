@@ -17,7 +17,8 @@
 //    chosen law states its limit.
 // 5. Proceed to Run applies; Start identifies; the review hold brings the identification forward
 //    with the sweep-rate warning; Proceed with words for the log.
-// 6. The frequency readout moves, Hold keeps it and Resume lets it go on; the run completes.
+// 6. The frequency readout moves; the sweep offers Jog and Go to and no Reverse (the sweep turns
+//    only at the band's edges); Hold keeps it and Resume lets it go on; the run completes.
 // 7. A dwell: the sweep verbs are gone; Abort ends it in words.
 //
 // Screenshots (1,440 by 900): `mimo_sine_<name>.png`.
@@ -172,6 +173,7 @@ try {
 	const f0 = await hzNow(a);
 	await until(a, 'the frequency moving', async (p) => (await hzNow(p)) !== f0, 15_000);
 	check('the frequency readout moves', true);
+	check('a sweep offers Jog and Go to, and no Reverse', (await tid(a, 'jog-up').count()) === 1 && (await tid(a, 'act-goto').count()) === 1 && (await a.getByRole('button', { name: 'Reverse' }).count()) === 0);
 	await tid(a, 'act-hold').click();
 	await until(a, 'held', async (p) => (await attr(p, 'msine-run-view', 'data-held')) === 'true', 10_000);
 	await shot(a, 'held');
@@ -193,7 +195,7 @@ try {
 	await startRun(a);
 	await tid(a, 'review-proceed').click();
 	await until(a, 'the dwell engaged', async (p) => ['engaged', 'full_level'].includes(await runPhase(p)), 30_000);
-	check('a dwell has no sweep verbs', (await tid(a, 'act-reverse').count()) === 0 && (await tid(a, 'jog-up').count()) === 0);
+	check('a dwell has no sweep verbs', (await tid(a, 'act-goto').count()) === 0 && (await tid(a, 'jog-up').count()) === 0);
 	await tid(a, 'act-abort').click();
 	await until(a, 'the run aborted', async (p) => (await runState(p)) === 'finished', 15_000);
 	check('Abort ends the run in words', /Aborted by the Operator/.test(await text(a, 'msine-end')));

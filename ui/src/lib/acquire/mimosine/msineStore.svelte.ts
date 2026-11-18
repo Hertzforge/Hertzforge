@@ -771,12 +771,6 @@ export class MimoSineStore {
 		return res !== null;
 	}
 
-	async reverse(): Promise<boolean> {
-		const res = await this.act<MimoSineState>('Reverse', 'mimo_sine.reverse');
-		if (res) this.onStatus(res);
-		return res !== null;
-	}
-
 	async jog(deltaHz: number): Promise<number | null> {
 		return (await this.act<{ frequency_hz: number }>('Jog', 'mimo_sine.jog', { delta_hz: deltaHz }))?.frequency_hz ?? null;
 	}

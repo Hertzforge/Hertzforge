@@ -173,6 +173,9 @@ describe('the MIMO Sine store', () => {
 		await until(() => ms.now?.phase === 'engaged');
 		expect(ms.verbs.hold.enabled).toBe(true);
 		expect(ms.verbs.jog.visible).toBe(true);
+		// A MIMO Sine sweep turns only at the band's edges: Reverse is never offered.
+		expect(Object.keys(ms.verbs).sort()).toEqual(['goto', 'hold', 'jog', 'resume']);
+		expect('reverse' in ms).toBe(false);
 		expect(await ms.hold()).toBe(true);
 		expect(ms.status?.held).toBe(true);
 		expect(ms.verbs.resume.visible).toBe(true);
@@ -189,7 +192,7 @@ describe('the MIMO Sine store', () => {
 		await until(() => ms.status?.state === 'review');
 		await ms.proceed();
 		expect(ms.verbs.jog.visible).toBe(false);
-		expect(ms.verbs.reverse.visible).toBe(false);
+		expect(ms.verbs.goto.visible).toBe(false);
 		await ms.abort();
 	});
 

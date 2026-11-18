@@ -1,8 +1,9 @@
 /**
  * What a MIMO Sine run offers now, and why a verb waits. The run bar's verbs, the level step and
- * the ladder mode are Sine's, as are the module's own: Hold and Resume, and on a sweep Reverse,
- * Jog and Go to. `mimo_sine.*` takes them with Sine's rules (PROTOCOL.md, "Running a MIMO Sine
- * Test"), so the rules are Sine's functions, read with the MIMO Sine state.
+ * the ladder mode are Sine's, as are the module's own: Hold and Resume, and on a sweep Jog and Go
+ * to. `mimo_sine.*` takes them with Sine's rules (PROTOCOL.md, "Running a MIMO Sine Test"), so the
+ * rules are Sine's functions, read with the MIMO Sine state. Sine's Reverse is not offered: a MIMO
+ * Sine sweep turns only at the band's edges, and the service refuses `mimo_sine.reverse`.
  */
 
 import type { MimoSineState } from '$lib/protocol/mimoSine';
@@ -11,7 +12,7 @@ import type { ActionId, ActionState, SetupStatus } from '../actions';
 import { LIVE_STATES } from '../actions';
 import { sineBarActions, sineModuleVerbs, sinePrimary, type SineVerbContext, type SineVerbId } from '../sine/sineVerbs';
 
-export type MsineVerbId = SineVerbId;
+export type MsineVerbId = Exclude<SineVerbId, 'reverse'>;
 
 export interface MsineVerbContext {
 	connected: boolean;
@@ -41,7 +42,8 @@ export function msinePrimary(ctx: MsineVerbContext): ActionId | null {
 	return sinePrimary(sineContext(ctx));
 }
 
-/** Hold or Resume, and on a sweep Reverse, Jog and Go to, with why each waits. */
+/** Hold or Resume, and on a sweep Jog and Go to, with why each waits. */
 export function msineModuleVerbs(ctx: MsineVerbContext): Record<MsineVerbId, ActionState> {
-	return sineModuleVerbs(sineContext(ctx));
+	const { hold, resume, jog, goto } = sineModuleVerbs(sineContext(ctx));
+	return { hold, resume, jog, goto };
 }
