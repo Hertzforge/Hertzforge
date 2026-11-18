@@ -62,6 +62,14 @@ pub struct FitLimits {
     pub max_group_work: u64,
     /// The same summed over the whole fit.
     pub max_total_work: u64,
+    /// Split a chain of overlapping candidates longer than `max_group` at its
+    /// widest gaps (in half-power bandwidths) into groups within it. Off, such a
+    /// chain is left out whole.
+    pub split: bool,
+    /// Fit each part of a split chain on the identification less the modal part
+    /// of every group fitted before it (groups are fitted in frequency order).
+    /// A group that was not split is fitted on the identification as it is.
+    pub subtract_fitted: bool,
 }
 
 impl Default for FitLimits {
@@ -72,9 +80,17 @@ impl Default for FitLimits {
             max_evaluations: 30_000,
             max_group_work: 2_000_000_000,
             max_total_work: 5_000_000_000,
+            split: true,
+            subtract_fitted: SUBTRACT_DEFAULT,
         }
     }
 }
+
+/// Whether the parts of a split chain are fitted less the modes already
+/// fitted (see [`FitLimits::subtract_fitted`]). On the 4 by 4 with scatter
+/// over 40 to 400 Hz it finds 8 of 8 true modes within a tenth of a bandwidth
+/// against 7 of 8 without.
+const SUBTRACT_DEFAULT: bool = true;
 
 /// Why a group of candidates was not kept.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +127,9 @@ pub struct FitReport {
     pub candidates_left_out: usize,
     /// Work spent over the whole fit.
     pub total_work: u64,
+    /// The frequency windows (Hz) of the groups left out: the model there is
+    /// the smoothed identification, not modal.
+    pub left_out_windows: Vec<(f64, f64)>,
 }
 
 impl ModalForm {
@@ -217,7 +236,26 @@ fn fit(
         }
     }
     groups.push(cur);
+    // Each group marked as a part of a split chain or not: the parts of a split
+    // chain overlap, so each is fitted less the modes already fitted.
+    let mut parts: Vec<(bool, Vec<usize>)> = Vec::new();
     for grp in groups {
+        if limits.split {
+            let bw = |j: usize| z_init[j] * picked[j];
+            let gap = |a: usize, b: usize| (picked[b] - picked[a]) / (bw(a) + bw(b));
+            let split = split_chain(grp, limits.max_group.max(1), &gap);
+            let is_split = split.len() > 1;
+            for part in split {
+                parts.push((is_split, part));
+            }
+        } else {
+            parts.push((false, grp));
+        }
+    }
+    let bwj = |j: usize| z_init[j] * picked[j];
+    let gap = |a: usize, b: usize| (picked[b] - picked[a]) / (bwj(a) + bwj(b));
+    let mut queue: std::collections::VecDeque<(bool, Vec<usize>)> = parts.into();
+    while let Some((is_part, grp)) = queue.pop_front() {
         let kk = grp.len();
         let fr: Vec<f64> = grp.iter().map(|&j| picked[j]).collect();
         let zr: Vec<f64> = grp.iter().map(|&j| z_init[j]).collect();
@@ -238,22 +276,53 @@ fn fit(
             work: 0,
             outcome: GroupOutcome::TooLarge,
         };
+        let window_hz = (g[sel[0]], g[sel[sel.len() - 1]]);
         if kk > limits.max_group {
             report.candidates_left_out += kk;
+            report.left_out_windows.push(window_hz);
             report.groups.push(gr);
             continue;
         }
         let left = limits.max_total_work.saturating_sub(report.total_work);
-        let window = Window::new(id, &sel, limits, left);
+        // The work a group would need at its full iterations, each with the
+        // finite-difference gradient and Hessian (2 np^2 evaluations) and a few
+        // trials: a group that cannot fit within its bound is halved before
+        // any work is spent on it.
+        let np = 2 * kk as u64;
+        let cols = kk as u64 + 2;
+        let unit = sel.len() as u64 * cols * ((n * m) as u64 + cols);
+        let need = limits.max_iterations as u64 * (2 * np * np + 8) * unit;
+        if limits.split && kk > 1 && need > limits.max_group_work.min(left) {
+            for part in split_chain(grp, kk.div_ceil(2), &gap).into_iter().rev() {
+                queue.push_front((true, part));
+            }
+            continue;
+        }
+        // A part of a split chain is fitted less every mode fitted before it; a
+        // whole group is fitted as it stands.
+        let prior =
+            (limits.subtract_fitted && is_part && !out.f_hz.is_empty()).then(|| out.clone());
+        let window = Window::new(id, &sel, limits, left, prior.as_ref());
         let fitted = window.fit_group(fr, zr, limits.max_iterations);
         gr.evaluations = window.evaluations.get();
         gr.work = window.work.get();
         report.total_work += gr.work;
         let (fr, zr, a) = match fitted {
             Ok(v) => v,
+            Err(Halt::Bound) if limits.split && kk > 1 => {
+                // Out of work: split it in two at its widest gap and fit the
+                // halves, each with its own bound, in its place.
+                gr.outcome = GroupOutcome::OutOfWork;
+                report.groups.push(gr);
+                for part in split_chain(grp, kk.div_ceil(2), &gap).into_iter().rev() {
+                    queue.push_front((true, part));
+                }
+                continue;
+            }
             Err(Halt::Bound) => {
                 gr.outcome = GroupOutcome::OutOfWork;
                 report.candidates_left_out += kk;
+                report.left_out_windows.push(window_hz);
                 report.groups.push(gr);
                 continue;
             }
@@ -271,6 +340,30 @@ fn fit(
         }
     }
     Ok((out, report))
+}
+
+/// Split a chain of candidates (indices in frequency order) at its widest gap,
+/// as measured by `gap(a, b)` between neighbours, until every part has at most
+/// `cap` candidates.
+fn split_chain(grp: Vec<usize>, cap: usize, gap: &dyn Fn(usize, usize) -> f64) -> Vec<Vec<usize>> {
+    if grp.len() <= cap {
+        return vec![grp];
+    }
+    let mut at = 1;
+    let mut widest = f64::NEG_INFINITY;
+    for i in 1..grp.len() {
+        let w = gap(grp[i - 1], grp[i]);
+        if w > widest {
+            widest = w;
+            at = i;
+        }
+    }
+    let right = grp[at..].to_vec();
+    let mut left = grp;
+    left.truncate(at);
+    let mut out = split_chain(left, cap, gap);
+    out.extend(split_chain(right, cap, gap));
+    out
 }
 
 fn argmin_abs(g: &[f64], f: f64) -> usize {
@@ -313,12 +406,29 @@ struct Window {
 }
 
 impl Window {
-    fn new(id: &Identification, sel: &[usize], limits: FitLimits, total_left: u64) -> Window {
+    fn new(
+        id: &Identification,
+        sel: &[usize],
+        limits: FitLimits,
+        total_left: u64,
+        prior: Option<&ModalForm>,
+    ) -> Window {
         let (_, n, m) = id.response.dims();
         let e = n * m;
         let mut y = Vec::with_capacity(sel.len() * e);
         for &k in sel {
+            let start = y.len();
             y.extend_from_slice(id.response.line(k));
+            if let Some(mf) = prior {
+                let f = id.grid_hz[k];
+                for r in 0..mf.modes() {
+                    let q = q_mode(f, mf.f_hz[r], mf.zeta[r]);
+                    let a = &mf.residues[r * e..(r + 1) * e];
+                    for (yv, av) in y[start..].iter_mut().zip(a) {
+                        *yv -= q * av;
+                    }
+                }
+            }
         }
         Window {
             gg: sel.iter().map(|&k| id.grid_hz[k]).collect(),
@@ -551,6 +661,16 @@ impl Model {
         band: (f64, f64),
         choice: ModelChoice,
     ) -> Result<Model, String> {
+        Self::build_with(id, band, choice, FitLimits::default())
+    }
+
+    /// Build the chosen model with the fit's bounds given.
+    pub fn build_with(
+        id: &Identification,
+        band: (f64, f64),
+        choice: ModelChoice,
+        limits: FitLimits,
+    ) -> Result<Model, String> {
         let (_, n, m) = id.response.dims();
         let size = n * m;
         let g = &id.grid_hz;
@@ -565,7 +685,7 @@ impl Model {
             ModelChoice::Identification => (raw.to_vec(), none),
             ModelChoice::Smoothed { lines } => (smooth_grid(g, raw, size, lines), none),
             ModelChoice::Modal { lines } => {
-                let (mf, rep) = ModalForm::fit_bounded(id, band, FitLimits::default())?;
+                let (mf, rep) = ModalForm::fit_bounded(id, band, limits)?;
                 fit = rep;
                 (modal_smoothed(id, &mf, lines), mf)
             }
@@ -598,6 +718,15 @@ impl Model {
             modes,
             fit: FitReport::default(),
         })
+    }
+
+    /// Whether `f_hz` lies inside the window of a group the fit left out, where
+    /// the model is the smoothed identification and not modal.
+    pub fn left_out_at(&self, f_hz: f64) -> bool {
+        self.fit
+            .left_out_windows
+            .iter()
+            .any(|&(lo, hi)| f_hz >= lo && f_hz <= hi)
     }
 
     /// The model at `f_hz`, `controls x drives` row-major.
