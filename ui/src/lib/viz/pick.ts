@@ -112,11 +112,6 @@ export function toggledSurface(params: Record<string, unknown>, kept: number[], 
 /** Meters in a length unit the view can be drawn in. */
 const METERS: Record<string, number> = { m: 1, cm: 0.01, mm: 0.001, in: 0.0254, ft: 0.3048 };
 
-/**
- * The grid an arrow's drag lands on, in the view's `unit`: a tenth of an inch for the inch family,
- * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
- * whose numbers have no unit to round in.
- */
 /** The gimbal's colors, X red, Y green and Z blue (three's TransformControls): the corner
  * axes and a coordinate system's arrows wear them too, so all three read alike. */
 export const AXIS_COLORS = [0xff0000, 0x00ff00, 0x0000ff] as const;
@@ -136,6 +131,11 @@ export function stillFramed(then: number, now: number): boolean {
 	return then > 0 && now > 0 && now / then < 1.25 && then / now < 1.25;
 }
 
+/**
+ * The grid an arrow's drag lands on, in the view's `unit`: a tenth of an inch for the inch family,
+ * a centimeter otherwise, so a dragged part lands on round numbers. None for an undefined geometry,
+ * whose numbers have no unit to round in.
+ */
 export function gridStep(unit: string): number | null {
 	const meters = METERS[unit];
 	if (meters === undefined) return null;

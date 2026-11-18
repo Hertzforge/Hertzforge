@@ -668,7 +668,7 @@ export interface ExportFormat {
 }
 
 export interface ActionRow {
-	/** `show.*` for a default, an operation's id, or `self.*`. */
+	/** `show.*` for a default, an operation's id, `self.*`, or `group.*` for a row that only holds others. */
 	id: string;
 	verb: string;
 	/** `group`: not an action, a row that holds the ones `under` it. */
@@ -1639,7 +1639,6 @@ export interface ReportField {
 	options: [string, string][];
 }
 
-/** `report.editor`: the edit page and the pane for the selection. */
 /** One block of a report as the shell's own page draws it (`report.views`). */
 export interface ReportPageBlock {
 	kind: 'text' | 'figure' | 'unbound';

@@ -67,8 +67,10 @@ def chosen_records(text: str, count: int) -> list[int]:
 
 def plot(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.plot`: chosen records of a data object as curves on one
-    plot. Records of another quantity than the first are left out, since
-    they do not share an axis; the view's title says how many."""
+    plot, a density drawn flat across its bins (`_curve`). Records of another
+    quantity than the first are left out, since they do not share an axis; the
+    view's title says how many. With `limits`, the warning and abort limits of
+    an object that carries them follow its records (`_limit_lines`)."""
     import hertzforge as hz
     from hertzforge.drawing.viz.waterfall import waterfall_arrays
 
@@ -761,8 +763,9 @@ OPERATIONS = (
         run=waterfall),
     Operation(
         id='project.plot', title='Plot Records', workspace='signals', everywhere=True,
-        summary='Chosen records of any data object as curves on one plot, '
-                'numbered from 1 as "1-3, 7"; the first eight when none are named.',
+        summary='Chosen records of any data object as curves on one plot, numbered from 1 '
+                'as "1-3, 7"; the first eight when none are named. A specification\'s '
+                'warning and abort limits are drawn with it.',
         params=(DATA, RECORDS, COMPONENT, LIMITS), outputs=('spectrum',), run=plot),
     Operation(
         id='project.compute_psds', title='Compute PSDs', workspace='random',

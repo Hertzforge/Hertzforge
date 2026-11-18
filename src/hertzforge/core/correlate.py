@@ -95,8 +95,9 @@ def projection_order(first: ShapeSet, second: ShapeSet) -> tuple[bool, str]:
 
 class NoNodeMatched(ValueError):
     """No test node has a model node within the match tolerance. `report` says how far
-    off they are: `matched` (0), `total`, `worst` (the nearest pair's distance) and
-    `limit`, as `project_shapes` reports a projection that did match."""
+    off they are: `matched` (0), `total`, `worst` (the nearest pair's distance),
+    `limit` and `dropped` (none named), as `project_shapes` reports a projection that
+    did match."""
 
     def __init__(self, message: str, report: dict[str, Any]):
         super().__init__(message)

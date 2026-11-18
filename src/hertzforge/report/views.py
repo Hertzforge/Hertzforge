@@ -6,11 +6,17 @@ report too. `page_blocks` builds the report as the page builds it
 (`report._report_payload`: bound, captioned, numbered, in display units,
 thinned for the file) and `block_views` turns each built block into views:
 
-- a plot into a `spectrum`, its control channels into the spectrum's
-  `groups` (target, response and limits each), its averaging frames into
-  `regions`, a synthesized curve a follower of the curve it models;
+- a plot into a `spectrum`, its averaging frames into `regions`, a
+  synthesized curve a follower of the curve it models. One control channel
+  against its requirement has its zones shaded (`bands`, named by `key`),
+  its lines outside an abort limit marked (`regions` of kind `over` and
+  `under`), its numbers boxed (`readouts`) and the requirement's band to
+  open on (`x_home`); several channels on one plot are the spectrum's
+  `groups` (target, response and limits each), the limits as lines;
+- a grid into a `spectrum` a channel and the layout that places them, a
+  row a node and a column a direction (`_grid`);
 - a scene into a `shape3d` with its modes;
-- a table and a grid's channel table into a `table`;
+- a table into a `table`;
 - a bar chart into `bars`, judged here as the page judged it;
 - a coherence map and a MAC into a `matrix`;
 - a verdict into a `reading`; a photo into an `image`;
@@ -18,8 +24,7 @@ thinned for the file) and `block_views` turns each built block into views:
 
 The page's payload writes a log axis's values as their log10 (it draws in
 decades); a view carries the values themselves and says the axis is log,
-so they are put back here. A specification's limits, shaded on the old
-page, are tolerance and abort lines here, as the app draws them.
+so they are put back here.
 """
 
 from __future__ import annotations
@@ -65,12 +70,14 @@ def _curve(name: str, role: str, x: np.ndarray, y: np.ndarray, edges: np.ndarray
     x, y = x[:n], y[:n]
     if edges is not None and len(edges) == n + 1:
         return v.series(name, role, x, y, 'steps', edges, follows=follows)
-    out = v.series(name, role, x, y, follows=follows)
-    return out
+    return v.series(name, role, x, y, follows=follows)
 
 
 def _plot(built: Mapping[str, Any], title: str) -> dict[str, Any] | None:
-    """A plot block as one `spectrum`, its channels as groups."""
+    """A plot block as one `spectrum`. Several channels are its groups, shown one at a
+    time with their limits as lines; one channel alone has its zones shaded (`bands`,
+    `key`), its lines outside abort marked (`regions`), its numbers (`readouts`) and
+    the band it opens on (`x_home`)."""
     logx, logy = bool(built.get('logx')), bool(built.get('logy'))
     x = _values(built.get('x') or [], logx)
     block_edges = (_values(built['edges'], logx)
@@ -403,6 +410,7 @@ def block_views(built: Mapping[str, Any], block: Mapping[str, Any] | None = None
     elif kind == 'image':
         made = _image(built, title)
     elif kind == 'grid':
+        # the plots alone: `page_blocks` asks `_grid` itself, for the layout with them
         laid = _grid(built, title)
         return [] if laid is None else laid[0]
     elif kind == 'stage':
@@ -445,11 +453,15 @@ def page_blocks(report: Any, objects: Mapping[str, Any], unit_system: Any = None
             entry.update(kind='unbound', was=str(built.get('was', 'block')),
                          empty=bool(built.get('empty')))
         else:
-            views = block_views(built, source_block, objects, length)
+            if kind == 'grid':
+                # its plots and where each goes, a row a node and a column a direction
+                laid = _grid(built, str(built.get('label') or ''))
+                views = [] if laid is None else laid[0]
+                if laid is not None:
+                    entry['grid'] = laid[1]
+            else:
+                views = block_views(built, source_block, objects, length)
             entry.update(kind='figure' if views else 'unbound', views=views)
-            if kind == 'grid' and views:
-                # where each of the views goes: a row a node, a column a direction
-                entry['grid'] = _grid(built, str(built.get('label') or ''))[1]
             if not views:
                 entry['was'] = str(kind)
         out.append(entry)
