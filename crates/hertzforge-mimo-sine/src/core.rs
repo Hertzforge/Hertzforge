@@ -927,8 +927,11 @@ impl MimoSineCore {
             self.event(EventKind::Held { by_law: true });
         }
         if st.level_changed {
+            // The response takes the structure's own time to follow a new
+            // level: the controls are not judged until it has.
             self.level_db = st.level_db;
             self.event(EventKind::Level);
+            self.sched.settle_for(self.settle_s(st.frequency_hz));
         }
         if st.jumped && !st.done {
             // A new step (or a manual frequency): the law engages again at the
