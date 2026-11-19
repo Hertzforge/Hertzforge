@@ -9,7 +9,7 @@
 	import type { SdmView, SpectrumView } from '$lib/protocol/types';
 	import MatrixGrid from '$lib/viz/MatrixGrid.svelte';
 	import SpectrumPane from '$lib/viz/SpectrumPane.svelte';
-	import { cellKind, CELL_WORDS, GRID_MAX, gridGeometry, maxOffset, scrollWindow, togglePin, windowControls, type GridWindowSpec } from '$lib/viz/matrixGrid';
+	import { cellKind, CELL_WORDS, steppedCellView, GRID_MAX, gridGeometry, maxOffset, scrollWindow, togglePin, windowControls, type GridWindowSpec } from '$lib/viz/matrixGrid';
 	import type { MimoViewsState } from './mimoViews.svelte';
 	import { gridSettings, plotId } from './pages';
 
@@ -28,7 +28,10 @@
 	const sdm = $derived((views.plotData(plotId(page, 'sdm'))?.views[0] as SdmView | undefined) ?? null);
 	const spectra = $derived(win.map((i) => (views.plotData(plotId(page, `psd:${i}`))?.views[0] as SpectrumView | undefined) ?? null));
 	const unit = $derived(sdm?.unit ?? 'g²/Hz');
-	const openView = $derived(s.open ? ((views.plotData(plotId(page, 'open'))?.views[0] as SpectrumView | undefined) ?? null) : null);
+	const openView = $derived.by(() => {
+		const v = s.open ? (views.plotData(plotId(page, 'open'))?.views[0] as SpectrumView | undefined) : undefined;
+		return v && s.open ? steppedCellView(v, s.open.kind) : null;
+	});
 	const openTitle = $derived(
 		s.open ? `${CELL_WORDS[s.open.kind]}: ${s.open.row === s.open.col ? labels[s.open.row] : `${labels[s.open.row]} with ${labels[s.open.col]}`}` : ''
 	);
