@@ -337,7 +337,9 @@ channel at.
     environments/<k>/            the control loops, when there are any,
                                  numbered because an environment's name
                                  is free text and may hold a slash
-            attrs   name
+            attrs   name, kind (the kind of test the loop ran:
+                    random, sine, transient, modal or time; absent
+                    when unknown)
             dsets   controls, drives   channel numbers
                     response_transformation, reference_transformation
                                        matrices, when set

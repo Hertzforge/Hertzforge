@@ -1440,7 +1440,8 @@ def geometry_sentence(objects: Mapping[str, Any],
 
 def front_matter(objects: Mapping[str, Any],
                  object_groups: Sequence[Mapping[str, Any]] | None,
-                 dofs_source: str) -> list[dict[str, Any]]:
+                 dofs_source: str, kind: str | None = None
+                 ) -> list[dict[str, Any]]:
     """The blocks every report opens with, always in the same order.
 
     A DOF scene for each quantity `dofs_source` measures (excitations
@@ -1452,7 +1453,9 @@ def front_matter(objects: Mapping[str, Any],
     known to draw: a project with no source or no geometry yet, or one
     whose DOFs land on no node of it. Every reference is symbolic, and
     an unbound or empty block is not rendered, so a bare project keeps
-    the outline without blank figures.
+    the outline without blank figures. `kind` picks the control loops
+    whose transformations follow the channel table
+    (`transformation_blocks`); every loop's when it is None.
     """
     # One order for every report (Brandon, 2026-08-23).
     geometry = '@basis:Geometry'
@@ -1508,7 +1511,7 @@ def front_matter(objects: Mapping[str, Any],
     blocks += photo_blocks
     blocks.append({'kind': 'table', 'source': '@basis:ChannelTable',
                    'caption': 'Instrumentation'})
-    blocks += transformation_blocks(objects, object_groups)
+    blocks += transformation_blocks(objects, object_groups, kind)
     return blocks
 
 
@@ -1519,10 +1522,17 @@ TRANSFORMATION_CAPTIONS = {
 
 
 def transformation_blocks(objects: Mapping[str, Any],
-                          object_groups: Sequence[Mapping[str, Any]] | None
-                          ) -> list[dict[str, Any]]:
+                          object_groups: Sequence[Mapping[str, Any]] | None,
+                          kind: str | None = None) -> list[dict[str, Any]]:
     """A table block for each transformation a control loop of the
     basis channel table ran, after the instrumentation table.
+
+    With `kind` ('random', 'sine', 'transient'), only the loops of that
+    kind count: a mixed run's random and sine may control through
+    different matrices, or one through a matrix and the other through
+    none, and each report shows its own. A loop whose kind is unknown
+    (a table saved before the kind was kept) counts only when it is the
+    table's one loop, since nothing else says which report it is for.
 
     The response transformation's rows are what the controller
     controlled in place of its control channels, and the reference
@@ -1538,7 +1548,10 @@ def transformation_blocks(objects: Mapping[str, Any],
     if not isinstance(table, ChannelTable):
         return []
     blocks = []
+    single = len(table.environments) == 1
     for environment, held in table.environments.items():
+        if kind is not None and held.kind != kind and (held.kind or not single):
+            continue
         for form in TRANSFORMATION_FORMS:
             if held.matrix(form) is None:
                 continue
@@ -2232,7 +2245,7 @@ def sine_template(objects: Mapping[str, Any],
             'was at each location — for a swept test the control '
             'channels are the ones the levels below are read from, '
             'and the table is where they are identified.'},
-        *front_matter(objects, object_groups, '@basis:TimeHistory'),
+        *front_matter(objects, object_groups, '@basis:TimeHistory', 'sine'),
         *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## The Recording\n\n'
@@ -2573,7 +2586,7 @@ def transient_template(objects: Mapping[str, Any],
             f'{ref(time, "duration")}.'},
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
-        *front_matter(objects, object_groups, time),
+        *front_matter(objects, object_groups, time, 'transient'),
         *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## Specification\n\nThe waveform the controller was asked '
@@ -3106,7 +3119,7 @@ def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[
                else '.')},
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
-        *front_matter(objects, object_groups, time),
+        *front_matter(objects, object_groups, time, 'random'),
         *_recorded_run(objects, object_groups),
         {'kind': 'text', 'text':
             '## Measured Data\n\nThe measured time histories, one '
@@ -3497,7 +3510,7 @@ def mimo_template(objects: Mapping[str, Any],
                else '.')},
         {'kind': 'text', 'text': instrumentation_text(objects, object_groups,
                                                       time)},
-        *front_matter(objects, object_groups, time),
+        *front_matter(objects, object_groups, time, 'random'),
         *([run_record_block(objects, object_groups,
                             [('Control error', 'control_error')])]
           if record is not None else []),

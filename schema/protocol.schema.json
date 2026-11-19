@@ -1187,7 +1187,8 @@
         "controls": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "drives": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "response_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}},
-        "reference_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}}
+        "reference_transformation": {"type": ["array", "null"], "items": {"type": "array", "items": {"type": "number"}}},
+        "kind": {"type": "string"}
       }
     },
     "tablesSaveParams": {

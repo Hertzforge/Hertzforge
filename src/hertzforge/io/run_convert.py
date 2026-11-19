@@ -267,17 +267,21 @@ def environment_from_json(value: Any) -> Any:
     matrices = {f'{form}_transformation': value.get(f'{form}_transformation')
                 for form in TRANSFORMATION_FORMS}
     return Environment(controls=list(value.get('controls') or []),
-                       drives=list(value.get('drives') or []), **matrices)
+                       drives=list(value.get('drives') or []),
+                       kind=str(value.get('kind') or ''), **matrices)
 
 
 def environment_to_json(environment: Any) -> dict[str, Any]:
     """An `Environment` as JSON: its control and drive channel numbers in
-    the controller's order, and each transformation as a list of rows, or
-    None."""
+    the controller's order, each transformation as a list of rows, or
+    None, and the kind of test it ran when it is known."""
     from ..core.channel_table import TRANSFORMATION_FORMS
 
     out: dict[str, Any] = {'controls': [int(n) for n in environment.controls],
                            'drives': [int(n) for n in environment.drives]}
+    if environment.kind:
+        # only when known, so a loop sent without one comes back as sent
+        out['kind'] = environment.kind
     for form in TRANSFORMATION_FORMS:
         matrix = environment.matrix(form)
         out[f'{form}_transformation'] = None if matrix is None else matrix.tolist()
