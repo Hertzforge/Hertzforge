@@ -4,17 +4,26 @@ Hertzforge is one toolset for structural dynamics testing, from acquiring
 the data to analyzing it. It joins Kevin Cross's data acquisition software
 with Brandon Zwink's structural dynamics analysis.
 
-The analysis core is under `src/hertzforge/`. The `hertzforge` package on PyPI
-at 0.0.1 predates it and installs only a command that prints its version;
-0.1.0 is the release that carries the core, and the desktop app of the same
-number is on [hertzforge.com](https://hertzforge.com).
+Hertzforge comes two ways.
 
-If you used Visual Dynamics, your `.vdyn` projects open here.
+The desktop app, from [hertzforge.com](https://hertzforge.com) or the
+[releases](https://github.com/Hertzforge/Hertzforge/releases), is the whole
+toolset: the interface, the analysis and control services, and its own Python.
+It needs nothing else installed. This is the way to get the interface.
+
+The `hertzforge` package on PyPI is the Python half: the analysis core, its
+readers and writers, reports, and the `hertzforge` command. It is for scripting
+an analysis, generating reports in a batch, or converting files. It does not
+carry the interface or the control service, which are built from TypeScript and
+Rust; `hertzforge serve` starts the analysis service alone, which the app or a
+source checkout draws.
 
 ```
 pip install hertzforge
 hertzforge --version
 ```
+
+If you used Visual Dynamics, your `.vdyn` projects open here.
 
 ## The First Vertical Slice
 
