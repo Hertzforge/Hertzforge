@@ -23,12 +23,15 @@
 
 	const shown = $derived(editing ? page.blocks : page.blocks.filter((b) => b.kind !== 'unbound'));
 
-	/** The height a figure's view is given: a 3-D scene and a long bar chart want more. */
+	/** The height a figure's view is given: a 3-D scene wants more, and a matrix a row's worth per row. */
 	function height(block: ReportPageBlock): number {
 		const view = block.views?.[0];
 		if (!view) return 240;
 		if (view.view === 'shape3d' || view.view === 'waterfall') return 380;
 		if (view.view === 'table' || view.view === 'bars' || view.view === 'reading') return 0;
+		// a coherence map or a MAC: tall enough that every row is labeled (the pane thins its
+		// labels below 13 px a row), with room under it for the tilted ticks and the legend
+		if (view.view === 'matrix') return Math.max(300, 16 * view.rows.ticks.length + 160);
 		return 300;
 	}
 
