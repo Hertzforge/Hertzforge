@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { getApp } from '$lib/app/state.svelte';
 	import { hasFileMenu, listenForDrops, listenForFileMenu, listenForOpenedFiles } from '$lib/project/files';
-	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
+	import { workspaceInfo } from '$lib/app/workspaces';
 	import { theme } from '$lib/theme/theme.svelte';
 	import Acquire from '$lib/workspaces/Acquire.svelte';
 	import Analysis from '$lib/workspaces/Analysis.svelte';
@@ -144,7 +144,8 @@
 		}
 		if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) {
 			e.preventDefault();
-			app.go(WORKSPACES[Number(e.code.slice(5)) - 1].id);
+			const w = app.workspaces[Number(e.code.slice(5)) - 1];
+			if (w) app.go(w.id);
 		}
 	}
 
@@ -160,7 +161,7 @@
 <div class="shell">
 	<TopBar {app} />
 	<div class="body" class:collapsed={app.railCollapsed} class:logged={app.runLog.shown && !app.runLog.windowed} class:alone={app.runLog.shown && !app.runLog.windowed && app.runLog.alone} style:--runlog-width="{app.runLog.width}px">
-		{#if !app.railCollapsed}<Rail current={app.workspace} onselect={(ws) => app.go(ws)} />{/if}
+		{#if !app.railCollapsed}<Rail workspaces={app.workspaces} current={app.workspace} onselect={(ws) => app.go(ws)} />{/if}
 		<div class="workspace" hidden={app.runLog.shown && !app.runLog.windowed && app.runLog.alone}>
 			<div class="ws">
 			{#if app.workspace === 'acquire'}

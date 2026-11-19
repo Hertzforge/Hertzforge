@@ -10,6 +10,11 @@ thread so the event loop stays responsive.
 Each connection has at most one project of its own (`project.*`), which
 every operation runs on and which ends with it. Table files (`tables.*`) are
 read and written by path beside it, without touching it.
+
+A plain HTTP request, one that does not ask to upgrade to WebSocket, is
+answered with the shell's built pages when the package carries them
+(`shell_folder`), so `hertzforge` with no command can open the interface in
+a browser from a pip install.
 """
 
 from __future__ import annotations
@@ -25,9 +30,12 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from websockets.asyncio.server import Server, ServerConnection, serve
+from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Request, Response
 
 from . import (
     display_units,
@@ -759,11 +767,69 @@ def _reason(text: str) -> str:
     return text if len(data) <= 123 else data[:120].decode('utf-8', 'ignore') + '...'
 
 
+#: what the shell's build holds, by suffix; anything else is sent as bytes
+_SHELL_TYPES = {
+    '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8', '.json': 'application/json',
+    '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
+    '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
+    '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8',
+}
+
+
+def shell_folder() -> Path | None:
+    """The shell's built pages: `hertzforge/shell` in an installed package
+    (the release workflow builds it into the wheel), else `ui/build` in a
+    source checkout after `npm --prefix ui run build`. None when neither
+    holds an `index.html`."""
+    package = Path(__file__).resolve().parents[1]
+    for folder in (package / 'shell', package.parents[1] / 'ui' / 'build'):
+        if (folder / 'index.html').is_file():
+            return folder
+    return None
+
+
+def shell_response(folder: Path, request: Request) -> Response | None:
+    """The file a plain GET asks for from the shell's `folder`, or None for
+    a WebSocket upgrade, which the protocol handles. The shell is a
+    single-page app, so a path with no suffix gets `index.html`; a missing
+    file with a suffix is a 404, and nothing outside `folder` is served."""
+    if 'websocket' in request.headers.get('Upgrade', '').lower():
+        return None
+    root = folder.resolve()
+    wanted = unquote(urlsplit(request.path).path).lstrip('/')
+    target = (root / wanted).resolve()
+    if not target.is_relative_to(root):
+        return _plain(404, 'Not Found', b'not found')
+    if not target.is_file():
+        if Path(wanted).suffix:
+            return _plain(404, 'Not Found', b'not found')
+        target = root / 'index.html'
+    body = target.read_bytes()
+    headers = Headers()
+    headers['Content-Type'] = _SHELL_TYPES.get(target.suffix, 'application/octet-stream')
+    headers['Content-Length'] = str(len(body))
+    # the hashed bundles under _app/immutable never change; the page that
+    # names them must be fetched afresh so an upgrade is seen
+    headers['Cache-Control'] = ('max-age=31536000, immutable' if '/immutable/' in target.as_posix()
+                                else 'no-cache')
+    return Response(200, 'OK', headers, body)
+
+
+def _plain(status: int, reason: str, body: bytes) -> Response:
+    headers = Headers()
+    headers['Content-Type'] = 'text/plain; charset=utf-8'
+    headers['Content-Length'] = str(len(body))
+    return Response(status, reason, headers, body)
+
+
 async def start(service: Service, host: str = '127.0.0.1',
-                port: int = 8791) -> Server:
+                port: int = 8791, shell: Path | None = None) -> Server:
     """A listening server (port 0 picks a free one; `server.sockets` says
-    which). It changes nothing beyond the server: the process that serves
-    calls `preload` and sets `SWITCH_INTERVAL` first (`__main__._serve`)."""
+    which). With `shell`, a plain HTTP request is answered from that folder
+    of built pages (`shell_response`). It changes nothing beyond the server:
+    the process that serves calls `preload` and sets `SWITCH_INTERVAL` first
+    (`__main__._serve`)."""
 
     async def handler(socket: ServerConnection) -> None:
         log.info('connection from %s', socket.remote_address)
@@ -772,5 +838,8 @@ async def start(service: Service, host: str = '127.0.0.1',
 
     # no per-message compression: loopback, and deflating a dense model's
     # shapes would run on the event loop
+    def pages(_connection: ServerConnection, request: Request) -> Response | None:
+        return shell_response(shell, request) if shell is not None else None
+
     return await serve(handler, host, port, compression=None,
-                       max_size=MAX_INCOMING)
+                       max_size=MAX_INCOMING, process_request=pages)
