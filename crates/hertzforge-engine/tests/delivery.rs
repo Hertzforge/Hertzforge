@@ -359,3 +359,38 @@ fn prefill_puts_the_contracted_lookahead_in_the_device_before_start() {
     assert_eq!(engine.prefill_output(&mut backend).unwrap(), 0);
     assert_eq!(backend.output_filled(), 4);
 }
+
+/// The engine states how many frames of its own prefill the device took: the
+/// whole lookahead, part of it when the device had less room, and none when
+/// the caller declared the output primed.
+#[test]
+fn mimo_sine_the_engine_states_what_its_prefill_put_in_the_device() {
+    let table = table_1ch();
+    for (cap, want) in [(64usize, 4usize), (3, 3)] {
+        let mut backend = MockBackend::new(1)
+            .with_rate(1000.0)
+            .with_output_buffer(cap, 0)
+            .with_script(script(2, 8));
+        backend.open().unwrap();
+        backend.arm().unwrap();
+        let mut engine = Engine::new(cfg(8), &table, &backend);
+        assert_eq!(
+            engine.output_prefill_frames(),
+            0,
+            "nothing before the prefill"
+        );
+        engine.prefill_output(&mut backend).unwrap();
+        assert_eq!(engine.output_prefill_frames(), want, "a {cap} frame buffer");
+        assert_eq!(backend.output_filled(), want);
+    }
+    let mut backend = MockBackend::new(1)
+        .with_rate(1000.0)
+        .with_output_buffer(64, 0)
+        .with_script(script(2, 8));
+    backend.open().unwrap();
+    backend.arm().unwrap();
+    let mut engine = Engine::new(cfg(8), &table, &backend);
+    engine.mark_output_prefilled();
+    assert_eq!(engine.prefill_output(&mut backend).unwrap(), 0);
+    assert_eq!(engine.output_prefill_frames(), 0);
+}

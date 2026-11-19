@@ -366,6 +366,8 @@ pub struct Engine {
     lookahead_frames: usize,
     /// Have we pushed the device-side zero prefill yet? See [`Engine::prefill_output`].
     prefilled: bool,
+    /// Frames the device accepted of this engine's own zero prefill.
+    prefill_frames: usize,
     /// Cap on `staged_out`, in frames: a backend refusing beyond this is stuck.
     max_staged_frames: usize,
     /// Running totals for the stall fault's own diagnosis: a stuck-output
@@ -486,6 +488,7 @@ impl Engine {
             loop_owner: caps.loop_owner,
             lookahead_frames: contract.min_lookahead_frames as usize,
             prefilled: false,
+            prefill_frames: 0,
             max_staged_frames,
             total_staged_frames: 0,
             total_accepted_frames: 0,
@@ -871,6 +874,14 @@ impl Engine {
         self.output.take_queue()
     }
 
+    /// Frames the device accepted of this engine's own zero prefill: 0 until
+    /// [`Engine::prefill_output`] has run, and 0 when the caller declared the
+    /// output primed. Read-only: a caller that states how many frames went
+    /// ahead of its first drive frame counts these.
+    pub fn output_prefill_frames(&self) -> usize {
+        self.prefill_frames
+    }
+
     pub fn prefill_output(&mut self, backend: &mut dyn Backend) -> Result<usize, StopReason> {
         if self.prefilled {
             return Ok(0);
@@ -896,7 +907,10 @@ impl Engine {
             let slice = &self.zero_block[sent * out_ch..want * out_ch];
             match backend.write_drive(slice) {
                 Ok(0) => break, // no room / not accepting: not fatal at prefill time
-                Ok(n) => sent += n.min(want - sent),
+                Ok(n) => {
+                    sent += n.min(want - sent);
+                    self.prefill_frames = sent;
+                }
                 Err(HalError::Disconnected(d)) => {
                     let _ = backend.emergency_stop();
                     return Err(StopReason::Disconnected(d));
