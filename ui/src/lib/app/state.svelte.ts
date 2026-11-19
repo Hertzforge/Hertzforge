@@ -1393,20 +1393,28 @@ export class ReportState {
 	/** The last issue recorded. */
 	issued = $state<Record<string, string> | null>(null);
 
+	/**
+	 * Whether Print is offered: in a browser, which prints the page in place and saves it as a PDF
+	 * from its dialog. The desktop app's web view does not print, so there the page would only be
+	 * opened in the browser to be printed; the saved HTML file does the same, opened there by hand.
+	 */
+	get canPrint(): boolean {
+		return !printsInBrowser();
+	}
+
 	/** Print the reader's page; the print dialog saves it as a PDF. */
 	async print(anyway = false): Promise<void> {
 		const name = this.name;
-		if (!name) return;
+		if (!name || !this.canPrint) return;
 		this.held = null;
 		await this.act('Preparing the page to print', async () => {
-			const res = await this.app.analysis.request<{ html: string | null; opened?: string; owed: string[]; index: { name: string; status: string }[] }>(
+			const res = await this.app.analysis.request<{ html: string | null; owed: string[]; index: { name: string; status: string }[] }>(
 				'report.print',
-				{ name, ...(anyway ? { anyway } : {}), ...(printsInBrowser() ? { browser: true } : {}) },
+				{ name, ...(anyway ? { anyway } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.html === null) this.held = { act: 'print', owed: res.owed, index: res.index };
-			// opened in the browser, which prints it; in place otherwise
-			else if (!res.opened) this.printing = res.html;
+			else this.printing = res.html;
 		});
 	}
 

@@ -1211,7 +1211,7 @@ bindings such as `@basis:ShapeSet` first) and `caption`.
 resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
 PDF. Its print stylesheet carries the margins the identity rides in. It makes `report.export`'s
 checks first and answers the same way: `html` null with `owed` and `index` until `anyway` is true.
-With `browser` true (the desktop app, whose web view does not print a page that asks to be) the service also writes the page to the temporary folder, opens it in the machine's default browser, which prints it, and gives its path as `opened`; Issue's `begin` takes the same flag. An issued report that has changed since is refused. `report.issue` is the Issue in three steps
+With `browser` true (for the desktop app, whose web view does not print a page that asks to be; the app offers no Print and sends the flag with Issue's `begin`) the service also writes the page to the temporary folder, opens it in the machine's default browser, which prints it, and gives its path as `opened`; Issue's `begin` takes the same flag. An issued report that has changed since is refused. `report.issue` is the Issue in three steps
 around that print. `begin` checks the report can be issued (Report Identity on, every required
 field entered, not already issued), makes the data index check `report.export` makes (answering
 `{"index":[...]}` alone when files are astray and `anyway` is not true), and gives the page to
