@@ -960,6 +960,8 @@ def save_channel_table(table: ChannelTable, group: h5py.Group) -> None:
     for k, (name, environment) in enumerate(table.environments.items()):
         sub = loops.create_group(str(k))
         sub.attrs['name'] = name
+        if environment.kind:
+            sub.attrs['kind'] = environment.kind
         sub.create_dataset('controls', data=np.asarray(environment.controls,
                                                       dtype=np.int64))
         sub.create_dataset('drives', data=np.asarray(environment.drives,
@@ -999,7 +1001,9 @@ def load_channel_table(group: h5py.Group) -> ChannelTable:
                     if 'response_transformation' in sub else None),
                 reference_transformation=(
                     sub['reference_transformation'][()]
-                    if 'reference_transformation' in sub else None))
+                    if 'reference_transformation' in sub else None),
+                # a table saved before the kind was kept has none
+                kind=str(sub.attrs.get('kind', '')))
     return ChannelTable(columns, environments=environments)
 
 

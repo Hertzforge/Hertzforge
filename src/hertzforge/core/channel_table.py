@@ -267,6 +267,11 @@ class Environment:
     reference_transformation : numpy.ndarray or None
         `(rows, len(drives))`: what it applied to its drive signals.
         None when it drove the channels themselves.
+    kind : str
+        What kind of test the loop ran ('random', 'sine', 'transient',
+        'modal' or 'time'), so a report on one kind shows that loop's
+        transformations and not another's from the same run. '' when
+        unknown, as in a table saved before the kind was kept.
     """
     # A combined run has one channel table and a loop per environment:
     # a sine and a random over the same hardware may control different
@@ -278,12 +283,14 @@ class Environment:
     drives: list[int] = field(default_factory=list)
     response_transformation: np.ndarray | None = None
     reference_transformation: np.ndarray | None = None
+    kind: str = ''
 
     def __post_init__(self) -> None:
         # a matrix typed as nested lists is a matrix from here on, so
         # the shape checks and the equality have one thing to look at
         self.controls = [int(n) for n in self.controls]
         self.drives = [int(n) for n in self.drives]
+        self.kind = str(self.kind or '').strip().lower()
         for form in TRANSFORMATION_FORMS:
             matrix = getattr(self, f'{form}_transformation')
             if matrix is not None:
@@ -295,6 +302,7 @@ class Environment:
             return NotImplemented
         return (list(self.controls) == list(other.controls)
                 and list(self.drives) == list(other.drives)
+                and self.kind == other.kind
                 and _same_matrix(self.response_transformation,
                                  other.response_transformation)
                 and _same_matrix(self.reference_transformation,
@@ -1353,7 +1361,8 @@ class ChannelTable:
             raise ValueError('an environment needs a name')
         checked = Environment(
             controls=[int(n) for n in environment.controls],
-            drives=[int(n) for n in environment.drives])
+            drives=[int(n) for n in environment.drives],
+            kind=environment.kind)
         for listed in ('controls', 'drives'):
             numbers = getattr(checked, listed)
             if len(set(numbers)) != len(numbers):

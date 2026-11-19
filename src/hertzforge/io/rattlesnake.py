@@ -1811,8 +1811,11 @@ def _record_environments(ds, table, drive_channels, scales_dims):
     names them (modal), else the table's drives, which is how the
     spectra find them too. A reference transformation whose columns do
     not fit those drives cannot be labeled and is left out with a
-    warning rather than imported over the wrong channels.
+    warning rather than imported over the wrong channels. Each loop
+    keeps the kind of test the file says it ran (`_environment_kinds`),
+    so a report on one kind shows that loop's transformations only.
     """
+    kinds = _environment_kinds(ds)
     for env_name, group in ds.groups.items():
         if 'control_channel_indices' not in group.variables:
             continue
@@ -1840,7 +1843,8 @@ def _record_environments(ds, table, drive_channels, scales_dims):
             controls=[int(i) + 1 for i in indices],
             drives=[d + 1 for d in drives],
             response_transformation=None if found is None else found[0],
-            reference_transformation=reference))
+            reference_transformation=reference,
+            kind=kinds.get(env_name) or ''))
 
 
 def _environment_rate(group, ds):

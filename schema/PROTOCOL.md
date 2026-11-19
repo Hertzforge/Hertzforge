@@ -967,7 +967,8 @@ A channel table may instead be sent as the control service's own rows: `channels
 rows in `channels.get`'s spelling (every field, and any optional member), in place of `columns`
 and `rows`, with `environments`, its control loops by name (each `{"controls","drives",
 "response_transformation","reference_transformation"}`: channel numbers in the controller's
-order, and each transformation a list of rows or null). The analysis service maps the rows onto
+order, and each transformation a list of rows or null; optionally `kind`, the kind of test the
+loop ran, such as `"random"` or `"sine"`, `""` or absent when unknown). The analysis service maps the rows onto
 the channel table's columns (`hertzforge.io.run_convert`, the one mapping, used both ways), and
 `tables.load` of a channel table answers `channels` and `environments` beside `columns` and
 `rows`, so a client that keeps the control rows never maps a column itself. A row's optional
