@@ -32,7 +32,10 @@ SPECIFICATION = Param('specification', 'Specification', 'enum',
 RECORD = Param('record', 'Specification record', 'integer', default=1, min=1, step=1)
 FIRST = Param('first', 'First PSD', 'enum', options_from='objects:psd')
 SECOND = Param('second', 'Second PSD', 'enum', options_from='objects:psd')
-SCALE = Param('scale', 'Scaling (blank detects it)', 'string', default='', unit='dB')
+# the level the run was at, as the report states it: -6 for a run at -6 dB, which
+# the comparison lifts by 6 dB. The field took that 6 and a -6 typed there sank the
+# run 6 dB further (Brandon, 2026-11-18)
+LEVEL = Param('level', 'Test level (blank detects it)', 'string', default='', unit='dB')
 
 TIME = v.axis('Time', 's', 'linear')
 #: the points a time trace is drawn with, every extreme kept
@@ -450,20 +453,23 @@ def _channel_row(channel: Any, reading: Any) -> dict:
 
 
 def comparison_scale(project: Any, params: dict[str, Any]) -> list[dict]:
-    """`project.comparison_scale`: hold the decibels a measured PSD is
-    scaled by when it is compared with a specification, on it and its
-    whole family (`Project.set_comparison_scale`), or with the field
-    blank go back to detecting it (`Project.comparison_scale`). The data is never changed."""
+    """`project.comparison_scale`: hold the level a measured PSD's run was
+    at, against full, so it is lifted by as much when it is compared with
+    a specification, on it and its whole family
+    (`Project.set_comparison_scale`, which takes the decibels added: the
+    level's negative), or with the field blank go back to detecting it
+    (`Project.comparison_scale`). The data is never changed."""
     spec_name, name = params['specification'], params['spectrum']
-    raw = params['scale'].strip().lower().removesuffix('db').strip()
+    raw = params['level'].strip().lower().removesuffix('db').strip()
     try:
-        value = int(raw) if raw else None
+        value = -int(raw) + 0 if raw else None
     except ValueError:
-        raise refused('Scaling is whole decibels — "+6", "-3", 0, or blank to detect it '
-                      'from the data') from None
+        raise refused('The test level is whole decibels against full — "-6", "-3", 0, or '
+                      'blank to detect it from the data') from None
     family = _refusing(project.set_comparison_scale, name, value)
     scale = project.comparison_scale(spec_name, name)
-    rows = [v.row('Comparison scale', float(scale), 'dB', 'info'),
+    rows = [v.row('Test level', float(-scale + 0), 'dB', 'info'),
+            v.row('Comparison scale', float(scale), 'dB', 'info'),
             v.row('Scaled', 'detected from the data' if value is None
                   else 'held: the data itself is unchanged', None, 'info'),
             v.row('Held on' if value is not None else 'Detected for', ', '.join(family), None,
@@ -1197,9 +1203,10 @@ OPERATIONS = (
         outputs=('spectrum', 'reading'), run=spec_composite),
     Operation(
         id='project.comparison_scale', title='Comparison Scaling', workspace='random',
-        summary='Hold the decibels a measured PSD is scaled by when it is compared with a '
-                'specification, or leave it blank to detect them; the data is not changed.',
-        params=(*PAIR, SCALE), outputs=('reading',), run=comparison_scale, edits=True),
+        summary='Hold the level a measured PSD\'s run was at, -6 for a run at -6 dB, so it is '
+                'lifted by as much against the specification, or leave it blank to detect it; '
+                'the data is not changed.',
+        params=(*PAIR, LEVEL), outputs=('reading',), run=comparison_scale, edits=True),
     Operation(
         id='project.spec_rms', title='Specification RMS', workspace='random',
         summary='The RMS level each channel of a specification asks for.',

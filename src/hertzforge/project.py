@@ -588,6 +588,7 @@ class Project(dict):
             for group in (object_groups or [])]
         #: what the last Work Up could not compute, (slot, why)
         self.last_work_up_skipped: list[tuple[str, str]] = []
+        self.last_work_up_refreshed: list[str] = []
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -8480,7 +8481,10 @@ class Project(dict):
         computation the data refuses (no drive channel for a coherence)
         is skipped, with its reason in `last_work_up_skipped`, and the
         rest still run. Nothing already present is made again, so calling
-        this twice adds nothing the second time.
+        this twice adds nothing the second time; but an object already
+        present that is out of date (its source's settings or values
+        changed since it was made, `stale`) is recomputed first, and its
+        name is in `last_work_up_refreshed`.
 
         It is journaled as one line, `project.work_up()`, the way
         `merge` is. The verbs it calls are the ones the guide describes,
@@ -8520,6 +8524,11 @@ class Project(dict):
                              'to work up: name the kind of test')
         added: list[str] = []
         self.last_work_up_skipped = []
+        # what is already here is brought up to date first: PSDs made
+        # before the averaging or the scale was changed were left as they
+        # were, and the report read them while it named the new frames
+        # (Brandon, 2026-11-18)
+        self.last_work_up_refreshed = self.refresh_stale()
 
         def make(verb, *args, **kwargs):
             names = verb(*args, **kwargs)
@@ -8573,8 +8582,15 @@ class Project(dict):
         def settled(record):
             # the FRFs and the coherence adopt the suggested averaging,
             # so PSDs made ahead of them on no averaging were one window
-            # over the whole record, and stale as soon as they were made
-            if self[record].averaging is None:
+            # over the whole record, and stale as soon as they were made.
+            # A random run's frames also go to its steady stretch when
+            # nobody chose where they start: a run folder's setup names
+            # the recipe and a count from the record's beginning, and
+            # that came through to the report undetected (Brandon,
+            # 2026-11-18). A burst record has no steady stretch to find.
+            own = self[record].averaging
+            random = project_type in ('Random Vibration', 'Random and Sine')
+            if own is None or (random and not own.start_set):
                 with contextlib.suppress(ValueError):
                     self[record].averaging = self[record].suggest_averaging()
 
@@ -9279,8 +9295,9 @@ class Project(dict):
     def refresh(self, name: Any) -> str:
         """Recompute a derived object in place, under its own name.
 
-        Links, the report's figures and the grids all refer to the
-        object by name, so replacing the value under that name keeps
+        What was set on the object itself (its comparison scale, its run
+        identity) is kept. Links, the report's
+        figures and the grids all refer to the object by name, so replacing the value under that name keeps
         every reference correct. Objects derived from this one then
         become stale by content, and are refreshed one at a time or all
         together with `refresh_stale`, never automatically. An object
@@ -9308,6 +9325,15 @@ class Project(dict):
                 f"{name!r} was computed from {source!r}, which is gone")
         verb, params = record['verb'], record.get('params', {})
         rebuilt = _RECOMPUTE[verb](self, source, params)
+        # what was set on the object itself is the user's, not the
+        # recipe's: a comparison scale lost on a refresh put a -6 dB run
+        # back on detection and the report read it as an under-test
+        # (Brandon, 2026-11-18)
+        was = self[name]
+        for setting in _HELD_ON_REFRESH:
+            value = getattr(was, setting, None)
+            if value is not None and hasattr(rebuilt, setting):
+                setattr(rebuilt, setting, value)
         self[name] = rebuilt
         record['state'] = self._analysis_state(source, verb, params)
         record.pop('source_print', None)
@@ -10231,6 +10257,10 @@ def _extract_again(project, source, params):
 
 #: how each verb rebuilds its object from the source, for `refresh` —
 #: the same core calls the verbs make, minus the add
+#: what a refresh carries from the object it replaces to the one it makes:
+#: settings made on the object itself, which its recipe does not hold
+_HELD_ON_REFRESH = ('scale_db', 'run_identity')
+
 _RECOMPUTE = {
     'compute_spectra': lambda p, s, k: p[s].compute_spectra(),
     'compute_psds': lambda p, s, k: p[s].compute_psds(),

@@ -205,3 +205,66 @@ def test_a_random_and_sine_run_works_up_both_halves():
     assert not [slot[0] for slot in project.missing()
                 if not slot[4] and slot[0] not in
                 ('Geometry', 'Photos', 'Channel Table', 'Multiple Coherence')]
+
+
+def test_a_random_run_whose_start_nobody_chose_is_framed_on_its_steady_stretch():
+    """A run folder's setup gives the recipe and a count from the record's
+    beginning; Auto Compute moves the frames to the steady stretch, as
+    the import of a controller file does (Brandon, 2026-11-18)."""
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    history = project['Time History']
+    detected = history.averaging
+    assert detected.start > 0
+    history.averaging = replace(detected, start=0.0, frames=10, start_set=False)
+    project.work_up('Random Vibration')
+    assert history.averaging == detected
+
+
+def test_a_start_chosen_by_hand_is_kept():
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    history = project['Time History']
+    chosen = replace(history.averaging, start=1.0, frames=10, start_set=True)
+    history.averaging = chosen
+    project.work_up('Random Vibration')
+    assert history.averaging == chosen
+
+
+def test_psds_made_before_the_averaging_changed_are_recomputed():
+    """Auto Compute brings what is already here up to date: PSDs computed
+    on the old frames were read by the report while it named the new
+    ones (Brandon, 2026-11-18)."""
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    psds = project.compute_psds('Time History')
+    before = project[psds].ordinate.copy()
+    history = project['Time History']
+    history.averaging = replace(history.averaging, start=10.0, frames=8, start_set=True)
+    assert psds in project.stale()
+    project.work_up('Random Vibration')
+    assert psds in project.last_work_up_refreshed
+    assert not project.stale()
+    assert not np.allclose(project[psds].ordinate, before)
+
+
+def test_a_recompute_keeps_the_comparison_scale():
+    """A -6 dB run's scale, set by hand, survives its PSDs being made again;
+    lost, the report read the run as an under-test (Brandon, 2026-11-18)."""
+    from dataclasses import replace
+
+    project = hertzforge.Project()
+    project.import_file(fixture_path('plate', 'random.nc4'))
+    psds = project.compute_psds('Time History')
+    project.set_comparison_scale(psds, 6)
+    history = project['Time History']
+    history.averaging = replace(history.averaging, start=10.0, frames=8, start_set=True)
+    project.work_up('Random Vibration')
+    assert psds in project.last_work_up_refreshed
+    assert project[psds].scale_db == 6
