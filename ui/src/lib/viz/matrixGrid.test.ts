@@ -13,6 +13,7 @@ import {
 	prepareGrid,
 	revealControl,
 	scrollWindow,
+	steppedCellView,
 	togglePin,
 	windowControls,
 	type GridWindowSpec
@@ -139,6 +140,51 @@ describe('what each cell draws', () => {
 		const cells = gridCells(2, 'coh_phase', block(2, 2), [own, null]);
 		expect(cells[0].curves.map((c) => c.role)).toEqual(['measured', 'reference', 'tolerance', 'tolerance', 'abort', 'abort']);
 		expect(cells[3].curves.map((c) => c.role)).toEqual(['reference', 'measured']);
+	});
+
+	it('a cross term is drawn stepped like the diagonal: flat across each bin, risers at the shared edges', () => {
+		const sdm = block(3, 6);
+		const rect = { x: 0, y: 0, w: 600, h: 100 };
+		const xr = { lo: 5, hi: 200, log: true };
+		const xsOf = (pts: Float32Array) => Array.from(pts.filter((_, i) => i % 2 === 0));
+		const path = (off: 'coh_phase' | 'csd', r: number, c: number, yr: { lo: number; hi: number; log: boolean }) => {
+			const cell = gridCells(3, off, sdm, [null, null, null]).find((x) => x.r === r && x.c === c)!;
+			return curvePoints(cell.curves.find((cv) => cv.role === 'measured')!, rect, xr, yr);
+		};
+		const lin = { lo: -180, hi: 180, log: false };
+		const diag = path('coh_phase', 1, 1, { lo: 0.1, hi: 100, log: true });
+		const cross = { coh: path('coh_phase', 0, 2, { lo: 0, hi: 1.05, log: false }), phase: path('coh_phase', 2, 0, lin), csd: path('csd', 0, 1, { lo: 0.1, hi: 100, log: true }) };
+		// two points per line, as the diagonal draws: left edge, right edge
+		expect(diag.length).toBe(4 * 6);
+		for (const [kind, pts] of Object.entries(cross)) {
+			expect(pts.length, kind).toBe(diag.length);
+			expect(xsOf(pts), kind).toEqual(xsOf(diag));
+			for (let i = 0; i < 6; i++) {
+				// horizontal across the bin
+				expect(pts[4 * i + 1], kind).toBe(pts[4 * i + 3]);
+				// the next bin starts where this one ends: the riser is vertical
+				if (i < 5) expect(pts[4 * i + 4], kind).toBe(pts[4 * i + 2]);
+			}
+		}
+	});
+
+	it('a coherence or phase cell opened full size is given the bins of its points; a density keeps its own', () => {
+		const view = (edges?: Float64Array): SpectrumView => ({
+			view: 'spectrum',
+			title: 'Coherence',
+			x: { label: 'Frequency', unit: 'Hz', scale: 'log' },
+			y: { label: 'Coherence', unit: '', scale: 'linear' },
+			series: [{ name: 'Measured', role: 'measured', x: F([10, 20, 40]), y: F([0.9, 0.8, 0.7]), ...(edges ? { shape: 'steps' as const, edges } : {}) }]
+		});
+		for (const kind of ['coh', 'phase'] as const) {
+			const s = steppedCellView(view(), kind).series[0];
+			expect(s.shape, kind).toBe('steps');
+			expect([...s.edges!], kind).toEqual([...edgesFromCenters(F([10, 20, 40]), true)]);
+		}
+		const own = F([5, 15, 30, 50]);
+		expect(steppedCellView(view(own), 'coh').series[0].edges).toBe(own);
+		const psd = view();
+		expect(steppedCellView(psd, 'psd')).toBe(psd);
 	});
 
 	it('edges sit between the centers, geometrically on a log axis', () => {
