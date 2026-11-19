@@ -27,7 +27,9 @@
 	function height(block: ReportPageBlock): number {
 		const view = block.views?.[0];
 		if (!view) return 240;
-		if (view.view === 'shape3d' || view.view === 'waterfall') return 380;
+		if (view.view === 'shape3d') return 380;
+		// a stage of every channel in depth, as wide as the page: room to read it
+		if (view.view === 'waterfall') return 520;
 		if (view.view === 'table' || view.view === 'bars' || view.view === 'reading') return 0;
 		// a coherence map or a MAC: tall enough that every row is labeled (the pane thins its
 		// labels below 13 px a row), with room under it for the tilted ticks and the legend
