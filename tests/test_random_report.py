@@ -733,7 +733,13 @@ def test_the_front_matter_says_only_what_the_project_holds():
     placed = hertzforge.random_vibration_run(
         fixture_path('plate', 'random.nc4'),
         geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
-    assert instrumentation_text(placed, placed.object_groups) == _INSTRUMENTATION_TEXT
+    # with excitation and response figures the geometry is drawn on them,
+    # not alone, and the sentence citing it alone goes with it
+    assert instrumentation_text(placed, placed.object_groups) == (
+        _INSTRUMENTATION_TEXT.replace(
+            'The test geometry ({{figure:Test geometry and measurement '
+            'locations}}) shows where the article was instrumented. The '
+            'excitation', 'The excitation'))
     assert instrumentation_text({}) == _INSTRUMENTATION_TEXT
 
 
@@ -906,14 +912,14 @@ def test_a_run_with_no_force_channels_cites_no_force_figure():
         geometry=fixture_path('plate', 'geometry.npz'), length_unit='m'))
     template = random_template(project, object_groups=project.object_groups)
     captions = [b['caption'] for b in template.blocks if b['kind'] == 'scene']
-    assert captions == ['Test geometry and measurement locations',
-                        'Response degrees of freedom (acceleration)']
+    assert captions == ['Response degrees of freedom (acceleration)']
     [prose] = [b['text'] for b in template.blocks if b['kind'] == 'text'
                and b['text'].startswith('## Test Article')]
     assert 'excitation' not in prose.lower()
     assert ('The response degrees of freedom ({{figure:Response degrees of '
             'freedom (acceleration)}}) mark every measured accelerometer '
             'direction.') in prose
+    assert 'Test geometry' not in prose
     page = render_html(template, project, object_groups=project.object_groups,
                        unit_system=hertzforge.SI)
     assert not re.search(r'\{\{[^}]*\}\}', page), \
@@ -978,3 +984,94 @@ def test_a_geometry_outside_the_basis_group_still_sorts_the_grid():
         r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
     control = next(b for b in payload['blocks'] if b['kind'] == 'grid')
     assert control['columns'] == ['Global Z']
+
+
+def _with_sensors(project):
+    """The placed plate run with a sensor model on every channel: a
+    uniaxial accelerometer on each acceleration row, a force sensor on
+    each force row."""
+    table = project['Channel Table']
+    for row, kind in enumerate(table.types()):
+        table.set_cell('model', row, '352A24' if kind == 'acceleration'
+                       else '208C02')
+    return project
+
+
+def _scenes(project):
+    """(caption, shape3d view) for each drawn scene of the project's
+    random report, as the report page draws it."""
+    from hertzforge.report.views import page_blocks
+
+    template = random_template(project, object_groups=project.object_groups)
+    drawn = []
+    for entry in page_blocks(template, project, hertzforge.SI,
+                             object_groups=project.object_groups):
+        for view in entry.get('views') or []:
+            if view.get('view') == 'shape3d':
+                drawn.append((entry.get('caption', ''), view))
+    return drawn
+
+
+def test_the_dof_figures_replace_the_geometry_and_carry_arrows_and_sensors():
+    """Three geometry figures where two say it all (Brandon, 2026-11-19):
+    the excitation and response figures draw the geometry, so it is not
+    drawn alone as well. Each carries the solid arrows of its own DOFs,
+    as the 3-D view draws them, and the bodies of the sensors that
+    measure its quantity."""
+    from hertzforge.core.sensors import place
+
+    project = _with_sensors(hertzforge.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m'))
+    template = random_template(project, object_groups=project.object_groups)
+    captions = [b['caption'] for b in template.blocks if b['kind'] == 'scene']
+    assert captions == ['Excitation degrees of freedom (force)',
+                        'Response degrees of freedom (acceleration)']
+    [prose] = [b['text'] for b in template.blocks if b['kind'] == 'text'
+               and b['text'].startswith('## Test Article')]
+    assert '{{figure:Test geometry' not in prose
+    assert prose.startswith('## Test Article and Instrumentation\n\n'
+                            'The excitation degrees of freedom')
+
+    drawn = _scenes(project)
+    assert len(drawn) == 2
+    table = project['Channel Table']
+    placed, _notes = place(table, project['Geometry'])
+    types = table.types()
+    for (_caption, view), quantity, inward in (
+            (drawn[0], 'force', 1), (drawn[1], 'acceleration', 0)):
+        rows = [r for r, kind in enumerate(types) if kind == quantity]
+        assert sorted(view['arrows']['labels']) == sorted(
+            table.dof_strings()[r] for r in rows)
+        assert set(view['arrows']['inward'].tolist()) == {inward}
+        assert set(view['arrows']['axes'].tolist()) == {2}, 'every DOF is Z'
+        own = [s for s in placed if types[s.rows[0]] == quantity]
+        assert own, 'the plate run has sensors of each quantity'
+        from hertzforge.drawing.viz.sensors import sensor_bodies
+        expected, _notes = sensor_bodies(own, project['Geometry'],
+                                         lambda node: 0)
+        assert len(view['bodies']['nodes']) == len(expected['nodes']), \
+            f'the {quantity} figure draws its own sensors and no others'
+
+
+def test_the_geometry_is_drawn_alone_when_no_dof_figure_can_be():
+    """With no record to read DOFs from there is no excitation or
+    response figure, and the geometry is drawn once, alone, with every
+    sensor of the channel table on it and no arrows."""
+    from hertzforge.core.sensors import place
+    from hertzforge.drawing.viz.sensors import sensor_bodies
+
+    project = _with_sensors(hertzforge.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m'))
+    project.remove(*[name for name in project.names
+                     if name not in ('Geometry', 'Channel Table')])
+    template = random_template(project, object_groups=project.object_groups)
+    captions = [b['caption'] for b in template.blocks if b['kind'] == 'scene']
+    assert captions == ['Test geometry and measurement locations']
+    [(_caption, view)] = _scenes(project)
+    assert 'arrows' not in view
+    every, _notes = place(project['Channel Table'], project['Geometry'])
+    assert len(every) == 12
+    expected, _notes = sensor_bodies(every, project['Geometry'], lambda node: 0)
+    assert len(view['bodies']['nodes']) == len(expected['nodes'])
