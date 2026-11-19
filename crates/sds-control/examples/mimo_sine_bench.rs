@@ -6,17 +6,23 @@
 //! # rehearsal: an in-process control service on the simulator's loopback 4 by 4
 //! cargo run -p sds-control --example mimo_sine_bench -- --rehearse [--python <python>] [--out <dir>]
 //! # the bench: a control service already running on the NI station, its devices named
-//! cargo run -p sds-control --example mimo_sine_bench -- --url ws://127.0.0.1:8765/ --ni <dev>[,<dev>...] [--python <python>]
+//! cargo run -p sds-control --example mimo_sine_bench -- --url ws://127.0.0.1:8765/ --ni <input module>,<output module> [--python <python>]
 //! ```
+//!
+//! Options for the bench: `--rows B1,B3` runs only the rows named (the first run on a station
+//! is B1 alone); `--out <dir>` keeps each row's end state and report as a file; `--fs <hz>`
+//! asks for a sample rate in place of the service's default; `--b1-seconds <s>` lengthens B1's
+//! dwell so a meter on the first output can read the tone; `--repeat <n>` runs each chosen
+//! row n times and prints how many of the n passed.
 //!
 //! The table is four control rows (inputs 1 to 4) and four drive rows (outputs 5 to 8), each
 //! drive at a 0.8 V ceiling or under and a 0.95 V abort, every reference 0.5 in its unit: no
 //! commanded drive passes 0.8 V peak, under the bench contract's 1.0 V, failure rows included.
 //! Before anything is configured on NI the driver checks every row's configuration and refuses
 //! to start if any drive's ceiling is over 0.8 V or its abort over 1.0 V (or either is missing);
-//! every row's largest drive is read from its report and a row over 0.8 V fails. On NI the drive
-//! rows are the first four outputs and the control rows the first four inputs of the devices
-//! named, in order; IEPE is off on every row.
+//! every row's largest drive is read from its report and a row over 0.8 V fails. On NI the
+//! control rows are bound to the first four inputs of the first device named and the drive rows
+//! to the first four outputs of the second, in order; IEPE is off on every row.
 //!
 //! The rows: B1 tone amplitude and phase between channels (a dwell with each control's own
 //! phase); B2 sweep timing; B3 dwell timing; B4 step timing; B5 the drive ceiling; B6 the change
@@ -25,7 +31,14 @@
 //! from `laws.list`), completed with its worst control error within 1.0 dB, the tolerance for an
 //! uncoupled loopback; B12 the level ladder (-12, -6 and 0 dB); B13 hold, resume and a manual
 //! frequency; B14 the finished run opening in the analysis side (converted by
-//! `hertzforge convert-run`).
+//! `hertzforge convert-run`); B15 B1's phases on a dwell at 73 Hz, where a slip of one update
+//! in the loop's delay shows as a phase error (at 100 Hz, B1's frequency, an update of 128
+//! frames at 12,800 Hz is one whole cycle and cannot be seen).
+//!
+//! Every row that runs a law which controls phase fails when its worst phase error is over
+//! 5 degrees and prints it. `paired` and `ratio` (and B10's law file, `ratio` built as a file)
+//! hold amplitude only, as their descriptions say: their rows print the phase error and are
+//! not failed on it.
 //!
 //! The rehearsal runs on the simulator's `sine-loopback-4x4`, the bench's twin: four outputs
 //! wired straight to four inputs (unity gain, a 0.8 ms delay, no coupling). On the simulator the
@@ -48,6 +61,10 @@ const REFERENCE: f64 = 0.5;
 const CONTRACT_V: f64 = 1.0;
 /// The worst control error a law may leave on an uncoupled loopback, dB (B11, B12).
 const LOOPBACK_TOLERANCE_DB: f64 = 1.0;
+/// The worst phase error a law that controls phase may leave, degrees.
+const PHASE_TOLERANCE_DEG: f64 = 5.0;
+/// The built-in laws that hold amplitude only and leave phase to the drive they start from.
+const AMPLITUDE_ONLY_LAWS: [&str; 2] = ["paired", "ratio"];
 /// The simulator's twin of the bench.
 const TWIN: &str = "sine-loopback-4x4";
 
@@ -199,6 +216,12 @@ struct Bench {
     rehearse: bool,
     rows: Vec<(String, bool, String)>,
     last_folder: Option<PathBuf>,
+    /// The folder each row's end state and report are kept in (`--out` on the bench).
+    out: Option<PathBuf>,
+    /// The finished state of the last run.
+    last_end: Value,
+    /// Whether the last configured row's law controls phase (its row is failed on phase).
+    phase_judged: bool,
 }
 
 impl Bench {
@@ -217,6 +240,8 @@ impl Bench {
             }
             return json!({"error": {"reason": "bench_drive_check", "message": why}});
         }
+        let law = cfg["control"]["law"]["id"].as_str().unwrap_or("matrix");
+        self.phase_judged = !AMPLITUDE_ONLY_LAWS.contains(&law);
         self.c
             .call("mimo_sine.configure", json!({"config": cfg}))
             .await
@@ -249,15 +274,58 @@ impl Bench {
             .unwrap_or(f64::NAN)
     }
 
-    /// A row, failed as well when its run played a drive over [`CEILING_V`].
+    /// The worst phase error of the last run's report, degrees (outside settle windows);
+    /// `None` when the report has none.
+    async fn worst_phase_deg(&mut self) -> Option<f64> {
+        let rep = self.c.ok("mimo_sine.report", json!({})).await["report"].clone();
+        rep["controls"].as_array().and_then(|v| {
+            v.iter()
+                .filter_map(|c| c["worst_phase_error_deg"].as_f64())
+                .reduce(f64::max)
+        })
+    }
+
+    /// A row, failed as well when its run played a drive over [`CEILING_V`], or when its law
+    /// controls phase and its worst phase error is over [`PHASE_TOLERANCE_DEG`].
     async fn judged_row(&mut self, id: &str, ok: bool, detail: String) {
         let peak = self.drive_peak().await;
         let under = peak <= CEILING_V + 1e-9;
-        self.row(
-            id,
-            ok && under,
-            format!("{detail}; largest drive {peak:.4} V"),
-        );
+        let phase = self.worst_phase_deg().await;
+        let phase_ok = !self.phase_judged || phase.is_none_or(|p| p <= PHASE_TOLERANCE_DEG);
+        let phase_words = match (phase, self.phase_judged) {
+            (None, _) => "no phase error read".to_owned(),
+            (Some(p), true) => format!("worst phase error {p:.2} deg"),
+            (Some(p), false) => {
+                format!("worst phase error {p:.2} deg (amplitude-only law, not judged)")
+            }
+        };
+        let pass = ok && under && phase_ok;
+        let detail = format!("{detail}; largest drive {peak:.4} V; {phase_words}");
+        if self.out.is_some() {
+            let rep = self.c.ok("mimo_sine.report", json!({})).await["report"].clone();
+            self.keep(id, pass, &detail, &rep);
+        }
+        self.row(id, pass, detail);
+    }
+
+    /// The row's end state and report as a file in the `--out` folder, named for the row.
+    fn keep(&self, id: &str, ok: bool, detail: &str, report: &Value) {
+        let Some(dir) = &self.out else { return };
+        let name: String = id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let body = json!({"row": id, "pass": ok, "detail": detail,
+                          "end": self.last_end, "report": report});
+        let written = std::fs::create_dir_all(dir).and_then(|()| {
+            std::fs::write(
+                dir.join(format!("{name}.json")),
+                serde_json::to_vec_pretty(&body).unwrap_or_default(),
+            )
+        });
+        if let Err(e) = written {
+            eprintln!("{id}: the row's file was not written: {e}");
+        }
     }
 
     /// Configure and start `cfg`; its finished state.
@@ -274,6 +342,7 @@ impl Bench {
         if let Some(f) = end["record"]["folder"].as_str() {
             self.last_folder = Some(PathBuf::from(f));
         }
+        self.last_end = end.clone();
         end
     }
 }
@@ -391,6 +460,16 @@ fn row_configs(rehearse: bool, laws: &[(String, Vec<String>)]) -> Vec<(String, V
                              "per_level": {"seconds": 2}, "full_level": {"seconds": 2}});
     out.push(("B12".into(), b12));
     out.push(("B13".into(), base(sweep(40.0, 80.0, 0.5), "matrix")));
+    out.push((
+        "B15".into(),
+        config(
+            dwell(73.0, 4.0),
+            "matrix",
+            [0.0, 30.0, 60.0, 90.0],
+            6.0,
+            rehearse,
+        ),
+    ));
     out
 }
 
@@ -405,25 +484,48 @@ async fn hold_resume_goto(b: &mut Bench, cfg: Value) -> (bool, String) {
     b.c.wait_phase("engaged", Duration::from_secs(300)).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let held = b.c.ok("mimo_sine.hold", json!({})).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let f0 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
-        .as_f64()
-        .unwrap_or(f64::NAN);
+    // On a station that runs in real time a request takes effect some updates later: wait
+    // for the frequency to stand still (at most 5 s), then see that it stays there.
+    let mut f0 = f64::NAN;
+    let asked = Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let f = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
+            .as_f64()
+            .unwrap_or(f64::NAN);
+        let still = (f - f0).abs() < 1e-6;
+        f0 = f;
+        if still || asked.elapsed() > Duration::from_secs(5) {
+            break;
+        }
+    }
+    let hold_s = asked.elapsed().as_secs_f64();
     tokio::time::sleep(Duration::from_millis(500)).await;
     let f1 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
         .as_f64()
         .unwrap_or(f64::NAN);
+    // The manual frequency: the tone has up to 5 s to arrive.
     let went = b.c.call("mimo_sine.goto", json!({"hz": 60.0})).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let f2 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
-        .as_f64()
-        .unwrap_or(f64::NAN);
+    let answered = went["result"]["frequency_hz"].clone();
+    let asked = Instant::now();
+    let mut f2 = f64::NAN;
+    while asked.elapsed() < Duration::from_secs(5) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        f2 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
+            .as_f64()
+            .unwrap_or(f64::NAN);
+        if (f2 - 60.0).abs() < 0.5 {
+            break;
+        }
+    }
+    let goto_s = asked.elapsed().as_secs_f64();
     b.c.ok("mimo_sine.resume", json!({})).await;
     tokio::time::sleep(Duration::from_millis(800)).await;
     let s3 = b.c.ok("mimo_sine.state", json!({})).await;
     let f3 = s3["frequency_hz"].as_f64().unwrap_or(f64::NAN);
     b.c.ok("mimo_sine.stop", json!({})).await;
     let end = b.c.finished(Duration::from_secs(60)).await;
+    b.last_end = end.clone();
     let ok = held["held"] == true
         && (f1 - f0).abs() < 1e-6
         && went.get("error").is_none()
@@ -434,7 +536,7 @@ async fn hold_resume_goto(b: &mut Bench, cfg: Value) -> (bool, String) {
     (
         ok,
         format!(
-            "{}; held at {f0:.3} Hz and still {f1:.3} Hz 0.5 s later, went to {f2:.3} Hz, resumed to {f3:.3} Hz",
+            "{}; held at {f0:.3} Hz ({hold_s:.2} s after the request) and still {f1:.3} Hz 0.5 s later, sent to 60 Hz (answered {answered}) and read {f2:.3} Hz after {goto_s:.2} s, resumed to {f3:.3} Hz",
             outcome(&end)
         ),
     )
@@ -487,6 +589,25 @@ async fn main() {
     };
     let rehearse = args.iter().any(|a| a == "--rehearse");
     let python = flag("--python").unwrap_or_else(|| "python3".into());
+    let only: Option<Vec<String>> = flag("--rows").map(|s| {
+        s.split(',')
+            .map(|r| r.trim().to_uppercase())
+            .filter(|r| !r.is_empty())
+            .collect()
+    });
+    let wanted = |id: &str| only.as_ref().is_none_or(|v| v.iter().any(|r| r == id));
+    let fs: Option<f64> = flag("--fs").map(|s| s.parse().expect("--fs <hz>"));
+    let b1_seconds: Option<f64> =
+        flag("--b1-seconds").map(|s| s.parse().expect("--b1-seconds <s>"));
+    let repeat: usize = flag("--repeat")
+        .map(|s| s.parse().expect("--repeat <n>"))
+        .unwrap_or(1)
+        .max(1);
+    let kept = if rehearse {
+        None
+    } else {
+        flag("--out").map(PathBuf::from)
+    };
     let url = if rehearse {
         let out = flag("--out").map(PathBuf::from).unwrap_or_else(|| {
             std::env::temp_dir().join(format!("msine-bench-{}", std::process::id()))
@@ -508,21 +629,38 @@ async fn main() {
     let mut c = Client::connect(&url).await;
     c.ok("session.claim", json!({"name": "MIMO Sine bench"}))
         .await;
+    // On NI: the input module then the output module, each row bound to its own channel.
+    let mut modules: Option<(String, String)> = None;
     if rehearse {
         c.ok("station.select", json!({"kind": "sim"})).await;
     } else {
         let devices: Vec<String> = flag("--ni")
-            .expect("--ni <device>[,<device>...]")
+            .expect("--ni <input module>,<output module>")
             .split(',')
             .map(str::to_owned)
             .collect();
-        c.ok("station.select", json!({"kind": "ni", "devices": devices}))
+        assert_eq!(
+            devices.len(),
+            2,
+            "--ni names the input module then the output module"
+        );
+        let station = c
+            .ok("station.select", json!({"kind": "ni", "devices": devices}))
             .await;
+        println!("station: {station}");
+        modules = Some((devices[0].clone(), devices[1].clone()));
     }
     let rev = c.ok("channels.get", json!({})).await["revision"].clone();
+    let physical = |i: u32, role: &str| match &modules {
+        None => Value::Null,
+        Some((_, ao)) if role == "drive" => {
+            json!({"device": ao, "channel": format!("ao{}", i - 5)})
+        }
+        Some((ai, _)) => json!({"device": ai, "channel": format!("ai{}", i - 1)}),
+    };
     let row = |i: u32, role: &str| {
         json!({"index": i, "enabled": true, "description": format!("{role} {i}"), "role": role,
-               "physical": null, "interface": "single_ended", "iepe_bias_v": null,
+               "physical": physical(i, role), "interface": "single_ended", "iepe_bias_v": null,
                "units": if role == "drive" { "V" } else { "g" }, "sensitivity_mv_per_eu": 1000,
                "range_max": if role == "drive" { 1 } else { 5 }, "polarity": "positive",
                "control_group": null,
@@ -537,7 +675,15 @@ async fn main() {
     // Every row's configuration, checked before anything is configured: on NI the driver
     // refuses to start if any could command a drive past the bench's limit.
     let laws = law_types(&mut c).await;
-    let plan = row_configs(rehearse, &laws);
+    let mut plan = row_configs(rehearse, &laws);
+    for (id, cfg) in &mut plan {
+        if let Some(f) = fs {
+            cfg["acquisition"] = json!({"fs_hz": f});
+        }
+        if let (true, Some(s)) = (id == "B1", b1_seconds) {
+            cfg["test"]["end"]["seconds"] = json!(s);
+        }
+    }
     let bad: Vec<String> = plan
         .iter()
         .filter_map(|(id, cfg)| could_pass(cfg).map(|w| format!("{id}: {w}")))
@@ -562,6 +708,9 @@ async fn main() {
         rehearse,
         rows: Vec::new(),
         last_folder: None,
+        out: kept,
+        last_end: Value::Null,
+        phase_judged: true,
     };
     println!(
         "MIMO Sine bench rows, {}",
@@ -576,260 +725,329 @@ async fn main() {
         plan.len()
     );
 
-    // B1: amplitude and phase between channels on a dwell.
-    let end = b.run(cfg_of("B1")).await;
-    let worst_db = b.worst_db().await;
-    let rep = b.c.ok("mimo_sine.report", json!({})).await["report"].clone();
-    let worst_ph = rep["controls"]
-        .as_array()
-        .map(|v| {
-            v.iter()
-                .filter_map(|c| c["worst_phase_error_deg"].as_f64())
-                .fold(0.0, f64::max)
-        })
-        .unwrap_or(f64::NAN);
-    b.judged_row(
-        "B1 tone amplitude and phase between channels",
-        outcome(&end) == "completed" && worst_db < 1.0 && worst_ph < 5.0,
-        format!(
-            "{}; worst error {worst_db:.2} dB, worst phase error {worst_ph:.2} deg (phases 0, 30, 60, 90)",
-            outcome(&end)
-        ),
-    )
-    .await;
-
-    // B2: sweep timing. 40 to 80 Hz at 4 oct/min is 15 s.
-    let end = b.run(cfg_of("B2")).await;
-    let at = end["end"]["at_s"].as_f64().unwrap_or(f64::NAN);
-    b.judged_row(
-        "B2 sweep timing",
-        outcome(&end) == "completed" && (at - 15.0).abs() < 0.5,
-        format!("{}; the sweep ended at {at:.3} s of 15 s", outcome(&end)),
-    )
-    .await;
-
-    // B3: dwell timing: 5 s at 100 Hz after the settle window.
-    let end = b.run(cfg_of("B3")).await;
-    let at = end["end"]["at_s"].as_f64().unwrap_or(f64::NAN);
-    b.judged_row(
-        "B3 dwell timing",
-        outcome(&end) == "completed" && (5.0..6.0).contains(&at),
-        format!(
-            "{}; the dwell ended at {at:.3} s (5 s and the settle window)",
-            outcome(&end)
-        ),
-    )
-    .await;
-
-    // B4: step timing: three steps of 2 s, each after its settle window.
-    let end = b.run(cfg_of("B4")).await;
-    let at = end["end"]["at_s"].as_f64().unwrap_or(f64::NAN);
-    b.judged_row(
-        "B4 step timing",
-        outcome(&end) == "completed" && end["steps"]["done"] == 3 && (6.0..9.0).contains(&at),
-        format!(
-            "{}; {} steps, ended at {at:.3} s (6 s and three settle windows)",
-            outcome(&end),
-            end["steps"]["done"]
-        ),
-    )
-    .await;
-
-    // B5: the drive ceiling: a reference the ceiling cannot reach.
-    let end = b.run(cfg_of("B5")).await;
-    let rep = b.c.ok("mimo_sine.report", json!({})).await["report"].clone();
-    let peak = b.drive_peak().await;
-    let over: u64 = rep["drives"]
-        .as_array()
-        .map(|v| {
-            v.iter()
-                .filter_map(|d| d["over_ceiling_ticks"].as_u64())
-                .sum()
-        })
-        .unwrap_or(0);
-    b.judged_row(
-        "B5 the drive ceiling",
-        peak <= 0.2 + 1e-6 && over > 0,
-        format!(
-            "{} (trip {}); largest drive {peak:.4} V against a 0.2 V ceiling, {over} ticks over it",
-            outcome(&end),
-            end["end"]["trip"]["kind"]
-        ),
-    )
-    .await;
-
-    // B6: the change cap: a reference that jumps 12 dB within four updates.
-    let end = b.run(cfg_of("B6")).await;
-    let capped = end["law"]["capped_ticks"].as_u64().unwrap_or(0);
-    let worst = b.worst_db().await;
-    b.judged_row(
-        "B6 the change cap",
-        outcome(&end) == "completed" && capped > 0,
-        format!(
-            "{}; a cap bound on {capped} ticks, worst error {worst:.2} dB",
-            outcome(&end)
-        ),
-    )
-    .await;
-
-    // B7: a control abort: ceilings that hold every control under its abort band.
-    let end = b.run(cfg_of("B7")).await;
-    b.judged_row(
-        "B7 a control abort",
-        outcome(&end) == "aborted" && end["end"]["trip"]["kind"] == "abort_band",
-        format!("{}; trip {}", outcome(&end), end["end"]["trip"]["kind"]),
-    )
-    .await;
-
-    // B8 and B9: the controlled stop and the abort.
-    for (id, verb, want) in [
-        ("B8 the controlled stop", "mimo_sine.stop", "operator_stop"),
-        ("B9 the abort", "mimo_sine.abort", "operator_abort"),
-    ] {
-        let r = b.configure(cfg_of("B8")).await;
-        assert!(r.get("error").is_none(), "{id}: {r}");
-        b.c.ok("mimo_sine.start", json!({})).await;
-        b.c.wait_phase("engaged", Duration::from_secs(300)).await;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        b.c.ok(verb, json!({})).await;
-        let end = b.c.finished(Duration::from_secs(60)).await;
-        let ramp = end["end"]["ramp_s"].clone();
-        b.judged_row(
-            id,
-            outcome(&end) == want,
-            format!("{}; ramp {ramp}", outcome(&end)),
+    for pass in 1..=repeat {
+        if repeat > 1 {
+            println!("pass {pass} of {repeat}");
+        }
+        // B1: amplitude and phase between channels on a dwell.
+        if wanted("B1") {
+            let end = b.run(cfg_of("B1")).await;
+            let worst_db = b.worst_db().await;
+            let rep = b.c.ok("mimo_sine.report", json!({})).await["report"].clone();
+            let worst_ph = rep["controls"]
+                .as_array()
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|c| c["worst_phase_error_deg"].as_f64())
+                        .fold(0.0, f64::max)
+                })
+                .unwrap_or(f64::NAN);
+            b.judged_row(
+            "B1 tone amplitude and phase between channels",
+            outcome(&end) == "completed" && worst_db < 1.0 && worst_ph < 5.0,
+            format!(
+                "{}; worst error {worst_db:.2} dB, worst phase error {worst_ph:.2} deg (phases 0, 30, 60, 90)",
+                outcome(&end)
+            ),
         )
         .await;
-    }
-
-    // B10: a law file arms and runs.
-    match law_file("hertzforge_law_mimo_sine_ratio") {
-        None => b.row(
-            "B10 a law file arms and runs",
-            false,
-            "the law file is not built; run scripts/build_laws.sh".into(),
-        ),
-        Some(p) => {
-            let id =
-                b.c.ok("laws.import", json!({"path": p.display().to_string()}))
-                    .await["law"]["id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
-            let mut cfg = cfg_of("B10");
-            cfg["control"]["law"]["id"] = json!(id);
-            let end = b.run(cfg).await;
+        }
+        // B2: sweep timing. 40 to 80 Hz at 4 oct/min is 15 s.
+        if wanted("B2") {
+            let end = b.run(cfg_of("B2")).await;
+            let at = end["end"]["at_s"].as_f64().unwrap_or(f64::NAN);
             b.judged_row(
-                "B10 a law file arms and runs",
-                outcome(&end) == "completed",
+                "B2 sweep timing",
+                outcome(&end) == "completed" && (at - 15.0).abs() < 0.5,
+                format!("{}; the sweep ended at {at:.3} s of 15 s", outcome(&end)),
+            )
+            .await;
+        }
+        // B3: dwell timing: 5 s at 100 Hz after the settle window.
+        if wanted("B3") {
+            let end = b.run(cfg_of("B3")).await;
+            let at = end["end"]["at_s"].as_f64().unwrap_or(f64::NAN);
+            b.judged_row(
+                "B3 dwell timing",
+                outcome(&end) == "completed" && (5.0..6.0).contains(&at),
                 format!(
-                    "{} (on NI it arms only once its check has passed)",
+                    "{}; the dwell ended at {at:.3} s (5 s and the settle window)",
+                    outcome(&end)
+                ),
+            )
+            .await;
+        }
+        // B4: step timing: three steps of 2 s, each after its settle window.
+        if wanted("B4") {
+            let end = b.run(cfg_of("B4")).await;
+            let at = end["end"]["at_s"].as_f64().unwrap_or(f64::NAN);
+            b.judged_row(
+                "B4 step timing",
+                outcome(&end) == "completed"
+                    && end["steps"]["done"] == 3
+                    && (6.0..9.0).contains(&at),
+                format!(
+                    "{}; {} steps, ended at {at:.3} s (6 s and three settle windows)",
+                    outcome(&end),
+                    end["steps"]["done"]
+                ),
+            )
+            .await;
+        }
+        // B5: the drive ceiling: a reference the ceiling cannot reach.
+        if wanted("B5") {
+            let end = b.run(cfg_of("B5")).await;
+            let rep = b.c.ok("mimo_sine.report", json!({})).await["report"].clone();
+            let peak = b.drive_peak().await;
+            let over: u64 = rep["drives"]
+                .as_array()
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|d| d["over_ceiling_ticks"].as_u64())
+                        .sum()
+                })
+                .unwrap_or(0);
+            b.judged_row(
+                "B5 the drive ceiling",
+                peak <= 0.2 + 1e-6 && over > 0,
+                format!(
+                "{} (trip {}); largest drive {peak:.4} V against a 0.2 V ceiling, {over} ticks over it",
+                outcome(&end),
+                end["end"]["trip"]["kind"]
+            ),
+            )
+            .await;
+        }
+        // B6: the change cap: a reference that jumps 12 dB within four updates.
+        if wanted("B6") {
+            let end = b.run(cfg_of("B6")).await;
+            let capped = end["law"]["capped_ticks"].as_u64().unwrap_or(0);
+            let worst = b.worst_db().await;
+            b.judged_row(
+                "B6 the change cap",
+                outcome(&end) == "completed" && capped > 0,
+                format!(
+                    "{}; a cap bound on {capped} ticks, worst error {worst:.2} dB",
+                    outcome(&end)
+                ),
+            )
+            .await;
+        }
+        // B7: a control abort: ceilings that hold every control under its abort band.
+        if wanted("B7") {
+            let end = b.run(cfg_of("B7")).await;
+            b.judged_row(
+                "B7 a control abort",
+                outcome(&end) == "aborted" && end["end"]["trip"]["kind"] == "abort_band",
+                format!("{}; trip {}", outcome(&end), end["end"]["trip"]["kind"]),
+            )
+            .await;
+        }
+        // B8 and B9: the controlled stop and the abort.
+        for (id, verb, want) in [
+            ("B8 the controlled stop", "mimo_sine.stop", "operator_stop"),
+            ("B9 the abort", "mimo_sine.abort", "operator_abort"),
+        ] {
+            if !wanted(&id[..2]) {
+                continue;
+            }
+            let r = b.configure(cfg_of("B8")).await;
+            assert!(r.get("error").is_none(), "{id}: {r}");
+            b.c.ok("mimo_sine.start", json!({})).await;
+            b.c.wait_phase("engaged", Duration::from_secs(300)).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            b.c.ok(verb, json!({})).await;
+            let end = b.c.finished(Duration::from_secs(60)).await;
+            b.last_end = end.clone();
+            let ramp = end["end"]["ramp_s"].clone();
+            b.judged_row(
+                id,
+                outcome(&end) == want,
+                format!("{}; ramp {ramp}", outcome(&end)),
+            )
+            .await;
+        }
+
+        // B10: a law file arms and runs.
+        if wanted("B10") {
+            match law_file("hertzforge_law_mimo_sine_ratio") {
+                None => b.row(
+                    "B10 a law file arms and runs",
+                    false,
+                    "the law file is not built; run scripts/build_laws.sh".into(),
+                ),
+                Some(p) => {
+                    let id =
+                        b.c.ok("laws.import", json!({"path": p.display().to_string()}))
+                            .await["law"]["id"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned();
+                    // On hardware a law file arms only with a passed check of this exact file.
+                    let checked = if b.rehearse {
+                        Ok(())
+                    } else {
+                        let r = b.c.call("laws.check", json!({"id": id})).await;
+                        match r.get("error") {
+                            Some(e) => Err(format!("laws.check was refused: {e}")),
+                            None if r["result"]["report"]["passed"] == true => Ok(()),
+                            None => Err("laws.check ran and the file did not pass".to_owned()),
+                        }
+                    };
+                    match checked {
+                        Err(why) => b.row("B10 a law file arms and runs", false, why),
+                        Ok(()) => {
+                            let mut cfg = cfg_of("B10");
+                            cfg["control"]["law"]["id"] = json!(id);
+                            let end = b.run(cfg).await;
+                            // The file is `ratio`, which holds amplitude only.
+                            b.phase_judged = false;
+                            b.judged_row(
+                                "B10 a law file arms and runs",
+                                outcome(&end) == "completed",
+                                format!(
+                                    "{} (on NI it arms only once its check has passed)",
+                                    outcome(&end)
+                                ),
+                            )
+                            .await;
+                        }
+                    }
+                }
+            }
+        }
+        // B11: each built-in law on every test type it accepts, within the loopback's tolerance.
+        if wanted("B11") {
+            for (law, types) in &laws {
+                for t in types {
+                    let id = format!("B11 {law} {t}");
+                    let end = b.run(cfg_of(&id)).await;
+                    let worst = b.worst_db().await;
+                    b.judged_row(
+                        &format!("B11 {law} on a {t}"),
+                        outcome(&end) == "completed" && worst <= LOOPBACK_TOLERANCE_DB,
+                        format!(
+                            "{}{}; worst error {worst:.2} dB (tolerance {LOOPBACK_TOLERANCE_DB} dB)",
+                            outcome(&end),
+                            end["end"]["trip"]["kind"]
+                                .as_str()
+                                .map(|k| format!(", trip {k}"))
+                                .unwrap_or_default()
+                        ),
+                    )
+                    .await;
+                }
+            }
+        }
+        // B12: the level ladder: -12, -6 and 0 dB, each rung held, the last at full level.
+        if wanted("B12") {
+            b.c.events.clear();
+            let end = b.run(cfg_of("B12")).await;
+            let worst = b.worst_db().await;
+            let rungs: Vec<f64> =
+                b.c.events
+                    .iter()
+                    .filter(|e| e["topic"] == "mimo_sine.state")
+                    .filter_map(|e| e["data"]["level_db"].as_f64())
+                    .fold(Vec::new(), |mut v, l| {
+                        if v.last() != Some(&l) {
+                            v.push(l);
+                        }
+                        v
+                    });
+            let reached = |l: f64| rungs.iter().any(|x| (x - l).abs() < 1e-6);
+            b.judged_row(
+                "B12 the level ladder",
+                outcome(&end) == "completed"
+                    && end["level_db"].as_f64() == Some(0.0)
+                    && worst <= LOOPBACK_TOLERANCE_DB,
+                format!(
+                "{}; ended at {} dB, levels seen {rungs:?} (all three: {}), worst error {worst:.2} dB",
+                outcome(&end),
+                end["level_db"],
+                reached(-12.0) && reached(-6.0) && reached(0.0)
+            ),
+            )
+            .await;
+        }
+        // B13: hold, resume and a manual frequency on a sweep.
+        if wanted("B13") {
+            let row = hold_resume_goto(&mut b, cfg_of("B13")).await;
+            b.judged_row("B13 hold, resume and a manual frequency", row.0, row.1)
+                .await;
+        }
+        // B14: the finished run opens in the analysis side.
+        if wanted("B14") {
+            match b.last_folder.clone() {
+                None => b.row(
+                    "B14 the finished run opens in the analysis side",
+                    false,
+                    "no run folder".into(),
+                ),
+                Some(f) => {
+                    let out = std::process::Command::new(&python)
+                        .args(["-m", "hertzforge", "convert-run"])
+                        .arg(&f)
+                        .output();
+                    let (ok, words) = match out {
+                        Ok(o) => (
+                            o.status.success(),
+                            String::from_utf8_lossy(if o.status.success() {
+                                &o.stdout
+                            } else {
+                                &o.stderr
+                            })
+                            .lines()
+                            .last()
+                            .unwrap_or("")
+                            .to_owned(),
+                        ),
+                        Err(e) => (false, e.to_string()),
+                    };
+                    let hforge = std::fs::read_dir(&f)
+                        .map(|d| {
+                            d.filter_map(|e| e.ok())
+                                .any(|e| e.path().extension().is_some_and(|x| x == "hforge"))
+                        })
+                        .unwrap_or(false);
+                    b.row(
+                        "B14 the finished run opens in the analysis side",
+                        ok && hforge,
+                        format!("{}: {words}", f.display()),
+                    );
+                }
+            }
+        }
+        // B15: B1's phases on a dwell at 73 Hz, where a slip of one update would show.
+        if wanted("B15") {
+            let end = b.run(cfg_of("B15")).await;
+            let worst_db = b.worst_db().await;
+            b.judged_row(
+                "B15 tone phase between channels at 73 Hz",
+                outcome(&end) == "completed" && worst_db < 1.0,
+                format!(
+                    "{}; worst error {worst_db:.2} dB (phases 0, 30, 60, 90)",
                     outcome(&end)
                 ),
             )
             .await;
         }
     }
-
-    // B11: each built-in law on every test type it accepts, within the loopback's tolerance.
-    for (law, types) in &laws {
-        for t in types {
-            let id = format!("B11 {law} {t}");
-            let end = b.run(cfg_of(&id)).await;
-            let worst = b.worst_db().await;
-            b.judged_row(
-                &format!("B11 {law} on a {t}"),
-                outcome(&end) == "completed" && worst <= LOOPBACK_TOLERANCE_DB,
-                format!(
-                    "{}{}; worst error {worst:.2} dB (tolerance {LOOPBACK_TOLERANCE_DB} dB)",
-                    outcome(&end),
-                    end["end"]["trip"]["kind"]
-                        .as_str()
-                        .map(|k| format!(", trip {k}"))
-                        .unwrap_or_default()
-                ),
-            )
-            .await;
-        }
-    }
-
-    // B12: the level ladder: -12, -6 and 0 dB, each rung held, the last at full level.
-    b.c.events.clear();
-    let end = b.run(cfg_of("B12")).await;
-    let worst = b.worst_db().await;
-    let rungs: Vec<f64> =
-        b.c.events
-            .iter()
-            .filter(|e| e["topic"] == "mimo_sine.state")
-            .filter_map(|e| e["data"]["level_db"].as_f64())
-            .fold(Vec::new(), |mut v, l| {
-                if v.last() != Some(&l) {
-                    v.push(l);
-                }
-                v
-            });
-    let reached = |l: f64| rungs.iter().any(|x| (x - l).abs() < 1e-6);
-    b.judged_row(
-        "B12 the level ladder",
-        outcome(&end) == "completed"
-            && end["level_db"].as_f64() == Some(0.0)
-            && worst <= LOOPBACK_TOLERANCE_DB,
-        format!(
-            "{}; ended at {} dB, levels seen {rungs:?} (all three: {}), worst error {worst:.2} dB",
-            outcome(&end),
-            end["level_db"],
-            reached(-12.0) && reached(-6.0) && reached(0.0)
-        ),
-    )
-    .await;
-
-    // B13: hold, resume and a manual frequency on a sweep.
-    let row = hold_resume_goto(&mut b, cfg_of("B13")).await;
-    b.judged_row("B13 hold, resume and a manual frequency", row.0, row.1)
-        .await;
-
-    // B14: the finished run opens in the analysis side.
-    match b.last_folder.clone() {
-        None => b.row(
-            "B14 the finished run opens in the analysis side",
-            false,
-            "no run folder".into(),
-        ),
-        Some(f) => {
-            let out = std::process::Command::new(&python)
-                .args(["-m", "hertzforge", "convert-run"])
-                .arg(&f)
-                .output();
-            let (ok, words) = match out {
-                Ok(o) => (
-                    o.status.success(),
-                    String::from_utf8_lossy(if o.status.success() {
-                        &o.stdout
-                    } else {
-                        &o.stderr
-                    })
-                    .lines()
-                    .last()
-                    .unwrap_or("")
-                    .to_owned(),
-                ),
-                Err(e) => (false, e.to_string()),
-            };
-            let hforge = std::fs::read_dir(&f)
-                .map(|d| {
-                    d.filter_map(|e| e.ok())
-                        .any(|e| e.path().extension().is_some_and(|x| x == "hforge"))
-                })
-                .unwrap_or(false);
-            b.row(
-                "B14 the finished run opens in the analysis side",
-                ok && hforge,
-                format!("{}: {words}", f.display()),
-            );
-        }
-    }
     let passed = b.rows.iter().filter(|r| r.1).count();
     println!("{passed} of {} rows passed", b.rows.len());
+    if repeat > 1 {
+        let mut ids: Vec<&str> = Vec::new();
+        for r in &b.rows {
+            if !ids.contains(&r.0.as_str()) {
+                ids.push(&r.0);
+            }
+        }
+        for id in ids {
+            let runs: Vec<bool> = b.rows.iter().filter(|r| r.0 == id).map(|r| r.1).collect();
+            let ok = runs.iter().filter(|p| **p).count();
+            println!("{id:<44} {ok} of {} passed", runs.len());
+        }
+    }
     // Every drive at zero at the end: no run is left live.
     let s = b.c.ok("mimo_sine.state", json!({})).await;
     assert_ne!(s["state"], "running");

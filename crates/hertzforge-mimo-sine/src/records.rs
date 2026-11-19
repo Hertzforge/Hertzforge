@@ -242,8 +242,9 @@ pub enum EventKind {
     Held { by_law: bool },
     /// The schedule resumed.
     Resumed,
-    /// The operator moved the frequency.
-    ManualFrequency,
+    /// The operator sent the tone to `to_hz` (the event's frequency is
+    /// where it was).
+    ManualFrequency { to_hz: f64 },
     /// The limit channels began to hold the reference down: the depth they
     /// allow of it.
     NotchIn { depth: f64 },
@@ -274,7 +275,7 @@ impl EventKind {
             EventKind::Level => "level",
             EventKind::Held { .. } => "held",
             EventKind::Resumed => "resumed",
-            EventKind::ManualFrequency => "manual_frequency",
+            EventKind::ManualFrequency { .. } => "manual_frequency",
             EventKind::NotchIn { .. } => "notch_in",
             EventKind::NotchOut => "notch_out",
             EventKind::NotchedReferenceRefused => "notched_reference_refused",

@@ -2,11 +2,12 @@
 //! zero.
 //!
 //! The service is handed the station's backend and channel table, the setup
-//! and the law's factory. [`MimoSineService::arm`] opens and configures the
-//! station; [`MimoSineService::identify`] plays the identification through the
-//! station's engine and parks the station; [`MimoSineService::engage`] builds
-//! the law (off the real-time path) and the core and brings the station back;
-//! [`MimoSineService::run_batches`] runs the engine in bounded batches of
+//! and the law's factory. [`MimoSineService::arm`] opens, configures and arms
+//! the station; [`MimoSineService::identify`] plays the identification through
+//! the station's engine and parks the station; [`MimoSineService::engage`]
+//! builds the law (off the real-time path) and the core and brings the station
+//! back; [`MimoSineService::run_batches`] starts it and runs the engine in
+//! bounded batches of
 //! ticks, each under `catch_unwind`, as single-shaker Sine does. A panic on
 //! the run thread issues the station's emergency stop at once and ends the
 //! run; there is no resume. An operator stop and every trip walk the drive
@@ -16,6 +17,27 @@
 //! Nothing here touches a file. Records go to the caller through the record
 //! channels ([`MimoSineService::take_records`]), sent from the loop with a call
 //! that never waits.
+//!
+//! # Starting a station that runs in real time
+//!
+//! A hardware station's output plays on its own clock whether or not it is
+//! fed, and an output that has run dry takes no more drive. So the station is
+//! never left running between the service's calls: each phase (the probe, the
+//! measured shot, the engaged run) starts it immediately before its first
+//! update, with everything that phase needs already built, and the caller's
+//! own work (opening a record, drawing a screen) happens while it is parked.
+//!
+//! The delay between a drive frame and its response is the frames ahead of it
+//! in the output. The identification measures that delay once and the law is
+//! told it, so it must be the same at every start of a run. On a station that
+//! runs in real time ([`EngineOptions::real_time`]) the service writes a
+//! lead-in of zeros before every start, the lookahead plus one block, and the
+//! engine writes nothing of its own: the station's own start silence then has
+//! nothing to add, and the frames ahead of the first drive frame are the
+//! lead-in and the engine's queue, whenever the first update comes. Each start
+//! is reported ([`StationStart`]); a lead-in the station does not take whole,
+//! or an engaged start whose count differs from the identification's, ends
+//! the run on a fault that says so.
 
 use crate::core::{reference_at, Command, CoreParts, CoreState, MimoSineCore, ShakerRating, Slots};
 use crate::ident::{self, Estimate};
@@ -85,7 +107,8 @@ impl std::error::Error for ServiceError {}
 pub enum ServiceState {
     /// Built, nothing opened.
     Idle,
-    /// The station is configured and running, at zero drive.
+    /// The station is configured and armed; nothing runs until the
+    /// identification starts it.
     Armed,
     /// The identification is done and passed its gate; the station is parked.
     Identified,
@@ -124,6 +147,11 @@ pub struct EngineOptions {
     pub record_capacity: usize,
     /// Events the caller's channel holds before one is dropped.
     pub event_capacity: usize,
+    /// The station's output runs on its own clock whether or not it is fed
+    /// (a hardware station): every start is led in by the service. `false`
+    /// is a station that steps with the service (the simulator), where the
+    /// engine writes its own prefill on its first update.
+    pub real_time: bool,
 }
 
 impl EngineOptions {
@@ -139,6 +167,7 @@ impl EngineOptions {
             law_budget: None,
             record_capacity: 1 << 16,
             event_capacity: 4096,
+            real_time: station.is_hardware(),
         }
     }
 }
@@ -150,6 +179,9 @@ pub struct IdentificationReport {
     pub identification: LawIdentification,
     /// The drive-to-response lag taken out, samples.
     pub lag_frames: usize,
+    /// The frames the station had accepted ahead of the first drive frame at
+    /// the start the lag was measured on (see [`StationStart`]).
+    pub frames_ahead: usize,
     /// The level it was taken at, dB against full level, stated by response:
     /// the largest measured peak at a control over the largest peak of the
     /// full-level reference. `None` when the reference has no amplitude.
@@ -174,6 +206,77 @@ pub struct IdentificationReport {
     /// resonance's own time constants the sweep spends inside its bandwidth,
     /// flagged under two.
     pub sweep_rate_warning: Vec<SweepRateReading>,
+}
+
+/// The phase a start of the station begins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartPhase {
+    /// The probe and the measured shot on one start (a station that steps
+    /// with the service).
+    Identification,
+    /// The identification's probe.
+    Probe,
+    /// The identification's measured shot: the start its lag is measured on.
+    MeasuredShot,
+    /// The engaged run.
+    Engaged,
+}
+
+impl StartPhase {
+    /// The stable record name.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StartPhase::Identification => "identification",
+            StartPhase::Probe => "probe",
+            StartPhase::MeasuredShot => "measured_shot",
+            StartPhase::Engaged => "engaged",
+        }
+    }
+
+    /// The phase in words.
+    pub fn words(&self) -> &'static str {
+        match self {
+            StartPhase::Identification => "the identification",
+            StartPhase::Probe => "the identification's probe",
+            StartPhase::MeasuredShot => "the identification's measured shot",
+            StartPhase::Engaged => "the engaged run",
+        }
+    }
+}
+
+/// One start of the station: what it held ahead of the phase's first drive
+/// frame, counted from what the station accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StationStart {
+    pub phase: StartPhase,
+    /// Frames of zeros the service wrote before the start (the lead-in).
+    pub lead_in_frames: usize,
+    /// Frames of zeros the engine's own prefill wrote (a station that steps
+    /// with the service).
+    pub prefill_frames: usize,
+    /// Frames of zeros in the engine's queue ahead of the first drive frame.
+    pub queue_frames: usize,
+}
+
+impl StationStart {
+    /// The frames ahead of the phase's first drive frame.
+    pub fn frames_ahead(&self) -> usize {
+        self.lead_in_frames + self.prefill_frames + self.queue_frames
+    }
+}
+
+/// The words for the engine's stop `reason`. An output that takes no drive
+/// for several updates in a row is said in plain words: on a station that
+/// runs in real time, it is an output that ran dry.
+pub fn station_stop_words(reason: &StopReason) -> String {
+    match reason {
+        StopReason::BackendError(m) if m.starts_with("drive output stalled") => format!(
+            "the drive output ran dry: the station played every frame it had been given \
+             before the next was written, and an output that has run dry takes no more \
+             drive, so the run was stopped ({m})"
+        ),
+        other => format!("{other:?}"),
+    }
 }
 
 /// The identification's step: plays its rows, records every input frame.
@@ -346,6 +449,13 @@ pub struct MimoSineService {
     parked: bool,
     drained: u32,
     station_note: Option<String>,
+    /// The phase whose start waits for the first `run_batches`.
+    pending_start: Option<StartPhase>,
+    /// A start on a station that steps with the service, counted after its
+    /// first update (the engine's own prefill runs inside it).
+    uncounted: Option<StationStart>,
+    starts: Vec<StationStart>,
+    starts_taken: usize,
 }
 
 impl MimoSineService {
@@ -399,6 +509,10 @@ impl MimoSineService {
             parked: false,
             drained: 0,
             station_note: None,
+            pending_start: None,
+            uncounted: None,
+            starts: Vec::new(),
+            starts_taken: 0,
         })
     }
 
@@ -437,6 +551,18 @@ impl MimoSineService {
         self.station_note.as_deref()
     }
 
+    /// Every start of the station so far, counted.
+    pub fn starts(&self) -> &[StationStart] {
+        &self.starts
+    }
+
+    /// The starts not taken before, once each: for the run's timeline.
+    pub fn take_starts(&mut self) -> Vec<StationStart> {
+        let new = self.starts[self.starts_taken..].to_vec();
+        self.starts_taken = self.starts.len();
+        new
+    }
+
     /// The mailbox the loop reads every update: stop, hold, resume, manual
     /// frequency, manual level. Clone it to command from another thread.
     pub fn commands(&self) -> SyncSender<Command> {
@@ -454,7 +580,9 @@ impl MimoSineService {
         self.sink.dropped()
     }
 
-    /// Open and configure the station and start it at zero drive.
+    /// Open, configure and arm the station. It is not started: each phase
+    /// starts it immediately before its first update, so whatever the caller
+    /// does next happens while nothing plays.
     pub fn arm(&mut self) -> Result<(), ServiceError> {
         if self.state != ServiceState::Idle {
             return Err(ServiceError::State(
@@ -487,9 +615,119 @@ impl MimoSineService {
         }
         self.actual = Some(actual);
         self.backend.arm().map_err(st)?;
-        self.backend.start().map_err(st)?;
         self.state = ServiceState::Armed;
         Ok(())
+    }
+
+    /// Start the station for `phase`, its engine built and its first frames
+    /// ready. On a station that runs in real time, the lead-in goes first:
+    /// zeros of the lookahead plus one block, so the station plays them while
+    /// the first block is acquired and its own start adds nothing; the engine
+    /// is told the output is primed, so nothing else goes ahead of the first
+    /// drive frame. Refused, with nothing started, when the station does not
+    /// take the lead-in whole, or when an engaged start would hold a different
+    /// count ahead of its first drive frame than the identification measured
+    /// its lag with.
+    fn start_station(&mut self, phase: StartPhase) -> Result<(), ServiceError> {
+        let st = |e: hertzforge_hal::HalError| ServiceError::Station(e.to_string());
+        let engine = self.engine.as_mut().expect("the phase's engine is built");
+        let queue = engine.health().output_queued;
+        let mut start = StationStart {
+            phase,
+            lead_in_frames: 0,
+            prefill_frames: 0,
+            queue_frames: queue,
+        };
+        if self.opts.real_time {
+            let lookahead = self
+                .backend
+                .caps()
+                .output_buffer
+                .map_or(0, |o| o.min_lookahead_frames as usize);
+            let block = self.actual.expect("armed").block_frames.max(1);
+            // The station's room before the start. `Some(0)` from a parked
+            // station is the unknown (a query it could not answer), not a
+            // full one: ask for the lead-in and let the accept count answer.
+            let room = self.backend.output_space();
+            let want = match room {
+                Some(r) if r > 0 => (lookahead + block).min(r),
+                _ => lookahead + block,
+            };
+            let out_ch = self.slots.as_ref().expect("built with slots").out_channels;
+            let zeros = vec![0.0f32; want * out_ch.max(1)];
+            let mut written = 0usize;
+            while written < want {
+                match self.backend.write_drive(&zeros[written * out_ch..]) {
+                    Ok(0) => break,
+                    Ok(n) => written += n.min(want - written),
+                    Err(e) => return Err(st(e)),
+                }
+            }
+            if written < want || written < lookahead {
+                return Err(ServiceError::Station(format!(
+                    "the station took {written} of the {want} frames written ahead of the start \
+                     of {}, under the {lookahead} it must hold to start; the frames ahead of the \
+                     first drive frame would not be the ones counted, so it was not started",
+                    phase.words()
+                )));
+            }
+            if let Some(r) = room.filter(|r| *r > 0) {
+                let after = self.backend.output_space();
+                if after != Some(r - written) {
+                    return Err(ServiceError::Station(format!(
+                        "the station reported {after:?} frames of room after taking {written} of \
+                         {r}; it holds frames the service did not write, so the frames ahead \
+                         of the first drive frame of {} are not known and it was not started",
+                        phase.words()
+                    )));
+                }
+            }
+            engine.mark_output_prefilled();
+            start.lead_in_frames = written;
+            self.check_start(&start)?;
+            self.starts.push(start);
+        } else {
+            self.uncounted = Some(start);
+        }
+        self.backend.start().map_err(st)?;
+        self.parked = false;
+        Ok(())
+    }
+
+    /// An engaged start must hold what the identification's measured shot
+    /// held ahead of its first drive frame: that is the delay the law is
+    /// told.
+    fn check_start(&self, start: &StationStart) -> Result<(), ServiceError> {
+        if start.phase != StartPhase::Engaged {
+            return Ok(());
+        }
+        let Some(rep) = self.ident.as_ref() else {
+            return Ok(());
+        };
+        if start.frames_ahead() != rep.frames_ahead {
+            return Err(ServiceError::Station(format!(
+                "the engaged run would start with {} frames ahead of its first drive frame and \
+                 the identification measured its lag with {}; every phase the run reads would \
+                 be off by the difference, so it was not run",
+                start.frames_ahead(),
+                rep.frames_ahead
+            )));
+        }
+        Ok(())
+    }
+
+    /// Count a start on a station that steps with the service, once the
+    /// engine's first update has written its prefill.
+    fn count_start(&mut self) -> Result<(), ServiceError> {
+        let Some(mut start) = self.uncounted.take() else {
+            return Ok(());
+        };
+        start.prefill_frames = self
+            .engine
+            .as_ref()
+            .map_or(0, |e| e.output_prefill_frames());
+        self.starts.push(start);
+        self.check_start(&start)
     }
 
     fn fresh_engine(&mut self) -> Result<(), ServiceError> {
@@ -535,16 +773,25 @@ impl MimoSineService {
             if report.reason != StopReason::InputEnded {
                 self.state = ServiceState::Ended(Outcome::Station);
                 let _ = self.backend.emergency_stop();
-                return Err(ServiceError::Station(format!("{:?}", report.reason)));
+                return Err(ServiceError::Station(station_stop_words(&report.reason)));
+            }
+            if let Err(e) = self.count_start() {
+                self.state = ServiceState::Ended(Outcome::Station);
+                let _ = self.backend.emergency_stop();
+                return Err(e);
             }
         }
         Ok(())
     }
 
+    /// Play `rows` and then `extra` frames of zeros, recording the inputs;
+    /// with `start`, the station is started for that phase first, the step
+    /// already built.
     fn play_ident(
         &mut self,
         rows: &[Vec<f64>],
         extra: usize,
+        start: Option<StartPhase>,
     ) -> Result<Vec<Vec<f64>>, ServiceError> {
         let slots = self.slots.clone().expect("built with slots");
         let mut step = IdentStep::new(
@@ -554,6 +801,9 @@ impl MimoSineService {
             slots.in_channels,
             extra,
         );
+        if let Some(phase) = start {
+            self.start_station(phase)?;
+        }
         self.pump(&mut step, IdentStep::done)?;
         Ok(slots
             .controls
@@ -602,15 +852,25 @@ impl MimoSineService {
             .unwrap_or_else(|| crate::setup::IdentificationSettings::default_frames(m))
             .max(m);
         let idf = |e: String| ServiceError::Identification(e);
+        let real_time = self.opts.real_time;
+        let block = self.actual.expect("armed").block_frames.max(1);
         self.fresh_engine()?;
-        // The probe.
+        // The probe. On a station that runs in real time it plays out and the
+        // station is parked while the measured shot is computed, which takes
+        // longer than the output holds; it is started again for the shot.
         let probe_rms: Vec<f64> = ceil
             .iter()
             .map(|c| c * ident::PROBE_RMS_OF_CEILING)
             .collect();
         let probe = ident::excitation(n, &band, &probe_rms, &ceil, 1, self.opts.seed ^ 0x9e37)
             .map_err(idf)?;
-        let resp = self.play_ident(&probe, 0)?;
+        let resp = if real_time {
+            let r = self.play_ident(&probe, DRAIN_BLOCKS * block, Some(StartPhase::Probe))?;
+            self.park();
+            r
+        } else {
+            self.play_ident(&probe, 0, Some(StartPhase::Identification))?
+        };
         let peaks = ident::measured_peaks(&resp[..nc], n, 1);
         let grid_f: Vec<f64> = band
             .iter()
@@ -629,9 +889,18 @@ impl MimoSineService {
         // The measured shot, then zeros until the station has played it all.
         let rows =
             ident::excitation(n, &band, &rms, &ceil, realizations, self.opts.seed).map_err(idf)?;
-        let block = self.actual.expect("armed").block_frames.max(1);
-        let resp = self.play_ident(&rows, DRAIN_BLOCKS * block)?;
+        let shot_start = if real_time {
+            self.backend
+                .arm()
+                .map_err(|e| ServiceError::Station(e.to_string()))?;
+            self.fresh_engine()?;
+            Some(StartPhase::MeasuredShot)
+        } else {
+            None
+        };
+        let resp = self.play_ident(&rows, DRAIN_BLOCKS * block, shot_start)?;
         self.park();
+        let frames_ahead = self.starts.last().map_or(0, StationStart::frames_ahead);
         let lag = ident::measure_lag(&rows, &resp, n);
         let est: Estimate =
             ident::estimate(&rows, &resp, n, realizations, fs, &band, lag).map_err(idf)?;
@@ -655,6 +924,7 @@ impl MimoSineService {
         self.ident = Some(IdentificationReport {
             identification: id,
             lag_frames: lag,
+            frames_ahead,
             level_db,
             drive_rms_v,
             band_coherence,
@@ -815,9 +1085,10 @@ impl MimoSineService {
         self.core = Some(core);
         if self.parked {
             // Back to the state the identification started from: closed,
-            // opened, configured as before and started, so the station's own
-            // buffer holds nothing from before and the drive-to-response lag
-            // is the one the identification measured.
+            // opened, configured as before and armed, so the station's own
+            // buffer holds nothing from before. It is started by the first
+            // `run_batches`, with the count ahead of the first drive frame
+            // checked against the identification's.
             let st = |e: hertzforge_hal::HalError| ServiceError::Station(e.to_string());
             let block = self.actual.expect("armed").block_frames;
             self.backend.close().map_err(st)?;
@@ -830,10 +1101,9 @@ impl MimoSineService {
                 ));
             }
             self.backend.arm().map_err(st)?;
-            self.backend.start().map_err(st)?;
-            self.parked = false;
         }
         self.fresh_engine()?;
+        self.pending_start = Some(StartPhase::Engaged);
         self.state = ServiceState::Running;
         Ok(())
     }
@@ -844,6 +1114,14 @@ impl MimoSineService {
     pub fn run_batches(&mut self, batches: u32) -> Result<bool, ServiceError> {
         if self.state != ServiceState::Running {
             return Ok(false);
+        }
+        if let Some(phase) = self.pending_start.take() {
+            if let Err(e) = self.start_station(phase) {
+                let _ = self.backend.emergency_stop();
+                self.station_note = Some(e.to_string());
+                self.state = ServiceState::Ended(Outcome::Station);
+                return Ok(false);
+            }
         }
         let slots = self.slots.clone().expect("built with slots");
         for _ in 0..batches {
@@ -876,11 +1154,17 @@ impl MimoSineService {
                 Ok(r) if r.reason != StopReason::InputEnded => {
                     // The engine already stopped the station where its rule says so.
                     let _ = self.backend.emergency_stop();
-                    self.station_note = Some(format!("{:?}", r.reason));
+                    self.station_note = Some(station_stop_words(&r.reason));
                     self.state = ServiceState::Ended(Outcome::Station);
                     return Ok(false);
                 }
                 Ok(_) => {}
+            }
+            if let Err(e) = self.count_start() {
+                let _ = self.backend.emergency_stop();
+                self.station_note = Some(e.to_string());
+                self.state = ServiceState::Ended(Outcome::Station);
+                return Ok(false);
             }
             if let Some(o) = ended {
                 // The drive is at zero: the batch just run played zeros on top

@@ -224,3 +224,30 @@ fn mimo_sine_a_law_request_is_recorded_and_honoured_only_when_allowed() {
         t.sweep_oct_per_min
     );
 }
+
+/// A manual frequency's event says where the tone was sent; its frequency is
+/// where the tone was when the request was read.
+#[test]
+fn mimo_sine_a_manual_frequency_event_says_where_the_tone_was_sent() {
+    let s = SineStructure::Linear4x4;
+    let mut svc = engaged(s, setup(s, sweep(2.0), "matrix"), law("matrix"), NOISE);
+    let (_rt, re) = svc.take_records().unwrap();
+    let cmd = svc.commands();
+    for _ in 0..(1.0 * FS / 512.0) as usize {
+        svc.run_batches(1).unwrap();
+    }
+    cmd.send(Command::GoTo(200.0)).unwrap();
+    for _ in 0..(0.5 * FS / 512.0) as usize {
+        svc.run_batches(1).unwrap();
+    }
+    let sent: Vec<(f64, f64)> = re
+        .try_iter()
+        .filter_map(|e| match e.kind {
+            EventKind::ManualFrequency { to_hz } => Some((to_hz, e.frequency_hz)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].0, 200.0, "sent to");
+    assert!(sent[0].1 < 150.0, "it was at {} Hz", sent[0].1);
+}

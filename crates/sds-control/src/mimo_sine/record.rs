@@ -477,6 +477,7 @@ pub fn identification_results(
     frf.insert("convention".into(), Value::from("file"));
     frf.insert("description".into(), Value::from(words.clone()));
     frf.insert("lag_frames".into(), Value::from(rep.lag_frames));
+    frf.insert("frames_ahead".into(), Value::from(rep.frames_ahead));
     let mut c = described("coherence", freq_axis(), json!({"responses": rows}));
     c.insert(
         "description".into(),
@@ -532,6 +533,7 @@ pub fn identification_json(rep: &IdentificationReport, law: Option<&LawSetup>) -
     json!({
         "level_db": rep.level_db.map(num),
         "lag_frames": rep.lag_frames,
+        "frames_ahead": rep.frames_ahead,
         "record_len": rep.record_len,
         "realizations": rep.realizations,
         "line_spacing_hz": num(rep.line_spacing_hz),

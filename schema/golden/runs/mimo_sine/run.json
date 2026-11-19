@@ -123,6 +123,7 @@
   "identification": {
     "level_db": -17.957222959437576,
     "lag_frames": 266,
+    "frames_ahead": 8,
     "record_len": 4096,
     "realizations": 4,
     "line_spacing_hz": 4,
