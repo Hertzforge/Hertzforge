@@ -60,7 +60,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
-import { baseName, confirmFirst, desktopRunFiles, isProjectFile } from '$lib/project/files';
+import { baseName, confirmFirst, desktopPrint, desktopRunFiles, isProjectFile } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
@@ -1405,7 +1405,11 @@ export class ReportState {
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.html === null) this.held = { act: 'print', owed: res.owed, index: res.index };
-			else this.printing = res.html;
+			else {
+				const elsewhere = desktopPrint();
+				if (elsewhere) await elsewhere(res.html, name);
+				else this.printing = res.html;
+			}
 		});
 	}
 
@@ -1427,7 +1431,9 @@ export class ReportState {
 			} else if (step === 'begin') {
 				this.issuing = res.status ?? 'issued';
 				this.issued = null;
-				this.printing = res.html ?? null;
+				const elsewhere = desktopPrint();
+				if (elsewhere && res.html) await elsewhere(res.html, name);
+				else this.printing = res.html ?? null;
 			} else {
 				this.issuing = null;
 				if (res.entry) this.issued = res.entry;
