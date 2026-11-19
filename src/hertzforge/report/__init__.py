@@ -3687,9 +3687,24 @@ def _table_block(block, source, geometry=None):
     asking what is in a channel table cannot answer differently. The
     caption is this end's business.
     """
+    from ..core.channel_table import TRANSFORMATION_FORMS, ChannelTable
     from ..core.shapes import ShapeSet
-    from ..core.tables import table_of
+    from ..core.tables import table_of, transformation_table
 
+    form = block.get('form')
+    if form is not None:
+        # a control loop's transformation, drawn only while the loop
+        # still holds it: a table re-imported without one leaves the
+        # block unrendered rather than an empty grid
+        held = (source.environments.get(block.get('environment', ''))
+                if isinstance(source, ChannelTable) else None)
+        if (form not in TRANSFORMATION_FORMS or held is None
+                or held.matrix(form) is None):
+            return None
+        headers, rows = transformation_table(source, block['environment'],
+                                             form)
+        return {'kind': 'table', 'caption': block.get('caption', ''),
+                'headers': headers, 'rows': rows}
     built = table_of(source, geometry)
     if built is None:
         return None
