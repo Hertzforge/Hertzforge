@@ -436,19 +436,41 @@ async fn hold_resume_goto(b: &mut Bench, cfg: Value) -> (bool, String) {
     b.c.wait_phase("engaged", Duration::from_secs(300)).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let held = b.c.ok("mimo_sine.hold", json!({})).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let f0 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
-        .as_f64()
-        .unwrap_or(f64::NAN);
+    // On a station that runs in real time a request takes effect some updates later: wait
+    // for the frequency to stand still (at most 5 s), then see that it stays there.
+    let mut f0 = f64::NAN;
+    let asked = Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let f = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
+            .as_f64()
+            .unwrap_or(f64::NAN);
+        let still = (f - f0).abs() < 1e-6;
+        f0 = f;
+        if still || asked.elapsed() > Duration::from_secs(5) {
+            break;
+        }
+    }
+    let hold_s = asked.elapsed().as_secs_f64();
     tokio::time::sleep(Duration::from_millis(500)).await;
     let f1 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
         .as_f64()
         .unwrap_or(f64::NAN);
+    // The manual frequency: the tone has up to 5 s to arrive.
     let went = b.c.call("mimo_sine.goto", json!({"hz": 60.0})).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let f2 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
-        .as_f64()
-        .unwrap_or(f64::NAN);
+    let answered = went["result"]["frequency_hz"].clone();
+    let asked = Instant::now();
+    let mut f2 = f64::NAN;
+    while asked.elapsed() < Duration::from_secs(5) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        f2 = b.c.ok("mimo_sine.state", json!({})).await["frequency_hz"]
+            .as_f64()
+            .unwrap_or(f64::NAN);
+        if (f2 - 60.0).abs() < 0.5 {
+            break;
+        }
+    }
+    let goto_s = asked.elapsed().as_secs_f64();
     b.c.ok("mimo_sine.resume", json!({})).await;
     tokio::time::sleep(Duration::from_millis(800)).await;
     let s3 = b.c.ok("mimo_sine.state", json!({})).await;
@@ -466,7 +488,7 @@ async fn hold_resume_goto(b: &mut Bench, cfg: Value) -> (bool, String) {
     (
         ok,
         format!(
-            "{}; held at {f0:.3} Hz and still {f1:.3} Hz 0.5 s later, went to {f2:.3} Hz, resumed to {f3:.3} Hz",
+            "{}; held at {f0:.3} Hz ({hold_s:.2} s after the request) and still {f1:.3} Hz 0.5 s later, sent to 60 Hz (answered {answered}) and read {f2:.3} Hz after {goto_s:.2} s, resumed to {f3:.3} Hz",
             outcome(&end)
         ),
     )
