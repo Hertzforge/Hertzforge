@@ -270,3 +270,20 @@ def test_a_written_export_says_what_it_left_out_and_what_the_check_found(project
     project[name].remove([0, 1])
     answer = reports.export(project, {'name': name, 'path': str(tmp_path / 'b')})
     assert answer['note'].startswith('Checked ') and 'match' in answer['note']
+
+
+def test_the_desktop_app_has_its_page_printed_in_the_browser(project, monkeypatch, validate):
+    """The desktop app's web view does not print a page that asks to be, so the
+    app asks its service to open the page in the default browser, which does."""
+    from pathlib import Path
+
+    name = reports.generate(project, {})
+    opened = []
+    monkeypatch.setattr(reports, '_open_file', lambda path, platform, subprocess: opened.append(path))
+    done = reports.print_page(project, {'name': name, 'anyway': True, 'browser': True})
+    validate(done, 'reportPrintResult')
+    assert opened == [done['opened']]
+    page = Path(done['opened']).read_text(encoding='utf-8')
+    assert page == done['html'] and 'hertzforge-print' in page, 'the page asks for the print dialog'
+    assert 'opened' not in reports.print_page(project, {'name': name, 'anyway': True})
+    assert len(opened) == 1, 'without the flag nothing is opened'

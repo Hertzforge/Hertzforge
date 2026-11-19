@@ -16,7 +16,6 @@
 
 #[cfg(target_os = "macos")]
 mod pasted_files;
-mod print_page;
 mod probe;
 mod run_files;
 mod save_file;
@@ -392,7 +391,6 @@ fn main() {
         run_files::data_folder,
         run_files::set_data_folder,
         run_files::show_folder,
-        print_page::print_page,
         run_files::opened_files
     ]);
     #[cfg(all(target_os = "macos", feature = "e2e"))]
@@ -405,7 +403,6 @@ fn main() {
         run_files::data_folder,
         run_files::set_data_folder,
         run_files::show_folder,
-        print_page::print_page,
         run_files::opened_files
     ]);
     #[cfg(all(not(target_os = "macos"), feature = "e2e"))]
@@ -416,7 +413,6 @@ fn main() {
         run_files::data_folder,
         run_files::set_data_folder,
         run_files::show_folder,
-        print_page::print_page,
         run_files::opened_files
     ]);
     #[cfg(all(not(target_os = "macos"), not(feature = "e2e")))]
@@ -425,7 +421,6 @@ fn main() {
         run_files::data_folder,
         run_files::set_data_folder,
         run_files::show_folder,
-        print_page::print_page,
         run_files::opened_files
     ]);
     let app = builder

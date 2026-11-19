@@ -255,6 +255,49 @@ def _printable(page: str) -> str:
     return page.replace('</body>', body + '</body>', 1)
 
 
+def _in_browser(page: str, name: str) -> str:
+    """`page` written to the temporary folder as `<name>.html` and opened in this
+    machine's default browser, which prints it (the page asks for the dialog
+    itself). Returns the file's path.
+
+    The desktop app's web view does not print a page that asks to be (WebKit
+    leaves `window.print()` to the app embedding it), so the app's Print or Save
+    as PDF did nothing; the app's own analysis service, on the same machine,
+    opens the page where printing works."""
+    import re
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.gettempdir()) / 'Hertzforge print'
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r'[^\w ().-]', '_', name).strip().strip('.') or 'Report'
+    path = folder / f'{stem}.html'
+    path.write_text(page, encoding='utf-8')
+    _open_file(str(path), sys.platform, subprocess)
+    return str(path)
+
+
+def _open_file(path: str, platform: str, subprocess: Any) -> None:
+    """Open `path` with the system's handler for it, without waiting."""
+    if platform == 'darwin':
+        subprocess.Popen(['open', path])
+    elif platform.startswith('win'):
+        os.startfile(path)  # the system's own handler for an .html file (Windows only)
+    else:
+        subprocess.Popen(['xdg-open', path])
+
+
+def _delivered(page: str, name: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """The printable page as the answer carries it: `html`, and with `browser`
+    true the page opened in the browser too and its `opened` path."""
+    printable = _printable(page)
+    if params.get('browser') is True:
+        return {'html': printable, 'opened': _in_browser(printable, name)}
+    return {'html': printable}
+
+
 def print_page(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
     """`report.print`: the reader's page, light, as it is printed: drawn at
     print resolution and asking for the print dialog once its figures are
@@ -263,21 +306,25 @@ def print_page(project: Any, params: Mapping[str, Any], units: Any = None) -> di
     'owed', 'index'}`. First the checks an export makes (`export_checks`):
     unless `anyway`, a report that owes sections or whose indexed files do
     not all match answers with them and `html` null, for the shell to ask.
-    Refused when the report was issued and has changed since."""
+    With `browser` true the page is also opened in the default browser, which
+    prints it, and its path is `opened` (`_in_browser`). Refused when the
+    report was issued and has changed since."""
     name = _report(project, params, 'report.print')
     checks = export_checks(project, name)
     if (checks['owed'] or checks['index']) and not _anyway(params, 'report.print'):
         return {'html': None, **checks}
     try:
-        return {'html': _printable(project._viewer_export(name, units)), 'owed': [], 'index': []}
+        page = project._viewer_export(name, units)
     except ValueError as error:
         raise refused(str(error)) from None
+    return {**_delivered(page, name, params), 'owed': [], 'index': []}
 
 
 def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[str, Any]:
     """`report.issue`, in three steps around the print the shell makes.
     `begin` checks the report can be issued (`issue_ready`) and gives the
-    page to print, which says issued; the report itself is unchanged.
+    page to print, which says issued, opened in the browser as well with
+    `browser` true; the report itself is unchanged.
     `record` reads the PDF printed from it at `path`, records the issue
     with the SHA-256 of the PDF and of the page (`record_issue`), which is
     what makes the report issued, and gives the record's entry. `cancel`
@@ -309,7 +356,7 @@ def issue(project: Any, params: Mapping[str, Any], units: Any = None) -> dict[st
         finally:
             unmark(report, before)
         _PENDING[id(report)] = (status, page)
-        return {'html': _printable(page), 'status': status}
+        return {**_delivered(page, name, params), 'status': status}
     pending = _PENDING.get(id(report))
     if pending is None:
         raise refused(f'{name} is not waiting to be issued; begin the issue first')

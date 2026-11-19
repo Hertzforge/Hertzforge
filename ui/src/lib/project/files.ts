@@ -329,13 +329,12 @@ export function desktopRunFiles(): import('$lib/app/runFiles.svelte').DesktopRun
 }
 
 /**
- * The desktop app prints a report's page in the system's browser (`print_page`): its own web view
- * does not print a page that asks to be. Null in a browser, where the page prints in place.
+ * Whether a report's page is printed in the system's browser and not in place: in the desktop app,
+ * whose web view does not print a page that asks to be. Its own analysis service, on the same
+ * machine, opens the page there (`report.print` with `browser`).
  */
-export function desktopPrint(): ((html: string, name: string) => Promise<string>) | null {
-	const core = tauri()?.core;
-	if (!core?.invoke || !tauri()?.dialog) return null;
-	return (html, name) => core.invoke<string>('print_page', { html, name });
+export function printsInBrowser(): boolean {
+	return Boolean(tauri()?.core?.invoke && tauri()?.dialog);
 }
 
 /** The files dragged out of the window this session, which a drop back on it leaves alone. */
