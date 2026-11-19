@@ -16,7 +16,7 @@ mod common;
 use common::{flat, law};
 use hertzforge_channel_table::{Channel, ChannelRole, ChannelTable};
 use hertzforge_mimo_sine::records::TickRecord;
-use hertzforge_mimo_sine::service::{EngineOptions, MimoSineService, ServiceState};
+use hertzforge_mimo_sine::service::{EngineOptions, MimoSineService, ServiceState, StartPhase};
 use hertzforge_mimo_sine::*;
 use hertzforge_module_abi::StationClass;
 use hertzforge_sine::scheduler::{DwellFor, DwellPlan, LadderConfig, RungFor};
@@ -63,7 +63,8 @@ mod double {
         pub first_call_after: u64,
         /// The first read after the start finds no input yet.
         pub first_read_empty: bool,
-        /// Writes made before the start are taken up to this many frames.
+        /// Before the start the output holds at most this many frames (its
+        /// room is reported and taken to that).
         pub prestart_cap: Option<usize>,
     }
 
@@ -105,7 +106,6 @@ mod double {
         next_script: Option<StartScript>,
         first_call: Option<u64>,
         first_read_empty: bool,
-        prestart_cap: Option<usize>,
         written_before: usize,
         starts: Vec<StartSeen>,
         running_at_return: Vec<&'static str>,
@@ -197,16 +197,6 @@ mod double {
             self.lock().starts.clone()
         }
 
-        /// Whether the station's tasks are running now.
-        pub fn running(&self) -> bool {
-            self.lock().task == Task::Running
-        }
-
-        /// The milliseconds `frames` frames last at the double's rate.
-        pub fn frames_of_ms(&self, ms: f64) -> u64 {
-            (ms * 1e-3 * self.lock().p.fs_hz).round() as u64
-        }
-
         /// Notes the test made of calls that returned with the station running.
         pub fn note_running_at_return(&self, what: &'static str) {
             let mut s = self.lock();
@@ -243,7 +233,6 @@ mod double {
             next_script: None,
             first_call: None,
             first_read_empty: false,
-            prestart_cap: None,
             written_before: 0,
             starts: Vec::new(),
             running_at_return: Vec::new(),
@@ -354,7 +343,6 @@ mod double {
             s.refill_store();
             s.first_call = Some(script.first_call_after);
             s.first_read_empty = script.first_read_empty;
-            s.prestart_cap = None;
             Ok(())
         }
 
@@ -409,9 +397,8 @@ mod double {
                 let cap = s
                     .next_script
                     .and_then(|x| x.prestart_cap)
-                    .or(s.prestart_cap)
                     .unwrap_or(usize::MAX);
-                accepted = accepted.min(cap.saturating_sub(s.written_before));
+                accepted = accepted.min(cap.saturating_sub(s.buffered()));
                 s.written_before += accepted;
             }
             s.buffer.extend(&drive[..accepted * n]);
@@ -424,7 +411,13 @@ mod double {
             if s.dry {
                 return Some(0);
             }
-            Some(s.p.buffer_frames.saturating_sub(s.buffered()))
+            let mut room = s.p.buffer_frames.saturating_sub(s.buffered());
+            if s.task != Task::Running {
+                if let Some(cap) = s.next_script.and_then(|x| x.prestart_cap) {
+                    room = room.min(cap.saturating_sub(s.buffered()));
+                }
+            }
+            Some(room)
         }
 
         fn poll_status(&mut self) -> BackendStatus {
@@ -538,6 +531,9 @@ fn service(setup: MimoSineSetup, backend: Box<dyn hertzforge_hal::Backend>) -> M
         EngineOptions {
             block_frames: Some(BLOCK),
             law_budget: Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+            // The station runs in real time; its class is the simulator's
+            // only so the engine's timing budgets do not read the wall clock.
+            real_time: true,
             ..EngineOptions::new(StationClass::HertzforgeSim)
         },
     )
@@ -661,4 +657,154 @@ fn mimo_sine_an_early_first_tick_at_engage_does_not_move_the_phase() {
         }
     }
     assert!(failed.is_empty(), "{failed:?}");
+}
+
+/// A start whose first update comes later than the lead-in lasts (768
+/// frames, 60 ms at 12,800 Hz) finds the output dry; the run ends on a fault
+/// that says so in plain words, and nothing more is driven.
+#[test]
+fn mimo_sine_a_start_that_finds_the_output_dry_ends_on_a_fault_that_says_so() {
+    let (backend, h) = double::station(Params::default());
+    let mut svc = service(setup(60.0, 2.0), backend);
+    svc.arm().expect("arms");
+    h.script_next_start(StartScript {
+        first_call_after: (0.09 * FS) as u64,
+        ..Default::default()
+    });
+    let e = svc
+        .identify()
+        .map(|r| r.gate_passed)
+        .unwrap_err()
+        .to_string();
+    println!("{e}");
+    assert!(e.contains("the drive output ran dry"), "{e}");
+    assert!(h.starts()[0].went_dry);
+    assert!(matches!(
+        svc.state(),
+        ServiceState::Ended(records::Outcome::Station)
+    ));
+}
+
+/// A station that does not take the whole lead-in would have its own start
+/// add silence the service did not count: refused before anything starts.
+#[test]
+fn mimo_sine_a_lead_in_the_station_does_not_take_whole_is_a_named_fault() {
+    let (backend, h) = double::station(Params::default());
+    let mut svc = service(setup(60.0, 2.0), backend);
+    svc.arm().expect("arms");
+    h.script_next_start(StartScript {
+        prestart_cap: Some(300),
+        ..Default::default()
+    });
+    let e = svc
+        .identify()
+        .map(|r| r.gate_passed)
+        .unwrap_err()
+        .to_string();
+    println!("{e}");
+    assert!(
+        e.contains("the station took 300 of the 300 frames written ahead of the start of the identification's probe, under the 512"),
+        "{e}"
+    );
+    assert!(
+        h.starts().is_empty(),
+        "nothing was started: {:?}",
+        h.starts()
+    );
+}
+
+/// Every start of a run holds the same frames ahead of its first drive
+/// frame, counted and reported; an engaged start that would hold another
+/// count than the identification measured its lag with is not run.
+#[test]
+fn mimo_sine_every_start_holds_the_count_the_identification_measured_with() {
+    let (backend, h) = double::station(Params::default());
+    let mut svc = service(setup(60.0, 1.0), backend);
+    svc.arm().expect("arms");
+    let rep = svc.identify().expect("identifies").clone();
+    // The lead-in is the whole 768 frame buffer (the 512 frame lookahead and
+    // one 256 frame block), and the engine's queue holds the lookahead.
+    assert_eq!(rep.frames_ahead, 768 + 512);
+    // The physical loop is 41 frames.
+    assert_eq!(rep.lag_frames, 768 + 512 + 41);
+    svc.engage().expect("engages");
+    run_to_end(&mut svc, 3.0);
+    let starts: Vec<_> = svc
+        .starts()
+        .iter()
+        .map(|s| (s.phase, s.lead_in_frames, s.prefill_frames, s.queue_frames))
+        .collect();
+    assert_eq!(
+        starts,
+        vec![
+            (StartPhase::Probe, 768, 0, 512),
+            (StartPhase::MeasuredShot, 768, 0, 512),
+            (StartPhase::Engaged, 768, 0, 512),
+        ]
+    );
+    assert_eq!(svc.take_starts().len(), 3);
+    assert!(svc.take_starts().is_empty(), "each start is taken once");
+
+    // The engaged start finds room for only 600 frames.
+    let (backend, h2) = double::station(Params::default());
+    let mut svc = service(setup(60.0, 1.0), backend);
+    svc.arm().expect("arms");
+    svc.identify().expect("identifies");
+    svc.engage().expect("engages");
+    h2.script_next_start(StartScript {
+        prestart_cap: Some(600),
+        ..Default::default()
+    });
+    assert_eq!(svc.run_batches(1), Ok(false));
+    assert!(matches!(
+        svc.state(),
+        ServiceState::Ended(records::Outcome::Station)
+    ));
+    let note = svc.station_note().unwrap_or_default().to_owned();
+    println!("{note}");
+    assert!(
+        note.contains("would start with 1112 frames ahead of its first drive frame and the identification measured its lag with 1280"),
+        "{note}"
+    );
+    assert_eq!(h2.starts().len(), 2, "the engaged run was not started");
+    let _ = h;
+}
+
+/// On the simulator, which steps with the service, the engine's own prefill
+/// is counted after its first update: the frames are the ones the simulator
+/// always played.
+#[test]
+fn mimo_sine_a_station_that_steps_with_the_service_counts_the_engines_prefill() {
+    use hertzforge_hal_sim::plants::SineStructure;
+    let s = SineStructure::Linear4x4;
+    let mut set = common::setup(s, common::dwell(80.0, 0.5), "matrix");
+    set.identification.resolution_hz = 2.0;
+    let mut svc = MimoSineService::new(
+        set,
+        common::table(s),
+        common::backend(s, 0.0, 7),
+        law("matrix"),
+        EngineOptions {
+            law_budget: Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET),
+            ..EngineOptions::new(StationClass::HertzforgeSim)
+        },
+    )
+    .expect("the setup is accepted");
+    svc.arm().expect("arms");
+    let rep = svc.identify().expect("identifies").clone();
+    assert_eq!(rep.frames_ahead, 4 + 4, "the prefill and the queue");
+    svc.engage().expect("engages");
+    run_to_end(&mut svc, 2.0);
+    let starts: Vec<_> = svc
+        .starts()
+        .iter()
+        .map(|s| (s.phase, s.lead_in_frames, s.prefill_frames, s.queue_frames))
+        .collect();
+    assert_eq!(
+        starts,
+        vec![
+            (StartPhase::Identification, 0, 4, 4),
+            (StartPhase::Engaged, 0, 4, 4),
+        ]
+    );
 }
