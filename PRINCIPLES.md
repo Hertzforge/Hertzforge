@@ -1,6 +1,6 @@
 # Core principles
 
-These principles came out of building Visual Dynamics, whose code Hertzforge is built from, and out of building the controller it is merged with. They explain why the software looks the way it does, and they are the standard a change is measured against, whether a person is reviewing a pull request or an AI assistant is working in the repository (`AGENTS.md` points here).
+These principles came out of building the analysis core Hertzforge grew from, and the controller it is merged with. They explain why the software looks the way it does, and they are the standard a change is measured against, whether a person is reviewing a pull request or an AI assistant is working in the repository (`AGENTS.md` points here).
 
 Where a principle has a hard edge case, the edge case is stated. A principle that never rules anything out is not doing any work.
 
@@ -8,7 +8,7 @@ Where a principle has a hard edge case, the edge case is stated. A principle tha
 
 ### 1. Data should be seen, and handled
 
-A number in a table is a claim, and a plot is the evidence for it. Every measurement can be drawn, and the plots are interactive: you can zoom into a shock transient, rotate a 3-D waterfall, or drag the corner of a filter and watch the trace change under it. Where a reading has a natural 3-D form, it is drawn in 3-D, for example as channels set one behind the other along a depth axis instead of thirty curves overlaid into a band.
+A number in a table is a claim, and a plot is the evidence for it. Every measurement can be drawn, and the plots are interactive: you can zoom into a shock transient, rotate a 3-D waterfall, or drag the corner of a filter and watch the trace change under it. Where a reading has a natural 3-D form, it is drawn in 3-D, for example as channels set one behind the other along a depth axis instead of thirty curves overlaid into a band. A plot shows what was computed: a density per line is drawn flat across its bin, as the area it stands for, and a specification is drawn with its warning and abort limits.
 
 ### 2. The workflow is the product
 
@@ -54,13 +54,13 @@ Where two parts of the system would answer the same question, they share one ans
 
 ### 10. AI is a welcome way to build this, and the discipline is what makes it one
 
-Much of Visual Dynamics was written with AI assistance, and so is much of Hertzforge, on purpose. It is how two people keep a toolset this size moving and can turn a reported bug around in an afternoon. That works because of the rules around it. AI writes code that looks right, which is exactly the failure this codebase guards against, so a change is not finished when it runs. It is finished when a test fails without it (11), when the reasoning is in the docstring (6), and when someone has checked that it did not import something it should not have. The repository has a rulebook that an assistant works under. The speed is the point, and the guardrails are what make the speed safe.
+Much of Hertzforge, and of the analysis core before it, was written with AI assistance, on purpose. It is how two people keep a toolset this size moving and can turn a reported bug around in an afternoon. That works because of the rules around it. AI writes code that looks right, which is exactly the failure this codebase guards against, so a change is not finished when it runs. It is finished when a test fails without it (11), when the reasoning is in the docstring (6), and when someone has checked that it did not import something it should not have. The repository has a rulebook that an assistant works under. The speed is the point, and the guardrails are what make the speed safe.
 
 ### 11. Every bug becomes a test, and every test is falsified
 
 Coverage is kept as high as real tests can make it, and the suite is kept fast enough that there is no reason not to run it. The habit matters more than the number: when a wrong answer is found, the fix comes with a test that would have caught it, pinned to the specific thing that was wrong (an axis label, a unit, a count), never to "something was built".
 
-Each test is then checked by breaking the fix on purpose and watching the test fail. A test that still passes with the fix reverted is testing nothing, and Visual Dynamics caught several of those. An intermittent failure is treated as a bug until proved otherwise. The word "flake" is not used here, because one failure that was dismissed that way twice turned out to be a real latch both times.
+Each test is then checked by breaking the fix on purpose and watching the test fail. A test that still passes with the fix reverted is testing nothing, and this habit has caught several of those. An intermittent failure is treated as a bug until proved otherwise. The word "flake" is not used here, because one failure that was dismissed that way twice turned out to be a real latch both times.
 
 ### 12. Track the latest version of everything, and never pin around a break
 

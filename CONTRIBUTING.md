@@ -26,39 +26,40 @@ Hertzforge is under the MIT License (`LICENSE`), copyright Brandon Zwink and Kev
 ```bash
 git clone https://github.com/<you>/Hertzforge      # your fork
 cd Hertzforge
-pip install -e . pytest ruff                        # the hertzforge package
-pip install uv                                      # runs the analysis service's environment
+pip install -e . pytest pytest-xdist jsonschema ruff   # the hertzforge package and its analysis service
+scripts/fetch_testdata.sh                           # the plate test data the tests read
 npm ci --prefix ui                                  # the shell
-bash python/scripts/fetch_data.sh                   # the analysis service's test data
 scripts/dev.sh                                      # all three services, shell at http://127.0.0.1:5191/
 ```
 
-Python 3.12 or newer, the current Node LTS, and the Rust toolchain named in `rust-toolchain.toml`. The control service builds against the controller's crates, which are not in this repository yet; until they are, it builds only beside a checkout of the controller workspace, and the shell runs without it (`?mock=1` runs the shell alone on synthetic data).
+Python 3.12 or newer in an environment of its own, the current Node LTS, and the Rust toolchain named in `rust-toolchain.toml`. The control service and the controller crates are one Cargo workspace (`cargo test --workspace`); the NI backend loads the NI-DAQmx driver at run time, so nothing from NI is needed to build or test. `?mock=1` runs the shell alone, its control side on synthetic data. The desktop app is built with `desktop/packaging/build.sh` (`docs/desktop-app.md`).
 
 ## How a change travels
 
 Work in a fork. The repository holds no working branches, only `main` and the branches the merge machinery makes for itself, and a ruleset refuses any other branch, the maintainers' included. Your fork is your own space: nobody else can create a branch there, and the fork's name says whose branch it is.
 
-Name the branch for what it carries: `fix/`, `feature/`, `docs/` or `tooling/`, then a short lower-case name of letters, digits and hyphens, such as `fix/decade-axis-ticks` or `docs/random-workflow`. Open the pull request against `main`. A check on every pull request reads the branch name and fails until the name fits the scheme. Renaming the branch in your fork is enough; the pull request follows the rename.
+Name the branch for what it carries: `fix/`, `feature/`, `docs/` or `tooling/`, then a short lower-case name of letters, digits and hyphens, such as `fix/decade-axis-ticks` or `docs/random-workflow`. Open the pull request against `main`. A check on every pull request reads the branch name and fails until the name fits the scheme. Name it before you push: renaming the branch in your fork closes its pull request, and the work then goes up as a new one.
 
 Nothing reaches `main` except through a pull request with its required checks green, and nobody pushes to `main` directly, the maintainers included. A maintainer may merge their own pull request once its checks pass. Anyone else's pull request needs a maintainer's approval as well.
 
 ## Before you push
 
 ```bash
-ruff check .                                                        # lint, every Python file
-python -m pytest tests -q                                           # the hertzforge package
-uv run --project python pytest python -q -n 4 --dist loadgroup      # the analysis service
-python -m pytest tools -q                                           # the tree checks' own tests
-python tools/check_tree.py                                          # names and npm licenses
-python tools/check_licenses.py --scope package                      # Python licenses and imports
-uv run --project python python tools/check_licenses.py --scope analysis
+ruff check .                                                       # lint, every Python file
+python -m pytest tests -q -n 4 -m "not slow and not timing"        # the package and the analysis service
+python -m pytest tools -q                                          # the tree checks' own tests
+python tools/check_tree.py                                         # names and npm licenses
+python tools/check_licenses.py --scope package                     # Python licenses and imports
+python tools/check_drive_path.py --base origin/main --title "..." --body-file body.md
 npm --prefix ui run check && npm --prefix ui test && npm --prefix ui run build
+npm --prefix ui run build:report                                   # when the shell changed: commit the rebuilt viewer
+scripts/rust_tests.sh parallel && cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo deny check                                                   # Rust licenses and advisories
 ```
 
-Judge each by its own exit code. CI runs the same checks on every pull request, on every push to `main`, once a week, and on demand: the Python suites on 3.12, 3.13 and 3.14, the analysis service and the shell on Linux, macOS and Windows. The weekly run matters because no dependency is pinned (`PRINCIPLES.md`, 12).
+Run the ones for the parts your change touches, and judge each by its own exit code. The plate test data (`scripts/fetch_testdata.sh`) has to be in place or about three hundred service tests fail. CI runs the same checks on every pull request, on every push to `main`, once a week, and on demand: the Python suites on 3.12, 3.13 and 3.14, the analysis service, the shell and the controller on Linux, macOS and Windows. The weekly run matters because no dependency is pinned (`PRINCIPLES.md`, 12).
 
-The pull request template asks for each command as you ran it with its exit code and counts, the test that fails when the change is broken on purpose, and any new dependency with its license. Fill it in; a reviewer judges the change from it before running anything.
+The pull request template asks for each command as you ran it with its exit code and counts, the test that fails when the change is broken on purpose, and any new dependency with its license. Fill it in; a reviewer judges the change from it before running anything. Two of its sections are checked by CI. A change to a path in `tools/drive_path.txt` fills in "Drive path and hardware" with its four answers (`docs/drive-path.md`), and a change to a path in `tools/run_data_paths.txt` fills in all eight "Run data" fields (`docs/run-data.md`). CI reads the description as it stands, so after editing it, push again or rerun the check.
 
 ## What the project expects of a change
 
@@ -79,7 +80,13 @@ Most of the fixes a review asks for fall into a few groups. [`AGENTS.md`](AGENTS
 - A claim in a docstring, the guide or the pull request has a test that would fail if it were false.
 - Rebase onto current `main` before asking for review; a test that fails on your branch and passes on `main` is your branch's.
 
-A cross-spectrum is stored as conj(X_a)·X_b, as Bendat and Piersol define it, in every file and every message between the services. The controller works in the matrix form internally (S = E[x xᴴ]) and converts once, where data leaves the control service. A multi-input calculation is tested with a complex plant, since a real-valued test cannot see a conjugation error.
+A cross-spectrum is stored as conj(X_a)·X_b, as Bendat and Piersol define it, everywhere in the core, in its files and in every message between the services. The conjugate is taken only where data crosses into or out of another convention: Rattlesnake and SDynPy files, and the MIMO control law interface. A multi-input calculation is tested with a complex plant, since a real-valued test cannot see a conjugation error.
+
+Values are shown and saved in the display unit system the user chose, g included. A file format with no place for units holds those values as they are; a format that declares its units writes ones it can declare.
+
+## Releasing
+
+A maintainer releases with one command, `scripts/release.sh X.Y.Z notes.md`, the notes being what the release brings by pull request. It bumps the version in every file that states it (`scripts/bump_version.py`), merges the version pull request once its checks pass, signs and pushes the tag, watches the desktop build that publishes the apps, and checks that the release and the PyPI package are out. Run again after a stop, it picks up where it stopped.
 
 ## Reporting a problem
 
