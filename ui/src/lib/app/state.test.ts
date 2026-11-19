@@ -515,3 +515,29 @@ describe('the force of a modal FRF response moved', () => {
 		expect(asked.at(-1)).toEqual({ drive: '505Z+', line: null });
 	});
 });
+
+describe('a shell with no control service (`?control=none`)', () => {
+	// `hertzforge` with no command opens the shell from the Python package, where no control
+	// service runs: the workspaces that need one are not offered and nothing connects to it.
+	it('offers the analysis and the report alone, and opens the analysis for a control address', () => {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		expect(app.config.control).toBe(false);
+		expect(app.workspaces.map((w) => w.id)).toEqual(['signals', 'report']);
+		app.go('acquire');
+		expect(app.workspace).toBe('signals');
+		app.go('simulate');
+		expect(app.workspace).toBe('signals');
+		app.go('report');
+		expect(app.workspace).toBe('report');
+	});
+
+	it('offers every workspace when a control service is named or assumed', () => {
+		for (const search of ['?analysis=ws://127.0.0.1:1&control=ws://127.0.0.1:1', '']) {
+			const app = new AppState(readConfig(search));
+			expect(app.config.control).toBe(true);
+			expect(app.workspaces.map((w) => w.id)).toEqual(['acquire', 'simulate', 'signals', 'report']);
+			app.go('simulate');
+			expect(app.workspace).toBe('simulate');
+		}
+	});
+});

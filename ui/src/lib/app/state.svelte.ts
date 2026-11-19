@@ -64,7 +64,7 @@ import { baseName, confirmFirst, desktopRunFiles, isProjectFile, printsInBrowser
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
-import { ANALYSIS, isWorkspace, moduleOf, STUDIES } from './workspaces';
+import { ANALYSIS, canOpen, isWorkspace, moduleOf, shownWorkspaces, STUDIES, type WorkspaceInfo } from './workspaces';
 
 function message(err: unknown): string {
 	if (err instanceof RequestError) return err.message;
@@ -2595,7 +2595,7 @@ export class AppState {
 		else if (mimoShock) this.mimoShockViews.watch();
 		else if (mimoSine) this.mimoSineViews.watch();
 		else this.display.watch();
-		this.control.connect();
+		if (this.config.control) this.control.connect();
 	}
 
 	/** The test type whose run is live; null when none is; undefined until the control service has said. */
@@ -2735,10 +2735,16 @@ export class AppState {
 		this.mimoSineViews.watch();
 		this.playbackViews.watch();
 		this.analysis.connect();
-		this.control.connect();
+		if (this.config.control) this.control.connect();
+	}
+
+	/** The rail's workspaces: without a control service, the analysis and the report alone. */
+	get workspaces(): WorkspaceInfo[] {
+		return shownWorkspaces(this.config.control);
 	}
 
 	go(workspace: Workspace): void {
+		if (!canOpen(workspace, this.config.control)) workspace = ANALYSIS;
 		const entering = workspace === 'acquire' && this.workspace !== 'acquire';
 		this.workspace = moduleOf(workspace);
 		if (entering) this.tests.open();

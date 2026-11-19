@@ -64,7 +64,7 @@ hertzforge = "hertzforge.__main__:main"
 
 [tool.setuptools.package-data]
 hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE",
-              "report/viewer.html"]
+              "report/viewer.html", "shell/**/*"]
 
 [tool.ruff]
 # Ruff's own rule set, 100 columns.

@@ -31,6 +31,19 @@ export const WORKSPACES: WorkspaceInfo[] = [
 	{ id: 'report', title: 'Report', rail: 'Report', summary: 'Reports from every workspace.' }
 ];
 
+/** The workspaces that run on the control service: left out when the shell has none (`?control=none`). */
+const CONTROL_WORKSPACES = new Set<Workspace>(['acquire', 'simulate']);
+
+/** The rail's workspaces for a shell with (`control`) or without a control service beside it. */
+export function shownWorkspaces(control: boolean): WorkspaceInfo[] {
+	return control ? WORKSPACES : WORKSPACES.filter((w) => !CONTROL_WORKSPACES.has(w.id));
+}
+
+/** Whether `id` opens in a shell with or without a control service; without one, only the analysis and the report do. */
+export function canOpen(id: Workspace, control: boolean): boolean {
+	return control || !CONTROL_WORKSPACES.has(moduleOf(id));
+}
+
 /**
  * The ids the analysis had when it was nine modules. Operations and table rows still name them
  * as their homes, and an address may; every one of them is the analysis module now.

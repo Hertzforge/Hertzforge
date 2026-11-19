@@ -464,3 +464,87 @@ def test_a_run_that_journals_marks_the_project_and_a_reading_does_not():
         assert state.project.project_type == 'Random Vibration' and state.modified
     finally:
         service.close()
+
+
+def test_a_plain_request_gets_the_shells_pages_beside_the_protocol(tmp_path):
+    """`hertzforge` with no command opens the interface from the service's
+    own port: a plain GET is a page of the shell's build, a path with no
+    suffix is the single-page app's index, a missing file and a path
+    outside the folder are 404s, and a WebSocket on the same port still
+    speaks the protocol."""
+    import urllib.error
+    import urllib.request
+
+    (tmp_path / 'index.html').write_text('<html>shell</html>')
+    (tmp_path / '_app' / 'immutable').mkdir(parents=True)
+    (tmp_path / '_app' / 'immutable' / 'start.js').write_text('export {}')
+    (tmp_path.parent / 'secret.txt').write_text('outside')
+    service = Service()
+
+    def get(url):
+        try:
+            with urllib.request.urlopen(url) as reply:
+                return reply.status, reply.headers, reply.read()
+        except urllib.error.HTTPError as error:
+            return error.code, error.headers, error.read()
+
+    async def run():
+        server = await start(service, '127.0.0.1', 0, shell=tmp_path)
+        port = server.sockets[0].getsockname()[1]
+        base = f'http://127.0.0.1:{port}'
+        try:
+            loop = asyncio.get_running_loop()
+            index = await loop.run_in_executor(None, get, f'{base}/?analysis=x&control=none')
+            route = await loop.run_in_executor(None, get, f'{base}/report')
+            script = await loop.run_in_executor(None, get, f'{base}/_app/immutable/start.js')
+            missing = await loop.run_in_executor(None, get, f'{base}/_app/gone.js')
+            outside = await loop.run_in_executor(None, get, f'{base}/%2E%2E/secret.txt')
+            async with connect(f'ws://127.0.0.1:{port}/', max_size=None) as socket:
+                said = frames.decode(await socket.recv())
+        finally:
+            server.close()
+            await server.wait_closed()
+        return index, route, script, missing, outside, said
+
+    try:
+        index, route, script, missing, outside, said = asyncio.run(run())
+    finally:
+        service.close()
+    assert index[0] == 200 and index[2] == b'<html>shell</html>'
+    assert index[1]['Content-Type'] == 'text/html; charset=utf-8'
+    assert index[1]['Cache-Control'] == 'no-cache'
+    assert route[0] == 200 and route[2] == b'<html>shell</html>'
+    assert script[0] == 200 and script[1]['Content-Type'] == 'text/javascript; charset=utf-8'
+    assert script[1]['Cache-Control'] == 'max-age=31536000, immutable'
+    assert missing[0] == 404
+    assert outside[0] == 404 and b'outside' not in outside[2]
+    assert said['type'] == 'hello'
+
+
+def test_without_the_shell_a_plain_request_is_refused_as_before():
+    """A service started with no shell folder (the desktop app's, which
+    draws its own) answers a plain GET as a WebSocket server does."""
+    import urllib.error
+    import urllib.request
+
+    service = Service()
+
+    async def run():
+        server = await start(service, '127.0.0.1', 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            def get():
+                try:
+                    urllib.request.urlopen(f'http://127.0.0.1:{port}/')
+                except urllib.error.HTTPError as error:
+                    return error.code
+                return 200
+            return await asyncio.get_running_loop().run_in_executor(None, get)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    try:
+        assert asyncio.run(run()) == 426
+    finally:
+        service.close()

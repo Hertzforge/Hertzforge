@@ -16,3 +16,5 @@ testdata/plate_projects/
 .coverage.*
 htmlcov/
 ui/build-report/
+# the shell's build, copied in by the release workflow so the wheel carries it
+src/hertzforge/shell/

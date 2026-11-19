@@ -4,17 +4,32 @@ Hertzforge is one toolset for structural dynamics testing, from acquiring
 the data to analyzing it. It joins Kevin Cross's data acquisition software
 with Brandon Zwink's structural dynamics analysis.
 
-The analysis core is under `src/hertzforge/`. The `hertzforge` package on PyPI
-at 0.0.1 predates it and installs only a command that prints its version;
-0.1.0 is the release that carries the core, and the desktop app of the same
-number is on [hertzforge.com](https://hertzforge.com).
+Hertzforge comes two ways.
 
-If you used Visual Dynamics, your `.vdyn` projects open here.
+The desktop app, from [hertzforge.com](https://hertzforge.com) or the
+[releases](https://github.com/Hertzforge/Hertzforge/releases), is the whole
+toolset: the interface, the analysis and control services, and its own Python.
+It needs nothing else installed, and it is the only way to run a test.
+
+The `hertzforge` package on PyPI is the analysis side. Run `hertzforge` with no
+command and it opens the interface in your browser, with everything but
+Acquire & Control and Simulate: projects, imports, processing, specifications,
+reports and export. The same core is there for scripts, and the command line
+converts files and records animations (`hertzforge --help`). The control
+service is Rust and needs the hardware drivers, so it comes only with the app.
 
 ```
 pip install hertzforge
-hertzforge --version
+hertzforge
 ```
+
+The interface opens at `http://127.0.0.1:8791/`, or on another port when the
+desktop app already holds that one, and stops with Ctrl-C. On a machine with no
+browser, such as over SSH, the command prints the address to open instead. Files
+are opened by typing their path, since a browser does not hand a page the paths
+of the files it picks.
+
+If you used Visual Dynamics, your `.vdyn` projects open here.
 
 ## The First Vertical Slice
 

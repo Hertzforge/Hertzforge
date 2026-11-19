@@ -8,6 +8,7 @@ PROJECT -o VIDEO --geometry NAME ...`` records it to an MP4 with no window open
 (`hertzforge.record`)."""
 
 import argparse
+from collections.abc import Callable
 
 from hertzforge import __version__
 
@@ -17,11 +18,13 @@ def main(argv: list[str] | None = None) -> int:
     None) and return the exit status.
 
     ``serve`` hands everything after it to the service's own parser, so
-    the service's options are not repeated here.
+    the service's options are not repeated here. With no command it opens
+    the interface in a browser (`_open_app`).
     """
     parser = argparse.ArgumentParser(
         prog="hertzforge",
-        description="Hertzforge: data acquisition and structural dynamics in one toolset.",
+        description="Hertzforge: data acquisition and structural dynamics in one toolset. "
+                    "With no command, it opens the interface in a browser.",
         epilog="https://github.com/hertzforge/hertzforge",
     )
     parser.add_argument("--version", action="version", version=f"hertzforge {__version__}")
@@ -140,7 +143,71 @@ def main(argv: list[str] | None = None) -> int:
         return code
     if rest:
         parser.error(f"unrecognized arguments: {' '.join(rest)}")
-    parser.print_help()
+    return _open_app()
+
+
+#: the analysis service's usual port; another is picked when it is taken,
+#: as when the desktop app is running
+APP_PORT = 8791
+
+
+def _free(port: int) -> bool:
+    """Whether `port` on the loopback address can be listened on."""
+    import socket
+
+    with socket.socket() as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _app_url(host: str, port: int) -> str:
+    """The page that opens the interface on the service at `host`:`port`.
+    The shell is told the service's address, since it assumes 8791
+    otherwise, and that no control service runs beside it, so it leaves out
+    the workspaces that need one."""
+    return f"http://{host}:{port}/?analysis=ws://{host}:{port}/&control=none"
+
+
+def _announce(url: str, opener: Callable[[str], bool]) -> None:
+    """Say where the interface is and open it with `opener`
+    (`webbrowser.open`); where that opens nothing, say to open it by hand."""
+    print(f"Hertzforge is open at {url}\nPress Ctrl-C to stop it.", flush=True)
+    if not opener(url):
+        print("No browser could be opened here; open that address in one.", flush=True)
+
+
+def _open_app() -> int:
+    """`hertzforge` with no command: the analysis service started with the
+    shell's built pages, and the interface opened in the default browser.
+    Where no browser opens (over SSH, on a server) the address is printed to
+    open by hand. The control service is not part of the Python package, so
+    running a test needs the desktop app."""
+    import asyncio
+    import logging
+    import sys
+    import webbrowser
+
+    from hertzforge.service.__main__ import _serve
+    from hertzforge.service.server import shell_folder
+
+    if shell_folder() is None:
+        print("This install of hertzforge carries no interface. In a source checkout, build it "
+              "with `npm --prefix ui run build`; otherwise get the desktop app from "
+              "https://hertzforge.com. `hertzforge --help` lists the commands.")
+        return 1
+
+    print(f"Starting Hertzforge {__version__}...", flush=True)
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    port = APP_PORT if _free(APP_PORT) else 0
+    try:
+        asyncio.run(_serve("127.0.0.1", port, ready=lambda host, bound: _announce(
+            _app_url(host, bound), webbrowser.open)))
+    except KeyboardInterrupt:
+        pass
     return 0
 
 

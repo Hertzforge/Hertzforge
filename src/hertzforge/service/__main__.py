@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+from collections.abc import Callable
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,8 +69,13 @@ def _stdin_closed(loop: asyncio.AbstractEventLoop) -> asyncio.Future:
     return closed
 
 
-async def _serve(host: str, port: int, *, watch_stdin: bool = False) -> None:
-    from .server import SWITCH_INTERVAL, Service, preload, start
+async def _serve(host: str, port: int, *, watch_stdin: bool = False,
+                 ready: Callable[[str, int], None] | None = None) -> None:
+    """Serve on `host`:`port` until cancelled, or until standard input
+    closes with `watch_stdin`. The shell's built pages are served beside the
+    protocol when the package carries them. `ready` is called with the
+    bound address once the port is open."""
+    from .server import SWITCH_INTERVAL, Service, preload, shell_folder, start
 
     # Process-wide setup, done here and not in start(), so a caller that
     # starts a server in its own process keeps its own settings. The heavy
@@ -80,11 +86,13 @@ async def _serve(host: str, port: int, *, watch_stdin: bool = False) -> None:
     sys.setswitchinterval(SWITCH_INTERVAL)
 
     service = Service()
-    server = await start(service, host, port)
+    server = await start(service, host, port, shell=shell_folder())
     bound = server.sockets[0].getsockname()
     # one line a launcher can wait for
     print(f'hertzforge analysis service listening on ws://{bound[0]}:{bound[1]}/',
           file=sys.stderr, flush=True)
+    if ready is not None:
+        ready(bound[0], bound[1])
     try:
         serving = asyncio.ensure_future(server.serve_forever())
         if watch_stdin:

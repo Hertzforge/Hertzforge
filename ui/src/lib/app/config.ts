@@ -13,6 +13,12 @@ export interface ShellConfig {
 	analysisUrl: string;
 	/** `?control=ws://host:port/` */
 	controlUrl: string;
+	/**
+	 * False for `?control=none`: no control service runs beside this shell, as when `hertzforge`
+	 * with no command opens it from the Python package. Acquire & Control and Simulate are left
+	 * out and nothing connects to control.
+	 */
+	control: boolean;
 	/** `?theme=dark|light|system` forces a theme for this load (screenshots, tests). */
 	theme: ThemePref | null;
 	/**
@@ -69,6 +75,7 @@ export function readConfig(search: string): ShellConfig {
 		mock: mock === '1' || mock === 'true',
 		analysisUrl: wsUrl(q.get('analysis'), DEFAULT_ANALYSIS_URL),
 		controlUrl: wsUrl(q.get('control'), DEFAULT_CONTROL_URL),
+		control: q.get('control') !== 'none',
 		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null,
 		popout: q.get('popout') === '1',
 		runLog: q.get('runlog') === '1',

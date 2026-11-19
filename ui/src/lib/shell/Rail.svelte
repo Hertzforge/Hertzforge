@@ -1,15 +1,17 @@
 <script lang="ts">
 	/** The workspace rail. Alt plus 1 to 9 jumps to the first nine; arrow keys move between items. */
-	import { WORKSPACES } from '$lib/app/workspaces';
+	import type { WorkspaceInfo } from '$lib/app/workspaces';
 	import type { Workspace } from '$lib/protocol/types';
 	import Icon from './Icon.svelte';
 
 	interface Props {
+		/** The workspaces this shell offers (`AppState.workspaces`). */
+		workspaces: WorkspaceInfo[];
 		current: Workspace;
 		onselect: (ws: Workspace) => void;
 	}
 
-	let { current, onselect }: Props = $props();
+	let { workspaces, current, onselect }: Props = $props();
 	let nav: HTMLElement;
 
 	function onKey(e: KeyboardEvent) {
@@ -24,7 +26,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <nav class="rail" aria-label="Workspaces" bind:this={nav} onkeydown={onKey}>
-	{#each WORKSPACES as w, i (w.id)}
+	{#each workspaces as w, i (w.id)}
 		<button
 			class="item"
 			data-testid="rail-{w.id}"
