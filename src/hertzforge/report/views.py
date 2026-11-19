@@ -239,9 +239,27 @@ def _scene(built: Mapping[str, Any], title: str, unit: str) -> dict[str, Any]:
         if mode.get('imag') is not None:
             entry['shape_imag'] = np.asarray(mode['imag'], np.float32).reshape(-1, 3)
         modes.append(entry)
-    return v.shape3d(title, unit, nodes, modes,
+    view = v.shape3d(title, unit, nodes, modes,
                      triangles=np.asarray(triangles, dtype=np.uint32).reshape(-1, 3),
                      lines=np.asarray(lines, dtype=np.uint32).reshape(-1, 2))
+    if built.get('arrows'):
+        # the solids the 3-D view draws for a channel table's DOFs
+        from ..drawing.viz.geometry import dof_arrow_solids
+
+        into = bool(built.get('arrows_incoming'))
+        view['arrows'] = dof_arrow_solids(
+            nodes, [(into, (int(arrow['node']), np.asarray(arrow['vector'], dtype=float),
+                            int(arrow['axis'])))
+                    for arrow in built['arrows']],
+            float(built['arrow_length']), [arrow['label'] for arrow in built['arrows']])
+    bodies = built.get('bodies')
+    if bodies:
+        view['bodies'] = {
+            'nodes': np.asarray(bodies['nodes'], dtype=np.float32).reshape(-1, 3),
+            'triangles': np.asarray(bodies['triangles'], dtype=np.uint32).reshape(-1, 3),
+            'colors': np.asarray(bodies['colors'], dtype=np.uint8).reshape(-1, 3),
+            'follow': np.asarray(bodies['follow'], dtype=np.uint32)}
+    return view
 
 
 def _bars(built: Mapping[str, Any], title: str) -> dict[str, Any]:

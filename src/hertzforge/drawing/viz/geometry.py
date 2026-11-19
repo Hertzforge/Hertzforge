@@ -4,7 +4,7 @@ to know, with none of the code that draws it."""
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -194,6 +194,29 @@ def dof_arrow_vectors(geometry: Geometry, dofs: Sequence[str]
             vector = vector @ rotation
         out.append((row, vector, axis))
     return out
+
+
+def dof_arrow_solids(xyz: np.ndarray,
+                     drawn: Sequence[tuple[bool, tuple[int, np.ndarray, int]]],
+                     length: float, labels: Sequence[str]) -> dict[str, Any]:
+    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long. `drawn` is
+    (points in, (node row, direction, axis)) per arrow; an arrow pointing in ends on its
+    node, the others start there. `tails` f32 [A, 3] is where each starts, `directions`
+    f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
+    (0 X, 1 Y, 2 Z), which picks its color. `labels` names each arrow's DOF and `inward`
+    u8 [A] is 1 for an arrow that points in, so a label can sit at the end away from the
+    node. A caller whose arrows move with the model adds `follow` u32 [A], the row of the
+    view's `nodes` whose motion each arrow takes."""
+    tails = np.zeros((len(drawn), 3), dtype=np.float32)
+    directions = np.zeros((len(drawn), 3), dtype=np.float32)
+    axes = np.zeros(len(drawn), dtype=np.uint8)
+    for k, (into, (row, vector, axis)) in enumerate(drawn):
+        tails[k] = xyz[row] - length * vector if into else xyz[row]
+        directions[k] = vector
+        axes[k] = axis
+    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length),
+            'labels': [str(label) for label in labels],
+            'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
 
 
 def dof_arrow_length(points: ArrayLike, extent: float) -> float:

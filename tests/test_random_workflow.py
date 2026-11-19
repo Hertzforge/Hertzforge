@@ -261,7 +261,9 @@ def test_a_scene_names_no_unit_and_the_report_asks_for_none(tmp_path):
     )
     scenes = [view for block in read_viewer(raw)['blocks'] for view in block.get('views', [])
               if view['view'] == 'shape3d']
-    assert len(scenes) == 3, 'geometry, excitation DOFs, response DOFs'
+    # the excitation and response figures draw the geometry, so it is
+    # not drawn alone as well
+    assert len(scenes) == 2, 'excitation DOFs, response DOFs'
 
 
 def _history(level, dof='101Z+'):

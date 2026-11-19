@@ -833,7 +833,13 @@ def _build_block(block, objects, us, object_groups=None):
     resolved = {key: (resolve_binding(block.get(key), objects, object_groups)
                       or '')
                 for key in ('source', 'geometry', 'shapes', 'dofs_source',
-                            'measured', 'specification') if block.get(key)}
+                            'measured', 'specification', 'channels')
+                if block.get(key)}
+    if block.get('kind') == 'scene' and 'channels' not in block:
+        # a scene draws the sensors of the basis channel table, a
+        # report saved before scenes named one included
+        resolved['channels'] = resolve_binding(
+            '@basis:ChannelTable', objects, object_groups) or ''
     block = {**block, **resolved}
     if block.get('caption'):
         # captions carry live references too — a filtered-transients
@@ -2482,7 +2488,7 @@ def _scene_block(block, geometry, shapes, us, objects):
                 continue
             arrows.append({'node': node_row[node],
                            'vector': [_compact(v) for v in vector],
-                           'color': AXIS_COLORS[axis],
+                           'color': AXIS_COLORS[axis], 'axis': int(axis),
                            'label': dof})
         if not arrows:
             return None     # nothing measured as that quantity here
@@ -2493,6 +2499,15 @@ def _scene_block(block, geometry, shapes, us, objects):
         built['arrow_length'] = float(dof_arrow_length(
             points[[arrow['node'] for arrow in arrows]], extent))
         built['arrows_incoming'] = quantity in EXCITATION_QUANTITIES
+    from ..core.channel_table import ChannelTable
+
+    # the sensors on the figures of what was instrumented, not over a
+    # mode's animation
+    table = objects.get(block.get('channels') or '')
+    if shapes is None and isinstance(table, ChannelTable):
+        bodies = _scene_bodies(table, geometry, quantity, node_row, us)
+        if bodies is not None:
+            built['bodies'] = bodies
     if shapes is not None:
         from ..deform import ShapeDeflection
 
@@ -2515,6 +2530,32 @@ def _scene_block(block, geometry, shapes, us, objects):
                 'peak': float(deflection.peak_magnitude) or 1.0,
                 **_motion(real, imag)})
     return built
+
+
+def _scene_bodies(table, geometry, quantity, node_row, us):
+    """The sensor bodies a scene draws, as the 3-D view draws them
+    (`core.sensors.place`, `drawing.viz.sensors.sensor_bodies`), in the
+    scene's display coordinates: on a DOF scene the sensors that measure
+    its quantity, on the geometry alone every sensor. None with none."""
+    from ..core.sensors import place
+    from ..drawing.viz.sensors import sensor_bodies
+
+    placed, _notes = place(table, geometry)
+    if quantity:
+        types = table.types()
+        placed = [sensor for sensor in placed
+                  if any(types[row] == quantity for row in sensor.rows)]
+    bodies, _notes = sensor_bodies(placed, geometry, node_row.get)
+    if bodies is None:
+        return None
+    nodes = bodies['nodes'].astype(float)
+    if geometry.units_defined:
+        nodes = us.from_si(nodes, 'length')
+    # lists, since the edit page carries the built block as JSON
+    return {'nodes': [[_compact(v) for v in p] for p in nodes],
+            'triangles': bodies['triangles'].tolist(),
+            'colors': bodies['colors'].tolist(),
+            'follow': bodies['follow'].tolist()}
 
 
 def _motion(real: np.ndarray, imag: np.ndarray) -> dict[str, Any]:

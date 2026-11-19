@@ -18,10 +18,11 @@ extra nodes and lines of the mesh; a sensor's body is a solid of its own
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+
+from hertzforge.drawing.viz.geometry import dof_arrow_solids
 
 from . import display_units, group_cells
 from . import views as v
@@ -112,28 +113,6 @@ def frames(geometry: Any, drawn: Any = None) -> list[dict[str, Any]]:
     return [{'origin': [float(c) for c in matrix[3]],
              'axes': [[float(c) for c in matrix[axis]] for axis in range(3)],
              'length': float(length)} for matrix in matrices]
-
-
-def arrows(xyz: np.ndarray, drawn: Sequence[tuple[bool, tuple[int, np.ndarray, int]]],
-           length: float, labels: Sequence[str]) -> dict[str, Any]:
-    """The `arrows` of a `shape3d`: one solid arrow per DOF, `length` long. `drawn` is
-    (points in, (node row, direction, axis)) per arrow; an arrow pointing in ends on its
-    node, the others start there. `tails` f32 [A, 3] is where each starts, `directions`
-    f32 [A, 3] the unit vector it points along, and `axes` u8 [A] the DOF's own axis
-    (0 X, 1 Y, 2 Z), which picks its color. `labels` names each arrow's DOF and `inward`
-    u8 [A] is 1 for an arrow that points in, so a label can sit at the end away from the
-    node. A caller whose arrows move with the model adds `follow` u32 [A], the row of the
-    view's `nodes` whose motion each arrow takes."""
-    tails = np.zeros((len(drawn), 3), dtype=np.float32)
-    directions = np.zeros((len(drawn), 3), dtype=np.float32)
-    axes = np.zeros(len(drawn), dtype=np.uint8)
-    for k, (into, (row, vector, axis)) in enumerate(drawn):
-        tails[k] = xyz[row] - length * vector if into else xyz[row]
-        directions[k] = vector
-        axes[k] = axis
-    return {'tails': tails, 'directions': directions, 'axes': axes, 'length': float(length),
-            'labels': [str(label) for label in labels],
-            'inward': np.array([bool(into) for into, _hit in drawn], dtype=np.uint8)}
 
 
 # ---- tables -------------------------------------------------------------------------
@@ -1055,7 +1034,7 @@ def dof_arrows(project: Any, params: dict[str, Any]) -> list[dict]:
     view = _drawn(f'{home}, DOFs of {name}', geometry)
     if drawn:
         length = dof_arrow_length(xyz[[hit[0] for _d, _i, hit in drawn]], _extent(xyz))
-        view['arrows'] = arrows(xyz, [(into, hit) for _d, into, hit in drawn], length,
+        view['arrows'] = dof_arrow_solids(xyz, [(into, hit) for _d, into, hit in drawn], length,
                                 [dof for dof, _i, _h in drawn])
     rows = []
     for dof, into, hit in zip(dofs, incoming, found, strict=True):

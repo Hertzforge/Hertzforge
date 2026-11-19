@@ -20,11 +20,11 @@ from hertzforge.core.scan_fit import (
 from hertzforge.core.scan_sensors import CHOICES, assemble, resolve
 from hertzforge.core.sensor_catalog import CATALOG
 from hertzforge.core.sensors import place
+from hertzforge.drawing.viz.geometry import dof_arrow_solids
 from hertzforge.drawing.viz.sensors import sensor_bodies
 
 from . import views as v
 from .descriptors import Operation, Option, Param
-from .ops_geometry import arrows
 from .protocol import refused
 
 MEASURED = Param('geometry', 'Measured points', 'enum', options_from='verb:create_sensors')
@@ -206,7 +206,7 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
             for axis in ('XYZ'.index(direction[0]) for direction in one.directions):
                 drawn.append((False, (row, frame[axis], axis)))
                 labels.append(f'{one.node}{"XYZ"[axis]}+')
-        view['arrows'] = arrows(centers, drawn, 1.5 * max(max(one.body) for one in placed),
+        view['arrows'] = dof_arrow_solids(centers, drawn, 1.5 * max(max(one.body) for one in placed),
                                 labels)
 
     unit = 'mm' if defined else 'file units'

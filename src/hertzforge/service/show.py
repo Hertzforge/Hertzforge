@@ -261,10 +261,14 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
     table, picked = _marked_table(project, objects, geometry_name)
     if not (prefs['arrows'] or picked or prefs['sensors']):
         return []
-    from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+    from hertzforge.drawing.viz.geometry import (
+        dof_arrow_length,
+        dof_arrow_solids,
+        dof_arrow_vectors,
+    )
     from hertzforge.drawing.viz.sensors import rows_of, sensor_bodies
 
-    from .ops_geometry import _extent, arrows
+    from .ops_geometry import _extent
 
     geometry = project[geometry_name]
     xyz = np.asarray(geometry.node_xyz, dtype=float).reshape(-1, 3)
@@ -284,7 +288,7 @@ def _marks(project: Any, views: list[dict], objects: list[str], prefs: dict[str,
                     # each its own, since converting a stage's units writes into it; a
                     # stage that draws a force of its own keeps that arrow alone
                     if 'arrows' not in stage:
-                        stage['arrows'] = arrows(xyz, drawn, length, labels)
+                        stage['arrows'] = dof_arrow_solids(xyz, drawn, length, labels)
             said = f'{len(drawn)} DOF arrow{"s" * (len(drawn) != 1)}'
             if only is not None:
                 said += f' ({len(only)} channel{"s" * (len(only) != 1)} picked)'
@@ -1027,9 +1031,13 @@ def _driven(project: Any, objects: list[str], records: dict[str, list[int]],
     static deflection. `prefs.drive` picks among several force references. None for any
     other selection."""
     from hertzforge.deform import modal_ods_deflection
-    from hertzforge.drawing.viz.geometry import dof_arrow_length, dof_arrow_vectors
+    from hertzforge.drawing.viz.geometry import (
+        dof_arrow_length,
+        dof_arrow_solids,
+        dof_arrow_vectors,
+    )
 
-    from .ops_geometry import _extent, arrows
+    from .ops_geometry import _extent
 
     chosen = _driven_selection(project, objects, records)
     if chosen is None:
@@ -1095,7 +1103,7 @@ def _driven(project: Any, objects: list[str], records: dict[str, list[int]],
         place = np.asarray(on.node_xyz, dtype=float).reshape(-1, 3)[hit[0]]
         row = int(np.argmin(np.linalg.norm(xyz[drawn_rows] - place, axis=1)))
         at_node = xyz[drawn_rows][[row]]
-        stage['arrows'] = arrows(at_node, [(True, (0, hit[1], hit[2]))],
+        stage['arrows'] = dof_arrow_solids(at_node, [(True, (0, hit[1], hit[2]))],
                                  dof_arrow_length(at_node, _extent(xyz)), [drive])
         stage['arrows']['follow'] = np.array([row], dtype=np.uint32)
     else:
