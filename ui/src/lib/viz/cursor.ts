@@ -58,3 +58,15 @@ export class CursorHub {
 
 /** The shell's one hub. */
 export const cursors = new CursorHub();
+
+/**
+ * Playback positions. A shape view playing measured motion sets its time here and a spectrum with
+ * the same group draws it as a line; dragging the line sets it back, and the shape view seeks
+ * there. Unlike the hover cursor the group is one result's, so two animations never drive each other.
+ */
+export const playheads = new CursorHub();
+
+/** The playhead group of `link` within `scope` (a result), or the link alone outside one. */
+export function playheadGroup(link: string, scope?: string): string {
+	return scope ? `${scope}/${link}` : link;
+}

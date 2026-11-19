@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "label": "maximal control profile",
+    "rows": [
+      {
+        "freq_hz": 5.0,
+        "quantity": "displacement_in_pp",
+        "value": 0.5,
+        "alarm_db": [
+          1.5,
+          1.5
+        ],
+        "abort_db": [
+          3.0,
+          3.0
+        ]
+      },
+      {
+        "freq_hz": 60.0,
+        "quantity": "velocity_ips_pk",
+        "value": 12.0
+      },
+      {
+        "freq_hz": 2000.0,
+        "quantity": "accel_g_pk",
+        "value": 5.0
+      }
+    ],
+    "global_alarm_db": [
+      1.5,
+      1.5
+    ],
+    "global_abort_db": [
+      3.0,
+      3.0
+    ]
+  },
+  "mode": {
+    "sweep": {
+      "band_hz": [
+        5.0,
+        2000.0
+      ],
+      "rate": {
+        "log_oct_per_min": 1.0
+      },
+      "start_hz": 5.0,
+      "initial_direction": "up",
+      "target": {
+        "whichever_first": {
+          "sweeps": 2,
+          "duration_s": 120.0
+        }
+      }
+    }
+  },
+  "control": {
+    "channels": [
+      {
+        "index": 1,
+        "weight": 1.0
+      },
+      {
+        "index": 2,
+        "weight": 0.5
+      }
+    ],
+    "mode": "weighted_avg"
+  },
+  "limit_profiles": [
+    {
+      "channel_index": 3,
+      "profile": {
+        "label": "fixture ceiling",
+        "rows": [
+          {
+            "freq_hz": 250.0,
+            "quantity": "accel_g_pk",
+            "value": 2.0
+          }
+        ],
+        "global_alarm_db": [
+          1.5,
+          1.5
+        ],
+        "global_abort_db": [
+          3.0,
+          3.0
+        ]
+      },
+      "shared_name": "fixture ceiling"
+    }
+  ],
+  "blend_w": 0.5,
+  "compression": {
+    "custom": {
+      "ki": 2.0,
+      "max_rate_db_per_s": 20.0
+    }
+  },
+  "tracking_bw": {
+    "proportional": {
+      "pct": 10.0,
+      "max_hz": 100.0
+    }
+  },
+  "feedforward": {
+    "coherence_floor": 0.5,
+    "h_floor_frac": 0.05
+  },
+  "notch": {
+    "drive_floor": 0.01,
+    "smoothing_ticks": 3.0,
+    "release_ramp_db_per_s": 20.0
+  },
+  "ladder": {
+    "sysid_level_db": -20.0,
+    "start_db": -12.0,
+    "table_db": [
+      -12.0,
+      -9.0,
+      -6.0,
+      -3.0,
+      0.0
+    ],
+    "per_rung": {
+      "sweeps": 1
+    },
+    "full_for": {
+      "sweeps": 2
+    }
+  },
+  "sysid_level_db": -20.0,
+  "coherence_floor": 0.5,
+  "drive_vpk_ceiling": 10.0,
+  "drive_vpk_abort": 20.0,
+  "fault_debounce_ticks": 5,
+  "kinematic_monitor": true,
+  "capture": {
+    "rule": {
+      "auto_first_seconds": {
+        "n_s": 30.0
+      }
+    },
+    "level_settle_s": 1.0,
+    "periodic_save_s": 60.0
+  },
+  "cola": {
+    "enabled": true,
+    "volts_pk": 1.0,
+    "waveform": "sine"
+  },
+  "feasibility": {
+    "shaker_json": "{\"name\":\"fixture shaker\"}",
+    "armature_lb": 120.0,
+    "slip_table_lb": 300.0,
+    "drive_adapter_lb": 15.0,
+    "fixturing_lb": 40.0,
+    "test_article_lb": 25.0
+  },
+  "control_tick_frames": 64,
+  "fs_hz": 51200.0,
+  "review_hold": true,
+  "metadata": [
+    {
+      "key": "operator",
+      "value": "Test Operator"
+    },
+    {
+      "key": "test_article",
+      "value": "fixture"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+ "type": "response",
+ "id": 2,
+ "error": {
+  "code": "refused",
+  "reason": "controller_held",
+  "message": "Another client controls this service (Shell on bench-pc). Close that client, or wait for it to release control.",
+  "detail": {
+   "holder": "Shell on bench-pc"
+  }
+ }
+}

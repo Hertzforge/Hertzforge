@@ -1,0 +1,750 @@
+"""Each channel of a record checked against its range.
+
+Every input measures over a window, its range, and a signal larger than
+the window is clipped: each sample beyond the edge is written as the
+edge, and the tops of the waveform come out flat. The averaged spectrum
+does not show it. Clipping takes a little energy off the few peaks that
+cross the edge and spreads it across the band as harmonics, and over
+dozens of frames the result is a spectrum a fraction of a decibel low
+in band with a slightly raised floor above it. The kurtosis barely
+moves either: a Gaussian record clipped at 2.8 standard deviations
+reads about 2.86, inside the kurtosis bars' band of 2 to 4. The
+overload is in the time history and nowhere else, so this reads it
+there, channel by channel, against each channel's own range.
+
+The reading of a record against a range is `core.time_statistics`'s,
+and this does not read it again: the samples on the rail (within
+`RAIL_MARGIN` of the range, judged against `RAIL_SAMPLES`), the crest
+factor, the peak and the kurtosis are that reading's, over the same span
+the kurtosis bars read (`core.kurtosis.analyzed_span`). What this adds
+is what a range makes of them:
+
+- The range itself, read from the channel table for every channel at
+  once, where the Statistics reading takes one range typed for one
+  channel.
+- The samples on the rail as a rate per second, beside the count and
+  the share.
+- The headroom of the range over the largest excursion, in dB:
+  20 log10(range / peak). At or below 0 dB the range was reached.
+- The largest excursion scaled to the next level of the test, a
+  stated step in dB up (6 dB, about twice the amplitude, by default),
+  and its headroom there. A test is run up in steps, and a range that
+  holds at one level is checked against the next level's peak before
+  the step, not found wanting after it. The scaled peak is a starting
+  point: structures at full level often do not behave as they did at
+  the low level, so it is never a ceiling.
+- Samples beyond the range: further out than the range and its margin.
+  A converter cannot write a sample past its own range, so a record
+  that holds one was not taken through the range the table states: the
+  ranges or the Sensitivity in the table are not the ones the record was
+  made with, and every other number here is against the wrong range.
+
+The range comes from the channel table. The level a channel clips at is
+`ChannelTable.clip_ranges()`, in volts: the smaller of its DAQ Range
+(the input's range) and its Sensor Range (the sensor's own full-scale
+output), whichever is stated. Its Sensitivity column is the chain's
+sensitivity in mV per the unit beside it, so the range in that unit is
+``volts * 1000 / sensitivity``, and in SI it is that times the unit's
+scale. `table_full_scales` reads it for each channel of a time history
+by the same match the role pairing uses (`ChannelTable.identities`). A
+channel the table does not name, or names with no sensitivity, or in a
+unit of some other quantity, has no range, and says why rather than
+being judged against a guess. Two rows naming one channel give it a
+range only when they agree, and say so. A range is a size either way,
+so a unit with an offset (a temperature) converts by its scale alone. A
+row that states neither range gives its channel none, and the channel
+says so rather than being read against a range nobody stated.
+
+`overload_check` reads every channel of a `TimeHistory` (also
+`TimeHistory.overload_check`), `channel_overload` one plain array; each
+channel's result is a `ChannelOverload`, which carries its
+`TimeStatistics`, and the whole an `OverloadCheck`.
+
+What is judged: the samples beyond the range (none), the samples on the
+rail (the time statistics' own judgment of them), and the peak scaled
+to the next level against the range. No headroom is asked for beyond
+that: how much a range should carry over its predicted peak is a choice
+a test procedure makes, and the procedures put no single number on it,
+so the headroom is reported and the step is set where the next level
+is.
+
+References
+----------
+What a channel is ranged against and what clipping costs are set out
+in the test standard this check follows.
+
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 517.3,
+   paragraph 4.4.1.1c: a channel ranged for the peak it is expected to
+   see, and a clipped signal from which no data can be recovered.
+   Method 516.8, paragraph 4.5: clipping found in a record, and a
+   record that shows it set aside.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NamedTuple
+
+import numpy as np
+from numpy.typing import ArrayLike
+
+from .channel_table import ChannelTable
+from .kurtosis import analyzed_span
+from .time_statistics import (
+    RAIL_MARGIN,
+    RAIL_SAMPLES,
+    TimeStatistics,
+    record_statistics,
+    time_statistics,
+)
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from .data import TimeHistory
+
+# Why the step is read and not only the rail: a Gaussian record of
+# 8.88 grms (a largest peak of 37 g) through a 25 g range reads 287
+# samples on the rail, 0.47 %, 24 a second, a crest factor of 2.83 and a
+# kurtosis of 2.86, which the kurtosis bars' band of 2 to 4 passes. At
+# minus 6 dB the same record peaks at 18.49 g, 2.6 dB under the range,
+# and scaled to full level that is 37 g against 25: the check that
+# catches it before the step.
+
+#: the step to the next level, in dB: minus 6 dB to full level doubles
+#: the amplitude
+STEP_DB = 6.0
+
+#: why a channel of zeros is not read against its range
+DEAD = ('zero throughout: a dead channel has no peak to read against its '
+        'range')
+
+#: every judged item, by key, and the name a table or the words give it
+OVERLOADS: dict[str, str] = {
+    'beyond': 'Beyond the range',
+    'rail': 'On the rail',
+    'next': 'Reaches its range at the next level',
+}
+
+
+def range_in_unit(range_volts: float, sensitivity: float) -> float:
+    """The range in the channel's own unit: a range in volts over a
+    sensitivity in mV per unit, ``volts * 1000 / sensitivity``.
+
+    A 10 V input on a 100 mV/g chain reads to 100 g. NaN when the
+    sensitivity is not a positive number, since there is then no range
+    to speak of.
+    """
+    sensitivity = float(sensitivity)
+    if not (np.isfinite(sensitivity) and sensitivity > 0.0):
+        return float('nan')
+    return float(range_volts) * 1000.0 / sensitivity
+
+
+class TableRanges(NamedTuple):
+    """Each channel's range as a channel table gives it.
+
+    One entry per channel of the history, in order: `full_scales` in
+    SI, NaN where there is none; `reasons`, why there is none, '' where
+    the range was read; and `notes`, anything else to say about the
+    rows the range came from, ''.
+    """
+
+    full_scales: np.ndarray
+    reasons: list[str]
+    notes: list[str]
+
+
+def table_full_scales(table: ChannelTable, history: TimeHistory
+                      ) -> TableRanges:
+    """Each channel's range in SI from a channel table, and why where
+    there is none.
+
+    The table's row for a channel is the one that names it
+    (`ChannelTable.identities`): its DOF and its channel type, or its
+    DOF alone when the type is blank and the history has one channel
+    there. The range is the level the row's channel clips at
+    (`ChannelTable.clip_ranges`, the smaller of its DAQ Range and its
+    Sensor Range that are stated) in volts over its Sensitivity in mV
+    per the row's unit (`range_in_unit`), put into SI by the unit's
+    scale. A row that states neither range gives none, and the reason
+    says so. Where two or more rows name one channel, it has a range
+    only when they all give the same one, and a note says which rows;
+    where they differ it has none, and the reason says so.
+
+    Parameters
+    ----------
+    table : ChannelTable
+        The channel table describing the recording.
+    history : TimeHistory
+        The recording.
+
+    Returns
+    -------
+    TableRanges
+        Per channel of `history`: the range in SI, why there is none,
+        and any note.
+    """
+    rows = table.identities(history)
+    ranges = table.clip_ranges()
+    sensitivities = table.sensitivities()
+    units = [str(unit).strip() for unit in table.frame['unit']]
+    count = history.num_records
+    scales = np.full(count, np.nan)
+    reasons = [''] * count
+    notes = [''] * count
+    for i in range(count):
+        identity = (history.response_dof[i], history.ordinate_dim[i])
+        named = [k for k, row in enumerate(rows) if row == identity]
+        if not named:
+            reasons[i] = 'not in the channel table'
+            continue
+        read = [_row_range(ranges[k], sensitivities[k], units[k],
+                           history.ordinate_dim[i]) for k in named]
+        if len(named) > 1:
+            # two rows naming one channel: taking the first would be a
+            # guess at which one the record was made through
+            which = _row_numbers(named)
+            values = np.array([value for value, _reason in read])
+            finite = values[np.isfinite(values)]
+            if finite.size and (finite.size < values.size
+                                or np.ptp(finite) > 1e-12 * finite.max()):
+                reasons[i] = (f'rows {which} of the channel table name it '
+                              'with different ranges')
+                continue
+            if finite.size:
+                notes[i] = (f'rows {which} of the channel table name it, '
+                            'with the same range')
+        value, reason = read[0]
+        if not np.isfinite(value):
+            reasons[i] = reason
+            continue
+        scales[i] = value
+    return TableRanges(scales, reasons, notes)
+
+
+def _row_range(volts: float, sensitivity: float, unit: str,
+               dimension: str) -> tuple[float, str]:
+    """(range in SI, '') from one table row's Range, Sensitivity and
+    unit for a channel of `dimension`, or (NaN, why) where they give
+    none."""
+    from ..units import UNKNOWN, UnitError, si_transform
+
+    if not np.isfinite(float(volts)):
+        return (float('nan'), ('no range in the channel table: neither its '
+                               'DAQ Range nor its Sensor Range is stated'))
+    in_unit = range_in_unit(volts, sensitivity)
+    if not np.isfinite(in_unit):
+        return float('nan'), 'no sensitivity in the channel table'
+    if not unit:
+        return float('nan'), 'no unit in the channel table'
+    if dimension == UNKNOWN:
+        # raw numbers of no stated quantity: a range in a unit says
+        # nothing about them
+        return (float('nan'),
+                'the channel states no quantity to hold a range in')
+    try:
+        scale, _offset = si_transform(unit, dimension)
+    except UnitError:
+        return float('nan'), f'the table\'s unit {unit!r} is not {dimension}'
+    # a range is a size either way: the unit's scale, no offset
+    return float(in_unit * scale), ''
+
+
+def _row_numbers(rows: Sequence[int]) -> str:
+    """Rows counted from 1, as the table shows them: '2 and 5',
+    '1, 3 and 4'."""
+    numbers = [str(k + 1) for k in rows]
+    return ', '.join(numbers[:-1]) + ' and ' + numbers[-1]
+
+
+@dataclass(frozen=True, eq=False)
+class ChannelOverload:
+    """One channel's record against its range.
+
+    `full_scale` and the values read from `statistics` are in the
+    record's own units (SI for a channel of a `TimeHistory`). Without a
+    range, `full_scale` is NaN, `reason` says why, and nothing is
+    judged; without a reading at all (a channel with fewer than two
+    finite samples), `statistics` is None as well.
+    """
+
+    #: the channel's index in its record, and its label
+    record: int
+    label: str
+    #: the range either way, NaN where there is none
+    full_scale: float
+    #: the time-domain reading the numbers come from, or None
+    statistics: TimeStatistics | None
+    #: the step to the next level, in dB
+    step_db: float = STEP_DB
+    #: why there is no range, or no reading; '' when there is both
+    reason: str = ''
+    #: the samples further out than the range and its margin: none
+    #: unless the record was not taken through this range
+    beyond: int = 0
+    #: anything else to say about where the range came from, ''
+    note: str = ''
+
+    @property
+    def has_range(self) -> bool:
+        """Whether the channel was read against a range."""
+        return self.statistics is not None and np.isfinite(self.full_scale)
+
+    @property
+    def peak(self) -> float:
+        """The largest excursion either way, a size: NaN without a
+        reading."""
+        if self.statistics is None:
+            return float('nan')
+        return abs(self.statistics.peak)
+
+    @property
+    def rms(self) -> float:
+        """The rms over the span read; NaN without a reading."""
+        return (float('nan') if self.statistics is None
+                else self.statistics.rms)
+
+    @property
+    def crest(self) -> float:
+        """The crest factor: the largest excursion over the rms."""
+        return (float('nan') if self.statistics is None
+                else self.statistics.crest)
+
+    @property
+    def rail(self) -> int | None:
+        """The samples on the rail; None without a range."""
+        return self.statistics.rail if self.has_range else None
+
+    @property
+    def rail_share(self) -> float | None:
+        """The samples on the rail as a share of those read; None
+        without a range."""
+        return self.statistics.rail_share if self.has_range else None
+
+    @property
+    def rail_rate(self) -> float | None:
+        """The samples on the rail per second of the span read; None
+        without a range."""
+        if not self.has_range:
+            return None
+        return self.statistics.rail / self.statistics.record_length
+
+    @property
+    def headroom_db(self) -> float:
+        """The range over the largest excursion in dB, 20 log10 of the
+        time statistics' `headroom` ratio. At or below 0 the range was
+        reached; infinite for a record that never leaves zero; NaN
+        without a range."""
+        if not self.has_range:
+            return float('nan')
+        ratio = self.statistics.headroom
+        if ratio is None:
+            return math.inf
+        return 20.0 * math.log10(ratio)
+
+    @property
+    def next_peak(self) -> float:
+        """The largest excursion scaled up by `step_db`, a size: what
+        the next level would put on the channel if the structure
+        behaves as it did at this one."""
+        return self.peak * 10.0 ** (self.step_db / 20.0)
+
+    @property
+    def next_headroom_db(self) -> float:
+        """The headroom at the next level, in dB: `headroom_db` less the
+        step."""
+        return self.headroom_db - self.step_db
+
+    def flags(self) -> dict[str, bool]:
+        """Each judged item, by `OVERLOADS` key, and whether it is
+        flagged; empty for a channel with no range. The rail is the time
+        statistics' own judgment (`TimeStatistics.flags`). The next
+        level is judged only where the range has not already been
+        reached, so a clipped channel is flagged for its clip and not
+        again for a scaled peak that predicts nothing."""
+        if not self.has_range:
+            return {}
+        stats = self.statistics
+        reached = bool(stats.rail)
+        # the scaled peak within the margin of the range is on the rail
+        # at the next level
+        edge = (1.0 - stats.margin) * self.full_scale
+        return {
+            'beyond': self.beyond > 0,
+            'rail': stats.flags().get('rail', False),
+            'next': not reached and self.next_peak >= edge,
+        }
+
+    @property
+    def flagged(self) -> list[str]:
+        """The keys flagged, in `OVERLOADS` order."""
+        found = self.flags()
+        return [key for key in OVERLOADS if found.get(key)]
+
+    def describe(self, unit: str = '', scale: float = 1.0) -> str:
+        """The channel's judgment in words.
+
+        `scale` divides the values (SI for a channel of a time history)
+        into `unit` for the words, as a unit system's transform scale
+        does: 9.80665 and 'g' state an acceleration in g.
+        """
+        if self.statistics is None:
+            return f'{self.label}: not read ({self.reason}).'
+        if not np.isfinite(self.full_scale):
+            return f'{self.label}: no range ({self.reason}).'
+        return self._judged(unit, scale) + ''.join(
+            f' {caution[0].upper()}{caution[1:]}.'
+            for caution in self.cautions())
+
+    def cautions(self) -> list[str]:
+        """What to doubt about the reading, in words: samples left out
+        because they are not finite, and any note on the rows the range
+        came from. Empty when there is nothing."""
+        found = []
+        left = 0 if self.statistics is None else self.statistics.nonfinite
+        if left:
+            found.append(f'{left} sample{"" if left == 1 else "s"} '
+                         f'{"is" if left == 1 else "are"} not finite and '
+                         'left out')
+        if self.note:
+            found.append(self.note)
+        return found
+
+    def _judged(self, unit: str, scale: float) -> str:
+        """The judgment in words, for a channel with a range."""
+        after = f' {unit}' if unit else ''
+        stats = self.statistics
+        if self.beyond:
+            return (f'{self.label}: {self.beyond} sample'
+                    f'{"s" * (self.beyond != 1)} beyond its range of '
+                    f'{self.full_scale / scale:.4g}{after}, the largest '
+                    f'{self.peak / scale:.4g}{after}: the range or the '
+                    'sensitivity in the table is not the one the record '
+                    'was taken with.')
+        if 'rail' in self.flagged or stats.rail:
+            return (f'{self.label}: {stats.rail} sample'
+                    f'{"s" * (stats.rail != 1)} on the rail '
+                    f'({100.0 * (self.rail_share or 0.0):.2g} %, '
+                    f'{self.rail_rate:.3g} a second), crest factor '
+                    f'{self.crest:.2f}.')
+        if 'next' in self.flagged:
+            return (f'{self.label}: {self.headroom_db:.1f} dB of headroom; '
+                    f'+{self.step_db:g} dB puts its peak at '
+                    f'{self.next_peak / scale:.4g}{after} against a range '
+                    f'of {self.full_scale / scale:.4g}{after}.')
+        return (f'{self.label}: {self.headroom_db:.1f} dB of headroom, '
+                f'{self.next_headroom_db:.1f} dB at +{self.step_db:g} dB.')
+
+
+@dataclass(frozen=True, eq=False)
+class OverloadCheck:
+    """Every channel read against its range, and the judgment."""
+
+    #: one per channel read, in the order asked for
+    channels: tuple[ChannelOverload, ...]
+    step_db: float = STEP_DB
+    margin: float = RAIL_MARGIN
+
+    def with_step(self, step_db: float) -> OverloadCheck:
+        """This check with the step to the next level at `step_db`, the
+        readings kept: nothing read from the record depends on the
+        step, so dragging the headroom floor does not read every
+        channel's statistics again (2.2 s for eight channels of a
+        five-minute record, on every drag)."""
+        from dataclasses import replace
+
+        step_db = float(step_db)
+        return OverloadCheck(tuple(replace(c, step_db=step_db)
+                                   for c in self.channels),
+                             step_db=step_db, margin=self.margin)
+
+    @property
+    def checked(self) -> list[ChannelOverload]:
+        """The channels read against a range."""
+        return [channel for channel in self.channels if channel.has_range]
+
+    @property
+    def unranged(self) -> list[ChannelOverload]:
+        """The channels with no range, or not read at all, each saying
+        why."""
+        return [channel for channel in self.channels
+                if not channel.has_range]
+
+    @property
+    def unread(self) -> list[ChannelOverload]:
+        """The channels not read at all (a dead channel, or one with too
+        few finite samples), each saying why."""
+        return [channel for channel in self.channels
+                if channel.statistics is None]
+
+    def with_flag(self, key: str) -> list[ChannelOverload]:
+        """The channels flagged for `key` (an `OVERLOADS` key)."""
+        if key not in OVERLOADS:
+            raise KeyError(key)
+        return [channel for channel in self.channels
+                if key in channel.flagged]
+
+    @property
+    def flagged(self) -> list[ChannelOverload]:
+        """The channels flagged for anything."""
+        return [channel for channel in self.channels if channel.flagged]
+
+    @property
+    def worst(self) -> ChannelOverload | None:
+        """The channel that most wants looking at: the most samples on
+        the rail, then the least headroom at the next level. None when
+        no channel has a range."""
+        checked = self.checked
+        if not checked:
+            return None
+        return max(checked, key=lambda channel: (channel.rail or 0,
+                                                 -channel.next_headroom_db))
+
+    def describe(self) -> str:
+        """The judgment in words: which channels are on the rail,
+        which reach their range at the next level, which hold samples
+        beyond it, and how many had no range."""
+        step = f'+{self.step_db:g} dB'
+        phrases = {'beyond': ('beyond its range', 'beyond their ranges'),
+                   'rail': ('on the rail', 'on the rail'),
+                   'next': (f'reaches its range at {step}',
+                            f'reach their ranges at {step}')}
+        parts = []
+        for key, (one, many) in phrases.items():
+            found = self.with_flag(key)
+            if found:
+                names = ', '.join(channel.label for channel in found)
+                parts.append(f'{len(found)} {one if len(found) == 1 else many}'
+                             f' ({names})')
+        checked = len(self.checked)
+        if not parts:
+            words = (f'All {checked} channel{"s" * (checked != 1)} inside '
+                     f'their ranges, at {step} as well.'
+                     if checked else 'No channel was read against a range.')
+        else:
+            words = (f'Of {checked} channel{"s" * (checked != 1)}: '
+                     + '; '.join(parts) + '.')
+        unread = self.unread
+        if unread:
+            words += ' Not read: ' + '; '.join(
+                f'{channel.label}, {channel.reason}' for channel in unread) + '.'
+        missing = len(self.unranged) - len(unread)
+        if missing:
+            words += (f' {missing} channel{"s" * (missing != 1)} '
+                      f'with no range.')
+        holes = [channel for channel in self.channels
+                 if channel.statistics is not None
+                 and channel.statistics.nonfinite]
+        if holes:
+            names = ', '.join(f'{channel.label} {channel.statistics.nonfinite}'
+                              for channel in holes)
+            words += (f' Samples not finite, left out: {names}.')
+        return words
+
+
+def _beyond(values: np.ndarray, spans: Sequence[tuple[int, int]] | None,
+            full_scale: float, margin: float) -> int:
+    """The finite samples of `values` within `spans` further out than
+    the range and its margin."""
+    if not np.isfinite(full_scale):
+        return 0
+    limit = (1.0 + margin) * full_scale
+    pieces = ([values] if spans is None
+              else [values[max(int(low), 0):int(high)] for low, high in spans])
+    count = 0
+    for piece in pieces:
+        with np.errstate(invalid='ignore'):
+            count += int(np.count_nonzero(np.abs(piece) > limit))
+    return count
+
+
+def channel_overload(values: ArrayLike, sample_rate: float,
+                     full_scale: float | None, *,
+                     step_db: float = STEP_DB,
+                     margin: float = RAIL_MARGIN,
+                     rail_samples: int = RAIL_SAMPLES,
+                     label: str = '', record: int = 0,
+                     start: float = 0.0,
+                     spans: Sequence[tuple[int, int]] | None = None
+                     ) -> ChannelOverload:
+    """Read one record against its range.
+
+    Parameters
+    ----------
+    values : array_like
+        The record, one channel, evenly sampled.
+    sample_rate : float
+        Samples per second.
+    full_scale : float or None
+        The range either way, in the units of `values`. None or NaN
+        reads the record with no range: nothing is judged.
+    step_db : float, default `STEP_DB`
+        The step to the next level, in dB.
+    margin : float, default `core.time_statistics.RAIL_MARGIN`
+        How close to the range a sample counts as on it, as a share.
+    rail_samples : int, default `core.time_statistics.RAIL_SAMPLES`
+        The most samples allowed on the rail.
+    label : str, optional
+        What the channel is called in the words.
+    record : int, default 0
+        The channel's index, carried for the caller.
+    start, spans
+        As `core.time_statistics.time_statistics` takes them.
+
+    Returns
+    -------
+    ChannelOverload
+        The numbers and the flags.
+
+    Raises
+    ------
+    ValueError
+        If the range is not above zero, or as
+        `core.time_statistics.time_statistics` raises.
+    """
+    scale = (float('nan') if full_scale is None else float(full_scale))
+    if np.isfinite(scale) and not scale > 0.0:
+        raise ValueError('the range is how far either way the channel '
+                         'reads, and has to be above zero')
+    data = np.real(np.asarray(values)).astype(float, copy=False).ravel()
+    stats = time_statistics(data, sample_rate, start=start, spans=spans,
+                            full_scale=scale if np.isfinite(scale) else None,
+                            margin=margin, rail_samples=rail_samples)
+    if stats.peak == 0.0:
+        return ChannelOverload(record=int(record), label=str(label),
+                               full_scale=scale, statistics=None,
+                               step_db=float(step_db), reason=DEAD)
+    return ChannelOverload(record=int(record), label=str(label),
+                           full_scale=scale, statistics=stats,
+                           step_db=float(step_db),
+                           reason='' if np.isfinite(scale) else 'no range given',
+                           beyond=_beyond(data, spans, scale, float(margin)))
+
+
+def overload_check(history: TimeHistory,
+                   ranges: ChannelTable | ArrayLike | float, *,
+                   records: Sequence[int] | None = None,
+                   step_db: float = STEP_DB,
+                   margin: float = RAIL_MARGIN,
+                   rail_samples: int = RAIL_SAMPLES) -> OverloadCheck:
+    """Read each channel of a time history against its range.
+
+    Over the span `core.kurtosis.analyzed_span` names, as the kurtosis
+    bars and the Statistics reading read it, so a channel's rail count
+    here is that reading's for the same range and margin.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The record.
+    ranges : ChannelTable, array_like or float
+        Where the ranges come from: the channel table describing the
+        record (`table_full_scales` reads its `clip_ranges`), or the ranges themselves
+        in SI, one per channel (NaN or None for a channel with none) or
+        one for every channel. A 25 g range on an acceleration channel
+        is ``25 * 9.80665``.
+    records : sequence of int, optional
+        Which channels, counting from 0; every channel by default.
+    step_db : float, default `STEP_DB`
+        The step to the next level, in dB.
+    margin : float, default `core.time_statistics.RAIL_MARGIN`
+        How close to the range a sample counts as on it, as a share.
+    rail_samples : int, default `core.time_statistics.RAIL_SAMPLES`
+        The most samples allowed on the rail.
+
+    Returns
+    -------
+    OverloadCheck
+        Every channel's numbers and flags, and the judgment.
+
+    Raises
+    ------
+    ValueError
+        If a channel named is not in the record, none is named, the
+        ranges given are not one per channel, a range is zero or
+        negative, the step is not finite, or the margin is not a share.
+    """
+    count = history.num_records
+    if records is not None and not len(records):
+        raise ValueError('no channel asked for: name one or more, or pass '
+                         'none for every channel')
+    if not np.isfinite(float(step_db)):
+        raise ValueError('the step to the next level is a number of dB')
+    if not 0.0 <= float(margin) < 1.0:
+        raise ValueError('the margin is a share of the range, from 0 up '
+                         'to 1')
+    if isinstance(ranges, ChannelTable):
+        scales, reasons, notes = table_full_scales(ranges, history)
+    else:
+        given = np.asarray(
+            [np.nan if value is None else value
+             for value in np.atleast_1d(np.asarray(ranges, dtype=object))],
+            dtype=float)
+        if given.size == 1:
+            given = np.full(count, given[0])
+        if given.size != count:
+            raise ValueError(f'{given.size} ranges for {count} channel'
+                             f'{"s" * (count != 1)}: one each, or one for '
+                             'all')
+        if np.any(np.isfinite(given) & ~(given > 0.0)):
+            raise ValueError('a range is how far either way a channel '
+                             'reads, and has to be above zero')
+        scales = given
+        reasons = ['' if np.isfinite(value) else 'no range given'
+                   for value in given]
+        notes = [''] * count
+    wanted = range(count) if records is None else [int(i) for i in records]
+    spans, _phrase = analyzed_span(history)
+    ordinate = np.asarray(history.ordinate)
+    channels = []
+    for i in wanted:
+        if not 0 <= i < count:
+            raise ValueError(f'the record has {count} channel'
+                             f'{"s" * (count != 1)}; there is no channel {i}')
+        scale = float(scales[i])
+        known = np.isfinite(scale)
+        try:
+            stats = record_statistics(
+                history, i, full_scale=scale if known else None,
+                margin=margin, rail_samples=rail_samples)
+        except ValueError as error:
+            # an empty channel: said, and left out of the verdict
+            channels.append(ChannelOverload(
+                record=i, label=history.record_label(i), full_scale=scale,
+                statistics=None, step_db=float(step_db),
+                reason=str(error)))
+            continue
+        if stats.peak == 0.0:
+            # zero throughout: infinite headroom would read as a pass
+            channels.append(ChannelOverload(
+                record=i, label=history.record_label(i), full_scale=scale,
+                statistics=None, step_db=float(step_db), reason=DEAD))
+            continue
+        channels.append(ChannelOverload(
+            record=i, label=history.record_label(i), full_scale=scale,
+            statistics=stats, step_db=float(step_db), reason=reasons[i],
+            beyond=_beyond(np.real(ordinate[i]), spans, scale,
+                           float(margin)),
+            note=notes[i]))
+    return OverloadCheck(channels=tuple(channels), step_db=float(step_db),
+                         margin=float(margin))
+
+
+def headroom_rows(check: OverloadCheck) -> list[tuple[str, float]]:
+    """[(label, headroom in dB)] for each channel, NaN where there is
+    no range: the rows the headroom bars draw."""
+    return [(channel.label, channel.headroom_db)
+            for channel in check.channels]
+
+
+def notes_for(check: OverloadCheck) -> dict[int, str]:
+    """{row: why} for each channel with no range: the sentence the
+    headroom bars write along its row in place of a bar."""
+    return {row: (f'not read: {channel.reason}'
+                  if channel.statistics is None
+                  else f'no range: {channel.reason}')
+            for row, channel in enumerate(check.channels)
+            if not channel.has_range}
+

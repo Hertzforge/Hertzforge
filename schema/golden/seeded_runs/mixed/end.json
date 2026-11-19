@@ -1,0 +1,21 @@
+{
+  "run_uid": "20261114-213512-d572fd8c",
+  "end": {
+    "outcome": "completed",
+    "message": "Test complete: the schedule finished and every part ramped down with the controlled stop.",
+    "at_s": 6.25,
+    "level_db": 0,
+    "ramp_s": 0.688,
+    "trip": null
+  },
+  "at_unix": 1794692112.610579,
+  "station_frames": 36096,
+  "summary": {
+    "elapsed_s": 6.25,
+    "t_s": 6.25,
+    "level_records": 1,
+    "trace_records": 1,
+    "spectra_records": 2
+  },
+  "streams": {}
+}

@@ -1,0 +1,251 @@
+"""Each of the tree's checks, run on the tree and on a planted case that
+must trip it. A check that cannot fail proves nothing."""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import subprocess
+import sys
+
+import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+import check_tree
+
+# a phrase no real tree contains, listed only for these tests
+PLANTED = frozenset({check_tree.phrase_hash('quokka foundry')})
+
+
+def _repo(root: pathlib.Path, files: dict[str, str]) -> None:
+    """A git repository at `root` with `files` ({path: text}) added to its
+    index, which is what `git ls-files` lists."""
+    for name, text in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding='utf-8')
+    subprocess.run(['git', 'init', '-q'], cwd=root, check=True, capture_output=True)
+    subprocess.run(['git', 'add', '.'], cwd=root, check=True, capture_output=True)
+
+
+def _lockfile(licenses: dict[str, str]) -> str:
+    return json.dumps({'packages': {
+        '': {'name': 'tool'},
+        **{f'node_modules/{name}': {'license': license_}
+           for name, license_ in licenses.items()}}})
+
+
+def test_the_tree_is_clean(capsys):
+    assert check_tree.main([]) == 0
+    assert ', 0 findings' in capsys.readouterr().out
+
+
+def test_a_file_deleted_but_not_committed_is_skipped(tmp_path, capsys):
+    # git ls-files still lists it; the check reads the tree as it stands
+    _repo(tmp_path, {'kept.md': 'clean\n', 'gone.md': 'clean\n'})
+    (tmp_path / 'gone.md').unlink()
+    assert check_tree.tracked_files(tmp_path) == [tmp_path / 'kept.md']
+    assert check_tree.main([], root=tmp_path) == 0
+    assert '1 tracked files, 0 npm lockfiles, 0 findings' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('text', [
+    'Built with the Quokka Foundry team.',
+    'see quokka-foundry/notes for the rest',
+    'QUOKKA_FOUNDRY = 1',
+])
+def test_a_listed_name_is_found_however_it_is_written(tmp_path, text):
+    path = tmp_path / 'notes.md'
+    path.write_text(f'first line\n{text}\n', encoding='utf-8')
+    found = check_tree.check_names([path], tmp_path, names=PLANTED)
+    assert found == ['notes.md: line 2 names a listed organization']
+
+
+def test_a_listed_name_in_a_path_is_found(tmp_path):
+    path = tmp_path / 'quokka_foundry.py'
+    path.write_text('x = 1\n', encoding='utf-8')
+    assert check_tree.check_names([path], tmp_path, names=PLANTED) == [
+        'quokka_foundry.py: its path names a listed organization']
+
+
+def test_one_word_of_a_listed_pair_is_not_a_hit(tmp_path):
+    path = tmp_path / 'notes.md'
+    path.write_text('a quokka and a foundry, apart\n', encoding='utf-8')
+    assert check_tree.check_names([path], tmp_path, names=PLANTED) == []
+
+
+def test_the_finding_never_repeats_the_name(tmp_path):
+    path = tmp_path / 'notes.md'
+    path.write_text('Quokka Foundry\n', encoding='utf-8')
+    (finding,) = check_tree.check_names([path], tmp_path, names=PLANTED)
+    assert 'quokka' not in finding.lower()
+
+
+def test_a_listed_notice_is_not_read_and_the_same_text_elsewhere_is(tmp_path):
+    notice = tmp_path / 'vendor' / 'specs' / 'LICENSE'
+    elsewhere = tmp_path / 'docs' / 'LICENSE'
+    for path in (notice, elsewhere):
+        path.parent.mkdir(parents=True)
+        path.write_text('Copyright (c) 2026, Quokka Foundry\n', encoding='utf-8')
+    found = check_tree.check_names([notice, elsewhere], tmp_path, names=PLANTED,
+                                   notices=frozenset({'vendor/specs/LICENSE'}))
+    assert found == ['docs/LICENSE: line 1 names a listed organization']
+
+
+def test_every_listed_notice_is_in_the_tree():
+    # a notice left listed after its file goes would exempt whatever
+    # later lands at that path
+    tracked = {path.relative_to(check_tree.ROOT).as_posix()
+               for path in check_tree.tracked_files()}
+    assert check_tree.NOTICES <= tracked
+
+
+def test_a_listed_reference_is_taken_out_and_the_rest_still_read(tmp_path):
+    address = 'git+https://example.org/quokka-foundry/specs.git'
+    references = frozenset({check_tree.reference_hash(address)})
+    path = tmp_path / 'ci.yml'
+    path.write_text(
+        f"run: pip install 'specs @ {address}'\n"
+        f"run: pip install 'specs @ {address}'  # from Quokka Foundry\n"
+        "run: pip install 'other @ git+https://example.org/quokka-foundry/other.git'\n",
+        encoding='utf-8')
+    found = check_tree.check_names([path], tmp_path, names=PLANTED, references=references)
+    assert found == ['ci.yml: line 2 names a listed organization',
+                     'ci.yml: line 3 names a listed organization']
+
+
+def test_every_listed_reference_is_in_the_tree():
+    # a reference left listed after its address goes would exempt that
+    # address wherever it was written later
+    seen = set()
+    for path in check_tree.tracked_files():
+        text = check_tree._text(path)
+        if text is None:
+            continue
+        seen.update(check_tree.reference_hash(address)
+                    for address in check_tree._ADDRESS.findall(text))
+    assert check_tree.REFERENCES <= seen
+
+
+@pytest.mark.parametrize('expression,allowed', [
+    ('MIT', True), ('(MIT OR GPL-3.0)', True), ('MIT AND OFL-1.1', True),
+    ('GPL-3.0', False), ('MIT AND GPL-3.0', False), ('LGPL-3.0', False),
+    (None, False), ('', False),
+    # a parenthesized choice joined to a copyleft license by AND, either side
+    ('(MIT OR Apache-2.0) AND GPL-3.0', False),
+    ('GPL-3.0 AND (MIT OR Apache-2.0)', False),
+    ('(MIT OR Apache-2.0) AND (ISC OR GPL-3.0)', True),
+    ('((MIT OR GPL-3.0) AND (Apache-2.0 OR LGPL-3.0))', True),
+    ('MIT AND (GPL-3.0 OR (LGPL-3.0 AND ISC))', False),
+    # AND binds tighter than OR: MIT OR (Apache-2.0 AND GPL-3.0), allowed by MIT
+    ('MIT OR Apache-2.0 AND GPL-3.0', True),
+    ('GPL-3.0 AND MIT OR Apache-2.0', True),
+    ('GPL-3.0 OR LGPL-3.0 AND MIT', False),
+    # an exception only adds permissions: the license before WITH decides
+    ('Apache-2.0 WITH LLVM-exception', True),
+    ('GPL-2.0-only WITH Classpath-exception-2.0', False),
+    ('(Apache-2.0 WITH LLVM-exception) AND GPL-3.0', False),
+    # not an expression: refused, never guessed at
+    ('MIT OR', False), ('(MIT', False), ('MIT)', False), ('MIT ISC', False),
+    ('AND MIT', False), ('MIT WITH', False), ('()', False),
+    ('MIT or Apache-2.0', False), ('SEE LICENSE IN LICENSE.md', False),
+])
+def test_npm_license_expressions(expression, allowed):
+    verdict = check_tree.check_licenses.judge_text(expression, check_tree.ALLOWED_LICENSES)
+    assert (verdict == check_tree.check_licenses.ALLOWED) is allowed
+
+
+def test_a_python_file_in_no_scope_is_found(tmp_path):
+    inside = tmp_path / 'src' / 'module.py'
+    outside = tmp_path / 'stray' / 'module.py'
+    assert check_tree.check_licenses.check_scopes([inside, outside], tmp_path) == [
+        'stray/module.py: in no scope of check_licenses.SCOPES, so its imports are never checked']
+
+
+def test_a_disallowed_or_missing_npm_license_is_found(tmp_path):
+    lockfile = tmp_path / 'package-lock.json'
+    lockfile.write_text(json.dumps({'packages': {
+        '': {'name': 'shell'},
+        'node_modules/fine': {'license': 'MIT'},
+        'node_modules/viral': {'license': 'GPL-3.0'},
+        'node_modules/@scope/quiet': {},
+    }}), encoding='utf-8')
+    assert check_tree.check_npm_licenses(lockfile, tmp_path) == [
+        'package-lock.json: viral is licensed GPL-3.0, which is not on the allowlist',
+        ('package-lock.json: @scope/quiet is licensed with no license stated, which is '
+         'not on the allowlist'),
+    ]
+
+
+def test_every_tracked_npm_lockfile_is_checked(tmp_path, capsys):
+    _repo(tmp_path, {
+        'ui/package-lock.json': _lockfile({'fine': 'MIT'}),
+        'tools/recorder/package-lock.json': _lockfile({'viral': 'GPL-3.0'}),
+    })
+    assert check_tree.main([], root=tmp_path) == 1
+    out = capsys.readouterr().out
+    where = pathlib.Path('tools', 'recorder', 'package-lock.json')
+    assert f'{where}: viral is licensed GPL-3.0, which is not on the allowlist' in out
+    assert '2 npm lockfiles, 1 findings' in out
+
+
+def test_every_offending_line_is_reported(tmp_path):
+    path = tmp_path / 'notes.md'
+    path.write_text('quokka foundry\nclean\nQuokka Foundry again\n', encoding='utf-8')
+    assert check_tree.check_names([path], tmp_path, names=PLANTED) == [
+        'notes.md: line 1 names a listed organization',
+        'notes.md: line 3 names a listed organization',
+    ]
+
+
+# The credit allowance: one listed name, as a source credit, in
+# the two credit places only, on a line that does not speak of hardware. The
+# cases plant names of their own; the real one is held as a hash.
+CREDITED_PLANT = check_tree.phrase_hash('quokka foundry')
+OTHER_PLANT = check_tree.phrase_hash('wombat works')
+BOTH = frozenset({CREDITED_PLANT, OTHER_PLANT})
+CREDIT_LINE = 'Concepts from the Quokka Foundry documentation, credited with thanks.\n'
+
+
+def _credit_check(tmp_path, rel, text):
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'Credits\n{text}', encoding='utf-8')
+    return check_tree.check_names([path], tmp_path, names=BOTH,
+                                  credited=frozenset({CREDITED_PLANT}))
+
+
+@pytest.mark.parametrize('rel', sorted(check_tree.CREDIT_FILES))
+def test_the_credited_name_passes_in_a_credit_file(tmp_path, rel):
+    assert _credit_check(tmp_path, rel, CREDIT_LINE) == []
+
+
+@pytest.mark.parametrize('rel', ['docs/mimo-random.md', 'crates/sds-control/src/lib.rs',
+                                 'site/public/index.html', 'acknowledgments.md'])
+def test_the_same_line_elsewhere_is_blocked(tmp_path, rel):
+    assert _credit_check(tmp_path, rel, CREDIT_LINE) == [
+        f'{rel}: line 2 names a listed organization']
+
+
+@pytest.mark.parametrize('line', [
+    'Runs on Quokka Foundry hardware.\n',
+    'The Quokka Foundry DAQ backend is supported.\n',
+    'Quokka Foundry drives the shakers.\n',
+])
+def test_a_hardware_claim_in_a_credit_file_is_blocked(tmp_path, line):
+    assert _credit_check(tmp_path, 'ACKNOWLEDGMENTS.md', line) == [
+        'ACKNOWLEDGMENTS.md: line 2 names a listed organization']
+
+
+def test_every_other_listed_name_is_still_blocked_in_a_credit_file(tmp_path):
+    found = _credit_check(tmp_path, 'site/public/credits.html',
+                          CREDIT_LINE + 'With thanks to Wombat Works.\n')
+    assert found == ['site/public/credits.html: line 3 names a listed organization']
+
+
+def test_the_allowance_is_one_listed_name():
+    # The credited hash is a listed name (so it stays blocked everywhere else),
+    # and the allowance holds no other.
+    assert len(check_tree.CREDITED) == 1
+    assert check_tree.CREDITED <= check_tree.NAMES

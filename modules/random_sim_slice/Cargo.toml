@@ -1,0 +1,13 @@
+[package]
+name = "random_sim_slice"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hertzforge-module-abi = { path = "../../crates/hertzforge-module-abi" }
+hertzforge-dsp = { path = "../../crates/hertzforge-dsp" }

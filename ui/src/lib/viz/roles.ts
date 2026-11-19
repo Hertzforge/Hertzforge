@@ -1,9 +1,11 @@
 /**
  * Series roles: line style first, color second, so no meaning rests on hue alone.
- * measured solid, reference dashed, tolerance dotted, abort dash-dot, drive thin solid.
+ * measured solid, reference dashed, tolerance dotted, abort dash-dot, limit dash-dot-dot (a
+ * ceiling the controller holds a channel under; it never aborts), drive thin solid.
  */
 
-import type { Role } from '$lib/protocol/types';
+import type { Role, Series } from '$lib/protocol/types';
+import { colormap } from './colormap';
 
 export interface RoleStyle {
 	/** Canvas dash pattern in CSS pixels; empty for solid. */
@@ -22,6 +24,7 @@ export const ROLE_STYLES: Record<Role, RoleStyle> = {
 	reference: { dash: [7, 4], width: 1.6, colorVar: '--series-reference', styleName: 'dashed', z: 4 },
 	tolerance: { dash: [1.5, 3.5], width: 1.6, colorVar: '--series-tolerance', styleName: 'dotted', z: 2 },
 	abort: { dash: [9, 3.5, 1.5, 3.5], width: 1.5, colorVar: '--series-abort', styleName: 'dash-dot', z: 3 },
+	limit: { dash: [10, 3, 1.5, 3, 1.5, 3], width: 1.7, colorVar: '--series-limit', styleName: 'dash-dot-dot', z: 3 },
 	drive: { dash: [], width: 1, colorVar: '--series-drive', styleName: 'thin solid', z: 1 },
 	other: { dash: [], width: 1.4, colorVar: '--series-other', styleName: 'solid', z: 1 }
 };
@@ -39,3 +42,95 @@ export function dashArray(role: Role): string {
 	const d = ROLE_STYLES[role].dash;
 	return d.length ? d.join(' ') : 'none';
 }
+
+/** How one series of a view is drawn. */
+export interface SeriesLook {
+	style: RoleStyle;
+	colorVar: string;
+	/** A color of its own, in place of `colorVar`: a curve of a plot of more records than the role has colors. */
+	color?: string;
+	/** A follower: drawn, but not listed in the legend. */
+	follows: boolean;
+}
+
+/** The part of viridis a curve is drawn from, short of the yellow end that washes out on a light background. */
+const VIRIDIS_SPAN = 0.85;
+
+/** The `n`th of `count` curves' color, spaced evenly along viridis. */
+export function viridisColor(n: number, count: number): string {
+	const [r, g, b] = colormap(count > 1 ? (n / (count - 1)) * VIRIDIS_SPAN : 0);
+	return `rgb(${Math.round(r * 255)} ${Math.round(g * 255)} ${Math.round(b * 255)})`;
+}
+
+/** A follower's dash: the reference role's, so it reads as dashed beside its solid measurement. */
+const FOLLOWER_DASH = ROLE_STYLES.reference.dash;
+
+/**
+ * The look of each of a view's series. Series step through their role's colors in order; a
+ * follower (`follows`, an earlier series that is not itself a follower) takes its measurement's
+ * color dashed and draws just above it. A `follows`
+ * that names no such series is ignored.
+ */
+export function seriesLooks(series: Pick<Series, 'role' | 'follows'>[]): SeriesLook[] {
+	const counts: Partial<Record<Role, number>> = {};
+	const looks: SeriesLook[] = [];
+	// more measured curves than the blue family has colors: each its own, along viridis, since
+	// ordinary curves never share a color
+	const isFollower = (s: Pick<Series, 'follows'>, i: number) => s.follows !== undefined && s.follows < i;
+	const measured = series.filter((s, i) => s.role === 'measured' && !isFollower(s, i)).length;
+	const spread = measured > MEASURED_VARIANTS.length;
+	series.forEach((s, i) => {
+		const followed = isFollower(s, i) ? looks[s.follows as number] : undefined;
+		if (followed && !followed.follows) {
+			const style = { ...followed.style, dash: FOLLOWER_DASH, styleName: 'dashed', z: followed.style.z + 0.5 };
+			looks.push({ style, colorVar: followed.colorVar, color: followed.color, follows: true });
+			return;
+		}
+		const nth = (counts[s.role] = (counts[s.role] ?? -1) + 1);
+		const color = spread && s.role === 'measured' ? viridisColor(nth, measured) : undefined;
+		looks.push({ style: ROLE_STYLES[s.role] ?? ROLE_STYLES.other, colorVar: roleColorVar(s.role, nth), color, follows: false });
+	});
+	return looks;
+}
+
+/**
+ * Colours a person may give a line: the Okabe and Ito set, chosen to stay apart under the common
+ * colour-vision deficiencies. Each has a name for the menu and the legend, and a line given one
+ * keeps its dash and its marker, so colour is never the only cue.
+ */
+export const TRACE_COLORS: readonly { id: string; words: string; hex: string }[] = [
+	{ id: 'orange', words: 'Orange', hex: '#e69f00' },
+	{ id: 'sky', words: 'Sky Blue', hex: '#56b4e9' },
+	{ id: 'green', words: 'Bluish Green', hex: '#009e73' },
+	{ id: 'yellow', words: 'Yellow', hex: '#f0e442' },
+	{ id: 'blue', words: 'Blue', hex: '#0072b2' },
+	{ id: 'vermillion', words: 'Vermillion', hex: '#d55e00' },
+	{ id: 'purple', words: 'Reddish Purple', hex: '#cc79a7' },
+	{ id: 'gray', words: 'Gray', hex: '#999999' }
+];
+
+/** The palette entry for a colour, matched without regard to case; undefined when it is not one. */
+export function traceColor(hex: string | null | undefined): { id: string; words: string; hex: string } | undefined {
+	const h = hex?.toLowerCase();
+	return h ? TRACE_COLORS.find((c) => c.hex === h) : undefined;
+}
+
+/** The dash patterns a line may be given, the role patterns' own, with their words. */
+export const DASH_STYLES = {
+	solid: { dash: ROLE_STYLES.measured.dash, words: 'solid' },
+	dashed: { dash: ROLE_STYLES.reference.dash, words: 'dashed' },
+	dotted: { dash: ROLE_STYLES.tolerance.dash, words: 'dotted' },
+	dashdot: { dash: ROLE_STYLES.abort.dash, words: 'dash-dot' }
+} as const satisfies Record<string, { dash: readonly number[]; words: string }>;
+
+export type MarkerShape = 'circle' | 'square' | 'triangle' | 'diamond' | 'cross';
+
+/** Markers in the order a plot hands them out, with their words for the legend. */
+export const MARKER_WORDS: Record<MarkerShape, string> = {
+	circle: 'circles',
+	square: 'squares',
+	triangle: 'triangles',
+	diamond: 'diamonds',
+	cross: 'crosses'
+};
+export const MARKER_ORDER: MarkerShape[] = ['circle', 'square', 'triangle', 'diamond', 'cross'];

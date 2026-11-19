@@ -1,0 +1,35 @@
+{
+ "type": "response",
+ "id": 109,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 3 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "row_not_recorded",
+     "field": "trigger.row",
+     "message": "Row 5 is not an enabled input row of the channel table; only those are recorded."
+    },
+    {
+     "reason": "out_of_range",
+     "field": "trigger.pre_s",
+     "message": "The pre-window is 12; it runs from 0 to 10 s."
+    },
+    {
+     "reason": "not_power_of_two",
+     "field": "analysis.block",
+     "message": "The analysis block is 3000; it is a power of two from 256 to 65536."
+    }
+   ],
+   "warnings": [
+    {
+     "reason": "drive_channel_present",
+     "channel": 5,
+     "message": "Row 5 is a drive row; a Recorder run does not open or record it."
+    }
+   ]
+  }
+ }
+}

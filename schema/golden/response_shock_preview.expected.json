@@ -1,0 +1,245 @@
+{
+ "type": "response",
+ "id": 53,
+ "result": {
+  "derived": {
+   "reference": {
+    "peak_g": 10,
+    "velocity_change_ips": 9.6522,
+    "displacement_pk_pk_in": 0.0123,
+    "main_start": 2,
+    "main_len": 3
+   },
+   "quiet_window": {
+    "worst_frac": 0.05,
+    "limit_frac": 0.15,
+    "inside": true
+   }
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Pulse",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Acceleration",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        -0.002,
+        -0.001,
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.5,
+        0.0,
+        7.5,
+        10.0,
+        7.5,
+        0.0,
+        -0.5
+       ]
+      }
+     },
+     {
+      "name": "Tolerance high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        6
+       ],
+       "values": [
+        -0.001,
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        6
+       ],
+       "values": [
+        1.5,
+        1.5,
+        9.0,
+        11.5,
+        9.0,
+        1.5
+       ]
+      }
+     },
+     {
+      "name": "Tolerance low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        6
+       ],
+       "values": [
+        -0.001,
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        6
+       ],
+       "values": [
+        -1.5,
+        -1.5,
+        6.0,
+        8.5,
+        6.0,
+        -1.5
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   },
+   {
+    "view": "spectrum",
+    "title": "Velocity",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Velocity",
+     "unit": "in/s",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        -0.002,
+        -0.001,
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        -0.096522,
+        -0.193044,
+        1.25,
+        4.6,
+        7.9,
+        9.65,
+        9.6522
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   },
+   {
+    "view": "spectrum",
+    "title": "Displacement",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Displacement",
+     "unit": "in",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        -0.002,
+        -0.001,
+        0.0,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        8
+       ],
+       "values": [
+        0.0,
+        0.0,
+        -0.0001,
+        -0.0002,
+        0.0026,
+        0.0089,
+        0.0123,
+        0.0122
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   }
+  ]
+ }
+}

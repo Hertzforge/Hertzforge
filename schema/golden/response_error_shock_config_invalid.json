@@ -1,0 +1,30 @@
+{
+ "type": "response",
+ "id": 58,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 2 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "out_of_range",
+     "field": "limits.drive_vpk_abort",
+     "message": "The drive abort is 0.4; it is above the drive ceiling of 0.5 V and at most 10 V"
+    },
+    {
+     "reason": "spacing_below_floor",
+     "field": "train.spacing_s",
+     "message": "0.5 s between pulses is below the floor of 1 s (the largest of the cooling, settling and compute times)."
+    }
+   ],
+   "warnings": [
+    {
+     "reason": "quiet_window_exceeded",
+     "field": "pulse.compensation",
+     "message": "The compensation reaches 24.7% of the peak in the standard's quiet window, whose tolerance is 15%: the reference itself would fail the amplitude check there. Longer or rectangular shoulders sit lower."
+    }
+   ]
+  }
+ }
+}

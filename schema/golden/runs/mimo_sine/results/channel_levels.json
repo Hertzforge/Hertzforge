@@ -1,0 +1,226 @@
+{
+  "name": "channel_levels",
+  "kind": "sine_levels",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "description": "every control's, limit channel's and drive's tracked amplitude, peak, and phase against the tone, tick by tick, with the tone's frequency, the scheduled level, the sweep's direction and pass, each control's reference and error, the notch and the readings; time from engage; a tick is NaN where a record was not filled",
+  "records": {
+    "index": "record",
+    "points": "the ticks the record holds before its NaN fill"
+  },
+  "units": [
+    {
+      "channel": 1,
+      "unit": "g"
+    },
+    {
+      "channel": 2,
+      "unit": "g"
+    },
+    {
+      "channel": 3,
+      "unit": "g"
+    },
+    {
+      "channel": 4,
+      "unit": "g"
+    },
+    {
+      "channel": 5,
+      "unit": "V"
+    },
+    {
+      "channel": 6,
+      "unit": "V"
+    },
+    {
+      "channel": 7,
+      "unit": "V"
+    },
+    {
+      "channel": 8,
+      "unit": "V"
+    }
+  ],
+  "roles": {
+    "controls": 4,
+    "limits": 0,
+    "drives": 4
+  },
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "Hz",
+      "offset": 128
+    },
+    {
+      "name": "level_db",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "dB",
+      "offset": 256
+    },
+    {
+      "name": "direction",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 384
+    },
+    {
+      "name": "pass",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 512
+    },
+    {
+      "name": "settling",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 640
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        8,
+        16
+      ],
+      "unit": "",
+      "offset": 768
+    },
+    {
+      "name": "phase",
+      "dtype": "f8",
+      "shape": [
+        8,
+        16
+      ],
+      "unit": "deg",
+      "offset": 1792
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "g",
+      "offset": 2816
+    },
+    {
+      "name": "reference_phase",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "deg",
+      "offset": 3328
+    },
+    {
+      "name": "error_db",
+      "dtype": "f8",
+      "shape": [
+        4,
+        16
+      ],
+      "unit": "dB",
+      "offset": 3840
+    },
+    {
+      "name": "limit_bound",
+      "dtype": "f8",
+      "shape": [
+        0,
+        16
+      ],
+      "unit": "",
+      "offset": 4352
+    },
+    {
+      "name": "notch_scale",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4352
+    },
+    {
+      "name": "notch_depth",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4480
+    },
+    {
+      "name": "notched",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4608
+    },
+    {
+      "name": "opposition_ratio",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4736
+    },
+    {
+      "name": "largest_share",
+      "dtype": "f8",
+      "shape": [
+        16
+      ],
+      "unit": "",
+      "offset": 4864
+    }
+  ]
+}

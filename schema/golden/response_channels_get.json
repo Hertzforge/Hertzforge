@@ -1,0 +1,85 @@
+{
+ "type": "response",
+ "id": 4,
+ "result": {
+  "revision": 3,
+  "channels": [
+   {
+    "index": 1,
+    "enabled": true,
+    "description": "Control",
+    "role": "control",
+    "physical": {
+     "device": "cDAQ1Mod1",
+     "channel": "ai0"
+    },
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "g",
+    "sensitivity_mv_per_eu": 100,
+    "range_max": 50,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": 40,
+     "velocity_ips": null,
+     "displacement_mil": null
+    }
+   },
+   {
+    "index": 2,
+    "enabled": true,
+    "description": "Fixture corner",
+    "role": "monitor",
+    "physical": {
+     "device": "cDAQ1Mod1",
+     "channel": "ai1"
+    },
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "g",
+    "sensitivity_mv_per_eu": 100,
+    "range_max": 50,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": null,
+     "velocity_ips": null,
+     "displacement_mil": null
+    }
+   },
+   {
+    "index": 3,
+    "enabled": true,
+    "description": "Drive",
+    "role": "drive",
+    "physical": {
+     "device": "cDAQ1Mod2",
+     "channel": "ao0"
+    },
+    "interface": "single_ended",
+    "iepe_bias_v": null,
+    "units": "V",
+    "sensitivity_mv_per_eu": 1000,
+    "range_max": 1,
+    "polarity": "positive",
+    "control_group": null,
+    "abort": {
+     "accel_g": null,
+     "velocity_ips": null,
+     "displacement_mil": null
+    }
+   }
+  ],
+  "report": {
+   "errors": [],
+   "warnings": [
+    {
+     "reason": "drive_channel_present",
+     "channel": 3,
+     "message": "channel 3 is a drive output (sensitivity/range are advisory)"
+    }
+   ]
+  }
+ }
+}

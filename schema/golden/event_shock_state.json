@@ -1,0 +1,100 @@
+{
+ "type": "event",
+ "topic": "shock.state",
+ "seq": 140,
+ "data": {
+  "run_id": "s-0003",
+  "state": "running",
+  "phase": "waiting",
+  "title": "Half-Sine 20 g 11 ms",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": []
+  },
+  "grid": {
+   "fs_hz": 51200,
+   "record_len": 8192,
+   "actual": true
+  },
+  "clock": "shared",
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -9,
+   -6,
+   -3,
+   0
+  ],
+  "level_db": -6,
+  "rung": 2,
+  "pulses": {
+   "fired": 3,
+   "passed": 3,
+   "at_level": 1,
+   "of_level": 1
+  },
+  "next_pulse_s": 0.6,
+  "elapsed_s": 12.5,
+  "alarm": false,
+  "identification": {
+   "drive_vrms": 0.05,
+   "drive_vpk": 0.21,
+   "coherence_mean": 0.998,
+   "min_mean_coherence": 0.8,
+   "passed": true
+  },
+  "prediction": {
+   "drive_vpk": 0.4,
+   "drive_vpk_ceiling": 0.5,
+   "drive_vpk_abort": 0.8,
+   "response_peak_g": 20.1,
+   "velocity_pk_ips": 27.3,
+   "displacement_pk_pk_in": 0.69
+  },
+  "last_pulse": {
+   "index": 2,
+   "origin": "ladder",
+   "scheduled_db": -6,
+   "commanded_db": -6,
+   "limit_scale": 1,
+   "drive_vpk": 0.2,
+   "peak_g": 9.98,
+   "peak_ratio": 0.998,
+   "error_pct": 1.9,
+   "velocity_change_ips": 27.02,
+   "velocity_change_ratio": 1.0014,
+   "verdicts": {
+    "envelope": true,
+    "velocity": true,
+    "substitution": true
+   },
+   "passed": true,
+   "srs": {
+    "bands": 21,
+    "passed_bands": 21
+   },
+   "at_s": 9.75,
+   "law": {
+    "used": true,
+    "miss": null,
+    "capped_bins": 0,
+    "peak_capped": false,
+    "call_ms": 1.4
+   }
+  },
+  "law": {
+   "id": "fd_correct",
+   "name": "frequency-domain correction",
+   "version": "0.1.0",
+   "sha256": null,
+   "misses": 0
+  },
+  "feasibility": {
+   "verdict": "pass",
+   "message": "The pulse is within the shaker's ratings."
+  },
+  "end": null
+ }
+}

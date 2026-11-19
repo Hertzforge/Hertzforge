@@ -1,8 +1,9 @@
 <script lang="ts">
 	/**
-	 * Command palette (Cmd/Ctrl+K): fuzzy search over workspaces, every catalog operation,
-	 * datasets and control actions. Fully keyboard driven: arrows move, Enter runs, Escape closes.
+	 * Command palette (Cmd/Ctrl+K): fuzzy search over workspaces, every catalog operation and
+	 * the control actions. Fully keyboard driven: arrows move, Enter runs, Escape closes.
 	 */
+	import { checkForUpdates, hasUpdater } from './updates';
 	import { tick } from 'svelte';
 	import type { AppState } from '$lib/app/state.svelte';
 	import { WORKSPACES, workspaceInfo } from '$lib/app/workspaces';
@@ -16,7 +17,7 @@
 
 	let { app }: Props = $props();
 
-	type Group = 'Actions' | 'Workspaces' | 'Tools' | 'Datasets';
+	type Group = 'Actions' | 'Workspaces' | 'Tools';
 
 	interface Command {
 		id: string;
@@ -30,7 +31,7 @@
 		run: () => void;
 	}
 
-	const GROUP_ORDER: Group[] = ['Actions', 'Workspaces', 'Tools', 'Datasets'];
+	const GROUP_ORDER: Group[] = ['Actions', 'Workspaces', 'Tools'];
 
 	let query = $state('');
 	let active = $state(0);
@@ -48,6 +49,39 @@
 		if (kind === 'start' && !app.sim.canStart) return 'Pick a profile first';
 		if (kind === 'stop' && app.sim.runState !== 'running') return 'No simulation is running';
 		return null;
+	}
+
+	/** The Random run's verbs, each with the run bar's own reason when it cannot run now. */
+	function randomCommands(): Command[] {
+		const acq = app.acquire;
+		const a = acq.actions;
+		const verb = (id: keyof typeof a, title: string, keywords: string, icon: IconName, run: () => unknown): Command | null =>
+			a[id].visible ? { id: `random:${id}`, group: 'Actions', title, subtitle: 'Acquire & Control', keywords, icon, disabledReason: a[id].reason, run: () => void run() } : null;
+		const out: (Command | null)[] = [
+			verb('abort', 'Abort Random Run', 'emergency halt end now immediate', 'abort', () => acq.abort()),
+			verb('stop', 'Stop Random Run, Ramped', 'halt end controlled', 'stop', () => acq.stop()),
+			verb('apply', 'Apply Random Setup', 'configure send profile', 'action', () => acq.apply()),
+			verb('arm', 'Arm Random Run', 'open station gate', 'action', () => acq.arm()),
+			verb('start', 'Start Random Run', 'run go begin', 'play', () => {
+				app.openTest('random');
+				return acq.start();
+			}),
+			verb('proceed', 'Proceed After Review', 'continue engage system identification', 'play', () => acq.proceed()),
+			verb('reset', 'New Random Run', 'reset again repeat', 'reset', () => acq.reset()),
+			acq.isController
+				? null
+				: {
+						id: 'random:claim',
+						group: 'Actions',
+						title: 'Take Control',
+						subtitle: 'Acquire & Control',
+						keywords: 'claim controller seat',
+						icon: 'action',
+						disabledReason: !acq.connected ? 'Control service is not connected' : acq.session?.controller?.present ? `${acq.session.controller.name} has control` : null,
+						run: () => void acq.claim()
+					}
+		];
+		return out.filter((c): c is Command => c !== null);
 	}
 
 	const commands = $derived.by((): Command[] => {
@@ -75,15 +109,16 @@
 				disabledReason: controlReason('stop'),
 				run: () => void app.sim.stop()
 			},
+			...randomCommands(),
 			{
-				id: 'act:clear',
+				id: 'act:new-project',
 				group: 'Actions',
-				title: 'Clear Analysis Results',
-				subtitle: `${app.analyze.results.length} in Analyze`,
-				keywords: 'remove panes reset',
-				icon: 'trash',
-				disabledReason: app.analyze.results.length ? null : 'No results to clear',
-				run: () => app.analyze.clearResults()
+				title: 'New Project',
+				subtitle: 'An empty project in place of this one',
+				keywords: 'new empty blank start project file',
+				icon: 'dataset',
+				disabledReason: app.analysis.isOpen ? null : 'Analysis service is not connected',
+				run: () => void app.project.newProject()
 			},
 			{
 				id: 'act:retry',
@@ -97,6 +132,19 @@
 					app.control.retryNow();
 				}
 			},
+			...(hasUpdater()
+				? [
+						{
+							id: 'act:update',
+							group: 'Actions',
+							title: 'Check for Updates',
+							subtitle: 'The desktop app',
+							keywords: 'update upgrade version new release',
+							icon: 'reset',
+							run: () => void checkForUpdates()
+						} satisfies Command
+					]
+				: []),
 			...(['system', 'dark', 'light'] as const).map(
 				(t): Command => ({
 					id: `act:theme-${t}`,
@@ -115,7 +163,7 @@
 				id: `ws:${w.id}`,
 				group: 'Workspaces',
 				title: `Go to ${w.title}`,
-				subtitle: w.live ? `Alt+${i + 1}` : 'Planned',
+				subtitle: i < 9 ? `Alt+${i + 1}` : w.summary,
 				keywords: w.summary,
 				icon: w.id,
 				run: () => app.go(w.id)
@@ -127,50 +175,23 @@
 				id: `op:${op.id}`,
 				group: 'Tools',
 				title: op.title,
-				subtitle: `${workspaceInfo(op.workspace).title}, works on ${op.accepts.replace('_', ' ')} data`,
+				subtitle: workspaceInfo(op.workspace).title,
 				keywords: `${op.id} ${op.summary ?? ''}`,
 				icon: 'tool',
-				run: () => void openTool(op.id)
+				run: () => openTool(op.id)
 			});
 		}
 
-		for (const ds of app.catalog?.datasets ?? []) {
-			out.push({
-				id: `ds:${ds.id}`,
-				group: 'Datasets',
-				title: ds.title,
-				subtitle: ds.kind === 'random_run' ? 'Random run, opens in Analyze' : 'Modal model, opens in Modal',
-				keywords: `${ds.id} ${ds.description ?? ''}`,
-				icon: 'dataset',
-				run: () => {
-					if (ds.kind === 'random_run') {
-						app.go('analyze');
-						void app.analyze.selectDataset(ds.id);
-					} else {
-						app.go('modal');
-						void app.modal.select(ds.id);
-					}
-				}
-			});
-		}
 		return out;
 	});
 
-	async function openTool(opId: string) {
+	function openTool(opId: string) {
 		const op = app.catalog?.operations.find((o) => o.id === opId);
 		if (!op) return;
-		if (op.workspace === 'modal' || op.accepts === 'modal_model') {
-			app.go('modal');
-			const first = app.modal.datasets[0];
-			if (!app.modal.datasetId && first) await app.modal.select(first.id);
-			return;
-		}
-		app.go(op.workspace === 'analyze' ? 'analyze' : op.workspace);
-		if (app.analyze.opened?.kind !== op.accepts) {
-			const ds = app.catalog?.datasets.find((d) => d.kind === op.accepts);
-			if (ds) await app.analyze.selectDataset(ds.id);
-		}
+		app.go(op.workspace);
 		app.analyze.selectOp(op.id);
+		app.analyze.formRow = null;
+		app.analyze.formOpen = true;
 	}
 
 	interface Row {
@@ -268,7 +289,7 @@
 				data-testid="palette-input"
 				bind:value={query}
 				onkeydown={onKey}
-				placeholder="Search workspaces, tools, datasets and actions"
+				placeholder="Search workspaces, tools and actions"
 				role="combobox"
 				aria-expanded="true"
 				aria-controls="palette-list"

@@ -57,6 +57,8 @@ pub enum Role {
     Reference,
     Tolerance,
     Abort,
+    /// A ceiling the controller holds a channel under; it never aborts.
+    Limit,
     Drive,
     Other,
 }
@@ -68,6 +70,7 @@ impl Role {
             Role::Reference => "reference",
             Role::Tolerance => "tolerance",
             Role::Abort => "abort",
+            Role::Limit => "limit",
             Role::Drive => "drive",
             Role::Other => "other",
         }
@@ -75,12 +78,15 @@ impl Role {
 }
 
 /// One x-y curve. `edges` set means the values are binned (`shape: "steps"`).
+/// `y_min` set means the curve is an envelope of a decimated one: `y` is the
+/// largest value in each point's interval and `y_min` the smallest.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Series {
     pub name: String,
     pub role: Role,
     pub x: Vec<f64>,
     pub y: Vec<f64>,
+    pub y_min: Option<Vec<f64>>,
     pub edges: Option<Vec<f64>>,
 }
 
@@ -91,6 +97,7 @@ impl Series {
             role,
             x,
             y,
+            y_min: None,
             edges: None,
         }
     }
@@ -142,6 +149,9 @@ pub fn spectrum(
             e.insert("role".into(), Value::from(s.role.as_str()));
             e.insert("x".into(), arrays.push_f64(s.x));
             e.insert("y".into(), arrays.push_f64(s.y));
+            if let Some(y_min) = s.y_min {
+                e.insert("y_min".into(), arrays.push_f64(y_min));
+            }
             if let Some(edges) = s.edges {
                 e.insert("shape".into(), Value::from("steps"));
                 e.insert("edges".into(), arrays.push_f64(edges));
@@ -268,14 +278,24 @@ mod tests {
     #[test]
     fn a_stepped_series_carries_its_shape_and_edges() {
         let mut arrays = Arrays::default();
-        let s = Series::new("Control", Role::Measured, vec![10.0, 20.0, 30.0], vec![1.0, 2.0, 3.0])
-            .stepped();
+        let s = Series::new(
+            "Control",
+            Role::Measured,
+            vec![10.0, 20.0, 30.0],
+            vec![1.0, 2.0, 3.0],
+        )
+        .stepped();
         let axis = Axis::new("Frequency", Some("Hz"), Scale::Log);
         let v = spectrum(&mut arrays, "t", &axis, &axis, vec![s], None);
         let series = &v["series"][0];
         assert_eq!(series["shape"], "steps");
         assert!(series["edges"]["$array"].is_string());
-        let keys: Vec<&str> = series.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let keys: Vec<&str> = series
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         assert_eq!(keys, ["name", "role", "x", "y", "shape", "edges"]);
     }
 }

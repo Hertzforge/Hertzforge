@@ -1,0 +1,44 @@
+{
+  "revision": 2,
+  "sha256": "3c7152eecf247ffaa739e279e6c5113d41f7b5b161441b659931e3374abed8f9",
+  "rows": [
+    {
+      "index": 1,
+      "enabled": true,
+      "description": "Control",
+      "role": "control",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "g",
+      "sensitivity_mv_per_eu": 100,
+      "range_max": 100,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": 50,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 2,
+      "enabled": true,
+      "description": "Drive",
+      "role": "drive",
+      "physical": null,
+      "interface": "single_ended",
+      "iepe_bias_v": null,
+      "units": "V",
+      "sensitivity_mv_per_eu": 1000,
+      "range_max": 10,
+      "polarity": "positive",
+      "control_group": null,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    }
+  ]
+}

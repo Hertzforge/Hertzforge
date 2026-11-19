@@ -1,6 +1,6 @@
 //! Simulated runs end to end through the controller's random service and Sim plant.
 //!
-//! Every assertion here is about a SIMULATED run: the plant is `eigen-hal-sim`, and
+//! Every assertion here is about a SIMULATED run: the plant is `hertzforge-hal-sim`, and
 //! nothing in this file is evidence about hardware.
 
 use sds_control::codec::{self, Arrays};

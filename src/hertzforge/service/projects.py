@@ -1,0 +1,1053 @@
+"""A connection's project: the `.hforge` (or new project) its requests
+work on, and the summary the shell draws its tree from
+(schema/PROTOCOL.md, Projects).
+
+Each function here runs on a worker thread and raises a ProtocolError
+with the core's own words when the core refuses a file.
+"""
+
+from __future__ import annotations
+
+import atexit
+import copy
+import os
+import re
+import shutil
+import tempfile
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+
+from hertzforge.project import describe
+
+from . import tree
+from .ops_settings import settings_of
+from .protocol import ProtocolError, bad_request, not_found, refused
+
+#: what `project.open` reads as a whole project (`Project.open`); anything
+#: else is a file to import into one
+PROJECT_SUFFIXES = ('.hforge', '.vdyn', '.mat', '.h5', '.hdf5', '.escdf')
+
+
+@dataclass
+class OpenProject:
+    """The project a connection has open, and whether it has changes its
+    file does not."""
+    project: Any
+    modified: bool = False
+
+
+def kind_of(obj: Any) -> str:
+    """An object's kind: its class name in lower case with underscores
+    (`Frf` 'frf', `TimeHistory` 'time_history', `ShapeSet` 'shape_set')."""
+    return re.sub(r'(?<=[a-z0-9])(?=[A-Z])', '_', type(obj).__name__).lower()
+
+
+def verbs_of(project: Any, name: str) -> list[str]:
+    """The core's processing verbs that apply to the object `name`, by the
+    table the core offers them by (`Project.verbs`), in its order: what a
+    `verb:` param lists the object under. A time history that a linked
+    channel table describes also lists `overload_check`, which reads it
+    against that table's ranges: the Overload reading is offered there
+    and nowhere else. A shock specification does not list
+    `generate_signal`: the one signal it makes is a synthesis, and that
+    has an operation of its own, `project.srs_synthesis`."""
+    verbs = [verb for verb, _summary in project.verbs(name)]
+    kind = kind_of(project[name])
+    if kind == 'time_history' and project.channel_table_for(name):
+        verbs.append('overload_check')
+    if kind == 'shock_specification':
+        verbs.remove('generate_signal')
+    return verbs
+
+
+def summary(state: OpenProject) -> dict[str, Any]:
+    """The project as the shell lists it: title, file, whether it has
+    unsaved changes, and each object with its kind, record count, source,
+    whether its units are declared, the groups it is in, the core verbs
+    that apply to it, the analysis settings it carries, and why it is
+    stale when its source's settings changed after it was computed."""
+    project = state.project
+    labels = [group.get('role') or group.get('name') or f'Group {k + 1}'
+              for k, group in enumerate(project.object_groups)]
+    stale = project.stale()
+    issues = compatibility_issues(project)
+    run_folders = _run_folders(project)
+    objects = []
+    for name, obj in project.items():
+        entry: dict[str, Any] = {'name': name, 'kind': kind_of(obj)}
+        if name in issues:
+            entry['issue'] = issues[name]
+        records = getattr(obj, 'num_records', None)
+        if records is not None:
+            entry['records'] = int(records)
+        source = getattr(obj, 'source', None)
+        if source is not None:
+            entry['source'] = str(source)
+        units = getattr(obj, 'units_defined', None)
+        if units is not None:
+            entry['units_defined'] = bool(units)
+        entry['groups'] = [label for label, group
+                           in zip(labels, project.object_groups, strict=True)
+                           if name in group['members']]
+        entry['verbs'] = verbs_of(project, name)
+        if tree.banded(obj):
+            entry['banded'] = True
+        between = _between(obj)
+        if between:
+            entry['between'] = between
+        entry['holds'] = describe(obj)
+        entry['opens'] = tree.opens(obj)
+        settings = settings_of(obj)
+        if settings:
+            entry['settings'] = settings
+        if name in stale:
+            entry['stale'] = stale[name]
+        if name in run_folders:
+            entry['run_folder'] = run_folders[name]
+        objects.append(entry)
+    out = {'title': project.name, 'file': project.file,
+           'modified': state.modified, 'objects': objects,
+           'active_geometry': project.active_geometry
+           if project.active_geometry in project else None,
+           'links': [{'members': [m for m in group['members'] if m in project],
+                      'role': group.get('role'), 'name': group.get('name') or ''}
+                     for group in project.object_groups
+                     if any(m in project for m in group['members'])]}
+    if project.unresolved:
+        # held by reference to a file that was not found or has changed:
+        # not loaded, and kept for the next save (`Project.unresolved`)
+        out['unresolved'] = [
+            {'name': name, 'kind': reference.kind, 'path': reference.path,
+             'reason': reference.reason}
+            for name, reference in project.unresolved.items()]
+    return out
+
+
+def _run_folders(project: Any) -> dict[str, str]:
+    """The run folder each run record came from, by object name, where
+    that folder is still there: the folder of a run's converted file the
+    project was opened from or imported, for Show Folder and Delete Run."""
+    from hertzforge.io.native import is_run_file
+
+    records = [name for name, obj in project.items() if kind_of(obj) == 'run_record']
+    if not records:
+        return {}
+    out: dict[str, str] = {}
+    for entry in project.data_index.records():
+        path = entry.get('path')
+        if isinstance(path, str) and path and is_run_file(path):
+            for name in entry.get('objects', ()):
+                if name in records:
+                    out[name] = os.path.dirname(os.path.abspath(path))
+    if project.file and is_run_file(project.file):
+        for name in records:
+            out.setdefault(name, os.path.dirname(os.path.abspath(project.file)))
+    return out
+
+
+def _between(obj: Any) -> list[str] | None:
+    """The two shape sets a Matched Modes object pairs, first and second, for the tree to set it
+    beside their groups and stripe its bracket with both (Brandon, 2026-11-14)."""
+    from hertzforge.core.matches import MatchedModes
+
+    return [obj.first, obj.second] if isinstance(obj, MatchedModes) else None
+
+
+def compatibility_issues(project: Any) -> dict[str, dict[str, Any]]:
+    """What does not fit, by object: the red rows
+    (`compatibility.check_compatibility`). An object is judged against the
+    geometry of its group, else the active one; a modal object against the
+    shape sets of its group. `sub_items` are the records, modes or channels
+    at fault, to mark in the grid. Incompatibility warns, it never blocks."""
+    from hertzforge.compatibility import check_compatibility
+
+    try:
+        report = check_compatibility(dict(project.items()), project.active_geometry,
+                                     project.object_groups)
+    except Exception:  # noqa: BLE001 - a check that cannot run marks nothing
+        return {}
+    return {name: {'message': issue.message,
+                   'sub_items': [int(i) for i in issue.sub_items]}
+            for name, issue in report.issues.items()}
+
+
+def _path(params: Mapping[str, Any], method: str) -> str:
+    path = params.get('path')
+    if not isinstance(path, str) or not path:
+        raise bad_request(f'{method} needs "path", the file\'s path on the '
+                          'analysis service\'s machine')
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def _refusal(error: Exception) -> ProtocolError:
+    """The core's refusal of a file as an error response."""
+    if isinstance(error, FileNotFoundError):
+        return not_found(str(error))
+    return refused(str(error))
+
+
+def new(params: Mapping[str, Any]) -> OpenProject:
+    """`project.new`: an empty project named `title`."""
+    import hertzforge as hz
+
+    title = params.get('title', 'Project')
+    if not isinstance(title, str) or not title.strip():
+        raise bad_request('project.new "title" must be a name, not empty')
+    return OpenProject(hz.Project(title.strip()))
+
+
+def open_file(params: Mapping[str, Any]) -> OpenProject:
+    """`project.open`: the project a `.hforge`, `.vdyn`, `.mat` or ESCDF
+    file holds, or a new project holding the object when the file holds
+    one (Save As writes those formats for one object), or the project a
+    control run's folder converts to (`Project.open`). Any other file is
+    refused with a pointer to import it."""
+    import hertzforge as hz
+    from hertzforge.io.run_folder import folder_of
+    from hertzforge.project import SingleObjectFile
+
+    path = _path(params, 'project.open')
+    # a control run's folder opens as the project file it converts to
+    if folder_of(path) is None and not path.lower().endswith(PROJECT_SUFFIXES):
+        raise refused(f'{os.path.basename(path)} is not a project file '
+                      f'({", ".join(PROJECT_SUFFIXES)}); import it into a '
+                      'project instead')
+    if not os.path.exists(path):
+        raise not_found(f'no file at {path}')
+    try:
+        try:
+            return OpenProject(hz.Project.open(path))
+        except SingleObjectFile:
+            project = hz.Project(os.path.splitext(os.path.basename(path))[0])
+            project.import_file(path)
+            return OpenProject(project, modified=True)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+
+
+#: the pictures `project.import` takes, by suffix (`core.photos.FORMATS`)
+PHOTO_FORMATS = ('.png', '.jpg', '.jpeg')
+
+
+def import_file(state: OpenProject | None, params: Mapping[str, Any],
+                progress: Callable[[int, int], None] | None = None
+                ) -> tuple[OpenProject, list[str]]:
+    """`project.import`: the file's objects added to the open project, or
+    to a new one when none is open; the project and the names added.
+    `units` declares what the file does not state, as `import_file`'s
+    options (`length_unit`, `ordinate_unit` and the rest)."""
+    import hertzforge as hz
+
+    path = _path(params, 'project.import')
+    if os.path.splitext(path)[1].lower() in PHOTO_FORMATS:
+        return _import_photo(state, path)
+    units = params.get('units', {})
+    if not isinstance(units, Mapping) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in units.items()):
+        raise bad_request('project.import "units" must be an object of '
+                          'option names to unit strings')
+    if state is None:
+        state = OpenProject(hz.Project())
+    project = state.project
+    call = ', '.join([repr(path)] + [f'{key}={value!r}'
+                                     for key, value in units.items()])
+    try:
+        # journaled as the one call a script makes, without the progress
+        # callable the service passes
+        with project.journal_as(f'project.import_file({call})'):
+            added = project.import_file(path, progress=progress, **units)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    state.modified = True
+    return state, added
+
+
+def _import_photo(state: OpenProject | None, path: str) -> tuple[OpenProject, list[str]]:
+    """A png or jpeg added to the project's Photos object, created on
+    first use (`Photos()` is the replayable line; a photo is its bytes, so
+    the file is added by its path). The Photos object is what was added."""
+    import hertzforge as hz
+    from hertzforge.core.photos import Photos
+
+    if state is None:
+        state = OpenProject(hz.Project())
+    project = state.project
+    name = next((n for n, obj in project.items() if isinstance(obj, Photos)), None)
+    if name is None:
+        with project.journal_as(None):
+            name = project.add('Photos', Photos())
+        project.journal.append(f'project.add({name!r}, Photos())')
+    try:
+        project[name].add_file(path)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    project.journal.append(f'project[{name!r}].add_file({path!r})')
+    state.modified = True
+    return state, [name]
+
+
+def save(state: OpenProject | None, params: Mapping[str, Any]) -> str:
+    """`project.save`: the project written to `path`, or to the file it
+    came from; the path written."""
+    if state is None:
+        raise refused('there is no project open to save')
+    if 'path' in params:
+        path = _path(params, 'project.save')
+    elif state.project.file and not state.project.file.endswith('.vdyn'):
+        path = state.project.file
+    else:
+        raise bad_request('project.save needs "path": this project has no '
+                          'file of its own to save to yet')
+    compress = params.get('compress', False)
+    if not isinstance(compress, bool):
+        raise bad_request('project.save "compress" is true or false')
+    try:
+        written = state.project.save(path, compress=compress)
+    except (ValueError, OSError) as error:
+        raise _refusal(error) from None
+    state.modified = False
+    return written
+
+
+#: where files dragged out of the window are written, made on first use and removed at exit:
+#: the application they are dropped on copies them after the drop, so they outlive the drag
+_DRAG_FOLDER: str | None = None
+
+
+def _drag_folder() -> str:
+    global _DRAG_FOLDER
+    if _DRAG_FOLDER is None:
+        _DRAG_FOLDER = tempfile.mkdtemp(prefix='hertzforge-drag-')
+        atexit.register(shutil.rmtree, _DRAG_FOLDER, ignore_errors=True)
+    return _DRAG_FOLDER
+
+
+def _file_name(text: str, fallback: str) -> str:
+    """A name a file can carry on every platform: the characters a path or a file manager
+    reads specially made dashes."""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '-', text).strip(' .')
+    return name or fallback
+
+
+def drag_out(state: OpenProject | None, params: Mapping[str, Any]) -> list[str]:
+    """`project.drag_out`: the project, or some of its objects, written to files for the shell
+    to drag out of the window (Brandon, 2026-11-11: dragging the project out saves it, as the
+    earlier toolset did). The project is one `.hforge` file named for its title; each object a
+    `.hforge` object named for itself. They go to a folder of their own, so a name is never
+    taken. A copy: the project stays bound to its own file and keeps its unsaved changes."""
+    from hertzforge.io import save as save_object
+
+    state = _open(state, 'project.drag_out')
+    whole, names = params.get('project', False), params.get('names')
+    if not isinstance(whole, bool):
+        raise bad_request('project.drag_out "project" is true or false')
+    if whole == (names is not None):
+        raise bad_request('project.drag_out takes "project": true or "names", one of them')
+    project = state.project
+    if not whole:
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+            raise bad_request('project.drag_out "names" is a list of object names')
+        missing = [n for n in names if n not in project]
+        if missing:
+            raise not_found(f'the project has no object named {missing[0]!r}')
+    folder = tempfile.mkdtemp(dir=_drag_folder())
+    try:
+        if whole:
+            path = os.path.join(folder, _file_name(project.name or '', 'Project') + '.hforge')
+            # `save` binds the project to what it wrote, and a drag out is a copy
+            file, references = project.file, dict(project.references)
+            prints = dict(project._reference_prints)
+            try:
+                written = [project.save(path)]
+            finally:
+                project.file = file
+                project.references.clear()
+                project.references.update(references)
+                project._reference_prints.clear()
+                project._reference_prints.update(prints)
+        else:
+            written = []
+            for name in names:
+                path = os.path.join(folder, _file_name(name, 'Object') + '.hforge')
+                save_object(project[name], path)
+                written.append(path)
+    except (ValueError, TypeError, OSError) as error:
+        raise _refusal(error) from None
+    return written
+
+
+def _open(state: OpenProject | None, method: str) -> OpenProject:
+    if state is None:
+        raise refused(f'{method} works on a project, and none is open')
+    return state
+
+
+def _name(params: Mapping[str, Any], key: str, method: str) -> str:
+    value = params.get(key)
+    if not isinstance(value, str) or not value:
+        raise bad_request(f'{method} needs "{key}", an object\'s name')
+    return value
+
+
+def retitle(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.retitle`: the project called `title`. Its file, if it has one, keeps its
+    name until it is saved somewhere else."""
+    state = _open(state, 'project.retitle')
+    title = _name(params, 'title', 'project.retitle').strip()
+    if not title:
+        raise bad_request('project.retitle "title" must be a name, not empty')
+    if title == state.project.name:
+        return
+    state.project.name = title
+    state.modified = True
+
+
+def rename(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.rename`: the object `name` called `to`, and every group,
+    provenance record and report block that names it following
+    (`Project.rename`); with `index`, one photo of a Photos object
+    renamed instead, the report blocks that show it following; with
+    `group`, `solid` or `mate`, one element group, solid or set of mated
+    surfaces of a geometry, by its id; with `mode`, the description of
+    one mode of a shape set, numbered from 1."""
+    state = _open(state, 'project.rename')
+    old = _name(params, 'name', 'project.rename')
+    new = _name(params, 'to', 'project.rename').strip()
+    if old not in state.project:
+        raise not_found(f'the project has no object named {old!r}')
+    if params.get('index') is not None:
+        return _rename_photo(state, old, params['index'], new)
+    for kind in SUB_ITEMS:
+        if params.get(kind) is not None:
+            return _rename_sub(state, old, kind, params[kind], new)
+    if new == old:
+        return
+    try:
+        state.project.rename(old, new)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    state.modified = True
+
+
+#: what `project.rename` names inside an object, besides a photo
+SUB_ITEMS = ('group', 'solid', 'mate', 'mode')
+
+
+def _rename_sub(state: OpenProject, name: str, kind: str, which: Any, new: str) -> None:
+    """One sub-item of an object renamed, as the script call that does it:
+    an element group (`Geometry.rename_group`), a solid
+    (`Project.edit_solid`), a set of mated surfaces
+    (`Project.edit_mated_surfaces`) or a mode's description
+    (`ShapeSet.set_description`)."""
+    from hertzforge.core import mates, solids
+    from hertzforge.core.geometry import Geometry
+    from hertzforge.core.shapes import ShapeSet
+
+    project = state.project
+    obj = project[name]
+    if not isinstance(which, int) or isinstance(which, bool):
+        raise bad_request(f'project.rename "{kind}" is a whole number')
+    if kind == 'mode':
+        if not isinstance(obj, ShapeSet):
+            raise refused(f'{name} is not a shape set; only a shape set has modes')
+        if not 1 <= which <= obj.num_shapes:
+            raise not_found(f'{name} has {obj.num_shapes} modes; there is no mode {which}')
+        if str(obj.description[which - 1]).strip() == new:
+            return
+        obj.set_description(which - 1, new)
+        project.record_call(obj, 'set_description', which - 1, new)
+        state.modified = True
+        return
+    if not isinstance(obj, Geometry):
+        raise refused(f'{name} is not a geometry')
+    try:
+        if kind == 'group':
+            ids = [int(one) for one in obj.group_id]
+            if which not in ids:
+                raise not_found(f'{name} has no element group {which}')
+            if obj.group_name[ids.index(which)].strip() == new:
+                return
+            obj.rename_group(which, new)
+            project.record_call(obj, 'rename_group', which, new)
+        elif kind == 'solid':
+            if which not in {int(one.id) for one in obj.solids}:
+                raise not_found(f'{name} has no solid {which}')
+            if solids.solid(obj, which).name.strip() == new:
+                return
+            project.edit_solid(name, which, name=new)
+        else:
+            if which not in {int(one.id) for one in getattr(obj, 'mates', ())}:
+                raise not_found(f'{name} has no mated surfaces {which}')
+            if mates.find(obj, which).name.strip() == new:
+                return
+            project.edit_mated_surfaces(name, which, name=new)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    state.modified = True
+
+
+def _rename_photo(state: OpenProject, name: str, index: Any, new: str) -> None:
+    """One photo renamed (`Photos.rename`), journaled as the call, and the
+    report blocks bound to it pointed at the new name."""
+    from hertzforge.core.photos import Photos
+    from hertzforge.core.report import Report
+
+    photos = state.project[name]
+    if not isinstance(photos, Photos):
+        raise refused(f'{name} is not a Photos object; only a photo is renamed by index')
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise bad_request('project.rename "index" is a photo\'s index, from 0')
+    if index >= photos.num_photos:
+        raise not_found(f'{name} has {photos.num_photos} photos; there is no photo {index}')
+    was = photos.names[index]
+    if new == was:
+        return
+    try:
+        photos.rename(index, new)
+    except ValueError as error:
+        raise refused(str(error)) from None
+    state.project.record_call(photos, 'rename', index, new)
+    for obj in state.project.values():
+        if isinstance(obj, Report):
+            for block in obj.blocks:
+                if (block.get('kind') == 'photo' and block.get('source') == name
+                        and block.get('photo') == was):
+                    block['photo'] = new
+    state.modified = True
+
+
+#: how each kind of object deletes its sub-items, by the tree's word for them
+_DELETERS = (('photos', 'delete_photos', 'photo'), ('shapes', 'delete_modes', 'mode'),
+             ('channel_table', 'delete_channels', 'channel'), ('data', 'delete_records', 'record'))
+
+
+def delete_parts(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.delete_parts`: the sub-items picked in the tree deleted
+    from their objects, `parts` mapping each object's name to the indices
+    picked: a data object's records, a shape set's modes, a channel table's
+    channels, a Photos object's photos. Every item of an object picked deletes the object
+    itself, as `project.remove` does, since none of these can be empty (Brandon,
+    2026-11-13: it was refused). Nothing is deleted when any part is refused, and each
+    deletion is journaled as the call a script would make."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.core.data import DataArray
+    from hertzforge.core.photos import Photos
+    from hertzforge.core.shapes import ShapeSet
+
+    state = _open(state, 'project.delete_parts')
+    parts = params.get('parts')
+    if (not isinstance(parts, Mapping) or not parts or not all(
+            isinstance(name, str) and isinstance(picks, list) and picks
+            and all(isinstance(i, int) and not isinstance(i, bool) and i >= 0 for i in picks)
+            for name, picks in parts.items())):
+        raise bad_request('project.delete_parts needs "parts", an object\'s name to the '
+                          'indices picked in it')
+    kinds = {'photos': Photos, 'shapes': ShapeSet, 'channel_table': ChannelTable,
+             'data': DataArray}
+    counts = {'photos': 'num_photos', 'shapes': 'num_shapes', 'channel_table': 'num_channels',
+              'data': 'num_records'}
+    planned, whole = [], []
+    for name, picks in parts.items():
+        if name not in state.project:
+            raise not_found(f'the project has no object named {name!r}')
+        obj = state.project[name]
+        found = next(((kind, deleter, word) for kind, deleter, word in _DELETERS
+                      if isinstance(obj, kinds[kind])), None)
+        if found is None:
+            raise refused(f'{name} has no parts to delete; remove the object instead')
+        kind, deleter, word = found
+        count = int(getattr(obj, counts[kind]))
+        chosen = sorted(set(picks))
+        if chosen[-1] >= count:
+            raise not_found(f'{name} has {count} {word}s; there is no {word} {chosen[-1] + 1}')
+        if len(chosen) >= count:
+            whole.append(name)
+            continue
+        planned.append((name, obj, deleter, chosen))
+    for name, obj, deleter, chosen in planned:
+        try:
+            getattr(obj, deleter)(chosen)
+        except ValueError as error:
+            raise refused(f'{name}: {error}') from None
+        state.project.record_call(obj, deleter, chosen)
+    if whole:
+        state.project.remove(*whole)
+    state.modified = True
+
+
+def remove(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.remove`: the objects named taken out of the project and its
+    groups (`Project.remove`). A name the project does not have is
+    refused before anything is removed."""
+    state = _open(state, 'project.remove')
+    names = params.get('names')
+    if (not isinstance(names, list) or not names
+            or not all(isinstance(name, str) for name in names)):
+        raise bad_request('project.remove needs "names", a list of object names')
+    missing = [name for name in names if name not in state.project
+               and name not in state.project.unresolved]
+    if missing:
+        raise not_found(f'the project has no object named '
+                        f'{", ".join(map(repr, missing))}')
+    state.project.remove(*names)
+    state.modified = True
+
+
+def _names(params: Mapping[str, Any], method: str, empty: bool = False) -> list[str]:
+    names = params.get('names')
+    if (not isinstance(names, list) or not (names or empty)
+            or not all(isinstance(name, str) for name in names)):
+        raise bad_request(f'{method} needs "names", a list of object names')
+    return names
+
+
+def duplicate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.duplicate`: a copy of each object named added beside it,
+    '<name> copy' (`Project.duplicate`), as Copy and Paste do in the tree. A copy's
+    arrays are its own; it is in no group."""
+    state = _open(state, 'project.duplicate')
+    names = _names(params, 'project.duplicate')
+    missing = [name for name in names if name not in state.project]
+    if missing:
+        raise not_found(f'the project has no object named {", ".join(map(repr, missing))}')
+    state.project.duplicate(*names)
+    state.modified = True
+
+
+def refresh(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.refresh`: each derived object named computed again from its
+    source in place, under its own name (`Project.refresh`); with no names,
+    every stale object, sources first (`Project.refresh_stale`)."""
+    state = _open(state, 'project.refresh')
+    names = _names(params, 'project.refresh', empty=True)
+    try:
+        if names:
+            for name in names:
+                state.project.refresh(name)
+        else:
+            state.project.refresh_stale()
+    except (KeyError, ValueError) as error:
+        raise refused(str(error).strip("'")) from None
+    state.modified = True
+
+
+def journal(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.journal`: the session as Python, every verb and settings
+    change since the project was made or opened as the line that replays
+    it (`Project.journal`), for the console: read-only, to be
+    copied into a script."""
+    state = _open(state, 'project.journal')
+    return {'lines': [str(line) for line in state.project.journal]}
+
+
+def units(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.units`: the tables an object's units are declared in
+    (`service.units.tables`)."""
+    from . import units as declared
+
+    state = _open(state, 'project.units')
+    return declared.tables(state.project, _name(params, 'name', 'project.units'))
+
+
+def children(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.children`: what an object holds, for the tree to open it
+    into (`service.tree.children`)."""
+    state = _open(state, 'project.children')
+    name = _name(params, 'name', 'project.children')
+    if name not in state.project:
+        raise not_found(f'no object named {name!r}')
+    return tree.children(state.project, name)
+
+
+#: the most rows one `project.entity_rows` answers with
+ENTITY_ROWS_MOST = 5000
+
+
+def entity_rows(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.entity_rows`: rows `start` to `start + count` of an entity table that sent
+    only its first ones (its `more`), as `{'columns', 'rows'}` in the geometry's stored
+    unit; the server puts them in the display units as it does the table."""
+    from .ops_geometry import ID_ARRAYS, entity_columns, entity_rows, picked_rows
+
+    state = _open(state, 'project.entity_rows')
+    name = _name(params, 'geometry', 'project.entity_rows')
+    if name not in state.project:
+        raise not_found(f'no object named {name!r}')
+    geometry = state.project[name]
+    kind = params.get('kind')
+    if kind not in ID_ARRAYS or not hasattr(geometry, 'elem_group'):
+        raise bad_request(f'kind is one of {", ".join(ID_ARRAYS)}, on a geometry')
+    start, count = params.get('start'), params.get('count')
+    if (not isinstance(start, int) or not isinstance(count, int) or start < 0
+            or not 0 < count <= ENTITY_ROWS_MOST):
+        raise bad_request(f'start is a row from 0, and count from 1 to {ENTITY_ROWS_MOST}')
+    picked = picked_rows(geometry, kind, str(params.get('family') or ''),
+                         str(params.get('groups') or ''))
+    every = np.arange(len(getattr(geometry, ID_ARRAYS[kind]))) if picked is None else picked
+    return {'columns': entity_columns(geometry, kind),
+            'rows': entity_rows(geometry, kind, every[start:start + count])}
+
+
+def mesh_size(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.mesh_size`: the element size the solids `solids` ("1, 3") of `geometry` are
+    likely to hold at as `elements`, in meters: Mesh's Detect button."""
+    from .ops_solids import likely_size
+    from .parsing import parse_id_runs
+
+    state = _open(state, 'project.mesh_size')
+    name = _name(params, 'geometry', 'project.mesh_size')
+    if name not in state.project:
+        raise not_found(f'no object named {name!r}')
+    ids = parse_id_runs(str(params.get('solids') or ''))
+    if not ids:
+        raise bad_request('project.mesh_size needs "solids", the ids picked')
+    try:
+        size = likely_size(state.project[name], ids, str(params.get('elements') or 'hexes'))
+    except (ValueError, KeyError) as error:
+        raise refused(str(error)) from None
+    return {'value': float(size), 'defined': state.project[name].units_defined}
+
+
+def averaging(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.averaging`: the regions that draw an averaging on a time history's
+    plot, without the plot (`show.averaging_drawn`): `averaging` holds what the
+    Averaging form holds, as `project.show`'s `prefs.averaging` does. The shell
+    asks this as the form is typed into, so only the frames are drawn again."""
+    from hertzforge.core.data import TimeHistory
+
+    from . import show as showing
+
+    state = _open(state, 'project.averaging')
+    name = _name(params, 'name', 'project.averaging')
+    if not isinstance(state.project[name], TimeHistory):
+        raise bad_request(f'{name} is not a time history')
+    drawn = params.get('averaging') or {}
+    if not isinstance(drawn, Mapping) or set(drawn) - set(showing.AVERAGING_FIELDS):
+        raise bad_request('project.averaging "averaging" holds '
+                          + ', '.join(showing.AVERAGING_FIELDS))
+    regions, note = showing.averaging_drawn(state.project, name, dict(drawn))
+    return {'regions': regions or [], 'note': note}
+
+
+def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.show`: what a selection in the tree shows (`service.show`)."""
+    from . import show as showing
+
+    state = _open(state, 'project.show')
+    objects = params.get('objects')
+    if not isinstance(objects, list) or not objects or not all(isinstance(n, str) for n in objects):
+        raise bad_request('project.show needs "objects", the selected objects\' names')
+    missing = [n for n in objects if n not in state.project]
+    if missing:
+        raise not_found(f'no object named {missing[0]!r}')
+    records = params.get('records') or {}
+    if not isinstance(records, Mapping) or not all(
+            isinstance(v, list) and all(isinstance(i, int) and i >= 0 for i in v)
+            for v in records.values()):
+        raise bad_request('project.show "records" maps an object\'s name to its picked record '
+                          'indices')
+    part = params.get('part')
+    if part is not None and not (isinstance(part, Mapping) and isinstance(part.get('kind'), str)):
+        raise bad_request('project.show "part" is {"kind", "id"} or null')
+    prefs = params.get('prefs') or {}
+    if not isinstance(prefs, Mapping) or set(prefs) - set(showing.PREFS):
+        raise bad_request('project.show "prefs" takes ' + ', '.join(showing.PREFS))
+    if 'component' in prefs and prefs['component'] not in ('magnitude', 'real', 'imag', 'phase'):
+        raise bad_request('project.show "component" is magnitude, real, imag or phase')
+    if prefs.get('line') is not None and not isinstance(prefs['line'], (int, float)):
+        raise bad_request('project.show "line" is a frequency in Hz, or null')
+    if prefs.get('shape_view') not in (None, 'animate', 'table', 'mac', 'values'):
+        raise bad_request('project.show "shape_view" is animate, table, mac or values, or null')
+    for key in ('projection', 'arrows', 'sensors', 'limits'):
+        if key in prefs and not isinstance(prefs[key], bool):
+            raise bad_request(f'project.show "{key}" is true or false')
+    from .show import TABLE_VIEWS, VALUES_CHOICES, VALUES_FORMS
+
+    if 'values_dofs' in prefs and prefs['values_dofs'] not in VALUES_CHOICES:
+        raise bad_request('project.show "values_dofs" is all, control, reference, response or '
+                          'monitor')
+    drawn = prefs.get('averaging')
+    if drawn is not None and not (isinstance(drawn, Mapping)
+                                  and not set(drawn) - set(showing.AVERAGING_FIELDS)):
+        raise bad_request('project.show "averaging" is null or holds '
+                          + ', '.join(showing.AVERAGING_FIELDS))
+    tolerance = prefs.get('match_tolerance', 2.0)
+    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) \
+            or not 0.0 < tolerance <= 100.0:
+        raise bad_request('project.show "match_tolerance" is a percent, above 0 and at most 100')
+    if prefs.get('drive') is not None and not isinstance(prefs['drive'], str):
+        raise bad_request('project.show "drive" is a DOF or null')
+    if 'arrow_role' in prefs and prefs['arrow_role'] not in VALUES_CHOICES:
+        raise bad_request('project.show "arrow_role" is all, control, reference, response or '
+                          'monitor')
+    if 'values_form' in prefs and prefs['values_form'] not in VALUES_FORMS:
+        raise bad_request('project.show "values_form" is shapes, response or reference')
+    if prefs.get('environment') is not None and not isinstance(prefs['environment'], str):
+        raise bad_request('project.show "environment" is a name, or null')
+    if 'table_view' in prefs and prefs['table_view'] not in TABLE_VIEWS:
+        raise bad_request('project.show "table_view" is channels, response or reference')
+    if prefs.get('tone') is not None and not isinstance(prefs['tone'], str):
+        raise bad_request('project.show "tone" is a tone\'s name, or null')
+    if 'sine_reading' in prefs and prefs['sine_reading'] not in ('curves', 'bars'):
+        raise bad_request('project.show "sine_reading" is curves or bars')
+    return showing.show(state.project, list(objects), {str(k): list(v) for k, v in records.items()},
+                        dict(part) if part else None, dict(prefs))
+
+
+def actions(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.actions`: what a selection can take (`service.actions`)."""
+    from . import actions as acting
+
+    state = _open(state, 'project.actions')
+    objects = params.get('objects', [])
+    if not isinstance(objects, list) or not all(isinstance(n, str) for n in objects):
+        raise bad_request('project.actions needs "objects", the selected objects\' names')
+    missing = [n for n in objects if n not in state.project]
+    if missing:
+        raise not_found(f'no object named {missing[0]!r}')
+    records = params.get('records') or {}
+    if not isinstance(records, Mapping):
+        raise bad_request('project.actions "records" maps an object\'s name to its picked records')
+    part = params.get('part')
+    if part is not None and not isinstance(part, Mapping):
+        raise bad_request('project.actions "part" names a part of a geometry in the tree')
+    return acting.actions(state.project, list(objects),
+                          {str(k): [int(i) for i in v] for k, v in records.items()}, part)
+
+
+def define_units(state: OpenProject | None, params: Mapping[str, Any]) -> list[int]:
+    """`project.define_units`: units declared on an object by table and
+    row (`service.units.define`); the records converted."""
+    from . import units as declared
+
+    state = _open(state, 'project.define_units')
+    name = _name(params, 'name', 'project.define_units')
+    converted = declared.define(state.project, name, params.get('units'))
+    state.modified = True
+    return converted
+
+
+def activate(state: OpenProject | None, params: Mapping[str, Any]) -> None:
+    """`project.activate`: the geometry data is drawn on when nothing else
+    names one."""
+    from hertzforge.core.geometry import Geometry
+
+    state = _open(state, 'project.activate')
+    name = _name(params, 'geometry', 'project.activate')
+    if name not in state.project:
+        raise not_found(f'the project has no object named {name!r}')
+    if not isinstance(state.project[name], Geometry):
+        raise refused(f'{name} is a {kind_of(state.project[name]).replace("_", " ")}, '
+                      'not a geometry')
+    if state.project.active_geometry != name:
+        state.project.active_geometry = name
+        state.project.journal.append(f'project.active_geometry = {name!r}')
+        state.modified = True
+
+
+# ---- test setups ------------------------------------------------------------------------------
+
+def setups(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.setups`: what a test's screen can open, the project's
+    saved setups and its runs' records, each with the module it is for.
+    With no project open both lists are empty: there is nothing to open."""
+    from hertzforge.core.run_record import RunRecord
+    from hertzforge.core.test_setup import TestSetup
+
+    if state is None:
+        return {'setups': [], 'runs': []}
+    saved, runs = [], []
+    for name, obj in state.project.items():
+        if isinstance(obj, TestSetup):
+            saved.append({'name': name, 'module': obj.module, 'title': obj.title,
+                          'protocol': obj.protocol, 'origin': dict(obj.origin),
+                          'holds': obj.describe()})
+        elif isinstance(obj, RunRecord):
+            runs.append({'name': name, 'module': obj.test, 'title': obj.title,
+                         'run_uid': obj.run_uid, 'run_id': obj.run_id,
+                         'outcome': obj.outcome, 'source': obj.source,
+                         'has_config': bool(obj.config), 'holds': obj.describe()})
+    return {'setups': saved, 'runs': runs}
+
+
+def save_setup(state: OpenProject | None, params: Mapping[str, Any]) -> str:
+    """`project.save_setup`: a test's setup saved into the project under
+    `name`. A name the project already holds is refused unless `replace`
+    is true and that object is itself a setup. Answers the name used."""
+    from hertzforge.core.test_setup import TestSetup
+
+    state = _open(state, 'project.save_setup')
+    name = _name(params, 'name', 'project.save_setup')
+    held = params.get('setup')
+    if not isinstance(held, Mapping) or not isinstance(held.get('config'), Mapping):
+        raise bad_request('project.save_setup needs "setup", with "module" and "config"')
+    try:
+        setup = TestSetup.from_dict(held)
+    except (KeyError, TypeError, ValueError) as error:
+        raise bad_request(f'project.save_setup: {error}') from error
+    project = state.project
+    if name in project or name in project.unresolved:
+        if not (params.get('replace') is True and isinstance(project.get(name), TestSetup)):
+            raise refused(f'the project already holds an object named {name!r}; '
+                          'choose another name or replace a saved setup')
+        project[name] = setup
+    else:
+        name = project.add(name, setup)
+    state.modified = True
+    return name
+
+
+def open_setup(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.open_setup`: a saved setup, or the setup a run's record
+    holds, as the shell fills a test's draft with it. Nothing is
+    configured: the shell's draft goes through the same configure call
+    and checks as one typed in."""
+    from hertzforge.core.run_record import RunRecord
+    from hertzforge.core.test_setup import TestSetup
+
+    state = _open(state, 'project.open_setup')
+    name = _name(params, 'name', 'project.open_setup')
+    if name not in state.project:
+        raise not_found(f'the project has no object named {name!r}')
+    obj = state.project[name]
+    if isinstance(obj, TestSetup):
+        return obj.as_dict()
+    if isinstance(obj, RunRecord):
+        try:
+            return TestSetup.from_run(obj, name).as_dict()
+        except ValueError as error:
+            raise refused(f'{name}: {error}') from error
+    raise refused(f'{name} is a {kind_of(obj).replace("_", " ")}, not a setup or a run record')
+
+
+# ---- the channel table's home ---------------------------------------------------------------
+
+def _channel_tables(project: Any) -> list[str]:
+    from hertzforge.core.channel_table import ChannelTable
+
+    return [name for name, obj in project.items() if isinstance(obj, ChannelTable)]
+
+
+def channel_table(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.channel_table`: one of the project's channel tables as the
+    control service's rows, through the one mapping
+    (`io.run_convert.rows_from_channel_table`), with its control loops.
+    With no `name`, the project's only channel table; a project with
+    several names them and asks for one. A table without the controller's
+    columns is given them at their defaults, and the answer says so."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.io.run_convert import environment_to_json, rows_from_channel_table
+
+    state = _open(state, 'project.channel_table')
+    held = _channel_tables(state.project)
+    name = params.get('name')
+    if name is None:
+        if not held:
+            raise not_found('the project holds no channel table')
+        if len(held) > 1:
+            raise refused(f'the project holds {len(held)} channel tables '
+                          f'({", ".join(held)}); name one')
+        name = held[0]
+    name = _name({'name': name}, 'name', 'project.channel_table')
+    if name not in state.project:
+        raise not_found(f'the project has no object named {name!r}')
+    table = state.project[name]
+    if not isinstance(table, ChannelTable):
+        raise refused(f'{name} is a {kind_of(table).replace("_", " ")}, not a channel table')
+    warnings: list[str] = []
+    if not table.has_controller_settings:
+        table = copy.deepcopy(table)
+        table.add_controller_settings()
+        warnings.append(f'{name} had no controller settings, so each channel was given them '
+                        'at their defaults: on, unbound and without abort limits.')
+    try:
+        rows = rows_from_channel_table(table)
+    except (ValueError, TypeError) as error:
+        raise refused(f'{name}: {error}') from error
+    return {'name': name, 'channels': rows, 'tables': held,
+            'environments': {key: environment_to_json(env)
+                             for key, env in table.environments.items()},
+            'warnings': warnings}
+
+
+def put_channel_table(state: OpenProject | None, params: Mapping[str, Any]) -> str:
+    """`project.put_channel_table`: the control service's rows saved as the
+    project's channel table `name`, through the one mapping
+    (`io.tables.channel_table_of_rows`), each value checked as a write
+    checks a column. A name the project already holds is refused unless
+    `replace` is true and that object is itself a channel table; the
+    table's control loops are kept when `environments` is not given.
+    Answers the name used."""
+    from hertzforge.core.channel_table import ChannelTable
+    from hertzforge.io import tables
+    from hertzforge.io.run_convert import environment_to_json
+
+    state = _open(state, 'project.put_channel_table')
+    name = _name(params, 'name', 'project.put_channel_table')
+    project = state.project
+    present = project.get(name) if name in project else None
+    held = name in project or name in project.unresolved
+    if held and not (params.get('replace') is True and isinstance(present, ChannelTable)):
+        raise refused(f'the project already holds an object named {name!r}; '
+                      'choose another name or replace a channel table')
+    environments = params.get('environments')
+    if environments is None and isinstance(present, ChannelTable):
+        environments = {key: environment_to_json(env)
+                        for key, env in present.environments.items()}
+    try:
+        table = tables.channel_table_of_rows(params.get('channels'), environments)
+    except (tables.TableContentError, ValueError, TypeError) as error:
+        raise bad_request(f'project.put_channel_table: {error}') from error
+    if isinstance(present, ChannelTable):
+        project[name] = table
+    else:
+        name = project.add(name, table)
+    state.modified = True
+    return name
+
+
+# ---- seeds: an analysis object fills part of a test's setup ------------------------------------
+
+def seeds(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.seeds`: the objects in the open project that could fill
+    part of `module`'s setup (`io.seeds.offers`); an empty list while no
+    project is open."""
+    from hertzforge.io import seeds as seeding
+
+    module = _name(params, 'module', 'project.seeds')
+    if state is None:
+        return {'seeds': []}
+    return {'seeds': seeding.offers(state.project, module)}
+
+
+def seed(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]:
+    """`project.seed`: the part of `module`'s configuration the object
+    `name` fills, its protective numbers apart, and its origin
+    (`io.seeds.seed`). Nothing is configured: the shell puts the part
+    into a test's draft once the operator has seen what it changes, and
+    the draft goes through the same configure call and checks as one
+    typed in. An object the module cannot control to is refused with
+    the reason."""
+    from hertzforge.io import seeds as seeding
+
+    state = _open(state, 'project.seed')
+    name = _name(params, 'name', 'project.seed')
+    module = _name(params, 'module', 'project.seed')
+    options: dict[str, Any] = {}
+    for key, kind in (('channel', str), ('units', str), ('tones', str), ('record', int)):
+        value = params.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, kind) or isinstance(value, bool):
+            raise bad_request(f'project.seed "{key}" is a {kind.__name__}')
+        options[key] = value
+    try:
+        return seeding.seed(state.project, name, module, **options)
+    except KeyError as error:
+        raise not_found(f'the project has no object named {error.args[0]!r}') from error
+    except seeding.SeedRefused as error:
+        raise refused(str(error)) from error

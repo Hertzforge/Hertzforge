@@ -1,0 +1,48 @@
+{
+  "name": "identification_frf",
+  "kind": "frf",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "references": [
+      5,
+      6,
+      7,
+      8
+    ]
+  },
+  "convention": "file",
+  "description": "identification: every control's and limit channel's response to every drive, the response taken 266 frames later (the lag the identification measured); a delay lags",
+  "lag_frames": 266,
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        10
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "values",
+      "dtype": "c16",
+      "shape": [
+        4,
+        4,
+        10
+      ],
+      "unit": "g/V",
+      "offset": 80
+    }
+  ]
+}

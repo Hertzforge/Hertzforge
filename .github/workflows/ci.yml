@@ -1,0 +1,351 @@
+name: tests
+
+# On every pull request, every push to main, in the merge queue, weekly and
+# on demand. The weekly run matters because dependencies are declared by name
+# with no pin: a new release upstream is
+# something new to test even when nothing here changed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: '0 13 * * 1'          # Mondays, 07:00 Mountain
+  workflow_dispatch:
+
+# A newer run on a pull request (or on any branch but main) cancels the one
+# it supersedes. Nothing on main is ever cancelled: each run there gets a
+# group of its own, its run id. In one shared group a manual or scheduled
+# run would cancel a push run still going, and even with cancel-in-progress
+# off a newer run replaces one still waiting (a group holds one pending run),
+# so a merged commit could end up with no result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The hertzforge package on PyPI: its own tests and the repository's lint.
+  package:
+    runs-on: ubuntu-latest
+    # The core suite takes about eight minutes on four workers on a recent
+    # Mac; hosted runners take several times that.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package and its test tools
+        run: pip install -e . pytest pytest-xdist pytest-cov jsonschema ruff
+      # The ESCDF reference implementation, which io/escdf.py and
+      # io/escdf_objects.py are tested against both ways. It is not on PyPI,
+      # so it is installed here rather than declared in pyproject, and its
+      # address is the one listed in check_tree.REFERENCES. The tests that
+      # need it skip without it.
+      - name: Install the ESCDF reference implementation
+        run: pip install 'escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git'
+      - name: Lint every Python file in the repository
+        run: ruff check .
+      - name: No GPL package installed, every import accounted for
+        run: python tools/check_licenses.py --scope package
+      - name: Fetch the plate test data at the release the core came from
+        run: bash scripts/fetch_testdata.sh
+      - name: Test
+        # The analysis service's tests run in the `analysis` job, on every
+        # platform. On 3.14 they run here as well, a few seconds, so that the
+        # coverage measured here counts the service too. The timing tests
+        # run alone in the `analysis` job.
+        env:
+          SCOPE: ${{ matrix.python-version == '3.14'
+                     && '--cov=hertzforge --cov-report=' || '--ignore=tests/service' }}
+        run: python -m pytest tests -q -n auto --durations=20 -m "not slow and not timing" $SCOPE
+      - name: Coverage
+        if: matrix.python-version == '3.14'
+        run: |
+          {
+            echo "## Coverage: $(python -m coverage report --format=total)%"
+            echo
+            echo "Statements the suite reaches, on Python 3.14, without the slow"
+            echo "demonstration models (demo/ reads low for that reason)."
+            echo
+            python -m coverage report --format=markdown --sort=cover
+          } >> "$GITHUB_STEP_SUMMARY"
+          # A floor: a change that adds code without tests fails the way a
+          # license finding does. Measured at 95.7% on 2026-11-07; raise it when
+          # the number rises, never lower it to pass.
+          python -m coverage report --fail-under=95 > /dev/null
+
+  # The guide's mesh table: 11 CPU-minutes here and 17 minutes of a runner, so
+  # weekly and on demand rather than on every pull request.
+  guide:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Install the package and its test tools
+        run: pip install -e . pytest pytest-xdist
+      - name: Test
+        run: python -m pytest tests/test_demo_shapes.py -q -n auto -m guide
+
+  # The analysis service (hertzforge.service) on every platform a desktop
+  # build targets, in the package's own environment.
+  analysis:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python-version: '3.12'}
+          - {os: ubuntu-latest, python-version: '3.13'}
+          - {os: ubuntu-latest, python-version: '3.14'}
+          - {os: macos-latest, python-version: '3.13'}
+          - {os: windows-latest, python-version: '3.13'}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package and its test tools
+        run: pip install -e . pytest pytest-xdist jsonschema
+      - name: Fetch the plate test data at the release the core came from
+        run: bash scripts/fetch_testdata.sh
+      - name: Test
+        run: python -m pytest tests/service -q -n 4 --dist loadgroup -m "not timing"
+      - name: Test the timing tests, one at a time
+        # Tests marked `timing` assert a wall-clock bound (event-loop latency),
+        # which other xdist workers break by sharing the runner's cores. They run
+        # here alone, without xdist. The marker is registered in pyproject.toml.
+        run: python -m pytest tests/service -q -m timing
+      - name: The sparse solver is the one this runner should have
+        # Accelerate on the Mac, PARDISO on the x86-64 Linux and Windows runners:
+        # an install that fell back to SuperLU still passes every test, slowly.
+        run: python -m hertzforge check-solver
+      - name: No GPL package installed, every import accounted for
+        run: python tools/check_licenses.py --scope package
+
+  # The shell: types, unit tests and a production build, on every platform
+  # a desktop build targets.
+  shell:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: Install
+        run: npm ci --prefix ui
+      - name: Type check
+        run: npm --prefix ui run check
+      - name: Test
+        run: npm --prefix ui test
+      - name: Build
+        run: npm --prefix ui run build
+      - name: The report viewer the package ships is the one this UI builds
+        # Windows checks the UI's sources out with CRLF, which the build carries into the page;
+        # the check needs one platform, and the others build from LF as the committed file was
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          npm --prefix ui run build:report
+          git diff --exit-code -- src/hertzforge/report/viewer.html || {
+            echo "::error::src/hertzforge/report/viewer.html is stale: run npm --prefix ui run build:report and commit it"
+            exit 1
+          }
+
+  # The control service and the controller crates, one Cargo workspace:
+  # formatting, lint and tests, on every platform a desktop build targets.
+  # The NI backend loads the NI-DAQmx driver at run time, so the runners need
+  # no NI software; the tests run on the Sim backend and the driverless paths.
+  control:
+    runs-on: ${{ matrix.os }}
+    # Each module adds its tests here. On windows-latest this job took 22 minutes with
+    # Random and shock, 37 to 39.5 with Sine and TWR, and passed 40 with Explorer.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Line tables only. A panic and a backtrace keep their file and line, and the
+      # test build is much smaller and links faster than with full debug
+      # information. The size matters: a recording refuses to start when the disk
+      # is under its free-space floor, and the run then goes on without one, so a
+      # test that looks for the run's folder fails on a runner whose disk the
+      # build has filled. The last step prints what was left.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      # One package at a time. `cargo fmt --all` hands rustfmt the whole
+      # workspace's file list on one command line, and with this many crates
+      # that line is past the length Windows allows ("The filename or
+      # extension is too long", os error 206). Every package is still checked
+      # on every system.
+      - name: Formatting
+        shell: bash
+        run: |
+          for p in $(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[].name' | tr -d '\r'); do
+            cargo fmt --check -p "$p"
+          done
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The control laws and the law host's test fixtures, built to
+      # WebAssembly (the wasm32-wasip2 target rust-toolchain.toml names).
+      # The test passes build them too; this step gives the build its own
+      # log and verdict.
+      - name: Build the guest laws
+        run: bash scripts/build_laws.sh
+      # Every test whose verdict does not rest on the wall clock. The timing
+      # tests (scripts/rust_timing_tests.txt) run in the `timing` job below.
+      - name: Test
+        run: bash scripts/rust_tests.sh parallel
+      - name: Disk space left after the build and the tests
+        if: always()
+        run: df -h .
+
+  # The timing tests: real-time pacing, deadlines and the 400-channel run,
+  # one at a time. They assume a machine that keeps up with real time, which a
+  # shared runner does not promise: on the shared runners a varying few failed
+  # on every run (the 400-channel engine run on all three, the sine notch and
+  # bring-up tests and a controller-timeout run on macOS, a controlled-stop
+  # test on Windows) while passing on a quiet machine. Nothing in the list is
+  # loosened or skipped; instead it runs where its verdict means something: a
+  # dedicated machine registered as a self-hosted runner with the label
+  # `timing`, after every push to main, weekly and by hand. Never on a pull
+  # request or in the merge queue: the repository is public, and code that has
+  # not been merged does not run on a machine on the maintainers' network. Off
+  # until the repository variable TIMING_RUNNER is 'true', so no job waits for
+  # a runner that is not there.
+  timing:
+    if: >-
+      vars.TIMING_RUNNER == 'true' &&
+      github.event_name != 'pull_request' && github.event_name != 'merge_group'
+    runs-on: [self-hosted, linux, timing]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - name: Test the timing tests, one at a time
+        run: bash scripts/rust_tests.sh timing
+
+  # Rust crate licenses, bans, sources and advisories (deny.toml). The
+  # lockfile holds every platform's packages and the check reads all of them,
+  # so one runner covers the three.
+  deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Licenses, bans, sources and advisories
+        run: cargo deny check
+
+  # The tree's own rules: no names, every Python file in a license-check
+  # scope, permissive npm licenses (tools/check_tree.py, with tests that plant
+  # each case). The licenses of the Python packages are checked where they
+  # are installed, in the package and analysis jobs (tools/check_licenses.py).
+  tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Names, license-check scopes and npm licenses
+        run: python tools/check_tree.py
+      - name: The checks catch what they claim to
+        run: |
+          pip install pytest
+          python -m pytest tools -q
+
+  # The drive path's rules (docs/drive-path.md, tools/check_drive_path.py, with tests that
+  # plant each case and run in the `tree` job). On every run: every crate on one of the two
+  # lists in tools/drive_path.txt, and every test in tools/safety_tests.txt present, not
+  # ignored and compiled in. On a pull request also: a change to a drive-path path carries
+  # the template's drive-path section, filled in, and a removed safety test or a path moved
+  # off the list is named in the title; a change to a path in tools/run_data_paths.txt
+  # carries the Run data section, filled in (docs/run-data.md). The description is read
+  # through the API as it is now, so re-running this job after editing the description
+  # checks the edit (the event payload keeps the description the pull request had when the
+  # run started).
+  drive-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # the whole history, so the base a pull request merges into is here to diff against
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: The drive-path lists and the safety tests
+        if: github.event_name != 'pull_request'
+        run: python tools/check_drive_path.py
+      - name: The drive-path lists, the safety tests and this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          event="$GITHUB_EVENT_PATH"
+          if gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER" > "$RUNNER_TEMP/now.json"; then
+            jq --slurpfile now "$RUNNER_TEMP/now.json" \
+              '.pull_request.title = $now[0].title | .pull_request.body = $now[0].body' \
+              "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/event.json"
+            event="$RUNNER_TEMP/event.json"
+          else
+            echo "::warning::The description could not be read as it is now; checking the one the event carried."
+          fi
+          python tools/check_drive_path.py --event "$event"
+
+  # The head branch of a pull request is named for what it carries. Skipped outside pull requests, where there
+  # is no head branch to name.
+  branch:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: The head branch is named by the scheme
+        env:
+          HEAD: ${{ github.head_ref }}
+        run: |
+          pattern='^(fix|feature|docs|tooling)/[a-z0-9][a-z0-9.-]*$|^sync/[0-9]{8}-[0-9]{4}$'
+          if [[ $HEAD =~ $pattern ]]; then
+            echo "$HEAD"
+          else
+            echo "::error::The branch '$HEAD' is not named by the scheme: fix/, feature/, docs/ or tooling/, then a short lower-case slug of letters, digits and hyphens, such as fix/decade-axis-ticks. Rename the branch in your fork (the pull request follows the rename) and push again."
+            exit 1
+          fi

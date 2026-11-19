@@ -1,0 +1,25 @@
+{
+ "type": "event",
+ "topic": "shock.live",
+ "seq": 139,
+ "data": {
+  "run_id": "s-0003",
+  "source": "SIM",
+  "state": "running",
+  "phase": "firing",
+  "mode": "auto",
+  "level_db": -6,
+  "rung": 2,
+  "pulses": {
+   "fired": 3,
+   "passed": 3,
+   "at_level": 1,
+   "of_level": 1
+  },
+  "next_pulse_s": null,
+  "fire": {
+   "done": 2048,
+   "of": 8192
+  }
+ }
+}

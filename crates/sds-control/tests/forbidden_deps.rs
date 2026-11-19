@@ -1,36 +1,387 @@
-//! The dependency firewall: this crate reaches only the controller crates on a
-//! reviewed allowlist, never any other controller crate (the private hardware backends
-//! among them) and never the controller's desktop app, directly or transitively,
-//! through any dependency kind. The allowlist is the whole rule, so the tree never has
-//! to name what it keeps out.
+//! The dependency firewall, at two levels.
 //!
-//! Two views of the graph: the workspace lockfile, which lists every resolved
-//! package for every platform, and `cargo metadata` (resolved, all features, dev and
-//! build dependencies included, filtered to the host platform so it runs offline),
-//! walked from this package.
+//! - **The repository** holds only the controller crates and modules imported and
+//!   reviewed when they came in. Any other controller crate in the lockfile, from this
+//!   tree or from a registry, fails, and so does any package built from this
+//!   repository's source that is not on a list here. No package is built from source
+//!   outside the repository.
+//! - **This crate** reaches only the controller crates on its own, narrower reviewed
+//!   allowlist, and never the controller's desktop app, directly or transitively,
+//!   through any dependency kind of its own (its dependencies' own dev-dependencies
+//!   are never built for it, so the walk does not follow them).
+//!
+//! The allowlists are the whole rule, so the tree never has to name what it keeps out.
+//!
+//! Two views of the graph: the workspace lockfile, which lists every resolved package
+//! for every platform, and `cargo metadata` (resolved, all features, dev and build
+//! dependencies included, filtered to the host platform so it runs offline).
 
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::path::Path;
 use std::process::Command;
 
-/// The only controller crates this crate may reach: open, hardware-neutral, reviewed.
-/// A new one is a change to review (license, hardware coupling) before this list grows.
+/// The only controller crates this crate may reach, each reviewed for license and
+/// hardware coupling. A new one is a change to review before this list grows.
+///
+/// Hardware comes in through one door: `hertzforge-station`, the controller's station
+/// factory, which alone names the NI-DAQmx backend (`hertzforge-hal-ni`, loaded at run
+/// time from NI's public driver; deny.toml allows no other crate to name it) and the
+/// build stamp every run's provenance carries (`hertzforge-buildinfo`).
 const REVIEWED_CONTROLLER_CRATES: &[&str] = &[
-    "eigen-breakpoints",
-    "eigen-capture",
-    "eigen-channel-table",
-    "eigen-dsp",
-    "eigen-engine",
-    "eigen-hal",
-    "eigen-hal-sim",
-    "eigen-module-abi",
-    "eigen-random",
-    "eigen-shaker-db",
+    "hertzforge-breakpoints",
+    "hertzforge-buildinfo",
+    "hertzforge-capture",
+    "hertzforge-channel-table",
+    "hertzforge-dsp",
+    "hertzforge-engine",
+    "hertzforge-hal",
+    "hertzforge-hal-ni",
+    "hertzforge-hal-sim",
+    "hertzforge-module-abi",
+    "hertzforge-random",
+    "hertzforge-sdm",
+    "hertzforge-shaker-db",
+    "hertzforge-station",
+    // The law catalog on the wire (`laws.list`, `laws.import`) and the MIMO setup's law
+    // choice, reviewed 2026-11-03: `hertzforge-random-laws` names no backend (its tests
+    // use the Sim as a fixture, which the Sim-leak lint already allows), and it brings
+    // the law host (the sandbox law files run in), the shared ratio-law math and the
+    // built-in MIMO laws (with the law SDK's plain types they are written against), all
+    // pure computation on the numbers they are handed. These are
+    // on LAW_CRATES, not IMPORTED_CONTROLLER_CRATES: written here, not imported.
+    "hertzforge-law-host",
+    "hertzforge-law-ratio-math",
+    "hertzforge-law-sdk",
+    "hertzforge-mimo-laws",
+    "hertzforge-random-laws",
+    // The band-average law's math, which `hertzforge-mimo-laws` brings, reviewed
+    // 2026-11-10: pure computation on `hertzforge-sdm`'s stacks, MIT, with no other
+    // dependency. Written here, so on LAW_CRATES.
+    "hertzforge-law-band-average-math",
+    // The MIMO Random run service and the reference reader behind the wire's MIMO
+    // driver (src/mimo/adapter.rs), reviewed 2026-11-03: `hertzforge-mimo-random`
+    // reaches hardware only through the station backend the control service hands it
+    // (built by `hertzforge-station`, wrapped for the operator's stop and abort) and
+    // holds the Sim only as a dev-dependency; `hertzforge-reference` reads and checks
+    // reference files (sha2 and zip, both MIT) and names no backend.
+    "hertzforge-mimo-random",
+    "hertzforge-reference",
+    // Classical shock behind the wire's `shock.*` methods, reviewed 2026-11-07: the
+    // classical run service (`hertzforge-shock-host`), the pulse run infrastructure it
+    // shares with SRS (`hertzforge-shock-common`) and time waveform replication's
+    // identification and inverse (`hertzforge-twr`, whose pure modules the closed loop
+    // uses) reach hardware only through the station backend the control service hands
+    // them, and hold the Sim, if at all, only as a dev-dependency. All three are MIT and
+    // name no backend in their `[dependencies]`.
+    "hertzforge-shock-common",
+    "hertzforge-shock-host",
+    "hertzforge-twr",
+    // The classical shock laws, reviewed 2026-11-07, as the Random law crates were:
+    // the built-in law's math (`hertzforge-shock-law-math`, on `hertzforge-dsp` alone)
+    // and the choice and check of a law (`hertzforge-shock-laws`, which runs a check
+    // case on the backend it is handed and names none). Written here, so on LAW_CRATES.
+    "hertzforge-shock-law-math",
+    "hertzforge-shock-laws",
+    // SRS shock behind the wire's `srs.*` methods, reviewed 2026-11-07: the SRS
+    // synthesis engines, the predictive limit notch and the SRS run service
+    // (`hertzforge-srs`, MIT), reached first through the SRS law choice and check in
+    // `hertzforge-shock-laws`. Its `[dependencies]` are crates already on this list and
+    // name no backend: it reaches hardware only through the station backend it is
+    // handed, and holds the Sim only as a dev-dependency. Its delegated fire path is
+    // never constructed by this crate.
+    "hertzforge-srs",
+    // Sine behind the wire's `sine.*` methods, reviewed 2026-11-08: the Sine profile
+    // grammar, schedulers, control core and run service (`hertzforge-sine`, MIT,
+    // imported), reached first through the Sine law choice and check in
+    // `hertzforge-sine-laws`. Its `[dependencies]` are crates already on this list
+    // and name no backend: the run service is handed a `Box<dyn Backend>` by the
+    // station factory, and the Sim is a dev-dependency only. Its law seam calls a
+    // factory the control service installs and holds no law host of its own.
+    "hertzforge-sine",
+    // The Sine laws, reviewed 2026-11-08 as the shock law crates were: the choice
+    // and check of a law (`hertzforge-sine-laws`), which runs a check case on the
+    // backend it is handed and names none. Written here, so on LAW_CRATES.
+    "hertzforge-sine-laws",
+    // The TWR laws, reviewed 2026-11-08 as the Sine and shock law crates were: the
+    // choice and check of a law (`hertzforge-twr-laws`), which runs a check case on
+    // the backend it is handed and names none. Its `[dependencies]` are
+    // `hertzforge-twr`, `hertzforge-random-laws` and `hertzforge-hal`, all on this
+    // list. Written here, so on LAW_CRATES.
+    "hertzforge-twr-laws",
+    // Explorer behind the wire's `explorer.*` methods, reviewed 2026-11-08: the
+    // hand-steered open-loop sine (`hertzforge-explorer-host`, MIT, imported): its
+    // process step, run service, analysis pass and run host. Its `[dependencies]` are
+    // `hertzforge-dsp`, `hertzforge-channel-table`, `hertzforge-engine`,
+    // `hertzforge-hal`, `hertzforge-module-abi` and `serde`, the
+    // controller crates all already on this list, and it names no backend: the run
+    // service is handed a finished `Box<dyn Backend>` by the station factory, and the
+    // Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-explorer-host",
+    // Playback behind the wire's `playback.*` methods, reviewed 2026-11-15: the drive
+    // file, its checks before arming and the run host that plays it
+    // (`hertzforge-playback`, MIT, written here). Its `[dependencies]` are
+    // `hertzforge-channel-table`, `hertzforge-engine`, `hertzforge-hal`,
+    // `hertzforge-module-abi`, `serde_json` and `sha2`, and it names no backend: the
+    // run host is handed a finished `Box<dyn Backend>` by the station factory, and the
+    // Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-playback",
+    // The Recorder behind the wire's `recorder.*` methods: the acquisition and recording
+    // core (`hertzforge-recorder`, MIT, imported): its trigger, recording writer and
+    // reader, analysis pass and run service. Its `[dependencies]` are
+    // `hertzforge-capture`, `hertzforge-channel-table`, `hertzforge-dsp`,
+    // `hertzforge-engine`, `hertzforge-hal`, `hertzforge-module-abi`, `serde` and
+    // `serde_json`, the controller crates all already on this list, and it names no
+    // backend: the run service is handed a finished `Box<dyn Backend>` by the station
+    // factory, and the Sim is a dev-dependency only. It runs no control law.
+    "hertzforge-recorder",
+    // Single Output Mixed Mode, reviewed 2026-11-10 with its contracts: the parts list,
+    // the part clock and the run service (`hertzforge-mixed`, MIT, written here), and
+    // the choice of its two laws and its check cases (`hertzforge-mixed-laws`). The
+    // core's `[dependencies]` are `hertzforge-dsp`, `hertzforge-breakpoints`,
+    // `hertzforge-random`, `hertzforge-sine`, `hertzforge-engine`, `hertzforge-hal`,
+    // `hertzforge-channel-table`, `hertzforge-capture`, `hertzforge-module-abi`,
+    // `serde` and `serde_json`, all on this list, and it names no backend: the run
+    // service is handed a finished `Box<dyn Backend>` by the station factory, and the
+    // Sim is a dev-dependency only. It holds no law host: its laws are the Random and
+    // Sine worlds', resolved by `hertzforge-mixed-laws` through their own resolvers.
+    // The laws crate is on LAW_CRATES, as the Sine and TWR law crates are.
+    "hertzforge-mixed",
+    "hertzforge-mixed-laws",
+    // MIMO Shock, reviewed 2026-11-11 with its contracts, before the wire reaches it:
+    // the run contracts and engine (`hertzforge-mimo-shock`, MIT, written here), whose
+    // `[dependencies]` are `hertzforge-shock-common`, `hertzforge-sdm`, `hertzforge-hal`,
+    // `hertzforge-channel-table`, `serde` and `serde_json`, all on this list; it names no
+    // backend and is handed its station at arm. The choice of its laws
+    // (`hertzforge-mimo-shock-laws`) depends on it and `hertzforge-shock-common` only.
+    // The laws crate is on LAW_CRATES.
+    "hertzforge-mimo-shock",
+    "hertzforge-mimo-shock-laws",
+    // The MIMO Shock laws' math (`hertzforge-mimo-shock-law-math`, on `hertzforge-dsp`
+    // and `hertzforge-sdm` alone, built for WebAssembly as the classical shock math is),
+    // reviewed 2026-11-11 with the laws it serves. Written here, so on LAW_CRATES.
+    "hertzforge-mimo-shock-law-math",
+    // MIMO Sine, reviewed 2026-11-17 with its contracts, before the wire reaches it:
+    // the run contracts (`hertzforge-mimo-sine`, MIT, written here), whose
+    // `[dependencies]` are `hertzforge-dsp`, `hertzforge-sdm`, `hertzforge-sine` (its
+    // pure core, without the service), `serde` and `serde_json`; it names no backend.
+    // The choice of its laws (`hertzforge-mimo-sine-laws`) depends on it, the law
+    // catalog, the law host and the law SDK (the built-in laws' declarations), as
+    // MIMO Shock's choice does, and its laws' math (`hertzforge-mimo-sine-law-math`,
+    // on `hertzforge-sdm` alone, built for WebAssembly). Both are on LAW_CRATES.
+    "hertzforge-mimo-sine",
+    "hertzforge-mimo-sine-laws",
+    "hertzforge-mimo-sine-law-math",
+];
+
+/// Every controller crate the repository holds (`crates/hertzforge-*`), each reviewed for
+/// license and hardware coupling when it was imported. A controller crate not on this
+/// list fails the lockfile check; adding one is a review, then a line here.
+///
+/// `hertzforge-mimo-random` was written here as well: the multiple-output Random
+/// run service (identification, the loop, the guards, records). Like the
+/// single-output service it reaches hardware only through the station factory
+/// and builds the Sim only as a test fixture. The control service reaches it
+/// through the wire adapter (`src/mimo/adapter.rs`).
+///
+/// `hertzforge-reference` was written here too: reference SDM builders, validation
+/// and file readers (the `zip` and `sha2` crates, both MIT). It names no backend and
+/// reaches no hardware. The control service reads a setup's reference file with it, and
+/// reaches it for `mimo_random.reference.*`.
+///
+/// `hertzforge-mixed` was written here as well (2026-11-10): the Single Output Mixed
+/// Mode parts list, part clock and run service, composed from the Random and Sine
+/// cores. It names no backend and builds the Sim only as a test fixture.
+///
+/// `hertzforge-mimo-shock` was written here as well (2026-11-11): the MIMO Shock
+/// contracts (the law setup, the per-pulse inputs and outputs, the law traits and
+/// their validation) and the run engine's surface. It names no backend; the run
+/// service hands it a finished station, and the Sim is at most a dev-dependency.
+///
+/// `hertzforge-mimo-sine` was written here as well (2026-11-17): the MIMO Sine
+/// contracts (the run's setup, the per-update law inputs and outputs, the law traits
+/// and their validation) and the run engine's surface. It names no backend.
+///
+/// `hertzforge-sdm` was written here, not imported: spectral density matrix stacks,
+/// the multiple-output law boundary and per-line linear algebra (faer, MIT). It
+/// names no backend and reaches no hardware; it builds for WebAssembly.
+///
+/// `hertzforge-playback` was written here as well (2026-11-15): the drive file, its
+/// checks before arming and the run host that plays it. It names no backend; the run
+/// service hands it a finished station, and the Sim is a dev-dependency only.
+const IMPORTED_CONTROLLER_CRATES: &[&str] = &[
+    "hertzforge-automation",
+    "hertzforge-backendd",
+    "hertzforge-breakpoints",
+    "hertzforge-buildinfo",
+    "hertzforge-capture",
+    "hertzforge-channel-table",
+    "hertzforge-data",
+    "hertzforge-demo",
+    "hertzforge-dsp",
+    "hertzforge-engine",
+    "hertzforge-explorer-host",
+    "hertzforge-formats",
+    "hertzforge-hal",
+    "hertzforge-hal-ni",
+    "hertzforge-hal-sim",
+    "hertzforge-host",
+    "hertzforge-insight",
+    "hertzforge-ipc",
+    "hertzforge-mimo-random",
+    "hertzforge-mimo-shock",
+    "hertzforge-mimo-sine",
+    "hertzforge-mixed",
+    "hertzforge-module-abi",
+    "hertzforge-playback",
+    "hertzforge-protocol",
+    "hertzforge-random",
+    "hertzforge-recorder",
+    "hertzforge-reference",
+    "hertzforge-shaker-db",
+    "hertzforge-shock-common",
+    "hertzforge-shock-host",
+    "hertzforge-sdm",
+    "hertzforge-sine",
+    "hertzforge-srs",
+    "hertzforge-station",
+    "hertzforge-twr",
+];
+
+/// The controller's modules (`modules/`), imported and reviewed with the crates.
+const IMPORTED_MODULES: &[&str] = &["mimo_compile_probe", "random_sim_slice", "smart"];
+
+/// The repository's own packages that are not controller code.
+const OWN_PACKAGES: &[&str] = &["sds-control"];
+
+/// The control-law host and its guest SDK, the shared ratio-law math, and the
+/// Random law catalog that joins the host to the Random core, written in this
+/// repository rather than imported, and the guest crates built to WebAssembly:
+/// the control laws under `laws/` and the law host's test fixtures. Reviewed
+/// for license and hardware coupling when they came in: none names a backend
+/// (the catalog's tests use the Sim), and the guests can reach nothing but the
+/// numbers the host hands them. This crate reaches the catalog and what it needs
+/// (see REVIEWED_CONTROLLER_CRATES), never a guest crate. The
+/// multiple-output set (`hertzforge-mimo-laws` and the `mimo-*` guests) was
+/// reviewed the same way: pure math on the stacks, no backend, synthetic plants
+/// in its tests. So was the classical shock set (2026-11-07): the built-in law's
+/// math, the choice and check of a law, the `shock-fdc` law file, and the
+/// `shock-misbehave` and `shock-template` host fixtures (the latter the SDK
+/// template's own law source, built in this workspace). The SRS shock set was
+/// listed the same way when its contracts were written (2026-11-07), before the
+/// crates exist: the `shock-srs-ratio` law file and the `srs-misbehave` and
+/// `srs-template` host fixtures. So was the Sine set (2026-11-08): the choice and
+/// check of a law (`hertzforge-sine-laws`, written with the contracts), and, before
+/// they exist, the `sine-servo` law file and the `sine-misbehave` and
+/// `sine-template` host fixtures. So was the TWR set (2026-11-08): the choice and
+/// check of a law (`hertzforge-twr-laws`, written with the contracts), and, before
+/// they exist, the `twr-correct` law file and the `twr-misbehave` and
+/// `twr-template` host fixtures. So was the Mixed Mode set (2026-11-10): the choice
+/// of its two laws through the Random and Sine resolvers and its check cases
+/// (`hertzforge-mixed-laws`); it adds no world, so no law file or fixture.
+/// So was the band-average MIMO law (2026-11-10):
+/// its math (`hertzforge-law-band-average-math`, on `hertzforge-sdm`'s stacks and
+/// factorizations and nothing else), the law in `hertzforge-mimo-laws` and the
+/// `mimo-band-average` law file. So was the MIMO Shock set (2026-11-11), written
+/// with its contracts: the choice of a law (`hertzforge-mimo-shock-laws`) and the
+/// `shock-mimo-minimal` host fixture, the smallest law file of the `shock-mimo`
+/// world, written against the world's own bindings. Its law files followed
+/// (2026-11-11): `mimo-shock-inverse`, `mimo-shock-shape` and `mimo-shock-paired`
+/// (the SDK over the same law mathematics) and the `shock-mimo-misbehave` host
+/// fixture. So was the MIMO Sine set (2026-11-17), named with its contracts before
+/// most of it exists: the choice of a law (`hertzforge-mimo-sine-laws`), its laws'
+/// math (`hertzforge-mimo-sine-law-math`), the law files `mimo-sine-matrix`,
+/// `mimo-sine-paired`, `mimo-sine-steepest-descent`, `mimo-sine-secant` and
+/// `mimo-sine-ratio` (the SDK over the same math), and the `sine-mimo-misbehave` host
+/// fixture; the `sine-mimo-template` host fixture (the SDK template's law, compiled as
+/// a law file) joined them with the law plumbing.
+const LAW_CRATES: &[&str] = &[
+    "hertzforge-law-band-average-math",
+    "hertzforge-law-hinv",
+    "hertzforge-law-host",
+    "hertzforge-law-mimo-band-average",
+    "hertzforge-law-mimo-buzz",
+    "hertzforge-law-mimo-min-drive",
+    "hertzforge-law-mimo-open-loop",
+    "hertzforge-law-mimo-pinv",
+    "hertzforge-law-mimo-shock-inverse",
+    "hertzforge-law-mimo-shock-paired",
+    "hertzforge-law-mimo-shock-shape",
+    "hertzforge-law-mimo-shape",
+    "hertzforge-law-mimo-sine-matrix",
+    "hertzforge-law-mimo-sine-paired",
+    "hertzforge-law-mimo-sine-ratio",
+    "hertzforge-law-mimo-sine-secant",
+    "hertzforge-law-mimo-sine-steepest-descent",
+    "hertzforge-law-mimo-zero",
+    "hertzforge-law-ratio",
+    "hertzforge-law-ratio-math",
+    "hertzforge-law-sdk",
+    "hertzforge-law-shock-fdc",
+    "hertzforge-law-shock-srs-ratio",
+    "hertzforge-law-sine-servo",
+    "hertzforge-law-twr-correct",
+    "hertzforge-mimo-laws",
+    "hertzforge-mimo-shock-law-math",
+    "hertzforge-mimo-shock-laws",
+    "hertzforge-mimo-sine-law-math",
+    "hertzforge-mimo-sine-laws",
+    "hertzforge-mixed-laws",
+    "hertzforge-random-laws",
+    "hertzforge-shock-law-math",
+    "hertzforge-shock-laws",
+    "hertzforge-sine-laws",
+    "hertzforge-twr-laws",
+    "law-fixture-bad-manifest",
+    "law-fixture-mimo-misbehave",
+    "law-fixture-misbehave",
+    "law-fixture-shock-mimo-minimal",
+    "law-fixture-shock-mimo-misbehave",
+    "law-fixture-shock-misbehave",
+    "law-fixture-shock-template",
+    "law-fixture-sine-mimo-misbehave",
+    "law-fixture-sine-mimo-template",
+    "law-fixture-sine-misbehave",
+    "law-fixture-sine-template",
+    "law-fixture-srs-misbehave",
+    "law-fixture-srs-template",
+    "law-fixture-twr-misbehave",
+    "law-fixture-twr-template",
 ];
 
 struct Package {
     name: String,
     manifest_path: String,
+}
+
+/// One `[[package]]` entry of the lockfile.
+struct Locked {
+    name: String,
+    /// `None` for a package built from source in this workspace.
+    source: Option<String>,
+}
+
+/// Every package the workspace lockfile lists.
+fn locked() -> Vec<Locked> {
+    let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock"))
+        .expect("the workspace lockfile exists (build once first)");
+    lock.split("[[package]]")
+        .skip(1)
+        .map(|entry| {
+            let field = |key: &str| {
+                entry.lines().find_map(|l| {
+                    l.strip_prefix(key)?
+                        .strip_prefix(" = \"")?
+                        .strip_suffix('"')
+                        .map(str::to_owned)
+                })
+            };
+            Locked {
+                name: field("name").expect("every lockfile entry has a name"),
+                source: field("source"),
+            }
+        })
+        .collect()
 }
 
 /// The host target triple, from `rustc -vV`.
@@ -46,8 +397,8 @@ fn host_triple() -> String {
         .expect("rustc -vV names the host")
 }
 
-/// Every package reachable from this one on the host platform.
-fn reachable() -> Vec<Package> {
+/// The resolved workspace graph on the host platform.
+fn metadata() -> Value {
     let out = Command::new(env!("CARGO"))
         .args([
             "metadata",
@@ -66,7 +417,12 @@ fn reachable() -> Vec<Package> {
         "cargo metadata failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let meta: Value = serde_json::from_slice(&out.stdout).expect("metadata is JSON");
+    serde_json::from_slice(&out.stdout).expect("metadata is JSON")
+}
+
+/// Every package reachable from this one on the host platform.
+fn reachable() -> Vec<Package> {
+    let meta = metadata();
 
     let packages: HashMap<&str, Package> = meta["packages"]
         .as_array()
@@ -82,7 +438,10 @@ fn reachable() -> Vec<Package> {
             )
         })
         .collect();
-    let edges: HashMap<&str, Vec<&str>> = meta["resolve"]["nodes"]
+    // Each edge keeps whether it is ONLY a dev-dependency: a dependency's own
+    // dev-dependencies (its tests and examples) are never built for this crate, so the
+    // walk follows them from this crate alone.
+    let edges: HashMap<&str, Vec<(&str, bool)>> = meta["resolve"]["nodes"]
         .as_array()
         .unwrap()
         .iter()
@@ -93,7 +452,12 @@ fn reachable() -> Vec<Package> {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .map(|d| d["pkg"].as_str().unwrap())
+                    .map(|d| {
+                        let dev_only = d["dep_kinds"]
+                            .as_array()
+                            .is_some_and(|k| !k.is_empty() && k.iter().all(|k| k["kind"] == "dev"));
+                        (d["pkg"].as_str().unwrap(), dev_only)
+                    })
                     .collect(),
             )
         })
@@ -108,7 +472,15 @@ fn reachable() -> Vec<Package> {
     let mut queue = VecDeque::from([root]);
     while let Some(id) = queue.pop_front() {
         if seen.insert(id) {
-            queue.extend(edges.get(id).into_iter().flatten().copied());
+            let from_root = id == root;
+            queue.extend(
+                edges
+                    .get(id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, dev_only)| from_root || !dev_only)
+                    .map(|(pkg, _)| *pkg),
+            );
         }
     }
     seen.remove(root);
@@ -125,19 +497,19 @@ fn reachable() -> Vec<Package> {
 
 #[test]
 fn the_lockfile_holds_only_reviewed_controller_crates_for_any_platform() {
-    let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock"))
-        .expect("the workspace lockfile exists (build once first)");
-    let names: BTreeSet<&str> = lock
-        .lines()
-        .filter_map(|l| l.strip_prefix("name = \"")?.strip_suffix('"'))
-        .collect();
+    let entries = locked();
+    let names: BTreeSet<&str> = entries.iter().map(|p| p.name.as_str()).collect();
     assert!(
-        names.contains("eigen-random") && names.contains("tokio"),
+        names.contains("hertzforge-random") && names.contains("tokio"),
         "the lockfile scan found none of the expected packages; the check cannot be trusted"
     );
     let unreviewed: Vec<&&str> = names
         .iter()
-        .filter(|n| n.starts_with("eigen-") && !REVIEWED_CONTROLLER_CRATES.contains(*n))
+        .filter(|n| {
+            n.starts_with("hertzforge-")
+                && !IMPORTED_CONTROLLER_CRATES.contains(*n)
+                && !LAW_CRATES.contains(*n)
+        })
         .collect();
     assert!(
         unreviewed.is_empty(),
@@ -151,10 +523,87 @@ fn the_lockfile_holds_only_reviewed_controller_crates_for_any_platform() {
 }
 
 #[test]
+fn every_package_built_from_this_repository_is_on_a_reviewed_list() {
+    let own: BTreeSet<String> = locked()
+        .into_iter()
+        .filter(|p| p.source.is_none())
+        .map(|p| p.name)
+        .collect();
+    // The scan must see the workspace, or a pass would prove nothing.
+    for known in ["sds-control", "hertzforge-random", "smart"] {
+        assert!(
+            own.contains(known),
+            "the lockfile scan did not find {known} among this repository's packages; the \
+             check cannot be trusted"
+        );
+    }
+    let unreviewed: Vec<&String> = own
+        .iter()
+        .filter(|n| {
+            let n = n.as_str();
+            !(IMPORTED_CONTROLLER_CRATES.contains(&n)
+                || IMPORTED_MODULES.contains(&n)
+                || OWN_PACKAGES.contains(&n)
+                || LAW_CRATES.contains(&n))
+        })
+        .collect();
+    assert!(
+        unreviewed.is_empty(),
+        "packages built from this repository's source that are on no reviewed list: \
+         {unreviewed:?} (review, then add them to IMPORTED_CONTROLLER_CRATES, IMPORTED_MODULES, \
+         OWN_PACKAGES or LAW_CRATES)"
+    );
+    // This crate's allowlist is a subset of what the repository holds.
+    let stray: Vec<&&str> = REVIEWED_CONTROLLER_CRATES
+        .iter()
+        .filter(|n| !IMPORTED_CONTROLLER_CRATES.contains(*n) && !LAW_CRATES.contains(*n))
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "this crate's allowlist names controller crates the repository does not hold: {stray:?}"
+    );
+}
+
+#[test]
+fn no_package_is_built_from_source_outside_the_repository() {
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .canonicalize()
+        .expect("the repository root exists");
+    let meta = metadata();
+    let local: Vec<(String, std::path::PathBuf)> = meta["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["source"].is_null())
+        .map(|p| {
+            let manifest = Path::new(p["manifest_path"].as_str().unwrap());
+            (
+                p["name"].as_str().unwrap().to_owned(),
+                manifest.canonicalize().unwrap_or_else(|_| manifest.into()),
+            )
+        })
+        .collect();
+    assert!(
+        local.iter().any(|(n, _)| n == "hertzforge-random"),
+        "the metadata scan found no controller crate built from source; the check cannot be \
+         trusted"
+    );
+    let outside: Vec<String> = local
+        .iter()
+        .filter(|(_, m)| !m.starts_with(&root))
+        .map(|(n, m)| format!("{n} ({})", m.display()))
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "packages built from source outside the repository: {outside:?}"
+    );
+}
+
+#[test]
 fn the_desktop_app_is_not_reachable() {
     let deps = reachable();
     // The walk must be able to find something, or a pass would prove nothing.
-    for known in ["eigen-random", "eigen-hal-sim", "tokio"] {
+    for known in ["hertzforge-random", "hertzforge-hal-sim", "tokio"] {
         assert!(
             deps.iter().any(|p| p.name == known),
             "the dependency walk did not find {known}; the check cannot be trusted"
@@ -175,7 +624,7 @@ fn the_desktop_app_is_not_reachable() {
 fn controller_crates_are_the_reviewed_set() {
     let mut controller: Vec<String> = reachable()
         .into_iter()
-        .filter(|p| p.name.starts_with("eigen-"))
+        .filter(|p| p.name.starts_with("hertzforge-"))
         .map(|p| p.name)
         .collect();
     controller.sort();

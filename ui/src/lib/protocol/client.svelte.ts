@@ -9,7 +9,7 @@
  */
 
 import { decodeFrame, encodeFrame, FrameError } from './codec';
-import { PROTOCOL, type Event, type Hello, type Message, type ServiceName } from './types';
+import { PROTOCOL, type Event, type Hello, type Message, type RefusalReason, type ServiceName } from './types';
 
 export interface SocketLike {
 	binaryType: string;
@@ -53,7 +53,11 @@ export class RequestError extends Error {
 	constructor(
 		readonly code: ClientErrorCode,
 		message: string,
-		readonly method: string
+		readonly method: string,
+		/** The protocol's name for the cause, when the service gave one. */
+		readonly reason?: RefusalReason,
+		/** The facts behind `reason`. */
+		readonly detail?: Record<string, unknown>
 	) {
 		super(message);
 		this.name = 'RequestError';
@@ -297,7 +301,7 @@ export class ServiceClient {
 			this.pending.delete(message.id);
 			clearTimeout(p.timer);
 			if ('error' in message && message.error) {
-				p.reject(new RequestError(message.error.code, message.error.message, p.method));
+				p.reject(new RequestError(message.error.code, message.error.message, p.method, message.error.reason, message.error.detail));
 			} else if ('result' in message) {
 				p.resolve(message.result);
 			} else {

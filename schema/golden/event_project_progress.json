@@ -1,0 +1,10 @@
+{
+ "type": "event",
+ "topic": "project.progress",
+ "seq": 4,
+ "data": {
+  "done": 3,
+  "total": 4,
+  "path": "/Users/someone/tests/bracket/geometry.unv"
+ }
+}

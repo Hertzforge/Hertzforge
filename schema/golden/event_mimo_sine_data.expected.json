@@ -1,0 +1,1391 @@
+{
+ "type": "event",
+ "topic": "mimo_sine.data",
+ "seq": 311,
+ "data": {
+  "run_id": "msine-0002",
+  "source": "SIM",
+  "class": "sim",
+  "state": "running",
+  "phase": "engaged",
+  "test": "sweep",
+  "mode": "auto",
+  "t_s": 81.25,
+  "elapsed_s": 81.25,
+  "frequency_hz": 97.25,
+  "direction": "up",
+  "sweep_rate_oct_per_min": 2,
+  "sweeps": {
+   "done": 1,
+   "of": 2
+  },
+  "steps": null,
+  "held": false,
+  "request_held": false,
+  "level_db": -6,
+  "commanded_db": -6,
+  "notch": true,
+  "notch_scale": 0.75,
+  "alarm": false,
+  "controls": [
+   {
+    "channel": 1,
+    "description": "Channel 1",
+    "unit": "g",
+    "amplitude": 0.5,
+    "phase_deg": -12.5,
+    "reference": 0.5,
+    "reference_phase_deg": -10,
+    "error_db": 0.25,
+    "phase_error_deg": -2.5,
+    "notch_depth_db": 0,
+    "overload": false
+   },
+   {
+    "channel": 2,
+    "description": "Channel 2",
+    "unit": "g",
+    "amplitude": 0.5625,
+    "phase_deg": -12.5,
+    "reference": 0.5,
+    "reference_phase_deg": -10,
+    "error_db": 0.25,
+    "phase_error_deg": -2.5,
+    "notch_depth_db": 0,
+    "overload": false
+   },
+   {
+    "channel": 3,
+    "description": "Channel 3",
+    "unit": "g",
+    "amplitude": 0.625,
+    "phase_deg": -12.5,
+    "reference": 0.5,
+    "reference_phase_deg": -10,
+    "error_db": 0.25,
+    "phase_error_deg": -2.5,
+    "notch_depth_db": 0,
+    "overload": false
+   },
+   {
+    "channel": 4,
+    "description": "Channel 4",
+    "unit": "g",
+    "amplitude": 0.6875,
+    "phase_deg": -12.5,
+    "reference": 0.5,
+    "reference_phase_deg": -10,
+    "error_db": 0.25,
+    "phase_error_deg": -2.5,
+    "notch_depth_db": 0,
+    "overload": false
+   }
+  ],
+  "limits": [
+   {
+    "channel": 5,
+    "description": "Channel 5",
+    "unit": "g",
+    "amplitude": 1.25,
+    "phase_deg": 171,
+    "bound": 3,
+    "margin_db": -7.5
+   },
+   {
+    "channel": 6,
+    "description": "Channel 6",
+    "unit": "g",
+    "amplitude": 1.5,
+    "phase_deg": 170,
+    "bound": 3,
+    "margin_db": -6
+   }
+  ],
+  "drives": [
+   {
+    "channel": 7,
+    "vpk": 0.25,
+    "phase_deg": 33,
+    "ceiling_vpk": 2
+   },
+   {
+    "channel": 8,
+    "vpk": 0.375,
+    "phase_deg": 33,
+    "ceiling_vpk": 2
+   },
+   {
+    "channel": 9,
+    "vpk": 0.5,
+    "phase_deg": 33,
+    "ceiling_vpk": 2
+   },
+   {
+    "channel": 10,
+    "vpk": 0.625,
+    "phase_deg": 33,
+    "ceiling_vpk": 2
+   }
+  ],
+  "readings": {
+   "opposition_ratio": 1.0625,
+   "largest_share": 0.3125,
+   "rotation_deg": 0.75
+  },
+  "request": null,
+  "law": {
+   "values": {
+    "gain": 0.125,
+    "group_delay_s": 0,
+    "condition": 0,
+    "carried_share": 0,
+    "rotation_deg": null,
+    "unseen_share": null,
+    "modes_kept": null,
+    "candidates_left_out": null
+   },
+   "misses": 0,
+   "capped_ticks": 3,
+   "faulted": false
+  },
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control",
+    "channels": [
+     1,
+     2
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Control 1",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          1.0
+         ]
+        }
+       },
+       {
+        "name": "Reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5942511137185092,
+          0.5942511137185092
+         ]
+        }
+       },
+       {
+        "name": "Alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.42069757082259757,
+          0.42069757082259757
+         ]
+        }
+       },
+       {
+        "name": "Abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.9976311574844398,
+          0.9976311574844398
+         ]
+        }
+       },
+       {
+        "name": "Abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.2505936168136361,
+          0.2505936168136361
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Control 2",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5625,
+          1.125
+         ]
+        }
+       },
+       {
+        "name": "Reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5942511137185092,
+          0.5942511137185092
+         ]
+        }
+       },
+       {
+        "name": "Alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.42069757082259757,
+          0.42069757082259757
+         ]
+        }
+       },
+       {
+        "name": "Abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.9976311574844398,
+          0.9976311574844398
+         ]
+        }
+       },
+       {
+        "name": "Abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.2505936168136361,
+          0.2505936168136361
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "ph",
+    "quantity": "phase",
+    "channels": [
+     1
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Phase 1",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          -12.5,
+          -15.0
+         ]
+        }
+       },
+       {
+        "name": "Reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          -10.0,
+          -10.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "err",
+    "quantity": "error",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Error",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Error",
+       "unit": "dB",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Control 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.25,
+          -0.5
+         ]
+        }
+       },
+       {
+        "name": "Control 2",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.25,
+          -0.5
+         ]
+        }
+       },
+       {
+        "name": "Control 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.25,
+          -0.5
+         ]
+        }
+       },
+       {
+        "name": "Control 4",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.25,
+          -0.5
+         ]
+        }
+       },
+       {
+        "name": "Alarm high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1.5,
+          1.5
+         ]
+        }
+       },
+       {
+        "name": "Alarm low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          -1.5,
+          -1.5
+         ]
+        }
+       },
+       {
+        "name": "Abort high",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          6.0,
+          6.0
+         ]
+        }
+       },
+       {
+        "name": "Abort low",
+        "role": "abort",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          -6.0,
+          -6.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "lim",
+    "quantity": "limit",
+    "channels": [
+     5,
+     6
+    ],
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Limit 5",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1.25,
+          2.5
+         ]
+        }
+       },
+       {
+        "name": "Bound",
+        "role": "limit",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          3.0,
+          3.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Limit 6",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1.5,
+          2.75
+         ]
+        }
+       },
+       {
+        "name": "Bound",
+        "role": "limit",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          3.0,
+          3.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "drv",
+    "quantity": "drive",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Drives",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Drive",
+       "unit": "V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Drive 7",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.25,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Drive 8",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.375,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Drive 9",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.5,
+          0.5
+         ]
+        }
+       },
+       {
+        "name": "Drive 10",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.625,
+          0.5
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "dph",
+    "quantity": "drive_phase",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Drive phase",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Drive 7",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          33.0,
+          30.0
+         ]
+        }
+       },
+       {
+        "name": "Drive 8",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          33.0,
+          30.0
+         ]
+        }
+       },
+       {
+        "name": "Drive 9",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          33.0,
+          30.0
+         ]
+        }
+       },
+       {
+        "name": "Drive 10",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          33.0,
+          30.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "channels": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Readings",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Reading",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Opposition",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          1.0625,
+          1.125
+         ]
+        }
+       },
+       {
+        "name": "Largest share",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          200.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.3125,
+          0.375
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Frequency",
+        "value": 97.25,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Direction",
+        "value": "up",
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Level",
+        "value": -6.0,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Notch",
+        "value": 0.75,
+        "unit": null,
+        "status": "warn"
+       },
+       {
+        "label": "Drive",
+        "value": 0.625,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Opposition",
+        "value": 1.063,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Largest share",
+        "value": 0.313,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Sweeps",
+        "value": "1 of 2",
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Elapsed",
+        "value": 81.3,
+        "unit": "s",
+        "status": "info"
+       },
+       {
+        "label": "Remaining",
+        "value": 178.1,
+        "unit": "s",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "t",
+    "quantity": "time",
+    "channels": [],
+    "views": []
+   },
+   {
+    "id": "id",
+    "quantity": "identification",
+    "channels": 1,
+    "views": []
+   },
+   {
+    "id": "law",
+    "quantity": "law",
+    "channels": null,
+    "views": [
+     {
+      "view": "reading",
+      "title": "Law",
+      "rows": [
+       {
+        "label": "Gain",
+        "value": 0.125,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Structure delay",
+        "value": 0,
+        "unit": "s",
+        "status": "info"
+       },
+       {
+        "label": "Condition",
+        "value": 0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Carried share",
+        "value": 0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Rotation",
+        "value": null,
+        "unit": "deg",
+        "status": "info"
+       },
+       {
+        "label": "Unseen share",
+        "value": null,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Modes in the model",
+        "value": null,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Resonances left out",
+        "value": null,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Unusable calls in a row",
+        "value": 0.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Ticks a cap bound",
+        "value": 3.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Largest rotation",
+        "value": 4.25,
+        "unit": "deg",
+        "status": "info"
+       },
+       {
+        "label": "Requests",
+        "value": "0 made, 0 granted",
+        "unit": null,
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

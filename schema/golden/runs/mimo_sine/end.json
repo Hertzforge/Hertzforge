@@ -1,0 +1,175 @@
+{
+  "run_uid": "golden-mimo-sine",
+  "end": {
+    "outcome": "completed",
+    "message": "Test complete: the schedule ran its 0.5 s of test time and every drive ramped down with the controlled stop.",
+    "at_s": 0.55,
+    "level_db": 0,
+    "at_hz": 80.929,
+    "ramp_s": 1,
+    "trip": null
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 75264,
+  "summary": {
+    "elapsed_s": 0.5499,
+    "records": 1,
+    "dropped": 0
+  },
+  "report": {
+    "run_id": "msine-0001",
+    "title": "Golden MIMO Sine",
+    "source": "SIM",
+    "grid": {
+      "fs_hz": 16384,
+      "tick_frames": 819,
+      "tick_s": 0.0499878,
+      "actual": true
+    },
+    "test": "sweep",
+    "shape": "square",
+    "phase_specified": true,
+    "law": {
+      "id": "matrix",
+      "name": "matrix",
+      "version": "0.1.0",
+      "sha256": null,
+      "params": {
+        "carry": 0.67,
+        "gain_rule": "loop_speed",
+        "fixed_gain": 0.5,
+        "delay_estimate": "largest",
+        "regularization": 0.001,
+        "model": "modal",
+        "smoothing_lines": 8,
+        "free_phase": "in_phase",
+        "carry_outside_model": false
+      }
+    },
+    "levels_db": [
+      0
+    ],
+    "controls": [
+      {
+        "channel": 1,
+        "worst_error_db": -0.346,
+        "worst_error_hz": 80.836,
+        "worst_phase_error_deg": 0.19,
+        "alarm_s": 0,
+        "notch_depth_max_db": 0
+      },
+      {
+        "channel": 2,
+        "worst_error_db": 0.411,
+        "worst_error_hz": 80.836,
+        "worst_phase_error_deg": 0.11,
+        "alarm_s": 0,
+        "notch_depth_max_db": 0
+      },
+      {
+        "channel": 3,
+        "worst_error_db": 0.311,
+        "worst_error_hz": 80.836,
+        "worst_phase_error_deg": 0.02,
+        "alarm_s": 0,
+        "notch_depth_max_db": 0
+      },
+      {
+        "channel": 4,
+        "worst_error_db": -0.354,
+        "worst_error_hz": 80.836,
+        "worst_phase_error_deg": 0.05,
+        "alarm_s": 0,
+        "notch_depth_max_db": 0
+      }
+    ],
+    "limits": [],
+    "drives": [
+      {
+        "channel": 5,
+        "vpk_max": 0.091477,
+        "vpk_max_hz": 80,
+        "ceiling_vpk": 2,
+        "over_ceiling_ticks": 0
+      },
+      {
+        "channel": 6,
+        "vpk_max": 0.12127,
+        "vpk_max_hz": 80.929,
+        "ceiling_vpk": 2,
+        "over_ceiling_ticks": 0
+      },
+      {
+        "channel": 7,
+        "vpk_max": 0.12176,
+        "vpk_max_hz": 80.929,
+        "ceiling_vpk": 2,
+        "over_ceiling_ticks": 0
+      },
+      {
+        "channel": 8,
+        "vpk_max": 0.088868,
+        "vpk_max_hz": 80,
+        "ceiling_vpk": 2,
+        "over_ceiling_ticks": 0
+      }
+    ],
+    "readings": {
+      "opposition_ratio_max": 1,
+      "largest_share_max": 0.3305
+    },
+    "requests": {
+      "asked": 0,
+      "granted": 0,
+      "held_s": 0
+    },
+    "identification": {
+      "level_db": -20,
+      "measured_level_db": -17.96,
+      "realizations": 4,
+      "line_spacing_hz": 4,
+      "duration_s": 2.5,
+      "drive_vrms": [
+        0.0028933,
+        0.0028933,
+        0.0028933,
+        0.0028933
+      ],
+      "coherence_mean": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "limit_coherence_mean": [],
+      "trusted_frac": 1,
+      "condition_max": 6.15,
+      "lag_frames": 266,
+      "gate_coherence": 0.5,
+      "passed": true
+    },
+    "end": {
+      "outcome": "completed",
+      "message": "Test complete: the schedule ran its 0.5 s of test time and every drive ramped down with the controlled stop.",
+      "at_s": 0.55,
+      "level_db": 0,
+      "at_hz": 80.929,
+      "ramp_s": 1,
+      "trip": null
+    }
+  },
+  "streams": {
+    "inputs": {
+      "frames": 128,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    },
+    "drives": {
+      "frames": 128,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    }
+  }
+}

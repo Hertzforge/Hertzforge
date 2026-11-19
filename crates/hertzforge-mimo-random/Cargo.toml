@@ -1,0 +1,36 @@
+[package]
+name = "hertzforge-mimo-random"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The multiple-output (MIMO) Random run service: configuration, the state
+# machine (feasibility, noise floor, identification, gates, prediction, the
+# closed loop, the stop), the core's guards on every law call, the per-drive
+# caps and ceilings, response limiting, drive synthesis through the
+# single-output module's generalized drive path, the status and display
+# quantities, the run records and the report data. It reuses the single-output
+# module's plant loop, level ramp, schedule, kinematic monitor and law clock
+# unchanged, and the per-line linear algebra of `hertzforge-sdm`.
+[dependencies]
+hertzforge-random = { path = "../hertzforge-random" }
+hertzforge-random-laws = { path = "../hertzforge-random-laws" }
+hertzforge-mimo-laws = { path = "../hertzforge-mimo-laws" }
+hertzforge-law-host = { path = "../hertzforge-law-host" }
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-hal = { path = "../hertzforge-hal" }
+hertzforge-engine = { path = "../hertzforge-engine" }
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+hertzforge-capture = { path = "../hertzforge-capture" }
+hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
+hertzforge-breakpoints = { path = "../hertzforge-breakpoints" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The tests run the service on the simulator's cross-coupled plants through the
+# real engine, as the single-output module's tests do.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

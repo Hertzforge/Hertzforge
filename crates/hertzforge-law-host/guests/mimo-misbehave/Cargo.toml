@@ -1,0 +1,17 @@
+[package]
+name = "law-fixture-mimo-misbehave"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# A test fixture for the law host, not a law to use: a multiple-output law that
+# misbehaves in the way its `mode` parameter names (a NaN, a matrix that is not
+# Hermitian, the wrong dimensions, a drive outside the band, an indefinite
+# matrix, a spin past the budget, a trap...). Built to WebAssembly by
+# scripts/build_laws.sh.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../../hertzforge-law-sdk" }

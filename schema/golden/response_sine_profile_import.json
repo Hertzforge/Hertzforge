@@ -1,0 +1,44 @@
+{
+ "type": "response",
+ "id": 77,
+ "result": {
+  "profile": {
+   "label": "",
+   "rows": [
+    {
+     "freq_hz": 20,
+     "quantity": "disp_pp_in",
+     "value": 0.0097
+    },
+    {
+     "freq_hz": 45,
+     "quantity": "accel_g",
+     "value": 1,
+     "alarm_db": [
+      1,
+      1
+     ],
+     "abort_db": [
+      2,
+      2
+     ]
+    },
+    {
+     "freq_hz": 2000,
+     "quantity": "accel_g",
+     "value": 1
+    }
+   ],
+   "alarm_db": [
+    1.5,
+    1.5
+   ],
+   "abort_db": [
+    3,
+    3
+   ]
+  },
+  "errors": [],
+  "warnings": []
+ }
+}

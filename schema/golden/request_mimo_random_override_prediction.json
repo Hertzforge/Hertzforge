@@ -1,0 +1,9 @@
+{
+ "type": "request",
+ "id": 39,
+ "method": "mimo_random.override",
+ "params": {
+  "ack": "Drive 2 is predicted 0.4 dB over its ceiling; the ceiling holds it and the error is accepted for this run.",
+  "reason": "prediction_exceeded"
+ }
+}

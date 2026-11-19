@@ -1,0 +1,251 @@
+{
+ "type": "response",
+ "id": 78,
+ "result": {
+  "errors": [],
+  "warnings": [],
+  "crossovers": [],
+  "kinematics": {
+   "peak_accel_g": 1,
+   "peak_velocity_ips": 1.25,
+   "peak_disp_pp_in": 0.0078,
+   "verdict": "pass",
+   "message": "The profile is within the shaker's ratings."
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Profile",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Acceleration",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Profile",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        1.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "name": "Alarm high",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        1.1875,
+        1.1875,
+        1.1875
+       ]
+      }
+     },
+     {
+      "name": "Alarm low",
+      "role": "tolerance",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        0.84375,
+        0.84375,
+        0.84375
+       ]
+      }
+     },
+     {
+      "name": "Abort high",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        1.4140625,
+        1.4140625,
+        1.4140625
+       ]
+      }
+     },
+     {
+      "name": "Abort low",
+      "role": "abort",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        0.70703125,
+        0.70703125,
+        0.70703125
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Velocity",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Velocity",
+     "unit": "in/s",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Profile",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        1.25,
+        0.625,
+        0.3125
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "spectrum",
+    "title": "Displacement",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Displacement",
+     "unit": "in pk-pk",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Profile",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        50.0,
+        100.0,
+        200.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        3
+       ],
+       "values": [
+        0.0078125,
+        0.001953125,
+        0.00048828125
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   }
+  ]
+ }
+}

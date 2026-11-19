@@ -1,0 +1,6 @@
+{
+ "type": "request",
+ "id": 64,
+ "method": "srs.fire",
+ "params": {}
+}

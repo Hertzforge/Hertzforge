@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hertzforge</title>
-<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset. Coming soon.">
+<meta name="description" content="Hertzforge: vibration and shock control, test simulation, environmental specification, data acquisition, data analysis and finite element modeling in one structural dynamics toolset.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://hertzforge.com/">
 <meta property="og:site_name" content="Hertzforge">
@@ -59,7 +59,21 @@
     box-shadow: 0 0 48px rgba(22, 143, 255, 0.16), 0 24px 64px rgba(0, 0, 0, 0.7);
   }
   .demo figcaption { color: var(--muted); font-size: 0.95rem; margin-top: 0.9em; }
+  .examples { margin: 2.6em auto 0; max-width: 760px; text-align: left; }
+  .examples h2 { font-size: 1.1rem; margin: 0 0 0.3em; color: var(--fg); }
+  .examples > p { font-size: 0.95rem; }
+  .examples ul { list-style: none; padding: 0; margin: 0.9em 0 0; display: grid; gap: 0.55em; }
+  .examples li {
+    display: grid; grid-template-columns: 1fr auto; gap: 0.2em 1em; align-items: baseline;
+    padding: 0.6em 0.9em; border: 1px solid rgba(22, 143, 255, 0.25); border-radius: 8px;
+    background: rgba(22, 143, 255, 0.05);
+  }
+  .examples li span { grid-column: 1 / -1; color: var(--muted); font-size: 0.9rem; }
+  .examples a { font-weight: 600; text-decoration: none; }
+  .examples .size { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
   .soon { color: var(--fg); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; font-size: 0.9rem; margin-top: 2.2em; }
+  .credits { font-size: 0.85rem; margin-top: 1.6em; }
+  .credits a { color: var(--muted); }
   a { color: var(--accent); }
   a:hover { color: var(--accent-hi); }
 </style>
@@ -87,10 +101,64 @@
     </video>
     <figcaption>The first working prototype, October 2026.</figcaption>
   </figure>
-  <p class="soon">Coming soon</p>
+  <section class="examples download" aria-labelledby="download-title">
+    <h2 id="download-title">Download</h2>
+    <p>The desktop app for macOS, Windows and Linux. The Mac images are signed and notarized; the Windows and Linux installers are not signed yet. <span id="dl-release">The latest release</span> is on <a href="https://github.com/Hertzforge/Hertzforge/releases/latest">GitHub</a> with its notes and checksums.</p>
+    <ul>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-macOS-AppleSilicon.dmg">Hertzforge for Apple silicon</a><em class="size" data-asset="Hertzforge-macOS-AppleSilicon.dmg"></em>
+        <span>M1 and later. Open the disk image and drag Hertzforge to Applications.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-macOS-Intel.dmg">Hertzforge for Intel Macs</a><em class="size" data-asset="Hertzforge-macOS-Intel.dmg"></em>
+        <span>macOS 11 or later.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-Windows-x64-setup.exe">Hertzforge for Windows</a><em class="size" data-asset="Hertzforge-Windows-x64-setup.exe"></em>
+        <span>Windows 10 or 11, x64. SmartScreen warns about an unrecognized app the first time: More info, then Run anyway.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-Linux-x64.AppImage">Hertzforge for Linux (AppImage)</a><em class="size" data-asset="Hertzforge-Linux-x64.AppImage"></em>
+        <span>x64. Make it executable (<code>chmod +x</code>) and run it.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/latest/download/Hertzforge-Linux-x64.deb">Hertzforge for Debian and Ubuntu</a><em class="size" data-asset="Hertzforge-Linux-x64.deb"></em>
+        <span>x64, Ubuntu 22.04 or later. Install with <code>sudo apt install ./Hertzforge-Linux-x64.deb</code>.</span></li>
+    </ul>
+  </section>
+  <section class="examples" aria-labelledby="examples-title">
+    <h2 id="examples-title">Example projects</h2>
+    <p>Hertzforge project files (<code>.hforge</code>) to open with File &rsaquo; Open or drop on the window. Every number in them was computed by Hertzforge itself.</p>
+    <ul>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/plate-random-run.hforge">Plate random run</a><em class="size">9.8 MB</em>
+        <span>A random vibration controller run on a free plate: eight control channels against a specification with warning and abort limits, four force channels, and the PSDs, 1/6-octave PSDs and multiple coherence the controller computed.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/plate-modal-run.hforge">Plate modal run</a><em class="size">4.0 MB</em>
+        <span>A modal survey of the same plate on a simulated plant: FRFs of eleven responses to two references, their multiple coherence and the time captures, with the survey geometry.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/free-plate.hforge">Free plate model</a><em class="size">0.3 MB</em>
+        <span>A free square plate of 144 shell elements and its 30 lowest normal modes, six of them rigid.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/frame-wing.hforge">Frame-Wing</a><em class="size">170 MB</em>
+        <span>The round-robin frame and its two wings as five models of solid bricks: the frame, each wing alone, and the frame with each wing screwed across two uprights (65,585 nodes with the thick one), every model with its modes to 1500 Hz. The large case.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/barc.hforge">BARC</a><em class="size">27.5 MB</em>
+        <span>The Box Assembly with Removable Component, the structural dynamics community's shared test article, in solid bricks (15,429 nodes): the box, two channels and the beam, each bolt a rigid mated patch under its washer with the bolt's mass at its head. Twelve drive forces at the box's bottom corners with a flat force CPSD, the sixteen triaxial accelerometers the RC plate carries, its 59 modes to 10 kHz, and those modes at the drives and accelerometers: the environment the RC plate test replicates.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/rc-plate.hforge">RC plate</a><em class="size">76.8 MB</em>
+        <span>The BARC's removable component bolted to a 10 &times; 1 &times; 10 in aluminum plate, in solid bricks (60,903 nodes), with twelve drive forces at the plate's corners, sixteen triaxial accelerometers on the component, its 38 modes to 10 kHz, and those modes at the 60 channels: a system to drive with a MIMO random controller.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/barc-random-specification.hforge">BARC random specification</a><em class="size">152.2 MB</em>
+        <span>The BARC example with the band-average study's random specification made from it in Hertzforge. The twelve uncorrelated drive forces at the box's bottom corners go through Compute Modal Responses and Expand to the sixteen triaxial accelerometers on the removable component, and Convert to Specification makes the result a 48-channel CPSD specification over 20 to 4000 Hz with &plusmn;3 dB warning and &plusmn;6 dB abort limits on each ASD. Delete the specification and do the three steps again to see how it is made.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/rc-plate-random-test.hforge">RC plate random test</a><em class="size">402.1 MB</em>
+        <span>The RC plate driven to the BARC specification: twelve drives at the plate's corners controlling the same 48 accelerometer channels on the removable component. The run is the band-average study's case with a 70 % drive reduction and FRF updates, on Hertzforge's MIMO Random engine with the plate simulated from its own modes, softening 8 % at full level and with white noise on every accelerometer. The file holds the last 60 s at full level, the PSDs and multiple coherence over the 117 frames the study scored, and the random report.</span></li>
+      <li><a href="https://github.com/Hertzforge/Hertzforge/releases/download/examples/rc-plate-modal-test.hforge">RC plate modal test</a><em class="size">275.7 MB</em>
+        <span>A burst random modal test of the RC plate, simulated in Hertzforge: all twelve drives at once, uncorrelated, 20 to 4000 Hz, 30 one-second bursts, with an accelerometer at each drive so the fitted shapes are scaled to unit modal mass. The file holds the time histories, the 60 by 12 H1 FRFs, the multiple coherence, the ten modes the automatic fit found between 300 and 3990 Hz, and the FE modes at the same channels to compare them with.</span></li>
+    </ul>
+  </section>
   <p><a href="https://github.com/Hertzforge/Hertzforge">GitHub</a></p>
+  <p class="credits"><a href="credits.html">Credits</a></p>
 </main>
 <script>
+  // The download links go through releases/latest, so they need no change per release; the
+  // version, date and sizes come from GitHub when the visitor's browser can reach it.
+  fetch('https://api.github.com/repos/Hertzforge/Hertzforge/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((release) => {
+      if (!release || !release.tag_name) return;
+      const when = release.published_at ? new Date(release.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+      document.getElementById('dl-release').textContent = `Version ${release.tag_name.replace(/^v/, '')}${when ? `, ${when},` : ''}`;
+      for (const el of document.querySelectorAll('em.size[data-asset]')) {
+        const asset = (release.assets || []).find((a) => a.name === el.dataset.asset);
+        if (asset) el.textContent = `${(asset.size / 1e6).toFixed(0)} MB`;
+      }
+    })
+    .catch(() => {});
   // Respect reduced motion: no autoplay, and give the visitor the controls instead.
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
     const demo = document.getElementById('demo');

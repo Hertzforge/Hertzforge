@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 87,
+ "method": "mimo_sine.jog",
+ "params": {
+  "delta_hz": 5
+ }
+}

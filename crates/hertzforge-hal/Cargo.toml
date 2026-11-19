@@ -1,0 +1,21 @@
+[package]
+name = "hertzforge-hal"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# `discovery` types cross the core<->UI seam, so they are serde-shaped. Same
+# version spec as every other crate in the workspace (no new version in the tree).
+serde = { version = "1", features = ["derive"] }
+
+[features]
+# `delegated::testing::ScriptedDelegate`, the DelegatedControl test double. For
+# [dev-dependencies] only: the sim-leak lint refuses a production [dependencies]
+# entry that enables it.
+test-support = []
+
+[dev-dependencies]
+serde_json = "1"

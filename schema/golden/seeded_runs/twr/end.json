@@ -1,0 +1,22 @@
+{
+  "run_uid": "20261114-213512-eb039b76",
+  "end": {
+    "outcome": "completed",
+    "message": "The playback schedule finished: 1 play at full level.",
+    "at_s": 6.625,
+    "level_db": 0,
+    "play": 8,
+    "frames_done": null,
+    "trip": null
+  },
+  "at_unix": 1794692112.488891,
+  "station_frames": 0,
+  "summary": {
+    "plays": 9,
+    "playback_plays": 1,
+    "law_calls": 0,
+    "level_db": 0.0,
+    "t_s": 6.625
+  },
+  "streams": {}
+}

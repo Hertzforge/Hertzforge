@@ -1,0 +1,90 @@
+{
+ "type": "response",
+ "id": 82,
+ "result": {
+  "reference": {
+   "sha256": "ea0d78a86bb2f879c279ea4cb28fc6c45a501b5ab5c773f09b4627ab0c8b9a88",
+   "path": null,
+   "name": "pasted",
+   "format": "text",
+   "fs_hz": 12800,
+   "samples": 16,
+   "duration_s": 0.00125,
+   "units": "g",
+   "peak": 0.5,
+   "rms": 0.306186
+  },
+  "warnings": [],
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Reference",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Reference",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Reference",
+      "role": "reference",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        16
+       ],
+       "values": [
+        0.0,
+        7.8125e-05,
+        0.00015625,
+        0.000234375,
+        0.0003125,
+        0.000390625,
+        0.00046875,
+        0.000546875,
+        0.000625,
+        0.000703125,
+        0.00078125,
+        0.000859375,
+        0.0009375,
+        0.001015625,
+        0.00109375,
+        0.001171875
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        16
+       ],
+       "values": [
+        0.0,
+        0.25,
+        0.5,
+        0.25,
+        0.0,
+        -0.25,
+        -0.5,
+        -0.25,
+        0.0,
+        0.25,
+        0.5,
+        0.25,
+        0.0,
+        -0.25,
+        -0.5,
+        -0.25
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   }
+  ]
+ }
+}

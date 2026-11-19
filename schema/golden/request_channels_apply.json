@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 13,
+ "method": "channels.apply",
+ "params": {
+  "revision": 4
+ }
+}

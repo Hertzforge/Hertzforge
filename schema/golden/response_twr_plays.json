@@ -1,0 +1,104 @@
+{
+ "type": "response",
+ "id": 85,
+ "result": {
+  "plays": [
+   {
+    "index": 0,
+    "kind": "iteration",
+    "level_db": -12,
+    "rung": 0,
+    "iteration": 1,
+    "rms_error_pct": 25,
+    "peak_error_pct": 50,
+    "spectral_error_db": 1.25,
+    "gated": false,
+    "clipped_samples": 0,
+    "clamped_bins": 3,
+    "drive_vpk": 0.0625,
+    "response_peak": 0.046875,
+    "lag_frames": null,
+    "drift_frames": null,
+    "start_frame": 52224,
+    "frames": 5120,
+    "at_s": 4.08,
+    "law": {
+     "used": true,
+     "miss": null,
+     "call_ms": 3.25,
+     "peak_rise_db": 0.5,
+     "bin_rise_db": 1.25,
+     "predicted_peak_ratio": 1,
+     "values": {
+      "corrected_bins": 812,
+      "clamped_bins": 3,
+      "drive_change_db": 0.5
+     }
+    }
+   },
+   {
+    "index": 1,
+    "kind": "iteration",
+    "level_db": -12,
+    "rung": 0,
+    "iteration": 2,
+    "rms_error_pct": 12.5,
+    "peak_error_pct": 25,
+    "spectral_error_db": 0.625,
+    "gated": false,
+    "clipped_samples": 0,
+    "clamped_bins": 0,
+    "drive_vpk": 0.0625,
+    "response_peak": 0.0546875,
+    "lag_frames": null,
+    "drift_frames": null,
+    "start_frame": 57344,
+    "frames": 5120,
+    "at_s": 4.48,
+    "law": {
+     "used": true,
+     "miss": null,
+     "call_ms": 3.5,
+     "peak_rise_db": 0.25,
+     "bin_rise_db": 0.75,
+     "predicted_peak_ratio": 1,
+     "values": {
+      "corrected_bins": 812,
+      "clamped_bins": 0,
+      "drive_change_db": 0.25
+     }
+    }
+   },
+   {
+    "index": 2,
+    "kind": "iteration",
+    "level_db": -12,
+    "rung": 0,
+    "iteration": 3,
+    "rms_error_pct": 6.25,
+    "peak_error_pct": 12.5,
+    "spectral_error_db": 0.375,
+    "gated": true,
+    "clipped_samples": 0,
+    "clamped_bins": 0,
+    "drive_vpk": 0.0625,
+    "response_peak": 0.059,
+    "lag_frames": null,
+    "drift_frames": null,
+    "start_frame": 62464,
+    "frames": 5120,
+    "at_s": 4.88,
+    "law": {
+     "used": false,
+     "miss": "over_budget",
+     "call_ms": 1500,
+     "peak_rise_db": null,
+     "bin_rise_db": null,
+     "predicted_peak_ratio": null,
+     "values": {}
+    }
+   }
+  ],
+  "next": 3
+ }
+}

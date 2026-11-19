@@ -1,6 +1,6 @@
 [package]
 name = "sds-control"
-description = "Control service for the structural dynamics suite: runs the random control engine against its Sim backend and serves the sds/1 WebSocket protocol."
+description = "Control service for the structural dynamics suite: runs closed-loop Random on the simulator or NI-DAQmx hardware and serves the sds/1 WebSocket protocol on loopback."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,14 +14,95 @@ name = "sds-control"
 path = "src/main.rs"
 
 [dependencies]
-eigen-breakpoints.workspace = true
-eigen-channel-table.workspace = true
-eigen-hal.workspace = true
-eigen-hal-sim.workspace = true
-eigen-module-abi.workspace = true
-eigen-random.workspace = true
+hertzforge-breakpoints.workspace = true
+hertzforge-capture.workspace = true
+hertzforge-channel-table.workspace = true
+hertzforge-dsp.workspace = true
+hertzforge-hal.workspace = true
+hertzforge-hal-sim.workspace = true
+hertzforge-module-abi.workspace = true
+hertzforge-random.workspace = true
+# The law catalog on the wire (`laws.list`, `laws.import`) and the MIMO setup's law
+# choice. Reviewed 2026-11-03: it names no backend; its tests use the Sim as a fixture.
+hertzforge-random-laws.workspace = true
+# The law catalog's manifest types (parameters, MIMO shapes and diagnostics).
+hertzforge-law-host.workspace = true
+# Packed spectral matrix stacks and their per-line checks (ranks, eigenvalues).
+hertzforge-sdm.workspace = true
+hertzforge-shaker-db.workspace = true
+# The MIMO Random run service behind the wire's driver trait (src/mimo/adapter.rs).
+# Reviewed 2026-11-03: it reaches hardware only through the station backend it is
+# handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-random = { path = "../hertzforge-mimo-random" }
+# The native reference file a MIMO setup names by path and hash, and the builders
+# and readers behind `mimo_random.reference.*` (breakpoints, rigid body, import,
+# validation), so the shell never repeats their math. Reviewed 2026-11-03: file
+# reading, validation and pure computation; it names no backend.
+hertzforge-reference = { path = "../hertzforge-reference" }
+hertzforge-station.workspace = true
+# Classical shock (src/shock/): the controller's classical shock service, its
+# shared run plumbing (ladder, pulse store, drive limits, the law guards), the
+# identification and inverse it closes the loop with, and the door every
+# classical law goes through. Reviewed 2026-11-07: each reaches hardware only
+# through the station backend it is handed, and holds the Sim only as a
+# dev-dependency (tests/forbidden_deps.rs).
+hertzforge-shock-common.workspace = true
+hertzforge-shock-host.workspace = true
+hertzforge-shock-laws.workspace = true
+hertzforge-twr.workspace = true
+# The built-in classical law's declaration (its parameters and the values it
+# reports), so the wire lists and checks it without running it. Plain math.
+hertzforge-shock-law-math.workspace = true
+# SRS shock (src/srs/): the controller's SRS shock service, its synthesis, tables
+# and predictive notch. Reviewed 2026-11-07: it reaches hardware only through the
+# station backend it is handed, and holds the Sim only as a dev-dependency
+# (tests/forbidden_deps.rs).
+hertzforge-srs.workspace = true
+# Sine (src/sine/): the controller's Sine service (profile, schedulers, the closed
+# loop with its law seam) and the door every Sine law goes through. Reviewed
+# 2026-11-08: each reaches hardware only through the station backend it is handed,
+# and holds the Sim only as a dev-dependency (tests/forbidden_deps.rs).
+hertzforge-sine.workspace = true
+hertzforge-sine-laws.workspace = true
+# Mixed Mode (no `mixed.*` method yet): the parts list, part clock and run service,
+# and the choice of its two laws. Reviewed 2026-11-10: the run service reaches
+# hardware only through the station backend it is handed, and holds the Sim only as
+# a dev-dependency (tests/forbidden_deps.rs).
+hertzforge-mixed.workspace = true
+hertzforge-mixed-laws.workspace = true
+# TWR (src/twr/): the door every TWR law goes through (the choice of law
+# and the law check). The TWR service itself is `hertzforge-twr` above. Reviewed
+# 2026-11-08: it runs a check case on the backend it is handed and names none.
+hertzforge-twr-laws.workspace = true
+# Explorer (src/explorer/): the controller's hand-steered open-loop sine, its process
+# step, run service, analysis pass and run host. Reviewed 2026-11-08: it is handed a
+# finished station backend and names none, and holds the Sim only as a
+# dev-dependency (tests/forbidden_deps.rs).
+hertzforge-explorer-host.workspace = true
+# Playback (src/playback/): the drive file, its checks and the run host that plays it.
+hertzforge-playback.workspace = true
+# The Recorder (src/recorder/): the controller's acquisition and recording core, its
+# trigger, recording writer and reader, and analysis pass. It is handed a finished
+# station backend and names none, and holds the Sim only as a dev-dependency
+# (tests/forbidden_deps.rs).
+hertzforge-recorder.workspace = true
+# MIMO Shock: the engine the run thread drives, and the law choice (built-ins,
+# law files, the catalog's entries) and the law check's cases.
+hertzforge-mimo-shock = { path = "../hertzforge-mimo-shock" }
+hertzforge-mimo-shock-laws = { path = "../hertzforge-mimo-shock-laws" }
+# MIMO Sine: the engine the run thread drives (its run service, handed the
+# station at arm), and the law choice (built-ins, law files, the catalog's
+# entries) and the law check's cases. Reviewed 2026-11-17 with their contracts
+# (tests/forbidden_deps.rs): each reaches hardware only through the station
+# backend it is handed, and holds the Sim only as a dev-dependency.
+hertzforge-mimo-sine = { path = "../hertzforge-mimo-sine" }
+hertzforge-mimo-sine-laws = { path = "../hertzforge-mimo-sine-laws" }
 serde_json.workspace = true
-tokio.workspace = true
+# A TWR reference is kept in the data folder under the SHA-256 of its record (MIT
+# or Apache-2.0, as the reference reader already has it).
+sha2 = "0.10"
+# `signal`: Ctrl-C and SIGTERM end a run with its controlled stop (main.rs).
+tokio = { workspace = true, features = ["signal"] }
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
 

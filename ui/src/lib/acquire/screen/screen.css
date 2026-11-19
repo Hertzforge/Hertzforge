@@ -1,0 +1,87 @@
+/*
+ * Shared pieces of a test screen's menus: items, checks, section heads and dividers. Tokens only;
+ * a checked item carries a mark as well as its weight.
+ */
+
+.ws-mi {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 28px;
+	padding: 4px 10px 4px 8px;
+	font-size: var(--text-sm);
+	text-align: left;
+	color: var(--text-1);
+	background: transparent;
+	border: 0;
+	border-radius: var(--radius-sm);
+	white-space: nowrap;
+}
+
+.ws-mi:hover:not(:disabled):not([aria-disabled='true']),
+.ws-mi:focus-visible {
+	background: var(--bg-4);
+	outline: none;
+}
+
+.ws-mi:disabled,
+.ws-mi[aria-disabled='true'] {
+	color: var(--text-4);
+	cursor: default;
+}
+
+/* The check of a checkbox or radio item: a tick when on, nothing when off. */
+.ws-mi .ws-check {
+	display: inline-grid;
+	flex: none;
+	place-items: center;
+	width: 14px;
+	height: 14px;
+	color: var(--blue-1);
+}
+
+.ws-mi[aria-checked='true'] {
+	font-weight: var(--weight-strong);
+}
+
+.ws-mi .ws-key {
+	margin-left: auto;
+	padding-left: var(--sp-4);
+	font-size: var(--text-2xs);
+	color: var(--text-3);
+}
+
+.ws-mi.ws-danger:not(:disabled) {
+	color: var(--amber-1);
+}
+
+.ws-mh {
+	padding: 6px 10px 2px;
+	font-size: var(--text-2xs);
+	font-weight: var(--weight-strong);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--text-3);
+}
+
+.ws-sep {
+	height: 1px;
+	margin: 4px 2px;
+	background: var(--line-1);
+	border: 0;
+}
+
+.ws-confirm {
+	display: flex;
+	flex-direction: column;
+	gap: var(--sp-2);
+	padding: 6px 8px;
+	font-size: var(--text-sm);
+	color: var(--text-1);
+}
+
+.ws-confirm .ws-row {
+	display: flex;
+	gap: 6px;
+}

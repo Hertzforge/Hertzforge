@@ -1,0 +1,25 @@
+{
+ "type": "response",
+ "id": 69,
+ "result": {
+  "target": {
+   "kind": "breakpoints",
+   "points": [
+    [
+     100,
+     40
+    ],
+    [
+     1000,
+     100
+    ],
+    [
+     2500,
+     100
+    ]
+   ]
+  },
+  "errors": [],
+  "warnings": []
+ }
+}

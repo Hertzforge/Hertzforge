@@ -4,13 +4,15 @@
 		size?: 'md' | 'lg';
 		/** Short wording for tight spaces such as the top bar. */
 		compact?: boolean;
+		/** What is simulated, when the default words are not specific enough. */
+		text?: string;
 	}
-	let { size = 'md', compact = false }: Props = $props();
+	let { size = 'md', compact = false, text }: Props = $props();
 </script>
 
 <span class="sim {size}" data-testid="sim-badge" role="status" aria-label="Simulated data. Not a hardware result.">
 	<span class="tag">SIM</span>
-	<span class="text">{compact ? 'Simulated' : 'Simulated data, not hardware'}</span>
+	<span class="text">{text ?? (compact ? 'Simulated' : 'Simulated data, not hardware')}</span>
 </span>
 
 <style>

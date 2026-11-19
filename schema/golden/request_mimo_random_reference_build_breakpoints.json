@@ -1,0 +1,96 @@
+{
+ "type": "request",
+ "id": 41,
+ "method": "mimo_random.reference.build_breakpoints",
+ "params": {
+  "grid": {
+   "fs_hz": 2048,
+   "n_pts": 256
+  },
+  "unit": "g",
+  "tables": [
+   {
+    "label": "Front",
+    "rows": [
+     {
+      "freq_hz": 20,
+      "psd_g2_hz": 0.01
+     },
+     {
+      "freq_hz": 500,
+      "psd_g2_hz": 0.01
+     }
+    ]
+   },
+   {
+    "label": "Rear",
+    "rows": [
+     {
+      "freq_hz": 20,
+      "psd_g2_hz": 0.01
+     },
+     {
+      "freq_hz": 500,
+      "psd_g2_hz": 0.01
+     }
+    ]
+   },
+   {
+    "label": "Side",
+    "rows": [
+     {
+      "freq_hz": 20,
+      "psd_g2_hz": 0.01
+     },
+     {
+      "freq_hz": 500,
+      "psd_g2_hz": 0.01
+     }
+    ]
+   }
+  ],
+  "pairs": [
+   {
+    "row": 0,
+    "col": 1,
+    "coherence": 0.9,
+    "phase_deg": 0
+   },
+   {
+    "row": 0,
+    "col": 2,
+    "coherence": 0.9,
+    "phase_deg": 0
+   },
+   {
+    "row": 1,
+    "col": 2,
+    "coherence": [
+     [
+      20,
+      0.9
+     ],
+     [
+      500,
+      0.9
+     ]
+    ],
+    "phase_deg": 180
+   }
+  ],
+  "unspecified": "independent",
+  "alarm_db": [
+   3,
+   3
+  ],
+  "abort_db": [
+   6,
+   6
+  ],
+  "repair": false,
+  "preview_pair": [
+   1,
+   2
+  ]
+ }
+}

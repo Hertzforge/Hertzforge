@@ -1,16 +1,25 @@
 <script lang="ts" module>
 	export type IconName =
 		| 'acquire'
-		| 'analyze'
+		| 'simulate'
+		| 'signals'
+		| 'random'
+		| 'sysid'
+		| 'shock'
+		| 'transient'
+		| 'sine'
 		| 'modal'
+		| 'geometry'
 		| 'model'
 		| 'specify'
-		| 'simulate'
 		| 'report'
 		| 'search'
 		| 'play'
 		| 'stop'
+		| 'abort'
 		| 'close'
+		| 'maximize'
+		| 'restore'
 		| 'tool'
 		| 'dataset'
 		| 'action'
@@ -48,9 +57,24 @@
 	{#if name === 'acquire'}
 		<rect x="2.5" y="4" width="15" height="12" rx="2" />
 		<path d="M4.5 10.5c1.2 0 1.2-3.5 2.4-3.5s1.2 6 2.4 6 1.2-4.5 2.4-4.5 1.2 2.5 2.4 2.5h1.4" />
-	{:else if name === 'analyze'}
+	{:else if name === 'signals'}
+		<path d="M2.5 10h2l1.5-4 2 8 2-6 1.5 3 1.5-1.5 1.5 1.5h3" />
+	{:else if name === 'random'}
 		<path d="M3 3v14h14" />
 		<path d="M5.5 13.5l2.5-5 2.5 3.5 2.2-6 2.3 4" />
+	{:else if name === 'shock'}
+		<path d="M2.5 13h4l2-9 2 13 2-7 1.5 3h3.5" />
+	{:else if name === 'sysid'}
+		<path d="M2.5 6.5h3l1.5-3 2 6 1.5-3h2" />
+		<path d="M3 16.5c3 0 4-5 6.5-5s3.500 3 7.500 3" />
+	{:else if name === 'transient'}
+		<path d="M2.500 10h3c1 0 1.300-5 2.500-5s1.500 10 2.800 10 1.400-7.500 2.400-7.500 1 2.500 2 2.500h1.800" />
+	{:else if name === 'sine'}
+		<path d="M2.5 10c1.9-6 3.7-6 5.6 0s3.7 6 5.6 0 2.7-4.5 3.8-3" />
+	{:else if name === 'geometry'}
+		<path d="M4 15.5h12l-3-5.5H7z" />
+		<path d="M10 3.5v6.5M7 10l-3 5.5M13 10l3 5.5" />
+		<circle cx="10" cy="3.5" r="1.1" fill="currentColor" stroke="none" />
 	{:else if name === 'modal'}
 		<path d="M2.5 10c2.5-5 5-5 7.5 0s5 5 7.5 0" />
 		<path d="M2.5 10c2.5 5 5 5 7.5 0s5-5 7.5 0" opacity="0.45" />
@@ -75,6 +99,13 @@
 		<path d="M6 4.2v11.6l9.2-5.8z" fill="currentColor" stroke="none" />
 	{:else if name === 'stop'}
 		<rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />
+	{:else if name === 'abort'}
+		<path d="M7 2.5h6l4.5 4.5v6L13 17.5H7L2.5 13V7z" fill="currentColor" stroke="none" />
+		<path d="M7.5 10h5" stroke="var(--bg-2)" stroke-width="1.8" />
+	{:else if name === 'maximize'}
+		<path d="M8 3H3v5M12 3h5v5M8 17H3v-5M12 17h5v-5" />
+	{:else if name === 'restore'}
+		<path d="M3 8h5V3M17 8h-5V3M3 12h5v5M17 12h-5v5" />
 	{:else if name === 'close'}
 		<path d="M5 5l10 10M15 5L5 15" />
 	{:else if name === 'tool'}

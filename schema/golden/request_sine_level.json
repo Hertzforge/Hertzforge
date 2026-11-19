@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 73,
+ "method": "sine.level",
+ "params": {
+  "delta_db": -1
+ }
+}

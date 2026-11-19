@@ -1,0 +1,23 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Random\" on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"note","text":"No shaker configured; feasibility NOT evaluated. Arming allowed without a shaker-limit block."}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"feasibility","text":"feasibility: NotEvaluated"}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"station","text":"armed on sim at 1280 Hz, 20 Hz lines, 9 in the band, shared clock","data":{"action":"arm","class":"sim","fs_hz":1280.0,"df_hz":20.0,"lines":9}}
+{"seq":5,"at_unix":1794240005.25,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":6,"at_unix":1794240006.25,"frame":null,"kind":"note","text":"started; system identification at -20.0 dB against the reference","data":{"action":"start","level_db":-20.0}}
+{"seq":7,"at_unix":1794240007.25,"frame":2048,"kind":"note","text":"identification level step 1: drive 0.0100 V rms, control 0.0187 rms against 0.1781 rms (-19.6 dB)"}
+{"seq":8,"at_unix":1794240008.25,"frame":2048,"kind":"note","text":"identification level step 2: drive 0.0954 V rms, control 0.1606 rms against 0.1781 rms (-0.9 dB)"}
+{"seq":9,"at_unix":1794240009.25,"frame":2048,"kind":"note","text":"identification at 0.0954 V rms: the control response is 0.1606 rms, -20.9 dB against the reference (-20.0 dB asked)"}
+{"seq":10,"at_unix":1794240010.25,"frame":2048,"kind":"note","text":"sysID drive check (nfft 64): commanded band-RMS 0.095438,                          realized 0.088593, ratio 0.9283 (1.0 = synthesis                          delivers what was asked)"}
+{"seq":11,"at_unix":1794240011.25,"frame":2048,"kind":"note","text":"sysID response check (nfft 64): in-band RMS 0.118966, total RMS 0.124418, in-band fraction 0.9143 (near 1.0 = the response carries the band we drove)"}
+{"seq":12,"at_unix":1794240012.25,"frame":2048,"kind":"note","text":"sysID align: record 1792 samples, nfft 64, lag 15 frames, peak |r|                  0.799, searched 896 lags"}
+{"seq":13,"at_unix":1794240013.25,"frame":2048,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
+{"seq":14,"at_unix":1794240014.25,"frame":2048,"kind":"gate","text":"coherence gate passed: band coherence 0.960, floor 0.50","data":{"band_coherence":0.96019015687422,"floor":0.5,"passed":true}}
+{"seq":15,"at_unix":1794240015.25,"frame":2048,"kind":"level","text":"level -3.0 dB (schedule)","data":{"level_db":-3.0,"by":"schedule"}}
+{"seq":16,"at_unix":1794240016.25,"frame":2048,"kind":"state","text":"coherence gate to engaged","data":{"from":"coherence_gate","to":"engaged","state":"running"}}
+{"seq":17,"at_unix":1794240017.25,"frame":2432,"kind":"level","text":"level +0.0 dB (schedule)","data":{"level_db":0.0,"by":"schedule"}}
+{"seq":18,"at_unix":1794240018.25,"frame":2688,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
+{"seq":19,"at_unix":1794240019.25,"frame":3328,"kind":"state","text":"full level to ramping down","data":{"from":"full_level","to":"ramping_down","state":"stopping"}}
+{"seq":20,"at_unix":1794240020.25,"frame":3328,"kind":"note","text":"controlled stop: ramping down over 0.1 s, then stopping (from +0.0 dB)"}
+{"seq":21,"at_unix":1794240021.25,"frame":3456,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
+{"seq":22,"at_unix":1794240022.25,"frame":3456,"kind":"note","text":"Test complete: 0.5 s held at full level.","data":{"outcome":"completed","by":"the operator"}}

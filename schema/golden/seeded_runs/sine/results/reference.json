@@ -1,0 +1,71 @@
+{
+  "name": "reference",
+  "kind": "envelope",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "controls": [
+      1
+    ]
+  },
+  "description": "the profile and its alarm and abort bands at 0 dB, peak, on the run's band: the breakpoints and points between them",
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "reference",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 72
+    },
+    {
+      "name": "alarm_low",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 144
+    },
+    {
+      "name": "alarm_high",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 216
+    },
+    {
+      "name": "abort_low",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 288
+    },
+    {
+      "name": "abort_high",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 360
+    }
+  ]
+}

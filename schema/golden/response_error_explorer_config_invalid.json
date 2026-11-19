@@ -1,0 +1,29 @@
+{
+ "type": "response",
+ "id": 99,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 3 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "band_above_grid",
+     "field": "band_hz",
+     "message": "The band's high edge is 6000 Hz, over 0.45 times the requested rate (5760 Hz); raise the rate or lower the band."
+    },
+    {
+     "reason": "ceiling_over_range",
+     "field": "max_drive_vpk",
+     "message": "The drive ceiling is 1.5 V, over the drive row's range of 1 V; lower the ceiling or raise the row's range."
+    },
+    {
+     "reason": "safe_stop_budget",
+     "field": "slew.drive_db_per_s",
+     "message": "At 1 dB/s the stop takes 40 s, longer than the 30 s the service waits for a stop; raise the drive slew above 1.333 dB/s."
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

@@ -1,0 +1,33 @@
+{
+ "type": "event",
+ "topic": "laws.check",
+ "seq": 412,
+ "data": {
+  "law_id": "9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b",
+  "index": 2,
+  "of": 6,
+  "case": "ill-conditioned 12 x 6",
+  "state": "done",
+  "result": {
+   "name": "ill-conditioned 12 x 6",
+   "plant": "modal-12x6-ill",
+   "passed": true,
+   "detail": "every call answered; the core ended the run by its own judgement (The change cap held drive 4 back on 721 lines for 5 loops in a row: the control law asked for more change than the core allows.); 5 calls, slowest 32.3 ms of 2125 ms; 0 drive-lines repaired, 7210 capped; identification gate overridden for the check",
+   "loops_to_converge": null,
+   "loops_at_full": 2,
+   "final_error_db": 6.32,
+   "worst_line_db": 10.55,
+   "settle_db": null,
+   "requirement": "survive",
+   "trip": "The change cap held drive 4 back on 721 lines for 5 loops in a row: the control law asked for more change than the core allows.",
+   "misses": 0,
+   "rejected": 0,
+   "repaired_lines": 0,
+   "capped_lines": 7210,
+   "calls": 5,
+   "worst_call_ms": 32.3,
+   "budget_ms": 2125,
+   "gate_passed": false
+  }
+ }
+}

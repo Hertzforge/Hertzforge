@@ -1,0 +1,34 @@
+{
+  "run_uid": "golden-sine",
+  "end": {
+    "outcome": "completed",
+    "message": "Test complete: the schedule ran its 3.7 s of test time and the drive ramped down with the controlled stop.",
+    "at_s": 4.905,
+    "level_db": 0,
+    "at_hz": 300,
+    "ramp_s": 1.201,
+    "trip": null
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 151190,
+  "summary": {
+    "elapsed_s": 3.7243761756592417,
+    "t_s": 4.90478515625,
+    "level_records": 1,
+    "trace_records": 1
+  },
+  "streams": {
+    "inputs": {
+      "frames": 1024,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    },
+    "drives": {
+      "frames": 1024,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    }
+  }
+}

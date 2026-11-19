@@ -1,0 +1,43 @@
+{
+  "unix_secs": 1793750400,
+  "settings_json": "",
+  "marks": [],
+  "payload": {
+    "format": "hertzforge-reference",
+    "format_version": 1,
+    "binary_file": "reference.bin",
+    "binary_bytes": 7992,
+    "content_hash": "sha256:62724e4770331ac2683c24be5f4a6068db04ad9f90eb93ea86f697d2c9605337",
+    "convention": "G = E[X X^H] per line",
+    "lines": 41,
+    "n": 3,
+    "df_hz": 5.0,
+    "band": [
+      4,
+      21
+    ],
+    "labels": [
+      "front",
+      "rear",
+      "top"
+    ],
+    "unit": "g",
+    "space": "physical",
+    "response_transformation": null,
+    "drive_transformation": null,
+    "provenance": {
+      "method": "specification_mat",
+      "source": "three_channel.mat",
+      "source_sha256": "sha256:74f359b97c18d82314e3035fbb63d82d04eb19adb62bc693cf246a83bbf6eddc",
+      "created_unix_secs": 1793750400,
+      "tool": "hertzforge 0.0.1",
+      "conjugated_on_import": true,
+      "assumptions": [
+        "the file's cross-spectral convention is not documented; it was taken as the Bendat and Piersol form, the conjugate of E[X X^H], and every cross term was conjugated",
+        "file frequencies placed on grid lines within 1e-09 of the 5 Hz spacing; grid lines absent from the file are zero",
+        "rows and columns taken in the control channels' order"
+      ],
+      "repair": null
+    }
+  }
+}

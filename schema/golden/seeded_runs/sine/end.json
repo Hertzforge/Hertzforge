@@ -1,0 +1,21 @@
+{
+  "run_uid": "20261114-213512-975c10c1",
+  "end": {
+    "outcome": "completed",
+    "message": "Test complete: the schedule ran its 3.7 s of test time and the drive ramped down with the controlled stop.",
+    "at_s": 4.905,
+    "level_db": 0,
+    "at_hz": 300,
+    "ramp_s": 1.201,
+    "trip": null
+  },
+  "at_unix": 1794692112.641126,
+  "station_frames": 151196,
+  "summary": {
+    "elapsed_s": 3.7243761756592417,
+    "t_s": 4.90478515625,
+    "level_records": 1,
+    "trace_records": 1
+  },
+  "streams": {}
+}

@@ -48,3 +48,11 @@ export function formatCount(n: number): string {
 export function withUnit(text: string, unit: string | null | undefined): string {
 	return unit ? `${text} ${unit}` : text;
 }
+
+/** A signed level in dB: "+2.4 dB", "-0.8 dB", "0.0 dB"; "-" for no value. */
+export function formatDb(v: number | null | undefined, digits = 1): string {
+	if (v === null || v === undefined || !Number.isFinite(v)) return '-';
+	const s = Math.abs(v).toFixed(digits);
+	const sign = Number(s) === 0 ? '' : v > 0 ? '+' : '-';
+	return `${sign}${s} dB`;
+}

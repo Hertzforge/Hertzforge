@@ -1,0 +1,104 @@
+# hertzforge-backendd - the headless CORE daemon of the split deployment.
+#
+# It runs ON the hardware host (the Linux box holding the cDAQ) and serves a remote
+# front end over `hertzforge-protocol` v3 on a WebSocket. THE CONTROL LOOP NEVER CROSSES
+# THE NETWORK: the engine, the watchdog and the drive clock are all co-resident with
+# the hardware, in THIS process. What crosses is the decimated display path down and
+# operator intent up.
+#
+# DEPENDENCY NOTE: this crate reaches hardware only through `hertzforge-station`, so it is
+# NOT a direct dependent of hertzforge-hal-sim or hertzforge-hal-ni and needs no cargo-deny
+# wrapper entry. See the comment at the end of deny.toml's [bans] section - a future
+# direct dependency has to be argued for there in the same commit.
+
+[package]
+name = "hertzforge-backendd"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# The wire contract. v3 exact-match.
+hertzforge-protocol = { path = "../hertzforge-protocol" }
+# THE station factory - the one construction point, shared with the Tauri app.
+hertzforge-station = { path = "../hertzforge-station" }
+# The `Backend` trait (driving a station means calling trait methods).
+hertzforge-hal = { path = "../hertzforge-hal" }
+# `StationClass`, for the arm gate and the provenance label.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# The channel table: the daemon is AUTHORITATIVE for it in a split deployment.
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# The Data Recorder service - the v1 daemon-side module coverage.
+hertzforge-recorder = { path = "../hertzforge-recorder" }
+
+hertzforge-random = { path = "../hertzforge-random" }
+# The host-closes-loop Explorer control core. The device-neutral half of
+# the Explorer module: the delegated SMART service is backend-bound and could never be
+# linked from this daemon - that split is exactly what `hertzforge-explorer-host` exists for.
+hertzforge-explorer-host = { path = "../hertzforge-explorer-host" }
+# The CLASSICAL SHOCK service, delegated-backend-FREE by construction. The whole
+# point of the `hertzforge-shock-host` extraction was that this daemon can link the shock
+# service without the private delegated backend entering its dependency graph - the
+# Path-A crate keeps the delegated firer and that dependency, and could never be linked
+# here.
+hertzforge-shock-host = { path = "../hertzforge-shock-host" }
+# The SRS synthesis service. Already delegated-backend-free (its Path-A seam is a trait
+# with zero implementors in this workspace).
+hertzforge-srs = { path = "../hertzforge-srs" }
+# The shared shock vocabulary both modules speak: the level ladder, the rate model, the
+# drive-limit table, the pulse store.
+hertzforge-shock-common = { path = "../hertzforge-shock-common" }
+# The pulse GENERATOR and the compensation types the wire profile mirrors.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The closed-loop SINE control core. Like `hertzforge-explorer-host` and
+# unlike the delegated SMART service, this crate is delegated-backend-FREE: it takes a
+# `Box<dyn Backend>` and a `StationClass`, so the daemon can link it without crossing
+# the dependency firewall in deny.toml.
+hertzforge-sine = { path = "../hertzforge-sine" }
+# The TIME WAVEFORM REPLICATION service. Already delegated-backend-
+# FREE by construction and there is no extraction crate to make: `hertzforge-twr` is generic
+# over `hertzforge_hal::Backend` and takes a `StationClass`, so the daemon links the service
+# itself without crossing the dependency firewall in deny.toml. Its delegated seam
+# (`TwrPath::Delegated`) is a documented shape with no implementor.
+hertzforge-twr = { path = "../hertzforge-twr" }
+hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
+
+hertzforge-breakpoints = { path = "../hertzforge-breakpoints" }
+# The capture sidecar shapes the LIST verb reads, and the data-root convention.
+hertzforge-capture = { path = "../hertzforge-capture" }
+# The core build stamp on the handshake.
+hertzforge-buildinfo = { path = "../hertzforge-buildinfo" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The config file format. `parse` only - the daemon never writes its own config.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+# The async runtime + WebSocket transport. `tokio-tungstenite` with default features
+# OFF: no TLS backend is pulled in, because this seam runs on a trusted lab network
+# and adding a TLS stack would drag ring/rustls into a build that must cross-compile
+# to the Windows kit without a C toolchain.
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "net",
+  "sync",
+  "time",
+  "macros",
+  "signal",
+  "io-util",
+] }
+# `connect` brings the client half (the soak harness drives the daemon through a real
+# socket) and with it `MaybeTlsStream`, whose TLS variants stay compiled out because no
+# TLS feature is enabled.
+tokio-tungstenite = { version = "0.24", default-features = false, features = [
+  "handshake",
+  "connect",
+] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }

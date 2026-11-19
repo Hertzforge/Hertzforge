@@ -1,5 +1,6 @@
 /** Shell configuration from the page URL. */
 
+import type { ControlServerOptions } from '$lib/protocol/mock/control';
 import type { ThemePref } from '$lib/theme/theme.svelte';
 
 export const DEFAULT_ANALYSIS_URL = 'ws://127.0.0.1:8791/';
@@ -14,6 +15,40 @@ export interface ShellConfig {
 	controlUrl: string;
 	/** `?theme=dark|light|system` forces a theme for this load (screenshots, tests). */
 	theme: ThemePref | null;
+	/**
+	 * `?popout=1&page=<id>`: a window that shows one display page of the run, opened from the main
+	 * window to place on another monitor. It observes the run with its own subscription.
+	 */
+	popout: boolean;
+	/** `?runlog=1`: the log alone fills the window (`--run-log` on the desktop app). */
+	runLog: boolean;
+	/** `?runlog_file=<path>`: the log to open there. */
+	runLogFile: string | null;
+	page: string | null;
+	/** `&test=mimo_random`, `&test=shock`, `&test=srs`, `&test=sine`, `&test=twr`, `&test=explorer`, `&test=recorder` or `&test=mimo_shock`: the pop-out shows that run's page; otherwise Random's. */
+	popoutTest: 'random' | 'mimo_random' | 'shock' | 'srs' | 'sine' | 'mixed' | 'twr' | 'explorer' | 'recorder' | 'mimo_shock' | 'mimo_sine';
+	/**
+	 * How the mock control service behaves, from `mock_*` parameters: `mock_speed` (run seconds
+	 * per second), `mock_ni=real|absent`, `mock_abort_at` (seconds after engaging at which a
+	 * resonance grows to an envelope abort), `mock_feasibility=exceeds`, `mock_coherence`,
+	 * `mock_record=unwritable|problem` (a Random run's record refused at arm, or failing as it runs),
+	 * `mock_sim=<inputs>x<outputs>` (the simulator's channels, default 8x1).
+	 */
+	mockControl: ControlServerOptions;
+}
+
+/** `mock_sim=24x8`: the mock simulator's inputs and outputs, each 1 to 64. */
+function simChannels(value: string | null): { simInputs?: number; simOutputs?: number } {
+	const m = /^(\d{1,2})x(\d{1,2})$/.exec(value ?? '');
+	if (!m) return {};
+	const [i, o] = [Number(m[1]), Number(m[2])];
+	return i >= 1 && i <= 64 && o >= 1 && o <= 64 ? { simInputs: i, simOutputs: o } : {};
+}
+
+function num(value: string | null): number | undefined {
+	if (value === null || value.trim() === '') return undefined;
+	const n = Number(value);
+	return Number.isFinite(n) ? n : undefined;
 }
 
 function wsUrl(value: string | null, fallback: string): string {
@@ -34,6 +69,21 @@ export function readConfig(search: string): ShellConfig {
 		mock: mock === '1' || mock === 'true',
 		analysisUrl: wsUrl(q.get('analysis'), DEFAULT_ANALYSIS_URL),
 		controlUrl: wsUrl(q.get('control'), DEFAULT_CONTROL_URL),
-		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null
+		theme: theme === 'dark' || theme === 'light' || theme === 'system' ? theme : null,
+		popout: q.get('popout') === '1',
+		runLog: q.get('runlog') === '1',
+		runLogFile: q.get('runlog_file'),
+		page: q.get('page') && /^[\w-]{1,64}$/.test(q.get('page') as string) ? q.get('page') : null,
+		popoutTest: q.get('test') === 'mimo_random' ? 'mimo_random' : q.get('test') === 'shock' ? 'shock' : q.get('test') === 'srs' ? 'srs' : q.get('test') === 'sine' ? 'sine' : q.get('test') === 'mixed' ? 'mixed' : q.get('test') === 'twr' ? 'twr' : q.get('test') === 'explorer' ? 'explorer' : q.get('test') === 'recorder' ? 'recorder' : q.get('test') === 'mimo_shock' ? 'mimo_shock' : q.get('test') === 'mimo_sine' ? 'mimo_sine' : 'random',
+		mockControl: {
+			speed: num(q.get('mock_speed')),
+			niReal: q.get('mock_ni') === 'real' ? true : undefined,
+			niInstalled: q.get('mock_ni') === 'absent' ? false : undefined,
+			abortDemoAtS: num(q.get('mock_abort_at')),
+			feasibilityExceeds: q.get('mock_feasibility') === 'exceeds' ? true : undefined,
+			coherence: num(q.get('mock_coherence')),
+			record: q.get('mock_record') === 'unwritable' ? 'unwritable' : q.get('mock_record') === 'problem' ? 'problem' : undefined,
+			...simChannels(q.get('mock_sim'))
+		}
 	};
 }

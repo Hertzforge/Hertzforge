@@ -1,0 +1,21 @@
+{
+ "type": "event",
+ "topic": "mimo_shock.live",
+ "seq": 209,
+ "data": {
+  "run_id": "ms-0002",
+  "source": "SIM",
+  "state": "running",
+  "phase": "waiting",
+  "mode": "auto",
+  "level_db": -6,
+  "rung": 2,
+  "pulses": {
+   "fired": 5,
+   "passed": 3,
+   "at_level": 2,
+   "of_level": 3
+  },
+  "next_pulse_s": 0.6
+ }
+}

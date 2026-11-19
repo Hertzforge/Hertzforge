@@ -1,0 +1,98 @@
+package hertzforge:control-law@0.1.0;
+
+// Time waveform replication: one drive, one control channel, one record at a time.
+//
+// - The record grid. Every record has `record-len` samples at `fs-hz`: a quiet
+//   lead-in, the replicated section, a quiet lead-out, padded to a power of two.
+//   Spectra are one-sided under the negative-exponent transform, as in
+//   `shock-classical`: `record-len / 2 + 1` bins, bin `k` at `k * fs-hz / record-len`.
+// - Level. Everything a law sees and returns is at full level (0 dB). The core
+//   scales the drive to the level and refers the response back by the scale it
+//   commanded. A law never sees the level and cannot change it.
+// - Units. Reference and response in the control channel's units (EU); drive in
+//   volts; plant in EU per volt.
+// - Cadence. Called between plays, never while one plays: once at proceed
+//   (`seed`), then after each judged play the core wants corrected (`iterate`).
+//   Each call has a time budget the core sets; a call past it is not used.
+//
+// This world is a draft until TWR merges, and frozen then.
+
+/// Types for time waveform replication.
+interface twr-types {
+    use types.{diagnostic-value};
+    use classical-types.{complex, plant};
+
+    /// What a TWR law is built for: fixed for the run.
+    record twr-setup {
+        fs-hz: f64,
+        record-len: u32,
+        band-lo-hz: f64,
+        band-hi-hz: f64,
+        /// The full-level reference on the record grid, EU.
+        reference: list<f64>,
+        /// The replicated section's first sample and length within `reference`.
+        section-start: u32,
+        section-len: u32,
+        plant: plant,
+        /// The drive ceiling at full level, volts peak.
+        drive-ceiling: f64,
+    }
+
+    /// The core's judgement of the last play.
+    record verdict {
+        /// The play met the convergence gate at its level.
+        gated: bool,
+        /// 100 ||y - r|| / ||r|| over the record.
+        rms-error-pct: f64,
+        /// 100 max|y - r| / max|r|.
+        peak-error-pct: f64,
+        /// Mean |20 log10(|Y| / |R|)| over the trusted bins, dB.
+        spectral-error-db: f64,
+    }
+
+    enum play-kind { iteration, playback }
+
+    record play-inputs {
+        /// Plays judged so far, the identification not counted: 0 at the seed.
+        play-index: u64,
+        kind: play-kind,
+        /// The last play's response referred to full level, EU. Empty at the seed.
+        response: list<f64>,
+        /// The drive the last play played, referred to full level, volts, after
+        /// the core's clip and taper. Empty at the seed.
+        drive: list<f64>,
+        /// None at the seed.
+        judged: option<verdict>,
+        /// The core clipped the last drive.
+        limited: bool,
+    }
+
+    record play-outputs {
+        /// The next full-level drive, volts: `record-len` finite samples.
+        drive: list<f64>,
+        /// At most 8 values, each under a key the manifest declares.
+        values: list<diagnostic-value>,
+    }
+}
+
+/// A TWR law: its state lives in one `law` resource, built once per run, at
+/// proceed.
+interface twr-single-law {
+    use types.{param};
+    use twr-types.{twr-setup, play-inputs, play-outputs};
+
+    resource law {
+        constructor(setup: twr-setup, params: list<param>) -> result<law, string>;
+        /// The first drive, before any play.
+        seed: func(inputs: play-inputs) -> result<play-outputs, string>;
+        /// The next drive, after a judged play.
+        iterate: func(inputs: play-inputs) -> result<play-outputs, string>;
+    }
+}
+
+/// The world a TWR law file implements.
+world twr-single {
+    use types.{manifest};
+    export describe: func() -> manifest;
+    export twr-single-law;
+}

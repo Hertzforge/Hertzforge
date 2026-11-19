@@ -1,0 +1,217 @@
+{
+ "type": "response",
+ "id": 39,
+ "result": {
+  "law": {
+   "id": "9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b",
+   "world": "mimo",
+   "builtin": false,
+   "name": "notch-aware pseudo-inverse",
+   "version": "0.2.0",
+   "author": "A. Contributor",
+   "summary": "A pseudo-inverse law that holds notched lines.",
+   "sha256": "9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b",
+   "check": {
+    "status": "passed",
+    "date": "2026-11-03T15:42:07Z",
+    "tool_version": "mimo-check 1",
+    "cases": [
+     {
+      "name": "modal 4 x 4",
+      "passed": true,
+      "detail": "within +/- 1 dB 1 loop after full level (worst control 0.46 dB, worst line 4.26 dB); 3 calls, slowest 7.4 ms of 2125 ms; 0 drive-lines repaired, 0 capped"
+     },
+     {
+      "name": "modal 12 x 6",
+      "passed": true,
+      "detail": "settled after 20 loops at full level (worst control 1.98 dB, last changes under 0.01 dB); 22 calls, slowest 32.9 ms of 2125 ms; 0 drive-lines repaired, 0 capped"
+     },
+     {
+      "name": "ill-conditioned 12 x 6",
+      "passed": true,
+      "detail": "every call answered; the core ended the run by its own judgement (The change cap held drive 4 back on 721 lines for 5 loops in a row: the control law asked for more change than the core allows.); 5 calls, slowest 32.3 ms of 2125 ms; 0 drive-lines repaired, 7210 capped; identification gate overridden for the check"
+     },
+     {
+      "name": "rigid plate 12 x 6",
+      "passed": true,
+      "detail": "within +/- 1 dB 1 loop after full level (worst control 0.62 dB, worst line 2.79 dB); 3 calls, slowest 5.7 ms of 2125 ms; 0 drive-lines repaired, 0 capped"
+     },
+     {
+      "name": "measurement noise 4 x 4",
+      "passed": true,
+      "detail": "within +/- 1 dB 1 loop after full level (worst control 0.77 dB, worst line 5.29 dB); 3 calls, slowest 7.4 ms of 2125 ms; 0 drive-lines repaired, 0 capped"
+     },
+     {
+      "name": "level ladder 12 x 6",
+      "passed": true,
+      "detail": "within +/- 1 dB 1 loop after full level (worst control 0.36 dB, worst line 4.02 dB); 6 calls, slowest 31.7 ms of 2125 ms; 0 drive-lines repaired, 0 capped"
+     }
+    ],
+    "hardware": true,
+    "message": "Checked against the simulated test articles and passed: cleared for hardware."
+   },
+   "params": [
+    {
+     "key": "gain",
+     "label": "Loop gain",
+     "help": "The fraction of each correction applied.",
+     "kind": "number",
+     "unit": "",
+     "min": 0.1,
+     "max": 1,
+     "step": 0.05,
+     "default": 0.5
+    }
+   ],
+   "diagnostics": [
+    {
+     "key": "held",
+     "label": "Held lines",
+     "unit": "",
+     "help": "Lines held this loop.",
+     "layout": "scalar"
+    }
+   ],
+   "shapes": [
+    "square",
+    "more_controls_than_drives"
+   ],
+   "needs": [
+    "last_drive"
+   ]
+  },
+  "report": {
+   "passed": true,
+   "recorded": true,
+   "tool_version": "mimo-check 1",
+   "cases": [
+    {
+     "name": "modal 4 x 4",
+     "plant": "modal-4x4",
+     "passed": true,
+     "detail": "within +/- 1 dB 1 loop after full level (worst control 0.46 dB, worst line 4.26 dB); 3 calls, slowest 7.4 ms of 2125 ms; 0 drive-lines repaired, 0 capped",
+     "loops_to_converge": 1,
+     "loops_at_full": 1,
+     "final_error_db": 0.46,
+     "worst_line_db": 4.26,
+     "settle_db": null,
+     "requirement": "converge",
+     "trip": null,
+     "misses": 0,
+     "rejected": 0,
+     "repaired_lines": 0,
+     "capped_lines": 0,
+     "calls": 3,
+     "worst_call_ms": 7.4,
+     "budget_ms": 2125,
+     "gate_passed": true
+    },
+    {
+     "name": "modal 12 x 6",
+     "plant": "modal-12x6",
+     "passed": true,
+     "detail": "settled after 20 loops at full level (worst control 1.98 dB, last changes under 0.01 dB); 22 calls, slowest 32.9 ms of 2125 ms; 0 drive-lines repaired, 0 capped",
+     "loops_to_converge": null,
+     "loops_at_full": 20,
+     "final_error_db": 1.98,
+     "worst_line_db": 11.06,
+     "settle_db": 0.01,
+     "requirement": "settle",
+     "trip": null,
+     "misses": 0,
+     "rejected": 0,
+     "repaired_lines": 0,
+     "capped_lines": 0,
+     "calls": 22,
+     "worst_call_ms": 32.9,
+     "budget_ms": 2125,
+     "gate_passed": true
+    },
+    {
+     "name": "ill-conditioned 12 x 6",
+     "plant": "modal-12x6-ill",
+     "passed": true,
+     "detail": "every call answered; the core ended the run by its own judgement (The change cap held drive 4 back on 721 lines for 5 loops in a row: the control law asked for more change than the core allows.); 5 calls, slowest 32.3 ms of 2125 ms; 0 drive-lines repaired, 7210 capped; identification gate overridden for the check",
+     "loops_to_converge": null,
+     "loops_at_full": 2,
+     "final_error_db": 6.32,
+     "worst_line_db": 10.55,
+     "settle_db": null,
+     "requirement": "survive",
+     "trip": "The change cap held drive 4 back on 721 lines for 5 loops in a row: the control law asked for more change than the core allows.",
+     "misses": 0,
+     "rejected": 0,
+     "repaired_lines": 0,
+     "capped_lines": 7210,
+     "calls": 5,
+     "worst_call_ms": 32.3,
+     "budget_ms": 2125,
+     "gate_passed": false
+    },
+    {
+     "name": "rigid plate 12 x 6",
+     "plant": "rigid-plate-12x6",
+     "passed": true,
+     "detail": "within +/- 1 dB 1 loop after full level (worst control 0.62 dB, worst line 2.79 dB); 3 calls, slowest 5.7 ms of 2125 ms; 0 drive-lines repaired, 0 capped",
+     "loops_to_converge": 1,
+     "loops_at_full": 1,
+     "final_error_db": 0.62,
+     "worst_line_db": 2.79,
+     "settle_db": null,
+     "requirement": "settle",
+     "trip": null,
+     "misses": 0,
+     "rejected": 0,
+     "repaired_lines": 0,
+     "capped_lines": 0,
+     "calls": 3,
+     "worst_call_ms": 5.7,
+     "budget_ms": 2125,
+     "gate_passed": true
+    },
+    {
+     "name": "measurement noise 4 x 4",
+     "plant": "modal-4x4",
+     "passed": true,
+     "detail": "within +/- 1 dB 1 loop after full level (worst control 0.77 dB, worst line 5.29 dB); 3 calls, slowest 7.4 ms of 2125 ms; 0 drive-lines repaired, 0 capped",
+     "loops_to_converge": 1,
+     "loops_at_full": 1,
+     "final_error_db": 0.77,
+     "worst_line_db": 5.29,
+     "settle_db": null,
+     "requirement": "converge",
+     "trip": null,
+     "misses": 0,
+     "rejected": 0,
+     "repaired_lines": 0,
+     "capped_lines": 0,
+     "calls": 3,
+     "worst_call_ms": 7.4,
+     "budget_ms": 2125,
+     "gate_passed": true
+    },
+    {
+     "name": "level ladder 12 x 6",
+     "plant": "modal-12x6",
+     "passed": true,
+     "detail": "within +/- 1 dB 1 loop after full level (worst control 0.36 dB, worst line 4.02 dB); 6 calls, slowest 31.7 ms of 2125 ms; 0 drive-lines repaired, 0 capped",
+     "loops_to_converge": 1,
+     "loops_at_full": 1,
+     "final_error_db": 0.36,
+     "worst_line_db": 4.02,
+     "settle_db": null,
+     "requirement": "settle",
+     "trip": null,
+     "misses": 0,
+     "rejected": 0,
+     "repaired_lines": 0,
+     "capped_lines": 0,
+     "calls": 6,
+     "worst_call_ms": 31.7,
+     "budget_ms": 2125,
+     "gate_passed": true
+    }
+   ]
+  }
+ }
+}

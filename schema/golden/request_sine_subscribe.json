@@ -1,0 +1,58 @@
+{
+ "type": "request",
+ "id": 72,
+ "method": "sine.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control"
+   },
+   {
+    "id": "drv",
+    "quantity": "drive"
+   },
+   {
+    "id": "resp",
+    "quantity": "response",
+    "channels": [
+     1,
+     3
+    ]
+   },
+   {
+    "id": "ph",
+    "quantity": "phase",
+    "channels": [
+     1,
+     3
+    ]
+   },
+   {
+    "id": "thd",
+    "quantity": "thd"
+   },
+   {
+    "id": "t1",
+    "quantity": "time",
+    "channels": [
+     1
+    ],
+    "points": 1024
+   },
+   {
+    "id": "id",
+    "quantity": "identification"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   }
+  ]
+ }
+}

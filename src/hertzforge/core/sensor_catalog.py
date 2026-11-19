@@ -1,0 +1,298 @@
+"""The sensors Hertzforge can draw by model: simplified bodies built
+from each outline drawing's dimensions.
+
+A body is described in its own frame. For a triaxial accelerometer the
+frame is the sensor's X, Y and Z, with the cable or connector on the −X
+face and Z normal to the mounting base; the X, Y and Z faces carry
+their letters, as the sensors do. For a uniaxial accelerometer or a
+force transducer, z is the sensing axis (normal to the mounting base)
+and the connector or cable is on the +x side. Sizes are the extents of
+the body alone along x, y and z in millimeters: for a box its sides,
+for a hex prism the width across the flats twice and then the height,
+for a puck its diameter twice and then its height, for a teardrop its
+length, the diameter of its round end and its height, and for a rounded
+box its length with the round nose, its width and its height. The plug
+is the connector out of the connector face, the cable what is drawn
+beyond it, and a force transducer's studs stand out of both ends.
+
+A sensor the catalog does not hold is drawn at its size when the size is
+written where the model would be: ``Block 17.5 mm`` for a cube,
+``Block 14 x 10 x 6 mm`` for a box along x, y and z, ``Cylinder 16 x 8 mm``
+for a round body by its diameter and height (`sized`).
+
+The bodies are drawn only, centered on their node. Nothing here enters
+the finite element model, the mass properties or a mesh.
+"""
+
+# The catalog is Brandon's list of 2026-10-26, with the models he has
+# asked for since. The shapes and sizes are
+# read from the makers' outline drawings (2026-10-27; drawing numbers beside
+# each entry): the masses from the specification tables. The drawings
+# settled what the first cut had guessed: a rectangular triax's long
+# side is X with the connector on -X and the X, Y and Z letters on the
+# positive faces; a uniaxial senses along its height; the 352A24 is a
+# teardrop and the 352A73 a box with a round nose.
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+#: the kinds of sensor a body is drawn for
+KINDS = ('triax', 'uniaxial', 'force')
+
+#: the channel type each kind measures
+MEASURES = {'triax': 'acceleration', 'uniaxial': 'acceleration',
+            'force': 'force'}
+
+#: the shapes a body is built from
+SHAPES = ('box', 'hex', 'puck', 'teardrop', 'rounded')
+
+NOTHING = (0.0, 0.0)
+
+
+@dataclass(frozen=True)
+class SensorModel:
+    """One sensor model's body: what it is, its shape and its size."""
+
+    model: str                              # as the datasheet names it
+    make: str
+    kind: str                               # one of KINDS
+    shape: str                              # one of SHAPES
+    size: tuple[float, float, float]        # mm along x, y, z, the body alone
+    mass: float                             # grams
+    connector: str                          # the face it is on: '+x' or '-x'
+    description: str = ''
+    plug: tuple[float, float] = NOTHING     # mm: diameter, length out of the face
+    cable: tuple[float, float] = NOTHING    # mm: diameter, length drawn
+    stud: tuple[float, float] = NOTHING     # mm: diameter, length out of each end
+
+
+def _triax(model, size, mass, connector_text, plug, cable=NOTHING):
+    return SensorModel(model, 'PCB', 'triax', 'box', size, mass, '-x',
+                       f'triaxial accelerometer, {connector_text}', plug,
+                       cable)
+
+
+def _uniaxial(model, shape, size, mass, connector_text, plug, cable=NOTHING,
+              make='PCB'):
+    return SensorModel(model, make, 'uniaxial', shape, size, mass, '+x',
+                       f'uniaxial accelerometer, {connector_text}', plug,
+                       cable)
+
+
+def _force(model, rating):
+    # drawing 8561: a 15.88 mm hex, a 10-32 tapped hole in each end for
+    # the supplied studs, the coaxial connector out of a flat
+    return SensorModel(model, 'PCB', 'force', 'hex', (15.88, 15.88, 15.88),
+                       22.7, '+x', f'force sensor, {rating}, 10-32 coaxial',
+                       plug=(8.4, 5.8), stud=(4.8, 3.5))
+
+
+CATALOG: tuple[SensorModel, ...] = (
+    # drawing 21823: a 6.3 mm cube, the cable's boot 3.4 mm out of -X
+    _triax('356A01', (6.3, 6.3, 6.3), 1.0, 'integral cable',
+           plug=(3.2, 3.4), cable=(1.3, 12.0)),
+    _triax('356A03', (6.3, 6.3, 6.3), 1.0, 'integral cable',
+           plug=(3.2, 3.4), cable=(1.3, 12.0)),
+    # drawing 10324: a 14 mm cube, 20.3 mm over the connector
+    _triax('356A02', (14.0, 14.0, 14.0), 10.5, '1/4-28 4-pin connector',
+           plug=(6.35, 6.3)),
+    # drawing 19954: a 10.2 mm cube, 19.6 mm over the connector
+    _triax('356A33', (10.2, 10.2, 10.2), 5.3, '1/4-28 4-pin connector',
+           plug=(6.35, 9.4)),
+    # drawing 31660: a 10.2 mm cube, 19.1 mm over the connector
+    _triax('356A43', (10.2, 10.2, 10.2), 4.2, '1/4-28 4-pin connector',
+           plug=(6.35, 8.9)),
+    # drawing 12331: a teardrop 9.9 mm long with a 7.1 mm round end,
+    # 4.8 mm high, the 3-56 connector out of the narrow end
+    _uniaxial('352A24', 'teardrop', (9.9, 7.1, 4.8), 0.8,
+              '3-56 coaxial connector', plug=(2.5, 2.3)),
+    # spec sheet 11544 (revision J): 3.6 mm high, 11.4 long and 6.4 wide,
+    # 0.6 g, a 3-56 coaxial jack on the side. PCB's photograph shows the
+    # 352A24's teardrop with the jack out of the narrow end; as there,
+    # the size is the body alone and the 3-56 plug stands beyond it
+    # (Brandon, 2026-11-11)
+    _uniaxial('352A21', 'teardrop', (11.4, 6.4, 3.6), 0.6,
+              '3-56 coaxial connector', plug=(2.5, 2.3)),
+    # drawing 24787: 6.75 mm long with a round nose, 3.96 mm wide, 2.8 mm
+    # high, a twisted pair out of the flat end (Brandon, 2026-10-27: the
+    # drawing's side view rounds the potting at the cable end, which a
+    # first cut took for the plan)
+    _uniaxial('352A73', 'rounded', (6.75, 3.96, 2.8), 0.3, 'integral cable',
+              plug=NOTHING, cable=(0.9, 10.0)),
+    # spec sheet 24786 (revision D): 3.6 mm high, 10.4 long and 6.4 wide,
+    # 0.64 g, solder pins with an attached 32 AWG twisted pair. PCB's
+    # photograph shows the 352A73's form at a larger size: a round nose,
+    # the pair out of the flat end (Brandon, 2026-11-11: two of them at
+    # one node in a test)
+    _uniaxial('352A71', 'rounded', (10.4, 6.4, 3.6), 0.64, 'integral cable',
+              plug=NOTHING, cable=(0.9, 10.0)),
+    # spec sheet 63633 (revision B): 4.8 mm high, 9.9 long and 7.1 wide,
+    # 1.22 g, solder pins with an attached cable on the side. PCB's
+    # photograph shows the 352A73's form again: a round nose, a twisted
+    # pair out of the flat end (Brandon, 2026-11-17)
+    _uniaxial('352A74', 'rounded', (9.9, 7.1, 4.8), 1.22, 'integral cable',
+              plug=NOTHING, cable=(0.9, 10.0)),
+    # outline drawing 80614: a flat block 14.22 mm long, 7.1 wide and
+    # 2.79 high with two screw holes through it, sensing through its
+    # height, a 1.27 mm cable out of one end. One body for every range
+    # (-2K to -60K). The drawing gives no mass: 1.5 g is Brandon's
+    # figure (2026-11-17)
+    _uniaxial('7270A', 'box', (14.22, 7.1, 2.79), 1.5, 'integral cable',
+              plug=NOTHING, cable=(1.27, 12.0), make='Endevco'),
+    # data sheet 091719, outline: a 9.78 mm round body 5.8 mm high, drawn
+    # out to a flat 6.60 mm from its center where two solder terminals
+    # stand 3.8 mm out, a screw through the middle; 1.8 g
+    _uniaxial('7250AM1', 'teardrop', (11.49, 9.78, 5.8), 1.8,
+              'solder terminals', plug=(3.0, 3.8), make='Endevco'),
+    _uniaxial('7250AM2', 'teardrop', (11.49, 9.78, 5.8), 1.8,
+              'solder terminals', plug=(3.0, 3.8), make='Endevco'),
+    _force('208C01', '10 lb'),
+    _force('208C02', '100 lb'),
+    _force('208C03', '500 lb'),
+    _force('208C04', '1000 lb'),
+    _force('208C05', '5000 lb'),
+)
+
+#: what a model not in the catalog is drawn as, by kind: a cube for an
+#: accelerometer and a puck for a force transducer, at a typical size
+GENERIC: dict[str, SensorModel] = {
+    'triax': SensorModel('', '', 'triax', 'box', (10.0, 10.0, 10.0), 0.0,
+                         '-x', 'triaxial accelerometer', plug=(5.0, 6.0)),
+    'uniaxial': SensorModel('', '', 'uniaxial', 'box', (8.0, 8.0, 8.0), 0.0,
+                            '+x', 'uniaxial accelerometer', plug=(2.5, 3.0)),
+    'force': SensorModel('', '', 'force', 'puck', (16.0, 16.0, 12.0), 0.0,
+                         '+x', 'force transducer', plug=(6.0, 5.0),
+                         stud=(4.8, 3.5)),
+}
+
+
+def _key(model: str) -> str:
+    return ''.join(str(model).split()).upper()
+
+
+_BY_MODEL = {_key(entry.model): entry for entry in CATALOG}
+
+
+#: the makes a Model cell may begin with ('PCB 352A71')
+_MAKES = sorted({_key(entry.make) for entry in CATALOG if entry.make},
+                key=len, reverse=True)
+
+
+def lookup(model: str) -> SensorModel | None:
+    """The catalog entry for a model, ignoring case and spaces, a make
+    written in front of it ('PCB 352A71') and a range or sensitivity
+    written after it ('7270A-20K', '7250AM1-10'); None when the model is
+    not in the catalog.
+
+    Parameters
+    ----------
+    model : str
+        The model as a channel table names it, such as '356A02'.
+
+    Returns
+    -------
+    SensorModel or None
+    """
+    key = _key(model)
+    found = _BY_MODEL.get(key)
+    if found is None:
+        # a table that writes the make in the Model cell (2026-11-11)
+        for make in _MAKES:
+            if key.startswith(make) and _BY_MODEL.get(key[len(make):]):
+                return _BY_MODEL[key[len(make):]]
+        # one body for every range or sensitivity of a model
+        if '-' in key:
+            return lookup(key.rsplit('-', 1)[0])
+    return found
+
+
+#: a size written where a model would be: a shape, one to three numbers
+#: parted by x, and mm
+_SIZED = re.compile(r'(block|cylinder)\s+(\d+(?:\.\d+)?)'
+                    r'(?:\s*x\s*(\d+(?:\.\d+)?))?(?:\s*x\s*(\d+(?:\.\d+)?))?\s*mm')
+
+
+def sized(model: str, kind: str) -> SensorModel | None:
+    """The body a size written as a model describes, or None when the
+    text is not a size.
+
+    Parameters
+    ----------
+    model : str
+        ``Block 17.5 mm`` (a cube), ``Block 14 x 10 x 6 mm`` (a box
+        along x, y and z), ``Cylinder 16 x 8 mm`` (a diameter and a
+        height along z) or ``Cylinder 16 mm`` (as high as it is wide).
+        Case and spacing do not matter.
+    kind : str
+        One of `KINDS`: what the rows it is on measure.
+
+    Returns
+    -------
+    SensorModel or None
+        A plain body of that size with no connector, named as written.
+        None for a block given two numbers, a cylinder given three, a
+        size of zero, and a cylinder for a tri-axial accelerometer, whose
+        faces carry its letters.
+    """
+    found = _SIZED.fullmatch(' '.join(str(model).split()).lower())
+    if found is None:
+        return None
+    numbers = [float(text) for text in found.groups()[1:] if text is not None]
+    if min(numbers) <= 0:
+        return None
+    if found.group(1) == 'block' and len(numbers) != 2:
+        size = tuple(numbers) if len(numbers) == 3 else (numbers[0],) * 3
+        shape = 'box'
+    elif found.group(1) == 'cylinder' and len(numbers) != 3 and kind != 'triax':
+        size = (numbers[0], numbers[0], numbers[-1])
+        shape = 'puck'
+    else:
+        return None
+    return SensorModel(' '.join(str(model).split()), '', kind, shape,
+                       size, 0.0, '-x' if kind == 'triax' else '+x',  # type: ignore[arg-type]
+                       f'{GENERIC[kind].description}, sized')
+
+
+def size_text(shape: str, size: Sequence[float]) -> str:
+    """A size as `sized` reads it, to write where a model would be.
+
+    Parameters
+    ----------
+    shape : str
+        'block' or 'cylinder'.
+    size : sequence of 3 floats
+        Millimeters along x, y and z; a cylinder's diameter is its x.
+
+    Returns
+    -------
+    str
+        ``Block 17.5 mm``, ``Block 14 x 10 x 6 mm`` or
+        ``Cylinder 16 x 8 mm``, each number to a hundredth.
+    """
+    def number(value: float) -> str:
+        return f'{float(value):.2f}'.rstrip('0').rstrip('.')
+
+    x, y, z = (number(value) for value in size)
+    if shape == 'cylinder':
+        return f'Cylinder {x} x {z} mm'
+    return f'Block {x} mm' if x == y == z else f'Block {x} x {y} x {z} mm'
+
+
+def models_for(channel_type: str) -> list[SensorModel]:
+    """The catalog's models that measure a channel type: accelerometers
+    for 'acceleration', force transducers for 'force', none otherwise.
+
+    Parameters
+    ----------
+    channel_type : str
+        A channel table's type, such as 'acceleration'.
+
+    Returns
+    -------
+    list of SensorModel
+    """
+    return [entry for entry in CATALOG
+            if MEASURES[entry.kind] == channel_type]

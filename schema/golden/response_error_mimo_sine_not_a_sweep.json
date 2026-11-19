@@ -1,0 +1,12 @@
+{
+ "type": "response",
+ "id": 91,
+ "error": {
+  "code": "refused",
+  "reason": "not_a_sweep",
+  "message": "A go to applies to a sweep; this test is a dwell.",
+  "detail": {
+   "test": "dwell"
+  }
+ }
+}

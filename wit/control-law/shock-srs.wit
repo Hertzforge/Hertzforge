@@ -1,0 +1,103 @@
+package hertzforge:control-law@0.1.0;
+
+// SRS shock: one drive, one control channel, one synthesized pulse at a time.
+//
+// - The drive. The core synthesizes every pulse from a table of components
+//   (odd-half-cycle wavelets or damped sines, one per band by default), so a
+//   pulse's zero net velocity and displacement hold by construction. A law
+//   never writes a record: it returns one multiplicative gain per component,
+//   and the core applies it to the table before the next pulse.
+// - The grids. `band-hz` is the analysis grid every spectrum is on: the band
+//   centres of the test's fractional-octave grid, ascending. `component-hz` is
+//   the synthesis grid, one frequency per component in table order; the two
+//   grids are distinct and may differ in length. Every spectrum is a shock
+//   response spectrum on `band-hz` at quality factor `q`, in the control
+//   channel's units (EU, g for an accelerometer).
+// - Level. The setup's target is the full-level (0 dB) target. The target a
+//   law sees on each call is at the scale the last pulse was commanded at:
+//   the level times the core's safety trims, so a law aims at what was asked
+//   of that pulse and never fights a limiter.
+// - Units. The identified gain at each component is in EU per volt.
+// - Cadence. A law is called between pulses, never while one plays: once after
+//   system identification and before the core plans its limit notch (`seed`),
+//   and once after each fired, measured and judged pulse (`iterate`). Each
+//   call has a time budget the core sets; a call past it is not used.
+// - The core's word is final. After every call the core caps the gains by its
+//   own per-pulse rise limit and by what its prediction says each limit
+//   channel can take (a falling gain always wins over a rising one), then
+//   checks the drive in volts against its ceiling and abort before it plays.
+//
+// This world is a draft until SRS shock is merged, and frozen then.
+
+/// Types for SRS shock.
+interface srs-types {
+    use types.{diagnostic-value};
+
+    /// What an SRS law is built for: fixed for the run.
+    record srs-setup {
+        /// The analysis band centres, Hz, ascending.
+        band-hz: list<f64>,
+        /// The synthesis components' frequencies, Hz, in table order.
+        component-hz: list<f64>,
+        /// The full-level target SRS on the band grid, EU.
+        target: list<f64>,
+        /// The quality factor every SRS is computed at.
+        q: f64,
+        /// |H| at each component, EU per volt, floored by the core. None when
+        /// the run identified nothing.
+        component-gain: option<list<f64>>,
+    }
+
+    /// Everything an SRS law sees after a pulse, or before the first.
+    record srs-inputs {
+        /// Pulses fired so far: 0 at the seed.
+        pulse-index: u64,
+        /// The target at the scale the last pulse was commanded at (level times
+        /// the core's safety trims); at the seed, at the starting level.
+        target: list<f64>,
+        /// The last pulse's measured control SRS; zeros at the seed.
+        measured: list<f64>,
+        /// The scale the last pulse was commanded at, linear; at the seed, the
+        /// starting level's.
+        commanded-scale: f64,
+    }
+
+    record srs-outputs {
+        /// Multiplicative update per component, in table order: finite, above
+        /// zero. At the seed, the starting gains relative to the table.
+        gains: list<f64>,
+        /// At most 8 values, each under a key the manifest declares.
+        values: list<diagnostic-value>,
+    }
+}
+
+/// An SRS shock law: its state lives in one `law` resource, built once per
+/// run, after system identification.
+interface shock-srs-law {
+    use types.{param};
+    use srs-types.{srs-setup, srs-inputs, srs-outputs};
+
+    resource law {
+        /// Build the law for a run. `params` holds every declared parameter,
+        /// already checked against the manifest, in manifest order; values
+        /// the operator left out carry their defaults. An error refuses the
+        /// run with the given reason.
+        constructor(setup: srs-setup, params: list<param>) -> result<law, string>;
+
+        /// The starting gains, before any pulse has fired.
+        seed: func(inputs: srs-inputs) -> result<srs-outputs, string>;
+
+        /// The next gains, after a pulse was fired, measured and judged.
+        iterate: func(inputs: srs-inputs) -> result<srs-outputs, string>;
+    }
+}
+
+/// The world an SRS shock law file implements.
+world shock-srs {
+    use types.{manifest};
+
+    /// The law's name, version, parameters and diagnostics.
+    export describe: func() -> manifest;
+
+    export shock-srs-law;
+}

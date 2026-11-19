@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 36,
+ "method": "laws.import",
+ "params": {
+  "path": "/home/operator/laws/notch_pinv.wasm"
+ }
+}

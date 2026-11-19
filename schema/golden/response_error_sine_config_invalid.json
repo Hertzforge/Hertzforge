@@ -1,0 +1,29 @@
+{
+ "type": "response",
+ "id": 79,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 3 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "tick_out_of_range",
+     "field": "acquisition.tick_ms",
+     "message": "The control tick is 1 ms; it runs from 2 to 1000 ms for a built-in law."
+    },
+    {
+     "reason": "abort_below_ceiling",
+     "field": "limits.drive_vpk_abort",
+     "message": "The drive abort of 0.4 V is under the drive ceiling of 0.5 V; the abort is at least the ceiling."
+    },
+    {
+     "reason": "limit_on_control_channel",
+     "field": "limits.channels[0].channel",
+     "message": "Channel 1 is a control row; a limit channel is another enabled input."
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

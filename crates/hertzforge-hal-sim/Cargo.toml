@@ -1,0 +1,13 @@
+[package]
+name = "hertzforge-hal-sim"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-hal = { path = "../hertzforge-hal" }
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# `MatrixStack`: the FRF stacks a plant model plays and reports (its exact FRF).
+hertzforge-sdm = { path = "../hertzforge-sdm" }

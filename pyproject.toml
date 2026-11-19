@@ -4,15 +4,52 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hertzforge"
-version = "0.0.1"
-description = "Data acquisition and structural dynamics in one toolset. Early release; the merged code is on its way."
+version = "0.1.16"
+description = "Data acquisition and structural dynamics in one toolset."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
+dependencies = [
+    # BSD-3-Clause
+    "numpy",
+    # BSD-3-Clause
+    "scipy",
+    # BSD-3-Clause
+    "h5py",
+    # MIT
+    "netCDF4",
+    # BSD-3-Clause
+    "pint",
+    # MIT
+    "openpyxl",
+    # BSD-3-Clause
+    "pandas",
+    # BSD-3-Clause
+    "threadpoolctl",
+    # BSD-3-Clause, pure Python: the sparse modal solve's factorization
+    # on x86-64 Windows and Linux (`core.sparse_solve.PardisoFactor`), as
+    # It brings Intel's oneMKL (`mkl`, `tbb`,
+    # `tcmlib`: the Intel Simplified Software License; `intel-openmp` and
+    # `intel-cmplr-lib-ur`: Intel's developer-tools EULA), proprietary and
+    # the one exception to the permissive rule (README, THIRD_PARTY_NOTICES),
+    # taken on 2026-11-03 so a large model solves in minutes on Windows and
+    # Linux, as it does through Accelerate on a Mac. The packaged builds
+    # carry only the libraries PARDISO loads, threaded through TBB, so none
+    # of the EULA'd OpenMP runtime. oneMKL is built for x86-64 only and no
+    # longer for the Mac, hence the marker; every other machine uses SuperLU.
+    "pypardiso; sys_platform != 'darwin' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')",
+    # Apache-2.0 bindings over the OpenCASCADE kernel (LGPL-2.1 with an
+    # exception): the solids' booleans, areas, volumes and surfaces, and
+    # STEP and IGES import. The build without VTK: cadquery-ocp requires
+    # vtk (about 600 MB) and nothing here draws with it.
+    "cadquery-ocp-novtk",
+    # BSD-3-Clause: the analysis service's WebSocket server
+    "websockets",
+]
 authors = [{ name = "Brandon Zwink" }, { name = "Kevin Cross" }]
 classifiers = [
-    "Development Status :: 1 - Planning",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering",
@@ -25,7 +62,31 @@ Source = "https://github.com/hertzforge/hertzforge"
 [project.scripts]
 hertzforge = "hertzforge.__main__:main"
 
+[tool.setuptools.package-data]
+hertzforge = ["py.typed", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE",
+              "report/viewer.html"]
+
+[tool.ruff]
+# Ruff's own rule set, 100 columns.
+# One configuration for every Python file in the repository.
+line-length = 100
+# Where this repository's own package lives, so import sorting files it as
+# first party.
+src = ["src"]
+
 [tool.pytest.ini_options]
-# The package's own tests. The analysis service under python/ has its own
-# environment and test suite (uv run --project python pytest python).
+# The package's tests, the analysis service's under tests/service.
 testpaths = ["tests"]
+addopts = '-m "not slow"'
+markers = [
+    "slow: the demonstration models, built for the website and the docs; run on demand rather than on every edit",
+    "guide: the guide's mesh table, minutes of meshing a shape; run weekly and on demand by the guide job in ci.yml, not on every pull request",
+    # CI runs these alone, after the rest (`-m timing`, without xdist): a test
+    # that asserts a wall-clock bound fails when other workers share its cores.
+    "timing: asserts a wall-clock bound, such as event-loop latency; run serially",
+]
+filterwarnings = [
+    # netCDF4's published wheel is built against an older numpy C API; the
+    # warning is harmless and goes when upstream rebuilds.
+    "ignore:numpy.ndarray size changed:RuntimeWarning",
+]

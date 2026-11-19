@@ -1,0 +1,39 @@
+{
+ "type": "request",
+ "id": 43,
+ "method": "tables.save",
+ "params": {
+  "kind": "breakpoints",
+  "table_kind": "sine_limit",
+  "path": "/Users/someone/tests/bracket/bound.hforge",
+  "columns": [
+   "freq_hz",
+   "quantity",
+   "bound"
+  ],
+  "rows": [
+   [
+    5,
+    "disp_pp_in",
+    0.5
+   ],
+   [
+    20,
+    "velocity_ips",
+    2
+   ],
+   [
+    100,
+    "accel_g",
+    3
+   ],
+   [
+    2000,
+    "accel_g",
+    3
+   ]
+  ],
+  "x_unit": "Hz",
+  "y_unit": ""
+ }
+}

@@ -1,0 +1,47 @@
+{
+ "type": "request",
+ "id": 42,
+ "method": "mimo_random.reference.build_rigid_body",
+ "params": {
+  "sensors": [
+   {
+    "label": "1X",
+    "position": [0, 0, 0],
+    "direction": [1, 0, 0]
+   },
+   {
+    "label": "1Y",
+    "position": [0, 0, 0],
+    "direction": [0, 1, 0]
+   },
+   {
+    "label": "1Z",
+    "position": [0, 0, 0],
+    "direction": [0, 0, 1]
+   },
+   {
+    "label": "2Y",
+    "position": [0.5, 0, 0],
+    "direction": [0, 1, 0]
+   },
+   {
+    "label": "2Z",
+    "position": [0.5, 0, 0],
+    "direction": [0, 0, 1]
+   },
+   {
+    "label": "3Z",
+    "position": [0, 0.5, 0],
+    "direction": [0, 0, 1]
+   },
+   {
+    "label": "4Z",
+    "position": [0.5, 0.5, 0],
+    "direction": [0, 0, 1]
+   }
+  ],
+  "reference_point": [0.25, 0.25, 0],
+  "unit": "g",
+  "length_unit": "m"
+ }
+}

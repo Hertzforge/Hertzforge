@@ -1,0 +1,24 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Sine\" on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"note","text":"run mode set to Auto"}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"note","text":"No shaker configured; feasibility NOT evaluated. Arming allowed without a shaker-limit block."}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"feasibility","text":"feasibility: NotEvaluated"}
+{"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"note","text":"block re-derived from the ADOPTED rate: 64 -> 1 frames (0.244 ms at 4096.000 Hz). The first pass sized the block against the pre-configure rate."}
+{"seq":5,"at_unix":1794240005.25,"frame":null,"kind":"note","text":"control tick 100.000 ms is 410 frames at the adopted 4096.000 Hz (100.0977 ms)"}
+{"seq":6,"at_unix":1794240006.25,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":7,"at_unix":1794240007.25,"frame":null,"kind":"station","text":"armed on sim at 4096 Hz, a 410 frame tick, shared clock"}
+{"seq":8,"at_unix":1794240008.25,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":9,"at_unix":1794240009.25,"frame":null,"kind":"note","text":"started; identification at -20 dB under full level","data":{"action":"start","level_db":-20.0}}
+{"seq":10,"at_unix":1794240010.25,"frame":131072,"kind":"note","text":"sysID align: record 131072 samples, nfft 16384, lag 0 frames, peak |r| 0.633, searched 4096 lags; APPLIED; win 32768+8192, d_rms 2.9106e-3, r_rms 3.7109e-3, d_mean -4.6359e-5, r_mean -4.8541e-7"}
+{"seq":11,"at_unix":1794240011.25,"frame":131072,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
+{"seq":12,"at_unix":1794240012.25,"frame":131072,"kind":"gate","text":"coherence gate passed: band coherence 0.995, gate 0.50","data":{"band_coherence":0.995295833008224,"gate":0.5,"passed":true}}
+{"seq":13,"at_unix":1794240013.25,"frame":131072,"kind":"note","text":"REVIEW HOLD: coherence gate PASSED at 0.9953 (floor 0.500). The sysID |H| and coherence are published; the loop is NOT closed and nothing is driven until proceed_after_review()."}
+{"seq":14,"at_unix":1794240014.25,"frame":131072,"kind":"note","text":"engage cold start: 4 frame(s) of REAL drive loaded before start (queue had 4096, held back 1 for the first tick). The device's own start prefill has nothing left to fill with silence."}
+{"seq":15,"at_unix":1794240015.25,"frame":131072,"kind":"state","text":"coherence gate to engaged","data":{"from":"coherence_gate","to":"engaged","state":"running"}}
+{"seq":16,"at_unix":1794240016.25,"frame":131072,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
+{"seq":17,"at_unix":1794240017.25,"frame":132096,"kind":"state","text":"full level to engaged","data":{"from":"full_level","to":"engaged","state":"running"}}
+{"seq":18,"at_unix":1794240018.25,"frame":139264,"kind":"level","text":"level 0 dB (schedule)","data":{"level_db":0.0,"from_db":-6.0,"by":"schedule"}}
+{"seq":19,"at_unix":1794240019.25,"frame":139264,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
+{"seq":20,"at_unix":1794240020.25,"frame":151190,"kind":"note","text":"run ended: operator stop: drive ramped to zero, generation drained, tasks stopped"}
+{"seq":21,"at_unix":1794240021.25,"frame":151190,"kind":"note","text":"run ended: operator stop"}
+{"seq":22,"at_unix":1794240022.25,"frame":151190,"kind":"state","text":"full level to stopped","data":{"from":"full_level","to":"stopped","state":"finished"}}
+{"seq":23,"at_unix":1794240023.25,"frame":151190,"kind":"note","text":"Test complete: the schedule ran its 3.7 s of test time and the drive ramped down with the controlled stop.","data":{"outcome":"completed","by":"the operator"}}

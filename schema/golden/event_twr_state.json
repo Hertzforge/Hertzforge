@@ -1,0 +1,96 @@
+{
+ "type": "event",
+ "topic": "twr.state",
+ "seq": 180,
+ "data": {
+  "run_id": "twr-0003",
+  "state": "running",
+  "phase": "playing",
+  "title": "Replication R1",
+  "source": "SIM",
+  "station": {
+   "kind": "sim",
+   "class": "sim",
+   "devices": []
+  },
+  "grid": {
+   "fs_hz": 12800,
+   "record_len": 4096,
+   "df_hz": 3.125,
+   "record_s": 0.32,
+   "section_start": 512,
+   "section_len": 2048,
+   "actual": true
+  },
+  "clock": "shared",
+  "mode": "auto",
+  "levels_db": [
+   -12,
+   -9,
+   -6,
+   -3,
+   0
+  ],
+  "level_db": 0,
+  "rung": 4,
+  "plays": {
+   "done": 10,
+   "at_level": 1,
+   "of_level": 8,
+   "playback": 2,
+   "of_playback": 375
+  },
+  "frozen": false,
+  "t_s": 4.25,
+  "alarm": false,
+  "identification": {
+   "excitation": "random",
+   "drive_vrms": 0.05,
+   "drive_vpk": 0.2297,
+   "coherence_mean": 0.9999971,
+   "min_mean_coherence": 0.8,
+   "coverage": 0.999267,
+   "lag_frames": 41,
+   "lag_source": "measured",
+   "passed": true
+  },
+  "prediction": {
+   "drive_vpk": 0.25,
+   "drive_vpk_ceiling": 0.5,
+   "level_db": 0
+  },
+  "last_play": {
+   "index": 9,
+   "kind": "playback",
+   "level_db": 0,
+   "rung": 4,
+   "iteration": null,
+   "rms_error_pct": 1.75,
+   "peak_error_pct": 4.5,
+   "spectral_error_db": 0.125,
+   "gated": true,
+   "clipped_samples": 0,
+   "clamped_bins": 0,
+   "drive_vpk": 0.25,
+   "response_peak": 0.2539,
+   "lag_frames": null,
+   "drift_frames": null,
+   "start_frame": 46080,
+   "frames": 5120,
+   "at_s": 3.6,
+   "law": null
+  },
+  "law": {
+   "id": "twr_correct",
+   "name": "frequency-domain correction",
+   "version": "0.1.0",
+   "sha256": null,
+   "misses": 0
+  },
+  "feasibility": {
+   "verdict": "pass",
+   "message": "The section at full level is within its kinematic ceilings."
+  },
+  "end": null
+ }
+}

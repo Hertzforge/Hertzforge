@@ -1,0 +1,52 @@
+{
+ "type": "request",
+ "id": 62,
+ "method": "srs.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "srs",
+    "quantity": "srs"
+   },
+   {
+    "id": "pulse",
+    "quantity": "pulse",
+    "points": 1024
+   },
+   {
+    "id": "vel",
+    "quantity": "velocity",
+    "points": 1024
+   },
+   {
+    "id": "id",
+    "quantity": "identification"
+   },
+   {
+    "id": "comp",
+    "quantity": "components"
+   },
+   {
+    "id": "lim",
+    "quantity": "limit_channels"
+   },
+   {
+    "id": "frf",
+    "quantity": "limit_frf"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "table",
+    "quantity": "pulses"
+   }
+  ]
+ }
+}

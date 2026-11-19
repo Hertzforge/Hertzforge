@@ -1,0 +1,665 @@
+<script lang="ts" module>
+	/** Where a long table was scrolled to, by its title: an edit or a delete draws it again, and it stays put. */
+	const scrolls = new Map<string, number>();
+</script>
+
+<script lang="ts">
+	/**
+	 * Rows of text under column headings. The headings stay at the top as the rows scroll; a cell
+	 * that reads as a number sits at the right of its column. Copy puts the table on the clipboard
+	 * as tab-separated text, headings first, so it pastes into a spreadsheet.
+	 *
+	 * Every table with `edit` behaves alike. A click selects a
+	 * cell, a drag or Shift a block, and the arrows move. Typing, Enter or a double-click opens the
+	 * cell; Enter commits and moves down, Tab across, Escape cancels. Typed with a block selected,
+	 * the value goes to every cell of it (Batch Edit). Delete clears the block, or, in a table whose rows
+ * are the entities themselves (a geometry's nodes or elements), removes its rows. Cmd or Ctrl+C copies
+	 * it, and tab-separated text pasted sets the cells it covers. The square at the selection's
+	 * corner is the fill handle: dragged, it repeats the block down, up or across; double-clicked,
+	 * down to the last row. Each value goes through the table's own operation, so one it refuses
+	 * leaves its cell as it was, with the reason under the table.
+	 */
+	import { tick, untrack } from 'svelte';
+	import type { TableEdit, TableView } from '$lib/protocol/types';
+	import Self from './TablePane.svelte';
+	import { mark, marked, markedRow } from './marks.svelte';
+	import { blockText, DRAWN_FROM, drawnRows, fillTargets, scrollFor, flagOn, inside, numeric, openedAtFirst, parseTsv, pasteTargets, spanned, tableHtml, tableText, toggled, type Block } from './table';
+
+	interface Props {
+		view: TableView;
+		showTitle?: boolean;
+		/** A cell typed into; resolves to the refusal's words, or null. */
+		onedit?: (row: number, column: string, value: string) => Promise<string | null>;
+		/** The rows are entities (`edit.remove`): the selected rows' ids, removed; resolves to the refusal's words, or null. */
+		onremove?: (ids: string[]) => Promise<string | null>;
+		/** A table that sent its first rows (`view.more`): rows `start` to `start + count`, asked for as they scroll into view. */
+		onrows?: (start: number, count: number) => Promise<string[][]>;
+		/** A cell typed into the table under an opened row (`view.nested`), with that table's own `edit`; resolves as `onedit`. */
+		onnested?: (edit: TableEdit, row: number, column: string, value: string) => Promise<string | null>;
+		/** A table with `select`: one row picked, by its cell in the column `select` names. */
+		onrowpick?: (id: string) => void;
+		/** Drawn whole, as a report page shows it: every row, no scrolling, each row one line of text. */
+		whole?: boolean;
+	}
+
+	let { view, showTitle = true, onedit, onremove, onrows, onnested, onrowpick, whole = false }: Props = $props();
+	/** The rows opened onto their own tables (`view.nested`), from 0: those the view opens to start with, then as they are clicked. */
+	let opened = $state(openedAtFirst(untrack(() => view.open)));
+	let copied = $state(false);
+	let anchor = $state<{ row: number; col: number } | null>(null);
+	let focus = $state<{ row: number; col: number } | null>(null);
+	let editing = $state<{ row: number; col: number; block: Block | null } | null>(null);
+	let draft = $state('');
+	let refusal = $state<string | null>(null);
+	let saving = $state(false);
+	let field = $state<HTMLInputElement | null>(null);
+	let grid = $state<HTMLDivElement | null>(null);
+	let dragging = $state<'select' | 'fill' | null>(null);
+	let fillTo = $state<{ row: number; col: number } | null>(null);
+
+	// a long table (a mesh's elements) draws only the rows in view: a hundred thousand rows
+	// drawn whole froze the page
+	let scrollTop = $state(0);
+	let viewHeight = $state(420);
+	let rowHeight = $state(27);
+	/** Rows past the first page of a table that sent only those (`view.more`), as they arrive. */
+	let fetched = $state.raw<Map<number, string[]>>(new Map());
+	const asked = new Set<number>();
+	const PAGE = 500;
+	const count = $derived(Math.max(view.total ?? 0, view.rows.length));
+	/** Every row by its number; the ones not come yet are holes. */
+	const known = $derived.by(() => {
+		if (count === view.rows.length) return view.rows;
+		const all = view.rows.slice();
+		all.length = count;
+		for (const [r, row] of fetched) all[r] = row;
+		return all;
+	});
+	const blank = $derived(view.columns.map(() => ''));
+	const long = $derived(!whole && count > DRAWN_FROM);
+	const span = $derived(drawnRows(count, scrollTop, viewHeight, rowHeight));
+	const drawn = $derived(long ? Array.from(known.slice(span.first, span.last), (row) => row ?? blank) : known);
+	function scrolled() {
+		if (!grid) return;
+		scrollTop = grid.scrollTop;
+		viewHeight = grid.clientHeight;
+		if (long) scrolls.set(view.title, scrollTop);
+	}
+	$effect(() => {
+		void view;
+		if (!grid || !long) return;
+		const row = grid.querySelector('tbody tr:not(.spacer)');
+		const height = row?.getBoundingClientRect().height;
+		if (height && Math.abs(height - rowHeight) > 0.5) rowHeight = height;
+		viewHeight = grid.clientHeight;
+		const was = scrolls.get(view.title);
+		if (was && !scrollTop) {
+			grid.scrollTop = was;
+			scrolled();
+		}
+	});
+	// the rows scrolled to that have not come, asked for a page at a time
+	$effect(() => {
+		if (!onrows || count <= view.rows.length) return;
+		for (let page = Math.floor(span.first / PAGE) * PAGE; page < span.last; page += PAGE) {
+			const from = Math.max(page, view.rows.length);
+			const to = Math.min(page + PAGE, count);
+			if (from >= to || asked.has(page)) continue;
+			asked.add(page);
+			onrows(from, to - from)
+				.then((rows) => {
+					const next = new Map(fetched);
+					rows.forEach((row, k) => next.set(from + k, row));
+					fetched = next;
+				})
+				.catch(() => asked.delete(page));
+		}
+	});
+	/** A row moved to by the keyboard, scrolled into view in a long table, where it may not be drawn. */
+	function reveal(row: number, always = false) {
+		if (always && !long) {
+			// a short table is drawn whole: the row itself is brought into view
+			void tick().then(() => grid?.querySelector(`td[data-r="${row}"]`)?.scrollIntoView({ block: 'nearest' }));
+			return;
+		}
+		if (!long || !grid) return;
+		const head = grid.querySelector('thead')?.getBoundingClientRect().height ?? rowHeight;
+		const rows = Math.max(1, Math.floor((grid.clientHeight - head) / rowHeight));
+		if (row < span.first + 30) grid.scrollTop = scrollFor(count, row, viewHeight, rowHeight);
+		else if (row >= span.first + 30 + rows) grid.scrollTop = scrollFor(count, row - rows + 1, viewHeight, rowHeight);
+		scrolled();
+	}
+
+	const keys = $derived(onedit && view.edit ? view.edit.columns : []);
+	/** How a column is edited: a flag by its check box, a choice from its list, a date in a date field. */
+	const kindOf = (col: number) => view.edit?.kinds?.[keys[col] ?? ''] ?? 'text';
+	const choicesOf = (col: number) => view.edit?.choices?.[keys[col] ?? ''];
+
+	/** A flag cell clicked: set the other way, with no field to type into. */
+	async function toggleFlag(row: number, col: number) {
+		if (!onedit || saving || !editable(col)) return;
+		select(row, col);
+		await apply([{ row, key: keys[col] as string, value: flagOn(known[row]?.[col] ?? '') ? 'False' : 'True' }]);
+	}
+	const editable = (col: number) => !!keys[col];
+	const block = $derived(anchor && focus ? spanned(anchor, focus) : null);
+	// one row picked in a table that says what a row picked does (`view.select`): said once a row
+	let rowPicked: string | null = null;
+	$effect(() => {
+		const pick = view.select;
+		if (!pick || !onrowpick || !block || block.r0 !== block.r1 || dragging) return;
+		const id = known[block.r0]?.[pick.column];
+		if (id === undefined || id === rowPicked) return;
+		rowPicked = id;
+		onrowpick(id);
+	});
+	// a table whose rows are marked with other views (`view.marks`): the rows selected mark their
+	// nodes in the 3-D view, and nodes marked there or in the tree are these rows, highlighted
+	const markedIds = $derived(view.marks ? new Set(marked(view.marks.link).map(String)) : null);
+	/** What this table last marked, so its own marks coming back do not move its selection. */
+	let sent: number[] | null = null;
+	$effect(() => {
+		const marks = view.marks;
+		if (!marks || !block) return;
+		const ids: number[] = [];
+		for (let r = block.r0; r <= block.r1; r++) {
+			const id = Number(known[r]?.[marks.column]);
+			if (Number.isFinite(id)) ids.push(id);
+		}
+		untrack(() => {
+			sent = ids;
+			mark(marks.link, ids, block.r0);
+		});
+	});
+	$effect(() => {
+		const marks = view.marks;
+		if (!marks) return;
+		const ids = marked(marks.link);
+		const hint = markedRow(marks.link);
+		untrack(() => {
+			if (ids === sent) return;
+			// marked from the view or the tree: the selection here would say other rows
+			sent = null;
+			anchor = null;
+			focus = null;
+			if (!ids.length) return;
+			const first = String(ids[0]);
+			const row = hint !== undefined && (known[hint] === undefined || known[hint]?.[marks.column] === first) ? hint : known.findIndex((cells) => cells?.[marks.column] === first);
+			if (row >= 0) reveal(row, true);
+		});
+	});
+	const fillBlock = $derived(block && fillTo && dragging === 'fill' ? spanned({ row: Math.min(block.r0, fillTo.row), col: Math.min(block.c0, fillTo.col) }, { row: Math.max(block.r1, fillTo.row), col: Math.max(block.c1, fillTo.col) }) : null);
+
+	function select(row: number, col: number, extend = false) {
+		if (!extend || !anchor) anchor = { row, col };
+		focus = { row, col };
+		reveal(row);
+		grid?.focus();
+	}
+
+	/** Set each cell in turn through the table's operation, stopping at the first refusal. */
+	async function apply(targets: { row: number; key: string; value: string }[]) {
+		if (!onedit || !targets.length) return;
+		saving = true;
+		refusal = null;
+		for (const t of targets) {
+			refusal = await onedit(t.row, t.key, t.value);
+			if (refusal) break;
+		}
+		saving = false;
+		await tick();
+		grid?.focus();
+	}
+
+	/** Delete in a table of entities: the block's rows go, and the selection with them. */
+	async function removeRows(b: Block) {
+		const column = view.edit?.remove?.column ?? 0;
+		const ids: string[] = [];
+		for (let r = b.r0; r <= b.r1; r++) {
+			const id = known[r]?.[column];
+			if (id) ids.push(id);
+		}
+		if (!onremove || !ids.length || saving) return;
+		saving = true;
+		refusal = await onremove(ids);
+		saving = false;
+		if (!refusal) {
+			anchor = null;
+			focus = null;
+		}
+	}
+
+	/** The editable cells of a block, each set to `value`: Delete clears with '', Batch Edit types. */
+	function everywhere(b: Block, value: string) {
+		const out: { row: number; key: string; value: string }[] = [];
+		for (let r = b.r0; r <= b.r1; r++) for (let c = b.c0; c <= b.c1; c++) if (keys[c]) out.push({ row: r, key: keys[c] as string, value });
+		return out;
+	}
+
+	async function open(row: number, col: number, seed?: string) {
+		if (!editable(col) || saving || !onedit) return;
+		const many = block && (block.r1 > block.r0 || block.c1 > block.c0) && inside(block, row, col) ? block : null;
+		editing = { row, col, block: many };
+		draft = seed ?? known[row]?.[col] ?? '';
+		await tick();
+		field?.focus();
+		if (seed === undefined) field?.select();
+	}
+
+	/** Commit the cell (or, from a block, every cell of it), then move by (dr, dc). */
+	async function commit(dr = 0, dc = 0) {
+		const at = editing;
+		if (!at || !onedit) return;
+		editing = null;
+		if (at.block) {
+			await apply(everywhere(at.block, draft));
+			return;
+		}
+		const was = known[at.row]?.[at.col] ?? '';
+		if (draft !== was) {
+			await apply([{ row: at.row, key: keys[at.col] as string, value: draft }]);
+			if (refusal) return;
+		} else refusal = null;
+		let row = at.row + dr;
+		let col = at.col + dc;
+		while (dc && col >= 0 && col < keys.length && !editable(col)) col += dc;
+		if (row >= 0 && row < count && col >= 0 && col < keys.length) select(row, col);
+		else select(at.row, at.col);
+	}
+
+	function editKey(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			void commit(e.shiftKey ? -1 : 1, 0);
+		} else if (e.key === 'Tab') {
+			e.preventDefault();
+			void commit(0, e.shiftKey ? -1 : 1);
+		} else if (e.key === 'Escape') {
+			editing = null;
+			grid?.focus();
+		}
+	}
+
+	function gridKey(e: KeyboardEvent) {
+		if (editing || !focus) return;
+		const moves: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+		const step = moves[e.key];
+		if (step) {
+			e.preventDefault();
+			const row = Math.max(0, Math.min(count - 1, focus.row + step[0]));
+			const col = Math.max(0, Math.min(view.columns.length - 1, focus.col + step[1]));
+			select(row, col, e.shiftKey);
+		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block && view.edit?.remove && onremove) {
+			e.preventDefault();
+			void removeRows(block);
+		} else if ((e.key === 'Delete' || e.key === 'Backspace') && block) {
+			e.preventDefault();
+			void apply(everywhere(block, ''));
+		} else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && block) {
+			e.preventDefault();
+			void navigator.clipboard.writeText(blockText(known, block));
+		} else if (e.key === 'Enter' || e.key === 'F2') {
+			e.preventDefault();
+			void open(focus.row, focus.col);
+		} else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+			e.preventDefault();
+			void open(focus.row, focus.col, e.key);
+		}
+	}
+
+	/** Pasted on the selection: a block sets the cells it covers; one value goes to every selected cell. */
+	async function paste(e: ClipboardEvent) {
+		const text = e.clipboardData?.getData('text/plain') ?? '';
+		if (!onedit || !block) return;
+		const multi = /[\t\n]/.test(text.replace(/\n$/, ''));
+		if (editing && !multi) return;
+		e.preventDefault();
+		editing = null;
+		if (multi) await apply(pasteTargets(parseTsv(text), block.r0, block.c0, keys, count));
+		else await apply(everywhere(block, text.replace(/\n$/, '')));
+	}
+
+	function cellAt(x: number, y: number): { row: number; col: number } | null {
+		const td = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('td[data-r]') as HTMLElement | null;
+		return td ? { row: Number(td.dataset.r), col: Number(td.dataset.c) } : null;
+	}
+
+	function down(e: PointerEvent, row: number, col: number) {
+		if (e.button !== 0 || editing) return;
+		select(row, col, e.shiftKey);
+		dragging = 'select';
+	}
+
+	function grabHandle(e: PointerEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		dragging = 'fill';
+		fillTo = focus;
+	}
+
+	function moved(e: PointerEvent) {
+		if (!dragging) return;
+		const at = cellAt(e.clientX, e.clientY);
+		if (!at) return;
+		if (dragging === 'select') focus = at;
+		else fillTo = at;
+	}
+
+	function released() {
+		const wasFill = dragging === 'fill';
+		dragging = null;
+		if (wasFill && block && fillTo) {
+			const targets = fillTargets(known, block, fillTo.row, fillTo.col, keys);
+			const to = fillTo;
+			fillTo = null;
+			void apply(targets).then(() => {
+				anchor = { row: Math.min(block.r0, to.row), col: Math.min(block.c0, to.col) };
+				focus = { row: Math.max(block.r1, to.row), col: Math.max(block.c1, to.col) };
+			});
+		}
+	}
+
+	/** Double-click on the handle: the block down to the last row. */
+	function fillDown() {
+		if (!block) return;
+		void apply(fillTargets(known, block, count - 1, block.c1, keys));
+	}
+
+	/** The whole table on the clipboard as text and as HTML at once, so a spreadsheet pastes cells and a document a table. */
+	async function copy() {
+		let rows = view.rows;
+		if (onrows && count > view.rows.length) {
+			rows = view.rows.slice();
+			for (let start = view.rows.length; start < count; start += 5000) rows.push(...(await onrows(start, Math.min(5000, count - start))));
+		}
+		const text = tableText({ columns: view.columns, rows });
+		try {
+			await navigator.clipboard.write([
+				new ClipboardItem({
+					'text/plain': new Blob([text], { type: 'text/plain' }),
+					'text/html': new Blob([tableHtml({ columns: view.columns, rows })], { type: 'text/html' })
+				})
+			]);
+		} catch {
+			await navigator.clipboard.writeText(text);
+		}
+		copied = true;
+		setTimeout(() => (copied = false), 1500);
+	}
+</script>
+
+<svelte:window onpointermove={moved} onpointerup={released} />
+
+<section class="table" data-testid="view-table" aria-label={view.title}>
+	<header>
+		{#if showTitle}<h3 class="title">{view.title}</h3>{/if}
+		<button class="btn ghost sm" data-testid="table-copy" onclick={copy} title="Copy the table as tab-separated text">
+			{copied ? 'Copied' : 'Copy'}
+		</button>
+	</header>
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<div class="scroll" class:long class:whole class:typed={!!view.edit} bind:this={grid} onscroll={scrolled} tabindex={onedit && view.edit ? 0 : undefined} role={onedit && view.edit ? 'grid' : undefined}
+		aria-label={onedit && view.edit ? `${view.title}, editable` : undefined} onkeydown={gridKey} onpaste={paste} data-testid="table-grid">
+		<table>
+			<thead>
+				<tr>
+					{#each view.columns as c, i (i)}<th scope="col">{c}</th>{/each}
+				</tr>
+			</thead>
+			<tbody>
+				{#if long && span.before > 0}<tr class="spacer" aria-hidden="true" style:height="{span.before}px"><td colspan={view.columns.length}></td></tr>{/if}
+				{#each drawn as row, k (span.first + k)}
+					{@const r = long ? span.first + k : k}
+					<tr class:marked={!!markedIds?.has(row[view.marks?.column ?? 0])}>
+						{#each row as cell, i (i)}
+							{@const opens = i === 0 && !!view.nested?.[r]}
+							{#if editing && editing.row === r && editing.col === i}
+								<td class="editing">
+									{#if kindOf(i) === 'choice' && choicesOf(i)}
+										<select bind:value={draft} class="cell" aria-label="{view.columns[i]}, row {r + 1}" onchange={() => commit()} onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-select">
+											{#if !choicesOf(i)?.includes(draft)}<option value={draft}>{draft || '(blank)'}</option>{/if}
+											{#each choicesOf(i) ?? [] as choice (choice)}<option value={choice}>{choice}</option>{/each}
+										</select>
+									{:else if kindOf(i) === 'date'}
+										<input bind:this={field} bind:value={draft} type="date" class="cell mono" aria-label="{view.columns[i]}, row {r + 1}" onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-input" />
+									{:else}
+										<input bind:this={field} bind:value={draft} class="cell mono" list={choicesOf(i) ? 'table-cell-choices' : undefined} aria-label="{view.columns[i]}, row {r + 1}"
+											onkeydown={editKey} onblur={() => commit()} data-testid="table-cell-input" />
+										{#if choicesOf(i)}
+											<datalist id="table-cell-choices">
+												{#each choicesOf(i) ?? [] as choice (choice)}<option value={choice}></option>{/each}
+											</datalist>
+										{/if}
+									{/if}
+								</td>
+							{:else}
+								<td data-r={r} data-c={i} class:num={numeric(cell)} class:editable={editable(i)}
+									class:picked={onedit && view.edit && inside(block, r, i)} class:filling={inside(fillBlock, r, i) && !inside(block, r, i)}
+									onpointerdown={(e) => onedit && view.edit && down(e, r, i)} ondblclick={() => kindOf(i) !== 'flag' && open(r, i)}>
+									{#if opens}
+										<button type="button" class="opener" class:on={opened.has(r)} aria-expanded={opened.has(r)} aria-label="{opened.has(r) ? 'Close' : 'Open'} {cell}" title={opened.has(r) ? 'Close' : 'Open what this row holds'}
+											onpointerdown={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()} onclick={(e) => { e.stopPropagation(); opened = toggled(opened, r); }} data-testid="table-row-opener">▸</button>
+									{/if}
+									{#if editable(i) && kindOf(i) === 'flag'}
+										<input type="checkbox" class="flag" checked={flagOn(cell)} aria-label="{view.columns[i]}, row {r + 1}" disabled={saving} onclick={(e) => { e.preventDefault(); void toggleFlag(r, i); }} data-testid="table-cell-flag" />
+									{:else}
+										{cell}
+									{/if}
+									{#if onedit && view.edit && block && r === block.r1 && i === block.c1 && !saving}
+										<span class="handle" role="presentation" title="Drag to fill; double-click to fill down" onpointerdown={grabHandle} ondblclick={fillDown} data-testid="table-fill-handle"></span>
+									{/if}
+								</td>
+							{/if}
+						{/each}
+					</tr>
+					{#if view.nested?.[r] && opened.has(r)}
+						{@const under = view.nested[r]!}
+						<tr class="under">
+							<td colspan={view.columns.length}>
+								<Self view={under} showTitle={false} onedit={onnested && under.edit ? (row, column, value) => onnested(under.edit!, row, column, value) : undefined} />
+							</td>
+						</tr>
+					{/if}
+				{/each}
+				{#if long && span.after > 0}<tr class="spacer" aria-hidden="true" style:height="{span.after}px"><td colspan={view.columns.length}></td></tr>{/if}
+			</tbody>
+		</table>
+		{#if count === 0}<p class="empty">No rows.</p>{/if}
+	</div>
+	{#if saving}<p class="note" role="status">Saving.</p>{/if}
+	{#if refusal}<p class="refusal" role="alert" data-testid="table-refusal">{refusal}</p>{/if}
+</section>
+
+<style>
+	header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--sp-3);
+		margin-bottom: var(--sp-2);
+	}
+
+	.title {
+		font-size: var(--text-sm);
+		font-weight: var(--weight-strong);
+	}
+
+	.scroll {
+		max-height: 420px;
+		overflow: auto;
+		border: 1px solid var(--line-1);
+		border-radius: var(--radius-md);
+	}
+
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--text-sm);
+	}
+
+	th {
+		position: sticky;
+		top: 0;
+		background: var(--bg-2);
+		color: var(--text-2);
+		font-weight: var(--weight-strong);
+		text-align: left;
+		white-space: nowrap;
+	}
+
+	th,
+	td {
+		padding: 5px var(--sp-3);
+		border-bottom: 1px solid var(--line-1);
+	}
+
+	td {
+		color: var(--text-1);
+	}
+
+	/* a long table's rows are one line each, so where a row is follows from its number; so are the
+	   rows of a table typed into (a channel table), which scrolls sideways instead of wrapping a
+	   description into a tall row */
+	.long td,
+	.typed td {
+		white-space: nowrap;
+	}
+
+	/* a page's table: as tall as its rows, each row one line of text, wider than the page scrolling sideways */
+	.whole {
+		max-height: none;
+	}
+
+	.whole th,
+	.whole td {
+		padding: 1px var(--sp-2);
+		line-height: 1.3;
+		white-space: nowrap;
+	}
+
+	.spacer td {
+		padding: 0;
+		border: 0;
+	}
+
+	td.num {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	.empty {
+		padding: var(--sp-3);
+		color: var(--text-3);
+	}
+
+	td.editable {
+		cursor: text;
+	}
+
+	td.editable:hover {
+		background: var(--bg-2);
+	}
+
+	.scroll:focus {
+		outline: none;
+	}
+
+	td {
+		position: relative;
+		user-select: none;
+	}
+
+	tr.marked td {
+		background: color-mix(in srgb, var(--blue-weak) 55%, transparent);
+	}
+
+	td.picked {
+		background: var(--blue-weak);
+	}
+
+	td.filling {
+		background: color-mix(in srgb, var(--blue-weak) 50%, transparent);
+		outline: 1px dashed var(--blue-line, var(--line-2));
+	}
+
+	/* a row that opens onto a table of its own: the mark turns when it is open, and the table sits in from the edge */
+	.opener {
+		all: unset;
+		display: inline-block;
+		width: 1.1em;
+		margin-right: 0.3em;
+		color: var(--text-2);
+		cursor: pointer;
+		text-align: center;
+		transition: transform 80ms;
+	}
+
+	.opener.on {
+		transform: rotate(90deg);
+	}
+
+	.opener:hover,
+	.opener:focus-visible {
+		color: var(--text-1);
+	}
+
+	/* the table under a row has no heading of its own: the row above it is its title */
+	tr.under > td > :global(section > header) {
+		display: none;
+	}
+
+	/* and is as wide as its own columns, at the left under its row, however wide the row's table is */
+	tr.under > td :global(table) {
+		width: auto;
+	}
+
+	tr.under > td {
+		padding: var(--sp-2) var(--sp-2) var(--sp-3) calc(var(--sp-4) + 1.4em);
+		background: var(--bg-1);
+	}
+
+	.handle {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		width: 7px;
+		height: 7px;
+		background: var(--accent, var(--blue-line));
+		border: 1px solid var(--bg-0);
+		cursor: crosshair;
+	}
+
+	td.editing {
+		padding: 0;
+	}
+
+	.cell {
+		width: 100%;
+		min-width: 6em;
+		padding: 4px var(--sp-3);
+		font: inherit;
+		color: var(--text-1);
+		background: var(--bg-2);
+		border: 1px solid var(--line-2, var(--line-1));
+		outline: none;
+	}
+
+	.note,
+	.refusal {
+		margin-top: var(--sp-2);
+		font-size: var(--text-xs);
+	}
+
+	.note {
+		color: var(--text-3);
+	}
+
+	.refusal {
+		color: var(--status-warn);
+	}
+	.flag {
+		margin: 0;
+		accent-color: var(--accent, #0a84ff);
+	}
+</style>

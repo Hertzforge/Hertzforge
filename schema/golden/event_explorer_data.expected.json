@@ -1,0 +1,346 @@
+{
+ "type": "event",
+ "topic": "explorer.data",
+ "seq": 192,
+ "data": {
+  "run_id": "explorer-0002",
+  "source": "HARDWARE",
+  "class": "ni_real",
+  "state": "running",
+  "phase": "steady",
+  "t_s": 41.38,
+  "frequency_hz": 250,
+  "target_hz": 250,
+  "measured_hz": 250.02,
+  "drive_vpk": 0.2,
+  "target_vpk": 0.2,
+  "max_drive_vpk": 0.5,
+  "sweep": null,
+  "channels": [
+   {
+    "index": 1,
+    "description": "Control",
+    "role": "control",
+    "rms": 0.1413,
+    "unit": "g"
+   },
+   {
+    "index": 3,
+    "description": "Fixture",
+    "role": "monitor",
+    "rms": 0.0706,
+    "unit": "g"
+   }
+  ],
+  "control": {
+   "index": 1,
+   "velocity_ips": 0.04916,
+   "displacement_mil": 0.0313,
+   "settling": false
+  },
+  "pipeline_frames": 1063,
+  "peak": {
+   "hz": 250,
+   "level": 0.1999
+  },
+  "blocks_dropped": 0,
+  "pass_ms": {
+   "last": 1.9,
+   "worst": 3.4
+  },
+  "plots": [
+   {
+    "id": "srv",
+    "quantity": "survey",
+    "channels": null,
+    "first_frame": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Survey",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Level",
+       "unit": "g",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Survey",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          200.0,
+          250.0,
+          300.0,
+          400.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.125,
+          0.1999,
+          0.15625,
+          0.09375
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "spec",
+    "quantity": "spectrum",
+    "channels": [
+     1,
+     3
+    ],
+    "first_frame": null,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Channel 1: Control",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Channel 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          3.125,
+          6.25,
+          9.375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0009765625,
+          0.001953125,
+          0.00048828125,
+          0.000244140625
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Channel 3: Fixture",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Channel 3",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          3.125,
+          6.25,
+          9.375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.00048828125,
+          0.0009765625,
+          0.000244140625,
+          0.0001220703125
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "t",
+    "quantity": "time",
+    "channels": null,
+    "first_frame": 529408,
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Time",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Amplitude",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Channel 1",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          41.36,
+          41.360078125,
+          41.36015625,
+          41.360234375
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          4
+         ],
+         "values": [
+          0.0,
+          0.125,
+          0.1875,
+          0.125
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "channels": null,
+    "first_frame": null,
+    "views": [
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Frequency",
+        "value": 250,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Target",
+        "value": 250,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Measured",
+        "value": 250.02,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Drive",
+        "value": 0.2,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Target drive",
+        "value": 0.2,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Ceiling",
+        "value": 0.5,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Sweep",
+        "value": "none",
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Control rms",
+        "value": 0.1413,
+        "unit": "g",
+        "status": "info"
+       },
+       {
+        "label": "Velocity",
+        "value": 0.04916,
+        "unit": "in/s",
+        "status": "info"
+       },
+       {
+        "label": "Displacement",
+        "value": 0.0313,
+        "unit": "mil",
+        "status": "info"
+       },
+       {
+        "label": "Peak",
+        "value": 250,
+        "unit": "Hz",
+        "status": "info"
+       },
+       {
+        "label": "Pipeline",
+        "value": 1063,
+        "unit": "frames",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

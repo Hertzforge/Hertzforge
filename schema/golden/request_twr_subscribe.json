@@ -1,0 +1,67 @@
+{
+ "type": "request",
+ "id": 84,
+ "method": "twr.subscribe",
+ "params": {
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "tgt",
+    "quantity": "target"
+   },
+   {
+    "id": "rep",
+    "quantity": "response",
+    "points": 1024
+   },
+   {
+    "id": "err",
+    "quantity": "error"
+   },
+   {
+    "id": "drv",
+    "quantity": "drive"
+   },
+   {
+    "id": "env",
+    "quantity": "envelope"
+   },
+   {
+    "id": "frf",
+    "quantity": "frf"
+   },
+   {
+    "id": "coh",
+    "quantity": "coherence"
+   },
+   {
+    "id": "trust",
+    "quantity": "mask"
+   },
+   {
+    "id": "spec",
+    "quantity": "spectra"
+   },
+   {
+    "id": "conv",
+    "quantity": "convergence"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "scope",
+    "quantity": "scope"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   },
+   {
+    "id": "plays",
+    "quantity": "plays"
+   }
+  ]
+ }
+}

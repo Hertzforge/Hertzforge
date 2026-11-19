@@ -1,0 +1,11 @@
+{
+ "type": "request",
+ "id": 42,
+ "method": "mimo_random.exclude",
+ "params": {
+  "controls": [
+   1
+  ],
+  "ack": "Control Y sits on a fixture node; kept as a monitor for this run."
+ }
+}

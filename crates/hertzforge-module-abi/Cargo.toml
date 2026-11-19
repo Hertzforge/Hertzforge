@@ -1,0 +1,11 @@
+[package]
+name = "hertzforge-module-abi"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-hal = { path = "../hertzforge-hal" }

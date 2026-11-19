@@ -1,0 +1,48 @@
+{
+  "channels": [
+    {
+      "index": 1,
+      "enabled": true,
+      "save": true,
+      "stream": false,
+      "interface": "Iepe",
+      "iepe_bias_v": 12.5,
+      "units": "AccelG",
+      "sensitivity_mv_per_eu": 1000.0,
+      "range_max": 5.0,
+      "polarity": "Positive",
+      "description": "Airbags",
+      "role": "Control",
+      "control_group": 0,
+      "abort": {
+        "accel_g": 9.0,
+        "velocity_ips": null,
+        "displacement_mil": null
+      }
+    },
+    {
+      "index": 2,
+      "enabled": true,
+      "save": true,
+      "stream": true,
+      "interface": "SingleEnded",
+      "iepe_bias_v": null,
+      "units": { "Custom": "psi" },
+      "sensitivity_mv_per_eu": 10.25,
+      "range_max": 100.0,
+      "polarity": "Negative",
+      "description": "Trunions",
+      "role": "Monitor",
+      "control_group": 0,
+      "abort": {
+        "accel_g": null,
+        "velocity_ips": 70.0,
+        "displacement_mil": 2250.0
+      }
+    }
+  ],
+  "reference": {
+    "n_reference": 0,
+    "notes": "authored before the v2 schema bump"
+  }
+}

@@ -1,0 +1,56 @@
+[package]
+name = "hertzforge-mimo-sine"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# MIMO Sine: sweeps, dwells and stepped sines at several control channels with
+# several drives, one tone at a time, closed every control update. This crate
+# holds the contracts the run engine and the laws are written against: the
+# run's setup, the per-update law inputs and outputs, the law traits, their
+# validation and size limits, and the run engine's public surface. It names no
+# backend.
+[dependencies]
+# The tracking filter's bandwidth rule.
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The complex values and matrix stacks the identification travels in, and the
+# control-to-drive shape.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+# Single-shaker Sine's schedulers (sweep, dwell, step, level ladder), its
+# profile grammar and its law seam's value buffer and descriptor. The control
+# core alone, without the run service.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+# The built-in laws' mathematics: the native laws are adapters to it, and the
+# readings and the sweep-rate warning are its helpers.
+hertzforge-mimo-sine-law-math = { path = "../hertzforge-mimo-sine-law-math" }
+# The built-in laws' declarations and constructor (`sine_mimo::builtin`): the
+# native built-in laws and the law files run the same code, with one set of
+# parameters.
+hertzforge-law-sdk = { path = "../hertzforge-law-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The run service, behind the default `service` feature: the engine it runs the
+# station through (its watchdog, output delivery and scheduling health), the
+# abstract station it is handed, the channel table, and the station's class.
+# No concrete backend: the simulator is a dev-dependency only.
+hertzforge-engine = { path = "../hertzforge-engine", optional = true }
+hertzforge-hal = { path = "../hertzforge-hal", optional = true }
+hertzforge-channel-table = { path = "../hertzforge-channel-table", optional = true }
+hertzforge-module-abi = { path = "../hertzforge-module-abi", optional = true }
+
+[features]
+default = ["service"]
+service = [
+    "dep:hertzforge-engine",
+    "dep:hertzforge-hal",
+    "dep:hertzforge-channel-table",
+    "dep:hertzforge-module-abi",
+]
+
+[dev-dependencies]
+# The simulator's sine structures, played through the same engine a station
+# gets.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+hertzforge-hal = { path = "../hertzforge-hal" }

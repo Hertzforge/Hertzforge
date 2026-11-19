@@ -1,0 +1,192 @@
+"""Read and write sdynpy data array files (.npz).
+
+The format is a NumPy .npz with two entries:
+
+- 'function_type': a scalar int, the universal file dataset 58 function
+  type code, which is the vocabulary Hertzforge uses (1 time
+  response, 4 FRF, 6 coherence, 9 PSD, 12 spectrum and so on).
+- 'data': a structured array of records with the fields 'abscissa'
+  (n,), 'ordinate' (n,), 'comment1' to 'comment5', and 'coordinate',
+  the (node, direction) pairs, shape (1,) for data with a response only
+  or (2,) for response and reference. Directions use the signed
+  universal file code, 1 to 6.
+
+sdynpy holds a cross-spectral density as X·conj(Y), and this package
+stores it as conj(X)·Y (`DataArray.compute_cpsds`). The two are
+elementwise conjugates and the file does not say which it holds, so a
+PSD is conjugated in both directions. No other kind of data is touched.
+
+The files have no units. Units may be declared at import:
+
+- time and spectrum data: `ordinate_unit` (for example 'm/s**2', 'g'
+  or 'N');
+- FRFs: `response_unit` and `reference_unit`, both needed;
+- PSDs: `ordinate_unit`, the unit whose square per Hz the PSD is in
+  (for example 'g' for g^2/Hz).
+
+Without them the data is unit-less, holding the file's values, and the
+units can be defined later with `define_units()`. Every record must
+share one abscissa; a file whose records differ is refused.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from ..core.data import DataArray
+    from ..units import UnitSystem
+
+import numpy as np
+
+from ..core.data import (
+    DataArray,
+    Frf,
+    Psd,
+    class_for_function_type,
+    direction_code,
+    dof_string,
+    parse_dof,
+)
+from .plain_numpy import PlainNpz
+from .sniffing import npz_has
+
+
+def sniff(path: str | os.PathLike) -> bool:
+    """True for an `.npz` holding `data` and `function_type`, the two
+    entries every sdynpy data array file has."""
+    return npz_has(path, {'data', 'function_type'})
+
+
+def load(path: str | os.PathLike, ordinate_unit: str | None = None,
+         response_unit: str | None = None,
+         reference_unit: str | None = None) -> DataArray:
+    """Read an sdynpy data array file as the DataArray subclass its function
+    type names.
+
+    Each record's five comment fields are joined with '; '. Units are
+    declared as the module docstring describes; an FRF needs both
+    `response_unit` and `reference_unit`, and with only one it imports
+    unit-less. Raises ValueError when the records do not share one abscissa,
+    or the file holds Python objects.
+    """
+    with PlainNpz(path) as d:
+        function_type = int(d['function_type'])
+        data = d['data']
+
+    cls = class_for_function_type(function_type)
+    data = data.reshape(-1)
+
+    abscissa = data['abscissa']
+    if not np.allclose(abscissa, abscissa[0]):
+        raise ValueError(f'Records in {path} have differing abscissae; '
+                         'hertzforge data arrays share one abscissa')
+
+    coordinate = data['coordinate']
+    response_dof = [dof_string(c['node'][0], c['direction'][0])
+                    for c in coordinate]
+    reference_dof = None
+    if coordinate.shape[-1] > 1:
+        reference_dof = [dof_string(c['node'][1], c['direction'][1])
+                         for c in coordinate]
+
+    comments = ['; '.join(s for i in range(1, 6)
+                          if (s := str(rec[f'comment{i}']).strip()))
+                for rec in data]
+
+    ordinate = np.stack(list(data['ordinate']))
+    array = cls(
+        abscissa=abscissa[0],
+        ordinate=np.conj(ordinate) if issubclass(cls, Psd) else ordinate,
+        response_dof=response_dof,
+        reference_dof=reference_dof,
+        comment=comments,
+    )
+
+    if cls is Frf:
+        if response_unit is not None and reference_unit is not None:
+            array.define_units(response_unit, reference_unit)
+    elif ordinate_unit is not None:
+        array.define_units(ordinate_unit)
+    return array
+
+
+def handles(obj: Any) -> bool:
+    """True for any DataArray: every kind is written under its function type
+    code."""
+    return isinstance(obj, DataArray)
+
+
+def _coordinate_pairs(data):
+    """(node, direction) per record, paired when the data names a reference.
+
+    Not only FRFs: a PSD names the pair it was formed from, and writing one
+    entry would quietly drop the reference on the way out.
+    """
+    width = 2 if data.reference_dof is not None else 1
+    pairs = np.zeros((data.num_records, width),
+                     dtype=[('node', '<u8'), ('direction', 'i1')])
+    for i in range(data.num_records):
+        node, direction = parse_dof(data.response_dof[i])
+        pairs[i, 0] = (node or 0, direction_code(direction) if direction else 0)
+        if width == 2:
+            node, direction = parse_dof(data.reference_dof[i])
+            pairs[i, 1] = (node or 0,
+                           direction_code(direction) if direction else 0)
+    return pairs
+
+
+def _matrix(data: DataArray) -> np.ndarray | None:
+    """The record indices of an FRF laid out responses by references, each
+    in the order it first appears, or None when it is not an FRF or not a
+    full grid: a pair missing or repeated."""
+    if not isinstance(data, Frf) or data.reference_dof is None:
+        return None
+    responses = list(dict.fromkeys(data.response_dof))
+    references = list(dict.fromkeys(data.reference_dof))
+    if len(responses) * len(references) != data.num_records:
+        return None
+    at = {pair: i for i, pair in
+          enumerate(zip(data.response_dof, data.reference_dof))}
+    if len(at) != data.num_records:
+        return None
+    return np.array([[at[(r, q)] for q in references] for r in responses])
+
+
+def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
+    """Write a data array in the sdynpy .npz layout.
+
+    An FRF that fills every response and reference pair is written as a
+    matrix, responses down the rows and references across, as a
+    controller reading a system's FRFs expects; any other data is one row
+    of records.
+
+    Values are written in `unit_system`, g included, when the
+    units are defined, and as stored otherwise. The format has no place
+    to record which units they are. The ordinate is complex only when
+    the data is, and the comment fields are left blank.
+    """
+    from .exporters import data_values
+
+    abscissa, ordinate = data_values(data, unit_system)
+    samples = len(abscissa)
+    # complex only for data that is: a real time history written as
+    # '<c16' doubles the file and comes back through the constructor
+    # with a ComplexWarning, which is sdynpy's own convention anyway —
+    # its writer stores each array in the ordinate's true dtype
+    dtype = [('abscissa', '<f8', (samples,)),
+             ('ordinate',
+              '<c16' if np.iscomplexobj(ordinate) else '<f8', (samples,)),
+             *[(f'comment{i}', '<U80') for i in range(1, 6)],
+             ('coordinate', [('node', '<u8'), ('direction', 'i1')],
+              (2 if data.reference_dof is not None else 1,))]
+    records = np.zeros(data.num_records, dtype=dtype)
+    records['abscissa'] = abscissa
+    records['ordinate'] = np.conj(ordinate) if isinstance(data, Psd) else ordinate
+    records['coordinate'] = _coordinate_pairs(data)
+    matrix = _matrix(data)
+    if matrix is not None:
+        records = records[matrix]
+    np.savez(path, data=records,
+             function_type=np.array(data.function_type))

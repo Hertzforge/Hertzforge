@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { alignSeries, valueAt } from './align';
 import { formatFixed, formatNumber, formatTick } from './format';
-import { logRange, logTicks } from './logTicks';
+import { decadeStride, logRange, logTicks } from './logTicks';
 import type { Series } from '$lib/protocol/types';
 
 const s = (x: number[], y: number[]): Series => ({ name: 'n', role: 'measured', x: Float64Array.from(x), y: Float64Array.from(y) });
@@ -24,6 +24,15 @@ describe('log ticks', () => {
 
 	it('label a frequency band with 1, 2, 5', () => {
 		expect(logTicks(20, 2000, [1, 2, 5])).toEqual([20, 50, 100, 200, 500, 1000, 2000]);
+	});
+
+	it('tick every other decade or fewer when a short axis spans many decades', () => {
+		// A drive PSD over 1e-8 to 1e-3 in 110 px: 22 px a decade, too close for six labels.
+		expect(decadeStride(22)).toBe(2);
+		expect(decadeStride(30)).toBe(1);
+		expect(decadeStride(7)).toBe(4);
+		expect(logTicks(1e-8, 1e-3, [1], decadeStride(22))).toEqual([1e-8, 1e-6, 1e-4]);
+		expect(logTicks(1e-8, 1e-3, [1])).toHaveLength(6);
 	});
 
 	it('snap ranges to decades', () => {

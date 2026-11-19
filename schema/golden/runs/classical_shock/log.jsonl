@@ -1,0 +1,19 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden Classical Shock\" on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"station","text":"armed on sim at 2048 Hz, records of 256 samples","data":{"class":"sim","fs_hz":2048.0,"record_len":256}}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"note","text":"started; identification at 0.05 V rms for 0.5 s","data":{"action":"start","drive_vrms":0.05,"duration_s":0.5}}
+{"seq":5,"at_unix":1794240005.25,"frame":null,"kind":"note","text":"No shaker configured; feasibility NOT evaluated. Arming allowed without a shaker-limit block."}
+{"seq":6,"at_unix":1794240006.25,"frame":null,"kind":"note","text":"closed loop: the pulse grid is 256 samples at 2048 Hz (125.0 ms)"}
+{"seq":7,"at_unix":1794240007.25,"frame":1024,"kind":"note","text":"identified: mean coherence 0.999, 77 trusted bins covering 100.0% of the reference's energy, drive peak 0.163 V","data":{"identified":true,"coherence_mean":0.9990539749856404,"trusted_bins":77,"band_energy":0.9999199987884632,"drive_vpk":0.16259471705260298}}
+{"seq":8,"at_unix":1794240008.25,"frame":1024,"kind":"note","text":"control law: frequency-domain correction 0.1.0 (built in)"}
+{"seq":9,"at_unix":1794240009.25,"frame":1024,"kind":"state","text":"sysid to waiting","data":{"from":"sysid","to":"waiting","state":"running"}}
+{"seq":10,"at_unix":1794240010.25,"frame":1024,"kind":"note","text":"seeded; the predicted full-level drive is 2.152 V pk","data":{"seeded":true,"drive_vpk":2.1519602543939196,"drive_vpk_ceiling":2.0,"drive_vpk_abort":3.0}}
+{"seq":11,"at_unix":1794240011.25,"frame":1024,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
+{"seq":12,"at_unix":1794240012.25,"frame":1280,"kind":"pulse","text":"pulse 1 at -6 dB: 0.496 g, passed","data":{"pulse":0,"level_db":-6.0,"scheduled_db":-6.0,"measured":true,"peak_g":0.49578312039375305,"velocity_change_ips":1.2351990317405253,"passed":true}}
+{"seq":13,"at_unix":1794240013.25,"frame":1280,"kind":"state","text":"firing to waiting","data":{"from":"firing","to":"waiting","state":"running"}}
+{"seq":14,"at_unix":1794240014.25,"frame":1280,"kind":"state","text":"waiting to firing","data":{"from":"waiting","to":"firing","state":"running"}}
+{"seq":15,"at_unix":1794240015.25,"frame":1536,"kind":"note","text":"drive limit (drive-ceiling) on pulse 2: scale 0.924, the drive's 2.1647 V pk is over the 2.0000 V pk drive ceiling; scaled to it","data":{"drive_limit":"drive-ceiling","pulse":1,"scale":0.9239089226007025,"reason":"the drive's 2.1647 V pk is over the 2.0000 V pk drive ceiling; scaled to it"}}
+{"seq":16,"at_unix":1794240016.25,"frame":1536,"kind":"pulse","text":"pulse 2 at -0.69 dB: 0.919 g, passed","data":{"pulse":1,"level_db":-0.6874167738983188,"scheduled_db":0.0,"measured":true,"peak_g":0.9189907312393188,"velocity_change_ips":2.290346860049976,"passed":true}}
+{"seq":17,"at_unix":1794240017.25,"frame":1536,"kind":"state","text":"firing to stopped","data":{"from":"firing","to":"stopped","state":"finished"}}
+{"seq":18,"at_unix":1794240018.25,"frame":1536,"kind":"state","text":"ended (completed): The schedule finished.","data":{"outcome":"completed","by":null,"end":{"outcome":"completed","message":"The schedule finished.","at_s":30.0,"level_db":0,"pulse":1,"trip":null}}}

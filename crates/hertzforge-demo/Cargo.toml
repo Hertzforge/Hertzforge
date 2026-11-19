@@ -1,0 +1,22 @@
+[package]
+name = "hertzforge-demo"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The first end-to-end, zero-hardware closed-loop run: Engine (L2) + SimBackend (L3)
+# + the control DSP (L1) tied together into a Random-on-Sim control loop that
+# demonstrably converges. Pure std + the four workspace crates; no external deps.
+[dependencies]
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-engine = { path = "../hertzforge-engine" }
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# hertzforge-hal is pulled in transitively; name it directly so the demo can use the
+# Backend trait and its status/caps types without leaning on a re-export.
+hertzforge-hal = { path = "../hertzforge-hal" }
+
+[[bin]]
+name = "hertzforge-demo"
+path = "src/main.rs"

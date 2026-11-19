@@ -1,1 +1,1 @@
-{"type": "response", "id": 8, "error": {"code": "not_found", "message": "No dataset named \"plate-x\"; catalog.list names the ones that exist."}}
+{"type": "response", "id": 8, "error": {"code": "not_found", "message": "No operation named 'random.nope'; catalog.list names the ones that exist."}}

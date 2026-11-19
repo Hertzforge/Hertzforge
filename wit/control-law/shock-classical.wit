@@ -1,0 +1,132 @@
+package hertzforge:control-law@0.1.0;
+
+// Classical shock: one drive, one control channel, one pulse at a time.
+//
+// - The pulse grid. Every record has `record-len` samples at `fs-hz` and starts
+//   with the quiet lead-in. A spectrum is the one-sided transform of a record
+//   under the negative-exponent transform,
+//   X[k] = sum_n x[n] exp(-j 2 pi k n / N): `record-len / 2 + 1` bins, bin `k`
+//   at `k * fs-hz / record-len`. The core forms the plant in this convention
+//   (the workspace FFT is positive-exponent, and the core conjugates its
+//   spectra), so a law never converts. A law transforms its own records under
+//   the same convention.
+// - Level. Everything a law sees and returns is at full level (0 dB): the
+//   reference is the full-level compensated pulse, the response is the last
+//   pulse referred to full level by the scale the core actually commanded, and
+//   the drive a law returns is the full-level drive. The core scales it to the
+//   scheduled level; a law never sees the level and cannot change it.
+// - Units. Reference and response in the control channel's units (EU, g for an
+//   accelerometer); drive in volts; plant in EU per volt.
+// - Cadence. A law is called between pulses, never while one plays: once after
+//   system identification (`seed`) and once after each fired, measured and
+//   judged pulse (`iterate`). Each call has a time budget the core sets; a call
+//   past it is not used.
+//
+// This world is a draft until classical shock is merged, and frozen then.
+
+/// Types for classical shock.
+interface classical-types {
+    use types.{diagnostic-value};
+
+    record complex {
+        re: f64,
+        im: f64,
+    }
+
+    /// The core's plant estimate from system identification, on the grid's bins.
+    record plant {
+        /// H[k], control response per drive volt.
+        frf: list<complex>,
+        /// Ordinary coherence of the identification, 0 to 1.
+        coherence: list<f64>,
+        /// The core's regularized inverse, conj(H) / (|H|^2 + epsilon).
+        inverse: list<complex>,
+        /// Bins the core trusts: in the correction band, coherence at or over
+        /// its floor, reference within its dynamic-range floor.
+        trusted: list<bool>,
+        /// The Tikhonov epsilon behind `inverse`, (EU/V)^2.
+        epsilon: f64,
+    }
+
+    /// What a classical law is built for: fixed for the run.
+    record classical-setup {
+        fs-hz: f64,
+        record-len: u32,
+        band-lo-hz: f64,
+        band-hi-hz: f64,
+        /// The full-level reference on the grid: the compensated pulse, EU.
+        reference: list<f64>,
+        /// The main pulse's first sample and length within `reference`.
+        main-start: u32,
+        main-len: u32,
+        plant: plant,
+        /// The drive ceiling referred to full level, volts peak.
+        drive-ceiling: f64,
+    }
+
+    /// The core's judgement of the last pulse.
+    record verdict {
+        /// Inside the standard's tolerance at its commanded level.
+        passed: bool,
+        /// RMS error over the judged window, percent of the reference.
+        error-pct: f64,
+        /// Measured peak over commanded peak.
+        peak-ratio: f64,
+        /// Measured velocity change over the nominal.
+        velocity-change-ratio: f64,
+    }
+
+    /// Everything a classical law sees after a pulse, or before the first.
+    record pulse-inputs {
+        /// Pulses fired so far: 0 at the seed.
+        pulse-index: u64,
+        /// The last pulse's response referred to full level, EU,
+        /// `record-len` samples. Empty at the seed.
+        response: list<f64>,
+        /// The drive the last pulse played referred to full level, volts,
+        /// after the core's limits. Empty at the seed.
+        drive: list<f64>,
+        /// None at the seed.
+        judged: option<verdict>,
+        /// The core scaled the last pulse down (drive ceiling or a monitor).
+        limited: bool,
+    }
+
+    record pulse-outputs {
+        /// The next full-level drive, volts: `record-len` finite samples.
+        drive: list<f64>,
+        /// At most 8 values, each under a key the manifest declares.
+        values: list<diagnostic-value>,
+    }
+}
+
+/// A classical shock law: its state lives in one `law` resource, built once
+/// per run, after system identification.
+interface shock-classical-law {
+    use types.{param};
+    use classical-types.{classical-setup, pulse-inputs, pulse-outputs};
+
+    resource law {
+        /// Build the law for a run. `params` holds every declared parameter,
+        /// already checked against the manifest, in manifest order; values
+        /// the operator left out carry their defaults. An error refuses the
+        /// run with the given reason.
+        constructor(setup: classical-setup, params: list<param>) -> result<law, string>;
+
+        /// The first drive, before any pulse has fired.
+        seed: func(inputs: pulse-inputs) -> result<pulse-outputs, string>;
+
+        /// The next drive, after a pulse was fired, measured and judged.
+        iterate: func(inputs: pulse-inputs) -> result<pulse-outputs, string>;
+    }
+}
+
+/// The world a classical shock law file implements.
+world shock-classical {
+    use types.{manifest};
+
+    /// The law's name, version, parameters and diagnostics.
+    export describe: func() -> manifest;
+
+    export shock-classical-law;
+}

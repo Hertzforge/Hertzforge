@@ -1,0 +1,22 @@
+{
+ "type": "event",
+ "topic": "mimo_sine.log",
+ "seq": 306,
+ "data": {
+  "run_id": "msine-0002",
+  "entries": [
+   {
+    "seq": 14,
+    "at_unix": 1794240081.25,
+    "kind": "notch",
+    "text": "the limit channels hold the reference down to 0.75 of it at 97.25 Hz"
+   },
+   {
+    "seq": 15,
+    "at_unix": 1794240081.5,
+    "kind": "request",
+    "text": "the law asks to slow the sweep at 98.1 Hz; not honoured"
+   }
+  ]
+ }
+}

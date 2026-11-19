@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CursorHub, type CursorState } from './cursor';
+import { CursorHub, playheadGroup, type CursorState } from './cursor';
 
 describe('CursorHub', () => {
 	it('shares a cursor across panes in one link group', () => {
@@ -50,5 +50,12 @@ describe('CursorHub', () => {
 		hub.set('f', 5, 'a');
 		off();
 		expect(hub.get('f')).toEqual({ x: null, source: null });
+	});
+});
+
+describe('playheadGroup', () => {
+	it('keeps one result\'s playhead apart from another\'s on the same link', () => {
+		expect(playheadGroup('time', 'r1')).not.toBe(playheadGroup('time', 'r2'));
+		expect(playheadGroup('time')).toBe('time');
 	});
 });

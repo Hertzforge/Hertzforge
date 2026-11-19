@@ -1,0 +1,9 @@
+[package]
+name = "mimo_compile_probe"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+hertzforge-module-abi = { path = "../../crates/hertzforge-module-abi" }

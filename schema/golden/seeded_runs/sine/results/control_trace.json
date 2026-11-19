@@ -1,0 +1,162 @@
+{
+  "name": "control_trace",
+  "kind": "sine_control",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {},
+  "description": "every call of the control law: the tone's frequency, the control composite's target and measured value, the drive in force before the call, the law's output and the drive the core took from it (before the notch and the drive ceiling); time from engage; a call is NaN where a record was not filled",
+  "diagnostics": [
+    "servo_step_db",
+    "prediction_step_db",
+    "total_step_db",
+    "servo_level_db"
+  ],
+  "hold": [
+    "free",
+    "notch",
+    "probe"
+  ],
+  "miss": [
+    "used",
+    "error",
+    "panicked",
+    "over_budget",
+    "over_memory",
+    "non_finite",
+    "negative",
+    "undeclared_value",
+    "too_many_values"
+  ],
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "tick",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 512
+    },
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "Hz",
+      "offset": 1024
+    },
+    {
+      "name": "target",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "g",
+      "offset": 1536
+    },
+    {
+      "name": "measured",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "g",
+      "offset": 2048
+    },
+    {
+      "name": "drive_in_force",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "V",
+      "offset": 2560
+    },
+    {
+      "name": "output",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "V",
+      "offset": 3072
+    },
+    {
+      "name": "applied",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "V",
+      "offset": 3584
+    },
+    {
+      "name": "prediction_db",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "dB",
+      "offset": 4096
+    },
+    {
+      "name": "hold",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 4608
+    },
+    {
+      "name": "miss",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 5120
+    },
+    {
+      "name": "capped",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "",
+      "offset": 5632
+    },
+    {
+      "name": "call_us",
+      "dtype": "f8",
+      "shape": [
+        64
+      ],
+      "unit": "us",
+      "offset": 6144
+    },
+    {
+      "name": "values",
+      "dtype": "f8",
+      "shape": [
+        4,
+        64
+      ],
+      "unit": "",
+      "offset": 6656
+    }
+  ]
+}

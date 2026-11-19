@@ -1,0 +1,29 @@
+[package]
+name = "hertzforge-shock-common"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The pulse/transient run infrastructure shared by both shock modules (classical +
+# SRS). This crate carries ONLY the tight cut:
+#   - path-honesty type seams (DrivePath + PathCapabilities) so the
+#     services and UI grey features from ONE source of truth;
+#   - the event-driven ShockControlLaw seam + a trivial PerBandGainLaw;
+#   - the shock level-ladder state machine (mirrors hertzforge-random's ladder shape);
+#   - per-pulse capture -> SRS -> store on hertzforge-capture's Snapshot payload seam;
+#   - the pulse-train scheduler + rate model, hardware-blocked markers;
+#   - the DETERMINISTIC-KINEMATICS feasibility path, reusing the
+#     hertzforge-shaker-db report/item/verdict TYPES and consuming force_shock (which no
+#     existing code path consumes) like-for-like by its RatingBasis.
+#
+# Explicitly OUT of scope: predictive-notch limiting + shaped-sysID
+# orchestration live in hertzforge-srs; tolerance checking lives in hertzforge-shock-host;
+# the FRF engine stays in hertzforge-dsp.
+[dependencies]
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+hertzforge-shaker-db = { path = "../hertzforge-shaker-db" }
+hertzforge-capture = { path = "../hertzforge-capture" }
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

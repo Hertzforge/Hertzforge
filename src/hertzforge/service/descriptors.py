@@ -1,0 +1,316 @@
+"""Operation descriptors: the typed form of the schema's `operation`.
+
+The shell builds an operation's panel from its descriptor, so the
+descriptor is also where a request's params are checked: `resolve` fills
+defaults and refuses a value the panel could not have sent, naming the
+param and what it accepts.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+from .protocol import bad_request, refused
+from .verbs import modules_of
+
+ParamType = Literal['number', 'integer', 'enum', 'boolean', 'string']
+#: the module an operation belongs to: the shell's rail entry that offers it. Geometry
+#: holds the finite element work too (meshing, properties, solving for modes): it was
+#: a module of its own, Model, until 2026-11-10.
+#: The analysis modules split the work by
+#: what is being studied (Brandon, 2026-11-04), so a user doing a sine test
+#: is not offered shock tools; an operation every module needs (Plot
+#: Records, Save As, the averaging settings) says `everywhere`.
+Workspace = Literal['acquire', 'simulate', 'signals', 'sysid', 'random', 'shock', 'transient',
+                    'sine', 'modal', 'geometry', 'specify', 'report']
+ViewKind = Literal['spectrum', 'reading', 'shape3d', 'waterfall', 'matrix', 'table']
+
+#: marks a param with no default: the request must give it
+REQUIRED = object()
+
+
+@dataclass(frozen=True)
+class Option:
+    """One choice of an enum param: the value sent back and the label shown."""
+
+    value: str | int | float
+    label: str
+
+    def to_json(self) -> dict[str, Any]:
+        """The option as the descriptor's `options` list carries it."""
+        return {'value': self.value, 'label': self.label}
+
+
+@dataclass(frozen=True)
+class Param:
+    """One input of an operation's panel."""
+
+    name: str
+    label: str
+    type: ParamType
+    default: Any = REQUIRED
+    unit: str | None = None
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    options: Sequence[Option] = ()
+    #: an enum whose options are the open project's objects of some kinds
+    #: ('objects:psd' or 'objects:psd|frf', by `projects.kind_of`), or
+    #: the objects a core verb applies to ('verb:integrate', by
+    #: `Project.verbs`, the table the verbs themselves are offered by)
+    options_from: str | None = None
+    #: set from the result's view rather than the panel, which does not
+    #: show it (a waterfall's quantity, chosen among the groups it drew)
+    in_view: bool = False
+    #: an `objects:` param with default '' is optional: '' names no object,
+    #: the shell offers it as "(none)", and the operation runs without one
+    #: (`optional`)
+    #: the setting of the object the operation's `source` param names that
+    #: the param opens on, as '<group>.<field>' in the summary's
+    #: `settings` ('averaging.frame_length'); the default when the object
+    #: has none
+    setting: str | None = None
+    #: a length, or a text of them ('0, 0, 0.1', '3: 0.01'), typed in the connection's display
+    #: system: the service takes it to meters before the operation runs, and the shell shows
+    #: the system's length unit for `unit`, and for '[m]' in the label
+    length: bool = False
+    #: a number of this dimension ('force/length' for a stiffness) typed in the connection's
+    #: display system: the service takes it to SI before the operation runs, and the shell
+    #: shows the system's unit for `unit` and its default in that unit (`units.system`'s
+    #: `quantities`)
+    quantity: str | None = None
+    #: a request the panel asks for this field's value, with the form's values, when the
+    #: button beside it is pressed (Mesh's element size, detected for the parts and the
+    #: element type chosen): `{'value'}` comes back, in the display units
+    suggest: str | None = None
+    #: shown only while another param holds a value, as (its name, the value): one of
+    #: two ways to say a thing, the other's field out of sight (Solve Modes asks for a
+    #: number of modes or a highest frequency, not both)
+    shown_with: tuple[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        source = self.options_from
+        if source is not None and not (
+                source.startswith('objects:') and all(self.kinds)
+                or source.startswith('verb:') and self.verb):
+            raise ValueError(f'options_from {source!r} is '
+                             '"objects:<kind>|<kind>" or "verb:<verb>"')
+
+    @property
+    def optional(self) -> bool:
+        """Whether this is an object param that may name none ('')."""
+        return bool(self.options_from) and self.default == ''
+
+    @property
+    def kinds(self) -> tuple[str, ...]:
+        """The object kinds an `objects:` param takes; empty for any other."""
+        source = self.options_from or ''
+        return (tuple(source.removeprefix('objects:').split('|'))
+                if source.startswith('objects:') else ())
+
+    @property
+    def verb(self) -> str:
+        """The core verb a `verb:` param's objects must take; '' for any
+        other."""
+        source = self.options_from or ''
+        return source.removeprefix('verb:') if source.startswith('verb:') else ''
+
+    def to_json(self) -> dict[str, Any]:
+        """The param as the schema's descriptor writes it. Fields left unset
+        are omitted rather than sent as null, and so is a required param's
+        default."""
+        out: dict[str, Any] = {'name': self.name, 'label': self.label,
+                               'type': self.type}
+        if self.unit is not None:
+            out['unit'] = self.unit
+        if self.default is not REQUIRED and self.default is not None:
+            out['default'] = self.default
+        for key in ('min', 'max', 'step'):
+            value = getattr(self, key)
+            if value is not None:
+                out[key] = value
+        if self.options:
+            out['options'] = [option.to_json() for option in self.options]
+        if self.options_from is not None:
+            out['options_from'] = self.options_from
+        if self.in_view:
+            out['in_view'] = True
+        if self.setting is not None:
+            out['setting'] = self.setting
+        if self.length:
+            out['length'] = True
+        if self.quantity is not None:
+            out['quantity'] = self.quantity
+        if self.suggest is not None:
+            out['suggest'] = self.suggest
+        if self.shown_with is not None:
+            out['shown_with'] = list(self.shown_with)
+        return out
+
+    def check(self, value: Any, choices: Sequence[Any] | None) -> Any:
+        """`value` as this param's type, or a bad_request naming why not.
+        `choices` are the allowed values of an `options_from` enum."""
+        what = f'param "{self.name}" ({self.label})'
+        if self.type in ('number', 'integer'):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise bad_request(f'{what} must be a number, not '
+                                  f'{json_type(value)}')
+            if not math.isfinite(value):
+                raise bad_request(f'{what} must be finite, not {value}')
+            if self.type == 'integer':
+                if float(value) != int(value):
+                    raise bad_request(f'{what} must be a whole number, not '
+                                      f'{value}')
+                value = int(value)
+            else:
+                value = float(value)
+            if self.min is not None and value < self.min:
+                raise bad_request(f'{what} is {value}; the least it takes is '
+                                  f'{self.min:g}{_unit(self.unit)}')
+            if self.max is not None and value > self.max:
+                raise bad_request(f'{what} is {value}; the most it takes is '
+                                  f'{self.max:g}{_unit(self.unit)}')
+            return value
+        if self.type == 'boolean':
+            if not isinstance(value, bool):
+                raise bad_request(f'{what} must be true or false, not '
+                                  f'{json_type(value)}')
+            return value
+        if self.type == 'string':
+            if not isinstance(value, str):
+                raise bad_request(f'{what} must be a string, not '
+                                  f'{json_type(value)}')
+            return value
+        allowed = (list(choices) if self.options_from is not None
+                   else [option.value for option in self.options])
+        if self.optional and value == '':
+            return value
+        if value not in allowed:
+            shown = ', '.join(repr(a) for a in allowed[:12])
+            more = ', ...' if len(allowed) > 12 else ''
+            raise bad_request(f'{what} is {value!r}, which is not one of the '
+                              f'choices: {shown}{more}')
+        return value
+
+
+def _unit(unit: str | None) -> str:
+    return f' {unit}' if unit else ''
+
+
+def json_type(value: Any) -> str:
+    """How a JSON value's type reads in an error message."""
+    if value is None:
+        return 'null'
+    if isinstance(value, bool):
+        return 'a boolean'
+    if isinstance(value, (int, float)):
+        return f'the number {value}'
+    if isinstance(value, str):
+        return f'the string {value!r}'
+    if isinstance(value, list):
+        return 'a list'
+    if isinstance(value, dict):
+        return 'an object'
+    return type(value).__name__
+
+
+@dataclass(frozen=True)
+class Operation:
+    """An operation's descriptor, plus the function that runs it.
+
+    `run(project, params)` receives the connection's `Project` and the
+    resolved params and returns the result's list of views.
+    """
+
+    id: str
+    title: str
+    workspace: Workspace
+    summary: str
+    params: Sequence[Param]
+    outputs: Sequence[ViewKind]
+    run: Callable[[Any, dict[str, Any]], list[dict[str, Any]]] = field(
+        repr=False, compare=False)
+    #: a project operation that changes an object in place (marks shocks
+    #: on a history), so the project has unsaved changes even when no
+    #: object was added or removed
+    edits: bool = False
+    #: for an operation that answers with a view until told to go ahead: whether these params
+    #: change anything, so looking at the view leaves the project unmodified
+    edits_when: Callable[[dict[str, Any]], bool] | None = field(default=None, repr=False,
+                                                                compare=False)
+    #: offered in every analysis module, not only its own: an act any
+    #: study needs (Plot Records, Save As, a table's cell edit)
+    everywhere: bool = False
+    #: the form can show this while it is typed: `op.run` with `preview` runs it on a
+    #: copy of its geometry, so nothing in the project changes
+    previews: bool = False
+    #: the boolean param that says go ahead, for an operation that shows what it would do
+    #: until told to (Mesh Solids, Merge Coincident Nodes): the form does not ask it, and sets
+    #: it false for its Preview button and true for Apply (Brandon, 2026-11-11)
+    commits: str | None = None
+    #: its readings and refusals say lengths in words, '0.2 m', which go to the display system
+    says_lengths: bool = False
+
+    def to_json(self) -> dict[str, Any]:
+        """The descriptor `catalog.list` sends for this operation; `run`
+        stays behind."""
+        out = {'id': self.id, 'title': self.title,
+               'workspace': self.workspace, 'summary': self.summary,
+               'params': [param.to_json() for param in self.params],
+               'outputs': list(self.outputs)}
+        out['modules'] = list(modules_of(self))
+        if self.previews:
+            out['previews'] = True
+        if self.commits:
+            out['commits'] = self.commits
+        return out
+
+    def resolve(self, given: Any, objects: Mapping[str, str] | None = None,
+                verbs: Mapping[str, Collection[str]] | None = None
+                ) -> dict[str, Any]:
+        """The params to run with: each given value checked, each missing
+        one its default. An `options_from` param with no default takes the
+        first of its choices: the names in `objects` (name to kind, the
+        project's order) of the kinds it takes, or the names in `verbs`
+        (name to the verbs that apply to it) its verb applies to."""
+        if not isinstance(given, Mapping):
+            raise bad_request(f'op.run "params" must be an object, not '
+                              f'{json_type(given)}')
+        known = {param.name: param for param in self.params}
+        unknown = sorted(set(given) - set(known))
+        if unknown:
+            raise bad_request(
+                f'{self.id} has no param named {", ".join(map(repr, unknown))}'
+                f'; it takes {", ".join(map(repr, known)) or "none"}')
+        out = {}
+        for param in self.params:
+            choices = ([name for name, kind in (objects or {}).items()
+                        if kind in param.kinds] if param.kinds
+                       else [name for name, applies in (verbs or {}).items()
+                             if param.verb in applies] if param.verb
+                       else None)
+            if param.name in given:
+                out[param.name] = param.check(given[param.name], choices)
+            elif param.default is not REQUIRED:
+                out[param.name] = param.default
+            elif choices:
+                out[param.name] = choices[0]
+            elif param.kinds:
+                kinds = ' or '.join(kind.replace('_', ' ') for kind in param.kinds)
+                raise refused(f'{self.title} needs a {kinds} ({param.label}), '
+                              'and the project has none')
+            elif param.verb:
+                raise refused(f'{self.title} applies to none of the project\'s '
+                              f'objects ({param.label})')
+            else:
+                raise bad_request(f'{self.id} needs param "{param.name}" '
+                                  f'({param.label})')
+        return out
+
+
+#: the channels picked in the tree, sent to an operation that acts on one channel so that
+#: it acts on each of them; a form does not ask for it (`parsing.each_picked`)
+TREE_PICKS = Param('picked', 'Channels picked in the tree', 'string', default='')

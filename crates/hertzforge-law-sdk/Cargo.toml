@@ -1,0 +1,41 @@
+[package]
+name = "hertzforge-law-sdk"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# The guest side of the control-law interface: what a law author depends on
+# to build a law file. Generates the bindings for the `random-single`,
+# `random-mimo`, `shock-classical`, `shock-srs`, `shock-mimo`, `sine-single` and `sine-mimo` worlds of
+# `wit/control-law/` and wraps them in the `RandomLaw`, `RandomMimoLaw`,
+# `ShockClassicalLaw`, `ShockSrsLaw`, `ShockMimoLaw`, `SineSingleLaw` and `SineMimoLaw` traits and their
+# `export_*!` macros. Builds for the host too (so the workspace lints it and a law's math
+# can be unit-tested natively); a law file is built with
+# `cargo build --target wasm32-wasip2 --release`.
+[dependencies]
+# 0.61 parses WIT with the same wasm-tools line (0.258) as Wasmtime 49, so
+# the build holds one copy of the parser. No async, no flags types.
+wit-bindgen = { version = "0.61", default-features = false, features = ["macros", "realloc", "std"] }
+# The spectral density matrix stacks and the MIMO law boundary a multiple-output
+# law is written against, shared with the controller.
+hertzforge-sdm = { path = "../hertzforge-sdm" }
+# A classical shock law's transforms (`shock::rfft_half`, `shock::irfft_half`)
+# in the world's convention, and the built-in law's arithmetic for the law file
+# that wraps it. Plain math that builds for `wasm32-wasip2`.
+hertzforge-shock-law-math = { path = "../hertzforge-shock-law-math" }
+# The MIMO Shock laws' mathematics (transforms on the pulse grid, the
+# regularized inverse, the SRS, delays, and the built-in laws' steps), re-exported
+# as `shock_mimo::math` so a MIMO Shock law file runs the controller's own code.
+# Plain math that builds for `wasm32-wasip2`.
+hertzforge-mimo-shock-law-math = { path = "../hertzforge-mimo-shock-law-math" }
+# The native Sine law seam (`hertzforge_sine::law`) and the built-in Sine law,
+# for a Sine law file that wraps a native law (`laws/sine-servo`). The control
+# core alone, without the run service: plain math that builds for
+# `wasm32-wasip2`.
+hertzforge-sine = { path = "../hertzforge-sine", default-features = false }
+# The MIMO Sine laws' mathematics (the built-in laws' steps, the loop-speed rule,
+# the model the carry runs through, the regularized inverse), re-exported as
+# `sine_mimo::math` so a MIMO Sine law file runs the controller's own code.
+# Plain math that builds for `wasm32-wasip2`.
+hertzforge-mimo-sine-law-math = { path = "../hertzforge-mimo-sine-law-math" }

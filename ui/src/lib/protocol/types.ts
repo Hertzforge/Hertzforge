@@ -48,6 +48,10 @@ export type ErrorCode = 'bad_request' | 'unknown_method' | 'not_found' | 'refuse
 export interface ProtocolErrorBody {
 	code: ErrorCode;
 	message: string;
+	/** A stable name for the cause; every hardware and Random error carries one. */
+	reason?: RefusalReason;
+	/** The facts behind `reason` (PROTOCOL.md, "Refusals"). */
+	detail?: Record<string, unknown>;
 }
 
 export interface ResponseOk<R = Record<string, unknown>> {
@@ -84,7 +88,7 @@ export interface Axis {
 	scale: Scale;
 }
 
-export type Role = 'measured' | 'reference' | 'tolerance' | 'abort' | 'drive' | 'other';
+export type Role = 'measured' | 'reference' | 'tolerance' | 'abort' | 'limit' | 'drive' | 'other';
 
 export interface Series {
 	name: string;
@@ -100,6 +104,14 @@ export interface Series {
 	shape?: SeriesShape;
 	/** Bin edges for `steps`: one more than there are y values, ascending. */
 	edges?: NumericArray;
+	/**
+	 * Present when the service decimated the series to the plot's width: each point stands for
+	 * an interval of the original lines, `y` its largest value and `y_min` its smallest. Drawn as
+	 * the band between them.
+	 */
+	y_min?: NumericArray;
+	/** Index of the series this one follows: a model's prediction of that measurement. */
+	follows?: number;
 }
 
 export type SeriesShape = 'line' | 'steps' | 'law';
@@ -111,6 +123,45 @@ export interface SpectrumView {
 	y: Axis;
 	series: Series[];
 	link?: string;
+	/** Spans of x shaded behind the curves: frames averaged from, or spans cut away. */
+	regions?: Region[];
+	/** Places on a series to drag up and down, which run `op` with `decibels` on release. */
+	handles?: SpectrumHandle[];
+	/** Sets of series shown one at a time, chosen from a list: a channel each, say. */
+	groups?: SeriesGroup[];
+	/** Zones shaded behind the curves, each between two edges at `x` (null: the plot's edge on that side): past a warning limit, over or under an abort. */
+	bands?: { kind: 'warning' | 'over' | 'under'; x: (number | null)[]; lower: (number | null)[] | null; upper: (number | null)[] | null }[];
+	/** The legend's lines for the zones and marks: a code (`warning`, `above`, `below`, `exceed_over`, `exceed_under`) and its words. */
+	key?: [string, string][];
+	/** Numbers boxed under the plot, as a group's: the share of lines out, the RMS error. */
+	readouts?: { label: string; text: string; status: Status }[];
+	/** The range of x the plot opens on, where that is not all of its data. */
+	x_home?: [number, number];
+}
+
+/** One set of a spectrum's series, by index, with readings that go with it. */
+export interface SeriesGroup {
+	label: string;
+	series: number[];
+	readouts?: { label: string; text: string; status: Status }[];
+}
+
+/** A span of x shaded behind a spectrum's curves. */
+export interface Region {
+	x0: number;
+	x1: number;
+	/** `frame`: a frame the spectra are averaged from; `cut`: a span left out; `span`: edges alone; `over`, `under`: lines outside an abort limit. */
+	kind: 'frame' | 'cut' | 'span' | 'over' | 'under';
+	label?: string;
+	/** A frame's window: its weights from 0 to 1, evenly spaced from x0 to x1, drawn on a rail above the curves and followed by the frame's shading. */
+	window?: number[];
+	/** The frame's row on the rail, of `rows`: frames that overlap cannot share one. */
+	level?: number;
+	rows?: number;
+	/** A dragged span of frames: a frame's length and the step between frames, in x, and the record's ends, to draw the whole frames a drag would leave while it is dragged. */
+	snap?: { frame: number; hop: number; low: number; high: number };
+	/** Present when the span is dragged: `op` runs with `params`, the new x0 as `low`, x1 as `high`. */
+	drag?: { op: string; params: Record<string, unknown>; low: string; high?: string };
 }
 
 export type Status = 'pass' | 'warn' | 'fail' | 'info';
@@ -132,8 +183,33 @@ export interface Mode {
 	index: number;
 	frequency_hz: number;
 	damping?: number | null;
-	/** f32 [N, 3], same node order as `nodes`. */
+	/** f32 [N, 3], same node order as `nodes`; the real part of a complex shape. */
 	shape: Float32Array;
+	/** f32 [N, 3], the imaginary part of a complex shape; absent for a real one. */
+	shape_imag?: Float32Array;
+	/** Names a shape that is not a mode, in place of "Mode <index>". */
+	label?: string;
+}
+
+/** Measured data played back on the mesh (schema/PROTOCOL.md, `shape3d` `motion`). */
+export interface Motion {
+	/** The abscissa: sample k is at start + k * step, in `unit`. */
+	label: string;
+	unit: string;
+	start: number;
+	step: number;
+	quantity: string;
+	value_unit: string;
+	/** u32 [D]: the node of `nodes` each DOF moves. */
+	node: Uint32Array;
+	/** f32 [D, 3]: the unit direction each DOF moves in. */
+	direction: Float32Array;
+	/** f32 [D, S]: DOF d at sample k is values[d * S + k]. */
+	values: Float32Array;
+	/** f32 [M, D, 3]: each mode's offset at each moved node; then `values` is [M, S], modal coordinates. */
+	modes?: Float32Array;
+	/** The furthest any node gets, in value_unit. */
+	peak: number;
 }
 
 export interface Shape3DView {
@@ -147,17 +223,334 @@ export interface Shape3DView {
 	/** u32 [T, 3]. */
 	triangles?: Uint32Array;
 	modes: Mode[];
+	/** Measured data to play back, with `modes` empty. */
+	motion?: Motion;
+	/** The drawn nodes' ids, for the hover captions; absent on a view that is not a geometry's. */
+	node_ids?: Uint32Array;
+	/** The way the view opens looking from: `eye` the direction from the model to the camera, `up` the way up on screen (the geometry's own view); from the front right, Z up, when absent. */
+	home?: { eye: number[]; up: number[] };
+	/** The shape is read at a line of the plot it is shown with; that plot's cursor moves it. */
+	cursor?: 'frequency';
+	/**
+	 * DOF arrows over the model in its own coordinates, solids that stay put: `tails` [A, 3] where
+	 * each starts, `directions` [A, 3] the unit vector it points along, `axes` [A] the DOF's own
+	 * axis (0 X, 1 Y, 2 Z), which picks its color, and the one `length`. `labels` names each
+	 * arrow's DOF; `inward` [A] is 1 for an arrow that points in and ends on its node. With
+	 * `follow` [A] the arrows move: each takes the motion of that row of `nodes` (2^32 − 1 stays put).
+	 */
+	arrows?: { tails: Float32Array; directions: Float32Array; axes: Uint8Array; length: number; labels: string[]; inward: Uint8Array; follow?: Uint32Array };
+	/**
+	 * Solids over the model in its own coordinates: sensor bodies. `colors` u8 [P, 3] is each
+	 * point's sRGB; `follow` [P] the row in `nodes` whose motion a point takes, or 2^32 − 1 to stay put.
+	 */
+	bodies?: { nodes: Float32Array; triangles: Uint32Array; colors: Uint8Array; follow: Uint32Array };
+	/**
+	 * Free points over the model in its own coordinates, in layers: the nodes of a geometry that no
+	 * line or face is drawn through (measured points, a cloud from a laser scan, nodes alone).
+	 * `xyz` f32 [P, 3], `colors` u8 [P, 3] each point's sRGB, `size` the point's width on screen
+	 * in pixels. They stay put and are framed with the model.
+	 */
+	points?: { xyz: Float32Array; colors: Uint8Array; size: number }[];
+	/** A second set of shapes on the same nodes, for a matrix that selects this view. */
+	overlays?: Mode[];
+	/** f32 [R, C]: the angle that aligns overlay c with mode r. */
+	overlay_phase?: Float32Array;
+	/**
+	 * The mesh the overlays move when they are a second geometry's shapes, whose nodes follow the
+	 * first's in `nodes`; `triangles` and `lines` are then the first geometry's alone.
+	 */
+	overlay_triangles?: Uint32Array;
+	overlay_lines?: Uint32Array;
+	/** Overlay k goes with mode k, and stepping the modes steps the pairs (Matched Modes). */
+	paired?: boolean;
+	/** Ties playback to a spectrum of the same result with this link, which marks its time. */
+	link?: string;
+	note?: string;
+	/** The nodes of `node_ids` are marked by a click, with every view of the same `link` (a table's rows). */
+	marks?: { link: string };
+	/** Things the tree's rows mark with the same `link`: id k rings the nodes `rows[k]`, or with `frames` the origin of the k-th frame. */
+	mark_sets?: { link: string; ids: number[]; rows?: number[][]; frames?: boolean }[];
+	/** What a click in the view does. */
+	pick?: Pick3D;
+	/** How solid the surface opens, below 1 to see what is marked on surfaces inside. */
+	opacity?: number;
+	gizmo?: Gizmo3D;
+	/** Coordinate systems to draw as the gimbal is drawn: each origin, its three axes and how long. */
+	frames?: { origin: number[]; axes: number[][]; length: number }[];
 }
 
-export type View = SpectrumView | ReadingView | Shape3DView;
+/** What a drag on a gizmo's arrow or ring runs. */
+export interface GizmoAct {
+	op: string;
+	params: Record<string, unknown>;
+	/** The param a drag along each axis goes in. */
+	values: Record<'x' | 'y' | 'z', string>;
+	/** What else each axis adds. */
+	adds?: Record<'x' | 'y' | 'z', Record<string, unknown>>;
+}
+
+/** Arrows and rings to drag in a `shape3d` view (schema/PROTOCOL.md). */
+export interface Gizmo3D {
+	origin: [number, number, number];
+	axes: [number, number, number][];
+	slide: GizmoAct;
+	turn: GizmoAct;
+	/** A drag's length in the view's unit, to meters; absent where the service takes it in the view's unit. */
+	to_si?: number;
+}
+
+/** A drag on a `spectrum` view: a place on `series` near `x`, at `decibels` from what it follows. */
+export interface SpectrumHandle {
+	series: number;
+	x: number;
+	decibels: number;
+	label: string;
+	op: string;
+	params: Record<string, unknown>;
+}
+
+/** A click in a `shape3d` view: the operation it runs, and what it sends (schema/PROTOCOL.md). */
+export interface Pick3D {
+	op: string;
+	params: Record<string, unknown>;
+	target: 'point' | 'nodes' | 'faces';
+	hint: string;
+	/** nodes: the node id of each pickable row, first rows first. */
+	ids?: number[];
+	/** nodes: how many make one; 0 takes any number, then Enter. */
+	count?: number;
+	/** nodes: the param the ids go in. */
+	param?: string;
+	/** nodes: how many of the last `ids` are left out, and drawn dim. */
+	off?: number;
+	/** nodes: a second set of places after the `ids` rows, drawn in their own color and not clicked: how many held, then how many not. */
+	others?: [number, number];
+	/** faces: each triangle's surface, -1 for none. */
+	faces?: Int32Array;
+	/** faces: the surfaces in use now. */
+	kept?: number[];
+	out?: string;
+	back?: string;
+	/** point: [scale, offset] taking a clicked coordinate in the view's unit back to SI; absent where the service takes it in the view's unit. */
+	to_si?: [number, number];
+}
+
+/**
+ * Many records of one quantity, each a polyline at its own depth (schema/PROTOCOL.md, `waterfall`).
+ * Values are in display units and never logged; the shell takes log10 of a `log` axis.
+ */
+export interface WaterfallView {
+	/** The view it opens in; a coherence opens on the map, seen from above. */
+	facing?: 'perspective' | 'top' | 'front';
+	view: 'waterfall';
+	title: string;
+	x: Axis;
+	z: Axis;
+	/** A stage of paths: every point at a depth of its own on this axis (the sine stage's time). */
+	y?: Axis;
+	/** f32 [P]: each point's depth on `y`. */
+	y_values?: Float32Array;
+	y_range?: [number, number];
+	/** One label per record, front to back. */
+	records: string[];
+	/** u32 [R + 1]: record r is points offsets[r] .. offsets[r + 1]. */
+	offsets: Uint32Array;
+	/** f32 [P]. */
+	x_values: Float32Array;
+	/** f32 [P]; NaN is a gap. */
+	z_values: Float32Array;
+	/** Where something is drawn on x. */
+	x_range: [number, number];
+	/** A level range the data pins (a coherence's 0 to 1.05). */
+	z_range?: [number, number];
+	/** Which page of how many, of how many records. */
+	page?: { number: number; count: number; records: number };
+	/** The quantities the object holds, two or more; choosing one reruns with `quantity` set. */
+	quantities?: { value: string; label: string; records: number }[];
+	/** The value of the quantity drawn. */
+	quantity?: string;
+	note?: string;
+	/** A stage: the depth axis's labels, front to back, in place of the records'. */
+	stations?: string[];
+	/** Each record's station; two records can share one. */
+	depths?: number[];
+	/** Each record's pen: 'measured' is colored by level, any other role in its color. */
+	roles?: Role[];
+	/** Limit bands; one with no `outer` runs to the stage's top or floor. */
+	zones?: StageZone[];
+	/** Lines past an abort limit: one rectangle each, from the limit to the top or floor. */
+	exceed?: StageExceed[];
+	/** One abscissa a station each: translucent walls from floor to top. */
+	walls?: Float32Array[];
+	/** The records are one surface, each on the same abscissa. */
+	surface?: boolean;
+	/** Spans of the abscissa across the whole stage, dragged as a spectrum's regions are. */
+	regions?: Region[];
+}
+
+export interface StageZone {
+	station: number;
+	kind: 'warning' | 'abort';
+	side: 'upper' | 'lower';
+	x: Float32Array;
+	/** On a stage of paths: the depth of each point, so the band follows the path. */
+	y?: Float32Array;
+	inner: Float32Array;
+	outer?: Float32Array;
+}
+
+export interface StageExceed {
+	station: number;
+	side: 'upper' | 'lower';
+	x0: Float32Array;
+	x1: Float32Array;
+	/** On a stage of paths: each rectangle's depths at its two edges. */
+	y0?: Float32Array;
+	y1?: Float32Array;
+	z: Float32Array;
+}
+
+/** One value per row and column, such as a MAC (schema/PROTOCOL.md, `matrix`). */
+export interface MatrixView {
+	view: 'matrix';
+	title: string;
+	rows: { label: string; ticks: string[] };
+	columns: { label: string; ticks: string[] };
+	/** f32 [R, C], row-major: row r, column c is values[r * C + c]. */
+	values: Float32Array;
+	value_label: string;
+	/** The color scale, pinned. */
+	value_range: [number, number];
+	/** Clicking cell (r, c) shows the result's shape3d view's mode r with overlay c. */
+	selects?: 'shape3d';
+	/** [row, column] pairs already kept as matched modes, marked in red. */
+	matched?: [number, number][];
+}
+
+/** Rows of values against frequency, such as MIMO Random's error per control (`heatmap`). */
+export interface HeatmapView {
+	view: 'heatmap';
+	title: string;
+	rows: { label: string; ticks: string[] };
+	x: Axis;
+	/** f64 [C]: the frequency of each column. */
+	x_values: Float64Array;
+	/** f32 [R, C], row-major. */
+	values: Float32Array;
+	value: { label: string; unit: string | null };
+	/** Each row's alarm and abort bands, `[below, above]` dB: the color breaks. */
+	row_bands: { alarm_db: [number, number]; abort_db: [number, number] }[];
+}
+
+/** A packed Hermitian block: per line, the upper triangle row by row. */
+export interface PackedArrays {
+	/** f64 [L, P], P = n (n + 1) / 2. */
+	re: Float64Array;
+	im: Float64Array;
+}
+
+/** A block of a spectral density matrix, such as MIMO Random's grid window (`sdm`). */
+export interface SdmView {
+	view: 'sdm';
+	title: string;
+	channels: string[];
+	packing: 'upper';
+	unit: string;
+	x: Axis;
+	x_values: Float64Array;
+	measured: PackedArrays | null;
+	reference: PackedArrays | null;
+}
+
+/** Rows of text under column headings, such as a mode table. */
+export interface TableView {
+	view: 'table';
+	title: string;
+	columns: string[];
+	/** One cell per column, as text. */
+	rows: string[][];
+	/** Present when the cells are typed into: the operation that sets one, and each column's key (null: read only). */
+	edit?: TableEdit;
+	/** A long table's count of rows, when it sent only its first ones. */
+	total?: number;
+	/** How to ask for the rest: `method` with `params`, `start` and `count`. */
+	more?: { method: string; params: Record<string, unknown> };
+	/** A table of its own under a row, shown when the row is opened: one per row, null for a row with none. */
+	nested?: (TableView | null)[];
+	/** The rows that start opened, from 1; the rest start closed. */
+	open?: number[];
+	/**
+	 * What picking one row does: `op` runs with `params` and the row's cell in `column` as `param`,
+	 * and the views it answers with that are not tables take the others' places (a coordinate
+	 * system's row puts the arrows and rings on it).
+	 */
+	select?: { op: string; params: Record<string, unknown>; param: string; column: number };
+	/** The rows selected are marked, each by its cell in `column`, with every view of the same `link` (a 3-D view's nodes). */
+	marks?: { link: string; column: number };
+}
+
+/** How a table's cells are edited: `op` runs with `params` plus `row` (from 1), `column` and `value`. */
+export interface TableEdit {
+	op: string;
+	params: Record<string, unknown>;
+	columns: (string | null)[];
+	/** What a column offers, by its key: a shortlist the cell can still be typed past. */
+	choices?: Record<string, string[]>;
+	/** How a column's cells are edited, by key: a flag is a check box, a choice a drop-down, a date a date field. */
+	kinds?: Record<string, 'choice' | 'flag' | 'date' | 'unit' | 'number' | 'text'>;
+	/** The row each shown row is in the object, from 1, when the table shows a pick of them. */
+	rows?: number[];
+	/** A column shown in the display units, by key: [scale, offset] taking a value typed back to SI. */
+	to_si?: Record<string, [number, number]>;
+	/** The rows are the entities: Delete runs `op` with `params` and the selected rows' ids, the cells in `column`, as runs. */
+	remove?: { op: string; params: Record<string, unknown>; column: number };
+}
+
+/** A photo of the test: the file's bytes as read, png or jpeg, drawn under its name. */
+export interface ImageView {
+	view: 'image';
+	title: string;
+	format: 'png' | 'jpeg';
+	/** u8 [N]: the encoded file. */
+	bytes: Uint8Array;
+}
+
+/**
+ * A bar a row, such as each channel's RMS error against its tolerance. The service judges
+ * each bar (`states`); the thresholds are sent to shade the ground past them.
+ */
+export interface BarsView {
+	view: 'bars';
+	title: string;
+	value: { label: string; unit: string | null };
+	labels: string[];
+	/** null: no number, so no bar; the row is still named. */
+	values: (number | null)[];
+	states: ('over' | 'under' | null)[];
+	/** Said along a row, such as why it was not scored. */
+	notes?: (string | null)[];
+	/** A value under it is out. */
+	under?: number | null;
+	/** A value over it is out. */
+	over?: number | null;
+	/** Where the bars grow from; 0 when absent. */
+	baseline?: number;
+	/** The axis never reaches below it. */
+	floor?: number | null;
+}
+
+export type View = SpectrumView | ReadingView | Shape3DView | WaterfallView | MatrixView | HeatmapView | SdmView | TableView | ImageView | BarsView;
 export type ViewKind = View['view'];
 
 // ---------------------------------------------------------------------------------------------
 // Operations and datasets
 
-export type Workspace = 'acquire' | 'analyze' | 'modal' | 'model' | 'specify' | 'simulate' | 'report';
-
-export type DatasetKind = 'random_run' | 'modal_model';
+/**
+ * The modules on the rail. The analysis is split by what is studied (signals, random, shock, sine,
+ * modal) and what is built (geometry, model), each a lens on the one project, rather than by a
+ * project type.
+ */
+export type Workspace = 'acquire' | 'simulate' | 'signals' | 'sysid' | 'random' | 'shock' | 'transient' | 'sine' | 'modal' | 'geometry' | 'specify' | 'report';
 
 export type ParamType = 'number' | 'integer' | 'enum' | 'boolean' | 'string';
 
@@ -176,41 +569,329 @@ export interface ParamDescriptor {
 	max?: number;
 	step?: number;
 	options?: ParamOption[];
-	options_from?: 'channels';
+	/** The dataset's channels, or the open project's objects of the kinds named (`objects:psd|frf`). */
+	options_from?: 'channels' | `objects:${string}` | `verb:${string}`;
+	/** Set from the result's view, not shown in the panel (a waterfall's quantity). */
+	in_view?: boolean;
+	/** A length, or a text of lengths, typed in the display system (`withDisplayLengths`). */
+	length?: boolean;
+	/** A number of this dimension ('force/length') typed in the display system (`withDisplayQuantities`). */
+	quantity?: string;
+	/** The setting of the `source` object the param opens on, as `<group>.<field>`. */
+	setting?: string;
+	/** A request for this field's value, asked with the form's values by a button beside it; `{value}` comes back in the display units. */
+	suggest?: string;
+	/** Shown only while another param holds a value: [its name, the value]. */
+	shown_with?: [string, unknown];
+}
+
+/** One object of the open project (schema/PROTOCOL.md, Projects). */
+export interface ProjectObject {
+	name: string;
+	/** The class in snake case: `frf`, `time_history`, `shape_set`, `geometry`. */
+	kind: string;
+	records?: number;
+	source?: DataSource;
+	/** False for an object imported without its units. */
+	units_defined?: boolean;
+	/** A PSD or a specification on proportional bands, which changes its icon. */
+	banded?: boolean;
+	/** The two shape sets a Matched Modes object pairs, first and second: the tree sets it beside their groups. */
+	between?: [string, string];
+	/** A few words on what the object holds: its size, not its name. */
+	holds?: string;
+	/** It holds a structure of items, so its row opens onto them (`project.children`). */
+	opens?: boolean;
+	/** Why the object does not fit what it answers to, and the records, modes or channels at fault. */
+	issue?: { message: string; sub_items: number[] };
+	/** Why a derived object no longer matches its source; absent while it does. */
+	stale?: string;
+	groups: string[];
+	/** The core's processing verbs that apply to it, which `verb:` params are filled from. */
+	verbs?: string[];
+	/** A time history's analysis settings, each group present only when set; a report's features. */
+	settings?: Record<string, Record<string, number | string | boolean>>;
+	/** A run record's run folder, while it is there: for Show Folder and Delete Run. */
+	run_folder?: string;
+}
+
+/** `runs.data_folder`: where the control service keeps runs, as the analysis service resolves it. */
+export interface DataFolderInfo {
+	path: string;
+	/** `setting`: chosen in the desktop app; `environment`: `HERTZFORGE_DATA_ROOT`; `default`: in the home folder. */
+	source: 'setting' | 'environment' | 'default';
+	exists?: boolean;
+	/** Whether a run's record can be written there now; absent when the folder does not exist yet. */
+	writable?: boolean;
+	/** Why it cannot be written. */
+	reason?: string;
+}
+
+/** `runs.delete`: what deleting a run removes (with `dry_run`, would remove). */
+export interface RunDeletePlan {
+	folder: string;
+	project_file: string;
+	project_file_exists: boolean;
+	/** Whether its `run.json` says the run ended cleanly; false only when asked with `not_live`. */
+	complete?: boolean;
+	deleted: boolean;
+}
+
+/** The connection's own project, as `project.*` and project operations return it. */
+export interface ProjectSummary {
+	title: string;
+	file: string | null;
+	modified: boolean;
+	objects: ProjectObject[];
+	/** The geometry data is drawn on when nothing else names one. */
+	active_geometry?: string | null;
+	/** The object groups, as the tree brackets them: members, `Basis` or null, and a name or blank. */
+	links?: { members: string[]; role: string | null; name: string }[];
+	/** Objects held by reference to a file that was not found or has changed: not loaded, kept. */
+	unresolved?: { name: string; kind: string; path: string; reason: 'not found' | 'changed' }[];
+}
+
+/** `project.actions`: the action table for a selection. */
+export interface Actions {
+	table: ActionTable;
+}
+
+/** A lone shape set's views, shown one at a time. */
+export type ShapeView = 'animate' | 'table' | 'mac' | 'values';
+
+export interface ExportFormat {
+	/** The `format` param's value. */
+	value: string;
+	label: string;
+	/** The file's suffix with its dot; empty for a folder. */
+	suffix: string;
+}
+
+export interface ActionRow {
+	/** `show.*` for a default, an operation's id, `self.*`, or `group.*` for a row that only holds others. */
+	id: string;
+	verb: string;
+	/** `group`: not an action, a row that holds the ones `under` it. */
+	kind: 'default' | 'run' | 'self' | 'group';
+	ready: boolean;
+	/** The id of the row it is listed under: the setting it computes with, or the object's group. */
+	under?: string;
+	/** A row with rows under it opens showing them. */
+	open?: true;
+	/** Why it cannot run now. */
+	reason?: string;
+	/** The modules that offer it; absent, every module. */
+	modules?: Workspace[];
+	fill?: Record<string, string>;
+	/** In a combination column, the objects that complete the row. */
+	candidates?: string[];
+	/** An operation on the part of a geometry picked in the tree. */
+	part?: true;
+	/** Params its form leaves out, since they do not apply to what is picked (a thickness for solid elements). */
+	omit?: string[];
+	/** Runs at once with what it is filled with (a shape added, then edited). */
+	instant?: true;
+	/** Its form applies each change as it is made: a field when it is left, a gimbal when it is let go. */
+	live?: true;
+	/** Export: the formats this object can be written in. */
+	formats?: ExportFormat[];
+}
+
+/** One column: the selection (`current`), or the selection with one more object of the last kind ('*' for any). */
+export interface ActionColumn {
+	kinds: string[];
+	current?: true;
+	/** A geometry's part picked in the tree, once per part picked (or to pick, in a column of parts together). */
+	parts?: string[];
+	rows: ActionRow[];
+}
+
+export interface ActionTable {
+	columns: ActionColumn[];
+}
+
+/** `project.show`: what a selection in the tree shows. */
+export interface Shown {
+	title: string;
+	views: View[];
+	/** What was left out or could not be drawn, in a sentence; empty when nothing. */
+	note: string;
+	/** Which of the bar's choices this selection takes. */
+	offers?: {
+		flat: boolean;
+		/** An object with warning and abort limits, which the 2-D plot draws or leaves off (`prefs.limits`). */
+		limits: boolean;
+		complex: boolean;
+		projection: boolean;
+		/** A lone shape set: its four views, one at a time, and where its values are read. */
+		shapes: boolean;
+		values_dofs: string[];
+		/** A stage on a geometry with DOFs to mark, or a channel table that places sensors. */
+		arrows: boolean;
+		/** The channel choices whose arrows can be drawn alone (`all` first); empty with no table's arrows to draw. */
+		arrow_roles: string[];
+		/** The force references modal FRFs shown on a geometry can be driven at (`prefs.drive`). */
+		drives: string[];
+		sensors: boolean;
+		/** A lone channel table: its control loops, and the views the picked one holds. */
+		environments: string[];
+		table_views: string[];
+		/** A sine specification or level set: its tones, and with both the Level Error reading. */
+		tones: string[];
+		sine_readings: boolean;
+	};
+}
+
+/** How the window reads data, kept across selections and launches (`project.show` `prefs`). */
+export interface ShowPrefs {
+	flat: boolean;
+	component: 'magnitude' | 'real' | 'imag' | 'phase';
+	/** The frequency an operating shape or envelope is read at; null for the loudest line. Not kept. */
+	line?: number | null;
+	/** Two shape sets on two geometries: animate the second projected onto the first's geometry. */
+	projection: boolean;
+	/** The warning and abort limits of a specification, drawn on its 2-D plot. */
+	limits: boolean;
+	/** Two shape sets on two geometries: how far a test node may be from its model node, in percent of the test geometry's extent. */
+	match_tolerance: number;
+	/** Where and in what form a lone shape set's values are read. */
+	values_dofs: string;
+	values_form: 'shapes' | 'response' | 'reference';
+	/** DOF arrows and the channel table's sensors over every stage. */
+	arrows: boolean;
+	/** The channels of the table whose arrows are drawn: `all`, `control` or a role. */
+	arrow_role: string;
+	/** The force reference modal FRFs are driven at; null for the table's first. */
+	drive: string | null;
+	sensors: boolean;
+	/** A channel table: which loop's control channels the Control column shows, and the table or one of its transformations. */
+	environment: string | null;
+	table_view: 'channels' | 'response' | 'reference';
+	/** A sine specification or level set: the tone read, and the levels as curves or as error bars. */
+	tone: string | null;
+	sine_reading: 'curves' | 'bars';
+	/** A MAC as 3-D bars (the default) or the flat grid. The shell's own; not sent. */
+	bars: boolean;
+}
+
+/** `project.children`: what an object opens into in the tree, by what it is. */
+export type ProjectChildren =
+	| {
+			kind: 'geometry';
+			parts: { id: 'nodes' | 'coordinate_systems'; label: string; count: number; ids?: number[]; rows?: string[] }[];
+			families: { id: string; label: string; count: number; groups: { id: number; label: string; count: number; elements?: number[] }[] }[];
+			solids: SolidRow[];
+			mates: { id: number; label: string; name: string }[];
+	  }
+	| {
+			kind: 'grid';
+			rows: { label: string; dof: string; quantity: string; role?: 'reference' | 'response' | 'monitor' }[];
+			columns: string[];
+			/** A record index per row and column, -1 for a hole. */
+			cells: number[][];
+			/** Each record's icon key: a quantity, `response/reference`, or empty for the object's own icon. */
+			icons: string[];
+			/** The records whose units are not declared. */
+			undefined: number[];
+	  }
+	| { kind: 'modes'; modes: { index: number; frequency: number; damping: number; description: string }[] }
+	| { kind: 'channels'; channels: { dof: string; quantity: string }[] }
+	| { kind: 'photos'; photos: string[] }
+	| { kind: 'matches'; matches: { first: number; second: number; mac: number }[] }
+	/** What any other object with a structure holds, one row an item: a prediction, a report's block. */
+	| { kind: 'items'; items: { label: string; detail: string }[] }
+	| { kind: 'none' };
+
+export interface SolidRow {
+	id: number;
+	label: string;
+	kind: string;
+	children: SolidRow[];
+}
+
+/** One row of `project.units`: a channel, or the object itself, and its unit. */
+export interface UnitsRow {
+	key: string;
+	label: string;
+	quantity: string | null;
+	unit: string | null;
+	choices: string[];
+}
+
+/** `project.units`: the tables an object's units are declared in. */
+export interface UnitsTables {
+	name: string;
+	tables: { side: 'object' | 'channels' | 'response' | 'reference'; rows: UnitsRow[] }[];
+}
+
+/** A mode of a fit: confirmed, or the preview. */
+export interface FitMode {
+	frequency: number;
+	/** A fraction of critical. */
+	damping: number;
+	description?: string;
+}
+
+/** `fit.*`: the mode fit under way on the project. */
+export interface FitStateView {
+	frf: string;
+	/** The shape set the fit edits or last published, or null. */
+	shapes: string | null;
+	pending: { frequency: number; damping: number; held: boolean };
+	preview: FitMode | null;
+	modes: FitMode[];
+	view: SpectrumView;
+	/** The confirmed modes' auto-MAC, the preview last; null for fewer than two. */
+	mac?: MatrixView | null;
+	/** The coherence the fit is weighted by, or null. */
+	coherence?: string | null;
+	/** Whether the view draws the residual's own CMIF. */
+	residual?: boolean;
+	/** The half-power reading of the residual CMIF peak under the cursor. */
+	half_power?: HalfPowerReading;
+}
+
+/** Q read off the half-power width of the residual CMIF peak; null where it could not be read. */
+export interface HalfPowerReading {
+	frequency: number;
+	low: number | null;
+	high: number | null;
+	q: number | null;
+	damping: number | null;
+	notes: string[];
+}
+
+/** `project.progress`: how far an import has read. */
+export interface ProjectProgress {
+	done: number;
+	total: number;
+	path: string;
 }
 
 export interface OperationDescriptor {
 	id: string;
 	title: string;
+	/** The module that offers it, its home. */
 	workspace: Workspace;
-	accepts: DatasetKind;
+	/** The modules that offer it. */
+	modules: Workspace[];
 	summary?: string;
 	params: ParamDescriptor[];
 	outputs: ViewKind[];
-}
-
-export interface DatasetInfo {
-	id: string;
-	kind: DatasetKind;
-	title: string;
-	description?: string;
+	/** The form shows this while it is typed: `op.run` with `preview`, on a copy. */
+	previews?: boolean;
+	/** The boolean param that says go ahead: the form does not ask it, Preview sends it false and Apply true. */
+	commits?: string;
 }
 
 export interface Catalog {
 	operations: OperationDescriptor[];
-	datasets: DatasetInfo[];
-}
-
-export interface OpenedDataset {
-	handle: string;
-	kind: DatasetKind;
-	title: string;
-	summary: Record<string, unknown>;
-	channels: ParamOption[];
 }
 
 export interface OpResult {
 	views: View[];
+	/** The project's summary, from an operation that runs on it. */
+	project?: ProjectSummary;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -247,3 +928,767 @@ export interface DisplayEvent {
 }
 
 export type RunOutcome = 'completed' | 'operator_stop' | 'aborted' | 'held' | 'fault';
+
+// ---------------------------------------------------------------------------------------------
+// Hardware and Random control (PROTOCOL.md, "Hardware and Random Control")
+
+/** Event topics of the hardware and Random control methods. */
+export const CONTROL_TOPICS = {
+	session: 'session.changed',
+	station: 'station.changed',
+	channels: 'channels.changed',
+	state: 'random.state',
+	live: 'random.live',
+	data: 'random.data',
+	log: 'random.log'
+} as const;
+
+export type RefusalReason =
+	| 'bad_params'
+	| 'not_controller'
+	| 'controller_held'
+	| 'run_active'
+	| 'not_configured'
+	| 'run_finished'
+	| 'wrong_state'
+	| 'manual_mode_required'
+	| 'not_a_rung'
+	| 'feasibility_exceeded'
+	| 'override_not_needed'
+	| 'arm_refused'
+	| 'ni_driver_unavailable'
+	| 'no_ni_devices'
+	| 'scan_failed'
+	| 'devices_absent'
+	| 'mixed_simulated_and_real'
+	| 'mixed_timing_families'
+	| 'not_enough_channels'
+	| 'hardware_busy'
+	| 'stale_revision'
+	| 'table_invalid'
+	| 'table_not_applied'
+	| 'nothing_to_apply'
+	| 'config_invalid'
+	| 'shaker_record_invalid'
+	// MIMO Random and the law catalog
+	| 'setup_invalid'
+	| 'gate_failed'
+	| 'prediction_exceeded'
+	| 'law_import_failed'
+	| 'catalog_unavailable'
+	| 'law_unknown'
+	| 'law_params_invalid'
+	| 'law_check_unsupported'
+	| 'law_check_running'
+	| 'law_check_not_recorded'
+	| 'law_not_checked'
+	| 'shutting_down'
+	// a Random run's record
+	| 'record_unwritable';
+
+export type ItemReason =
+	// channel table
+	| 'duplicate_index'
+	| 'no_channel_enabled'
+	| 'zero_sensitivity'
+	| 'negative_sensitivity'
+	| 'non_positive_range'
+	| 'control_group_gap'
+	| 'reference_without_control'
+	| 'unsupported_schema'
+	| 'channel_unbound'
+	| 'physical_channel_unknown'
+	| 'physical_channel_wrong_direction'
+	| 'physical_channel_shared'
+	| 'mixed_timing_families'
+	| 'iepe_without_bias'
+	| 'bias_on_single_ended'
+	| 'drive_channel_present'
+	| 'unit_unknown'
+	| 'drive_not_in_volts'
+	| 'abort_not_in_g'
+	// profile
+	| 'profile_empty'
+	| 'first_row_not_anchor'
+	| 'row_level_ambiguous'
+	| 'frequency_not_positive'
+	| 'frequency_not_ascending'
+	| 'psd_negative'
+	| 'alarm_wider_than_abort'
+	// acquisition
+	| 'n_pts_not_power_of_two'
+	| 'band_above_grid'
+	| 'too_few_lines'
+	// schedule
+	| 'levels_empty'
+	| 'levels_not_ascending'
+	| 'dwell_missing'
+	// control and limits
+	| 'no_control_channel'
+	| 'weight_unknown_channel'
+	| 'weights_sum_not_positive'
+	| 'limit_unknown_channel'
+	| 'limit_rows_not_ascending'
+	| 'out_of_range'
+	// MIMO Random setup
+	| 'control_unknown_channel'
+	| 'drive_unknown_channel'
+	| 'duplicate_channel'
+	| 'no_drive_channel'
+	| 'transform_shape'
+	| 'transform_rank_deficient'
+	| 'transform_ill_conditioned'
+	| 'reference_shape'
+	| 'reference_too_large_inline'
+	| 'reference_not_hermitian'
+	| 'reference_not_psd'
+	| 'reference_repaired'
+	| 'reference_rank_above_drives'
+	| 'reference_file_unread'
+	| 'law_unknown'
+	| 'law_wrong_world'
+	| 'law_shape_not_supported'
+	| 'law_param_unknown'
+	| 'law_param_invalid'
+	| 'backend_not_selected'
+	| 'plant_unknown'
+	| 'reference_invalid'
+	| 'reference_file'
+	| 'geometry'
+	| 'transform_rank'
+	| 'transform_condition'
+	| 'tolerance';
+
+/** One validation finding, located by whichever of `channel`, `row` and `field` applies. */
+export interface ReportItem {
+	reason: ItemReason;
+	message: string;
+	/** A channel table row's `index`; null for a finding about the whole table. */
+	channel?: number | null;
+	/** A breakpoint row, from 0. */
+	row?: number;
+	/** A configuration field path such as `control.damping`. */
+	field?: string;
+}
+
+export interface ValidationReport {
+	errors: ReportItem[];
+	warnings: ReportItem[];
+}
+
+// --- controller and observers --------------------------------------------------------------
+
+export type SessionRole = 'controller' | 'observer';
+
+export interface ControllerSeat {
+	name: string;
+	/** False while the holder is gone and its seat is kept for `timeout_s`. */
+	present: boolean;
+}
+
+export interface SessionState {
+	role: SessionRole;
+	controller: ControllerSeat | null;
+	/** Seconds before an unattended live run is stopped, or null. */
+	orphan_s: number | null;
+	heartbeat_s: number;
+	timeout_s: number;
+}
+
+export interface SessionClaimResult {
+	role: 'controller';
+	lease: string;
+	resumed: boolean;
+	heartbeat_s: number;
+	timeout_s: number;
+}
+
+export interface SessionReleaseResult {
+	role: 'observer';
+	orphan_s: number | null;
+}
+
+/** Each connection receives its own copy: `role` is the receiving connection's. */
+export interface SessionChanged {
+	role: SessionRole;
+	controller: ControllerSeat | null;
+	orphan_s: number | null;
+}
+
+// --- stations ------------------------------------------------------------------------------
+
+export type StationKind = 'sim' | 'ni';
+/** `sim`: the simulator's plant. `ni_simulated`: driver-simulated NI devices. `ni_real`: physical. */
+export type StationClass = 'sim' | 'ni_simulated' | 'ni_real';
+export type ClockDomain = 'shared' | 'independent' | 'unknown';
+
+export interface DiscoveredChannel {
+	id: string;
+	label: string;
+}
+
+export interface NiDevice {
+	id: string;
+	product: string;
+	serial: string;
+	/** The driver's own statement that no physical device is behind this id. */
+	simulated: boolean;
+	parent: string | null;
+	slot: number | null;
+	/** Devices that can share one sample clock; a run's channels all sit in one family. */
+	timing_family: string | null;
+	inputs: DiscoveredChannel[];
+	outputs: DiscoveredChannel[];
+}
+
+export interface SimStation {
+	kind: 'sim';
+	title: string;
+	available: true;
+	class: 'sim';
+	inputs: number;
+	outputs: number;
+	clock: 'shared';
+}
+
+export interface NiStation {
+	kind: 'ni';
+	title: string;
+	available: boolean;
+	unavailable: { reason: 'ni_driver_unavailable' | 'no_ni_devices' | 'scan_failed'; message: string } | null;
+	scanned_unix: number | null;
+	devices: NiDevice[];
+}
+
+export interface StationSelected {
+	kind: StationKind;
+	devices: string[];
+	class: StationClass;
+	source: DataSource;
+	inputs: number;
+	outputs: number;
+	timing_family: string | null;
+}
+
+export interface StationList {
+	stations: [SimStation, NiStation];
+	selected: StationSelected;
+}
+
+// --- channel table -------------------------------------------------------------------------
+
+export type ChannelRole = 'control' | 'monitor' | 'drive' | 'reference';
+
+export interface PhysicalChannel {
+	device: string;
+	channel: string;
+}
+
+export interface ChannelAbortLimits {
+	accel_g: number | null;
+	velocity_ips: number | null;
+	displacement_mil: number | null;
+}
+
+export interface ChannelRow {
+	index: number;
+	enabled: boolean;
+	description: string;
+	role: ChannelRole;
+	physical: PhysicalChannel | null;
+	/** IEPE is off unless a client turns it on for this row. */
+	interface: 'single_ended' | 'iepe';
+	iepe_bias_v: number | null;
+	/** `g`, `in/s`, `mil`, `lbf`, `V`, or another unit's name. */
+	units: string;
+	sensitivity_mv_per_eu: number;
+	range_max: number;
+	polarity: 'positive' | 'negative';
+	control_group: number | null;
+	abort: ChannelAbortLimits;
+	// The analysis side's columns, carried with the row and never run from. Each is optional:
+	// the service writes one only when it holds something and keeps every one it is sent.
+	/** The geometry node the channel is at. */
+	node?: number | null;
+	/** The direction it measures along (`X+`). */
+	direction?: string;
+	/** The quantity it measures (`acceleration`, `force`, ...). */
+	channel_type?: string;
+	/** What the channel is to a frequency response, apart from its role in the loop. */
+	analysis_role?: 'reference' | 'response' | 'monitor' | '';
+	/** The input's range, volts. */
+	daq_range_v?: number | null;
+	/** The sensor's own full-scale output, volts. */
+	sensor_range_v?: number | null;
+	serial_number?: string;
+	make?: string;
+	model?: string;
+	/** Which leg of a triaxial sensor. */
+	triax_dof?: string;
+	/** When the sensor's calibration runs out, `YYYY-MM-DD`. */
+	expiration?: string;
+	/** `full`, `rotating` or `decimated:N`; absent is `full`. */
+	analysis_tier?: string;
+	/** The row is a limit channel. A mark only: each test's limits stay in its setup. */
+	limit?: boolean;
+	/** Any other column, by name. */
+	extra?: Record<string, string>;
+}
+
+export interface ChannelTable {
+	revision: number;
+	channels: ChannelRow[];
+	report: ValidationReport;
+	/** Present while the table came from the kept file, a project or a file and is not applied: no run arms on it. */
+	restored?: RestoredTable;
+	/** Why the kept table was not used at start, or why the last keeping write failed. */
+	kept_problem?: string;
+}
+
+/** Where a restored table came from and when (PROTOCOL.md, "Restored Tables"). */
+export interface RestoredTable {
+	source: 'kept' | 'project' | 'file';
+	/** The project table's or the file's name; the kept file's name for a kept table. */
+	name: string;
+	/** When it was taken (a kept table: when it was written), unix seconds. */
+	at_unix: number;
+	/** The same instant as `YYYY-MM-DD HH:MM:SS UTC`. */
+	at: string;
+}
+
+/** What a client names as a table's source in `channels.set`. */
+export interface TableSource {
+	kind: 'project' | 'file';
+	name: string;
+}
+
+export interface ChannelsSetParams {
+	revision: number;
+	channels: ChannelRow[];
+	dry_run?: boolean;
+	/** A table from a project or a file arrives restored; none is a table typed or edited here. */
+	source?: TableSource | null;
+}
+
+export interface ChannelsApplyParams {
+	revision: number;
+}
+
+export interface ChannelsApplyResult {
+	revision: number;
+	applied: RestoredTable;
+	report: ValidationReport;
+}
+
+/** `project.channel_table`: a project table as the control service's rows. */
+export interface ProjectChannelTable {
+	name: string;
+	channels: ChannelRow[];
+	tables: string[];
+	environments: Record<string, unknown>;
+	warnings: string[];
+}
+
+export interface ChannelsSetResult {
+	revision: number;
+	report: ValidationReport;
+}
+
+// --- Random configuration ------------------------------------------------------------------
+
+/** `[below, above]` in positive dB around the reference. */
+export type BandDb = [number, number];
+
+/** A PSD anchor (`psd_g2_hz`) or a slope from the row before (`slope_db_oct`), never both. */
+export type Breakpoint = { freq_hz: number; alarm_db?: BandDb; abort_db?: BandDb } & (
+	| { psd_g2_hz: number; slope_db_oct?: never }
+	| { slope_db_oct: number; psd_g2_hz?: never }
+);
+
+export interface RandomProfile {
+	breakpoints: Breakpoint[];
+	alarm_db?: BandDb;
+	abort_db?: BandDb;
+}
+
+export interface Acquisition {
+	fs_hz: number;
+	n_pts: number;
+	n_avg: number;
+}
+
+export type LadderMode = 'auto' | 'manual';
+
+export interface ScheduleLevel {
+	db: number;
+	/** Required on every level but the last. */
+	dwell_s?: number;
+}
+
+export interface Schedule {
+	mode: LadderMode;
+	levels: ScheduleLevel[];
+	full_level_s: number;
+}
+
+export type CompositeMode = 'weighted_avg' | 'min' | 'max';
+
+export interface PretestParams {
+	averages?: number;
+	/** The control response identification steps up to, dB relative to the reference. */
+	level_db?: number;
+	max_vrms?: number | null;
+	/** The drive identification starts from, V rms. */
+	start_vrms?: number;
+	shaped?: boolean;
+}
+
+/** Every field optional; the defaults are in PROTOCOL.md. */
+export interface ControlParams {
+	composite?: CompositeMode;
+	weights?: { channel: number; weight: number }[];
+	control_dof?: number;
+	damping?: number;
+	max_lines_out?: number;
+	max_loops_out?: number;
+	max_sigma?: number | null;
+	drive_ceiling_vrms?: number;
+	drive_abort_vrms?: number | null;
+	coherence_floor?: number;
+	review_after_sysid?: boolean;
+	pretest?: PretestParams;
+	soft_start_db?: number;
+	soft_start_relax_db?: number;
+	level_ramp_s?: number;
+	shutdown_ramp_s?: number;
+}
+
+export interface LimitProfile {
+	channel: number;
+	kind: 'response' | 'force';
+	rows: { freq_hz: number; ceiling: number }[];
+}
+
+export interface FeasibilityInputs {
+	/** A shaker record in the controller's shaker-database form. */
+	shaker: Record<string, unknown>;
+	moving_mass_lb: {
+		armature: number;
+		slip_table: number;
+		drive_adapter: number;
+		fixturing: number;
+		test_article: number;
+	};
+	crest_factor?: number;
+}
+
+export interface RandomConfig {
+	title: string;
+	/** The operator's words, kept in the run's record. */
+	operator?: string;
+	article?: string;
+	notes?: string;
+	/** The document and clause the test is run to. */
+	specification?: { document: string; clause: string } | null;
+	/** `streams: false` keeps the record without the inputs and drive streams. */
+	record?: { streams?: boolean } | null;
+	profile: RandomProfile;
+	acquisition: Acquisition;
+	schedule: Schedule;
+	control?: ControlParams;
+	limits?: LimitProfile[];
+	feasibility?: FeasibilityInputs | null;
+}
+
+export interface Grid {
+	fs_hz: number;
+	n_pts: number;
+	df_hz: number;
+	/** Lines in the band. */
+	lines: number;
+	/** Time one control loop takes. */
+	loop_s: number;
+	/** True once the run has armed and the grid is the one the hardware runs at. */
+	actual: boolean;
+}
+
+export interface Derived {
+	grms_g: number;
+	velocity_rms_ips: number;
+	displacement_rms_mil: number;
+	band_hz: [number, number];
+	grid: Grid;
+	control_channels: number[];
+}
+
+export interface RandomConfigureResult {
+	state: RandomState;
+	derived: Derived;
+	warnings: ReportItem[];
+}
+
+export interface RandomDryRunResult {
+	errors: ReportItem[];
+	warnings: ReportItem[];
+	derived: Derived | null;
+	/** `[reference]`: the profile on the requested grid at 0 dB, stepped; empty with errors. */
+	views: SpectrumView[];
+}
+
+/** `random.config`: what the present run was configured with; all null when unconfigured. */
+export interface RandomConfigResult {
+	run_id: string | null;
+	config: RandomConfig | null;
+	derived: Derived | null;
+	views: SpectrumView[];
+}
+
+// --- running -------------------------------------------------------------------------------
+
+export interface RandomLevelResult {
+	level_db: number;
+}
+
+export type RandomRunState = 'unconfigured' | 'configured' | 'blocked' | 'armed' | 'running' | 'review' | 'stopping' | 'finished';
+
+export type RandomPhase =
+	| 'idle'
+	| 'feasibility_blocked'
+	| 'armed'
+	| 'sysid'
+	| 'coherence_gate'
+	| 'engaged'
+	| 'full_level'
+	| 'awaiting_review'
+	| 'ramping_down'
+	| 'stopped'
+	| 'aborted'
+	| 'coherence_hold';
+
+export interface StationRef {
+	kind: StationKind;
+	class: StationClass;
+	devices: { id: string; serial: string }[];
+}
+
+export type Trip = { at_level_db: number; at_loop: number } & (
+	| { kind: 'envelope'; abort_lines: number; worst_db: number }
+	| { kind: 'kinematic'; channel: number; axis: 'accel' | 'velocity' | 'displacement'; value: number; limit: number }
+	| { kind: 'drive_vrms'; realized_vrms: number; limit_vrms: number }
+	| { kind: 'divergence'; consecutive_loops: number; divergent_bins: number }
+	| { kind: 'law_fault'; reason: LawFaultReason; consecutive: number }
+);
+
+/** What was wrong with the control law's last unusable output. */
+export type LawFaultReason = 'error' | 'panicked' | 'over_budget' | 'wrong_length' | 'non_finite' | 'negative' | 'non_finite_level' | 'over_memory' | 'bad_diagnostics';
+
+export type RandomOutcome = 'completed' | 'operator_stop' | 'operator_abort' | 'safe_stop' | 'aborted' | 'held' | 'sysid_level_unreachable' | 'fault' | 'law_fault';
+
+export interface RunEnd {
+	outcome: RandomOutcome;
+	message: string;
+	at_s: number | null;
+	level_db: number | null;
+	/** Present when `outcome` is `aborted` or `law_fault`. */
+	trip: Trip | null;
+}
+
+export interface FeasibilityVerdict {
+	verdict: 'pass' | 'advisory' | 'exceeded' | 'not_evaluated';
+	message: string;
+}
+
+/** The `random.state` result and event. */
+export interface RandomState {
+	run_id: string | null;
+	state: RandomRunState;
+	phase: RandomPhase;
+	title: string | null;
+	source: DataSource | null;
+	station: StationRef | null;
+	grid: Grid | null;
+	clock: ClockDomain | null;
+	mode: LadderMode | null;
+	levels_db: number[] | null;
+	/** The commanded level; null when nothing drives. */
+	level_db: number | null;
+	full_level_s: number | null;
+	elapsed_s: number | null;
+	at_level_s: number | null;
+	remaining_at_level_s: number | null;
+	alarm: boolean;
+	feasibility: FeasibilityVerdict | null;
+	end: RunEnd | null;
+	/** The run's record, from arm on: its folder, whether it holds the streams, and the latest problem writing it. */
+	record?: RunRecordRef;
+}
+
+export interface RunRecordRef {
+	folder: string;
+	streams: 'on' | 'off';
+	problem: string | null;
+}
+
+export interface LiveChannel {
+	index: number;
+	description: string;
+	role: Exclude<ChannelRole, 'drive'>;
+	/** rms over the band in the row's own unit. */
+	rms: number | null;
+	unit: string;
+	/** Latched once the row reached 90 % of its range this run, or the station saw 98 % of it. */
+	overload: boolean;
+}
+
+export type Alarm = { kind: 'envelope'; lines: number; worst_db: number } | { kind: 'overload'; channel: number };
+
+/** The numbers every live frame carries, `random.live` and `random.data` alike. */
+export interface RandomLiveHead {
+	run_id: string;
+	source: DataSource;
+	class: StationClass;
+	state: 'running' | 'review' | 'stopping' | 'finished';
+	phase: RandomPhase;
+	mode: LadderMode;
+	elapsed_s: number;
+	/** The level the drive is at now; null when nothing drives. */
+	level_db: number | null;
+	/** The level the run is headed for (the run state's `level_db`); differs from `level_db` while ramping. */
+	commanded_db: number | null;
+	at_level_s: number | null;
+	remaining_at_level_s: number | null;
+	/** The time the schedule holds the present level; null in manual and while nothing drives. */
+	level_s: number | null;
+	loop: number;
+	control_rms_g: number | null;
+	/** The target: the reference rms at the last control loop's level. */
+	reference_rms_g: number | null;
+	/** 20 log10(control / reference), from the same loop. */
+	control_error_db: number | null;
+	drive_rms_v: number | null;
+	lines: { in_band: number; alarm: number; abort: number };
+	channels: LiveChannel[];
+	alarms: Alarm[];
+}
+
+/** The `random.live` event: control, drive and run views plus the numbers behind them. */
+export interface RandomLive extends RandomLiveHead {
+	/** Control spectrum, drive spectrum, run readings, in that order. */
+	views: [SpectrumView, SpectrumView, ReadingView];
+}
+
+/** What a live plot can show (PROTOCOL.md, "Live Data Subscriptions"). */
+export type LiveQuantity = 'control' | 'drive' | 'response' | 'time' | 'coherence' | 'readings';
+
+/** Which channels a `response` or `time` plot shows: indexes, or a set the service resolves. */
+export type ChannelSelector = number[] | 'all' | 'control' | 'limited';
+
+export interface SubscribePlot {
+	id: string;
+	quantity: LiveQuantity;
+	channels?: ChannelSelector;
+	points?: number;
+}
+
+export interface RandomSubscribeResult {
+	default: boolean;
+	rate_hz: number;
+	plots: SubscribePlot[] | null;
+	quantities: LiveQuantity[];
+}
+
+/** One plot's data in a `random.data` frame. */
+export interface DataPlot {
+	id: string;
+	quantity: LiveQuantity;
+	/** The resolved channels, in table order; null for the quantities without channels. */
+	channels: number[] | null;
+	views: View[];
+}
+
+/** The `random.data` event: a subscribed connection's own frame. */
+export interface RandomData extends RandomLiveHead {
+	plots: DataPlot[];
+}
+
+/** `pulse` and `law` are classical shock's: a line per pulse fired, and the law's calls that were not used. */
+export type LogKind = 'state' | 'feasibility' | 'override' | 'station' | 'gate' | 'level' | 'alarm' | 'overload' | 'trip' | 'note' | 'pulse' | 'law' | 'record';
+
+export interface LogEntry {
+	seq: number;
+	at_unix: number;
+	kind: LogKind;
+	text: string;
+}
+
+export interface RandomLogResult {
+	entries: LogEntry[];
+	next: number;
+}
+
+export interface RandomLogEvent {
+	run_id: string;
+	entries: LogEntry[];
+}
+
+/** One field of a report block the editor's pane sets: the objects it may name. */
+export interface ReportField {
+	field: string;
+	label: string;
+	value: string;
+	options: [string, string][];
+}
+
+/** One block of a report as the shell's own page draws it (`report.views`). */
+export interface ReportPageBlock {
+	kind: 'text' | 'figure' | 'unbound';
+	/** The index of the report block it came from; a block's several figures share it. */
+	block: number | null;
+	/** Its figure or table number, such as "Figure 3". */
+	label: string;
+	caption: string;
+	note?: string;
+	/** Text: its HTML, written by the core from the block's escaped markdown. */
+	html?: string;
+	/** A figure: the views it is drawn as. */
+	views?: View[];
+	/** A figure laid out as a table of plots: a column a direction, a row a node, each cell its figures by their place in `views`. */
+	grid?: { columns: string[]; rows: { label: string; cells: { view: number; caption: string; note?: string; facts?: [string, string][] }[][] }[] };
+	/** An unbound slot: what the block was. */
+	was?: string;
+	empty?: boolean;
+}
+
+/** A report as the shell's own page draws it (`report.views`). */
+export interface ReportPageData {
+	name: string;
+	title: string;
+	marking: string;
+	/** The stylesheet the report adds, such as the printed page's margins; empty for none. */
+	css?: string;
+	blocks: ReportPageBlock[];
+}
+
+export interface ReportEditor {
+	/** The edit page; left out when only the pane was asked for. */
+	html?: string;
+	selected: number | null;
+	title: string;
+	marking: string;
+	marking_color: 'ink' | 'red';
+	blocks: number;
+	/** The Insert menu, `[kind, label]`. */
+	insert: [string, string][];
+	/** `[label, caption]` of each numbered figure and table, for `{{figure:<caption>}}`; left out with `html`. */
+	references?: [string, string][];
+	block: {
+		index: number;
+		kind: string;
+		mode: string;
+		fields: ReportField[];
+		text?: string;
+		caption?: string;
+		special?: string | null;
+	} | null;
+	project?: ProjectSummary;
+}

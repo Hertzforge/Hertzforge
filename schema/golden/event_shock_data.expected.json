@@ -1,0 +1,539 @@
+{
+ "type": "event",
+ "topic": "shock.data",
+ "seq": 142,
+ "data": {
+  "run_id": "s-0003",
+  "source": "SIM",
+  "state": "running",
+  "phase": "waiting",
+  "mode": "auto",
+  "level_db": -6,
+  "rung": 2,
+  "pulses": {
+   "fired": 3,
+   "passed": 3,
+   "at_level": 1,
+   "of_level": 1
+  },
+  "next_pulse_s": 0.6,
+  "fire": null,
+  "plots": [
+   {
+    "id": "pulse",
+    "quantity": "pulse",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Pulse",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Acceleration",
+       "unit": "g",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Reference",
+        "role": "reference",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          -0.002,
+          -0.001,
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.5,
+          0.0,
+          7.5,
+          10.0,
+          7.5,
+          0.0,
+          -0.5
+         ]
+        }
+       },
+       {
+        "name": "Tolerance high",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          6
+         ],
+         "values": [
+          -0.001,
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          6
+         ],
+         "values": [
+          1.5,
+          1.5,
+          9.0,
+          11.5,
+          9.0,
+          1.5
+         ]
+        }
+       },
+       {
+        "name": "Tolerance low",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          6
+         ],
+         "values": [
+          -0.001,
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          6
+         ],
+         "values": [
+          -1.5,
+          -1.5,
+          6.0,
+          8.5,
+          6.0,
+          -1.5
+         ]
+        }
+       },
+       {
+        "name": "Measured",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          -0.002,
+          -0.001,
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.25,
+          0.25,
+          7.25,
+          9.75,
+          7.75,
+          0.25,
+          -0.5
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     },
+     {
+      "view": "spectrum",
+      "title": "Drive",
+      "x": {
+       "label": "Time",
+       "unit": "s",
+       "scale": "linear"
+      },
+      "y": {
+       "label": "Drive",
+       "unit": "V",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Drive",
+        "role": "drive",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          -0.002,
+          -0.001,
+          0.0,
+          0.001,
+          0.002,
+          0.003,
+          0.004,
+          0.005
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          8
+         ],
+         "values": [
+          0.0,
+          -0.0125,
+          0.0,
+          0.1875,
+          0.25,
+          0.1875,
+          0.0,
+          -0.0125
+         ]
+        }
+       }
+      ],
+      "link": "time"
+     }
+    ]
+   },
+   {
+    "id": "id",
+    "quantity": "identification",
+    "views": [
+     {
+      "view": "spectrum",
+      "title": "Identification Gain",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Gain",
+       "unit": "g/V",
+       "scale": "log"
+      },
+      "series": [
+       {
+        "name": "Gain",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.5,
+          1.0,
+          0.75
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Identification Phase",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Phase",
+       "unit": "deg",
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Phase",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          -10.0,
+          -20.0,
+          -30.0
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     },
+     {
+      "view": "spectrum",
+      "title": "Coherence",
+      "x": {
+       "label": "Frequency",
+       "unit": "Hz",
+       "scale": "log"
+      },
+      "y": {
+       "label": "Coherence",
+       "unit": null,
+       "scale": "linear"
+      },
+      "series": [
+       {
+        "name": "Coherence",
+        "role": "measured",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          100.0,
+          200.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          3
+         ],
+         "values": [
+          0.99,
+          0.5,
+          0.98
+         ]
+        }
+       },
+       {
+        "name": "Trusted bins",
+        "role": "other",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.99,
+          0.98
+         ]
+        }
+       },
+       {
+        "name": "Floor",
+        "role": "tolerance",
+        "x": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          100.0,
+          300.0
+         ]
+        },
+        "y": {
+         "dtype": "f64",
+         "shape": [
+          2
+         ],
+         "values": [
+          0.9,
+          0.9
+         ]
+        }
+       }
+      ],
+      "link": "frequency"
+     }
+    ]
+   },
+   {
+    "id": "law",
+    "quantity": "law",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Law",
+      "rows": [
+       {
+        "label": "Corrected bins",
+        "value": 412.0,
+        "unit": "bins",
+        "status": "info"
+       },
+       {
+        "label": "Bins at the rise limit",
+        "value": 3.0,
+        "unit": "bins",
+        "status": "info"
+       },
+       {
+        "label": "Drive change",
+        "value": 0.42,
+        "unit": "dB",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "run",
+    "quantity": "readings",
+    "views": [
+     {
+      "view": "reading",
+      "title": "Run",
+      "rows": [
+       {
+        "label": "Level",
+        "value": -6.0,
+        "unit": "dB",
+        "status": "info"
+       },
+       {
+        "label": "Pulses fired",
+        "value": 3.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Pulses passed",
+        "value": 3.0,
+        "unit": null,
+        "status": "info"
+       },
+       {
+        "label": "Last peak",
+        "value": 9.98,
+        "unit": "g",
+        "status": "pass"
+       },
+       {
+        "label": "Last error",
+        "value": 1.9,
+        "unit": "%",
+        "status": "info"
+       },
+       {
+        "label": "Last drive peak",
+        "value": 0.2,
+        "unit": "V",
+        "status": "info"
+       },
+       {
+        "label": "Next pulse",
+        "value": 0.6,
+        "unit": "s",
+        "status": "info"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "table",
+    "quantity": "pulses",
+    "views": [
+     {
+      "view": "table",
+      "title": "Pulses",
+      "columns": [
+       "Pulse",
+       "Origin",
+       "Level (dB)",
+       "Peak (g)",
+       "Error (%)",
+       "Velocity change (in/s)",
+       "Envelope",
+       "Velocity",
+       "Substitution",
+       "Passed"
+      ],
+      "rows": [
+       [
+        "3",
+        "ladder",
+        "-6",
+        "9.98",
+        "1.9",
+        "27.02",
+        "pass",
+        "pass",
+        "pass",
+        "pass"
+       ]
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

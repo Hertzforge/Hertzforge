@@ -64,8 +64,12 @@
 	/* Blue: the active, interactive and measured hue */
 	--blue-1: #8ac6f2;
 	--blue-2: #5aa9e6;
+	--action-default: #e0a8f0;
 	--blue-3: #2f7fbf;
 	--blue-weak: rgba(90, 169, 230, 0.13);
+	--region-frame: rgba(90, 169, 230, 0.1);
+	--region-frame-edge: rgba(90, 169, 230, 0.35);
+	--region-cut: rgba(128, 128, 128, 0.22);
 	--blue-line: rgba(90, 169, 230, 0.45);
 
 	/* Amber: the attention hue (tolerance, warn, fail, SIM) */
@@ -94,6 +98,7 @@
 	--series-reference: #dfe6ee;
 	--series-tolerance: #d39a3c;
 	--series-abort: #ffc65c;
+	--series-limit: #e0a8f0;
 	--series-drive: #7f93a8;
 	--series-other: #8ac6f2;
 	--plot-grid: rgba(166, 179, 192, 0.09);
@@ -124,8 +129,12 @@
 		--text-on-accent: #ffffff;
 		--blue-1: #1d5f99;
 		--blue-2: #1f6fb2;
+		--action-default: #8a3fa8;
 		--blue-3: #2b86d1;
 		--blue-weak: rgba(31, 111, 178, 0.1);
+		--region-frame: rgba(31, 111, 178, 0.08);
+		--region-frame-edge: rgba(31, 111, 178, 0.3);
+		--region-cut: rgba(110, 110, 110, 0.18);
 		--blue-line: rgba(31, 111, 178, 0.4);
 		--amber-1: #8a5200;
 		--amber-2: #a86400;
@@ -145,6 +154,7 @@
 		--series-reference: #1f2a35;
 		--series-tolerance: #b5730f;
 		--series-abort: #8a4f00;
+		--series-limit: #7a3d8f;
 		--series-drive: #6b7f93;
 		--series-other: #3d8bd0;
 		--plot-grid: rgba(15, 24, 32, 0.08);
@@ -174,8 +184,12 @@
 	--text-on-accent: #ffffff;
 	--blue-1: #1d5f99;
 	--blue-2: #1f6fb2;
+	--action-default: #8a3fa8;
 	--blue-3: #2b86d1;
 	--blue-weak: rgba(31, 111, 178, 0.1);
+	--region-frame: rgba(31, 111, 178, 0.08);
+	--region-frame-edge: rgba(31, 111, 178, 0.3);
+	--region-cut: rgba(110, 110, 110, 0.18);
 	--blue-line: rgba(31, 111, 178, 0.4);
 	--amber-1: #8a5200;
 	--amber-2: #a86400;
@@ -195,6 +209,7 @@
 	--series-reference: #1f2a35;
 	--series-tolerance: #b5730f;
 	--series-abort: #8a4f00;
+	--series-limit: #7a3d8f;
 	--series-drive: #6b7f93;
 	--series-other: #3d8bd0;
 	--plot-grid: rgba(15, 24, 32, 0.08);

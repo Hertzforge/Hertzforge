@@ -1,0 +1,53 @@
+{
+ "type": "response",
+ "id": 36,
+ "result": {
+  "law": {
+   "id": "9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b",
+   "world": "mimo",
+   "builtin": false,
+   "name": "notch-aware pseudo-inverse",
+   "version": "0.2.0",
+   "author": "A. Contributor",
+   "summary": "A pseudo-inverse law that holds notched lines.",
+   "sha256": "9f2c4e6a8b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c2e4f6a8b0d2f4e6a8c0b",
+   "check": {
+    "status": "unchecked",
+    "date": null,
+    "tool_version": null,
+    "cases": [],
+    "hardware": false,
+    "message": "This control law has not been checked on the simulator; check it before it drives hardware."
+   },
+   "params": [
+    {
+     "key": "gain",
+     "label": "Loop gain",
+     "help": "The fraction of each correction applied.",
+     "kind": "number",
+     "unit": "",
+     "min": 0.1,
+     "max": 1,
+     "step": 0.05,
+     "default": 0.5
+    }
+   ],
+   "diagnostics": [
+    {
+     "key": "held",
+     "label": "Held lines",
+     "unit": "",
+     "help": "Lines held this loop.",
+     "layout": "scalar"
+    }
+   ],
+   "shapes": [
+    "square",
+    "more_controls_than_drives"
+   ],
+   "needs": [
+    "last_drive"
+   ]
+  }
+ }
+}

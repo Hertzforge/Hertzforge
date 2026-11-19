@@ -1,0 +1,1317 @@
+"""Read and write Universal Files (.unv, .uff, .uf), following the SDRL
+dataset specifications (https://www.ceas3.uc.edu/sdrluff/; local copies
+are in docs/uff_spec).
+
+Datasets read:
+
+- 164, units: the length, force and temperature factors. The spec
+  divides file values by these factors to get SI, so a file with a 164
+  imports with its units defined.
+- 15, nodes in the old single-precision form, one line per node.
+- 2411, nodes in double precision, a 4I10 record and a 3D25.16 record
+  per node. Each position is converted to global from the coordinate
+  system the node is defined in.
+- 2420, coordinate systems.
+- 82, tracelines: a node list in which 0 lifts the pen (a move without
+  drawing). Each traceline becomes one element group of two-node line
+  elements, with one run for each stretch between pen-ups.
+- 2412, elements. The FE descriptor codes are the element type codes
+  Hertzforge uses; beam descriptors have an extra orientation
+  record before the nodes.
+- 55, mode shapes: normal modes (analysis type 2) or complex modes
+  (type 3), not both in one file.
+- 58, functions at nodal DOFs: time histories (function type 1), FRFs
+  (4), coherence (6), PSDs (9), spectra (12), shock response spectra
+  (24) and multiple coherence (26). The scale to SI comes from the axis
+  data-type unit exponents and the 164 factors. Without a 164, a record
+  whose quantity has a unit imports with its unit undefined, unless
+  `ordinate_unit` is given, and keeps the quantity's name as a hint.
+  Records are grouped by function type into one data object per type,
+  and records of one type with different abscissas go into separate
+  objects. Other function types are skipped.
+- 58b, the binary form of 58: the same eleven ASCII header records,
+  followed by the values as raw floats. Read in either byte order at
+  single or double precision. Only IEEE 754 floats are read; DEC VMS
+  and IBM 5/370 floats are refused by name, because reading them as
+  IEEE would return wrong numbers without an error. A marker line with
+  no fields after the `58b` is read too: the size comes from record 7
+  and has to end at a delimiter, and the values are taken as little
+  endian IEEE 754, which such a file cannot confirm.
+
+A file with several objects returns a dict keyed 'geometry', 'shapes'
+and the function names ('time', 'frf', 'coherence', 'psd', 'spectrum',
+'srs', 'multiple_coherence'; a second abscissa of one type is keyed
+'frf (2)' and so on). A file with one object returns it directly. Other
+datasets are skipped, since a UNV file is a stream of independent
+datasets separated by '-1' lines.
+
+`save` writes geometry, data of every function type above, and mode
+shapes; `save_binary` writes the functions as 58b.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:                                    # pragma: no cover
+    from ..units import UnitSystem
+
+import re
+
+import numpy as np
+
+from ..core.data import direction_code
+from ..core.geometry import ELEMENT_TYPES, pen_up_runs, to_global, to_local
+from .sniffing import text_head
+
+_FLOAT = re.compile(r'[-+]?(?:\d*\.?\d+(?:[DdEe][-+]?\d+)?|nan|inf(?:inity)?)', re.IGNORECASE)
+
+# 2412 FE descriptors with the extra beam-definition record before the nodes
+_BEAM_DESCRIPTORS = {11, 21, 22, 23, 24}
+
+# Dataset 58 specific data type -> (dimension, length exponent, force exponent).
+# The exponents express the quantity in UFF unit-system terms (length L, force
+# F; time and temperature never rescale between UFF unit systems).
+_58_DATA_TYPES = {
+    0: ('unknown', 0, 0),  # type 0 is 'unknown' in the spec, and hertzforge has a
+                           # dimension for exactly that; calling it
+                           # dimensionless would claim knowledge the file
+                           # does not carry
+    1: (None, 0, 0),  # general: exponents come from the record itself
+    2: ('pressure', -2, 1),
+    3: ('dimensionless', 0, 0),
+    5: ('temperature', 0, 0),  # by the 164's factor and offset, not exponents
+    8: ('length', 1, 0),
+    9: ('force', 0, 1),
+    11: ('velocity', 1, 0),
+    12: ('acceleration', 1, 0),
+    13: ('force', 0, 1),
+    15: ('pressure', -2, 1),
+    16: ('mass', -1, 1),
+    17: ('time', 0, 0),
+    18: ('frequency', 0, 0),
+}
+
+# dataset 58's function types, and the name each becomes on import. 6 and 26
+# are both coherence and are not interchangeable: 6 is one response against
+# one reference, 26 is one response against all of them at once.
+_58_NAMES = {1: 'time', 4: 'frf', 6: 'coherence', 9: 'psd', 12: 'spectrum',
+             24: 'srs', 26: 'multiple_coherence'}
+
+EXTENSIONS = ('.unv', '.uff', '.uf')
+
+
+def _ratio_dim(numerator: str, denominator: str) -> str:
+    """A record's dimension from its two axes. A ratio is only as known as its
+    two halves, and one half unknown leaves the whole record so: the
+    dimension algebra has no part called 'unknown', and one odd record is no
+    reason to refuse the file."""
+    if 'unknown' in (numerator, denominator):
+        return 'unknown'
+    return f'{numerator}/{denominator}'
+
+
+def _floats(line):
+    return [float(tok.replace('D', 'E').replace('d', 'e'))
+            for tok in _FLOAT.findall(line)]
+
+
+def _ints(line):
+    return [int(tok) for tok in line.split()]
+
+
+#: The marker line of a binary dataset: the number, a lowercase 'b',
+#: then the fields that say how to read what follows. Format
+#: (I6,1A1,I6,I6,I12,I12,I6,I6,I12,I12) — byte ordering, floating point
+#: format, the count of ASCII lines, and the count of bytes after them
+#: (docs/uff_spec/58b.asc).
+_BINARY_MARKER = re.compile(r'\s*(\d+)b\s*(-?\d+)\s+(-?\d+)\s+'
+                            r'(-?\d+)\s+(-?\d+)')
+
+#: The marker line of a binary dataset that gives its number and nothing
+#: else. Some writers stop there, so the byte order, the float format and
+#: the byte count have to come from elsewhere (`_implied_size`).
+_BARE_MARKER = re.compile(r'\s*(\d+)b\s*$')
+
+#: The ASCII records of a dataset 58, before its values.
+_58_HEADER_LINES = 11
+
+#: Byte ordering method, field 3.
+LITTLE_ENDIAN, BIG_ENDIAN = 1, 2
+
+#: Floating point format, field 4. Only IEEE 754 is decoded: DEC VMS's
+#: F/G float and IBM 5/370's hexadecimal float are different
+#: representations, not different byte orders, and reading either as
+#: IEEE would return plausible wrong numbers rather than fail.
+IEEE_754 = 2
+
+_FP_FORMATS = {1: 'DEC VMS', 2: 'IEEE 754', 3: 'IBM 5/370'}
+
+
+@dataclass(frozen=True)
+class Binary:
+    """The binary part of a dataset 58b: its bytes, and how to read them.
+
+    `order` (1 little endian, 2 big endian) and `fp_format` (2 is IEEE
+    754) are the fields of the dataset's own marker line, kept with the
+    bytes so that the data is always decoded by the byte order and
+    float format it was written with.
+    """
+
+    order: int
+    fp_format: int
+    data: bytes
+
+
+def _implied_size(records, data, position):
+    """How many bytes of values a 58b with a bare marker holds, by its
+    record 7, confirmed by the delimiter that has to follow them.
+
+    Raises ValueError when no size the record allows ends at a delimiter,
+    because reading on regardless would return numbers from the wrong
+    place in the file.
+    """
+    form = _ints(records[6][:30])
+    ordinate_type, count, even = form[0], form[1], form[2]
+    width = _58_PRECISION.get(ordinate_type)
+    if width is None:
+        raise ValueError(f'ordinate data type {ordinate_type} has no defined '
+                         f'float width, so the binary data cannot be read')
+    values = 2 if ordinate_type in (5, 6) else 1
+    # the format's 4-byte X first, then an X as wide as the values
+    sizes = ([count * values * width] if even
+             else [count * (4 + values * width), count * (1 + values) * width])
+    for size in dict.fromkeys(sizes):
+        rest = data[position + size:position + size + 16].lstrip(b'\r\n ')
+        if (position + size <= len(data)
+                and (not rest or rest.startswith(b'-1'))):
+            return size
+    raise ValueError(
+        f'a binary dataset 58 gives no byte count, and its values do not end '
+        f'where its record 7 says ({count} values of ordinate type '
+        f'{ordinate_type})')
+
+
+def iter_datasets(
+        data: str | bytes, unread: list[str] | None = None,
+) -> Iterator[tuple[int | None, list[str], bytes]]:
+    """Yield (dataset_number, record_lines, payload) for each dataset.
+
+    `payload` is None for an ordinary ASCII dataset and a `Binary` for a
+    binary one (dataset 58b), whose eleven header records are still
+    ASCII and come back in `record_lines` like any other. A dataset
+    whose number line is not an integer is not yielded, and that line
+    is appended to `unread` when it is given.
+
+    `data` is read as bytes, a line at a time, rather than split into
+    lines first, because a binary payload is not text: its float bytes
+    can contain newlines and the byte pattern of a '-1' delimiter line,
+    and splitting first would cut a dataset in two there. The payload
+    is taken by the byte count its marker line declares and is never
+    scanned.
+    """
+    if isinstance(data, str):
+        data = data.encode('utf-8', 'surrogateescape')
+    position, number, records, state = 0, None, [], 'between'
+    payload = None
+    while position < len(data):
+        stop = data.find(b'\n', position)
+        if stop == -1:
+            stop = len(data)
+        line = data[position:stop].decode('utf-8', 'replace').rstrip('\r')
+        position = stop + 1
+
+        if line.strip() == '-1':
+            if state == 'in' and number is not None:
+                yield number, records, payload
+            number, records, payload = None, [], None
+            state = 'delim' if state == 'between' else 'between'
+            continue
+        if state == 'delim':
+            state = 'in'
+            binary = _BINARY_MARKER.match(line)
+            if binary:
+                number = int(binary.group(1))
+                order, fp, ascii_lines, count = (int(binary.group(i))
+                                                 for i in (2, 3, 4, 5))
+                for _ in range(ascii_lines):
+                    stop = data.find(b'\n', position)
+                    if stop == -1:
+                        stop = len(data)
+                    records.append(
+                        data[position:stop].decode('utf-8', 'replace')
+                        .rstrip('\r'))
+                    position = stop + 1
+                blob = data[position:position + count]
+                position += count
+                # a writer may or may not end the blob with a newline;
+                # skipping one keeps an empty record out of the list
+                if data[position:position + 1] == b'\n':
+                    position += 1
+                payload = Binary(order, fp, blob)
+                continue
+            bare = _BARE_MARKER.match(line)
+            if bare and int(bare.group(1)) == 58:
+                number = 58
+                for _ in range(_58_HEADER_LINES):
+                    stop = data.find(b'\n', position)
+                    if stop == -1:
+                        stop = len(data)
+                    records.append(data[position:stop].decode('utf-8', 'replace')
+                                   .rstrip('\r'))
+                    position = stop + 1
+                size = _implied_size(records, data, position)
+                blob = data[position:position + size]
+                position += size
+                # the same optional newline as the full marker's. With no
+                # field to say so, little endian IEEE 754 is assumed: the
+                # file cannot confirm it, and a byte order misread would
+                # give numbers rather than an error.
+                if data[position:position + 1] == b'\n':
+                    position += 1
+                payload = Binary(LITTLE_ENDIAN, IEEE_754, blob)
+                continue
+            try:
+                number = int(line.strip())
+            except ValueError:
+                number = None
+                if unread is not None:
+                    unread.append(line.strip())
+        elif state == 'in':
+            records.append(line)
+    if state == 'in' and number is not None:
+        yield number, records, payload
+
+
+def sniff(path: str | os.PathLike) -> bool:
+    """True for a `.unv`, `.uff` or `.uf` file whose first text is a `-1`
+    line, the separator every dataset opens with."""
+    if not str(path).lower().endswith(EXTENSIONS):
+        return False
+    head = text_head(path, 2048)
+    return head is not None and head.lstrip().startswith('-1')
+
+
+def _parse_2411(records, nodes):
+    for i in range(0, len(records) - 1, 2):
+        label, def_cs, disp_cs, color = _ints(records[i])[:4]
+        xyz = _floats(records[i + 1])[:3]
+        nodes.append((label, def_cs, disp_cs, color, xyz))
+
+
+def _parse_15(records, nodes):
+    for line in records:
+        parts = line.split()
+        if len(parts) < 7:
+            continue
+        label, def_cs, disp_cs, color = (int(p) for p in parts[:4])
+        xyz = [float(p.replace('D', 'E')) for p in parts[4:7]]
+        nodes.append((label, def_cs, disp_cs, color, xyz))
+
+
+def _parse_2420(records, systems):
+    """Coordinate systems: label, type, name and a 4x3 transform each.
+
+    Rows 0-2 of the transform are the system's axes in global coordinates
+    and row 3 is its origin, which is exactly how hertzforge holds one.
+
+    NOTE: the published spec for this dataset could not be reached when
+    this was written (the SDRL pages 404, including for datasets already
+    mirrored under docs/uff_spec). The layout below — a part header, then
+    per system an integer record, a name record and four matrix records —
+    round trips through hertzforge, but has not been checked against the
+    standard or against another tool's file.
+    """
+    if len(records) < 2:
+        return
+    body = records[2:]                     # skip the part uid and part name
+    i = 0
+    while i + 5 < len(body) + 1 and i + 1 < len(body):
+        header = _ints(body[i])
+        if len(header) < 2:
+            break
+        label, cs_type = header[0], header[1]
+        color = header[2] if len(header) > 2 else 1
+        name = body[i + 1].strip()
+        rows = []
+        j = i + 2
+        while len(rows) < 4 and j < len(body):
+            values = _floats(body[j])
+            if len(values) >= 3:
+                rows.append(values[:3])
+            j += 1
+        if len(rows) < 4:
+            break
+        systems.append((label, cs_type, color, name, np.array(rows)))
+        i = j
+
+
+def _parse_82(records, tracelines):
+    tl_id, num_nodes, color = (_ints(records[0]) + [1, 1])[:3]
+    desc = records[1].strip() if len(records) > 1 else ''
+    entries = []
+    for line in records[2:]:
+        entries.extend(_ints(line))
+        if len(entries) >= num_nodes:
+            break
+    for run in pen_up_runs(entries[:num_nodes]):
+        tracelines.append((tl_id, color, desc, run))
+
+
+def _parse_2412(records, elements, path):
+    i = 0
+    while i < len(records):
+        fields = _ints(records[i])
+        if len(fields) < 6:
+            i += 1
+            continue
+        label, descriptor, _phys, _mat, color, num_nodes = fields[:6]
+        i += 1
+        if descriptor in _BEAM_DESCRIPTORS:
+            i += 1  # beam orientation / cross-section record
+        conn = []
+        while len(conn) < num_nodes and i < len(records):
+            conn.extend(_ints(records[i]))
+            i += 1
+        if descriptor not in ELEMENT_TYPES:
+            raise ValueError(
+                f"Unsupported FE descriptor {descriptor} "
+                f"(element {label}) in {path}")
+        elements.append((label, descriptor, color, conn[:num_nodes]))
+
+
+def _int_slice(line, start, stop, default=0):
+    token = line[start:stop].strip()
+    try:
+        return int(token)
+    except ValueError:
+        return default
+
+
+# dataset 55 writes whole nodal vectors: three translations, or those plus
+# the three rotations
+_55_COMPONENTS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')
+
+
+def _parse_55(records, modes, path):
+    """Parse one dataset 55 — one mode's shape over the nodes — into `modes`.
+
+    Two analysis types are mode shapes, and both are read. Type 2, a
+    normal mode, carries frequency, modal mass and damping ratio. Type
+    3, a complex eigenvalue of the first-order problem, carries the
+    eigenvalue itself (rad/s), modal A and modal B, each as a real and
+    imaginary pair; it is how a curve fitter exports complex modes. The
+    eigenvalue l becomes frequency |l| / 2 pi and damping -Re(l) / |l|,
+    which is the pole `ShapeSet.synthesize_frf` rebuilds; modal A goes
+    into `modal_mass`, which is what that synthesis reads it as for
+    complex shapes, and modal B into `modal_damping`. The other analysis
+    types (static, transient, buckling) are not mode shapes and would
+    need somewhere else to go.
+    """
+    definition = _ints(records[5])
+    if len(definition) < 6:
+        raise ValueError(f'{path}: dataset 55 has a short definition record')
+    analysis_type, characteristic = definition[1], definition[2]
+    data_type, values_per_node = definition[4], definition[5]
+    if analysis_type not in (2, 3):
+        return                      # not a mode shape; nothing to build here
+    # The characteristic says what a node's vector *is* — 2 a 3-DOF
+    # translation, 3 translation and rotation — and so how many values
+    # it has; the count field only repeats it. Where the two disagree
+    # the count is the writer's slip: sdynpy writes 1 for a 3-DOF
+    # vector, and trusting it read one value per node and dropped the
+    # rest without a word (2026-09-23).
+    values_per_node = {2: 3, 3: 6}.get(characteristic, values_per_node)
+    if values_per_node > len(_55_COMPONENTS):
+        raise ValueError(
+            f'{path}: dataset 55 has {values_per_node} values per node; '
+            f'hertzforge understands up to {len(_55_COMPONENTS)}')
+
+    integers = _ints(records[6])
+    reals = _floats(records[7])
+    mode_number = integers[3] if len(integers) > 3 else len(modes) + 1
+    modal_b = 0.0
+    if analysis_type == 3:
+        pairs = [complex(reals[k], reals[k + 1]) if len(reals) > k + 1
+                 else 0j for k in (0, 2, 4)]
+        eigenvalue, modal_mass, modal_b = pairs
+        frequency = abs(eigenvalue) / (2.0 * np.pi)
+        damping = (-eigenvalue.real / abs(eigenvalue)
+                   if eigenvalue != 0 else 0.0)
+        # a writer with no scaling to give leaves modal A zero; unity is
+        # what the synthesis assumes of a set that carries none
+        if modal_mass == 0:
+            modal_mass = 1.0
+    else:
+        frequency = reals[0] if reals else 0.0
+        modal_mass = reals[1] if len(reals) > 1 else 1.0
+        damping = reals[2] if len(reals) > 2 else 0.0
+
+    complex_values = data_type == 5
+    per_node = values_per_node * (2 if complex_values else 1)
+    node_values = {}
+    i = 8
+    while i < len(records):
+        node = _ints(records[i])
+        if not node:
+            break
+        values = []
+        i += 1
+        while len(values) < per_node and i < len(records):
+            values.extend(_floats(records[i]))
+            i += 1
+        values = values[:per_node]
+        if complex_values:
+            values = [values[k] + 1j * values[k + 1]
+                      for k in range(0, len(values), 2)]
+        node_values[node[0]] = values
+    modes.append({'mode': mode_number, 'analysis': analysis_type,
+                  'frequency': frequency, 'modal_mass': modal_mass,
+                  'modal_b': modal_b, 'damping': damping,
+                  'values_per_node': values_per_node, 'nodes': node_values,
+                  'comment': records[0].strip() if records else ''})
+
+
+def _build_shapes(modes, path):
+    """One ShapeSet from the dataset 55 blocks, ordered by mode number."""
+    from ..core.shapes import ShapeSet
+
+    modes = sorted(modes, key=lambda m: m['mode'])
+    # the two carry different scalings — a normal mode's modal mass and
+    # a complex mode's modal A — and one set holds one of them
+    if len({m['analysis'] for m in modes}) > 1:
+        raise ValueError(
+            f'{path}: dataset 55 mixes normal modes (analysis type 2) with '
+            'complex eigenvalues (type 3); a hertzforge ShapeSet is '
+            'one or the other')
+    first = modes[0]
+    nodes = list(first['nodes'])
+    width = first['values_per_node']
+    for mode in modes[1:]:
+        if list(mode['nodes']) != nodes or mode['values_per_node'] != width:
+            raise ValueError(
+                f'{path}: modes cover differing nodes; a hertzforge ShapeSet '
+                'shares one set of coordinates')
+
+    coordinate = [f'{node}{_55_COMPONENTS[k]}'
+                  for node in nodes for k in range(width)]
+    shape_matrix = np.array(
+        [[value for node in nodes for value in mode['nodes'][node]]
+         for mode in modes])
+    return ShapeSet(
+        frequency=[m['frequency'] for m in modes],
+        damping=[m['damping'] for m in modes],
+        coordinate=coordinate,
+        shape_matrix=shape_matrix,
+        modal_mass=[m['modal_mass'] for m in modes],
+        comment=[m['comment'] for m in modes],
+        modal_damping=([m['modal_b'] for m in modes]
+                       if any(m['modal_b'] != 0 for m in modes) else None),
+    )
+
+
+#: Ordinate data type (record 7, field 1) -> bytes per float. 2 and 5
+#: are single precision, 4 and 6 double; 5 and 6 are the complex pair,
+#: which is two floats rather than a wider one.
+_58_PRECISION = {2: 4, 4: 8, 5: 4, 6: 8}
+
+
+def _decode_58b(payload, ordinate_type, num_values=0, even=True):
+    """The floats a binary dataset 58 carries, in file order.
+
+    The format's abscissa is always single precision, so double-precision
+    data with uneven spacing is a 4-byte X followed by 8-byte values.
+    Some writers, this module's `save` among them, write that X as 8
+    bytes as well, so the byte count says which it is: anything short of
+    the all-double size is the format's mixed layout.
+    """
+    if payload.fp_format != IEEE_754:
+        raise ValueError(
+            f'this universal file stores its binary data as '
+            f'{_FP_FORMATS.get(payload.fp_format, payload.fp_format)} '
+            f'floating point, and only IEEE 754 is decoded. Reading it '
+            f'as IEEE would not fail — it would return wrong numbers.')
+    width = _58_PRECISION.get(ordinate_type)
+    if width is None:
+        raise ValueError(
+            f'ordinate data type {ordinate_type} has no defined float '
+            f'width, so the binary data cannot be read')
+    end = '<' if payload.order == LITTLE_ENDIAN else '>'
+    dtype = np.dtype(f'{end}f{width}')
+    per_point = 2 if ordinate_type == 6 else 1
+    if (not even and width == 8
+            and len(payload.data) < num_values * 8 * (1 + per_point)):
+        pairs = np.frombuffer(
+            payload.data,
+            dtype=[('x', f'{end}f4'), ('y', f'{end}f8', (per_point,))],
+            count=len(payload.data) // (4 + 8 * per_point))
+        return np.column_stack([pairs['x'].astype(float),
+                                pairs['y'].astype(float)]).reshape(-1)
+    usable = len(payload.data) - len(payload.data) % width
+    return np.frombuffer(payload.data[:usable], dtype=dtype).astype(float)
+
+
+def _parse_58(records, functions, payload=None):
+    """Parse one dataset 58 into an entry dict appended to `functions`.
+
+    `payload` is the `Binary` of a 58b, whose values are the same
+    numbers in the same order as the ASCII records 12 onward would
+    hold — so only how they are *read* differs, and everything after
+    that is the one implementation both forms go through.
+    """
+    from ..core.data import dof_string
+
+    dof_line = records[5]
+    function_type = _int_slice(dof_line, 0, 5)
+    response = dof_string(_int_slice(dof_line, 41, 51),
+                          _int_slice(dof_line, 51, 55))
+    reference_node = _int_slice(dof_line, 66, 76)
+    # node 0 is how the format says there is no reference; reading it as a
+    # DOF named '0' would invent one
+    reference = (dof_string(reference_node, _int_slice(dof_line, 76, 80))
+                 if reference_node else '')
+
+    form = _ints(records[6][:30]) + _floats(records[6][30:])
+    ordinate_type, num_values, even = form[0], form[1], form[2]
+    abscissa_min, abscissa_inc = form[3], form[4]
+    is_complex = ordinate_type in (5, 6)
+
+    def axis(record: str) -> tuple[str, int, int]:
+        data_type = _int_slice(record, 0, 10)
+        dim, lexp, fexp = _58_DATA_TYPES.get(data_type, ('dimensionless', 0, 0))
+        if dim is None:  # general: exponents stored in the record
+            dim = 'dimensionless'
+            lexp = _int_slice(record, 10, 15)
+            fexp = _int_slice(record, 15, 20)
+        return dim, lexp, fexp
+
+    num_dim, num_l, num_f = axis(records[8])
+    den_type = _int_slice(records[9], 0, 10)
+    if den_type:
+        den_dim, den_l, den_f = axis(records[9])
+        ordinate_dim = _ratio_dim(num_dim, den_dim)
+        lexp, fexp = num_l - den_l, num_f - den_f
+    elif function_type == 4:
+        # an FRF is a ratio by definition; a record that names no
+        # denominator still is one, and the class holds it to that
+        ordinate_dim = _ratio_dim(num_dim, 'dimensionless')
+        lexp, fexp = num_l, num_f
+    else:
+        ordinate_dim = num_dim
+        lexp, fexp = num_l, num_f
+    if ordinate_dim == 'unknown':
+        lexp, fexp = 0, 0
+
+    if payload is None:
+        values = []
+        for line in records[11:]:
+            values.extend(_floats(line))
+        values = np.array(values)
+    else:
+        values = _decode_58b(payload, ordinate_type, num_values, even)
+
+    if even:
+        ordinate = values
+        abscissa = abscissa_min + abscissa_inc * np.arange(num_values)
+    else:
+        step = 3 if is_complex else 2
+        values = values[:num_values * step].reshape(num_values, step)
+        abscissa = values[:, 0]
+        ordinate = values[:, 1:]
+    if is_complex:
+        flat = ordinate.reshape(-1)
+        ordinate = flat[0::2] + 1j * flat[1::2]
+    elif ordinate.ndim > 1:
+        # unevenly spaced real data arrives as (n, 1) pairs; a record is one
+        # series, not a series of one-element rows
+        ordinate = ordinate[:, 0]
+    ordinate = ordinate[:num_values]
+
+    functions.append({
+        'function_type': function_type,
+        'response': response,
+        'reference': reference,
+        'abscissa': abscissa,
+        'ordinate': ordinate,
+        'ordinate_dim': ordinate_dim,
+        'lexp': lexp,
+        'fexp': fexp,
+        'comment': records[0].strip() if records else '',
+    })
+
+
+def _build_data_objects(functions, factors, ordinate_unit, path,
+                        temperature=None):
+    """Group parsed 58 entries by function type into hertzforge data objects.
+
+    With a 164 present the ordinate scale to SI is known from the unit
+    exponents, so the data is unit-aware. Without one, unit-bearing records
+    import unit-less unless `ordinate_unit` was declared.
+    """
+    out = {}
+    for code, name in _58_NAMES.items():
+        typed = [f for f in functions if f['function_type'] == code]
+        if not typed:
+            continue
+        # Records of one type need not share an axis: a writer holds
+        # them happily in one file (an awkward real-world sample
+        # pinned it), but a hertzforge data array does
+        # share one — so each distinct abscissa becomes its own
+        # object. This used to refuse the whole file, which turned
+        # one odd record into no import at all.
+        grouped = []
+        for entry in typed:
+            for group in grouped:
+                first = group[0]['abscissa']
+                if (len(entry['abscissa']) == len(first)
+                        and np.allclose(entry['abscissa'], first)):
+                    group.append(entry)
+                    break
+            else:
+                grouped.append([entry])
+        for which, entries in enumerate(grouped):
+            _build_one(out, name if which == 0 else f'{name} ({which + 1})',
+                       code, entries, factors, ordinate_unit, temperature)
+    return out
+
+
+def _build_one(out, name, code, entries, factors, ordinate_unit,
+               temperature=None):
+    from ..core.data import class_for_function_type
+    from ..units import UNKNOWN, si_factor, si_transform
+
+    abscissa = entries[0]['abscissa']
+    scales, offsets, dims, hints = [], [], [], []
+    for entry in entries:
+        offsets.append(0.0)
+        if entry['ordinate_dim'] == 'temperature':
+            # A temperature's scale has an offset, so its exponents say
+            # nothing. Without a 164 or a declared unit the values are
+            # in an unstated scale, and calling them kelvin would put a
+            # 20 degC reading at 20 K: named but left unit-less instead.
+            if temperature is not None:
+                factor, offset = temperature
+                scales.append(1.0 / factor)
+                offsets[-1] = offset / factor
+                dims.append('temperature')
+                hints.append(None)
+            elif ordinate_unit is not None:
+                scale, offset = si_transform(ordinate_unit, 'temperature')
+                scales.append(scale)
+                offsets[-1] = offset
+                dims.append('temperature')
+                hints.append(None)
+            else:
+                scales.append(1.0)
+                dims.append(UNKNOWN)
+                hints.append('temperature')
+        elif factors is not None:
+            length_factor, force_factor = factors
+            scales.append(1.0 / (length_factor ** entry['lexp']
+                                 * force_factor ** entry['fexp']))
+            dims.append(entry['ordinate_dim'])
+            hints.append(None)
+        elif entry['lexp'] == 0 and entry['fexp'] == 0:
+            scales.append(1.0)
+            dims.append(entry['ordinate_dim'])
+            hints.append(None)
+        elif ordinate_unit is not None:
+            scales.append(si_factor(ordinate_unit))
+            dims.append(entry['ordinate_dim'])
+            hints.append(None)
+        else:
+            # The 58 names the quantity but the missing 164 sizes it, so
+            # the values stay raw. Keep the name: it is still true, and
+            # it is most of what someone needs to declare the unit later.
+            scales.append(1.0)
+            dims.append(UNKNOWN)
+            hints.append(entry['ordinate_dim'])
+    cls = class_for_function_type(code)
+    out[name] = cls(
+        abscissa=abscissa,
+        ordinate=np.array([e['ordinate'] * s + o
+                           for e, s, o in zip(entries, scales, offsets)]),
+        response_dof=[e['response'] for e in entries],
+        reference_dof=([e['reference'] for e in entries]
+                       if cls.needs_reference
+                       or any(e['reference'].strip() for e in entries)
+                       else None),
+        ordinate_dim=dims,
+        dimension_hint=hints,
+        comment=[e['comment'] for e in entries],
+    )
+
+
+def load(path: str | os.PathLike, length_unit: str | None = None,
+         ordinate_unit: str | None = None) -> Any:
+    """Read the supported datasets of a universal file (see the module
+    docstring).
+
+    Returns the one object the file holds, or a dict keyed 'geometry',
+    'shapes' and the function names when it holds several. With a dataset
+    164 the values are converted to SI by its factors; without one,
+    `length_unit` declares the unit of the positions and `ordinate_unit`
+    that of the functions, and without those they import unit-less. Raises
+    ValueError when no supported dataset is found.
+    """
+    from ..units import si_factor
+
+    # bytes, because a 58b dataset holds raw floats that are not text
+    # and must not be decoded, replaced or newline-translated on the way
+    # in (Brandon, 2026-08-25)
+    with open(path, 'rb') as f:
+        text = f.read()
+
+    factors, temperature, unread = None, None, []
+    nodes, tracelines, elements = [], [], []
+    functions, mode_shapes, systems = [], [], []
+    for number, records, payload in iter_datasets(text, unread):
+        if number == 164:
+            fields = _floats(' '.join(records[1:]))
+            factors = (fields[0], fields[1])  # length, force
+            if len(fields) >= 4:
+                temperature = (fields[2], fields[3])  # factor, offset
+        elif number == 2411:
+            _parse_2411(records, nodes)
+        elif number == 15:
+            _parse_15(records, nodes)
+        elif number == 82:
+            _parse_82(records, tracelines)
+        elif number == 2412:
+            _parse_2412(records, elements, path)
+        elif number == 58:
+            _parse_58(records, functions, payload)
+        elif number == 55:
+            _parse_55(records, mode_shapes, path)
+        elif number == 2420:
+            _parse_2420(records, systems)
+
+    out = _build_data_objects(functions, factors, ordinate_unit, path,
+                              temperature)
+    if mode_shapes:
+        out['shapes'] = _build_shapes(mode_shapes, path)
+
+    if nodes:
+        if factors is not None:
+            scale, geometry_unit = 1.0 / factors[0], 'm'
+        elif length_unit is not None:
+            scale, geometry_unit = si_factor(length_unit, 'length'), length_unit
+        else:
+            scale, geometry_unit = 1.0, None  # unit-less: raw coordinates
+        out['geometry'] = _build_geometry(nodes, tracelines, elements, scale,
+                                          geometry_unit, systems)
+    elif not out:
+        raise ValueError(f'No supported datasets found in {path}'
+                         + _what_was_skipped(functions, unread))
+
+    return next(iter(out.values())) if len(out) == 1 else out
+
+
+def _what_was_skipped(functions, unread):
+    """What the file held that was passed over, for the refusal: "no
+    supported datasets" alone reads as an empty file, and it is usually
+    a function type or a dataset line this module does not read."""
+    parts = []
+    skipped = sorted({f['function_type'] for f in functions})
+    if skipped:
+        known = ', '.join(str(code) for code in _58_NAMES)
+        parts.append(f'dataset 58 of function type '
+                     f'{", ".join(map(str, skipped))} (read: {known})')
+    if unread:
+        parts.append(f'{len(unread)} dataset(s) whose first line could not '
+                     f'be read, the first being {unread[0][:40]!r}')
+    return '. Skipped: ' + '; '.join(parts) if parts else ''
+
+
+def _origin_scale(scale):
+    """Scale that leaves the axes alone and converts only the origin row."""
+    factors = np.ones((4, 3))
+    factors[3] = scale
+    return factors
+
+
+def _geometry_without_lines(nodes, elements, scale, length_unit,
+                            systems=()):
+    from ..core.geometry import Geometry
+
+    node_ids = [n[0] for n in nodes]
+    # a 2411 record states a node's position in the frame it is placed
+    # in — the record's own second column — and the frames are in the
+    # 2420 beside it. Read as written they land wherever those numbers
+    # happen to point in global (Brandon, 2026-09-20). Resolved before
+    # the unit scale, because an angle is not a length.
+    frames = ([s[0] for s in systems], [s[1] for s in systems],
+              np.array([s[4] for s in systems])) if systems else None
+    written = np.array([n[4] for n in nodes], dtype=float)
+    placement = [n[1] for n in nodes]
+    return Geometry(
+        length_unit=length_unit,
+        node_id=node_ids,
+        node_xyz=(written if frames is None
+                  else to_global(written, placement, *frames)) * scale,
+        node_def_cs=placement,
+        node_disp_cs=[n[2] for n in nodes],
+        node_color=[n[3] for n in nodes],
+        cs_id=[s[0] for s in systems] or None,
+        cs_type=[s[1] for s in systems] or None,
+        cs_name=[s[3] for s in systems] or None,
+        cs_matrix=(np.array([s[4] for s in systems]) * _origin_scale(scale)
+                   if systems else None),
+        elem_id=[e[0] for e in elements],
+        elem_type=[e[1] for e in elements],
+        elem_color=[e[2] for e in elements],
+        elem_conn=[np.array(e[3]) for e in elements],
+    )
+
+
+def _build_geometry(nodes, tracelines, elements, scale, length_unit,
+                    systems=()):
+    geometry = _geometry_without_lines(nodes, elements, scale, length_unit,
+                                       systems)
+    # 2412 carries no blocks, so every element arrived in one; a block
+    # holds one family (2026-09-30)
+    geometry.split_groups_by_family()
+    # an 82 line is a block of two-node line elements with no
+    # properties; a line that lifted the pen is one block of several
+    # runs, so it goes back out under its one id
+    by_id: dict[int, tuple[str, int, list]] = {}
+    for tl_id, color, desc, run in tracelines:
+        _name, _color, runs = by_id.setdefault(tl_id, (desc, color, []))
+        runs.append(run)
+    geometry.attach_drawn_lines(list(by_id.values()))
+    return geometry
+
+
+# ---- writing --------------------------------------------------------------
+
+def handles(obj: Any) -> bool:
+    """True for a Geometry, any DataArray or a ShapeSet: everything `save`
+    writes as ASCII datasets."""
+    from ..core.data import DataArray
+    from ..core.geometry import Geometry
+    from ..core.shapes import ShapeSet
+
+    return isinstance(obj, (Geometry, DataArray, ShapeSet))
+
+
+def handles_binary(obj: Any) -> bool:
+    """True for data arrays only, because only dataset 58 has a binary
+    form.
+
+    Datasets 2411, 82, 2412 and 55 have no binary variant, so a geometry
+    or a mode shape set written "binary" would be the same ASCII file
+    the other exporter writes.
+    """
+    # Caught by test_shapes_can_be_written_to_every_format_that_holds_them,
+    # which already knew what a ShapeSet may be written as (2026-08-25).
+    # Inventing a `b` variant of 2411, 82, 2412 or 55 would produce a file
+    # nothing else reads.
+    from ..core.data import DataArray
+
+    return isinstance(obj, DataArray)
+
+
+# hertzforge dimension -> the dataset 58 specific data type that means it
+_58_CODES = {'length': 8, 'force': 9, 'velocity': 11, 'acceleration': 12,
+             'pressure': 15, 'mass': 16, 'time': 17, 'frequency': 18,
+             'dimensionless': 3, 'temperature': 5}
+
+DELIMITER = '    -1\n'
+
+
+def _block(number, body):
+    """One dataset, delimited the way a UNV file delimits them."""
+    return f'{DELIMITER}{number:6d}\n{body}{DELIMITER}'
+
+
+def _binary_block(number, header, blob):
+    """One binary dataset: the marker line, the ASCII header records,
+    then the bytes.
+
+    Written little endian and IEEE 754 — the only pair every machine
+    this runs on speaks natively, and both are declared on the marker
+    line rather than assumed, which is what lets the reader take a file
+    written the other way round.
+
+    The marker's format is (I6,1A1,I6,I6,I12,I12,I6,I6,I12,I12); the
+    last four fields are reserved and written as zeros
+    (docs/uff_spec/58b.asc).
+    """
+    lines = header.count('\n')
+    marker = (f'{number:6d}b{LITTLE_ENDIAN:6d}{IEEE_754:6d}'
+              f'{lines:12d}{len(blob):12d}'
+              f'{0:6d}{0:6d}{0:12d}{0:12d}\n')
+    return (DELIMITER.encode() + marker.encode() + header.encode()
+            + blob + b'\n' + DELIMITER.encode())
+
+
+def _geometry_datasets(geometry, unit_system=None):
+    """Nodes as 2411, tracelines as 82, elements as 2412."""
+    from .exporters import geometry_values
+
+    points, matrices = geometry_values(geometry, unit_system)
+    out = [_coordinate_system_dataset(geometry, matrices)]
+
+    # written back into each node's own placement frame, or the file
+    # would state global coordinates under a local frame and the next
+    # reader would resolve them a second time
+    written = to_local(points, geometry.node_def_cs, geometry.cs_id,
+                       geometry.cs_type, matrices)
+    nodes = []
+    for i, node in enumerate(geometry.node_id):
+        nodes.append(f'{int(node):10d}{int(geometry.node_def_cs[i]):10d}'
+                     f'{int(geometry.node_disp_cs[i]):10d}'
+                     f'{int(geometry.node_color[i]):10d}\n')
+        nodes.append(''.join(f'{v:25.16E}' for v in written[i]) + '\n')
+    out.append(_block(2411, ''.join(nodes)))
+
+    # a drawn line — a block of two-node line elements with no
+    # properties — is an 82 line, its runs joined by pen-ups (0), and
+    # not a 2412 element as well
+    drawn = geometry.drawn_lines()
+    for line in drawn:
+        ids: list[int] = []
+        for chain in line['chains']:
+            ids += ([0] if ids else []) + [int(n) for n in chain]
+        body = (f'{int(line["group"]):10d}{len(ids):10d}'
+                f'{int(line["color"]):10d}\n'
+                f'{str(line["name"])[:80]}\n')
+        body += ''.join(
+            ''.join(f'{n:10d}' for n in ids[start:start + 8]) + '\n'
+            for start in range(0, len(ids), 8))
+        out.append(_block(82, body))
+    drawn_blocks = {line['group'] for line in drawn}
+
+    if len(geometry.elem_conn):
+        elements = []
+        for i, conn in enumerate(geometry.elem_conn):
+            if int(geometry.elem_group[i]) in drawn_blocks:
+                continue
+            ids = [int(n) for n in conn]
+            descriptor = int(geometry.elem_type[i])
+            if descriptor == 203:
+                # a measured point is its node, which is written; the
+                # universal file has no element that only marks one
+                continue
+            if descriptor >= 200:
+                from ..core.geometry import ELEMENT_TYPES
+                raise ValueError(
+                    f'universal files cannot carry a '
+                    f'{ELEMENT_TYPES[descriptor][0]} (element '
+                    f'{int(geometry.elem_id[i])}): UFF 2412 has no '
+                    'pyramid descriptor. Export to exodus instead.')
+            elements.append(
+                f'{int(geometry.elem_id[i]):10d}{descriptor:10d}'
+                f'{1:10d}{1:10d}{int(geometry.elem_color[i]):10d}'
+                f'{len(ids):10d}\n')
+            if descriptor in _BEAM_DESCRIPTORS:
+                elements.append(f'{0:10d}{1:10d}{1:10d}\n')
+            elements.extend(
+                ''.join(f'{n:10d}' for n in ids[start:start + 8]) + '\n'
+                for start in range(0, len(ids), 8))
+        out.append(_block(2412, ''.join(elements)))
+    return out
+
+
+def _58_axis_record(dimension, label='', units=''):
+    code = _58_CODES.get(dimension, 0)
+    return (f'{code:10d}{0:5d}{0:5d}{0:5d}  '
+            f'{label[:20]:<20}{units[:20]:<20}\n')
+
+
+def _e13(value: float) -> str:
+    """A value in the record's E13.5 field. A positive one has a column to
+    spare, and the seventh figure is what holds a step such as 1/51200 s."""
+    text = f'{value:13.6E}'
+    return text if len(text) == 13 else f'{value:13.5E}'
+
+
+def _58_values(abscissa, ordinate, complex_data, even):
+    """The lines after a double-precision record's eleventh, in the layouts
+    the format gives its double types: 4E20.12 when the abscissa is even,
+    2(E13.5,E20.12) or E13.5,2E20.12 when every abscissa value is present."""
+    if even:
+        scalars = (np.column_stack((ordinate.real, ordinate.imag)).ravel()
+                   if complex_data else ordinate)
+        scalars = scalars.tolist()
+        return [''.join(f'{v:20.12E}' for v in scalars[start:start + 4]) + '\n'
+                for start in range(0, len(scalars), 4)]
+    if complex_data:
+        return [f'{_e13(x)}{y.real:20.12E}{y.imag:20.12E}\n'
+                for x, y in zip(abscissa.tolist(), ordinate.tolist())]
+    pairs = [f'{_e13(x)}{y:20.12E}'
+             for x, y in zip(abscissa.tolist(), ordinate.tolist())]
+    return [''.join(pairs[start:start + 2]) + '\n'
+            for start in range(0, len(pairs), 2)]
+
+
+def _58_dataset(data, record, abscissa, ordinates, binary=False):
+    """One function, written as dataset 58 the way this module reads one.
+    `abscissa` and `ordinates` are the object's values in the units being
+    written (`exporters.data_values`), converted once for all its records."""
+    from ..core.data import parse_dof
+
+    response_node, response_direction = parse_dof(data.response_dof[record])
+    reference_node, reference_direction = (
+        parse_dof(data.reference_dof[record])
+        if data.reference_dof is not None else (0, ''))
+
+    abscissa = np.asarray(abscissa, dtype=np.float64)
+    ordinate = np.atleast_1d(ordinates[record])
+    complex_data = np.iscomplexobj(ordinate)
+    steps = np.diff(abscissa)
+    # an even record's start and step are all the abscissa takes: every value
+    # written in thirteen columns is a value rounded to seven figures. The
+    # binary form holds each abscissa value whole, as doubles
+    even = (not binary and steps.size > 0 and steps[0] > 0
+            and bool(np.allclose(steps, steps[0], rtol=1e-9, atol=0.0)))
+
+    lines = [f'{data.record_label(record)[:80]}\n', 'NONE\n', 'NONE\n',
+             'NONE\n', 'NONE\n']
+    lines.append(
+        f'{data.function_type:5d}{record + 1:10d}{0:5d}{0:10d} '
+        f'{"NONE":<10}{response_node or 0:10d}'
+        f'{direction_code(response_direction) if response_direction else 0:4d} '
+        f'{"NONE":<10}{reference_node or 0:10d}'
+        f'{direction_code(reference_direction) if reference_direction else 0:4d}\n')
+    start, step = (float(abscissa[0]), float(steps[0])) if even else (0.0, 0.0)
+    lines.append(f'{6 if complex_data else 4:10d}{len(ordinate):10d}{int(even):10d}'
+                 f'{_e13(start)}{_e13(step)}{0.0:13.5E}\n')
+    lines.append(_58_axis_record(data.abscissa_dim))
+
+    # dataset 58 names a dimension from a fixed vocabulary. A PSD's
+    # acceleration**2/frequency is not in it, so rather than write half of
+    # it — which reads back as a dimension the units engine rejects — the
+    # record says nothing and the data returns unit-less.
+    # A record whose unit is undefined may still know what it is, and this
+    # is one of the few things a 58 can say without a 164 to size it: name
+    # the quantity, write no scale. Reading it back recovers the hint.
+    dimension = data.known_dim(record) or 'unknown'
+    numerator, _, denominator = dimension.partition('/')
+    nameable = numerator in _58_CODES and (not denominator
+                                           or denominator in _58_CODES)
+    blank = f'{0:10d}{0:5d}{0:5d}{0:5d}  {"":<20}{"":<20}\n'
+    lines.append(_58_axis_record(numerator) if nameable else blank)
+    lines.append(_58_axis_record(denominator)
+                 if nameable and denominator else blank)
+    lines.append(f'{0:10d}{0:5d}{0:5d}{0:5d}  {"":<20}{"":<20}\n')
+
+    if binary:
+        # float64 because the header two records above declares ordinate
+        # type 4 or 6 — the double-precision pair. The two must agree,
+        # and the header is the one that says so.
+        columns = ((abscissa, ordinate.real, ordinate.imag) if complex_data
+                   else (abscissa, ordinate))
+        blob = np.column_stack(columns).astype('<f8').tobytes()
+        return _binary_block(58, ''.join(lines), blob)
+    lines += _58_values(abscissa, ordinate, complex_data, even)
+    return _block(58, ''.join(lines))
+
+
+# hertzforge unit system -> (dataset 164 code, the description that goes with it)
+_164_SYSTEMS = {
+    'm-kg-N-s': (1, 'SI - meters (newton)'),
+    'mm-kg-N-s': (10, 'mm (newton)'),
+    'in-slinch-lbf-s': (7, 'Inch (pound f)'),
+    'ft-slug-lbf-s': (2, 'BG - Foot (pound f)'),
+}
+
+
+def _units_dataset(unit_system=None):
+    """Dataset 164: which units the file is in, and how to leave them.
+
+    The spec's factors convert *out* of the file's units by division, so
+    each is the number of file units in one SI unit. Temperature takes an
+    offset as well, which is why a file in degrees Fahrenheit is expressible
+    at all.
+    """
+    from ..units import SI, si_factor, si_transform
+
+    unit_system = (unit_system or SI).coherent
+    code, description = _164_SYSTEMS.get(unit_system.name,
+                                         (9, unit_system.name[:20]))
+    length = 1.0 / si_factor(unit_system.unit('length'), 'length')
+    force = 1.0 / si_factor(unit_system.unit('force'), 'force')
+    scale, offset = si_transform(unit_system.unit('temperature'),
+                                 'temperature')
+    return _block(164,
+                  f'{code:10d}{description:<20}{2:10d}\n'
+                  + ''.join(f'{v:25.17E}'.replace('E', 'D')
+                            for v in (length, force, 1.0 / scale)) + '\n'
+                  + f'{offset / scale:25.17E}'.replace('E', 'D') + '\n')
+
+
+def _coordinate_system_dataset(geometry, matrices=None):
+    """Dataset 2420, so the frames the nodes refer to are actually defined.
+
+    Without it a file's local displacement directions mean nothing to
+    whoever reads it, and mode shapes written in those directions would be
+    taken for global ones.
+    """
+    lines = [f'{1:10d}\n', 'hertzforge\n']
+    for i, cs_id in enumerate(geometry.cs_id):
+        lines.append(f'{int(cs_id):10d}{int(geometry.cs_type[i]):10d}'
+                     f'{1:10d}\n')
+        # written even when blank: an empty name is a name, and the
+        # reader takes this record's line whatever is on it
+        lines.append(f'{str(geometry.cs_name[i])[:40]}\n')
+        rows = (geometry.cs_matrix if matrices is None else matrices)[i]
+        lines.extend(''.join(f'{v:25.16E}' for v in row) + '\n'
+                     for row in rows)
+    return _block(2420, ''.join(lines))
+
+
+def _shape_datasets(shapes, unit_system=None):
+    """One dataset 55 per mode, whole nodal vectors at a time.
+
+    The dataset stores a vector per node, so the DOFs are grouped by node
+    and any the shape does not carry are written as zero — which means a
+    shape covering only some directions comes back covering all of them.
+    """
+    from ..core.data import parse_dof
+    from .exporters import shape_values
+
+    coefficients = shape_values(shapes, unit_system)
+    order, components = [], {}
+    for i, dof in enumerate(shapes.coordinate):
+        node, direction = parse_dof(dof)
+        if node is None or direction.upper() not in _55_COMPONENTS:
+            raise ValueError(f'{dof} is not a direction dataset 55 can hold')
+        if node not in components:
+            order.append(node)
+            components[node] = {}
+        components[node][_55_COMPONENTS.index(direction.upper())] = i
+
+    width = 6 if any(k > 2 for node in order
+                     for k in components[node]) else 3
+    complex_values = bool(np.iscomplexobj(shapes.shape_matrix))
+
+    blocks = []
+    for mode in range(shapes.num_shapes):
+        values = coefficients[mode]
+        lines = [f'{shapes.mode_label(mode)[:80]}\n', 'NONE\n', 'NONE\n',
+                 'NONE\n', 'NONE\n']
+        # a complex set goes out as analysis type 3, the complex
+        # eigenvalue, which is where every reader looks for one and the
+        # only record with room for a complex modal A; a real set as
+        # type 2, the normal mode
+        lines.append(f'{1:10d}{3 if complex_values else 2:10d}'
+                     f'{2 if width == 3 else 3:10d}'
+                     f'{8:10d}{5 if complex_values else 2:10d}'
+                     f'{width:10d}\n')
+        if complex_values:
+            eigenvalue, modal_a, modal_b = _complex_mode_record(shapes, mode)
+            lines.append(f'{2:10d}{6:10d}{1:10d}{mode + 1:10d}\n')
+            lines.append(''.join(f'{v:13.5E}' for pair in
+                                 (eigenvalue, modal_a, modal_b)
+                                 for v in (pair.real, pair.imag)) + '\n')
+        else:
+            lines.append(f'{2:10d}{4:10d}{1:10d}{mode + 1:10d}\n')
+            lines.append(f'{float(shapes.frequency[mode]):13.5E}'
+                         f'{float(np.real(shapes.modal_mass[mode])):13.5E}'
+                         f'{float(shapes.damping[mode]):13.5E}'
+                         f'{0.0:13.5E}\n')
+        for node in order:
+            lines.append(f'{node:10d}\n')
+            row = []
+            for k in range(width):
+                index = components[node].get(k)
+                value = 0.0 if index is None else values[index]
+                row.extend((value.real, value.imag) if complex_values
+                           else (float(np.real(value)),))
+            lines.append(''.join(f'{v:13.5E}' for v in row) + '\n')
+        blocks.append(_block(55, ''.join(lines)))
+    return blocks
+
+
+def _complex_mode_record(shapes, mode):
+    """(eigenvalue, modal A, modal B) for one complex mode's record.
+
+    The eigenvalue is the pole `synthesize_frf` uses, -z w + i w
+    sqrt(1 - z^2) in rad/s. Modal B is the set's own where it carried
+    one; otherwise it is -l A, which is what B is for the first-order
+    problem (l = -B / A), rather than a zero that would claim the pole
+    sits at the origin.
+    """
+    omega = 2.0 * np.pi * float(shapes.frequency[mode])
+    zeta = float(shapes.damping[mode])
+    eigenvalue = complex(-zeta * omega,
+                         omega * np.sqrt(complex(1.0 - zeta ** 2)).real)
+    modal_a = complex(shapes.modal_mass[mode])
+    carried = shapes.modal_damping
+    modal_b = (complex(carried[mode]) if carried is not None
+               else -eigenvalue * modal_a)
+    return eigenvalue, modal_a, modal_b
+
+
+def save(obj: Any, path: str | os.PathLike,
+         unit_system: UnitSystem | None = None, binary: bool = False) -> None:
+    """Write a geometry, a data array or a mode shape set as a universal
+    file.
+
+    Geometry is written as 2420 coordinate systems, 2411 nodes, 82
+    tracelines and 2412 elements; data as one dataset 58 per record; mode
+    shapes as one dataset 55 per mode. Node positions are written in the
+    coordinate system each node is defined in. Shape values stay in each
+    node's own displacement system, which is what dataset 55 means by
+    them, and the coordinate systems written with them define those
+    directions.
+
+    When the object's units are defined, the values are written in
+    `unit_system` (its coherent form, or SI when none is given) and a
+    dataset 164 declaring that system goes first, so the file reads back
+    with its units. When they are not defined, the stored values are
+    written as they are with no 164, and the file reads back unit-less.
+
+    `binary` writes the functions as dataset 58b instead of 58: the same
+    eleven ASCII header records, then the values as little-endian IEEE
+    754 doubles instead of `20.12E` text. That is 8 bytes a value instead
+    of 20 characters, and a float read back is exactly the float written.
+    Only the functions
+    change form; geometry, mode shapes and the units dataset have no
+    binary variant and are written as ASCII.
+
+    Raises ValueError for a pyramid element, which dataset 2412 has no
+    descriptor for, and for a shape coordinate that is not a direction
+    dataset 55 can hold.
+    """
+    from ..core.geometry import Geometry
+
+    # the units block cannot declare g, so UNV writes the coherent system
+    if unit_system is not None:
+        unit_system = unit_system.coherent
+    blocks = []
+    if getattr(obj, 'units_defined', False):
+        blocks.append(_units_dataset(unit_system))
+    from ..core.shapes import ShapeSet
+
+    if isinstance(obj, Geometry):
+        blocks += _geometry_datasets(obj, unit_system)
+    elif isinstance(obj, ShapeSet):
+        blocks += _shape_datasets(obj, unit_system)
+    else:
+        from .exporters import data_values
+
+        abscissa, ordinates = data_values(obj, unit_system)
+        blocks += [_58_dataset(obj, i, abscissa, ordinates, binary)
+                   for i in range(obj.num_records)]
+    # bytes throughout: a 58b block is bytes, the rest are text, and the
+    # file is one stream of both
+    with open(path, 'wb') as handle:
+        handle.writelines(block if isinstance(block, bytes)
+                          else block.encode() for block in blocks)
+
+
+def save_binary(obj: Any, path: str | os.PathLike,
+                unit_system: UnitSystem | None = None) -> None:
+    """`save` with `binary=True`: the registry's exporter for dataset 58b.
+
+    It is a separate exporter because the Export menu is a list of
+    formats, and whether another program reads 58b is a property of the
+    format. Choosing the format by suffix gets the ASCII form, which more
+    programs read.
+    """
+    save(obj, path, unit_system, binary=True)

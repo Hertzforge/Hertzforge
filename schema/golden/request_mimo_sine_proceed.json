@@ -1,0 +1,8 @@
+{
+ "type": "request",
+ "id": 83,
+ "method": "mimo_sine.proceed",
+ "params": {
+  "acknowledge": "The 40 Hz resonance is flagged; the sweep stays at 2 oct/min."
+ }
+}

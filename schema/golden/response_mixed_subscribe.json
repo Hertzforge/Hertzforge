@@ -1,0 +1,66 @@
+{
+ "type": "response",
+ "id": 93,
+ "result": {
+  "default": false,
+  "rate_hz": 2,
+  "plots": [
+   {
+    "id": "ctl",
+    "quantity": "control"
+   },
+   {
+    "id": "res",
+    "quantity": "residual"
+   },
+   {
+    "id": "rsp",
+    "quantity": "response",
+    "channels": "control"
+   },
+   {
+    "id": "gain",
+    "quantity": "identification"
+   },
+   {
+    "id": "amp",
+    "quantity": "amplitude",
+    "parts": [
+     "t2"
+    ]
+   },
+   {
+    "id": "frq",
+    "quantity": "frequency",
+    "parts": "bands"
+   },
+   {
+    "id": "lvl",
+    "quantity": "level",
+    "parts": "all"
+   },
+   {
+    "id": "law",
+    "quantity": "law"
+   },
+   {
+    "id": "run",
+    "quantity": "readings"
+   }
+  ],
+  "quantities": [
+   "control",
+   "residual",
+   "drive",
+   "response",
+   "time",
+   "coherence",
+   "identification",
+   "amplitude",
+   "frequency",
+   "level",
+   "law",
+   "readings"
+  ]
+ }
+}

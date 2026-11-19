@@ -1,0 +1,67 @@
+{
+ "type": "response",
+ "id": 32,
+ "error": {
+  "code": "bad_request",
+  "reason": "setup_invalid",
+  "message": "The MIMO setup has 1 error; correct it and send it again.",
+  "detail": {
+   "ok": false,
+   "errors": [
+    {
+     "reason": "control_unknown_channel",
+     "channel": 9,
+     "message": "Channel 9 is not an enabled control row of the channel table; set its role to control, or remove it from the setup."
+    }
+   ],
+   "warnings": [],
+   "shape": {
+    "controls": 2,
+    "drives": 2,
+    "space": "physical",
+    "dofs": null,
+    "shape": "square"
+   },
+   "transforms": {
+    "response": null,
+    "drive": null
+   },
+   "reference": {
+    "source": "inline",
+    "lines": 8,
+    "n": 2,
+    "band_hz": [
+     100,
+     143.75
+    ],
+    "min_eigenvalue_ratio": 0,
+    "rank_min": 2,
+    "rank_max": 2,
+    "repaired_lines": 0
+   },
+   "feasibility": [
+    {
+     "channel": 3,
+     "ceiling_vrms": 2,
+     "verdict": "not_evaluated",
+     "predicted_vrms": null,
+     "message": "The drive this test needs is predicted after system identification, before the loop engages."
+    },
+    {
+     "channel": 4,
+     "ceiling_vrms": 2,
+     "verdict": "not_evaluated",
+     "predicted_vrms": null,
+     "message": "The drive this test needs is predicted after system identification, before the loop engages."
+    }
+   ],
+   "law": {
+    "id": "pinv_closed",
+    "name": "pseudo-inverse, closed loop",
+    "version": "1.0.0",
+    "sha256": null,
+    "admitted": true
+   }
+  }
+ }
+}

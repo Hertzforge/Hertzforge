@@ -1,0 +1,169 @@
+import type { TableView } from '$lib/protocol/types';
+
+/** Whether a cell reads as a number ('439.2', '-0.5', '1e-3', '0.5-0.25j', '+2.1 %'). */
+/** Past this many rows a table draws only the rows in view, and some above and below. */
+export const DRAWN_FROM = 300;
+
+/** The tallest a long table is laid out: a browser stops an element growing near 2^24 pixels. */
+export const TALLEST = 15_000_000;
+
+/** What a long table draws for a scroll: rows [first, last), and the space before and after them. */
+export interface Window {
+	first: number;
+	last: number;
+	before: number;
+	after: number;
+}
+
+/**
+ * The rows of a long table to draw for a scroll of `top` pixels in a viewport `height` pixels
+ * tall, each row `rowHeight` tall, with `spare` rows either side so a quick scroll shows no gap,
+ * and the space above and below them. Past `TALLEST` pixels the table is laid out at that height
+ * and the scroll bar spans its rows in proportion, so a million rows reach their end. A table of
+ * `DRAWN_FROM` rows or fewer is drawn whole.
+ */
+export function drawnRows(count: number, top: number, height: number, rowHeight: number, spare = 30): Window {
+	if (count <= DRAWN_FROM) return { first: 0, last: count, before: 0, after: 0 };
+	const step = Math.max(1, rowHeight);
+	const full = count * step;
+	const laid = Math.min(full, TALLEST);
+	// how many pixels of rows one pixel of scroll passes over
+	const ratio = laid > height ? Math.max(1, (full - height) / (laid - height)) : 1;
+	const reached = Math.min(top, Math.max(0, laid - height)) * ratio;
+	const showing = Math.floor(reached / step);
+	const first = Math.max(0, showing - spare);
+	const last = Math.min(count, showing + Math.ceil(height / step) + spare);
+	const before = Math.max(0, top - (reached - first * step));
+	return { first, last, before, after: Math.max(0, laid - before - (last - first) * step) };
+}
+
+/** Where to scroll a long table so row `row` is at its top: the inverse of `drawnRows`. */
+export function scrollFor(count: number, row: number, height: number, rowHeight: number): number {
+	const step = Math.max(1, rowHeight);
+	const full = count * step;
+	const laid = Math.min(full, TALLEST);
+	const ratio = laid > height ? Math.max(1, (full - height) / (laid - height)) : 1;
+	return (row * step) / ratio;
+}
+
+export function numeric(cell: string): boolean {
+	return /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?([+-](\d+\.?\d*|\.\d+)([eE][+-]?\d+)?j)?( ?%)?$/.test(cell.trim());
+}
+
+/** The table as tab-separated text, headings first: what pastes into a spreadsheet. */
+export function tableText(view: Pick<TableView, 'columns' | 'rows'>): string {
+	const clean = (cell: string) => cell.replace(/[\t\r\n]+/g, ' ');
+	return [view.columns, ...view.rows].map((row) => row.map(clean).join('\t')).join('\n');
+}
+
+/** The table as HTML, headings in a `thead`: what a document or an email pastes as a table. */
+export function tableHtml(view: Pick<TableView, 'columns' | 'rows'>): string {
+	const escape = (cell: string) => cell.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const cells = (tag: string, row: string[]) => row.map((c) => `<${tag}>${escape(c)}</${tag}>`).join('');
+	const head = `<thead><tr>${cells('th', view.columns)}</tr></thead>`;
+	const body = `<tbody>${view.rows.map((r) => `<tr>${cells('td', r)}</tr>`).join('')}</tbody>`;
+	return `<table>${head}${body}</table>`;
+}
+
+/** Whether a flag cell reads as set: the table writes True and False, a file may say yes or 1. */
+export function flagOn(cell: string): boolean {
+	return ['true', 'yes', '1', 'on', 'x'].includes(cell.trim().toLowerCase());
+}
+
+/** Tab-separated text as rows of cells, a trailing line break dropped: what a spreadsheet copies. */
+export function parseTsv(text: string): string[][] {
+	const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+	return lines.map((line) => line.split('\t'));
+}
+
+/**
+ * The cells a pasted block sets, starting at (row, column): each pasted column lands on the next
+ * editable column, read-only columns skipped; rows past the table's end and columns past its
+ * editable ones are left out.
+ */
+export function pasteTargets(
+	block: string[][],
+	row: number,
+	column: number,
+	keys: (string | null)[],
+	rowCount: number
+): { row: number; key: string; value: string }[] {
+	const editable = keys.map((k, i) => (k ? i : -1)).filter((i) => i >= column);
+	const out: { row: number; key: string; value: string }[] = [];
+	block.forEach((cells, r) => {
+		if (row + r >= rowCount) return;
+		cells.forEach((value, c) => {
+			const at = editable[c];
+			if (at !== undefined) out.push({ row: row + r, key: keys[at] as string, value });
+		});
+	});
+	return out;
+}
+
+/** A rectangle of cells, inclusive, rows and columns from 0. */
+export interface Block {
+	r0: number;
+	c0: number;
+	r1: number;
+	c1: number;
+}
+
+/** The block two corners span, whichever way round. */
+export function spanned(a: { row: number; col: number }, b: { row: number; col: number }): Block {
+	return { r0: Math.min(a.row, b.row), c0: Math.min(a.col, b.col), r1: Math.max(a.row, b.row), c1: Math.max(a.col, b.col) };
+}
+
+export function inside(block: Block | null, row: number, col: number): boolean {
+	return !!block && row >= block.r0 && row <= block.r1 && col >= block.c0 && col <= block.c1;
+}
+
+/** The selected block as tab-separated text, what Copy puts on the clipboard. */
+export function blockText(rows: string[][], block: Block): string {
+	return rows
+		.slice(block.r0, block.r1 + 1)
+		.map((row) => row.slice(block.c0, block.c1 + 1).join('\t'))
+		.join('\n');
+}
+
+/**
+ * The cells a fill handle dragged from `block` to (row, col) sets: the rectangle the block and that
+ * cell span, less the block itself, each cell taking the block's value at the same place counted
+ * cyclically, so two alternating rows carry the alternation, as a spreadsheet fills. Read-only
+ * columns are left out.
+ */
+export function fillTargets(
+	rows: string[][],
+	block: Block,
+	row: number,
+	col: number,
+	keys: (string | null)[]
+): { row: number; key: string; value: string }[] {
+	const out: { row: number; key: string; value: string }[] = [];
+	const r0 = Math.min(block.r0, row);
+	const r1 = Math.max(block.r1, row);
+	const c0 = Math.min(block.c0, col);
+	const c1 = Math.max(block.c1, col);
+	const height = block.r1 - block.r0 + 1;
+	const width = block.c1 - block.c0 + 1;
+	const mod = (n: number, m: number) => ((n % m) + m) % m;
+	for (let r = r0; r <= r1; r++) {
+		for (let c = c0; c <= c1; c++) {
+			if (inside(block, r, c) || !keys[c]) continue;
+			const value = rows[block.r0 + mod(r - block.r0, height)]?.[block.c0 + mod(c - block.c0, width)] ?? '';
+			out.push({ row: r, key: keys[c] as string, value });
+		}
+	}
+	return out;
+}
+
+/** The rows a table opens onto their own tables to start with: `open` counts from 1, the set from 0. */
+export function openedAtFirst(open: number[] | undefined): Set<number> {
+	return new Set((open ?? []).map((row) => row - 1));
+}
+
+/** A set of opened rows with `row` opened if it was closed and closed if it was open. */
+export function toggled(opened: Set<number>, row: number): Set<number> {
+	const next = new Set(opened);
+	if (!next.delete(row)) next.add(row);
+	return next;
+}

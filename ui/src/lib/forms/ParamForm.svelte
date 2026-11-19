@@ -4,13 +4,12 @@
 	 * parameters, with units, ranges and dataset-driven options. Values bind out; the parent
 	 * decides when to run. Errors are words beside the field, never a color alone.
 	 */
-	import type { ParamDescriptor, ParamOption } from '$lib/protocol/types';
+	import type { ParamDescriptor } from '$lib/protocol/types';
 	import { optionsFor, parseNumber, rangeHint, validate, type ParamValues } from './params';
 
 	interface Props {
 		params: ParamDescriptor[];
 		values: ParamValues;
-		channels?: ParamOption[];
 		/** Show errors only after the user has touched a field or tried to run. */
 		showAllErrors?: boolean;
 		layout?: 'stack' | 'row';
@@ -18,18 +17,51 @@
 		idPrefix?: string;
 		/** data-testid on each field is `<testidPrefix>-<param name>`. */
 		testidPrefix?: string;
+		/** A form that applies as it goes: called when a changed field is left, or a choice made. */
+		oncommit?: () => void;
+		/** A field with `suggest`: its value asked for, the button beside it pressed; null when none came. */
+		onsuggest?: (p: ParamDescriptor) => Promise<number | null>;
 	}
 
 	let {
 		params,
 		values = $bindable(),
-		channels = [],
 		showAllErrors = false,
 		layout = 'stack',
 		disabled = false,
 		idPrefix = 'pf',
-		testidPrefix = 'param'
+		testidPrefix = 'param',
+		oncommit,
+		onsuggest
 	}: Props = $props();
+
+	let suggesting = $state<string | null>(null);
+	/** The value a field's request says, filled in, as if typed. */
+	async function suggestFor(p: ParamDescriptor) {
+		if (!onsuggest || suggesting) return;
+		suggesting = p.name;
+		try {
+			const value = await onsuggest(p);
+			if (value !== null) {
+				delete drafts[p.name];
+				values[p.name] = value;
+				touched[p.name] = true;
+				commit();
+			}
+		} finally {
+			suggesting = null;
+		}
+	}
+
+	/** The values last applied, so leaving a field that did not change applies nothing. */
+	let applied = JSON.stringify(values);
+	function commit() {
+		if (!oncommit) return;
+		const now = JSON.stringify(values);
+		if (now === applied) return;
+		applied = now;
+		oncommit();
+	}
 
 	/** Text being typed into number fields, so "1." or "-" can sit there while editing. */
 	let drafts = $state<Record<string, string>>({});
@@ -37,7 +69,7 @@
 
 	function errorFor(p: ParamDescriptor): string | null {
 		if (!showAllErrors && !touched[p.name]) return null;
-		return validate(p, values[p.name], channels);
+		return validate(p, values[p.name]);
 	}
 
 	function numberText(p: ParamDescriptor): string {
@@ -80,12 +112,14 @@
 
 	/** Short option lists read better as a segmented control than a menu. */
 	function segmented(p: ParamDescriptor): boolean {
-		const opts = optionsFor(p, channels);
+		const opts = optionsFor(p);
 		return opts.length > 0 && opts.length <= 3 && opts.every((o) => o.label.length <= 12);
 	}
 </script>
 
-<div class="form {layout}">
+<!-- Enter in a field of a form that applies as it goes leaves the field, which applies it -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="form {layout}" onfocusout={commit} onclick={(e) => (e.target as HTMLElement).closest('button') && commit()} onchange={(e) => (e.target as HTMLElement).tagName === 'SELECT' || (e.target as HTMLInputElement).type === 'checkbox' ? commit() : undefined} onkeydown={(e) => oncommit && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && (e.target as HTMLElement).blur()} role="group">
 	{#each params as p (p.name)}
 		{@const id = `${idPrefix}-${p.name}`}
 		{@const err = errorFor(p)}
@@ -113,7 +147,7 @@
 					{#if hint}<span class="hint num">{hint}</span>{/if}
 				</label>
 				{#if p.type === 'number' || p.type === 'integer'}
-					<div class="numeric">
+					<div class="numeric" style:--unit-length="{p.unit?.length ?? 0}ch">
 						<input
 							{id}
 							class="field num"
@@ -140,8 +174,11 @@
 							</button>
 						</div>
 					</div>
+					{#if p.suggest && onsuggest}
+						<button type="button" class="btn ghost sm suggest" data-testid="{tid}-suggest" disabled={disabled || suggesting !== null} title="Fill in the value detected for what is picked" onclick={() => suggestFor(p)}>{suggesting === p.name ? 'Detecting' : 'Detect'}</button>
+					{/if}
 				{:else if p.type === 'enum'}
-					{@const opts = optionsFor(p, channels)}
+					{@const opts = optionsFor(p)}
 					{#if segmented(p)}
 						<div class="seg" role="radiogroup" aria-labelledby={id} {id} data-testid={tid}>
 							{#each opts as o (o.value)}
@@ -201,6 +238,11 @@
 </div>
 
 <style>
+	.suggest {
+		align-self: flex-start;
+		margin-top: 4px;
+	}
+
 	.form.stack {
 		display: flex;
 		flex-direction: column;
@@ -247,7 +289,7 @@
 	}
 
 	.numeric .field {
-		padding-right: 52px;
+		padding-right: max(52px, calc(34px + var(--unit-length, 0ch)));
 		text-align: right;
 	}
 

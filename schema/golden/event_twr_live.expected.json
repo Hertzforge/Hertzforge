@@ -1,0 +1,82 @@
+{
+ "type": "event",
+ "topic": "twr.live",
+ "seq": 181,
+ "data": {
+  "run_id": "twr-0003",
+  "source": "SIM",
+  "state": "running",
+  "phase": "playing",
+  "mode": "auto",
+  "t_s": 4.25,
+  "level_db": 0,
+  "rung": 4,
+  "plays": {
+   "done": 10,
+   "at_level": 1,
+   "of_level": 8,
+   "playback": 2,
+   "of_playback": 375
+  },
+  "play": {
+   "index": 10,
+   "kind": "playback",
+   "iteration": null,
+   "frames_done": 2560,
+   "frames": 5120
+  },
+  "last": {
+   "rms_error_pct": 1.75,
+   "peak_error_pct": 4.5,
+   "spectral_error_db": 0.125,
+   "gated": true
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Scope",
+    "x": {
+     "label": "Time",
+     "unit": "s",
+     "scale": "linear"
+    },
+    "y": {
+     "label": "Acceleration",
+     "unit": "g",
+     "scale": "linear"
+    },
+    "series": [
+     {
+      "name": "Control",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        4.0,
+        4.000078125,
+        4.00015625,
+        4.000234375
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.0,
+        0.125,
+        0.25,
+        0.125
+       ]
+      }
+     }
+    ],
+    "link": "time"
+   }
+  ]
+ }
+}

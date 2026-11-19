@@ -1,0 +1,29 @@
+{
+ "type": "response",
+ "id": 68,
+ "error": {
+  "code": "bad_request",
+  "reason": "config_invalid",
+  "message": "The configuration has 3 errors.",
+  "detail": {
+   "errors": [
+    {
+     "reason": "alarm_wider_than_abort",
+     "field": "envelope.abort_db",
+     "message": "The abort band is narrower than the alarm band on one side; a band would abort without ever alarming. Widen the abort band or narrow the alarm band."
+    },
+    {
+     "reason": "out_of_range",
+     "field": "limits.drive_vpk_abort",
+     "message": "The drive abort is 0.4; it is above the drive ceiling of 0.5 V and at most 10 V"
+    },
+    {
+     "reason": "limit_unknown_channel",
+     "field": "limit_channels.channels[0].channel",
+     "message": "Channel 7 is not a row of the channel table other than the control channel; name the row the bound is for."
+    }
+   ],
+   "warnings": []
+  }
+ }
+}

@@ -1,0 +1,756 @@
+"""The action table beside the tree: its first column is the selection, each
+other column the selection with one more object, and what a selection draws by
+itself is declared so the shell can name it before anything is drawn."""
+
+from __future__ import annotations
+
+import copy
+import itertools
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from hertzforge.core.data import Psd, Specification, TimeHistory
+from hertzforge.core.shapes import ShapeSet
+from hertzforge.service import action_table, projects, show, verbs
+from hertzforge.service.protocol import ProtocolError
+from hertzforge.service.server import OPERATIONS
+
+PLATE = Path(__file__).resolve().parents[2] / 'testdata' / 'plate'
+
+
+@pytest.fixture(scope='module')
+def plate():
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    projects.import_file(state, {'path': str(PLATE / 'modal_spectra.nc4')})
+    projects.import_file(state, {'path': str(PLATE / 'geometry.unv'),
+                                 'units': {'length_unit': 'mm'}})
+    return state
+
+
+def named(state, kind):
+    return next(name for name, obj in state.project.items() if projects.kind_of(obj) == kind)
+
+
+def table(state, *objects, records=None, part=None, validate=None):
+    out = projects.actions(state, {'objects': list(objects), 'records': records or {}, 'part': part})
+    if validate:
+        validate(out, 'actions')
+    return out['table']['columns']
+
+
+def column(columns, *kinds):
+    return next(c for c in columns if c['kinds'] == list(kinds))
+
+
+def row(col, verb):
+    return next(r for r in col['rows'] if r['verb'] == verb)
+
+
+def verbs_in(col):
+    return [r['verb'] for r in col['rows']]
+
+
+def test_every_operation_has_a_verb_or_is_hidden():
+    ids = {op.id for op in OPERATIONS}
+    assert ids == set(verbs.VERBS) | verbs.HIDDEN, 'a new operation needs a word in service/verbs.py'
+    assert not set(verbs.VERBS) & verbs.HIDDEN
+    assert set(verbs.MODULES) <= ids and set(verbs.PARTS) <= ids
+
+
+def test_every_row_has_a_glyph():
+    """The shell draws each row with its glyph (ui/src/lib/workspaces/actionIcons.ts), so a new
+    operation, act or default needs one there."""
+    import re
+
+    icons = (Path(__file__).resolve().parents[2] / 'ui' / 'src' / 'lib' / 'workspaces'
+             / 'actionIcons.ts').read_text(encoding='utf-8')
+    glyphs = set(re.findall(r"^\t'([a-z_]+\.[a-z_]+)': '", icons, re.MULTILINE))
+    source = Path(action_table.__file__).read_text(encoding='utf-8')
+    own = set(re.findall(r"_row\('((?:self|show)\.[a-z_]+)'", source))
+    defaults = {f'show.{verb.lower()}' for verb in ('Plot', 'Stack', 'Table', 'Values', 'MAC', 'Animate')}
+    offered = {op for op in verbs.VERBS if op not in verbs.UNOFFERED}
+    assert 'project.compute_psds' in glyphs and 'self.rename' in glyphs
+    assert not (offered | own | defaults) - glyphs, 'a row needs a glyph in actionIcons.ts'
+
+
+def test_verbs_are_short():
+    # two words, but for Auto Compute, which names its kind of test now that the one
+    # analysis module offers all six together; under its row they read by the test alone
+    long = [v for v in verbs.VERBS.values() if len(v.split()) > 2]
+    assert all(v.startswith('Auto Compute ') for v in long)
+    work_ups = [v for k, v in verbs.VERBS.items() if 'work_up_' in k]
+    assert len(set(work_ups)) == len(work_ups) == 6
+
+
+def test_every_core_verb_an_operation_takes_has_its_types():
+    used = {p.verb for op in OPERATIONS for p in op.params if p.verb}
+    assert used <= set(action_table.VERB_WHEN)
+
+
+def test_modules_narrow_what_was_offered_everywhere():
+    by_id = {op.id: op for op in OPERATIONS}
+    averaging = verbs.modules_of(by_id['project.set_averaging'])
+    assert 'modal' in averaging and 'random' in averaging
+    assert 'shock' not in averaging and 'sine' not in averaging
+    assert 'shock' in verbs.modules_of(by_id['project.save_as'])
+    assert verbs.modules_of(by_id['project.cmif']) == ('modal',)
+
+
+def test_a_geometry_alone(plate, validate):
+    geometry = named(plate, 'geometry')
+    first, *rest = table(plate, geometry, validate=validate)
+    assert first['current'] and first['kinds'] == ['geometry']
+    plot = first['rows'][0]
+    assert (plot['verb'], plot['kind'], plot['ready']) == ('Plot', 'default', True)
+    assert geometry in row(first, 'Export')['fill'].values()
+    assert row(first, 'Unlink')['ready'] is False and row(first, 'Unlink')['reason']
+    assert 'View Geometry' not in verbs_in(first), 'what it draws by itself is the default row'
+    animate = row(column(rest, 'geometry', 'time_history'), 'Animate')
+    assert animate['kind'] == 'default' and animate['ready']
+    assert set(animate['candidates']) == {n for n, o in plate.project.items()
+                                          if projects.kind_of(o) == 'time_history'}
+    missing = row(column(rest, 'geometry', 'specification'), 'Animate')
+    assert not missing['ready'] and missing['candidates'] == [] and 'specification' in missing['reason']
+    assert 'Link' in verbs_in(column(rest, 'geometry', '*'))
+
+
+def test_each_object_goes_on_the_param_that_takes_it_whichever_was_picked_first(plate):
+    project = plate.project
+    project.add('Measured', Psd(**_psd()))
+    project.add('Spec', Specification(**_psd()))
+    try:
+        first = table(plate, 'Spec', 'Measured')[0]
+        assert row(first, 'RMS Error')['fill'] == {'spectrum': 'Measured', 'specification': 'Spec'}
+        assert first['rows'][0]['verb'] == 'Compare' and first['rows'][0]['kind'] == 'default'
+    finally:
+        project.remove('Measured')
+        project.remove('Spec')
+
+
+def test_the_stage_rule_makes_no_false_combinations(plate):
+    """A geometry stands by beside data as the stage, so Averaging fills from a
+    time history alone; it is not something the two do together."""
+    col = column(table(plate, named(plate, 'geometry')), 'geometry', 'time_history')
+    assert verbs_in(col) == ['Animate']
+
+
+def test_two_geometries_default_to_the_overlay(plate):
+    project = plate.project
+    project.add('Second', project[named(plate, 'geometry')])
+    try:
+        columns = table(plate, named(plate, 'geometry'), 'Second')
+        first = columns[0]
+        assert first['rows'][0]['verb'] == 'Overlay' and first['rows'][0]['kind'] == 'default'
+        assert 'Merge' in verbs_in(first) and 'Link' in verbs_in(first)
+        assert not row(first, 'Rename')['ready']
+        assert not [c for c in columns if c['kinds'][-1] == '*'], 'Link is already in the first column'
+    finally:
+        project.remove('Second')
+
+
+def test_a_merge_only_pairs_objects_of_one_type(plate):
+    columns = table(plate, named(plate, 'geometry'))
+    assert 'Merge' in verbs_in(column(columns, 'geometry', 'geometry'))
+    assert 'Merge' not in verbs_in(column(columns, 'geometry', 'time_history'))
+
+
+def test_a_verb_that_cannot_run_says_why(plate):
+    first = table(plate, named(plate, 'geometry'))[0]
+    solve = row(first, 'Solve')
+    assert not solve['ready'] and 'properties' in solve['reason'] and solve['modules'] == ['geometry']
+
+
+def test_an_frf_starts_a_fit_in_modal_only(plate):
+    first = table(plate, named(plate, 'frf'))[0]
+    # one Fit Modes, the fitting screen: the band fit is not offered (Brandon, 2026-11-14)
+    fit = row(first, 'Fit Modes')
+    assert fit['id'] == 'self.fit' and fit['modules'] == ['modal']
+    assert [r['id'] for r in first['rows']].count('self.fit') == 1
+    assert 'project.fit_modes' not in [r['id'] for r in first['rows']]
+    edit = row(column(table(plate, named(plate, 'frf')), 'frf', 'shape_set'), 'Edit Fit')
+    assert edit['modules'] == ['modal']
+
+
+def test_picks_fill_the_records(plate):
+    frf = named(plate, 'frf')
+    first = table(plate, frf, records={frf: [0, 1, 2, 6]})[0]
+    assert frf in row(first, 'CMIF')['fill'].values()
+    assert row(first, 'Export')['fill'].get('records', '1-3, 7') == '1-3, 7'
+
+
+def test_a_part_of_a_geometry_brings_its_own_verbs(plate):
+    geometry = named(plate, 'geometry')
+    assert 'Add Node' not in verbs_in(table(plate, geometry)[0])
+    with_part = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0]
+    assert row(with_part, 'Add Node')['part'] is True
+    assert 'Rotate' not in verbs_in(with_part)
+    systems = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'coordinate_systems'})[0]
+    # a system is slid and turned in its Edit, by its row or its arrows and rings
+    assert verbs_in(systems) == ['Plot', 'Edit', 'Add System']
+    edit = row(systems, 'Edit')
+    assert edit['fill']['cs'] == 0 and 'cs' in edit['omit']
+
+
+SHAPES = ['Add Block', 'Add Cylinder', 'Add Cone', 'Add Sphere', 'Add Section', 'Add Plate',
+          'Add Disk']
+
+
+def test_the_geometry_row_leaves_its_parts_verbs_to_its_parts(plate):
+    geometry = named(plate, 'geometry')
+    own = verbs_in(table(plate, geometry)[0])
+    assert {'Export', 'Set View'} <= set(own)
+    # a part picked in the tree shows its entities' table, and Delete takes its rows
+    assert not {'Show Entities', 'Delete Picks'} & set(own)
+    for verb in [*SHAPES, 'Show Solids', 'Mesh', 'Add Element', 'Add Group', 'Set Properties',
+                 'Merge Nodes', 'Align', 'Mate', 'Add Node', 'Rotate']:
+        assert verb not in own, verb
+    # placed by dragging in the tree, removed with Delete, a hole subtracted as a cylinder
+    assert not {'Place', 'Remove', 'Add Hole'} & set(own)
+
+
+def test_a_part_offers_its_own_verbs_alone(plate):
+    geometry = named(plate, 'geometry')
+    solids = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'solids', 'id': 0})[0])
+    assert set(SHAPES) <= set(solids)
+    assert 'Mesh' not in solids, 'Mesh meshes the solids picked'
+    assert not {'Add Hole', 'Export', 'Add Node', 'Rename', 'Duplicate', 'Combine'} & set(solids)
+    assert 'Reorder' not in solids, 'a solid is reordered by dragging it in the tree'
+    assert 'Show Solids' not in solids, 'picking the row shows them'
+    nodes = verbs_in(table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})[0])
+    assert 'Add Node' in nodes and 'Add Block' not in nodes and 'Merge Nodes' not in nodes
+
+
+def test_a_family_fills_the_element_it_adds(plate):
+    geometry = named(plate, 'geometry')
+    family = table(plate, geometry, part={'name': geometry, 'kind': 'family', 'id': 'hexes'})[0]
+    assert row(family, 'Add Element')['fill']['family'] == 'hexes'
+    assert row(family, 'Add Element')['part'] is True and 'Add Group' in verbs_in(family)
+
+
+def test_element_groups_picked_together_fill_what_ties_them(plate):
+    geometry = named(plate, 'geometry')
+    one, together = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1})
+    assert one['parts'] == ['group'] and together['parts'] == ['group', 'group']
+    assert row(one, 'Merge Nodes')['fill']['groups'] == '1'
+    others = [str(g) for g in plate.project[geometry].group_id if g != 1]
+    for verb in ('Merge Groups', 'Align', 'Mate'):
+        assert verb not in verbs_in(one)
+        assert row(together, verb)['candidates'] == others
+        assert row(together, verb)['ready'] is bool(others)
+    columns = table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': 1, 'ids': [1, 2]})
+    both = columns[0]
+    assert both['parts'] == ['group', 'group']
+    for verb in ('Merge Nodes', 'Merge Groups', 'Align', 'Mate', 'Set Properties'):
+        assert row(both, verb)['fill']['groups'] == '1, 2'
+        assert row(both, verb)['ready'] is True
+    assert len(columns) == 1, 'nothing more for a third group to add'
+
+
+def test_solids_picked_together_combine(validate):
+    state = projects.new({'title': 'x'})
+    project = state.project
+    project.new_geometry('Part', unit='m')
+    for _ in range(3):
+        OPS['project.add_solid_block'].run(project, OPS['project.add_solid_block'].resolve(
+            {'geometry': 'Part'}, objects={'Part': 'geometry'}, verbs={'Part': []}))
+    one, together = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': 1},
+                          validate=validate)
+    assert one['parts'] == ['solid'] and 'Combine' not in verbs_in(one)
+    # a block is edited in its own Add form, which takes the place of Edit Solid
+    assert row(one, 'Edit')['fill']['solid'] == '1' and 'Edit Solid' not in verbs_in(one)
+    # Mesh on the Solids row meshes every part; on solids picked, those
+    assert row(one, 'Mesh')['fill']['solids'] == '1' and 'geometry' in row(one, 'Mesh')['modules']
+    assert row(together, 'Combine')['candidates'] == ['2', '3']
+    picked = {'name': 'Part', 'kind': 'solid', 'id': 1, 'ids': [1, 3]}
+    columns = table(state, 'Part', part=picked, validate=validate)
+    both = columns[0]
+    assert both['parts'] == ['solid', 'solid']
+    for verb in ('Combine', 'Move Part', 'Pattern', 'Delete Solids'):
+        assert row(both, verb)['fill']['solids'] == '1, 3' and row(both, verb)['ready'], verb
+    assert row(both, 'Edit Solid')['reason'] == 'Pick one solid in the tree'
+    assert len(columns) == 1
+    assert row(one, 'Take Apart')['reason'] == 'It is not a boolean or a pattern'
+    combine = OPS['project.combine_solids']
+    combine.run(state.project, combine.resolve(
+        {'geometry': 'Part', 'operation': 'union', 'solids': '1, 2'},
+        objects={'Part': 'geometry'}, verbs={'Part': []}))
+    union = int(state.project['Part'].solids[-1].id)
+    made = table(state, 'Part', part={'name': 'Part', 'kind': 'solid', 'id': union})[0]
+    assert row(made, 'Take Apart')['ready'] and row(made, 'Take Apart')['fill']['solids'] == str(union)
+
+
+def test_a_part_pairs_only_with_its_own_kind(plate):
+    geometry = named(plate, 'geometry')
+    columns = table(plate, geometry, part={'name': geometry, 'kind': 'part', 'id': 'nodes'})
+    assert len(columns) == 1 and columns[0]['parts'] == ['part:nodes']
+
+
+def test_nothing_selected_is_the_project_alone(plate, validate):
+    columns = table(plate, validate=validate)
+    assert len(columns) == 1 and columns[0]['kinds'] == []
+    assert {'New Geometry', 'New Table'} <= set(verbs_in(columns[0]))
+
+
+def _shapes():
+    return ShapeSet(frequency=[10.0, 20.0], damping=[0.01, 0.01], shape_matrix=np.eye(2),
+                    coordinate=['1Z+', '2Z+'])
+
+
+def _psd():
+    f = np.linspace(20, 2000, 50)
+    return {'abscissa': f, 'ordinate': np.full((2, 50), 0.01), 'response_dof': ['1Z+', '2Z+'],
+            'ordinate_unit': ['g**2/Hz'] * 2}
+
+
+def test_the_declared_pairs_are_what_show_draws(plate):
+    """Every pair the table names as drawn by itself has a joint reading, and a
+    geometry beside a type it does not name has none."""
+    project = plate.project
+    project.add('Shapes', _shapes())
+    project.add('Shapes 2', _shapes())
+    project.add('Measured', Psd(**_psd()))
+    project.add('Measured 2', Psd(**_psd()))
+    project.add('Spec', Specification(**_psd()))
+    project.add('Stage 2', project[named(plate, 'geometry')])
+    names = {'geometry': named(plate, 'geometry'), 'time_history': named(plate, 'time_history'),
+             'frf': named(plate, 'frf'), 'channel_table': named(plate, 'channel_table'),
+             'shape_set': 'Shapes', 'psd': 'Measured', 'specification': 'Spec'}
+    second = {'geometry': 'Stage 2', 'shape_set': 'Shapes 2', 'psd': 'Measured 2'}
+    try:
+        for a, b in action_table.JOINT:
+            if a not in names or b not in names:
+                continue
+            first, other = names[a], second[b] if a == b else names[b]
+            try:
+                assert show._pair(project, first, other, {}, None) is not None, (a, b)
+            except ProtocolError:
+                pass  # the pair's own reading, refusing these two objects' DOFs
+        assert show._pair(project, names['geometry'], named(plate, 'multiple_coherence'), {}, None) is None
+        assert ('geometry', 'multiple_coherence') not in action_table.JOINT
+    finally:
+        for name in ('Shapes', 'Shapes 2', 'Measured', 'Measured 2', 'Spec', 'Stage 2'):
+            project.remove(name)
+
+
+def test_a_lone_shape_set_animates_only_on_a_geometry(plate):
+    project = plate.project
+    project.add('Shapes', _shapes())
+    try:
+        kinds = ['shape_set']
+        assert action_table.defaults(project, kinds, []) == ['Table']
+    finally:
+        project.remove('Shapes')
+    assert action_table.defaults(project, ['geometry'], []) == ['Plot']
+    assert action_table.defaults(project, ['report'], []) == []
+
+
+def test_export_lists_the_formats_of_the_object_it_was_reached_from(plate, validate):
+    from hertzforge.io import exporters
+
+    name = named(plate, 'geometry')
+    first = table(plate, name, validate=validate)[0]
+    row = next(r for r in first['rows'] if r['id'] == 'project.save_as')
+    assert row['fill'] == {'object': name}
+    values = [f['value'] for f in row['formats']]
+    assert values == ['hforge', *(e.name for e in exporters(plate.project[name]))]
+    assert 'unv' in values and 'delimited' not in values and 'sdynpy_shapes' not in values
+    assert row['formats'][0]['suffix'] == '.hforge'
+
+
+def test_adding_a_geometry_to_shape_sets_is_not_offered(plate):
+    project = plate.project
+    project.add('Shapes', _shapes())
+    project.add('Shapes B', _shapes())
+    try:
+        for selected in (['Shapes'], ['Shapes', 'Shapes B']):
+            with_geometry = [c for c in table(plate, *selected)[1:] if 'geometry' in c['kinds']]
+            assert not [r for c in with_geometry for r in c['rows'] if r['kind'] == 'default']
+        with_shapes = [c for c in table(plate, named(plate, 'geometry'))[1:]
+                       if c['kinds'] == ['geometry', 'shape_set']]
+        assert not [r for c in with_shapes for r in c['rows'] if r['kind'] == 'default']
+        # selected by hand they still draw together
+        assert action_table.defaults(project, ['geometry', 'shape_set'], []) == ['Animate']
+    finally:
+        project.remove('Shapes')
+        project.remove('Shapes B')
+
+
+def test_a_mate_picked_in_the_tree_fills_the_rows_that_act_on_it(plate, validate):
+    from hertzforge import mesh
+
+    project = plate.project
+    project.add('Part', mesh.assemble(
+        mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'base', unit='m'),
+        mesh.block((0, 0, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1.0, 'lid', unit='m'),
+        apart=True))
+    found = project.mate_surfaces('Part')
+    picked = {'name': 'Part', 'kind': 'mate', 'id': found[0]}
+    (current, *_rest) = table(plate, 'Part', part=picked, validate=validate)
+    edit = row(current, 'Edit')
+    assert edit['id'] == 'project.mate_surfaces' and edit['fill']['mate'] == str(found[0])
+    assert edit['fill']['name'] == 'base on lid' and edit['fill']['normal'] == 'rigid'
+    assert {'groups', 'tolerance', 'patch'} <= set(edit['omit'])
+    assert row(current, 'Delete Mates')['fill']['mates'] == str(found[0])
+
+
+def test_a_lone_shape_sets_views_are_a_verb_each(plate, validate):
+    project = plate.project
+    project.add('Shapes', _shapes())
+    try:
+        first = table(plate, 'Shapes', validate=validate)[0]
+        default = first['rows'][0]
+        assert (default['id'], default['kind'], default['ready']) == ('show.animate', 'default', True)
+        views = [r for r in first['rows'] if r['id'].startswith('show.') and r['kind'] == 'run']
+        assert [(r['id'], r['verb'], r['ready']) for r in views] == [
+            ('show.table', 'Table', True), ('show.mac', 'MAC', True), ('show.values', 'Values', True)]
+    finally:
+        project.remove('Shapes')
+
+
+OPS = {op.id: op for op in OPERATIONS}
+
+
+def _refusal(project, op_id, fill):
+    """What the operation answers on what the row fills, typing nothing: None when it runs."""
+    op = OPS[op_id]
+    values = op.resolve(fill, objects={n: projects.kind_of(o) for n, o in project.items()},
+                        verbs={n: projects.verbs_of(project, n) for n in project})
+    try:
+        op.run(copy.deepcopy(project), values)
+    except ProtocolError as error:
+        return error.message
+    return None
+
+
+@pytest.fixture
+def rich():
+    """Its own project: these rows are about what objects hold, and some of it is set here."""
+    state, _ = projects.import_file(None, {'path': str(PLATE / 'modal.nc4')})
+    projects.import_file(state, {'path': str(PLATE / 'geometry.unv'),
+                                 'units': {'length_unit': 'mm'}})
+    return state
+
+
+def _offered(state, name, verb, op_id, part=None):
+    """The row with the words its operation would refuse on, for the same state."""
+    found = row(table(state, name, part=part)[0], verb)
+    assert found['id'] == op_id
+    return found
+
+
+def test_mesh_meshes_the_solids_picked_at_the_size_they_hold_at(rich):
+    """No ids to type and no size per piece: the solids picked, at one size, the one they
+    are likely to hold at, as shells when they are flat."""
+    geometry = named(rich, 'geometry')
+    assert 'no solids' in _refusal(rich.project, 'project.mesh_solids', {'geometry': geometry})
+    for op_id in ('project.add_solid_block', 'project.add_solid_plate'):
+        run = OPS[op_id]
+        run.run(rich.project, run.resolve(
+            {'geometry': geometry}, objects={geometry: 'geometry'}, verbs={geometry: []}))
+    block, plate = (int(s.id) for s in rich.project[geometry].solids[-2:])
+    found = _offered(rich, geometry, 'Mesh', 'project.mesh_solids',
+                     {'name': geometry, 'kind': 'solid', 'id': block})
+    assert found['ready'] and found['fill']['solids'] == str(block)
+    assert found['fill']['elements'] == 'hexes' and float(found['fill']['size']) > 0
+    assert set(found['omit']) == {'solids', 'sizes', 'detect'}
+    flat = _offered(rich, geometry, 'Mesh', 'project.mesh_solids',
+                    {'name': geometry, 'kind': 'solid', 'id': plate})
+    assert flat['fill']['elements'] == 'quads'
+    both = _offered(rich, geometry, 'Mesh', 'project.mesh_solids',
+                    {'name': geometry, 'kind': 'solid', 'id': block, 'ids': [block, plate]})
+    assert both['fill']['solids'] == f'{block}, {plate}' and both['fill']['elements'] == 'hexes'
+
+
+def test_mesh_detects_a_size_for_the_element_type_chosen():
+    import asyncio
+
+    from .test_projects import _exchange
+
+    out = asyncio.run(_exchange([
+        ('units.system', {'name': 'in-slinch-lbf-s (g)'}),
+        ('op.run', {'op': 'project.new_geometry', 'params': {'name': 'Part', 'unit': 'in'}}),
+        ('op.run', {'op': 'project.add_solid_block', 'params': {'geometry': 'Part'}}),
+        ('project.mesh_size', {'geometry': 'Part', 'solids': '1', 'elements': 'hexes',
+                               'size': 0}),
+        ('project.mesh_size', {'geometry': 'Part', 'solids': '1', 'elements': 'tetras'}),
+        ('project.mesh_size', {'geometry': 'Part', 'elements': 'tetras'}),
+    ]))
+    hexes, tetras = out[3][-1]['result']['value'], out[4][-1]['result']['value']
+    # a block of 1 in: half its side as bricks, a third as tetras, in inches
+    assert hexes == 0.5 and tetras == 0.3333
+    assert out[5][-1]['error']['code'] == 'bad_request'
+
+
+def test_unmark_shock_says_there_are_none_marked(rich):
+    history = named(rich, 'time_history')
+    found = _offered(rich, history, 'Unmark Shock', 'project.remove_shock')
+    assert not found['ready'] and 'no shocks' in found['reason']
+    assert _refusal(rich.project, found['id'], {'history': history})
+    rich.project.detect_shocks(history)
+    if rich.project[history].shocks:
+        assert _offered(rich, history, 'Unmark Shock', 'project.remove_shock')['ready']
+
+
+@pytest.mark.parametrize(('verb', 'op_id'), [('Conditioning', 'project.conditioning'),
+                                             ('Realizability', 'project.realizability')])
+def test_an_autospectrum_set_says_it_needs_cross_terms(rich, verb, op_id):
+    rich.project.add('Autos', Psd(**_psd()))
+    found = _offered(rich, 'Autos', verb, op_id)
+    assert not found['ready'] and found['reason'] == 'It needs cross terms'
+    assert 'no cross terms' in _refusal(rich.project, op_id, {'data': 'Autos'})
+    history = named(rich, 'time_history')
+    cross = rich.project.compute_cpsds(history)
+    assert _offered(rich, cross, verb, op_id)['ready']
+
+
+def test_transmissibility_says_an_frf_not_computed_here_has_nothing_behind_it(rich):
+    projects.import_file(rich, {'path': str(PLATE / 'frfs.unv')})
+    outside = next(n for n, o in rich.project.items() if projects.kind_of(o) == 'frf')
+    found = _offered(rich, outside, 'Transmissibility', 'project.transmissibility')
+    assert not found['ready'] and 'not computed' in found['reason']
+    assert 'not an FRF computed' in _refusal(rich.project, found['id'], {'frf': outside})
+    made = rich.project.compute_frfs(named(rich, 'time_history'))
+    held = {str(dof) for dof in rich.project[made].reference_dof}
+    computed = _offered(rich, made, 'Transmissibility', 'project.transmissibility')
+    assert computed['ready'] == (len(held) == 1)
+    assert _refusal(rich.project, found['id'], {'frf': made}) if len(held) > 1 else True
+
+
+def test_partial_coherence_says_a_coherence_not_computed_here_has_nothing_behind_it(rich):
+    project = rich.project
+    made = project.compute_multiple_coherence(named(rich, 'time_history'))
+    assert _offered(rich, made, 'Partial Coherence', 'project.partial_coherence')['ready']
+    project.add('Outside', project[made])
+    found = _offered(rich, 'Outside', 'Partial Coherence', 'project.partial_coherence')
+    assert not found['ready'] and 'not computed' in found['reason']
+    assert 'neither a time history' in _refusal(project, found['id'], {'coherence': 'Outside'})
+
+
+def test_sensors_says_a_table_names_no_sensor_model(rich):
+    name = named(rich, 'channel_table')
+    found = _offered(rich, name, 'Sensors', 'project.sensors')
+    assert not found['ready'] and 'no sensor model' in found['reason']
+    assert 'no sensor model' in _refusal(rich.project, found['id'], {'table': name})
+
+
+def test_apply_truncation_names_the_row_that_sets_a_span(rich):
+    history = named(rich, 'time_history')
+    found = _offered(rich, history, 'Apply Truncation', 'project.truncate_data')
+    assert not found['ready'] and 'Truncation sets one' in found['reason']
+    assert 'Truncation sets one' in _refusal(rich.project, found['id'], {'source': history})
+    rich.project[history].truncation = (0.0, 0.01)
+    assert _offered(rich, history, 'Apply Truncation', 'project.truncate_data')['ready']
+
+
+def test_a_set_with_no_mass_unit_says_so_for_a_state_space_model(rich):
+    project = rich.project
+    project.add('Unscaled', _shapes())
+    table_name = named(rich, 'channel_table')
+    found = row(table(rich, 'Unscaled', table_name)[0], 'Export Model')
+    assert not found['ready'] and 'mass unit' in found['reason']
+
+
+def _forces():
+    time = np.arange(50) / 100.0
+    return TimeHistory(time, np.sin(time)[None, :], ['1Z+'], ordinate_dim='force')
+
+
+def test_modal_responses_need_a_force_channel_and_the_partner_column_lists_only_those(rich):
+    project = rich.project
+    project.add('Shapes', _shapes())
+    project.add('Forces', _forces())
+    project.add('Quiet', TimeHistory(np.arange(50) / 100.0, np.zeros((1, 50)), ['1Z+'],
+                                     ordinate_dim='acceleration'))
+    words = 'Modal Responses'
+    quiet = row(table(rich, 'Shapes', 'Quiet')[0], words)
+    assert not quiet['ready'] and 'force channel' in quiet['reason']
+    assert row(table(rich, 'Shapes', 'Forces')[0], words)['ready']
+    partner = row(column(table(rich, 'Shapes'), 'shape_set', 'time_history'), words)
+    assert 'Forces' in partner['candidates'] and 'Quiet' not in partner['candidates']
+
+
+def test_the_table_and_the_core_agree_on_every_pair(rich):
+    """One rule for what a pair can do: `Project.selection_verbs`."""
+    from hertzforge.project import PARTNER_VERBS
+
+    project = rich.project
+    projects.import_file(rich, {'path': str(PLATE / 'frfs.unv')})
+    project.add('Shapes', _shapes())
+    project.add('Shapes 2', _shapes())
+    project.add('Autos', Psd(**_psd()))
+    project.add('Forces', _forces())
+    names = list(project)
+    for first, second in itertools.permutations(names, 2):
+        core = {verb for verb, _ in project.selection_verbs(first, second)} & set(PARTNER_VERBS)
+        rows = table(rich, first, second)[0]['rows']
+        here = {r['id'].removeprefix('project.') for r in rows
+                if r['id'].startswith('project.') and r['ready']} & set(PARTNER_VERBS)
+        assert here == core, (first, second)
+
+
+def _played(state):
+    project = state.project
+    shapes = project.generate_rigid_body_modes(named(state, 'geometry'))
+    held = project[shapes]
+    time = np.arange(50) / 100.0
+    project.add('Responses', TimeHistory(
+        time, np.vstack([np.sin((k + 1) * time) for k in range(held.num_shapes)]),
+        [f'M{k + 1}' for k in range(held.num_shapes)], ordinate_dim='modal_length',
+        comment=[f'{shapes}: modal displacement, mode {k + 1}' for k in range(held.num_shapes)]))
+    return shapes
+
+
+def test_animate_is_promised_only_for_a_history_that_plays(rich):
+    """A geometry, a shape set and modal coordinates play; a physical history beside the two
+    draws each on its own, so it has no default row and is no candidate for one."""
+    shapes = _played(rich)
+    geometry = named(rich, 'geometry')
+    physical = next(n for n, o in rich.project.items()
+                    if projects.kind_of(o) == 'time_history' and n != 'Responses')
+    drawn = projects.show(rich, {'objects': [geometry, shapes, physical], 'records': {}, 'prefs': {}})
+    assert 'motion' not in drawn['views'][0], 'what the table has to agree with'
+    played = projects.show(rich, {'objects': [geometry, shapes, 'Responses'], 'records': {}, 'prefs': {}})
+    assert 'motion' in played['views'][0]
+
+    assert 'Animate' not in verbs_in(table(rich, geometry, shapes, physical)[0])
+    assert 'Animate' in verbs_in(table(rich, geometry, shapes, 'Responses')[0])
+    offered = row(column(table(rich, geometry, shapes), 'geometry', 'shape_set', 'time_history'),
+                  'Animate')
+    assert offered['candidates'] == ['Responses']
+    added = [c for c in table(rich, shapes, physical)
+             if c['kinds'] == ['shape_set', 'time_history', 'geometry']]
+    assert not added or 'Animate' not in verbs_in(added[0])
+
+
+def test_a_group_with_no_shells_is_not_asked_for_a_thickness(plate):
+    """A thickness is a shell's: Set Properties on hexes leaves it out of the form."""
+    from hertzforge.core.geometry import ELEMENT_TYPES
+
+    geometry = named(plate, 'geometry')
+    held = plate.project[geometry]
+    group = int(held.group_id[0])
+    face = ELEMENT_TYPES[int(held.elem_type[0])][2] == 'face'
+    found = row(table(plate, geometry, part={'name': geometry, 'kind': 'group', 'id': group})[0],
+                'Set Properties')
+    assert ('thickness' in found['omit']) is not face and 'groups' in found['omit']
+    solid = projects.new({'title': 'x'})
+    solid.project.new_geometry('Part', unit='m')
+    for op_id, given in (('project.add_solid_block', {}),
+                         ('project.mesh_solids', {'size': 0.5})):
+        OPS[op_id].run(solid.project, OPS[op_id].resolve(
+            {'geometry': 'Part', **given}, objects={'Part': 'geometry'}, verbs={'Part': []}))
+    hexes = row(table(solid, 'Part', part={'name': 'Part', 'kind': 'group', 'id': 1})[0],
+                'Set Properties')
+    # nor for the groups: the ones picked in the tree are the ones it sets
+    assert hexes['omit'] == ['groups', 'thickness'] and hexes['fill']['groups'] == '1'
+
+
+def test_cmif_plots_the_whole_frf_with_no_form(plate):
+    """Nothing picked is every record, so the row runs at once (Brandon, 2026-11-14)."""
+    frf = named(plate, 'frf')
+    cmif = next(r for r in table(plate, frf)[0]['rows'] if r['id'] == 'project.cmif')
+    assert cmif['ready'] and cmif['fill']['records'] == '' and cmif['fill']['frf'] == frf
+
+
+def test_actions_are_listed_under_the_setting_they_work_from(plate, validate):
+    from hertzforge.service.action_table import NESTS, OBJECT_GROUP, OBJECT_ROWS, nested
+
+    history = named(plate, 'time_history')
+    rows = {r['id']: r for r in table(plate, history)[0]['rows']}
+    # what is computed from the averaging is under it, and it opens showing them
+    for child in ('project.compute_psds', 'project.compute_cpsds', 'project.compute_frfs'):
+        assert rows[child]['under'] == 'project.set_averaging'
+    assert rows['project.set_averaging'].get('open') is True
+    assert 'under' not in rows['project.set_averaging']
+    # a filter is one action, set and applied in its form; Integrate and Differentiate
+    # are under a row that is not an action
+    assert 'project.filter_data' not in rows and rows['project.set_filter']['verb'] == 'Filter'
+    assert 'under' not in rows['project.set_filter']
+    assert rows['group.calculus']['kind'] == 'group'
+    assert rows['project.integrate']['under'] == rows['project.differentiate']['under'] \
+        == 'group.calculus'
+    assert rows['project.truncate_data']['under'] == 'project.set_truncation'
+    # the object's own acts are under a row that is not an action
+    assert rows[OBJECT_GROUP]['kind'] == 'group'
+    assert rows['self.rename']['under'] == OBJECT_GROUP
+    assert all(rows[r]['under'] == OBJECT_GROUP for r in OBJECT_ROWS if r in rows)
+    # nothing is under two rows, and nothing holds and is held
+    children = [child for held in NESTS.values() for child in held]
+    assert len(children) == len(set(children)) and not set(children) & set(NESTS)
+    assert not set(children) & set(OBJECT_ROWS)
+    # a row whose setting cannot run stays where it was
+    loose = nested([{'id': 'project.set_truncation', 'verb': 'Truncation', 'kind': 'run',
+                     'ready': False, 'reason': 'no'},
+                    {'id': 'project.truncate_data', 'verb': 'Apply Truncation', 'kind': 'run',
+                     'ready': True}])
+    assert all('under' not in row for row in loose)
+
+
+def test_the_projects_own_actions_are_grouped(validate):
+    from hertzforge.service.action_table import HEADS
+
+    held = projects.new({'title': 'Empty'})
+    rows = table(held, validate=validate)[0]['rows']
+    by_id = {r['id']: r for r in rows}
+    order = [r['id'] for r in rows]
+    # the six computations by kind of test are under one row, which stands where they did
+    six = HEADS['group.auto_compute'][1]
+    assert len(six) == 6 and all(by_id[op]['under'] == 'group.auto_compute' for op in six)
+    assert by_id['group.auto_compute'] == {'id': 'group.auto_compute', 'verb': 'Auto Compute',
+                                           'kind': 'group', 'ready': True}
+    assert order.index('group.auto_compute') == order.index(six[0]) - 1
+    assert all(by_id[op]['verb'].startswith('Auto Compute ') for op in six)
+    # the ways a file comes in are under Import, and the rest under rows of their own
+    assert by_id['project.import_text']['under'] == 'self.import'
+    for head, (_words, ops) in HEADS.items():
+        for op in ops:
+            if op in by_id:
+                assert by_id[op]['under'] == head
+    assert {'group.index', 'group.reports', 'group.new'} <= set(by_id)
+    assert 'group.object' not in by_id, 'nothing is selected'
+
+
+def test_an_action_runs_on_what_is_picked_in_the_tree_and_asks_for_no_channel(plate):
+    history = named(plate, 'time_history')
+    whole = {r['id']: r for r in table(plate, history)[0]['rows']}
+    picked = {r['id']: r for r in table(plate, history, records={history: [1, 2]})[0]['rows']}
+    # an action on one channel takes every channel picked, or every channel of the object
+    role = picked['project.set_channel_role']
+    assert role['fill']['picked'] == '2-3' and {'record', 'picked'} <= set(role['omit'])
+    assert whole['project.set_channel_role']['fill']['picked'] == 'all'
+    # a reading of one record reads the first one picked, and a list takes them all
+    assert picked['project.amplitude_spectrum']['fill']['record'] == '2'
+    assert 'record' in whole['project.amplitude_spectrum']['omit']
+    assert 'record' not in whole['project.amplitude_spectrum']['fill']
+    assert picked['project.rescale']['fill']['records'] == '2-3'
+    assert whole['project.rescale']['fill']['records'] == ''
+    assert 'records' in whole['project.rescale']['omit']
+    # no row of an object asks for its channels, records or rows by number
+    by_id = {op.id: op for op in OPERATIONS}
+    for row in whole.values():
+        op = by_id.get(row['id'])
+        if op is None or not row['ready']:
+            continue
+        asked = {p.name for p in op.params} - set(row.get('omit', ()))
+        assert not asked & {'records', 'channels', 'rows', 'record', 'drawn', 'picked'}, row['id']
+
+
+def test_a_channels_role_is_set_on_every_channel_picked(plate):
+    history = named(plate, 'time_history')
+    op = next(o for o in OPERATIONS if o.id == 'project.set_channel_role')
+    kinds = {name: projects.kind_of(obj) for name, obj in plate.project.items()}
+
+    def run(**given):
+        return op.run(plate.project, op.resolve({'source': history, **given}, objects=kinds))
+
+    run(role='monitor', picked='2-3')
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == roles[2] == 'monitor' and roles[0] != 'monitor'
+    # called with a channel and no picks, as a script calls it, it is the one channel
+    run(role='response', record=2)
+    roles = list(plate.project[history].channel_roles().values())
+    assert roles[1] == 'response' and roles[2] == 'monitor'
+    with pytest.raises(ProtocolError, match='outside'):
+        run(role='monitor', picked='999')

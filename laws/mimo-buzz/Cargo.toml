@@ -1,0 +1,17 @@
+[package]
+name = "hertzforge-law-mimo-buzz"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+# A built-in multiple-output Random law, the buzz-test matched law, as a law
+# file. It is the controller's own `hertzforge_mimo_laws::BuzzMatchedLaw`, so
+# the native law and the law file are one implementation. Built to a law file
+# by `scripts/build_laws.sh`.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hertzforge-law-sdk = { path = "../../crates/hertzforge-law-sdk" }
+hertzforge-mimo-laws = { path = "../../crates/hertzforge-mimo-laws", features = ["law-file"] }

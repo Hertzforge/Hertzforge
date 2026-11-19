@@ -1,0 +1,44 @@
+{
+  "name": "limit_ch2",
+  "kind": "limit",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "array": "frequency"
+  },
+  "channels": {
+    "responses": [
+      2
+    ]
+  },
+  "description": "a limit channel's lines at 0 dB, peak: the level the notch holds it to and its abort bound",
+  "arrays": [
+    {
+      "name": "frequency",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "Hz",
+      "offset": 0
+    },
+    {
+      "name": "limit",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 72
+    },
+    {
+      "name": "abort_high",
+      "dtype": "f8",
+      "shape": [
+        9
+      ],
+      "unit": "g",
+      "offset": 144
+    }
+  ]
+}

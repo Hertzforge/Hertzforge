@@ -1,0 +1,2 @@
+{"index":0,"call":"seed","after_pulse":null,"level_db":-6,"used":true,"miss":null,"call_ms":0.0,"values":[{"key":"drive_rms_full_level","value":0.0173998465566649}]}
+{"index":1,"call":"iterate","after_pulse":0,"level_db":0,"used":true,"miss":null,"call_ms":0.0,"values":[{"key":"worst_srs_error_db","value":6.706768075091042},{"key":"weight","value":0.82},{"key":"drive_rms_full_level","value":0.017726974036541634},{"key":"gain_extent_db","value":5.496560106988625},{"key":"stalled_points","value":0}]}

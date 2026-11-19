@@ -1,0 +1,236 @@
+name: desktop
+
+# The desktop app (desktop/, docs/desktop-app.md): its own lint, tests and
+# dependency checks, and its installers for macOS, Windows and Linux. It is not a
+# required check. A tag v* builds them and, once every one has built, publishes a
+# release with all of them on it (the macOS images signed) and starts release.yml. A run started by hand on main builds them as a test and publishes
+# nothing; its images are artifacts, for a maintainer to try. A push to the desktop
+# branch on a maintainer's fork builds them too, unsigned: a fork has no certificate.
+on:
+  push:
+    branches: [feature/desktop-app]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The desktop crate is a Cargo workspace of its own, so the controller jobs in
+  # ci.yml do not reach it. The UI build is not needed here: a debug build of the
+  # app takes the shell from the development server, not from ui/build.
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: The icons the build embeds (made from desktop/icon.png)
+        run: npm --prefix desktop ci && npm --prefix desktop run icons
+      - name: Formatting
+        run: cargo fmt --manifest-path desktop/Cargo.toml --check
+      - name: Lint, as shipped and with the local proof's feature
+        run: |
+          cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path desktop/Cargo.toml --all-targets --locked --features e2e -- -D warnings
+      - name: Test
+        run: cargo test --manifest-path desktop/Cargo.toml --locked
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: Licenses, bans, sources and advisories (the lockfile holds every platform)
+        run: cargo deny --manifest-path desktop/Cargo.toml --config desktop/deny.toml check
+      - name: Its license and source policy is the repository's
+        run: |
+          python3 - <<'PY'
+          import sys, tomllib
+          root = tomllib.load(open('deny.toml', 'rb'))
+          app = tomllib.load(open('desktop/deny.toml', 'rb'))
+          same = (root['licenses']['allow'] == app['licenses']['allow']
+                  and root['sources'] == app['sources'])
+          print('the same policy' if same else 'desktop/deny.toml differs from deny.toml')
+          sys.exit(0 if same else 1)
+          PY
+
+  installers:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, bundles: nsis, name: windows-x64}
+          # The oldest supported Ubuntu runner, so the .deb and the AppImage start
+          # on the distributions newer than the one that built them.
+          - {os: ubuntu-22.04, bundles: 'deb,appimage', name: linux-x64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      # linuxdeploy, which makes the AppImage, is itself an AppImage, and runners
+      # have no FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: The system libraries Tauri builds against on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
+      - name: Build the app and its installers
+        run: bash desktop/packaging/build.sh --bundles '${{ matrix.bundles }}'
+      - name: Sizes
+        run: |
+          {
+            echo "## ${{ matrix.name }}"
+            find target/release/bundle -maxdepth 2 -type f \
+              \( -name '*-setup.exe' -o -name '*.deb' -o -name '*.AppImage' \) \
+              -exec du -h {} \;
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hertzforge-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+
+  # One job per architecture, each on a runner of that architecture. The `release`
+  # environment holds the signing secrets and admits only a v* tag or main, so a
+  # workflow on any other branch cannot read them. They reach only the signing step,
+  # after everything the build downloads has run. HERTZFORGE_REQUIRE_NOTARIZED stops
+  # the job if Apple has not accepted both the app and the image.
+  macos:
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-latest, name: macos-arm64}
+          - {os: macos-26-intel, name: macos-x64}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain rust-toolchain.toml names
+        run: rustup toolchain install --no-self-update
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+      - name: Build the app and its image
+        run: bash desktop/packaging/build.sh --bundles app,dmg
+      - name: Sign and notarize
+        if: github.repository == 'Hertzforge/Hertzforge'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          HERTZFORGE_REQUIRE_NOTARIZED: '1'
+        run: |
+          bash desktop/packaging/ci_signing.sh
+          dmg=$(ls target/release/bundle/dmg/*.dmg)
+          bash desktop/packaging/sign_macos.sh target/release/bundle/macos/Hertzforge.app "$dmg"
+      # The archive the app's updater downloads: the signed, stapled app, signed again with the
+      # updater's own key so the app refuses an archive the release process did not make. Only when
+      # the key is set; a release without it has images to download and no update to offer.
+      - name: The update archive
+        if: github.repository == 'Hertzforge/Hertzforge'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is not set: no update archive" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          archive="target/release/bundle/macos/Hertzforge-$(uname -m).app.tar.gz"
+          tar -czf "$archive" -C target/release/bundle/macos Hertzforge.app
+          (cd desktop && npx --no-install tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$GITHUB_WORKSPACE/$archive")
+          ls -l "$archive" "$archive.sig"
+      - name: Size
+        run: du -h target/release/bundle/dmg/*.dmg | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hertzforge-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.app.tar.gz
+            target/release/bundle/macos/*.app.tar.gz.sig
+
+  # Waits for every installer, so a release is never missing one, then publishes it.
+  # The assets carry no version in their names, so the site's links through
+  # releases/latest/download stay the same from release to release; the release's own
+  # page says which version it is. A release made with the workflow's token starts no
+  # other workflow, so release.yml, the PyPI upload, is started here by name.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, installers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hertzforge-*
+          merge-multiple: true
+          path: images
+      # Each artifact keeps the bundle folders it was uploaded from (dmg/, macos/, deb/,
+      # appimage/), so the files are brought up to one level first.
+      - name: Stable names
+        run: |
+          cd images
+          find . -mindepth 2 -type f -exec mv {} . \;
+          find . -mindepth 1 -type d -empty -delete
+          for f in *; do
+            case "$f" in
+              *aarch64*.dmg|*arm64*.dmg) mv "$f" Hertzforge-macOS-AppleSilicon.dmg ;;
+              *x64*.dmg|*x86_64*.dmg) mv "$f" Hertzforge-macOS-Intel.dmg ;;
+              *arm64*.app.tar.gz) mv "$f" Hertzforge-macOS-AppleSilicon.app.tar.gz ;;
+              *x86_64*.app.tar.gz) mv "$f" Hertzforge-macOS-Intel.app.tar.gz ;;
+              *arm64*.app.tar.gz.sig) mv "$f" Hertzforge-macOS-AppleSilicon.app.tar.gz.sig ;;
+              *x86_64*.app.tar.gz.sig) mv "$f" Hertzforge-macOS-Intel.app.tar.gz.sig ;;
+              *-setup.exe) mv "$f" Hertzforge-Windows-x64-setup.exe ;;
+              *.deb) mv "$f" Hertzforge-Linux-x64.deb ;;
+              *.AppImage) mv "$f" Hertzforge-Linux-x64.AppImage ;;
+            esac
+          done
+          ls -l
+      - name: Checksums
+        run: cd images && sha256sum *.dmg *.exe *.deb *.AppImage > SHA256SUMS && cat SHA256SUMS
+      - name: The updater's manifest
+        run: python3 desktop/packaging/updater_manifest.py "${GITHUB_REF_NAME}" images
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: images/*
+          draft: false
+          make_latest: true
+          generate_release_notes: true
+      - name: The PyPI upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"

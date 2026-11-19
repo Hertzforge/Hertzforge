@@ -1,0 +1,37 @@
+# hertzforge-explorer-host - Explorer, the hand-steered open-loop sine: the process
+# step that synthesizes the tone, the run service, the off-tick analysis pass and the
+# run host around them.
+#
+# This crate names no hardware backend. It is handed a finished station backend, and
+# the dependency firewall (`cargo deny check bans`) keeps a concrete backend out of it.
+
+[package]
+name = "hertzforge-explorer-host"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+# The DSP primitives the analysis is built on (FFT, Hann window, the oscillator).
+hertzforge-dsp = { path = "../hertzforge-dsp" }
+# The channel table the limit monitor derives its limiters and interleave slots from.
+hertzforge-channel-table = { path = "../hertzforge-channel-table" }
+# The engine the run ticks, its tri-field limit checker and the acceleration integrator.
+hertzforge-engine = { path = "../hertzforge-engine" }
+# The abstract hal trait crate (never a concrete backend): the station's caps, the
+# rate it programmed.
+hertzforge-hal = { path = "../hertzforge-hal" }
+# The loop-resolution and arm-gate vocabulary.
+hertzforge-module-abi = { path = "../hertzforge-module-abi" }
+# serde version matches the rest of the workspace (hertzforge-channel-table).
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# DEV-ONLY, and it must stay that way. The integration tests drive the whole control
+# core (arm at 0 V, ramp, retune, sweep, ramped stop) against the HERTZFORGE-SIM plant,
+# most of them configured as a WIRE (no resonance, unity feedthrough, no noise: the
+# software analogue of a jumpered AO->AI loopback). The service itself takes a finished
+# `Box<dyn Backend>` and never names a concrete backend, which is the property the
+# sim-leak lint (`crates/hertzforge-hal-sim/tests/no_sim_leak.rs`) checks.
+hertzforge-hal-sim = { path = "../hertzforge-hal-sim" }

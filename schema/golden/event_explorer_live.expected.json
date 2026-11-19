@@ -1,0 +1,177 @@
+{
+ "type": "event",
+ "topic": "explorer.live",
+ "seq": 191,
+ "data": {
+  "run_id": "explorer-0002",
+  "source": "HARDWARE",
+  "class": "ni_real",
+  "state": "running",
+  "phase": "steady",
+  "t_s": 41.38,
+  "frequency_hz": 250,
+  "target_hz": 250,
+  "measured_hz": 250.02,
+  "drive_vpk": 0.2,
+  "target_vpk": 0.2,
+  "max_drive_vpk": 0.5,
+  "sweep": null,
+  "channels": [
+   {
+    "index": 1,
+    "description": "Control",
+    "role": "control",
+    "rms": 0.1413,
+    "unit": "g"
+   },
+   {
+    "index": 3,
+    "description": "Fixture",
+    "role": "monitor",
+    "rms": 0.0706,
+    "unit": "g"
+   }
+  ],
+  "control": {
+   "index": 1,
+   "velocity_ips": 0.04916,
+   "displacement_mil": 0.0313,
+   "settling": false
+  },
+  "pipeline_frames": 1063,
+  "peak": {
+   "hz": 250,
+   "level": 0.1999
+  },
+  "blocks_dropped": 0,
+  "pass_ms": {
+   "last": 1.9,
+   "worst": 3.4
+  },
+  "views": [
+   {
+    "view": "spectrum",
+    "title": "Survey",
+    "x": {
+     "label": "Frequency",
+     "unit": "Hz",
+     "scale": "log"
+    },
+    "y": {
+     "label": "Level",
+     "unit": "g",
+     "scale": "log"
+    },
+    "series": [
+     {
+      "name": "Survey",
+      "role": "measured",
+      "x": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        200.0,
+        250.0,
+        300.0,
+        400.0
+       ]
+      },
+      "y": {
+       "dtype": "f64",
+       "shape": [
+        4
+       ],
+       "values": [
+        0.125,
+        0.1999,
+        0.15625,
+        0.09375
+       ]
+      }
+     }
+    ],
+    "link": "frequency"
+   },
+   {
+    "view": "reading",
+    "title": "Run",
+    "rows": [
+     {
+      "label": "Frequency",
+      "value": 250,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Target",
+      "value": 250,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Measured",
+      "value": 250.02,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Drive",
+      "value": 0.2,
+      "unit": "V",
+      "status": "info"
+     },
+     {
+      "label": "Target drive",
+      "value": 0.2,
+      "unit": "V",
+      "status": "info"
+     },
+     {
+      "label": "Ceiling",
+      "value": 0.5,
+      "unit": "V",
+      "status": "info"
+     },
+     {
+      "label": "Sweep",
+      "value": "none",
+      "unit": null,
+      "status": "info"
+     },
+     {
+      "label": "Control rms",
+      "value": 0.1413,
+      "unit": "g",
+      "status": "info"
+     },
+     {
+      "label": "Velocity",
+      "value": 0.04916,
+      "unit": "in/s",
+      "status": "info"
+     },
+     {
+      "label": "Displacement",
+      "value": 0.0313,
+      "unit": "mil",
+      "status": "info"
+     },
+     {
+      "label": "Peak",
+      "value": 250,
+      "unit": "Hz",
+      "status": "info"
+     },
+     {
+      "label": "Pipeline",
+      "value": 1063,
+      "unit": "frames",
+      "status": "info"
+     }
+    ]
+   }
+  ]
+ }
+}

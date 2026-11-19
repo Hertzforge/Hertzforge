@@ -1,25 +1,43 @@
 /**
- * Sequential colormap for magnitude: a cividis-like ramp, dark blue through gray to yellow.
+ * Sequential colormap for magnitude: viridis, dark purple through blue and green to yellow, as
+ * matplotlib draws it (Brandon, 2026-11-02, over the cividis the shell had).
  * Designed to read the same with red-green color vision deficiency, and monotonic in lightness,
  * so the order of values survives in grayscale too.
+ *
+ * On the dark theme the map starts a fifth of the way in, at the blue-violet: its dark purple end
+ * is nearly the background's own lightness there and a curve or a face in it could not be seen
+ * (Brandon, 2026-11-16). It is the same map from there on, so the order holds. The light theme
+ * has the whole of it.
  */
+import { theme } from '$lib/theme/theme.svelte';
 
+/** Where the map starts on the dark theme, as a fraction of the whole map. */
+export const DARK_LOW = 0.2;
+
+/** Where the map starts on the theme shown: `DARK_LOW` on the dark one, 0 on the light one. */
+export function colormapLow(): number {
+	return theme.resolved === 'dark' ? DARK_LOW : 0;
+}
+
+// matplotlib's viridis at eleven even steps
 const STOPS: [number, number, number][] = [
-	[0, 34, 78],
-	[24, 55, 111],
-	[61, 77, 110],
-	[90, 97, 111],
-	[117, 117, 117],
-	[143, 138, 120],
-	[171, 160, 114],
-	[201, 184, 98],
-	[234, 211, 72],
-	[254, 232, 56]
+	[68, 1, 84],
+	[72, 36, 117],
+	[65, 68, 135],
+	[53, 95, 141],
+	[42, 120, 142],
+	[33, 145, 140],
+	[34, 168, 132],
+	[68, 191, 112],
+	[122, 209, 81],
+	[189, 223, 38],
+	[253, 231, 37]
 ];
 
-/** RGB in 0..1 for t in 0..1 (clamped). */
-export function colormap(t: number, out: [number, number, number] = [0, 0, 0]): [number, number, number] {
-	const c = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0)) * (STOPS.length - 1);
+/** RGB in 0..1 for t in 0..1 (clamped), from the part of the map the theme shows (`low` on). */
+export function colormap(t: number, out: [number, number, number] = [0, 0, 0], low = colormapLow()): [number, number, number] {
+	const within = Math.min(1, Math.max(0, Number.isFinite(t) ? t : 0));
+	const c = (low + (1 - low) * within) * (STOPS.length - 1);
 	const i = Math.min(STOPS.length - 2, Math.floor(c));
 	const f = c - i;
 	const a = STOPS[i];
@@ -32,6 +50,21 @@ export function colormap(t: number, out: [number, number, number] = [0, 0, 0]): 
 
 /** CSS linear-gradient stops for a legend bar. */
 export function colormapGradient(direction = 'to right'): string {
-	const stops = STOPS.map(([r, g, b], i) => `rgb(${r} ${g} ${b}) ${((i / (STOPS.length - 1)) * 100).toFixed(1)}%`);
+	const rgb: [number, number, number] = [0, 0, 0];
+	const stops = STOPS.map((_stop, i) => {
+		colormap(i / (STOPS.length - 1), rgb);
+		return `rgb(${Math.round(rgb[0] * 255)} ${Math.round(rgb[1] * 255)} ${Math.round(rgb[2] * 255)}) ${((i / (STOPS.length - 1)) * 100).toFixed(1)}%`;
+	});
 	return `linear-gradient(${direction}, ${stops.join(', ')})`;
+}
+
+/** The colormap as `steps` RGBA bytes in sRGB, for a texture a shader looks colors up in. */
+export function colormapBytes(steps = 256): Uint8Array {
+	const out = new Uint8Array(steps * 4);
+	const rgb: [number, number, number] = [0, 0, 0];
+	for (let i = 0; i < steps; i++) {
+		colormap(i / (steps - 1), rgb);
+		out.set([Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255), 255], i * 4);
+	}
+	return out;
 }

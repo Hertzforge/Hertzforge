@@ -1,0 +1,81 @@
+{
+ "type": "response",
+ "id": 51,
+ "result": {
+  "state": {
+   "run_id": "s-0001",
+   "state": "configured",
+   "phase": "idle",
+   "title": "Half-Sine 20 g 11 ms",
+   "source": "SIM",
+   "station": {
+    "kind": "sim",
+    "class": "sim",
+    "devices": []
+   },
+   "grid": {
+    "fs_hz": 51200,
+    "record_len": 8192,
+    "actual": false
+   },
+   "clock": null,
+   "mode": "auto",
+   "levels_db": [
+    -12,
+    -9,
+    -6,
+    -3,
+    0
+   ],
+   "level_db": null,
+   "rung": null,
+   "pulses": {
+    "fired": 0,
+    "passed": 0,
+    "at_level": 0,
+    "of_level": 0
+   },
+   "next_pulse_s": null,
+   "elapsed_s": null,
+   "alarm": false,
+   "identification": null,
+   "prediction": null,
+   "last_pulse": null,
+   "law": {
+    "id": "fd_correct",
+    "name": "frequency-domain correction",
+    "version": "0.1.0",
+    "sha256": null,
+    "misses": 0
+   },
+   "feasibility": null,
+   "end": null
+  },
+  "derived": {
+   "grid": {
+    "fs_hz": 51200,
+    "record_len": 8192,
+    "actual": false
+   },
+   "reference": {
+    "peak_g": 20,
+    "velocity_change_ips": 53.9588,
+    "displacement_pk_pk_in": 0.687732,
+    "main_start": 2534,
+    "main_len": 563
+   },
+   "quiet_window": {
+    "worst_frac": 0.0795,
+    "limit_frac": 0.15,
+    "inside": true
+   },
+   "spacing_s": 1,
+   "call_budget_s": 0.25,
+   "feasibility": {
+    "verdict": "pass",
+    "message": "The pulse is within the shaker's ratings."
+   }
+  },
+  "warnings": []
+ }
+}
