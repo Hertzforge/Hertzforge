@@ -74,6 +74,9 @@ class Report:
         ('dofs' + 'dofs_source' make a DOFs scene: labeled arrows at
         every DOF that one data object measures as that quantity)
       {'kind': 'table', 'source': name, 'caption': str}
+        (with 'environment' and 'form' 'response' or 'reference', a
+        channel table's block is that control loop's transformation
+        instead: `transformation_blocks`)
       {'kind': 'photo', 'source': Photos-name, 'photo': photo-name,
                         'caption': str}
       {'kind': 'pairs', 'source': MatchedModes-name, 'caption': str}
@@ -1477,6 +1480,46 @@ def front_matter(objects: Mapping[str, Any],
     blocks += photo_blocks
     blocks.append({'kind': 'table', 'source': '@basis:ChannelTable',
                    'caption': 'Instrumentation'})
+    blocks += transformation_blocks(objects, object_groups)
+    return blocks
+
+
+#: what each transformation's table caption calls it and its columns
+TRANSFORMATION_CAPTIONS = {
+    'response': ('Response transformation', 'control channel'),
+    'reference': ('Reference transformation', 'drive channel')}
+
+
+def transformation_blocks(objects: Mapping[str, Any],
+                          object_groups: Sequence[Mapping[str, Any]] | None
+                          ) -> list[dict[str, Any]]:
+    """A table block for each transformation a control loop of the
+    basis channel table ran, after the instrumentation table.
+
+    The response transformation's rows are what the controller
+    controlled in place of its control channels, and the reference
+    transformation's are what it drove in place of its drive channels;
+    the columns are those channels, headed by their DOFs
+    (`ChannelTable.transformation`). A loop with no transformation adds
+    nothing, and neither does a project with no channel table.
+    """
+    from .channel_table import TRANSFORMATION_FORMS, ChannelTable
+
+    source = '@basis:ChannelTable'
+    table = objects.get(resolve_binding(source, objects, object_groups) or '')
+    if not isinstance(table, ChannelTable):
+        return []
+    blocks = []
+    for environment, held in table.environments.items():
+        for form in TRANSFORMATION_FORMS:
+            if held.matrix(form) is None:
+                continue
+            title, column = TRANSFORMATION_CAPTIONS[form]
+            blocks.append({
+                'kind': 'table', 'source': source,
+                'environment': environment, 'form': form,
+                'caption': f'{title}, {environment}: a row per transformed '
+                           f'degree of freedom, a column per {column}'})
     return blocks
 
 
