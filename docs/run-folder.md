@@ -429,7 +429,9 @@ cut to its first 80 frames (`cut_from_frames`, on the stream and on each shot);
 
 From arm: `run.json` (with the simulator's structure by name in
 `sim.structure`; after the identification, its facts in `identification`: the
-level it was taken at by response, the drive-to-response lag, the record
+level it was taken at by response, the drive-to-response lag, the frames the
+station held ahead of the first drive frame at the start that lag was measured
+on (`frames_ahead`; every start of the run must hold the same), the record
 length, the records averaged, the line spacing, how long it played, each
 drive's rms, each control's band-mean coherence, whether the gate passed, the
 resonances it found and the sweep-rate warning for each, and, once the law is
@@ -443,9 +445,10 @@ rule, the law and its parameters, the request switch and its bounds, the rates
 and the simulator's structure; the derived values; the feasibility inputs and
 verdict), `law/law.json` (the law's identity, its parameters as given and in
 force, the shapes, test types and references it accepts, its declared values
-and its guards) and `log.jsonl` (every state, the station, the identification's
-gate and each flagged resonance, the engage, every level change, hold and
-resume, manual frequency, notch in and out, refused notched reference, alarm in
+and its guards) and `log.jsonl` (every state, the station, each start of the
+station with the frames it held ahead of its first drive frame, the
+identification's gate and each flagged resonance, the engage, every level change, hold and
+resume, manual frequency (where the tone was sent, `to_hz` in `data`), notch in and out, refused notched reference, alarm in
 and out, unusable law call, drive over its ceiling, each change of the law's
 request and its outcome, the stop or trip and the end, each with its tick, its
 station time, its frequency and its level in `data`), and these files, each

@@ -906,8 +906,8 @@ impl MimoSineCore {
                     }
                 }
                 Command::GoTo(hz) => {
-                    if self.sched.go_to(hz).is_some() {
-                        self.event(EventKind::ManualFrequency);
+                    if let Some(to_hz) = self.sched.go_to(hz) {
+                        self.event(EventKind::ManualFrequency { to_hz });
                     }
                 }
                 Command::StepLevel(db) => {

@@ -23,6 +23,7 @@
   "convention": "file",
   "description": "identification: every control's and limit channel's response to every drive, the response taken 266 frames later (the lag the identification measured); a delay lags",
   "lag_frames": 266,
+  "frames_ahead": 8,
   "arrays": [
     {
       "name": "frequency",

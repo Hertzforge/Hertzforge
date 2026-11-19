@@ -959,6 +959,7 @@ impl Actor {
             return;
         };
         let r = svc.identify().cloned();
+        self.note_starts();
         let signal = self.shared.signal.load(Ordering::SeqCst);
         if signal == ABORT {
             self.abort_now(&self.ender());
@@ -1050,6 +1051,37 @@ impl Actor {
         }
     }
 
+    /// One timeline note for each start of the station not noted yet: the
+    /// frames it held ahead of the phase's first drive frame.
+    fn note_starts(&mut self) {
+        let Some(svc) = self.svc.as_mut() else { return };
+        for s in svc.take_starts() {
+            let parts: Vec<String> = [
+                (s.lead_in_frames, "written before the start"),
+                (s.prefill_frames, "from the engine's first update"),
+                (s.queue_frames, "in the engine's queue"),
+            ]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, w)| format!("{n} {w}"))
+            .collect();
+            self.shared.add_log_data(
+                "station",
+                format!(
+                    "the station started for {} with {} frames ahead of the first drive frame ({})",
+                    s.phase.words(),
+                    s.frames_ahead(),
+                    parts.join(", ")
+                ),
+                Some(json!({"event": "station_start", "phase": s.phase.as_str(),
+                            "frames_ahead": s.frames_ahead(),
+                            "lead_in_frames": s.lead_in_frames,
+                            "prefill_frames": s.prefill_frames,
+                            "queue_frames": s.queue_frames})),
+            );
+        }
+    }
+
     fn identification_json(&self, rep: &IdentificationReport) -> Value {
         let s = &self.plan.config.setup;
         let id = &rep.identification;
@@ -1125,6 +1157,7 @@ impl Actor {
         if let Some(svc) = self.svc.as_mut() {
             let _ = svc.run_batches(1);
         }
+        self.note_starts();
         self.end(
             "fault",
             "aborted",
@@ -1221,6 +1254,7 @@ impl Actor {
             return;
         };
         let r = svc.run_batches(BATCHES);
+        self.note_starts();
         self.drain();
         match r {
             Ok(true) => {
@@ -1319,10 +1353,15 @@ impl Actor {
                 format!("the schedule resumed at {hz} Hz"),
                 Some(with(json!({"event": "resumed"}))),
             ),
-            EventKind::ManualFrequency => self.shared.add_log_data(
+            EventKind::ManualFrequency { to_hz } => self.shared.add_log_data(
                 "note",
-                format!("the operator moved the tone to {hz} Hz"),
-                Some(with(json!({"event": "manual_frequency"}))),
+                format!(
+                    "the operator sent the tone to {} Hz from {hz} Hz",
+                    num(round(to_hz, 2))
+                ),
+                Some(with(
+                    json!({"event": "manual_frequency", "to_hz": num(round(to_hz, 4))}),
+                )),
             ),
             EventKind::NotchIn { depth } => self.shared.add_log_data(
                 "notch",
@@ -1871,6 +1910,7 @@ impl Actor {
             // with the station's own stop.
             let _ = svc.run_batches(1);
         }
+        self.note_starts();
         self.drain();
         {
             let mut b = lock(&self.shared.ended_by);
