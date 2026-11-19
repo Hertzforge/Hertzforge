@@ -7,7 +7,7 @@
 	import { STATE_WORDS } from '../words';
 	import type { MimoSection } from './mimoSetup';
 	import type { MimoState } from './mimoStore.svelte';
-	import { missingList, summarize } from './summary';
+	import { missingList, missingWords, summarize } from './summary';
 
 	interface Props {
 		mimo: MimoState;
@@ -51,7 +51,7 @@
 				Ready to run
 			{:else}
 				<svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true"><path d="M7 1.6l5.6 10H1.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" /></svg>
-				{missing.length} {missing.length === 1 ? 'thing' : 'things'} before a run
+				{missingWords(missing.length)}
 			{/if}
 		</span>
 	</div>

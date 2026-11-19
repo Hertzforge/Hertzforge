@@ -338,13 +338,16 @@ export class MimoState {
 	/**
 	 * The dry run's errors. The service checks the setup against the table it holds; while the
 	 * table has edits here (applied with the setup), a channel the edits give the right role is
-	 * not an error.
+	 * not an error, and neither is the simulator's size finding: it counted the held table, and
+	 * the service counts the edited one again when Apply sends it. Shown, it would block the
+	 * Apply that cures it.
 	 */
 	get checkErrors() {
 		const items = this.check?.errors ?? [];
 		if (!this.acq.tableDirty) return items;
 		const want: Record<string, ChannelRow['role']> = { control_unknown_channel: 'control', drive_unknown_channel: 'drive', limit_unknown_channel: 'monitor' };
 		return items.filter((it) => {
+			if (it.reason === 'plant_unknown') return false;
 			const role = want[it.reason];
 			if (!role || it.channel === undefined || it.channel === null) return true;
 			return !this.acq.rows.some((r) => r.index === it.channel && r.enabled && r.role === role);

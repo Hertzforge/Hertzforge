@@ -142,6 +142,11 @@ export function summarize(x: SummaryInputs): SectionSummary[] {
 	return out;
 }
 
+/** The summary's heading when something is missing: "1 thing before a run", "3 things before a run". */
+export function missingWords(n: number): string {
+	return `${n} ${n === 1 ? 'thing' : 'things'} before a run`;
+}
+
 /** Every item that must happen before a run can start, in section order. */
 export function missingList(sections: SectionSummary[]): { section: SectionSummary['section']; title: string; text: string }[] {
 	return sections.flatMap((s) => s.missing.map((text) => ({ section: s.section, title: s.title, text })));
