@@ -910,7 +910,8 @@
     "reportPrintResult": {
       "allOf": [{"$ref": "#/$defs/reportHeld"}],
       "type": "object", "required": ["html"],
-      "properties": {"html": {"type": ["string", "null"]}}
+      "properties": {"html": {"type": ["string", "null"]},
+                     "opened": {"type": "string", "description": "With browser true: the file the page was written to and opened in the default browser."}}
     },
     "reportField": {
       "type": "object", "required": ["field", "label", "value", "options"],

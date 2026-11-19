@@ -1152,8 +1152,8 @@ what the window says after (an abort's owed first minute, an unplanned notch's h
 | `report.export` | `{"name","path","anyway"?}` | `{"path","owed","index","note"?}` |
 | `report.editor` | `{"name","selected"?,"theme"?,"page"?}` | the editor (below) |
 | `report.operate` | `{"name","op",...,"selected"?,"theme"?}` | the editor, and `"project"` |
-| `report.print` | `{"name","anyway"?}` | `{"html","owed","index"}` |
-| `report.issue` | `{"name","step","path"?,"anyway"?}` | `{"html","status"}`, `{"index"}`, `{"entry"}` or `{}`, and `"project"` |
+| `report.print` | `{"name","anyway"?,"browser"?}` | `{"html","opened"?,"owed","index"}` |
+| `report.issue` | `{"name","step","path"?,"anyway"?,"browser"?}` | `{"html","opened"?,"status"}`, `{"index"}`, `{"entry"}` or `{}`, and `"project"` |
 
 `report.generate` builds a report from a starter template bound by type to the project's objects
 (`Project.generate_report`): `template` is `modal` (the default), `random`, `shock`,
@@ -1211,7 +1211,7 @@ bindings such as `@basis:ShapeSet` first) and `caption`.
 resolution (`#print`), and asking for the print dialog once they are drawn, where the reader saves a
 PDF. Its print stylesheet carries the margins the identity rides in. It makes `report.export`'s
 checks first and answers the same way: `html` null with `owed` and `index` until `anyway` is true.
-An issued report that has changed since is refused. `report.issue` is the Issue in three steps
+With `browser` true (the desktop app, whose web view does not print a page that asks to be) the service also writes the page to the temporary folder, opens it in the machine's default browser, which prints it, and gives its path as `opened`; Issue's `begin` takes the same flag. An issued report that has changed since is refused. `report.issue` is the Issue in three steps
 around that print. `begin` checks the report can be issued (Report Identity on, every required
 field entered, not already issued), makes the data index check `report.export` makes (answering
 `{"index":[...]}` alone when files are astray and `anyway` is not true), and gives the page to

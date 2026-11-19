@@ -28,7 +28,10 @@
 </div>
 
 <style>
-	:global(html, body) {
+	/* the window is the stage: locked to it only on this page (viewer.ts marks it), since the
+	   report pages share this bundle and its global rules, and a report has to scroll */
+	:global(html.stage-page),
+	:global(html.stage-page body) {
 		margin: 0;
 		height: 100%;
 		overflow: hidden;

@@ -28,6 +28,8 @@ if (target) {
 	const animation = (page as unknown as { animation?: { view: Shape3DView; setup: AnimationSetup } } | null)?.animation;
 	// a recording in place of a report (`hertzforge record`): one 3-D view, drawn frame by frame
 	const record = (page as unknown as { record?: { view: Shape3DView; setup: RecordSetup } } | null)?.record;
+	// a stage fills the window and does not scroll; a report scrolls (`AnimationStage`'s rule)
+	if (animation || record) document.documentElement.classList.add('stage-page');
 	if (animation) mount(AnimationStage, { target, props: { view: animation.view, setup: animation.setup } });
 	else if (record) mount(RecordStage, { target, props: { view: record.view, setup: record.setup } });
 	else mount(ReportViewer, { target, props: { page, error } });

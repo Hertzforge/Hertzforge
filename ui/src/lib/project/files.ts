@@ -328,6 +328,15 @@ export function desktopRunFiles(): import('$lib/app/runFiles.svelte').DesktopRun
 	};
 }
 
+/**
+ * Whether a report's page is printed in the system's browser and not in place: in the desktop app,
+ * whose web view does not print a page that asks to be. Its own analysis service, on the same
+ * machine, opens the page there (`report.print` with `browser`).
+ */
+export function printsInBrowser(): boolean {
+	return Boolean(tauri()?.core?.invoke && tauri()?.dialog);
+}
+
 /** The files dragged out of the window this session, which a drop back on it leaves alone. */
 const draggedOut = new Set<string>();
 

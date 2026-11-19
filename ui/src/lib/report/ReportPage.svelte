@@ -43,6 +43,16 @@
 		onselect?.(block);
 	}
 
+	/**
+	 * A wheel over a figure scrolls the page, as a document's should, and zooms the plot only with
+	 * Cmd or Ctrl held or on a trackpad pinch (which the browser sends with Ctrl): the plots span
+	 * the page, so a wheel they all took left nowhere to scroll from. Caught on its way down, before
+	 * the plot's own handler, and left to the browser.
+	 */
+	function scrollsPage(e: WheelEvent) {
+		if (!e.ctrlKey && !e.metaKey) e.stopPropagation();
+	}
+
 	function keyed(e: KeyboardEvent, block: number | null) {
 		if (editing && (e.key === 'Enter' || e.key === ' ')) {
 			e.preventDefault();
@@ -84,7 +94,7 @@
 				<!-- the core's escaped subset of markdown: headings, emphasis, code and lists -->
 				<div class="text">{@html block.html ?? ''}</div>
 			{:else if block.kind === 'figure'}
-				<figure>
+				<figure onwheelcapture={scrollsPage}>
 					{#if block.grid}
 						<!-- a table of plots: a row a node, a column a direction -->
 						<div class="plotgrid" data-testid="report-grid" style:--columns={Math.max(1, block.grid.columns.length)}>

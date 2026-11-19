@@ -60,7 +60,7 @@ import type { ActionColumn, ActionRow, Actions, ExportFormat, Region, ShapeView,
 	View,
 	Workspace, MatrixView } from '$lib/protocol/types';
 import { defaultValues, hasObjectsFor, objectKinds, objectVerb, reconcile, rescaled, rescaledQuantities, validateAll, withDisplayLengths, withDisplayQuantities, withObjects, withSettings, type DisplayUnit, type ParamValues } from '$lib/forms/params';
-import { baseName, confirmFirst, desktopRunFiles, isProjectFile } from '$lib/project/files';
+import { baseName, confirmFirst, desktopRunFiles, isProjectFile, printsInBrowser } from '$lib/project/files';
 import { RunLogState } from '$lib/runlog/store.svelte';
 import { theme } from '$lib/theme/theme.svelte';
 import { readConfig, type ShellConfig } from './config';
@@ -1399,13 +1399,14 @@ export class ReportState {
 		if (!name) return;
 		this.held = null;
 		await this.act('Preparing the page to print', async () => {
-			const res = await this.app.analysis.request<{ html: string | null; owed: string[]; index: { name: string; status: string }[] }>(
+			const res = await this.app.analysis.request<{ html: string | null; opened?: string; owed: string[]; index: { name: string; status: string }[] }>(
 				'report.print',
-				{ name, ...(anyway ? { anyway } : {}) },
+				{ name, ...(anyway ? { anyway } : {}), ...(printsInBrowser() ? { browser: true } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			if (res.html === null) this.held = { act: 'print', owed: res.owed, index: res.index };
-			else this.printing = res.html;
+			// opened in the browser, which prints it; in place otherwise
+			else if (!res.opened) this.printing = res.html;
 		});
 	}
 
@@ -1416,9 +1417,9 @@ export class ReportState {
 		this.held = null;
 		const doing = { begin: 'Preparing the page to issue', record: 'Recording the issue', cancel: 'Cancelling the issue' }[step];
 		await this.act(doing, async () => {
-			const res = await this.app.analysis.request<{ html?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
+			const res = await this.app.analysis.request<{ html?: string; opened?: string; status?: string; entry?: Record<string, string>; index?: { name: string; status: string }[]; project: ProjectSummary }>(
 				'report.issue',
-				{ name, step, ...(path ? { path } : {}), ...(anyway ? { anyway } : {}) },
+				{ name, step, ...(path ? { path } : {}), ...(anyway ? { anyway } : {}), ...(step === 'begin' && printsInBrowser() ? { browser: true } : {}) },
 				{ timeoutMs: RUN_TIMEOUT_MS }
 			);
 			this.app.project.apply(res.project);
@@ -1427,7 +1428,7 @@ export class ReportState {
 			} else if (step === 'begin') {
 				this.issuing = res.status ?? 'issued';
 				this.issued = null;
-				this.printing = res.html ?? null;
+				this.printing = res.opened ? null : (res.html ?? null);
 			} else {
 				this.issuing = null;
 				if (res.entry) this.issued = res.entry;
