@@ -33,7 +33,7 @@ import {
 	type EffectiveSpace,
 	type MimoDraft
 } from './mimoSetup';
-import { missingList, summarize, type SummaryInputs } from './summary';
+import { missingList, missingWords, summarize, type SummaryInputs } from './summary';
 
 function row(index: number, role: ChannelRow['role'], description = ''): ChannelRow {
 	const drive = role === 'drive';
@@ -294,6 +294,11 @@ describe('the setup on the wire', () => {
 });
 
 describe('the setup summary', () => {
+	it('says how many things are missing with a space after the count', () => {
+		expect(missingWords(1)).toBe('1 thing before a run');
+		expect(missingWords(3)).toBe('3 things before a run');
+	});
+
 	function inputs(over: Partial<SummaryInputs> = {}): SummaryInputs {
 		const { rows, d } = bench();
 		const zero = { errors: 0, warnings: 0 };

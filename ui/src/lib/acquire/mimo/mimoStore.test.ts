@@ -99,6 +99,7 @@ async function screen() {
 	const sent: { method: string; params: Record<string, unknown> }[] = [];
 	let repairAccepted = false;
 	let startRefused = false;
+	let validation = VALIDATION;
 	const real = client.request.bind(client);
 	// The MIMO methods answer from here; everything else goes to the mock service.
 	client.request = (async (method: string, params: Record<string, unknown> = {}) => {
@@ -107,7 +108,7 @@ async function screen() {
 		if (method === 'mimo_random.status') return { run_id: null, state: 'unconfigured', phase: 'idle' };
 		if (method === 'mimo_random.report') return { report: null };
 		if (method === 'mimo_random.reference.build_breakpoints') return refResult(repairAccepted || params.repair === true);
-		if (method === 'mimo_random.setup') return { validation: VALIDATION };
+		if (method === 'mimo_random.setup') return { validation };
 		if (method === 'mimo_random.start' && startRefused)
 			throw new RequestError('refused', "The run's record could not be written, so the run did not arm: /data/x (Read-only file system). Choose a data folder that can be written.", 'mimo_random.start', 'record_unwritable', { path: '/data/x', reason: 'Read-only file system' });
 		return real(method, params);
@@ -117,7 +118,7 @@ async function screen() {
 	// What the store's watch does as rows change.
 	ensureSettings(acq.rows, mimo.setup);
 	await mimo.sync();
-	return { client, acq, mimo, sent, accept: () => (repairAccepted = true), refuseStart: () => (startRefused = true) };
+	return { client, acq, mimo, sent, accept: () => (repairAccepted = true), refuseStart: () => (startRefused = true), answer: (v: MimoValidation) => (validation = v) };
 }
 
 describe('the MIMO Random store', () => {
@@ -164,6 +165,24 @@ describe('the MIMO Random store', () => {
 		// An edit makes the dry run stale: its finding is no longer shown.
 		mimo.setup.drives['4'].peak_v = 5;
 		await until(() => mimo.fieldErrors['drive.4.peak_v'] === undefined);
+	});
+
+	it("holds back the simulator's size finding while the table's edits are not yet applied", async () => {
+		const { acq, mimo, answer } = await screen();
+		const size = 'The simulator plays a standard plant of 4 by 4, 12 by 6, 24 by 24 or 72 by 24 (inputs by drives), and this table has 1 inputs and 1 drives; enable that many rows to run on the simulator.';
+		answer({ ...VALIDATION, errors: [{ reason: 'plant_unknown', field: 'setup.channels', message: size }] });
+		mimo.setup.reference.acceptRepair = true;
+		await mimo.buildReference();
+		await mimo.checkSetup();
+		// The dry run counted the service's table; the edited one goes with Apply and is counted then.
+		expect(acq.tableDirty).toBe(true);
+		expect(mimo.checkErrors).toEqual([]);
+		expect(mimo.counts.channels.errors).toBe(0);
+		// With the table applied, the finding is about the table the run would use, and it shows.
+		acq.baseRows = JSON.parse(JSON.stringify(acq.rows)) as ChannelRow[];
+		expect(acq.tableDirty).toBe(false);
+		expect(Object.values(mimo.fieldErrors).flat()).toContain(size);
+		expect(mimo.counts.channels.errors).toBe(1);
 	});
 
 	it('offers Apply first, and Start only once the setup is held', async () => {
