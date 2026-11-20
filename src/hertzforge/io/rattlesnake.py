@@ -198,7 +198,8 @@ def _channel_rows(channels, dofs: list[str]) -> list[int]:
 
 def _read_stream(variable, rows=None, first: int = 0,
                  last: int | None = None, ticker: Any = None) -> np.ndarray:
-    """A (channels, samples) stream variable, read into one array.
+    """A (channels, samples) stream variable, netCDF or h5py, read into
+    one array.
 
     `rows` picks channels, in the order given; `first` and `last` a
     sample range [first, last) — the import window, read as a slice of
@@ -215,7 +216,9 @@ def _read_stream(variable, rows=None, first: int = 0,
     the old whole read handed back too, and a masked array of this size
     would be a second one.
     """
-    variable.set_auto_maskandscale(False)
+    if hasattr(variable, 'set_auto_maskandscale'):
+        # an h5py dataset (a SignalCalc export's TimeData) has no masking
+        variable.set_auto_maskandscale(False)
     last = variable.shape[1] if last is None else int(last)
     rows = list(range(variable.shape[0])) if rows is None else list(rows)
     # netCDF reads an integer sequence along an axis in sorted order;

@@ -2,8 +2,9 @@
 of its channels, its refusals and notes, and the round trip.
 
 The fixtures are written here in the export's own layout (HDF5 behind
-MATLAB's version 7.3 header, one `INP_k_Data` column per channel,
-NUL-padded character matrices), with synthetic numbers.
+MATLAB's version 7.3 header, one `INP_k_Data` column per channel or
+one chunked, compressed `TimeData` matrix, NUL-padded character
+matrices), with synthetic numbers.
 """
 
 from __future__ import annotations
@@ -41,17 +42,26 @@ def _doubles(f, name, values):
 
 def _export(path, names=('A6501- Z', 'Current', 'Voltage'),
             units=('g', 'ampere', 'V'), data=None, step=STEP, inputs=None,
-            sensitivity=None, skip=(), columns=None):
+            sensitivity=None, skip=(), columns=None, matrix=False):
     """An export in the layout SignalCalc writes. `data` is one row of
     samples per channel (row k + 1 is `INP_<k + 1>_Data`); `skip` leaves
-    variables out; `columns` replaces a channel's dataset as written."""
+    variables out; `columns` replaces a channel's dataset as written.
+    `matrix` writes the samples as one `TimeData` instead, chunked across
+    every channel and compressed as a real export's is, and `'both'`
+    writes `TimeData` and the `INP_k_Data` too."""
     if data is None:
         data = np.vstack([np.full(SAMPLES, k + 1.0) + np.sin(np.arange(SAMPLES) * (k + 1))
                           for k in range(len(names))])
     inputs = list(range(1, len(names) + 1)) if inputs is None else inputs
     sensitivity = [25.0] * len(names) if sensitivity is None else sensitivity
     with h5py.File(path, 'w', userblock_size=512) as f:
-        for k, row in enumerate(data):
+        if matrix:
+            # MATLAB's samples x channels is (channels, samples) in HDF5
+            stored = np.asarray(data, dtype=float)
+            dataset = f.create_dataset('TimeData', data=stored, compression='gzip',
+                                       chunks=(stored.shape[0], 7))
+            dataset.attrs['MATLAB_class'] = np.bytes_(b'double')
+        for k, row in enumerate(data if matrix in (False, 'both') else ()):
             name = f'INP_{k + 1}_Data'
             if name in skip:
                 continue
@@ -298,3 +308,75 @@ def test_an_unevenly_sampled_history_is_not_written(tmp_path):
     history = TimeHistory(np.array([0.0, 0.1, 0.3, 0.4]), np.ones((1, 4)), response_dof=['1X+'])
     with pytest.raises(ValueError, match='not evenly spaced|evenly'):
         signalcalc_mat.save(history, tmp_path / 'out.mat')
+
+
+def test_the_matrix_layout_reads_as_the_vector_layout_does(tmp_path):
+    """Column k of TimeData is row k of ChanName, as INP_k_Data is,
+    whatever the input numbers."""
+    data = np.vstack([np.linspace(-1, 1, SAMPLES), np.full(SAMPLES, 0.5) + np.arange(SAMPLES),
+                      np.cos(np.arange(SAMPLES))])
+    path = _export(tmp_path / 'run.mat', data=data, inputs=[3, 1, 2], matrix=True)
+    assert signalcalc_mat.sniff(path)
+    history, table, notes = _read(path)
+    assert history.ordinate_dim == ['acceleration', 'current', 'voltage']
+    assert np.allclose(history.ordinate[0], data[0] * 9.80665)
+    assert np.allclose(history.ordinate[1:], data[1:])
+    assert history.sample_rate == pytest.approx(20480.0)
+    assert [history.record_label(i) for i in range(3)] == ['A6501- Z', 'Current', 'Voltage']
+    assert history.comment[1] == 'column 2 of TimeData of run.mat'
+    assert list(table['comment']) == ['A6501- Z, input 3', 'Current, input 1',
+                                      'Voltage, input 2']
+    assert notes == []
+
+
+def test_a_window_and_a_pick_from_the_matrix_span_its_blocks(tmp_path, monkeypatch):
+    """TimeData is read a block of samples at a time; a block of 5
+    samples puts the window's ends inside blocks and the pick out of row
+    order."""
+    from hertzforge.io import rattlesnake
+
+    monkeypatch.setattr(rattlesnake, 'READ_SAMPLES', 5)
+    data = np.vstack([np.arange(SAMPLES, dtype=float) * (k + 1) for k in range(3)])
+    path = _export(tmp_path / 'run.mat', data=data, matrix=True)
+    done = []
+    found = signalcalc_mat.load(path, start=10 * STEP, stop=31 * STEP,
+                                channels=['Voltage', 0],
+                                progress=lambda n, total: done.append((n, total)))
+    history = found['time_data']
+    assert history.ordinate.shape == (2, 22)
+    assert history.abscissa[0] == pytest.approx(10 * STEP)
+    assert np.array_equal(history.ordinate[0], data[2, 10:32])
+    assert np.allclose(history.ordinate[1], data[0, 10:32] * 9.80665)
+    assert history.comment[0].startswith(f'{10 * STEP:g} to {31 * STEP:g} s of column 3')
+    assert done[-1] == (22, 22)
+
+
+def test_a_matrix_with_other_than_one_column_per_name_is_refused(tmp_path):
+    four = np.vstack([np.arange(SAMPLES, dtype=float)] * 4)
+    with pytest.raises(ValueError, match=r'run\.mat: TimeData is 64 x 4 \(samples x channels '
+                                         r'in MATLAB\); ChanName names 3 channels'):
+        import_file(_export(tmp_path / 'run.mat', data=four, matrix=True))
+    # a matrix stored channels x samples in MATLAB is the other way round
+    path = tmp_path / 'flip.mat'
+    _export(path, matrix=True)
+    with h5py.File(path, 'r+') as f:
+        del f['TimeData']
+        f.create_dataset('TimeData', data=np.zeros((SAMPLES, 3)))
+    with pytest.raises(ValueError, match='TimeData is 3 x 64'):
+        import_file(path)
+
+
+def test_a_complex_matrix_is_refused(tmp_path):
+    path = tmp_path / 'run.mat'
+    _export(path, matrix=True)
+    with h5py.File(path, 'r+') as f:
+        del f['TimeData']
+        f.create_dataset('TimeData', data=np.zeros((3, SAMPLES), dtype=complex))
+    with pytest.raises(ValueError, match='TimeData holds complex128, not real numbers'):
+        import_file(path)
+
+
+def test_a_file_with_both_layouts_is_refused(tmp_path):
+    path = _export(tmp_path / 'run.mat', matrix='both')
+    with pytest.raises(ValueError, match='holds both TimeData and INP_1_Data'):
+        import_file(path)
