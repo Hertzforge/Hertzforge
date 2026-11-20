@@ -8,20 +8,22 @@
 SignalCalc writes a recorded time history to MATLAB as an HDF5 file
 (MATLAB's version 7.3) holding, for N channels:
 
-- `INP_1_Data` to `INP_N_Data`, one vector of samples per channel;
+- `INP_1_Data` to `INP_N_Data`, one vector of samples per channel, or
+  `TimeData`, one matrix of samples by N channels;
 - `ChanName` and `Unit`, character matrices with one row per channel,
   padded with NUL characters;
 - `hDelta`, the time step in seconds;
 - `Sensitivity` and `InputChanNums`, one number per channel, and
   `EUType`, a code per channel.
 
-`INP_k_Data` holds the channel named in row k of `ChanName`. It is not
-the channel whose `InputChanNums` entry is k: the input numbers follow
-the analyzer's wiring and need not be in row order, and a shaker's
-current and voltage monitors read by row are coherent with each other
-the way a shaker's are, where read by input number they are two
-accelerometers. The values are in each channel's engineering unit,
-which `Unit` names; the sensitivity is kept for reference, not applied.
+`INP_k_Data`, or column k of `TimeData`, holds the channel named in
+row k of `ChanName`. It is not the channel whose `InputChanNums` entry
+is k: the input numbers follow the analyzer's wiring and need not be in
+row order, and a shaker's current and voltage monitors read by row are
+coherent with each other the way a shaker's are, where read by input
+number they are two accelerometers. The values are in each channel's
+engineering unit, which `Unit` names; the sensitivity is kept for
+reference, not applied.
 
 What is read: one `TimeHistory` with a record per channel, starting at
 0 s, and a `ChannelTable` with each channel's unit, quantity and
@@ -37,18 +39,22 @@ public description of its codes was found.
 `start`, `stop` and `channels` read part of a long export, as for a
 Rattlesnake run (`rattlesnake.load`): the window is inclusive at both
 ends on the file's clock, and only the samples it holds are read from
-the file, a channel at a time.
+the file: a channel at a time from `INP_k_Data`, and from `TimeData` a
+block of samples across the channels at a time, since its compressed
+chunks each hold every channel.
 
 Refused, each by name: an `hDelta` that is not one positive time step,
 a channel vector that is a matrix or of another length than the rest, a
 `Unit`, `Sensitivity` or `InputChanNums` whose count differs from the
-names', an `INP_k_Data` with no row k and a row with no `INP_k_Data`.
+names', an `INP_k_Data` with no row k and a row with no `INP_k_Data`, a
+`TimeData` with another number of columns than there are names, and a
+file holding both `TimeData` and `INP_k_Data`.
 A missing sample is kept as NaN and noted, and so is a channel that
 never varies (`core.channel_health`).
 
-`save` writes a time history back in the same layout, which this module
-reads back; whether SignalCalc's own MATLAB import takes it has not
-been tested. The format has no start time, so a history that starts
+`save` writes a time history back in the `INP_k_Data` layout, which
+this module reads back; whether SignalCalc's own MATLAB import takes it
+has not been tested. The format has no start time, so a history that starts
 later than 0 s reads back starting at 0 s.
 """
 
@@ -70,6 +76,8 @@ SUFFIX = '.mat'
 #: the variables every export has, besides its channels
 NEEDED = ('ChanName', 'Unit', 'hDelta')
 _CHANNEL = re.compile(r'^INP_(\d+)_Data$')
+#: the variable holding every channel, in the export's other layout
+MATRIX = 'TimeData'
 #: MATLAB's version 7.3 header: 116 bytes of text, an 8-byte subsystem
 #: offset (none), the version (0x0200) and the byte order mark
 _HEADER_TEXT = b'MATLAB 7.3 MAT-file, Platform: hertzforge, HDF5 schema 1.00 .'
@@ -77,7 +85,7 @@ _HEADER_TEXT = b'MATLAB 7.3 MAT-file, Platform: hertzforge, HDF5 schema 1.00 .'
 
 def sniff(path: str | os.PathLike) -> bool:
     """Whether `path` is a SignalCalc time history export: an HDF5 `.mat`
-    holding `ChanName`, `Unit`, `hDelta` and at least one
+    holding `ChanName`, `Unit`, `hDelta` and `TimeData` or at least one
     `INP_<n>_Data`. Only the names of the file's variables are read."""
     if not str(path).lower().endswith(SUFFIX):
         return False
@@ -91,7 +99,7 @@ def sniff(path: str | os.PathLike) -> bool:
     except Exception:  # noqa: BLE001 - sniffers must not raise on foreign files
         return False
     return (set(NEEDED) <= names
-            and any(_CHANNEL.match(name) for name in names))
+            and (MATRIX in names or any(_CHANNEL.match(name) for name in names)))
 
 
 # ---- reading ------------------------------------------------------------------
@@ -164,6 +172,23 @@ def _channel_vectors(f: Any, count: int) -> list[Any]:
     return vectors
 
 
+def _channel_matrix(f: Any, count: int) -> Any:
+    """`TimeData`, checked to hold one column per channel. MATLAB's
+    samples × channels matrix is (channels, samples) in HDF5."""
+    inp = sorted(name for name in f if _CHANNEL.match(name))
+    if inp:
+        raise ValueError(f'the file holds both {MATRIX} and {inp[0]}; '
+                         'which one holds the channels cannot be told')
+    dataset = f[MATRIX]
+    if dataset.dtype.kind not in 'fiu':
+        raise ValueError(f'{MATRIX} holds {dataset.dtype}, not real numbers')
+    if dataset.ndim != 2 or dataset.shape[0] != count:
+        shape = ' x '.join(str(n) for n in reversed(dataset.shape))
+        raise ValueError(f'{MATRIX} is {shape} (samples x channels in MATLAB); '
+                         f'ChanName names {count} channels')
+    return dataset
+
+
 def _read_span(dataset: Any, first: int, last: int) -> np.ndarray:
     # MATLAB's n×1 column is (1, n) in HDF5, and a 1×n row is (n, 1)
     if dataset.shape[0] == 1:
@@ -190,7 +215,9 @@ def load(path: str | os.PathLike, start: float | None = None,
         is labeled (its DOF, or its name from `ChanName`). All of them
         when omitted.
     progress : callable, optional
-        Called with `(done, total)` samples as the channels are read.
+        Called with `(done, total)` as the samples are read: samples of
+        every channel picked from `INP_k_Data`, samples across them from
+        `TimeData`.
 
     Returns
     -------
@@ -211,7 +238,7 @@ def load(path: str | os.PathLike, start: float | None = None,
     from ..core.progress import Ticker
     from ..core.validate import dofs
     from ..units import dimension_of, from_si
-    from .rattlesnake import _channel_rows, _sample_window
+    from .rattlesnake import _channel_rows, _read_stream, _sample_window
 
     path = str(path)
     base = os.path.basename(path)
@@ -231,7 +258,12 @@ def load(path: str | os.PathLike, start: float | None = None,
             sensitivity = _per_channel(f, 'Sensitivity', len(names))
             inputs = _per_channel(f, 'InputChanNums', len(names))
             step = _time_step(f)
-            vectors = _channel_vectors(f, len(names))
+            if MATRIX in f:
+                matrix, vectors = _channel_matrix(f, len(names)), None
+                samples = matrix.shape[1]
+            else:
+                matrix, vectors = None, _channel_vectors(f, len(names))
+                samples = max(vectors[0].shape)
         except ValueError as error:
             raise refused(error) from None
 
@@ -246,7 +278,6 @@ def load(path: str | os.PathLike, start: float | None = None,
                 response.append(dof)
                 block.append('')
         labels = [dof or name for dof, name in zip(response, block, strict=True)]
-        samples = max(vectors[0].shape)
         try:
             rows = (list(range(len(names))) if channels is None
                     else _channel_rows(channels, labels))
@@ -258,11 +289,19 @@ def load(path: str | os.PathLike, start: float | None = None,
                                      f'{samples} samples'))
         first, last = span
         ticker = Ticker(progress)
-        ticker.add(len(rows) * (last - first))
-        values = np.empty((len(rows), last - first), dtype=np.float64)
-        for position, row in enumerate(rows):
-            values[position] = _read_span(vectors[row], first, last)
-            ticker.tick(last - first)
+        if matrix is not None:
+            # a block of samples across every channel is one step
+            ticker.add(last - first)
+            values = _read_stream(matrix, rows, first, last, ticker)
+        else:
+            ticker.add(len(rows) * (last - first))
+            values = np.empty((len(rows), last - first), dtype=np.float64)
+            for position, row in enumerate(rows):
+                values[position] = _read_span(vectors[row], first, last)
+                ticker.tick(last - first)
+
+    def source(row: int) -> str:
+        return f'column {row + 1} of {MATRIX}' if matrix is not None else f'INP_{row + 1}_Data'
 
     window = ('' if (first, last) == (0, samples) else
               f'{first * step:g} to {(last - 1) * step:g} s of ')
@@ -270,7 +309,7 @@ def load(path: str | os.PathLike, start: float | None = None,
         np.arange(first, last) * step, values,
         response_dof=[response[row] for row in rows],
         block=[block[row] for row in rows] if any(block[row] for row in rows) else None,
-        comment=[f'{window}INP_{row + 1}_Data of {base}' for row in rows])
+        comment=[f'{window}{source(row)} of {base}' for row in rows])
     notes = []
     chosen = [units[row] for row in rows]
     for k, unit, reason in declare_stated_units(history, chosen):
