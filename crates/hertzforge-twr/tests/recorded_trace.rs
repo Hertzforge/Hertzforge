@@ -20,10 +20,13 @@
 //!
 //! The trace was recorded once, before the seam changed anything, into
 //! `tests/data/twr_trace.txt`. On the platform it was recorded on (its first
-//! line says which) the trace must match byte for byte. On another platform
-//! the floating-point library may round a last bit differently, so the drive
-//! hashes are not compared there and every number is held to a relative 1e-9;
-//! everything discrete must still match.
+//! line says which: the OS, its release and the architecture) the trace must
+//! match byte for byte. On another platform the floating-point library may
+//! round a last bit differently, so the drive hashes are not compared there and
+//! every number is held to a relative 1e-9; everything discrete must still
+//! match. Another release of the same OS counts as another platform: the
+//! system math library is the OS's, and macOS 26 and 27 round the drive's last
+//! bits apart.
 //!
 //! `HERTZFORGE_RECORD_TRACE=1` rewrites the file. Only do that when the run
 //! without the seam is meant to change, and say so in the commit.
@@ -230,10 +233,28 @@ fn record_all() -> String {
 
 fn platform() -> String {
     format!(
-        "# recorded on {} {}",
+        "# recorded on {} {} {}",
         std::env::consts::OS,
+        os_release(),
         std::env::consts::ARCH
     )
+}
+
+/// The OS release, where the trace is recorded byte for byte; elsewhere a
+/// placeholder, as no golden is held to those platforms' bits.
+fn os_release() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .expect("sw_vers runs on macOS");
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "any".to_owned()
+    }
 }
 
 fn golden_path() -> PathBuf {
