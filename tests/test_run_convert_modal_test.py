@@ -210,3 +210,17 @@ def test_modal_test_a_report_names_the_test_and_every_wire_name_is_in_one_table(
     assert TEST_NAMES['modal_test'] == 'Modal Test'
     assert modal_run.WIRE['test'] == 'modal_test'
     assert run_convert.PROJECT_TYPES['modal_test'] == 'Modal Test'
+
+
+def test_modal_test_the_guide_fragment_maps_the_run_to_the_objects_it_becomes(tmp_path):
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / 'docs' / 'modal-test-analysis.md').read_text(
+        encoding='utf-8')
+    rows = re.findall(r'^\| `[^|]*\| (.*?) \|', text, flags=re.MULTILINE)
+    named = {o.strip() for cell in rows for o in re.findall(r'\*\*([^*]+)\*\*', cell)}
+    done, _project = _open(tmp_path, again=[2])
+    made = {re.sub(r'^Measurement \d+ frames.*$', 'Measurement k frames', o)
+            for o in done.objects}
+    assert named == made
