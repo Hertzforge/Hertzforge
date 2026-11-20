@@ -549,6 +549,17 @@
 		grid-column: 1 / -1;
 	}
 
+	/* a reading's views each take their own height and the reading scrolls: auto rows in a frame of
+	   fixed height shrank every table to a sliver, and its rows ran over the next table's */
+	.svviews.several:not(.panes) {
+		grid-auto-rows: max-content;
+		overflow-y: auto;
+	}
+
+	.svviews.several:not(.panes) .view.shape3d {
+		min-height: 440px;
+	}
+
 	@container (min-width: 900px) {
 		.svviews.several:has(.view.shape3d) {
 			grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -568,6 +579,7 @@
 
 		.svviews.several:not(.panes) .view.shape3d {
 			grid-row: 1 / span var(--beside, 2);
+			min-height: 520px;
 		}
 
 		/* the panes share the frame's height instead of growing past it: the 3-D pane down the left, the rest in rows beside it; without one, the rows share the height */
