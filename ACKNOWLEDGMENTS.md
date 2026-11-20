@@ -117,6 +117,14 @@ way.
   autospectra, coherence and phase, and the eigenvalue clamp that repairs one that cannot be had;
   and the nearly independent drive algorithm, its name, its diagonal solve and the rule that a
   negative drive level is set to zero, for both independent-drive laws.
+- **N. Hunter**, "The Independent Drive Law, Step by Step", an unpublished note, 18 November 2026,
+  private communication, 2026, used with his permission: four refinements of the independent
+  drive law, the defaults of the independent-drives and nearly-independent-drives laws: the solve
+  weighted by each control's target, and non-negative least squares in place of setting a negative
+  level to zero (both laws); the exactness test that keeps independent drives on a line they meet
+  exactly, and the level set that scales the first drive to the total specified power (nearly
+  independent drives); and the open loop form of the nearly-independent-drives law, his law as his
+  note runs it.
 - **L. Jacobs, M. Ross, G. Tipton, G. Nelson, K. Cross, N. Hunter and J. Harvie**, "6-DOF Shaker
   Test Input Derivation from Field Test" and "Experimental Execution of 6DOF Tests Derived from
   Field Tests", IMAC XXXV, 2017: six degree-of-freedom references from field data.

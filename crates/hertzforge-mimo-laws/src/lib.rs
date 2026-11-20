@@ -66,8 +66,10 @@ pub mod law_file;
 pub use band_average::BandAverageLaw;
 pub use buzz::{buzz_reference, BuzzConfig, BuzzMatchedLaw};
 pub use independent::{
-    independent_levels, nearly_independent_reference, IndependentConfig, IndependentDrivesLaw,
-    IndependentLevels, NearlyIndependentConfig, NearlyIndependentLaw,
+    independent_levels, independent_levels_with, nearly_independent_reference,
+    nearly_independent_reference_with, nonnegative_least_squares, squared_magnitudes,
+    IndependentConfig, IndependentDrivesLaw, IndependentLevels, LevelSolve,
+    NearlyIndependentConfig, NearlyIndependentLaw, Nnls, SolveOptions, NNLS_ITERATIONS_PER_UNKNOWN,
 };
 pub use min_drive::{MinimumDriveConfig, MinimumDriveLaw};
 pub use open_loop::{OpenLoopConfig, OpenLoopLaw};

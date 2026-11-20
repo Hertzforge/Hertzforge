@@ -38,8 +38,32 @@ use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
 const LINES: usize = 64;
 const BAND: (usize, usize) = (8, 56);
 
+/// The published form's parameters that `L` declares, then `extra`.
+fn published_with<L: BuiltinMimoLaw>(
+    extra: &[(&'static str, ParamVal)],
+) -> Vec<(&'static str, ParamVal)> {
+    let keys: Vec<&str> = L::spec().params.iter().map(|p| p.key).collect();
+    let mut out: Vec<(&'static str, ParamVal)> = published()
+        .into_iter()
+        .filter(|(k, _)| keys.contains(k) && !extra.iter().any(|(e, _)| e == k))
+        .collect();
+    out.extend(extra.iter().cloned());
+    out
+}
+
+/// The published independent-drives law, unregularized.
 fn exact() -> Vec<(&'static str, ParamVal)> {
-    vec![("regularization_constant", ParamVal::Number(0.0))]
+    published_with::<IndependentDrivesLaw>(&[("regularization_constant", ParamVal::Number(0.0))])
+}
+
+/// The published independent-drives law.
+fn pub_ind() -> Vec<(&'static str, ParamVal)> {
+    published_with::<IndependentDrivesLaw>(&[])
+}
+
+/// The published nearly-independent law.
+fn pub_near() -> Vec<(&'static str, ParamVal)> {
+    published_with::<NearlyIndependentLaw>(&[])
 }
 
 /// The diagonal drive of `levels` (`lines * nd`).
@@ -198,7 +222,7 @@ fn on_a_decoupled_structure_independent_drives_meet_the_autospectra_to_rounding(
     let seed_gap = autospectra_gap(&y, &s.setup.reference);
     // With the published constant the seed is short by the regularization, and
     // the loop removes it.
-    let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+    let mut law = IndependentDrivesLaw::with_params(&s.setup, &pub_ind()).expect("law");
     let run = closed_loop(&mut law, &s, 30);
     let first = autospectra_gap(
         &congruence(&s.plant, &run.outputs[0].drive),
@@ -359,8 +383,8 @@ fn a_negative_level_is_set_to_zero_counted_and_the_rescale_keeps_the_autospectra
         assert_out_of_band_zero("target", &target);
     }
     // The laws report the count: the seed of each.
-    let mut ind = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
-    let mut near = NearlyIndependentLaw::with_params(&s.setup, &[]).expect("law");
+    let mut ind = IndependentDrivesLaw::with_params(&s.setup, &pub_ind()).expect("law");
+    let mut near = NearlyIndependentLaw::with_params(&s.setup, &pub_near()).expect("law");
     for out in [
         closed_loop(&mut ind, &s, 0).outputs.remove(0),
         closed_loop(&mut near, &s, 0).outputs.remove(0),
@@ -653,10 +677,12 @@ fn hand_step(
     reference: [f64; 3],
     last: [f64; 2],
     x: [f64; 3],
-    params: &[(&str, ParamVal)],
+    params: &[(&'static str, ParamVal)],
 ) -> (Vec<f64>, hertzforge_sdm::law::MimoLoopOutputs) {
     let (setup, h) = hand_setup(reference);
-    let mut law = IndependentDrivesLaw::with_params(&setup, params).expect("law");
+    let mut law =
+        IndependentDrivesLaw::with_params(&setup, &published_with::<IndependentDrivesLaw>(params))
+            .expect("law");
     let mut response = HermitianStack::zeros(1, 3);
     for k in 0..3 {
         response.set(0, k, k, C64::new(x[k], 0.0));
@@ -784,7 +810,7 @@ fn hand_step_two_lines(last: [[f64; 2]; 2]) -> (Vec<[f64; 2]>, f64) {
         tolerances: Tolerances::none(2, 3),
         ..one
     };
-    let mut law = IndependentDrivesLaw::with_params(&setup, &[]).expect("law");
+    let mut law = IndependentDrivesLaw::with_params(&setup, &pub_ind()).expect("law");
     let csd = MatrixStack::zeros(2, 3, 2);
     let coherence = [1.0; 6];
     let inputs = |l: u64| MimoLoopInputs {
@@ -946,7 +972,7 @@ fn the_nearly_independent_loop_converges_as_the_minimum_drive_loop_does() {
         // Cap, Norman and Smallwood's Eq. 5 done once from the estimate.
         let (hp, _) = pinv(&s.frf, Regularization::Truncated { rcond: 1e-3 }).expect("pinv");
         let one_shot = worst_db_against(&s, &congruence(&hp, &target), &target);
-        let mut law = NearlyIndependentLaw::with_params(&s.setup, &[]).expect("law");
+        let mut law = NearlyIndependentLaw::with_params(&s.setup, &pub_near()).expect("law");
         let run = closed_loop(&mut law, &s, loops);
         let worst = worst_db_against(&s, run.last(), &goal);
         let from_target = worst_db_against(&s, run.last(), &target);
@@ -978,7 +1004,7 @@ fn where_feasible_the_independent_loop_reaches_the_reference_through_a_gain_erro
         let g0 = positive_levels(seed, nd);
         let reference = congruence(&plant, &diag_drive(&g0, LINES, nd));
         let s = run_on(seed, plant, estimate, reference, BAND, 0.01);
-        let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+        let mut law = IndependentDrivesLaw::with_params(&s.setup, &pub_ind()).expect("law");
         let run = closed_loop(&mut law, &s, 30);
         let seed_db = worst_db(&s, &run.outputs[0].drive);
         let worst = worst_db(&s, run.last());
@@ -1000,7 +1026,7 @@ fn where_not_feasible_the_independent_loop_settles_and_the_count_says_why() {
     for eps in [0.0, 0.01] {
         let mut s = needs_a_negative_level(80);
         s.eps = eps;
-        let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+        let mut law = IndependentDrivesLaw::with_params(&s.setup, &pub_ind()).expect("law");
         let run = closed_loop(&mut law, &s, 30);
         let changes: Vec<f64> = (28..=30).map(|l| run.scalar(l, "correction_db")).collect();
         let negative: f64 = run.per_line(30, "negative_levels").iter().sum();
@@ -1026,6 +1052,78 @@ fn where_not_feasible_the_independent_loop_settles_and_the_count_says_why() {
     }
 }
 
+#[test]
+fn under_noise_the_two_refinements_together_move_the_infeasible_loop_more() {
+    // The infeasible 3 x 3 with 1 percent noise, over loops 10 to 30: the
+    // spread of the worst control and the mean largest drive change a loop,
+    // at the defaults, published, each refinement alone, and the defaults
+    // with `convergence` 0.5. With both refinements, levels near zero switch
+    // between held at zero and free from loop to loop under the noise.
+    let choice = |v: &str| ParamVal::Choice(v.into());
+    let settings: Vec<(&str, Vec<(&'static str, ParamVal)>)> = vec![
+        ("defaults", vec![]),
+        ("published", pub_ind()),
+        (
+            "weighting only",
+            published_with::<IndependentDrivesLaw>(&[("solve_weighting", choice("target"))]),
+        ),
+        (
+            "non-negative only",
+            published_with::<IndependentDrivesLaw>(&[("solve", choice("nonnegative"))]),
+        ),
+        (
+            "defaults, convergence 0.5",
+            vec![("convergence", ParamVal::Number(0.5))],
+        ),
+    ];
+    let mut measured = Vec::new();
+    for (name, params) in &settings {
+        let mut s = needs_a_negative_level(80);
+        s.eps = 0.01;
+        let mut law = IndependentDrivesLaw::with_params(&s.setup, params).expect("law");
+        let run = closed_loop(&mut law, &s, 30);
+        let worsts: Vec<f64> = (10..=30)
+            .map(|l| worst_db(&s, &run.outputs[l].drive))
+            .collect();
+        let spread = worsts.iter().copied().fold(f64::MIN, f64::max)
+            - worsts.iter().copied().fold(f64::MAX, f64::min);
+        let mean = (10..=30)
+            .map(|l| run.scalar(l, "correction_db"))
+            .sum::<f64>()
+            / 21.0;
+        // Loops on which the number of levels held at zero changed.
+        let held: Vec<f64> = (9..=30)
+            .map(|l| run.per_line(l, "held_at_zero").iter().sum())
+            .collect();
+        let switches = held.windows(2).filter(|w| w[0] != w[1]).count();
+        println!(
+            "infeasible 3 x 3, noise 0.01, {name}: spread {spread:.3} dB, mean change \
+             {mean:.3} dB a loop, held count changed on {switches} loops"
+        );
+        measured.push((spread, mean, switches));
+    }
+    // As measured (spread, mean change), each held to 5 percent.
+    let want = [
+        (0.627, 2.653),
+        (0.295, 0.475),
+        (0.175, 0.444),
+        (0.266, 0.453),
+        (0.409, 1.433),
+    ];
+    for ((name, _), (&(spread, mean, _), &(ws, wm))) in
+        settings.iter().zip(measured.iter().zip(&want))
+    {
+        assert!((spread - ws).abs() <= 0.05 * ws, "{name}: spread {spread}");
+        assert!((mean - wm).abs() <= 0.05 * wm, "{name}: mean change {mean}");
+    }
+    // At the defaults the count of held levels changes under the noise;
+    // published and with either refinement alone it does not.
+    assert!(measured[0].2 > 0, "{:?}", measured[0]);
+    for m in &measured[1..4] {
+        assert_eq!(m.2, 0, "{m:?}");
+    }
+}
+
 /// A feasible, well-conditioned 3 x 3 structure and a reference independent
 /// drives meet, with the harness's 1 percent measurement noise.
 fn feasible_noisy() -> Synthetic {
@@ -1041,7 +1139,7 @@ fn under_noise_the_whole_step_moves_the_drive_and_a_smaller_factor_moves_it_less
     let mut mean_change = Vec::new();
     for k in [1.0, 0.5] {
         let s = feasible_noisy();
-        let given = [("convergence", ParamVal::Number(k))];
+        let given = published_with::<IndependentDrivesLaw>(&[("convergence", ParamVal::Number(k))]);
         let mut law = IndependentDrivesLaw::with_params(&s.setup, &given).expect("law");
         let run = closed_loop(&mut law, &s, 30);
         let changes: Vec<f64> = (10..=30).map(|l| run.scalar(l, "correction_db")).collect();
@@ -1087,4 +1185,516 @@ fn iterate_before_seed_and_a_missing_last_drive_are_refused() {
     assert!(err.0.contains("last drive"), "{}", err.0);
     let mut near = NearlyIndependentLaw::with_params(&s.setup, &[]).expect("law");
     assert!(near.iterate(&without).is_err());
+}
+
+// -------------------------------------------------------------------------
+// The published forms, pinned from commit 5decb4a5
+// -------------------------------------------------------------------------
+
+/// Every in-band diagonal drive entry, summed, and three entries.
+fn fingerprint(g: &HermitianStack) -> [f64; 4] {
+    let n = g.n();
+    let mut sum = 0.0;
+    for line in BAND.0..BAND.1 {
+        for d in 0..n {
+            sum += g.get(line, d, d).re;
+        }
+    }
+    [
+        sum,
+        g.get(BAND.0, 0, 0).re,
+        g.get(BAND.0 + 17, n - 1, n - 1).re,
+        g.get(BAND.1 - 1, 0, n - 1).norm(),
+    ]
+}
+
+/// The parameters that give the published forms of both laws.
+fn published() -> Vec<(&'static str, ParamVal)> {
+    vec![
+        ("solve", ParamVal::Choice("set_to_zero".into())),
+        ("solve_weighting", ParamVal::Choice("none".into())),
+        ("exact_tolerance", ParamVal::Number(0.0)),
+        ("level_set", ParamVal::Toggle(false)),
+    ]
+}
+
+/// Printed by the code of commit 5decb4a5, before the refinements: law,
+/// case, loop (-1: the nearly independent reference), fingerprint.
+const PINNED: &[(&str, &str, i64, [f64; 4])] = &[
+    (
+        "independent",
+        "6x4",
+        0,
+        [
+            2.0945695421006287,
+            0.041342309989361455,
+            0.006013191538783034,
+            0.0,
+        ],
+    ),
+    (
+        "independent",
+        "6x4",
+        1,
+        [
+            2.1849678661855485,
+            0.04388736773277341,
+            0.007345471440304391,
+            0.0,
+        ],
+    ),
+    (
+        "independent",
+        "6x4",
+        5,
+        [
+            2.2148427746406822,
+            0.04192090629739884,
+            0.0073281619742067644,
+            0.0,
+        ],
+    ),
+    (
+        "nearly",
+        "6x4",
+        0,
+        [
+            1.9322983150469617,
+            0.033235280844885716,
+            0.006185165039210962,
+            0.00011997452673139224,
+        ],
+    ),
+    (
+        "nearly",
+        "6x4",
+        1,
+        [
+            1.9223056739576576,
+            0.032742593189651,
+            0.006175692357445786,
+            0.0001327171307765957,
+        ],
+    ),
+    (
+        "nearly",
+        "6x4",
+        5,
+        [
+            1.9241840857513948,
+            0.03224403401320896,
+            0.006176854697786981,
+            9.747507053483406e-5,
+        ],
+    ),
+    (
+        "reference",
+        "6x4",
+        -1,
+        [
+            4.621882610475126,
+            0.022769799544710808,
+            0.011441352684717491,
+            0.006204606252918832,
+        ],
+    ),
+    (
+        "independent",
+        "3x3neg",
+        0,
+        [0.9488509544269965, 0.009885579242546237, 0.0, 0.0],
+    ),
+    (
+        "independent",
+        "3x3neg",
+        1,
+        [0.9582595437205905, 0.00992379081647185, 0.0, 0.0],
+    ),
+    (
+        "independent",
+        "3x3neg",
+        5,
+        [0.9589175994861803, 0.010002551749624748, 0.0, 0.0],
+    ),
+    (
+        "nearly",
+        "3x3neg",
+        0,
+        [
+            1.0088949296183778,
+            0.017043616614229973,
+            0.0010762569061763168,
+            0.0016780782019599956,
+        ],
+    ),
+    (
+        "nearly",
+        "3x3neg",
+        1,
+        [
+            1.0087050387190384,
+            0.0169827165131694,
+            0.0010609962649488795,
+            0.001686483886404145,
+        ],
+    ),
+    (
+        "nearly",
+        "3x3neg",
+        5,
+        [
+            1.0074097441409633,
+            0.016933652765063423,
+            0.0010703087997476293,
+            0.001641058366777867,
+        ],
+    ),
+    (
+        "reference",
+        "3x3neg",
+        -1,
+        [
+            1.2239948611322422,
+            0.011241510796354895,
+            0.000751269086267139,
+            0.0008853875796315238,
+        ],
+    ),
+    (
+        "independent",
+        "3x5",
+        0,
+        [
+            2.557759480419605,
+            0.009525102605957458,
+            0.012263342076599543,
+            0.0,
+        ],
+    ),
+    (
+        "independent",
+        "3x5",
+        1,
+        [
+            2.6466803668908017,
+            0.007648419908588037,
+            0.012691021409553601,
+            0.0,
+        ],
+    ),
+    (
+        "independent",
+        "3x5",
+        5,
+        [
+            2.680073509550447,
+            0.009857968214684428,
+            0.01239856194942411,
+            0.0,
+        ],
+    ),
+    (
+        "nearly",
+        "3x5",
+        0,
+        [
+            1.4507113856965712,
+            0.0068425278885957015,
+            0.006363882804270293,
+            0.0008411176878307101,
+        ],
+    ),
+    (
+        "nearly",
+        "3x5",
+        1,
+        [
+            1.4477047354857542,
+            0.006805952453617438,
+            0.006472889281696079,
+            0.00080166201809892,
+        ],
+    ),
+    (
+        "nearly",
+        "3x5",
+        5,
+        [
+            1.4466928211531038,
+            0.007158610138405746,
+            0.0065537991101481275,
+            0.000780719831685278,
+        ],
+    ),
+    (
+        "reference",
+        "3x5",
+        -1,
+        [
+            3.4916745095839135,
+            0.02554845159581733,
+            0.030598396468249623,
+            0.003786896655621966,
+        ],
+    ),
+];
+
+#[test]
+fn with_the_published_parameters_both_laws_give_what_they_gave_before_the_refinements() {
+    let cases: Vec<(&str, Synthetic)> = vec![
+        ("6x4", synthetic(33, 6, 4)),
+        ("3x3neg", {
+            let mut s = needs_a_negative_level(80);
+            s.eps = 0.01;
+            s
+        }),
+        ("3x5", synthetic(34, 3, 5)),
+    ];
+    let mut worst: f64 = 0.0;
+    for (name, s) in &cases {
+        let mut got: Vec<(&str, i64, [f64; 4])> = Vec::new();
+        let mut law = IndependentDrivesLaw::with_params(&s.setup, &pub_ind()).expect("law");
+        let run = closed_loop(&mut law, s, 5);
+        for l in [0usize, 1, 5] {
+            got.push(("independent", l as i64, fingerprint(&run.outputs[l].drive)));
+        }
+        let mut near = NearlyIndependentLaw::with_params(&s.setup, &pub_near()).expect("law");
+        let run = closed_loop(&mut near, s, 5);
+        for l in [0usize, 1, 5] {
+            got.push(("nearly", l as i64, fingerprint(&run.outputs[l].drive)));
+        }
+        let (t, _) =
+            nearly_independent_reference(&s.frf, &s.setup.reference, BAND, 0.01).expect("target");
+        got.push(("reference", -1, fingerprint(&t)));
+        for (law, l, f) in got {
+            let (_, _, _, want) = PINNED
+                .iter()
+                .find(|(a, c, k, _)| *a == law && c == name && *k == l)
+                .expect("pinned");
+            for j in 0..4 {
+                let scale = want[0].abs();
+                let gap = (f[j] - want[j]).abs() / scale;
+                worst = worst.max(gap);
+                assert!(
+                    gap <= 1e-12,
+                    "{law} {name} loop {l} [{j}]: {} against {}",
+                    f[j],
+                    want[j]
+                );
+            }
+        }
+    }
+    println!("published forms against the pinned numbers: worst {worst:.2e} relative");
+}
+
+/// Printed by the round 5 code with `exact_tolerance` 0 and the level set
+/// off: N. Hunter's weighting and non-negative solve, with the regularization
+/// scaled drive by drive under the weighting (Marquardt's scaling). Case,
+/// loop, fingerprint. A regression pin only; round 3's numbers, from the
+/// one constant per line, no longer hold.
+const PINNED_ROUND_5: &[(&str, usize, [f64; 4])] = &[
+    (
+        "6x4",
+        0,
+        [
+            1.9389481014062129,
+            0.033308937221682225,
+            0.0047043457567341644,
+            0.00016816519813205814,
+        ],
+    ),
+    (
+        "6x4",
+        1,
+        [
+            1.9338310490232353,
+            0.032773517311516225,
+            0.004703733506733967,
+            0.00017258735602371992,
+        ],
+    ),
+    (
+        "6x4",
+        5,
+        [
+            1.9342146370994375,
+            0.032339625486439746,
+            0.004723060266112141,
+            0.00019683686304795744,
+        ],
+    ),
+    (
+        "3x3neg",
+        0,
+        [
+            0.9804207988903297,
+            0.01763367912648192,
+            0.0015940826150752014,
+            0.0024503322253968305,
+        ],
+    ),
+    (
+        "3x3neg",
+        1,
+        [
+            0.979065946950929,
+            0.01757210501905116,
+            0.0015737152747466261,
+            0.002456970796820915,
+        ],
+    ),
+    (
+        "3x3neg",
+        5,
+        [
+            0.9799695759121739,
+            0.01752669229019966,
+            0.001586667957780767,
+            0.0024008496615724735,
+        ],
+    ),
+    (
+        "3x5",
+        0,
+        [
+            1.497432420556191,
+            0.005904660659743874,
+            0.005964645488281702,
+            0.0008437909554581137,
+        ],
+    ),
+    (
+        "3x5",
+        1,
+        [
+            1.4925421083769808,
+            0.0059546772087860364,
+            0.0060430197625793245,
+            0.0008037050972265801,
+        ],
+    ),
+    (
+        "3x5",
+        5,
+        [
+            1.4926367891857921,
+            0.0061915616544864485,
+            0.0061068225848305,
+            0.0007812305703297185,
+        ],
+    ),
+];
+
+#[test]
+fn with_marquardts_scaling_and_the_level_set_and_exactness_test_off_nearly_gives_round_5s_numbers()
+{
+    let cases: Vec<(&str, Synthetic)> = vec![
+        ("6x4", synthetic(33, 6, 4)),
+        ("3x3neg", {
+            let mut s = needs_a_negative_level(80);
+            s.eps = 0.01;
+            s
+        }),
+        ("3x5", synthetic(34, 3, 5)),
+    ];
+    let mut worst: f64 = 0.0;
+    for (name, s) in &cases {
+        let p = [
+            ("exact_tolerance", ParamVal::Number(0.0)),
+            ("level_set", ParamVal::Toggle(false)),
+        ];
+        let mut near = NearlyIndependentLaw::with_params(&s.setup, &p).expect("law");
+        let run = closed_loop(&mut near, s, 5);
+        for &(case, l, want) in PINNED_ROUND_5.iter().filter(|(c, _, _)| c == name) {
+            let f = fingerprint(&run.outputs[l].drive);
+            for j in 0..4 {
+                let gap = (f[j] - want[j]).abs() / want[0].abs();
+                worst = worst.max(gap);
+                assert!(
+                    gap <= 1e-12,
+                    "{case} loop {l} [{j}]: {} against {}",
+                    f[j],
+                    want[j]
+                );
+            }
+        }
+    }
+    println!("level set and exactness test off against round 5: worst {worst:.2e} relative");
+}
+
+// -------------------------------------------------------------------------
+// The regularization under the weighting (Marquardt's scaling)
+// -------------------------------------------------------------------------
+
+#[test]
+fn at_the_defaults_on_a_decoupled_structure_the_seed_is_short_by_the_constant_and_the_loop_closes_it(
+) {
+    // The twin, at the defaults, of the decoupled test above: with the
+    // weighting each drive is regularized by the same relative amount, so the
+    // seed is short by c / (1 + c) of every target and each loop cuts the gap
+    // by the same factor again.
+    let h = decoupled(1, 4);
+    let mut s = Synthetic::with_plant(1, h, BAND, 0.0);
+    s.frf = s.plant.clone();
+    let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+    let run = closed_loop(&mut law, &s, 30);
+    let gaps: Vec<f64> = run
+        .drives()
+        .map(|d| autospectra_gap(&congruence(&s.plant, d), &s.setup.reference))
+        .collect();
+    println!(
+        "decoupled 4 x 4 at the defaults: seed {:.3e}, loop 5 {:.3e}, loop 10 {:.3e}, loop 30 {:.3e}",
+        gaps[0], gaps[5], gaps[10], gaps[30]
+    );
+    let c: f64 = 0.01;
+    assert!((gaps[0] - c / (1.0 + c)).abs() < 1e-9, "{}", gaps[0]);
+    assert!(
+        gaps[0] > 1e-4,
+        "the regularization did not show: {}",
+        gaps[0]
+    );
+    assert!(gaps[10] < 1e-9, "{}", gaps[10]);
+    assert!(gaps[30] < 1e-12, "{}", gaps[30]);
+    for (l, d) in run.drives().enumerate() {
+        assert_diagonal(&format!("loop {l}"), d);
+        assert_out_of_band_zero(&format!("loop {l}"), d);
+    }
+}
+
+#[test]
+fn with_targets_a_thousand_apart_both_drives_converge_at_the_same_rate() {
+    let h = decoupled(5, 2);
+    let mut reference = HermitianStack::zeros(LINES, 2);
+    for line in BAND.0..BAND.1 {
+        reference.set(line, 0, 0, C64::new(1e-3, 0.0));
+        reference.set(line, 1, 1, C64::new(1.0, 0.0));
+    }
+    let s = run_on(5, h.clone(), h, reference, BAND, 0.0);
+    let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+    let run = closed_loop(&mut law, &s, 6);
+    for (l, d) in run.drives().enumerate() {
+        let y = congruence(&s.plant, d);
+        let mut short = [0.0f64; 2];
+        for line in BAND.0..BAND.1 {
+            for k in 0..2 {
+                let t = s.setup.reference.get(line, k, k).re;
+                short[k] = short[k].max(1.0 - y.get(line, k, k).re / t);
+            }
+        }
+        println!(
+            "loop {l}: each control short by {:.3e} and {:.3e}",
+            short[0], short[1]
+        );
+        // Through loop 3: by loop 4 the gap is near rounding.
+        if l < 4 {
+            let want = (0.01f64 / 1.01).powi(l as i32 + 1);
+            for k in 0..2 {
+                assert!(
+                    (short[k] - want).abs() <= 1e-6 * want,
+                    "loop {l}, control {k}: {} against {want}",
+                    short[k]
+                );
+            }
+        }
+    }
 }
