@@ -387,7 +387,7 @@ mod tests {
         // and well beyond (CH1 slot of NCH-wide frames); no spurious trip.
         let n = (mon.settle_frames() + 20_000) as usize;
         let mut samples = vec![0.0f32; n * NCH];
-        for (k, frame) in samples.chunks_exact_mut(NCH).enumerate() {
+        for (k, frame) in samples.as_chunks_mut::<NCH>().0.iter_mut().enumerate() {
             let t = k as f64 / fs;
             frame[0] = (0.5 * (TAU * 250.0 * t).sin() + 0.3) as f32;
         }
@@ -418,7 +418,7 @@ mod tests {
         // well over the 4 in/s limit, tripping once the integrator has settled.
         let n = (settle + 40_000) as usize;
         let mut samples = vec![0.0f32; n * NCH];
-        for (k, frame) in samples.chunks_exact_mut(NCH).enumerate() {
+        for (k, frame) in samples.as_chunks_mut::<NCH>().0.iter_mut().enumerate() {
             let tt = k as f64 / fs;
             frame[0] = (5.0 * (TAU * 30.0 * tt).sin()) as f32;
         }

@@ -335,10 +335,7 @@ fn find_cfg_test(s: &str) -> Option<(usize, usize)> {
     while let Some(rel) = s[from..].find("#[cfg(") {
         let start = from + rel;
         // The attribute ends at the matching `]`.
-        let end = match s[start..].find(")]") {
-            Some(e) => start + e + 2,
-            None => return None,
-        };
+        let end = start + s[start..].find(")]")? + 2;
         let attr = &s[start..end];
         // `test` as a whole word inside the predicate.
         let has_test = attr

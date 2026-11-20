@@ -74,23 +74,20 @@ pub fn station_for(case: ClassicalCheckCase) -> Box<dyn Backend> {
 /// directory found from this test binary's own path.
 pub fn law_file(name: &str) -> PathBuf {
     let exe = std::env::current_exe().expect("the test binary has a path");
-    // <target>/debug/deps/<test> -> <target>
-    let target = exe
-        .ancestors()
-        .nth(3)
-        .expect("the test binary sits under <target>/<profile>/deps")
-        .to_path_buf();
-    let path = target
-        .join("wasm32-wasip2")
-        .join("release")
-        .join(format!("{name}.wasm"));
-    assert!(
-        path.is_file(),
-        "{} is missing: run scripts/build_laws.sh (it builds every guest law into \
-         <target>/wasm32-wasip2/release/)",
-        path.display()
-    );
-    path
+    let file = format!("{name}.wasm");
+    // Every folder above the binary: how deep cargo puts a test binary under
+    // <target> depends on its layout, and only <target> holds wasm32-wasip2/.
+    exe.ancestors()
+        .skip(1)
+        .map(|d| d.join("wasm32-wasip2").join("release").join(&file))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "{file} is missing above {}: run scripts/build_laws.sh (it builds every guest \
+                 law into <target>/wasm32-wasip2/release/)",
+                exe.display()
+            )
+        })
 }
 
 /// The SRS tests' station rate, Hz.

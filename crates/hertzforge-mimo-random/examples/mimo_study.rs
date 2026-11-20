@@ -72,8 +72,10 @@ impl MimoLawFactory for Unhurried {
 fn doubles(path: &Path) -> Vec<f64> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     bytes
-        .chunks_exact(8)
-        .map(|b| f64::from_le_bytes(b.try_into().expect("eight bytes")))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|b| f64::from_le_bytes(*b))
         .collect()
 }
 
