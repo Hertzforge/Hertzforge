@@ -127,3 +127,21 @@ def test_modal_test_fit_modes_notes_the_window_too(tmp_path):
     plain = _project(tmp_path / 'plain', 'fixed_hammer')
     name = plain.fit_modes('modal_frf', bounds=(5.0, 140.0), limit=3)
     assert window_corrected(plain[name]) == [None] * 3
+
+
+def test_modal_test_run_takes_the_modal_report_and_it_builds_and_renders(tmp_path):
+    """A Modal Test project picks the modal report, and that report builds from the converted
+    run with its fit and renders with the run's FRFs, coherence and modes bound."""
+    from hertzforge.core.report import TEMPLATE_BUILDERS, TEST_TEMPLATES
+    from hertzforge.report import render_html
+    from hertzforge.service.reports import run_template
+
+    project = _project(tmp_path, 'fixed_hammer')
+    _fit(project, 'modal_frf')
+    assert TEST_TEMPLATES['modal_test'] == 'modal'
+    assert run_template(project) == 'modal'
+    report = TEMPLATE_BUILDERS[run_template(project)](project, project.object_groups)
+    page = render_html(report, project, None, object_groups=project.object_groups)
+    assert 'Modal Test Report' in page
+    # the identified parameters table holds the fit of the run's FRFs
+    assert '"rows": [["1", "20.0000", "3.000", ""]' in page
