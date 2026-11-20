@@ -3289,7 +3289,7 @@ async fn connection(
     stream: TcpStream,
     peer: String,
     service: Arc<Service>,
-) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+) -> Result<(), Box<tokio_tungstenite::tungstenite::Error>> {
     let ws = tokio_tungstenite::accept_async(stream).await?;
     let (mut sink, mut source) = ws.split();
     sink.send(Message::Text(protocol::hello().to_string()))

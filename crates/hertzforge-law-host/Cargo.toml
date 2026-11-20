@@ -15,8 +15,8 @@ publish = false
 # share).
 [dependencies]
 hertzforge-sdm = { path = "../hertzforge-sdm" }
-wasmtime = { version = "49", default-features = false, features = ["cranelift", "component-model", "runtime", "std"] }
-wasmtime-wasi = { version = "49", default-features = false, features = ["p2"] }
+wasmtime = { version = "51", default-features = false, features = ["cranelift", "component-model", "runtime", "std"] }
+wasmtime-wasi = { version = "51", default-features = false, features = ["p2"] }
 # The deterministic generator behind the guest's random sources; the version
 # wasmtime-wasi itself builds on.
 rand = { version = "0.10", default-features = false, features = ["std_rng"] }

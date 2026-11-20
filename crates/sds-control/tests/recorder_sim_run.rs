@@ -108,8 +108,10 @@ fn samples(dir: &Path) -> (usize, Vec<f32>) {
     let rows = rec["rows"].as_array().unwrap().len();
     let raw = std::fs::read(dir.join("telemetry.f32")).unwrap();
     let v = raw
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect();
     (rows, v)
 }

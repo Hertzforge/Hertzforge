@@ -199,8 +199,10 @@ fn main() {
     let bytes = std::fs::read(drive.unwrap_or_else(|| die("--drive is required")))
         .unwrap_or_else(|e| die(e));
     let x: Vec<f64> = bytes
-        .chunks_exact(8)
-        .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| f64::from_le_bytes(*c))
         .collect();
     let (nd, no, nm) = (plant.n_drives, plant.n_inputs, plant.modes.len());
     if !x.len().is_multiple_of(nd) {

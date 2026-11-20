@@ -634,8 +634,7 @@ impl RecorderRun {
                             }
                         }
                     }
-                    for c in 0..rows {
-                        let col = &mut d.time[c];
+                    for col in d.time.iter_mut().take(rows) {
                         while col.len() > keep {
                             col.pop_front();
                         }

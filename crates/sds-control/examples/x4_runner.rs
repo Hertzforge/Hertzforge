@@ -645,7 +645,9 @@ fn read_c16(path: &Path, want: usize) -> Vec<C64> {
         ));
     }
     bytes
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|c| {
             C64::new(
                 f64::from_le_bytes(c[..8].try_into().unwrap()),
@@ -801,9 +803,9 @@ struct Moments {
 
 fn dot8(a: &[f64], b: &[f64]) -> f64 {
     let mut acc = [0.0f64; 8];
-    let (ca, cb) = (a.chunks_exact(8), b.chunks_exact(8));
-    let (ra, rb) = (ca.remainder(), cb.remainder());
-    for (x, y) in ca.zip(cb) {
+    let (ca, ra) = a.as_chunks::<8>();
+    let (cb, rb) = b.as_chunks::<8>();
+    for (x, y) in ca.iter().zip(cb) {
         for k in 0..8 {
             acc[k] += x[k] * y[k];
         }

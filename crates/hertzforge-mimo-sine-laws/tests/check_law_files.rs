@@ -26,7 +26,7 @@ use std::time::Instant;
 fn law_file(id: &str) -> PathBuf {
     let file = format!("hertzforge_law_mimo_sine_{id}.wasm");
     let exe = std::env::current_exe().expect("the test binary knows its own path");
-    for dir in exe.ancestors().skip(1).take(4) {
+    for dir in exe.ancestors().skip(1) {
         let p = dir.join("wasm32-wasip2").join("release").join(&file);
         if p.is_file() {
             return p;

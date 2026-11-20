@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 /// The bytes of `<name>.wasm`, built by scripts/build_laws.sh into
 /// `<target>/wasm32-wasip2/release/`. The target directory is found from
-/// this test binary's own path (`<target>/<profile>/deps/<binary>`), so it is
+/// this test binary's own path, at whatever depth cargo's layout puts it, so it is
 /// the one cargo built the test into, `CARGO_TARGET_DIR` or not.
 /// `HERTZFORGE_LAW_WASM_DIR` overrides the directory.
 fn law_bytes(name: &str) -> Vec<u8> {
@@ -29,7 +29,7 @@ fn law_bytes(name: &str) -> Vec<u8> {
         tried.push(PathBuf::from(dir).join(&file));
     } else {
         let exe = std::env::current_exe().expect("the test binary knows its own path");
-        for dir in exe.ancestors().skip(1).take(4) {
+        for dir in exe.ancestors().skip(1) {
             tried.push(dir.join("wasm32-wasip2").join("release").join(&file));
         }
     }

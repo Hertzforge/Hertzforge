@@ -1204,10 +1204,7 @@ impl SrsEngine for ServiceEngine {
             .filter(|&k| (lo..=hi).contains(&v.freqs_hz[k]))
             .collect();
         let first = *bins.first()?;
-        let df = match v.freqs_hz.get(1) {
-            Some(f1) => f1 - v.freqs_hz[0],
-            None => return None,
-        };
+        let df = v.freqs_hz.get(1)? - v.freqs_hz[0];
         Some(IdentRecord {
             first_hz: v.freqs_hz[first],
             df_hz: df,
