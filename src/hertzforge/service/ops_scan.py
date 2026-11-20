@@ -17,7 +17,7 @@ from hertzforge.core.scan_fit import (
     residuals,
     surface_of,
 )
-from hertzforge.core.scan_sensors import CHOICES, assemble, resolve
+from hertzforge.core.scan_sensors import TYPED, assemble, resolve
 from hertzforge.core.sensor_catalog import CATALOG
 from hertzforge.core.sensors import place
 from hertzforge.drawing.viz.geometry import dof_arrow_solids
@@ -31,7 +31,7 @@ MEASURED = Param('geometry', 'Measured points', 'enum', options_from='verb:creat
 KEEP = Param('keep', 'Create the geometry and channel table', 'boolean', default=False)
 ROW = Param('row', 'Row', 'integer', default=1, min=1, step=1)
 COLUMN = Param('column', 'Column', 'enum', default='model', options=tuple(
-    Option(key, key.title()) for key in CHOICES))
+    Option(key, key.title()) for key in TYPED))
 VALUE = Param('value', 'Value', 'string', default='')
 SET_COLUMN = Param('column', 'Column', 'enum', default='surface', options=(
     Option('sensor', 'Sensor'), Option('surface', 'Surface')))
@@ -115,7 +115,8 @@ def _sets_table(title: str, name: str, rows: list[tuple[int, list[str]]], unit: 
 def _sensors_table(name: str, resolved: list, fits: dict, defined: bool,
                    sets: list[tuple[str | None, list[str]]]) -> dict:
     """The table of sensors, typed into: a node, a model from the catalog
-    or any name, and a size and a length, which go out in the display
+    or any name, and a length (a cube's side or a round body's length)
+    and a diameter (a round body's), which go out in the display
     system's length when the geometry's unit is declared."""
     unit = ' [m]' if defined else ''
     def fit_cell(one: Any) -> str:
@@ -123,8 +124,14 @@ def _sensors_table(name: str, resolved: list, fits: dict, defined: bool,
         warned = [flag.text for flag in fits[one.sensor].flags if flag.level == 'warn']
         return '; '.join([one.problem or 'placed', *warned])
 
+    def sizes(one: Any) -> list[str]:
+        # a cube's size is its length; a round body's size is its diameter
+        if one.kind == 'triax':
+            return [_length(one.size), '']
+        return [_length(one.length), _length(one.size)]
+
     rows = [[one.sensor, '' if one.node is None else str(one.node), one.model, one.shape,
-             _length(one.size), _length(one.length), fit_cell(one)]
+             *sizes(one), fit_cell(one)]
             for one in resolved]
     models = [entry.model for entry in CATALOG if entry.kind in ('triax', 'uniaxial', 'force')]
     # under each sensor, the sets of points it was fitted to; a sensor that is not placed
@@ -135,12 +142,12 @@ def _sensors_table(name: str, resolved: list, fits: dict, defined: bool,
               for one in resolved]
     table = v.table(
         f'Sensors of {name}',
-        ['Sensor', 'Node', 'Model', 'Shape', f'Size{unit}', f'Length{unit}', 'Fit'], rows,
+        ['Sensor', 'Node', 'Model', 'Shape', f'Length{unit}', f'Diameter{unit}', 'Fit'], rows,
         edit=v.editing('project.set_sensor', {'geometry': name},
-                       [None, 'node', 'model', None, 'size', 'length', None],
+                       [None, 'node', 'model', None, 'length', 'diameter', None],
                        choices={'model': models},
-                       kinds={'node': 'number', 'model': 'text', 'size': 'number',
-                              'length': 'number'}))
+                       kinds={'node': 'number', 'model': 'text', 'length': 'number',
+                              'diameter': 'number'}))
     table['nested'] = nested
     table['open'] = [row for row, one in enumerate(resolved, start=1) if not one.placed]
     return table
@@ -153,8 +160,8 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
     accelerometer's body where it would be placed, a little under size
     so the points on its faces show, and an arrow along each channel.
     The first table is the sensors, typed into (`project.set_sensor`): a
-    node, a model, a size and a length each; the second reads each fit.
-    Create adds the geometry and the channel table
+    node, a model, a length and a diameter each; the second reads each
+    fit. Create adds the geometry and the channel table
     (`Project.create_sensors`); without it nothing changes."""
     name = params['geometry']
     scan = project[name]
@@ -244,7 +251,7 @@ def create_sensors(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def set_sensor(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.set_sensor`: one cell of the sensors table typed over, by
-    row (from 1) and column: a node, a model, a size or a length
+    row (from 1) and column: a node, a model, a length or a diameter
     (`Project.set_sensor`). An empty value takes the choice back. A
     value its column cannot hold is refused and the cell is unchanged.
     The preview is drawn again with it."""
@@ -304,16 +311,16 @@ OPERATIONS = (
     Operation(
         id='project.create_sensors', title='Fit Sensors', workspace='geometry',
         summary='Accelerometers fitted to points measured on their faces with a measuring arm: '
-                'a plane to each face, a cylinder to each round side. Preview draws each body '
-                'on its points with its channels\' arrows and lists the sensors; type a node, '
-                'a model, a size or a length into the table and the preview is drawn again. '
-                'Apply adds the test geometry and channel table.',
+                'a plane to each face, a cylinder to each round side. It opens on its preview, '
+                'each body drawn on its points with its channels\' arrows and the sensors '
+                'listed; type a node, a model, a length or a diameter into the table and the '
+                'preview is drawn again. Apply adds the test geometry and channel table.',
         params=(MEASURED, KEEP), outputs=('shape3d', 'table', 'reading'),
-        run=create_sensors, edits_when=_kept, commits='keep'),
+        run=create_sensors, edits_when=_kept, commits='keep', opens_previewed=True),
     Operation(
         id='project.set_sensor', title='Set Sensor', workspace='geometry',
-        summary='One cell of Fit Sensors\' table typed over: a sensor\'s node, model, size or '
-                'length. The table edits through it.',
+        summary='One cell of Fit Sensors\' table typed over: a sensor\'s node, model, length '
+                'or diameter. The table edits through it.',
         params=(MEASURED, ROW, COLUMN, VALUE), outputs=('shape3d', 'table', 'reading'),
         run=set_sensor, edits=True),
     Operation(

@@ -882,6 +882,8 @@ export interface OperationDescriptor {
 	previews?: boolean;
 	/** The boolean param that says go ahead: the form does not ask it, Preview sends it false and Apply true. */
 	commits?: string;
+	/** With `commits`: the form runs its preview as soon as it opens, and has only Apply. */
+	opens_previewed?: boolean;
 }
 
 export interface Catalog {

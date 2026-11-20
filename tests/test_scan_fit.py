@@ -207,6 +207,18 @@ def test_a_side_and_a_top_give_the_axis_the_top_center_and_the_center(label, cha
     assert fit.direction == channel and fit.axes == (label,)
 
 
+@pytest.mark.parametrize(('band', 'label'), [((0.0, 1.0), 3), ((0.2, 0.7), 3), ((0.5, 0.95), -2)])
+def test_a_cans_length_is_twice_its_top_from_the_middle_of_its_side(band, label):
+    # the middle is the side's points' mean along the axis, so a side measured off center
+    # gives a length that is not the true height
+    frame, center, _radius, height, side, top = _can(23, band=band, label=label)
+    up = np.sign(label) * frame[abs(label) - 1]
+    middle = float(np.mean((side - center) @ up))
+    fit = fit_uniaxial('11', side, top, str(label), meters=1.0)
+    assert fit.length == pytest.approx(2 * (height / 2 - middle), rel=1e-6)
+    assert fit.length != pytest.approx(fit.extent, rel=1e-2)
+
+
 def test_what_is_wrong_with_a_uniaxial_is_flagged():
     frame, _center, _radius, height, side, top = _can(22)
 

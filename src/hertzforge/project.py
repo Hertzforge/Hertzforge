@@ -1918,7 +1918,7 @@ class Project(dict):
 
     def set_sensor(self, source: Any, sensor: Any, **chosen: Any) -> dict[str, Any]:
         """Choose what a measured accelerometer is made as: its node, its
-        model, and its size. The choice is kept on the geometry holding
+        model, and its length and diameter. The choice is kept on the geometry holding
         the measured points and is what `create_sensors` makes it from.
 
         Parameters
@@ -1931,18 +1931,18 @@ class Project(dict):
         **chosen
             Any of ``node`` (a whole number above 0), ``model`` (a
             catalog model, a size written as one such as
-            ``'Block 17.5 mm'``, or any name), ``size`` (a cube's side,
-            or a round body's diameter) and ``length`` (a round body's
-            length), the last two in meters once the geometry's unit is
-            declared and in its own numbers before. None takes a choice
-            back, leaving it to the fit and the catalog. Naming a model
-            takes back a size and a length typed before it, so the
-            model's own are used.
+            ``'Block 17.5 mm'``, or any name), ``length`` (a cube's
+            side, or a round body's length) and ``diameter`` (a round
+            body's diameter), the last two in meters once the
+            geometry's unit is declared and in its own numbers before.
+            None takes a choice back, leaving it to the fit and the
+            catalog. Naming a model takes back a length and a diameter
+            typed before it, so the model's own are used.
 
         Returns
         -------
         dict
-            What is now chosen for the sensor.
+            What is now chosen for the sensor, named as it is typed.
 
         Raises
         ------
@@ -1950,22 +1950,26 @@ class Project(dict):
             If the source is not a geometry.
         ValueError
             If the geometry holds no measured points, the sensor is not
-            among them, a choice is not one of the four, or a value is
-            not one its choice can hold.
+            among them, a choice is not one of the four, a diameter is
+            given for a cube, or a value is not one its choice can hold.
         """
-        from .core.scan_sensors import CHOICES
+        from .core.scan_sensors import TYPED, kept_as_typed, typed_choice
 
         source = self.name_of(source)
         fits, _notes = self.fit_sensors(source)
         sensor = str(sensor).strip()
-        if sensor not in {fit.sensor for fit in fits}:
+        kinds = {fit.sensor: fit.kind for fit in fits}
+        if sensor not in kinds:
             raise ValueError(f'{source!r} has no sensor {sensor} among its measured points')
-        stray = sorted(set(chosen) - set(CHOICES))
+        stray = sorted(set(chosen) - set(TYPED))
         if stray:
             raise ValueError(f'a sensor\'s {stray[0]} is not chosen; its '
-                             f'{", ".join(CHOICES)} are')
+                             f'{", ".join(TYPED)} are')
+        kind = kinds[sensor]
+        kept = {typed_choice(kind, word) for word in chosen}
         held = dict(self[source].sensor_choices.get(sensor, {}))
-        for key, value in chosen.items():
+        for word, value in chosen.items():
+            key = typed_choice(kind, word)
             if value is None or (isinstance(value, str) and not value.strip()):
                 held.pop(key, None)
             elif key == 'node':
@@ -1974,19 +1978,18 @@ class Project(dict):
                 held[key] = int(value)
             elif key == 'model':
                 held[key] = str(value).strip()
-                if 'size' not in chosen:
-                    held.pop('size', None)
-                if 'length' not in chosen:
-                    held.pop('length', None)
+                for size in ('size', 'length'):
+                    if size not in kept:
+                        held.pop(size, None)
             else:
                 if not float(value) > 0:
-                    raise ValueError(f'a {key} is a length above 0')
+                    raise ValueError(f'a {word} is a length above 0')
                 held[key] = float(value)
         if held:
             self[source].sensor_choices[sensor] = held
         else:
             self[source].sensor_choices.pop(sensor, None)
-        return held
+        return kept_as_typed(kind, held)
 
     def set_scan_set(self, source: Any, scan_set: str, sensor: Any = None,
                      surface: str | None = None) -> str:

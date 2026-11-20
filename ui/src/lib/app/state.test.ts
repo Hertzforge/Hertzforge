@@ -239,6 +239,19 @@ describe('a form with a Preview button', () => {
 		expect(runs.at(-1)?.preview).toBeUndefined();
 	});
 
+	it('opens on its preview when it is opens_previewed, and not otherwise', async () => {
+		const fitSensors = { ...meshSolids, id: 'project.create_sensors', title: 'Fit Sensors', opens_previewed: true, params: [geometry, { name: 'keep', label: 'Create', type: 'boolean', default: false }] } as unknown as OperationDescriptor;
+		const { a, runs, app } = withMesh();
+		app.catalog = { operations: [addBlock, meshSolids, fitSensors] } as never;
+		await a.perform(row(fitSensors), column);
+		expect(a.formOpen).toBe(true);
+		expect(runs.map((r) => [r.op, r.params?.keep])).toEqual([['project.create_sensors', false]]);
+		expect(a.reading?.title).toBe('Fit Sensors, preview');
+		a.closeForm();
+		await a.perform(row(meshSolids), column);
+		expect(runs.length).toBe(1);
+	});
+
 	it('Preview does nothing on a form without one', async () => {
 		const { a, runs } = withMesh();
 		await a.perform(row(addBlock), column);

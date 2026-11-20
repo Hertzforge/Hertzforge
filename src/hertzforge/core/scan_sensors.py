@@ -16,8 +16,9 @@ its size: a cube's side, or a round body's diameter and length. A size
 typed is used. Otherwise the size is the model's, when the model is in
 the catalog or is itself a size (`Block 17.5 mm`); otherwise that of the
 smallest tri-axial catalog model the measured points fit in; otherwise
-what was measured, a block's least side or a cylinder's diameter for
-both its diameter and its length. A sensor with no model named takes
+what was measured: a block's least side, or a cylinder's diameter and,
+for its length, twice how far its top lies from the middle of the
+points on its side. A sensor with no model named takes
 its size written where its model would be, which is how the 3-D view
 draws it at that size.
 """
@@ -43,8 +44,38 @@ MODEL_SLACK = 0.2
 SHAPES = {'box': 'Cube', 'puck': 'Cylinder', 'hex': 'Hex', 'teardrop': 'Teardrop',
           'rounded': 'Rounded'}
 
-#: what may be chosen for a sensor
+#: what is kept chosen for a sensor: 'size' is a cube's side or a round body's diameter,
+#: 'length' a round body's length
 CHOICES = ('node', 'model', 'size', 'length')
+
+#: what is typed for a sensor, as the table of sensors names it: 'length' is a cube's side
+#: or a round body's length, 'diameter' a round body's diameter (`typed_choice`)
+TYPED = ('node', 'model', 'length', 'diameter')
+
+
+def typed_choice(kind: str, key: str) -> str:
+    """The kept choice (`CHOICES`) a typed one (`TYPED`) is for a sensor
+    measured as `kind`: a cube's length is its size, a cylinder's
+    diameter its size.
+
+    Raises
+    ------
+    ValueError
+        For a diameter typed for a cube, which has none.
+    """
+    if key == 'length':
+        return 'size' if kind == 'triax' else 'length'
+    if key == 'diameter':
+        if kind == 'triax':
+            raise ValueError('a cube has no diameter; its side is typed as its length')
+        return 'size'
+    return key
+
+
+def kept_as_typed(kind: str, held: Mapping[str, Any]) -> dict[str, Any]:
+    """A sensor's kept choices named as they are typed (`typed_choice`)."""
+    names = {'size': 'length' if kind == 'triax' else 'diameter', 'length': 'length'}
+    return {names.get(key, key): value for key, value in held.items()}
 
 
 @dataclass(frozen=True)
@@ -166,12 +197,13 @@ def _resolve_one(fit: SensorFit, choice: Mapping[str, Any], meters: float
         if entry is not None:
             body = tuple(v * to_units for v in entry.size)
             shape = SHAPES.get(entry.shape, entry.shape.title())
-        elif measured is not None:
-            body, shape = (measured, measured, measured), 'Cylinder'
+        elif measured is not None and fit.length is not None:
+            body, shape = (measured, measured, fit.length), 'Cylinder'
             if typed_length is None:
                 sized_by = 'measured'
-                notes.append(f'sensor {fit.sensor}: its length is not measured and is taken '
-                             f'as its diameter, {measured * meters * 1e3:.1f} mm')
+                notes.append(f'sensor {fit.sensor}: its length is taken as twice how far its top '
+                             f'is from the middle of its side\'s points, '
+                             f'{fit.length * meters * 1e3:.1f} mm')
         else:
             body, shape = None, 'Cylinder'
         if body is not None and (typed_size is not None or typed_length is not None):
