@@ -142,24 +142,48 @@ async def _study(client, socket, validate, seen):
     seen['project.fit_modes'] = shape
 
 
+def _checked_after(validate):
+    """`(collect, check_all)`: the study hands its messages to `collect`, and
+    `check_all` checks them against the schema once the session has closed.
+
+    The client shares the event loop the session measures, so a check made as
+    a message arrives is counted as the service holding the loop. Building the
+    validator for the catalog alone took 45-48 ms on an M-series Mac and about
+    twice that on CI's runners, where it failed the 100 ms bar by itself; with
+    the checks after the session the loop is held about 6 ms locally."""
+    taken = []
+
+    def collect(instance, name=None):
+        taken.append((instance, name))
+
+    def check_all():
+        assert taken, 'the study handed over nothing to check'
+        for instance, name in taken:
+            validate(instance, name)
+
+    return collect, check_all
+
+
 # Beside other workers: what it holds to does not rest on the wall clock.
 @pytest.mark.xdist_group('serving')
 def test_smoke(validate):
     seen = {}
+    collect, check_all = _checked_after(validate)
 
     async def check(client, socket):
-        await _study(client, socket, validate, seen)
+        await _study(client, socket, collect, seen)
 
     imported = set()
     lag = asyncio.run(_session(check, imported))
+    check_all()
     assert seen['project.plot'][0]['view'] == 'spectrum'
     assert seen['project.waterfall'][0]['view'] == 'waterfall'
     # Nothing heavy was first imported while serving: that is what stalls the
     # loop on a cold machine (server.PRELOAD), however fast this one is.
     assert not imported, f'imported while serving: {sorted(imported)}'
     # heavy work ran off the loop: what the loop's thread itself spent between two ticks, which
-    # other processes sharing the cores do not add to as they do to the wall clock. Encoding and
-    # checking frames here came to 60-70 ms under load; a fit run on the loop would be seconds.
+    # other processes sharing the cores do not add to as they do to the wall clock. Encoding
+    # frames here comes to a few milliseconds; a fit run on the loop would be seconds.
     print(f'longest stretch on the event loop {lag["busy"] * 1000:.1f} ms of its thread')
     assert lag['busy'] < 0.25, f'event loop kept busy for {lag["busy"]:.3f} s'
 
@@ -174,11 +198,13 @@ def test_smoke(validate):
 @pytest.mark.xdist_group('serving')
 def test_the_event_loop_is_not_held_up_for_long(validate):
     seen = {}
+    collect, check_all = _checked_after(validate)
 
     async def check(client, socket):
-        await _study(client, socket, validate, seen)
+        await _study(client, socket, collect, seen)
 
     lag = asyncio.run(_session(check))
+    check_all()
     print(f'longest event-loop stall {lag["held"] * 1000:.1f} ms')
     assert lag['held'] < 0.1, f'event loop held for {lag["held"]:.3f} s'
 
