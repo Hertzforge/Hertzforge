@@ -224,3 +224,61 @@ def test_modal_test_the_guide_fragment_maps_the_run_to_the_objects_it_becomes(tm
     made = {re.sub(r'^Measurement \d+ frames.*$', 'Measurement k frames', o)
             for o in done.objects}
     assert named == made
+
+
+def test_modal_test_a_point_selected_again_with_only_rejected_hits_replaces_nothing(tmp_path):
+    done, project = _open(tmp_path, unfinished=[2])
+    # measurement 7 selected point 3 again, took a trial hit and a double hit, and finished
+    # nothing: measurement 3 stands in every object, and its frames are not called replaced
+    assert 'Measurement 3 frames (point 3)' in project
+    assert not any('replaced' in name for name in project)
+    frf = project['modal_frf']
+    k = frf.reference_dof.index('3Z+')
+    assert 'measurement 3, point 3' in frf.comment[k]
+    np.testing.assert_allclose(frf.ordinate[k], rf.modal_accelerance(LINES, 0, 2), rtol=1e-12)
+    assert not any('measurement 7' in line for line in done.lacked)
+
+
+def _point_3(project):
+    frf, coherence = project['modal_frf'], project['modal_coherence']
+    spectra = project['modal_reference_spectra']
+    return (frf.comment[frf.reference_dof.index('3Z+')],
+            coherence.comment[coherence.reference_dof.index('3Z+')],
+            spectra.block[[i for i, c in enumerate(spectra.comment)
+                           if spectra.response_dof[i] == '3Z+'][0]])
+
+
+def test_modal_test_an_incomplete_repeat_replaces_nothing_in_any_object(tmp_path):
+    # measurement 7, point 3 again: its FRF line landed, its coherence and spectra did not
+    done, project = _open(tmp_path, again=[2], torn=[6], complete=False)
+    frf_said, coherence_said, spectra_block = _point_3(project)
+    assert 'measurement 3, point 3' in frf_said and 'measurement 3, point 3' in coherence_said
+    assert spectra_block == 'measurement 3'
+    frf = project['modal_frf']
+    np.testing.assert_allclose(frf.ordinate[frf.reference_dof.index('3Z+')],
+                               rf.modal_accelerance(LINES, 0, 2), rtol=1e-12)
+    assert ('measurement 7 of point 3 is incomplete (it has no coherence and no reference '
+            'spectra), so it is left out and measurement 3 stands') in done.lacked
+    assert project['modal_coherence'].num_records == project['modal_frf'].num_records == 6
+    assert 'Measurement 7 frames (point 3) (incomplete)' in project
+    assert 'Measurement 3 frames (point 3)' in project
+
+
+def test_modal_test_a_complete_repeat_replaces_an_incomplete_earlier_one(tmp_path):
+    done, project = _open(tmp_path, again=[2], torn=[2])
+    frf_said, coherence_said, spectra_block = _point_3(project)
+    assert 'measurement 7, point 3' in frf_said and 'measurement 7, point 3' in coherence_said
+    assert spectra_block == 'measurement 7'
+    assert 'Measurement 3 frames (point 3) (replaced)' in project
+    assert not any('incomplete' in line for line in done.lacked)
+
+
+def test_modal_test_a_repeated_layout_leaves_one_copy_of_the_reference_spectra(tmp_path):
+    _done, project = _open(tmp_path, 'two_shakers', again=[0])
+    spectra = project['modal_reference_spectra']
+    assert spectra.num_records == 2 and spectra.block == ['measurement 2'] * 2
+    frf = project['modal_frf']
+    assert frf.num_records == 12 and all('measurement 2' in c for c in frf.comment)
+    np.testing.assert_allclose(frf.ordinate[0], 2 * rf.modal_accelerance(LINES, 0, 0),
+                               rtol=1e-12)
+    assert project['modal_coherence'].num_records == 6

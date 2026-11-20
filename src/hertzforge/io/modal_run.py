@@ -211,16 +211,60 @@ def _unit_refusal(channels: _Channels, entries: Sequence[Mapping[str, Any]]) -> 
     return ''
 
 
-def _superseded(records: Sequence[Mapping[str, Any]]) -> set[int]:
-    """The measurements a later measurement of the same point replaced."""
-    last: dict[int, int] = {}
-    for record in records:
-        m, p = _number(record.get(_w('measurement'))), _number(record.get(_w('point')))
-        if m is not None and p is not None:
-            last[p] = max(m, last.get(p, m))
-    return {m for record in records
-            if (m := _number(record.get(_w('measurement')))) is not None
-            and (p := _number(record.get(_w('point')))) is not None and last[p] != m}
+def _measured(result: run_folder.Result | None) -> set[int]:
+    return {m for record in ((result.records or []) if result is not None else [])
+            if (m := _number(record.get(_w('measurement')))) is not None}
+
+
+def _standing(run: run_folder.RunFolder) -> tuple[dict[int, str], list[str]]:
+    """Which measurements every object leaves out, and why: {measurement:
+    'replaced' or 'incomplete'}, and what to say of them.
+
+    One rule for the FRFs, the coherence, the reference spectra and the
+    frames: a measurement is complete when it has its FRF records and,
+    where the run wrote coherence or reference spectra for any
+    measurement, its own of those too. At each point (or, with nothing
+    roving, the whole layout) the latest complete measurement stands and
+    replaces the earlier ones; a later incomplete one (its coherence or
+    spectra never written, as a killed run leaves it) replaces nothing and
+    is left out. A point with no complete measurement keeps its latest.
+    Frames alone (trial or rejected hits) are no measurement and replace
+    nothing.
+    """
+    frf = run.results.get(_w('frf'))
+    has = {'FRFs': _measured(frf)}
+    for key, words in (('coherence', 'coherence'), ('reference_spectra', 'reference spectra')):
+        result = run.results.get(_w(key))
+        if result is not None and result.records:
+            has[words] = _measured(result)
+    points: dict[Any, list[int]] = {}
+    for record in (frf.records or []) if frf is not None else []:
+        m = _number(record.get(_w('measurement')))
+        if m is not None:
+            at = points.setdefault(_number(record.get(_w('point'))), [])
+            if m not in at:
+                at.append(m)
+    out: dict[int, str] = {}
+    said: list[str] = []
+    for point, ms in points.items():
+        complete = [m for m in ms if all(m in held for held in has.values())]
+        stands = max(complete) if complete else max(ms)
+        where = '' if point is None else f' of point {_said(point)}'
+        for m in ms:
+            short = [words for words, held in has.items() if m not in held]
+            if m == stands:
+                if short:
+                    said.append(f'measurement {_said(m)}{where} has no '
+                                f'{" and no ".join(short)}; it is kept as it is')
+                continue
+            if m in complete or m < stands:
+                out[m] = 'replaced'
+            else:
+                out[m] = 'incomplete'
+                said.append(f'measurement {_said(m)}{where} is incomplete (it has no '
+                            f'{" and no ".join(short)}), so it is left out and measurement '
+                            f'{_said(stands)} stands')
+    return out, said
 
 
 def _window_words(record: Mapping[str, Any], block: int | None) -> str:
@@ -485,7 +529,7 @@ def frames(run: run_folder.RunFolder, table: Any,
                       *(record.get(_w('references')) or [])]:
             if isinstance(entry, Mapping) and isinstance(entry.get(_w('index')), int):
                 named.setdefault(m, {})[int(entry[_w('index')])] = channels.dof(entry)
-    replaced = _superseded(lines)
+    standing, _said_of = _standing(run)
     shaker = str(_config(run).get(_w('mode')) or '') == 'shaker'
     config_shaker = _config(run).get(_w('shaker'))
     window = (str(config_shaker.get('window') or 'hann') if shaker
@@ -559,8 +603,9 @@ def frames(run: run_folder.RunFolder, table: Any,
                     labels.append(f'{word} {average if average is not None else k + 1}')
                     comments.append(f'measurement {_said(m)}'
                                     + (f', point {_said(point)}' if point is not None else '')
-                                    + (', replaced by a later measurement of the point'
-                                       if m in replaced else ''))
+                                    + {'replaced': ', replaced by a later measurement',
+                                       'incomplete': ', incomplete and left out of the '
+                                                     'spectra'}.get(standing.get(m), ''))
         rate = stream.rate
         history = TimeHistory((np.arange(length) - pre) / rate, np.asarray(rows),
                               response_dof=dofs, ordinate_dim=dims, ordinate_unit=units,
@@ -571,7 +616,7 @@ def frames(run: run_folder.RunFolder, table: Any,
         history.averaging = Averaging.for_records(length, window=window)
         title = (f'Measurement {_said(m)} frames'
                  + (f' (point {_said(point)})' if point is not None else '')
-                 + (' (replaced)' if m in replaced else ''))
+                 + (f' ({standing[m]})' if m in standing else ''))
         out.append((title, history))
     return out
 
@@ -604,7 +649,9 @@ def results(run: run_folder.RunFolder, table: Any, lacked: list[str]
     out: list[tuple[str, Any]] = []
     frf_result = run.results.get(_w('frf'))
     records = (frf_result.records or []) if frf_result is not None else []
-    drop = _superseded(records)
+    standing, said = _standing(run)
+    lacked.extend(said)
+    drop = set(standing)
     measured = sorted({p for r in records if (p := _number(r.get(_w('point')))) is not None})
     planned = len(channels.points)
     outcome = run.results.get(_w('outcome'))

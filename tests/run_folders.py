@@ -511,22 +511,31 @@ def playback_run(folder: str, pre: int = 512, play: int = 2048, post: int = 1024
              'at_unix': START['unix'] + 6, 'station_frames': frames})
 
 
-#: the structure a Modal Test run measures: three modes over six points on Z
+#: the structure a Modal Test run measures: three modes over six points, mostly on Z, a
+#: little on X and Y
 MODAL_FREQUENCIES = (20.0, 45.0, 80.0)
 MODAL_DAMPING = (0.03, 0.02, 0.015)
 MODAL_SHAPES = np.array([[1.0, 0.9, 0.6, 0.2, -0.3, -0.8],
                          [0.8, 0.2, -0.7, -1.0, -0.2, 0.6],
                          [0.5, -0.6, -0.4, 0.7, 0.3, -0.9]])
+#: each axis's shapes, by the axis's letter
+MODAL_AXES = {'Z': MODAL_SHAPES, 'X': 0.4 * np.roll(MODAL_SHAPES, 1, axis=1),
+              'Y': 0.25 * np.roll(MODAL_SHAPES, 2, axis=1)}
 #: its spectral lines (Hz) and its frames' samples
 MODAL_STEP, MODAL_LINES, MODAL_BLOCK = 0.25, 601, 4096
 
 
-def modal_poles(shift: float = 0.0) -> list[tuple[float, float]]:
+def _modes(modes):
+    return modes if modes is not None else (MODAL_FREQUENCIES, MODAL_DAMPING)
+
+
+def modal_poles(shift: float = 0.0, modes=None) -> list[tuple[float, float]]:
     """Each mode's (natural frequency in Hz, damping ratio), its pole moved
     left by `shift` 1/s, as an exponential window of time constant 1/shift
-    moves it (the damped frequency kept)."""
+    moves it (the damped frequency kept); of `modes` (frequencies, damping)
+    in place of the structure's when given."""
     out = []
-    for fn, zeta in zip(MODAL_FREQUENCIES, MODAL_DAMPING, strict=True):
+    for fn, zeta in zip(*_modes(modes), strict=True):
         wn = 2 * np.pi * fn
         decay, damped = zeta * wn + shift, wn * np.sqrt(1 - zeta ** 2)
         out.append((float(np.hypot(decay, damped) / (2 * np.pi)),
@@ -534,59 +543,93 @@ def modal_poles(shift: float = 0.0) -> list[tuple[float, float]]:
     return out
 
 
-def modal_receptance(f: np.ndarray, j: int, k: int, shift: float = 0.0) -> np.ndarray:
-    """The structure's displacement at point `j` per force at point `k`
-    (points from 0), m/N, at `f` Hz: symmetric in j and k; with its poles
-    moved left by `shift` 1/s when given (`modal_poles`)."""
+def _dof(at) -> tuple[int, str, float]:
+    """(point, axis, sign) of a point number (on Z+) or a (point, 'Z-') pair."""
+    if isinstance(at, (int, np.integer)):
+        return int(at), 'Z', 1.0
+    point, direction = at
+    return int(point), direction[0], -1.0 if direction.endswith('-') else 1.0
+
+
+def modal_receptance(f: np.ndarray, j, k, shift: float = 0.0, modes=None) -> np.ndarray:
+    """The structure's displacement at `j` per force at `k`, m/N, at `f` Hz,
+    each a point from 0 (on Z+) or a (point, direction) pair ('X+', 'Z-'):
+    symmetric in j and k; with its poles moved left by `shift` 1/s when
+    given (`modal_poles`)."""
     w = 2 * np.pi * np.asarray(f, dtype=np.float64)
+    (pj, aj, sj), (pk, ak, sk) = _dof(j), _dof(k)
     out = np.zeros(w.shape, dtype=np.complex128)
-    for (fn, zeta), phi in zip(modal_poles(shift), MODAL_SHAPES, strict=True):
+    for r, (fn, zeta) in enumerate(modal_poles(shift, modes)):
         wn = 2 * np.pi * fn
-        out += phi[j] * phi[k] / (wn ** 2 - w ** 2 + 2j * zeta * wn * w)
+        out += (sj * MODAL_AXES[aj][r, pj] * sk * MODAL_AXES[ak][r, pk]
+                / (wn ** 2 - w ** 2 + 2j * zeta * wn * w))
     return out
 
 
-def modal_accelerance(f: np.ndarray, j: int, k: int, shift: float = 0.0) -> np.ndarray:
-    """The structure's acceleration at point `j` per force at point `k`,
-    (m/s^2)/N."""
+def modal_accelerance(f: np.ndarray, j, k, shift: float = 0.0, modes=None) -> np.ndarray:
+    """The structure's acceleration at `j` per force at `k`, (m/s^2)/N
+    (`modal_receptance`)."""
     w = 2 * np.pi * np.asarray(f, dtype=np.float64)
-    return -(w ** 2) * modal_receptance(f, j, k, shift)
+    return -(w ** 2) * modal_receptance(f, j, k, shift, modes)
 
 
-def _modal_channel(index: int, point: int, unit: str) -> dict[str, Any]:
-    return {'index': index, 'node': point + 1, 'direction': 'Z+', 'unit': unit}
+def _modal_channel(index: int, at, unit: str) -> dict[str, Any]:
+    point, axis, sign = _dof(at)
+    return {'index': index, 'node': point + 1, 'direction': f'{axis}{"-" if sign < 0 else "+"}',
+            'unit': unit}
 
 
 def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
                    measured: Sequence[int] | None = None, again: Sequence[int] = (),
                    frames: bool = True, complete: bool = True,
-                   tau_s: float | None = None) -> str:
+                   tau_s: float | None = None, torn: Sequence[int] = (),
+                   unfinished: Sequence[int] = (), directions: Mapping[int, str] = {},
+                   modes=None, noise_db: float | None = None) -> str:
     """A Modal Test run of the structure above, as the wire notes are
     assumed to lay one out (`hertzforge.io.modal_run.WIRE`).
 
     `layout` is 'roving_hammer' (an accelerometer fixed at point 1, the
-    hammer at every point), 'fixed_hammer' (six accelerometers, the hammer
-    at point 1, one measurement) or 'two_shakers' (six accelerometers,
-    shakers at points 1 and 4, one measurement, multiple coherence).
+    hammer at every point), 'triaxial_roving_hammer' (triaxial
+    accelerometers fixed at points 1 to 3, nine responses, the hammer at
+    every point), 'fixed_hammer' (six accelerometers, the hammer at point
+    1, one measurement) or 'two_shakers' (six accelerometers, shakers at
+    points 1 and 4, one measurement, multiple coherence).
     `measured` picks the roving hammer's points (from 0; every point when
-    omitted); `again` names points measured a second time, after the rest,
-    with their values doubled so the later set is told apart. Each impact
-    measurement has `hits` accepted frames, a rejected double hit and a
-    trial hit in its frame lines. `complete` False leaves the run killed:
-    no end, the outcome not written. `tau_s` names an exponential window
-    on every channel in each record's window record, and the FRFs are
-    written with the structure's poles moved left by 1 / tau_s, as the
-    window moves them (`modal_poles`)."""
+    omitted); `again` names points measured a second time, after the rest
+    (with nothing roving, the layout measured again once per entry), with
+    their values doubled so the later set is told apart. `unfinished`
+    names points selected again after that, with only a trial and a
+    rejected hit in the frame lines and no records. `torn` names
+    measurements (from 0) whose coherence and reference spectra lines were
+    never written, as a run killed between them leaves it. `directions`
+    gives a roving hammer's direction at a point ('Z-' to hit it from
+    below). Each impact measurement has `hits` accepted frames, a rejected
+    double hit and a trial hit in its frame lines. `complete` False leaves
+    the run killed: no end, the outcome not written. `tau_s` names an
+    exponential window on every channel in each record's window record,
+    and the FRFs are written with the structure's poles moved left by
+    1 / tau_s, as the window moves them (`modal_poles`). `modes` puts
+    (frequencies, damping) in place of the structure's; `noise_db` adds
+    complex noise that many dB below each FRF's own RMS, seeded."""
     lines = np.arange(MODAL_LINES) * MODAL_STEP
     pre = 64
-    if layout == 'roving_hammer':
-        rows = [row(1, 'monitor', description='Fixed accelerometer', node='1',
-                    direction='Z+', analysis_role='response'),
-                row(2, 'reference', 'N', description='Hammer', node='1', direction='Z+')]
+    rng = np.random.default_rng(11)
+    if layout in ('roving_hammer', 'triaxial_roving_hammer'):
+        if layout == 'roving_hammer':
+            fixed = [(1, (0, 'Z+'))]
+        else:
+            fixed = [(1 + 3 * p + a, (p, axis)) for p in range(3)
+                     for a, axis in enumerate(('X+', 'Y+', 'Z+'))]
+        hammer = len(fixed) + 1
+        rows = [row(i, 'monitor', description=f'Fixed accelerometer {i}', node=str(at[0] + 1),
+                    direction=at[1], analysis_role='response') for i, at in fixed]
+        rows.append(row(hammer, 'reference', 'N', description='Hammer', node='1',
+                        direction='Z+'))
         points = list(range(6)) if measured is None else list(measured)
-        plan = [(p, [(1, 0)], [(2, p)]) for p in [*points, *again]]
-        roving = {'channels': [2], 'points': [{'node': p + 1, 'direction': 'Z+'}
-                                              for p in range(6)]}
+        plan = [(p, fixed, [(hammer, (p, directions.get(p, 'Z+')))])
+                for p in [*points, *again, *unfinished]]
+        roving = {'channels': [hammer], 'points': [
+            {'node': p + 1, 'direction': directions.get(p, 'Z+')} for p in range(6)]}
         mode = 'impact'
     else:
         refs = [0] if layout == 'fixed_hammer' else [0, 3]
@@ -599,6 +642,7 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
         plan += [(None, plan[0][1], plan[0][2]) for _ in again]
         roving = {'channels': [], 'points': []}
         mode = 'impact' if layout == 'fixed_hammer' else 'shaker'
+    selected_again = set(range(len(plan) - len(unfinished), len(plan))) if unfinished else set()
     window: dict[str, Any] = {
         'reference': ({'kind': 'force', 'width': 0.05, 'fall': 0.1} if mode == 'impact'
                       else {'kind': 'hann'}),
@@ -613,41 +657,52 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
     seen: set = set()
     for m, (point, responses, references) in enumerate(plan):
         later = 2.0 if (point if point is not None else 'all') in seen else 1.0
+        if m in selected_again:
+            later = 0.0
         seen.add(point if point is not None else 'all')
         unit = {**{i: 'g' for i, _p in responses}, **{i: 'N' for i, _p in references}}
         common = {'measurement': m, 'point': point,
                   'responses': [_modal_channel(i, p, unit[i]) for i, p in responses],
                   'references': [_modal_channel(i, p, unit[i]) for i, p in references]}
-        frf_records.append({**common, 'estimator': 'H1', 'averages': averages,
-                            'window': window})
         shift = 0.0 if tau_s is None else 1.0 / tau_s
-        frf_values.append(np.array([[modal_accelerance(lines, j, k, shift) / G * later
-                                     for _rk, k in references] for _ri, j in responses]))
+        values = np.array([[modal_accelerance(lines, j, k, shift, modes) / G * later
+                            for _rk, k in references] for _ri, j in responses])
+        if noise_db is not None:
+            level = np.sqrt(np.mean(np.abs(values) ** 2, axis=-1, keepdims=True))
+            values = values + level * 10 ** (noise_db / 20) / np.sqrt(2) * (
+                rng.standard_normal(values.shape) + 1j * rng.standard_normal(values.shape))
+        if m not in selected_again:
+            frf_records.append({**common, 'estimator': 'H1', 'averages': averages,
+                                'window': window})
+            frf_values.append(values)
         coherence = np.ones((len(responses), len(references), MODAL_LINES)) * 0.99
         coherence[..., 0] = 0.0
-        if len(references) > 1:
-            coherence_records.append({**common, 'coherence': 'multiple'})
-            coherence_values.append(coherence[:, 0])
-        else:
-            coherence_records.append({**common, 'coherence': 'ordinary'})
-            coherence_values.append(coherence)
-        spectra_records.append(common)
-        spectra_values.append(np.ones((len(references), MODAL_LINES)) * 1e-3)
-        condition.append(np.full(MODAL_LINES, 3.0))
+        if m not in torn and m not in selected_again:
+            if len(references) > 1:
+                coherence_records.append({**common, 'coherence': 'multiple'})
+                coherence_values.append(coherence[:, 0])
+            else:
+                coherence_records.append({**common, 'coherence': 'ordinary'})
+                coherence_values.append(coherence)
+            spectra_records.append(common)
+            spectra_values.append(np.ones((len(references), MODAL_LINES)) * 1e-3)
+            condition.append(np.full(MODAL_LINES, 3.0))
         if mode != 'impact' or not frames:
             continue
         # the frames: a half-sine hit at the trigger, the response by the receptance
         n = np.arange(MODAL_BLOCK)
         f = np.fft.rfftfreq(MODAL_BLOCK, 1 / FS)
         _ri, k = references[0]
-        for a, kind in enumerate(('trial', 'accepted', 'double', *(['accepted'] * (hits - 1)))):
+        kinds = (('trial', 'double') if m in selected_again
+                 else ('trial', 'accepted', 'double', *(['accepted'] * (hits - 1))))
+        for a, kind in enumerate(kinds):
             pulse = np.where((n >= pre) & (n < pre + 5), np.sin(np.pi * (n - pre) / 5), 0.0)
             pulse = pulse * (100.0 + 10 * a)
             if kind == 'double':
                 pulse = pulse + np.roll(pulse, 40)
             spectrum = np.fft.rfft(pulse)
-            columns = [np.fft.irfft(spectrum * modal_accelerance(f, j, k) / G * later,
-                                    MODAL_BLOCK) for _ri, j in responses]
+            columns = [np.fft.irfft(spectrum * modal_accelerance(f, j, k, 0.0, modes) / G
+                                    * (later or 1.0), MODAL_BLOCK) for _ri, j in responses]
             columns.append(pulse)
             offset = sum(len(s) for s in stream_frames)
             stream_frames.append(np.stack(columns, axis=1))
@@ -666,6 +721,7 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
     if frf_records:
         results['modal_frf'] = ({'kind': 'modal_frf', 'abscissa': axis},
                                 {'values': np.array(frf_values)}, frf_records)
+    if coherence_records:
         results['modal_coherence'] = ({'kind': 'modal_coherence', 'abscissa': axis},
                                       {'values': np.array(coherence_values)},
                                       coherence_records)
