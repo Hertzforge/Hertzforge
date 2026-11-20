@@ -330,8 +330,9 @@ export function desktopRunFiles(): import('$lib/app/runFiles.svelte').DesktopRun
 
 /**
  * Whether a report's page is printed in the system's browser and not in place: in the desktop app,
- * whose web view does not print a page that asks to be. Its own analysis service, on the same
- * machine, opens the page there (`report.print` with `browser`).
+ * whose web view does not print a page that asks to be. There the report offers no Print (the saved
+ * HTML file is opened in a browser instead), and an issue's page is opened in the browser by the
+ * app's own analysis service, on the same machine (`report.issue` with `browser`).
  */
 export function printsInBrowser(): boolean {
 	return Boolean(tauri()?.core?.invoke && tauri()?.dialog);

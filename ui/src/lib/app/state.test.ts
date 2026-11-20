@@ -541,3 +541,33 @@ describe('a shell with no control service (`?control=none`)', () => {
 		}
 	});
 });
+
+describe("a report's Print", () => {
+	const g = globalThis as { __TAURI__?: unknown };
+	afterEach(() => {
+		delete g.__TAURI__;
+	});
+
+	// The desktop app's web view does not print; there the saved HTML file is opened in a browser
+	// instead, so the app offers no Print and asks the service for no printable page.
+	it('is not offered in the desktop app, and asks for nothing there', async () => {
+		g.__TAURI__ = { core: { invoke: vi.fn() }, dialog: { open: vi.fn(), save: vi.fn() } };
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const request = vi.spyOn(app.analysis, 'request').mockResolvedValue({ html: '<p>page</p>', owed: [], index: [] } as never);
+		app.report.name = 'Random';
+		expect(app.report.canPrint).toBe(false);
+		await app.report.print();
+		expect(request.mock.calls.filter(([method]) => method === 'report.print')).toEqual([]);
+	});
+
+	it('is offered in a browser, and prints the page in place', async () => {
+		const app = new AppState(readConfig('?analysis=ws://127.0.0.1:1&control=none'));
+		const request = vi.spyOn(app.analysis, 'request').mockResolvedValue({ html: '<p>page</p>', owed: [], index: [] } as never);
+		app.report.name = 'Random';
+		expect(app.report.canPrint).toBe(true);
+		await app.report.print();
+		const sent = request.mock.calls.filter(([method]) => method === 'report.print');
+		expect(sent.map(([, params]) => params)).toEqual([{ name: 'Random' }]);
+		expect(app.report.printing).toBe('<p>page</p>');
+	});
+});

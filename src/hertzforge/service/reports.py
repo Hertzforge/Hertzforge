@@ -261,9 +261,10 @@ def _in_browser(page: str, name: str) -> str:
     itself). Returns the file's path.
 
     The desktop app's web view does not print a page that asks to be (WebKit
-    leaves `window.print()` to the app embedding it), so the app's Print or Save
-    as PDF did nothing; the app's own analysis service, on the same machine,
-    opens the page where printing works."""
+    leaves `window.print()` to the app embedding it), so the app's Issue, which
+    needs the page printed to a PDF, has its own analysis service, on the same
+    machine, open the page where printing works. The app offers no Print for a
+    plain report: its saved HTML file, opened in a browser, does the same."""
     import re
     import subprocess
     import sys
