@@ -1890,20 +1890,35 @@ fn a_reading_stuck_high_leaves_the_line_at_the_floor_and_it_recovers() {
         })
         .sum();
     println!("updates on the stuck lines while stuck: {updates}");
-    // After release: back within 1 dB of the free run's drive on every
-    // stuck line, no faster than the 3 dB step limit allows from the floor.
+    // After release: back within `close` dB of the free run's drive on every
+    // stuck line, and staying there, no faster than the 3 dB step limit
+    // allows from the floor. The drive does not return to the free run's
+    // exactly: on line 32 it overshoots it. Measured to loop 480 at this
+    // seed, line 32 first comes within 1 dB 40 loops after release on macOS
+    // and 38 on Windows, then reaches +0.92 dB on macOS and +1.21 dB on
+    // Windows (at loop 480), so a 1 dB bound held on macOS only. Over twelve
+    // noise seeds run to loop 800 on each platform, the largest distance
+    // from the free run after line 32 first came within 1 dB was 1.40 dB on
+    // macOS and 1.48 dB on Windows, and within 2 dB every stuck line
+    // recovered in 31 to 38 loops. The two platforms' runs differ from the
+    // start: the structure's normal draws use the system `ln` and `cos`, and
+    // the first drive's pseudo-inverse differs in the last bit even on
+    // identical inputs.
+    let close = 2.0;
     let mut recovered = 0;
     let mut fastest = 0;
     for line in stuck.clone() {
         let floor = 1e-8 * model_trace(s, line);
         let want = free[loops as usize].drive.trace(line);
         let gap = db(want, floor);
-        let allowed = ((gap - 1.0) / 3.0).ceil() as usize;
+        let allowed = ((gap - close) / 3.0).ceil() as usize;
         let took = (release as usize..=loops as usize)
             .find(|&l| {
                 (release as usize..=loops as usize)
                     .skip(l - release as usize)
-                    .all(|k| db(outs[k].drive.trace(line), free[k].drive.trace(line)).abs() <= 1.0)
+                    .all(|k| {
+                        db(outs[k].drive.trace(line), free[k].drive.trace(line)).abs() <= close
+                    })
             })
             .expect("never recovered")
             - (release as usize - 1);
