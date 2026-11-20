@@ -1417,6 +1417,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hertzforge-modal-test"
+version = "0.1.19"
+dependencies = [
+ "hertzforge-channel-table",
+ "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-module-abi",
+ "hertzforge-playback",
+ "hertzforge-sdm",
+ "serde_json",
+]
+
+[[package]]
 name = "hertzforge-module-abi"
 version = "0.1.19"
 dependencies = [
