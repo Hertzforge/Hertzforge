@@ -509,3 +509,188 @@ def playback_run(folder: str, pre: int = 512, play: int = 2048, post: int = 1024
              'end': {'outcome': 'completed', 'message': 'The drive played to its end.',
                      'at_s': frames / FS},
              'at_unix': START['unix'] + 6, 'station_frames': frames})
+
+
+#: the structure a Modal Test run measures: three modes over six points on Z
+MODAL_FREQUENCIES = (20.0, 45.0, 80.0)
+MODAL_DAMPING = (0.03, 0.02, 0.015)
+MODAL_SHAPES = np.array([[1.0, 0.9, 0.6, 0.2, -0.3, -0.8],
+                         [0.8, 0.2, -0.7, -1.0, -0.2, 0.6],
+                         [0.5, -0.6, -0.4, 0.7, 0.3, -0.9]])
+#: its spectral lines (Hz) and its frames' samples
+MODAL_STEP, MODAL_LINES, MODAL_BLOCK = 0.25, 601, 4096
+
+
+def modal_receptance(f: np.ndarray, j: int, k: int) -> np.ndarray:
+    """The structure's displacement at point `j` per force at point `k`
+    (points from 0), m/N, at `f` Hz: symmetric in j and k."""
+    w = 2 * np.pi * np.asarray(f, dtype=np.float64)
+    out = np.zeros(w.shape, dtype=np.complex128)
+    for fn, zeta, phi in zip(MODAL_FREQUENCIES, MODAL_DAMPING, MODAL_SHAPES, strict=True):
+        wn = 2 * np.pi * fn
+        out += phi[j] * phi[k] / (wn ** 2 - w ** 2 + 2j * zeta * wn * w)
+    return out
+
+
+def modal_accelerance(f: np.ndarray, j: int, k: int) -> np.ndarray:
+    """The structure's acceleration at point `j` per force at point `k`,
+    (m/s^2)/N."""
+    w = 2 * np.pi * np.asarray(f, dtype=np.float64)
+    return -(w ** 2) * modal_receptance(f, j, k)
+
+
+def _modal_channel(index: int, point: int, unit: str) -> dict[str, Any]:
+    return {'index': index, 'node': point + 1, 'direction': 'Z+', 'unit': unit}
+
+
+def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
+                   measured: Sequence[int] | None = None, again: Sequence[int] = (),
+                   frames: bool = True, complete: bool = True,
+                   tau_s: float | None = None) -> str:
+    """A Modal Test run of the structure above, as the wire notes are
+    assumed to lay one out (`hertzforge.io.modal_run.WIRE`).
+
+    `layout` is 'roving_hammer' (an accelerometer fixed at point 1, the
+    hammer at every point), 'fixed_hammer' (six accelerometers, the hammer
+    at point 1, one measurement) or 'two_shakers' (six accelerometers,
+    shakers at points 1 and 4, one measurement, multiple coherence).
+    `measured` picks the roving hammer's points (from 0; every point when
+    omitted); `again` names points measured a second time, after the rest,
+    with their values doubled so the later set is told apart. Each impact
+    measurement has `hits` accepted frames, a rejected double hit and a
+    trial hit in its frame lines. `complete` False leaves the run killed:
+    no end, the outcome not written. `tau_s` names an exponential window
+    on every channel in each record's window record (the values are the
+    structure's own: the FRFs are written as estimated without it)."""
+    lines = np.arange(MODAL_LINES) * MODAL_STEP
+    pre = 64
+    if layout == 'roving_hammer':
+        rows = [row(1, 'monitor', description='Fixed accelerometer', node='1',
+                    direction='Z+', analysis_role='response'),
+                row(2, 'reference', 'N', description='Hammer', node='1', direction='Z+')]
+        points = list(range(6)) if measured is None else list(measured)
+        plan = [(p, [(1, 0)], [(2, p)]) for p in [*points, *again]]
+        roving = {'channels': [2], 'points': [{'node': p + 1, 'direction': 'Z+'}
+                                              for p in range(6)]}
+        mode = 'impact'
+    else:
+        refs = [0] if layout == 'fixed_hammer' else [0, 3]
+        rows = [row(k + 1, 'monitor', description=f'Accelerometer {k + 1}', node=str(k + 1),
+                    direction='Z+', analysis_role='response') for k in range(6)]
+        rows += [row(7 + n, 'reference', 'N', description=f'Force {n + 1}', node=str(p + 1),
+                     direction='Z+') for n, p in enumerate(refs)]
+        plan = [(None, [(k + 1, k) for k in range(6)],
+                 [(7 + n, p) for n, p in enumerate(refs)])]
+        plan += [(None, plan[0][1], plan[0][2]) for _ in again]
+        roving = {'channels': [], 'points': []}
+        mode = 'impact' if layout == 'fixed_hammer' else 'shaker'
+    window: dict[str, Any] = {
+        'reference': ({'kind': 'force', 'width': 0.05, 'fall': 0.1} if mode == 'impact'
+                      else {'kind': 'hann'}),
+        'response': {'kind': 'boxcar' if mode == 'impact' else 'hann'}}
+    if tau_s is not None:
+        window['exponential'] = {'tau_s': tau_s, 'end': float(
+            np.exp(-(MODAL_BLOCK - 1) / (tau_s * FS))), 'decay_rate_per_s': 1.0 / tau_s}
+    averages = hits if mode == 'impact' else 40
+    frf_records, coherence_records, spectra_records = [], [], []
+    frf_values, coherence_values, spectra_values, condition = [], [], [], []
+    frame_lines, stream_frames = [], []
+    seen: set = set()
+    for m, (point, responses, references) in enumerate(plan):
+        later = 2.0 if (point if point is not None else 'all') in seen else 1.0
+        seen.add(point if point is not None else 'all')
+        unit = {**{i: 'g' for i, _p in responses}, **{i: 'N' for i, _p in references}}
+        common = {'measurement': m, 'point': point,
+                  'responses': [_modal_channel(i, p, unit[i]) for i, p in responses],
+                  'references': [_modal_channel(i, p, unit[i]) for i, p in references]}
+        frf_records.append({**common, 'estimator': 'H1', 'averages': averages,
+                            'window': window})
+        frf_values.append(np.array([[modal_accelerance(lines, j, k) / G * later
+                                     for _rk, k in references] for _ri, j in responses]))
+        coherence = np.ones((len(responses), len(references), MODAL_LINES)) * 0.99
+        coherence[..., 0] = 0.0
+        if len(references) > 1:
+            coherence_records.append({**common, 'coherence': 'multiple'})
+            coherence_values.append(coherence[:, 0])
+        else:
+            coherence_records.append({**common, 'coherence': 'ordinary'})
+            coherence_values.append(coherence)
+        spectra_records.append(common)
+        spectra_values.append(np.ones((len(references), MODAL_LINES)) * 1e-3)
+        condition.append(np.full(MODAL_LINES, 3.0))
+        if mode != 'impact' or not frames:
+            continue
+        # the frames: a half-sine hit at the trigger, the response by the receptance
+        n = np.arange(MODAL_BLOCK)
+        f = np.fft.rfftfreq(MODAL_BLOCK, 1 / FS)
+        _ri, k = references[0]
+        for a, kind in enumerate(('trial', 'accepted', 'double', *(['accepted'] * (hits - 1)))):
+            pulse = np.where((n >= pre) & (n < pre + 5), np.sin(np.pi * (n - pre) / 5), 0.0)
+            pulse = pulse * (100.0 + 10 * a)
+            if kind == 'double':
+                pulse = pulse + np.roll(pulse, 40)
+            spectrum = np.fft.rfft(pulse)
+            columns = [np.fft.irfft(spectrum * modal_accelerance(f, j, k) / G * later,
+                                    MODAL_BLOCK) for _ri, j in responses]
+            columns.append(pulse)
+            offset = sum(len(s) for s in stream_frames)
+            stream_frames.append(np.stack(columns, axis=1))
+            frame_lines.append({
+                'measurement': m, 'point': point, 'average': None if kind != 'accepted' else
+                sum(1 for line in frame_lines if line['measurement'] == m
+                    and line['accepted']) + 1,
+                'stream': 'inputs', 'offset': offset, 'length': MODAL_BLOCK,
+                'trigger_sample': pre, 'accepted': kind == 'accepted',
+                'trial': kind == 'trial',
+                'reason': {'trial': 'trial hit', 'double': 'double hit'}.get(kind, ''),
+                'checks': {'double_hit': kind == 'double', 'overload': False},
+                'at_unix': START['unix'] + 10 * m + a})
+    results: dict[str, Any] = {}
+    axis = {'start': 0.0, 'step': MODAL_STEP, 'unit': 'Hz'}
+    if frf_records:
+        results['modal_frf'] = ({'kind': 'modal_frf', 'abscissa': axis},
+                                {'values': np.array(frf_values)}, frf_records)
+        results['modal_coherence'] = ({'kind': 'modal_coherence', 'abscissa': axis},
+                                      {'values': np.array(coherence_values)},
+                                      coherence_records)
+        spectra = {'values': np.array(spectra_values)}
+        if len(plan[0][2]) > 1:
+            spectra['condition'] = np.array(condition)
+        results['modal_reference_spectra'] = (
+            {'kind': 'modal_reference_spectra', 'abscissa': axis}, spectra, spectra_records)
+    if frame_lines:
+        results['modal_frames'] = ({'kind': 'modal_frames'}, {}, frame_lines)
+    if complete:
+        results['modal_outcome'] = ({'kind': 'modal_outcome', 'points_planned':
+                                     len(roving['points']),
+                                     'points_measured': len({p for p, _r, _f in plan
+                                                             if p is not None}),
+                                     'frames': len(frame_lines),
+                                     'frames_accepted': sum(line['accepted']
+                                                            for line in frame_lines),
+                                     'ended': 'completed', 'reason': ''}, {}, None)
+    config = {'mode': mode, 'block': MODAL_BLOCK,
+              'band': {'low_hz': 0.0, 'high_hz': lines[-1]}, 'estimator': 'H1',
+              'averages': averages, 'roving': roving,
+              'impact': {'trigger_level': 0.1, 'pre_trigger': pre, 'window': window},
+              'shaker': {'window': 'hann', 'overlap': 0.5} if mode == 'shaker' else None}
+    channels = [r['index'] for r in rows]
+    streams: dict[str, Any] = {}
+    if stream_frames:
+        values = np.concatenate(stream_frames)
+        order = [i for i, _p in plan[0][1]] + [i for i, _p in plan[0][2]]
+        streams['inputs'] = ({'kind': 'inputs', 'channels': [
+            {'index': i, 'unit': 'g' if i in [r for r, _p in plan[0][1]] else 'N'}
+            for i in order], 'fs_hz': FS, 'first_station_frame': 1000, 'frames': len(values),
+            'gaps': [], 'complete': complete, 'fault': None}, values)
+    assert sorted(channels) == channels
+    return write_run(
+        folder, _manifest('modal_test', complete=complete),
+        {'revision': 3, 'sha256': 'a' * 64, 'rows': rows}, {'config': config},
+        streams=streams, results=results,
+        log=[{'seq': 0, 'at_unix': START['unix'], 'frame': 1000, 'kind': 'state',
+              'text': 'measuring'}],
+        end=None if not complete else {
+            'run_uid': 'uid-modal_test-0001',
+            'end': {'outcome': 'completed', 'message': 'Every point was measured.',
+                    'at_s': 60.0}, 'at_unix': START['unix'] + 60, 'station_frames': 61440})
