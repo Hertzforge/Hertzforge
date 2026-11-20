@@ -145,3 +145,48 @@ def test_modal_test_run_takes_the_modal_report_and_it_builds_and_renders(tmp_pat
     assert 'Modal Test Report' in page
     # the identified parameters table holds the fit of the run's FRFs
     assert '"rows": [["1", "20.0000", "3.000", ""]' in page
+
+
+def test_modal_test_three_triaxial_accelerometers_and_a_roving_hammer_are_turned(tmp_path):
+    """Nine fixed responses and six hammer points: fewer references than responses, so the
+    set's shape alone would not say the excitation roved; the roving plan does."""
+    project = _project(tmp_path, 'triaxial_roving_hammer')
+    measured = project['modal_frf']
+    assert len(set(measured.response_dof)) == 9 and len(set(measured.reference_dof)) == 6
+    turned = project['modal_frf fixed reference']
+    assert sorted(set(turned.reference_dof)) == sorted(set(measured.response_dof))
+    assert fit_refusal(turned) == ''
+    fit = fitting.start(project, {'frf': 'modal_frf fixed reference'})
+    assert fit.coherence == 'modal_coherence fixed reference'
+    # the record of 5Z+ for a force at 2X+ is the structure's own, turned from 2X+ per 5Z+
+    k = [i for i in range(turned.num_records)
+         if (turned.response_dof[i], turned.reference_dof[i]) == ('5Z+', '2X+')][0]
+    np.testing.assert_allclose(turned.ordinate[k],
+                               rf.modal_accelerance(rf_lines(turned), (4, 'Z+'), (1, 'X+')),
+                               rtol=1e-12)
+    _check(_fit(project, 'modal_frf fixed reference'))
+
+
+def rf_lines(frf):
+    return np.asarray(frf.abscissa)
+
+
+def test_modal_test_turning_carries_each_hammer_direction_in_the_values(tmp_path):
+    """Hammer hits from below (Z-) at points 2 and 5: the turned records' values carry the
+    sign, and the fit's shapes on those points are the structure's turned over."""
+    project = _project(tmp_path, 'roving_hammer', directions={1: 'Z-', 4: 'Z-'})
+    turned = project['modal_frf fixed reference']
+    assert set(turned.response_dof) == {'1Z+', '2Z-', '3Z+', '4Z+', '5Z-', '6Z+'}
+    for dof, point, sign in (('2Z-', 1, -1.0), ('3Z+', 2, 1.0), ('5Z-', 4, -1.0)):
+        np.testing.assert_allclose(turned.ordinate[turned.response_dof.index(dof)],
+                                   sign * rf.modal_accelerance(rf_lines(turned), point, 0),
+                                   rtol=1e-12)
+    shapes = _fit(project, 'modal_frf fixed reference')
+    _check(shapes)
+    order = np.argsort(shapes.frequency)
+    row = shapes.shape_matrix[order]
+    for dof, point, sign in (('2Z-', 1, -1.0), ('5Z-', 4, -1.0)):
+        k = list(shapes.coordinate).index(dof)
+        ratio = np.real(row[:, k] / row[:, list(shapes.coordinate).index('1Z+')])
+        np.testing.assert_allclose(ratio, sign * rf.MODAL_SHAPES[:, point]
+                                   / rf.MODAL_SHAPES[:, 0], rtol=1e-2)

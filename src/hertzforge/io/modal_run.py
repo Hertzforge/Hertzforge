@@ -28,7 +28,8 @@ What a Modal Test run becomes:
   save and the fit's damping can be read less it
   (`core.modal_test.frf_tau`).
 - **modal_frf fixed reference**: for a test whose excitation roved
-  (more reference DOFs than response DOFs), the same FRFs turned round
+  (its roving channels are reference rows; with no roving plan, more
+  reference DOFs than response DOFs), the same FRFs turned round
   by reciprocity (`core.modal_test.fixed_reference`), marked so on every
   record, the form a modal fit takes; with its ordinary coherence turned
   the same way.
@@ -481,6 +482,19 @@ def _reference_spectra(result: run_folder.Result, channels: _Channels,
                comment=[f'reference autospectrum, {b}' for b in blocks]), ''
 
 
+def _excitation_roved(channels: _Channels, frf: Any) -> bool:
+    """Whether the test roved its excitation, so its FRFs are turned round
+    for the fit: from the roving plan when the setup has one (the roving
+    channels are reference rows), else from the set's shape (more
+    reference DOFs than response DOFs, `core.modal_test.roving_excitation`)."""
+    from ..core.modal_test import roving_excitation
+
+    roving = [i for i in channels.roving if i in channels.row]
+    if roving:
+        return all(channels.roles[channels.row[i]] == 'reference' for i in roving)
+    return roving_excitation(frf)
+
+
 def _frame_lines(run: run_folder.RunFolder) -> list[dict[str, Any]]:
     result = run.results.get(_w('frames'))
     return [dict(r) for r in (result.records or [])] if result is not None else []
@@ -641,7 +655,7 @@ def results(run: run_folder.RunFolder, table: Any, lacked: list[str]
         stay in the run record whole), which the general mapping leaves
         alone; and the arrays of those results the run record keeps.
     """
-    from ..core.modal_test import fixed_reference, fixed_reference_refusal, roving_excitation
+    from ..core.modal_test import fixed_reference, fixed_reference_refusal
 
     channels = _Channels(run, table)
     handled = {_w(k) for k in ('frf', 'coherence', 'reference_spectra', 'frames', 'outcome')}
@@ -679,7 +693,7 @@ def results(run: run_folder.RunFolder, table: Any, lacked: list[str]
         out.append((result.name, held))
         if key == 'frf':
             frf = held
-        if frf is None or not roving_excitation(frf):
+        if frf is None or not _excitation_roved(channels, frf):
             continue
         why = fixed_reference_refusal(held)
         if why:

@@ -244,8 +244,7 @@ def _point_3(project):
     spectra = project['modal_reference_spectra']
     return (frf.comment[frf.reference_dof.index('3Z+')],
             coherence.comment[coherence.reference_dof.index('3Z+')],
-            spectra.block[[i for i, c in enumerate(spectra.comment)
-                           if spectra.response_dof[i] == '3Z+'][0]])
+            spectra.block[spectra.response_dof.index('3Z+')])
 
 
 def test_modal_test_an_incomplete_repeat_replaces_nothing_in_any_object(tmp_path):
