@@ -317,38 +317,87 @@ fn the_run_without_the_seam_is_unchanged() {
             path.display()
         )
     });
-    if want.lines().next() == Some(platform().as_str()) {
+    if let Err(e) = compare_trace(&want, &got, &platform()) {
+        panic!("{e}");
+    }
+}
+
+/// `want` against `got`, run where `here` is the platform line: byte for
+/// byte when `want` was recorded here (the same OS release), otherwise line
+/// by line with `same_within_rounding`.
+fn compare_trace(want: &str, got: &str, here: &str) -> Result<(), String> {
+    if want.lines().next() == Some(here) {
         if want != got {
             for (i, (w, g)) in want.lines().zip(got.lines()).enumerate() {
                 if w != g {
-                    panic!("the trace moved at line {}:\n  was {w}\n  now {g}", i + 1);
+                    return Err(format!(
+                        "the trace moved at line {}:\n  was {w}\n  now {g}",
+                        i + 1
+                    ));
                 }
             }
-            panic!(
+            return Err(format!(
                 "the trace moved: {} lines recorded, {} now",
                 want.lines().count(),
                 got.lines().count()
-            );
+            ));
         }
-        return;
+        return Ok(());
     }
     let (wl, gl): (Vec<&str>, Vec<&str>) = (
         want.lines().skip(1).collect(),
         got.lines().skip(1).collect(),
     );
-    assert_eq!(
-        wl.len(),
-        gl.len(),
-        "the trace has a different number of lines"
-    );
+    if wl.len() != gl.len() {
+        return Err(format!(
+            "the trace has a different number of lines: {} recorded, {} now",
+            wl.len(),
+            gl.len()
+        ));
+    }
     for (i, (w, g)) in wl.iter().zip(&gl).enumerate() {
-        if let Err(e) = same_within_rounding(w, g) {
-            panic!(
+        same_within_rounding(w, g).map_err(|e| {
+            format!(
                 "the trace moved at line {}: {e}\n  was {w}\n  now {g}",
                 i + 2
-            );
-        }
+            )
+        })?;
     }
+    Ok(())
+}
+
+#[test]
+fn only_the_recording_release_is_held_to_the_bits() {
+    let here = platform();
+    // The platform line names the release as its own token, between the OS
+    // and the architecture.
+    let tokens: Vec<&str> = here.split(' ').collect();
+    assert_eq!(tokens.len(), 6, "{here}");
+    assert_eq!(tokens[3], std::env::consts::OS, "{here}");
+    assert_eq!(tokens[5], std::env::consts::ARCH, "{here}");
+    if cfg!(target_os = "macos") {
+        assert!(
+            tokens[4].starts_with(|c: char| c.is_ascii_digit()) && tokens[4].contains('.'),
+            "the macOS release, as sw_vers gives it: {here}"
+        );
+    }
+    let play = "a play=0 rms_pct=5.0237728630191 gated=true drive_sha=00";
+    let rehashed = "a play=0 rms_pct=5.023772863019105 gated=true drive_sha=ff";
+    let ungated = "a play=0 rms_pct=5.0237728630191 gated=false drive_sha=00";
+    let now = |line: &str| format!("{here}\n{line}");
+    // Recorded on this release: another last bit or hash is a move.
+    assert!(compare_trace(&now(play), &now(rehashed), &here).is_err());
+    assert!(compare_trace(&now(play), &now(play), &here).is_ok());
+    // Recorded on another release of this OS: hashes are skipped and numbers
+    // held to 1e-9, but a discrete value must still match.
+    let elsewhere = format!(
+        "# recorded on {} 0.0-another {}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+    assert!(compare_trace(&format!("{elsewhere}{play}"), &now(rehashed), &here).is_ok());
+    let e = compare_trace(&format!("{elsewhere}{play}"), &now(ungated), &here).unwrap_err();
+    assert!(e.contains("gated=true against gated=false"), "{e}");
 }
 
 #[test]
