@@ -186,3 +186,40 @@ def test_modal_test_turning_carries_each_hammer_direction_in_the_values(tmp_path
         ratio = np.real(row[:, k] / row[:, list(shapes.coordinate).index('1Z+')])
         np.testing.assert_allclose(ratio, sign * rf.MODAL_SHAPES[:, point]
                                    / rf.MODAL_SHAPES[:, 0], rtol=1e-2)
+
+
+#: two modes 3 % apart, each with a half-power bandwidth larger than their spacing's half
+CLOSE = ((20.0, 45.0, 46.35), (0.02, 0.02, 0.02))
+#: measured on this branch through the turned set with one refine, with margin: the
+#: largest frequency error 7.8e-6, damping error 9.6e-4, shape-ratio error 1.7e-3
+CLOSE_ACHIEVED = (5e-5, 5e-3, 1e-2)
+
+
+def test_modal_test_close_modes_in_noise_are_separated_by_the_fit(tmp_path):
+    """Modes at 45 and 46.35 Hz, 2 % damped, overlap: each one's half-power band is 1.8 Hz
+    and they are 1.35 Hz apart. With noise 40 dB under each FRF, a roving hammer's set turned
+    round goes through the fitting screen's path and one refine, and the fit recovers all
+    three modes and the shapes on Z."""
+    project = _project(tmp_path, 'roving_hammer', modes=CLOSE, noise_db=-40)
+    turned = project['modal_frf fixed reference']
+    clean = np.array([rf.modal_accelerance(turned.abscissa, j, 0, modes=CLOSE)
+                      for j in range(6)])
+    # the noise is there, at about the level asked for
+    error = np.sqrt(np.mean(np.abs(turned.ordinate - clean) ** 2, axis=-1)
+                    / np.mean(np.abs(clean) ** 2, axis=-1))
+    assert np.all((error > 10 ** (-42 / 20)) & (error < 10 ** (-38 / 20))), error
+    fit = fitting.start(project, {'frf': 'modal_frf fixed reference'})
+    for _ in range(3):
+        fitting.act(fit, 'fit.find', {'low': 5.0, 'high': 140.0})
+        fitting.act(fit, 'fit.confirm', {})
+    fitting.act(fit, 'fit.refine', {})
+    shapes = project[fitting.publish(project, fit, {})]
+    assert shapes.num_shapes == 3 and not shapes.unscaled
+    df, dz = _errors(shapes, list(zip(*CLOSE, strict=True)))
+    assert df < CLOSE_ACHIEVED[0] and dz < CLOSE_ACHIEVED[1], (df, dz)
+    order = np.argsort(shapes.frequency)
+    columns = [list(shapes.coordinate).index(f'{k}Z+') for k in range(1, 7)]
+    for row, m in enumerate(order):
+        ratio = np.real(shapes.shape_matrix[m, columns] / shapes.shape_matrix[m, columns[0]])
+        np.testing.assert_allclose(ratio, rf.MODAL_SHAPES[row] / rf.MODAL_SHAPES[row, 0],
+                                   rtol=0, atol=CLOSE_ACHIEVED[2])
