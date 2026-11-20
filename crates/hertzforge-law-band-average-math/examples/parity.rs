@@ -14,14 +14,18 @@ use std::time::Instant;
 fn read_f64(path: &str) -> Vec<f64> {
     let bytes = fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     bytes
-        .chunks_exact(8)
-        .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|b| f64::from_le_bytes(*b))
         .collect()
 }
 
 fn read_c64(path: &str) -> Vec<C64> {
     read_f64(path)
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|x| C64::new(x[0], x[1]))
         .collect()
 }

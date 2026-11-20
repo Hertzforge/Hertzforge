@@ -116,7 +116,9 @@ fn control_error_db(r: &Run, slot: usize, frames: usize) -> f64 {
     let lc = LoopConfig::demo_default();
     let all = r.seen.lock().unwrap().clone();
     let x: Vec<f64> = all
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .rev()
         .take(frames)
         .map(|f| f64::from(f[slot]))
@@ -166,7 +168,9 @@ fn a_limit_on_the_row_after_the_inputs_judges_that_row() {
     }
     let all = r.seen.lock().unwrap().clone();
     let peak = |slot: usize| {
-        all.chunks_exact(2)
+        all.as_chunks::<2>()
+            .0
+            .iter()
             .map(|f| f[slot].abs())
             .fold(0.0f32, f32::max)
     };

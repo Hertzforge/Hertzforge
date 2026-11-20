@@ -1994,8 +1994,7 @@ impl Actor {
                            "at_level_db": at_level.map(|l| num(round(l, 2))),
                            "at_tick": tick});
         let hz = num(round(at_hz.unwrap_or(0.0), 2));
-        let words;
-        match o {
+        let words: String = match o {
             Outcome::ControlAbort { control } => {
                 let c = control as usize;
                 let ch = self.channel_of_control(c);
@@ -2015,10 +2014,10 @@ impl Actor {
                 t["side"] = json!(side);
                 t["measured"] = num(sig(measured));
                 t["limit"] = limit.map_or(Value::Null, |l| num(sig(l)));
-                words = format!(
+                format!(
                     "Aborted: control {ch} passed its {side} abort band at {hz} Hz ({} dB).",
                     num(round(err, 2))
-                );
+                )
             }
             Outcome::LimitAbort { limit } => {
                 let j = limit as usize;
@@ -2034,7 +2033,7 @@ impl Actor {
                 t["channel"] = json!(ch);
                 t["measured"] = num(sig(measured));
                 t["limit"] = bound.map_or(Value::Null, |l| num(sig(l)));
-                words = format!("Aborted: limit channel {ch} passed its abort bound at {hz} Hz.");
+                format!("Aborted: limit channel {ch} passed its abort bound at {hz} Hz.")
             }
             Outcome::DriveAbort { drive } => {
                 let d = drive as usize;
@@ -2044,7 +2043,7 @@ impl Actor {
                 t["channel"] = json!(ch);
                 t["vpk"] = num(sig(vpk));
                 t["abort_vpk"] = num(s.drives.get(d).map_or(f64::NAN, |x| x.abort_vpk));
-                words = format!("Aborted: drive {ch} reached its abort at {hz} Hz.");
+                format!("Aborted: drive {ch} reached its abort at {hz} Hz.")
             }
             Outcome::Kinematic { control } => {
                 let c = control as usize;
@@ -2055,22 +2054,22 @@ impl Actor {
                 t["axis"] = Value::Null;
                 t["value"] = Value::Null;
                 t["limit"] = Value::Null;
-                words = format!(
+                format!(
                     "Aborted: the motion at control {} passed its shaker's rating at {hz} Hz.",
                     self.channel_of_control(c)
-                );
+                )
             }
             Outcome::LawFault => {
                 let reason = r.and_then(|r| r.miss).unwrap_or("error");
                 t["kind"] = json!("law_fault");
                 t["reason"] = json!(reason);
                 t["consecutive"] = json!(self.view.counts.misses);
-                words = format!(
+                format!(
                     "The law gave no usable drive {} times in a row ({}); the run took its \
                      controlled stop at {hz} Hz.",
                     self.view.counts.misses,
                     reason.replace('_', " ")
-                );
+                )
             }
             Outcome::Divergence => {
                 let cap = if r.is_some_and(|r| r.rotation_bound) {
@@ -2081,23 +2080,23 @@ impl Actor {
                 t["kind"] = json!("divergence");
                 t["capped_s"] = num(s.guards.divergence_s);
                 t["cap"] = json!(cap);
-                words = format!(
+                format!(
                     "Aborted: a cap bound for {} s without a break at {hz} Hz; the run took its \
                      controlled stop.",
                     num(s.guards.divergence_s)
-                );
+                )
             }
             Outcome::FrequencyOutOfRange => {
                 t["kind"] = json!("oscillator_range");
                 t["requested_hz"] = at_hz.map_or(Value::Null, num);
                 t["fs_hz"] = num(self.view.grid.fs_hz);
-                words = "Aborted: the tone left what the station can play.".into();
+                "Aborted: the tone left what the station can play.".into()
             }
             _ => {
                 t["kind"] = json!(o.as_str());
-                words = format!("The run ended: {}.", o.as_str().replace('_', " "));
+                format!("The run ended: {}.", o.as_str().replace('_', " "))
             }
-        }
+        };
         (t, words)
     }
 

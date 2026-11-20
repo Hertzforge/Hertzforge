@@ -898,13 +898,13 @@ pub(crate) fn add_noise(rng: &mut Xorshift64, sigma: f64, out: &mut [f64]) {
     if sigma == 0.0 {
         return;
     }
-    let mut chunks = out.chunks_exact_mut(2);
-    for pair in &mut chunks {
+    let (pairs, rest) = out.as_chunks_mut::<2>();
+    for pair in pairs {
         let (a, b) = rng.next_gaussian_pair();
         pair[0] += sigma * a;
         pair[1] += sigma * b;
     }
-    if let [last] = chunks.into_remainder() {
+    if let [last] = rest {
         *last += sigma * rng.next_gaussian_pair().0;
     }
 }
