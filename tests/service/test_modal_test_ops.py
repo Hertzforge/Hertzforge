@@ -47,10 +47,11 @@ def test_modal_test_estimate_again_adds_frfs_and_coherence_beside_the_frames(pro
     assert isinstance(frf, Frf) and isinstance(coherence, Coherence)
     assert frf.response_dof == [f'{k}Z+' for k in range(1, 7)]
     assert frf.reference_dof == ['1Z+'] * 6
-    assert frf.averaging.frames == 2 and frf.averaging.window == 'exponential'
-    assert frf_tau(frf) == pytest.approx(-(rf.MODAL_BLOCK - 1) / np.log(0.05) / rf.FS)
+    assert frf.averaging.frames == 2 and frf.averaging.window == 'boxcar'
+    tau = -(rf.MODAL_BLOCK - 1) / np.log(0.05) / rf.FS
+    assert frf_tau(frf) == pytest.approx(tau)
     rows = {row['label']: row['value'] for row in views[0]['rows']}
-    assert rows['Frames'] == 2.0 and rows['Window'] == 'exponential (end 0.05)'
+    assert rows['Frames'] == 2.0 and rows['Exponential tau'] == pytest.approx(tau)
     np.testing.assert_array_equal(project['modal_frf'].ordinate, measured)
     assert 'project.reprocess_modal_test(' in project.journal[-1]
     assert frf.source == 'SIM'

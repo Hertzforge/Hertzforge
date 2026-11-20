@@ -8,8 +8,9 @@ import math
 import numpy as np
 import pytest
 
-from hertzforge.core.averaging import Averaging, exponential_tau
+from hertzforge.core.averaging import Averaging
 from hertzforge.core.data import Coherence, Frf, MultipleCoherence, TimeHistory
+from hertzforge.core.impact_windows import exponential_tau
 from hertzforge.core.modal_test import (
     TRANSPOSED,
     fixed_reference,
@@ -20,6 +21,7 @@ from hertzforge.core.modal_test import (
     note_window_damping,
     reprocess,
     roving_excitation,
+    tau_words,
     window_corrected,
     window_damping,
     window_note,
@@ -40,7 +42,7 @@ def _roving(n: int = 4, dim: str = 'acceleration/force') -> Frf:
 
 def test_modal_test_fixed_reference_turns_a_roving_set_round():
     frf = _roving()
-    frf.averaging = Averaging(frame_length=1024, window='exponential', window_parameter=0.05)
+    frf.averaging = Averaging(frame_length=1024, window='hann')
     assert roving_excitation(frf)
     out = fixed_reference(frf)
     assert isinstance(out, Frf) and out is not frf
@@ -111,15 +113,19 @@ def test_modal_test_window_damping_is_one_over_two_pi_f_tau():
         less_window_damping(50.0, 0.02, 0.0)
 
 
-def test_modal_test_frf_tau_reads_the_averaging_and_survives_its_end_value():
+def _windowed(frf, tau):
+    frf.comment = [f'{c}; {tau_words(tau)}' for c in frf.comment]
+    return frf
+
+
+def test_modal_test_frf_tau_reads_every_records_comment():
     frf = _roving()
     assert frf_tau(frf) is None
-    # a 1024 block at 1 Hz lines is 1024 samples a second
-    end = math.exp(-(1024 - 1) / (0.25 * 1024))
-    frf.averaging = Averaging(frame_length=1024, window='exponential', window_parameter=end)
-    assert frf_tau(frf) == pytest.approx(0.25, rel=1e-12)
-    frf.averaging = Averaging(frame_length=1024, window='hann')
+    assert frf_tau(_windowed(frf, 0.25)) == pytest.approx(0.25, rel=1e-12)
+    # records that disagree, or one that says nothing, name no one time constant
+    frf.comment[1] = 'H1, point 2'
     assert frf_tau(frf) is None
+    assert frf_tau(fixed_reference(_windowed(_roving(), 0.125))) == 0.125
 
 
 def _shapes(frequency, damping, comment=None) -> ShapeSet:
@@ -129,9 +135,7 @@ def _shapes(frequency, damping, comment=None) -> ShapeSet:
 
 
 def test_modal_test_note_window_damping_writes_the_mode_less_the_window():
-    frf = _roving()
-    end = math.exp(-(1024 - 1) / (0.25 * 1024))
-    frf.averaging = Averaging(frame_length=1024, window='exponential', window_parameter=end)
+    frf = _windowed(_roving(), 0.25)
     shapes = _shapes([50.0, 120.0], [0.03, 0.02], comment=['bending', ''])
     note_window_damping(shapes, frf)
     assert shapes.comment[0].startswith('bending | exponential window tau 0.25 s')
@@ -157,21 +161,26 @@ def test_modal_test_note_window_damping_writes_the_mode_less_the_window():
 FN, ZETA, BLOCK, PRE = 50.0, 0.02, 1024, 32
 
 
-def _impact(hits: int = 4, noise: float = 0.0, seed: int = 3) -> TimeHistory:
+def _impact(hits: int = 4, noise: float = 0.0, seed: int = 3, *, pre: int = PRE,
+            block: int = BLOCK, delay: int = 0) -> TimeHistory:
     """An impact measurement of one mode: a hammer at 2Z+ and an accelerometer
-    at 1Z+, `hits` frames, each with its pre-trigger samples at negative times."""
+    at 1Z+, `hits` frames, each with its pre-trigger samples at negative times;
+    the hit `delay` samples after the trigger."""
     rng = np.random.default_rng(seed)
-    t = (np.arange(BLOCK) - PRE) / FS
+    t = (np.arange(block) - pre) / FS
+    t0 = delay / FS
     wn = 2 * np.pi * FN
     wd = wn * np.sqrt(1 - ZETA ** 2)
     rows, dofs, dims, labels = [], [], [], []
     for k in range(hits):
-        pulse = np.where((t >= 0) & (t < 0.004), np.sin(np.pi * t / 0.004), 0.0) * (1 + k)
+        pulse = np.where((t >= t0) & (t < t0 + 0.004), np.sin(np.pi * (t - t0) / 0.004),
+                         0.0) * (1 + k)
         # the receptance's impulse response, differentiated twice for acceleration
-        h = np.where(t >= 0, np.exp(-ZETA * wn * t) * np.sin(wd * t) / wd, 0.0)
-        x = np.convolve(pulse, h)[:BLOCK] / FS
+        since = np.arange(block) / FS
+        h = np.exp(-ZETA * wn * since) * np.sin(wd * since) / wd
+        x = np.convolve(pulse, h)[:block] / FS
         a = np.gradient(np.gradient(x, 1 / FS), 1 / FS)
-        a = a + noise * rng.standard_normal(BLOCK) * np.abs(a).max()
+        a = a + noise * rng.standard_normal(block) * np.abs(a).max()
         rows += [pulse, a]
         dofs += ['2Z+', '1Z+']
         dims += ['force', 'acceleration']
@@ -203,10 +212,12 @@ def test_modal_test_reprocess_carries_its_windows_and_a_subset_of_frames():
                        method='H1')
     assert len(frf.abscissa) == 512 // 2 + 1
     assert frf.averaging.frame_length == 512 and frf.averaging.frames == 2
-    assert frf.averaging.window == 'exponential'
+    assert frf.averaging.window == 'boxcar'
     assert frf_tau(frf) == pytest.approx(exponential_tau(0.01, 512) / FS, rel=1e-9)
     assert 'captures 1, 3' in frf.comment[0]
-    assert 'force window 0.05 of the block on the references' in frf.comment[0]
+    # 0.05 of the 480 samples after the 32-sample pre-trigger: 24, falling over 2
+    assert ('force window on the references, 24 samples after the trigger at sample 32 '
+            'and a fall of 2') in frf.comment[0]
     # the windowed estimate differs from the plain one: the windows were applied
     plain, _ = reprocess(history, block=512, captures=[0, 2])
     assert not np.allclose(plain.ordinate, frf.ordinate)
@@ -259,3 +270,26 @@ def test_modal_test_runs_of_a_survey_in_parts_merge_then_turn_or_turn_then_merge
     np.testing.assert_array_equal(after.ordinate, turned.ordinate)
     assert after.response_dof == turned.response_dof
     assert 'more than once' in mergeable([fixed_reference(first), fixed_reference(first)])
+
+
+def test_modal_test_reprocess_force_window_keeps_a_hit_after_a_long_pre_trigger():
+    """The reviewer's case: block 4096, pre-trigger 64, force 0.01. A window held from the
+    frame's first sample removed the hit and gave an FRF of zeros with no refusal."""
+    history = _impact(pre=64, block=4096)
+    frf, _ = reprocess(history, force=0.01)
+    assert np.abs(frf.ordinate).max() > 0
+    plain, _ = reprocess(history)
+    near = (frf.abscissa > 30) & (frf.abscissa < 70)
+    np.testing.assert_allclose(np.abs(frf.ordinate[0, near]), np.abs(plain.ordinate[0, near]),
+                               rtol=1e-6)
+
+
+def test_modal_test_reprocess_refuses_a_window_that_removes_the_pulse_naming_it():
+    # a pulse at the trigger, then a frame whose hit comes late: 3 samples cannot hold it
+    history = _impact(pre=64, block=4096, delay=200)
+    with pytest.raises(ValueError, match='once windowed: the force window holds one to'):
+        reprocess(history, force=3 / (4096 - 64))
+    with pytest.raises(ValueError, match='runs past the block'):
+        reprocess(history, force=1.0)
+    with pytest.raises(ValueError, match='above zero'):
+        reprocess(history, force=float('nan'))

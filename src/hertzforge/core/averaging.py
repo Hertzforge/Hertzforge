@@ -66,39 +66,16 @@ from numpy.typing import ArrayLike
 #: — engineering prose says rectangle, and the aliases keep every such
 #: spelling working, along with what Rattlesnake writes ('Hann',
 #: 'rectangle').
-#: The last two are an impact test's transient windows, written here
-#: rather than taken from scipy: 'force' (one over the force pulse at
-#: the start of the frame, a half-cosine fall, zero after;
-#: `force_window`) and 'exponential' (a decay from one at the frame's
-#: first sample; `exponential_window`). scipy's window of that name
-#: takes its time constant in samples; this one is named by its value
-#: at the frame's last sample, and its samples are scipy's with
-#: ``center=0`` at the time constant that end gives.
-#: `tests/data/modal_test_windows.json` holds both windows' samples, so
-#: every implementation of them is checked against the same numbers.
 WINDOWS = ('boxcar', 'hann', 'hamming', 'blackman',
-           'blackmanharris', 'flattop', 'tukey', 'kaiser',
-           'force', 'exponential')
+           'blackmanharris', 'flattop', 'tukey', 'kaiser')
 
 #: the windows that take a number, with what it is called, its
 #: default and the range a box may offer. Tukey's alpha is the
 #: tapered fraction — 0 is a boxcar, 1 is a hann — and 0.5 is
 #: scipy's own default; Kaiser's beta trades main-lobe width for
-#: sidelobes, and 14 sits in the blackman-harris class. The force
-#: window's width is the fraction of the frame it holds one over, its
-#: fall a further `FORCE_FALL` of that width; the exponential window's
-#: end is its value at the frame's last sample, which sets its time
-#: constant for the frame's length (`exponential_tau`). Both are
-#: fractions of the frame, as alpha is, so one number means the same
-#: window at any frame length.
+#: sidelobes, and 14 sits in the blackman-harris class.
 WINDOW_PARAMETERS = {'tukey': ('alpha', 0.5, (0.0, 1.0)),
-                     'kaiser': ('beta', 14.0, (0.0, 40.0)),
-                     'force': ('width', 0.1, (1e-6, 1.0)),
-                     'exponential': ('end', 0.01, (1e-12, 1.0))}
-
-#: the force window's half-cosine fall, as a fraction of its width,
-#: when the window is named by its width alone
-FORCE_FALL = 0.1
+                     'kaiser': ('beta', 14.0, (0.0, 40.0))}
 
 _ALIASES = {'uniform': 'boxcar', 'rectangle': 'boxcar', 'none': 'boxcar',
             'rect': 'boxcar', 'hanning': 'hann', 'flat_top': 'flattop',
@@ -159,13 +136,9 @@ def window_shape(name: str | None, length: int,
 
     This is scipy's `get_window`, periodic (`fftbins=True`), the
     convention for spectral work, where a frame is one period of a
-    signal assumed to repeat. `parameter` is the Tukey window's alpha,
-    the Kaiser window's beta, the force window's width or the
-    exponential window's end value, the default in `WINDOW_PARAMETERS`
-    when None; other windows ignore it. The force and exponential
-    windows are `force_window` and `exponential_window`, the force
-    window's width and fall rounded to whole samples. A length under one
-    is refused.
+    signal assumed to repeat. `parameter` is the Tukey window's alpha or
+    the Kaiser window's beta, the default in `WINDOW_PARAMETERS` when
+    None; other windows ignore it. A length under one is refused.
     """
     # These were hand-written cosine sums until 2026-08-28, because
     # scipy was a test-only dependency and fifty lines was the better
@@ -182,160 +155,12 @@ def window_shape(name: str | None, length: int,
     key = normalize_window(name)
     if length < 1:
         raise ValueError('a window needs at least one sample')
-    if key in ('force', 'exponential'):
-        value = (WINDOW_PARAMETERS[key][1] if parameter is None
-                 else float(parameter))
-        if key == 'force':
-            width = nearest_sample(value * length)
-            return force_window(length, width, nearest_sample(FORCE_FALL * width))
-        return exponential_window(length, exponential_tau(value, length))
     if key in WINDOW_PARAMETERS:
         what, default, _bounds = WINDOW_PARAMETERS[key]
         del what
         return get_window((key, default if parameter is None
                            else float(parameter)), length, fftbins=True)
     return get_window(key, length, fftbins=True)
-
-
-def nearest_sample(value: float) -> int:
-    """`value` samples rounded to the nearest whole sample, a half
-    rounded up, never below zero: the one rounding the transient
-    windows use, the same in every language (Python's own `round`
-    rounds a half to even)."""
-    return max(0, int(np.floor(float(value) + 0.5)))
-
-
-def force_window(length: int, width: int, fall: int = 0) -> np.ndarray:
-    """The force window: one over the force pulse, a half-cosine fall to
-    zero, zero after.
-
-    For sample n of a frame of `length` samples, `width` W and `fall` F
-    (both in samples):
-
-        w[n] = 1                                  for n < W
-        w[n] = (1 + cos(pi (n - W) / F)) / 2      for W <= n < W + F
-        w[n] = 0                                  for n >= W + F
-
-    so the fall starts at one on sample W and would reach zero on sample
-    W + F, which is the first zero. A fall of 0 is a plain cut. The
-    window starts at the frame's first sample, so a frame taken with a
-    pre-trigger holds its pre-trigger samples at one; the width is the
-    pre-trigger and the pulse together.
-
-    It keeps the force pulse and takes away what the force channel holds
-    after it (noise, and the ringing of the hammer's own structure),
-    which would otherwise be read as force over the whole frame. It
-    cures nothing about a second hit inside the frame: a double hit is a
-    second force the structure felt, and cutting it from the force
-    channel leaves it in every response.
-
-    The definition is to be confirmed against the cited source by the
-    lead.
-
-    Parameters
-    ----------
-    length : int
-        The frame's samples, at least one.
-    width : int
-        The samples held at one, from the frame's first; at most
-        `length`.
-    fall : int, optional
-        The samples of the half-cosine fall after them.
-
-    Returns
-    -------
-    numpy.ndarray
-        One value per sample.
-
-    Raises
-    ------
-    ValueError
-        For a length under one, or a width or fall below zero.
-    """
-    length, width, fall = int(length), int(width), int(fall)
-    if length < 1:
-        raise ValueError('a window needs at least one sample')
-    if width < 0 or fall < 0:
-        raise ValueError('the force window\'s width and fall are whole samples, '
-                         'zero or more')
-    n = np.arange(length, dtype=np.float64)
-    out = np.zeros(length)
-    out[n < width] = 1.0
-    if fall > 0:
-        falling = (n >= width) & (n < width + fall)
-        out[falling] = 0.5 * (1.0 + np.cos(np.pi * (n[falling] - width) / fall))
-    return out
-
-
-def exponential_tau(end: float, length: int) -> float:
-    """The time constant, in samples, of an exponential window whose
-    value at the last sample of a frame of `length` samples is `end`:
-    ``(length - 1) / -ln(end)``, infinite for an end of one (no decay).
-
-    Parameters
-    ----------
-    end : float
-        The window's last value, above 0 and at most 1.
-    length : int
-        The frame's samples.
-
-    Returns
-    -------
-    float
-        Samples.
-
-    Raises
-    ------
-    ValueError
-        For an end outside (0, 1].
-    """
-    end = float(end)
-    if not 0.0 < end <= 1.0:
-        raise ValueError(f'an exponential window ends between 0 and 1; {end:g} does not')
-    if end == 1.0 or int(length) < 2:
-        return float('inf')
-    return (int(length) - 1) / -np.log(end)
-
-
-def exponential_window(length: int, tau: float) -> np.ndarray:
-    """The exponential window: ``w[n] = exp(-n / tau)``, n from the
-    frame's first sample, `tau` in samples (a time constant tau_s in
-    seconds at a rate fs is ``tau_s * fs`` samples).
-
-    It makes a response that has not died out by the end of the frame
-    die out inside it, so the frame holds the whole response and leaks
-    nothing. It does that by adding damping: a mode's decay rate becomes
-    its own plus 1 / tau_s, so the damping ratio a fit reads from the
-    windowed FRF at natural frequency f_n is high by about
-    1 / (2 pi f_n tau_s) (`core.modal_test.window_damping`). The time
-    constant is kept with every FRF so that can be taken back out.
-
-    The definition is to be confirmed against the cited source by the
-    lead.
-
-    Parameters
-    ----------
-    length : int
-        The frame's samples, at least one.
-    tau : float
-        The time constant in samples, above zero; infinite for no decay.
-
-    Returns
-    -------
-    numpy.ndarray
-        One value per sample.
-
-    Raises
-    ------
-    ValueError
-        For a length under one or a time constant not above zero.
-    """
-    tau = float(tau)
-    if int(length) < 1:
-        raise ValueError('a window needs at least one sample')
-    if not tau > 0.0:
-        raise ValueError('an exponential window\'s time constant is above zero')
-    return np.exp(-np.arange(int(length), dtype=np.float64) / tau)
 
 
 #: the flat rail's proportions, in fractions of the visible height.

@@ -224,6 +224,8 @@ def _superseded(records: Sequence[Mapping[str, Any]]) -> set[int]:
 
 
 def _window_words(record: Mapping[str, Any], block: int | None) -> str:
+    from ..core.modal_test import tau_words
+
     window = record.get(_w('window'))
     if not isinstance(window, Mapping):
         return 'windows not recorded'
@@ -238,9 +240,7 @@ def _window_words(record: Mapping[str, Any], block: int | None) -> str:
             width, fall = one.get(_w('force_width')), one.get(_w('force_fall'))
             part = 'force window'
             if isinstance(width, (int, float)):
-                part += f' {width * 100:g} % of the block'
-                if block:
-                    part += f' ({width * block:g} samples)'
+                part += f' {width * 100:g} % of the block after the trigger'
             if isinstance(fall, (int, float)):
                 part += f', falling over a further {fall * 100:g} % of its width'
             said.append(f'{part} on {words}')
@@ -251,7 +251,7 @@ def _window_words(record: Mapping[str, Any], block: int | None) -> str:
         tau = exponential.get(_w('tau_s'))
         part = 'exponential window on every channel'
         if isinstance(tau, (int, float)) and tau > 0:
-            part += f', tau {tau:g} s (adds a decay rate of {1.0 / tau:g} 1/s)'
+            part = f'{tau_words(tau)} (adds a decay rate of {1.0 / tau:g} 1/s)'
         end = exponential.get(_w('end'))
         if isinstance(end, (int, float)):
             part += f', ending at {end * 100:g} %'
@@ -262,15 +262,15 @@ def _window_words(record: Mapping[str, Any], block: int | None) -> str:
 def _averaging(run: run_folder.RunFolder, records: Sequence[Mapping[str, Any]],
                lines: np.ndarray, lacked: list[str]) -> Any:
     """The averaging the FRFs were estimated with: the block, the averages
-    and the window every channel shares (the exponential window by its end
-    value at this block and rate, else the shaker's window, else none)."""
+    and the shaker's window, or none (a boxcar) for an impact's frames,
+    whose force and exponential windows each record's comment says
+    (`core.modal_test.tau_words`)."""
     from ..core.averaging import Averaging, normalize_window
 
     config = _config(run)
     block = _number(config.get(_w('block')))
     if block is None or block < 2 or not records or len(lines) < 2:
         return None
-    rate = block * float(np.median(np.diff(lines)))
     taus, kinds = set(), set()
     for record in records:
         window = record.get(_w('window')) if isinstance(record.get(_w('window')),
@@ -283,23 +283,17 @@ def _averaging(run: run_folder.RunFolder, records: Sequence[Mapping[str, Any]],
                   if isinstance(response, Mapping) else 'boxcar')
     if len(taus) > 1 or len(kinds) > 1:
         lacked.append('the measurements were windowed differently, so the FRFs carry no '
-                      'averaging; each record\'s comment says its windows')
+                      'averaging and no one exponential window; each record\'s comment says '
+                      'its windows')
         return None
-    tau, = taus
     averages = _number(records[0].get(_w('averages'))) or 1
     shaker = config.get(_w('shaker')) if isinstance(config.get(_w('shaker')), Mapping) else {}
     overlap = shaker.get(_w('overlap'))
     overlap = float(overlap) if isinstance(overlap, (int, float)) and 0 <= overlap < 1 else 0.0
-    if tau is not None:
-        end = float(np.exp(-(block - 1) / (tau * rate)))
-        return Averaging(frame_length=block, overlap=overlap, window='exponential',
-                         frames=averages, window_parameter=max(end, 1e-12))
     kind, = kinds
     try:
         window = normalize_window(kind)
     except ValueError:
-        return None
-    if window in ('force', 'exponential'):
         return None
     return Averaging(frame_length=block, overlap=overlap, window=window, frames=averages)
 

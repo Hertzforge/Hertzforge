@@ -20,42 +20,47 @@ That is valid when
 - the structure is linear and reciprocal: its mass, stiffness and
   damping matrices are symmetric, which a passive structure's are and a
   spinning, actively controlled or aeroelastically loaded one's need not
-  be. Nothing in the records can show this; it is the test's
-  assumption, and each turned record says it was turned.
+  be. Then the receptance (K - omega^2 M + i omega C)^-1 is the inverse
+  of a symmetric matrix and is symmetric itself, and so are its
+  velocity and acceleration forms. Nothing in the records can show
+  this; it is the test's assumption, and each turned record says it was
+  turned.
 
 Anything else is refused by name (`fixed_reference_refusal`). Each
 turned record's comment begins `TRANSPOSED` and names what it was
 measured as, so the form travels with the object through a save.
 
-**The exponential window's damping.** A response windowed by exp(-t / tau)
-decays faster by 1 / tau: each mode's pole moves left by exactly 1 / tau,
-so a fit of the windowed FRF reads a decay rate of zeta w_n + 1 / tau
-and a damping ratio high by about 1 / (2 pi f_n tau)
-(`window_damping`). `less_window_damping` takes it back out exactly,
-keeping the damped frequency, and `note_window_damping` writes it beside
-each mode of a published fit whose FRF carries the window
-(`frf_tau`), leaving the fitted values as the fit made them.
+**The exponential window's damping.** A response windowed by
+exp(-t / tau) decays faster by 1 / tau: each mode's pole moves left by
+exactly 1 / tau, so a fit of the windowed FRF reads a decay rate of
+zeta omega_n + 1 / tau and a damping ratio high by 1 / (tau omega_n) to
+first order (`window_damping`). The first-order correction holds for
+light damping, and is badly off when the damping is very small and
+poorly estimated; capturing more of the decay is better than correcting.
+`less_window_damping` takes the shift back out exactly, keeping the
+damped frequency, and `note_window_damping` writes it beside each mode
+of a published fit whose FRF carries the window (`frf_tau`), leaving the
+fitted values as the fit made them.
 
 **Estimating again.** `reprocess` estimates a measurement's FRFs and
 coherence again from its frames, with the windows, block and frames
 chosen, by the analysis core's own estimators (`TimeHistory.compute_frfs`,
-`TimeHistory.compute_multiple_coherence`): the windows are applied to
-each frame first, the force window to the references only, and each
-frame is then one average.
+`TimeHistory.compute_multiple_coherence`): the windows
+(`core.impact_windows`) are applied to each frame first, the force
+window to the references only from the frame's trigger, and each frame
+is then one average.
 
 References
 ----------
-The reciprocity of a linear structure's FRFs and the exponential
-window's added damping are set out in the modal testing texts; both are
-to be confirmed against the cited source by the lead.
-
-1. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
-   Application*, 2nd ed. Research Studies Press. Reciprocity of the
-   receptance matrix of a linear structure, the roving hammer test it
-   allows, and the windows of an impact test.
-2. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
-   Experimental Modal Analysis*. Research Studies Press. The shift of a
-   pole by an exponential window and its correction.
+1. Trethewey, M. W., & Cafeo, J. A. (1992). "Tutorial: Signal
+   Processing Aspects of Structural Impact Testing." *International
+   Journal of Analytical and Experimental Modal Analysis* 7(2),
+   129-149. The exponential window (equation 22) and the correction of
+   the damping it adds, zeta_corrected = zeta - 1 / (tau omega_n)
+   (equation 27), with its caution for very light damping.
+2. Fladung, W. A. (1997). "Windows Used for Impact Testing."
+   *Proceedings of IMAC XV*. The force window, and the exponential
+   window applied to the force and the response alike.
 """
 
 from __future__ import annotations
@@ -308,36 +313,50 @@ def less_window_damping(frequency: Any, damping: Any, tau: float
     return natural / (2.0 * np.pi), ratio
 
 
+def tau_words(tau: float) -> str:
+    """How a record's comment says the exponential window it was estimated
+    with, which `frf_tau` reads back: ``'exponential window on every
+    channel, tau 0.5 s'``.
+
+    Parameters
+    ----------
+    tau : float
+        The time constant, s.
+
+    Returns
+    -------
+    str
+    """
+    return f'{TAU_WORDS} {float(tau):.12g} s'
+
+
+#: what begins `tau_words`
+TAU_WORDS = 'exponential window on every channel, tau'
+
+_TAU = re.compile(re.escape(TAU_WORDS) + r' ([0-9.eE+-]+) s')
+
+
 def frf_tau(frf: Any) -> float | None:
     """The exponential window's time constant, in seconds, an FRF was
-    estimated with, from its averaging, or None when it was not.
-
-    The averaging holds the window by its end value over a frame
-    (`core.averaging.exponential_tau`); the rate is the frame's samples
-    times the line spacing.
+    estimated with, or None when it was not: from its records' comments
+    (`tau_words`), which survive a save, when every record names the same
+    time constant.
 
     Parameters
     ----------
     frf : DataArray
-        An FRF, or any object with an `averaging`.
+        An FRF, or any object with comments.
 
     Returns
     -------
     float or None
     """
-    from .averaging import exponential_tau
-
-    averaging = getattr(frf, 'averaging', None)
-    if averaging is None or averaging.window != 'exponential':
+    comments = list(getattr(frf, 'comment', None) or [])
+    found = {float(m.group(1)) if (m := _TAU.search(str(c))) else None for c in comments}
+    if len(found) != 1:
         return None
-    lines = np.asarray(getattr(frf, 'abscissa', ()), dtype=np.float64)
-    if len(lines) < 2:
-        return None
-    spacing = float(np.median(np.diff(lines)))
-    tau = exponential_tau(float(averaging.window_parameter), averaging.frame_length)
-    if not spacing > 0.0 or not np.isfinite(tau):
-        return None
-    return tau / (averaging.frame_length * spacing)
+    tau, = found
+    return tau if tau is not None and np.isfinite(tau) and tau > 0.0 else None
 
 
 def window_note(frequency: float, damping: float, tau: float) -> str:
@@ -432,15 +451,17 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
     """A measurement's FRFs and coherence estimated again from its frames.
 
     `history` holds the measurement's frames, a record per channel per
-    frame (a converted Modal Test run's measurement frames). Each frame
-    is cut to its first `block` samples, windowed (the force window on
-    the references, the exponential window on every channel, or the
-    shaker window on every channel), and is then one average of the
-    core's own estimate (`TimeHistory.compute_frfs` and
-    `TimeHistory.compute_multiple_coherence`, on the channels' roles).
-    With one reference the coherence is the ordinary coherence (the
-    multiple coherence of one reference is that) as a `Coherence` of each
-    response against it; with several, a `MultipleCoherence`.
+    frame (a converted Modal Test run's measurement frames), timed from
+    the trigger: the samples at negative times are the pre-trigger. Each
+    frame is cut to its first `block` samples, windowed (the force window
+    on the references from the trigger, the exponential window on every
+    channel, or the shaker window on every channel; `core.impact_windows`),
+    and is then one average of the core's own estimate
+    (`TimeHistory.compute_frfs` and `TimeHistory.compute_multiple_coherence`,
+    on the channels' roles). With one reference the coherence is the
+    ordinary coherence (the multiple coherence of one reference is that)
+    as a `Coherence` of each response against it; with several, a
+    `MultipleCoherence`.
 
     Parameters
     ----------
@@ -449,11 +470,12 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
     method : str, default 'H1'
         'H1', 'H2' or 'Hv'.
     force : float, optional
-        The force window's width as a fraction of the block, on the
-        references; none when omitted.
+        The force window's width as a fraction of the block after the
+        trigger, on the references (`impact_windows.force_width`); none
+        when omitted.
     exponential : float, optional
-        The exponential window's end value, on every channel; none when
-        omitted.
+        The exponential window's end value at the block's last sample,
+        on every channel; none when omitted.
     block : int, optional
         Samples of each frame to use, from its first; the whole frame
         when omitted.
@@ -471,13 +493,23 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
     Raises
     ------
     ValueError
-        For a block longer than the frames or under two samples, no
-        frames picked, a capture the history does not hold, a shaker
-        window beside a transient one, a reference that holds one value
-        through a frame (a dead channel), or anything the estimators refuse
-        (too few frames for the references, a frame that is not finite).
+        For a block longer than the frames or under two samples, or that
+        ends before the trigger; no frames picked, a capture the history
+        does not hold; a shaker window beside a transient one; a force
+        window that is not one (`impact_windows.force_window`); a
+        reference that holds one value through a frame once windowed (a
+        dead channel, or a window that removed the pulse, named so); or
+        anything the estimators refuse (too few frames for the
+        references, a frame that is not finite).
     """
-    from .averaging import Averaging, exponential_tau, window_shape
+    from .averaging import Averaging, window_shape
+    from .impact_windows import (
+        exponential_tau,
+        exponential_window,
+        force_fall,
+        force_width,
+        force_window,
+    )
 
     length = len(history.abscissa)
     block = length if block is None else int(block)
@@ -487,6 +519,10 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
     if shaker_window is not None and (force is not None or exponential is not None):
         raise ValueError('a shaker window is the whole frame\'s; it is not used with the '
                          'force or exponential window')
+    pre = int(np.count_nonzero(np.asarray(history.abscissa[:block]) < 0.0))
+    if force is not None and pre >= block:
+        raise ValueError(f'the block of {block} samples ends before the trigger at sample '
+                         f'{pre}, so there is no pulse to hold')
     held = history.capture_indices()
     count = max(held) + 1 if held else 0
     chosen = sorted(set(range(count) if captures is None else (int(c) for c in captures)))
@@ -499,22 +535,29 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
     roles = history.channel_roles()
     keep = [i for i, c in enumerate(held) if c in chosen]
     rows = np.array(history.ordinate[keep, :block], dtype=np.float64)
-    for k, i in enumerate(keep):
-        identity = (history.response_dof[i], history.ordinate_dim[i])
-        if roles.get(identity) == 'reference' and np.isfinite(rows[k]).all() and not np.any(
-                rows[k] != rows[k, 0]):
-            frame = history.block[i] if history.block is not None else f'capture {held[i] + 1}'
-            raise ValueError(f'the reference {identity[0]} holds one value through {frame}: '
-                             'a dead reference gives no FRF; leave that frame out')
     every = np.ones(block)
+    tau = None
     if exponential is not None:
-        every = every * window_shape('exponential', block, exponential)
+        tau = exponential_tau(exponential, block)
+        every = every * exponential_window(block, tau)
     if shaker_window is not None:
         every = every * window_shape(shaker_window, block)
-    on_force = window_shape('force', block, force) if force is not None else np.ones(block)
+    width = force_width(force, block, pre) if force is not None else None
+    on_force = force_window(block, pre, width) if width is not None else np.ones(block)
     for k, i in enumerate(keep):
         identity = (history.response_dof[i], history.ordinate_dim[i])
-        rows[k] *= every * (on_force if roles.get(identity) == 'reference' else 1.0)
+        reference = roles.get(identity) == 'reference'
+        before = rows[k].copy()
+        rows[k] *= every * (on_force if reference else 1.0)
+        if reference and np.isfinite(rows[k]).all() and not np.any(rows[k] != rows[k, 0]):
+            frame = history.block[i] if history.block is not None else f'capture {held[i] + 1}'
+            if np.any(before != before[0]):
+                raise ValueError(
+                    f'the reference {identity[0]} holds one value through {frame} once '
+                    f'windowed: the force window holds one to sample {pre + width} and the '
+                    'force there is nothing; widen it or check the trigger')
+            raise ValueError(f'the reference {identity[0]} holds one value through {frame}: '
+                             'a dead reference gives no FRF; leave that frame out')
     frames = TimeHistory(history.abscissa[:block], rows,
                          response_dof=[history.response_dof[i] for i in keep],
                          ordinate_dim=[history.ordinate_dim[i] for i in keep],
@@ -536,19 +579,17 @@ def reprocess(history: TimeHistory, *, method: str = 'H1',
         coherence = multiple
     said = [f'{len(chosen)} frames' + (f' (captures {", ".join(str(c + 1) for c in chosen)})'
                                          if captures is not None else '')]
-    if force is not None:
-        said.append(f'force window {force:g} of the block on the references')
-    if exponential is not None:
-        tau = exponential_tau(exponential, block)
-        said.append(f'exponential window ending at {exponential:g} '
-                    f'(tau {tau:.6g} samples) on every channel')
+    if width is not None:
+        said.append(f'force window on the references, {width} samples after the trigger '
+                    f'at sample {pre} and a fall of {force_fall(width)}')
+    if tau is not None:
+        rate = 1.0 / float(np.median(np.diff(history.abscissa[:block])))
+        said.append(f'{tau_words(tau / rate)}, ending at {exponential:g}')
     if shaker_window is not None:
         said.append(f'{shaker_window} window on every channel')
-    frf.comment = [f'{c}; {", ".join(said)}' for c in frf.comment]
+    frf.comment = [f'{c}; {"; ".join(said)}' for c in frf.comment]
     frf.averaging = Averaging(frame_length=block, frames=len(chosen),
-                              window='exponential' if exponential is not None else (
-                                  shaker_window or 'boxcar'),
-                              window_parameter=exponential)
+                              window=shaker_window or 'boxcar')
     for made in (frf, coherence):
         made.source = history.source
     return frf, coherence

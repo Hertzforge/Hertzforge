@@ -15,8 +15,8 @@ from .protocol import refused
 FRAMES = Param('source', 'Measurement frames', 'enum', options_from='objects:time_history')
 ESTIMATOR = Param('method', 'Estimator', 'enum', default='H1',
                   options=(Option('H1', 'H1'), Option('H2', 'H2'), Option('Hv', 'Hv')))
-FORCE = Param('force', 'Force window', 'number', default=0.0, unit='of the block', min=0.0,
-              max=1.0, step=0.01)
+FORCE = Param('force', 'Force window', 'number', default=0.0,
+              unit='of the block after the trigger', min=0.0, max=1.0, step=0.01)
 EXPONENTIAL = Param('exponential', 'Exponential window ends at', 'number', default=0.0,
                     unit='of its start', min=0.0, max=1.0, step=0.01)
 BLOCK = Param('block', 'Block', 'integer', default=0, unit='samples', min=0, step=1024)
@@ -31,6 +31,8 @@ def reprocess_modal_test(project: Any, params: dict[str, Any]) -> list[dict]:
     estimated again from its frames, added beside them; a zero force width, a zero
     exponential end, a zero block and a blank list of frames each mean none chosen (no
     window, the whole frame, every frame)."""
+    from hertzforge.core.modal_test import frf_tau
+
     name = params['source']
     history = project[name]
     count = max(history.capture_indices(), default=-1) + 1
@@ -50,6 +52,9 @@ def reprocess_modal_test(project: Any, params: dict[str, Any]) -> list[dict]:
             v.row('Frames', float(made.averaging.frames), '', 'info'),
             v.row('Block', float(made.averaging.frame_length), 'samples', 'info'),
             v.row('Window', made.averaging.window_text(), None, 'info')]
+    tau = frf_tau(made)
+    if tau is not None:
+        rows.append(v.row('Exponential tau', tau, 's', 'info'))
     return [v.reading(f'{name}: {params["method"]} again', rows)]
 
 

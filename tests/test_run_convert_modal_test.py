@@ -46,7 +46,7 @@ def test_modal_test_fixed_hammer_frfs_are_at_each_dof_in_si(tmp_path):
         np.testing.assert_allclose(frf.ordinate[k], rf.modal_accelerance(LINES, k, 0),
                                    rtol=1e-12, atol=1e-12)
     assert frf.comment[0].startswith('H1 from 1 reference, 3 averages; measurement 1;')
-    assert 'force window 5 % of the block (204.8 samples)' in frf.comment[0]
+    assert 'force window 5 % of the block after the trigger' in frf.comment[0]
     assert isinstance(project['modal_coherence'], Coherence)
     assert project['modal_coherence'].reference_dof == ['1Z+'] * 6
     spectra = project['modal_reference_spectra']
@@ -145,7 +145,7 @@ def test_modal_test_two_shakers_carry_multiple_coherence(tmp_path):
 def test_modal_test_window_and_comments_survive_a_save_and_reopen(tmp_path):
     _done, project = _open(tmp_path, 'fixed_hammer', tau_s=0.5)
     frf = project['modal_frf']
-    assert frf.averaging.window == 'exponential'
+    assert frf.averaging.window == 'boxcar'
     assert frf.averaging.frame_length == rf.MODAL_BLOCK and frf.averaging.frames == 3
     assert frf_tau(frf) == pytest.approx(0.5, rel=1e-9)
     assert 'tau 0.5 s (adds a decay rate of 2 1/s)' in frf.comment[0]
