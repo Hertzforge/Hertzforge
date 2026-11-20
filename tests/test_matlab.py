@@ -237,6 +237,39 @@ def test_a_strangers_mat_is_refused_by_name(tmp_path):
         import_file(path)
 
 
+def _version_7_3(path):
+    """An HDF5 file behind the 512-byte header MATLAB writes for '-v7.3',
+    holding one array, one struct and MATLAB's own '#refs#' group."""
+    with h5py.File(path, 'w', userblock_size=512) as f:
+        f.create_dataset('Xx', data=np.zeros((2, 8)))
+        f.create_group('meta')
+        f.create_group('#refs#')
+    text = b'MATLAB 7.3 MAT-file, Platform: test, HDF5 schema 1.00 .'
+    with open(path, 'r+b') as fh:
+        fh.write(text.ljust(116, b' ') + bytes(8) + b'\x00\x02IM')
+
+
+def test_a_version_7_3_file_is_refused_with_what_it_holds(tmp_path):
+    """Another program's export is named by its contents, not told to
+    re-save with '-v7', and MATLAB's own '#refs#' is not listed."""
+    path = str(tmp_path / 'export.mat')
+    _version_7_3(path)
+    with pytest.raises(ValueError) as caught:
+        import_file(path)
+    said = str(caught.value)
+    assert 'version 7.3 file (HDF5)' in said
+    assert 'it holds Xx, meta.' in said
+
+
+def test_an_hdf5_file_named_mat_is_refused_with_what_it_holds(tmp_path):
+    """With no MATLAB header scipy only said 'Unknown mat file type'."""
+    path = str(tmp_path / 'plain.mat')
+    with h5py.File(path, 'w') as f:
+        f.create_dataset('signal', data=np.ones(4))
+    with pytest.raises(ValueError, match='it holds signal\\.'):
+        import_file(path)
+
+
 def test_a_struct_built_to_the_layout_is_read_without_the_stamp(tmp_path):
     """A user's own struct with the documented fields is the one
     unstamped shape accepted — and it comes in as the object it says."""
