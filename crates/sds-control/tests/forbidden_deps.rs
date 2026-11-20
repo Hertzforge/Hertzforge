@@ -300,6 +300,7 @@ const LAW_CRATES: &[&str] = &[
     "hertzforge-law-hinv",
     "hertzforge-law-host",
     "hertzforge-law-mimo-band-average",
+    "hertzforge-law-mimo-broyden-congruence",
     "hertzforge-law-mimo-buzz",
     "hertzforge-law-mimo-independent",
     "hertzforge-law-mimo-min-drive",

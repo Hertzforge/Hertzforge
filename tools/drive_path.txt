@@ -65,6 +65,7 @@ crates/hertzforge-mimo-shock-law-math  the multiple-drive shock law math and its
 crates/hertzforge-mimo-sine-law-math  the multiple-drive sine law math: the laws' steps, the loop-speed rule, the model the drive is carried along
 laws/hinv                           a law file: computes a drive
 laws/mimo-band-average              a law file: computes a drive
+laws/mimo-broyden-congruence        a law file: computes a drive
 laws/mimo-buzz                      a law file: computes a drive
 laws/mimo-independent               a law file: computes a drive
 laws/mimo-min-drive                 a law file: computes a drive

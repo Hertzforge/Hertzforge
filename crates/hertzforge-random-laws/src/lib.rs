@@ -22,9 +22,9 @@
 //! native law's behavior over a whole run.
 //!
 //! Multiple-output Random has its own list, [`LawCatalog::mimo_entries`]: the
-//! eight built-in laws of `hertzforge-mimo-laws` (`pinv_closed`, the default,
+//! nine built-in laws of `hertzforge-mimo-laws` (`pinv_closed`, the default,
 //! `pinv_open`, `shape_svd`, `buzz_match`, `min_drive`, `band_average`, `independent`,
-//! `nearly_independent`), then the imported
+//! `nearly_independent`, `broyden_congruence`), then the imported
 //! `random-mimo` law
 //! files. [`LawCatalog::resolve_mimo`] returns the [`MimoLawFactory`] a MIMO
 //! run builds its law with; a law file runs through the law host's

@@ -100,7 +100,8 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             "min_drive",
             "band_average",
             "independent",
-            "nearly_independent"
+            "nearly_independent",
+            "broyden_congruence"
         ]
     );
     assert_eq!(DEFAULT_MIMO_LAW_ID, "pinv_closed");
@@ -143,6 +144,7 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             ("band average".to_string(), true),
             ("independent drives".to_string(), true),
             ("nearly independent drives".to_string(), true),
+            ("Broyden congruence".to_string(), true),
             ("misbehaving multiple-output fixture".to_string(), false),
             ("zero drive".to_string(), false),
         ]

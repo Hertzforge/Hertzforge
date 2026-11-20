@@ -1056,24 +1056,31 @@ fn where_not_feasible_the_independent_loop_settles_and_the_count_says_why() {
 fn under_noise_the_two_refinements_together_move_the_infeasible_loop_more() {
     // The infeasible 3 x 3 with 1 percent noise, over loops 10 to 30: the
     // spread of the worst control and the mean largest drive change a loop,
-    // at the defaults, published, each refinement alone, and the defaults
-    // with `convergence` 0.5. With both refinements, levels near zero switch
-    // between held at zero and free from loop to loop under the noise.
+    // with both refinements, published, each refinement alone (the
+    // non-negative solve alone is the defaults), and both refinements with
+    // `convergence` 0.5. With both, levels near zero switch between held at
+    // zero and free from loop to loop under the noise.
     let choice = |v: &str| ParamVal::Choice(v.into());
     let settings: Vec<(&str, Vec<(&'static str, ParamVal)>)> = vec![
-        ("defaults", vec![]),
+        (
+            "both refinements (solve nonnegative, solve_weighting target)",
+            vec![("solve_weighting", choice("target"))],
+        ),
         ("published", pub_ind()),
         (
             "weighting only",
             published_with::<IndependentDrivesLaw>(&[("solve_weighting", choice("target"))]),
         ),
         (
-            "non-negative only",
-            published_with::<IndependentDrivesLaw>(&[("solve", choice("nonnegative"))]),
+            "the defaults (solve nonnegative, solve_weighting none)",
+            vec![],
         ),
         (
-            "defaults, convergence 0.5",
-            vec![("convergence", ParamVal::Number(0.5))],
+            "both refinements, convergence 0.5",
+            vec![
+                ("solve_weighting", choice("target")),
+                ("convergence", ParamVal::Number(0.5)),
+            ],
         ),
     ];
     let mut measured = Vec::new();
@@ -1116,8 +1123,8 @@ fn under_noise_the_two_refinements_together_move_the_infeasible_loop_more() {
         assert!((spread - ws).abs() <= 0.05 * ws, "{name}: spread {spread}");
         assert!((mean - wm).abs() <= 0.05 * wm, "{name}: mean change {mean}");
     }
-    // At the defaults the count of held levels changes under the noise;
-    // published and with either refinement alone it does not.
+    // With both refinements the count of held levels changes under the
+    // noise; published and with either refinement alone it does not.
     assert!(measured[0].2 > 0, "{:?}", measured[0]);
     for m in &measured[1..4] {
         assert_eq!(m.2, 0, "{m:?}");
@@ -1627,23 +1634,24 @@ fn with_marquardts_scaling_and_the_level_set_and_exactness_test_off_nearly_gives
 // -------------------------------------------------------------------------
 
 #[test]
-fn at_the_defaults_on_a_decoupled_structure_the_seed_is_short_by_the_constant_and_the_loop_closes_it(
+fn with_the_target_weighting_on_a_decoupled_structure_the_seed_is_short_by_the_constant_and_the_loop_closes_it(
 ) {
-    // The twin, at the defaults, of the decoupled test above: with the
-    // weighting each drive is regularized by the same relative amount, so the
-    // seed is short by c / (1 + c) of every target and each loop cuts the gap
-    // by the same factor again.
+    // The twin, with the weighting by the target (off by default), of the
+    // decoupled test above: with the weighting each drive is regularized by
+    // the same relative amount, so the seed is short by c / (1 + c) of every
+    // target and each loop cuts the gap by the same factor again.
     let h = decoupled(1, 4);
     let mut s = Synthetic::with_plant(1, h, BAND, 0.0);
     s.frf = s.plant.clone();
-    let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+    let target = [("solve_weighting", ParamVal::Choice("target".into()))];
+    let mut law = IndependentDrivesLaw::with_params(&s.setup, &target).expect("law");
     let run = closed_loop(&mut law, &s, 30);
     let gaps: Vec<f64> = run
         .drives()
         .map(|d| autospectra_gap(&congruence(&s.plant, d), &s.setup.reference))
         .collect();
     println!(
-        "decoupled 4 x 4 at the defaults: seed {:.3e}, loop 5 {:.3e}, loop 10 {:.3e}, loop 30 {:.3e}",
+        "decoupled 4 x 4, weighting by the target: seed {:.3e}, loop 5 {:.3e}, loop 10 {:.3e}, loop 30 {:.3e}",
         gaps[0], gaps[5], gaps[10], gaps[30]
     );
     let c: f64 = 0.01;
@@ -1670,7 +1678,9 @@ fn with_targets_a_thousand_apart_both_drives_converge_at_the_same_rate() {
         reference.set(line, 1, 1, C64::new(1.0, 0.0));
     }
     let s = run_on(5, h.clone(), h, reference, BAND, 0.0);
-    let mut law = IndependentDrivesLaw::with_params(&s.setup, &[]).expect("law");
+    // With the weighting by the target, off by default.
+    let target = [("solve_weighting", ParamVal::Choice("target".into()))];
+    let mut law = IndependentDrivesLaw::with_params(&s.setup, &target).expect("law");
     let run = closed_loop(&mut law, &s, 6);
     for (l, d) in run.drives().enumerate() {
         let y = congruence(&s.plant, d);
@@ -1696,5 +1706,67 @@ fn with_targets_a_thousand_apart_both_drives_converge_at_the_same_rate() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn with_the_target_weighting_the_independent_loop_settles_low_where_the_targets_cannot_all_be_met()
+{
+    // Why the weighting is off by default in `independent` (its Choice 21).
+    // Tall structures, the estimate exact, no noise: the targets are the
+    // autospectra of uncorrelated drives a decade apart in level, each moved
+    // by a random factor within 3 dB, so no uncorrelated drives meet them and
+    // the targets differ between controls by more than a decade. The level
+    // error of a control is 10 log10 of its response's power over its
+    // target's, summed over the band; the mean over the controls after 30
+    // loops is negative with the weighting on and near zero with it off.
+    for (nc, nd, seed) in [(6usize, 3usize, 90u64), (12, 6, 94)] {
+        let h = well_conditioned(seed, nc, nd, LINES);
+        let mut rng = Rng::new(seed);
+        let mut g = HermitianStack::zeros(LINES, nd);
+        for line in BAND.0..BAND.1 {
+            for d in 0..nd {
+                let level = 1e-2 * 10f64.powf(2.0 * d as f64 / (nd - 1) as f64);
+                g.set(line, d, d, C64::new(level, 0.0));
+            }
+        }
+        let feasible = congruence(&h, &g);
+        let mut reference = HermitianStack::zeros(LINES, nc);
+        let mut apart: f64 = 0.0;
+        for line in BAND.0..BAND.1 {
+            let (mut lo, mut hi) = (f64::MAX, 0.0f64);
+            for k in 0..nc {
+                let off = 10f64.powf(3.0 * (2.0 * rng.uniform() - 1.0) / 10.0);
+                let t = feasible.get(line, k, k).re * off;
+                lo = lo.min(t);
+                hi = hi.max(t);
+                reference.set(line, k, k, C64::new(t, 0.0));
+            }
+            apart = apart.max(hi / lo);
+        }
+        assert!(apart >= 10.0, "{apart}");
+        let s = run_on(seed, h.clone(), h, reference, BAND, 0.0);
+        let mut level = [0.0f64; 2];
+        for (j, w) in ["target", "none"].into_iter().enumerate() {
+            let p = [("solve_weighting", ParamVal::Choice(w.into()))];
+            let mut law = IndependentDrivesLaw::with_params(&s.setup, &p).expect("law");
+            let run = closed_loop(&mut law, &s, 30);
+            let y = congruence(&s.plant, run.last());
+            for k in 0..nc {
+                let (mut a, mut b) = (0.0, 0.0);
+                for line in BAND.0..BAND.1 {
+                    a += y.get(line, k, k).re;
+                    b += s.setup.reference.get(line, k, k).re;
+                }
+                level[j] += 10.0 * (a / b).log10() / nc as f64;
+            }
+        }
+        println!(
+            "{nc} x {nd}, targets up to {apart:.0} times apart: mean level error {:.3} dB with \
+             the weighting by the target, {:.3} dB without",
+            level[0], level[1]
+        );
+        assert!(level[0] < -0.5, "{nc} x {nd}: {} dB", level[0]);
+        assert!(level[1].abs() < 0.25, "{nc} x {nd}: {} dB", level[1]);
     }
 }

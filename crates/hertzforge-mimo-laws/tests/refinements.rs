@@ -685,9 +685,15 @@ fn the_defaults_are_the_refinements() {
             "{}",
             spec.name
         );
+        // The weighting is off by default in `independent` (its Choice 21).
+        let weighting = if spec.name == "independent drives" {
+            "none"
+        } else {
+            "target"
+        };
         assert!(
             format!("{:?}", get("solve_weighting").expect("weighting"))
-                .contains("default: \"target\""),
+                .contains(&format!("default: \"{weighting}\"")),
             "{}",
             spec.name
         );
@@ -711,17 +717,24 @@ fn each_refinement_turned_off_by_its_parameter_changes_the_seed() {
     let h = note_frf();
     let diag = |out: &MimoLoopOutputs| out.drive.diagonal(0);
     // Weighting and the non-negative solve, on case 3, both laws.
+    // `independent` with both refinements on: the weighting is off by default.
     let s3 = setup_for(CASE3);
-    let base = IndependentDrivesLaw::with_params(&s3, &unregularized())
+    let both = || {
+        let mut p = unregularized();
+        p.push(("solve_weighting", choice("target")));
+        p
+    };
+    let base = IndependentDrivesLaw::with_params(&s3, &both())
         .map(|mut l| seed_on(&mut l, &s3, &h))
         .expect("law");
     for (key, off) in [("solve_weighting", "none"), ("solve", "set_to_zero")] {
-        let mut p = unregularized();
+        let mut p: Vec<(&'static str, ParamVal)> =
+            both().into_iter().filter(|(k, _)| *k != key).collect();
         p.push((key, choice(off)));
         let mut law = IndependentDrivesLaw::with_params(&s3, &p).expect("law");
         let other = seed_on(&mut law, &s3, &h);
         println!(
-            "independent case 3: {key} {off} {:?}, defaults {:?}",
+            "independent case 3: {key} {off} {:?}, both refinements {:?}",
             diag(&other),
             diag(&base)
         );

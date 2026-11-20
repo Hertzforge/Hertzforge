@@ -10,8 +10,9 @@
 //! inputs once, as a [`LawSpec`]; the law file's manifest and the controller's
 //! catalog entry are both built from it.
 //!
-//! The eight built-in laws ([`BuiltinMimo`]). All but the sixth are from the
-//! published literature, each cited in its module by author, title and venue:
+//! The nine built-in laws ([`BuiltinMimo`]). All but the sixth and the ninth
+//! are from the published literature, each cited in its module by author,
+//! title and venue:
 //!
 //! - [`PseudoInverseLaw`], the default: the regularized pseudo-inverse drive,
 //!   then Smallwood's closed-loop correction of a factor of the reference.
@@ -41,6 +42,14 @@
 //!   and phase of the response independent drives would produce, then the
 //!   default closed loop.
 //!
+//! The ninth is N. Hunter's, from his unpublished note, used with his
+//! permission:
+//!
+//! - [`BroydenCongruenceLaw`]: autospectra only. The inverse of the reference
+//!   first, then each loop a gain (and a phase) per drive, `X <- D X D^H`,
+//!   which keeps the coherence between drives, solved through a sensitivity
+//!   that a damped Broyden secant update corrects from what each step did.
+//!
 //! And [`ZeroLaw`]: always the zero drive. It proves the path a law takes; it
 //! controls nothing.
 
@@ -48,6 +57,7 @@
 #![warn(missing_docs)]
 
 mod band_average;
+mod broyden;
 mod buzz;
 mod factor;
 mod independent;
@@ -64,6 +74,10 @@ mod zero;
 pub mod law_file;
 
 pub use band_average::BandAverageLaw;
+pub use broyden::{
+    detmath, resonance_gains, BroydenConfig, BroydenCongruenceLaw, LineRecord, BROYDEN_DELTA,
+    FLOOR_REL, MIN_WINDOW_LINES, MODEL_CEILING_FACTOR, STEP_REPEATS,
+};
 pub use buzz::{buzz_reference, BuzzConfig, BuzzMatchedLaw};
 pub use independent::{
     independent_levels, independent_levels_with, nearly_independent_reference,
@@ -103,11 +117,13 @@ pub enum BuiltinMimo {
     Independent,
     /// Nearly independent drives.
     NearlyIndependent,
+    /// N. Hunter's Broyden congruence law.
+    BroydenCongruence,
 }
 
 impl BuiltinMimo {
     /// Every built-in law, the default first.
-    pub const ALL: [BuiltinMimo; 8] = [
+    pub const ALL: [BuiltinMimo; 9] = [
         BuiltinMimo::PseudoInverse,
         BuiltinMimo::OpenLoop,
         BuiltinMimo::ShapeConstrained,
@@ -116,6 +132,7 @@ impl BuiltinMimo {
         BuiltinMimo::BandAverage,
         BuiltinMimo::Independent,
         BuiltinMimo::NearlyIndependent,
+        BuiltinMimo::BroydenCongruence,
     ];
 
     /// The stable id a choice of law names it by.
@@ -129,6 +146,7 @@ impl BuiltinMimo {
             BuiltinMimo::BandAverage => "band_average",
             BuiltinMimo::Independent => "independent",
             BuiltinMimo::NearlyIndependent => "nearly_independent",
+            BuiltinMimo::BroydenCongruence => "broyden_congruence",
         }
     }
 
@@ -148,6 +166,7 @@ impl BuiltinMimo {
             BuiltinMimo::BandAverage => BandAverageLaw::spec(),
             BuiltinMimo::Independent => IndependentDrivesLaw::spec(),
             BuiltinMimo::NearlyIndependent => NearlyIndependentLaw::spec(),
+            BuiltinMimo::BroydenCongruence => BroydenCongruenceLaw::spec(),
         }
     }
 
@@ -166,6 +185,7 @@ impl BuiltinMimo {
             BuiltinMimo::BandAverage => Box::new(BandAverageLaw::build(setup, params)?),
             BuiltinMimo::Independent => Box::new(IndependentDrivesLaw::build(setup, params)?),
             BuiltinMimo::NearlyIndependent => Box::new(NearlyIndependentLaw::build(setup, params)?),
+            BuiltinMimo::BroydenCongruence => Box::new(BroydenCongruenceLaw::build(setup, params)?),
         })
     }
 }

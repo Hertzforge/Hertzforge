@@ -125,6 +125,15 @@ way.
   exactly, and the level set that scales the first drive to the total specified power (nearly
   independent drives); and the open loop form of the nearly-independent-drives law, his law as his
   note runs it.
+- **N. Hunter**, "The Broyden Congruence Law, Step by Step", an unpublished note, 17 November 2026,
+  private communication, 2026, used with his permission: the Broyden congruence law, his law: the
+  first drive from the inverse of the reference, each later drive the last one multiplied by a gain
+  and turned by a phase per drive, the sensitivity of the log response to those gains from the
+  frequency response and corrected each loop by a damped secant update, the model anchor, the
+  common level split, the ridge solve, the step limit and the ceiling.
+- **C. G. Broyden**, "A Class of Methods for Solving Nonlinear Simultaneous Equations",
+  Mathematics of Computation 19, 1965: the secant update the Broyden congruence law corrects its
+  sensitivity with.
 - **L. Jacobs, M. Ross, G. Tipton, G. Nelson, K. Cross, N. Hunter and J. Harvie**, "6-DOF Shaker
   Test Input Derivation from Field Test" and "Experimental Execution of 6DOF Tests Derived from
   Field Tests", IMAC XXXV, 2017: six degree-of-freedom references from field data.

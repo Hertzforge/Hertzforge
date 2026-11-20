@@ -16,8 +16,9 @@
 //! holds that reference, as `buzz_match` and `min_drive` hold theirs.
 //!
 //! By default both laws carry N. Hunter's refinements (see "Refinements by
-//! N. Hunter" below); each one's parameter sets the law back to the published
-//! method. `nearly_independent` also has an open form, his law as his note
+//! N. Hunter" below), except the weighting by the target, which is off by
+//! default in `independent` (Choice 21); each one's parameter sets the law
+//! back to the published method. `nearly_independent` also has an open form, his law as his note
 //! runs it: the same drive on every call, with no correction from the
 //! response.
 //!
@@ -67,14 +68,16 @@
 //! The refinements below are N. Hunter's, from his unpublished note "The
 //! Independent Drive Law, Step by Step" (18 November 2026), a private
 //! communication, and are used with his permission. No published paper gives
-//! them. They are the defaults; the parameter named after each sets it back to
-//! the published form.
+//! them. They are the defaults, except the weighting in `independent`
+//! (Choice 21); the parameter named after each sets it back to the published
+//! form.
 //!
 //! 1. **Weighting by the target** (his step 2). Each control's row of `A` and
 //!    its target autospectrum are divided by that target, so every control's
 //!    error counts in proportion to its own level, and a control with a zero
-//!    target takes no part in the solve on that line. Both laws;
-//!    `solve_weighting` `none` is the published form.
+//!    target takes no part in the solve on that line. Both laws declare it;
+//!    the default in `nearly_independent`, off by default in `independent`
+//!    (Choice 21). `solve_weighting` `none` is the published form.
 //! 2. **Non-negative least squares** (his steps 3 and 4). Where the plain
 //!    solve gives a negative level, the levels are the minimizer of the same
 //!    objective over levels of zero or more, instead of the plain levels with
@@ -170,15 +173,15 @@
 //!    30 the drive changed 1.70 dB a loop on average and up to 3.01 dB (the
 //!    rise limit) while the worst control moved 0.11 dB; with `convergence`
 //!    0.5 the drive changed 0.74 dB on average and up to 1.25 dB
-//!    (`tests/independent.rs`). At the defaults, on a structure where
-//!    independent drives cannot meet the autospectra and levels are held at
-//!    zero, the noise moves the loop more: on an infeasible 3 x 3 structure
-//!    with 1 percent noise, over loops 10 to 30, the worst control moved
-//!    0.63 dB and the drive 2.65 dB a loop on average, against 0.30 dB and
-//!    0.48 dB published and 0.18 to 0.27 dB and 0.44 to 0.45 dB with either
-//!    refinement alone; the number of levels held at zero changed on 4 of
-//!    those 21 loops, and on none in the other three. With `convergence` 0.5
-//!    the defaults gave 0.41 dB and 1.43 dB (`tests/independent.rs`).
+//!    (`tests/independent.rs`). On an infeasible 3 x 3 structure with
+//!    1 percent noise, over loops 10 to 30, the defaults (`solve`
+//!    `nonnegative`, `solve_weighting` `none`) moved the worst control
+//!    0.27 dB and the drive 0.45 dB a loop on average, against 0.30 dB and
+//!    0.48 dB published. With both refinements (`solve_weighting` `target`
+//!    as well), where levels are held at zero, the noise moves the loop more:
+//!    0.63 dB and 2.65 dB, and the number of levels held at zero changed on
+//!    4 of those 21 loops (on none in the other settings); with
+//!    `convergence` 0.5, 0.41 dB and 1.43 dB (`tests/independent.rs`).
 //! 7. **The frequency response.** Both laws use the frequency response the
 //!    core hands them on each call. `S+` is formed again when it changes (the
 //!    FRF updated during the run). The nearly independent reference is formed
@@ -291,6 +294,19 @@
 //!     the response, so its error is whatever the model's error is; the
 //!     core's level, limits, ceilings and aborts act on it as on any law.
 //!     `convergence` has no meaning in it.
+//! 21. **The weighting is off by default in `independent`.** Least squares
+//!     on the relative error, where the targets cannot all be met, settles
+//!     low, because an overshoot of a control costs more than the same
+//!     undershoot. In N. Hunter's law the weighted solve gives only the trial
+//!     drives, whose levels are then replaced by the specified autospectra
+//!     (and set by his level step where that is not exact), so the bias does
+//!     no harm; in `independent` the solved levels are the drive that is
+//!     played, and nothing after the solve sets the level. On the benchmark's
+//!     tuning structures, with the weighting on, `independent` ran 3 to 7 dB
+//!     low on every case, and the non-negative solve without the weighting
+//!     had the level right. This reading and the default are Hertzforge's,
+//!     to be confirmed with the author; `nearly_independent` keeps his
+//!     weighting by default.
 //!
 //! # Ideas Not Built
 //!
@@ -1153,18 +1169,30 @@ fn solve_param() -> ParamDecl {
     }
 }
 
-fn solve_weighting_param() -> ParamDecl {
+/// `solve_weighting`: `none` by default in `independent`, `target` in
+/// `nearly_independent` (Choice 21).
+fn solve_weighting_param(default: &'static str) -> ParamDecl {
+    let help = if default == "target" {
+        "target (the default, N. Hunter's refinement) divides each control's row of the \
+         squared-magnitude system and its target by that target, so each control's error \
+         counts in proportion to its own level and a control with no target on a line \
+         takes no part there; none is the published, unweighted solve. Unlike the \
+         shared error weighting, it changes the result on a square system too."
+    } else {
+        "none (the default) is the published, unweighted solve; target (N. Hunter's \
+         refinement) divides each control's row of the squared-magnitude system and its \
+         target by that target, so each control's error counts in proportion to its own \
+         level and a control with no target on a line takes no part there. Caution: the \
+         solved levels are the drive played, and where the targets cannot all be met the \
+         weighted solve settles low."
+    };
     ParamDecl {
         key: "solve_weighting",
         label: "Solve weighting",
-        help: "target (the default, N. Hunter's refinement) divides each control's row of the \
-               squared-magnitude system and its target by that target, so each control's error \
-               counts in proportion to its own level and a control with no target on a line \
-               takes no part there; none is the published, unweighted solve. Unlike the \
-               shared error weighting, it changes the result on a square system too.",
+        help,
         kind: ParamKindDecl::Choice {
             options: SOLVE_WEIGHTINGS,
-            default: "target",
+            default,
         },
     }
 }
@@ -1306,7 +1334,8 @@ pub struct IndependentConfig {
     /// The fraction of the Eq. 6 step applied: 1, the default, is the
     /// published whole step.
     pub convergence: f64,
-    /// Weight each control's row by its target (N. Hunter's refinement).
+    /// Weight each control's row by its target (N. Hunter's refinement); off
+    /// by default in this law (Choice 21).
     pub weighted: bool,
     /// Negative levels: the non-negative solve (N. Hunter's refinement) or
     /// the published set-to-zero rule.
@@ -1321,7 +1350,7 @@ impl Default for IndependentConfig {
             limit_up_percent: 100.0,
             limit_down_percent: 67.0,
             convergence: 1.0,
-            weighted: true,
+            weighted: false,
             solve: LevelSolve::NonNegative,
         }
     }
@@ -1611,10 +1640,12 @@ impl BuiltinMimoLaw for IndependentDrivesLaw {
                       +100 / -67 percent a loop (Mayes and Rohe); a convergence factor below \
                       1 takes part of the step. It matches autospectra only: \
                       the cross terms are whatever the structure makes of uncorrelated drives. \
-                      By default it carries N. Hunter's refinements, used with his permission: \
-                      each control weighted by its own target, and non-negative least squares \
-                      where the plain solve gives a negative level. The level solve set to \
-                      set_to_zero and the solve weighting to none give the published method.",
+                      By default it carries N. Hunter's non-negative least squares, used with \
+                      his permission, where the plain solve gives a negative level; his \
+                      weighting of each control by its own target can be set, and is off by \
+                      default because, with the solved levels played directly, it settles low \
+                      where the targets cannot all be met. The level solve set to set_to_zero \
+                      gives the published method.",
             params: vec![
                 regularization_constant_param(),
                 ParamDecl {
@@ -1662,7 +1693,7 @@ impl BuiltinMimoLaw for IndependentDrivesLaw {
                 },
                 independent_convergence_param(),
                 solve_param(),
-                solve_weighting_param(),
+                solve_weighting_param("none"),
             ],
             diagnostics: vec![
                 diag_correction(),
@@ -2074,7 +2105,7 @@ impl BuiltinMimoLaw for NearlyIndependentLaw {
                     ..convergence_param()
                 },
                 solve_param(),
-                solve_weighting_param(),
+                solve_weighting_param("target"),
                 level_set_param(),
                 loop_param(),
                 ParamDecl {
