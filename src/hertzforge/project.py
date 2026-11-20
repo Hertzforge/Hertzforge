@@ -6128,6 +6128,7 @@ class Project(dict):
         # silently skipped the second mode of a repeated pair that
         # `suggest` had offered on purpose.
         from .core.modal_fit import ModalFitSession
+        from .core.modal_test import note_window_damping
 
         source = self.name_of(source)
         if at is None and bounds is not None:
@@ -6160,8 +6161,10 @@ class Project(dict):
                     break
         for _ in range(int(refine)):
             session.refine_residues()
-        return self._derive(source, session.shape_set(),
-                            name or f'{source} Modes')
+        # an FRF estimated with an exponential window: each mode notes the
+        # damping it added, and the mode less it (`core.modal_test`)
+        shapes = note_window_damping(session.shape_set(), self[source])
+        return self._derive(source, shapes, name or f'{source} Modes')
 
     def fit_replay_line(self, source: str, name: str, session: Any,
                         coherence: str | None = None) -> str:

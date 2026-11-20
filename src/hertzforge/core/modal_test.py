@@ -363,7 +363,7 @@ def window_note(frequency: float, damping: float, tau: float) -> str:
             'damping')
     if not np.isfinite(zeta):
         return f'{head}; it accounts for all of it, so the damping less it is not known'
-    return f'{head}; less it: {zeta * 100:.4g} % at {f:.6g} Hz'
+    return f'{head}; less it: {zeta * 100:.6g} % at {f:.8g} Hz'
 
 
 _NOTE_VALUES = re.compile(r'less it: ([0-9.eE+-]+) % at ([0-9.eE+-]+) Hz')

@@ -521,22 +521,36 @@ MODAL_SHAPES = np.array([[1.0, 0.9, 0.6, 0.2, -0.3, -0.8],
 MODAL_STEP, MODAL_LINES, MODAL_BLOCK = 0.25, 601, 4096
 
 
-def modal_receptance(f: np.ndarray, j: int, k: int) -> np.ndarray:
+def modal_poles(shift: float = 0.0) -> list[tuple[float, float]]:
+    """Each mode's (natural frequency in Hz, damping ratio), its pole moved
+    left by `shift` 1/s, as an exponential window of time constant 1/shift
+    moves it (the damped frequency kept)."""
+    out = []
+    for fn, zeta in zip(MODAL_FREQUENCIES, MODAL_DAMPING, strict=True):
+        wn = 2 * np.pi * fn
+        decay, damped = zeta * wn + shift, wn * np.sqrt(1 - zeta ** 2)
+        out.append((float(np.hypot(decay, damped) / (2 * np.pi)),
+                    float(decay / np.hypot(decay, damped))))
+    return out
+
+
+def modal_receptance(f: np.ndarray, j: int, k: int, shift: float = 0.0) -> np.ndarray:
     """The structure's displacement at point `j` per force at point `k`
-    (points from 0), m/N, at `f` Hz: symmetric in j and k."""
+    (points from 0), m/N, at `f` Hz: symmetric in j and k; with its poles
+    moved left by `shift` 1/s when given (`modal_poles`)."""
     w = 2 * np.pi * np.asarray(f, dtype=np.float64)
     out = np.zeros(w.shape, dtype=np.complex128)
-    for fn, zeta, phi in zip(MODAL_FREQUENCIES, MODAL_DAMPING, MODAL_SHAPES, strict=True):
+    for (fn, zeta), phi in zip(modal_poles(shift), MODAL_SHAPES, strict=True):
         wn = 2 * np.pi * fn
         out += phi[j] * phi[k] / (wn ** 2 - w ** 2 + 2j * zeta * wn * w)
     return out
 
 
-def modal_accelerance(f: np.ndarray, j: int, k: int) -> np.ndarray:
+def modal_accelerance(f: np.ndarray, j: int, k: int, shift: float = 0.0) -> np.ndarray:
     """The structure's acceleration at point `j` per force at point `k`,
     (m/s^2)/N."""
     w = 2 * np.pi * np.asarray(f, dtype=np.float64)
-    return -(w ** 2) * modal_receptance(f, j, k)
+    return -(w ** 2) * modal_receptance(f, j, k, shift)
 
 
 def _modal_channel(index: int, point: int, unit: str) -> dict[str, Any]:
@@ -560,8 +574,9 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
     measurement has `hits` accepted frames, a rejected double hit and a
     trial hit in its frame lines. `complete` False leaves the run killed:
     no end, the outcome not written. `tau_s` names an exponential window
-    on every channel in each record's window record (the values are the
-    structure's own: the FRFs are written as estimated without it)."""
+    on every channel in each record's window record, and the FRFs are
+    written with the structure's poles moved left by 1 / tau_s, as the
+    window moves them (`modal_poles`)."""
     lines = np.arange(MODAL_LINES) * MODAL_STEP
     pre = 64
     if layout == 'roving_hammer':
@@ -605,7 +620,8 @@ def modal_test_run(folder: str, layout: str = 'roving_hammer', *, hits: int = 3,
                   'references': [_modal_channel(i, p, unit[i]) for i, p in references]}
         frf_records.append({**common, 'estimator': 'H1', 'averages': averages,
                             'window': window})
-        frf_values.append(np.array([[modal_accelerance(lines, j, k) / G * later
+        shift = 0.0 if tau_s is None else 1.0 / tau_s
+        frf_values.append(np.array([[modal_accelerance(lines, j, k, shift) / G * later
                                      for _rk, k in references] for _ri, j in responses]))
         coherence = np.ones((len(responses), len(references), MODAL_LINES)) * 0.99
         coherence[..., 0] = 0.0
