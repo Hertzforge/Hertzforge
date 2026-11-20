@@ -281,3 +281,46 @@ def test_modal_test_a_repeated_layout_leaves_one_copy_of_the_reference_spectra(t
     np.testing.assert_allclose(frf.ordinate[0], 2 * rf.modal_accelerance(LINES, 0, 0),
                                rtol=1e-12)
     assert project['modal_coherence'].num_records == 6
+
+
+def _rewrite(folder, result, old, new):
+    path = os.path.join(folder, 'results', f'{result}.jsonl')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    assert old in text
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace(old, new))
+
+
+def test_modal_test_a_direction_no_dof_spells_is_refused_by_name(tmp_path):
+    folder = rf.modal_test_run(str(tmp_path / 'run'), 'fixed_hammer')
+    for result in ('modal_frf', 'modal_coherence'):
+        _rewrite(folder, result, '"node": 5, "direction": "Z+"', '"node": 5, "direction": "-Z"')
+    done = run_convert.convert(folder)
+    for result in ('modal_frf', 'modal_coherence'):
+        assert any(line.startswith(f"the result '{result}' is kept as arrays")
+                   and "the DOF of channel 5, node 5 and direction '-Z', '5-Z' names no "
+                   "direction" in line for line in done.lacked), done.lacked
+    project = Project.open(done.path)
+    assert 'modal_frf' not in project and 'modal_coherence' not in project
+    assert _record(project).arrays['modal_frf']['values'].shape == (1, 6, 1, rf.MODAL_LINES)
+    assert isinstance(project['modal_reference_spectra'], Psd)
+
+
+@pytest.mark.parametrize('layout, old, new, words', [
+    ('fixed_hammer', '"coherence": "ordinary"', '"coherence": "partial"',
+     "names its coherence 'partial' in its 'coherence' member, not ordinary or multiple"),
+    ('fixed_hammer', ', "coherence": "ordinary"', '',
+     "names its coherence None in its 'coherence' member"),
+    # values of one row per response, as multiple coherence holds, said to be ordinary
+    ('two_shakers', '"coherence": "multiple"', '"coherence": "ordinary"',
+     'record 0 names 6 responses and 2 references and holds values of shape (6, 601)'),
+])
+def test_modal_test_coherence_is_the_kind_each_record_names(tmp_path, layout, old, new, words):
+    folder = rf.modal_test_run(str(tmp_path / 'run'), layout)
+    _rewrite(folder, 'modal_coherence', old, new)
+    done = run_convert.convert(folder)
+    assert any(line.startswith("the result 'modal_coherence' is kept as arrays")
+               and words in line for line in done.lacked), done.lacked
+    project = Project.open(done.path)
+    assert 'modal_coherence' not in project and isinstance(project['modal_frf'], Frf)

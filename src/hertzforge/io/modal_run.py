@@ -165,12 +165,25 @@ class _Channels:
     def dof(self, entry: Mapping[str, Any]) -> str:
         """A record's channel as a DOF string, as `ChannelTable.dof_strings`
         spells one: its node and direction joined, the table's own where
-        the record names neither."""
+        the record names neither.
+
+        Raises
+        ------
+        ValueError
+            Naming the channel, for a node and direction that spell no
+            DOF (``'5-Z'``): an analysis object would refuse it later,
+            with nothing to say which record wrote it.
+        """
+        from ..core.validate import dofs
+
         node, direction = entry.get(_w('node')), entry.get(_w('direction'))
+        index = int(entry[_w('index')])
         if node is None and not direction:
-            return self.dofs[self.row[int(entry[_w('index')])]]
-        table = self.dofs[self.row[int(entry[_w('index')])]]
-        return f'{node if node is not None else ""}{direction or ""}' or table
+            return self.dofs[self.row[index]]
+        text = f'{node if node is not None else ""}{direction or ""}' or self.dofs[
+            self.row[index]]
+        return dofs([text], f'the DOF of channel {index}, node {node!r} and direction '
+                            f'{direction!r},')[0]
 
     def planned(self, index: int, point: int | None) -> str:
         """Channel `index`'s DOF in a measurement of `point`, from the roving
@@ -362,7 +375,16 @@ def _spectral(run: run_folder.RunFolder, result: run_folder.Result, channels: _C
     if abscissa is None or len(abscissa) != lines:
         return None, 'its abscissa is not stated, or not as long as its values'
     frf = result.kind == _w('frf')
-    multiple = not frf and values.ndim == 3
+    multiple = False
+    if not frf:
+        kinds = [record.get(_w('coherence_form')) for record in records]
+        for r, kind in enumerate(kinds):
+            if kind not in ('ordinary', 'multiple'):
+                return None, (f'record {r} names its coherence {kind!r} in its '
+                              f'{_w("coherence_form")!r} member, not ordinary or multiple')
+        if len(set(kinds)) > 1:
+            return None, 'its records name both ordinary and multiple coherence'
+        multiple = kinds[0] == 'multiple'
     held: dict[tuple, tuple[int, int, int | None]] = {}
     for r, record in enumerate(records):
         responses = list(record.get(_w('responses')) or [])
@@ -382,9 +404,12 @@ def _spectral(run: run_folder.RunFolder, result: run_folder.Result, channels: _C
             for j, reference in enumerate([None] if multiple else references):
                 ri, rj = int(response[_w('index')]), None if reference is None else int(
                     reference[_w('index')])
-                key = (channels.dof(response), channels.scale[ri][1],
-                       None if reference is None else channels.dof(reference),
-                       None if rj is None else channels.scale[rj][1])
+                try:
+                    key = (channels.dof(response), channels.scale[ri][1],
+                           None if reference is None else channels.dof(reference),
+                           None if rj is None else channels.scale[rj][1])
+                except ValueError as error:
+                    return None, f'in record {r}, {error}'
                 # a later measurement of the same pair replaces the earlier
                 held.pop(key, None)
                 held[key] = (r, i, j if reference is not None else None)
@@ -470,8 +495,11 @@ def _reference_spectra(result: run_folder.Result, channels: _Channels,
             continue
         for k, reference in enumerate(references):
             s, d, u = channels.scale[int(reference[_w('index')])]
+            try:
+                dofs.append(channels.dof(reference))
+            except ValueError as error:
+                return None, f'in record {r}, {error}'
             rows.append(values[r, k] * (s * s if d != UNKNOWN else 1.0))
-            dofs.append(channels.dof(reference))
             dims.append(f'{d}**2/frequency' if d != UNKNOWN else UNKNOWN)
             units.append(u if d != UNKNOWN else None)
             blocks.append(f'measurement {_said(_number(record.get(_w("measurement"))))}')
@@ -542,7 +570,10 @@ def frames(run: run_folder.RunFolder, table: Any,
         for entry in [*(record.get(_w('responses')) or []),
                       *(record.get(_w('references')) or [])]:
             if isinstance(entry, Mapping) and isinstance(entry.get(_w('index')), int):
-                named.setdefault(m, {})[int(entry[_w('index')])] = channels.dof(entry)
+                try:
+                    named.setdefault(m, {})[int(entry[_w('index')])] = channels.dof(entry)
+                except ValueError:
+                    pass  # the FRF's own refusal names it; the frame keeps the table's
     standing, _said_of = _standing(run)
     shaker = str(_config(run).get(_w('mode')) or '') == 'shaker'
     config_shaker = _config(run).get(_w('shaker'))

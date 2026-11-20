@@ -159,16 +159,12 @@ def test_modal_test_three_triaxial_accelerometers_and_a_roving_hammer_are_turned
     fit = fitting.start(project, {'frf': 'modal_frf fixed reference'})
     assert fit.coherence == 'modal_coherence fixed reference'
     # the record of 5Z+ for a force at 2X+ is the structure's own, turned from 2X+ per 5Z+
-    k = [i for i in range(turned.num_records)
-         if (turned.response_dof[i], turned.reference_dof[i]) == ('5Z+', '2X+')][0]
+    k = next(i for i in range(turned.num_records)
+             if (turned.response_dof[i], turned.reference_dof[i]) == ('5Z+', '2X+'))
     np.testing.assert_allclose(turned.ordinate[k],
-                               rf.modal_accelerance(rf_lines(turned), (4, 'Z+'), (1, 'X+')),
+                               rf.modal_accelerance(turned.abscissa, (4, 'Z+'), (1, 'X+')),
                                rtol=1e-12)
     _check(_fit(project, 'modal_frf fixed reference'))
-
-
-def rf_lines(frf):
-    return np.asarray(frf.abscissa)
 
 
 def test_modal_test_turning_carries_each_hammer_direction_in_the_values(tmp_path):
@@ -179,7 +175,7 @@ def test_modal_test_turning_carries_each_hammer_direction_in_the_values(tmp_path
     assert set(turned.response_dof) == {'1Z+', '2Z-', '3Z+', '4Z+', '5Z-', '6Z+'}
     for dof, point, sign in (('2Z-', 1, -1.0), ('3Z+', 2, 1.0), ('5Z-', 4, -1.0)):
         np.testing.assert_allclose(turned.ordinate[turned.response_dof.index(dof)],
-                                   sign * rf.modal_accelerance(rf_lines(turned), point, 0),
+                                   sign * rf.modal_accelerance(turned.abscissa, point, 0),
                                    rtol=1e-12)
     shapes = _fit(project, 'modal_frf fixed reference')
     _check(shapes)
