@@ -259,10 +259,10 @@ and the drives refused, the drive-lines the controller repaired or held back, an
 against its budget. The seven built-in laws from the literature pass, and so does N. Hunter's
 Broyden congruence law, on all six cases within 1 dB one loop after full level and 0.32 to 0.50 dB
 off on its worst control at the end. Uncorrelated drives cannot
-produce every control's autospectrum on the four 12 x 6 cases. At its defaults, with N. Hunter's
-refinements, independent drives ends three of them 0.86 to 0.92 dB off on its worst control,
-converged by the check's rule, and settles 1.19 dB off on the rigid plate; with the published
-method it settles 1.5 to 2.1 dB off on all four. On the ill-conditioned case the core
+produce every control's autospectrum on the four 12 x 6 cases. At its defaults independent
+drives settles 1.5 to 2.1 dB off on its worst control on all four, as it does with the
+published method; with N. Hunter's weighting by the target set (`solve_weighting` `target`) it
+ends them about 0.9 to 1.2 dB off. On the ill-conditioned case the core
 ends the nearly-independent run by its change cap, a pass by the check's rules. The band-average law passes
 four cases and settles on the two that ask a 4 x 4 plant to converge: it controls band averages,
 so each control's line-by-line rms error holds steady at 1.5 dB there, with every call answered in
