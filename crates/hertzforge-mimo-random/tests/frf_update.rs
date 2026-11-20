@@ -11,7 +11,7 @@ mod common;
 use common::*;
 use hertzforge_hal_sim::plants::StandardPlant;
 use hertzforge_mimo_random::{FrfMode, MimoConfig, MimoQuantity, MimoRandomService, MimoState};
-use hertzforge_sdm::C64;
+use hertzforge_sdm::{HermitianStack, MatrixStack, C64};
 
 /// The response the law sees now, rebuilt from the `Frf` quantity's magnitude and
 /// phase: band lines by controls by drives.
@@ -104,4 +104,90 @@ fn an_updated_response_keeps_the_identifications_timing_after_engaging() {
     );
     assert!(median < 0.05, "median relative distance {median}");
     assert!(p90 < 0.15, "90th percentile relative distance {p90}");
+}
+
+/// A reference whose drive is nearly fully coherent: one strong drive direction
+/// and three about 1e-5 of it on every band line, so the update's truncated H1
+/// (relative 1e-3) drops three of the four drive directions. The response the
+/// law sees must keep the response in force there, not zero and not a blend
+/// toward zero: at blend 1 it stays near the identification on every line and is
+/// never singular where the identification is not.
+#[test]
+fn an_updated_response_keeps_the_response_in_unexcited_drive_directions() {
+    let grid = Grid::standard();
+    let p = StandardPlant::Modal4x4.build();
+    let (mut cfg, table) = physical_config(&p, &grid, 0.5);
+    update_config(&mut cfg);
+    let h = exact_frf(&p, &grid);
+    let x = coherent_drive_sdm(4, &grid, 0.25 / grid_bandwidth(&grid), 1e-5);
+    let r = response_of(&h, &x, &grid);
+    cfg.reference = reference(r, &grid);
+    let mut svc = service(cfg, table, &p, &grid, "frf-update-unexcited");
+    let (ident, updated) = engage_and_update(&mut svc, 4, 4, 4);
+    let d = relative_distances(&updated, &ident);
+    let median = d[d.len() / 2];
+    let p90 = d[d.len() * 9 / 10];
+    let singular = smallest_over_largest(&updated)
+        .iter()
+        .filter(|&&r| r < 1e-6)
+        .count();
+    let singular_ident = smallest_over_largest(&ident)
+        .iter()
+        .filter(|&&r| r < 1e-6)
+        .count();
+    eprintln!(
+        "updated against identified, {} band lines: median {median:.4}, 90th percentile \
+         {p90:.4}; singular lines {singular} (identification {singular_ident})",
+        d.len()
+    );
+    assert_eq!(singular_ident, 0);
+    assert_eq!(singular, 0, "lines where the updated response is singular");
+    assert!(median < 0.05, "median relative distance {median}");
+    assert!(p90 < 0.15, "90th percentile relative distance {p90}");
+}
+
+/// The band's width, Hz.
+fn grid_bandwidth(grid: &Grid) -> f64 {
+    let (lo, hi) = grid.band();
+    (hi - lo) as f64 * grid.df()
+}
+
+/// A drive SDM `psd (a a^H + eps I)` on the band, `a` a fixed complex vector of
+/// unit norm: one direction at `psd`, the others at `eps` of it.
+fn coherent_drive_sdm(n_d: usize, grid: &Grid, psd: f64, eps: f64) -> HermitianStack {
+    let (lo, hi) = grid.band();
+    let mut rng = Rng::new(0xC0_4E);
+    let mut a: Vec<C64> = (0..n_d).map(|_| C64::new(rng.sym(), rng.sym())).collect();
+    let norm = a.iter().map(|v| v.norm_sqr()).sum::<f64>().sqrt();
+    for v in a.iter_mut() {
+        *v /= norm;
+    }
+    let mut g = HermitianStack::zeros(grid.lines(), n_d);
+    for line in lo..hi {
+        for i in 0..n_d {
+            for j in i..n_d {
+                let mut v = a[i] * a[j].conj();
+                if i == j {
+                    v += C64::new(eps, 0.0);
+                }
+                g.set(line, i, j, v * psd);
+            }
+        }
+    }
+    g
+}
+
+/// Per line, the smallest singular value over the largest (one over the condition
+/// number) of a square response.
+fn smallest_over_largest(h: &[Vec<C64>]) -> Vec<f64> {
+    let n = (h[0].len() as f64).sqrt() as usize;
+    let mut m = MatrixStack::zeros(h.len(), n, n);
+    for (l, row) in h.iter().enumerate() {
+        m.line_mut(l).copy_from_slice(row);
+    }
+    hertzforge_sdm::linalg::condition_numbers(&m)
+        .expect("condition numbers")
+        .iter()
+        .map(|c| 1.0 / c)
+        .collect()
 }

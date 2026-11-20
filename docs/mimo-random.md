@@ -269,8 +269,11 @@ MIMO laws are listed apart, and a single-output law is refused here.
 - **Hold** (the default): the law uses the FRF from identification for the whole run.
 - **Update**: the FRF is estimated again every loop from the drive played and the response
   measured, and blended with identification's (the blend sets the weight of each loop's estimate,
-  0.5 by default). An updated FRF is sound only in the directions the drive actually excites, so
-  it follows a plant that changes with level but can wander where the drive is weak. The Drive
+  0.5 by default). A loop measures the FRF only in the drive directions its drive excites; in a
+  direction whose drive power is at most a thousandth of the strongest direction's on that line,
+  the FRF in force is kept as it is rather than set to zero. So the FRF follows a structure whose
+  response changes with level, and a direction the drive rarely excites keeps its last estimate.
+  The Drive
   and Plant page shows the live estimate. A law that reads the multiple coherence is given the
   loop's own alongside, in place of identification's.
 

@@ -225,6 +225,10 @@ pub struct MimoRandomService {
     /// The FRF the law sees (control space by law drives), held or updated.
     frf_law: Option<MatrixStack>,
     frf_law_ident: Option<MatrixStack>,
+    /// The physical FRF of the controls in force (the update mode's; the
+    /// identification's until a loop updates it): `frf_law` before the
+    /// transformations, kept so a drive direction a loop did not excite keeps it.
+    frf_c_in_force: Option<MatrixStack>,
     coherence: Vec<f64>,
     /// The multiple coherence the law sees while the FRF is updated: that of the
     /// loop's own estimate, the one the updated FRF's H1 comes from. `None` holds
@@ -486,6 +490,7 @@ impl MimoRandomService {
             frf_l: None,
             frf_law: None,
             frf_law_ident: None,
+            frf_c_in_force: None,
             coherence: Vec::new(),
             coherence_law: None,
             condition: Vec::new(),
@@ -1558,6 +1563,7 @@ impl MimoRandomService {
         self.coherence = set.coherence.clone();
         self.coherence_law = None;
         self.condition = set.condition.clone();
+        self.frf_c_in_force = Some(h_c.clone());
         self.frf_c = Some(h_c);
         self.frf_l = Some(h_l);
         self.frf_law_ident = Some(frf_law.clone());
@@ -2750,13 +2756,7 @@ impl MimoRandomService {
                 Regularization::Truncated { rcond: 1e-3 },
                 self.band,
             ) {
-                if let (Ok(h_law), Some(base)) = (self.frf_to_law(&h), self.frf_law_ident.clone()) {
-                    let mut m = base;
-                    for (a, b) in m.data_mut().iter_mut().zip(h_law.data()) {
-                        *a = *a * (1.0 - blend) + *b * blend;
-                    }
-                    self.frf_law = Some(m);
-                }
+                self.update_frf(&h, &g_dd, blend);
             }
             // The coherence of the same estimate, so a law that weighs the updated
             // FRF by it reads the two from one measurement. Every term is at full
@@ -2795,6 +2795,72 @@ impl MimoRandomService {
         }
         self.after_loop();
         Ok(self.state.is_running())
+    }
+
+    /// The update mode's FRF from the loop's H1 `h` (physical, at full level) and
+    /// the drive SDM it came from: `(1 - blend) H_id + blend H1` in the drive
+    /// directions the loop excited, and the FRF in force kept as it is in the
+    /// directions the H1's truncation dropped.
+    ///
+    /// The truncated H1 is exactly zero in a dropped direction: the loop's drive
+    /// did not excite it, so the estimate says nothing there. Blending that zero
+    /// in would halve the response in that direction every loop at a blend of
+    /// 0.5, and at a blend of 1 hand the law a singular FRF wherever the drive is
+    /// nearly coherent. So per line `H = (1 - blend) H_id + blend H1 + (H_prev -
+    /// (1 - blend) H_id)(I - P)`, `P` the projector onto the excited directions,
+    /// which is `H_prev` on each dropped direction and the blend on the others. It
+    /// is built on the physical FRF in force and carried to the law's space by
+    /// the transformations, as the identification is; a line with no direction
+    /// dropped is the blend alone.
+    fn update_frf(&mut self, h: &MatrixStack, g_dd: &HermitianStack, blend: f64) {
+        let (Some(h_id), Some(h_prev), Some(base)) = (
+            self.frf_c.as_ref(),
+            self.frf_c_in_force.as_ref(),
+            self.frf_law_ident.clone(),
+        ) else {
+            return;
+        };
+        let Ok(h_law) = self.frf_to_law(h) else {
+            return;
+        };
+        let mut held = h_prev.clone();
+        for (a, b) in held.data_mut().iter_mut().zip(h_id.data()) {
+            *a -= *b * (1.0 - blend);
+        }
+        let Ok((held, lines_dropped)) = pool::h1_unexcited_part(
+            g_dd,
+            Regularization::Truncated { rcond: 1e-3 },
+            &held,
+            self.band,
+        ) else {
+            return;
+        };
+        let held_law = if lines_dropped > 0 {
+            match self.frf_to_law(&held) {
+                Ok(x) => Some(x),
+                Err(_) => return,
+            }
+        } else {
+            None
+        };
+        let mut m = base;
+        for (a, b) in m.data_mut().iter_mut().zip(h_law.data()) {
+            *a = *a * (1.0 - blend) + *b * blend;
+        }
+        let mut phys = h_id.clone();
+        for (a, b) in phys.data_mut().iter_mut().zip(h.data()) {
+            *a = *a * (1.0 - blend) + *b * blend;
+        }
+        if let Some(k) = held_law {
+            for (a, b) in m.data_mut().iter_mut().zip(k.data()) {
+                *a += *b;
+            }
+            for (a, b) in phys.data_mut().iter_mut().zip(held.data()) {
+                *a += *b;
+            }
+        }
+        self.frf_law = Some(m);
+        self.frf_c_in_force = Some(phys);
     }
 
     fn after_loop(&mut self) {

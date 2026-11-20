@@ -874,3 +874,57 @@ fn non_finite_input_is_a_named_error() {
         }
     }
 }
+
+#[test]
+fn h1_plus_the_unexcited_part_is_the_estimate_where_excited_and_the_prior_elsewhere() {
+    // A drive that excites two of four directions (eigenvalues 1 and 0.5; 1e-6 and
+    // 0 fall under rcond 1e-3). H1 is the true response on the excited directions
+    // and exactly zero on the others; adding the prior's part in the dropped
+    // directions gives back the whole response when the prior is the response.
+    let mut rng = Rng(0x4B45_4550);
+    let (lines, c, d) = (3, 3, 4);
+    let h = random_stack(&mut rng, lines, c, d);
+    let gxx = with_eigenvalues(&mut rng, &vec![vec![1.0, 0.5, 1e-6, 0.0]; lines]);
+    let mut gyx = MatrixStack::zeros(lines, c, d);
+    for l in 0..lines {
+        let g: Vec<C64> = (0..d * d).map(|k| gxx.get(l, k / d, k % d)).collect();
+        gyx.line_mut(l)
+            .copy_from_slice(&mul(h.line(l), &g, c, d, d));
+    }
+    let reg = Regularization::Truncated { rcond: 1e-3 };
+    let plain = h1_frf(&gyx, &gxx, reg).unwrap();
+    let (part, dropped) = h1_unexcited_part(&gxx, reg, &h).unwrap();
+    assert_eq!(dropped, vec![2; lines]);
+    let mut kept = plain.clone();
+    for (a, b) in kept.data_mut().iter_mut().zip(part.data()) {
+        *a += *b;
+    }
+    let dist = |a: &MatrixStack, b: &MatrixStack| -> f64 {
+        let n: f64 = a
+            .data()
+            .iter()
+            .zip(b.data())
+            .map(|(x, y)| (x - y).norm_sqr())
+            .sum();
+        let s: f64 = b.data().iter().map(|y| y.norm_sqr()).sum();
+        (n / s).sqrt()
+    };
+    assert!(dist(&kept, &h) < 1e-12, "kept {}", dist(&kept, &h));
+    assert!(dist(&plain, &h) > 0.1, "plain {}", dist(&plain, &h));
+    // The part lies wholly in the dropped directions, so the part times the drive
+    // SDM is at most the dropped eigenvalues' size (1e-6) times the response's.
+    for l in 0..lines {
+        let g: Vec<C64> = (0..d * d).map(|k| gxx.get(l, k / d, k % d)).collect();
+        let pg = mul(part.line(l), &g, c, d, d);
+        let n: f64 = pg.iter().map(|x| x.norm_sqr()).sum::<f64>().sqrt();
+        assert!(n < 1e-5, "line {l}: |part G_xx| = {n}");
+    }
+    // Nothing dropped: exactly zero.
+    let full = with_eigenvalues(&mut rng, &vec![vec![1.0, 0.5, 0.2, 0.1]; lines]);
+    let (z, n) = h1_unexcited_part(&full, reg, &h).unwrap();
+    assert_eq!(n, vec![0; lines]);
+    assert!(z.data().iter().all(|x| *x == ZERO));
+    // A prior of the wrong shape is a named error.
+    let wrong = MatrixStack::zeros(lines, c, d + 1);
+    assert!(h1_unexcited_part(&gxx, reg, &wrong).is_err());
+}
