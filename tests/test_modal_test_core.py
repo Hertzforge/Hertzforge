@@ -239,3 +239,23 @@ def test_modal_test_reprocess_refuses_a_frame_that_is_not_finite_and_an_empty_hi
     # leaving the dead hit out estimates from the rest
     frf, _ = reprocess(dead, captures=[0, 2, 3])
     assert np.isfinite(frf.ordinate).all() and np.abs(frf.ordinate).max() > 0
+
+
+def test_modal_test_runs_of_a_survey_in_parts_merge_then_turn_or_turn_then_merge():
+    """A roving hammer survey taken as two runs (points 1 and 2, then 3 and 4) is one set by
+    `core.merge`, turned before or after: the merge's own rule that a pair measured twice
+    is not one set holds for the turned records as for the measured."""
+    from hertzforge.core.merge import merge, mergeable
+
+    whole = _roving(4)
+    first, second = (Frf(LINES, whole.ordinate[rows], response_dof=['1X+'] * 2,
+                         reference_dof=[whole.reference_dof[i] for i in rows],
+                         ordinate_dim=['acceleration/force'] * 2,
+                         comment=[whole.comment[i] for i in rows])
+                     for rows in ([0, 1], [2, 3]))
+    turned = merge([fixed_reference(first), fixed_reference(second)])
+    assert turned.response_dof == ['1X+', '2X+', '3X+', '4X+'] and is_transposed(turned)
+    after = fixed_reference(merge([first, second]))
+    np.testing.assert_array_equal(after.ordinate, turned.ordinate)
+    assert after.response_dof == turned.response_dof
+    assert 'more than once' in mergeable([fixed_reference(first), fixed_reference(first)])
