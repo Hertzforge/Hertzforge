@@ -256,7 +256,10 @@ with a drive the checks accept, and that no protection trips. Then:
 
 Each case reports the loops it took to converge, the trip if one ended the run, the calls not used
 and the drives refused, the drive-lines the controller repaired or held back, and the slowest call
-against its budget. The five built-in laws from the literature pass. The band-average law passes
+against its budget. The seven built-in laws from the literature pass. Independent drives settles
+off the reference, 1.5 to 2.1 dB on its worst control, on the four 12 x 6 cases: uncorrelated
+drives cannot produce every control's autospectrum there. On the ill-conditioned case the core
+ends the nearly-independent run by its change cap, a pass by the check's rules. The band-average law passes
 four cases and settles on the two that ask a 4 x 4 plant to converge: it controls band averages,
 so each control's line-by-line rms error holds steady at 1.5 dB there, with every call answered in
 time and no trip. The zero-drive law fails every case (the envelope
@@ -274,11 +277,11 @@ whether the file is cleared for hardware.
 
 ### The built-in MIMO laws
 
-Six multiple-output laws are built in, each running natively and also built as a law file from
+Eight multiple-output laws are built in, each running natively and also built as a law file from
 the same source (`laws/mimo-pinv`, `laws/mimo-open-loop`, `laws/mimo-shape`, `laws/mimo-buzz`,
-`laws/mimo-min-drive`, `laws/mimo-band-average`, all on the crate
-`crates/hertzforge-mimo-laws`). The first five are from the published literature; the sixth is
-Brandon Zwink's. There are tests
+`laws/mimo-min-drive`, `laws/mimo-band-average`, `laws/mimo-independent`,
+`laws/mimo-nearly-independent`, all on the crate `crates/hertzforge-mimo-laws`). All but the
+sixth are from the published literature; the sixth is Brandon Zwink's. There are tests
 that hold every law file to its native law within `1e-12`, relative:
 
 | Id | Law | What it does |
@@ -289,6 +292,8 @@ that hold every law file to its native law within `1e-12`, relative:
 | `buzz_match` | Buzz-test matched | Keeps the reference's autospectra and takes each pair's coherence and phase from the identification response, the structure's own response to uncorrelated drive; pairs below a coherence floor are left independent; then the default law's closed loop |
 | `min_drive` | Minimum drive | Takes the reference's cross terms from the drive that needs the least power to produce its autospectra: on each line the drive minimizing the autospectrum residuals plus a trade-off times the drive power, over the positive semi-definite cone, and the plant's predicted response to it as the target (K. Coletti, R. B. Davis and R. Schultz, "Pareto-optimal target definition for multi-axis random vibration testing", 2026; Smallwood's minimum input trace at the exact-control end). The trade-off is picked at the knee of drive against residual, among the trade-offs whose target stays inside the alarm lines and leaves no control more than the largest shortfall under its specification on average over the band (3 dB by default), or set; closed loop by the default law's correction on that target. Parameters: the trade-off (auto or fixed) and its value, the largest shortfall, the residual weighting, convergence factor |
 | `band_average` | Band average | Solves the inverse in fractional-octave bands: for each band, one drive cross-spectral matrix, flat across the band, whose band-averaged response matches the band-averaged reference; how correlated the drives are comes out of the solve, so they can be fully correlated, uncorrelated or partly correlated, with a threshold per band chosen by a sweep at the first solve; then a gain correction band by band from the measured response, and optionally a new solve from the updated FRF. It controls band averages, not lines |
+| `independent` | Independent drives | Uncorrelated drives: on each line the drive autospectra solved from the reference autospectra through the squared magnitudes of the FRF (R. L. Mayes and D. P. Rohe, IMAC XXXIV, 2016; R. Schultz, IMAC XXXVII, 2019), a negative level set to zero (N. Hunter, K. Cross and G. Nelson, IMAC XXXVI, 2018); then each loop the levels played plus the solve of the autospectrum error, times a convergence factor (1 by default, the published whole step), each level's autospectrum held to +100 and -67 percent per loop (the paper says "voltage"; read as amplitude the limit would be +300 / -89 percent of the autospectrum, looser than the core's own cap, and either reading can be set). It counts per line the levels solved below zero before the negative rule and the limit: at the seed, lines where independent drives cannot meet the autospectra; on later loops also a step that overshoots, and a counted level may still be played above zero where the fall limit holds it. It matches autospectra only, with the coherence and phase the structure gives uncorrelated drives. Parameters: the regularization constant, the floor a negative level is set to, the largest rise and fall per loop, convergence factor |
+| `nearly_independent` | Nearly independent drives | Keeps the reference's autospectra and takes each pair's coherence and phase from the response the independent drives would produce through the FRF, rescaled to the specified autospectra (J. S. Cap, S. Norman and D. O. Smallwood, 86th Shock and Vibration Symposium, 2015, Appendix A); then the default law's closed loop. With more controls than drives that reference is in general out of reach, and the loop settles at the part of it the drives can produce. Parameters: the regularization constant, convergence factor |
 
 The band-average law's arithmetic is `crates/hertzforge-law-band-average-math`, a port of
 Brandon Zwink's Python law that the crate's `parity` example holds to it call for call. It leaves

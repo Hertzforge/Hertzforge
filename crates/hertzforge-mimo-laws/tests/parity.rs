@@ -112,6 +112,8 @@ fn file_of(law: BuiltinMimo) -> &'static str {
         BuiltinMimo::BuzzMatched => "hertzforge_law_mimo_buzz",
         BuiltinMimo::MinimumDrive => "hertzforge_law_mimo_min_drive",
         BuiltinMimo::BandAverage => "hertzforge_law_mimo_band_average",
+        BuiltinMimo::Independent => "hertzforge_law_mimo_independent",
+        BuiltinMimo::NearlyIndependent => "hertzforge_law_mimo_nearly_independent",
     }
 }
 
@@ -177,6 +179,23 @@ fn non_default(law: BuiltinMimo) -> (Given, OnePercent) {
                 ("cross_terms", choice("reference")),
             ],
             ("gain_correction_rate", 0.25, 0.2525),
+        ),
+        BuiltinMimo::Independent => (
+            vec![
+                ("regularization_constant", num(0.05)),
+                ("negative_floor", num(0.01)),
+                ("limit_up_percent", num(50.0)),
+                ("limit_down_percent", num(50.0)),
+                ("convergence", num(0.7)),
+            ],
+            ("convergence", 0.5, 0.505),
+        ),
+        BuiltinMimo::NearlyIndependent => (
+            vec![
+                ("regularization_constant", num(0.05)),
+                ("convergence", num(0.8)),
+            ],
+            ("regularization_constant", 0.01, 0.0101),
         ),
     }
 }

@@ -6,7 +6,7 @@ license = "MIT"
 publish = false
 description = "The built-in multiple-output Random control laws, native and as law files from one source"
 
-# The four built-in MIMO Random laws (and the trivial zero law that proves the
+# The eight built-in MIMO Random laws (and the trivial zero law that proves the
 # chain), each written once against the MIMO law boundary of `hertzforge-sdm`.
 # The controller runs them natively; `laws/mimo-*` build each into a law file
 # through the `law-file` feature, which adds the SDK glue. Pure Rust, no system

@@ -10,7 +10,7 @@
 //! inputs once, as a [`LawSpec`]; the law file's manifest and the controller's
 //! catalog entry are both built from it.
 //!
-//! The six built-in laws ([`BuiltinMimo`]). The first five are from the
+//! The eight built-in laws ([`BuiltinMimo`]). All but the sixth are from the
 //! published literature, each cited in its module by author, title and venue:
 //!
 //! - [`PseudoInverseLaw`], the default: the regularized pseudo-inverse drive,
@@ -32,6 +32,15 @@
 //!   whose band-averaged response matches the band-averaged reference, then a
 //!   gain correction band by band. It controls band averages, not lines.
 //!
+//! The seventh and eighth are from the published literature again:
+//!
+//! - [`IndependentDrivesLaw`]: uncorrelated drives, their autospectra solved
+//!   from the squared magnitudes of the frequency response, then corrected
+//!   each loop from the autospectrum error.
+//! - [`NearlyIndependentLaw`]: the reference's autospectra with the coherence
+//!   and phase of the response independent drives would produce, then the
+//!   default closed loop.
+//!
 //! And [`ZeroLaw`]: always the zero drive. It proves the path a law takes; it
 //! controls nothing.
 
@@ -41,6 +50,7 @@
 mod band_average;
 mod buzz;
 mod factor;
+mod independent;
 mod min_drive;
 mod open_loop;
 mod pareto;
@@ -55,6 +65,10 @@ pub mod law_file;
 
 pub use band_average::BandAverageLaw;
 pub use buzz::{buzz_reference, BuzzConfig, BuzzMatchedLaw};
+pub use independent::{
+    independent_levels, nearly_independent_reference, IndependentConfig, IndependentDrivesLaw,
+    IndependentLevels, NearlyIndependentConfig, NearlyIndependentLaw,
+};
 pub use min_drive::{MinimumDriveConfig, MinimumDriveLaw};
 pub use open_loop::{OpenLoopConfig, OpenLoopLaw};
 pub use pinv::{PseudoInverseConfig, PseudoInverseLaw};
@@ -83,17 +97,23 @@ pub enum BuiltinMimo {
     MinimumDrive,
     /// Band-average control.
     BandAverage,
+    /// Independent (uncorrelated) drives.
+    Independent,
+    /// Nearly independent drives.
+    NearlyIndependent,
 }
 
 impl BuiltinMimo {
     /// Every built-in law, the default first.
-    pub const ALL: [BuiltinMimo; 6] = [
+    pub const ALL: [BuiltinMimo; 8] = [
         BuiltinMimo::PseudoInverse,
         BuiltinMimo::OpenLoop,
         BuiltinMimo::ShapeConstrained,
         BuiltinMimo::BuzzMatched,
         BuiltinMimo::MinimumDrive,
         BuiltinMimo::BandAverage,
+        BuiltinMimo::Independent,
+        BuiltinMimo::NearlyIndependent,
     ];
 
     /// The stable id a choice of law names it by.
@@ -105,6 +125,8 @@ impl BuiltinMimo {
             BuiltinMimo::BuzzMatched => "buzz_match",
             BuiltinMimo::MinimumDrive => "min_drive",
             BuiltinMimo::BandAverage => "band_average",
+            BuiltinMimo::Independent => "independent",
+            BuiltinMimo::NearlyIndependent => "nearly_independent",
         }
     }
 
@@ -122,6 +144,8 @@ impl BuiltinMimo {
             BuiltinMimo::BuzzMatched => BuzzMatchedLaw::spec(),
             BuiltinMimo::MinimumDrive => MinimumDriveLaw::spec(),
             BuiltinMimo::BandAverage => BandAverageLaw::spec(),
+            BuiltinMimo::Independent => IndependentDrivesLaw::spec(),
+            BuiltinMimo::NearlyIndependent => NearlyIndependentLaw::spec(),
         }
     }
 
@@ -138,6 +162,8 @@ impl BuiltinMimo {
             BuiltinMimo::BuzzMatched => Box::new(BuzzMatchedLaw::build(setup, params)?),
             BuiltinMimo::MinimumDrive => Box::new(MinimumDriveLaw::build(setup, params)?),
             BuiltinMimo::BandAverage => Box::new(BandAverageLaw::build(setup, params)?),
+            BuiltinMimo::Independent => Box::new(IndependentDrivesLaw::build(setup, params)?),
+            BuiltinMimo::NearlyIndependent => Box::new(NearlyIndependentLaw::build(setup, params)?),
         })
     }
 }

@@ -95,13 +95,28 @@ way.
   Vibration Testing", Experimental Techniques, 2020: the shape-constrained law.
 - **R. Schultz**, "A Demonstration of Force Estimation and Regularization Methods for Multi-Shaker
   Testing", IMAC proceedings: the regularization choices and the condition-number limit of the
-  identification gate.
+  identification gate; and, in IMAC XXXVII, 2019, the independent-drive solve with a negative level
+  set to zero and the rescale of the target from the estimated responses, both independent-drive
+  laws.
+- **R. L. Mayes and D. P. Rohe**, "Physical Vibration Simulation of an Acoustic Environment with
+  Six Shakers on an Industrial Structure", IMAC XXXIV, 2016: the independent-drives law, its real
+  system of squared magnitudes, the Tikhonov pseudo-inverse and its constant, the feedback
+  iteration and its limit of +100 and -67 percent per loop.
+- **J. S. Cap, S. Norman and D. O. Smallwood**, "The Derivation of Multiple-Input-Multiple Output
+  (MIMO) Acoustic Test Specifications to Simulate a Missile Flight", 86th Shock and Vibration
+  Symposium, 2015, Appendix A: the nearly-independent-drives law, the response of independent
+  drives rescaled to the specified autospectra, keeping its coherence and phase, which they credit
+  to D. O. Smallwood, "A Revised Algorithm for Minimum Input Trace to a Multiple-Input /
+  Multiple-Output System (MIMO) to Match the Output Autospectral Densities", 85th Shock and
+  Vibration Symposium, 2014.
 - **P. M. Daborn, C. Roberts, D. J. Ewins and P. R. Ind**, "Next-Generation Random Vibration
   Tests", IMAC XXXII, 2014: the buzz-test method, matching the structure's own coherence and
   phase, as described by Schultz.
 - **N. Hunter, K. Cross and G. Nelson**, "The Cross Spectrum in Multiple Input Multiple Response
   Vibration Testing", IMAC proceedings: which references a signal can have, entering one as
-  autospectra, coherence and phase, and the eigenvalue clamp that repairs one that cannot be had.
+  autospectra, coherence and phase, and the eigenvalue clamp that repairs one that cannot be had;
+  and the nearly independent drive algorithm, its name, its diagonal solve and the rule that a
+  negative drive level is set to zero, for both independent-drive laws.
 - **L. Jacobs, M. Ross, G. Tipton, G. Nelson, K. Cross, N. Hunter and J. Harvie**, "6-DOF Shaker
   Test Input Derivation from Field Test" and "Experimental Execution of 6DOF Tests Derived from
   Field Tests", IMAC XXXV, 2017: six degree-of-freedom references from field data.

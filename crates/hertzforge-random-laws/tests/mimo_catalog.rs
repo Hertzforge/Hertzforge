@@ -98,7 +98,9 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             "shape_svd",
             "buzz_match",
             "min_drive",
-            "band_average"
+            "band_average",
+            "independent",
+            "nearly_independent"
         ]
     );
     assert_eq!(DEFAULT_MIMO_LAW_ID, "pinv_closed");
@@ -139,6 +141,8 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             ("buzz-test matched".to_string(), true),
             ("minimum drive".to_string(), true),
             ("band average".to_string(), true),
+            ("independent drives".to_string(), true),
+            ("nearly independent drives".to_string(), true),
             ("misbehaving multiple-output fixture".to_string(), false),
             ("zero drive".to_string(), false),
         ]
