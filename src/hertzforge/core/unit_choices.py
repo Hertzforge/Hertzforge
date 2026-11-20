@@ -38,6 +38,8 @@ ORDINATE_UNITS = {
     'force': ['lbf', 'N', 'kN'],
     'pressure': ['psi', 'Pa', 'kPa', 'MPa'],
     'voltage': ['V', 'mV'],
+    # a shaker amplifier's current monitor
+    'current': ['A', 'mA'],
     # strain has its own entry although its dimensionality is empty:
     # it is a quantity a channel measures, where 'dimensionless' is
     # the claim that a number has no units at all. Offering a strain

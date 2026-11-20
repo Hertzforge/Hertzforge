@@ -63,7 +63,7 @@ class Spec(NamedTuple):
 #: type and a record's dimension are the same word and the unit
 #: shortlist follows from it — not a second vocabulary to keep in step.
 CHANNEL_TYPES = ('acceleration', 'velocity', 'length', 'force', 'pressure',
-                 'strain', 'voltage', 'temperature')
+                 'strain', 'voltage', 'current', 'temperature')
 
 def record_quantity(quantity: str) -> str:
     """A channel's quantity in the word a record's dimension uses. A record

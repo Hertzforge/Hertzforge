@@ -42,6 +42,7 @@ HAND_CHECKED = [
     ('psi', LBF / IN ** 2, 0.0),
     # voltages
     ('V', 1.0, 0.0), ('mV', 1e-3, 0.0),
+    ('A', 1.0, 0.0), ('mA', 1e-3, 0.0),
     # strains, which are ratios: one meter per meter is one
     ('strain', 1.0, 0.0), ('microstrain', 1e-6, 0.0), ('m/m', 1.0, 0.0),
     # temperatures, the affine ones with their offsets

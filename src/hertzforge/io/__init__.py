@@ -41,6 +41,7 @@ from . import (
     sdynpy_data,
     sdynpy_npz,
     sdynpy_shapes,
+    signalcalc_mat,
     step,
     stl,
     threemf,
@@ -381,6 +382,10 @@ register_importer('step',
                   step.sniff, step.load)
 register_importer('stl', 'CAD triangle mesh (.stl)',
                   stl.sniff, stl.load)
+# ahead of the project layout, whose sniff takes every .mat by its
+# suffix: an HDF5 .mat holding SignalCalc's channel variables is SignalCalc's
+register_importer('signalcalc_mat', 'SignalCalc time history export (.mat)',
+                  signalcalc_mat.sniff, signalcalc_mat.load)
 register_importer('matlab', 'MATLAB file, the project layout (.mat)',
                   matlab.sniff, matlab.load)
 register_importer('escdf', 'Engineering Sciences Common Data Format (.h5)',
@@ -460,6 +465,9 @@ register_exporter('report_template', 'Report template (.hftemplate)',
 # are in that system's units (matlab's module docstring)
 register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
                   matlab.handles, matlab.save)
+# after the project layout, which stays the one picked by the .mat suffix
+register_exporter('signalcalc_mat', 'SignalCalc time history export (.mat)',
+                  signalcalc_mat.SUFFIX, signalcalc_mat.handles, signalcalc_mat.save)
 register_exporter('escdf', 'Engineering Sciences Common Data Format (.h5)',
                   escdf_objects.SUFFIX, escdf_objects.handles, escdf_objects.save)
 # a time history back out as the text it most often arrives as, read
