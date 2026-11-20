@@ -27,9 +27,9 @@ keeps a survey of a hundred points at five hits to a hundred objects, and the fr
 measurement share their DOFs and their length, which is what estimating them again needs.
 Rejected and trial frames stay in the stream and in the frame lines.
 
-The window record travels on the FRF. The exponential window is held in the FRF's averaging
-by its end value, so its time constant survives a save; the force window, the estimator and
-the averages are in each record's comment. What the run lacked is listed in the run record:
+The window record travels on the FRF, in each record's comment: the force window, the
+exponential window's time constant, the estimator and the averages, all of which survive a
+save. A fit reads the time constant back from there. What the run lacked is listed in the run record:
 points planned but not measured, values that are not finite numbers, a result whose units
 do not match the channel table (kept as arrays, with the reason). A run ended early, or
 killed, converts with what it has.
@@ -52,14 +52,31 @@ record says it was turned. Anything else is refused, with the reason.
 
 A survey taken as several runs merges into one set (Merge), before or after turning.
 
+## The Impact Windows
+
+The force window holds one over the pre-trigger and the pulse, from the frame's trigger
+sample, then falls to zero by a steep half-cosine and stays zero for the rest of the frame.
+Its width is the pulse allowance after the trigger, given as a fraction of the block after
+the trigger; the fall is a tenth of the width, at least one sample. A window that would run
+past the block is refused rather than cut short, and a window that removes the pulse is
+refused with that cause named. The exponential window, w(t) = exp(-t / tau) from the frame's
+first sample, is applied to the force and every response alike. Both are an impact capture's
+windows: the averaging of a continuous record does not offer them.
+
 ## The Exponential Window's Damping
 
 An impact response windowed by exp(-t / tau) decays faster by 1 / tau: each mode's pole
 moves left by exactly 1 / tau, so a fit of the windowed FRF reads a damping ratio high by
-about 1 / (2 pi f_n tau). A fit published from an FRF that carries an exponential window
-notes this on each mode, in the mode's comment: the time constant, the damping it added,
-and the mode's frequency and damping less it. The fitted values are left as the fit made
-them, so the shape set still synthesizes the FRF it was fitted to.
+1 / (tau omega_n) to first order, where omega_n is the mode's natural frequency in radians
+per second. A fit published from an FRF estimated with an exponential window notes this on
+each mode, in the mode's comment: the time constant, the damping it added, and the mode's
+frequency and damping less it. The fitted values are left as the fit made them, so the shape
+set still synthesizes the FRF it was fitted to.
+
+The first-order correction, zeta less 1 / (tau omega_n), is for light damping. It can be
+badly off when the damping is very small and poorly estimated, since the window's share is
+then most of what was fitted. Capturing more of the decay (a longer frame, a finer line
+spacing) is better than correcting for a short time constant.
 
 ## Estimating A Measurement Again
 
@@ -67,21 +84,14 @@ Estimate Again (`project.reprocess_modal_test`) takes one measurement's frames a
 its FRFs and coherence again with the estimator (H1, H2 or Hv), the force window on the
 references, the exponential window on every channel, or a shaker window, the block and the
 frames chosen. The results are added beside the frames; the run's own FRFs are not changed.
-A dead reference, a block longer than the frames, too few frames for the references and
-frames that are not finite are refused.
+A dead reference, a window that removes the pulse, a block longer than the frames, too few
+frames for the references and frames that are not finite are refused.
 
-## Definitions To Confirm
+## References
 
-The window definitions and the reciprocity and damping statements are to be confirmed
-against the cited sources by the lead.
-
-- Force window: one over the pulse width W samples, a half-cosine fall over F samples,
-  w[n] = (1 + cos(pi (n - W) / F)) / 2, zero after. W is the width fraction of the block
-  rounded half up; F is a tenth of W unless given.
-- Exponential window: w[n] = exp(-n / tau), n from the frame's first sample. Named by its end
-  value e at the last sample: tau = (length - 1) / -ln(e).
-- Golden vectors for both, read by every implementation: `tests/data/modal_test_windows.json`.
-- Sources: Ewins, D. J. (2000), *Modal Testing: Theory, Practice and Application*, 2nd ed.,
-  Research Studies Press (reciprocity, the roving hammer test, impact windows); Maia, N. M. M.
-  and Silva, J. M. M. (1997), *Theoretical and Experimental Modal Analysis*, Research Studies
-  Press (the exponential window's pole shift and its correction).
+- Trethewey, M. W., and Cafeo, J. A. (1992). "Tutorial: Signal Processing Aspects of
+  Structural Impact Testing." *International Journal of Analytical and Experimental Modal
+  Analysis* 7(2), 129-149. The exponential window (equation 22) and the damping correction
+  (equation 27), with its caution for very light damping.
+- Fladung, W. A. (1997). "Windows Used for Impact Testing." *Proceedings of IMAC XV*. The
+  force window, and the exponential window applied to the force and the response alike.
