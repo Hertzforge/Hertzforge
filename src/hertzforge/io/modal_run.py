@@ -147,18 +147,18 @@ class _Channels:
     unit, SI scale and analysis role, and a measurement's DOFs."""
 
     def __init__(self, run: run_folder.RunFolder, table: Any) -> None:
-        self.row = {int(i): k for k, i in enumerate(table['channel'])}
-        self.dofs = table.dof_strings()
-        self.roles = table.roles()
+        self.row: dict[int, int] = {int(i): k for k, i in enumerate(table['channel'])}
+        self.dofs: list[str] = list(table.dof_strings())
+        self.roles: list[str] = table.roles()
         units = {int(r['index']): str(r.get('units', '') or '') for r in run.rows}
-        self.unit = units
-        self.scale = {i: _unit_scale(u) for i, u in units.items()}
+        self.unit: dict[int, str] = units
+        self.scale: dict[int, tuple[float, str, str]] = {i: _unit_scale(u) for i, u in units.items()}
         config = _config(run)
         roving = config.get(_w('roving')) if isinstance(config.get(_w('roving')),
                                                         Mapping) else {}
-        self.roving = [int(i) for i in roving.get(_w('roving_channels')) or []
+        self.roving: list[int] = [int(i) for i in roving.get(_w('roving_channels')) or []
                        if isinstance(i, int)]
-        self.points = [p for p in roving.get(_w('roving_points')) or []
+        self.points: list[Mapping[str, Any]] = [p for p in roving.get(_w('roving_points')) or []
                        if isinstance(p, Mapping)]
 
     def dof(self, entry: Mapping[str, Any]) -> str:
