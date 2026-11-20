@@ -779,8 +779,10 @@ impl Driver {
         };
         self.check(st, &format!("{SYM}({dev})"))?;
         Ok(buf
-            .chunks_exact(2)
-            .map(|p| (p[0], p[1]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[lo, hi]| (lo, hi))
             .filter(|&(lo, hi)| hi > lo)
             .collect())
     }

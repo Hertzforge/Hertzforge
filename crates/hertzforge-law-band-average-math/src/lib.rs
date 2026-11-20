@@ -1740,13 +1740,19 @@ mod tests {
         let next_b = b
             .control(&plant.frame(&plant.h, Some(&low_response), Some(&low_output), 10))
             .unwrap();
-        for (x, y) in next_a.chunks_exact(4).zip(next_b.chunks_exact(4)) {
+        for (x, y) in next_a
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(next_b.as_chunks::<4>().0)
+        {
             let size: f64 = x.iter().map(|v| v.norm_sqr()).sum();
             let diff: f64 = x.iter().zip(y).map(|(u, v)| (*u - *v).norm_sqr()).sum();
             assert!(diff <= 1e-12 * size, "{diff} against {size}");
         }
         // A quarter of a 2 dB error comes off the targets at the default rate.
-        let trace = |d: &[C64]| -> f64 { d.chunks_exact(4).map(|p| p[0].re + p[3].re).sum() };
+        let trace =
+            |d: &[C64]| -> f64 { d.as_chunks::<4>().0.iter().map(|p| p[0].re + p[3].re).sum() };
         let ratio = trace(&next_a) / trace(&first);
         assert!((10.0 * ratio.log10() + 0.5).abs() < 0.05, "ratio {ratio}");
     }
@@ -1785,7 +1791,8 @@ mod tests {
         );
         // One frame of eleven with a plant reading 4 times the power: drive down by
         // (10 + 4) / 11 = 14/11 in power.
-        let power = |d: &[C64]| -> f64 { d.chunks_exact(4).map(|p| p[0].re + p[3].re).sum() };
+        let power =
+            |d: &[C64]| -> f64 { d.as_chunks::<4>().0.iter().map(|p| p[0].re + p[3].re).sum() };
         assert!((power(&first) / power(&updated) - 14.0 / 11.0).abs() < 0.01);
     }
 

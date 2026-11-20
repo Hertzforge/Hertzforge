@@ -250,11 +250,11 @@ def test_every_offered_unit_folds_back_to_itself_from_upper_case():
     interface offers, or a typed `KPA` would land as unknown while `kPa`
     is one click away. Two upper-case spellings are units in their own
     right and stay as written, which is the rule the test above pins:
-    `MV` is megavolts and `M/M` is molar over molar — the same dimension
+    `MV` is megavolts, `MA` megaamperes and `M/M` is molar over molar — the same dimension
     either way, so nothing downstream reads them differently."""
     from hertzforge.core.unit_choices import ALL_ORDINATE_UNITS, LENGTH_UNITS, MASS_UNITS
 
-    their_own = {'mV': 'MV', 'm/m': 'M/M'}
+    their_own = {'mV': 'MV', 'mA': 'MA', 'm/m': 'M/M'}
     for unit in [*ALL_ORDINATE_UNITS, *LENGTH_UNITS, *MASS_UNITS]:
         upper = unit.upper()
         assert units.dimension_of(upper) == units.dimension_of(unit), unit
@@ -321,3 +321,32 @@ def test_the_report_the_reading_and_the_replication_check_share_it():
 
     for module in (check_blocks, ops_sine_shock, replication_segments):
         assert not hasattr(module, '_signed')
+
+
+def test_current_is_a_quantity_in_every_system():
+    """A shaker's current monitor is a channel like any other: its unit
+    is read, converted and offered, and every system shows it in A."""
+    from hertzforge.core.channel_table import CHANNEL_TYPES
+    from hertzforge.core.unit_choices import ORDINATE_UNITS
+
+    for unit in ('A', 'mA', 'ampere', 'amp'):
+        assert units.dimension_of(unit) == 'current', unit
+    assert units.to_si(5.0, 'mA') == pytest.approx(0.005)
+    assert {system.unit('current') for system in units.SYSTEMS.values()} == {'A'}
+    assert ORDINATE_UNITS['current'] == ['A', 'mA']
+    assert 'current' in CHANNEL_TYPES
+
+
+def test_amps_is_a_current_and_not_attometers_per_second():
+    """pint reads 'amps' as attometers per second, a velocity, which
+    would declare a current monitor's channel as one."""
+    for unit in ('amps', 'Amps', 'AMPS'):
+        assert units.dimension_of(unit) == 'current', unit
+    assert units.to_si(2.0, 'amps') == pytest.approx(2.0)
+
+
+def test_capital_pa_stays_pascals_with_current_tracked():
+    """pint reads 'PA' as petaamperes; typed, it means pascals."""
+    assert units.fold_unit_case('PA') == 'Pa'
+    assert units.dimension_of('PA') == 'pressure'
+    assert units.dimension_of('MA') == 'current'

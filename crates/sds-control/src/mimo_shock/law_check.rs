@@ -279,10 +279,9 @@ impl ShotPath for NoisyShot {
         })?;
         for (ch, rms) in self.noise.clone() {
             if let Some(slot) = rows.channels.iter().position(|c| *c == ch) {
-                let n = rows.rows[slot].len();
-                for i in 0..n {
+                for x in rows.rows[slot].iter_mut() {
                     let g = self.gauss();
-                    rows.rows[slot][i] += rms * g;
+                    *x += rms * g;
                 }
             }
         }

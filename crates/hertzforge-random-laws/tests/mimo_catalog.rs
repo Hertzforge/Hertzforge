@@ -232,11 +232,11 @@ fn a_mimo_choice_resolves_to_a_factory_that_builds_a_running_law() {
     assert_eq!(out.drive, HermitianStack::zeros(16, 2));
 
     // A law of the other test type is refused, both ways.
-    for (id, is_for) in [("hinv", "single-output Random")] {
-        match cat.resolve_mimo(&LawChoice::new(id, Vec::new()), 3) {
-            Err(ChoiceError::WrongTestType { law_is_for, .. }) => assert_eq!(law_is_for, is_for),
-            other => panic!("{id}: {:?}", other.err()),
+    match cat.resolve_mimo(&LawChoice::new("hinv", Vec::new()), 3) {
+        Err(ChoiceError::WrongTestType { law_is_for, .. }) => {
+            assert_eq!(law_is_for, "single-output Random")
         }
+        other => panic!("hinv: {:?}", other.err()),
     }
     let mut cfg = manual_cfg();
     for id in ["pinv_closed".to_string(), zero.id.clone()] {

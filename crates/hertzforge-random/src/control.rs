@@ -1271,16 +1271,16 @@ impl HinvLaw {
         // level stays the servo's). A held/notched bin is NOT touched.
         if set_count > 0 {
             let mut set_sum_after = 0.0;
-            for k in lo..hi {
+            for (k, &s) in self.shape.iter().enumerate().take(hi).skip(lo) {
                 if in_set(k) {
-                    set_sum_after += self.shape[k];
+                    set_sum_after += s;
                 }
             }
             if set_sum_after > 0.0 && set_sum_before > 0.0 {
                 let renorm = set_sum_before / set_sum_after;
-                for k in lo..hi {
+                for (k, s) in self.shape.iter_mut().enumerate().take(hi).skip(lo) {
                     if in_set(k) {
-                        self.shape[k] *= renorm;
+                        *s *= renorm;
                     }
                 }
             }
@@ -1393,9 +1393,9 @@ impl HinvLaw {
         }
         let mut sum = 0.0;
         let mut any_trusted = false;
-        for k in lo..hi {
+        for (k, &p) in inputs.measured_psd.iter().enumerate().take(hi).skip(lo) {
             if !untrusted.get(k).copied().unwrap_or(false) {
-                sum += inputs.measured_psd[k];
+                sum += p;
                 any_trusted = true;
             }
         }

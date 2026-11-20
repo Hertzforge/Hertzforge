@@ -110,7 +110,9 @@ fn profile() -> BreakpointTable {
 /// The drive's rms in dB over consecutive windows.
 fn window_db(drive: &[f32]) -> Vec<f64> {
     drive
-        .chunks_exact(WINDOW)
+        .as_chunks::<WINDOW>()
+        .0
+        .iter()
         .map(|w| {
             let ms = w.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>() / WINDOW as f64;
             10.0 * ms.max(1e-30).log10()

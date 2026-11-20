@@ -73,8 +73,10 @@ fn the_reference_is_written_once_and_the_sidecar_does_not_grow_with_it() {
         let (header, bytes) = read_binary_record(&dir, "reference").unwrap();
         assert_eq!(&header, described);
         let back: Vec<f64> = bytes
-            .chunks_exact(8)
-            .map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|b| f64::from_le_bytes(*b))
             .collect();
         assert_eq!(back.len(), reference.samples.len());
         assert!(back

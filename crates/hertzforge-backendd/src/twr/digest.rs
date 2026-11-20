@@ -93,9 +93,8 @@ impl Sha256 {
         pad.extend_from_slice(&bit_len.to_be_bytes());
         let mut buf = std::mem::take(&mut self.tail);
         buf.extend_from_slice(&pad);
-        for block in buf.chunks_exact(64) {
-            let b: [u8; 64] = block.try_into().expect("64 bytes");
-            self.compress(&b);
+        for block in buf.as_chunks::<64>().0 {
+            self.compress(block);
         }
         let mut out = String::with_capacity(64);
         for w in self.h {
@@ -106,8 +105,8 @@ impl Sha256 {
 
     fn compress(&mut self, block: &[u8; 64]) {
         let mut w = [0u32; 64];
-        for (i, c) in block.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([c[0], c[1], c[2], c[3]]);
+        for (i, c) in block.as_chunks::<4>().0.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*c);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -188,7 +187,7 @@ pub fn decode_b64(s: &str) -> Result<Vec<u8>, ProtocolError> {
         });
     }
     let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    for (i, quad) in bytes.chunks_exact(4).enumerate() {
+    for (i, quad) in bytes.as_chunks::<4>().0.iter().enumerate() {
         let pad = quad.iter().filter(|&&b| b == b'=').count();
         if pad > 2 || (pad > 0 && i + 1 != bytes.len() / 4) {
             return Err(ProtocolError::MalformedPayload {
