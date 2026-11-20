@@ -34,6 +34,8 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     'set_band_edge',
     # the table's own rows
     'link', 'unlink', 'set_basis', 'name_object_group',
+    # in the palette and scripts until the shell gives its row a glyph
+    'reprocess_modal_test',
 ))
 
 VERBS = {f'project.{name}': verb for name, verb in {
