@@ -432,6 +432,13 @@ impl MimoMixedService {
         est.end_loop();
         let dof = est.min_clean_dof(band);
         let clean = est.clean_mask();
+        // The lines judged: clean lines whose own estimate holds
+        // `MIN_ENVELOPE_DOF`. A line a moving part has just left is clean
+        // again but young; judging only on the band's least degrees of
+        // freedom would leave the floor unjudged for as long as a part moves.
+        let ripe: Vec<bool> = (0..lines)
+            .map(|l| clean[l] && est.dof(l) >= MIN_ENVELOPE_DOF)
+            .collect();
         let mut meas = HermitianStack::zeros(lines, n);
         let mut lim = vec![0.0; lines * p];
         for l in 0..lines {
@@ -471,7 +478,7 @@ impl MimoMixedService {
         let mut err = vec![f64::NAN; n];
         for (i, e) in err.iter_mut().enumerate() {
             let (mut a, mut r) = (0.0, 0.0);
-            for l in (band.0..band.1).filter(|&l| clean[l]) {
+            for l in (band.0..band.1).filter(|&l| ripe[l]) {
                 a += meas.get(l, i, i).re.max(0.0);
                 r += floor_ref.get(l, i, i).re.max(0.0);
             }
@@ -480,9 +487,12 @@ impl MimoMixedService {
             }
         }
         self.floor_err_db = err.clone();
-        let judged = dof >= MIN_ENVELOPE_DOF;
+        let judged = (band.0..band.1).any(|l| ripe[l]);
         self.equalized = judged && err.iter().all(|e| e.abs() <= FLOOR_EQUALIZED_DB);
-        if judged && !self.judge_floor(&meas, &clean, &lim) {
+        if judged && !self.judge_floor(&meas, &ripe, &lim) {
+            return;
+        }
+        if !self.judge_folded_bands(&meas, &floor_ref, &ripe) {
             return;
         }
         // The floor law.
@@ -534,6 +544,70 @@ impl MimoMixedService {
         }
     }
 
+    /// Each folded band on its mean added level, as a servoed band is read:
+    /// over the lines the band covers whole, the floor estimate less the
+    /// floor's own reference against the band's increment (the floor law's
+    /// reference less the floor's), dB per control, on the judged (`ripe`)
+    /// lines; NaN while none of its lines is judged. Outside its abort band for `BAND_ABORT_LOOPS` loops in a
+    /// row it aborts `band_abort`, naming the band and the control. `false`
+    /// when the run is ending.
+    fn judge_folded_bands(
+        &mut self,
+        meas: &HermitianStack,
+        floor_ref: &HermitianStack,
+        ripe: &[bool],
+    ) -> bool {
+        let n = self.cfg.n();
+        let df = self.df;
+        let mut trip: Option<RunEnd> = None;
+        let mut w = vec![0.0; self.lines];
+        for b in self.bands.iter_mut().filter(|b| b.law.is_none()) {
+            crate::band::weights_at(&b.width, b.center_hz, df, &mut w);
+            for i in 0..n {
+                let (mut a, mut st) = (0.0, 0.0);
+                for (l, _) in w.iter().enumerate().filter(|&(l, &x)| x >= 1.0 && ripe[l]) {
+                    let f = self.cfg.reference.sdm.get(l, i, i).re;
+                    a += meas.get(l, i, i).re - f;
+                    st += floor_ref.get(l, i, i).re - f;
+                }
+                b.error_db[i] = if st <= 0.0 {
+                    f64::NAN
+                } else if a > 0.0 {
+                    10.0 * (a / st).log10()
+                } else {
+                    -99.0
+                };
+                let e = b.error_db[i];
+                let (lo, hi) = b.abort_db[i];
+                if e.is_finite() && (e < -lo || e > hi) {
+                    b.over_loops[i] += 1;
+                } else {
+                    b.over_loops[i] = 0;
+                }
+                if b.over_loops[i] >= BAND_ABORT_LOOPS {
+                    trip.get_or_insert(RunEnd {
+                        name: "band_abort",
+                        aborted: true,
+                        part: Some(b.id.clone()),
+                        control: Some(i),
+                        drive: None,
+                        words: format!(
+                            "band {} read {e:.2} dB on control {i}, outside its abort band",
+                            b.id
+                        ),
+                    });
+                }
+            }
+        }
+        match trip {
+            Some(t) => {
+                self.abort_with(t);
+                false
+            }
+            None => true,
+        }
+    }
+
     fn drive_sum_rms(&self) -> f64 {
         self.drive_full.as_ref().map_or(0.0, |d| {
             guards::drive_rms(d, self.band, self.df).iter().sum()
@@ -546,7 +620,7 @@ impl MimoMixedService {
     fn judge_floor(&mut self, meas: &HermitianStack, clean: &[bool], lim: &[f64]) -> bool {
         let n = self.cfg.n();
         let p = self.cfg.p();
-        let tol = self.cfg.floor_tolerances();
+        let tol = self.floor_tolerances();
         let relax_db = if self.phase == MimoMixedPhase::FloorAlone {
             self.cfg.soft_start_relax_db
         } else {
@@ -628,11 +702,11 @@ impl MimoMixedService {
         };
         let sysid_response = want(MimoInput::SysidResponse).then(|| id.g_cc.clone());
         let sysid_drive = want(MimoInput::SysidDrive).then(|| id.g_dd.clone());
-        let tolerances = self.cfg.floor_tolerances();
         let reference = self
             .floor_ref
             .clone()
             .unwrap_or_else(|| self.loop_reference());
+        let tolerances = self.cfg.floor_tolerances_about(&reference);
         let inputs = MimoLoopInputs {
             reference: &reference,
             tolerances: &tolerances,

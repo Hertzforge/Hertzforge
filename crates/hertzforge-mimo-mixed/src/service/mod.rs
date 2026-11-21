@@ -2131,6 +2131,16 @@ impl MimoMixedService {
         Ok(())
     }
 
+    /// The floor's alarm and abort lines about the floor law's reference
+    /// (the floor plus every folded band): a folded band's lines are judged
+    /// against floor plus band, not the floor alone.
+    pub(crate) fn floor_tolerances(&self) -> hertzforge_sdm::law::Tolerances {
+        match &self.floor_ref {
+            Some(r) => self.cfg.floor_tolerances_about(r),
+            None => self.cfg.floor_tolerances_about(&self.loop_reference()),
+        }
+    }
+
     /// The floor law's reference: the floor plus every folded band.
     pub(crate) fn loop_reference(&self) -> HermitianStack {
         let mut g = self.cfg.reference.sdm.clone();
@@ -2156,7 +2166,7 @@ impl MimoMixedService {
             df_hz: self.df,
             band: self.band,
             reference: floor_ref.clone(),
-            tolerances: self.cfg.floor_tolerances(),
+            tolerances: self.cfg.floor_tolerances_about(floor_ref),
         };
         let budget_s = self.floor_budget_s();
         let law = self

@@ -637,18 +637,16 @@ fn mimo_mixed_a_tone_the_law_refuses_is_refused_before_the_station_opens() {
     };
     let mut cfg = run_config(s, 0.5, vec![tone("sw", sweep, 1.0)], 30.0);
     cfg.law.tones = hertzforge_mixed::LawPick::new("paired");
-    let r = MimoMixedLaws::builtin(&cfg)
-        .map_err(MimoMixedError::from)
-        .and_then(|laws| {
-            MimoMixedService::new(
-                cfg,
-                table(s),
-                backend(s, 7),
-                hertzforge_module_abi::StationClass::HertzforgeSim,
-                laws,
-            )
-            .map(|_| ())
-        });
+    let r = MimoMixedLaws::builtin(&cfg).and_then(|laws| {
+        MimoMixedService::new(
+            cfg,
+            table(s),
+            backend(s, 7),
+            hertzforge_module_abi::StationClass::HertzforgeSim,
+            laws,
+        )
+        .map(|_| ())
+    });
     match r {
         Err(e) => {
             println!("refused: {} ({e})", e.name());

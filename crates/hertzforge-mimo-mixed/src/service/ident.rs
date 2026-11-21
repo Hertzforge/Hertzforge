@@ -220,12 +220,14 @@ impl MimoMixedService {
         loop {
             let rec = self.ident_play(settle + seg(search_frames) + max_lag)?;
             if steps == 0 {
-                let len = rec.drive[0].len() - settle;
+                // `best_lag` pairs each control window with the drive that
+                // ends with it and starts `max_lag` frames earlier.
+                let w = rec.drive[0].len() - settle - max_lag;
                 let ctl: Vec<&[f64]> = rec.resp[..n.min(4)]
                     .iter()
-                    .map(|r| &r[settle..settle + len])
+                    .map(|r| &r[settle + max_lag..settle + max_lag + w])
                     .collect();
-                lag = best_lag(&ctl, &rec.drive[0][settle..settle + len], max_lag);
+                lag = best_lag(&ctl, &rec.drive[0][settle..settle + w + max_lag], max_lag);
             }
             let e = self.ident_estimate(&rec, settle, lag);
             level = self.level_vs_reference(&e.g_cc);

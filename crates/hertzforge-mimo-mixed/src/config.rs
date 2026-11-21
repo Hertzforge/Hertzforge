@@ -871,13 +871,23 @@ impl MimoMixedConfig {
     /// part's dB bands applied (`p 10^(+db/10)` above, `p 10^(-db/10)`
     /// below); `NaN` outside the band and where the reference is zero.
     pub fn floor_tolerances(&self) -> hertzforge_sdm::law::Tolerances {
+        self.floor_tolerances_about(&self.reference.sdm)
+    }
+
+    /// The floor's alarm and abort lines about `sdm` (the floor law's
+    /// reference: the floor plus every band folded into it), the floor
+    /// part's dB bands applied as in [`Self::floor_tolerances`].
+    pub fn floor_tolerances_about(
+        &self,
+        sdm: &hertzforge_sdm::HermitianStack,
+    ) -> hertzforge_sdm::law::Tolerances {
         let (lines, n) = (self.lines(), self.n());
         let mut t = hertzforge_sdm::law::Tolerances::none(lines, n);
         let Some(f) = self.floor() else { return t };
         let (lo, hi) = self.reference.band;
         for l in lo..hi.min(lines) {
             for i in 0..n {
-                let p = self.reference.sdm.get(l, i, i).re;
+                let p = sdm.get(l, i, i).re;
                 if p.is_nan() || p <= 0.0 {
                     continue;
                 }
