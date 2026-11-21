@@ -9,6 +9,7 @@
 	import type { View, Workspace } from '$lib/protocol/types';
 	import ProjectPanel from '$lib/project/ProjectPanel.svelte';
 	import ActionTable from './ActionTable.svelte';
+	import { lonePlot } from './readingLayout';
 	import Icon from '$lib/shell/Icon.svelte';
 	import ViewRenderer from '$lib/viz/ViewRenderer.svelte';
 	import { cursors } from '$lib/viz/cursor';
@@ -139,7 +140,7 @@
 					<h3>{a.reading.title}</h3>
 					<p class="meta">{a.shown?.title ?? ''}</p>
 				</header>
-				<div class="svviews" class:several={a.reading.views.length > 1} style:--beside={Math.max(a.reading.views.length - 1, 1)}>
+				<div class="svviews" class:several={a.reading.views.length > 1} class:lone={lonePlot(a.reading.views)} style:--beside={Math.max(a.reading.views.length - 1, 1)}>
 					{#each a.reading.views as v, i (i)}
 						<div class="view {v.view}">
 							<ViewRenderer view={v} layout="strip" showTitle={v.view === 'spectrum' || v.view === 'table'} minHeight={240} scope="reading" onparams={(patch) => a.rerunReading(patch)} onpick={v.view === 'shape3d' && v.pick ? (patch) => a.pickInReading(v.pick!, patch) : undefined} onhandle={(h, decibels) => a.pickInReading(h, { decibels })} ongizmo={(act, patch) => a.pickInReading(act, patch)}
@@ -735,6 +736,17 @@
 
 	.view.spectrum {
 		height: 340px;
+	}
+
+	/* a reading's one plot fills its frame: the height a plot keeps in a column of them squeezed a
+	   lone CMIF into the top of an empty frame. A lone table still takes its rows */
+	.svviews.lone:not(.panes) {
+		grid-template-rows: minmax(0, 1fr);
+	}
+
+	.svviews.lone:not(.panes) .view {
+		height: auto;
+		min-height: 240px;
 	}
 
 	/* the 3-D views grow with the window; a plot keeps its height, which suits a column of them */
