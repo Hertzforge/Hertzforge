@@ -2143,7 +2143,7 @@ impl MimoMixedService {
                 .build(&setup)
                 .map_err(|e| MimoMixedError::Law(format!("tone {pid}: {}", e.reason())))?;
             let desc = self.laws.tones.describe();
-            // D17: how each control's reading is judged, at full level.
+            // How each control's reading is judged, at full level.
             let f0 = {
                 let proj = self.cfg.projection(0);
                 let mut clock = PartClock::new(&proj)?;

@@ -1,8 +1,9 @@
-//! The theory's verification cases built in this package (Derivations
-//! MMX-D-8): MV1, MV3, MV4, MV5, MV6 (estimator only), MV8 (both ceiling
-//! rules, static), MV9, MV11 (first half) and MV14, each against its stated
-//! expectation and band. The falsify rule holds: a band is the derivation's,
-//! never tuned; a case that fails is recorded with its measured number.
+//! The theory's verification cases built in this package, as its
+//! derivations state them: MV1, MV3, MV4, MV5, MV6 (estimator only), MV8
+//! (both ceiling rules, static), MV9, MV11 (first half) and MV14, each
+//! against its stated expectation and band. The falsify rule holds: a band
+//! is the derivation's, never tuned; a case that fails is recorded with its
+//! measured number.
 //!
 //! Every case prints its measured figures (`--nocapture` shows them).
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
