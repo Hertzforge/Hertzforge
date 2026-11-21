@@ -747,17 +747,31 @@ impl MixedService {
         Ok(())
     }
 
+    /// The verbs posted and not yet taken up by the step, oldest first.
+    fn queued(&self) -> Vec<Verb> {
+        self.pending.lock().map(|q| q.clone()).unwrap_or_default()
+    }
+
+    /// The level the run is going to: the last level asked for, whether the
+    /// step has taken it up yet or not. A verb takes effect at the step's next
+    /// batch, so the level in force alone would let a second request made
+    /// before then start from the level the first is about to leave.
     fn level_db_now(&self) -> f64 {
-        self.rt
-            .as_ref()
-            .map_or(self.cfg.schedule.start_db, |r| db(r.step.level.target()))
+        let queued = self.queued().iter().rev().find_map(|v| match v {
+            Verb::Level(db_) => Some(*db_),
+            _ => None,
+        });
+        queued.unwrap_or_else(|| {
+            self.rt
+                .as_ref()
+                .map_or(self.cfg.schedule.start_db, |r| db(r.step.level.target()))
+        })
     }
 
     /// Step the level by `delta_db` (every part moves by the same dB, as a
-    /// ramp).
-    pub fn step_level(&self, delta_db: f64) -> Result<(), MixedError> {
+    /// ramp), from the level the run is going to; returns the level taken.
+    pub fn step_level(&self, delta_db: f64) -> Result<f64, MixedError> {
         self.set_level_db(self.level_db_now() + delta_db)
-            .map(|_| ())
     }
 
     /// Jump to rung `i` of the level table.
@@ -803,6 +817,37 @@ impl MixedService {
     /// Resume test progress; every clock restarts together.
     pub fn resume(&self) -> Result<(), MixedError> {
         self.post(Verb::Hold(false))
+    }
+
+    /// Whether the part `part` is switched on, as the run will have it once
+    /// every switch already asked for is applied. `None` for a part the test
+    /// does not have.
+    ///
+    /// A switch takes effect at the step's next batch, and the status reports
+    /// the switch in force. Anything that decides on the status alone between
+    /// the two sees the old switch: asked "off" and then "on" before the next
+    /// batch, it would find the part still on, take the "on" for nothing to
+    /// do, and leave the part off. This is the switch to decide on.
+    pub fn part_switch(&self, part: &str) -> Option<bool> {
+        let i = self.cfg.index_of(part)?;
+        let queued = self.queued().iter().rev().find_map(|v| match v {
+            Verb::Part(j, on) if *j == i => Some(*on),
+            _ => None,
+        });
+        if queued.is_some() {
+            return queued;
+        }
+        Some(match self.rt.as_ref() {
+            Some(rt) => rt
+                .step
+                .tones
+                .iter()
+                .find(|t| t.part == i)
+                .map(|t| t.switched_on)
+                .or_else(|| rt.bands.iter().find(|b| b.part == i).map(|b| b.switched_on))
+                .unwrap_or(true),
+            None => self.cfg.parts[i].enabled,
+        })
     }
 
     /// Switch the part `part` on or off during the run, as a ramp at the part
