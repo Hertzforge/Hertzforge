@@ -292,7 +292,7 @@ describe('modal test after review', () => {
 		expect(v.forceRegions.map((r) => r.level)).toEqual([0, 1]);
 		expect(v.responseRegions).toHaveLength(1);
 		expect(v.second).toBeCloseTo(2 / 1024, 12);
-		expect(forceSpectrumView(live)?.readouts?.[0].text).toBe('9.5 dB to the band top');
+		expect(forceSpectrumView(live)?.readouts?.[0].text).toBe('9.5 dB');
 		expect(hitViews({ ...live, hit: null } as ModalTestLive, latest, dofs, 0).force).toBeNull();
 		const shaker = { ...live, hit: undefined, references: { frequency_hz: [1, 2], averages: 3, autospectra: [{ index: 1, unit: 'lbf^2/Hz', values: [1, 2] }] } } as unknown as ModalTestLive;
 		expect(referenceSpectraView(shaker, dofs)?.series[0].name).toBe('1Z+ (row 1)');

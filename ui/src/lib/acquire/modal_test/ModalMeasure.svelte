@@ -247,7 +247,7 @@
 					{#if hit?.force}
 						<SpectrumPane view={hit.force} live minHeight={150} readout={false} copyButton={false} regions={hit.forceRegions} marker={hit.second} />
 					{:else}<p class="empty">The force is drawn once a hit lands.</p>{/if}
-					{#if latest?.double_hit}<span class="pflag double" data-testid="mt-double-flag">Double Hit{second ? `: ${second}` : ''}</span>{/if}
+					{#if latest?.double_hit}<span class="pflag double" title={second ?? undefined} data-testid="mt-double-flag">Double Hit</span>{/if}
 					{#if latest?.overload}<span class="pflag overload" data-testid="mt-overload-flag">Overload</span>{/if}
 				</div>
 				<div class="plot" data-testid="mt-response-plot">
@@ -255,7 +255,7 @@
 				</div>
 				<div class="plot" data-testid="mt-fspec-plot">
 					{#if fspec}<SpectrumPane view={fspec} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The force spectrum is drawn once a hit lands.</p>{/if}
-					{#if latest?.tip_warning}<span class="pflag tip" data-testid="mt-tip-flag">Tip: the force falls {num(tipDrop)} dB across the band. A harder tip reaches higher.</span>{/if}
+					{#if latest?.tip_warning}<span class="pflag tip" title="The force falls {num(tipDrop)} dB across the band. A harder tip reaches higher." data-testid="mt-tip-flag">Soft Tip</span>{/if}
 				</div>
 			{:else}
 				<div class="plot">{#if refTraces}<SpectrumPane view={refTraces} live minHeight={150} readout={false} copyButton={false} />{:else}<p class="empty">The forces are drawn while the shakers drive.</p>{/if}</div>
@@ -286,7 +286,7 @@
 
 	<aside class="right">
 		{#if end}
-			<section class="panel endline {outcomeTone(end.outcome)}" data-testid="mt-end" data-outcome={end.outcome}>
+			<section class="panel endline {outcomeTone(end.outcome)}" data-testid="mt-ended" data-outcome={end.outcome}>
 				<h2 class="outcome">{MODAL_OUTCOME_WORDS[end.outcome] ?? end.outcome}</h2>
 				{#if MODAL_OUTCOME_HELP[end.outcome]}<p class="help" data-testid="mt-end-help">{MODAL_OUTCOME_HELP[end.outcome]}</p>{/if}
 				<p class="hint">{end.message}</p>
@@ -475,11 +475,12 @@
 		margin-top: var(--sp-1);
 	}
 
+	/* the list gives way first, scrolling, so the keys and End Test stay on screen */
 	.points {
 		display: flex;
 		flex-direction: column;
-		min-height: 160px;
-		flex: 1;
+		min-height: 104px;
+		flex: 1 1 auto;
 	}
 
 	.points .head {
@@ -508,6 +509,7 @@
 		padding: 0;
 		overflow: auto;
 		flex: 1;
+		min-height: 0;
 	}
 
 	.pt {

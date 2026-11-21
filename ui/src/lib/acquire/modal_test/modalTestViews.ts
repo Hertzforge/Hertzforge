@@ -197,7 +197,7 @@ export function forceSpectrumView(live: ModalTestLive | null): SpectrumView | nu
 		x: { label: 'Frequency', unit: 'Hz', scale: 'linear' },
 		y: { label: 'Autospectrum', unit: s.unit, scale: 'log' },
 		series: [{ name: 'Force', role: 'drive', x: arr(s.frequency_hz), y: arr(s.values) }],
-		readouts: [{ label: 'Tip roll-off', text: s.tip_drop_db === null ? 'the spectrum is zero at the band top' : `${num(s.tip_drop_db, 'dB')} to the band top`, status: 'info' }]
+		readouts: [{ label: 'Tip roll-off', text: s.tip_drop_db === null ? 'no force at the band top' : num(s.tip_drop_db, 'dB'), status: 'info' }]
 	};
 }
 
