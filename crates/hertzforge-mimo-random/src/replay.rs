@@ -12,7 +12,7 @@
 
 use crate::records::{self, param_from_json, RecordedCall};
 use hertzforge_law_host::Param;
-use hertzforge_random_laws::{BuiltinMimo, LawCatalog, LawChoice, MimoLawFactory};
+use hertzforge_random_laws::{BuiltinMimo, LawBudgets, LawCatalog, LawChoice, MimoLawFactory};
 use hertzforge_sdm::law::{DiagnosticData, MimoControlLaw, MimoLoopOutputs};
 use hertzforge_sdm::HermitianStack;
 use std::path::{Path, PathBuf};
@@ -261,7 +261,7 @@ pub fn replay(dir: &Path, opts: &ReplayOptions) -> Result<ReplayReport, String> 
             let setup = c.inputs.setup();
             let f = source.factory(&id, params, setup.controls)?;
             law = Some(
-                f.build(&setup, REPLAY_BUDGET)
+                f.build(&setup, LawBudgets::same(REPLAY_BUDGET))
                     .map_err(|e| format!("the recorded law did not build: {e}"))?,
             );
         }

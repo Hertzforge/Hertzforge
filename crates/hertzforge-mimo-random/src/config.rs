@@ -33,6 +33,12 @@ pub const DEFAULT_ENVELOPE_ABORT_LINES: usize = 10;
 /// The soft start's depth below the lowest scheduled level, dB (single-output
 /// Random's default).
 pub const DEFAULT_SOFT_START_DB: f64 = 9.0;
+/// Seconds the law's first solve may take. It runs once, between identification
+/// and the prediction, with the outputs stopped, so the limit is on what an
+/// operator will wait for and not on the loop. The built-in laws' first solves
+/// measured on a 48 by 12 plate at 8193 lines: 0.2 s (the default law), 1.6 s
+/// (buzz), 0.5 to 3.1 s (band average) and 12 s (minimum drive).
+pub const DEFAULT_SEED_BUDGET_S: f64 = 120.0;
 /// The envelope's relaxation while the soft start climbs, dB.
 pub const DEFAULT_SOFT_START_RELAX_DB: f64 = 6.0;
 /// The soft start's climb when no level ramp is set, seconds.
@@ -372,6 +378,10 @@ pub struct MimoConfig {
     /// The law call's time budget (a fraction of the loop) and the misses in a
     /// row that stop the run. `max_change_db` is not used here: [`Caps`] is.
     pub law_guards: LawGuards,
+    /// Seconds the law's first solve (its seed) may take, with the outputs
+    /// stopped. A first solve that takes longer is not used and the run goes no
+    /// further. Every call after it is held to `law_guards`.
+    pub seed_budget_s: f64,
     pub schedule: LevelSchedule,
     /// Seconds a commanded level change takes (0: a step between loops).
     pub level_ramp_s: f64,
@@ -417,6 +427,7 @@ impl MimoConfig {
             gates: Gates::default(),
             caps: Caps::default(),
             law_guards: LawGuards::default(),
+            seed_budget_s: DEFAULT_SEED_BUDGET_S,
             schedule: LevelSchedule::auto_default(),
             level_ramp_s: 0.0,
             shutdown_ramp_s: 2.0,
@@ -708,6 +719,9 @@ impl MimoConfig {
                 "the law budget must be a fraction of the loop above 0 and at most 1, and the \
                  misses before a stop at least 1",
             );
+        }
+        if !(self.seed_budget_s > 0.0 && self.seed_budget_s.is_finite()) {
+            return err("the budget of the law's first solve must be a time above 0 s");
         }
         let s = &self.schedule;
         if s.table_db.is_empty() || s.table_db.windows(2).any(|w| w[1] < w[0]) {

@@ -55,7 +55,7 @@ reports divergent lines), but never suppress one.
 | R3 | **Manifest.** The law describes itself: name, version (semantic versioning), author, a one-paragraph summary, its declared parameters and diagnostics, and for MIMO the channel shapes it supports, the optional inputs it needs and the layout of each diagnostic (section 7). |
 | R4 | **No system access.** The controller grants a law no files, no network, no environment and no arguments. Its clock and random source are fixed, so a law must not depend on them. Anything it prints is discarded. |
 | R5 | **Deterministic.** The same inputs and parameter values give the same outputs. This is what makes a recorded run replayable. |
-| R6 | **Budgets.** A law gets a memory cap (256 MiB by default) and a time budget per call (by default a quarter of one loop's acquisition time). Exceeding either is a failed call. |
+| R6 | **Budgets.** A law gets a memory cap (256 MiB by default) and a time budget per call (by default a quarter of one loop's acquisition time). Exceeding either is a failed call. A MIMO Random law's first solve (`seed`) has a time budget of its own, in seconds (section 7). |
 | R7 | **Errors.** A law that cannot compute a sound drive returns an error with a message instead of a value. A trap (for example a panic) is a failed call. |
 | R8 | **Valid outputs.** Outputs have the stated dimensions and are finite. A single-output drive spectrum is non-negative; a MIMO drive SDM is Hermitian and positive semidefinite (the core repairs a small negative eigenvalue and refuses a large one, section 7). Lines outside the band are zero. An invalid output is a failed call. |
 | R9 | **Failure handling (core).** On a failed call the core holds the previous drive. Three failed calls in a row (configurable) end the run with a controlled stop, recorded with the reason. |
@@ -186,6 +186,15 @@ against the manifest, in manifest order, with defaults for the values the operat
 error refuses the run with the reason given. `seed(inputs)` is called once after system
 identification with the identification response as the measured response, and returns the first
 drive. `iterate(inputs)` is called once per control loop.
+
+**The first solve's budget.** `seed` runs once, before anything drives at test level, and the
+outputs are stopped while it runs: the controller ramps them to zero when identification has its
+record and starts them again when the loop engages. Its length therefore matters to the operator
+and not to the loop, and it has a budget of its own: 120 s by default, where every `iterate` call
+has a quarter of a loop. A law may do its heavy work here (a target solved line by line, a sweep
+over a threshold) and keep `iterate` light. A first solve past its budget is not used and the run
+goes no further; a law file's is stopped at that deadline by the host. The constructor has the
+`iterate` budget.
 
 **Inputs, per call.**
 
