@@ -753,12 +753,13 @@ impl Pump<'_> {
         estop: bool,
     ) {
         let st = &self.inner.step;
+        // After the emergency stop the step never runs again, so its own phase is the one
+        // it last had (often driving): every reader is told zeroed, before the end shows.
+        if estop {
+            st.phase.store(DrivePhase::Zeroed as u8, Ordering::Release);
+        }
         let mut s = lock(&self.inner.status);
-        s.phase = if estop {
-            DrivePhase::Zeroed
-        } else {
-            st.phase()
-        };
+        s.phase = st.phase();
         s.generated = st.generated.load(Ordering::Acquire);
         s.end = Some(Outcome {
             outcome,

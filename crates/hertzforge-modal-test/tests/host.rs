@@ -290,6 +290,30 @@ fn modal_test_shaker_host_abort_zeroes_at_once() {
 }
 
 #[test]
+fn modal_test_shaker_host_abort_leaves_the_phase_zeroed_every_time() {
+    // The abort is most often taken between the loop's batches, when the step never runs
+    // again: the phase every reader sees must still be zeroed, never the step's last.
+    for k in 0..12 {
+        let (b, seen) = sim(1, 1);
+        let h = ModalHost::start(shaker(1, 1.0), table(1), b, StationClass::HertzforgeSim).unwrap();
+        h.start_drive();
+        assert!(wait_for(
+            || h.shared().phase() == DrivePhase::Driving,
+            Duration::from_secs(20)
+        ));
+        std::thread::sleep(Duration::from_millis(3 * k));
+        h.abort();
+        assert!(h.join(Duration::from_secs(20)));
+        let o = h.status().end.unwrap();
+        assert_eq!(o.outcome, "aborted");
+        assert_eq!(h.status().phase, DrivePhase::Zeroed, "run {k}");
+        assert_eq!(h.shared().phase(), DrivePhase::Zeroed, "run {k}");
+        let s = seen.lock().unwrap();
+        assert_eq!(s.after_estop_peak, 0.0, "run {k}");
+    }
+}
+
+#[test]
 fn modal_test_shaker_host_ceiling_trips_the_emergency_stop() {
     let (b, seen) = sim(1, 1);
     // A chirp of 0.1 V RMS peaks at 0.1414 V: over a 0.12 V ceiling once ramped.
