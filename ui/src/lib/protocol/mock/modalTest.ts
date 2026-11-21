@@ -404,8 +404,11 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 		else settle(r);
 	}
 
-	/** After an accept: the point has its averages, or the test stays armed. */
-	function settle(r: Run) {
+	/**
+	 * After an accept: the point has its averages, or the test arms again for the next hit, as the
+	 * service does, when it was armed or a hit waited; an accept made while disarmed leaves it so.
+	 */
+	function settle(r: Run, rearm = true) {
 		const c = countsOf(r);
 		if (c.point.accepted >= c.point.asked) {
 			note(r, 'point', `Point ${r.point + 1} measured: ${c.point.accepted} accepted.`);
@@ -419,7 +422,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				r.state = 'point_done';
 				r.drivePhase = r.config.mode === 'shaker' ? 'zeroed' : 'idle';
 			}
-		} else if (r.config.mode === 'impact') r.state = 'arming';
+		} else if (r.config.mode === 'impact' && rearm) r.state = 'arming';
 	}
 
 	function latestHere(r: Run): Hit | null {
@@ -853,7 +856,7 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				h.status = 'accepted';
 				h.reason = null;
 				note(r, 'operator', `Hit ${h.n} accepted by the operator.`);
-				settle(r);
+				settle(r, r.state === 'captured');
 				emit();
 				return answer(r);
 			},
@@ -869,7 +872,9 @@ export function createModalTestMock(host: ShockMockHost): ModalTestMock {
 				h.status = 'rejected';
 				h.reason = 'operator';
 				note(r, 'operator', `Hit ${h.n} rejected by the operator.`);
-				if (r.state === 'captured' || r.state === 'point_done' || was === 'accepted') r.state = 'arming';
+				// as the service does: a hit that waited arms again; an accepted one taken out opens its
+				// point again, armed unless the test was disarmed
+				if (r.state === 'captured' || (was === 'accepted' && r.state !== 'idle' && r.state !== 'armed')) r.state = 'arming';
 				emit();
 				return answer(r);
 			},

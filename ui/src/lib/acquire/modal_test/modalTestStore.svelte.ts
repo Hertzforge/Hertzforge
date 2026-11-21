@@ -131,6 +131,14 @@ const VERB_WORDS: Record<ModalVerb, string> = {
 	end: 'End Test'
 };
 
+/** A key as the person pressed it, in words: Space, Left arrow, R. */
+function keyName(k: string): string {
+	if (k === ' ' || k === 'Spacebar') return 'Space';
+	if (k === 'ArrowLeft') return 'Left arrow';
+	if (k === 'ArrowRight') return 'Right arrow';
+	return k.length === 1 ? k.toUpperCase() : k;
+}
+
 export class ModalTestStore {
 	readonly control: ServiceClient;
 	private readonly localStore: Storage | null;
@@ -708,8 +716,10 @@ export class ModalTestStore {
 
 	/**
 	 * A key press on the Measure screen: its verb runs when it is one of the screen's keys and the
-	 * verb applies now. Returns the verb run (so the caller can stop the browser's own use of the
-	 * key), or null when the key was not the screen's.
+	 * verb applies now; when it does not (a hit waits, or the service has not yet answered the key
+	 * before), the key is refused in words where the screen shows refusals, never dropped unseen.
+	 * Returns the verb asked for (so the caller can stop the browser's own use of the key), or null
+	 * when the key was not the screen's.
 	 */
 	onKey(e: KeyLike): ModalVerb | null {
 		if (this.step !== 'run') return null;
@@ -717,6 +727,12 @@ export class ModalTestStore {
 		if (!a) return null;
 		const v = this.keyVerb(a);
 		if (!v) return null;
+		const gate = this.verbs[v];
+		if (!gate.enabled) {
+			const message = `${keyName(e.key)} was not taken: ${gate.reason ?? 'not now.'}`;
+			this.verbRefusal = { verb: VERB_WORDS[v], reason: 'key_not_taken', code: 'refused', title: 'Key Not Taken', message, facts: [], detail: undefined };
+			return v;
+		}
 		void this.verb(v);
 		return v;
 	}

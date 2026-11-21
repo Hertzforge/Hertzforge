@@ -166,6 +166,49 @@ describe('the Modal Test store', () => {
 		await modal.abort();
 	});
 
+	it('modal test keys: Space right after an accept or an undo made while disarmed arms, and a key that does not apply now is refused in words', async () => {
+		const { modal } = await impactLive('auto', 5);
+		modal.step = 'run';
+		expect(modal.onKey({ key: ' ' })).toBe('arm');
+		await until(() => (modal.now?.hits.length ?? 0) === 1);
+		await until(() => modal.now?.state === 'armed' || modal.now?.state === 'arming');
+		expect(modal.onKey({ key: ' ' })).toBe('disarm');
+		await until(() => modal.now?.state === 'idle');
+		// an override made while disarmed leaves the test disarmed, as the service does: Space then arms
+		expect(modal.onKey({ key: 'r' })).toBe('reject');
+		await until(() => modal.now?.latest?.status === 'rejected');
+		expect(modal.onKey({ key: 'a' })).toBe('accept');
+		await until(() => modal.now?.latest?.status === 'accepted');
+		expect(modal.now?.state).toBe('idle');
+		expect(modal.onKey({ key: ' ' })).toBe('arm');
+		await until(() => modal.now?.state === 'armed' || modal.now?.state === 'arming');
+		await until(() => (modal.now?.hits.length ?? 0) === 2);
+		expect(modal.onKey({ key: ' ' })).toBe('disarm');
+		await until(() => modal.now?.state === 'idle');
+		expect(modal.onKey({ key: 'u' })).toBe('undo');
+		await until(() => modal.now?.counts.point.accepted === 1);
+		expect(modal.onKey({ key: ' ' })).toBe('arm');
+		await until(() => modal.now?.state === 'armed' || modal.now?.state === 'arming');
+		expect(modal.verbRefusal).toBeNull();
+		await modal.abort();
+	});
+
+	it('modal test keys: a key whose verb does not apply now, a hit waiting or the service not yet answered, is refused in words', async () => {
+		const { modal } = await impactLive('manual', 3);
+		modal.step = 'run';
+		expect(modal.onKey({ key: ' ' })).toBe('arm');
+		await until(() => modal.now?.state === 'captured');
+		// Space while a hit waits: refused where the screen shows refusals, not dropped unseen
+		expect(modal.onKey({ key: ' ' })).toBe('arm');
+		expect(modal.verbRefusal).toMatchObject({ verb: 'Arm', reason: 'key_not_taken', message: 'Space was not taken: Accept or reject the hit first.' });
+		// Enter, then Space before the service has answered: the Space is refused in words too
+		expect(modal.onKey({ key: 'Enter' })).toBe('accept');
+		expect(modal.onKey({ key: ' ' })).toBe('arm');
+		expect(modal.verbRefusal?.message).toBe('Space was not taken: Accept or reject the hit first.');
+		await until(() => modal.now?.counts.point.accepted === 1);
+		await modal.abort();
+	});
+
 	it('modal test flags a hit High or Low against a target from a hit, and never rejects it for that', async () => {
 		const { modal } = await impactLive('auto', 5);
 		await modal.simHit('clean');
