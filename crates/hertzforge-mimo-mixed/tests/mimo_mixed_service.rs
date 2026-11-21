@@ -460,3 +460,39 @@ fn mv8_run(rule: &str) {
         assert_eq!(end.name, "completed", "{rule}: {}", end.words);
     }
 }
+
+/// Requirement (A7): a run with a folder writes `law.json` naming
+/// `hertzforge.mimo_mixed.law_ticks.v1` and both laws, and `law_ticks.bin`
+/// as whole records that read back, holding floor-law calls and tone-law
+/// calls for the run's one tone.
+#[test]
+fn mimo_mixed_the_law_call_record_is_written_to_the_run_folder() {
+    use hertzforge_mimo_mixed::service::records::*;
+    let s = SineStructure::Linear4x4;
+    let cfg = run_config(s, 0.5, vec![tone("t", fixed(240.0), 1.0)], 2.0);
+    let dir = std::env::temp_dir().join(format!("mimo-mixed-law-ticks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut svc = service(s, cfg).with_run_dir(dir.clone());
+    engage(&mut svc);
+    while svc.run_chunk().expect("chunk") {}
+    assert_eq!(svc.end().map(|e| e.name), Some("completed"));
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join(LAW_JSON_FILE)).expect("law.json"))
+            .expect("json");
+    assert_eq!(json["format"], LAW_TICKS_FORMAT);
+    assert_eq!(json["roles"]["floor"], "pinv_closed");
+    assert_eq!(json["roles"]["tones"], "matrix");
+    assert_eq!(json["record_bytes"], LawRecord::BYTES);
+    let bin = std::fs::read(dir.join(LAW_TICKS_FILE)).expect("law_ticks.bin");
+    assert_eq!(bin.len() % LawRecord::BYTES, 0);
+    let recs: Vec<LawRecord> = bin
+        .chunks(LawRecord::BYTES)
+        .map(|c| LawRecord::read_from(c).expect("a record"))
+        .collect();
+    let floor = recs.iter().filter(|r| r.role == RecordRole::Floor).count();
+    let tone = recs.iter().filter(|r| r.role == RecordRole::Tone).count();
+    println!("law records: {} ({floor} floor, {tone} tone)", recs.len());
+    assert!(floor > 0 && tone > 0);
+    assert!(recs.iter().all(|r| r.t_s.is_finite() && r.tone == 0));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

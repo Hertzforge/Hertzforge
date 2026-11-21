@@ -530,6 +530,7 @@ hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_floor_equalizes_with_
 hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_laws_work_by_configuration_alone
 hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_fill_no_error_against_a_stale_average
 hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_mv8_shared_ceiling_common_scale_in_the_run
+hertzforge-mimo-mixed  test:mimo_mixed_service  mimo_mixed_the_law_call_record_is_written_to_the_run_folder
 hertzforge-mimo-mixed  test:mimo_mixed_step_cost  mimo_mixed_step_does_not_allocate
 hertzforge-mimo-mixed  test:mimo_mixed_step_cost  mimo_mixed_step_cost_at_twelve_tones_is_under_the_frame_period
 hertzforge-mimo-mixed-laws  test:mimo_mixed_check  mimo_mixed_check_floor_only
