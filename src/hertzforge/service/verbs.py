@@ -46,7 +46,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'convert_to_specification': 'Make Spec', 'convert_to_psd': 'Make PSD',
     'detect_shocks': 'Detect Shocks', 'extract_sine': 'Extract Sine', 'transform': 'Transform',
     'expand': 'Expand', 'generate_rigid_body_modes': 'Rigid Modes', 'solve_modes': 'Solve',
-    'project_onto_basis': 'Project', 'set_averaging': 'Averaging',
+    'project_onto_basis': 'Project', 'set_projection': 'Project', 'set_averaging': 'Averaging',
     'detect_averaging': 'Detect Averaging', 'set_filter': 'Filter',
     'set_truncation': 'Truncation', 'group_properties': 'Set Properties',
     'merge_coincident_nodes': 'Merge Nodes', 'element_groups': 'Show Groups',

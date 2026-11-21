@@ -8,6 +8,8 @@ the local frame, and the uniaxial dot product all pin exactly.
 
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 import pytest
 
@@ -553,3 +555,88 @@ def test_the_match_distance_is_said_for_the_pair_it_projects():
     project['Test Geometry'].define_units('m')
     assert project.match_distance('FEM Shapes', 'Test Shapes') is None, \
         'one geometry in meters and one in its own units overlay in no frame'
+
+
+def test_a_pair_is_projected_the_way_it_is_set():
+    """Unset, the cube's modes go onto the test's (the test holds one direction at each node)
+    within 2 % of the test geometry's size; set, with the distance asked for, and the line that
+    replays it is in the journal."""
+    project = _two_geometries()
+    assert project.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  None)
+    default = project.compared_sets('FEM Shapes', 'Test Shapes')[3]['limit']
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    assert project.projection_of('FEM Shapes', 'Test Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                  0.0011)
+    _rows, _columns, said, report = project.compared_sets('Test Shapes', 'FEM Shapes')
+    assert report['limit'] == 0.0011 != default
+    assert said.startswith('FEM Shapes projected onto Test Shapes')
+    assert project.journal[-1] == ("project.set_projection('Test Shapes', 'FEM Shapes', "
+                                   'distance=0.0011)')
+    # a distance asked for in the call still takes the place of the one set
+    assert project.compared_sets('FEM Shapes', 'Test Shapes', distance=0.002)[3]['limit'] == 0.002
+
+
+def test_two_sets_that_both_hold_every_direction_go_the_way_they_are_set():
+    project = _two_geometries()
+    project.add('Model B', copy.deepcopy(project['FEM Geometry']))
+    project.add('Modes B', copy.deepcopy(project['FEM Shapes']))
+    project.link('Model B', 'Modes B')
+    chosen = project.projection_of('FEM Shapes', 'Modes B')[0]
+    other = 'Modes B' if chosen == 'FEM Shapes' else 'FEM Shapes'
+    project.set_projection('FEM Shapes', 'Modes B', source=other)
+    assert project.projection_of('Modes B', 'FEM Shapes')[0] == other
+    said = project.compared_sets('FEM Shapes', 'Modes B')[2]
+    assert said == f'{other} projected onto {chosen}: the direction set in Project'
+
+
+@pytest.mark.parametrize(('first', 'second', 'given', 'refused'), [
+    ('Test Shapes', 'FEM Shapes', {'source': 'Test Shapes'},
+     'Test Shapes cannot be projected onto FEM Shapes: Test Shapes has 2 nodes'),
+    ('Test Shapes', 'FEM Shapes', {'source': 'FEM Geometry'}, 'is Test Shapes or FEM Shapes'),
+    ('Test Shapes', 'FEM Shapes', {'distance': -1.0}, 'must be above zero'),
+    ('FEM Shapes', 'FEM Geometry', {}, 'FEM Geometry is not a shape set'),
+])
+def test_a_projection_that_cannot_be_made_is_refused_and_not_kept(first, second, given, refused):
+    project = _two_geometries()
+    with pytest.raises((ValueError, TypeError), match=refused):
+        project.set_projection(first, second, **given)
+    assert project.projections == {}
+
+
+def test_two_sets_on_one_geometry_have_no_projection_to_set():
+    project = _two_geometries()
+    project.add('Other Modes', copy.deepcopy(project['FEM Shapes']))
+    project.link('FEM Geometry', 'Other Modes')
+    with pytest.raises(ValueError, match='Both are on FEM Geometry, so there is nothing'):
+        project.set_projection('FEM Shapes', 'Other Modes')
+
+
+def test_the_projection_is_kept_in_the_file_and_follows_a_rename(tmp_path):
+    project = _two_geometries()
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    path = str(tmp_path / 'kept.hforge')
+    project.save(path)
+    opened = hertzforge.Project.open(path)
+    assert opened.projection_of('Test Shapes', 'FEM Shapes') == ('FEM Shapes', 'Test Shapes',
+                                                                 0.0011)
+    opened.rename('FEM Shapes', 'Model Modes')
+    assert opened.projection_of('Test Shapes', 'Model Modes') == ('Model Modes', 'Test Shapes',
+                                                                  0.0011)
+    assert list(opened.projections) == [('Model Modes', 'Test Shapes')], 'the old name is gone'
+    opened.remove('Test Shapes')
+    assert opened.projections == {}, 'gone with either set'
+
+
+def test_a_file_written_before_projections_were_kept_opens_with_none(tmp_path):
+    import h5py
+
+    project = _two_geometries()
+    project.set_projection('Test Shapes', 'FEM Shapes', distance=0.0011)
+    path = str(tmp_path / 'older.hforge')
+    project.save(path)
+    with h5py.File(path, 'a') as f:
+        del f.attrs['projections']
+    opened = hertzforge.Project.open(path)
+    assert opened.projections == {}
+    assert opened.projection_of('Test Shapes', 'FEM Shapes')[2] is None

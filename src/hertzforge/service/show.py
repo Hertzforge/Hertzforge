@@ -83,7 +83,7 @@ def _geometry_for(project: Any, name: str) -> str | None:
 #: component of complex data, and what is drawn with it (a specification's limits, a
 #: table's arrows and sensors). The axes' scales are chosen on the plot, not here.
 PREFS = {'flat': False, 'component': 'magnitude', 'line': None,
-         'projection': False, 'match_distance': 0.0, 'shape_view': None, 'limits': True,
+         'projection': False, 'shape_view': None, 'limits': True,
          'values_dofs': 'all', 'values_form': 'shapes', 'arrows': False, 'arrow_role': 'all',
          'drive': None,
          'sensors': True,
@@ -723,23 +723,6 @@ def _matched(project: Any, first: str, second: str) -> tuple[str, Any] | None:
                  and obj.second == second), None)
 
 
-def _pair_distance(project: Any, first: str, second: str,
-                   prefs: dict[str, Any]) -> float | None:
-    """How far a node may be from its match when two shape sets on two geometries are
-    compared: `prefs['match_distance']` when it is above 0, otherwise the distance 2 % of
-    the size of the geometry projected onto comes to (`Project.match_distance`), the way
-    `core.correlate.projection_order` projects them. None when no projection would be
-    made. In meters, or the model's own units when its geometries have none."""
-    from hertzforge.core.correlate import projection_order
-
-    typed = float(prefs.get('match_distance') or 0.0)
-    if typed > 0:
-        return typed
-    flipped, _why = projection_order(project[first], project[second])
-    moved, onto = (first, second) if flipped else (second, first)
-    return project.match_distance(moved, onto)
-
-
 def _none_matched(first: str, second: str, homes: Any, error: Any
                   ) -> tuple[list[dict], list[str]]:
     """Two sets whose geometries share no node within the tolerance: how far off they
@@ -750,7 +733,7 @@ def _none_matched(first: str, second: str, homes: Any, error: Any
     both = homes[0][1].units_defined and homes[1][1].units_defined
     return ([v.reading(f'No node of {first} and {second} matched',
                        _report_rows(error.report, both))],
-            [f'{error}. Node match, above, sets the tolerance'])
+            [f'{error}. Project sets the node match tolerance'])
 
 
 def _mac(project: Any, first: str, second: str, geometry: str | None,
@@ -773,13 +756,11 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     homes = project.geometry_for(first), project.geometry_for(second)
     apart = all(home is not None for home in homes) and homes[0][1] is not homes[1][1]
     notes: list[str] = []
-    # how far a test node may be from its model node: the comparison's own setting, as the
-    # Projection view's (Brandon, 2026-11-17), a distance as the projection forms take it
-    distance = _pair_distance(project, first, second, prefs) if apart else None
+    # how the pair is projected, and how far a node may be from its match, are Project's
+    # (`Project.set_projection`): the MAC is drawn the way Project sets it
     if apart and prefs.get('projection'):
         try:
-            views = _run(project, 'project.projection_overlay', first=first, second=second,
-                         distance=distance or 0.0)
+            views = _run(project, 'project.projection_overlay', first=first, second=second)
         except ProtocolError as error:
             if not isinstance(error.__cause__, NoNodeMatched):
                 raise
@@ -792,8 +773,7 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
             # the two sets as they are compared: one projected onto the other's DOFs when
             # they are on two geometries, for the MAC and for each pair's alignment
             ours, theirs, said, report = ((rows, columns, '', None) if first == second
-                                          else project.compared_sets(
-                                              first, second, distance=distance))
+                                          else project.compared_sets(first, second))
             values = rows.auto_mac() if first == second else cross_mac(ours, theirs)
         except NoNodeMatched as error:
             return _none_matched(first, second, homes, error)
@@ -1440,9 +1420,6 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
     if sine:
         tones = ([tone.name for tone in specs[0].tones] if specs
                  else list(level_sets[0].tone_names))
-    within = _pair_distance(project, sets[0], sets[1], prefs) if apart else None
-    matching = (None if within is None
-                else {'value': within, 'defined': bool(homes[0][1].units_defined)})
     return {
         'tones': tones,
         'sine_readings': bool(sine and specs and level_sets and any(
@@ -1461,9 +1438,6 @@ def _offers(project: Any, objects: list[str], prefs: dict[str, Any],
                         and _picked_channels(objects, records or {}, table) is None else []),
         'sensors': bool(placed),
         'projection': apart,
-        # the distance the comparison matches nodes within, typed or the default, offered
-        # with Projection (`prefs.match_distance`)
-        'match_distance': matching,
         'flat': bool(data),
         # an object with warning and abort limits to draw on the 2-D plot, or leave off
         'limits': any(bool(getattr(obj, 'limits', None)) for obj in data),

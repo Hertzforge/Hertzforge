@@ -566,7 +566,8 @@ class Project(dict):
                  object_groups: Iterable[ObjectGroup] | None = None,
                  provenance: dict[str, dict[str, Any]] | None = None,
                  data_index: DataIndex | Iterable[Mapping[str, Any]]
-                 | None = None
+                 | None = None,
+                 projections: Iterable[Mapping[str, Any]] | None = None
                  ) -> None:
         super().__init__(objects or {})
         self.name: str = str(name)
@@ -600,6 +601,15 @@ class Project(dict):
         #: offers (Brandon, 2026-08-23: explicit, never automatic —
         #: a report must not rewrite itself).
         self.provenance: dict[str, dict[str, Any]] = dict(provenance or {})
+        #: how each pair of shape sets on two geometries is projected when compared, set by
+        #: Project and read by every comparison of the pair (`set_projection`): {(a, b): {
+        #: 'source': the set projected, 'distance': the node match distance or None}}, the
+        #: pair's names sorted
+        self.projections: dict[tuple[str, str], dict[str, Any]] = {
+            tuple(sorted((str(held['first']), str(held['second'])))): {
+                'source': str(held['source']),
+                'distance': None if held.get('distance') is None else float(held['distance'])}
+            for held in (projections or [])}
         #: every file the project rests on, by name, size and SHA-256:
         #: each file imported, and each document attached (`index_file`).
         #: One index, whatever adds to it; saved in the `.hforge`, and
@@ -971,6 +981,8 @@ class Project(dict):
                      if isinstance(obj, Geometry)), None)
         self._prune_links()
         self._prune_provenance()
+        for pair in [pair for pair in self.projections if set(pair) & set(names)]:
+            del self.projections[pair]
 
     def _prune_provenance(self) -> None:
         """Forget the recipe of every removed object that nothing left
@@ -1029,6 +1041,11 @@ class Project(dict):
         for record in self.provenance.values():
             _retarget_record(record, {old: new})
         self.data_index.rename_object(old, new)
+        for pair, held in list(self.projections.items()):
+            if old in pair:
+                del self.projections[pair]
+                self.projections[tuple(sorted(new if n == old else n for n in pair))] = {
+                    **held, 'source': new if held['source'] == old else held['source']}
         if old in self.references:
             self.references[new] = self.references.pop(old)
             self._reference_prints[new] = self._reference_prints.pop(old)
@@ -6719,12 +6736,11 @@ class Project(dict):
 
         Sets on one geometry are compared as they are. Sets on two
         geometries share no DOF, so one is projected onto the other's
-        DOFs, and which one is decided by what the sets measure, not by
-        the order they are named in (`core.correlate.projection_order`):
-        the set with nodes measured in fewer than three directions is the
-        one projected onto, since it has no whole motion to project. The
-        MAC, the matches and the angle that aligns a pair are all read
-        from these.
+        DOFs, the way the pair's projection says (`projection_of`): as
+        Project set it (`set_projection`), or else the way
+        `core.correlate.projection_order` decides from what the sets
+        measure, not the order they are named in. The MAC, the matches
+        and the angle that aligns a pair are all read from these.
 
         Parameters
         ----------
@@ -6733,10 +6749,12 @@ class Project(dict):
         second : str
             The other shape set, by name.
         tolerance : float, default 0.02
-            How far the nearest node may be (`project_onto_basis`).
+            How far the nearest node may be, as a share of the extent
+            of the geometry projected onto, when neither `distance` nor
+            the pair's projection gives a distance.
         distance : float, optional
-            How far the nearest node may be as a distance
-            (`project_onto_basis`).
+            How far the nearest node may be, in place of the pair's
+            projection's (`project_onto_basis`).
 
         Returns
         -------
@@ -6747,14 +6765,15 @@ class Project(dict):
             matched (`core.correlate.project_shapes`' report, None on
             one geometry).
         """
-        from .core.correlate import project_shapes, projection_order
+        from .core.correlate import project_shapes
 
         first, second = self.name_of(first), self.name_of(second)
         home, theirs = self.geometry_for(first), self.geometry_for(second)
         if (home is None or theirs is None or home[1] is theirs[1]):
             return self[first], self[second], '', None
-        flipped, why = projection_order(self[first], self[second])
-        if flipped:
+        source, _onto, held, why = self._projection(first, second)
+        distance = held if distance is None else distance
+        if source == first:
             projected, report = project_shapes(self[first], home[1], self[second],
                                                theirs[1], tolerance=tolerance,
                                                distance=distance)
@@ -6764,6 +6783,102 @@ class Project(dict):
                                            home[1], tolerance=tolerance,
                                            distance=distance)
         return self[first], projected, f'{second} projected onto {first}: {why}', report
+
+    def set_projection(self, first: str, second: str, *, source: str | None = None,
+                       distance: float | None = None) -> None:
+        """Set how two shape sets on two geometries are projected when they
+        are compared (Project): which set is projected onto the other, and
+        how far its nodes may be from the nodes they are matched to. The
+        MAC, the matches, the animated projection and a Matched Modes
+        object of the pair all read it (`compared_sets`), and the project
+        file keeps it.
+
+        Parameters
+        ----------
+        first, second : str
+            The two shape sets, by name, in either order.
+        source : str, optional
+            The set projected onto the other's DOFs, `first` or `second`.
+            Left out, the one `core.correlate.projection_order` chooses.
+        distance : float, optional
+            How far a node may be from the node it is matched to, in
+            meters when the geometries' units are defined and in their own
+            units otherwise. Left out, `match_distance`'s.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        TypeError
+            If either is not a shape set.
+        ValueError
+            If the two are on one geometry, either has
+            no geometry, `source` is neither of them or holds too little
+            motion to be projected onto the other (`projection_why`), or
+            `distance` is not above zero.
+        """
+        from .core.correlate import projection_order
+
+        first, second = self.name_of(first), self.name_of(second)
+        for name in (first, second):
+            if not isinstance(self[name], ShapeSet):
+                raise TypeError(f'{name} is not a shape set')
+        if source is None:
+            flipped, _why = projection_order(self[first], self[second])
+            source = first if flipped else second
+        source = self.name_of(source)
+        if source not in (first, second):
+            raise ValueError(f'the set projected is {first} or {second}, not {source}')
+        onto = second if source == first else first
+        why = projection_why(self, source, onto)
+        if why:
+            raise ValueError(f'{source} cannot be projected onto {onto}: {why}')
+        if distance is not None and not (np.isfinite(distance) and distance > 0):
+            raise ValueError(f'the node match distance is {distance}; it must be above zero')
+        self.projections[tuple(sorted((first, second)))] = {
+            'source': source, 'distance': None if distance is None else float(distance)}
+
+    def projection_of(self, first: str, second: str) -> tuple[str, str, float | None]:
+        """How two shape sets are projected when compared (`compared_sets`):
+        (the set projected, the one it is projected onto, the node match
+        distance or None for `match_distance`'s), as Project set it
+        (`set_projection`), or else the way
+        `core.correlate.projection_order` decides, with no distance.
+
+        Parameters
+        ----------
+        first, second : str
+            The two shape sets, by name, in either order.
+
+        Returns
+        -------
+        tuple of (str, str, float or None)
+        """
+        source, onto, distance, _why = self._projection(self.name_of(first),
+                                                        self.name_of(second))
+        return source, onto, distance
+
+    def _projection(self, first: str, second: str) -> tuple[str, str, float | None, str]:
+        """`projection_of` with why it goes that way."""
+        from .core.correlate import projection_order
+
+        held = self.projections.get(tuple(sorted((first, second))))
+        flipped, why = projection_order(self[first], self[second])
+        chosen = first if flipped else second
+        if held is not None:
+            source = held['source']
+            if source != chosen:
+                why = 'the direction set in Project'
+            return source, second if source == first else first, held['distance'], why
+        return chosen, second if chosen == first else first, None, why
+
+    def projection_records(self) -> list[dict[str, Any]]:
+        """The pairs' projections as the project file holds them: one
+        `{'first', 'second', 'source', 'distance'}` per pair set."""
+        return [{'first': pair[0], 'second': pair[1], **held}
+                for pair, held in self.projections.items()]
 
     def match_distance(self, source: Any, onto: Any, *,
                        tolerance: float = 0.02) -> float | None:
@@ -9786,7 +9901,7 @@ class Project(dict):
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, object_groups=self.object_groups,
-                  provenance=self.provenance,
+                  provenance=self.provenance, projections=self.projection_records(),
                   data_index=self.data_index.records(), compress=compress,
                   references={**kept, **self.unresolved})
         # an object edited since it was read is in this file now, whole
@@ -10636,7 +10751,7 @@ _JOURNALED_VERBS = (
     'transform_responses', 'follow_averaging',
     'convert_to_specification', 'convert_to_psd',
     'author_specification', 'derive_specification',
-    'transform', 'expand', 'project_onto_basis', 'match_modes',
+    'transform', 'expand', 'project_onto_basis', 'set_projection', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'report_features', 'report_section',
     'report_test_date', 'predict', 'report_prediction', 'export_report',

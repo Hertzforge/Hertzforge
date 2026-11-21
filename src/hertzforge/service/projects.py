@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import atexit
 import copy
-import math
 import os
 import re
 import shutil
@@ -776,11 +775,6 @@ def show(state: OpenProject | None, params: Mapping[str, Any]) -> dict[str, Any]
                                   and not set(drawn) - set(showing.AVERAGING_FIELDS)):
         raise bad_request('project.show "averaging" is null or holds '
                           + ', '.join(showing.AVERAGING_FIELDS))
-    distance = prefs.get('match_distance', 0.0)
-    if isinstance(distance, bool) or not isinstance(distance, (int, float)) \
-            or not math.isfinite(distance) or distance < 0.0:
-        raise bad_request('project.show "match_distance" is a distance, 0 or above: 0 for 2 % '
-                          "of the target's size")
     if prefs.get('drive') is not None and not isinstance(prefs['drive'], str):
         raise bad_request('project.show "drive" is a DOF or null')
     if 'arrow_role' in prefs and prefs['arrow_role'] not in VALUES_CHOICES:

@@ -1864,6 +1864,7 @@ def save_test(path: str | os.PathLike, name: str,
               provenance: Mapping[str, Any] | None = None,
               data_index: Sequence[Mapping[str, Any]] | None = None,
               compress: bool = False,
+              projections: Sequence[Mapping[str, Any]] | None = None,
               references: Mapping[str, Reference] | None = None) -> None:
     """Save a whole test, every named object, to one .hforge file.
 
@@ -1891,7 +1892,7 @@ def save_test(path: str | os.PathLike, name: str,
     with (_replaced(hforge_path(path)) as partial,
           h5py.File(partial, 'w') as f, compressed(compress)):
         save_test_into(f, name, objects, active_geometry, project_type,
-                       object_groups, provenance, data_index, references)
+                       object_groups, provenance, data_index, references, projections)
 
 
 def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
@@ -1900,7 +1901,8 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    object_groups: Sequence[Mapping[str, Any]] | None = None,
                    provenance: Mapping[str, Any] | None = None,
                    data_index: Sequence[Mapping[str, Any]] | None = None,
-                   references: Mapping[str, Reference] | None = None
+                   references: Mapping[str, Reference] | None = None,
+                   projections: Sequence[Mapping[str, Any]] | None = None
                    ) -> None:
     """`save_test` into an open, empty HDF5 file (see `save_into`).
     References are written relative to the folder the file is in."""
@@ -1919,6 +1921,11 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     # how each derived object was computed, for the staleness
     # badges — settings fingerprints, so they survive the file
     f.attrs['provenance'] = json.dumps(provenance or {})
+    if projections:
+        # how each pair of shape sets on two geometries is projected when compared, set by
+        # Project; written only when one is set, so a project with none is stored as it
+        # always was
+        f.attrs['projections'] = json.dumps(list(projections))
     if data_index:
         # the files the project rests on, by name, size and SHA-256. A
         # dataset, not an attribute: an attached settings list rides in
@@ -2041,7 +2048,8 @@ def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
                           json.loads(f.attrs['links' if VDYN_STAMP in f.attrs
                                              else 'object_groups']),
                           provenance=json.loads(f.attrs['provenance']),
-                          data_index=indexed)
+                          data_index=indexed,
+                          projections=json.loads(f.attrs.get('projections', '[]')))
         for name, reference in followed.items():
             project.hold_by_reference(name, reference)
         project.unresolved = unresolved
