@@ -38,6 +38,7 @@ crates/hertzforge-random            Random: drive synthesis, ceilings, aborts, s
 crates/hertzforge-mimo-random       multiple-output Random: drive caps, ceilings, law guards, aborts
 crates/hertzforge-sine              Sine: oscillator, notching, kinematic and drive aborts, stop ramp
 crates/hertzforge-mixed             Mixed Mode: summed tone and random drive, its ceilings and aborts
+crates/hertzforge-mimo-mixed        MIMO Mixed Mode: summed tone, band and random drive at several drives, ceilings, aborts, stop ramp
 crates/hertzforge-shock-common      classical shock: pulse limits, pre-fire drive ceiling, law guard settings
 crates/hertzforge-shock-host        the shock firer: pulse ceilings, tolerance aborts, emergency stop on abort
 crates/hertzforge-mimo-shock        multiple-drive shock: growth caps, abort lines, divergence watch
@@ -59,6 +60,7 @@ crates/hertzforge-mimo-shock-laws   the built-in multiple-drive shock laws
 crates/hertzforge-mimo-sine-laws    the built-in multiple-drive sine laws and their check
 crates/hertzforge-twr-laws          the built-in waveform replication laws
 crates/hertzforge-mixed-laws        the law roles of a Mixed Mode test
+crates/hertzforge-mimo-mixed-laws   the law roles of a MIMO Mixed Mode test and its check
 crates/hertzforge-law-ratio-math    the ratio law's math, run by the built-in laws
 crates/hertzforge-law-band-average-math  the band-average law's math, run by a built-in law
 crates/hertzforge-shock-law-math    the classical, SRS and waveform shock law math
