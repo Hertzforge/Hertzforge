@@ -317,11 +317,13 @@ pub fn measurement_results(
     let nl = freqs.len();
     let (nr, nf) = (e.frf.len(), e.frf.first().map_or(0, Vec::len));
     let line = json!({"measurement": measurement, "point": point, "replaces": replaces,
-                      "averages": e.averages, "estimator": s.setup.estimator.name(),
+                      "averages": e.averages,
+                      "estimator": if s.plan.refs.len() > 1 { "matrix H1" } else { s.setup.estimator.name() },
                       "rows": rows(s, m)});
     let records = json!({"measurement": "the measurement's number in the test",
                          "point": "the point", "replaces": "the measurement of the point it replaces, if any",
-                         "averages": "the hits or frames averaged", "estimator": "h1, h2 or hv",
+                         "averages": "the hits or frames averaged",
+                         "estimator": "H1, H2 or Hv with one reference; matrix H1 with several",
                          "rows": "the references and responses at the point"});
     let mut out = Vec::new();
 
