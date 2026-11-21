@@ -74,7 +74,7 @@
 										{:else if p.on}
 											<span class="mark ok" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="currentColor" /></svg></span>{p.ramp < 0.999 ? 'Ramping' : 'Playing'}
 										{:else}
-											<span class="mark" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.2" /></svg></span>{p.enabled ? 'Waiting' : 'Off'}
+											<span class="mark" aria-hidden="true"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" stroke-width="1.2" /></svg></span>{mm.now?.state === 'finished' ? 'Ended' : p.enabled ? 'Waiting' : 'Off'}
 										{/if}
 										{#if p.follows}<br /><span class="sub">Follows {mm.partName(p.follows.of)} × {p.follows.ratio}</span>{/if}
 									</td>

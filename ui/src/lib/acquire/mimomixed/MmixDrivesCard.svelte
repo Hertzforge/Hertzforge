@@ -25,7 +25,7 @@
 	{:else}
 		<div class="aq-scroll">
 			<table class="aq-table" data-testid="mmix-drives-table">
-				<thead><tr><th>Drive</th><th class="num">Random rms</th><th class="num">Held peak</th><th class="num">Tone sum</th><th class="num">Headroom</th><th>Need against ceiling</th></tr></thead>
+				<thead><tr><th>Drive</th><th class="num">Random rms</th><th class="num">Held peak</th><th class="num">Tone sum</th><th class="num" title="The peak ceiling less the random part's held peak: the room left to the tones.">Headroom</th><th>Need against ceiling</th></tr></thead>
 				<tbody>
 					{#each drives as d, j (d.channel)}
 						{@const need = d.random_peak_v + d.tone_sum_v}

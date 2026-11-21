@@ -487,7 +487,7 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 				random_peak_v: round(rms * crest, 4),
 				tone_sum_v: round(toneSum, 4),
 				ceiling_v: d.peak_v,
-				headroom_v: round(la > 0 ? Math.max(0, d.peak_v / la - 0.25 * (1 + 0.1 * j) * crest) : d.peak_v, 4)
+				headroom_v: round(Math.max(0, d.peak_v - rms * crest), 4)
 			};
 		});
 	}
@@ -646,7 +646,8 @@ export function createMimoMixedMock(host: MimoMixedMockHost): MimoMixedMock {
 		r.phaseT += dt;
 		if (r.stopping !== null && r.t >= r.stopping) {
 			const op = r.end === null;
-			return end(r, op ? (r.phase === 'ramping_down' && r.atLevel < 0 ? 'completed' : 'operator_stop') : r.end!.outcome, op ? 'Stopped by the operator.' : r.end!.message);
+			const done = r.phase === 'ramping_down' && r.atLevel < 0;
+			return end(r, op ? (done ? 'completed' : 'operator_stop') : r.end!.outcome, op ? (done ? 'The schedule finished.' : 'Stopped by the operator.') : r.end!.message);
 		}
 		if (r.phase === 'sysid' && r.phaseT >= SYSID_S) {
 			identify(r);

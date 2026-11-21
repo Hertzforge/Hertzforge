@@ -78,7 +78,7 @@
 
 {#snippet notes()}
 	{#if status?.state === 'review' && !compact}
-		<div class="review" data-testid="mmix-review" data-phase={status.phase}>
+		<div class="review" data-testid="mmix-review-notes" data-phase={status.phase}>
 			{#if gates}
 				<p class="aq-small" data-testid="mmix-gate-words">
 					{gates.passed ? 'The gate passed' : 'The gate did not pass'}: the worst multiple coherence is {gates.coherence_min.toFixed(2)} against {gates.coherence_floor}; the model's condition is {Math.round(gates.condition_max)} against {gates.condition_limit}.
@@ -118,7 +118,7 @@
 		'data-level': live?.level_db ?? ''
 	}}
 	{verbs}
-	review={gateHold ? 'The run holds on its gate: proceed with your words, or abort.' : 'The identification, the gate and the prediction are drawn; nothing drives at level until you proceed.'}
+	review={status?.phase === 'gate_failed' ? 'The identification gate did not pass: proceed with your words, or abort.' : status?.phase === 'prediction_exceeded' ? 'The prediction is over a ceiling: proceed with your words, or abort.' :'The identification, the gate and the prediction are drawn; nothing drives at level until you proceed.'}
 	{notes}
 	{cards}
 	{channels}
