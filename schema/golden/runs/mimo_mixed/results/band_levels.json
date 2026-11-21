@@ -1,0 +1,87 @@
+{
+  "name": "band_levels",
+  "kind": "mimo_mixed_bands",
+  "abscissa": {
+    "kind": "time",
+    "unit": "s",
+    "array": "time"
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "bands": [
+    "b1"
+  ],
+  "description": "each band through the run: its center, its ramp, whether it is folded into the floor's reference; per control its added level against the stated (dB, NaN before a reading or for a folded band) and alarm",
+  "arrays": [
+    {
+      "name": "time",
+      "dtype": "f8",
+      "shape": [
+        32
+      ],
+      "unit": "s",
+      "offset": 0
+    },
+    {
+      "name": "center",
+      "dtype": "f8",
+      "shape": [
+        1,
+        1,
+        32
+      ],
+      "unit": "Hz",
+      "offset": 256
+    },
+    {
+      "name": "part_level",
+      "dtype": "f8",
+      "shape": [
+        1,
+        1,
+        32
+      ],
+      "unit": "",
+      "offset": 512
+    },
+    {
+      "name": "folded",
+      "dtype": "f8",
+      "shape": [
+        1,
+        1,
+        32
+      ],
+      "unit": "",
+      "offset": 768
+    },
+    {
+      "name": "error_db",
+      "dtype": "f8",
+      "shape": [
+        1,
+        4,
+        32
+      ],
+      "unit": "dB",
+      "offset": 1024
+    },
+    {
+      "name": "alarm",
+      "dtype": "f8",
+      "shape": [
+        1,
+        4,
+        32
+      ],
+      "unit": "",
+      "offset": 2048
+    }
+  ]
+}

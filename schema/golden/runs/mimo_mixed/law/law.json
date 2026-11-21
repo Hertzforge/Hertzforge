@@ -1,0 +1,88 @@
+{
+  "id": "pinv_closed+matrix",
+  "name": "MIMO Mixed Mode",
+  "builtin": true,
+  "floor": {
+    "law": {
+      "id": "pinv_closed",
+      "name": "pseudo-inverse, closed loop",
+      "version": "1.0.0",
+      "sha256": null,
+      "builtin": true,
+      "world": "mimo",
+      "hardware": true,
+      "not_cleared": null
+    },
+    "choice": {
+      "id": "pinv_closed",
+      "params": {}
+    }
+  },
+  "tones": {
+    "law": {
+      "id": "matrix",
+      "name": "matrix",
+      "version": "0.1.0",
+      "sha256": null,
+      "builtin": true,
+      "world": "sine_mimo",
+      "hardware": true,
+      "not_cleared": null
+    },
+    "choice": {
+      "id": "matrix",
+      "params": {}
+    }
+  },
+  "bands": {
+    "id": "auto",
+    "params": {}
+  },
+  "ceiling_rule": {
+    "id": "common_scale",
+    "params": {}
+  },
+  "fill_rule": {
+    "id": "no_error",
+    "params": {}
+  },
+  "calls": {
+    "format": "hertzforge.mimo_mixed.law_ticks.v1",
+    "record_bytes": 32,
+    "fields": [
+      {
+        "name": "t_s",
+        "type": "f64"
+      },
+      {
+        "name": "drive_in",
+        "type": "f64"
+      },
+      {
+        "name": "drive_out",
+        "type": "f64"
+      },
+      {
+        "name": "took_us",
+        "type": "f32"
+      },
+      {
+        "name": "role",
+        "type": "u8"
+      },
+      {
+        "name": "tone",
+        "type": "u8"
+      },
+      {
+        "name": "miss",
+        "type": "u8"
+      },
+      {
+        "name": "flags",
+        "type": "u8"
+      }
+    ],
+    "result": "control_trace"
+  }
+}

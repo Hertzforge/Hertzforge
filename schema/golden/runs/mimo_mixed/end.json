@@ -1,0 +1,36 @@
+{
+  "run_uid": "golden-mimo-mixed",
+  "end": {
+    "outcome": "completed",
+    "name": "completed",
+    "message": "Test complete: the schedule finished and every part ramped down with the controlled stop.",
+    "at_s": 12.75,
+    "level_db": 0,
+    "part": null,
+    "control": null,
+    "drive": null,
+    "ramp_s": 0.875
+  },
+  "at_unix": 1794240060.25,
+  "station_frames": 86528,
+  "summary": {
+    "t_s": 12.75,
+    "level_records": 2,
+    "trace_records": 2,
+    "spectra_records": 3
+  },
+  "streams": {
+    "inputs": {
+      "frames": 128,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    },
+    "drives": {
+      "frames": 128,
+      "drops": 0,
+      "gaps": 0,
+      "fault": null
+    }
+  }
+}

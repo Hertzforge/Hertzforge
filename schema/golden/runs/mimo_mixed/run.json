@@ -1,0 +1,147 @@
+{
+  "test": "mimo_mixed",
+  "run_uid": "golden-mimo-mixed",
+  "run_id": "mimo-mixed-0001",
+  "title": "Golden MIMO Mixed Mode",
+  "operator": "A. Operator",
+  "article": "Plate",
+  "notes": "the golden run folder",
+  "specification": {
+    "document": "Example procedure",
+    "clause": "3.2"
+  },
+  "source": "SIM",
+  "sim": {
+    "model": "sine_structure",
+    "parameters": {
+      "sample_rate_hz": 4096.0,
+      "resonances": [
+        {
+          "f_hz": 200.0,
+          "q": 2.5
+        },
+        {
+          "f_hz": 550.0,
+          "q": 2.5
+        }
+      ],
+      "noise_level": 0.0002,
+      "feedthrough": 0.35,
+      "transport_delay_samples": 0,
+      "inputs": 8,
+      "outputs": 4
+    },
+    "seed": 1515852340,
+    "structure": "sine-linear-4x4"
+  },
+  "station": {
+    "kind": "sim",
+    "class": "sim",
+    "label": "HERTZFORGE-SIM",
+    "backend": "hertzforge-hal-sim",
+    "devices": [],
+    "clock": "shared"
+  },
+  "grid": {
+    "requested_fs_hz": 4096,
+    "fs_hz": 4096,
+    "n_pts": 512,
+    "df_hz": 8,
+    "lines": 257
+  },
+  "build": {
+    "version": "0.0.0",
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false
+  },
+  "armed": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200
+  },
+  "start": {
+    "unix": 1794240000.25,
+    "utc_offset_s": -25200,
+    "station_frame": 0
+  },
+  "recording": {
+    "streams": "on"
+  },
+  "schema": "hertzforge-run/1",
+  "channel_table": {
+    "revision": 2,
+    "sha256": "57f327a988e31f4febb8f7eac35b45ac378157a601fabaab0a94cb508aee8a83"
+  },
+  "streams": [
+    {
+      "name": "inputs",
+      "kind": "inputs",
+      "channels": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "name": "drives",
+      "kind": "drives",
+      "channels": [
+        5,
+        6,
+        7,
+        8
+      ]
+    }
+  ],
+  "results": [
+    {
+      "name": "reference",
+      "kind": "sdm_reference"
+    },
+    {
+      "name": "identification_frf",
+      "kind": "frf"
+    },
+    {
+      "name": "identification_coherence",
+      "kind": "coherence"
+    },
+    {
+      "name": "identification_response",
+      "kind": "cpsd"
+    },
+    {
+      "name": "identification_drive",
+      "kind": "cpsd"
+    },
+    {
+      "name": "identification",
+      "kind": "mimo_identification"
+    },
+    {
+      "name": "control_spectra",
+      "kind": "mimo_mixed_spectra"
+    },
+    {
+      "name": "drive_spectra",
+      "kind": "mimo_mixed_drive_spectra"
+    },
+    {
+      "name": "tone_levels",
+      "kind": "mimo_mixed_tones"
+    },
+    {
+      "name": "band_levels",
+      "kind": "mimo_mixed_bands"
+    },
+    {
+      "name": "drive_levels",
+      "kind": "mimo_mixed_drives"
+    },
+    {
+      "name": "control_trace",
+      "kind": "mimo_mixed_control"
+    }
+  ],
+  "complete": true
+}

@@ -4,9 +4,9 @@
 `.hforge` project every analysis tool opens with `Project.open`, by
 default `<run name>.hforge` inside the folder. Every control module of
 the control service writes a run folder for every run: Random, MIMO
-Random, Sine, Mixed Mode, Classical Shock, SRS shock, MIMO Shock, TWR,
-Explorer, the Recorder and Playback. This is the analysis side of that
-bridge.
+Random, Sine, Mixed Mode, MIMO Mixed Mode, Classical Shock, SRS shock,
+MIMO Shock, TWR, Explorer, the Recorder and Playback. This is the
+analysis side of that bridge.
 
 The project holds, in this order:
 
@@ -36,7 +36,9 @@ The project holds, in this order:
   `Specification` with its cross terms, each controlled channel's
   alarm and abort lines as its warning and abort limits (a reference
   in virtual degrees of freedom, which are not channels, stays in the
-  run record as arrays);
+  run record as arrays); a MIMO Mixed Mode run's floor reference the
+  same way, its tones' and bands' histories, spectra and law calls
+  (`control_trace`) kept in the run record as arrays;
 - for a Sine sweep or step test, a `SineLevelSet` of the inputs' tracked
   levels (a result of kind `sine_levels`): the last one-way sweep at the
   highest level the run reached, as one `SineLevel` of that tone over
@@ -101,7 +103,8 @@ from .rattlesnake import _stream_offsets, _unit_scale
 PROJECT_TYPES = {'random': 'Random Vibration', 'mimo_random': 'Random Vibration',
                  'sine': 'Sine Sweep', 'classical_shock': 'Shock', 'srs': 'Shock',
                  'mimo_shock': 'Shock', 'twr': 'Transient', 'mixed': 'Random and Sine',
-                 'mimo_sine': 'Sine Sweep', 'modal_test': 'Modal Test'}
+                 'mimo_sine': 'Sine Sweep', 'modal_test': 'Modal Test',
+                 'mimo_mixed': 'Random and Sine'}
 
 #: the result kinds that become an analysis object; any other is kept in
 #: the run record as named arrays
@@ -1358,7 +1361,9 @@ def convert(path: str | os.PathLike, output: str | os.PathLike | None = None,
         spec = _sine_specification(run, table, lacked)
     elif run.test == 'mimo_sine':
         spec = _mimo_sine_specification(run, table, lacked)
-    elif run.test == 'mimo_random':
+    elif run.test in ('mimo_random', 'mimo_mixed'):
+        # a MIMO Mixed Mode run's floor was controlled to MIMO Random's reference
+        # form; its tones and bands, its spectra and its law calls stay as arrays
         spec = None
         reference = run.results.get('reference')
         if reference is None:

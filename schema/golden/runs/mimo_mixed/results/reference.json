@@ -1,0 +1,90 @@
+{
+  "name": "reference",
+  "kind": "sdm_reference",
+  "abscissa": {
+    "kind": "frequency",
+    "unit": "Hz",
+    "start": 112.0,
+    "step": 8.0
+  },
+  "channels": {
+    "responses": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "references": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "labels": [
+      "control 1",
+      "control 2",
+      "control 3",
+      "control 4"
+    ]
+  },
+  "band": [
+    14,
+    29
+  ],
+  "convention": "file",
+  "source": "inline, 2 points from 112 to 224 Hz, on 15 grid lines",
+  "description": "the floor's reference spectral density matrix at full level, and each control's alarm and abort lines as spectral densities (from the floor part's bands)",
+  "arrays": [
+    {
+      "name": "values",
+      "dtype": "c16",
+      "shape": [
+        4,
+        4,
+        15
+      ],
+      "unit": "g^2/Hz",
+      "offset": 0
+    },
+    {
+      "name": "alarm_upper",
+      "dtype": "f8",
+      "shape": [
+        4,
+        15
+      ],
+      "unit": "g^2/Hz",
+      "offset": 3840
+    },
+    {
+      "name": "alarm_lower",
+      "dtype": "f8",
+      "shape": [
+        4,
+        15
+      ],
+      "unit": "g^2/Hz",
+      "offset": 4320
+    },
+    {
+      "name": "abort_upper",
+      "dtype": "f8",
+      "shape": [
+        4,
+        15
+      ],
+      "unit": "g^2/Hz",
+      "offset": 4800
+    },
+    {
+      "name": "abort_lower",
+      "dtype": "f8",
+      "shape": [
+        4,
+        15
+      ],
+      "unit": "g^2/Hz",
+      "offset": 5280
+    }
+  ]
+}

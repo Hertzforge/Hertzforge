@@ -490,6 +490,68 @@ workspace. The trust mask, every other point of the levels, the references as
 judged, the errors, the notch, the readings and the law's calls have no
 analysis class and stay in the run record as named arrays.
 
+## What a MIMO Mixed Mode Run Saves
+
+From arm: `run.json` (with the operator's words, `specification` when one is named,
+and `recording`), `table.json`, `setup.json` (the setup as sent in `config`, which
+holds an inline reference whole; `resolved.parts`, each part as the controller
+plays it; `resolved.reference`, where the floor's reference came from, its size and
+band; `resolved.controls`, `resolved.drives` with their ceilings, peaks and abort
+levels, `resolved.limits`; `resolved.tolerances`, each part's alarm and abort bands
+per control; `resolved.law` with both laws, `resolved.ceiling_rule` and
+`resolved.fill_rule`; `resolved.identification`, `resolved.gates`,
+`resolved.schedule`, `resolved.full_level_s`, `resolved.estimation` and
+`resolved.acquisition`; `resolved.controller`, the controller's own settings; and
+`derived`, the grid, the band, the reference's rms, its source and where each law
+came from), `law/law.json` (the floor's law and the tones' law, each with its
+identity, the world it comes from, whether it may drive hardware and its parameters
+as given; the band and ceiling rules; and `calls`, the format of the law-call record,
+`hertzforge.mimo_mixed.law_ticks.v1`, and the result that holds it; a law that is a
+file has its bytes beside it) and `log.jsonl` (the controller's events, its state
+changes, levels, each part coming in and going out, alarms, holds, the operator's
+level, part, stop and abort, each as it is made), and these files, each checked
+against the golden run folder (`schema/golden/runs/mimo_mixed/`) by
+`tests/test_run_folder_golden_mimo_mixed.py`. Spectral results are on the floor's
+band lines, matrices in the file's convention (`conj(X) Y`); levels are at the level
+in force:
+
+| File | What |
+|---|---|
+| `streams/inputs` | Every enabled input as read from the station, in table order (`kind` `inputs`), the identification included |
+| `streams/drives` | Every drive as the device accepted it, in volts (`kind` `drives`), the identification's noise included |
+| `results/reference` | The floor's reference spectral density matrix at full level, with each control's alarm and abort lines as spectral densities from the floor part's bands (`kind` `sdm_reference`) |
+| `results/identification_frf` | The identification's transfer function matrix, each drive to each control and limit channel, the response taken the lag it measured later (`kind` `frf`) |
+| `results/identification_coherence` | Each control's multiple coherence with the drives (`kind` `coherence`) |
+| `results/identification_response` | The controls' spectral matrix while the drives played (`kind` `cpsd`) |
+| `results/identification_drive` | The drives' spectral matrix (`kind` `cpsd`) |
+| `results/identification` | The identification's facts: its level against the reference, the steps of its level search, its frames and lag, each control's band coherence and each drive's rms (`kind` `mimo_identification`) |
+| `results/control_spectra` | Per record, per control: the composite autospectrum with the tones in, the residual the floor law controls (the tones taken out) and the reference (`kind` `mimo_mixed_spectra`) |
+| `results/drive_spectra` | Per record, per drive: the floor law's drive autospectrum (`kind` `mimo_mixed_drive_spectra`) |
+| `results/tone_levels` | Each tone through the run: its frequency, part level, whether the shared ceiling held it and the scale it applied; per control its tracked amplitude, phase, target and error, and alarm; per drive the amplitude and phase it played (`kind` `mimo_mixed_tones`) |
+| `results/band_levels` | Each band through the run: its center, its ramp, whether it is folded into the floor's reference; per control its added level against the stated, and alarm (`kind` `mimo_mixed_bands`) |
+| `results/drive_levels` | The run's level and each control's floor error; per drive the random part's rms, the largest magnitude played, the peak held over the last second, the tones' summed amplitude and the headroom to its peak ceiling (`kind` `mimo_mixed_drives`) |
+| `results/control_trace` | Every call of the two laws in the order taken, the law-call record `law_ticks v1`: station time, the law (0 the floor's, once a loop; 1 a tone's, once a tick), the tone, the drive in force before the call and the drive taken from it, the call's time, a miss and its flags; 64 calls to a record (`kind` `mimo_mixed_control`) |
+| `end.json` | The end, as the run's state reports it (the outcome and why, the drops), with what the record counted (the test time, the level, trace and spectra records) and the station's frames |
+
+A run that ends before identification has no identification, and none of the loop or
+level results; one that ends before it engages has no law calls. With
+`record.streams` false there is no `streams/` folder. A run killed in mid-test keeps
+what it wrote: no `end.json`, and `run.json` not marked complete.
+
+On the analysis side the floor's reference becomes a `Specification` with a record for
+each autospectrum and each cross term above the diagonal, each control's alarm and
+abort lines as the warning and abort limits of its autospectrum; the transfer function
+matrix an `Frf`; the multiple coherence a `MultipleCoherence`; the identification's
+spectral matrices a `Psd` with cross terms; all in SI, opened in the Random and Sine
+workspace. The tones', bands' and drives' histories, the loops' spectra and every law
+call stay in the run record as named arrays.
+
+The golden folder is written by `cargo test -p sds-control --test
+mimo_mixed_golden_run` from a short run on the simulator's linear 4 by 4 (a floor, a
+tone and a band, the automatic schedule to completion), with fixed seeds, its wall
+times, build fields and each law call's time normalized, and its streams cut to their
+first 128 frames (`cut_from_frames`); `scripts/make_golden_runs.sh` rewrites it.
+
 ## What a TWR Run Saves
 
 From arm: `run.json`, `table.json`, `setup.json` (the configuration as accepted;

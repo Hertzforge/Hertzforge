@@ -1,0 +1,35 @@
+{"seq":0,"at_unix":1794240000.25,"frame":null,"kind":"state","text":"configured \"Golden MIMO Mixed Mode\" on sim"}
+{"seq":1,"at_unix":1794240001.25,"frame":null,"kind":"note","text":"0.00 s: Armed: 4 controls, 4 drives, 0 limits, 257 lines of 8 Hz at 4096 Hz."}
+{"seq":2,"at_unix":1794240002.25,"frame":null,"kind":"state","text":"idle to armed","data":{"from":"idle","to":"armed","state":"armed"}}
+{"seq":3,"at_unix":1794240003.25,"frame":null,"kind":"station","text":"armed on sim at 4096 Hz, shared clock","data":{"class":"sim","fs_hz":4096.0,"event":"arm"}}
+{"seq":4,"at_unix":1794240004.25,"frame":null,"kind":"state","text":"armed to sysid","data":{"from":"armed","to":"sysid","state":"running"}}
+{"seq":5,"at_unix":1794240005.25,"frame":null,"kind":"identification","text":"identification started","data":{"event":"identification_start"}}
+{"seq":6,"at_unix":1794240006.25,"frame":33792,"kind":"note","text":"7.25 s: Identified at -20.2 dB against the reference after 2 steps; lag 74 frames; 8 frames ahead of the first drive frame.","data":{"source":"controller"}}
+{"seq":7,"at_unix":1794240007.25,"frame":33792,"kind":"state","text":"sysid to coherence gate","data":{"from":"sysid","to":"coherence_gate","state":"running"}}
+{"seq":8,"at_unix":1794240008.25,"frame":33792,"kind":"note","text":"7.25 s: Coherence gate passed: per control [0.9277816396807598, 0.9453263191911627, 0.9354935326807595, 0.9412528748357146] against 0.5.","data":{"source":"controller"}}
+{"seq":9,"at_unix":1794240009.25,"frame":33792,"kind":"identification","text":"identified at -20.15 dB in 2 steps: band coherence [0.928, 0.945, 0.935, 0.941], gate passed","data":{"event":"identification","level_db":-20.153224955811375,"steps":2,"band_coherence":[0.9277816396807598,0.9453263191911628,0.9354935326807596,0.9412528748357146],"passed":true,"lag_frames":74}}
+{"seq":10,"at_unix":1794240010.25,"frame":33792,"kind":"state","text":"coherence gate to awaiting review","data":{"from":"coherence_gate","to":"awaiting_review","state":"review"}}
+{"seq":11,"at_unix":1794240011.25,"frame":33792,"kind":"note","text":"the operator reviewed the identification and proceeded","data":{"action":"proceed"}}
+{"seq":12,"at_unix":1794240012.25,"frame":33792,"kind":"note","text":"0.00 s: Engaged at -6.0 dB, the floor alone.","data":{"source":"controller"}}
+{"seq":13,"at_unix":1794240013.25,"frame":33792,"kind":"engage","text":"engaged: the floor plays alone at the soft-start level","data":{"event":"engage"}}
+{"seq":14,"at_unix":1794240014.25,"frame":33792,"kind":"state","text":"awaiting review to floor only","data":{"from":"awaiting_review","to":"floor_only","state":"running"}}
+{"seq":15,"at_unix":1794240015.25,"frame":34816,"kind":"level","text":"level -6 dB","data":{"event":"level","level_db":-6.0,"t_s":0.25}}
+{"seq":16,"at_unix":1794240016.25,"frame":34816,"kind":"part","text":"band b1 in","data":{"event":"part_in","part":"b1","folded":true,"t_s":0.25}}
+{"seq":17,"at_unix":1794240017.25,"frame":37888,"kind":"alarm","text":"band b1 outside its alarm band at controls [1, 2, 3, 4]","data":{"event":"alarm","part":"b1","controls":[1,2,3,4],"t_s":1.0}}
+{"seq":18,"at_unix":1794240018.25,"frame":44032,"kind":"alarm","text":"band b1 back inside its alarm band","data":{"event":"alarm_cleared","part":"b1","controls":[],"t_s":2.5}}
+{"seq":19,"at_unix":1794240019.25,"frame":60416,"kind":"note","text":"6.38 s: Level -3.00 dB.","data":{"source":"controller"}}
+{"seq":20,"at_unix":1794240020.25,"frame":60416,"kind":"note","text":"6.38 s: The floor is equalized; the parts come in.","data":{"source":"controller"}}
+{"seq":21,"at_unix":1794240021.25,"frame":60416,"kind":"state","text":"floor only to engaged","data":{"from":"floor_only","to":"engaged","state":"running"}}
+{"seq":22,"at_unix":1794240022.25,"frame":60416,"kind":"floor","text":"the floor is equalized","data":{"event":"floor_equalized","t_s":6.5}}
+{"seq":23,"at_unix":1794240023.25,"frame":60416,"kind":"part","text":"tone t1 in","data":{"event":"part_in","part":"t1","t_s":6.5}}
+{"seq":24,"at_unix":1794240024.25,"frame":61440,"kind":"level","text":"level -3 dB","data":{"event":"level","level_db":-3.0,"t_s":6.75}}
+{"seq":25,"at_unix":1794240025.25,"frame":68608,"kind":"note","text":"8.38 s: Level 0.00 dB.","data":{"source":"controller"}}
+{"seq":26,"at_unix":1794240026.25,"frame":68608,"kind":"state","text":"engaged to full level","data":{"from":"engaged","to":"full_level","state":"running"}}
+{"seq":27,"at_unix":1794240027.25,"frame":69632,"kind":"level","text":"level 0 dB","data":{"event":"level","level_db":0.0,"t_s":8.75}}
+{"seq":28,"at_unix":1794240028.25,"frame":81920,"kind":"floor","text":"the floor is equalized","data":{"event":"floor_equalized","t_s":11.75}}
+{"seq":29,"at_unix":1794240029.25,"frame":82944,"kind":"note","text":"11.88 s: Ending: completed (the schedule ran to its end)","data":{"source":"controller"}}
+{"seq":30,"at_unix":1794240030.25,"frame":82944,"kind":"state","text":"full level to ramping down","data":{"from":"full_level","to":"ramping_down","state":"stopping"}}
+{"seq":31,"at_unix":1794240031.25,"frame":84992,"kind":"part","text":"tone t1 out","data":{"event":"part_out","part":"t1","t_s":12.5}}
+{"seq":32,"at_unix":1794240032.25,"frame":86528,"kind":"note","text":"12.88 s: Ended: completed (the schedule ran to its end)","data":{"source":"controller"}}
+{"seq":33,"at_unix":1794240033.25,"frame":86528,"kind":"state","text":"ramping down to stopped","data":{"from":"ramping_down","to":"stopped","state":"finished"}}
+{"seq":34,"at_unix":1794240034.25,"frame":86528,"kind":"stop","text":"Test complete: the schedule finished and every part ramped down with the controlled stop.","data":{"event":"stop","outcome":"completed","end":{"outcome":"completed","name":"completed","message":"Test complete: the schedule finished and every part ramped down with the controlled stop.","at_s":12.75,"level_db":0,"part":null,"control":null,"drive":null,"ramp_s":0.875}}}

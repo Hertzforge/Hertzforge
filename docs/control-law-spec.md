@@ -584,6 +584,7 @@ Each test type gets its own world, built on the same mechanism.
 | MIMO variants of the above | As above | After MIMO Random |
 | MIMO Shock (classical and SRS, several drives) | Between pulses | Built: section 15 |
 | MIMO Sine (sweep, dwell and stepped sine, several drives) | Every control update | Built: section 16; its check is not built yet |
+| MIMO Mixed Mode (a random floor with sine tones and narrow bands, several drives) | The floor's law once a loop, the tones' law every control update | Built: the floor takes a MIMO Random law (section 7) and the tones a MIMO Sine law (section 16); on hardware an imported law also needs the MIMO Mixed check in its role (`mimo-mixed-check 1`) |
 
 ## 13. Writing a law
 
