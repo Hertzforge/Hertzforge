@@ -826,7 +826,7 @@ fn mimo_mixed_mv8_shared_ceiling_common_scale() {
     assert_eq!(room, [5.0, 5.0]);
     let mut s = [0.0; 3];
     let mut lim = [false; 3];
-    CommonScale.apply(&d, 3, &room, &mut s, &mut lim);
+    CommonScale.apply(&d, &[0.0; 6], 3, &room, &mut s, &mut lim);
     let db = 20.0 * s[0].log10();
     println!("MV8 common_scale: scales {s:?} ({db:.2} dB), limiting {lim:?}");
     assert!(s.iter().all(|v| (v - 5.0 / 6.0).abs() < 1e-12));
@@ -880,7 +880,7 @@ fn mimo_mixed_mv8_shared_ceiling_in_turn_depends_on_order() {
     let room = [5.0, 5.0];
     let mut s = [0.0; 3];
     let mut lim = [false; 3];
-    InTurn.apply(&d, 3, &room, &mut s, &mut lim);
+    InTurn.apply(&d, &[0.0; 6], 3, &room, &mut s, &mut lim);
     // The reverse order.
     let rev: Vec<C64> = [2, 1, 0]
         .iter()
@@ -888,7 +888,7 @@ fn mimo_mixed_mv8_shared_ceiling_in_turn_depends_on_order() {
         .collect();
     let mut sr = [0.0; 3];
     let mut limr = [false; 3];
-    InTurn.apply(&rev, 3, &room, &mut sr, &mut limr);
+    InTurn.apply(&rev, &[0.0; 6], 3, &room, &mut sr, &mut limr);
     println!(
         "MV8 in_turn in bank order: scales {s:?} limiting {lim:?}; reversed (tones 3, 2, 1): \
          scales {sr:?} limiting {limr:?}"
@@ -903,6 +903,27 @@ fn mimo_mixed_mv8_shared_ceiling_in_turn_depends_on_order() {
     let fwd = [s[0], s[1], s[2]];
     let back = [sr[2], sr[1], sr[0]];
     assert!(fwd.iter().zip(&back).any(|(a, b)| (a - b).abs() > 1e-6));
+}
+
+/// Requirement: `in_turn` judges a tone against the other tones' drives in
+/// force, never their asks. One drive, 5 V of room; tone 1 plays 3 V and
+/// asks 0.5 V, tone 0 asks 4 V. Against the asks tone 0 would get its 4 V
+/// (4 + 0.5 <= 5); against what tone 1 plays it gets 2 V (scale 0.5,
+/// limiting). Tone 1 is then judged against the larger of tone 0's 1 V in
+/// force and its 2 V decided: scale 1. The decided sum stays within 5 V.
+#[test]
+fn mimo_mixed_in_turn_judges_against_drives_in_force() {
+    let d = [c(4.0, 0.0), c(0.0, 0.5)];
+    let in_force = [1.0, 3.0];
+    let mut s = [0.0; 2];
+    let mut lim = [false; 2];
+    InTurn.apply(&d, &in_force, 2, &[5.0], &mut s, &mut lim);
+    println!("in_turn in force: scales {s:?} limiting {lim:?}");
+    assert!((s[0] - 0.5).abs() < 1e-12);
+    assert!(lim[0]);
+    assert!((s[1] - 1.0).abs() < 1e-12);
+    assert!(!lim[1]);
+    assert!(s[0] * 4.0 + s[1] * 0.5 <= 5.0 + 1e-12);
 }
 
 // =============================================================================

@@ -8,7 +8,10 @@
 //! random part's held peak at full-level scale. When it binds the ceiling
 //! rule decides, by id: `common_scale` (S2, default; every tone's vector by
 //! one factor) or `in_turn` (S1; each tone against what the others play, in
-//! bank order: the single-output behaviour).
+//! bank order: the single-output behaviour). Both are given the tones' drives
+//! in force as well as their asks; `in_turn` judges each tone against the
+//! other tones' drives in force (or, for a tone already decided this tick,
+//! the larger of that and its decided drive), never against their asks.
 //!
 //! [`headroom`] and the rules' [`CeilingRule::apply`] do not allocate.
 //! [`forecast`] runs at setup along the schedule and names the first time
@@ -36,9 +39,11 @@ pub fn headroom(level: f64, ceiling_v: &[f64], random_peak_v: &[f64], out: &mut 
 
 /// A ceiling rule (design D8): given every tone's requested drive vector
 /// (`tones` vectors of `drives` values, tone-major, peak volts at full
-/// level, already times each tone's part level) and each drive's headroom,
-/// write a scale per tone in `[0, 1]` and whether each tone is limiting.
-/// After the rule, `sum_k scale_k |D_k,j| <= A_j` on every drive.
+/// level, already times each tone's part level), every tone's drive
+/// magnitudes in force (`in_force`, the same layout, as played: part level
+/// times the drive the bank holds) and each drive's headroom, write a scale
+/// per tone in `[0, 1]` and whether each tone is limiting. After the rule,
+/// `sum_k scale_k |D_k,j| <= A_j` on every drive.
 pub trait CeilingRule: Send {
     /// The rule's id.
     fn id(&self) -> &'static str;
@@ -46,6 +51,7 @@ pub trait CeilingRule: Send {
     fn apply(
         &mut self,
         drives: &[C64],
+        in_force: &[f64],
         tones: usize,
         headroom: &[f64],
         scales: &mut [f64],
@@ -76,6 +82,7 @@ impl CeilingRule for CommonScale {
     fn apply(
         &mut self,
         drives: &[C64],
+        _in_force: &[f64],
         tones: usize,
         headroom: &[f64],
         scales: &mut [f64],
@@ -100,9 +107,14 @@ impl CeilingRule for CommonScale {
 }
 
 /// `in_turn` (S1): in bank order, tone `k`'s vector by
-/// `s_k = min(1, min_j (A_j - sum_{l != k} |D_l,j|) / |D_k,j|)`, the tones
-/// before it as scaled, the tones after it as asked. The outcome depends on
-/// the order, which is the rule's known weakness.
+/// `s_k = min(1, min_j (A_j - sum_{l != k} P_l,j) / |D_k,j|)`, `P_l,j` the
+/// other tone's drive in force on drive `j`; for a tone `l` before `k`,
+/// already decided this tick, the larger of its drive in force and its
+/// decided drive `s_l |D_l,j|`. So a tone is judged against what the others
+/// play, never against what they ask, and the last tone on each drive sees
+/// every decided drive before it: `sum_k s_k |D_k,j| <= A_j` holds after the
+/// pass. The outcome depends on the order, which is the rule's known
+/// weakness.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct InTurn;
 
@@ -119,6 +131,7 @@ impl CeilingRule for InTurn {
     fn apply(
         &mut self,
         drives: &[C64],
+        in_force: &[f64],
         tones: usize,
         headroom: &[f64],
         scales: &mut [f64],
@@ -135,8 +148,12 @@ impl CeilingRule for InTurn {
                 let others: f64 = (0..tones)
                     .filter(|&l| l != k)
                     .map(|l| {
-                        let sl = if l < k { scales[l] } else { 1.0 };
-                        sl * drives[l * m + j].norm()
+                        let now = in_force.get(l * m + j).copied().unwrap_or(0.0);
+                        if l < k {
+                            now.max(scales[l] * drives[l * m + j].norm())
+                        } else {
+                            now
+                        }
                     })
                     .sum();
                 s = s.min((a - others) / mine);

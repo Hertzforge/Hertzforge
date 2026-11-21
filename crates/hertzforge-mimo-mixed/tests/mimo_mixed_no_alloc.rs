@@ -144,6 +144,7 @@ fn mimo_mixed_ceiling_rules_do_not_allocate() {
         c(1.0, 0.0),
         c(4.0, 0.0),
     ];
+    let in_force = [0.0; 6];
     let mut room = [0.0; 2];
     let mut scales = [0.0; 3];
     let mut limiting = [false; 3];
@@ -152,8 +153,8 @@ fn mimo_mixed_ceiling_rules_do_not_allocate() {
     let allocs = counted(|| {
         for i in 0..1000 {
             headroom(0.5 + i as f64 * 1e-4, &[10.0, 10.0], &[5.0, 4.0], &mut room);
-            common.apply(&drives, 3, &room, &mut scales, &mut limiting);
-            turn.apply(&drives, 3, &room, &mut scales, &mut limiting);
+            common.apply(&drives, &in_force, 3, &room, &mut scales, &mut limiting);
+            turn.apply(&drives, &in_force, 3, &room, &mut scales, &mut limiting);
         }
     });
     assert_eq!(allocs, 0, "the ceiling rules allocated {allocs} times");
