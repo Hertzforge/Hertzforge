@@ -112,6 +112,9 @@ fn file_of(law: BuiltinMimo) -> &'static str {
         BuiltinMimo::BuzzMatched => "hertzforge_law_mimo_buzz",
         BuiltinMimo::MinimumDrive => "hertzforge_law_mimo_min_drive",
         BuiltinMimo::BandAverage => "hertzforge_law_mimo_band_average",
+        BuiltinMimo::Independent => "hertzforge_law_mimo_independent",
+        BuiltinMimo::NearlyIndependent => "hertzforge_law_mimo_nearly_independent",
+        BuiltinMimo::BroydenCongruence => "hertzforge_law_mimo_broyden_congruence",
     }
 }
 
@@ -177,6 +180,58 @@ fn non_default(law: BuiltinMimo) -> (Given, OnePercent) {
                 ("cross_terms", choice("reference")),
             ],
             ("gain_correction_rate", 0.25, 0.2525),
+        ),
+        BuiltinMimo::Independent => (
+            vec![
+                ("regularization_constant", num(0.05)),
+                ("negative_floor", num(0.01)),
+                ("limit_up_percent", num(50.0)),
+                ("limit_down_percent", num(50.0)),
+                ("convergence", num(0.7)),
+                ("solve", choice("set_to_zero")),
+                // Off by default in this law.
+                ("solve_weighting", choice("target")),
+            ],
+            ("convergence", 0.5, 0.505),
+        ),
+        BuiltinMimo::NearlyIndependent => (
+            vec![
+                ("regularization_constant", num(0.05)),
+                ("convergence", num(0.8)),
+                ("solve", choice("set_to_zero")),
+                ("solve_weighting", choice("none")),
+                ("exact_tolerance", num(1e-6)),
+                ("level_set", ParamVal::Toggle(false)),
+                ("loop", choice("open")),
+            ],
+            ("regularization_constant", 0.01, 0.0101),
+        ),
+        BuiltinMimo::BroydenCongruence => (
+            vec![
+                ("regularization", choice("tikhonov")),
+                ("regularization_amount", num(1e-2)),
+                ("max_drive_coherence", num(0.9)),
+                ("start_cap", ParamVal::Toggle(true)),
+                ("start_cap_db", num(-6.0)),
+                ("convergence", num(0.7)),
+                ("max_step_db", num(2.0)),
+                ("ridge", num(0.2)),
+                ("resonance_sensitivity", num(1.0)),
+                ("resonance_halfwidth_oct", num(0.5)),
+                ("resonance_min_gain", num(0.2)),
+                ("ceiling_db", num(6.0)),
+                ("broyden_gain", num(0.4)),
+                ("coherence_power", num(2.0)),
+                ("model_anchor", num(0.1)),
+                ("min_du_db", num(0.1)),
+                ("split_level", ParamVal::Toggle(false)),
+                ("base_on_command", ParamVal::Toggle(false)),
+                ("realize_tol_db", num(1.0)),
+                ("phase_steering", ParamVal::Toggle(false)),
+                ("max_phase_step_deg", num(10.0)),
+                ("effective_averages", num(19.0)),
+            ],
+            ("broyden_gain", 0.5, 0.505),
         ),
     }
 }
