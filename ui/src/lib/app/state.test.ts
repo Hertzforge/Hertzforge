@@ -721,3 +721,66 @@ describe("the MAC's node match, a distance", () => {
 		expect(a.matchShown).toBeNull();
 	});
 });
+
+describe('the display system changed', () => {
+	beforeEach(() => void vi.useFakeTimers());
+	afterEach(() => void vi.useRealTimers());
+	// the service draws in the system it was last set to, as the real one does
+	function unitsMade() {
+		const made = make();
+		let system = 'mm-kg-N-s';
+		const shows: { line: number | null; projection: boolean }[] = [];
+		const runs: Sent[] = [];
+		(made.app.analysis as unknown as { request: unknown }).request = vi.fn(async (method: string, params: Sent & { name?: string; prefs?: { line: number | null; projection: boolean } }) => {
+			if (method === 'units.system') {
+				if (params.name) system = params.name;
+				return { name: system, systems: ['mm-kg-N-s', 'in-slinch-lbf-s'] };
+			}
+			if (method === 'project.show') {
+				shows.push({ line: params.prefs!.line, projection: params.prefs!.projection });
+				return { title: `shown in ${system}`, note: '', views: [] };
+			}
+			if (method === 'op.run') {
+				runs.push(params);
+				return { views: [{ view: 'reading', title: `${params.preview ? 'PREVIEW' : 'REAL'} in ${system}`, rows: [] }] };
+			}
+			return { table: { columns: [] } };
+		});
+		made.app.project.selection = { objects: ['Test Modes', 'FEM Modes'], records: {} } as never;
+		return { ...made, shows, runs };
+	}
+
+	it('draws the selection again in the new units, keeping its line, picks and Projection', async () => {
+		const { app, a, shows } = unitsMade();
+		await app.units.sync();
+		await a.showSelection();
+		a.setPref('projection', true);
+		a.moveLine(12);
+		a.pickCell({ row: 1, column: 2 });
+		await rest();
+		expect(a.shown?.title).toBe('shown in mm-kg-N-s');
+		await app.units.choose('in-slinch-lbf-s');
+		await rest();
+		expect(a.shown?.title).toBe('shown in in-slinch-lbf-s');
+		expect(shows.at(-1)).toEqual({ line: 12, projection: true });
+		expect(a.picks).toEqual([{ row: 1, column: 2 }]);
+	});
+
+	it('keeps a reading that was applied, and draws a preview again', async () => {
+		const { app, a, runs } = unitsMade();
+		await app.units.sync();
+		await a.perform(row(addBlock), column);
+		await a.run();
+		await app.units.choose('in-slinch-lbf-s');
+		await rest();
+		expect(said(a)).toBe('REAL in mm-kg-N-s');
+		expect(runs.filter((r) => !r.preview).length).toBe(1);
+		a.followPreview();
+		await rest();
+		expect(said(a)).toBe('PREVIEW in in-slinch-lbf-s');
+		await app.units.choose('mm-kg-N-s');
+		await rest();
+		expect(said(a)).toBe('PREVIEW in mm-kg-N-s');
+		expect(a.reading?.title).toBe('Add Block, preview');
+	});
+});
