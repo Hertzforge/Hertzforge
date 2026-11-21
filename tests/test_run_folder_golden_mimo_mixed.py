@@ -58,7 +58,7 @@ def test_the_mimo_mixed_folder_converts_and_opens_with_nothing_lacking(converted
     _folder, done, project = converted
     assert done.lacked == []
     assert list(project) == done.objects
-    assert project.project_type == 'Random and Sine'
+    assert project.project_type == 'Random Vibration'
     assert project.name == 'Golden MIMO Mixed Mode'
 
 

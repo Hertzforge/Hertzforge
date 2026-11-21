@@ -104,7 +104,9 @@ PROJECT_TYPES = {'random': 'Random Vibration', 'mimo_random': 'Random Vibration'
                  'sine': 'Sine Sweep', 'classical_shock': 'Shock', 'srs': 'Shock',
                  'mimo_shock': 'Shock', 'twr': 'Transient', 'mixed': 'Random and Sine',
                  'mimo_sine': 'Sine Sweep', 'modal_test': 'Modal Test',
-                 'mimo_mixed': 'Random and Sine'}
+                 # a MIMO Mixed Mode run opens as a random run until it has an
+                 # analysis of its own; its tone results are still converted
+                 'mimo_mixed': 'Random Vibration'}
 
 #: the result kinds that become an analysis object; any other is kept in
 #: the run record as named arrays

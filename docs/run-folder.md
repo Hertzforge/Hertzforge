@@ -543,8 +543,8 @@ On the analysis side the floor's reference becomes a `Specification` with a reco
 each autospectrum and each cross term above the diagonal, each control's alarm and
 abort lines as the warning and abort limits of its autospectrum; the transfer function
 matrix an `Frf`; the multiple coherence a `MultipleCoherence`; the identification's
-spectral matrices a `Psd` with cross terms; all in SI, opened in the Random and Sine
-workspace. The tones', bands' and drives' histories, the loops' spectra and every law
+spectral matrices a `Psd` with cross terms; all in SI, opened in the Random Vibration
+workspace, until the test has an analysis of its own. The tones', bands' and drives' histories, the loops' spectra and every law
 call stay in the run record as named arrays.
 
 The golden folder is written by `cargo test -p sds-control --test
