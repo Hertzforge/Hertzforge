@@ -111,10 +111,17 @@ def test_a_correction_strikes_the_entry_and_says_what_changed(keeper):
 
 
 def test_a_late_event_is_written_when_it_happened(keeper):
+    from datetime import datetime
+
     opened(keeper)
     spec = call(keeper, 'runlog.form', form='note')
+    # The form opened at noon on a past day, in this computer's zone, so the
+    # typed 00:00:01 is that day's and the note is late at any hour the test
+    # runs. Opened today, the note is not late for the ten minutes after
+    # midnight (LATE_AFTER).
+    taken = datetime(2026, 11, 3, 12, 0, 0).astimezone().isoformat()
     log = call(keeper, 'runlog.write', form='note', values={}, text='door left open',
-               time='00:00:01', taken=spec['taken'], author='BZ')['log']
+               time='00:00:01', taken=taken, author='BZ')['log']
     assert log['rows'][-1]['line'].startswith('00:00:01')
     assert log['rows'][-1]['late'] is not None
     with pytest.raises(ProtocolError, match='not a time of day'):
