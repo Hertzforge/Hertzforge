@@ -190,6 +190,29 @@ pub fn h1_frf(
     ))
 }
 
+/// [`linalg::h1_unexcited_part`] on the band's lines: the part of `m` in the drive
+/// directions [`h1_frf`] drops. Zero outside the band; also the number of band
+/// lines on which at least one direction was dropped.
+pub fn h1_unexcited_part(
+    g_xx: &HermitianStack,
+    reg: Regularization,
+    m: &MatrixStack,
+    band: (usize, usize),
+) -> Result<(MatrixStack, usize), LinalgError> {
+    let parts = collect(par_map(band, |r| {
+        linalg::h1_unexcited_part(&sub_herm(g_xx, r.clone()), reg, &sub_mat(m, r))
+    }))?;
+    let lines_dropped = parts
+        .iter()
+        .map(|(_, d)| d.iter().filter(|&&n| n > 0).count())
+        .sum();
+    let mats = parts.into_iter().map(|(p, _)| p).collect();
+    Ok((
+        join_mat(m.lines(), m.rows(), m.cols(), band, mats),
+        lines_dropped,
+    ))
+}
+
 /// Multiple coherence on the band's lines, line-major; 0 outside the band.
 pub fn multiple_coherence(
     g_yy: &HermitianStack,
