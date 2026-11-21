@@ -485,6 +485,7 @@ pub struct MimoMixedService {
     pub(crate) clip_v: Vec<f64>,
     pub(crate) unsteady: u64,
     pub(crate) ident_rec: Option<ident::IdentRec>,
+    pub(crate) forecast: Option<crate::budget::BudgetForecast>,
     // The level.
     pub(crate) level_db: f64,
     pub(crate) rung: usize,
@@ -652,6 +653,7 @@ impl MimoMixedService {
             clip_v: Vec::new(),
             unsteady: 0,
             ident_rec: None,
+            forecast: None,
             level_db: f64::NEG_INFINITY,
             rung: 0,
             phase_at_s: 0.0,
@@ -761,6 +763,17 @@ impl MimoMixedService {
             }
         }
         Some((g, est.clean_mask()))
+    }
+
+    /// The floor law's reference: the floor plus every folded band (after
+    /// proceed), full level.
+    pub fn floor_reference(&self) -> Option<&HermitianStack> {
+        self.floor_ref.as_ref()
+    }
+
+    /// The setup forecast's worst moment (after proceed).
+    pub fn budget_forecast(&self) -> Option<crate::budget::BudgetForecast> {
+        self.forecast
     }
 
     /// The floor's band, lines `[lo, hi)`.
@@ -1693,13 +1706,14 @@ impl MimoMixedService {
         // The setup forecast.
         let pred = crate::predict::predict(&self.cfg, &model)?;
         let horizon = self.schedule_horizon_s();
-        crate::budget::forecast(
+        let fc = crate::budget::forecast(
             &self.cfg,
             &model,
             &pred.random_peaks_v(),
             FORECAST_STEP_S,
             horizon,
         )?;
+        self.forecast = Some(fc);
         // The floor's reference with the folded bands; the bands.
         self.build_bands()?;
         let floor_ref = self.loop_reference();

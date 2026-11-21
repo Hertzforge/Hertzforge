@@ -1296,13 +1296,22 @@ name = "hertzforge-mimo-mixed"
 version = "0.1.20"
 dependencies = [
  "hertzforge-breakpoints",
+ "hertzforge-channel-table",
  "hertzforge-dsp",
+ "hertzforge-engine",
+ "hertzforge-hal",
+ "hertzforge-hal-sim",
+ "hertzforge-law-host",
  "hertzforge-mimo-random",
+ "hertzforge-mimo-sine",
  "hertzforge-mixed",
+ "hertzforge-module-abi",
  "hertzforge-random",
+ "hertzforge-random-laws",
  "hertzforge-reference",
  "hertzforge-sdm",
  "hertzforge-shaker-db",
+ "hertzforge-sine",
  "serde",
  "serde_json",
 ]

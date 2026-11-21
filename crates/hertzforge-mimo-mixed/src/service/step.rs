@@ -562,12 +562,29 @@ impl MimoMixedStep {
             } else {
                 0.0
             };
+            let was_engaged = tc.engaged;
             self.tones[k].f_prev = f;
             self.tones[k].usable = usable;
+            // An engaged tone with no usable reading (its tracker settling
+            // after a ramp, the level moving) is still handed to its law
+            // every tick, told it is on target, so the law carries its drive
+            // along a sweep on its model and corrects nothing (single-output
+            // Mixed's rule). Found: a swept tone held at its drive in force
+            // through 20 Hz of a mode read 2 dB off the moment it was usable
+            // again, and aborted at -3.2 dB a second later.
+            let shown = !usable
+                && was_engaged
+                && want > 0.0
+                && self.tones_run
+                && lam > 0.0
+                && self.trip.is_none();
             if !usable {
                 let tc = &mut self.tones[k];
                 tc.avg_s.fill(0.0);
                 tc.abort_for_s.fill(0.0);
+            }
+            if !usable && !shown {
+                let tc = &mut self.tones[k];
                 if tc.engaged || want <= 0.0 {
                     tc.ask.copy_from_slice(&self.dif);
                 } else {
@@ -580,6 +597,9 @@ impl MimoMixedStep {
             self.bank.tracked_vector(k, &mut self.y);
             for i in 0..n {
                 self.refv[i] = self.tones[k].reference[i * lines + line] * lam;
+            }
+            if shown {
+                self.y[..n].copy_from_slice(&self.refv);
             }
             for v in self.dif.iter_mut() {
                 *v *= lam;
@@ -685,7 +705,9 @@ impl MimoMixedStep {
                     }
                 }
             }
-            self.judge(k, line, lam, dt);
+            if usable {
+                self.judge(k, line, lam, dt);
+            }
         }
         if k_tones == 0 {
             return;
