@@ -20,7 +20,7 @@
 //! parameters; on a hardware station each role's law must clear
 //! `hertzforge_mimo_mixed_laws::may_arm_in_role`.
 
-use crate::protocol::{ErrorCode, MethodError};
+use crate::protocol::{num, ErrorCode, MethodError};
 use crate::table::{Item, Report};
 use hertzforge_channel_table::{ChannelRole, ChannelTable};
 use hertzforge_law_host::ParamSpec;
@@ -683,6 +683,22 @@ pub fn check(
     if let Err(e) = cfg.validate(Some(w.fs_hz)) {
         r.errors
             .push(Item::field(e.name(), "config", format!("{e}.")));
+    }
+    // With tones, the lines are at most half the exclusion width apart, so a
+    // tone's exclusion covers at least two lines: the controller refuses the arm
+    // otherwise, so the check says it first, on the field (single-output Mixed
+    // Mode's rule and words).
+    if cfg.tones().next().is_some() && w.df_hz() > cfg.exclusion_hz / 2.0 + 1e-12 {
+        r.errors.push(Item::field(
+            "out_of_range",
+            "exclusion_hz",
+            format!(
+                "the lines are {} Hz apart; with tones they are at most half the \
+                 exclusion width of {} Hz",
+                num(round(w.df_hz(), 4)),
+                num(cfg.exclusion_hz)
+            ),
+        ));
     }
     // The table: every control and limit an enabled input, every drive an enabled drive.
     let input = |i: u32| {

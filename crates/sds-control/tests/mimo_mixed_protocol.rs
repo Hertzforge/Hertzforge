@@ -195,6 +195,41 @@ async fn mimo_mixed_refuses_by_name_before_a_configuration_and_for_what_it_does_
     assert_eq!(s["state"], "unconfigured", "{s}");
 }
 
+/// An exclusion narrower than two lines cannot arm with tones; the dry run says
+/// so on the field, before the operator proceeds to a run the arm would refuse.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mimo_mixed_the_dry_run_refuses_an_exclusion_narrower_than_two_lines() {
+    let (_, mut c) = client().await;
+    controller(&mut c).await;
+    let df = mmix::FS_HZ / mmix::N_PTS as f64;
+    let mut narrow = config();
+    narrow["exclusion_hz"] = json!(df);
+    let r = c
+        .ok(
+            "mimo_mixed.configure",
+            json!({"config": narrow, "dry_run": true}),
+        )
+        .await;
+    let errors = r["errors"].as_array().unwrap();
+    assert!(
+        errors.iter().any(|i| i["field"] == "exclusion_hz"
+            && i["reason"] == "out_of_range"
+            && i["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("4 Hz apart"))),
+        "{r}"
+    );
+    let mut wide = config();
+    wide["exclusion_hz"] = json!(2.0 * df);
+    let r = c
+        .ok(
+            "mimo_mixed.configure",
+            json!({"config": wide, "dry_run": true}),
+        )
+        .await;
+    assert_eq!(r["errors"], json!([]), "{r}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mimo_mixed_refuses_bad_parameters_the_wrong_state_and_a_screen_without_control() {
     let (_, addr, mut c) = client_with(opts(Duration::from_secs(600))).await;

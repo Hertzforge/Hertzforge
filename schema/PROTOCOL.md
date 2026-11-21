@@ -4657,7 +4657,8 @@ of the report: a channel that is not an enabled control or drive of the table
 (`law_wrong_world`), an unknown law (`law_unknown`), a parameter the law does not declare
 (`param_unknown`) or outside its range (`param_out_of_range`), a channel named as two drives
 (`duplicate_drive`, at the second), a drive's peak abort not above its peak ceiling
-(`abort_below_ceiling`), a level or part ramp under two control ticks (`ramp_too_short`), a tone
+(`abort_below_ceiling`), a level or part ramp under two control ticks (`ramp_too_short`), with
+tones an `exclusion_hz` under two of the grid's lines (`out_of_range` on `exclusion_hz`), a tone
 the model gives no finite drive for (`tone_model_not_finite`), a budget the schedule cannot fit
 (`budget_cannot_fit`); with any error the configuration is refused `config_invalid` with the
 report, and a configuration that cannot be read at all `config_unreadable`.

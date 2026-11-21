@@ -26,6 +26,15 @@ function filled() {
 
 const item = (over: Partial<MimoMixedReportItem>): MimoMixedReportItem => ({ reason: 'bad_config', message: 'm', ...over }) as MimoMixedReportItem;
 
+describe('the defaults', () => {
+	it("give the default tone an exclusion of at least two of the default frame's lines, which the controller needs to arm", () => {
+		const d = defaultMmixSetup();
+		const df = d.estimation.fs_hz / d.estimation.n_pts;
+		expect(d.tones.length).toBeGreaterThan(0);
+		expect(d.exclusion_hz).toBeGreaterThanOrEqual(2 * df);
+	});
+});
+
 describe('the channels', () => {
 	it('takes every enabled control and drive row, and fits every per-control list to the controls', () => {
 		const d = filled();

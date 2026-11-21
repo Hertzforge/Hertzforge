@@ -233,7 +233,8 @@ export function defaultMmixSetup(): MmixDraft {
 		bands: [],
 		exclusion_hz: MIMO_MIXED_DEFAULTS.exclusion_hz,
 		tracking_hz: MIMO_MIXED_DEFAULTS.tracking_hz,
-		estimation: { fs_hz: 4096, n_pts: 2048, frames_per_loop: 8, memory_loops: 4 },
+		// Lines 1 Hz apart: the default 2 Hz exclusion around a tone covers the two lines the controller needs.
+		estimation: { fs_hz: 4096, n_pts: 4096, frames_per_loop: 8, memory_loops: 4 },
 		identification: { below_reference_db: 20, frames: 64, start_vrms: 0.01, tolerance_db: 1, max_steps: 8, noise_frames: 32 },
 		gates: { coherence_threshold: 0.5, condition_threshold: 1000 },
 		schedule: {

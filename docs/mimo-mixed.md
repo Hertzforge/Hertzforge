@@ -182,6 +182,7 @@ names you may see:
 |---|---|
 | Part outside the band | A tone or narrowband leaves the floor's band somewhere in its motion |
 | Parts too close | Two tones come within two tracking widths of each other |
+| Exclusion under two lines | With tones, the width left out around each tone is less than two of the frame's lines; widen it or lengthen the frame |
 | Too many tones, too many narrowbands, controls, drives or limits | Over the first version's counts |
 | Two parts with one id, follows an unknown part, follows itself, followers in a loop | The parts list does not hold together |
 | Wrong number of values per control | A per-control list does not match the controls |
