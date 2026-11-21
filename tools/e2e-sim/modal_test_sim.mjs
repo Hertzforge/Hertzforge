@@ -347,6 +347,19 @@ const forceLabels = (a) => a.evaluate(() => [...document.querySelectorAll('[data
 	return { text: n.textContent.replace(/\s+/g, ' ').trim(), lines: r.height > parseFloat(getComputedStyle(n).fontSize) * 2.2 ? 2 : 1, inside: r.left >= area.left - 0.5 && r.right <= area.right + 0.5 && r.top >= area.top - 0.5 && r.bottom <= area.bottom + 0.5 };
 }));
 
+/** The shaker's time plots: the x span the screen sets, the last time a trace reaches, the burst's end and its marker and label. */
+const timePlots = (a) => a.evaluate(() => ['mt-shaker-force-plot', 'mt-shaker-response-plot', 'mt-shaker-drive-plot'].map((id) => {
+	const p = document.querySelector(`[data-testid="${id}"]`);
+	if (!p) return { id, missing: true };
+	const n = (k) => (p.dataset[k] === '' || p.dataset[k] === undefined ? null : Number(p.dataset[k]));
+	const note = [...p.querySelectorAll('.area [role="note"]')].some((e) => {
+		const r = e.getBoundingClientRect();
+		const area = e.closest('.area').getBoundingClientRect();
+		return /Burst\s*End/.test(e.textContent) && r.left >= area.left - 0.5 && r.right <= area.right + 0.5 && r.top >= area.top - 0.5 && r.bottom <= area.bottom + 0.5;
+	});
+	return { id, frame: n('frame'), end: n('xEnd'), last: n('xLast'), step: n('step'), burst: n('burst'), marker: !!p.querySelector('.marker'), note };
+}));
+
 /** Whether End Test is wholly on screen and on top where it is drawn. */
 const endOnScreen = (a) => a.evaluate(() => {
 	const b = document.querySelector('[data-testid="mt-end"]');
@@ -360,18 +373,19 @@ const count = async (a) => Number(/^(\d+) of/.exec(await text(a, 'mt-count'))?.[
 const accepted = async (a) => (await tiles(a)).filter((t) => t.status === 'accepted').length;
 const treeNames = (a) => a.locator('[data-testid="project-tree"] [data-testid^="object-"]').evaluateAll((els) => els.map((e) => e.dataset.testid.slice('object-'.length)));
 
-/** Arm, wait for `n` more tiles, disarm. */
-/** Space to arm; on the mock a Space just after another key is sometimes not taken, and is pressed again. */
+/** Space to arm: one press, every time, even just after another key. */
 async function arm(a) {
 	const before = (await tiles(a)).length;
 	await press(a, 'Space');
 	const armed = await until(a, 'armed', async (p) => ['armed', 'arming'].includes(await measureState(p)) || (await tiles(p)).length > before, 3000).then(() => true, () => false);
 	if (!armed) {
 		lostSpace += 1;
-		await press(a, 'Space');
+		throw new Error(`a Space did not arm (the screen: ${await measureState(a)}; ${await text(a, 'mt-refusal').catch(() => 'no refusal')})`);
 	}
 }
 let lostSpace = 0;
+
+/** Arm, wait for `n` more tiles, disarm. */
 
 async function hits(a, n, what) {
 	const before = (await tiles(a)).length;
@@ -711,6 +725,9 @@ async function shaker(theme, full) {
 		if (await refusal.count()) await refusal.locator('xpath=../..').locator('button[aria-label="Dismiss"]').first().click();
 		await shot(a, 'setup_shaker');
 	}
+	// the frame's length as set up: the block over the sample rate
+	await section(a, 'acquisition');
+	const frameS = Number(await tid(a, 'mt-block').inputValue()) / Number(await field(a, 'mt-fs').inputValue());
 	await tid(a, 'proceed-to-run').click();
 	await until(a, 'the setup applied', async (p) => (await attr(p, 'flow-run', 'aria-current')) === 'step' && (await attr(p, 'run-state', 'data-state')) === 'configured', 30_000);
 	await tid(a, 'act-start').click();
@@ -735,6 +752,24 @@ async function shaker(theme, full) {
 	} else if (full && !MOCK) {
 		check('Stop Driving is reached while the shakers drive', false, await measureState(a));
 	}
+	// the time plots draw the latest whole frame, from its start, with the burst's end marked
+	// (checked once the drive is stopped in the light run, so the point does not fill meanwhile)
+	const tp = await timePlots(a);
+	const span = (p) => p && Math.abs(p.end - frameS) < 1e-9 * frameS && p.last <= p.end + 1e-12 && p.last >= p.end - 2 * p.step;
+	check(`the time plots span the whole frame, ${frameS} s, from its start (${theme})`, tp.length === 3 && tp.every((p) => p.frame && span(p)), JSON.stringify(tp));
+	const [tf, tr, td] = tp;
+	check(`the burst's end is marked on every time plot, the drives no later than the inputs (${theme})`, tp.every((p) => p.burst !== null && p.burst > 0 && p.burst < p.end && p.marker && p.note) && tf.burst === tr.burst && td.burst <= tf.burst, JSON.stringify(tp.map((p) => [p.id, p.burst, p.marker, p.note])));
+	const fd = await text(a, 'mt-frame-decay').catch(() => '');
+	const fdFit = await a.evaluate(() => {
+		const d = document.querySelector('[data-testid="mt-frame-decay"]');
+		const h = d?.closest('.plot')?.querySelector('.head .title');
+		if (!d || !h) return { whole: false, clear: false };
+		const words = document.createRange();
+		words.selectNodeContents(h);
+		return { whole: d.scrollWidth <= d.clientWidth + 1, clear: words.getBoundingClientRect().right <= d.getBoundingClientRect().left, title: d.title };
+	});
+	check(`the frame's decay words are whole and clear of the Response title at 1440 by 900 (${theme})`, fdFit.whole && fdFit.clear, JSON.stringify(fdFit));
+	check(`the frame's decay is beside the Response plot, with its row and percent (${theme})`, /^(Not Died Away)?Row \d+, [\d.]+%$/.test(fd), fd);
 	await a.setViewportSize({ width: 1280, height: 800 });
 	await a.waitForTimeout(600);
 	const tcs = await titlesCut(a);
@@ -743,6 +778,8 @@ async function shaker(theme, full) {
 	check(`every legend is whole at 1280 by 800 (shaker, ${theme})`, ls800.every((l) => !l.cut), legendWords(ls800));
 	const e800 = await endOnScreen(a);
 	check(`End Test is on screen at 1280 by 800 (shaker, ${theme})`, e800.seen, e800.at);
+	const tp800 = await timePlots(a);
+	check(`the burst's end label stays inside each time plot at 1280 by 800 (${theme})`, tp800.every((p) => p.note && p.marker), JSON.stringify(tp800.map((p) => [p.id, p.burst, p.marker, p.note])));
 	await a.screenshot({ path: path.join(SHOTS, `modal_test_${theme === 'dark' ? 'dark_' : ''}measure_shaker_1280x800.png`) });
 	await a.setViewportSize({ width: 1440, height: 900 });
 	await a.waitForTimeout(400);
@@ -784,8 +821,8 @@ try {
 	stopAll();
 }
 
+check('every Space armed on its first press', lostSpace === 0, `${lostSpace} missed`);
 const passed = results.filter((r) => r.ok).length;
-if (lostSpace) console.log(`a Space that did not arm was pressed again ${lostSpace} time(s)`);
 console.log(`\nmodal test: ${passed} of ${results.length} checks passed${failed ? `; stopped: ${failed.message}` : ''}`);
 console.log(`screenshots in ${SHOTS}`);
 process.exit(failed ? 1 : 0);
