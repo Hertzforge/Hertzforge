@@ -96,15 +96,18 @@ def projection_order(first: ShapeSet, second: ShapeSet) -> tuple[bool, str]:
 class NoNodeMatched(ValueError):
     """No test node has a model node within the match tolerance. `report` says how far
     off they are: `matched` (0), `total`, `worst` (the nearest pair's distance),
-    `limit` and `dropped` (none named), as `project_shapes` reports a projection that
-    did match."""
+    `limit`, `dropped` (none named), `pairs` (none) and `unmatched` (every test node's
+    id), as `project_shapes` reports a projection that did match."""
 
     def __init__(self, message: str, report: dict[str, Any]):
         super().__init__(message)
         self.report: dict[str, Any] = report
 
 
-def _si_points(geometry: Geometry) -> np.ndarray:
+def si_points(geometry: Geometry) -> np.ndarray:
+    """Each node's place in the global frame, [N, 3] in the geometry's node order: in
+    meters when its units are defined, in its own units otherwise. Where `project_shapes`
+    measures how far apart two geometries' nodes are."""
     from ..drawing.viz.geometry import display_points
     from ..units import SYSTEMS
 
@@ -140,7 +143,7 @@ def match_distance(fem_geometry: Geometry, test_geometry: Geometry,
     node from the nodes' mean position), plus half the FEM geometry's thickest plate,
     because sensors are on surfaces and plate nodes are on mid-surfaces. In meters when
     the geometries' units are defined, in the model's own units otherwise."""
-    return float(tolerance) * _extent(_si_points(test_geometry)) + _surface(fem_geometry)
+    return float(tolerance) * _extent(si_points(test_geometry)) + _surface(fem_geometry)
 
 
 def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
@@ -179,8 +182,8 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
                          ' to overlay them in one frame')
     if distance is not None and not (np.isfinite(distance) and distance > 0):
         raise ValueError(f'the node match distance is {distance}; it must be above zero')
-    test_points = _si_points(test_geometry)
-    fem_points = _si_points(fem_geometry)
+    test_points = si_points(test_geometry)
+    fem_points = si_points(fem_geometry)
     if not len(test_points) or not len(fem_points):
         raise ValueError('both geometries need nodes')
 
@@ -213,7 +216,8 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
             f'{closest:.4g}{unit} away and the limit is {limit:.4g} — '
             'check that the geometries overlay, or loosen the tolerance',
             {'matched': 0, 'total': len(unique_rows), 'worst': closest, 'limit': limit,
-             'dropped': []})
+             'dropped': [], 'pairs': [],
+             'unmatched': [int(test_geometry.node_id[row]) for row in unique_rows]})
 
     keep = [i for i, row in enumerate(rows) if int(row) in matched_rows]
     used_indices = np.flatnonzero(used)

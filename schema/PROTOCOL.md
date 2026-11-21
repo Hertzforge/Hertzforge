@@ -785,7 +785,10 @@ from each model's catalog shape and size, `nodes` f32 [P, 3] in the geometry's c
 `project.sensors` draws its view's sensors the same way. A geometry's nodes that no line, face or solid element
 uses are drawn as `points`: a list of layers, each `xyz` f32 [P, 3] in the view's coordinates,
 `colors` u8 [P, 3] (sRGB) and `size`, a point's width on screen in pixels. The points stay put and
-are framed with the model. A node in a one-node element takes the element's color, so the points
+are framed with the model. Free line segments over the model are `segments`, a list of layers, each `xyz`
+f32 [2K, 3] in the view's coordinates (segment k from row 2k to row 2k + 1) and one `color` [r, g, b]
+(sRGB); they stay put, are drawn over the surface and are framed with the model. Project onto Basis
+DOFs draws the node pairs its projection matched this way. A node in a one-node element takes the element's color, so the points
 measured on one surface (an element group of measured points, as a measuring arm's feature table
 imports) read together; more than 5,000 bare nodes, a laser scan's cloud, are colored by height
 along the axis they span least and drawn small; fewer are gray. More than 500,000 are drawn every
