@@ -34,8 +34,6 @@ HIDDEN = frozenset(f'project.{name}' for name in (
     'set_band_edge',
     # the table's own rows
     'link', 'unlink', 'set_basis', 'name_object_group',
-    # in the palette and scripts until the shell gives its row a glyph
-    'reprocess_modal_test',
 ))
 
 VERBS = {f'project.{name}': verb for name, verb in {
@@ -64,6 +62,7 @@ VERBS = {f'project.{name}': verb for name, verb in {
     'import_rattlesnake_part': 'Import Part', 'truncate_rattlesnake_file': 'Trim Run',
     'text_preview': 'Preview Text', 'import_text': 'Import Text', 'generate_signal': 'Generate',
     'srs_synthesis': 'Synthesize', 'compute_modal_responses': 'Modal Responses', 'synthesize_modal_frfs': 'Modal FRFs',
+    'reprocess_modal_test': 'Estimate Again',
     'sweep_rate': 'Sweep Rate', 'fatigue': 'Fatigue', 'drive_prediction': 'Predict Drive',
     'notch_prediction': 'Predict Notch', 'conditioning': 'Conditioning',
     'realizability': 'Realizability', 'view_entities': 'Edit', 'add_node': 'Add Node',
