@@ -427,4 +427,38 @@ pub(crate) mod tests {
         });
         assert_eq!(reasons(&table(false), &s), vec!["out_of_range"]);
     }
+
+    #[test]
+    fn modal_test_a_ceiling_over_a_drive_rows_range_is_refused_by_row() {
+        let mut s = ModalSetup::new(Mode::Shaker, 1024.0, 1024);
+        s.shaker.drives = vec![
+            DriveSet {
+                row: 4,
+                level_vrms: 0.05,
+            },
+            DriveSet {
+                row: 5,
+                level_vrms: 0.05,
+            },
+        ];
+        let mut t = table(true);
+        assert!(Plan::build(&t, &s).is_ok());
+        // drive row 5 reaches 2 V only: a 3 V ceiling is over it
+        s.shaker.ceiling_v = 3.0;
+        assert!(Plan::build(&t, &s).is_ok());
+        t.channels
+            .iter_mut()
+            .find(|c| c.index == 5)
+            .unwrap()
+            .range_max = 2.0;
+        let r = Plan::build(&t, &s).err().unwrap();
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert_eq!(r[0].reason, "ceiling_over_range");
+        assert_eq!(r[0].channel, Some(5));
+        assert!(
+            r[0].message.contains("3 V") && r[0].message.contains("2 V"),
+            "{}",
+            r[0].message
+        );
+    }
 }

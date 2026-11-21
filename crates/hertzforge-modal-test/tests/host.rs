@@ -1,5 +1,7 @@
 //! The run host on the simulator: impact mode writes no drive sample; shaker mode ramps
-//! up on a frame's start, stops by the shared ramp, and an abort zeroes at once.
+//! up on a frame's start, stops by the shared ramp, and an abort zeroes at once; a
+//! response past its abort limit, a source that runs dry and a source thread that fails
+//! each end the run with the emergency stop and nothing driven after it.
 
 use hertzforge_channel_table::{AbortLimits, ChannelRole, ChannelTable, Units};
 use hertzforge_hal::{
@@ -9,7 +11,7 @@ use hertzforge_modal_test::host::{
     capture_only_table, stop_ramp_frames, DriveBuild, DrivePhase, HostBuild, ModalHost, Pacing,
 };
 use hertzforge_modal_test::setup::SourceKind;
-use hertzforge_modal_test::source::SourceBuild;
+use hertzforge_modal_test::source::{Frames, Source, SourceBuild};
 use hertzforge_module_abi::StationClass;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -287,4 +289,120 @@ fn modal_test_shaker_host_ceiling_trips_the_emergency_stop() {
     let s = seen.lock().unwrap();
     assert!(s.drive.iter().all(|v| v.abs() <= 0.12));
     assert_eq!(s.estops.len(), 1);
+}
+
+#[test]
+fn modal_test_shaker_host_response_abort_zeroes_at_once() {
+    let mut t = table(1);
+    // The simulator's structure answers the drive on every input: a response limit far
+    // under it trips the engine's watchdog.
+    t.channels[0].abort.accel_g = Some(1e-4);
+    let (b, seen) = sim(1, 1);
+    let h = ModalHost::start(shaker(1, 1.0), t, b, StationClass::HertzforgeSim).unwrap();
+    h.start_drive();
+    assert!(h.join(Duration::from_secs(30)));
+    let o = h.status().end.unwrap();
+    assert_eq!(o.outcome, "response_abort", "{}", o.message);
+    assert!(o.emergency_stop);
+    assert!(o.trip.is_some(), "the trip's facts");
+    assert_eq!(h.status().phase, DrivePhase::Zeroed);
+    let s = seen.lock().unwrap();
+    assert_eq!(s.estops.len(), 1, "the watchdog issued the emergency stop");
+    assert_eq!(s.after_estop_peak, 0.0, "nothing but zero after it");
+}
+
+/// What a test source does once its first `fast` frames are made.
+enum Then {
+    /// Make each later frame this slowly: far slower than the station takes them.
+    Crawl(Duration),
+    /// Panic.
+    Fail,
+}
+
+struct TestFrames {
+    inner: Source,
+    fast: usize,
+    made: usize,
+    then: Then,
+}
+
+impl Frames for TestFrames {
+    fn block(&self) -> usize {
+        Frames::block(&self.inner)
+    }
+    fn width(&self) -> usize {
+        Frames::width(&self.inner)
+    }
+    fn next_frame(&mut self) -> Vec<Vec<f64>> {
+        self.made += 1;
+        if self.made > self.fast {
+            match self.then {
+                Then::Crawl(d) => std::thread::sleep(d),
+                Then::Fail => panic!("the source broke"),
+            }
+        }
+        self.inner.next_frame()
+    }
+}
+
+fn test_frames(b: &HostBuild, then: Then) -> TestFrames {
+    let (sb, _) = b.drive.as_ref().unwrap();
+    TestFrames {
+        inner: Source::new(sb.clone()),
+        // the feeder's first fill, 2 s ahead, and a little more
+        fast: 2 * FS as usize / N + 2,
+        made: 0,
+        then,
+    }
+}
+
+#[test]
+fn modal_test_shaker_host_source_underrun_zeroes_at_once() {
+    let (b, seen) = sim(1, 1);
+    let build = shaker(1, 1.0);
+    let frames = test_frames(&build, Then::Crawl(Duration::from_millis(500)));
+    let h = ModalHost::start_with_frames(
+        build,
+        Some(frames),
+        table(1),
+        b,
+        StationClass::HertzforgeSim,
+    )
+    .unwrap();
+    h.start_drive();
+    assert!(h.join(Duration::from_secs(30)));
+    let o = h.status().end.unwrap();
+    assert_eq!(o.outcome, "drive_underrun", "{}", o.message);
+    assert!(o.emergency_stop);
+    let s = seen.lock().unwrap();
+    assert!(
+        s.drive.iter().any(|v| *v != 0.0),
+        "it drove before the underrun"
+    );
+    assert_eq!(s.estops.len(), 1);
+    assert_eq!(s.after_estop_peak, 0.0);
+}
+
+#[test]
+fn modal_test_shaker_host_source_thread_failure_ends_in_the_emergency_stop() {
+    let (b, seen) = sim(1, 1);
+    let build = shaker(1, 1.0);
+    let frames = test_frames(&build, Then::Fail);
+    let h = ModalHost::start_with_frames(
+        build,
+        Some(frames),
+        table(1),
+        b,
+        StationClass::HertzforgeSim,
+    )
+    .unwrap();
+    h.start_drive();
+    assert!(h.join(Duration::from_secs(30)));
+    let o = h.status().end.unwrap();
+    assert_eq!(o.outcome, "source_failed", "{}", o.message);
+    assert!(o.message.contains("the source broke"), "{}", o.message);
+    assert!(o.emergency_stop);
+    let s = seen.lock().unwrap();
+    assert_eq!(s.estops.len(), 1);
+    assert_eq!(s.after_estop_peak, 0.0);
 }

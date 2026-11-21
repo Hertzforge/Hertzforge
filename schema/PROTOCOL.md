@@ -6963,8 +6963,9 @@ block's start, `tau = -T / ln(end)`, `T = block / fs`. FRFs are indexed
 - **`modal_test.end`** ends the test (`ended`), in shaker mode through the stop ramp;
   **`modal_test.abort`** takes the drive to zero at once with the emergency stop (`aborted`).
   The run also ends with the emergency stop on a response abort (`response_abort`), a drive
-  sample over the ceiling (`drive_ceiling`), an underrun (`drive_underrun`), an input overload on
-  a limited row (`input_overload`), a loop fault (`loop_faulted`) or a panic (`loop_panicked`).
+  sample over the ceiling (`drive_ceiling`), an underrun (`drive_underrun`), the source thread's
+  failure (`source_failed`), an input overload on a limited row (`input_overload`), a loop fault
+  (`loop_faulted`) or a panic (`loop_panicked`).
 - A later measurement of a point is a new record naming the one it replaces; points finished
   stay on the disk however the run ends.
 

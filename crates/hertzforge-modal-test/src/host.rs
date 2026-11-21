@@ -17,7 +17,7 @@
 //!   does no analysis and no file work.
 
 use crate::setup::{STOP_RAMP_DEPTH_DB, STOP_RAMP_S};
-use crate::source::{Feeder, Source, SourceBuild};
+use crate::source::{Feeder, Frames, Source, SourceBuild};
 use hertzforge_channel_table::{AbortLimits, ChannelRole, ChannelTable};
 use hertzforge_engine::ring::{Consumer, Producer};
 use hertzforge_engine::{AbortTrip, Engine, EngineConfig, ProcessStep, StopReason, VecCaptureSink};
@@ -359,8 +359,8 @@ impl std::fmt::Display for HostError {
 /// How the host ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outcome {
-    /// `ended`, `aborted`, `response_abort`, `drive_underrun`, `drive_ceiling`,
-    /// `input_overload`, `loop_faulted` or `loop_panicked`.
+    /// `ended`, `aborted`, `response_abort`, `drive_underrun`, `source_failed`,
+    /// `drive_ceiling`, `input_overload`, `loop_faulted` or `loop_panicked`.
     pub outcome: &'static str,
     pub message: String,
     pub trip: Option<AbortTrip>,
@@ -417,6 +417,19 @@ impl ModalHost {
     pub fn start(
         b: HostBuild,
         table: ChannelTable,
+        backend: Box<dyn Backend>,
+        station: StationClass,
+    ) -> Result<ModalHost, HostError> {
+        let frames = b.drive.as_ref().map(|(sb, _)| Source::new(sb.clone()));
+        ModalHost::start_with_frames(b, frames, table, backend, station)
+    }
+
+    /// [`ModalHost::start`] with the drive's frames made by `frames` in place of the
+    /// source `b.drive` names (its block and its drives).
+    pub fn start_with_frames<F: Frames>(
+        b: HostBuild,
+        frames: Option<F>,
+        table: ChannelTable,
         mut backend: Box<dyn Backend>,
         station: StationClass,
     ) -> Result<ModalHost, HostError> {
@@ -430,11 +443,11 @@ impl ModalHost {
         let outputs = b.drive.as_ref().map_or(0, |d| d.1.outputs);
         let mut feeder = None;
         let mut drive_parts = None;
-        if let Some((sb, db)) = &b.drive {
-            let ahead = ((SOURCE_AHEAD_S * fs) as u64).max(4 * sb.block as u64);
-            let (tx, rx) =
-                hertzforge_engine::ring::channel(ahead as usize + sb.block, sb.levels.len());
-            let fd = Feeder::spawn(Source::new(sb.clone()), tx, ahead)
+        if let (Some((_, db)), Some(src)) = (&b.drive, frames) {
+            let (block, width) = (src.block(), src.width());
+            let ahead = ((SOURCE_AHEAD_S * fs) as u64).max(4 * block as u64);
+            let (tx, rx) = hertzforge_engine::ring::channel(ahead as usize + block, width);
+            let fd = Feeder::spawn(src, tx, ahead)
                 .map_err(|e| HostError::Arm(format!("the source could not start: {e}")))?;
             drive_parts = Some((db.clone(), rx, fd.shared.clone()));
             feeder = Some(fd);
@@ -731,6 +744,25 @@ impl Pump<'_> {
                     );
                     break;
                 }
+            }
+            let failed = self
+                .feeder
+                .as_ref()
+                .filter(|f| f.shared.failed.load(Ordering::Acquire))
+                .map(|f| {
+                    lock(&f.shared.why)
+                        .clone()
+                        .unwrap_or_else(|| "no words".to_owned())
+                });
+            if let Some(why) = failed {
+                let e = self.emergency();
+                self.end(
+                    "source_failed",
+                    format!("the source thread failed ({why}); the drive went to zero at once"),
+                    None,
+                    e,
+                );
+                break;
             }
             if st.underrun.load(Ordering::Acquire) {
                 let e = self.emergency();

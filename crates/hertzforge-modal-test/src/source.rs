@@ -22,8 +22,9 @@
 use crate::setup::{SourceKind, RANDOM_CREST};
 use hertzforge_engine::ring::Producer;
 use std::f64::consts::PI;
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -311,6 +312,40 @@ pub struct FeedShared {
     /// Sample frames the step has taken.
     pub popped: AtomicU64,
     pub cancel: AtomicBool,
+    /// Set when the feeder thread failed (its source panicked): the loop ends the run
+    /// with the emergency stop rather than wait for the ring to run dry.
+    pub failed: AtomicBool,
+    /// The failure's words.
+    pub why: Mutex<Option<String>>,
+}
+
+/// What a feeder fills its ring from: frames of `block` samples for each of `width`
+/// drives, one after another. [`Source`] is the one the run uses.
+pub trait Frames: Send + 'static {
+    fn block(&self) -> usize;
+    fn width(&self) -> usize;
+    /// The next frame, per drive.
+    fn next_frame(&mut self) -> Vec<Vec<f64>>;
+}
+
+impl Frames for Source {
+    fn block(&self) -> usize {
+        self.build().block
+    }
+    fn width(&self) -> usize {
+        self.build().levels.len()
+    }
+    fn next_frame(&mut self) -> Vec<Vec<f64>> {
+        Source::next_frame(self)
+    }
+}
+
+/// A caught panic's words.
+fn panic_words(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|x| (*x).to_owned())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no words".to_owned())
 }
 
 /// The feeder thread: fills the ring ahead of the loop, frame by frame.
@@ -322,13 +357,19 @@ pub struct Feeder {
 impl Feeder {
     /// Fill `ring` (one ring frame per sample, every drive) until it holds
     /// `ahead_frames`, before returning; then keep it filled on its own thread.
-    pub fn spawn(mut source: Source, ring: Producer, ahead_frames: u64) -> std::io::Result<Feeder> {
+    /// A panic in the source is caught: before the thread starts it is an error, after
+    /// it [`FeedShared::failed`] is set and the thread stops filling.
+    pub fn spawn<F: Frames>(
+        mut source: F,
+        ring: Producer,
+        ahead_frames: u64,
+    ) -> std::io::Result<Feeder> {
         let shared = Arc::new(FeedShared::default());
-        let block = source.build().block as u64;
-        let width = source.build().levels.len();
+        let block = source.block() as u64;
+        let width = source.width();
         let fill = {
             let shared = shared.clone();
-            move |source: &mut Source, ring: &Producer| -> bool {
+            move |source: &mut F, ring: &Producer| -> bool {
                 let mut pushed_any = false;
                 while shared.pushed.load(Ordering::Acquire) - shared.popped.load(Ordering::Acquire)
                     + block
@@ -350,14 +391,28 @@ impl Feeder {
                 pushed_any
             }
         };
-        fill(&mut source, &ring);
+        let first = std::panic::catch_unwind(AssertUnwindSafe(|| fill(&mut source, &ring)));
+        if let Err(p) = first {
+            return Err(std::io::Error::other(format!(
+                "the source failed: {}",
+                panic_words(p.as_ref())
+            )));
+        }
         let sh = shared.clone();
         let thread = std::thread::Builder::new()
             .name("modal-test-source".into())
             .spawn(move || {
                 while !sh.cancel.load(Ordering::Acquire) {
-                    if !fill(&mut source, &ring) {
-                        std::thread::sleep(Duration::from_millis(2));
+                    match std::panic::catch_unwind(AssertUnwindSafe(|| fill(&mut source, &ring))) {
+                        Ok(true) => {}
+                        Ok(false) => std::thread::sleep(Duration::from_millis(2)),
+                        Err(p) => {
+                            if let Ok(mut w) = sh.why.lock() {
+                                *w = Some(panic_words(p.as_ref()));
+                            }
+                            sh.failed.store(true, Ordering::Release);
+                            break;
+                        }
                     }
                 }
             })?;
@@ -547,5 +602,53 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         assert!(fd.shared.pushed.load(Ordering::Acquire) > n);
         fd.cancel();
+    }
+
+    /// A source that panics after `after` frames.
+    struct Breaks {
+        after: usize,
+        made: usize,
+    }
+
+    impl Frames for Breaks {
+        fn block(&self) -> usize {
+            1024
+        }
+        fn width(&self) -> usize {
+            1
+        }
+        fn next_frame(&mut self) -> Vec<Vec<f64>> {
+            self.made += 1;
+            assert!(self.made <= self.after, "the source broke");
+            vec![vec![0.0; 1024]]
+        }
+    }
+
+    #[test]
+    fn modal_test_a_source_that_fails_is_caught_before_and_after_the_feeder_starts() {
+        // before: the start is refused with the words, not a panic on the caller
+        let (tx, _rx) = hertzforge_engine::ring::channel(8192, 1);
+        let e = Feeder::spawn(Breaks { after: 1, made: 0 }, tx, 4096).err();
+        let e = e.expect("refused");
+        assert!(e.to_string().contains("the source broke"), "{e}");
+        // after: the thread says it failed
+        let (tx, rx) = hertzforge_engine::ring::channel(8192, 1);
+        let fd = Feeder::spawn(Breaks { after: 4, made: 0 }, tx, 4096).unwrap();
+        let mut s = [0f32; 1];
+        let mut n = 0u64;
+        while rx.pop(&mut s) {
+            n += 1;
+        }
+        fd.shared.popped.store(n, Ordering::Release);
+        let t = std::time::Instant::now();
+        while !fd.shared.failed.load(Ordering::Acquire) {
+            assert!(
+                t.elapsed() < Duration::from_secs(5),
+                "the failure was not seen"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let why = fd.shared.why.lock().unwrap().clone().unwrap();
+        assert!(why.contains("the source broke"), "{why}");
     }
 }
