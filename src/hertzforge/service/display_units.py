@@ -220,8 +220,9 @@ def quantities_of(name: str, quantities: set[str]) -> dict[str, dict[str, Any]]:
 
 def typed_lengths(params: Any, values: dict[str, Any], name: str, geometry: Any) -> dict[str, Any]:
     """`values` with each `length` param taken from the system `name` to meters, and each
-    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are."""
-    if not geometry.units_defined or name == DEFAULT:
+    `quantity` param to SI. An undefined geometry's numbers are its own, and pass as they are;
+    with no geometry (None) they are taken as the system's."""
+    if (geometry is not None and not geometry.units_defined) or name == DEFAULT:
         return values
     system = _system(name)
     scale = float(system.transform('length')[0])

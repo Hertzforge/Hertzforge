@@ -170,6 +170,23 @@ SWITCH_INTERVAL = 0.001
 
 
 
+def _typed_on(project: Any, op: Any, values: dict[str, Any]) -> Any:
+    """The geometry whose units an operation's lengths are typed in: its `geometry`, or
+    else the one the first object it names is drawn on; None when it names none."""
+    from hertzforge.core.geometry import Geometry
+
+    names = ([values['geometry']] if 'geometry' in values else
+             [values[p.name] for p in op.params if (p.kinds or p.verb) and p.name in values])
+    for name in names:
+        held = project.get(name) if isinstance(name, str) else None
+        if isinstance(held, Geometry):
+            return held
+        found = project.geometry_for(name) if held is not None else None
+        if found is not None:
+            return found[1]
+    return None
+
+
 def _preview_copy(project: Any, *names: str) -> Any:
     """A project holding only copies of the objects `names`, for an operation to act on while
     its form is typed: nothing it does reaches the project or its journal."""
@@ -481,7 +498,7 @@ class Connection:
                 values['units'] = self.units
             if any(param.length or param.quantity for param in op.params):
                 values = display_units.typed_lengths(op.params, values, self.units,
-                                                     project[values['geometry']])
+                                                     _typed_on(project, op, values))
             if params.get('preview') and not op.previews:
                 raise bad_request(f'{op.id} does not preview')
             if params.get('preview'):

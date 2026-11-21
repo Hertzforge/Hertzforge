@@ -370,13 +370,17 @@ TOP_FREQUENCY = Param('maximum_frequency', 'Highest frequency', 'number', defaul
                       unit='Hz', min=0.0, step=10.0, shown_with=('by', 'frequency'))
 MODAL_DAMPING = Param('damping', 'Damping', 'number', default=2.0, unit='%', min=0.0,
                       max=100.0, step=0.5)
-ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table')
+ONTO = Param('onto', 'Onto', 'enum', options_from='objects:shape_set|channel_table|geometry')
 PARTNER_OR_TABLE = Param('shapes', 'Shape set or channel table', 'enum',
                          options_from='objects:shape_set|channel_table')
-EXPAND_MATCH = Param('tolerance', 'Node match tolerance, on another geometry', 'number',
-                     default=2.0, unit='%', min=0.01, max=100.0, step=0.5)
-MATCH = Param('tolerance', 'Node match tolerance', 'number', default=2.0, unit='%',
-              min=0.01, max=100.0, step=0.5)
+#: how far a node may be from the nearest node of the other geometry, typed in the display
+#: system's length (or the model's own units); 0 for 2 % of the target geometry's size plus
+#: half its thickest plate (`Project.match_distance`), which the action table fills in
+MATCH = Param('distance', "Node match tolerance (0 for 2 % of the target's size)", 'number',
+              default=0.0, unit='m', min=0.0, step=0.001, length=True)
+EXPAND_MATCH = Param('distance', 'Node match tolerance, on another geometry (0 for 2 % of '
+                     "the target's size)", 'number', default=0.0, unit='m', min=0.0,
+                     step=0.001, length=True)
 
 
 def _added_shapes(project: Any, call: Any) -> list[dict]:
@@ -467,12 +471,12 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
     from hertzforge.core.channel_table import ChannelTable
 
     source, partner = params['source'], params['shapes']
-    tolerance = float(params.get('tolerance', 2.0)) / 100.0
+    distance = float(params.get('distance') or 0.0) or None
     at_table = isinstance(project.get(partner), ChannelTable)
     if not at_table:
         return _derived(project, lambda: project.expand(source, partner))
     try:
-        added = project.expand(source, partner, tolerance=tolerance)
+        added = project.expand(source, partner, distance=distance)
     except (ValueError, TypeError) as error:
         raise refused(str(error)) from None
     made = project[added]
@@ -504,10 +508,11 @@ def expand(project: Any, params: dict[str, Any]) -> list[dict]:
 
 def onto_basis(project: Any, params: dict[str, Any]) -> list[dict]:
     """`project.project_onto_basis`: a shape set sampled at another set's
-    DOFs, or at a channel table's (`Project.project_onto_basis`), a node
-    matched within a share of the basis model's size, 2 %."""
+    DOFs, at a channel table's, or at every node of a geometry
+    (`Project.project_onto_basis`), a node matched within the distance
+    typed, or `Project.match_distance`'s for 0."""
     return _added_shapes(project, lambda: project.project_onto_basis(
-        params['source'], onto=params['onto'], tolerance=params['tolerance'] / 100.0))
+        params['source'], onto=params['onto'], distance=params['distance'] or None))
 
 
 FIRST = Param('first', 'Rows', 'enum', options_from='objects:shape_set')
@@ -606,8 +611,9 @@ MODAL_VERB_OPERATIONS = (
     Operation(
         id='project.project_onto_basis', title='Project onto Basis DOFs',
         workspace='modal',
-        summary='A shape set sampled at another set\'s DOFs, or at a channel '
-                'table\'s sensors, by the nearest node and its direction.',
+        summary='A shape set sampled at another set\'s DOFs, at a channel table\'s '
+                'sensors, or at every node of another geometry, by the nearest node '
+                'within the tolerance and its direction.',
         params=(_source('project_onto_basis', 'Shape set'), ONTO, MATCH),
         outputs=('shape3d', 'reading'), run=onto_basis),
 )

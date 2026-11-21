@@ -517,6 +517,14 @@ def test_at_a_test_geometry_the_shapes_are_taken_at_its_channels():
     looser = project.expand(modal, 'Channels', tolerance=0.05)
     assert project.provenance[looser]['params']['tolerance'] == 0.05
     assert any("tolerance=0.05" in line for line in project.journal)
+    # a distance in place of the share: each node is 1 mm from its corner
+    with pytest.raises(ValueError, match='within the match tolerance'):
+        project.expand(modal, 'Channels', distance=0.0009)
+    held = project.expand(modal, 'Channels', distance=0.0011)
+    assert project.provenance[held]['params']['distance'] == 0.0011
+    assert project[held].transform_report.projection['limit'] == 0.0011
+    assert project[project.refresh(held)].transform_report.projection['limit'] == 0.0011, \
+        'a refresh projects within the distance its recipe holds'
 
 
 def test_a_channel_too_far_from_the_model_is_dropped_and_said():

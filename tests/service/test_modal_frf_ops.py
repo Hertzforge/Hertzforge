@@ -94,7 +94,7 @@ def test_a_complex_set_is_not_offered_and_a_real_one_is():
 
 def test_expand_at_a_table_draws_the_frfs_and_says_what_it_used(project, validate):
     modal = project.synthesize_modal_frfs('Modes', sample_rate=1024.0, frame_length=512)
-    views = run(project, 'project.expand', source=modal, shapes='Channels', tolerance=2.0)
+    views = run(project, 'project.expand', source=modal, shapes='Channels', distance=0.0)
     wire_views(views, validate)
     made = project[f'{modal} @ Channels']
     assert made.response_dof == ['2X-', '1X+'] and made.reference_dof == ['1X+', '1X+']
@@ -109,7 +109,7 @@ def test_expand_at_a_table_draws_the_frfs_and_says_what_it_used(project, validat
 
 def test_expand_through_a_set_is_as_before(project):
     modal = project.synthesize_modal_frfs('Modes', sample_rate=256.0, frame_length=256)
-    views = run(project, 'project.expand', source=modal, shapes='Modes', tolerance=2.0)
+    views = run(project, 'project.expand', source=modal, shapes='Modes', distance=0.0)
     assert [view['view'] for view in views] == ['waterfall']
 
 
@@ -117,7 +117,7 @@ def test_a_table_with_no_force_reference_is_refused_in_the_cores_words(project):
     modal = project.synthesize_modal_frfs('Modes', sample_rate=256.0, frame_length=256)
     project['Channels'] = _table(channel_type=['acceleration'] * 4)
     with pytest.raises(ProtocolError, match='no reference channel measuring force'):
-        run(project, 'project.expand', source=modal, shapes='Channels', tolerance=2.0)
+        run(project, 'project.expand', source=modal, shapes='Channels', distance=0.0)
 
 
 def test_the_action_table_offers_expand_for_modal_frfs_with_a_table(project):

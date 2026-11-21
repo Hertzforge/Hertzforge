@@ -760,9 +760,15 @@ def _mac(project: Any, first: str, second: str, geometry: str | None,
     # extent: the comparison's own setting, as the Projection view's (Brandon, 2026-11-17)
     percent = float(prefs.get('match_tolerance') or 2.0)
     if apart and prefs.get('projection'):
+        from hertzforge.core.correlate import projection_order
+
+        # the overlay takes a distance: the one the percent comes to, the way it projects
+        flipped, _why = projection_order(rows, columns)
+        moved, onto = (first, second) if flipped else (second, first)
+        distance = project.match_distance(moved, onto, tolerance=percent / 100.0)
         try:
             views = _run(project, 'project.projection_overlay', first=first, second=second,
-                         tolerance=percent)
+                         distance=distance or 0.0)
         except ProtocolError as error:
             if not isinstance(error.__cause__, NoNodeMatched):
                 raise
