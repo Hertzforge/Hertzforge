@@ -178,6 +178,23 @@ def _sensors_placed(project: Any, name: str) -> str:
     return '' if placed else 'It names no sensor model at a node of its geometry'
 
 
+def _modal_test_frames(project: Any, name: str) -> str:
+    """Why Estimate Again cannot take this time history: it is not a Modal Test run's
+    measurement frames (its object group's run record a Modal Test's, holding the frame
+    lines), or it has no reference or no response channel to estimate between."""
+    from hertzforge.report.run_records import record_of
+
+    record = record_of(project, name)
+    if record is None or record.test != 'modal_test':
+        return "It is not a Modal Test run's measurement frames"
+    if 'modal_frames' not in record.results:
+        return 'Its run record holds no frame lines'
+    roles = set(project[name].channel_roles().values())
+    if not {'reference', 'response'} <= roles:
+        return 'It needs a reference and a response channel'
+    return ''
+
+
 #: what an operation needs of an object beyond its type, tested before the click so the row
 #: can say so (Brandon, 2026-11-07): the param holding the object, and why it will not do, or ''
 WHEN: dict[str, tuple[str, Callable[[Any, str], str]]] = {
@@ -190,6 +207,7 @@ WHEN: dict[str, tuple[str, Callable[[Any, str], str]]] = {
     'project.truncate_data': ('source', _span),
     'project.sensors': ('table', _sensors_placed),
     'project.fit_modes': ('frf', _fittable),
+    'project.reprocess_modal_test': ('source', _modal_test_frames),
 }
 
 #: why the core (`Project.selection_verbs`) turns down a pair, where the verb's own reason

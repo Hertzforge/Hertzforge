@@ -754,3 +754,30 @@ def test_a_channels_role_is_set_on_every_channel_picked(plate):
     assert roles[1] == 'response' and roles[2] == 'monitor'
     with pytest.raises(ProtocolError, match='outside'):
         run(role='monitor', picked='999')
+
+
+def test_modal_test_estimate_again_is_ready_only_on_a_modal_test_runs_frames(rich, tmp_path):
+    """Estimate Again is offered on every time history by its type; it is ready only on a
+    Modal Test run's measurement frames with a reference and a response, and says why not
+    on anything else, as the operation itself would refuse it."""
+    import run_folders as rf
+
+    from hertzforge.io import run_convert
+
+    history = named(rich, 'time_history')
+    found = _offered(rich, history, 'Estimate Again', 'project.reprocess_modal_test')
+    assert not found['ready']
+    assert found['reason'] == "It is not a Modal Test run's measurement frames"
+    assert _refusal(rich.project, found['id'], {'source': history})
+    folder = rf.modal_test_run(str(tmp_path / 'run'), 'fixed_hammer', hits=3)
+    state = projects.open_file({'path': run_convert.convert(folder).path})
+    frames = 'Measurement 1 frames (point 1)'
+    found = _offered(state, frames, 'Estimate Again', 'project.reprocess_modal_test')
+    assert found['ready'] and not found.get('reason')
+    assert _refusal(state.project, found['id'], {'source': frames}) is None
+    held = state.project[frames]
+    held.roles = {key: 'response' for key in held.channel_roles()}
+    found = _offered(state, frames, 'Estimate Again', 'project.reprocess_modal_test')
+    assert not found['ready']
+    assert found['reason'] == 'It needs a reference and a response channel'
+    assert _refusal(state.project, found['id'], {'source': frames})
