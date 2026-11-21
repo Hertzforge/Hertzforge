@@ -95,8 +95,8 @@ other's sensor, which is a mistake.
 
 ## Fit Sensors
 
-With the geometry selected, **Fit Sensors** is in the action table. Its form has **Preview** and
-**Apply** and nothing to fill in. Preview changes nothing. It draws:
+With the geometry selected, **Fit Sensors** is in the action table. It opens on its preview, which
+changes nothing, and has **Apply** and nothing to fill in. The preview draws:
 
 - every measured point, colored by how far it lies from the surface fitted to it: green on the
   surface, amber at 0.05 mm, red at 0.1 mm and beyond, gray when no surface was fitted to it;
@@ -112,8 +112,8 @@ Beside the view is the table of sensors, one row a sensor.
 | Node | Its node number; typed |
 | Model | Its model, from the catalog's list or any name; typed, and optional |
 | Shape | Cube or Cylinder as it was probed, or the catalog body's shape |
-| Size | A cube's side, or a round body's diameter; typed, in the display units |
-| Length | A round body's length; typed, in the display units |
+| Length | A cube's side, or a round body's length; typed, in the display units |
+| Diameter | A round body's diameter, blank for a cube; typed, in the display units |
 | Fit | Placed, or why not, and what the fit warns of |
 
 Each cell typed draws the preview again. The choices are kept with the geometry, so they are saved
@@ -124,19 +124,22 @@ with the project.
 The node goes at the center of the body, which is half the body's size back from each face probed.
 The size is therefore needed, and it comes from the first of these there is:
 
-1. a size typed in the row;
+1. a length or diameter typed in the row;
 2. the model's, when the model is in the sensor catalog or is itself a size (`Block 17.5 mm`,
    `Cylinder 16 x 9 mm`);
 3. for a cube, the smallest tri-axial model in the catalog that the points fit in;
 4. what was measured: a cube's side as the furthest its points reach from the corner, which is the
-   least it can be, and a round body's diameter for both its diameter and its length.
+   least it can be, and a round body's diameter from its side.
 
-A cylinder's length cannot be measured from its side and its top, so type it, or name a model. In
-the example the rows of sensors 31 and 32 take lengths of 5 mm and 9 mm. A cube whose points reach
-close to its edges needs nothing.
+A round body's length is taken as twice how far its top lies, along its axis, from the middle of
+the points on its side: the middle of those points is taken as the middle of the body. It is right
+when the side was probed evenly about its middle, and too long or too short by twice the offset
+when it was not, so type the length, or name a model, when it matters. The reading under the table
+says each length that was taken this way. A cube whose points reach close to its edges needs
+nothing.
 
-Choosing a catalog model fills Size and Length from the catalog and takes back a size typed before
-it. A force transducer's model makes the row a force channel.
+Choosing a catalog model fills Length and Diameter from the catalog and takes back what was typed
+before it. A force transducer's model makes the row a force channel.
 
 ### The Scan Sets
 

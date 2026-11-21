@@ -267,7 +267,7 @@ pub fn law_bytes(name: &str) -> Vec<u8> {
         tried.push(PathBuf::from(dir).join(&file));
     } else {
         let exe = std::env::current_exe().expect("the test binary knows its own path");
-        for dir in exe.ancestors().skip(1).take(4) {
+        for dir in exe.ancestors().skip(1) {
             tried.push(dir.join("wasm32-wasip2").join("release").join(&file));
         }
     }

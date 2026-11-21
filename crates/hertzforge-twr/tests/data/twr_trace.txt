@@ -1,4 +1,4 @@
-# recorded on macos aarch64
+# recorded on macos 27.3 aarch64
 a sysid coherence=0.9978890074345098 coverage=0.9991803106227527 lag=25 source=Measured
 a play=0 kind=iteration level_db=-12.0 rung=0 iteration=1 rms_pct=50.702031769786515 peak_pct=50.141039121449445 spectral_db=6.255712504120317 response_rms=0.013904751728629742 drive_rms=0.005506292456809925 gated=false clamped=0 clipped=0 start=66560 frames=9216 state=Iterating drive_sha=d345af085492a031afe462653cbb97c135e5818c699d61c80bd669a59641f1d6
 a play=1 kind=iteration level_db=-12.0 rung=0 iteration=2 rms_pct=25.882059132789166 peak_pct=25.59393996709929 spectral_db=2.6501072891556503 response_rms=0.02092016391717057 drive_rms=0.008407149878217444 gated=false clamped=0 clipped=0 start=75776 frames=9216 state=Iterating drive_sha=d08ad9f7e976fe27b500eb81d2fdc44dd6497142eeb5dd452c7cd4cf446d6d44

@@ -50,6 +50,9 @@ def test_an_operation_that_waits_to_be_told_says_which_param_tells_it(catalog):
             assert named[op['commits']]['type'] == 'boolean', op['id']
         else:
             assert 'keep' not in named, f'{op["id"]} has a keep tickbox and no Preview'
+    # Fit Sensors opens on its preview, which asks nothing, and has only Apply
+    opening = [op['id'] for op in catalog['operations'] if op.get('opens_previewed')]
+    assert opening == ['project.create_sensors']
 
 
 def test_an_object_param_lists_no_options_of_its_own(catalog):

@@ -2895,7 +2895,7 @@ fn notched_under_test_does_not_trip_low_side_or_servo_fault() {
     assert!(
         !matches!(
             trip,
-            Some(TripKind::ScalarAbort { side: _, .. }) | Some(TripKind::ServoFault { .. })
+            Some(TripKind::ScalarAbort { .. }) | Some(TripKind::ServoFault { .. })
         ),
         "a legitimately-notched under-test must NOT trip a low-side scalar abort \
          or a servo-fault collapse; got {trip:?}"

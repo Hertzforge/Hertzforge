@@ -248,13 +248,17 @@ pub fn parse_npy(bytes: &[u8], name: &str) -> Result<NpyArray, ReferenceError> {
     let data = match descr.as_str() {
         "<f8" => NpyData::F64(
             need(8)?
-                .chunks_exact(8)
-                .map(|c| f64::from_le_bytes(le8(c)))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| f64::from_le_bytes(*c))
                 .collect(),
         ),
         "<c16" => NpyData::C128(
             need(16)?
-                .chunks_exact(16)
+                .as_chunks::<16>()
+                .0
+                .iter()
                 .map(|c| {
                     C64::new(
                         f64::from_le_bytes(le8(&c[..8])),
@@ -265,38 +269,50 @@ pub fn parse_npy(bytes: &[u8], name: &str) -> Result<NpyArray, ReferenceError> {
         ),
         "<i8" => NpyData::Int(
             need(8)?
-                .chunks_exact(8)
-                .map(|c| i64::from_le_bytes(le8(c)))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| i64::from_le_bytes(*c))
                 .collect(),
         ),
         "<u8" => NpyData::Int(
             need(8)?
-                .chunks_exact(8)
-                .map(|c| u64::from_le_bytes(le8(c)).min(i64::MAX as u64) as i64)
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| u64::from_le_bytes(*c).min(i64::MAX as u64) as i64)
                 .collect(),
         ),
         "<i4" => NpyData::Int(
             need(4)?
-                .chunks_exact(4)
-                .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]) as i64)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| i32::from_le_bytes(*c) as i64)
                 .collect(),
         ),
         "<u4" => NpyData::Int(
             need(4)?
-                .chunks_exact(4)
-                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]) as i64)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_le_bytes(*c) as i64)
                 .collect(),
         ),
         "<i2" => NpyData::Int(
             need(2)?
-                .chunks_exact(2)
-                .map(|c| i16::from_le_bytes([c[0], c[1]]) as i64)
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| i16::from_le_bytes(*c) as i64)
                 .collect(),
         ),
         "<u2" => NpyData::Int(
             need(2)?
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]) as i64)
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_le_bytes(*c) as i64)
                 .collect(),
         ),
         "|i1" => NpyData::Int(need(1)?.iter().map(|&b| b as i8 as i64).collect()),
@@ -319,8 +335,10 @@ pub fn parse_npy(bytes: &[u8], name: &str) -> Result<NpyArray, ReferenceError> {
             } else {
                 for c in raw.chunks_exact(size) {
                     let s: String = c
-                        .chunks_exact(4)
-                        .map(|u| u32::from_le_bytes([u[0], u[1], u[2], u[3]]))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|u| u32::from_le_bytes(*u))
                         .take_while(|&u| u != 0)
                         .map(|u| char::from_u32(u).unwrap_or('\u{fffd}'))
                         .collect();

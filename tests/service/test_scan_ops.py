@@ -88,21 +88,25 @@ def test_the_preview_draws_the_fits_and_changes_nothing(validate):
     assert len(view['bodies']['triangles']) > 30
     assert view['arrows']['labels'] == ['31X+', '31Y+', '31Z+', '11Z+', '40X+', '40Y+', '40Z+']
     np.testing.assert_allclose(view['arrows']['tails'][0], centers['31'], atol=1e-6)
-    # the can's length is not measured and is taken as its diameter, 8 mm for 6
+    # the can's length is twice its top from the middle of its side's points, not its true 6 mm
     np.testing.assert_allclose(view['arrows']['tails'][3], centers['11'], atol=1.1e-3)
-    # the sensors, one a row: node, model, shape, size, length, fit
-    assert sensors['columns'] == ['Sensor', 'Node', 'Model', 'Shape', 'Size [m]', 'Length [m]',
-                                  'Fit']
+    # the sensors, one a row: node, model, shape, length, diameter, fit
+    assert sensors['columns'] == ['Sensor', 'Node', 'Model', 'Shape', 'Length [m]',
+                                  'Diameter [m]', 'Fit']
     found = _sensors(sensors)
     assert found['31'] == ['31', '31', '356A33', 'Cube', '0.0102', '', 'placed']
     assert found['11'][:4] == ['11', '11', '', 'Cylinder']
-    assert float(found['11'][4]) == pytest.approx(0.008, rel=1e-4) == float(found['11'][5])
+    # a cube's side is its length and it has no diameter; a can has both
+    can = next(fit for fit in project.fit_sensors('Probed')[0] if fit.sensor == '11')
+    assert float(found['11'][5]) == pytest.approx(0.008, rel=1e-4)
+    assert float(found['11'][4]) == pytest.approx(can.length, rel=1e-4)
+    assert float(found['11'][4]) != pytest.approx(0.008, rel=1e-2)
     assert found['40'][2:4] == ['', 'Cube'] and float(found['40'][4]) == pytest.approx(0.0171, abs=2e-4)
     assert found['50'][4:] == ['', '', ('one face gives one axis; a second face is needed to '
                                        'orient the accelerometer')]
-    # typed into: a node, a model from the catalog or any name, a size and a length
+    # typed into: a node, a model from the catalog or any name, a length and a diameter
     assert sensors['edit']['op'] == 'project.set_sensor'
-    assert sensors['edit']['columns'] == [None, 'node', 'model', None, 'size', 'length', None]
+    assert sensors['edit']['columns'] == [None, 'node', 'model', None, 'length', 'diameter', None]
     assert {'356A02', '352A24', '208C01'} <= set(sensors['edit']['choices']['model'])
     assert fits['columns'][0] == 'Sensor' and len(fits['rows']) == 4
     read = _rows(reading)
@@ -118,26 +122,30 @@ def test_the_sizes_are_shown_and_typed_in_the_display_length():
     views = run(project)
     display_units.convert(views, 'in-slinch-lbf-s')
     table = views[1]
-    assert table['columns'][4:6] == ['Size [in]', 'Length [in]']
+    assert table['columns'][4:6] == ['Length [in]', 'Diameter [in]']
     assert float(_sensors(table)['31'][4]) == pytest.approx(10.2 / 25.4, rel=1e-5)
     # what is typed there comes back in meters by these
-    assert table['edit']['to_si'] == {'size': [0.0254, 0.0], 'length': [0.0254, 0.0]}
+    assert table['edit']['to_si'] == {'length': [0.0254, 0.0], 'diameter': [0.0254, 0.0]}
 
 
 def test_a_cell_typed_changes_the_sensor_and_the_preview():
     project, centers = _project()
-    # a size for the block no model fits: its node moves to its center
-    view, sensors, *_rest = edit(project, 3, 'size', '0.019')
+    # a length for the block no model fits, its side: its node moves to its center
+    view, sensors, *_rest = edit(project, 3, 'length', '0.019')
     assert project['Probed'].sensor_choices == {'40': {'size': 0.019}}
-    assert project.journal[-1] == "project.set_sensor('Probed', '40', size=0.019)"
+    assert project.journal[-1] == "project.set_sensor('Probed', '40', length=0.019)"
     assert _sensors(sensors)['40'][4] == '0.019'
     np.testing.assert_allclose(view['arrows']['tails'][4], centers['40'], atol=1e-6)
     # a length for the can
     view, sensors, *_rest = edit(project, 2, 'length', '0.006')
-    assert _sensors(sensors)['11'][5] == '0.006'
+    assert _sensors(sensors)['11'][4] == '0.006'
+    assert project['Probed'].sensor_choices['11'] == {'length': 0.006}
     np.testing.assert_allclose(view['arrows']['tails'][3], centers['11'], atol=1e-6)
-    # a model fills the size from the catalog, and takes back the size typed before
-    edit(project, 1, 'size', '0.012')
+    # a diameter for the can is its size
+    edit(project, 2, 'diameter', '0.009')
+    assert project['Probed'].sensor_choices['11'] == {'length': 0.006, 'size': 0.009}
+    # a model fills the size from the catalog, and takes back the length typed before
+    edit(project, 1, 'length', '0.012')
     _view, sensors, *_rest = edit(project, 1, 'model', '356A02')
     assert _sensors(sensors)['31'][2:5] == ['356A02', 'Cube', '0.014']
     # a force transducer on the can: its catalog size, and a force channel on Apply
@@ -154,8 +162,10 @@ def test_a_cell_typed_changes_the_sensor_and_the_preview():
 
 def test_a_cell_that_cannot_hold_what_was_typed_is_refused_or_said():
     project, _centers = _project()
-    for row, column, value, said in ((1, 'size', 'big', 'a size is a number'),
-                                     (1, 'size', '-1', 'a length above 0'),
+    for row, column, value, said in ((1, 'length', 'big', 'a length is a number'),
+                                     (1, 'length', '-1', 'a length is a length above 0'),
+                                     (2, 'diameter', '-1', 'a diameter is a length above 0'),
+                                     (1, 'diameter', '0.01', 'a cube has no diameter'),
                                      (1, 'node', '2.5', 'whole number'),
                                      (9, 'node', '5', 'there is no row 9')):
         with pytest.raises(ProtocolError, match=said):
@@ -169,7 +179,7 @@ def test_a_cell_that_cannot_hold_what_was_typed_is_refused_or_said():
 
 def test_apply_creates_the_geometry_and_the_table():
     project, centers = _project()
-    edit(project, 3, 'size', '0.019')
+    edit(project, 3, 'length', '0.019')
     *_views, reading = run(project, keep=True)
     assert list(project) == ['Probed', 'Probed Sensors Geometry', 'Probed Sensors Channels']
     assert _rows(reading)[-1] == ('Created', ('Probed Sensors Geometry and Probed Sensors '
@@ -185,7 +195,7 @@ def test_what_cannot_be_placed_is_said_in_the_preview_and_refused_on_apply():
     project, _centers = _project(unit=None)
     view, sensors, _stray, fits, reading = run(project)
     assert 'bodies' not in view and 'arrows' not in view and len(sensors['rows']) == 4
-    assert sensors['columns'][4:6] == ['Size', 'Length']
+    assert sensors['columns'][4:6] == ['Length', 'Diameter']
     assert fits['columns'][3] == 'Worst RMS [file units]'
     assert any(label == 'Not placed' and 'has no length unit' in value
                for label, value, _status in _rows(reading))

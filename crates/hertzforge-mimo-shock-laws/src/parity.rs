@@ -509,7 +509,7 @@ pub mod bench {
     pub fn law_file(crate_name: &str) -> PathBuf {
         let file = format!("{crate_name}.wasm");
         let exe = std::env::current_exe().expect("the test binary knows its own path");
-        for dir in exe.ancestors().skip(1).take(4) {
+        for dir in exe.ancestors().skip(1) {
             let p = dir.join("wasm32-wasip2").join("release").join(&file);
             if p.is_file() {
                 return p;

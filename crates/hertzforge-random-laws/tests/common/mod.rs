@@ -227,8 +227,8 @@ pub fn recording(factory: Arc<dyn LawFactory>) -> (Arc<dyn LawFactory>, Arc<Mute
 }
 
 /// The path of `<name>.wasm`, built by scripts/build_laws.sh into
-/// `<target>/wasm32-wasip2/release/`, found from this test binary's own path
-/// (`<target>/<profile>/deps/<binary>`). `HERTZFORGE_LAW_WASM_DIR` overrides
+/// `<target>/wasm32-wasip2/release/`, found from this test binary's own path, at
+/// whatever depth cargo's layout puts it. `HERTZFORGE_LAW_WASM_DIR` overrides
 /// the directory. Fails, naming the script, when the file is not built.
 pub fn law_file(name: &str) -> PathBuf {
     let file = format!("{name}.wasm");
@@ -237,7 +237,7 @@ pub fn law_file(name: &str) -> PathBuf {
         tried.push(PathBuf::from(dir).join(&file));
     } else {
         let exe = std::env::current_exe().expect("the test binary knows its own path");
-        for dir in exe.ancestors().skip(1).take(4) {
+        for dir in exe.ancestors().skip(1) {
             tried.push(dir.join("wasm32-wasip2").join("release").join(&file));
         }
     }

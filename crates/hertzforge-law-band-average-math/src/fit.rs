@@ -157,7 +157,7 @@ fn response(c: &[C64], n_rows: usize, n: usize, cols: usize, l: &[C64]) -> Vec<f
 /// `Re(sum a_k b_k)`, without conjugating either.
 pub(crate) fn real_dot(a: &[C64], b: &[C64]) -> f64 {
     let mut acc = [0.0; 4];
-    for (x, y) in a.chunks_exact(2).zip(b.chunks_exact(2)) {
+    for (x, y) in a.as_chunks::<2>().0.iter().zip(b.as_chunks::<2>().0) {
         acc[0] += x[0].re * y[0].re;
         acc[1] -= x[0].im * y[0].im;
         acc[2] += x[1].re * y[1].re;
@@ -197,14 +197,10 @@ fn gradients(c: &[C64], n: usize, cols: usize, l: &[C64], g: &mut [f64]) {
 /// Separate running sums, so the compiler can vectorize a floating point sum.
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     let mut acc = [0.0; 4];
-    let (a4, b4) = (a.chunks_exact(4), b.chunks_exact(4));
-    let tail: f64 = a4
-        .remainder()
-        .iter()
-        .zip(b4.remainder())
-        .map(|(x, y)| x * y)
-        .sum();
-    for (x, y) in a4.zip(b4) {
+    let (a4, a_tail) = a.as_chunks::<4>();
+    let (b4, b_tail) = b.as_chunks::<4>();
+    let tail: f64 = a_tail.iter().zip(b_tail).map(|(x, y)| x * y).sum();
+    for (x, y) in a4.iter().zip(b4) {
         for i in 0..4 {
             acc[i] += x[i] * y[i];
         }

@@ -98,7 +98,10 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             "shape_svd",
             "buzz_match",
             "min_drive",
-            "band_average"
+            "band_average",
+            "independent",
+            "nearly_independent",
+            "broyden_congruence"
         ]
     );
     assert_eq!(DEFAULT_MIMO_LAW_ID, "pinv_closed");
@@ -139,6 +142,9 @@ fn mimo_laws_are_listed_apart_from_single_output_ones() {
             ("buzz-test matched".to_string(), true),
             ("minimum drive".to_string(), true),
             ("band average".to_string(), true),
+            ("independent drives".to_string(), true),
+            ("nearly independent drives".to_string(), true),
+            ("Broyden congruence".to_string(), true),
             ("misbehaving multiple-output fixture".to_string(), false),
             ("zero drive".to_string(), false),
         ]
@@ -226,11 +232,11 @@ fn a_mimo_choice_resolves_to_a_factory_that_builds_a_running_law() {
     assert_eq!(out.drive, HermitianStack::zeros(16, 2));
 
     // A law of the other test type is refused, both ways.
-    for (id, is_for) in [("hinv", "single-output Random")] {
-        match cat.resolve_mimo(&LawChoice::new(id, Vec::new()), 3) {
-            Err(ChoiceError::WrongTestType { law_is_for, .. }) => assert_eq!(law_is_for, is_for),
-            other => panic!("{id}: {:?}", other.err()),
+    match cat.resolve_mimo(&LawChoice::new("hinv", Vec::new()), 3) {
+        Err(ChoiceError::WrongTestType { law_is_for, .. }) => {
+            assert_eq!(law_is_for, "single-output Random")
         }
+        other => panic!("hinv: {:?}", other.err()),
     }
     let mut cfg = manual_cfg();
     for id in ["pinv_closed".to_string(), zero.id.clone()] {

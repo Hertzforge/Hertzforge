@@ -176,8 +176,10 @@ fn parse_record(bytes: &[u8]) -> Option<(f64, String, Vec<f64>)> {
         return None;
     }
     let samples = rest
-        .chunks_exact(8)
-        .map(|c| f64::from_le_bytes(c.try_into().unwrap_or([0; 8])))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| f64::from_le_bytes(*c))
         .collect();
     Some((fs_hz, units, samples))
 }
