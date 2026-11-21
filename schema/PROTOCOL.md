@@ -6987,7 +6987,10 @@ the tile's `start_frame` in station frames.
   latest hit. Once a point's averages are in, its FRF is measured and, with `auto_advance`, the
   next point is selected and armed.
 - **Shaker.** `drive_start` ramps the drive up over `ramp_s` from the next frame's start; frames
-  are averaged from the ramp's start plus the station's input delay. Once a point's averages are
+  are averaged from the ramp's end plus the station's input delay: random after its
+  `delay_frames`, pseudo random and periodic chirp after their `delay_frames` at full level,
+  periodic random the last frame of each group of `delay_frames + 1`, the first group played
+  wholly after the ramp, and the burst sources from the first frame. Once a point's averages are
   in, the drive is stopped with the shared stop ramp, 40 dB down over 3 s. `drive_stop` stops it
   the same way.
 - **`modal_test.end`** ends the test (`ended`), in shaker mode through the stop ramp;

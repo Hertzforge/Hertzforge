@@ -429,10 +429,11 @@ impl Session {
             SourceKind::BurstRandom | SourceKind::BurstChirp => (first, n),
             SourceKind::PseudoRandom | SourceKind::PeriodicChirp => (first + d * n, n),
             SourceKind::PeriodicRandom => {
-                // The measured frame is the last of each group of `d + 1`.
+                // The measured frame is the last of each group of `d + 1`, and the first
+                // is one whose `d` delay frames were all played after the ramp.
                 let j = source_frame + ramp_frames / n;
                 let g = d + 1;
-                let k = (0..g).find(|k| (j + k) % g == d).unwrap_or(0);
+                let k = (d..d + g).find(|k| (j + k) % g == d).unwrap_or(d);
                 (first + k * n, g * n)
             }
         };
@@ -982,6 +983,47 @@ mod tests {
         });
         let plan = Plan::build(&crate::plan::tests::table(false), &s).unwrap();
         Session::new(s, plan)
+    }
+
+    #[test]
+    fn modal_test_periodic_random_averages_only_after_full_delay_frames() {
+        // Every periodic-random frame averaged is the last of its group, and the frames
+        // before it in the group were played at full level, not in the ramp: whatever
+        // source frame the ramp began on.
+        let n = 1024u64;
+        for source_frame in 0..3u64 {
+            let mut s = ModalSetup::new(Mode::Shaker, 1024.0, n as usize);
+            s.shaker.source = SourceKind::PeriodicRandom;
+            s.shaker.delay_frames = 2;
+            s.shaker.drives = vec![
+                crate::setup::DriveSet {
+                    row: 4,
+                    level_vrms: 0.05,
+                },
+                crate::setup::DriveSet {
+                    row: 5,
+                    level_vrms: 0.05,
+                },
+            ];
+            let plan = Plan::build(&crate::plan::tests::table(true), &s).unwrap();
+            let mut ss = Session::new(s, plan);
+            ss.state = State::Idle;
+            let (ramp_start, ramp) = (5 * n, n);
+            ss.begin_measuring(ramp_start, source_frame, ramp).unwrap();
+            let start = ss.next_seg.unwrap();
+            let full = ramp_start + ramp;
+            assert!(
+                start >= full + 2 * n,
+                "source frame {source_frame}: averaged from {start}, full level from {full}"
+            );
+            let j = source_frame + (start - ramp_start) / n;
+            assert_eq!(
+                j % 3,
+                2,
+                "source frame {source_frame}: not the group's last"
+            );
+            assert_eq!(ss.seg_step, 3 * n);
+        }
     }
 
     /// Feed a hit of `kind` at the selected point, then quiet until it is taken.
