@@ -150,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
 #: as when the desktop app is running
 APP_PORT = 8791
 
+#: how long `hertzforge` with no command waits after its last browser tab
+#: closes before it stops; a reload reconnects within half a second
+CLOSED_S = 5.0
+
 
 def _free(port: int) -> bool:
     """Whether `port` on the loopback address can be listened on."""
@@ -174,14 +178,17 @@ def _app_url(host: str, port: int) -> str:
 def _announce(url: str, opener: Callable[[str], bool]) -> None:
     """Say where the interface is and open it with `opener`
     (`webbrowser.open`); where that opens nothing, say to open it by hand."""
-    print(f"Hertzforge is open at {url}\nPress Ctrl-C to stop it.", flush=True)
+    print(f"Hertzforge is open at {url}\nIt stops when its browser tab is closed, "
+          "or press Ctrl-C.", flush=True)
     if not opener(url):
         print("No browser could be opened here; open that address in one.", flush=True)
 
 
 def _open_app() -> int:
     """`hertzforge` with no command: the analysis service started with the
-    shell's built pages, and the interface opened in the default browser.
+    shell's built pages, and the interface opened in the default browser. It
+    stops `CLOSED_S` seconds after its last browser tab closes; the project
+    lives on the tab's connection, so nothing is kept for a tab opened later.
     Where no browser opens (over SSH, on a server) the address is printed to
     open by hand. The control service is not part of the Python package, so
     running a test needs the desktop app."""
@@ -205,9 +212,10 @@ def _open_app() -> int:
     port = APP_PORT if _free(APP_PORT) else 0
     try:
         asyncio.run(_serve("127.0.0.1", port, ready=lambda host, bound: _announce(
-            _app_url(host, bound), webbrowser.open)))
+            _app_url(host, bound), webbrowser.open), quit_when_closed=CLOSED_S))
     except KeyboardInterrupt:
-        pass
+        return 0
+    print("The browser tab was closed; Hertzforge stopped.", flush=True)
     return 0
 
 
