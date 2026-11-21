@@ -1582,6 +1582,21 @@ impl MimoMixedService {
                     part: id,
                 }
             }
+            StepTrip::ToneUnreadable { tone, seconds } => {
+                let id = tone_id(*tone);
+                RunEnd {
+                    name: "tone_unreadable",
+                    aborted: true,
+                    control: None,
+                    drive: None,
+                    words: format!(
+                        "tone {} had no usable reading for {seconds:.1} s with its ramps done: \
+                         its drive was played open loop",
+                        id.clone().unwrap_or_default()
+                    ),
+                    part: id,
+                }
+            }
         }
     }
 

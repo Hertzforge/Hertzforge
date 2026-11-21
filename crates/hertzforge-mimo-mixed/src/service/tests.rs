@@ -1,8 +1,13 @@
 //! The step's drive protections, on the cost probe's step: the `drive_vpk`
-//! abort and the clamp at each drive's own peak.
+//! abort, the clamp at each drive's own peak, the ceiling rule's budget
+//! across ramps and switch-ons, and the tone guards (the cap at zero drive,
+//! the bounded carry, the watch behind the ceiling).
 
+use super::step::{LIMITED_DIVERGENCE_FACTOR, SHOWN_MAX_DELAYS, UNREADABLE_ABORT_DELAYS};
 use super::*;
 use hertzforge_engine::ProcessStep;
+use hertzforge_mimo_sine::law::LawValues;
+use hertzforge_mimo_sine::tick::{LawFault, TickInputs, TickOutputs};
 
 const FS: f64 = 16384.0;
 const BLOCK: usize = 1024;
@@ -295,4 +300,219 @@ fn mimo_mixed_a_tone_switched_on_under_a_bound_rule_stays_inside_the_budget() {
     assert!(pr.step.bank.part_level(1) > 0.999, "switched on");
     assert_eq!(pr.step.clamped, 0, "a frame past the peak");
     assert!(pr.step.trip.is_none());
+}
+
+/// A tone law that asks twice what it asked last (twice the drive in force
+/// where there is one), every tick: a law running away.
+struct Greedy {
+    last: Vec<C64>,
+}
+
+impl hertzforge_mimo_sine::law::MimoSineLaw for Greedy {
+    fn name(&self) -> &str {
+        "greedy"
+    }
+    fn engage(
+        &mut self,
+        x: &TickInputs<'_>,
+        o: &mut TickOutputs,
+        v: &mut LawValues,
+    ) -> Result<(), LawFault> {
+        self.tick(x, o, v)
+    }
+    fn tick(
+        &mut self,
+        x: &TickInputs<'_>,
+        o: &mut TickOutputs,
+        _v: &mut LawValues,
+    ) -> Result<(), LawFault> {
+        let zero = x.drive_in_force.iter().all(|d| d.norm() == 0.0);
+        self.last
+            .resize(x.drive_in_force.len(), C64::new(1e-3, 0.0));
+        for ((d, f), l) in o.drive.iter_mut().zip(x.drive_in_force).zip(&mut self.last) {
+            *d = if zero { *l * 2.0 } else { *f * 2.0 };
+            *l = *d;
+        }
+        Ok(())
+    }
+}
+
+struct GreedyFactory(Arc<dyn MimoSineLawFactory>);
+
+impl MimoSineLawFactory for GreedyFactory {
+    fn build(
+        &self,
+        _setup: &hertzforge_mimo_sine::law::LawSetup,
+    ) -> Result<Box<dyn hertzforge_mimo_sine::law::MimoSineLaw + Send>, LawFault> {
+        Ok(Box::new(Greedy { last: Vec::new() }))
+    }
+    fn describe(&self) -> hertzforge_mimo_sine::law::LawDescriptor {
+        self.0.describe()
+    }
+    fn manifest(&self) -> hertzforge_mimo_sine::law::LawManifest {
+        self.0.manifest()
+    }
+}
+
+/// Requirement: a tone the ceiling rule holds at zero keeps its law's ask
+/// under the rise cap, against its own last ask: with every drive's peak
+/// at a microvolt (no room, every tone scaled to zero) a law that doubles
+/// its ask every tick grows its ask by at most the cap's rise per tick
+/// (`max_step_db`, or `max_rise_db_per_s` over a tick), where uncapped it
+/// would not be capped at all (measured: 11.0 dB in one tick with the cap
+/// taken against the zero drive in force).
+#[test]
+fn mimo_mixed_a_tone_held_at_zero_by_the_ceiling_rises_no_faster_than_its_cap() {
+    let law = Arc::new(GreedyFactory(
+        hertzforge_mimo_sine::laws::builtin("matrix").expect("matrix"),
+    ));
+    let mut pr = StepCostProbe::new(FS, 4, 4, 0, 2, law).expect("probe");
+    let m = pr.step.m;
+    pr.step.abort_v = vec![1e9; m];
+    pr.step.peak_v = vec![1e9; m];
+    let mut input = Vec::new();
+    let tf = pr.step.tick_frames as usize;
+    pr.step.rand_ramp = Ramp::at(1.0);
+    for _ in 0..2000 {
+        if pr.step.tones.iter().all(|t| t.engaged) {
+            break;
+        }
+        play_frames(&mut pr, tf, &mut input);
+    }
+    assert!(pr.step.tones[0].engaged, "the tone engaged");
+    // The ring kept four ticks ahead, so the rule sees the random part's
+    // peak (0.01 V) over every drive's peak: no room for any tone.
+    pr.feed(4 * tf);
+    pr.step.peak_v = vec![1e-6; m];
+    let norm = |a: &[C64]| a.iter().map(|v| v.norm_sqr()).sum::<f64>().sqrt();
+    let g = pr.step.guards.clone();
+    let up_db = g.max_step_db.min(g.max_rise_db_per_s * pr.step.tick_s);
+    let mut prev = norm(&pr.step.tones[0].ask);
+    let mut worst_db = f64::NEG_INFINITY;
+    let mut zeroed = 0;
+    for _ in 0..40 {
+        play_frames(&mut pr, tf, &mut input);
+        let a = norm(&pr.step.tones[0].ask);
+        if pr.step.tones[0].scale == 0.0 && prev > 0.0 {
+            zeroed += 1;
+            worst_db = worst_db.max(20.0 * (a / prev).log10());
+        }
+        prev = a;
+    }
+    println!(
+        "{zeroed} ticks at zero; largest rise of the ask {worst_db:.3} dB a tick (cap {up_db:.3} dB)"
+    );
+    assert!(zeroed >= 30, "the rule held the tone at zero");
+    assert!(worst_db <= up_db + 1e-9, "{worst_db} dB");
+}
+
+/// The probe with `law`, the abort and peaks out of the way and the random
+/// part in, played tick by tick until every tone has engaged.
+fn engaged_probe(law: Arc<dyn MimoSineLawFactory>, input: &mut Vec<f32>) -> StepCostProbe {
+    let mut pr = StepCostProbe::new(FS, 4, 4, 0, 2, law).expect("probe");
+    let m = pr.step.m;
+    pr.step.abort_v = vec![1e9; m];
+    pr.step.peak_v = vec![1e9; m];
+    pr.step.rand_ramp = Ramp::at(1.0);
+    let tf = pr.step.tick_frames as usize;
+    for _ in 0..2000 {
+        if pr.step.tones.iter().all(|t| t.engaged) {
+            break;
+        }
+        play_frames(&mut pr, tf, input);
+    }
+    assert!(pr.step.tones.iter().all(|t| t.engaged), "the tones engaged");
+    pr
+}
+
+/// Requirement: the "told on target" carry is bounded. A tone whose reading
+/// goes unusable with its ramps done (the floor under it raised past any
+/// reading) is handed to its law, told on target, for `SHOWN_MAX_DELAYS`
+/// tracker delays, then holds its last ask with its law no longer called,
+/// and ends the run `tone_unreadable` at `UNREADABLE_ABORT_DELAYS`.
+#[test]
+fn mimo_mixed_a_tone_unread_is_carried_for_a_bounded_time_then_held_then_ends() {
+    let mut input = Vec::new();
+    let law = hertzforge_mimo_sine::laws::builtin("matrix").expect("matrix");
+    let mut pr = engaged_probe(law, &mut input);
+    let tf = pr.step.tick_frames as usize;
+    let delay = hertzforge_dsp::tone::TRACKER_DELAY_FACTOR / pr.step.bank.bn_hz();
+    pr.step.floor_diag.fill(1e30);
+    let t0 = pr.step.frame as f64 / FS;
+    let mut last_call_s = None;
+    let mut calls = pr.step.tones[0].calls;
+    let ask0 = pr.step.tones[0].ask.clone();
+    let mut held_ask = None;
+    let limit_s = (UNREADABLE_ABORT_DELAYS + 4.0) * delay;
+    while pr.step.trip.is_none() && pr.step.frame as f64 / FS - t0 < limit_s {
+        play_frames(&mut pr, tf, &mut input);
+        let t = pr.step.frame as f64 / FS - t0;
+        let tc = &pr.step.tones[0];
+        assert!(!tc.usable, "unreadable");
+        if tc.calls != calls {
+            calls = tc.calls;
+            last_call_s = Some(t);
+        } else if last_call_s.is_some() && held_ask.is_none() {
+            held_ask = Some(tc.ask.clone());
+        }
+        if let Some(h) = held_ask.as_ref() {
+            assert_eq!(h, &tc.ask, "held, its ask stands");
+        }
+    }
+    let end_s = pr.step.frame as f64 / FS - t0;
+    println!(
+        "tracker delay {delay:.3} s: law last called {last_call_s:?} s in, trip {:?} at {end_s:.2} s",
+        pr.step.trip
+    );
+    let last = last_call_s.expect("carried at first");
+    assert!(
+        last <= SHOWN_MAX_DELAYS * delay + 2.0 * pr.step.tick_s,
+        "{last} s"
+    );
+    assert!(
+        last >= SHOWN_MAX_DELAYS * delay - 2.0 * pr.step.tick_s,
+        "{last} s"
+    );
+    assert!(held_ask.is_some_and(|h| h.len() == ask0.len()));
+    assert!(
+        matches!(pr.step.trip, Some(StepTrip::ToneUnreadable { .. })),
+        "{:?}",
+        pr.step.trip
+    );
+    assert!(
+        (end_s - UNREADABLE_ABORT_DELAYS * delay).abs() <= 2.0 * pr.step.tick_s,
+        "{end_s}"
+    );
+}
+
+/// Requirement: a tone law that runs away while the shared ceiling holds
+/// its tone (every drive's peak at a microvolt, the tone at zero, its caps
+/// binding every tick) is counted by the limited divergence watch and ends
+/// the run `divergence` at `LIMITED_DIVERGENCE_FACTOR` times the
+/// divergence time.
+#[test]
+fn mimo_mixed_a_law_running_away_behind_the_ceiling_ends_in_divergence() {
+    let mut input = Vec::new();
+    let law = Arc::new(GreedyFactory(
+        hertzforge_mimo_sine::laws::builtin("matrix").expect("matrix"),
+    ));
+    let mut pr = engaged_probe(law, &mut input);
+    let tf = pr.step.tick_frames as usize;
+    let m = pr.step.m;
+    pr.feed(4 * tf);
+    pr.step.peak_v = vec![1e-6; m];
+    let want_s = LIMITED_DIVERGENCE_FACTOR * pr.step.guards.divergence_s;
+    let t0 = pr.step.frame as f64 / FS;
+    while pr.step.trip.is_none() && pr.step.frame as f64 / FS - t0 < 2.0 * want_s {
+        play_frames(&mut pr, tf, &mut input);
+    }
+    let t = pr.step.frame as f64 / FS - t0;
+    println!("trip {:?} at {t:.2} s (watch {want_s} s)", pr.step.trip);
+    assert!(
+        matches!(pr.step.trip, Some(StepTrip::ToneDivergence { .. })),
+        "{:?}",
+        pr.step.trip
+    );
+    assert!(t >= want_s - 2.0 * pr.step.tick_s, "{t} s");
+    assert!(t <= want_s + 0.5, "{t} s");
 }
