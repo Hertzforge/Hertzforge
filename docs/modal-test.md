@@ -120,7 +120,10 @@ window over both. A double hit's second impact is marked on the force trace wher
 service found it, and said in words with its size against the peak. The force spectrum shows how
 much of the band the tip reaches, with the tip's roll-off, the drop from the spectrum's largest
 value to its value at the band's top: a drop over the tip warning is flagged, and a harder tip
-reaches higher.
+reaches higher. A response that has not died away by the end of the block (its last 5% still over
+2% of its loudest, after the windows) is named in the hit's report with how loud it ends; the hit
+is kept, and a longer block or an exponential window helps. Burst random and burst chirp frames
+are checked the same way.
 
 ## Shaker
 
