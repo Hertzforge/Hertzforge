@@ -621,6 +621,96 @@ fn mimo_mixed_real_time_start_is_refused_short_of_the_lookahead() {
     assert_eq!(svc.end().map(|e| e.name), Some("start_refused"));
 }
 
+// =============================================================================
+// Each drive to its own shaker.
+// =============================================================================
+
+/// The identification of a two-tone run on Linear4x4 whose drives are the
+/// table's drive rows `rows` (channel indices), in that order.
+fn identified_h(rows: &[u32]) -> hertzforge_sdm::MatrixStack {
+    let s = SineStructure::Linear4x4;
+    let mut cfg = two_tone_config(30.0);
+    let proto = cfg.drives[0].clone();
+    cfg.drives = rows
+        .iter()
+        .map(|&r| {
+            let mut d = proto.clone();
+            d.channel_index = r;
+            d
+        })
+        .collect();
+    let mut svc = service(s, cfg);
+    svc.arm().expect("arm");
+    let id = svc.identify().expect("identify");
+    println!(
+        "drives {rows:?}: identified at {:.2} dB in {} steps",
+        id.level_db, id.steps
+    );
+    id.h.clone()
+}
+
+/// The median over the band's lines of `|a[:, ja] - b[:, jb]| / |b[:, jb]|`
+/// on the controls.
+fn column_mismatch(
+    a: &hertzforge_sdm::MatrixStack,
+    ja: usize,
+    b: &hertzforge_sdm::MatrixStack,
+    jb: usize,
+) -> f64 {
+    let (lo, hi) = BAND;
+    let mut r: Vec<f64> = (lo..hi)
+        .map(|l| {
+            let (mut num, mut den) = (0.0, 0.0);
+            for i in 0..4 {
+                num += (a.get(l, i, ja) - b.get(l, i, jb)).norm_sqr();
+                den += b.get(l, i, jb).norm_sqr();
+            }
+            (num / den).sqrt()
+        })
+        .collect();
+    r.sort_by(f64::total_cmp);
+    r[r.len() / 2]
+}
+
+/// Requirement: drive `j` of the test reaches the shaker on its own table
+/// row whatever order the test lists its drives in and whether it uses
+/// every drive row. On Linear4x4 (drive rows 5 to 8), the identification of
+/// a test listing its drives as [8, 7, 6, 5], and of one using only [7, 5],
+/// gives in each column the response of that column's own row in the
+/// identification with [5, 6, 7, 8] and of no other row. The bands are from
+/// the scatter: two identifications of the same row on independent random
+/// streams differ by a median 0.35 over the band, and the four rows' own
+/// responses differ from each other by 1.2 or more; so a column is its own
+/// row's under 0.5 and every other row's over 1.0. Before drives were mapped
+/// to their rows the reversed test's column 0 matched row 5's response, not
+/// row 8's.
+#[test]
+fn mimo_mixed_each_drive_reaches_its_own_shaker_in_any_order_or_subset() {
+    let base = identified_h(&[5, 6, 7, 8]);
+    let rev = identified_h(&[8, 7, 6, 5]);
+    let sub = identified_h(&[7, 5]);
+    let pairs: [(&str, &hertzforge_sdm::MatrixStack, usize, usize); 6] = [
+        ("reversed col 0 (row 8)", &rev, 0, 3),
+        ("reversed col 1 (row 7)", &rev, 1, 2),
+        ("reversed col 2 (row 6)", &rev, 2, 1),
+        ("reversed col 3 (row 5)", &rev, 3, 0),
+        ("subset col 0 (row 7)", &sub, 0, 2),
+        ("subset col 1 (row 5)", &sub, 1, 0),
+    ];
+    for (what, h, j, row) in pairs {
+        let v: Vec<f64> = (0..4).map(|r| column_mismatch(h, j, &base, r)).collect();
+        println!("{what}: mismatch against the base's columns {v:.3?}");
+        assert!(
+            v[row] < 0.5,
+            "{what}: {:.3} from its own row's response",
+            v[row]
+        );
+        for (r, x) in v.iter().enumerate().filter(|&(r, _)| r != row) {
+            assert!(*x > 1.0, "{what}: {x:.3} from row {r}'s response");
+        }
+    }
+}
+
 /// Requirement: a sweeping tone under the dwell-only tone law `paired` is
 /// refused `law_refuses_tone`, naming the tone, before anything is opened.
 #[test]

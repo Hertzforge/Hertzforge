@@ -558,4 +558,5 @@ hertzforge-mimo-mixed   tests/mimo_mixed_safety.rs             mimo_mixed_law_fa
 hertzforge-mimo-mixed   tests/mimo_mixed_safety.rs             mimo_mixed_real_time_start_is_refused_short_of_the_lookahead  arm-gate  a MIMO Mixed real-time start that cannot fill its lookahead is refused
 hertzforge-mimo-mixed   tests/mimo_mixed_safety.rs             mimo_mixed_a_tone_the_law_refuses_is_refused_before_the_station_opens  arm-gate  a MIMO Mixed tone its law refuses is refused before the station opens
 hertzforge-mimo-mixed   tests/mimo_mixed_safety.rs             mimo_mixed_a_budget_that_cannot_fit_is_refused_at_proceed  arm-gate  a MIMO Mixed run whose drives cannot fit their ceilings is refused at proceed
+hertzforge-mimo-mixed   tests/mimo_mixed_safety.rs             mimo_mixed_each_drive_reaches_its_own_shaker_in_any_order_or_subset  arm-gate  each MIMO Mixed drive plays on its own table row whatever the order or subset of drives
 hertzforge-mimo-mixed-laws  tests/mimo_mixed_arm.rs                mimo_mixed_a_law_arms_in_a_role_only_on_both_checks  arm-gate  a MIMO Mixed law arms on hardware only in its world's role with both checks passed

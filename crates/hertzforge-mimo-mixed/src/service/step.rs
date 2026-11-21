@@ -248,6 +248,10 @@ pub struct MimoMixedStep {
     n_in: usize,
     /// Input slots of the controls then the limits.
     slots: Vec<usize>,
+    /// The station's output frame width (every enabled drive row) and each
+    /// drive's column in it.
+    n_out: usize,
+    out_slots: Vec<usize>,
     /// Overload watch on control and limit slots: (slot, level, channel).
     pub(crate) overload: Vec<(usize, f64, u32)>,
     pub(crate) kin: Option<KinematicMonitor>,
@@ -317,6 +321,8 @@ pub(crate) struct StepShape {
     pub(crate) p: usize,
     pub(crate) n_in: usize,
     pub(crate) slots: Vec<usize>,
+    pub(crate) n_out: usize,
+    pub(crate) out_slots: Vec<usize>,
     pub(crate) peak_v: Vec<f64>,
     pub(crate) tick_s: f64,
     pub(crate) ring_frames: usize,
@@ -352,6 +358,8 @@ impl MimoMixedStep {
             p,
             n_in: s.n_in,
             slots: s.slots,
+            n_out: s.n_out.max(1),
+            out_slots: s.out_slots,
             overload: Vec::new(),
             kin: None,
             kin_scratch: Vec::with_capacity(s.n_in * s.max_block),
@@ -473,7 +481,7 @@ impl MimoMixedStep {
                 x
             };
             self.d[j] = y;
-            drive_out[j] = y as f32;
+            drive_out[self.out_slots[j]] = y as f32;
         }
         self.bank.track_frame(&self.ch, &mut self.res);
         let r = &mut self.records;
@@ -848,13 +856,13 @@ impl MimoMixedStep {
 
 impl ProcessStep for MimoMixedStep {
     fn process(&mut self, input: &[f32], n_frames: usize, drive_out: &mut Vec<f32>) {
-        let m = self.m;
+        let w = self.n_out;
         drive_out.clear();
-        drive_out.resize(n_frames * m, 0.0);
+        drive_out.resize(n_frames * w, 0.0);
         let n_in = self.n_in.max(1);
         for f in 0..n_frames {
             let inp = input.get(f * n_in..(f + 1) * n_in).unwrap_or(&[]);
-            let out = &mut drive_out[f * m..(f + 1) * m];
+            let out = &mut drive_out[f * w..(f + 1) * w];
             self.frame_step(inp, out);
         }
         if let Some(kin) = self.kin.as_mut() {

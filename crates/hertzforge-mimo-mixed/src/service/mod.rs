@@ -451,6 +451,11 @@ pub struct MimoMixedService {
     pub(crate) band: (usize, usize),
     pub(crate) n_in: usize,
     pub(crate) slots: Vec<usize>,
+    /// The station's output frame: one column per enabled drive row of the
+    /// table, in table order; drive `j` of the test plays in column
+    /// `drive_slots[j]` and every other column plays zero (MIMO Sine's map).
+    pub(crate) n_out: usize,
+    pub(crate) drive_slots: Vec<usize>,
     pub(crate) engine: Option<Engine>,
     pub(crate) step: Option<MimoMixedStep>,
     pub(crate) uncounted: Option<StationStart>,
@@ -568,17 +573,35 @@ impl MimoMixedService {
                 )));
             }
         }
+        // The station's output columns are the table's enabled drive rows in
+        // table order; each drive of the test is mapped to its own row's
+        // column, so a test may list its drives in any order or use some of
+        // the rows (the others play zero).
+        let drive_rows: Vec<u32> = table
+            .channels
+            .iter()
+            .filter(|c| c.enabled && c.role == ChannelRole::Drive)
+            .map(|c| c.index)
+            .collect();
+        let mut drive_slots = Vec::with_capacity(cfg.m());
         for d in &cfg.drives {
-            if !table
-                .channels
-                .iter()
-                .any(|c| c.index == d.channel_index && c.enabled && c.role == ChannelRole::Drive)
-            {
+            let Some(slot) = drive_rows.iter().position(|&r| r == d.channel_index) else {
                 return Err(MimoMixedError::BadState(format!(
                     "drive {} is not an enabled drive of the table",
                     d.channel_index
                 )));
+            };
+            if drive_slots.contains(&slot) {
+                return Err(MimoMixedError::Refused {
+                    name: "duplicate_drive",
+                    part: String::new(),
+                    why: format!(
+                        "drive {} is listed more than once; each shaker is one drive of the test",
+                        d.channel_index
+                    ),
+                });
             }
+            drive_slots.push(slot);
         }
         let manifest = laws.tones.manifest();
         let shape = MimoShape::of(cfg.n(), cfg.m());
@@ -622,6 +645,8 @@ impl MimoMixedService {
             band: (0, 0),
             n_in: 0,
             slots: Vec::new(),
+            n_out: drive_rows.len(),
+            drive_slots,
             engine: None,
             step: None,
             uncounted: None,
@@ -946,7 +971,7 @@ impl MimoMixedService {
         let actual = self
             .actual
             .ok_or_else(|| MimoMixedError::BadState("the station is not armed".into()))?;
-        let mut ecfg = EngineConfig::with_block(self.n_in, self.cfg.m(), &actual);
+        let mut ecfg = EngineConfig::with_block(self.n_in, self.n_out, &actual);
         if !self.station.is_hardware() {
             ecfg.jitter_frac = hertzforge_engine::TEST_DISABLE_JITTER_GUARD;
             ecfg.compute_budget = Some(hertzforge_engine::TEST_RELAX_COMPUTE_BUDGET);
@@ -982,7 +1007,8 @@ impl MimoMixedService {
     /// station the lead-in of zeros, its count checked, the engine told it
     /// was prefilled; otherwise the start is counted after the first batch.
     pub(crate) fn start_station(&mut self, phase: &'static str) -> Result<(), MimoMixedError> {
-        let m = self.cfg.m();
+        // The lead-in is written in the station's own output frame.
+        let m = self.n_out;
         let block = self.actual.map_or(1, |a| a.block_frames.max(1));
         let engine = self
             .engine
@@ -1843,6 +1869,8 @@ impl MimoMixedService {
             p,
             n_in: self.n_in,
             slots: self.slots.clone(),
+            n_out: self.n_out,
+            out_slots: self.drive_slots.clone(),
             peak_v: self.cfg.drives.iter().map(|d| d.peak_v).collect(),
             tick_s: self.cfg.control_tick_s(),
             ring_frames: 4 * chunk + 4 * self.nfft,
@@ -2339,6 +2367,8 @@ impl StepCostProbe {
             p,
             n_in: q,
             slots: (0..q).collect(),
+            n_out: m,
+            out_slots: (0..m).collect(),
             peak_v: vec![1e9; m],
             tick_s: 0.01,
             ring_frames: 1 << 16,
