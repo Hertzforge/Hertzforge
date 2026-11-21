@@ -3,7 +3,8 @@
 //! tone's per tick, in `law_ticks.bin` with `law.json` describing the
 //! layout. The tone laws' records are pushed by the step into a
 //! preallocated buffer and the floor law's by the loop side; both are turned
-//! into bytes and written between batches, off the step's thread.
+//! into bytes between batches and handed to a writer thread, which does all
+//! the file work (none on the loop's thread).
 
 use std::path::Path;
 
@@ -124,6 +125,69 @@ pub fn append(dir: &Path, json: &serde_json::Value, bytes: &[u8]) -> std::io::Re
         .append(true)
         .open(dir.join(LAW_TICKS_FILE))?;
     f.write_all(bytes)
+}
+
+/// The record's writer thread: the loop side hands it whole records with a
+/// send that never waits, and it does all the file work. A write that fails
+/// is handed back as words for the run's events; the run goes on.
+pub(crate) struct RecordWriter {
+    tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
+    errors: std::sync::mpsc::Receiver<String>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl RecordWriter {
+    /// Start the writer for the run folder `dir`, `law.json` holding `json`.
+    pub(crate) fn start(dir: std::path::PathBuf, json: serde_json::Value) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (etx, errors) = std::sync::mpsc::channel::<String>();
+        let handle = std::thread::Builder::new()
+            .name("mimo-mixed-law-record".into())
+            .spawn(move || {
+                let mut failed = false;
+                for bytes in rx {
+                    if failed {
+                        continue;
+                    }
+                    if let Err(e) = append(&dir, &json, &bytes) {
+                        failed = true;
+                        let _ = etx.send(format!("law record: {e}; no more records are written"));
+                    }
+                }
+            })
+            .ok();
+        RecordWriter {
+            tx: Some(tx),
+            errors,
+            handle,
+        }
+    }
+
+    /// Hand `bytes` to the writer (never waits).
+    pub(crate) fn send(&self, bytes: Vec<u8>) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(bytes);
+        }
+    }
+
+    /// The writer's failures since the last call.
+    pub(crate) fn failures(&self) -> Vec<String> {
+        self.errors.try_iter().collect()
+    }
+
+    /// Let the writer finish what it holds and stop.
+    pub(crate) fn close(&mut self) {
+        self.tx = None;
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+impl Drop for RecordWriter {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 #[cfg(test)]

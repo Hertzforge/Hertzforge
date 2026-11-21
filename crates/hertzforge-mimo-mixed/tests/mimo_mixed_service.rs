@@ -461,7 +461,8 @@ fn mv8_run(rule: &str) {
     }
 }
 
-/// Requirement (A7): a run with a folder writes `law.json` naming
+/// Requirement (A7): a run with a folder writes, on its writer thread,
+/// `law.json` naming
 /// `hertzforge.mimo_mixed.law_ticks.v1` and both laws, and `law_ticks.bin`
 /// as whole records that read back, holding floor-law calls and tone-law
 /// calls for the run's one tone.
@@ -476,6 +477,7 @@ fn mimo_mixed_the_law_call_record_is_written_to_the_run_folder() {
     engage(&mut svc);
     while svc.run_chunk().expect("chunk") {}
     assert_eq!(svc.end().map(|e| e.name), Some("completed"));
+    svc.close_records();
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join(LAW_JSON_FILE)).expect("law.json"))
             .expect("json");

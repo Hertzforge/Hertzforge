@@ -497,6 +497,7 @@ pub struct MimoMixedService {
     pub(crate) chunk_peak: Vec<f64>,
     // Records.
     pub(crate) run_dir: Option<PathBuf>,
+    pub(crate) law_writer: Option<records::RecordWriter>,
     pub(crate) law_kept: Vec<LawRecord>,
     pub(crate) keep_law_records: bool,
     pub(crate) events: Vec<String>,
@@ -663,6 +664,7 @@ impl MimoMixedService {
             chunk_rms: Vec::new(),
             chunk_peak: Vec::new(),
             run_dir: None,
+            law_writer: None,
             law_kept: Vec::new(),
             keep_law_records: false,
             events: Vec::new(),
@@ -708,10 +710,25 @@ impl MimoMixedService {
         self
     }
 
-    /// Write the law-call record into `dir` between batches.
+    /// Write the law-call record into `dir`, on a writer thread.
     pub fn with_run_dir(mut self, dir: PathBuf) -> Self {
+        let json = records::law_json(
+            &self.cfg.law.floor.id,
+            &self.cfg.law.tones.id,
+            self.cfg.tones().count(),
+        );
+        self.law_writer = Some(records::RecordWriter::start(dir.clone(), json));
         self.run_dir = Some(dir);
         self
+    }
+
+    /// Let the law-call record's writer finish what it holds and stop (the
+    /// files are whole when this returns). Dropping the service does the
+    /// same.
+    pub fn close_records(&mut self) {
+        if let Some(w) = self.law_writer.as_mut() {
+            w.close();
+        }
     }
 
     /// Keep the law-call records for the caller ([`Self::take_law_records`]).
@@ -1694,19 +1711,19 @@ impl MimoMixedService {
     }
 
     pub(crate) fn push_law_records(&mut self, recs: &[LawRecord]) {
-        if let Some(dir) = self.run_dir.clone() {
-            let mut bytes = Vec::with_capacity(recs.len() * LawRecord::BYTES);
-            for r in recs {
-                r.write_to(&mut bytes);
+        let failed = match self.law_writer.as_ref() {
+            Some(w) => {
+                let mut bytes = Vec::with_capacity(recs.len() * LawRecord::BYTES);
+                for r in recs {
+                    r.write_to(&mut bytes);
+                }
+                w.send(bytes);
+                w.failures()
             }
-            let json = records::law_json(
-                &self.cfg.law.floor.id,
-                &self.cfg.law.tones.id,
-                self.cfg.tones().count(),
-            );
-            if let Err(e) = records::append(&dir, &json, &bytes) {
-                self.events.push(format!("law record: {e}"));
-            }
+            None => Vec::new(),
+        };
+        for f in failed {
+            self.note(f);
         }
         if self.keep_law_records {
             self.law_kept.extend_from_slice(recs);
